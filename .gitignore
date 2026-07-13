@@ -1,3 +1,14 @@
+.boris-*/
+.boris/
+.DS_Store
+.release-gate/
 .zig-cache/
-zig-out/
+*.a
 *.o
+dist/
+rag/
+rag1/
+rag2/
+source-rag/
+test-output/
+zig-out/

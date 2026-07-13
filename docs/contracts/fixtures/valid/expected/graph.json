@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "0.1.0",
+  "frozen": true,
+  "nodes": [
+    {
+      "index": 0,
+      "id": "guides/intro",
+      "sourcePath": "guides/intro.md",
+      "role": "trunk",
+      "parent": null,
+      "parentIndex": null,
+      "title": "Introduction",
+      "status": "published",
+      "tags": ["guide", "intro"],
+      "bodyOffset": 67
+    },
+    {
+      "index": 1,
+      "id": "guides/intro-tips",
+      "sourcePath": "guides/intro-tips.md",
+      "role": "satellite",
+      "parent": "guides/intro",
+      "parentIndex": 0,
+      "title": "Intro Tips",
+      "status": "draft",
+      "tags": ["guide", "tips"],
+      "bodyOffset": 81
+    },
+    {
+      "index": 2,
+      "id": "index",
+      "sourcePath": "index.md",
+      "role": "trunk",
+      "parent": null,
+      "parentIndex": null,
+      "title": "Home",
+      "status": "published",
+      "tags": ["home"],
+      "bodyOffset": 51
+    }
+  ],
+  "edges": [
+    {
+      "from": 1,
+      "to": 0,
+      "kind": "parent"
+    }
+  ]
+}

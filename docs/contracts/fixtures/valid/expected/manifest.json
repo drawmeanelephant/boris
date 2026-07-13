@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "0.1.0",
+  "compiler": "boris/0.1.1",
+  "contentRoot": "docs/contracts/fixtures/valid/content",
+  "pageCount": 3,
+  "pages": [
+    {
+      "index": 0,
+      "id": "guides/intro",
+      "sourcePath": "guides/intro.md",
+      "role": "trunk",
+      "parent": null,
+      "title": "Introduction",
+      "status": "published"
+    },
+    {
+      "index": 1,
+      "id": "guides/intro-tips",
+      "sourcePath": "guides/intro-tips.md",
+      "role": "satellite",
+      "parent": "guides/intro",
+      "title": "Intro Tips",
+      "status": "draft"
+    },
+    {
+      "index": 2,
+      "id": "index",
+      "sourcePath": "index.md",
+      "role": "trunk",
+      "parent": null,
+      "title": "Home",
+      "status": "published"
+    }
+  ]
+}

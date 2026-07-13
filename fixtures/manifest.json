@@ -1,0 +1,112 @@
+{
+  "schemaVersion": "0.1.0",
+  "note": "Fixture inventory only. Compiler validation of these trees is not implemented yet.",
+  "valid": [
+    {
+      "path": "content/valid/trunk-root.md",
+      "role": "trunk",
+      "notes": "Root Trunk with explicit id home and title"
+    },
+    {
+      "path": "content/valid/satellite-child.md",
+      "role": "satellite",
+      "notes": "Satellite with parent home"
+    },
+    {
+      "path": "content/valid/nested/deep/page.md",
+      "role": "trunk",
+      "notes": "Canonical id nested/deep/page (slash normalization)"
+    },
+    {
+      "path": "content/valid/empty-no-fm.md",
+      "role": "trunk",
+      "notes": "Empty page, no frontmatter; path-derived id empty-no-fm; title null"
+    }
+  ],
+  "invalid": [
+    {
+      "suite": "duplicate-id",
+      "expectedCategory": "EDUPLICATEID",
+      "paths": [
+        "content/invalid/duplicate-id/a.md",
+        "content/invalid/duplicate-id/b.md"
+      ]
+    },
+    {
+      "suite": "missing-parent",
+      "expectedCategory": "EPARENTMISSING",
+      "paths": [
+        "content/invalid/missing-parent.md"
+      ]
+    },
+    {
+      "suite": "self-parent",
+      "expectedCategory": "EPARENTSELF",
+      "paths": [
+        "content/invalid/self-parent.md"
+      ]
+    },
+    {
+      "suite": "satellite-of-satellite",
+      "expectedCategory": "EPARENTNOTTRUNK",
+      "paths": [
+        "content/invalid/satellite-of-satellite/trunk.md",
+        "content/invalid/satellite-of-satellite/mid.md",
+        "content/invalid/satellite-of-satellite/leaf.md"
+      ]
+    },
+    {
+      "suite": "cycle",
+      "expectedCategory": "EPARENTCYCLE",
+      "paths": [
+        "content/invalid/cycle/a.md",
+        "content/invalid/cycle/b.md"
+      ]
+    },
+    {
+      "suite": "duplicate-key",
+      "expectedCategory": "EFRONTMATTER",
+      "paths": [
+        "content/invalid/duplicate-key.md"
+      ]
+    },
+    {
+      "suite": "unclosed-frontmatter",
+      "expectedCategory": "EFRONTMATTER",
+      "paths": [
+        "content/invalid/unclosed-frontmatter.md"
+      ]
+    },
+    {
+      "suite": "nested-mapping",
+      "expectedCategory": "EFRONTMATTER",
+      "paths": [
+        "content/invalid/nested-mapping.md"
+      ]
+    },
+    {
+      "suite": "invalid-utf8",
+      "expectedCategory": "EINVALIDUTF8",
+      "paths": [
+        "content/invalid/invalid-utf8.md"
+      ]
+    },
+    {
+      "suite": "invalid-path-id",
+      "expectedCategory": "EINVALIDPATH",
+      "paths": [
+        "content/invalid/invalid-path-id.md"
+      ]
+    }
+  ],
+  "requiredInvalidCategories": [
+    "EDUPLICATEID",
+    "EPARENTMISSING",
+    "EPARENTSELF",
+    "EPARENTNOTTRUNK",
+    "EPARENTCYCLE",
+    "EFRONTMATTER",
+    "EINVALIDUTF8",
+    "EINVALIDPATH"
+  ]
+}

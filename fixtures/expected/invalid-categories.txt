@@ -1,0 +1,11 @@
+# Content-error categories that must appear in fixtures/manifest.json
+# (one code per line; # comments and blank lines ignored).
+# CLI-only categories EUSAGE and EIO are intentionally omitted.
+EDUPLICATEID
+EPARENTMISSING
+EPARENTSELF
+EPARENTNOTTRUNK
+EPARENTCYCLE
+EFRONTMATTER
+EINVALIDUTF8
+EINVALIDPATH
