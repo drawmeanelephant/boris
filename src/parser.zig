@@ -510,6 +510,21 @@ test "parse: valid frontmatter document" {
     try std.testing.expect(@intFromPtr(r.doc.body.ptr) >= @intFromPtr(src.ptr));
 }
 
+// Canonical author-facing parent key on the product IR/RAG parse path.
+test "parse: canonical parent is accepted" {
+    const src =
+        \\---
+        \\title: Child
+        \\parent: guides/intro
+        \\---
+        \\body
+        \\
+    ;
+    const r = parse(src);
+    try std.testing.expect(r.isOk());
+    try std.testing.expectEqualStrings("guides/intro", r.doc.meta.parent.?);
+}
+
 test "parse: CRLF input" {
     const src = "---\r\ntitle: CRLF Title\r\nstatus: draft\r\n---\r\n# Body\r\n";
     const r = parse(src);
@@ -570,6 +585,7 @@ test "parse: unknown key is EFRONTMATTER" {
     try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "unsupported") != null);
 }
 
+// Product path does not accept legacy author aliases (not mapped to `parent`).
 test "parse: legacy parentEntry is unknown key" {
     const src =
         \\---
@@ -580,6 +596,22 @@ test "parse: legacy parentEntry is unknown key" {
     const r = parse(src);
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EFRONTMATTER);
+    try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "unsupported") != null);
+    try std.testing.expect(r.doc.meta.parent == null);
+}
+
+test "parse: legacy parent_entry is unknown key" {
+    const src =
+        \\---
+        \\parent_entry: guides/intro
+        \\---
+        \\
+    ;
+    const r = parse(src);
+    try std.testing.expect(!r.isOk());
+    try std.testing.expect(r.category().? == .EFRONTMATTER);
+    try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "unsupported") != null);
+    try std.testing.expect(r.doc.meta.parent == null);
 }
 
 test "parse: nested mapping is EFRONTMATTER" {

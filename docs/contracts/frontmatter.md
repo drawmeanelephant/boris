@@ -1,9 +1,8 @@
 # Frontmatter grammar (v0.1)
 
-**Status:** normative contract  
-**Milestone:** 5 implements the library parser (`src/parser.zig`) and fixture
-coverage. The default CLI still does **not** invoke the parser until a later
-pipeline milestone.
+**Status:** normative contract — **implemented** on the shared IR/RAG compile path  
+**Module:** `src/parser.zig` (product frontmatter); pipeline invokes parse before
+Aside tokenize and graph validation.
 
 Boris frontmatter is a **deliberately closed, bounded grammar**. It is **not**
 general YAML and must never be documented or implemented as “YAML support.”
@@ -152,6 +151,20 @@ Implementations **must not** accept or silently map:
 
 If content uses `parentEntry` or `parent_entry`, the compiler treats them as
 **unknown keys** → [`EFRONTMATTER`](diagnostics.md).
+
+### Migration / compatibility note (`parent` vs legacy names)
+
+| Surface | Behavior |
+|---------|----------|
+| **Author source frontmatter** | Sole key: **`parent`**. New content, fixtures, and features must use `parent`. |
+| **Product parse path** (`src/parser.zig`) | Shared by IR, RAG **input**, and experimental HTML. `parentEntry` / `parent_entry` are **not** aliases: they fail as unknown keys → [`EFRONTMATTER`](diagnostics.md). No silent map to `parent`. |
+| **IR JSON** | Field name is always `parent` (never `parentEntry`). |
+| **RAG export** | Catalog column and exported page metadata may use the name **`parent_entry`** for the same parent entity-id string (or `""`). That is **export packaging only**, not author grammar. See [rag-export.md](rag-export.md). |
+| **Non-product helpers** | `frontmatter.zig` (fuzz) and historical `harness.zig` must not reintroduce a second accepted author dialect. Prefer `parent` only. |
+
+Historical notes and older code sometimes described a second dialect that accepted `parentEntry` on HTML/RAG helpers. **Active product source input does not.** Accepting those keys as aliases would not change Trunk/Satellite semantics (same foreign-key id string), but would create a dual grammar that can diverge — which this contract forbids.
+
+There is **no** scheduled removal date in repository planning material for the RAG export field name `parent_entry` (catalog schema). Author-key rejection of `parentEntry` / `parent_entry` is already the product behavior.
 
 ---
 

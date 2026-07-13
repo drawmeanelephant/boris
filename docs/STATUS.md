@@ -61,6 +61,7 @@ zig build run -- --input fixtures/content/valid --out /tmp/boris-ir
 zig build run -- --input fixtures/content/valid --rag-dir /tmp/boris-rag
 zig build run -- --input docs/contracts/fixtures/valid/content --out .boris
 zig build source-rag
+zig build package                  # optional review tar → packages/
 ./scripts/release-gate.sh
 ```
 
@@ -103,7 +104,7 @@ Exit codes: `0` success, `1` content, `2` usage, `3` I/O.
 - Hostile double tests mechanical wrapper rules; full C non-retention against
   arbitrary engines remains a contract (see `docs/contracts/apex-abi.md`)
 
-## Intentionally deferred
+## Intentionally deferred (v0.1 non-goals)
 
 - Default CLI HTML `dist/` product mode
 - Markdown-native `:::` **authoring** (export representation only)
@@ -111,6 +112,77 @@ Exit codes: `0` success, `1` content, `2` usage, `3` I/O.
 - Incremental rebuild / reverse dependency index
 - Concurrency / worker pools / watch mode / mmap
 - Process RSS flatness claims
+- Full YAML frontmatter
+
+---
+
+## Priority list (post-m10 reevaluation)
+
+**Phase context:** v0.1 content-compiler surface is **in force** (IR + optional
+RAG + Aside + Apex + experimental HTML). Next work should **not** reopen
+polyglot frameworks or concurrency-before-correctness. Prefer sequential
+product depth, then graph-native dependency tracking (AGENTS long-term), then
+parallelism.
+
+### P0 — finish / keep clean (do first; low blast radius)
+
+| Priority | Item | Why now |
+|----------|------|---------|
+| P0.1 | Contract navigation & stale planning notes | Contributors must not treat redirects or m2 stubs as truth; ownership is in `docs/contracts/README.md` |
+| P0.2 | Fix remaining doc drift (e.g. “CLI still stubs pipeline”, dual-dialect confusion) | STATUS/contracts/README must match m10 reality |
+| P0.3 | Point code comments at canonical contracts (e.g. `graph.zig` → `ir-schema.md`) | Avoid citing non-normative redirects |
+| P0.4 | Dual frontmatter path clarity | Product path is `parser.zig` + **`parent` only** (rejects `parentEntry` / `parent_entry` as `EFRONTMATTER`). Residual: RAG export field name `parent_entry`; non-product `frontmatter.zig` (fuzz) + historical `harness.zig` — must not reintroduce a second author dialect |
+
+### P1 — next product surface (sequential SSG path)
+
+| Priority | Item | Why this order |
+|----------|------|----------------|
+| **P1.1** | **Promote experimental HTML to opt-in CLI** (e.g. explicit flag; still not default over IR) | Path already tested (Whiteboard, Aside stream, Atomic publish); natural m11 without new languages |
+| P1.2 | Graph-aware navigation / TOC from frozen Trunk–Satellite graph | Uses existing IR; no reverse index required yet |
+| P1.3 | Apex markdown fidelity (stub → real docs needs) | HTML quality bottleneck; keep C ABI, no child-process renderers |
+| P1.4 | Layout / asset dependency edges (typed, validated) | First step toward long-term dependency graph; still sequential |
+
+### P2 — graph-native build foundations (before incremental / parallel)
+
+| Priority | Item | Gate |
+|----------|------|------|
+| P2.1 | Forward + reverse dependency indexes (pages, layouts, includes, assets) | Design + implement sequentially; freeze after validate |
+| P2.2 | Includes / transclusion as first-class edges | Only with deterministic discovery + cycle rules |
+| P2.3 | Content-addressed cache keys + affected-set calculation | After indexes exist and are tested |
+| P2.4 | Incremental rebuild | **After** P2.1–P2.3; do not ship partial “maybe stale” caches |
+
+### P3 — scale-out (only after sequential correctness + benchmarks)
+
+| Priority | Item | Gate |
+|----------|------|------|
+| P3.1 | Bounded worker pool for independent render jobs | Graph frozen; workers must not mutate shared graph/outputs |
+| P3.2 | Watch mode | Incremental path proven first |
+| P3.3 | Multi-target isolated output dirs / cache namespaces | Explicit cross-target rules |
+
+### Explicitly deprioritized (do not pull forward without a design ask)
+
+| Item | Rationale |
+|------|-----------|
+| Nested asides / multi-component registry / MDX | Expand registry carefully; no executable MDX |
+| `:::` authoring | Export-only representation is enough for v0.1/RAG |
+| Full YAML frontmatter | Closed grammar is intentional |
+| Process RSS flatness claims | Measure before claiming; Whiteboard capacity only today |
+| Cross-volume atomic publish guarantees | Platform-qualified; document, don’t overclaim |
+
+### Open risks (track; not automatic next tickets)
+
+1. Apex stub ≠ CommonMark — fidelity gap for real authoring.
+2. Publication atomicity across volumes/OSes not fully proven.
+3. Residual dual-helper surface: product IR/RAG/HTML input uses `parser.zig` with
+   author key **`parent` only** (`parentEntry` / `parent_entry` rejected).
+   `frontmatter.zig` remains for fuzz; historical `harness.zig` is not on the
+   default test graph. RAG export still names the parent id column
+   `parent_entry` (export-only; not author frontmatter). Narrative seeds may
+   still mention older alias wording — contracts win.
+4. Root `fixtures_test.zig` is inventory-only; compiler goldens live under contract fixtures + hardening tests (wording must stay honest).
+
+**North star:** Zig Markdown documentation compiler — load, roll, ignite, reset —
+validated metadata and graph-aware docs, not a polyglot web framework.
 
 ---
 
@@ -120,12 +192,14 @@ Exit codes: `0` success, `1` content, `2` usage, `3` I/O.
 |-----|------|
 | `README.md` | Human front door |
 | `AGENTS.md` | Hard constraints |
-| `docs/contracts/` | Normative contracts |
-| `docs/contracts/components.md` | **Aside tokenizer (m10)** |
+| `docs/contracts/` | Normative contracts (canonical list in `README.md`) |
+| `docs/contracts/acceptance.md` | v0.1 acceptance checklist (non-normative) |
+| `docs/contracts/v0.1-overview.md` | Orientation snapshot (non-normative) |
+| `docs/contracts/components.md` | Aside tokenizer (m10) |
 | `docs/AUDIT-v0.1.md` | Self-audit report |
 | `docs/rag/system/` | Narrative seeds (RAG system segment) |
 | `CHANGELOG.md` | What changed |
-| This file | Living status |
+| This file | Living status + priority list |
 
 ---
 

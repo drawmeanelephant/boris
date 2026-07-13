@@ -21,7 +21,25 @@ every surface is implemented (e.g. HTML `dist/` remains experimental).
 | Experimental HTML path | **Implemented** (Aside stream; not default CLI) |
 | HTML `dist/` default CLI | **Not** default product |
 
-## Normative documents (v0.1)
+## Canonical ownership (one document per topic)
+
+Use **only** these files as normative sources of truth. One canonical owner
+per topic:
+
+| Topic | Canonical normative document |
+|-------|------------------------------|
+| Frontmatter grammar | [frontmatter.md](frontmatter.md) |
+| Source paths and entity IDs | [identity-and-paths.md](identity-and-paths.md) |
+| Discovery / scanning | [scanner.md](scanner.md) |
+| Parent / graph validation (Trunk / Satellite) | [ir-schema.md](ir-schema.md) (graph section); `parent` field shape in [frontmatter.md](frontmatter.md) |
+| JSON IR (manifest, graph, build-report) | [ir-schema.md](ir-schema.md) |
+| Diagnostics | [diagnostics.md](diagnostics.md) |
+| RAG export | [rag-export.md](rag-export.md) |
+| Aside / components | [components.md](components.md) |
+| Apex C ABI | [apex-abi.md](apex-abi.md) |
+| Experimental HTML output | [html-output.md](html-output.md) |
+
+### Normative documents (v0.1) — full list
 
 | Document | Topic |
 |----------|-------|
@@ -35,8 +53,26 @@ every surface is implemented (e.g. HTML `dist/` remains experimental).
 | [apex-abi.md](apex-abi.md) | In-process Apex C ABI, allocator lifetime, Zig error rules (m8) |
 | [html-output.md](html-output.md) | Experimental HTML Whiteboard, Aside stream, layout splice, Atomic publish |
 
-Supporting / historical drafts may remain in this tree; **if they conflict**,
-the documents above win. Prefer linking those names from new work.
+## Redirect / compatibility paths (non-normative)
+
+These filenames are **not** competing contracts. They exist only so old links
+do not go dark. They carry **no** independent normative claims. On any
+conflict, the canonical document **wins**.
+
+| Compatibility path | Redirects to (canonical) |
+|--------------------|--------------------------|
+| [parent-relationships.md](parent-relationships.md) | [ir-schema.md](ir-schema.md) (graph); [frontmatter.md](frontmatter.md) for `parent` key |
+| [source-path-and-id.md](source-path-and-id.md) | [identity-and-paths.md](identity-and-paths.md) |
+| [json-ir-and-manifest.md](json-ir-and-manifest.md) | [ir-schema.md](ir-schema.md) |
+
+Supporting / historical drafts may also remain in this tree. Prefer linking the
+**canonical** names from new work.
+
+| Supporting (non-normative) | Role |
+|----------------------------|------|
+| [acceptance.md](acceptance.md) | v0.1 acceptance checklist |
+| [v0.1-overview.md](v0.1-overview.md) | Orientation; points at canonical contracts |
+| [../STATUS.md](../STATUS.md) | Living status + post-m10 priority list |
 
 ## Fixture corpus
 
@@ -50,9 +86,9 @@ fixtures/
   expected/              # stable notes useful before IR goldens exist
 ```
 
-Tests: `src/fixtures_test.zig` — verifies fixture files exist and that the
-manifest’s invalid categories are consistent. **Does not** run the compiler
-against fixtures yet.
+Tests: `src/fixtures_test.zig` — inventory only (paths + categories). Compiler
+runs against contract fixtures / hardening suites separately (`pipeline`,
+`hardening_test`, release-gate).
 
 ## Rules of use
 
@@ -65,6 +101,8 @@ against fixtures yet.
    as evidence that the binary implements it.
 4. **Author-facing parent key is only `parent`.** Never document `parentEntry`
    as accepted compiler frontmatter.
+5. **Redirect paths are not sources of truth.** Cite the canonical file from
+   the ownership table above, not a compatibility redirect.
 
 ## Explicit non-goals (remaining)
 

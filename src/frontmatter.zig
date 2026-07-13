@@ -377,6 +377,28 @@ test "parse title parent status tags" {
     try std.testing.expectEqualStrings("b", meta.tags[1]);
 }
 
+// Non-product helper must match product closed set: no parentEntry alias.
+test "parse rejects parentEntry as unknown key" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+
+    const src =
+        \\---
+        \\parentEntry: guides/intro
+        \\---
+        \\
+    ;
+    const meta = try parse(src, "legacy.md", retain, gpa, &diags);
+    try std.testing.expect(meta.parent == null);
+    try std.testing.expectEqual(@as(usize, 1), diags.items.len);
+    try std.testing.expect(diags.items[0].code == .EFRONTMATTER);
+    try std.testing.expect(std.mem.indexOf(u8, diags.items[0].message, "parentEntry") != null);
+}
+
 test "parse rejects unknown key and continues" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);

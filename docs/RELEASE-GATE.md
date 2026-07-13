@@ -11,6 +11,7 @@ zig build test-apex-hostile
 zig build test-apex-sanitize   # optional; documents skip if sanitizers unavailable
 zig build run -- --input fixtures/content/valid --out /tmp/boris-ir
 zig build run -- --input fixtures/content/valid --rag-dir /tmp/boris-rag
+zig build package              # optional; review tar under packages/ (not ship-blocking)
 ```
 
 CI (`.github/workflows/ci.yml`) pins **Zig 0.16.0** and runs `zig build` plus

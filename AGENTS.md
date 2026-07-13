@@ -49,7 +49,14 @@ rhythm for the pipeline: **Load → Roll → Ignite → Reset**. Narrative seed:
 | Source pack for LLM notebooks | `tools/source-rag/` (`zig build source-rag` → `source-rag/`) |
 | Apex / Aside / HTML assemble experiments | `apex`, `aside`, `parser`, `compile`, `assemble`, `scanner`, `page` |
 
-There are currently **two frontmatter dialects** (compiler: `parent`; legacy parser/RAG: `parentEntry`). Prefer the compiler dialect for new content and new features. Do not “fix” one path by silently changing the other without tests.
+Author-facing frontmatter parent key is **`parent` only** (product parser on
+IR, RAG input, and experimental HTML). Legacy names `parentEntry` /
+`parent_entry` are **rejected** as unknown keys (`EFRONTMATTER`), not aliased.
+RAG export may still use the field name `parent_entry` in catalog/export
+packaging for the same parent id — that is not author grammar. Non-product
+helpers (`frontmatter.zig` fuzz, historical `harness.zig`) must not reintroduce
+a second accepted dialect. Do not “fix” one path by silently changing another
+without tests.
 
 ## Hard constraints (do not violate unless the user explicitly requests a deviation)
 

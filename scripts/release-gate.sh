@@ -244,14 +244,14 @@ if ! command -v git >/dev/null || [[ ! -d .git ]]; then
 else
   is_generated_path() {
     case "$1" in
-      dist|dist/*|rag|rag/*|rag1|rag1/*|rag2|rag2/*|.boris|.boris/*|.boris-*|.boris-*/*|test-output|test-output/*|.release-gate|.release-gate/*|.zig-cache|.zig-cache/*|zig-out|zig-out/*) return 0 ;;
+      dist|dist/*|packages|packages/*|rag|rag/*|rag1|rag1/*|rag2|rag2/*|.boris|.boris/*|.boris-*|.boris-*/*|test-output|test-output/*|.release-gate|.release-gate/*|.zig-cache|.zig-cache/*|zig-out|zig-out/*) return 0 ;;
       *) return 1 ;;
     esac
   }
   is_approved_generated() {
     # Approved to exist as local/untracked (and normally gitignored).
     case "$1" in
-      dist|dist/*|rag|rag/*|rag1|rag1/*|rag2|rag2/*|.boris|.boris/*|.boris-*|.boris-*/*|test-output|test-output/*|.release-gate|.release-gate/*|.zig-cache|.zig-cache/*|zig-out|zig-out/*) return 0 ;;
+      dist|dist/*|packages|packages/*|rag|rag/*|rag1|rag1/*|rag2|rag2/*|.boris|.boris/*|.boris-*|.boris-*/*|test-output|test-output/*|.release-gate|.release-gate/*|.zig-cache|.zig-cache/*|zig-out|zig-out/*) return 0 ;;
       *) return 1 ;;
     esac
   }
@@ -282,7 +282,7 @@ else
     esac
     # Only care about generated-looking names
     case "${path}" in
-      dist|dist/*|rag|rag/*|rag[0-9]*|rag[0-9]*/*|.boris|.boris/*|.boris-*|.boris-*/*|test-output|test-output/*|.release-gate|.release-gate/*|.zig-cache|.zig-cache/*|zig-out|zig-out/*|out|out/*|.boris-*/*)
+      dist|dist/*|packages|packages/*|rag|rag/*|rag[0-9]*|rag[0-9]*/*|.boris|.boris/*|.boris-*|.boris-*/*|test-output|test-output/*|.release-gate|.release-gate/*|.zig-cache|.zig-cache/*|zig-out|zig-out/*|out|out/*|.boris-*/*)
         if ! is_approved_generated "${path}"; then
           untracked_bad=1
           echo "    untracked generated (not approved): ${path}"
@@ -299,6 +299,20 @@ else
   else
     pass "no disallowed untracked generated artifacts"
   fi
+fi
+
+# --- 9. Optional review package (not ship-blocking) ----------------------
+# Produces packages/boris-package.tar for maintainer inspection. Failure here
+# does not fail the gate (package step is optional for v0.1).
+note "9. Optional review package (non-blocking)"
+if zig build package -- --input="${VALID_CONTENT}" --packages-dir="${GATE_DIR}/packages" --quiet; then
+  if [[ -f "${GATE_DIR}/packages/boris-package.tar" ]]; then
+    pass "zig build package wrote ${GATE_DIR}/packages/boris-package.tar"
+  else
+    pass "zig build package exited 0 (archive path not under gate dir — inspect packages/)"
+  fi
+else
+  pass "zig build package skipped/failed (optional; not a gate fail)"
 fi
 
 # --- Summary -------------------------------------------------------------

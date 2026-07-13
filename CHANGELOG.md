@@ -19,6 +19,43 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Review package step
+
+- Add `zig build package` (`boris-package`): deterministic tar under
+  `packages/boris-package.tar` with IR JSON, optional RAG corpus,
+  `MACHINE-READABLE-VERSION.json`, and `SHA256SUMS`. Reuses `pipeline.run` /
+  `rag.run`; does not change IR schema or HTML defaults.
+
+### Frontmatter parent key containment
+
+- Clarified that author-facing source frontmatter accepts **`parent` only**;
+  `parentEntry` / `parent_entry` are rejected as unknown keys (`EFRONTMATTER`)
+  on the product parse path (IR + RAG input share `parser.zig`). RAG catalog
+  field `parent_entry` remains export packaging only.
+  See [docs/contracts/frontmatter.md](docs/contracts/frontmatter.md)
+  (migration / compatibility note); README + STATUS + AGENTS aligned.
+- Focused parser tests: canonical `parent` accepted; legacy
+  `parentEntry` / `parent_entry` rejected with `EFRONTMATTER` (not aliased).
+  Non-product `frontmatter.zig` helper gets matching `parentEntry` rejection.
+  **No runtime removal** of residual non-product helpers or RAG export field
+  names in this change.
+
+### Contracts navigation cleanup
+
+- Explicit non-normative redirect banners on
+  [`parent-relationships.md`](docs/contracts/parent-relationships.md),
+  [`source-path-and-id.md`](docs/contracts/source-path-and-id.md), and
+  [`json-ir-and-manifest.md`](docs/contracts/json-ir-and-manifest.md);
+  [`docs/contracts/README.md`](docs/contracts/README.md) ownership map lists one
+  canonical normative document per topic (no competing sources of truth).
+- Planning notes refreshed: [`acceptance.md`](docs/contracts/acceptance.md) and
+  [`v0.1-overview.md`](docs/contracts/v0.1-overview.md) match m10 reality;
+  stale “CLI still stubs pipeline” status lines cleared on frontmatter /
+  identity contracts; README RAG Aside export note corrected.
+- Post-m10 priority list reevaluated in [`docs/STATUS.md`](docs/STATUS.md)
+  (P0 hygiene → P1 opt-in HTML / graph nav / Apex fidelity → P2 dependency
+  indexes → P3 concurrency last).
+
 ### Milestone 10 — v0.1 hardening (Aside + CI + audit)
 
 - Constrained `<Aside>` tokenizer in [`src/aside.zig`](src/aside.zig): kind

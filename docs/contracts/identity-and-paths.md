@@ -1,9 +1,8 @@
 # Identity and paths (v0.1)
 
-**Status:** normative contract; **implemented** for path/id derivation and
-discovery in milestone 4 (`src/identity.zig`, `src/scanner.zig`).  
-Default CLI still stubs the full content pipeline (does not scan on every run
-until later milestones wire it).
+**Status:** normative contract — **implemented** for path/id derivation and
+discovery (`src/identity.zig`, `src/scanner.zig`); wired into default IR and
+RAG CLI via `pipeline.compile`.
 
 See also: [scanner.md](scanner.md).
 

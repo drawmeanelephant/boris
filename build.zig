@@ -5,7 +5,7 @@ const std = @import("std");
 /// scanner/parser (m4–m5). Milestone 8: in-process Apex C ABI (linked; not
 /// default IR/RAG path). Milestone 9: experimental HTML assemble/compile tests
 /// (not default CLI). Milestone 10: Aside tokenizer + hardening. Fixture
-/// inventory (m2). Separate tool: `boris-source-rag`.
+/// inventory (m2). Separate tools: `boris-source-rag`, `boris-package`.
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -300,6 +300,41 @@ pub fn build(b: *std.Build) void {
     const run_fuzz_tests = b.addRunArtifact(fuzz_tests);
     run_fuzz_tests.setCwd(b.path("."));
 
+    // --- Review package (IR + optional RAG tar) ----------------------------
+    // Reuses pipeline.run / rag.run; does not change IR schema or HTML defaults.
+    const package_mod = b.createModule(.{
+        .root_source_file = b.path("src/package.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkApex(package_mod, b, false);
+    package_mod.addOptions("build_options", apex_opts);
+
+    const package_exe = b.addExecutable(.{
+        .name = "boris-package",
+        .root_module = package_mod,
+    });
+    b.installArtifact(package_exe);
+
+    const package_run = b.addRunArtifact(package_exe);
+    package_run.setCwd(b.path("."));
+    package_run.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        package_run.addArgs(args);
+    }
+
+    const package_step = b.step(
+        "package",
+        "Build a deterministic IR (+ optional RAG) review tar under packages/",
+    );
+    package_step.dependOn(&package_run.step);
+
+    const package_tests = b.addTest(.{
+        .root_module = package_mod,
+    });
+    const run_package_tests = b.addRunArtifact(package_tests);
+    run_package_tests.setCwd(b.path("."));
+
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_fixtures_tests.step);
@@ -315,6 +350,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_hardening_tests.step);
     test_step.dependOn(&run_fuzz_tests.step);
     test_step.dependOn(&run_source_rag_tests.step);
+    test_step.dependOn(&run_package_tests.step);
 
     const test_harness_step = b.step(
         "test-harness",

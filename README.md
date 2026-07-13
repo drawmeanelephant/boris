@@ -96,8 +96,9 @@ rag/
   system/**  content/pages/**  graph/entity-catalog.md  graph/relations.md
 ```
 
-Same scanner, parser, PageDb records, and `graph.validate` as IR mode. Asides
-are **not** rewritten to `:::kind` in this milestone (deferred). See
+Same scanner, parser, PageDb records, and `graph.validate` as IR mode. Aside
+export uses `:::kind` / `:::kind{id="…"}` form (non-round-trippable; not an
+authoring syntax). See
 [docs/contracts/rag-export.md](docs/contracts/rag-export.md).
 
 ## Quick start
@@ -112,6 +113,7 @@ zig build run -- --rag --no-rag    # usage conflict; exit 2
 zig build run -- --rag --out x     # usage conflict; exit 2
 zig build test                     # unit tests (CLI + fixtures + scanner + pipeline + RAG)
 zig build source-rag               # source pack for LLM upload → source-rag/
+zig build package                  # review tar → packages/boris-package.tar (IR + RAG + version + SHA256SUMS)
 ```
 
 ```bash
@@ -132,10 +134,22 @@ the shell typically sees exit `1` from `zig build` itself. Prefer
 
 | Step | Purpose |
 |------|---------|
-| `zig build` | Build and install `boris` and `boris-source-rag` |
+| `zig build` | Build and install `boris`, `boris-source-rag`, and `boris-package` |
 | `zig build run -- [args]` | Run `boris` with optional arguments after `--` |
 | `zig build test` | Run unit tests (includes fixture inventory) |
 | `zig build source-rag` | Generate a **source-code** RAG pack for LLM upload |
+| `zig build package` | Deterministic review tar under `packages/` (IR + optional RAG) |
+
+### Review package
+
+After a successful IR/RAG surface, produce a single inspectable archive:
+
+```bash
+zig build package
+# or: zig-out/bin/boris-package --help
+tar -tf packages/boris-package.tar
+# inspect: MACHINE-READABLE-VERSION.json, SHA256SUMS, ir/*.json, rag/**
+```
 
 ### Source RAG (standalone tool)
 
@@ -177,7 +191,11 @@ binary under `tools/source-rag/` — not wired into the product `boris` CLI.
 | [rag-export.md](docs/contracts/rag-export.md) | Optional RAG export; `:::kind` is export-only / deferred |
 | [apex-abi.md](docs/contracts/apex-abi.md) | In-process Apex C ABI + Zig wrapper (m8; not default CLI) |
 
-**Author-facing parent key is only `parent`.** Do not use `parentEntry`.
+**Author-facing parent key is only `parent`.** Do not use `parentEntry` or
+`parent_entry` in source frontmatter (rejected as `EFRONTMATTER`). RAG catalog
+column `parent_entry` is export packaging only — see
+[docs/contracts/frontmatter.md](docs/contracts/frontmatter.md)
+(migration / compatibility note).
 
 ## Status
 
