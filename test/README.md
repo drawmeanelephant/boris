@@ -6,17 +6,14 @@ Zig/C ABI, path discovery, graph validation, and deterministic artifacts.
 ## Commands
 
 ```bash
-# Full default suite (unit + fixture + integration + fuzz)
+# Full default suite (unit + fixture + hardening + fuzz)
 zig build test
 
-# Same tests, named step (alias for documentation / CI scripts)
+# Hardening integration subset
 zig build test-harness
 
-# Fuzz / property suite only (still via the main test binary filters if needed)
-# Prefer the full suite; fuzz lives in src/fuzz.zig and is part of `zig build test`.
-zig build test
-
-# Optional: Apex C ASan+UBSan smoke (real engine, C-only binary)
+# Optional: Apex C ASan+UBSan smoke (opt-in; documented skip if unavailable)
+# Not required on CI (sanitizer runtime varies by host).
 zig build test-apex-sanitize
 
 # Optional: hostile Apex C test double (swaps apex.c → apex_hostile.c)
@@ -64,19 +61,14 @@ for invalid-graph cases.
 
 | Area | Module / step |
 |------|----------------|
-| Valid multi-page IR | `src/harness.zig` |
-| Invalid graph cases | harness + contract fixtures |
-| Frontmatter + UTF-8 | harness |
-| Component tokenize / render | harness |
-| Empty + large-but-bounded page | harness |
-| Layout markers | harness + `test/fixtures/layouts/` |
-| RAG-only vs IR build | harness |
-| Repro HTML / graph / RAG (two runs) | harness |
-| Whiteboard per-page reset isolation | harness |
-| Frontmatter fuzz | `src/fuzz.zig` |
-| Component fuzz | `src/fuzz.zig` |
-| Apex fuzz (pointer/len contracts) | `src/fuzz.zig` |
-| Random graph vs reference checker | `src/fuzz.zig` |
+| Aside tokenizer + HTML + RAG `:::kind` | `src/aside.zig`, `src/hardening_test.zig` |
+| IR/RAG dual-run determinism | `src/hardening_test.zig`, pipeline/rag tests |
+| Matching IR/RAG graph diagnostic codes | `src/hardening_test.zig` |
+| Scanner order independence | `src/hardening_test.zig`, `src/scanner.zig` |
+| Duplicate id non-masking | `src/hardening_test.zig`, `src/graph.zig` |
+| Output path escape rejection | `src/hardening_test.zig`, `src/identity.zig` |
+| Experimental HTML Aside stream | `src/compile.zig`, hardening |
+| Frontmatter / component / Apex / graph fuzz | `src/fuzz.zig` |
 | Hostile Apex ABI double | `zig build test-apex-hostile` |
 
 ## Fuzz seeds and bounds

@@ -19,6 +19,107 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Milestone 10 — v0.1 hardening (Aside + CI + audit)
+
+- Constrained `<Aside>` tokenizer in [`src/aside.zig`](src/aside.zig): kind
+  allowlist (`note|tip|info|warning|danger`), optional safe-anchor `id`, quoted
+  attributes only, nested Aside rejected, unknown PascalCase tags hard-error,
+  recognition **outside** fenced code only.
+- Shared pipeline validation emits `ECOMPONENT` ([`docs/contracts/diagnostics.md`](docs/contracts/diagnostics.md)).
+- Experimental HTML stream: Apex(markdown) + `aside.renderHtml` in document order.
+- RAG export representation: `:::kind` / `:::kind{id="…"}` (non-round-trippable);
+  raw `<Aside>` does not remain in exported pages.
+- Hardening tests: IR/RAG dual-run determinism, matching graph categories, scanner
+  order independence, duplicate-id non-masking, path escape rejection, component
+  fixtures ([`src/hardening_test.zig`](src/hardening_test.zig)).
+- CI matrix: Linux + macOS; Apex sanitizer remains opt-in local
+  (`zig build test-apex-sanitize`).
+- Contract: [`docs/contracts/components.md`](docs/contracts/components.md).
+- Self-audit: [`docs/AUDIT-v0.1.md`](docs/AUDIT-v0.1.md).
+- Docs/seeds synchronized; publishing-workshop analogies paired with invariants.
+
+### Milestone 9 — experimental HTML path (Whiteboard + layout splice)
+
+- Experimental single-threaded HTML path in [`src/compile.zig`](src/compile.zig)
+  + [`src/assemble.zig`](src/assemble.zig): document-local Whiteboard arena,
+  long-lived PageDb metadata, Apex body render, immutable layout prefix/suffix,
+  Zig 0.16 `createFileAtomic` + `Atomic.replace` publication.
+- **Not** default CLI (IR/RAG unchanged). `compile.experimental == true`.
+- Layout: exactly one `{{content}}`; missing/duplicate hard errors before
+  content compile. Three sequential writes only — no mega-string assembly.
+- Flush-before-reset tests: `HoldUntilFlush` proves invalidate-before-flush
+  fails; production order flush → publish → `free_all`.
+- Error paths: render failure does not publish; write failure preserves prior
+  final and cleans temp. PageDb survives each Whiteboard reset.
+- Fixtures: [`test/fixtures/html/`](test/fixtures/html/) content + expected.
+- Contract: [`docs/contracts/html-output.md`](docs/contracts/html-output.md).
+- Release gate: Whiteboard flush/reset item checked for experimental path.
+
+### Milestone 8 — in-process Apex C ABI + defensive Zig wrapper
+
+- Native Apex C engine under [`vendor/apex/`](vendor/apex/) (`apex.h` / `apex.c`)
+  compiled and linked into the Boris process (no child-process renderer).
+- Defensive Zig wrapper [`src/apex.zig`](src/apex.zig): `@cImport` of
+  `apex.h`, stack-lifetime `ApexAllocator`, status-before-outputs,
+  null+nonzero rejection, arena free no-op, `Html` borrowed lifetime,
+  `forbidApexFree` guard. **Not** wired into default IR or RAG CLI paths.
+- Hostile C double [`vendor/apex/apex_hostile.c`](vendor/apex/apex_hostile.c)
+  + [`src/apex_hostile_test.zig`](src/apex_hostile_test.zig); step
+  `zig build test-apex-hostile`.
+- Optional ASan+UBSan smoke: `zig build test-apex-sanitize` (documents skip if
+  sanitizers unavailable on the host).
+- Contract: [`docs/contracts/apex-abi.md`](docs/contracts/apex-abi.md)
+  (mechanically checked / tested / vendor assumptions).
+- Build: `build.zig` links Apex for product binary + Apex unit tests.
+
+### Milestone 7 — optional deterministic RAG export
+
+- Product RAG export in [`src/rag.zig`](src/rag.zig): reuses
+  [`pipeline.compile`](src/pipeline.zig) (scanner → parser → PageDb →
+  `graph.validate` → freeze). No second parser or graph implementation.
+- CLI: `--rag` → corpus under `rag/`; `--rag-dir DIR` implies RAG-only;
+  `--out` remains invalid with RAG flags (exit 2).
+- Corpus: `INDEX.md`, `UPLOAD-GUIDE.md`, `catalog.jsonl`, `catalog_meta.json`,
+  `system/**` (from `docs/rag/system` when present), `content/pages/**`,
+  `graph/entity-catalog.md`, `graph/relations.md`.
+- Determinism: stable sorts (system path, entity id, edges by src/tgt,
+  catalog by `rag_path`); fixed JSONL field order; metadata-owned single H1
+  (strip leading H1, demote remaining H1→H2). No timestamps / absolute paths
+  in artifacts.
+- Staging publication (`{out}.boris-rag-stage`); failed validation does not
+  publish a graph-dependent corpus. Absolute `--rag-dir` supported; cross-volume
+  atomic replace not claimed.
+- Asides deferred: do **not** fabricate `:::kind` (documented in contract).
+- Tests: dual-export byte-identity, catalog parse/field order, H1 rule, system
+  seed order, IR/RAG identical diagnostic categories on invalid graph.
+- Contract finalized: [`docs/contracts/rag-export.md`](docs/contracts/rag-export.md).
+- Golden samples: `fixtures/expected/rag/`.
+
+### Milestone 6 — IR vertical slice (scan → parse → graph → JSON)
+
+- End-to-end content compiler pipeline in [`src/pipeline.zig`](src/pipeline.zig):
+  scanner → bounded frontmatter parser → **PageDb** promote → graph validate →
+  freeze → deterministic JSON IR.
+- Graph validation in [`src/graph.zig`](src/graph.zig): duplicate id, missing
+  parent, self-parent, satellite-of-satellite, cycles; freeze only when clean.
+- Durable metadata ownership in [`src/page.zig`](src/page.zig) (`PageDb` /
+  `DurablePage`); no retained parser slices after source buffers free.
+- Emit under `--out` (default `.boris`): `manifest.json`, `graph.json`,
+  `build-report.json` with stable field order ([`src/json_out.zig`](src/json_out.zig)).
+- Publication: stage to `{out}.boris-stage` then per-file rename on success;
+  content failure writes only `build-report.json` and removes graph-dependent
+  artifacts. Cross-volume atomicity not claimed.
+- CLI IR mode wired in [`src/main.zig`](src/main.zig); exit `1` content, `2`
+  usage, `3` I/O. `--quiet` suppresses progress only.
+- Diagnostic codes match contracts (`EDUPLICATEID`, `EPARENTMISSING`, …) in
+  [`src/diag.zig`](src/diag.zig).
+- Integration tests: valid e2e + JSON parse, invalid categories, dual-build
+  determinism, no staging paths in IR, promote-after-free.
+- Contracts finalized: [`docs/contracts/ir-schema.md`](docs/contracts/ir-schema.md),
+  [`docs/contracts/diagnostics.md`](docs/contracts/diagnostics.md).
+- Golden samples: `fixtures/expected/valid/`,
+  `docs/contracts/fixtures/valid/expected/`.
+
 ### Name and metaphor (narrative / roll-forward)
 
 - Document project namesake and compile rhythm **Load → Roll → Ignite → Reset**

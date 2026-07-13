@@ -1,16 +1,22 @@
-# Expected artifacts (milestone 2)
+# Expected IR / RAG samples
 
-Full IR goldens (`manifest.json` / `graph.json` / `build-report.json` under
-`.boris/`) are **not** committed yet: the compiler does not emit IR on the
-default CLI.
+Golden / sample artifacts from the product pipelines.
 
-What is stable and useful now:
+| Path | Source content | Notes |
+|------|----------------|-------|
+| `valid/` | `fixtures/content/valid` | Full three-file IR set from a successful build |
+| `rag/` | `fixtures/content/valid` + `docs/rag/system` | Full RAG corpus tree (m7) |
 
-| Artifact | Purpose |
-|----------|---------|
-| [`../manifest.json`](../manifest.json) | Inventory of valid/invalid fixtures and expected diagnostic categories |
-| [`invalid-categories.txt`](invalid-categories.txt) | Flat list of content-error categories that must have fixtures |
+Regenerate:
 
-When the pipeline lands, add golden IR under suite-specific `expected/` folders
-and teach harness tests to compare them. Until then, do not invent goldens that
-cannot be produced by the product binary.
+```bash
+zig build
+./zig-out/bin/boris --input fixtures/content/valid --out fixtures/expected/valid --quiet
+./zig-out/bin/boris --input fixtures/content/valid --rag-dir fixtures/expected/rag --quiet
+```
+
+Contract fixture IR goldens also live at
+`docs/contracts/fixtures/valid/expected/`.
+
+These files are **illustrative** and test-supported; normative schemas live in
+`docs/contracts/ir-schema.md` and `docs/contracts/rag-export.md`.

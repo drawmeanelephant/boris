@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "0.1.0",
+  "compiler": "boris/0.1.1",
+  "contentRoot": "fixtures/content/valid",
+  "pageCount": 4,
+  "pages": [
+    {
+      "index": 0,
+      "id": "empty-no-fm",
+      "sourcePath": "empty-no-fm.md",
+      "role": "trunk",
+      "parent": null,
+      "title": null,
+      "status": null
+    },
+    {
+      "index": 1,
+      "id": "home",
+      "sourcePath": "trunk-root.md",
+      "role": "trunk",
+      "parent": null,
+      "title": "Home Trunk",
+      "status": "published"
+    },
+    {
+      "index": 2,
+      "id": "nested/deep/page",
+      "sourcePath": "nested/deep/page.md",
+      "role": "trunk",
+      "parent": null,
+      "title": "Nested Deep Page",
+      "status": "published"
+    },
+    {
+      "index": 3,
+      "id": "satellite-child",
+      "sourcePath": "satellite-child.md",
+      "role": "satellite",
+      "parent": "home",
+      "title": "Child Satellite",
+      "status": "draft"
+    }
+  ]
+}

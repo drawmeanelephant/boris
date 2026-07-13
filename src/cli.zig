@@ -180,7 +180,7 @@ fn takeValue(
 
 pub fn printUsage() void {
     std.debug.print(
-        \\Boris — Zig content compiler (CLI surface, milestone 3)
+        \\Boris — Zig content compiler (IR + optional RAG, milestone 7)
         \\
         \\Usage: boris [options]
         \\
@@ -194,8 +194,15 @@ pub fn printUsage() void {
         \\  --input <DIR>       Content root (default: content)
         \\  --out <DIR>         IR output directory (default: .boris; IR mode only)
         \\  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
-        \\  --quiet             Suppress progress / stub messages
+        \\  --quiet             Suppress progress logging only (not artifacts/diagnostics)
         \\  -h, --help          Show this help and exit 0
+        \\
+        \\IR artifacts (success):
+        \\  <out>/manifest.json  <out>/graph.json  <out>/build-report.json
+        \\
+        \\RAG artifacts (success; same graph validation as IR):
+        \\  INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json
+        \\  system/**  content/pages/**  graph/entity-catalog.md  graph/relations.md
         \\
         \\Conflicts (exit 2):
         \\  --rag with --no-rag
@@ -204,8 +211,7 @@ pub fn printUsage() void {
         \\
         \\Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
         \\
-        \\Note: content pipelines are not implemented yet (milestone 6+).
-        \\Valid build modes print a stub message and exit 0 until then.
+        \\Note: Apex/HTML render is not the default product surface.
         \\
     , .{});
 }

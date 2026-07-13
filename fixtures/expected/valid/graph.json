@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "0.1.0",
+  "frozen": true,
+  "nodes": [
+    {
+      "index": 0,
+      "id": "empty-no-fm",
+      "sourcePath": "empty-no-fm.md",
+      "role": "trunk",
+      "parent": null,
+      "parentIndex": null,
+      "title": null,
+      "status": null,
+      "tags": [],
+      "bodyOffset": 0
+    },
+    {
+      "index": 1,
+      "id": "home",
+      "sourcePath": "trunk-root.md",
+      "role": "trunk",
+      "parent": null,
+      "parentIndex": null,
+      "title": "Home Trunk",
+      "status": "published",
+      "tags": ["home"],
+      "bodyOffset": 66
+    },
+    {
+      "index": 2,
+      "id": "nested/deep/page",
+      "sourcePath": "nested/deep/page.md",
+      "role": "trunk",
+      "parent": null,
+      "parentIndex": null,
+      "title": "Nested Deep Page",
+      "status": "published",
+      "tags": [],
+      "bodyOffset": 50
+    },
+    {
+      "index": 3,
+      "id": "satellite-child",
+      "sourcePath": "satellite-child.md",
+      "role": "satellite",
+      "parent": "home",
+      "parentIndex": 1,
+      "title": "Child Satellite",
+      "status": "draft",
+      "tags": ["satellite"],
+      "bodyOffset": 76
+    }
+  ],
+  "edges": [
+    {
+      "from": 3,
+      "to": 1,
+      "kind": "parent"
+    }
+  ]
+}

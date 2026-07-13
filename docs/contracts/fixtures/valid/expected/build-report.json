@@ -2,7 +2,7 @@
   "schemaVersion": "0.1.0",
   "ok": true,
   "contentRoot": "docs/contracts/fixtures/valid/content",
-  "outDir": ".release-gate/ir-valid",
+  "outDir": "docs/contracts/fixtures/valid/expected",
   "pageCount": 3,
   "errorCount": 0,
   "diagnostics": []

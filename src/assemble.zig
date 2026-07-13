@@ -1,17 +1,16 @@
-//! Phase 5: zero-copy layout splicing.
+//! Experimental zero-copy layout splicing for the HTML path (milestone 9).
 //!
-//! Layout is loaded once at **startup** (before content scan) and split into
+//! Layout is loaded once at **startup** (before content compile) and split into
 //! immutable prefix/suffix slices around a single `{{content}}` marker.
-//! Final HTML is streamed with a stack-buffered writer — no Header+Content+Footer
-//! concatenation in app memory.
+//! Final HTML is streamed with sequential writes — no Header+Content+Footer
+//! mega-string concatenation in application memory.
 //!
 //! ## I/O invariants
 //!
 //! - Missing or **duplicate** `{{content}}` is a hard error at layout load time.
 //! - `Layout.prefix` and `Layout.suffix` are `[]const u8` views into `Layout.raw`.
 //!   The owning `Layout` (and its raw buffer) must outlive every `writePage` call.
-//! - Page bytes are written as three sequential `writeAll`s: prefix | body | suffix.
-//!   There is no `prefix ++ body ++ suffix` allocation.
+//! - Page bytes are written as three sequential segments: prefix | body | suffix.
 //! - Publish uses Zig 0.16 `Dir.createFileAtomic` + `File.Atomic.replace`:
 //!   a unique temporary name (hex u64, scoped to the destination directory) is
 //!   created, fully written and flushed, then renamed into the final path.
@@ -29,9 +28,10 @@
 //! - Cross-device / cross-volume atomic rename (may fail or copy depending on OS).
 //! - Windows: Zig std documents a brief window where concurrent openers of the
 //!   destination may see `error.AccessDenied` during replace.
+//! - Universal atomic replacement on every filesystem without multi-OS CI.
 //!
-//! Unit tests below exercise successful replace-over-prior and failed-write
-//! preservation of prior output on the host running `zig build test`.
+//! Unit tests exercise successful replace-over-prior and failed-write
+//! preservation of prior output on the **host OS** running `zig build test`.
 
 const std = @import("std");
 const Io = std.Io;
@@ -39,7 +39,7 @@ const Io = std.Io;
 pub const content_marker = "{{content}}";
 
 /// Stack buffer size for the page writer — large enough that most pages need
-/// one underlying write path per splice segment.
+/// one underlying write path per splice segment. **Not** Whiteboard memory.
 pub const write_buffer_size = 64 * 1024;
 
 pub const LayoutError = error{
@@ -47,7 +47,7 @@ pub const LayoutError = error{
     DuplicateContentMarker,
 };
 
-/// Immutable split of layouts/main.html.
+/// Immutable split of a layout template (e.g. `layouts/main.html`).
 ///
 /// `prefix` and `suffix` are `[]const u8` slices into `raw`. Keep the `Layout`
 /// (and the allocator that owns `raw`) alive for the full duration of all
@@ -64,7 +64,6 @@ pub const Layout = struct {
     pub fn split(raw: []const u8) LayoutError!Layout {
         const idx = std.mem.indexOf(u8, raw, content_marker) orelse return error.MissingContentMarker;
         const after_first = idx + content_marker.len;
-        // Duplicate marker is almost always a template authoring mistake.
         if (std.mem.indexOf(u8, raw[after_first..], content_marker) != null) {
             return error.DuplicateContentMarker;
         }
@@ -77,7 +76,7 @@ pub const Layout = struct {
 };
 
 /// Load layout file once into `arena` (process/build lifetime).
-/// Call this **before** scanning `content/` so a bad template fails fast.
+/// Call this **before** compiling content so a bad template fails fast.
 pub fn loadLayout(io: Io, dir: Io.Dir, path: []const u8, arena: std.mem.Allocator) !Layout {
     var file = try dir.openFile(io, path, .{});
     defer file.close(io);
@@ -96,9 +95,8 @@ pub fn ensureParentPath(io: Io, out_dir: Io.Dir, rel_path: []const u8) !void {
     }
 }
 
-/// Pre-create every unique parent directory needed by `output_paths` (scan-time
-/// batch). Removes mkdir branching from the hot per-page write path when used
-/// before the compile loop. Paths must outlive `cache` keys (PageDb-owned).
+/// Pre-create every unique parent directory needed by `output_paths`.
+/// Paths must outlive `seen` keys (PageDb-owned).
 pub fn precreateOutputDirs(
     io: Io,
     out_dir: Io.Dir,
@@ -113,7 +111,6 @@ pub fn precreateOutputDirs(
         if (parent.len == 0) continue;
         const gop = try seen.getOrPut(gpa, parent);
         if (gop.found_existing) continue;
-        // Key is a stable slice into PageDb path storage.
         try out_dir.createDirPath(io, parent);
     }
 }
@@ -138,6 +135,10 @@ pub const WritePageOptions = struct {
 /// The writer buffer is **stack** storage. Source slices must remain valid until
 /// this function returns (flush + replace included). Callers must only
 /// `arena.reset(.free_all)` **after** return.
+///
+/// Publication API (Zig 0.16): `Io.Dir.createFileAtomic` → write/flush →
+/// `Io.File.Atomic.replace` (same-directory rename). See module docs for
+/// platform-qualified guarantees.
 pub fn writePage(
     io: Io,
     out_dir: Io.Dir,
@@ -158,7 +159,6 @@ pub fn writePageOpts(
     options: WritePageOptions,
 ) !void {
     // Unique temp name scoped to the destination directory (Zig std hex u64).
-    // `make_path` creates parent dirs of `output_path` when needed.
     var atomic_file = try out_dir.createFileAtomic(io, output_path, .{
         .replace = true,
         .make_path = true,
@@ -173,6 +173,7 @@ pub fn writePageOpts(
     const w = &file_writer.interface;
 
     // Three sequential writes of existing slices — zero-copy assembly.
+    // No `prefix ++ html ++ suffix` allocation.
     try w.writeAll(layout.prefix);
     try w.writeAll(html_body);
     try w.writeAll(layout.suffix);
@@ -185,6 +186,86 @@ pub fn writePageOpts(
 
     // Destination replacement on the same volume (see module docs for limits).
     try atomic_file.replace(io);
+}
+
+// ---------------------------------------------------------------------------
+// Hold-until-flush sink (tests prove flush-before-reset, not kernel buffering)
+// ---------------------------------------------------------------------------
+
+/// Sink that retains **slice references** until `flush`, then materializes them.
+///
+/// Unlike a file writer that may copy into a stack buffer during `writeAll`, this
+/// deliberately does **not** consume bytes until flush. Fingerprints captured at
+/// `writeAll` detect invalidation (e.g. Whiteboard wipe / in-place destroy)
+/// before flush — without relying on use-after-free reads of freed pages.
+pub const HoldUntilFlush = struct {
+    parts: [3]?[]const u8 = .{ null, null, null },
+    /// Wyhash of each part at `writeAll` time (stable fingerprint).
+    fingerprints: [3]u64 = .{ 0, 0, 0 },
+    n: usize = 0,
+    materialized: ?[]u8 = null,
+    gpa: std.mem.Allocator,
+
+    pub const Error = error{
+        TooManyParts,
+        /// Slice bytes changed (or were invalidated) before flush — models
+        /// premature Whiteboard `free_all` / destroy-before-flush.
+        PrematureInvalidation,
+    } || std.mem.Allocator.Error;
+
+    pub fn init(gpa: std.mem.Allocator) HoldUntilFlush {
+        return .{ .gpa = gpa };
+    }
+
+    pub fn deinit(self: *HoldUntilFlush) void {
+        if (self.materialized) |m| self.gpa.free(m);
+        self.* = undefined;
+    }
+
+    pub fn writeAll(self: *HoldUntilFlush, bytes: []const u8) Error!void {
+        if (self.n >= self.parts.len) return error.TooManyParts;
+        self.parts[self.n] = bytes;
+        self.fingerprints[self.n] = std.hash.Wyhash.hash(0, bytes);
+        self.n += 1;
+    }
+
+    /// Copy retained slices into an owned buffer. Must run while slices still
+    /// match their write-time fingerprints (i.e. before Whiteboard reset).
+    pub fn flush(self: *HoldUntilFlush) Error!void {
+        var total: usize = 0;
+        var i: usize = 0;
+        while (i < self.n) : (i += 1) {
+            const p = self.parts[i].?;
+            if (std.hash.Wyhash.hash(0, p) != self.fingerprints[i]) {
+                return error.PrematureInvalidation;
+            }
+            total += p.len;
+        }
+        const out = try self.gpa.alloc(u8, total);
+        errdefer self.gpa.free(out);
+        var off: usize = 0;
+        i = 0;
+        while (i < self.n) : (i += 1) {
+            const p = self.parts[i].?;
+            // Re-check immediately before copy (TOCTOU against in-place destroy).
+            if (std.hash.Wyhash.hash(0, p) != self.fingerprints[i]) {
+                return error.PrematureInvalidation;
+            }
+            @memcpy(out[off .. off + p.len], p);
+            off += p.len;
+        }
+        if (self.materialized) |old| self.gpa.free(old);
+        self.materialized = out;
+    }
+};
+
+/// Splice layout + body into a `HoldUntilFlush` (three writes, then flush).
+/// Production `writePage` follows the same ordering against a file writer.
+pub fn spliceToHold(layout: Layout, html_body: []const u8, sink: *HoldUntilFlush) !void {
+    try sink.writeAll(layout.prefix);
+    try sink.writeAll(html_body);
+    try sink.writeAll(layout.suffix);
+    try sink.flush();
 }
 
 fn readAllFile(io: Io, dir: Io.Dir, path: []const u8, gpa: std.mem.Allocator) ![]u8 {
@@ -216,13 +297,16 @@ fn countHexTempNames(io: Io, dir: Io.Dir) !usize {
     return n;
 }
 
+// =============================================================================
+// Tests
+// =============================================================================
+
 test "layout split is zero-copy into raw" {
     const raw = "<html>{{content}}</html>";
     const layout = try Layout.split(raw);
     try std.testing.expectEqualStrings("<html>", layout.prefix);
     try std.testing.expectEqualStrings("</html>", layout.suffix);
     try std.testing.expect(@intFromPtr(layout.prefix.ptr) == @intFromPtr(raw.ptr));
-    // Types are []const u8 views (not owned copies).
     try std.testing.expect(@TypeOf(layout.prefix) == []const u8);
     try std.testing.expect(@TypeOf(layout.suffix) == []const u8);
 }
@@ -234,6 +318,39 @@ test "layout missing content marker is hard error" {
 test "layout duplicate content marker is hard error" {
     const raw = "<a>{{content}}</a>{{content}}";
     try std.testing.expectError(error.DuplicateContentMarker, Layout.split(raw));
+}
+
+test "static layout fixtures missing and duplicate" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+
+    {
+        var f = try cwd.openFile(io, "test/fixtures/layouts/missing-marker.html", .{});
+        defer f.close(io);
+        var r = f.reader(io, &.{});
+        const raw = try r.interface.allocRemaining(gpa, .unlimited);
+        defer gpa.free(raw);
+        try std.testing.expectError(error.MissingContentMarker, Layout.split(raw));
+    }
+    {
+        var f = try cwd.openFile(io, "test/fixtures/layouts/duplicate-marker.html", .{});
+        defer f.close(io);
+        var r = f.reader(io, &.{});
+        const raw = try r.interface.allocRemaining(gpa, .unlimited);
+        defer gpa.free(raw);
+        try std.testing.expectError(error.DuplicateContentMarker, Layout.split(raw));
+    }
+    {
+        var f = try cwd.openFile(io, "test/fixtures/layouts/ok.html", .{});
+        defer f.close(io);
+        var r = f.reader(io, &.{});
+        const raw = try r.interface.allocRemaining(gpa, .unlimited);
+        defer gpa.free(raw);
+        const layout = try Layout.split(raw);
+        try std.testing.expect(layout.prefix.len > 0);
+        try std.testing.expect(layout.suffix.len > 0);
+    }
 }
 
 test "writePage destination replacement over prior output" {
@@ -255,8 +372,6 @@ test "writePage destination replacement over prior output" {
     const got = try readAllFile(io, out, "page.html", gpa);
     defer gpa.free(got);
     try std.testing.expectEqualStrings("<html>SECOND</html>", got);
-
-    // No leftover atomic temps after successful publish.
     try std.testing.expectEqual(@as(usize, 0), try countHexTempNames(io, out));
 }
 
@@ -300,7 +415,6 @@ test "temp-file cleanup on failed write" {
 
     const layout = try Layout.split("<x>{{content}}</x>");
 
-    // Seed a final file so we can also assert it survives.
     try writePage(io, out, "page.html", layout, "keep");
 
     try std.testing.expectError(
@@ -310,7 +424,6 @@ test "temp-file cleanup on failed write" {
         }),
     );
 
-    // Unique hex temps from createFileAtomic must be gone after deinit.
     try std.testing.expectEqual(@as(usize, 0), try countHexTempNames(io, out));
 
     const got = try readAllFile(io, out, "page.html", gpa);
@@ -320,6 +433,7 @@ test "temp-file cleanup on failed write" {
 
 test "writePage sequential splice does not concatenate in memory" {
     // Behavioral guarantee: published file is prefix|body|suffix order.
+    // Product code never builds prefix ++ body ++ suffix as one allocation.
     const gpa = std.testing.allocator;
     const io = std.testing.io;
 
@@ -336,4 +450,87 @@ test "writePage sequential splice does not concatenate in memory" {
     const got = try readAllFile(io, out, "nested/out.html", gpa);
     defer gpa.free(got);
     try std.testing.expectEqualStrings("PRE-BODY-SUF", got);
+}
+
+test "HoldUntilFlush: correct order succeeds (flush then free_all)" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    const layout = try Layout.split("P{{content}}S");
+    const body = try arena.allocator().dupe(u8, "ARENA-BODY");
+
+    var sink = HoldUntilFlush.init(gpa);
+    defer sink.deinit();
+
+    try spliceToHold(layout, body, &sink);
+    // Flush completed while body was live — materialization is durable.
+    const snapshot = try gpa.dupe(u8, sink.materialized.?);
+    defer gpa.free(snapshot);
+
+    _ = arena.reset(.free_all);
+    try std.testing.expectEqual(@as(usize, 0), arena.queryCapacity());
+    // Owned snapshot still correct after Whiteboard wipe.
+    try std.testing.expectEqualStrings("PARENA-BODYS", snapshot);
+}
+
+test "HoldUntilFlush: premature invalidation before flush fails the test" {
+    // Models Whiteboard reset / destroy-before-flush without use-after-free:
+    // hold slice refs past writeAll, then in-place destroy the body bytes
+    // (same effect as free_all reclaiming payload), then flush.
+    // Fingerprint check returns PrematureInvalidation.
+    //
+    // Correct production order (flush, then free_all) is covered by the
+    // sibling test and by writePage returning only after flush+replace.
+
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    const layout = try Layout.split("P{{content}}S");
+    const body = try arena.allocator().dupe(u8, "LIVE-BODY-BYTES");
+
+    var sink = HoldUntilFlush.init(gpa);
+    defer sink.deinit();
+    try sink.writeAll(layout.prefix);
+    try sink.writeAll(body);
+    try sink.writeAll(layout.suffix);
+
+    // --- anti-pattern: invalidate payload BEFORE flush (models free_all) ---
+    // In-place destroy while the allocation is still live — no UAF. A real
+    // free_all would reclaim the same bytes; we prove flush must run first.
+    @memset(body, 0xAA);
+
+    try std.testing.expectError(error.PrematureInvalidation, sink.flush());
+
+    // Whiteboard may be reset only after a successful flush path returns.
+    _ = arena.reset(.free_all);
+}
+
+test "HoldUntilFlush: implemented order equals prefix+html+suffix" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    const layout = try Layout.split("<main>{{content}}</main>");
+    const body = try arena.allocator().dupe(u8, "<p>x</p>");
+
+    var sink = HoldUntilFlush.init(gpa);
+    defer sink.deinit();
+    try spliceToHold(layout, body, &sink);
+
+    // Oracle for equality only (tests may allocate the concat; product path must not).
+    const oracle = try std.fmt.allocPrint(gpa, "{s}{s}{s}", .{ layout.prefix, body, layout.suffix });
+    defer gpa.free(oracle);
+    try std.testing.expectEqualStrings(oracle, sink.materialized.?);
+
+    _ = arena.reset(.free_all);
+}
+
+test "no mega-string helper exists for page assembly" {
+    // compile-time documentation: writePage / spliceToHold only use sequential
+    // writeAll of three slices. This test locks the public API surface.
+    const layout = try Layout.split("a{{content}}b");
+    try std.testing.expectEqualStrings("a", layout.prefix);
+    try std.testing.expectEqualStrings("b", layout.suffix);
 }

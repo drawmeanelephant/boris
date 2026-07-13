@@ -62,7 +62,7 @@ fn buildIdIndex(list_gpa: std.mem.Allocator, nodes: []const Node) !std.StringHas
 }
 
 /// Detect duplicate ids among provisional nodes (by id string).
-/// Does not remove nodes; records E_DUP_ID on later occurrences (sorted by source_path first).
+/// Does not remove nodes; records EDUPLICATEID on later occurrences (sorted by source_path first).
 pub fn diagnoseDuplicateIds(
     list_gpa: std.mem.Allocator,
     retain: std.mem.Allocator,
@@ -99,7 +99,7 @@ pub fn diagnoseDuplicateIds(
             );
             try diags.append(list_gpa, .{
                 .severity = .error_,
-                .code = .E_DUP_ID,
+                .code = .EDUPLICATEID,
                 .message = msg,
                 .remediation = try retain.dupe(u8, "Give each document a unique id (path-derived or id: override)"),
                 .source_path = n.source_path,
@@ -118,7 +118,7 @@ pub fn diagnoseDuplicateIds(
 /// resolution, duplicate-id checks, or cycle detection in those modules.
 ///
 /// Order is normative (contracts `parent-relationships.md`):
-///   1. `E_DUP_ID` — detect duplicate entity ids first
+///   1. `EDUPLICATEID` — detect duplicate entity ids first
 ///   2. Topology — self / missing / not-trunk / cycles (`validateTopology`)
 ///
 /// Aggregates all diagnostics (does not abort early — callers check
@@ -142,10 +142,10 @@ pub fn validate(
 /// abort early — callers check `diag.countErrors`).
 ///
 /// Checks (in order):
-///   1. `E_PARENT_SELF` — parent equals own id
-///   2. `E_PARENT_MISSING` — parent id not in the page set
-///   3. `E_PARENT_NOT_TRUNK` — parent is itself a satellite (hard error)
-///   4. `E_PARENT_CYCLE` — DFS with visiting (gray) set
+///   1. `EPARENTSELF` — parent equals own id
+///   2. `EPARENTMISSING` — parent id not in the page set
+///   3. `EPARENTNOTTRUNK` — parent is itself a satellite (hard error)
+///   4. `EPARENTCYCLE` — DFS with visiting (gray) set
 ///
 /// Algorithm (single-threaded):
 ///   1. Hash map entity id → index (O(n))
@@ -167,7 +167,7 @@ pub fn validateTopology(
             if (std.mem.eql(u8, p, n.id)) {
                 try diags.append(list_gpa, .{
                     .severity = .error_,
-                    .code = .E_PARENT_SELF,
+                    .code = .EPARENTSELF,
                     .message = try std.fmt.allocPrint(retain, "parent \"{s}\" refers to this document", .{p}),
                     .remediation = try retain.dupe(u8, "Remove parent or point it at a different document id"),
                     .source_path = n.source_path,
@@ -185,7 +185,7 @@ pub fn validateTopology(
             } else {
                 try diags.append(list_gpa, .{
                     .severity = .error_,
-                    .code = .E_PARENT_MISSING,
+                    .code = .EPARENTMISSING,
                     .message = try std.fmt.allocPrint(retain, "parent \"{s}\" does not exist", .{p}),
                     .remediation = try retain.dupe(u8, "Create the parent document or fix the parent id"),
                     .source_path = n.source_path,
@@ -210,7 +210,7 @@ pub fn validateTopology(
             if (parent.parent != null) {
                 try diags.append(list_gpa, .{
                     .severity = .error_,
-                    .code = .E_PARENT_NOT_TRUNK,
+                    .code = .EPARENTNOTTRUNK,
                     .message = try std.fmt.allocPrint(
                         retain,
                         "parent \"{s}\" is a satellite (multi-hop parent chains are unsupported in v0.1)",
@@ -312,7 +312,7 @@ pub fn validateTopology(
             const ni = findIndexById(nodes, id).?;
             try diags.append(list_gpa, .{
                 .severity = .error_,
-                .code = .E_PARENT_CYCLE,
+                .code = .EPARENTCYCLE,
                 .message = try std.fmt.allocPrint(retain, "parent cycle involving {s}", .{path_owned}),
                 .remediation = try retain.dupe(u8, "Break the cycle by changing or removing a parent link"),
                 .source_path = nodes[ni].source_path,
@@ -330,6 +330,9 @@ pub const resolve = validateTopology;
 
 /// Sort nodes by id, assign stable indices, rebuild parent_index and edges.
 /// Marks graph frozen. Nodes slice is reordered in place.
+///
+/// Call only after `validate` reports zero errors. Do not claim the structure
+/// is a frozen DAG (or forest) until this returns successfully.
 pub fn freeze(
     list_gpa: std.mem.Allocator,
     nodes: []Node,
@@ -407,8 +410,8 @@ test "validateTopology missing and self" {
     try std.testing.expect(nodes[2].role == .trunk);
     try std.testing.expect(nodes[0].role == .satellite);
     try std.testing.expect(nodes[1].role == .satellite);
-    try expectCodeCount(diags.items, .E_PARENT_MISSING, 1);
-    try expectCodeCount(diags.items, .E_PARENT_SELF, 1);
+    try expectCodeCount(diags.items, .EPARENTMISSING, 1);
+    try expectCodeCount(diags.items, .EPARENTSELF, 1);
 }
 
 test "validateTopology two-node cycle" {
@@ -425,7 +428,7 @@ test "validateTopology two-node cycle" {
     defer diags.deinit(gpa);
     try validateTopology(gpa, retain, &nodes, &diags);
     try std.testing.expect(diag.countErrors(diags.items) >= 1);
-    try expectCodeCount(diags.items, .E_PARENT_CYCLE, 2); // one per cycle participant
+    try expectCodeCount(diags.items, .EPARENTCYCLE, 2); // one per cycle participant
 }
 
 test "validateTopology longer cycle (3 nodes)" {
@@ -442,11 +445,11 @@ test "validateTopology longer cycle (3 nodes)" {
     var diags: std.ArrayList(diag.Diagnostic) = .empty;
     defer diags.deinit(gpa);
     try validateTopology(gpa, retain, &nodes, &diags);
-    try expectCodeCount(diags.items, .E_PARENT_CYCLE, 3);
+    try expectCodeCount(diags.items, .EPARENTCYCLE, 3);
     // Message lists ids in stable sorted order.
     var saw_path = false;
     for (diags.items) |d| {
-        if (d.code == .E_PARENT_CYCLE and std.mem.indexOf(u8, d.message, "a -> b -> c -> a") != null) {
+        if (d.code == .EPARENTCYCLE and std.mem.indexOf(u8, d.message, "a -> b -> c -> a") != null) {
             saw_path = true;
         }
     }
@@ -482,7 +485,7 @@ test "validate detects duplicate ids before parent resolution" {
 
     // Later source_path loses; parent of shared is intentionally missing so a
     // topology error would also fire if validation continued without dups —
-    // we still expect E_DUP_ID from the first pass.
+    // we still expect EDUPLICATEID from the first pass.
     var nodes = [_]Node{
         .{ .id = "shared", .source_path = "alpha.md" },
         .{ .id = "shared", .source_path = "beta.md", .parent = "missing-trunk" },
@@ -490,7 +493,7 @@ test "validate detects duplicate ids before parent resolution" {
     var diags: std.ArrayList(diag.Diagnostic) = .empty;
     defer diags.deinit(gpa);
     try validate(gpa, retain, &nodes, &diags);
-    try expectCodeCount(diags.items, .E_DUP_ID, 1);
+    try expectCodeCount(diags.items, .EDUPLICATEID, 1);
     // First-wins map: beta's parent lookup may still report missing.
     try std.testing.expect(diag.countErrors(diags.items) >= 1);
 }
@@ -518,7 +521,7 @@ test "freeze assigns indices by id order" {
     try std.testing.expect(g.edges[0].to == 1);
 }
 
-test "validateTopology satellite-of-satellite is hard error E_PARENT_NOT_TRUNK" {
+test "validateTopology satellite-of-satellite is hard error EPARENTNOTTRUNK" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -536,7 +539,7 @@ test "validateTopology satellite-of-satellite is hard error E_PARENT_NOT_TRUNK" 
 
     var not_trunk: usize = 0;
     for (diags.items) |d| {
-        if (d.code == .E_PARENT_NOT_TRUNK) {
+        if (d.code == .EPARENTNOTTRUNK) {
             not_trunk += 1;
             try std.testing.expect(d.severity == .error_);
             try std.testing.expect(d.isError());

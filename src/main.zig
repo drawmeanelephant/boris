@@ -1,21 +1,29 @@
-//! Boris — product CLI entry (milestone 3).
+//! Boris — product CLI entry (milestone 7: IR + optional RAG).
 //!
-//! Typed flag parsing + exit-code model. Content pipelines are not wired yet:
-//! valid build modes print a controlled "pipeline not implemented" stub and
-//! exit 0 until later milestones.
+//! Typed flag parsing + exit-code model. IR mode runs the content compiler
+//! pipeline (scan → parse → PageDb → graph validate → deterministic JSON IR).
+//! RAG mode reuses `pipeline.compile` + exports a deterministic corpus.
 
 const std = @import("std");
+const Io = std.Io;
 const cli = @import("cli.zig");
 const diagnostic = @import("diagnostic.zig");
+const pipeline = @import("pipeline.zig");
+const rag = @import("rag.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const Options = cli.Options;
 pub const Mode = cli.Mode;
 pub const parseOptions = cli.parseOptions;
 
-/// Production runner: help text + not-yet-implemented pipeline stub.
-/// Methods are `pub` so `cli.execute` can call them via `anytype` across modules.
+const default_out = ".boris";
+const default_rag = "rag";
+
+/// Production runner: help text + IR / RAG pipelines.
 const ProdRunner = struct {
+    gpa: std.mem.Allocator,
+    io: Io,
+
     pub fn printHelp(_: *const @This()) void {
         cli.printUsage();
     }
@@ -25,34 +33,90 @@ const ProdRunner = struct {
         cli.printUsage();
     }
 
-    pub fn run(_: *const @This(), opts: Options) ExitCode {
-        return runPipelineStub(opts).exitCode();
+    pub fn run(self: *const @This(), opts: Options) ExitCode {
+        return runPipeline(self.io, self.gpa, opts);
     }
 };
 
-/// Stub until milestone 6 wires discovery / IR / RAG. Never scans content.
-pub fn runPipelineStub(opts: Options) diagnostic.RunResult {
-    if (!opts.quiet) {
-        switch (opts.mode) {
-            .ir => std.debug.print(
-                "pipeline not implemented (IR mode; input={s}, out={s})\n",
-                .{ opts.input_dir, opts.out_dir orelse default_out },
-            ),
-            .rag => std.debug.print(
-                "pipeline not implemented (RAG mode; input={s}, rag-dir={s})\n",
-                .{ opts.input_dir, opts.rag_dir orelse default_rag },
-            ),
-        }
+/// Map pipeline result to process exit code.
+///
+/// - validation / content errors → 1
+/// - usage errors are handled before this (exit 2)
+/// - I/O / system errors → 3
+pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    switch (opts.mode) {
+        .rag => return runRag(io, gpa, opts),
+        .ir => {},
     }
-    return diagnostic.RunResult.success();
+
+    const out_dir = opts.out_dir orelse default_out;
+
+    var result = pipeline.run(io, gpa, .{
+        .content_root = opts.input_dir,
+        .out_dir = out_dir,
+        .quiet = opts.quiet,
+    }) catch |err| {
+        std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer result.deinit();
+
+    if (result.diagnostics.items.len > 0) {
+        pipeline.printDiagnostics(gpa, result.diagnostics.items) catch {
+            return .io_error;
+        };
+    }
+
+    if (result.ok) {
+        if (!opts.quiet) {
+            std.debug.print("ok: wrote IR under {s} ({d} page(s))\n", .{ out_dir, result.pages.items.len });
+        }
+        return .success;
+    }
+
+    return switch (result.failure) {
+        .io => .io_error,
+        .content, .none => .content_error,
+    };
 }
 
-const default_out = ".boris";
-const default_rag = "rag";
+/// Optional deterministic RAG export (same compile + graph.validate as IR).
+pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    const rag_dir = opts.rag_dir orelse default_rag;
 
-/// Pure dispatch used by `main` and tests (no `std.process.Init` required).
+    var result = rag.run(io, gpa, .{
+        .content_root = opts.input_dir,
+        .out_dir = rag_dir,
+        .system_docs_dir = "docs/rag/system",
+        .quiet = opts.quiet,
+    }) catch |err| {
+        std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer result.deinit();
+
+    if (result.diagnostics().len > 0) {
+        pipeline.printDiagnostics(gpa, result.diagnostics()) catch {
+            return .io_error;
+        };
+    }
+
+    if (result.ok()) {
+        if (!opts.quiet) {
+            std.debug.print("ok: wrote RAG under {s} ({d} page(s))\n", .{ rag_dir, result.stats.content_pages });
+        }
+        return .success;
+    }
+
+    return switch (result.compile.failure) {
+        .io => .io_error,
+        .content, .none => .content_error,
+    };
+}
+
+/// Pure dispatch used by tests (injectable runner; no process.Init required).
 pub fn runArgs(args: []const []const u8) u8 {
-    const runner: ProdRunner = .{};
+    var runner: SilentRunner = .{};
     return cli.runArgs(args, &runner);
 }
 
@@ -65,7 +129,6 @@ pub fn main(init: std.process.Init) u8 {
         return ExitCode.io_error.int();
     };
 
-    // toSlice yields [:0]const u8; parseOptions wants []const []const u8.
     var args_list: std.ArrayList([]const u8) = .empty;
     defer args_list.deinit(cold);
     args_list.ensureTotalCapacity(cold, args_z.len) catch {
@@ -76,12 +139,16 @@ pub fn main(init: std.process.Init) u8 {
         args_list.appendAssumeCapacity(a);
     }
 
-    return runArgs(args_list.items);
+    const runner: ProdRunner = .{
+        .gpa = init.gpa,
+        .io = init.io,
+    };
+    return cli.runArgs(args_list.items, &runner);
 }
 
 // --- main-level exit-code mapping tests ------------------------------------
 
-/// Silent runner for tests: no help/usage/stub I/O.
+/// Silent runner for CLI-only tests: no help/usage/pipeline I/O.
 const SilentRunner = struct {
     pipeline_calls: usize = 0,
 
@@ -105,12 +172,10 @@ const SilentRunner = struct {
 test "runArgs: documented exit code mapping" {
     var runner: SilentRunner = .{};
 
-    // Help → 0, never runs pipeline
     try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--help" }, &runner));
     try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "-h" }, &runner));
     try std.testing.expectEqual(@as(usize, 0), runner.pipeline_calls);
 
-    // Valid build modes → 0
     try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{"boris"}, &runner));
     try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--quiet" }, &runner));
     try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--no-rag" }, &runner));
@@ -118,7 +183,6 @@ test "runArgs: documented exit code mapping" {
     try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--rag-dir", "x" }, &runner));
     try std.testing.expect(runner.pipeline_calls >= 5);
 
-    // Usage → 2, still no extra pipeline
     const before = runner.pipeline_calls;
     try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--rag", "--no-rag" }, &runner));
     try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--rag", "--out", "x" }, &runner));
@@ -129,20 +193,99 @@ test "runArgs: documented exit code mapping" {
     try std.testing.expectEqual(before, runner.pipeline_calls);
 }
 
-test "runPipelineStub: success and quiet" {
-    const r = runPipelineStub(.{
-        .mode = .ir,
-        .input_dir = "content",
-        .out_dir = ".boris",
-        .rag_dir = null,
-        .quiet = true,
-    });
-    try std.testing.expectEqual(ExitCode.success, r.exitCode());
-}
-
 test "ExitCode contract surface" {
     try std.testing.expectEqual(@as(u8, 0), ExitCode.success.int());
     try std.testing.expectEqual(@as(u8, 1), ExitCode.content_error.int());
     try std.testing.expectEqual(@as(u8, 2), ExitCode.usage.int());
     try std.testing.expectEqual(@as(u8, 3), ExitCode.io_error.int());
+}
+
+test "runPipeline: valid fixture exits 0" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cli-valid", .{tmp.sub_path});
+    defer gpa.free(out);
+
+    const code = runPipeline(io, gpa, .{
+        .mode = .ir,
+        .input_dir = "docs/contracts/fixtures/valid/content",
+        .out_dir = out,
+        .rag_dir = null,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(ExitCode.success, code);
+}
+
+test "runPipeline: duplicate-id exits 1" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cli-dup", .{tmp.sub_path});
+    defer gpa.free(out);
+
+    const code = runPipeline(io, gpa, .{
+        .mode = .ir,
+        .input_dir = "docs/contracts/fixtures/duplicate-ids/content",
+        .out_dir = out,
+        .rag_dir = null,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(ExitCode.content_error, code);
+}
+
+test "runPipeline: missing content root exits 3" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cli-noroot", .{tmp.sub_path});
+    defer gpa.free(out);
+
+    const code = runPipeline(io, gpa, .{
+        .mode = .ir,
+        .input_dir = "docs/contracts/fixtures/__no_such_root__",
+        .out_dir = out,
+        .rag_dir = null,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(ExitCode.io_error, code);
+}
+
+test "runPipeline: valid RAG fixture exits 0" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cli-rag", .{tmp.sub_path});
+    defer gpa.free(out);
+
+    const code = runPipeline(io, gpa, .{
+        .mode = .rag,
+        .input_dir = "fixtures/content/valid",
+        .out_dir = null,
+        .rag_dir = out,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(ExitCode.success, code);
+}
+
+test "runPipeline: RAG invalid graph exits 1" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cli-rag-bad", .{tmp.sub_path});
+    defer gpa.free(out);
+
+    const code = runPipeline(io, gpa, .{
+        .mode = .rag,
+        .input_dir = "docs/contracts/fixtures/duplicate-ids/content",
+        .out_dir = null,
+        .rag_dir = out,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(ExitCode.content_error, code);
 }

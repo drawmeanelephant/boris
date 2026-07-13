@@ -11,9 +11,14 @@ related:
 
 # Apex: native C-ABI markdown engine
 
-Apex is the markdown renderer used by the HTML and RAG body paths. In Boris it
-is **not** invoked as a CLI. It is compiled as C, linked into the binary, and
-called through Zig `@cImport`. The default v0.1 CLI (JSON IR) does not call Apex.
+**Workshop analogy:** in-house typesetting machine on the shop floor.  
+**Invariant:** synchronous C ABI call; no retained pointers after `apex_render`
+returns; never a child-process markdown renderer.
+
+Apex is the markdown renderer used by the **experimental HTML** path (and
+Aside inner bodies). It is compiled as C, linked into the binary, and called
+through Zig `@cImport`. The default v0.1 CLI (JSON IR) and the RAG export path
+do **not** call Apex.
 
 ## Why not spawn processes
 

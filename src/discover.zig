@@ -7,13 +7,13 @@
 //!
 //! ## v0.1 symlink policy
 //!
-//! - **Reject** symlinked directories (`E_SYMLINK`); never enter them (no recursive
+//! - **Reject** symlinked directories (`EIO`); never enter them (no recursive
 //!   follow of directory symlinks).
-//! - **Reject** symlinked page files (`E_SYMLINK`); do not treat them as pages.
+//! - **Reject** symlinked page files (`EIO`); do not treat them as pages.
 //! - Track visited **directory** identities (`inode`) so accidental re-entry still
-//!   emits `E_SYMLINK_CYCLE` rather than looping.
+//!   emits `EIO` rather than looping.
 //! - Track visited **file** identities so hard-linked duplicates are diagnosed
-//!   (`E_SOURCE_PATH`) instead of double-registered.
+//!   (`EINVALIDPATH`) instead of double-registered.
 //!
 //! ## Determinism
 //!
@@ -107,7 +107,7 @@ fn pushSymlink(
         list_gpa,
         retain,
         out_diags,
-        .E_SYMLINK,
+        .EIO,
         path,
         msg,
         try retain.dupe(u8, "Replace the symlink with a real file or directory under the content root (v0.1 does not follow content symlinks)"),
@@ -130,7 +130,7 @@ fn pushSymlinkCycle(
         list_gpa,
         retain,
         out_diags,
-        .E_SYMLINK_CYCLE,
+        .EIO,
         path,
         msg,
         try retain.dupe(u8, "Remove the cyclic symlink under the content root"),
@@ -138,7 +138,7 @@ fn pushSymlinkCycle(
     );
 }
 
-/// After discovery, emit `E_ENTITY_CASE_COLLISION` when two canonical source
+/// After discovery, emit `EINVALIDPATH` when two canonical source
 /// paths or entity ids differ only in letter case.
 pub fn diagnoseEntityCaseCollisions(
     list_gpa: std.mem.Allocator,
@@ -162,7 +162,7 @@ pub fn diagnoseEntityCaseCollisions(
             );
             try out_diags.append(list_gpa, .{
                 .severity = .error_,
-                .code = .E_ENTITY_CASE_COLLISION,
+                .code = .EINVALIDPATH,
                 .message = msg,
                 .remediation = try retain.dupe(u8, "Rename one path so source paths and entity ids are unique ignoring case"),
                 .source_path = found[i].source_path,
@@ -196,7 +196,7 @@ fn tryRegisterPage(
                 list_gpa,
                 retain,
                 out_diags,
-                .E_SOURCE_PATH,
+                .EINVALIDPATH,
                 entry_path,
                 msg,
                 try retain.dupe(u8, "Remove hard links so each page has a single path under the content root"),
@@ -216,7 +216,7 @@ fn tryRegisterPage(
             list_gpa,
             retain,
             out_diags,
-            .E_SOURCE_PATH,
+            .EINVALIDPATH,
             entry_path,
             msg,
             try retain.dupe(u8, "Use a content-root-relative path without ., .., empty segments, or absolute prefixes"),
@@ -234,7 +234,7 @@ fn tryRegisterPage(
             list_gpa,
             retain,
             out_diags,
-            .E_SOURCE_PATH,
+            .EINVALIDPATH,
             canon,
             msg,
             try retain.dupe(u8, "Use a .md/.mdx page path whose stem is a valid entity id (≤255 bytes, no ., ..)"),
@@ -375,7 +375,7 @@ test "diagnoseEntityCaseCollisions detects case-only path pairs" {
 
     try diagnoseEntityCaseCollisions(gpa, retain, &found, &diags);
     try std.testing.expectEqual(@as(usize, 1), diags.items.len);
-    try std.testing.expect(diags.items[0].code == .E_ENTITY_CASE_COLLISION);
+    try std.testing.expect(diags.items[0].code == .EINVALIDPATH);
     try std.testing.expectEqualStrings("guides/intro", diags.items[0].id);
 }
 
@@ -485,7 +485,7 @@ test "discover rejects directory symlink without following" {
     try std.testing.expectEqual(@as(usize, 2), found.items.len);
     var saw_symlink = false;
     for (diags.items) |d| {
-        if (d.code == .E_SYMLINK) saw_symlink = true;
+        if (d.code == .EIO) saw_symlink = true;
     }
     try std.testing.expect(saw_symlink);
     // Must not discover the same page twice via the link.
@@ -535,7 +535,7 @@ test "discover rejects page-file symlink" {
     try std.testing.expectEqualStrings("real", found.items[0].entity_id);
     var saw_symlink = false;
     for (diags.items) |d| {
-        if (d.code == .E_SYMLINK) saw_symlink = true;
+        if (d.code == .EIO) saw_symlink = true;
     }
     try std.testing.expect(saw_symlink);
 }
@@ -590,7 +590,7 @@ test "discover detects symlink directory cycle without hanging" {
     try std.testing.expect(found.items.len >= 1);
     var saw_symlink_policy = false;
     for (diags.items) |d| {
-        if (d.code == .E_SYMLINK or d.code == .E_SYMLINK_CYCLE) saw_symlink_policy = true;
+        if (d.code == .EIO) saw_symlink_policy = true;
     }
     try std.testing.expect(saw_symlink_policy);
 }

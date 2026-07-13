@@ -11,37 +11,40 @@ related:
 
 # Data model: Page and Frontmatter
 
-The HTML/RAG path uses `Page` (`src/page.zig`). The IR compiler path uses
-`graph.Node` / pipeline page entries with the same entity-id and parent ideas.
+**Workshop analogy:** permanent card catalog (PageDb) vs temporary workbench
+notes (Whiteboard / source buffers).  
+**Invariant:** durable fields are duplicated into a retain arena; never store
+raw parser slices on PageDb.
 
-## Page fields (HTML / RAG `Page`)
+Discovery and promotion use `src/page.zig`. The IR path uses `graph.Node` with
+the same entity-id and `parent` ideas.
 
-| Field | Type (concept) | Meaning |
-|-------|----------------|---------|
-| `source_path` | string | Path relative to `content/` (e.g. `guides/intro.md`) |
-| `output_path` | string | Path relative to `dist/` (e.g. `guides/intro.html`) |
-| `entity_id` | string | Stable graph key (path without extension) |
-| `frontmatter` | object | Title, `parent_entry`, extras |
-| `raw_source` | string | Full file (when retained) |
-| `body_md` | string | Markdown after frontmatter |
+## Durable Page fields (PageDb)
+
+| Field | Meaning |
+|-------|---------|
+| `source_path` | Path relative to content root (e.g. `guides/intro.md`) |
+| `output_path` | Safe path relative to output root (e.g. `guides/intro.html`) |
+| `entity_id` | Stable graph key (path without extension, or `id:` override) |
+| `title`, `parent`, `status`, `tags` | Promoted frontmatter copies |
+| `body_offset` | Integer offset into source (not a live buffer) |
 
 **Not** a Page field: asides / components. Those exist only as parse-time tokens
-on the document segment stream. The Page model does not require a fixed component list.
+on the document segment stream.
 
 ## Entity id rules
 
 - `content/guides/intro.md` → entity id `guides/intro`
 - `content/index.md` → entity id `index`
 - Extensions `.md` and `.mdx` are stripped the same way (case-sensitive)
-- Entity ids preserve letter case; case-only collisions → `E_ENTITY_CASE_COLLISION`
-- Single derivation: `pathutil.canonicalEntityId`
+- Single derivation: `identity.canonicalEntityId`
 
 ## Frontmatter (not YAML)
 
 Closed, line-oriented `key: value` grammar with `---` fences. See
 `docs/contracts/frontmatter.md`.
 
-### Compiler path (`frontmatter.zig`) — preferred for new content
+### Authoring keys (compiler dialect)
 
 ```markdown
 ---
@@ -53,26 +56,16 @@ tags: [guide, intro]
 ```
 
 Keys: `id`, `title`, `parent`, `status`, `tags`. Unknown keys error.
-Legacy `parentEntry` / `parent_entry` are **rejected** here.
-
-### HTML / RAG path (`parser.zig`)
-
-Accepts `parent` **or** `parentEntry` **or** `parent_entry` (not together).
-Same closed scalar grammar; dual aliases → `duplicate_key`.
-
-There is **no** general YAML support and no silent “extras for forward compat”
-on either path (except recognized `id` stored for RAG override on the parser path).
+Legacy `parentEntry` is **rejected** (`EFRONTMATTER`). There is **no** general
+YAML support.
 
 ## Components (parse-time only)
 
-Optional registered blocks such as `<Aside kind="tip">` are tokenized into the
-ordered segment stream. They render in place and are not graph nodes.
+Optional `<Aside kind="tip">` blocks are tokenized into the ordered segment
+stream (`src/aside.zig`). They render in place (HTML path) or export as
+`:::kind` (RAG). They are not graph nodes.
 
 ## PageDb
 
-`PageDb` holds:
-
-- `pages: ArrayList(Page)` — spine allocated with the backing GPA
-- `arena` — long-lived arena for path strings and promoted metadata
-
-Scan populates paths only; compile/RAG parse fills relational metadata.
+Long-lived retain arena for promoted metadata only. Scan populates paths;
+promote copies frontmatter strings before source free.

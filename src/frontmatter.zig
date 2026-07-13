@@ -164,11 +164,11 @@ pub fn parse(
     var meta: Meta = .{};
 
     if (source.len >= 3 and source[0] == 0xEF and source[1] == 0xBB and source[2] == 0xBF) {
-        try pushDiag(list_gpa, retain, diags, source_path, .E_ENCODING, 1, 1, "UTF-8 BOM is not allowed", "Save the file as UTF-8 without a BOM");
+        try pushDiag(list_gpa, retain, diags, source_path, .EINVALIDUTF8, 1, 1, "UTF-8 BOM is not allowed", "Save the file as UTF-8 without a BOM");
         return meta;
     }
     if (!std.unicode.utf8ValidateSlice(source)) {
-        try pushDiag(list_gpa, retain, diags, source_path, .E_ENCODING, 1, 1, "source is not valid UTF-8", "Re-encode the file as UTF-8");
+        try pushDiag(list_gpa, retain, diags, source_path, .EINVALIDUTF8, 1, 1, "source is not valid UTF-8", "Re-encode the file as UTF-8");
         return meta;
     }
 
@@ -181,7 +181,7 @@ pub fn parse(
     var i: usize = 3;
     if (i < source.len and source[i] == '\r') i += 1;
     if (i >= source.len or source[i] != '\n') {
-        try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER, 1, 1, "opening frontmatter fence must be a line consisting of exactly ---", "Start the file with --- on its own line");
+        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, 1, 1, "opening frontmatter fence must be a line consisting of exactly ---", "Start the file with --- on its own line");
         return meta;
     }
     i += 1;
@@ -211,32 +211,32 @@ pub fn parse(
             const col = keyColumn(line, key);
 
             if (key.len == 0) {
-                try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER, line_no, col, "empty frontmatter key", "Use a supported key: id, title, parent, status, tags");
+                try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "empty frontmatter key", "Use a supported key: id, title, parent, status, tags");
             } else if (std.mem.eql(u8, key, "id")) {
                 if (flags.id) {
-                    try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_DUP_KEY, line_no, col, "duplicate frontmatter key \"id\"", "Keep a single id field per document");
+                    try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "duplicate frontmatter key \"id\"", "Keep a single id field per document");
                 } else {
                     flags.id = true;
                     const val = parsePlainOrQuoted(raw_val) catch |err| switch (err) {
                         error.EmptyValue => blk: {
-                            try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_VALUE, line_no, col, "id value must be a non-empty string", "Set id: to a canonical document id (e.g. guides/intro)");
+                            try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "id value must be a non-empty string", "Set id: to a canonical document id (e.g. guides/intro)");
                             break :blk null;
                         },
                         error.SingleQuote => blk: {
-                            try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER, line_no, col, "single-quoted values are not supported", "Use plain text or double quotes");
+                            try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "single-quoted values are not supported", "Use plain text or double quotes");
                             break :blk null;
                         },
                         error.BadQuote => blk: {
-                            try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_VALUE, line_no, col, "malformed double-quoted string", "Close the quote and avoid embedded raw quotes");
+                            try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "malformed double-quoted string", "Close the quote and avoid embedded raw quotes");
                             break :blk null;
                         },
                     };
                     if (val) |v| {
                         if (v.len > max_entity_id_bytes) {
                             const msg = try std.fmt.allocPrint(retain, "id exceeds maximum length of {d} bytes (got {d})", .{ max_entity_id_bytes, v.len });
-                            try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_VALUE, line_no, col, msg, "Shorten the id to at most 255 bytes");
+                            try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, msg, "Shorten the id to at most 255 bytes");
                         } else if (!validateId(v)) {
-                            try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_VALUE, line_no, col, "id is not a valid canonical document id", "Use slash-separated segments without ., .., or whitespace");
+                            try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "id is not a valid canonical document id", "Use slash-separated segments without ., .., or whitespace");
                         } else {
                             // Bound checked: safe to retain into the long-lived arena.
                             meta.id = try retain.dupe(u8, v);
@@ -245,11 +245,11 @@ pub fn parse(
                 }
             } else if (std.mem.eql(u8, key, "title")) {
                 if (flags.title) {
-                    try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_DUP_KEY, line_no, col, "duplicate frontmatter key \"title\"", "Keep a single title field per document");
+                    try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "duplicate frontmatter key \"title\"", "Keep a single title field per document");
                 } else {
                     flags.title = true;
                     const val = parsePlainOrQuoted(raw_val) catch {
-                        try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_VALUE, line_no, col, "title value must be a non-empty plain or double-quoted string", "Example: title: My Page");
+                        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "title value must be a non-empty plain or double-quoted string", "Example: title: My Page");
                         line_no += 1;
                         if (line_end < source.len) i = line_end + 1 else break;
                         continue;
@@ -257,38 +257,38 @@ pub fn parse(
                     if (val.len > max_title_bytes) {
                         // Reject before dupe — oversized titles must not enter the retain arena.
                         const msg = try std.fmt.allocPrint(retain, "title exceeds maximum length of {d} bytes (got {d})", .{ max_title_bytes, val.len });
-                        try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_VALUE, line_no, col, msg, "Shorten the title to at most 512 bytes");
+                        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, msg, "Shorten the title to at most 512 bytes");
                     } else {
                         meta.title = try retain.dupe(u8, val);
                     }
                 }
             } else if (std.mem.eql(u8, key, "parent")) {
                 if (flags.parent) {
-                    try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_DUP_KEY, line_no, col, "duplicate frontmatter key \"parent\"", "Keep a single parent field per document");
+                    try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "duplicate frontmatter key \"parent\"", "Keep a single parent field per document");
                 } else {
                     flags.parent = true;
                     const val = parsePlainOrQuoted(raw_val) catch {
-                        try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_VALUE, line_no, col, "parent value must be a non-empty canonical document id", "Example: parent: guides/intro");
+                        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "parent value must be a non-empty canonical document id", "Example: parent: guides/intro");
                         line_no += 1;
                         if (line_end < source.len) i = line_end + 1 else break;
                         continue;
                     };
                     if (val.len > max_entity_id_bytes) {
                         const msg = try std.fmt.allocPrint(retain, "parent exceeds maximum length of {d} bytes (got {d})", .{ max_entity_id_bytes, val.len });
-                        try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_VALUE, line_no, col, msg, "Shorten the parent id to at most 255 bytes");
+                        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, msg, "Shorten the parent id to at most 255 bytes");
                     } else if (!validateId(val)) {
-                        try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_VALUE, line_no, col, "parent is not a valid canonical document id", "Use the parent document id, not a file path or URL");
+                        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "parent is not a valid canonical document id", "Use the parent document id, not a file path or URL");
                     } else {
                         meta.parent = try retain.dupe(u8, val);
                     }
                 }
             } else if (std.mem.eql(u8, key, "status")) {
                 if (flags.status) {
-                    try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_DUP_KEY, line_no, col, "duplicate frontmatter key \"status\"", "Keep a single status field per document");
+                    try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "duplicate frontmatter key \"status\"", "Keep a single status field per document");
                 } else {
                     flags.status = true;
                     const val = parsePlainOrQuoted(raw_val) catch {
-                        try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_VALUE, line_no, col, "status value is empty or malformed", "Use status: draft, published, or archived");
+                        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "status value is empty or malformed", "Use status: draft, published, or archived");
                         line_no += 1;
                         if (line_end < source.len) i = line_end + 1 else break;
                         continue;
@@ -296,16 +296,16 @@ pub fn parse(
                     if (Status.parse(val)) |st| {
                         meta.status = st;
                     } else {
-                        try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_VALUE, line_no, col, "invalid status value", "Allowed status values: draft, published, archived");
+                        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "invalid status value", "Allowed status values: draft, published, archived");
                     }
                 }
             } else if (std.mem.eql(u8, key, "tags")) {
                 if (flags.tags) {
-                    try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_DUP_KEY, line_no, col, "duplicate frontmatter key \"tags\"", "Keep a single tags list per document");
+                    try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "duplicate frontmatter key \"tags\"", "Keep a single tags list per document");
                 } else {
                     flags.tags = true;
                     meta.tags = parseTagsList(retain, raw_val) catch {
-                        try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER_VALUE, line_no, col, "tags must be a simple list like [a, b]", "Use tags: [tag1, tag2] with plain or double-quoted items");
+                        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "tags must be a simple list like [a, b]", "Use tags: [tag1, tag2] with plain or double-quoted items");
                         meta.tags = &.{};
                         line_no += 1;
                         if (line_end < source.len) i = line_end + 1 else break;
@@ -317,7 +317,7 @@ pub fn parse(
                 const msg = try std.fmt.allocPrint(retain, "unsupported frontmatter key \"{s}\"", .{key});
                 try diags.append(list_gpa, .{
                     .severity = .error_,
-                    .code = .E_FRONTMATTER,
+                    .code = .EFRONTMATTER,
                     .message = msg,
                     .remediation = try retain.dupe(u8, "Supported keys: id, title, parent, status, tags"),
                     .source_path = source_path,
@@ -326,7 +326,7 @@ pub fn parse(
                 });
             }
         } else {
-            try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER, line_no, 1, "malformed frontmatter line (expected key: value)", "Each non-empty frontmatter line must be key: value");
+            try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, 1, "malformed frontmatter line (expected key: value)", "Each non-empty frontmatter line must be key: value");
         }
 
         line_no += 1;
@@ -334,13 +334,13 @@ pub fn parse(
             i = line_end + 1;
         } else {
             // EOF without closing fence.
-            try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER, 1, 1, "unclosed frontmatter: missing closing ---", "Add a closing --- line after the metadata fields");
+            try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, 1, 1, "unclosed frontmatter: missing closing ---", "Add a closing --- line after the metadata fields");
             meta.body_offset = source.len;
             return meta;
         }
     }
 
-    try pushDiag(list_gpa, retain, diags, source_path, .E_FRONTMATTER, 1, 1, "unclosed frontmatter: missing closing ---", "Add a closing --- line after the metadata fields");
+    try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, 1, 1, "unclosed frontmatter: missing closing ---", "Add a closing --- line after the metadata fields");
     meta.body_offset = source.len;
     return meta;
 }
@@ -397,7 +397,7 @@ test "parse rejects unknown key and continues" {
     try std.testing.expect(diags.items.len >= 1);
     var saw_tags = false;
     for (diags.items) |d| {
-        if (d.code == .E_FRONTMATTER_VALUE) saw_tags = true;
+        if (d.code == .EFRONTMATTER) saw_tags = true;
     }
     try std.testing.expect(saw_tags);
 }
@@ -419,7 +419,7 @@ test "parse duplicate key" {
     ;
     const meta = try parse(src, "d.md", retain, gpa, &diags);
     try std.testing.expectEqual(@as(usize, 1), diags.items.len);
-    try std.testing.expect(diags.items[0].code == .E_FRONTMATTER_DUP_KEY);
+    try std.testing.expect(diags.items[0].code == .EFRONTMATTER);
     try std.testing.expectEqualStrings("A", meta.title.?);
 }
 
@@ -460,7 +460,7 @@ test "parse rejects oversize title without retaining it" {
 
     try std.testing.expect(meta.title == null);
     try std.testing.expectEqual(@as(usize, 1), diags.items.len);
-    try std.testing.expect(diags.items[0].code == .E_FRONTMATTER_VALUE);
+    try std.testing.expect(diags.items[0].code == .EFRONTMATTER);
     try std.testing.expect(std.mem.indexOf(u8, diags.items[0].message, "512") != null);
     try std.testing.expect(std.mem.indexOf(u8, diags.items[0].message, "10000") != null);
     // Retain arena holds only short diagnostic strings, never the 10KB title body.
@@ -485,7 +485,7 @@ test "parse rejects oversize id without retaining it" {
     const meta = try parse(src.items, "huge-id.md", retain, gpa, &diags);
     try std.testing.expect(meta.id == null);
     try std.testing.expectEqual(@as(usize, 1), diags.items.len);
-    try std.testing.expect(diags.items[0].code == .E_FRONTMATTER_VALUE);
+    try std.testing.expect(diags.items[0].code == .EFRONTMATTER);
     try std.testing.expect(std.mem.indexOf(u8, diags.items[0].message, "255") != null);
 }
 

@@ -34,12 +34,11 @@ affiliated with any commercial tobacco or rolling-paper brand.
 - Optionally export an **LLM-friendly RAG corpus** under `rag/`
 - Keep hard constraints: Zig core, in-process Apex when rendering, no Node SSG stack
 
-## Long-term / experimental (present in tree, not default CLI)
+## Implemented beyond default IR (library / flags / tests)
 
-- Render markdown via a **native C-ABI engine (Apex)** linked in-process
-- Tokenize registered components (e.g. `<Aside>`) that stay in document order
-- Document-local **Whiteboard** arena for per-page scratch
-- **Zero-copy layout splicing** to `dist/` (prefix | body | suffix writes)
+- **Aside** tokenizer on the shared compile path (`ECOMPONENT` on failure)
+- Optional RAG corpus with `:::kind` **export** blocks for parsed Asides
+- Experimental HTML: Apex + Aside stream + Whiteboard + layout splice to `dist/`
 
 Normative IR contracts: `docs/contracts/`. Narrative seeds here must not
 overclaim untested guarantees (see STATUS and RELEASE-GATE).

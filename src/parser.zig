@@ -3,8 +3,8 @@
 //! ## What this is
 //!
 //! A **deliberately closed, line-oriented** metadata grammar plus a body slice.
-//! It is **not** YAML, not a YAML subset, not a general config language, and
-//! not a component / Aside / Apex tokenizer.
+//! It is **not** YAML, not a YAML subset, and not a general config language.
+//! Aside / component body tokenization is **`aside.zig`** (milestone 10).
 //!
 //! ## Ownership
 //!

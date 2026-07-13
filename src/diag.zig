@@ -1,7 +1,8 @@
 //! Structured diagnostics for the content compiler.
 //!
-//! Strings inside a Diagnostic are owned by the caller's retain allocator
-//! (typically the long-lived arena for a compile run).
+//! Code strings match `docs/contracts/diagnostics.md` exactly (no underscore
+//! variants). Strings inside a Diagnostic are owned by the caller's retain
+//! allocator (typically the long-lived arena for a compile run).
 
 const std = @import("std");
 
@@ -23,27 +24,20 @@ pub const Severity = enum {
     }
 };
 
-/// Closed diagnostic codes for the metadata + graph slice.
+/// Closed diagnostic codes for v0.1 (normative: docs/contracts/diagnostics.md).
 pub const Code = enum {
-    E_CONTENT_ROOT,
-    E_SOURCE_PATH,
-    /// Symlinked directory or page file under the content root (v0.1 rejects both).
-    E_SYMLINK,
-    /// Directory walk revisited a previously seen directory inode (symlink cycle / hard re-entry).
-    E_SYMLINK_CYCLE,
-    E_ENCODING,
-    E_DUP_ID,
-    /// Two source paths or entity ids differ only in letter case (ids preserve case).
-    E_ENTITY_CASE_COLLISION,
-    E_FRONTMATTER,
-    E_FRONTMATTER_DUP_KEY,
-    E_FRONTMATTER_VALUE,
-    E_PARENT_MISSING,
-    E_PARENT_SELF,
-    E_PARENT_CYCLE,
-    /// Parent exists but is itself a satellite (multi-hop chain unsupported in v0.1; hard error).
-    E_PARENT_NOT_TRUNK,
-    E_INTERNAL,
+    EDUPLICATEID,
+    EPARENTMISSING,
+    EPARENTSELF,
+    EPARENTNOTTRUNK,
+    EPARENTCYCLE,
+    EFRONTMATTER,
+    EINVALIDUTF8,
+    EINVALIDPATH,
+    /// Aside / registered-component tokenizer failures (milestone 10).
+    ECOMPONENT,
+    EUSAGE,
+    EIO,
 
     pub fn name(self: Code) []const u8 {
         return @tagName(self);
@@ -97,6 +91,7 @@ pub fn formatText(d: Diagnostic, allocator: std.mem.Allocator) ![]u8 {
         try std.fmt.allocPrint(allocator, " [{s}]", .{d.remediation})
     else
         "";
+    defer if (d.remediation.len > 0) allocator.free(rem);
 
     if (d.source_path.len == 0) {
         return std.fmt.allocPrint(allocator, "{s}: {s}: {s}{s}", .{
@@ -137,9 +132,9 @@ pub fn countErrors(diags: []const Diagnostic) usize {
 
 test "sortDiagnostics orders by path then line" {
     var diags = [_]Diagnostic{
-        .{ .severity = .error_, .code = .E_DUP_ID, .message = "b", .source_path = "b.md", .line = 1, .column = 1 },
-        .{ .severity = .error_, .code = .E_DUP_ID, .message = "a", .source_path = "a.md", .line = 2, .column = 1 },
-        .{ .severity = .error_, .code = .E_DUP_ID, .message = "a1", .source_path = "a.md", .line = 1, .column = 1 },
+        .{ .severity = .error_, .code = .EDUPLICATEID, .message = "b", .source_path = "b.md", .line = 1, .column = 1 },
+        .{ .severity = .error_, .code = .EDUPLICATEID, .message = "a", .source_path = "a.md", .line = 2, .column = 1 },
+        .{ .severity = .error_, .code = .EDUPLICATEID, .message = "a1", .source_path = "a.md", .line = 1, .column = 1 },
     };
     sortDiagnostics(&diags);
     try std.testing.expectEqualStrings("a.md", diags[0].source_path);
@@ -147,4 +142,18 @@ test "sortDiagnostics orders by path then line" {
     try std.testing.expectEqualStrings("a.md", diags[1].source_path);
     try std.testing.expect(diags[1].line.? == 2);
     try std.testing.expectEqualStrings("b.md", diags[2].source_path);
+}
+
+test "Code names match contract strings" {
+    try std.testing.expectEqualStrings("EDUPLICATEID", Code.EDUPLICATEID.name());
+    try std.testing.expectEqualStrings("EPARENTMISSING", Code.EPARENTMISSING.name());
+    try std.testing.expectEqualStrings("EPARENTSELF", Code.EPARENTSELF.name());
+    try std.testing.expectEqualStrings("EPARENTNOTTRUNK", Code.EPARENTNOTTRUNK.name());
+    try std.testing.expectEqualStrings("EPARENTCYCLE", Code.EPARENTCYCLE.name());
+    try std.testing.expectEqualStrings("EFRONTMATTER", Code.EFRONTMATTER.name());
+    try std.testing.expectEqualStrings("EINVALIDUTF8", Code.EINVALIDUTF8.name());
+    try std.testing.expectEqualStrings("EINVALIDPATH", Code.EINVALIDPATH.name());
+    try std.testing.expectEqualStrings("ECOMPONENT", Code.ECOMPONENT.name());
+    try std.testing.expectEqualStrings("EUSAGE", Code.EUSAGE.name());
+    try std.testing.expectEqualStrings("EIO", Code.EIO.name());
 }

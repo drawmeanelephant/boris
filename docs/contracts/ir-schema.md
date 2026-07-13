@@ -1,25 +1,36 @@
 # Intermediate representation (IR) schema (v0.1)
 
-**Status:** normative contract for future compiler implementation  
-**Milestone:** 2 (contracts + fixtures). Default CLI does **not** emit IR yet.
+**Status:** normative contract — **implemented** by the milestone 6 default CLI  
+**Compiler id:** `boris/0.1.1`  
+**schemaVersion:** `0.1.0`
 
-Default v0.1 product output is **deterministic JSON IR** under `.boris/`.
-**HTML is not** a default product surface for v0.1 acceptance.
+Default v0.1 product output is **deterministic JSON IR** under `.boris/` (or
+`--out`). **HTML is not** a default product surface for v0.1 acceptance.
 
 ---
 
 ## Artifacts
 
-On every completed compile run (success **or** content failure that still
-finished the pipeline), Boris writes a single output directory (CLI default
-`.boris/`):
+On a **successful** compile (`ok: true`), Boris publishes three files under the
+output directory (CLI default `.boris/`):
 
 ```text
 .boris/
   manifest.json       # required — page summaries
-  graph.json          # required — frozen nodes + parent edges (when ok)
+  graph.json          # required — frozen nodes + parent edges
   build-report.json   # required — ok flag, errorCount, diagnostics
 ```
+
+On **content validation failure** (`ok: false`):
+
+- `build-report.json` is written with `ok: false` and diagnostics
+- **Graph-dependent** artifacts (`manifest.json`, `graph.json`) are **not**
+  published; any prior copies under the out directory are removed
+- The process exits **1**
+
+On **I/O/system failure** (exit **3**), files may be missing or partial;
+`build-report.json` may still be written when the failure is detected after
+output setup.
 
 There is **no** `pages.json`. Full page body text is **not** emitted in v0.1
 IR; nodes carry `bodyOffset` only (byte offset of body start in the source
@@ -29,8 +40,8 @@ No HTML, no RAG tree, no per-page fragment files under this IR contract.
 
 | File | On success (`ok: true`) | On content failure (`ok: false`) |
 |------|-------------------------|-----------------------------------|
-| `manifest.json` | Full page list | Page list as far as parsed (may be partial) |
-| `graph.json` | `frozen: true`, nodes + edges | `frozen: false` unless freeze completed; may be empty edges |
+| `manifest.json` | Full page list, sorted by `id` | **Not published** |
+| `graph.json` | `frozen: true`, nodes + edges | **Not published** |
 | `build-report.json` | `ok: true`, empty diagnostics | `ok: false`, non-empty diagnostics |
 
 ---
@@ -50,8 +61,8 @@ Every top-level IR document **must** include:
 | Breaking change | New `schemaVersion`; old writers must not silently emit new shapes under `"0.1.0"` |
 
 Also required on success paths: a compiler id string of the form `boris/<product-version>`
-(e.g. `boris/0.0.1` during foundation). Product patch bumps may update this
-string; IR `schemaVersion` stays `"0.1.0"` until the emit shape breaks.
+(currently `boris/0.1.1`). Product patch bumps may update this string; IR
+`schemaVersion` stays `"0.1.0"` until the emit shape breaks.
 
 ---
 
@@ -60,13 +71,16 @@ string; IR `schemaVersion` stays `"0.1.0"` until the emit shape breaks.
 | Stage | Name | Input | Output |
 |------:|------|-------|--------|
 | 1 | Discover | content root on disk | set of source paths (`.md` / `.mdx`) |
-| 2 | Identify | source paths | `sourcePath` + `id` per page |
-| 3 | Parse metadata | file bytes | frontmatter + `bodyOffset` |
-| 4 | Resolve | pages + `parent` fields | role + parent edges |
-| 5 | Validate | resolved graph | diagnostics; freeze only if clean |
-| 6 | Emit | pages + edges + diagnostics | three JSON files above |
+| 2 | Identify | source paths | `sourcePath` + path-derived `id` per page |
+| 3 | Parse + promote | file bytes | durable PageDb fields + `bodyOffset` |
+| 4 | Validate | pages + `parent` fields | diagnostics; **no freeze yet** |
+| 5 | Freeze | only if zero errors | stable indices + edges; `frozen: true` |
+| 6 | Emit | pages + edges + diagnostics | JSON under `--out` (see publication) |
 
 Stages run **sequentially** in a single process. No concurrency in v0.1.
+
+**Ownership rule:** after promote, no parser slice into a temporary file buffer
+may be retained. PageDb strings live on a long-lived retain arena.
 
 ---
 
@@ -102,15 +116,21 @@ Every page has exactly one role after resolution:
 7. Multiple satellites may share the same Trunk parent.
 8. Valid graphs are a **one-level forest**: roots are Trunks; every Satellite
    edges to exactly one Trunk.
+9. **Do not claim the structure is a DAG (or frozen forest) until validation
+   succeeds and freeze runs.** On failure, `frozen` is never true and
+   `graph.json` is not published.
 
 ### Validation order (when multiple issues exist)
 
-1. Encoding / path / frontmatter errors for that file  
-2. [`EDUPLICATEID`](diagnostics.md) (global identify stage)  
-3. [`EPARENTSELF`](diagnostics.md)  
-4. [`EPARENTMISSING`](diagnostics.md)  
-5. [`EPARENTNOTTRUNK`](diagnostics.md)  
+1. Encoding / path / frontmatter errors for that file (during parse)
+2. [`EDUPLICATEID`](diagnostics.md) (global; detected before map overwrite can hide it)
+3. [`EPARENTSELF`](diagnostics.md)
+4. [`EPARENTMISSING`](diagnostics.md)
+5. [`EPARENTNOTTRUNK`](diagnostics.md)
 6. After all pages processed: [`EPARENTCYCLE`](diagnostics.md) (global)
+
+Diagnostics are sorted for emit by (`sourcePath`, `line`, `column`, `code`,
+`message`) — deterministic and non-duplicative for a given content tree.
 
 ### Non-goals (graph)
 
@@ -130,14 +150,41 @@ the CLI, same compiler version, and the **same host OS/filesystem semantics**:
 2. `build-report.json` identical when `outDir` / `contentRoot` strings match.
 3. **Sorted** `pages` / `nodes` by `id` ascending (unsigned byte order of UTF-8).
 4. **Stable key order** within each object (order listed below).
-5. No wall-clock timestamps, hostnames, absolute machine paths, or random IDs
-   in the IR (paths are content-root-relative `sourcePath` or entity ids).
+5. No wall-clock timestamps, hostnames, absolute machine paths for **source**
+   identity, or random IDs in the IR (`sourcePath` is content-root-relative;
+   `contentRoot` / `outDir` are the CLI path strings as passed).
 6. Newlines: **LF only**. Pretty-print with **2-space indent**, no trailing
    spaces, final newline at EOF.
 7. Integers only where specified (no floats).
+8. Do **not** iterate a hash map while serializing; arrays are built from
+   sorted lists.
 
 **Not claimed:** bit-identical IR across operating systems without
 cross-platform CI evidence.
+
+---
+
+## Output publication behavior
+
+Implementation (`src/pipeline.zig`):
+
+1. Build and validate **entirely in memory** first.
+2. **Success:** write all three JSON files into a sibling staging directory
+   `{outDir}.boris-stage`, then **rename each file** into `outDir` (Zig
+   `Dir.rename`, which replaces an existing file of the same name). Remove the
+   staging directory afterward.
+3. **Content failure:** write only `build-report.json`; delete any existing
+   `manifest.json` / `graph.json` under `outDir`.
+
+### Platform limitations (documented, not over-claimed)
+
+| Claim | Status |
+|-------|--------|
+| Same-directory file rename after staging | Used on success path |
+| Whole-directory atomic replace of `outDir` | **Not** used |
+| Cross-volume / cross-device atomic publish | **Not claimed** |
+| Concurrent readers never observe a torn three-file set | Best-effort via staging; not formally proven on all hosts |
+| Staging path names inside JSON | Never — only final `outDir` string as passed to the CLI |
 
 ---
 
@@ -152,7 +199,7 @@ schemaVersion, compiler, contentRoot, pageCount, pages
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `schemaVersion` | string | yes | `"0.1.0"` |
-| `compiler` | string | yes | e.g. `"boris/0.0.1"` |
+| `compiler` | string | yes | e.g. `"boris/0.1.1"` |
 | `contentRoot` | string | yes | Content root path string as passed to the pipeline (no trailing slash) |
 | `pageCount` | integer | yes | `pages.length` |
 | `pages` | array | yes | Summary entries sorted by `id` |
@@ -178,7 +225,7 @@ Example (shape only):
 ```json
 {
   "schemaVersion": "0.1.0",
-  "compiler": "boris/0.0.1",
+  "compiler": "boris/0.1.1",
   "contentRoot": "content",
   "pageCount": 2,
   "pages": [
@@ -219,7 +266,7 @@ schemaVersion, frozen, nodes, edges
 | `schemaVersion` | string | `"0.1.0"` |
 | `frozen` | boolean | `true` only after successful graph freeze |
 | `nodes` | array | Full node objects, sorted by `id` |
-| `edges` | array | Parent edges after freeze |
+| `edges` | array | Parent edges after freeze (sorted by `from`, then `to`) |
 
 ### Node object
 
@@ -239,7 +286,7 @@ index, id, sourcePath, role, parent, parentIndex, title, status, tags, bodyOffse
 | `parentIndex` | integer \| null | Index of parent node, or null |
 | `title` | string \| null | From frontmatter |
 | `status` | string \| null | Validated status or null |
-| `tags` | array of string | May be empty |
+| `tags` | array of string | May be empty; author order preserved |
 | `bodyOffset` | integer | Byte offset of body start in source (≥ 0) |
 
 **No `body` field.** Re-read the file when raw body is needed.
@@ -272,7 +319,7 @@ schemaVersion, ok, contentRoot, outDir, pageCount, errorCount, diagnostics
 | `ok` | boolean | `true` iff zero error diagnostics and freeze succeeded |
 | `contentRoot` | string | Same string as pipeline option |
 | `outDir` | string | Same string as pipeline option |
-| `pageCount` | integer | Number of page nodes retained |
+| `pageCount` | integer | Number of page nodes retained after successful parses |
 | `errorCount` | integer | Count of severity=`error` diagnostics |
 | `diagnostics` | array | Sorted diagnostics (see [diagnostics.md](diagnostics.md)) |
 
@@ -293,9 +340,8 @@ See [diagnostics.md](diagnostics.md) for field meanings and the closed code set.
 On hard content error (CLI exit `1`):
 
 1. Diagnostics printed to stderr (text form).
-2. All three JSON files are still written when the pipeline completes;
-   `build-report.json` has `ok: false` and non-empty `diagnostics`.
-3. Do not treat `ok: false` artifacts as a valid frozen graph for consumers.
+2. Only `build-report.json` is published under `--out` (`ok: false`).
+3. Do not treat the out directory as a valid frozen graph for consumers.
 
 On I/O/system failure (CLI exit `3`), files may be missing or partial.
 

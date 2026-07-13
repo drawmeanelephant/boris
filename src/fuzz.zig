@@ -32,7 +32,7 @@
 
 const std = @import("std");
 const frontmatter = @import("frontmatter.zig");
-const parser = @import("parser.zig");
+const aside = @import("aside.zig");
 const apex = @import("apex.zig");
 const graph_mod = @import("graph.zig");
 const diag = @import("diag.zig");
@@ -148,21 +148,20 @@ pub fn runComponentFuzz(seed: u64, iterations: usize) !void {
         };
 
         // Valid UTF-8: must not crash; may return diagnostics.
-        const result = parser.parseBodySegmentsSimple(payload, a) catch |err| switch (err) {
+        const result = aside.tokenizeBody(payload, a) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             error.InvalidUtf8 => {
                 // Should not happen when we only emit valid UTF-8.
                 try std.testing.expect(false);
                 continue;
             },
-            else => continue, // other parse errors are fine
         };
         _ = result;
     }
 
     // Explicit invalid UTF-8 path: clean error, no crash.
     const bad = [_]u8{ 0xFF, 0xFE, '<', 'A', 's', 'i', 'd', 'e', '>' };
-    try std.testing.expectError(error.InvalidUtf8, parser.parseBodySegmentsSimple(&bad, arena.allocator()));
+    try std.testing.expectError(error.InvalidUtf8, aside.tokenizeBody(&bad, arena.allocator()));
 }
 
 fn fillValidUtf8(random: std.Random, buf: []u8) void {
@@ -397,11 +396,11 @@ fn productionProblems(diags: []const diag.Diagnostic) RefProblems {
     var p: RefProblems = .{};
     for (diags) |d| {
         switch (d.code) {
-            .E_DUP_ID => p.dup_id = true,
-            .E_PARENT_SELF => p.self_parent = true,
-            .E_PARENT_MISSING => p.missing_parent = true,
-            .E_PARENT_NOT_TRUNK => p.not_trunk = true,
-            .E_PARENT_CYCLE => p.cycle = true,
+            .EDUPLICATEID => p.dup_id = true,
+            .EPARENTSELF => p.self_parent = true,
+            .EPARENTMISSING => p.missing_parent = true,
+            .EPARENTNOTTRUNK => p.not_trunk = true,
+            .EPARENTCYCLE => p.cycle = true,
             else => {},
         }
     }

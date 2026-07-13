@@ -1,19 +1,14 @@
-//! Integration / regression harness for Boris highest-risk boundaries.
+//! Historical harness sketch (not on the m10 build graph).
 //!
-//! Catches bugs unit tests alone miss: Whiteboard reset misuse, Zig/C ABI
-//! edges (via real Apex), path discovery, graph inconsistencies, and
-//! non-deterministic artifacts.
+//! **Superseded by** `src/hardening_test.zig` + module tests (`aside`, `pipeline`,
+//! `rag`, `compile`, `fuzz`). This file is retained as a reference for older
+//! API experiments and is **not** compiled by `zig build test`.
 //!
-//! ## Invariants
+//! Active integration coverage:
+//! - `zig build test` (includes hardening + fuzz)
+//! - `zig build test-harness` → hardening subset only
 //!
-//! - Single-threaded only (no worker pools, no async races).
-//! - Never rely on filesystem enumeration order for assertions — always sort
-//!   paths / ids before comparing.
-//! - All disposable artifacts land under `test-output/` and are cleaned by
-//!   the owning `WorkDir` (or explicitly by the test).
-//!
-//! Run with `zig build test` (included) or `zig build test-harness`.
-//! See `test/README.md` for the full command matrix.
+//! See `test/README.md` and `docs/AUDIT-v0.1.md`.
 
 const std = @import("std");
 const Io = std.Io;

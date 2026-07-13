@@ -1,34 +1,520 @@
-//! Aside / admonition HTML rendering — built-in documentation callouts.
+//! Aside component tokenizer + HTML rendering (milestone 10).
 //!
-//! Asides are in-document components. They stay in page order and render as
-//! semantic `<aside class="admonition admonition--{kind}">`. They do **not**
-//! become standalone fragment pages or graph nodes.
+//! ## Authoring
 //!
-//! Inner body goes through Apex (markdown → HTML) just like main prose.
+//! The only supported component is constrained `<Aside …>…</Aside>`.
+//! Unknown PascalCase open tags are hard errors. This is **not** generic HTML
+//! parsing, **not** MDX, and **not** a multi-component registry system.
+//!
+//! ## Recognition rules
+//!
+//! - Components are recognized **only outside** fenced code blocks
+//!   (``` / ~~~ CommonMark-style fences).
+//! - Literal `<Aside>` / `</Aside>` text inside fences stays literal.
+//! - Close tag `</Aside>` is recognized only at **logical line start**
+//!   (optional ASCII spaces/tabs). Mid-line `</Aside>` does not close.
+//! - Nested Aside is rejected with a stable diagnostic.
+//! - Document order is preserved; asides never become graph nodes or pages.
+//!
+//! ## RAG export representation
+//!
+//! Parsed asides may be emitted as `:::kind` / `:::kind{id="…"}` blocks for
+//! retrieval. That form is **export-only** and **not** round-trippable source.
 
 const std = @import("std");
 const apex = @import("apex.zig");
 
+// ---------------------------------------------------------------------------
+// Bounds / allowlists
+// ---------------------------------------------------------------------------
+
+/// Max bytes for an optional Aside `id` attribute value.
+pub const max_aside_id_bytes: usize = 64;
+
+/// Closed kind vocabulary (exact spellings, lowercase).
+pub const allowed_kinds = [_][]const u8{ "note", "tip", "info", "warning", "danger" };
+
+pub fn isAllowedKind(kind: []const u8) bool {
+    for (allowed_kinds) |k| {
+        if (std.mem.eql(u8, k, kind)) return true;
+    }
+    return false;
+}
+
+/// Safe-anchor grammar for optional `id`:
+///   `[A-Za-z0-9][A-Za-z0-9_-]*` length 1…64
+pub fn isValidAsideId(id: []const u8) bool {
+    if (id.len == 0 or id.len > max_aside_id_bytes) return false;
+    const c0 = id[0];
+    const ok0 = (c0 >= 'A' and c0 <= 'Z') or
+        (c0 >= 'a' and c0 <= 'z') or
+        (c0 >= '0' and c0 <= '9');
+    if (!ok0) return false;
+    for (id[1..]) |c| {
+        const ok = (c >= 'A' and c <= 'Z') or
+            (c >= 'a' and c <= 'z') or
+            (c >= '0' and c <= '9') or
+            c == '_' or c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
 /// Structured callout extracted from `<Aside kind="…" id="…">…</Aside>`.
-/// All string fields are slices into the parent page's raw source (zero-copy).
-///
-/// Canonical name is **Aside** (not a mascot brand). Nested asides are
-/// unsupported (hard error in `parser.zig`). `id` is parse-validated to a
-/// safe identifier grammar; HTML still escapes attribute sinks defensively.
+/// String fields are slices into the parent page body/source (zero-copy).
 pub const Aside = struct {
-    /// Semantic kind: note, tip, info, warning, danger, … (from kind= or legacy type=).
-    kind: []const u8 = "",
+    /// Semantic kind from allowlist (default `"note"` when attribute omitted).
+    kind: []const u8 = "note",
     /// Optional stable in-page anchor (empty when omitted).
     id: []const u8 = "",
     /// Inner markdown between open and close tags (slice into source).
     body: []const u8 = "",
     /// Full span of the original tag in source, for diagnostics.
     raw_span: []const u8 = "",
-    /// 1-based line of the opening tag in the full source file.
+    /// 1-based line of the opening tag within the scanned buffer.
     line: u32 = 1,
-    /// 1-based byte column of the opening tag.
+    /// 1-based byte column of the opening tag within its line.
     column: u32 = 1,
 };
+
+pub const Segment = union(enum) {
+    markdown: []const u8,
+    aside: Aside,
+};
+
+/// Component-local diagnostic kinds (stable for tests; map to `ECOMPONENT` in pipeline).
+pub const DiagKind = enum {
+    unregistered_component,
+    unterminated_component,
+    nested_component,
+    invalid_kind,
+    invalid_id,
+    duplicate_attribute,
+    unknown_attribute,
+    unterminated_quote,
+    malformed_attribute,
+    missing_close_angle,
+};
+
+pub const Diagnostic = struct {
+    kind: DiagKind,
+    /// 1-based line within the scanned buffer (body-relative for body-only scans).
+    line: u32 = 1,
+    /// 1-based byte column within the line.
+    column: u32 = 1,
+    /// Static or arena-owned message.
+    message: []const u8,
+    /// Component name when relevant (e.g. `Figure`), else empty.
+    name: []const u8 = "",
+};
+
+pub const TokenizeResult = struct {
+    segments: []const Segment = &.{},
+    asides: []const Aside = &.{},
+    diagnostics: []const Diagnostic = &.{},
+
+    pub fn hasErrors(self: TokenizeResult) bool {
+        return self.diagnostics.len > 0;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Line / position helpers
+// ---------------------------------------------------------------------------
+
+fn isSpace(c: u8) bool {
+    return c == ' ' or c == '\t';
+}
+
+fn lineColAt(source: []const u8, index: usize) struct { u32, u32 } {
+    var line: u32 = 1;
+    var col: u32 = 1;
+    var i: usize = 0;
+    while (i < index and i < source.len) : (i += 1) {
+        if (source[i] == '\n') {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    return .{ line, col };
+}
+
+fn atLineStart(source: []const u8, index: usize) bool {
+    if (index == 0) return true;
+    return source[index - 1] == '\n';
+}
+
+/// Detect open/close fence at `index` when `index` is a line start.
+/// Returns fence marker char (` or ~) and run length, or null.
+fn fenceAtLineStart(source: []const u8, index: usize) ?struct { u8, usize } {
+    if (!atLineStart(source, index)) return null;
+    var i = index;
+    // Optional indent up to 3 spaces (CommonMark).
+    var spaces: usize = 0;
+    while (i < source.len and source[i] == ' ' and spaces < 3) : ({
+        i += 1;
+        spaces += 1;
+    }) {}
+    if (i >= source.len) return null;
+    const ch = source[i];
+    if (ch != '`' and ch != '~') return null;
+    var run: usize = 0;
+    while (i + run < source.len and source[i + run] == ch) : (run += 1) {}
+    if (run < 3) return null;
+    // Info string may follow; we only need the marker.
+    return .{ ch, run };
+}
+
+fn lineEndIndex(source: []const u8, start: usize) usize {
+    var i = start;
+    while (i < source.len and source[i] != '\n') : (i += 1) {}
+    return i;
+}
+
+/// True when `name` is PascalCase component-like: starts with A–Z, continues
+/// with [A-Za-z0-9_-].
+fn isPascalComponentName(name: []const u8) bool {
+    if (name.len == 0) return false;
+    if (name[0] < 'A' or name[0] > 'Z') return false;
+    for (name[1..]) |c| {
+        const ok = (c >= 'A' and c <= 'Z') or
+            (c >= 'a' and c <= 'z') or
+            (c >= '0' and c <= '9') or
+            c == '_' or c == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+/// Lexical boundary after `<Aside` / `<Figure`: next must be whitespace, `/`, or `>`.
+fn tagNameBoundaryOk(source: []const u8, after_name: usize) bool {
+    if (after_name >= source.len) return true;
+    const c = source[after_name];
+    return isSpace(c) or c == '/' or c == '>' or c == '\n' or c == '\r';
+}
+
+// ---------------------------------------------------------------------------
+// Attribute parse
+// ---------------------------------------------------------------------------
+
+const AttrError = error{
+    DuplicateAttribute,
+    UnknownAttribute,
+    UnterminatedQuote,
+    MalformedAttribute,
+    InvalidKind,
+    InvalidId,
+};
+
+const ParsedAttrs = struct {
+    kind: []const u8 = "note",
+    id: []const u8 = "",
+    saw_kind: bool = false,
+    saw_id: bool = false,
+};
+
+fn parseAttributes(open_inner: []const u8) AttrError!ParsedAttrs {
+    var attrs: ParsedAttrs = .{};
+    var i: usize = 0;
+    while (i < open_inner.len) {
+        while (i < open_inner.len and (isSpace(open_inner[i]) or open_inner[i] == '\n' or open_inner[i] == '\r')) : (i += 1) {}
+        if (i >= open_inner.len) break;
+
+        const key_start = i;
+        while (i < open_inner.len) {
+            const c = open_inner[i];
+            const ok = (c >= 'A' and c <= 'Z') or
+                (c >= 'a' and c <= 'z') or
+                (c >= '0' and c <= '9') or
+                c == '_' or c == '-';
+            if (!ok) break;
+            i += 1;
+        }
+        if (i == key_start) return error.MalformedAttribute;
+        const key = open_inner[key_start..i];
+
+        while (i < open_inner.len and isSpace(open_inner[i])) : (i += 1) {}
+        if (i >= open_inner.len or open_inner[i] != '=') return error.MalformedAttribute;
+        i += 1;
+        while (i < open_inner.len and isSpace(open_inner[i])) : (i += 1) {}
+        if (i >= open_inner.len or open_inner[i] != '"') {
+            // Quoted values only.
+            return error.MalformedAttribute;
+        }
+        i += 1; // opening "
+        const val_start = i;
+        while (i < open_inner.len and open_inner[i] != '"') : (i += 1) {}
+        if (i >= open_inner.len) return error.UnterminatedQuote;
+        const val = open_inner[val_start..i];
+        i += 1; // closing "
+
+        if (std.mem.eql(u8, key, "kind") or std.mem.eql(u8, key, "type")) {
+            // `type` is a legacy alias for `kind` (same allowlist / same slot).
+            if (attrs.saw_kind) return error.DuplicateAttribute;
+            attrs.saw_kind = true;
+            if (!isAllowedKind(val)) return error.InvalidKind;
+            attrs.kind = val;
+        } else if (std.mem.eql(u8, key, "id")) {
+            if (attrs.saw_id) return error.DuplicateAttribute;
+            attrs.saw_id = true;
+            if (!isValidAsideId(val)) return error.InvalidId;
+            attrs.id = val;
+        } else {
+            return error.UnknownAttribute;
+        }
+    }
+    return attrs;
+}
+
+// ---------------------------------------------------------------------------
+// Tokenizer
+// ---------------------------------------------------------------------------
+
+const OpenState = struct {
+    open_start: usize,
+    open_end: usize, // index of '>'
+    attrs: ParsedAttrs,
+    line: u32,
+    column: u32,
+};
+
+/// Tokenize a markdown body for Aside components.
+///
+/// Requires valid UTF-8 (`error.InvalidUtf8` otherwise). Allocates segment /
+/// aside / diagnostic arrays from `allocator` (typically a document arena).
+pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeResult {
+    if (body.len > 0 and !std.unicode.utf8ValidateSlice(body)) {
+        return error.InvalidUtf8;
+    }
+
+    var segments: std.ArrayList(Segment) = .empty;
+    errdefer segments.deinit(allocator);
+    var asides: std.ArrayList(Aside) = .empty;
+    errdefer asides.deinit(allocator);
+    var diagnostics: std.ArrayList(Diagnostic) = .empty;
+    errdefer diagnostics.deinit(allocator);
+
+    var md_start: usize = 0;
+    var i: usize = 0;
+    var fence_ch: u8 = 0;
+    var fence_run: usize = 0;
+    var open: ?OpenState = null;
+
+    while (i < body.len) {
+        // Fence open/close only at line starts, and only when not mid-tag open wait.
+        if (atLineStart(body, i)) {
+            if (fenceAtLineStart(body, i)) |f| {
+                const ch = f[0];
+                const run = f[1];
+                if (fence_ch == 0) {
+                    // Opening fence — content stays markdown (literal).
+                    fence_ch = ch;
+                    fence_run = run;
+                    i = lineEndIndex(body, i);
+                    if (i < body.len and body[i] == '\n') i += 1;
+                    continue;
+                } else if (ch == fence_ch and run >= fence_run) {
+                    // Closing fence.
+                    fence_ch = 0;
+                    fence_run = 0;
+                    i = lineEndIndex(body, i);
+                    if (i < body.len and body[i] == '\n') i += 1;
+                    continue;
+                }
+            }
+        }
+
+        // Inside fenced code: never recognize components.
+        if (fence_ch != 0) {
+            i += 1;
+            continue;
+        }
+
+        // Line-start close tag while an Aside is open.
+        if (open != null and atLineStart(body, i)) {
+            var j = i;
+            while (j < body.len and isSpace(body[j])) : (j += 1) {}
+            if (j + 8 <= body.len and std.mem.eql(u8, body[j .. j + 8], "</Aside>")) {
+                const after = j + 8;
+                // Optional trailing whitespace to EOL.
+                var k = after;
+                while (k < body.len and (isSpace(body[k]) or body[k] == '\r')) : (k += 1) {}
+                const at_eol = k >= body.len or body[k] == '\n';
+                if (at_eol) {
+                    const st = open.?;
+                    // Flush markdown before open tag.
+                    if (st.open_start > md_start) {
+                        try segments.append(allocator, .{ .markdown = body[md_start..st.open_start] });
+                    }
+                    const inner_body = body[st.open_end + 1 .. i];
+                    const a: Aside = .{
+                        .kind = st.attrs.kind,
+                        .id = st.attrs.id,
+                        .body = inner_body,
+                        .raw_span = body[st.open_start..k],
+                        .line = st.line,
+                        .column = st.column,
+                    };
+                    try asides.append(allocator, a);
+                    try segments.append(allocator, .{ .aside = a });
+                    open = null;
+                    // Skip close line including newline.
+                    i = if (k < body.len and body[k] == '\n') k + 1 else k;
+                    md_start = i;
+                    continue;
+                }
+            }
+        }
+
+        // Potential open tag: '<' + PascalCase name.
+        if (body[i] == '<' and i + 1 < body.len and body[i + 1] >= 'A' and body[i + 1] <= 'Z') {
+            const name_start = i + 1;
+            var name_end = name_start;
+            while (name_end < body.len) {
+                const c = body[name_end];
+                const ok = (c >= 'A' and c <= 'Z') or
+                    (c >= 'a' and c <= 'z') or
+                    (c >= '0' and c <= '9') or
+                    c == '_' or c == '-';
+                if (!ok) break;
+                name_end += 1;
+            }
+            const name = body[name_start..name_end];
+            if (isPascalComponentName(name) and tagNameBoundaryOk(body, name_end)) {
+                const lc = lineColAt(body, i);
+                const line = lc[0];
+                const col = lc[1];
+
+                // Find closing '>'.
+                var gt = name_end;
+                var in_quote = false;
+                while (gt < body.len) : (gt += 1) {
+                    const c = body[gt];
+                    if (c == '"') in_quote = !in_quote;
+                    if (!in_quote and c == '>') break;
+                    if (!in_quote and c == '<') break; // nested open / garbage
+                }
+                if (gt >= body.len or body[gt] != '>') {
+                    try diagnostics.append(allocator, .{
+                        .kind = .missing_close_angle,
+                        .line = line,
+                        .column = col,
+                        .message = "component open tag is missing closing '>'",
+                        .name = name,
+                    });
+                    // Skip the '<' so we make progress.
+                    i += 1;
+                    continue;
+                }
+
+                if (!std.mem.eql(u8, name, "Aside")) {
+                    try diagnostics.append(allocator, .{
+                        .kind = .unregistered_component,
+                        .line = line,
+                        .column = col,
+                        .message = "unregistered component tag",
+                        .name = name,
+                    });
+                    i = gt + 1;
+                    continue;
+                }
+
+                // Nested Aside while one is open.
+                if (open != null) {
+                    try diagnostics.append(allocator, .{
+                        .kind = .nested_component,
+                        .line = line,
+                        .column = col,
+                        .message = "nested Aside is not supported",
+                        .name = "Aside",
+                    });
+                    i = gt + 1;
+                    continue;
+                }
+
+                const attr_slice = body[name_end..gt];
+                const attrs = parseAttributes(attr_slice) catch |err| {
+                    const kind: DiagKind = switch (err) {
+                        error.DuplicateAttribute => .duplicate_attribute,
+                        error.UnknownAttribute => .unknown_attribute,
+                        error.UnterminatedQuote => .unterminated_quote,
+                        error.MalformedAttribute => .malformed_attribute,
+                        error.InvalidKind => .invalid_kind,
+                        error.InvalidId => .invalid_id,
+                    };
+                    const msg: []const u8 = switch (err) {
+                        error.DuplicateAttribute => "duplicate Aside attribute",
+                        error.UnknownAttribute => "unknown Aside attribute",
+                        error.UnterminatedQuote => "unterminated quote in Aside attribute",
+                        error.MalformedAttribute => "malformed Aside attribute (quoted values only)",
+                        error.InvalidKind => "invalid Aside kind (allowlist: note, tip, info, warning, danger)",
+                        error.InvalidId => "invalid Aside id (must match [A-Za-z0-9][A-Za-z0-9_-]* length 1..64)",
+                    };
+                    try diagnostics.append(allocator, .{
+                        .kind = kind,
+                        .line = line,
+                        .column = col,
+                        .message = msg,
+                        .name = "Aside",
+                    });
+                    i = gt + 1;
+                    continue;
+                };
+
+                open = .{
+                    .open_start = i,
+                    .open_end = gt,
+                    .attrs = attrs,
+                    .line = line,
+                    .column = col,
+                };
+                i = gt + 1;
+                continue;
+            }
+        }
+
+        i += 1;
+    }
+
+    if (open) |st| {
+        try diagnostics.append(allocator, .{
+            .kind = .unterminated_component,
+            .line = st.line,
+            .column = st.column,
+            .message = "unterminated Aside (missing line-start </Aside>)",
+            .name = "Aside",
+        });
+        // Do not emit a partial aside segment; leave open-span as markdown.
+    }
+
+    if (md_start < body.len) {
+        try segments.append(allocator, .{ .markdown = body[md_start..] });
+    } else if (segments.items.len == 0 and body.len == 0) {
+        // empty body → empty markdown segment for uniform consumers
+        try segments.append(allocator, .{ .markdown = body });
+    }
+
+    return .{
+        .segments = try segments.toOwnedSlice(allocator),
+        .asides = try asides.toOwnedSlice(allocator),
+        .diagnostics = try diagnostics.toOwnedSlice(allocator),
+    };
+}
+
+/// Alias used by harness / fuzz.
+pub fn parseBodySegmentsSimple(body: []const u8, allocator: std.mem.Allocator) !TokenizeResult {
+    return tokenizeBody(body, allocator);
+}
+
+// ---------------------------------------------------------------------------
+// HTML render
+// ---------------------------------------------------------------------------
 
 /// CSS class stem from kind (sanitized to [a-z0-9_-]).
 fn sanitizeClass(comptime max: usize, raw: []const u8, buf: *[max]u8) []const u8 {
@@ -87,7 +573,6 @@ pub fn renderHtml(a: Aside, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
     var label_buf: [64]u8 = undefined;
     const label = kindLabel(kind, &label_buf);
 
-    // Inner markdown → HTML via native Apex (same whiteboard path as page body).
     const inner = if (a.body.len > 0)
         (try apex.render(a.body, doc_arena)).bytes
     else
@@ -114,6 +599,76 @@ pub fn renderHtml(a: Aside, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
 
     return try out.toOwnedSlice(arena);
 }
+
+// ---------------------------------------------------------------------------
+// RAG export representation (non-round-trippable)
+// ---------------------------------------------------------------------------
+
+/// Format one Aside as an export-only `:::kind` block.
+///
+/// Kind and id are already allowlist/grammar-validated at tokenize time.
+/// Body is written verbatim (export representation for retrieval, not HTML).
+pub fn formatRagDirective(a: Aside, allocator: std.mem.Allocator) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.appendSlice(allocator, ":::");
+    try out.appendSlice(allocator, a.kind);
+    if (a.id.len > 0) {
+        try out.appendSlice(allocator, "{id=\"");
+        try out.appendSlice(allocator, a.id);
+        try out.appendSlice(allocator, "\"}");
+    }
+    try out.append(allocator, '\n');
+    // Trim a single leading newline from inner body for cleaner export.
+    var body = a.body;
+    if (body.len > 0 and body[0] == '\n') body = body[1..];
+    if (body.len > 0 and body[body.len - 1] == '\r') body = body[0 .. body.len - 1];
+    try out.appendSlice(allocator, body);
+    if (body.len == 0 or body[body.len - 1] != '\n') try out.append(allocator, '\n');
+    try out.appendSlice(allocator, ":::\n");
+    return try out.toOwnedSlice(allocator);
+}
+
+/// Rebuild a body for RAG: markdown segments H1-normalized by caller pieces,
+/// asides as `:::kind` blocks, document order preserved.
+pub fn exportBodyWithDirectives(
+    segments: []const Segment,
+    prepare_md: *const fn ([]const u8, std.mem.Allocator) anyerror![]const u8,
+    allocator: std.mem.Allocator,
+) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    for (segments) |seg| {
+        switch (seg) {
+            .markdown => |md| {
+                if (std.mem.trim(u8, md, " \t\r\n").len == 0) {
+                    try out.appendSlice(allocator, md);
+                    continue;
+                }
+                const prepared = try prepare_md(md, allocator);
+                try out.appendSlice(allocator, prepared);
+            },
+            .aside => |a| {
+                const block = try formatRagDirective(a, allocator);
+                defer allocator.free(block);
+                try out.appendSlice(allocator, block);
+            },
+        }
+    }
+    return try out.toOwnedSlice(allocator);
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic → pipeline code mapping
+// ---------------------------------------------------------------------------
+
+pub fn diagnosticMessage(d: Diagnostic) []const u8 {
+    return d.message;
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 test "renderHtml wraps tip" {
     const gpa = std.testing.allocator;
@@ -144,4 +699,242 @@ test "renderHtml omits id when empty" {
     }, &arena);
     try std.testing.expect(std.mem.indexOf(u8, html, "id=") == null);
     try std.testing.expect(std.mem.indexOf(u8, html, "admonition--warning") != null);
+}
+
+test "renderHtml escapes id attribute sinks" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    // Bypass parse grammar: defensive escape still applies if id were hostile.
+    const html = try renderHtml(.{
+        .kind = "note",
+        .id = "a\"b&c",
+        .body = "x",
+        .raw_span = "",
+    }, &arena);
+    try std.testing.expect(std.mem.indexOf(u8, html, "id=\"a&quot;b&amp;c\"") != null);
+}
+
+test "tokenize: valid Aside with optional id" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const body =
+        \\Hello **world**.
+        \\
+        \\<Aside kind="warning" id="w1">
+        \\Careful.
+        \\</Aside>
+        \\
+        \\Done.
+    ;
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(!r.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), r.asides.len);
+    try std.testing.expectEqualStrings("warning", r.asides[0].kind);
+    try std.testing.expectEqualStrings("w1", r.asides[0].id);
+    try std.testing.expect(std.mem.indexOf(u8, r.asides[0].body, "Careful") != null);
+    try std.testing.expectEqual(@as(usize, 3), r.segments.len);
+}
+
+test "tokenize: invalid kind" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const body =
+        \\<Aside kind="banana">
+        \\x
+        \\</Aside>
+        \\
+    ;
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(r.hasErrors());
+    try std.testing.expect(r.diagnostics[0].kind == .invalid_kind);
+}
+
+test "tokenize: duplicate attribute" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const body =
+        \\<Aside kind="tip" kind="note">
+        \\x
+        \\</Aside>
+        \\
+    ;
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(r.hasErrors());
+    try std.testing.expect(r.diagnostics[0].kind == .duplicate_attribute);
+}
+
+test "tokenize: unterminated quote" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const body =
+        \\<Aside kind="tip>
+        \\x
+        \\</Aside>
+        \\
+    ;
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(r.hasErrors());
+    var saw = false;
+    for (r.diagnostics) |d| {
+        if (d.kind == .unterminated_quote or d.kind == .missing_close_angle or d.kind == .malformed_attribute)
+            saw = true;
+    }
+    try std.testing.expect(saw);
+}
+
+test "tokenize: nested Aside" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const body =
+        \\<Aside kind="tip">
+        \\outer
+        \\<Aside kind="note">
+        \\inner
+        \\</Aside>
+        \\</Aside>
+        \\
+    ;
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(r.hasErrors());
+    var saw_nested = false;
+    for (r.diagnostics) |d| {
+        if (d.kind == .nested_component) saw_nested = true;
+    }
+    try std.testing.expect(saw_nested);
+}
+
+test "tokenize: unknown component tag" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const body = "<Figure src=\"x\">y</Figure>\n";
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(r.hasErrors());
+    try std.testing.expect(r.diagnostics[0].kind == .unregistered_component);
+    try std.testing.expectEqualStrings("Figure", r.diagnostics[0].name);
+}
+
+test "tokenize: Broside is unregistered" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const body =
+        \\<Broside kind="tip">
+        \\no
+        \\</Broside>
+        \\
+    ;
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(r.hasErrors());
+    try std.testing.expect(r.diagnostics[0].kind == .unregistered_component);
+}
+
+test "tokenize: fenced code keeps Aside literal" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const body =
+        \\Before
+        \\
+        \\```md
+        \\<Aside kind="tip">
+        \\example
+        \\</Aside>
+        \\```
+        \\
+        \\After
+    ;
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(!r.hasErrors());
+    try std.testing.expectEqual(@as(usize, 0), r.asides.len);
+    // Whole body is one markdown segment (or multiple md with no asides).
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(gpa);
+    for (r.segments) |seg| {
+        switch (seg) {
+            .markdown => |md| try joined.appendSlice(gpa, md),
+            .aside => try std.testing.expect(false),
+        }
+    }
+    try std.testing.expect(std.mem.indexOf(u8, joined.items, "<Aside kind=\"tip\">") != null);
+}
+
+test "tokenize: real Aside after fence still works" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const body =
+        \\```
+        \\<Aside kind="tip">
+        \\literal
+        \\</Aside>
+        \\```
+        \\
+        \\<Aside kind="note" id="n1">
+        \\real
+        \\</Aside>
+        \\
+    ;
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(!r.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), r.asides.len);
+    try std.testing.expectEqualStrings("note", r.asides[0].kind);
+    try std.testing.expectEqualStrings("n1", r.asides[0].id);
+}
+
+test "tokenize: unterminated Aside" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const r = try tokenizeBody("<Aside kind=\"tip\">\nno close\n", arena.allocator());
+    try std.testing.expect(r.hasErrors());
+    try std.testing.expect(r.diagnostics[0].kind == .unterminated_component);
+}
+
+test "tokenize: invalid id grammar" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const body =
+        \\<Aside kind="tip" id="bad!">
+        \\x
+        \\</Aside>
+        \\
+    ;
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(r.hasErrors());
+    try std.testing.expect(r.diagnostics[0].kind == .invalid_id);
+}
+
+test "formatRagDirective export representation" {
+    const gpa = std.testing.allocator;
+    const block = try formatRagDirective(.{
+        .kind = "tip",
+        .id = "z1",
+        .body = "Tip body.\n",
+    }, gpa);
+    defer gpa.free(block);
+    try std.testing.expectEqualStrings(":::tip{id=\"z1\"}\nTip body.\n:::\n", block);
+}
+
+test "isValidAsideId grammar" {
+    try std.testing.expect(isValidAsideId("a"));
+    try std.testing.expect(isValidAsideId("006-1"));
+    try std.testing.expect(isValidAsideId("ok_1"));
+    try std.testing.expect(!isValidAsideId(""));
+    try std.testing.expect(!isValidAsideId("bad!"));
+    try std.testing.expect(!isValidAsideId("-lead"));
+    try std.testing.expect(!isValidAsideId("has space"));
+}
+
+test "tokenize rejects invalid UTF-8" {
+    const gpa = std.testing.allocator;
+    const bad = [_]u8{ 0xFF, 0xFE, '<', 'A', 's', 'i', 'd', 'e', '>' };
+    try std.testing.expectError(error.InvalidUtf8, tokenizeBody(&bad, gpa));
 }

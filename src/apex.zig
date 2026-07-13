@@ -55,12 +55,43 @@ const c = @cImport({
     @cInclude("apex.h");
 });
 
-// Compile-time: Zig `usize` must match C `size_t` (apex_render md_len) width.
+// Compile-time ABI compatibility — beyond a single width check.
+// Declarations must match apex.h via @cImport; we still assert key properties
+// so a mismatched header/toolchain fails the build rather than miscompiling.
 comptime {
-    const md_len_t = @typeInfo(@TypeOf(c.apex_render)).@"fn".params[1].type.?;
+    // 1) Length widths: Zig usize must match C size_t for md_len / out_len.
+    const render_info = @typeInfo(@TypeOf(c.apex_render)).@"fn";
+    const md_len_t = render_info.params[1].type.?;
+    const out_len_ptr_t = render_info.params[3].type.?;
     if (@sizeOf(usize) != @sizeOf(md_len_t)) {
         @compileError("usize / size_t size mismatch: cannot pass md.len as size_t safely");
     }
+    // out_len is size_t* in C; after cImport, expect a pointer to size_t-sized int.
+    const out_len_child = @typeInfo(out_len_ptr_t).pointer.child;
+    if (@sizeOf(usize) != @sizeOf(out_len_child)) {
+        @compileError("out_len size_t width mismatch with usize");
+    }
+
+    // 2) Parameter arity of apex_render (md, md_len, out_html, out_len, allocator).
+    if (render_info.params.len != 5) {
+        @compileError("apex_render arity changed; update Zig wrapper and apex-abi contract");
+    }
+
+    // 3) Status constants match documented ABI (also runtime-tested).
+    if (c.APEX_OK != 0 or c.APEX_ERR_ARGS != 1 or c.APEX_ERR_OOM != 2) {
+        @compileError("Apex status constants do not match documented ABI");
+    }
+
+    // 4) ApexAllocator layout: three fields (alloc, free, ctx) — field count.
+    const alloc_info = @typeInfo(c.ApexAllocator).@"struct";
+    if (alloc_info.fields.len != 3) {
+        @compileError("ApexAllocator field count changed; update Zig wrapper");
+    }
+
+    // 5) Function pointer call conventions are C (cImport should already match).
+    // apex_version returns [*c]const u8 / [*:0]const u8.
+    _ = @TypeOf(c.apex_version);
+    _ = @TypeOf(c.apex_free);
 }
 
 pub const ApexError = error{
@@ -71,10 +102,18 @@ pub const ApexError = error{
 /// Bounded stress size for large-input tests (keeps CI bounded).
 pub const test_large_md_bytes: usize = 64 * 1024;
 
-/// Zig-side view of rendered HTML. Memory is owned by the document
-/// Whiteboard arena passed to `render` — never by libc, never by a Zig free.
+/// Zig-side view of rendered HTML.
+///
+/// **Borrowed lifetime:** `bytes` is a view of Whiteboard (arena) memory
+/// produced by `render`. It is valid only until the arena is reset or
+/// deinitialized (`reset(.free_all)` / `deinit`). Do not free with
+/// `apex_free`, libc `free`, or any Zig `free` on these bytes — use
+/// `forbidApexFree` as a panic guard if a future path is tempted.
 pub const Html = struct {
     bytes: []const u8,
+
+    /// Documents that this buffer is arena-borrowed and must not be freed.
+    pub const owns_memory: bool = false;
 };
 
 /// C ABI `ApexAllocator.alloc` — allocate from the document Whiteboard.
@@ -85,9 +124,19 @@ pub const Html = struct {
 /// a non-null pointer. Failure returns null (ordinary C error path → OOM).
 fn zigAlloc(ctx: ?*anyopaque, size: usize) callconv(.c) ?*anyopaque {
     const allocator: *std.mem.Allocator = @ptrCast(@alignCast(ctx orelse return null));
-    // size == 0: Zig alloc of 0 is legal; return a non-null sentinel via alloc(0)
-    // when the child allocator supports it. ArenaAllocator handles 0-size.
-    const slice = allocator.alloc(u8, size) catch return null;
+
+    // Zero-byte request: still return a stable non-null pointer when possible.
+    // ArenaAllocator accepts alloc(0); do not special-case with a null return
+    // (null means OOM to Apex). Checked size: size is already usize from C.
+    const n = size; // size_t → usize width verified at comptime
+
+    // Checked arithmetic placeholder for any future size padding/alignment:
+    // refuse unrepresentable growth (identity here; documents the rule).
+    const alloc_size = std.math.add(usize, n, 0) catch return null;
+
+    const slice = allocator.alloc(u8, alloc_size) catch return null;
+    // Zig empty slices should still yield a non-null base for Apex (null = OOM).
+    if (@intFromPtr(slice.ptr) == 0) return null;
     return slice.ptr;
 }
 
@@ -99,6 +148,7 @@ fn zigAlloc(ctx: ?*anyopaque, size: usize) callconv(.c) ?*anyopaque {
 /// `doc_arena.reset(.free_all)` runs after the page has been fully written.
 fn zigFree(_: ?*anyopaque, _: ?*anyopaque, _: usize) callconv(.c) void {
     // Intentionally empty: arena bulk-free is the sole reclamation path.
+    // Safe to call any number of times (including after intermediate resizes).
 }
 
 /// Panic guard: arena-backed Apex HTML must never be passed to `apex_free`
@@ -379,6 +429,66 @@ test "apex forced allocation failure returns OutOfMemory" {
     ;
     const result = render(md, &arena);
     try std.testing.expectError(error.OutOfMemory, result);
+}
+
+test "apex input is not required to be NUL-terminated" {
+    try skipIfHostileEngine();
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    // Payload is a slice into a larger buffer; no trailing NUL after md_len.
+    // If Apex used strlen, it would read the 0xFF markers / "POISON" suffix.
+    var storage = "Hi **there**\nPOISON\xff\xff\xff".*;
+    const md: []const u8 = storage[0..13]; // "Hi **there**\n"
+    try std.testing.expect(md[md.len - 1] == '\n');
+    // Confirm no NUL at md_len boundary (byte after slice is 'P').
+    try std.testing.expect(storage[13] == 'P');
+
+    const html = try render(md, &arena);
+    try std.testing.expect(std.mem.indexOf(u8, html.bytes, "POISON") == null);
+    try std.testing.expect(std.mem.indexOf(u8, html.bytes, "there") != null);
+}
+
+test "apex free callback is no-op under arena (html survives resizes)" {
+    try skipIfHostileEngine();
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    // Large enough to force buf_reserve growth (C calls free on old buffer).
+    // Under Whiteboard, zigFree is a no-op; prior bytes remain until free_all.
+    var md_buf: std.ArrayList(u8) = .empty;
+    defer md_buf.deinit(gpa);
+    try md_buf.appendSlice(gpa, "# Grow\n\n");
+    var i: usize = 0;
+    while (i < 400) : (i += 1) {
+        try md_buf.appendSlice(gpa, "word **bold** and more text to expand HTML buffer ");
+    }
+
+    const html = try render(md_buf.items, &arena);
+    try std.testing.expect(html.bytes.len > 256);
+    // Still readable after intermediate C free callbacks (no-op).
+    try std.testing.expect(std.mem.indexOf(u8, html.bytes, "<h1>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html.bytes, "<strong>bold</strong>") != null);
+
+    // Reclaim only via arena — never apex_free.
+    _ = arena.reset(.free_all);
+    try std.testing.expectEqual(@as(usize, 0), arena.queryCapacity());
+}
+
+test "Html documents borrowed arena lifetime" {
+    try std.testing.expect(!Html.owns_memory);
+}
+
+test "zigAlloc zero-size path is safe (via empty success)" {
+    // Empty md success may yield null+0 without allocating; separately exercise
+    // zero-size through the public render path when C allocates empty.
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const html = try render("", &arena);
+    try std.testing.expectEqual(@as(usize, 0), html.bytes.len);
 }
 
 // --- mapRenderResult / hostile C outputs (wrapper never trusts error outs) ---

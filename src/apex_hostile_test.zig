@@ -7,7 +7,9 @@
 //! error outputs and rejects success+null+nonzero-length.
 
 const std = @import("std");
-const apex = @import("apex.zig");
+// Named import from build.zig (`imports = &.{ .{ .name = "apex", ... } }`) so
+// this binary links the hostile C double attached to that module instance.
+const apex = @import("apex");
 
 test "hostile apex version is the test double" {
     const v = apex.version();

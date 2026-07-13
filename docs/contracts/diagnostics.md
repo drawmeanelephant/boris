@@ -1,8 +1,8 @@
 # Diagnostics, severity, exit behavior, source locations
 
-**Status:** normative contract for future compiler implementation  
-**Milestone:** 2 (contracts + fixtures). The default CLI does **not** emit these
-diagnostics yet (milestone 1 ships only usage / help).
+**Status:** normative contract — **implemented** by the milestone 6 IR pipeline  
+**Emitted by:** `src/diag.zig` (codes), `src/parser.zig` (parse categories),
+`src/graph.zig` (graph codes), `src/pipeline.zig` (aggregation + stderr)
 
 ---
 
@@ -70,17 +70,17 @@ When line/column are null but path is set:
 {severity}: {code}: {sourcePath}: {message}
 ```
 
-Examples:
+Examples (actual codes as emitted):
 
 ```text
-error: EDUPLICATEID: guides/intro.md:1:1: duplicate id "guides/intro" (also content/guides/intro.md)
+error: EDUPLICATEID: beta.md:1:1: duplicate id "shared" (also alpha.md)
 error: EFRONTMATTER: bad.md:2:1: unknown key "category"
-error: EPARENTMISSING: tips.md:3:1: parent "nope" does not exist
+error: EPARENTMISSING: orphan.md:1:1: parent "nope" does not exist
 error: EPARENTCYCLE: a.md:1:1: parent cycle involving a -> b -> a
 ```
 
-Sorting for JSON arrays: by (`sourcePath` nulls last), then `line`, `column`,
-`code`, `message` — all ascending with nulls last for paths.
+Sorting for JSON arrays: by (`sourcePath` empty last in practice via empty
+string first), then `line`, `column`, `code`, `message` — all ascending.
 
 ---
 
@@ -89,18 +89,19 @@ Sorting for JSON arrays: by (`sourcePath` nulls last), then `line`, `column`,
 These codes are the **stable machine-readable categories**. Implementations
 must emit exactly these strings (no underscore variants such as `E_DUP_ID`).
 
-| Code | Severity | When |
-|------|----------|------|
-| `EDUPLICATEID` | error | Two pages would share the same `id` (byte-exact) |
-| `EPARENTMISSING` | error | `parent` id not in the page set |
-| `EPARENTSELF` | error | `parent` equals the page’s own `id` |
-| `EPARENTNOTTRUNK` | error | `parent` resolves to a Satellite (satellite-of-satellite) |
-| `EPARENTCYCLE` | error | Cycle in parent edges |
-| `EFRONTMATTER` | error | Unclosed fence, bad line, unknown key, duplicate key, unsupported syntax, empty/oversize value, invalid status/tags |
-| `EINVALIDUTF8` | error | Source not valid UTF-8, or leading UTF-8 BOM |
-| `EINVALIDPATH` | error | Path or entity id cannot be canonicalized; illegal segments; absolute path; empty / `.` / `..` components |
-| `EUSAGE` | error | CLI usage / flag error (unknown flag, conflicts, malformed options) |
-| `EIO` | error | I/O or system failure (filesystem, permissions, unexpected runtime outside content validation) |
+| Code | Severity | When | Emitted by |
+|------|----------|------|------------|
+| `EDUPLICATEID` | error | Two pages would share the same `id` (byte-exact) | `graph.diagnoseDuplicateIds` |
+| `EPARENTMISSING` | error | `parent` id not in the page set | `graph.validateTopology` |
+| `EPARENTSELF` | error | `parent` equals the page’s own `id` | `graph.validateTopology` |
+| `EPARENTNOTTRUNK` | error | `parent` resolves to a Satellite (satellite-of-satellite) | `graph.validateTopology` |
+| `EPARENTCYCLE` | error | Cycle in parent edges | `graph.validateTopology` |
+| `EFRONTMATTER` | error | Unclosed fence, bad line, unknown key, duplicate key, unsupported syntax, empty/oversize value, invalid status/tags | `parser.parse` → pipeline |
+| `EINVALIDUTF8` | error | Source not valid UTF-8, or leading UTF-8 BOM | `parser.parse` → pipeline |
+| `EINVALIDPATH` | error | Path or entity id cannot be canonicalized; illegal segments; absolute path; empty / `.` / `..` components; invalid frontmatter `id:` | scanner / `parser.parse` → pipeline |
+| `ECOMPONENT` | error | Aside / component tokenizer failure (unknown PascalCase tag, nested Aside, invalid kind/id, bad attributes, unterminated Aside) | `aside.tokenizeBody` → pipeline |
+| `EUSAGE` | error | CLI usage / flag error (unknown flag, conflicts, malformed options) | CLI (exit 2; not in build-report) |
+| `EIO` | error | I/O or system failure (missing content root, unreadable file, unexpected runtime) | pipeline / CLI (exit 3 when pure I/O) |
 
 ### Mapping notes
 
@@ -110,7 +111,8 @@ must emit exactly these strings (no underscore variants such as `E_DUP_ID`).
 | Nested mapping / unsupported YAML form | `EFRONTMATTER` |
 | Unclosed frontmatter | `EFRONTMATTER` |
 | Frontmatter `id:` with `..` or absolute shape | `EINVALIDPATH` |
-| Content root missing | `EIO` (or `EUSAGE` if surfaced as bad CLI path — prefer `EIO` when the path string was well-formed but unusable) |
+| Content root missing | `EIO` |
+| Symlink under content root | `EIO` |
 
 Unknown codes must not be invented by the v0.1 compiler without a contract
 amendment. Implementations may later **subdivide** messages under the same
@@ -122,13 +124,13 @@ category but must keep the `code` string stable.
 
 | Issue | Location points to |
 |-------|---------------------|
-| Duplicate id | First line of the second file discovered in sort order by `sourcePath` (report both paths in `message`) |
+| Duplicate id | First line of the later file in `sourcePath` order (report both paths in `message`) |
 | Unclosed frontmatter | Line of opening `---` (1:1) or EOF line |
 | Unknown / bad key | Start of that field line |
-| Missing parent | Start of the `parent` field line |
-| Cycle | `parent` field of each involved file, or primary file with full cycle in message |
+| Missing parent | Page source (line/column from validation; v0.1 often `1:1`) |
+| Cycle | Each involved file (`1:1` in v0.1) with full cycle path in message |
 | Encoding | `1:1` of the file |
-| Invalid path/id | The offending path or the `id:` / `parent:` field line |
+| Invalid path/id | The offending path or the `id:` field line |
 
 If a precise column is unknown, use column `1`.
 
@@ -145,20 +147,17 @@ If a precise column is unknown, use column `1`.
 
 Rules:
 
-1. Exit `0` only if the IR path completed with `ok: true` (or, when implemented,
-   optional RAG export succeeded without content errors).
+1. Exit `0` only if the IR path completed with `ok: true`.
 2. Warnings alone do not force non-zero exit.
 3. Do not exit `0` if any `error` was emitted, even if some files parsed.
 4. `--help` / `-h` exit `0` without scanning content or writing artifacts.
-5. Prefer `3` over `1` for pure I/O failures that are not represented as content
+5. Prefer `3` over `1` for pure I/O failures (missing content root, read errors
+   classified as `EIO` with `failure: io`).
+6. On content failure the pipeline writes `build-report.json` with diagnostics
+   and does **not** publish graph-dependent IR; that does **not** make the exit
+   code `0`.
+7. `--quiet` suppresses **progress** logging only — not artifacts and not
    diagnostics.
-6. On content failure the pipeline should still write `build-report.json` with
-   diagnostics when it can; that does **not** make the exit code `0`.
-
-**Milestone 3 CLI (current implementation):** exit `0` (help or valid-mode
-stub), `2` (usage/flag conflicts), and `3` (arg allocation / process I/O
-failures at the entry point). Code `1` is reserved until the content pipeline
-emits validation diagnostics.
 
 ---
 
@@ -166,31 +165,31 @@ emits validation diagnostics.
 
 | Stream | Content |
 |--------|---------|
-| **stderr** | Diagnostics (text form); optional progress logs must not interleave mid-line with diagnostics in fixtures |
-| **stdout** | Reserved; v0.1 may print nothing or a single success summary |
+| **stderr** | Diagnostics (text form); optional progress logs (`boris: load/roll/ignite/reset`) |
+| **stdout** | Reserved; v0.1 prints nothing on the success path (progress uses stderr via `std.debug`) |
 
 ---
 
 ## Fixture coverage
 
 Critical graph and parser error categories have inventory fixtures under
-`fixtures/content/invalid/` and are listed in `fixtures/manifest.json`.
-Fixture tests verify **inventory and manifest consistency only** until the
-compiler validates them.
+`fixtures/content/invalid/` and contract fixtures under
+`docs/contracts/fixtures/`. Pipeline integration tests assert **stable
+categories** and non-publication of graph IR on failure.
 
-| Category | Fixture suite (see manifest) |
-|----------|------------------------------|
-| `EDUPLICATEID` | `duplicate-id` |
-| `EPARENTMISSING` | `missing-parent` |
-| `EPARENTSELF` | `self-parent` |
+| Category | Fixture suite |
+|----------|---------------|
+| `EDUPLICATEID` | `duplicate-id`, `docs/contracts/fixtures/duplicate-ids` |
+| `EPARENTMISSING` | `missing-parent`, contract `missing-parent` |
+| `EPARENTSELF` | `self-parent`, contract `self-parent` |
 | `EPARENTNOTTRUNK` | `satellite-of-satellite` |
-| `EPARENTCYCLE` | `cycle` |
+| `EPARENTCYCLE` | `cycle`, contract `cycles` / `longer-cycle` |
 | `EFRONTMATTER` | `duplicate-key`, `unclosed-frontmatter`, `nested-mapping` |
 | `EINVALIDUTF8` | `invalid-utf8` |
-| `EINVALIDPATH` | `invalid-path-id` |
+| `EINVALIDPATH` | `invalid-path-id`, contract `invalid-id` |
 
-`EUSAGE` and `EIO` are CLI/runtime categories; they are not represented as
-content-tree fixtures.
+`EUSAGE` and `EIO` are CLI/runtime categories; content-tree fixtures do not
+cover them except missing content root (`EIO`).
 
 ---
 
@@ -198,6 +197,3 @@ content-tree fixtures.
 
 - Language server protocol
 - JSON-RPC
-- Soft “continue on error” multi-file partial IR for v0.1 success path
-  (implementations may parse all files to collect diagnostics, but must not
-  claim success or write full success IR)

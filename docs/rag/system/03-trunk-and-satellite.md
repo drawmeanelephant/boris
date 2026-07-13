@@ -16,10 +16,10 @@ related:
 Boris does **not** treat the content tree as a flat list of unrelated files. It
 uses a **Trunk and Satellite** relational model.
 
-In the project metaphor, this is the **interleaved chain** beat of **Roll**:
-small supporting leaves declare how they attach; the compiler builds reverse
-links so nothing useful floats into the void. See
-[system/10-name-and-metaphor.md](10-name-and-metaphor.md).
+**Workshop analogy:** records clerk — each satellite files a direct card under
+exactly one trunk; no satellite-of-satellite filing.  
+**Invariant:** `parent` must name an existing Trunk; cycles and missing parents
+are hard errors (`EPARENT*`).
 
 ## Definitions
 

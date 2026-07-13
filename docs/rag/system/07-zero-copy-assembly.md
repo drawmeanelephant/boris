@@ -16,10 +16,10 @@ related:
 Traditional SSGs concatenate `header + content + footer` into one huge string.
 Boris forbids that for final assembly.
 
-Metaphorically this is **improvisation under constraint** (the **Ignite** write
-path): when rebuilding the middle would waste work, stream the pieces you already
-have — layout prefix, page body, layout suffix — straight to the output. See
-[system/10-name-and-metaphor.md](10-name-and-metaphor.md).
+**Workshop analogy:** letterhead / body / footer conveyor — three sequential
+writes, never one mega-string assembly.  
+**Invariant:** layout split once on `{{content}}`; each page streams
+`prefix | html | suffix` via `assemble.writePage`.
 
 ## Layout load (once, before content scan)
 
@@ -50,7 +50,7 @@ buffered writer (64 KiB **stack** buffer, not arena):
   writeAll(page_html)    # already includes asides in document order
   writeAll(layout.suffix)
 flush
-Atomic.replace → rename temp → final path
+Atomic.replace → rename temp → final path   # private proof copy then replace
 Atomic.deinit on failure → delete only this op's temp
 ```
 
@@ -67,6 +67,7 @@ No `prefix ++ html ++ suffix` allocation exists in application memory.
 | Collision | Independent Boris processes use distinct temp basenames in the dest dir |
 | On write failure | Only the current temp is cleaned; prior final file is preserved |
 | Destination replace | Same-directory rename replace; exercised by unit tests on the **host OS** running `zig build test` |
+| Publication model | Private proof copy (temp) then replace; temp cleanup on failure |
 
 **Explicitly not claimed:**
 

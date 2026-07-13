@@ -8,7 +8,11 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,3 +27,15 @@ jobs:
 
       - name: Test
         run: zig build test
+
+      - name: Apex hostile ABI tests
+        run: zig build test-apex-hostile
+
+      # Optional ASan+UBSan smoke: opt-in only.
+      # Not in default CI because sanitizer runtimes and zig cc flags vary by
+      # host (especially macOS Apple Silicon). Local: zig build test-apex-sanitize
+      # (exits 0 with a documented skip when sanitizers are unavailable).
+      - name: Document sanitizer policy
+        run: |
+          echo "C sanitizers are opt-in: zig build test-apex-sanitize"
+          echo "CI does not require a green sanitizer run (host-dependent runtime)."

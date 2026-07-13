@@ -1,6 +1,6 @@
-# Project status — Boris milestone 5
+# Project status — Boris milestone 10 (v0.1 harden)
 
-**As of:** 2026-07-13 (product **0.0.1** parser + discovery + CLI surface + contracts)  
+**As of:** 2026-07-13 (product **0.0.1** / compiler **boris/0.1.1** IR + RAG + Aside + Apex + experimental HTML)  
 **Zig target:** 0.16.0 (`build.zig.zon` / CI pin **0.16.0**)
 
 This file is the living **“where we are”** note. Prefer it (and
@@ -11,10 +11,22 @@ starting a session.
 
 ## One-line product (current phase)
 
-**Boris milestone 5 ships a strict, bounded frontmatter parser and Markdown
-body splitter** (library surface + fixture tests). The default CLI still stubs
-the full pipeline (does not scan or parse on every invocation until later
-wiring). Graph IR and product RAG remain future work.
+**Boris v0.1 ships a single-threaded content compiler** with validated JSON IR,
+optional deterministic RAG (including `:::kind` Aside export), constrained
+`<Aside>` tokenization on the shared compile path, and an experimental HTML
+render path (Apex + Whiteboard + layout splice). Default CLI is still IR or RAG
+only — HTML is library/test surface, not default product mode.
+
+---
+
+## Status legend
+
+| Tag | Meaning |
+|-----|---------|
+| **Implemented & tested** | Covered by `zig build test` / release gate on CI |
+| **Platform-qualified** | Behavior depends on host OS/FS; not overclaimed |
+| **Vendor contract** | Relies on Apex C ABI assumptions (not fully Zig-provable) |
+| **Intentionally deferred** | Explicit non-goal for v0.1 |
 
 ---
 
@@ -22,40 +34,83 @@ wiring). Graph IR and product RAG remain future work.
 
 | Capability | Status | Notes |
 |------------|--------|--------|
-| `zig build` → `boris` executable | **Shipped** | `zig-out/bin/boris` |
-| Typed CLI options | **Shipped** | m3: `--input`, `--out`, `--rag`, … |
-| Deterministic scanner | **Shipped** | `src/scanner.zig` — `.md`/`.mdx`, sorted, symlink reject |
-| Canonical identity | **Shipped** | `src/identity.zig` — single `canonicalEntityId` |
-| Discovery `Page` metadata | **Shipped** | `src/page.zig` — paths/id + frontmatter view types |
-| Bounded frontmatter parser | **Shipped** | `src/parser.zig` — not YAML; body split; source views |
-| `zig build test` | **Shipped** | CLI + fixtures + scanner/identity + **parser** + source-rag |
-| Normative contracts | **Shipped (docs)** | + [frontmatter.md](contracts/frontmatter.md) precision |
-| Fixture corpus | **Shipped** | Inventory + exercised by parser fixture tests |
-| Source RAG tool | **Shipped** | `zig build source-rag` |
-| Frontmatter on default CLI | **Not wired** | library only until pipeline milestone |
-| Parent graph / JSON IR | **Not started** | |
-| Product RAG export | **Not started** | |
-| Apex / HTML assemble | **Not started** (default product) | |
+| `zig build` → `boris` executable | **Implemented & tested** | Apex C linked in-process |
+| Typed CLI (`--input`, `--out`, `--rag`, …) | **Implemented & tested** | Exit 0/1/2/3 |
+| Deterministic scanner | **Implemented & tested** | Sort by entity id; symlink reject |
+| Canonical identity + safe output paths | **Implemented & tested** | No `..` escape |
+| Bounded frontmatter parser | **Implemented & tested** | Not YAML |
+| Aside component tokenizer | **Implemented & tested** | `src/aside.zig`; `ECOMPONENT` |
+| Graph validate + freeze (shared IR/RAG) | **Implemented & tested** | One entry point |
+| Deterministic JSON IR | **Implemented & tested** | `.boris/` staging publish |
+| Optional RAG + `:::kind` Aside export | **Implemented & tested** | Non-round-trippable export form |
+| Apex C ABI + Zig wrapper | **Implemented & tested** | Hostile + opt-in sanitizer |
+| Experimental HTML + Aside stream | **Implemented & tested** | Not default CLI |
+| CI matrix Linux + macOS | **Implemented & tested** | GitHub Actions |
+| HTML `dist/` default CLI | **Intentionally deferred** | Modules/tests only |
+| Full YAML / MDX / concurrency / watch | **Intentionally deferred** | See non-goals |
 
 ### How to run
 
 ```bash
 zig build
-zig build test                     # includes parser + scanner + identity tests
+zig build test
+zig build test-apex-hostile
+zig build test-apex-sanitize   # opt-in; skips cleanly if unavailable
 zig build run -- --help
+zig build run -- --input fixtures/content/valid --out /tmp/boris-ir
+zig build run -- --input fixtures/content/valid --rag-dir /tmp/boris-rag
+zig build run -- --input docs/contracts/fixtures/valid/content --out .boris
 zig build source-rag
+./scripts/release-gate.sh
 ```
 
-### Parser (library surface)
+### Shared pipeline surface
 
 ```text
-const r = parser.parse(source_bytes);
-// r.isOk() / r.category() → EFRONTMATTER | EINVALIDUTF8 | EINVALIDPATH
-// r.doc.meta.* and r.doc.body are views into source_bytes
+Load  → scanner.scan
+Roll  → parser.parse + aside.tokenizeBody + PageDb.promote
+Ignite → graph.validate (+ freeze when clean)
+         + IR JSON emit  OR  RAG corpus export
+Reset → retain arena lifetime ends with Result.deinit
 ```
 
-BOM: **rejected** (`EINVALIDUTF8`). Line endings: LF and CRLF.  
-Absent title: `null` (no derivation from headings or filename).
+**Experimental HTML:**
+
+```text
+Layout load → PageDb promote → per page:
+  Whiteboard → parse/tokenize → Apex + Aside HTML → writePage → free_all
+```
+
+Exit codes: `0` success, `1` content, `2` usage, `3` I/O.
+
+---
+
+## Platform-qualified behavior
+
+- Symlink unit tests skipped on Windows / when symlink create is denied
+- IR/RAG publication: staging + rename/copy; **not** whole-tree atomic replace;
+  cross-volume atomicity **not** claimed
+- HTML Atomic replace: same-directory rename; multi-OS CI covers Linux + macOS
+  unit tests, not every filesystem
+- Cross-OS bit-identical RAG/IR trees **not** claimed beyond dual-run tests on
+  each CI host
+
+## Vendor contract / assumptions (Apex)
+
+- Synchronous `apex_render`; no retained pointers after return
+- Custom allocator path; never `apex_free` on whiteboard HTML
+- Stub engine is a **minimal** markdown subset — not CommonMark
+- Hostile double tests mechanical wrapper rules; full C non-retention against
+  arbitrary engines remains a contract (see `docs/contracts/apex-abi.md`)
+
+## Intentionally deferred
+
+- Default CLI HTML `dist/` product mode
+- Markdown-native `:::` **authoring** (export representation only)
+- Nested asides, multi-component registry, MDX
+- Incremental rebuild / reverse dependency index
+- Concurrency / worker pools / watch mode / mmap
+- Process RSS flatness claims
 
 ---
 
@@ -66,60 +121,23 @@ Absent title: `null` (no derivation from headings or filename).
 | `README.md` | Human front door |
 | `AGENTS.md` | Hard constraints |
 | `docs/contracts/` | Normative contracts |
-| `docs/contracts/frontmatter.md` | Bounded FM grammar, bounds, ownership |
-| `docs/contracts/scanner.md` | Discovery walk + symlink policy |
-| `docs/contracts/identity-and-paths.md` | Id/path rules |
-| `docs/rag/system/` | Narrative seeds (incl. name / Load·Roll·Ignite·Reset) |
-| `fixtures/` | Content fixture corpus |
+| `docs/contracts/components.md` | **Aside tokenizer (m10)** |
+| `docs/AUDIT-v0.1.md` | Self-audit report |
+| `docs/rag/system/` | Narrative seeds (RAG system segment) |
 | `CHANGELOG.md` | What changed |
-| This file § To be implemented | Forward notes to fold into code later |
+| This file | Living status |
 
 ---
 
-## Known gaps (expected at m5)
+## Identity metaphor (narrative → code)
 
-- Default CLI does not yet invoke the scanner or parser (pipeline stub from m3)
-- No graph validation, IR emit, or product RAG on the default CLI
-- Symlink unit tests skipped on Windows / when symlink create is denied
-- Experimental modules under `src/` (compile/harness/HTML path) may still assume
-  a richer pre-m4/m5 surface; they are not the default product surface
+| Teaching beat | Current mapping |
+|---------------|-----------------|
+| **Load** | `scanner.scan` |
+| **Roll** | frontmatter + Aside tokenize + PageDb promote + graph classify |
+| **Ignite** | validate + freeze + emit IR or RAG; experimental HTML write |
+| **Reset** | IR/RAG: arena deinit; HTML: Whiteboard `free_all` per page |
 
----
-
-## To be implemented / roll forward
-
-Living scratch for product work still ahead. Not contracts. Append notes here as
-they arrive; fold into modules/contracts when a milestone actually lands them.
-
-### Pipeline wiring (m6+)
-
-- Wire scanner + parser into the default CLI (`pipeline.run`, not stub)
-- Parent graph validation + freeze
-- Deterministic JSON IR under `.boris/` (`manifest`, `graph`, `build-report`)
-- Optional product RAG export (`--rag`) against contracts
-- HTML/Apex assemble remains experimental until explicitly promoted
-
-### Identity metaphor (narrative → code over time)
-
-Seed already drafted: [`docs/rag/system/10-name-and-metaphor.md`](rag/system/10-name-and-metaphor.md).
-**More notes will land here.** Prefer rolling metaphors into real surfaces
-gradually (docs first, then comments/log language, never trademarked branding).
-
-| Teaching beat | Target meaning when implemented |
-|---------------|----------------------------------|
-| **Load** | Discover / scan / identity — deterministic content set |
-| **Roll** | Frontmatter + body shape + bottom-up Trunk/Satellite graph freeze |
-| **Ignite** | Validate + emit IR / optional RAG / experimental HTML (in-process Apex) |
-| **Reset** | Whiteboard arena `free_all` per page on HTML path; clean finish on IR path |
-
-**Constraints while rolling this in:**
-
-- Namesake = folk Zouave improviser known as Boris — independent homage, **not**
-  affiliated with any commercial tobacco / rolling-paper brand or their marks.
-- Do **not** invent branded component names (no “Broside”); use Aside / admonition / component.
-- Do **not** frame the product as a pre-processor for Astro/Next or any JS SSG.
-- Do **not** claim multi-thread / zero-lock pools until the monolith is correct and STATUS says so.
-- Load/Roll/Ignite/Reset are teaching names, not CLI flags or IR field names, unless a later design deliberately promotes them.
-
-**Private drop:** local `SUPPORT/` is gitignored (scratch images/notes). Not
-source of truth; do not commit it.
+Namesake = folk Zouave improviser known as Boris — independent homage, **not**
+affiliated with any commercial tobacco / rolling-paper brand. Do **not** invent
+branded component names (no “Broside”).

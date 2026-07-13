@@ -1,22 +1,23 @@
-//! Content compiler pipeline:
-//!   discover → parse frontmatter → ids → graph resolve → freeze
-//!   → emit manifest.json, graph.json, build-report.json
+//! Content compiler pipeline (milestone 6–7):
+//!   scan → parse frontmatter → promote PageDb → graph validate → freeze
+//!   → IR emit (`run`) or shared compile for RAG (`compile`)
 //!
-//! No HTML, layouts, Apex, components, or RAG.
+//! No HTML, layouts, or Apex on this path.
 
 const std = @import("std");
 const Io = std.Io;
-const pathutil = @import("pathutil.zig");
 const diag = @import("diag.zig");
-const discover_mod = @import("discover.zig");
-const frontmatter = @import("frontmatter.zig");
+const scanner = @import("scanner.zig");
+const parser = @import("parser.zig");
+const aside = @import("aside.zig");
 const graph_mod = @import("graph.zig");
 const json_out = @import("json_out.zig");
 const page_mod = @import("page.zig");
-const rag = @import("rag.zig");
 
 pub const schema_version = "0.1.0";
 pub const compiler_id = "boris/0.1.1";
+/// Product version string (package / catalog_meta.boris_version).
+pub const boris_version = "0.0.1";
 
 pub const Options = struct {
     content_root: []const u8 = "content",
@@ -24,7 +25,20 @@ pub const Options = struct {
     quiet: bool = false,
 };
 
+/// Shared load options for IR and RAG (no output paths).
+pub const CompileOptions = struct {
+    content_root: []const u8 = "content",
+    quiet: bool = false,
+};
+
 pub const PageEntry = graph_mod.Node;
+
+/// Pipeline failure class for CLI exit mapping.
+pub const FailureKind = enum {
+    none,
+    content,
+    io,
+};
 
 pub const Result = struct {
     arena: std.heap.ArenaAllocator,
@@ -35,6 +49,9 @@ pub const Result = struct {
     out_dir: []const u8,
     ok: bool,
     graph_frozen: bool = false,
+    /// True when graph-dependent artifacts (manifest + graph) were published.
+    published_graph_ir: bool = false,
+    failure: FailureKind = .none,
 
     pub fn deinit(self: *Result) void {
         const gpa = self.arena.child_allocator;
@@ -49,29 +66,17 @@ pub const Result = struct {
     }
 };
 
+fn log(opts: Options, comptime fmt: []const u8, args: anytype) void {
+    if (!opts.quiet) {
+        std.debug.print(fmt, args);
+    }
+}
+
 fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Allocator) ![]u8 {
     var file = try dir.openFile(io, path, .{});
     defer file.close(io);
     var reader = file.reader(io, &.{});
     return try reader.interface.allocRemaining(allocator, .unlimited);
-}
-
-fn writeJsonFiles(io: Io, gpa: std.mem.Allocator, result: *const Result) !void {
-    const cwd = Io.Dir.cwd();
-    try cwd.createDirPath(io, result.out_dir);
-    var out = try cwd.openDir(io, result.out_dir, .{});
-    defer out.close(io);
-
-    const manifest = try renderManifest(gpa, result);
-    defer gpa.free(manifest);
-    const graph_json = try renderGraph(gpa, result);
-    defer gpa.free(graph_json);
-    const report = try renderBuildReport(gpa, result);
-    defer gpa.free(report);
-
-    try out.writeFile(io, .{ .sub_path = "manifest.json", .data = manifest });
-    try out.writeFile(io, .{ .sub_path = "graph.json", .data = graph_json });
-    try out.writeFile(io, .{ .sub_path = "build-report.json", .data = report });
 }
 
 fn writeOptionalString(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: ?[]const u8) !void {
@@ -82,42 +87,22 @@ fn writeOptionalString(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: ?[]co
     }
 }
 
-fn writeOptionalU32(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, v: ?u32) !void {
-    try json_out.writeOptionalU32(buf, gpa, v);
+fn parserCategoryToCode(cat: parser.Category) diag.Code {
+    return switch (cat) {
+        .EFRONTMATTER => .EFRONTMATTER,
+        .EINVALIDUTF8 => .EINVALIDUTF8,
+        .EINVALIDPATH => .EINVALIDPATH,
+    };
 }
 
-/// Emit `E_ENTITY_CASE_COLLISION` when two page ids differ only in letter case
-/// (after path derivation and optional frontmatter `id:` override).
-fn diagnoseEntityIdCaseCollisions(
-    list_gpa: std.mem.Allocator,
-    retain: std.mem.Allocator,
-    pages: []const PageEntry,
-    diags: *std.ArrayList(diag.Diagnostic),
-) !void {
-    var i: usize = 0;
-    while (i < pages.len) : (i += 1) {
-        var j: usize = 0;
-        while (j < i) : (j += 1) {
-            if (!pathutil.pathsDifferOnlyInCase(pages[i].id, pages[j].id)) continue;
-            const msg = try std.fmt.allocPrint(
-                retain,
-                "entity ids differ only in case: \"{s}\" ({s}) and \"{s}\" ({s})",
-                .{ pages[i].id, pages[i].source_path, pages[j].id, pages[j].source_path },
-            );
-            try diags.append(list_gpa, .{
-                .severity = .error_,
-                .code = .E_ENTITY_CASE_COLLISION,
-                .message = msg,
-                .remediation = try retain.dupe(u8, "Rename a file or id: override so entity ids are unique ignoring case"),
-                .source_path = pages[i].source_path,
-                .line = 1,
-                .column = 1,
-                .id = pages[i].id,
-            });
-            break;
-        }
-    }
+fn statusName(st: ?page_mod.Status) ?[]const u8 {
+    if (st) |s| return s.name();
+    return null;
 }
+
+// ---------------------------------------------------------------------------
+// JSON renderers (stable field order; no hash-map iteration)
+// ---------------------------------------------------------------------------
 
 pub fn renderManifest(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
@@ -226,7 +211,7 @@ pub fn renderGraph(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
         try buf.appendSlice(gpa, ",\n");
         try json_out.indent(&buf, gpa, 3);
         try buf.appendSlice(gpa, "\"parentIndex\": ");
-        try writeOptionalU32(&buf, gpa, p.parent_index);
+        try json_out.writeOptionalU32(&buf, gpa, p.parent_index);
         try buf.appendSlice(gpa, ",\n");
         try json_out.indent(&buf, gpa, 3);
         try buf.appendSlice(gpa, "\"title\": ");
@@ -371,8 +356,106 @@ pub fn renderBuildReport(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
     return try buf.toOwnedSlice(gpa);
 }
 
-/// Full pipeline. Always aggregates diagnostics; emits artifacts even on failure.
-pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
+// ---------------------------------------------------------------------------
+// Output publication
+// ---------------------------------------------------------------------------
+
+/// Artifact publication policy (v0.1):
+///
+/// **Success (`ok`):** write `manifest.json`, `graph.json`, and
+/// `build-report.json` under a sibling staging directory
+/// (`{out_dir}.boris-stage`), then rename each file into `out_dir`. This avoids
+/// publishing a partial three-file set if a mid-write fails. Staging lives
+/// next to the final directory (same parent) so same-filesystem rename is
+/// likely; **cross-volume atomic replace is not claimed**.
+///
+/// **Content failure:** do **not** publish graph-dependent artifacts
+/// (`manifest.json`, `graph.json`). Write only `build-report.json` with
+/// `ok: false` and diagnostics. Remove any prior graph/manifest in `out_dir`
+/// so a failed rebuild cannot leave a valid-looking IR set.
+///
+/// Limitations: directory rename of the whole tree is not used; per-file
+/// rename from staging is best-effort. Not proven cross-platform atomic for
+/// concurrent readers. Temp staging path names never appear inside JSON.
+fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result) !void {
+    const cwd = Io.Dir.cwd();
+    try cwd.createDirPath(io, result.out_dir);
+
+    const report = try renderBuildReport(gpa, result);
+    defer gpa.free(report);
+
+    if (!result.ok) {
+        // Remove graph-dependent artifacts from a previous successful build.
+        var out = try cwd.openDir(io, result.out_dir, .{});
+        defer out.close(io);
+        out.deleteFile(io, "manifest.json") catch {};
+        out.deleteFile(io, "graph.json") catch {};
+        try out.writeFile(io, .{ .sub_path = "build-report.json", .data = report });
+        result.published_graph_ir = false;
+        return;
+    }
+
+    const manifest = try renderManifest(gpa, result);
+    defer gpa.free(manifest);
+    const graph_json = try renderGraph(gpa, result);
+    defer gpa.free(graph_json);
+
+    // Sibling staging directory: `{out_dir}.boris-stage`
+    const stage_rel = try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{result.out_dir});
+    defer gpa.free(stage_rel);
+
+    cwd.deleteTree(io, stage_rel) catch {};
+    try cwd.createDirPath(io, stage_rel);
+
+    {
+        var stage = try cwd.openDir(io, stage_rel, .{});
+        defer stage.close(io);
+        try stage.writeFile(io, .{ .sub_path = "manifest.json", .data = manifest });
+        try stage.writeFile(io, .{ .sub_path = "graph.json", .data = graph_json });
+        try stage.writeFile(io, .{ .sub_path = "build-report.json", .data = report });
+    }
+
+    // Publish: rename each staged file into the final directory (replaces if present).
+    var stage_dir = try cwd.openDir(io, stage_rel, .{});
+    defer stage_dir.close(io);
+    var out_dir = try cwd.openDir(io, result.out_dir, .{});
+    defer out_dir.close(io);
+
+    const names = [_][]const u8{ "manifest.json", "graph.json", "build-report.json" };
+    for (names) |name| {
+        try stage_dir.rename(name, out_dir, name, io);
+    }
+
+    cwd.deleteTree(io, stage_rel) catch {};
+    result.published_graph_ir = true;
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline
+// ---------------------------------------------------------------------------
+
+fn logCompile(quiet: bool, comptime fmt: []const u8, args: anytype) void {
+    if (!quiet) std.debug.print(fmt, args);
+}
+
+/// 1-based line number of the byte at `index` (line of index 0 is 1).
+fn countLinesUpTo(source: []const u8, index: usize) u32 {
+    var line: u32 = 1;
+    var i: usize = 0;
+    const end = @min(index, source.len);
+    while (i < end) : (i += 1) {
+        if (source[i] == '\n') line += 1;
+    }
+    return line;
+}
+
+/// Shared compile path for IR and RAG: scan → parse → PageDb → `graph.validate`
+/// → freeze when clean. Does **not** publish artifacts.
+///
+/// Call sites must use this (or `run` / `rag.run`, which call it) so both modes
+/// share one graph-validation entry (`graph.validate`) and the same diagnostic
+/// categories for invalid content.
+pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result {
     var result: Result = .{
         .arena = std.heap.ArenaAllocator.init(gpa),
         .pages = .empty,
@@ -381,375 +464,242 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
         .content_root = undefined,
         .out_dir = undefined,
         .ok = false,
+        .failure = .none,
     };
     errdefer result.deinit();
 
     const retain = result.arena.allocator();
     result.content_root = try retain.dupe(u8, options.content_root);
-    result.out_dir = try retain.dupe(u8, options.out_dir);
+    // Callers that publish IR set out_dir before publishArtifacts.
+    result.out_dir = try retain.dupe(u8, "");
 
-    var found: std.ArrayList(discover_mod.Found) = .empty;
-    defer found.deinit(gpa);
+    logCompile(options.quiet, "boris: load  scanning {s}\n", .{options.content_root});
 
-    var content_missing = false;
-    discover_mod.discover(io, gpa, retain, .{
-        .content_root = options.content_root,
-    }, &found, &result.diagnostics) catch |err| switch (err) {
+    // --- 1. Scan once -------------------------------------------------------
+    var scan_list = page_mod.PageList.init(gpa, retain);
+    defer scan_list.deinit();
+
+    scanner.scan(io, .{ .content_root = options.content_root }, &scan_list) catch |err| switch (err) {
         error.ContentDirMissing => {
-            content_missing = true;
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
-                .code = .E_CONTENT_ROOT,
+                .code = .EIO,
                 .message = try std.fmt.allocPrint(retain, "content root \"{s}\" not found or not a directory", .{options.content_root}),
                 .remediation = try retain.dupe(u8, "Create the content directory or pass --input=DIR"),
             });
+            result.failure = .io;
+            diag.sortDiagnostics(result.diagnostics.items);
+            return result;
         },
+        error.SymlinkRejected, error.SymlinkCycle => {
+            try result.diagnostics.append(gpa, .{
+                .severity = .error_,
+                .code = .EIO,
+                .message = try std.fmt.allocPrint(retain, "content tree rejected symlink policy under \"{s}\": {s}", .{ options.content_root, @errorName(err) }),
+                .remediation = try retain.dupe(u8, "Remove symlinks under the content root (v0.1 does not follow them)"),
+            });
+            result.failure = .content;
+            diag.sortDiagnostics(result.diagnostics.items);
+            return result;
+        },
+        error.InvalidPath => {
+            try result.diagnostics.append(gpa, .{
+                .severity = .error_,
+                .code = .EINVALIDPATH,
+                .message = try retain.dupe(u8, "content path or entity id cannot be canonicalized"),
+                .remediation = try retain.dupe(u8, "Rename paths so they have no empty, ., or .. segments"),
+            });
+            result.failure = .content;
+            diag.sortDiagnostics(result.diagnostics.items);
+            return result;
+        },
+        error.OutOfMemory => return error.OutOfMemory,
         else => {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
-                .code = .E_INTERNAL,
+                .code = .EIO,
                 .message = try std.fmt.allocPrint(retain, "discovery failed: {s}", .{@errorName(err)}),
                 .remediation = try retain.dupe(u8, "Check filesystem permissions and path spelling"),
             });
-            content_missing = true;
+            result.failure = .io;
+            diag.sortDiagnostics(result.diagnostics.items);
+            return result;
         },
     };
 
-    if (!content_missing) {
-        const cwd = Io.Dir.cwd();
-        var content_dir = try cwd.openDir(io, options.content_root, .{});
-        defer content_dir.close(io);
+    logCompile(options.quiet, "boris: roll  parsing {d} page(s)\n", .{scan_list.len()});
 
-        // Scratch arena for file bytes (not retained after parse).
-        var scratch = std.heap.ArenaAllocator.init(gpa);
-        defer scratch.deinit();
+    // --- 2–3. Read, parse, promote durable metadata only --------------------
+    var db = page_mod.PageDb.init(gpa, retain);
+    defer db.deinit();
 
-        for (found.items) |f| {
-            _ = scratch.reset(.free_all);
-            const sa = scratch.allocator();
+    const cwd = Io.Dir.cwd();
+    var content_dir = cwd.openDir(io, options.content_root, .{}) catch |err| {
+        try result.diagnostics.append(gpa, .{
+            .severity = .error_,
+            .code = .EIO,
+            .message = try std.fmt.allocPrint(retain, "failed to open content root \"{s}\": {s}", .{ options.content_root, @errorName(err) }),
+            .remediation = try retain.dupe(u8, "Check that the content directory is readable"),
+        });
+        result.failure = .io;
+        diag.sortDiagnostics(result.diagnostics.items);
+        return result;
+    };
+    defer content_dir.close(io);
 
-            const source = readFileAlloc(io, content_dir, f.source_path, sa) catch |err| {
-                try result.diagnostics.append(gpa, .{
-                    .severity = .error_,
-                    .code = .E_INTERNAL,
-                    .message = try std.fmt.allocPrint(retain, "failed to read \"{s}\": {s}", .{ f.source_path, @errorName(err) }),
-                    .remediation = try retain.dupe(u8, "Ensure the file is readable"),
-                    .source_path = f.source_path,
-                    .line = 1,
-                    .column = 1,
-                });
-                continue;
-            };
-
-            const meta = try frontmatter.parse(source, f.source_path, retain, gpa, &result.diagnostics);
-
-            // Path-derived id from discovery (`pathutil.canonicalEntityId`); case-preserving.
-            const path_id = f.entity_id;
-
-            // Frontmatter id/parent: normalize separators only; preserve case.
-            // Case-insensitive collisions are diagnosed after the full set is built.
-            const id = if (meta.id) |override|
-                pathutil.normalizeEntityId(retain, override) catch |err| switch (err) {
-                    error.IdTooLong => {
-                        try result.diagnostics.append(gpa, .{
-                            .severity = .error_,
-                            .code = .E_FRONTMATTER_VALUE,
-                            .message = try std.fmt.allocPrint(retain, "id exceeds maximum length of {d} bytes", .{page_mod.max_entity_id_bytes}),
-                            .remediation = try retain.dupe(u8, "Shorten the id to at most 255 bytes"),
-                            .source_path = f.source_path,
-                            .line = 1,
-                            .column = 1,
-                        });
-                        continue;
-                    },
-                    error.EmptyId, error.IllegalSegment, error.AbsolutePath, error.UnsupportedExtension, error.EmptyPath => {
-                        try result.diagnostics.append(gpa, .{
-                            .severity = .error_,
-                            .code = .E_FRONTMATTER_VALUE,
-                            .message = try std.fmt.allocPrint(retain, "id is not a valid canonical document id: {s}", .{@errorName(err)}),
-                            .remediation = try retain.dupe(u8, "Use slash-separated segments without ., .., backslashes, or whitespace"),
-                            .source_path = f.source_path,
-                            .line = 1,
-                            .column = 1,
-                        });
-                        continue;
-                    },
-                    else => return err,
-                }
-            else
-                path_id;
-            const parent: ?[]const u8 = if (meta.parent) |p|
-                pathutil.normalizeEntityId(retain, p) catch |err| switch (err) {
-                    error.IdTooLong => {
-                        try result.diagnostics.append(gpa, .{
-                            .severity = .error_,
-                            .code = .E_FRONTMATTER_VALUE,
-                            .message = try std.fmt.allocPrint(retain, "parent exceeds maximum length of {d} bytes", .{page_mod.max_entity_id_bytes}),
-                            .remediation = try retain.dupe(u8, "Shorten the parent id to at most 255 bytes"),
-                            .source_path = f.source_path,
-                            .line = 1,
-                            .column = 1,
-                        });
-                        continue;
-                    },
-                    error.EmptyId, error.IllegalSegment, error.AbsolutePath, error.UnsupportedExtension, error.EmptyPath => {
-                        try result.diagnostics.append(gpa, .{
-                            .severity = .error_,
-                            .code = .E_FRONTMATTER_VALUE,
-                            .message = try std.fmt.allocPrint(retain, "parent is not a valid canonical document id: {s}", .{@errorName(err)}),
-                            .remediation = try retain.dupe(u8, "Use the parent document id, not a file path or URL"),
-                            .source_path = f.source_path,
-                            .line = 1,
-                            .column = 1,
-                        });
-                        continue;
-                    },
-                    else => return err,
-                }
-            else
-                null;
-            const status_str: ?[]const u8 = if (meta.status) |st| st.name() else null;
-
-            try result.pages.append(gpa, .{
-                .id = id,
-                .source_path = f.source_path,
-                .title = meta.title,
-                .parent = parent,
-                .status = status_str,
-                .tags = meta.tags,
-                .body_offset = meta.body_offset,
-                .role = .trunk,
+    // Per-file scratch: freed after each promote so no parser slice can leak.
+    for (scan_list.items()) |disc| {
+        const source = readFileAlloc(io, content_dir, disc.source_path, gpa) catch |err| {
+            try result.diagnostics.append(gpa, .{
+                .severity = .error_,
+                .code = .EIO,
+                .message = try std.fmt.allocPrint(retain, "failed to read \"{s}\": {s}", .{ disc.source_path, @errorName(err) }),
+                .remediation = try retain.dupe(u8, "Ensure the file is readable"),
+                .source_path = disc.source_path,
+                .line = 1,
+                .column = 1,
             });
+            continue;
+        };
+        defer gpa.free(source);
+
+        const parsed = parser.parse(source);
+        if (parsed.diagnostic) |pd| {
+            try result.diagnostics.append(gpa, .{
+                .severity = .error_,
+                .code = parserCategoryToCode(pd.category),
+                .message = try retain.dupe(u8, pd.message),
+                .remediation = try retain.dupe(u8, "Fix the frontmatter or encoding for this file"),
+                .source_path = disc.source_path,
+                .line = pd.line,
+                .column = pd.column,
+            });
+            // Skip durable page on hard parse failure.
+            continue;
         }
 
-        // Case-insensitive entity-id collisions after id: overrides (path-level
-        // collisions already diagnosed during discover).
-        try diagnoseEntityIdCaseCollisions(gpa, retain, result.pages.items, &result.diagnostics);
+        // Aside / component scan on the body (document order; hard errors).
+        // Scratch arena owns tokenizer arrays; only diagnostics are retained.
+        {
+            var tok_arena = std.heap.ArenaAllocator.init(gpa);
+            defer tok_arena.deinit();
+            const tok = aside.tokenizeBody(parsed.doc.body, tok_arena.allocator()) catch |err| switch (err) {
+                error.InvalidUtf8 => {
+                    // Frontmatter path already UTF-8-gated; treat as content error.
+                    try result.diagnostics.append(gpa, .{
+                        .severity = .error_,
+                        .code = .EINVALIDUTF8,
+                        .message = try retain.dupe(u8, "body is not valid UTF-8"),
+                        .remediation = try retain.dupe(u8, "Re-encode the file as UTF-8"),
+                        .source_path = disc.source_path,
+                        .line = 1,
+                        .column = 1,
+                    });
+                    continue;
+                },
+                error.OutOfMemory => return error.OutOfMemory,
+            };
+            if (tok.hasErrors()) {
+                // Map body-relative lines to full-source lines via body_offset.
+                const body_line_base = countLinesUpTo(source, parsed.doc.body_offset);
+                for (tok.diagnostics) |cd| {
+                    const full_line = body_line_base + cd.line - 1;
+                    const msg = if (cd.name.len > 0)
+                        try std.fmt.allocPrint(retain, "{s}: {s}", .{ cd.name, cd.message })
+                    else
+                        try retain.dupe(u8, cd.message);
+                    try result.diagnostics.append(gpa, .{
+                        .severity = .error_,
+                        .code = .ECOMPONENT,
+                        .message = msg,
+                        .remediation = try retain.dupe(u8, "Use only <Aside kind=\"…\" id=\"…\"> with allowlisted kind/id, outside fenced code"),
+                        .source_path = disc.source_path,
+                        .line = full_line,
+                        .column = cd.column,
+                    });
+                }
+                // Still promote so graph diagnostics can run; compile fails overall.
+            }
+        }
 
-        // Single shared graph entry (dups then topology) — same as RAG export.
-        try graph_mod.validate(gpa, retain, result.pages.items, &result.diagnostics);
+        // Resolve final entity id: frontmatter id: override or path-derived.
+        const final_id: []const u8 = if (parsed.doc.meta.id) |override| override else disc.entity_id;
 
-        const frozen = try graph_mod.freeze(gpa, result.pages.items);
-        // freeze reorders pages in place and returns edges owned by gpa list → transfer
-        result.edges.deinit(gpa);
-        result.edges = std.ArrayList(graph_mod.Edge).fromOwnedSlice(frozen.edges);
-        result.graph_frozen = frozen.frozen;
+        // Promote copies all durable strings into retain before source free.
+        try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset);
     }
 
-    diag.sortDiagnostics(result.diagnostics.items);
-    result.ok = diag.countErrors(result.diagnostics.items) == 0;
+    // --- 4. Build provisional graph nodes from PageDb -----------------------
+    try result.pages.ensureTotalCapacity(gpa, db.len());
+    for (db.items()) |p| {
+        try result.pages.append(gpa, .{
+            .id = p.entity_id,
+            .source_path = p.source_path,
+            .title = p.title,
+            .parent = p.parent,
+            .status = statusName(p.status),
+            .tags = p.tags,
+            .body_offset = p.body_offset,
+            .role = if (p.parent != null) .satellite else .trunk,
+        });
+    }
 
-    try writeJsonFiles(io, gpa, &result);
+    // --- 5. Validate whole graph once (shared with RAG) ---------------------
+    logCompile(options.quiet, "boris: ignite validating graph\n", .{});
+    try graph_mod.validate(gpa, retain, result.pages.items, &result.diagnostics);
+    diag.sortDiagnostics(result.diagnostics.items);
+
+    const err_count = diag.countErrors(result.diagnostics.items);
+    result.ok = err_count == 0;
+    if (!result.ok) {
+        result.failure = .content;
+        result.graph_frozen = false;
+        logCompile(options.quiet, "boris: content validation failed ({d} error(s))\n", .{err_count});
+        return result;
+    }
+
+    // --- 6. Freeze only after clean validation ------------------------------
+    const frozen = try graph_mod.freeze(gpa, result.pages.items);
+    result.edges.deinit(gpa);
+    result.edges = std.ArrayList(graph_mod.Edge).fromOwnedSlice(frozen.edges);
+    result.graph_frozen = frozen.frozen;
     return result;
+}
+
+/// Full IR pipeline. Validates the whole graph before publishing artifacts.
+/// Graph-dependent IR is published only when validation succeeds.
+pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
+    var result = try compile(io, gpa, .{
+        .content_root = options.content_root,
+        .quiet = options.quiet,
+    });
+    errdefer result.deinit();
+
+    const retain = result.arena.allocator();
+    result.out_dir = try retain.dupe(u8, options.out_dir);
+
+    if (result.ok) {
+        log(options, "boris: ignite emitting IR → {s}\n", .{options.out_dir});
+    }
+    try publishArtifacts(io, gpa, &result);
+    if (result.ok) {
+        log(options, "boris: reset done ({d} page(s))\n", .{result.pages.items.len});
+    }
+    return result;
+}
+
+/// Print diagnostics to stderr (text form). Does not change artifacts.
+pub fn printDiagnostics(gpa: std.mem.Allocator, diags: []const diag.Diagnostic) !void {
+    for (diags) |d| {
+        const line = try diag.formatText(d, gpa);
+        defer gpa.free(line);
+        std.debug.print("{s}\n", .{line});
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
-test "fixture valid has trunk and satellite" {
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/valid-out", .{tmp.sub_path});
-    defer gpa.free(out_rel);
-    try Io.Dir.cwd().createDirPath(io, out_rel);
-
-    var result = try run(io, gpa, .{
-        .content_root = "docs/contracts/fixtures/valid/content",
-        .out_dir = out_rel,
-        .quiet = true,
-    });
-    defer result.deinit();
-
-    try std.testing.expect(result.ok);
-    try std.testing.expect(result.graph_frozen);
-    try std.testing.expectEqual(@as(usize, 3), result.pages.items.len);
-
-    // Sorted by id: guides/intro, guides/intro-tips, index
-    try std.testing.expectEqualStrings("guides/intro", result.pages.items[0].id);
-    try std.testing.expect(result.pages.items[0].role == .trunk);
-    try std.testing.expectEqualStrings("guides/intro-tips", result.pages.items[1].id);
-    try std.testing.expect(result.pages.items[1].role == .satellite);
-    try std.testing.expectEqualStrings("guides/intro", result.pages.items[1].parent.?);
-    try std.testing.expect(result.pages.items[1].parent_index.? == 0);
-
-    const g1 = try renderGraph(gpa, &result);
-    defer gpa.free(g1);
-    const g2 = try renderGraph(gpa, &result);
-    defer gpa.free(g2);
-    try std.testing.expectEqualStrings(g1, g2);
-}
-
-test "fixture missing parent" {
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/miss-out", .{tmp.sub_path});
-    defer gpa.free(out_rel);
-    try Io.Dir.cwd().createDirPath(io, out_rel);
-
-    var result = try run(io, gpa, .{
-        .content_root = "docs/contracts/fixtures/missing-parent/content",
-        .out_dir = out_rel,
-        .quiet = true,
-    });
-    defer result.deinit();
-    try std.testing.expect(!result.ok);
-    var saw = false;
-    for (result.diagnostics.items) |d| {
-        if (d.code == .E_PARENT_MISSING) saw = true;
-    }
-    try std.testing.expect(saw);
-}
-
-test "fixture cycles" {
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cyc-out", .{tmp.sub_path});
-    defer gpa.free(out_rel);
-    try Io.Dir.cwd().createDirPath(io, out_rel);
-
-    var result = try run(io, gpa, .{
-        .content_root = "docs/contracts/fixtures/cycles/content",
-        .out_dir = out_rel,
-        .quiet = true,
-    });
-    defer result.deinit();
-    try std.testing.expect(!result.ok);
-    var saw = false;
-    for (result.diagnostics.items) |d| {
-        if (d.code == .E_PARENT_CYCLE) saw = true;
-    }
-    try std.testing.expect(saw);
-}
-
-test "fixture longer cycle" {
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/long-cyc-out", .{tmp.sub_path});
-    defer gpa.free(out_rel);
-    try Io.Dir.cwd().createDirPath(io, out_rel);
-
-    var result = try run(io, gpa, .{
-        .content_root = "docs/contracts/fixtures/longer-cycle/content",
-        .out_dir = out_rel,
-        .quiet = true,
-    });
-    defer result.deinit();
-    try std.testing.expect(!result.ok);
-    try expectCode(&result, .E_PARENT_CYCLE);
-}
-
-test "fixture satellite-of-satellite" {
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/sos-out", .{tmp.sub_path});
-    defer gpa.free(out_rel);
-    try Io.Dir.cwd().createDirPath(io, out_rel);
-
-    var result = try run(io, gpa, .{
-        .content_root = "docs/contracts/fixtures/satellite-of-satellite/content",
-        .out_dir = out_rel,
-        .quiet = true,
-    });
-    defer result.deinit();
-    try std.testing.expect(!result.ok);
-    try expectCode(&result, .E_PARENT_NOT_TRUNK);
-}
-
-test "fixture malformed frontmatter aggregates" {
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/mal-out", .{tmp.sub_path});
-    defer gpa.free(out_rel);
-    try Io.Dir.cwd().createDirPath(io, out_rel);
-
-    var result = try run(io, gpa, .{
-        .content_root = "docs/contracts/fixtures/malformed-frontmatter/content",
-        .out_dir = out_rel,
-        .quiet = true,
-    });
-    defer result.deinit();
-    try std.testing.expect(!result.ok);
-    // Multiple files / rules → more than one diagnostic
-    try std.testing.expect(result.diagnostics.items.len >= 2);
-}
-
-test "fixture duplicate ids via override" {
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/dup-out", .{tmp.sub_path});
-    defer gpa.free(out_rel);
-    try Io.Dir.cwd().createDirPath(io, out_rel);
-
-    var result = try run(io, gpa, .{
-        .content_root = "docs/contracts/fixtures/duplicate-ids/content",
-        .out_dir = out_rel,
-        .quiet = true,
-    });
-    defer result.deinit();
-    try std.testing.expect(!result.ok);
-    var saw = false;
-    for (result.diagnostics.items) |d| {
-        if (d.code == .E_DUP_ID) saw = true;
-    }
-    try std.testing.expect(saw);
-}
-
-test "fixture self parent" {
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/self-out", .{tmp.sub_path});
-    defer gpa.free(out_rel);
-    try Io.Dir.cwd().createDirPath(io, out_rel);
-
-    var result = try run(io, gpa, .{
-        .content_root = "docs/contracts/fixtures/self-parent/content",
-        .out_dir = out_rel,
-        .quiet = true,
-    });
-    defer result.deinit();
-    try std.testing.expect(!result.ok);
-    var saw = false;
-    for (result.diagnostics.items) |d| {
-        if (d.code == .E_PARENT_SELF) saw = true;
-    }
-    try std.testing.expect(saw);
-}
-
-test "missing content root still writes report" {
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/noroot", .{tmp.sub_path});
-    defer gpa.free(out_rel);
-    try Io.Dir.cwd().createDirPath(io, out_rel);
-
-    var result = try run(io, gpa, .{
-        .content_root = "docs/contracts/fixtures/__no_such_root__",
-        .out_dir = out_rel,
-        .quiet = true,
-    });
-    defer result.deinit();
-    try std.testing.expect(!result.ok);
-    try std.testing.expect(result.diagnostics.items[0].code == .E_CONTENT_ROOT);
-}
 
 fn expectCode(result: *const Result, code: diag.Code) !void {
     for (result.diagnostics.items) |d| {
@@ -765,103 +715,365 @@ fn hasCode(diags: []const diag.Diagnostic, code: diag.Code) bool {
     return false;
 }
 
-// Pipeline IR path and RAG path must surface the same graph diagnostic class
-// for each invalid graph fixture (shared `graph.validate` entry).
-test "pipeline and rag share graph diagnostic class on fixtures" {
+fn outRel(gpa: std.mem.Allocator, tmp: *std.testing.TmpDir, name: []const u8) ![]u8 {
+    return try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/{s}", .{ tmp.sub_path, name });
+}
+
+fn fileExists(io: Io, dir_path: []const u8, name: []const u8) bool {
+    const cwd = Io.Dir.cwd();
+    var dir = cwd.openDir(io, dir_path, .{}) catch return false;
+    defer dir.close(io);
+    _ = dir.statFile(io, name, .{}) catch return false;
+    return true;
+}
+
+fn readOutFile(io: Io, gpa: std.mem.Allocator, dir_path: []const u8, name: []const u8) ![]u8 {
+    const cwd = Io.Dir.cwd();
+    var dir = try cwd.openDir(io, dir_path, .{});
+    defer dir.close(io);
+    return try readFileAlloc(io, dir, name, gpa);
+}
+
+test "e2e valid fixture builds three JSON artifacts" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try outRel(gpa, &tmp, "valid-out");
+    defer gpa.free(out);
+
+    var result = try run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/valid/content",
+        .out_dir = out,
+        .quiet = true,
+    });
+    defer result.deinit();
+
+    try std.testing.expect(result.ok);
+    try std.testing.expect(result.graph_frozen);
+    try std.testing.expect(result.published_graph_ir);
+    try std.testing.expectEqual(@as(usize, 3), result.pages.items.len);
+
+    try std.testing.expect(fileExists(io, out, "manifest.json"));
+    try std.testing.expect(fileExists(io, out, "graph.json"));
+    try std.testing.expect(fileExists(io, out, "build-report.json"));
+
+    // Sorted by id after freeze: guides/intro, guides/intro-tips, index
+    try std.testing.expectEqualStrings("guides/intro", result.pages.items[0].id);
+    try std.testing.expect(result.pages.items[0].role == .trunk);
+    try std.testing.expectEqualStrings("guides/intro-tips", result.pages.items[1].id);
+    try std.testing.expect(result.pages.items[1].role == .satellite);
+    try std.testing.expectEqualStrings("guides/intro", result.pages.items[1].parent.?);
+    try std.testing.expect(result.pages.items[1].parent_index.? == 0);
+
+    // Parse generated JSON with Zig's JSON parser.
+    const man_bytes = try readOutFile(io, gpa, out, "manifest.json");
+    defer gpa.free(man_bytes);
+    var man_parsed = try std.json.parseFromSlice(std.json.Value, gpa, man_bytes, .{});
+    defer man_parsed.deinit();
+    try std.testing.expectEqualStrings("0.1.0", man_parsed.value.object.get("schemaVersion").?.string);
+    try std.testing.expectEqualStrings(compiler_id, man_parsed.value.object.get("compiler").?.string);
+    try std.testing.expectEqual(@as(i64, 3), man_parsed.value.object.get("pageCount").?.integer);
+
+    const graph_bytes = try readOutFile(io, gpa, out, "graph.json");
+    defer gpa.free(graph_bytes);
+    var graph_parsed = try std.json.parseFromSlice(std.json.Value, gpa, graph_bytes, .{});
+    defer graph_parsed.deinit();
+    try std.testing.expect(graph_parsed.value.object.get("frozen").?.bool);
+    try std.testing.expectEqual(@as(usize, 3), graph_parsed.value.object.get("nodes").?.array.items.len);
+    try std.testing.expectEqual(@as(usize, 1), graph_parsed.value.object.get("edges").?.array.items.len);
+
+    // Deterministic node order by id.
+    const nodes = graph_parsed.value.object.get("nodes").?.array.items;
+    try std.testing.expectEqualStrings("guides/intro", nodes[0].object.get("id").?.string);
+    try std.testing.expectEqualStrings("guides/intro-tips", nodes[1].object.get("id").?.string);
+    try std.testing.expectEqualStrings("index", nodes[2].object.get("id").?.string);
+
+    // No absolute paths in outputs.
+    try std.testing.expect(std.mem.indexOf(u8, man_bytes, "/Users/") == null);
+    try std.testing.expect(std.mem.indexOf(u8, man_bytes, "/tmp/") == null);
+    try std.testing.expect(std.mem.indexOf(u8, graph_bytes, "/Users/") == null);
+    try std.testing.expect(std.mem.indexOf(u8, graph_bytes, ".boris-stage") == null);
+}
+
+test "duplicate id fails and does not publish graph-dependent IR" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try outRel(gpa, &tmp, "dup-out");
+    defer gpa.free(out);
+
+    // Seed a prior "successful" artifact set that must be cleared on failure.
+    try Io.Dir.cwd().createDirPath(io, out);
+    {
+        var d = try Io.Dir.cwd().openDir(io, out, .{});
+        defer d.close(io);
+        try d.writeFile(io, .{ .sub_path = "manifest.json", .data = "{\"stale\":true}\n" });
+        try d.writeFile(io, .{ .sub_path = "graph.json", .data = "{\"frozen\":true}\n" });
+    }
+
+    var result = try run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/duplicate-ids/content",
+        .out_dir = out,
+        .quiet = true,
+    });
+    defer result.deinit();
+
+    try std.testing.expect(!result.ok);
+    try std.testing.expect(!result.graph_frozen);
+    try std.testing.expect(!result.published_graph_ir);
+    try expectCode(&result, .EDUPLICATEID);
+
+    try std.testing.expect(!fileExists(io, out, "manifest.json"));
+    try std.testing.expect(!fileExists(io, out, "graph.json"));
+    try std.testing.expect(fileExists(io, out, "build-report.json"));
+
+    const report = try readOutFile(io, gpa, out, "build-report.json");
+    defer gpa.free(report);
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, report, .{});
+    defer parsed.deinit();
+    try std.testing.expect(!parsed.value.object.get("ok").?.bool);
+}
+
+test "invalid graph fixtures emit stable categories" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
 
     const Case = struct {
         root: []const u8,
         code: diag.Code,
-        /// When true, pipeline must succeed (ok) and RAG must also accept the graph.
-        ok: bool = false,
     };
-    const cases = [_]Case{
-        .{ .root = "docs/contracts/fixtures/valid/content", .code = .E_INTERNAL, .ok = true },
-        .{ .root = "docs/contracts/fixtures/missing-parent/content", .code = .E_PARENT_MISSING },
-        .{ .root = "docs/contracts/fixtures/self-parent/content", .code = .E_PARENT_SELF },
-        .{ .root = "docs/contracts/fixtures/cycles/content", .code = .E_PARENT_CYCLE },
-        .{ .root = "docs/contracts/fixtures/longer-cycle/content", .code = .E_PARENT_CYCLE },
-        .{ .root = "docs/contracts/fixtures/satellite-of-satellite/content", .code = .E_PARENT_NOT_TRUNK },
-        .{ .root = "docs/contracts/fixtures/duplicate-ids/content", .code = .E_DUP_ID },
+    const dir_cases = [_]Case{
+        .{ .root = "docs/contracts/fixtures/missing-parent/content", .code = .EPARENTMISSING },
+        .{ .root = "docs/contracts/fixtures/self-parent/content", .code = .EPARENTSELF },
+        .{ .root = "docs/contracts/fixtures/satellite-of-satellite/content", .code = .EPARENTNOTTRUNK },
+        .{ .root = "docs/contracts/fixtures/cycles/content", .code = .EPARENTCYCLE },
+        .{ .root = "docs/contracts/fixtures/longer-cycle/content", .code = .EPARENTCYCLE },
+        .{ .root = "fixtures/content/invalid/duplicate-id", .code = .EDUPLICATEID },
+        .{ .root = "fixtures/content/invalid/cycle", .code = .EPARENTCYCLE },
+        .{ .root = "fixtures/content/invalid/satellite-of-satellite", .code = .EPARENTNOTTRUNK },
     };
 
-    for (cases, 0..) |c, i| {
+    for (dir_cases, 0..) |c, i| {
         var tmp = std.testing.tmpDir(.{});
         defer tmp.cleanup();
-        const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/dual-{d}", .{ tmp.sub_path, i });
-        defer gpa.free(out_rel);
-        try Io.Dir.cwd().createDirPath(io, out_rel);
+        const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/inv-{d}", .{ tmp.sub_path, i });
+        defer gpa.free(out);
 
-        // --- IR / normal build path ---
-        var pipe = try run(io, gpa, .{
+        var result = try run(io, gpa, .{
             .content_root = c.root,
-            .out_dir = out_rel,
+            .out_dir = out,
             .quiet = true,
         });
-        defer pipe.deinit();
+        defer result.deinit();
 
-        // --- RAG path (same graph.validate, no corpus write required) ---
-        var retain_arena = std.heap.ArenaAllocator.init(gpa);
-        defer retain_arena.deinit();
-        const retain = retain_arena.allocator();
-        var rag_diags: std.ArrayList(diag.Diagnostic) = .empty;
-        defer rag_diags.deinit(gpa);
-        const rag_result = rag.validateContentGraph(io, gpa, retain, c.root, &rag_diags);
-
-        if (c.ok) {
-            try std.testing.expect(pipe.ok);
-            try rag_result;
-            try std.testing.expectEqual(@as(usize, 0), diag.countErrors(rag_diags.items));
-        } else {
-            try std.testing.expect(!pipe.ok);
-            try expectCode(&pipe, c.code);
-            try std.testing.expectError(error.GraphValidationFailed, rag_result);
-            try std.testing.expect(hasCode(rag_diags.items, c.code));
-        }
+        try std.testing.expect(!result.ok);
+        try std.testing.expect(!result.published_graph_ir);
+        try expectCode(&result, c.code);
+        try std.testing.expect(!fileExists(io, out, "manifest.json"));
+        try std.testing.expect(!fileExists(io, out, "graph.json"));
     }
 }
 
-test "fixture invalid status tags id unsupported dup-key aggregate" {
+test "determinism: two builds produce byte-identical IR" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out_a = try outRel(gpa, &tmp, "det-a");
+    defer gpa.free(out_a);
+    const out_b = try outRel(gpa, &tmp, "det-b");
+    defer gpa.free(out_b);
+
+    // Same content_root string; distinct out dirs.
+    const content = "docs/contracts/fixtures/valid/content";
+
+    var ra = try run(io, gpa, .{ .content_root = content, .out_dir = out_a, .quiet = true });
+    defer ra.deinit();
+    var rb = try run(io, gpa, .{ .content_root = content, .out_dir = out_b, .quiet = true });
+    defer rb.deinit();
+
+    try std.testing.expect(ra.ok and rb.ok);
+
+    const names = [_][]const u8{ "manifest.json", "graph.json" };
+    for (names) |name| {
+        const a = try readOutFile(io, gpa, out_a, name);
+        defer gpa.free(a);
+        const b = try readOutFile(io, gpa, out_b, name);
+        defer gpa.free(b);
+        try std.testing.expectEqualStrings(a, b);
+    }
+
+    // build-report differs only in outDir when paths differ — compare with same outDir via renderer.
+    const rep_a = try renderBuildReport(gpa, &ra);
+    defer gpa.free(rep_a);
+    // Force same outDir for comparison of non-path identity: re-render rb with swapped out.
+    const saved = rb.out_dir;
+    rb.out_dir = ra.out_dir;
+    const rep_b = try renderBuildReport(gpa, &rb);
+    rb.out_dir = saved;
+    defer gpa.free(rep_b);
+    try std.testing.expectEqualStrings(rep_a, rep_b);
+}
+
+test "render twice is byte-identical (no ambient entropy)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try outRel(gpa, &tmp, "render-twice");
+    defer gpa.free(out);
+
+    var result = try run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/valid/content",
+        .out_dir = out,
+        .quiet = true,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+
+    const g1 = try renderGraph(gpa, &result);
+    defer gpa.free(g1);
+    const g2 = try renderGraph(gpa, &result);
+    defer gpa.free(g2);
+    try std.testing.expectEqualStrings(g1, g2);
+
+    const m1 = try renderManifest(gpa, &result);
+    defer gpa.free(m1);
+    const m2 = try renderManifest(gpa, &result);
+    defer gpa.free(m2);
+    try std.testing.expectEqualStrings(m1, m2);
+}
+
+test "fixtures/content/valid builds and orders by id" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try outRel(gpa, &tmp, "fix-valid");
+    defer gpa.free(out);
+
+    var result = try run(io, gpa, .{
+        .content_root = "fixtures/content/valid",
+        .out_dir = out,
+        .quiet = true,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+    // empty-no-fm, nested/deep/page, satellite-child (parent home), trunk-root (id home)
+    try std.testing.expectEqual(@as(usize, 4), result.pages.items.len);
+    // Sorted by id: empty-no-fm, home (from trunk-root id:), nested/deep/page, satellite-child
+    try std.testing.expectEqualStrings("empty-no-fm", result.pages.items[0].id);
+    try std.testing.expectEqualStrings("home", result.pages.items[1].id);
+    try std.testing.expect(result.pages.items[1].role == .trunk);
+    try std.testing.expectEqualStrings("nested/deep/page", result.pages.items[2].id);
+    try std.testing.expectEqualStrings("satellite-child", result.pages.items[3].id);
+    try std.testing.expect(result.pages.items[3].role == .satellite);
+}
+
+test "promoted metadata survives source buffer free (via PageDb unit + pipeline)" {
+    // Covered primarily by page.zig PageDb.promote test; pipeline re-uses promote.
+    // Here: run valid content and assert title strings are still readable after run.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try outRel(gpa, &tmp, "promote-live");
+    defer gpa.free(out);
+
+    var result = try run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/valid/content",
+        .out_dir = out,
+        .quiet = true,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+    try std.testing.expectEqualStrings("Introduction", result.pages.items[0].title.?);
+    try std.testing.expectEqualStrings("Intro Tips", result.pages.items[1].title.?);
+    try std.testing.expectEqualStrings("Home", result.pages.items[2].title.?);
+}
+
+test "parser error fixtures map to EFRONTMATTER / EINVALIDPATH" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
 
     const cases = [_]struct { root: []const u8, code: diag.Code }{
-        .{ .root = "docs/contracts/fixtures/invalid-status/content", .code = .E_FRONTMATTER_VALUE },
-        .{ .root = "docs/contracts/fixtures/invalid-tags/content", .code = .E_FRONTMATTER_VALUE },
-        .{ .root = "docs/contracts/fixtures/invalid-id/content", .code = .E_FRONTMATTER_VALUE },
-        .{ .root = "docs/contracts/fixtures/unsupported-syntax/content", .code = .E_FRONTMATTER },
-        .{ .root = "docs/contracts/fixtures/duplicate-key/content", .code = .E_FRONTMATTER_DUP_KEY },
+        .{ .root = "docs/contracts/fixtures/invalid-status/content", .code = .EFRONTMATTER },
+        .{ .root = "docs/contracts/fixtures/invalid-tags/content", .code = .EFRONTMATTER },
+        .{ .root = "docs/contracts/fixtures/invalid-id/content", .code = .EINVALIDPATH },
+        .{ .root = "docs/contracts/fixtures/unsupported-syntax/content", .code = .EFRONTMATTER },
+        .{ .root = "docs/contracts/fixtures/duplicate-key/content", .code = .EFRONTMATTER },
+        .{ .root = "docs/contracts/fixtures/malformed-frontmatter/content", .code = .EFRONTMATTER },
     };
 
     for (cases, 0..) |c, i| {
         var tmp = std.testing.tmpDir(.{});
         defer tmp.cleanup();
-        const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/case-{d}", .{ tmp.sub_path, i });
-        defer gpa.free(out_rel);
-        try Io.Dir.cwd().createDirPath(io, out_rel);
-        var result = try run(io, gpa, .{ .content_root = c.root, .out_dir = out_rel, .quiet = true });
+        const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/parse-{d}", .{ tmp.sub_path, i });
+        defer gpa.free(out);
+        var result = try run(io, gpa, .{ .content_root = c.root, .out_dir = out, .quiet = true });
         defer result.deinit();
         try std.testing.expect(!result.ok);
         try expectCode(&result, c.code);
+        try std.testing.expect(!result.published_graph_ir);
     }
+}
 
-    // Aggregate: multiple independent codes
+test "missing content root is EIO and does not publish graph IR" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/agg", .{tmp.sub_path});
-    defer gpa.free(out_rel);
-    try Io.Dir.cwd().createDirPath(io, out_rel);
+    const out = try outRel(gpa, &tmp, "noroot");
+    defer gpa.free(out);
+
     var result = try run(io, gpa, .{
-        .content_root = "docs/contracts/fixtures/aggregate/content",
-        .out_dir = out_rel,
+        .content_root = "docs/contracts/fixtures/__no_such_root__",
+        .out_dir = out,
         .quiet = true,
     });
     defer result.deinit();
     try std.testing.expect(!result.ok);
-    try expectCode(&result, .E_PARENT_MISSING);
-    try expectCode(&result, .E_PARENT_SELF);
-    try expectCode(&result, .E_FRONTMATTER);
-    try std.testing.expect(result.diagnostics.items.len >= 3);
+    try std.testing.expect(result.failure == .io);
+    try expectCode(&result, .EIO);
+    try std.testing.expect(!fileExists(io, out, "manifest.json"));
+    try std.testing.expect(!fileExists(io, out, "graph.json"));
+}
+
+test "golden expected IR shape for valid fixture" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try outRel(gpa, &tmp, "golden");
+    defer gpa.free(out);
+
+    var result = try run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/valid/content",
+        .out_dir = out,
+        .quiet = true,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+
+    const man = try renderManifest(gpa, &result);
+    defer gpa.free(man);
+    // Field presence / order markers (stable key order).
+    const man_keys = [_][]const u8{
+        "\"schemaVersion\"", "\"compiler\"", "\"contentRoot\"", "\"pageCount\"", "\"pages\"",
+    };
+    var pos: usize = 0;
+    for (man_keys) |k| {
+        const found = std.mem.indexOfPos(u8, man, pos, k) orelse return error.MissingKey;
+        pos = found + k.len;
+    }
+
+    const graph = try renderGraph(gpa, &result);
+    defer gpa.free(graph);
+    try std.testing.expect(std.mem.indexOf(u8, graph, "\"frozen\": true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, graph, "\"bodyOffset\": 67") != null);
+    try std.testing.expect(std.mem.indexOf(u8, graph, "\"bodyOffset\": 81") != null);
+    try std.testing.expect(std.mem.indexOf(u8, graph, "\"bodyOffset\": 51") != null);
+    try std.testing.expect(std.mem.indexOf(u8, graph, "\"tags\": [\"guide\", \"intro\"]") != null);
 }

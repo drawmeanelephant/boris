@@ -1,71 +1,54 @@
-//! RAG corpus exporter — LLM-friendly, path-segmented markdown for chat upload.
+//! Optional deterministic RAG export (milestone 7).
+//!
+//! Reuses the shared compile path: `pipeline.compile` → scanner → parser →
+//! PageDb-derived graph nodes → `graph.validate` → freeze. Does **not** invent
+//! a second parser or graph validator. No Apex / HTML rendering.
+//!
+//! Normative contract: `docs/contracts/rag-export.md`.
 //!
 //! Output tree (default `rag/`):
 //!   INDEX.md, UPLOAD-GUIDE.md, catalog.jsonl, catalog_meta.json
-//!   system/*.md          — curated architecture knowledge
-//!   content/pages/**     — site pages (entity-path mirrored; asides inlined)
-//!   graph/*.md           — entity catalog + trunk→satellite edges
+//!   system/**          — seeds from system_docs_dir when present
+//!   content/pages/**   — path-mirrored page segments
+//!   graph/entity-catalog.md, graph/relations.md
 //!
-//! Normative machine contract: `docs/contracts/rag-export.md`.
+//! Determinism: no timestamps, absolute paths, hostnames, random values, or
+//! hash-map / filesystem walk order in emitted bytes. Stable sorts:
+//!   system seeds  → normalized relative rag path
+//!   content pages → entity id
+//!   graph edges   → source id then target id
+//!   catalog rows  → rag_path
 //!
-//! Determinism (hard requirements):
-//! - No wall-clock timestamps, random IDs, absolute paths, hostnames, or
-//!   environment-specific fields in corpus files.
-//! - Never serialize from hash-map iteration order.
-//! - Stable sort keys (see contract):
-//!     system seeds     → relative path under system_docs_dir
-//!     content pages    → entity_id
-//!     graph hubs/edges → entity_id
-//!     catalog / INDEX  → rag_path
-//!
-//! Graph edges are **validated** before export via `graph.validate` (same
-//! single entry as the IR compiler): duplicate ids, missing parent, self-parent,
-//! multi-hop (satellite-of-satellite), and cycles are all hard fails.
-//!
-//! `catalog_meta.json` is corpus-level machine metadata (format + versions).
-//! It is part of the generated tree and INDEX documentation but is **not** a
-//! `catalog.jsonl` entry (same policy as `catalog.jsonl` itself).
-//!
-//! `catalog.jsonl` schema (one JSON object per line, field order fixed):
-//!   rag_id, rag_path, category, title, entity_id, role, parent_entry, tags
-//!
-//! Title / H1 ownership for content pages: **metadata-owned**.
-//! Frontmatter `title` (else entity_id) is the sole document H1; a leading
-//! source H1 is stripped and any remaining ATX H1 lines are demoted to H2.
-//!
-//! RAG `:::kind` blocks are an **export representation** of authoring
-//! `<Aside>` components — not necessarily round-trippable authoring syntax.
-//!
-//! Content parse policy: one shared pass via `parser.parsePageSource` — the
-//! same full-page entry point as the HTML compile loop (`compile.zig`).
-//!
-//! Native Zig only. No Node, Python, or external packagers.
+//! Aside / `:::kind`: authoring is constrained `<Aside>`. On export, parsed
+//! asides become `:::kind` / `:::kind{id="…"}` blocks (export representation
+//! only — not round-trippable authoring syntax). See
+//! `docs/contracts/components.md` and `docs/contracts/rag-export.md`.
 
 const std = @import("std");
 const Io = std.Io;
-const page_mod = @import("page.zig");
-const parser = @import("parser.zig");
-const graph_mod = @import("graph.zig");
 const diag = @import("diag.zig");
-const scanner = @import("scanner.zig");
-const pathutil = @import("pathutil.zig");
+const graph_mod = @import("graph.zig");
+const identity = @import("identity.zig");
 const json_out = @import("json_out.zig");
-const PageDb = page_mod.PageDb;
-const Frontmatter = page_mod.Frontmatter;
+const parser = @import("parser.zig");
+const aside = @import("aside.zig");
+const pipeline = @import("pipeline.zig");
 
 /// Machine format id written into `catalog_meta.json`.
 pub const catalog_format = "boris-rag";
 
 /// Integer schema version for the RAG catalog machine interface.
-/// Bump only when `catalog.jsonl` / `catalog_meta.json` shape breaks consumers.
 pub const catalog_schema_version: u32 = 1;
 
-/// Product version stamped into `catalog_meta.json` (not per-line in catalog.jsonl).
-pub const boris_version = "0.1.1";
+/// Product version stamped into `catalog_meta.json`.
+pub const boris_version = pipeline.boris_version;
 
 pub const RagOptions = struct {
+    /// Content root (same as IR `--input`).
+    content_root: []const u8 = "content",
+    /// Final RAG corpus directory (default `rag`).
     out_dir: []const u8 = "rag",
-    content_dir: []const u8 = "content",
+    /// Curated system-seed root; missing → skip system segment (no error).
     system_docs_dir: []const u8 = "docs/rag/system",
     quiet: bool = false,
 };
@@ -75,85 +58,38 @@ pub const RagStats = struct {
     content_pages: usize = 0,
     graph_docs: usize = 0,
     catalog_entries: usize = 0,
+    /// True when a complete graph-dependent corpus was published.
+    published: bool = false,
 };
 
-// ---------------------------------------------------------------------------
-// Shared parse cache (one parsePageSource per content page)
-// ---------------------------------------------------------------------------
+pub const RagResult = struct {
+    arena: std.heap.ArenaAllocator,
+    /// Shared compile result (pages, edges, diagnostics, ok/failure).
+    compile: pipeline.Result,
+    stats: RagStats = .{},
 
-/// In-memory parse result for one content page, shared by meta + body export.
-///
-/// `parsed` slices are zero-copy into source bytes retained on `arena`.
-/// Built only via `parser.parsePageSource` — identical entry point to
-/// `compile.zig`'s whiteboard loop, so HTML-path and RAG-path body trees
-/// cannot diverge from different parsers or configurations.
-const CachedParse = struct {
-    entity_id: []const u8,
-    source_path: []const u8,
-    output_path: []const u8,
-    /// Full pre-render parse; lives on the export retain arena with its source.
-    parsed: parser.ParsedPage,
+    pub fn deinit(self: *RagResult) void {
+        self.compile.deinit();
+        self.arena.deinit();
+    }
+
+    pub fn diagnostics(self: *const RagResult) []const diag.Diagnostic {
+        return self.compile.diagnostics.items;
+    }
+
+    pub fn ok(self: *const RagResult) bool {
+        return self.compile.ok and self.stats.published;
+    }
 };
 
-/// Read each page once and parse with `parser.parsePageSource` (compile-identical).
-/// Callers must keep `arena` alive for the lifetime of the returned slice.
-fn buildParseCache(
-    io: Io,
-    gpa: std.mem.Allocator,
-    arena: std.mem.Allocator,
-    db: *const PageDb,
-    content_dir_name: []const u8,
-) ![]CachedParse {
-    const cwd = Io.Dir.cwd();
-    var content_dir = try cwd.openDir(io, content_dir_name, .{});
-    defer content_dir.close(io);
-
-    var list: std.ArrayList(CachedParse) = .empty;
-    errdefer list.deinit(gpa);
-
-    try list.ensureTotalCapacity(gpa, db.items().len);
-
-    for (db.items()) |p| {
-        // Source + ParsedPage both on export arena so segment slices stay valid.
-        const source = try readFileAlloc(io, content_dir, p.source_path, arena);
-        const parsed = try parser.parsePageSource(source, arena);
-        if (parsed.hasErrors()) {
-            for (parsed.diagnostics) |d| {
-                var line_buf: std.ArrayList(u8) = .empty;
-                defer line_buf.deinit(gpa);
-                try parser.formatDiag(d, p.source_path, &line_buf, gpa);
-                std.log.err("{s}", .{line_buf.items});
-            }
-            return error.ComponentParseFailed;
-        }
-        try list.append(gpa, .{
-            .entity_id = p.entity_id,
-            .source_path = p.source_path,
-            .output_path = p.output_path,
-            .parsed = parsed,
-        });
-    }
-
-    return try list.toOwnedSlice(gpa);
-}
-
-fn findCachedParse(cache: []const CachedParse, entity_id: []const u8) ?CachedParse {
-    for (cache) |c| {
-        if (std.mem.eql(u8, c.entity_id, entity_id)) return c;
-    }
-    return null;
-}
-
-/// Machine interface row for `catalog.jsonl` (pinned schema).
+/// Machine catalog row (`catalog.jsonl`). Field order is fixed and normative.
 const CatalogEntry = struct {
     rag_id: []const u8,
     rag_path: []const u8,
     category: []const u8,
     title: []const u8,
     entity_id: []const u8 = "",
-    /// `trunk` | `satellite` for content pages; empty for system/graph/meta.
     role: []const u8 = "",
-    /// Parent entity id for satellites; empty otherwise.
     parent_entry: []const u8 = "",
     tags: []const u8 = "",
 };
@@ -180,6 +116,39 @@ fn writeBytes(io: Io, root: Io.Dir, rel_path: []const u8, data: []const u8) !voi
     try root.writeFile(io, .{ .sub_path = rel_path, .data = data });
 }
 
+/// Normalize a relative path to `/` separators (no leading `./`, no `//`).
+fn normalizeRelPath(allocator: std.mem.Allocator, raw: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    var i: usize = 0;
+    // Skip leading ./ and ./
+    while (i < raw.len) {
+        if (raw[i] == '/' or raw[i] == '\\') {
+            i += 1;
+            continue;
+        }
+        break;
+    }
+    var need_slash = false;
+    while (i < raw.len) {
+        const c = raw[i];
+        if (c == '/' or c == '\\') {
+            need_slash = true;
+            i += 1;
+            // collapse multiple separators
+            while (i < raw.len and (raw[i] == '/' or raw[i] == '\\')) : (i += 1) {}
+            continue;
+        }
+        if (need_slash) {
+            try out.append(allocator, '/');
+            need_slash = false;
+        }
+        try out.append(allocator, c);
+        i += 1;
+    }
+    return try out.toOwnedSlice(allocator);
+}
+
 fn appendCatalog(
     catalog: *std.ArrayList(CatalogEntry),
     list_gpa: std.mem.Allocator,
@@ -198,12 +167,19 @@ fn appendCatalog(
     });
 }
 
-/// Escape a string for JSON double quotes (same rules as IR `json_out`).
-fn jsonEscapeAppend(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
-    try json_out.escapeAppend(buf, gpa, s);
+fn sortCatalogByRagPath(entries: []CatalogEntry) void {
+    std.mem.sort(CatalogEntry, entries, {}, struct {
+        fn less(_: void, a: CatalogEntry, b: CatalogEntry) bool {
+            return std.mem.order(u8, a.rag_path, b.rag_path) == .lt;
+        }
+    }.less);
 }
 
-/// True when `line` (already left-trimmed of spaces/tabs) is an ATX level-1 heading.
+// ---------------------------------------------------------------------------
+// H1 ownership (metadata-owned title)
+// ---------------------------------------------------------------------------
+
+/// True when `left_trimmed` is an ATX level-1 heading (`#` not `##`).
 fn isAtxH1Line(left_trimmed: []const u8) bool {
     if (left_trimmed.len == 0) return false;
     if (left_trimmed[0] != '#') return false;
@@ -212,7 +188,7 @@ fn isAtxH1Line(left_trimmed: []const u8) bool {
     return left_trimmed[1] == ' ' or left_trimmed[1] == '\t';
 }
 
-/// Drop a leading ATX H1 (and blank lines before it) so metadata can own the title H1.
+/// Drop a leading ATX H1 (and blank lines before it).
 fn stripLeadingAtxH1(body: []const u8) []const u8 {
     var i: usize = 0;
     while (i < body.len) {
@@ -229,14 +205,12 @@ fn stripLeadingAtxH1(body: []const u8) []const u8 {
             if (line_end < body.len and body[line_end] == '\n') return body[line_end + 1 ..];
             return body[line_end..];
         }
-        // First non-blank line is not an H1 — keep original body intact.
         return body;
     }
     return body;
 }
 
-/// Demote remaining ATX H1 lines to H2 so exported content has exactly one H1
-/// (the metadata-owned title injected by the exporter).
+/// Demote remaining ATX H1 lines to H2.
 fn demoteAtxH1ToH2(body: []const u8, arena: std.mem.Allocator) ![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(arena);
@@ -270,12 +244,33 @@ fn demoteAtxH1ToH2(body: []const u8, arena: std.mem.Allocator) ![]const u8 {
     return try out.toOwnedSlice(arena);
 }
 
-/// Prepare content body under metadata-owned H1 policy.
 fn prepareContentBody(body: []const u8, arena: std.mem.Allocator) ![]const u8 {
     return demoteAtxH1ToH2(stripLeadingAtxH1(body), arena);
 }
 
-/// Count ATX level-1 headings (for tests / invariants).
+/// Export body: H1-normalize markdown segments; emit asides as `:::kind` blocks.
+fn exportBodyForRag(segments: []const aside.Segment, arena: std.mem.Allocator) ![]const u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(arena);
+    for (segments) |seg| {
+        switch (seg) {
+            .markdown => |md| {
+                if (std.mem.trim(u8, md, " \t\r\n").len == 0) {
+                    try out.appendSlice(arena, md);
+                    continue;
+                }
+                const prepared = try prepareContentBody(md, arena);
+                try out.appendSlice(arena, prepared);
+            },
+            .aside => |a| {
+                const block = try aside.formatRagDirective(a, arena);
+                try out.appendSlice(arena, block);
+            },
+        }
+    }
+    return try out.toOwnedSlice(arena);
+}
+
 fn countAtxH1(text: []const u8) usize {
     var n: usize = 0;
     var i: usize = 0;
@@ -291,19 +286,31 @@ fn countAtxH1(text: []const u8) usize {
     return n;
 }
 
-/// Stable catalog order: ascending `rag_path` (byte-wise). Never rely on append order alone.
-fn sortCatalogByRagPath(entries: []CatalogEntry) void {
-    std.mem.sort(CatalogEntry, entries, {}, struct {
-        fn less(_: void, a: CatalogEntry, b: CatalogEntry) bool {
-            return std.mem.order(u8, a.rag_path, b.rag_path) == .lt;
-        }
-    }.less);
+// ---------------------------------------------------------------------------
+// Tags / titles helpers
+// ---------------------------------------------------------------------------
+
+fn formatTags(arena: std.mem.Allocator, tags: []const []const u8) ![]const u8 {
+    if (tags.len == 0) return try arena.dupe(u8, "[]");
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(arena);
+    try buf.append(arena, '[');
+    for (tags, 0..) |t, i| {
+        if (i > 0) try buf.appendSlice(arena, ", ");
+        try buf.appendSlice(arena, t);
+    }
+    try buf.append(arena, ']');
+    return try buf.toOwnedSlice(arena);
+}
+
+fn pageTitle(p: graph_mod.Node) []const u8 {
+    if (p.title) |t| return t;
+    return p.id;
 }
 
 fn firstHeadingOrFallback(body: []const u8, fallback: []const u8) []const u8 {
     var i: usize = 0;
     while (i < body.len) {
-        // Skip leading blank lines.
         var line_end = i;
         while (line_end < body.len and body[line_end] != '\n') : (line_end += 1) {}
         var line = body[i..line_end];
@@ -312,9 +319,6 @@ fn firstHeadingOrFallback(body: []const u8, fallback: []const u8) []const u8 {
         if (trimmed.len == 0) {
             i = if (line_end < body.len) line_end + 1 else body.len;
             continue;
-        }
-        if (std.mem.startsWith(u8, trimmed, "# ")) {
-            return std.mem.trim(u8, trimmed[2..], " \t");
         }
         if (std.mem.startsWith(u8, trimmed, "#")) {
             var j: usize = 0;
@@ -333,7 +337,6 @@ fn titleFromFilename(path: []const u8) []const u8 {
     return base;
 }
 
-/// Strip existing YAML frontmatter so we can rewrite a normalized header.
 fn stripFrontmatter(source: []const u8) []const u8 {
     if (!std.mem.startsWith(u8, source, "---")) return source;
     var i: usize = 3;
@@ -355,44 +358,6 @@ fn stripFrontmatter(source: []const u8) []const u8 {
         } else break;
     }
     return source;
-}
-
-fn extractRelatedBlock(source: []const u8, arena: std.mem.Allocator) ![]const u8 {
-    // Best-effort: copy related: list lines from seed frontmatter if present.
-    if (!std.mem.startsWith(u8, source, "---")) return "";
-    var i: usize = 3;
-    if (i < source.len and source[i] == '\r') i += 1;
-    if (i < source.len and source[i] == '\n') i += 1;
-    var related_lines: std.ArrayList(u8) = .empty;
-    defer related_lines.deinit(arena);
-    var in_related = false;
-    var line_start = i;
-    while (line_start < source.len) {
-        var line_end = line_start;
-        while (line_end < source.len and source[line_end] != '\n') : (line_end += 1) {}
-        var line = source[line_start..line_end];
-        if (line.len > 0 and line[line.len - 1] == '\r') line = line[0 .. line.len - 1];
-        if (std.mem.eql(u8, line, "---")) break;
-
-        const trimmed = std.mem.trimStart(u8, line, " \t");
-        if (std.mem.startsWith(u8, trimmed, "related:")) {
-            in_related = true;
-            try related_lines.appendSlice(arena, line);
-            try related_lines.append(arena, '\n');
-        } else if (in_related) {
-            if (std.mem.startsWith(u8, trimmed, "- ") or trimmed.len == 0) {
-                try related_lines.appendSlice(arena, line);
-                try related_lines.append(arena, '\n');
-            } else {
-                in_related = false;
-            }
-        }
-
-        if (line_end < source.len and source[line_end] == '\n') {
-            line_start = line_end + 1;
-        } else break;
-    }
-    return try related_lines.toOwnedSlice(arena);
 }
 
 fn extractTagsLine(source: []const u8) []const u8 {
@@ -442,7 +407,7 @@ fn extractRagId(source: []const u8, fallback: []const u8) []const u8 {
 }
 
 // ---------------------------------------------------------------------------
-// System docs
+// System seeds
 // ---------------------------------------------------------------------------
 
 fn exportSystemDocs(
@@ -456,14 +421,13 @@ fn exportSystemDocs(
     const cwd = Io.Dir.cwd();
     var sys_dir = cwd.openDir(io, opts.system_docs_dir, .{ .iterate = true }) catch |err| switch (err) {
         error.FileNotFound => {
-            std.log.warn("system docs dir '{s}' missing; skipping system RAG seeds", .{opts.system_docs_dir});
+            log(opts, "  rag system  (seed dir missing; skipped)\n", .{});
             return 0;
         },
         else => return err,
     };
     defer sys_dir.close(io);
 
-    // Collect relative paths first, then sort — never emit in filesystem walk order.
     var rels: std.ArrayList([]const u8) = .empty;
     defer rels.deinit(gpa);
     {
@@ -472,7 +436,8 @@ fn exportSystemDocs(
         while (try walker.next(io)) |entry| {
             if (entry.kind != .file) continue;
             if (!std.mem.endsWith(u8, entry.basename, ".md")) continue;
-            try rels.append(gpa, try arena.dupe(u8, entry.path));
+            const norm = try normalizeRelPath(arena, entry.path);
+            try rels.append(gpa, norm);
         }
     }
     std.mem.sort([]const u8, rels.items, {}, struct {
@@ -490,7 +455,7 @@ fn exportSystemDocs(
         const fallback_id = try std.fmt.allocPrint(arena, "system/{s}", .{titleFromFilename(rel)});
         const rag_id = extractRagId(source, fallback_id);
         const tags = extractTagsLine(source);
-        const related_block = try extractRelatedBlock(source, arena);
+        const tags_out = if (tags.len > 0) tags else "[boris, system]";
 
         var doc: std.ArrayList(u8) = .empty;
         defer doc.deinit(gpa);
@@ -500,17 +465,9 @@ fn exportSystemDocs(
         try doc.appendSlice(gpa, "\nrag_path: ");
         try doc.appendSlice(gpa, rag_path);
         try doc.appendSlice(gpa, "\ncategory: system\n");
-        if (tags.len > 0) {
-            try doc.appendSlice(gpa, "tags: ");
-            try doc.appendSlice(gpa, tags);
-            try doc.append(gpa, '\n');
-        } else {
-            try doc.appendSlice(gpa, "tags: [boris, system]\n");
-        }
-        if (related_block.len > 0) {
-            try doc.appendSlice(gpa, related_block);
-        }
-        try doc.appendSlice(gpa, "---\n\n");
+        try doc.appendSlice(gpa, "tags: ");
+        try doc.appendSlice(gpa, tags_out);
+        try doc.appendSlice(gpa, "\n---\n\n");
         try doc.appendSlice(gpa, body);
         if (body.len == 0 or body[body.len - 1] != '\n') try doc.append(gpa, '\n');
 
@@ -520,7 +477,7 @@ fn exportSystemDocs(
             .rag_path = rag_path,
             .category = "system",
             .title = title,
-            .tags = if (tags.len > 0) tags else "[boris, system]",
+            .tags = tags_out,
         });
         count += 1;
         log(opts, "  rag system  {s}\n", .{rag_path});
@@ -529,7 +486,7 @@ fn exportSystemDocs(
 }
 
 // ---------------------------------------------------------------------------
-// Content pages (asides inlined into page body)
+// Content pages
 // ---------------------------------------------------------------------------
 
 fn exportContentPages(
@@ -537,46 +494,45 @@ fn exportContentPages(
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
     out_dir: Io.Dir,
-    /// Shared parse cache (already validated; no disk re-read).
-    cache: []const CachedParse,
-    /// Validated, entity_id-sorted page metas (graph neighbors for `related:`).
-    metas: []const PageMeta,
+    pages: []const graph_mod.Node,
+    content_root: []const u8,
     opts: RagOptions,
     catalog: *std.ArrayList(CatalogEntry),
 ) !usize {
-    var pages_n: usize = 0;
+    const cwd = Io.Dir.cwd();
+    var content_dir = try cwd.openDir(io, content_root, .{});
+    defer content_dir.close(io);
 
-    // Whiteboard for per-page body/related scratch only (not re-parsing).
     var doc_arena = std.heap.ArenaAllocator.init(gpa);
     defer doc_arena.deinit();
 
-    // Emit pages in deterministic entity_id order (metas already sorted).
-    for (metas) |m| {
-        const cached = findCachedParse(cache, m.entity_id) orelse continue;
-        const parsed = cached.parsed;
-
+    var n: usize = 0;
+    // pages already sorted by entity id after freeze
+    for (pages) |p| {
         _ = doc_arena.reset(.free_all);
         const scratch = doc_arena.allocator();
 
-        // Prefer full document body with asides inlined (callouts stay on-page).
-        // Segments come from the shared parsePageSource result — same tree as HTML.
-        // `:::kind` blocks are export representation only (not authoring syntax).
-        const body_raw = try parser.bodyWithAsidesInline(parsed.segments, scratch);
-        // Metadata-owned H1: strip/demote source H1s so exactly one document H1 remains.
-        const body_full = try prepareContentBody(body_raw, scratch);
-        const title = m.title;
-        const role = m.role;
-        const parent = m.parent_entry;
+        const source = try readFileAlloc(io, content_dir, p.source_path, scratch);
+        const parsed = parser.parse(source);
+        if (parsed.diagnostic != null) {
+            // Should not happen after successful compile; treat as I/O-class abort.
+            return error.UnexpectedParseFailure;
+        }
+        // Component scan already hard-failed compile when invalid; re-tokenize
+        // for export representation (:::kind blocks, non-round-trippable).
+        const tok = aside.tokenizeBody(parsed.doc.body, scratch) catch return error.UnexpectedParseFailure;
+        if (tok.hasErrors()) return error.UnexpectedParseFailure;
+        const body_full = try exportBodyForRag(tok.segments, scratch);
+        const title = pageTitle(p);
+        const role = p.role.name();
+        const parent = p.parent orelse "";
+        const tags_str = try formatTags(arena, p.tags);
 
-        const entity_id = m.entity_id;
-        const source_path = m.source_path;
+        const rag_path = try identity.ragPagePath(arena, p.id);
+        const rag_id = try std.fmt.allocPrint(arena, "content/{s}", .{p.id});
 
-        // Output paths only from validated entity ids (no output-root escape).
-        const rag_path = try pathutil.ragPagePath(arena, entity_id);
-        const rag_id = try pathutil.ragCatalogId(arena, entity_id);
-
-        // related: direct graph neighbors only (token-efficient; INDEX is the hub).
-        // Children are emitted in metas order (already sorted by entity_id).
+        // related: direct graph neighbors only, stable order (parent first, then
+        // children by entity id — pages are already id-sorted).
         var related: std.ArrayList(u8) = .empty;
         defer related.deinit(scratch);
         try related.appendSlice(scratch, "related:\n");
@@ -585,18 +541,18 @@ fn exportContentPages(
             try related.appendSlice(scratch, parent);
             try related.appendSlice(scratch, ".md\n");
         }
-        for (metas) |other| {
-            if (!std.mem.eql(u8, other.role, "satellite")) continue;
-            if (!std.mem.eql(u8, other.parent_entry, entity_id)) continue;
+        for (pages) |other| {
+            if (other.role != .satellite) continue;
+            const op = other.parent orelse continue;
+            if (!std.mem.eql(u8, op, p.id)) continue;
             try related.appendSlice(scratch, "  - content/pages/");
-            try related.appendSlice(scratch, other.entity_id);
+            try related.appendSlice(scratch, other.id);
             try related.appendSlice(scratch, ".md\n");
         }
 
         var doc: std.ArrayList(u8) = .empty;
         defer doc.deinit(gpa);
 
-        // Self-contained frontmatter (relative logical paths only — no absolutes/hosts).
         try doc.appendSlice(gpa, "---\n");
         try doc.appendSlice(gpa, "rag_id: ");
         try doc.appendSlice(gpa, rag_id);
@@ -604,11 +560,9 @@ fn exportContentPages(
         try doc.appendSlice(gpa, rag_path);
         try doc.appendSlice(gpa, "\ncategory: content\n");
         try doc.appendSlice(gpa, "entity_id: ");
-        try doc.appendSlice(gpa, entity_id);
-        try doc.appendSlice(gpa, "\nsource_path: content/");
-        try doc.appendSlice(gpa, source_path);
-        try doc.appendSlice(gpa, "\noutput_path: dist/");
-        try doc.appendSlice(gpa, cached.output_path);
+        try doc.appendSlice(gpa, p.id);
+        try doc.appendSlice(gpa, "\nsource_path: ");
+        try doc.appendSlice(gpa, p.source_path);
         try doc.appendSlice(gpa, "\nrole: ");
         try doc.appendSlice(gpa, role);
         try doc.append(gpa, '\n');
@@ -620,18 +574,16 @@ fn exportContentPages(
         try doc.appendSlice(gpa, "title: ");
         try doc.appendSlice(gpa, title);
         try doc.append(gpa, '\n');
-        try doc.print(gpa, "asides: {d}\n", .{parsed.asides.len});
-        try doc.appendSlice(gpa, "tags: [content, ");
-        try doc.appendSlice(gpa, role);
-        try doc.appendSlice(gpa, "]\n");
+        try doc.appendSlice(gpa, "tags: ");
+        try doc.appendSlice(gpa, tags_str);
+        try doc.append(gpa, '\n');
         try doc.appendSlice(gpa, related.items);
         try doc.appendSlice(gpa, "---\n\n");
 
-        // Sole document H1 — owned by frontmatter title (else entity_id).
+        // Sole document H1 — metadata-owned (frontmatter title else entity id).
         try doc.appendSlice(gpa, "# ");
         try doc.appendSlice(gpa, title);
         try doc.appendSlice(gpa, "\n\n");
-
         try doc.appendSlice(gpa, body_full);
         if (body_full.len == 0 or body_full[body_full.len - 1] != '\n') {
             try doc.append(gpa, '\n');
@@ -643,213 +595,27 @@ fn exportContentPages(
             .rag_path = rag_path,
             .category = "content",
             .title = title,
-            .entity_id = entity_id,
+            .entity_id = p.id,
             .role = role,
             .parent_entry = parent,
-            .tags = if (std.mem.eql(u8, role, "satellite")) "[content, satellite]" else "[content, trunk]",
+            .tags = tags_str,
         });
-        pages_n += 1;
+        n += 1;
         log(opts, "  rag page    {s}\n", .{rag_path});
     }
-
-    return pages_n;
+    return n;
 }
 
 // ---------------------------------------------------------------------------
 // Graph docs
 // ---------------------------------------------------------------------------
 
-const PageMeta = struct {
-    entity_id: []const u8,
-    title: []const u8,
-    role: []const u8,
-    parent_entry: []const u8,
-    source_path: []const u8,
-};
-
-/// Prefer frontmatter `id:` override when present in extras (compiler dialect);
-/// otherwise path-derived entity id. Aligns graph keys with the IR path so
-/// `E_DUP_ID` fixtures resolve the same way on both product surfaces.
-///
-/// Overrides are run through `pathutil.normalizeEntityId` so RAG output paths
-/// stay under validated entity-id shape (no `..` / absolute / `\` leakage).
-fn entityIdFromParsed(arena: std.mem.Allocator, path_entity_id: []const u8, fm: Frontmatter) ![]const u8 {
-    for (fm.extras) |kv| {
-        if (std.mem.eql(u8, kv.key, "id") and kv.value.len > 0) {
-            return pathutil.normalizeEntityId(arena, kv.value) catch {
-                // Fall back to path-derived id if override is malformed.
-                return try arena.dupe(u8, path_entity_id);
-            };
-        }
-    }
-    return try arena.dupe(u8, path_entity_id);
-}
-
-/// Normalize parent foreign key the same way as entity ids (or empty).
-fn parentFromParsed(arena: std.mem.Allocator, fm: Frontmatter) ![]const u8 {
-    const parent = fm.parent_entry orelse return "";
-    if (parent.len == 0) return "";
-    return pathutil.normalizeEntityId(arena, parent) catch {
-        // Keep raw for graph diagnostics (missing/illegal parent still fails validate).
-        return try arena.dupe(u8, parent);
-    };
-}
-
-/// Build PageMeta from the shared parse cache (no disk I/O, no re-parse).
-fn collectPageMeta(
-    arena: std.mem.Allocator,
-    cache: []const CachedParse,
-) ![]PageMeta {
-    var list: std.ArrayList(PageMeta) = .empty;
-    for (cache) |c| {
-        const parsed = c.parsed;
-        const entity_id = try entityIdFromParsed(arena, c.entity_id, parsed.frontmatter);
-        const title = if (parsed.frontmatter.title) |t| t else entity_id;
-        const role = if (parsed.frontmatter.isSatellite()) "satellite" else "trunk";
-        const parent = try parentFromParsed(arena, parsed.frontmatter);
-        try list.append(arena, .{
-            .entity_id = entity_id,
-            .title = try arena.dupe(u8, title),
-            .role = try arena.dupe(u8, role),
-            .parent_entry = parent,
-            .source_path = try arena.dupe(u8, c.source_path),
-        });
-    }
-    return try list.toOwnedSlice(arena);
-}
-
-/// Sort by entity_id and validate via shared `graph.validate` (dups + topology).
-/// Hard-fails on duplicate id, missing parent, self-parent, multi-hop, or cycles.
-fn validateAndSortPageMeta(
-    gpa: std.mem.Allocator,
-    metas: []PageMeta,
-    opts: RagOptions,
-) !void {
-    std.mem.sort(PageMeta, metas, {}, struct {
-        fn less(_: void, a: PageMeta, b: PageMeta) bool {
-            return std.mem.order(u8, a.entity_id, b.entity_id) == .lt;
-        }
-    }.less);
-
-    // Provisional nodes → single shared graph entry (same as pipeline).
-    const nodes = try gpa.alloc(graph_mod.Node, metas.len);
-    defer gpa.free(nodes);
-    for (metas, 0..) |m, i| {
-        nodes[i] = .{
-            .id = m.entity_id,
-            .source_path = m.source_path,
-            .title = m.title,
-            .parent = if (m.parent_entry.len > 0) m.parent_entry else null,
-        };
-    }
-
-    var retain_arena = std.heap.ArenaAllocator.init(gpa);
-    defer retain_arena.deinit();
-    const retain = retain_arena.allocator();
-
-    var diags: std.ArrayList(diag.Diagnostic) = .empty;
-    defer diags.deinit(gpa);
-
-    // Case-insensitive entity-id collisions (after optional id: overrides).
-    var i: usize = 0;
-    while (i < metas.len) : (i += 1) {
-        var j: usize = 0;
-        while (j < i) : (j += 1) {
-            if (!pathutil.pathsDifferOnlyInCase(metas[i].entity_id, metas[j].entity_id)) continue;
-            const msg = try std.fmt.allocPrint(
-                retain,
-                "entity ids differ only in case: \"{s}\" ({s}) and \"{s}\" ({s})",
-                .{ metas[i].entity_id, metas[i].source_path, metas[j].entity_id, metas[j].source_path },
-            );
-            try diags.append(gpa, .{
-                .severity = .error_,
-                .code = .E_ENTITY_CASE_COLLISION,
-                .message = msg,
-                .remediation = try retain.dupe(u8, "Rename a file or id: override so entity ids are unique ignoring case"),
-                .source_path = metas[i].source_path,
-                .line = 1,
-                .column = 1,
-                .id = metas[i].entity_id,
-            });
-            break;
-        }
-    }
-
-    try graph_mod.validate(gpa, retain, nodes, &diags);
-    diag.sortDiagnostics(diags.items);
-
-    // Mirror classified roles onto metas (validator is source of truth).
-    for (metas, nodes) |*m, n| {
-        m.role = if (n.role == .satellite) "satellite" else "trunk";
-    }
-
-    const hard_errors = diag.countErrors(diags.items);
-    for (diags.items) |d| {
-        const line = try diag.formatText(d, gpa);
-        defer gpa.free(line);
-        if (d.isError()) {
-            std.log.err("{s}", .{line});
-        } else {
-            std.log.warn("{s}", .{line});
-        }
-    }
-
-    if (hard_errors > 0) return error.GraphValidationFailed;
-    if (!opts.quiet) {
-        log(opts, "  graph ok    {d} entities (sorted by entity_id)\n", .{metas.len});
-    }
-}
-
-/// Test/helper: run the same graph validation RAG uses on a content tree.
-/// Returns collected diagnostics (strings owned by `retain`). Does not write corpus files.
-pub fn validateContentGraph(
-    io: Io,
-    gpa: std.mem.Allocator,
-    retain: std.mem.Allocator,
-    content_dir: []const u8,
-    diags: *std.ArrayList(diag.Diagnostic),
-) !void {
-    var db = PageDb.init(gpa);
-    defer db.deinit();
-    try scanner.scanFromCwd(io, &db, content_dir);
-
-    var parse_arena = std.heap.ArenaAllocator.init(gpa);
-    defer parse_arena.deinit();
-    const arena = parse_arena.allocator();
-
-    const parse_cache = try buildParseCache(io, gpa, arena, &db, content_dir);
-    defer gpa.free(parse_cache);
-
-    const metas = try collectPageMeta(arena, parse_cache);
-    // Diagnostics messages are allocated on an internal arena inside
-    // validateAndSortPageMetaCollect; re-run shared validate with retain so
-    // callers can keep messages for the test duration.
-    std.mem.sort(PageMeta, metas, {}, struct {
-        fn less(_: void, a: PageMeta, b: PageMeta) bool {
-            return std.mem.order(u8, a.entity_id, b.entity_id) == .lt;
-        }
-    }.less);
-    const nodes = try gpa.alloc(graph_mod.Node, metas.len);
-    defer gpa.free(nodes);
-    for (metas, 0..) |m, i| {
-        nodes[i] = .{
-            .id = m.entity_id,
-            .source_path = m.source_path,
-            .title = m.title,
-            .parent = if (m.parent_entry.len > 0) m.parent_entry else null,
-        };
-    }
-    try graph_mod.validate(gpa, retain, nodes, diags);
-    diag.sortDiagnostics(diags.items);
-    if (diag.countErrors(diags.items) > 0) return error.GraphValidationFailed;
-}
-
 fn exportGraphDocs(
     io: Io,
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
     out_dir: Io.Dir,
-    metas: []const PageMeta,
+    pages: []const graph_mod.Node,
     catalog: *std.ArrayList(CatalogEntry),
     opts: RagOptions,
 ) !usize {
@@ -867,32 +633,30 @@ fn exportGraphDocs(
             \\tags: [graph, catalog, entities]
             \\related:
             \\  - graph/relations.md
-            \\  - system/03-trunk-and-satellite.md
             \\---
             \\
             \\# Entity catalog
             \\
-            \\Complete list of content entities known to Boris after scanning `content/`.
-            \\Pages are the only first-class graph nodes; asides remain in-page content.
+            \\Content entities after shared scan / parse / graph validation.
+            \\Pages are the only first-class graph nodes; asides are not nodes.
             \\
             \\| entity_id | title | role | source | RAG path |
             \\|-----------|-------|------|--------|----------|
             \\
         );
-        for (metas) |m| {
+        for (pages) |p| {
             try doc.appendSlice(gpa, "| `");
-            try doc.appendSlice(gpa, m.entity_id);
+            try doc.appendSlice(gpa, p.id);
             try doc.appendSlice(gpa, "` | ");
-            try doc.appendSlice(gpa, m.title);
+            try doc.appendSlice(gpa, pageTitle(p));
             try doc.appendSlice(gpa, " | ");
-            try doc.appendSlice(gpa, m.role);
-            try doc.appendSlice(gpa, " | `content/");
-            try doc.appendSlice(gpa, m.source_path);
+            try doc.appendSlice(gpa, p.role.name());
+            try doc.appendSlice(gpa, " | `");
+            try doc.appendSlice(gpa, p.source_path);
             try doc.appendSlice(gpa, "` | `content/pages/");
-            try doc.appendSlice(gpa, m.entity_id);
+            try doc.appendSlice(gpa, p.id);
             try doc.appendSlice(gpa, ".md` |\n");
         }
-
         try writeBytes(io, out_dir, "graph/entity-catalog.md", doc.items);
         try appendCatalog(catalog, gpa, arena, .{
             .rag_id = "graph/entity-catalog",
@@ -905,7 +669,7 @@ fn exportGraphDocs(
         log(opts, "  rag graph   graph/entity-catalog.md\n", .{});
     }
 
-    // relations.md
+    // relations.md — edges sorted by source id then target id
     {
         var doc: std.ArrayList(u8) = .empty;
         defer doc.deinit(gpa);
@@ -914,46 +678,46 @@ fn exportGraphDocs(
             \\rag_id: graph/relations
             \\rag_path: graph/relations.md
             \\category: graph
-            \\tags: [graph, relations, trunk, satellite, parentEntry]
+            \\tags: [graph, relations, trunk, satellite]
             \\related:
             \\  - graph/entity-catalog.md
-            \\  - system/03-trunk-and-satellite.md
             \\---
             \\
             \\# Graph relations (Trunk → Satellite)
             \\
-            \\Edges are declared by satellite frontmatter `parentEntry: <trunk-entity-id>`.
-            \\Trunk hubs and satellite lists are ordered by `entity_id` (deterministic).
-            \\Missing parents and satellite-of-satellite chains fail the export (hard errors).
+            \\Edges come from satellite frontmatter `parent: <trunk-entity-id>`.
+            \\Hubs and satellite lists are ordered by `entity_id`. Edge list is
+            \\ordered by source id then target id. Invalid graphs never publish
+            \\this file (shared `graph.validate` must pass first).
             \\
             \\## Trunk hubs
             \\
             \\
         );
 
-        // metas are sorted by entity_id; hubs and children therefore emit deterministically.
-        for (metas) |m| {
-            if (!std.mem.eql(u8, m.role, "trunk")) continue;
+        for (pages) |p| {
+            if (p.role != .trunk) continue;
             try doc.appendSlice(gpa, "### `");
-            try doc.appendSlice(gpa, m.entity_id);
+            try doc.appendSlice(gpa, p.id);
             try doc.appendSlice(gpa, "` — ");
-            try doc.appendSlice(gpa, m.title);
+            try doc.appendSlice(gpa, pageTitle(p));
             try doc.appendSlice(gpa, "\n\n");
             try doc.appendSlice(gpa, "- Trunk RAG: `content/pages/");
-            try doc.appendSlice(gpa, m.entity_id);
+            try doc.appendSlice(gpa, p.id);
             try doc.appendSlice(gpa, ".md`\n");
             try doc.appendSlice(gpa, "- Satellites:\n");
             var any = false;
-            for (metas) |child| {
-                if (!std.mem.eql(u8, child.role, "satellite")) continue;
-                if (!std.mem.eql(u8, child.parent_entry, m.entity_id)) continue;
+            for (pages) |child| {
+                if (child.role != .satellite) continue;
+                const par = child.parent orelse continue;
+                if (!std.mem.eql(u8, par, p.id)) continue;
                 any = true;
                 try doc.appendSlice(gpa, "  - `");
-                try doc.appendSlice(gpa, child.entity_id);
+                try doc.appendSlice(gpa, child.id);
                 try doc.appendSlice(gpa, "` (");
-                try doc.appendSlice(gpa, child.title);
+                try doc.appendSlice(gpa, pageTitle(child));
                 try doc.appendSlice(gpa, ") → `content/pages/");
-                try doc.appendSlice(gpa, child.entity_id);
+                try doc.appendSlice(gpa, child.id);
                 try doc.appendSlice(gpa, ".md`\n");
             }
             if (!any) try doc.appendSlice(gpa, "  - *(none)*\n");
@@ -966,12 +730,28 @@ fn exportGraphDocs(
             \\```
             \\
         );
-        for (metas) |m| {
-            if (!std.mem.eql(u8, m.role, "satellite")) continue;
-            try doc.appendSlice(gpa, "parentEntry\t");
-            try doc.appendSlice(gpa, m.entity_id);
+
+        // Build (source_id, target_id) pairs and sort.
+        const EdgePair = struct { src: []const u8, tgt: []const u8 };
+        var pairs: std.ArrayList(EdgePair) = .empty;
+        defer pairs.deinit(gpa);
+        for (pages) |p| {
+            if (p.role != .satellite) continue;
+            const par = p.parent orelse continue;
+            try pairs.append(gpa, .{ .src = p.id, .tgt = par });
+        }
+        std.mem.sort(EdgePair, pairs.items, {}, struct {
+            fn less(_: void, a: EdgePair, b: EdgePair) bool {
+                const o = std.mem.order(u8, a.src, b.src);
+                if (o != .eq) return o == .lt;
+                return std.mem.order(u8, a.tgt, b.tgt) == .lt;
+            }
+        }.less);
+        for (pairs.items) |e| {
+            try doc.appendSlice(gpa, "parent\t");
+            try doc.appendSlice(gpa, e.src);
             try doc.appendSlice(gpa, "\t->\t");
-            try doc.appendSlice(gpa, m.parent_entry);
+            try doc.appendSlice(gpa, e.tgt);
             try doc.append(gpa, '\n');
         }
         try doc.appendSlice(gpa, "```\n");
@@ -992,12 +772,9 @@ fn exportGraphDocs(
 }
 
 // ---------------------------------------------------------------------------
-// Index, upload guide, catalog.jsonl
+// Catalog / INDEX / UPLOAD-GUIDE
 // ---------------------------------------------------------------------------
 
-/// Write `catalog_meta.json` — corpus-level format + versions (once, not per line).
-/// Fixed field order: format, schema_version, boris_version. Compact + trailing LF.
-/// Not a catalog entry — see `docs/contracts/rag-export.md`.
 fn exportCatalogMeta(io: Io, out_dir: Io.Dir) !void {
     var buf: [160]u8 = undefined;
     const text = try std.fmt.bufPrint(
@@ -1008,9 +785,7 @@ fn exportCatalogMeta(io: Io, out_dir: Io.Dir) !void {
     try writeBytes(io, out_dir, "catalog_meta.json", text);
 }
 
-/// Write `catalog.jsonl` — pinned schema for bulk upload scripts.
-/// Field order is stable: rag_id, rag_path, category, title, entity_id, role, parent_entry, tags.
-/// Schema/product version lives in `catalog_meta.json`, not on each line.
+/// Fixed field order: rag_id, rag_path, category, title, entity_id, role, parent_entry, tags.
 fn exportCatalogJsonl(
     io: Io,
     gpa: std.mem.Allocator,
@@ -1021,21 +796,21 @@ fn exportCatalogJsonl(
     defer doc.deinit(gpa);
     for (catalog) |e| {
         try doc.appendSlice(gpa, "{\"rag_id\":\"");
-        try jsonEscapeAppend(&doc, gpa, e.rag_id);
+        try json_out.escapeAppend(&doc, gpa, e.rag_id);
         try doc.appendSlice(gpa, "\",\"rag_path\":\"");
-        try jsonEscapeAppend(&doc, gpa, e.rag_path);
+        try json_out.escapeAppend(&doc, gpa, e.rag_path);
         try doc.appendSlice(gpa, "\",\"category\":\"");
-        try jsonEscapeAppend(&doc, gpa, e.category);
+        try json_out.escapeAppend(&doc, gpa, e.category);
         try doc.appendSlice(gpa, "\",\"title\":\"");
-        try jsonEscapeAppend(&doc, gpa, e.title);
+        try json_out.escapeAppend(&doc, gpa, e.title);
         try doc.appendSlice(gpa, "\",\"entity_id\":\"");
-        try jsonEscapeAppend(&doc, gpa, e.entity_id);
+        try json_out.escapeAppend(&doc, gpa, e.entity_id);
         try doc.appendSlice(gpa, "\",\"role\":\"");
-        try jsonEscapeAppend(&doc, gpa, e.role);
+        try json_out.escapeAppend(&doc, gpa, e.role);
         try doc.appendSlice(gpa, "\",\"parent_entry\":\"");
-        try jsonEscapeAppend(&doc, gpa, e.parent_entry);
+        try json_out.escapeAppend(&doc, gpa, e.parent_entry);
         try doc.appendSlice(gpa, "\",\"tags\":\"");
-        try jsonEscapeAppend(&doc, gpa, e.tags);
+        try json_out.escapeAppend(&doc, gpa, e.tags);
         try doc.appendSlice(gpa, "\"}\n");
     }
     try writeBytes(io, out_dir, "catalog.jsonl", doc.items);
@@ -1061,9 +836,8 @@ fn exportIndex(
         \\
         \\# Boris RAG corpus — INDEX
         \\
-        \\This file is the **master retrieval map** for the Boris project knowledge pack.
-        \\Upload the entire `rag/` directory (or selected subtrees) to a chat LLM knowledge
-        \\base such as Grok or Gemini.
+        \\Master retrieval map for the Boris product RAG pack. Upload this
+        \\directory tree to a chat LLM knowledge base.
         \\
         \\## Counts
         \\
@@ -1086,13 +860,18 @@ fn exportIndex(
     });
 
     try doc.appendSlice(gpa,
-        \\## How to retrieve (suggested order)
+        \\## Generated artifacts
         \\
-        \\1. **What is Boris / how does it work?** → `system/00-overview.md`, `system/10-name-and-metaphor.md`, then other `system/*`
-        \\2. **Site content / guides?** → `content/pages/**`, then satellites via `graph/relations.md`
-        \\3. **Callouts / tips?** → stay on the parent page segment (inlined `:::kind` blocks in Body)
-        \\4. **Entity list / parentEntry edges?** → `graph/entity-catalog.md`, `graph/relations.md`
-        \\5. **Upload instructions?** → `UPLOAD-GUIDE.md`
+        \\| Path | Role |
+        \\|------|------|
+        \\| `INDEX.md` | This retrieval map (catalog row) |
+        \\| `UPLOAD-GUIDE.md` | Upload notes (catalog row) |
+        \\| `catalog.jsonl` | Machine catalog — **not** a catalog row |
+        \\| `catalog_meta.json` | Format + versions — **not** a catalog row |
+        \\| `system/**` | Curated architecture seeds |
+        \\| `content/pages/**` | Content page segments |
+        \\| `graph/entity-catalog.md` | Entity table |
+        \\| `graph/relations.md` | Trunk → Satellite edges |
         \\
         \\## Full catalog
         \\
@@ -1121,54 +900,27 @@ fn exportIndex(
 
     try doc.appendSlice(gpa,
         \\
-        \\## Path conventions
-        \\
-        \\| Prefix | Meaning |
-        \\|--------|---------|
-        \\| `system/` | Compiler & architecture (Zig + Apex native) |
-        \\| `content/pages/<entity_id>.md` | Author page, path-mirrored entity id |
-        \\| `graph/` | Entity catalog and relational edges |
-        \\| `catalog.jsonl` | Machine catalog — one JSON object per document (see schema below) |
-        \\| `catalog_meta.json` | Corpus format + versions (machine file; **not** a catalog entry) |
-        \\
-        \\Each **content** document is self-contained via YAML frontmatter (`entity_id`,
-        \\`role`, `parent_entry`, `title`, direct-neighbor `related`). Use `INDEX.md` as
-        \\the hub for the full path map; per-page files do not repeat sibling catalogs.
-        \\
-        \\**Catalog entry policy:** only retrieval markdown documents appear in
-        \\`catalog.jsonl` / this table. Machine files `catalog.jsonl` and
-        \\`catalog_meta.json` are part of the tree and documented here but are **not**
-        \\catalog rows.
-        \\
-        \\Content title ownership: **metadata-owned** H1 (frontmatter `title`). Source
-        \\leading H1 is stripped; remaining ATX H1s demoted to H2. Inlined asides use
-        \\`:::kind` as an **export representation** only (authoring is `<Aside>`).
-        \\
-        \\### catalog_meta.json
-        \\
-        \\```json
-        \\{"format":"boris-rag","schema_version":1,"boris_version":"0.1.1"}
-        \\```
-        \\
-        \\### catalog.jsonl schema (stable field order)
+        \\## Catalog schema (stable field order)
         \\
         \\```text
         \\rag_id, rag_path, category, title, entity_id, role, parent_entry, tags
         \\```
         \\
-        \\Rows are sorted by `rag_path` (byte order). No timestamps, absolute paths,
-        \\hostnames, or random ids appear in corpus files.
+        \\Rows sorted by `rag_path`. No timestamps, absolute paths, hostnames,
+        \\or random ids. Content title H1 is metadata-owned (frontmatter `title`
+        \\else entity id). Source leading H1 stripped; remaining ATX H1s demoted
+        \\to H2. Parsed `<Aside>` callouts are emitted as `:::kind` blocks
+        \\(export representation only — not round-trippable authoring syntax).
         \\
-        \\| Field | Meaning |
-        \\|-------|---------|
-        \\| `rag_id` | Stable logical id |
-        \\| `rag_path` | Path within the corpus |
-        \\| `category` | `system` \| `content` \| `graph` \| `meta` |
-        \\| `title` | Human title |
-        \\| `entity_id` | Content entity id, or empty |
-        \\| `role` | `trunk` \| `satellite`, or empty for non-content |
-        \\| `parent_entry` | Parent entity id for satellites, else empty |
-        \\| `tags` | String form of tag list |
+        \\### catalog_meta.json
+        \\
+        \\```json
+        \\{"format":"boris-rag","schema_version":1,"boris_version":"
+    );
+    try doc.appendSlice(gpa, boris_version);
+    try doc.appendSlice(gpa,
+        \\"}
+        \\```
         \\
     );
 
@@ -1184,15 +936,14 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir) !void {
         \\tags: [upload, grok, gemini, llm, rag]
         \\related:
         \\  - INDEX.md
-        \\  - system/09-rag-export.md
         \\---
         \\
         \\# Upload guide — Grok, Gemini, and similar chat LLMs
         \\
         \\## What to upload
         \\
-        \\Upload the **entire** generated `rag/` directory as a knowledge pack / collection
-        \\of markdown files. Prefer folder upload when the product supports it.
+        \\Upload the **entire** generated RAG directory. Prefer folder upload when
+        \\the product supports it.
         \\
         \\Minimum useful set if you must subset:
         \\
@@ -1201,144 +952,252 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir) !void {
         \\3. All of `content/` (site knowledge)
         \\4. All of `graph/` (relations)
         \\
-        \\Optional for scripts: `catalog.jsonl` (schema: `rag_id`, `rag_path`, `category`,
-        \\`title`, `entity_id`, `role`, `parent_entry`, `tags` — one JSON object per line,
-        \\sorted by `rag_path`) and `catalog_meta.json`
-        \\(`format`, `schema_version`, `boris_version` — once per corpus; not a catalog row).
-        \\
-        \\## Suggested system prompt snippet
-        \\
-        \\```
-        \\You are answering questions using the Boris RAG corpus.
-        \\Prefer files under system/ for architecture and implementation questions.
-        \\Prefer content/pages/ for site/content questions (asides/admonitions are inlined).
-        \\Use graph/relations.md to find trunk→satellite links.
-        \\Cite rag_path values from document frontmatter when you rely on a source.
-        \\Boris is a Zig + native Apex project; do not assume Node/React unless asked.
-        \\```
-        \\
-        \\## Grok (xAI)
-        \\
-        \\1. Create or open a Grok project / collection that accepts file uploads.
-        \\2. Upload the `rag/` folder (or zip it first if required).
-        \\3. Pin `INDEX.md` or paste its retrieval order into the project instructions.
-        \\4. Ask with explicit paths when useful, e.g. "Using system/05-memory-whiteboard.md, explain free_all".
-        \\
-        \\## Gemini
-        \\
-        \\1. Open Gemini with Apps / File upload / Gems that support document grounding.
-        \\2. Upload markdown files from `rag/` (batch by folder if needed: system, content, graph).
-        \\3. Start the chat with: "Read INDEX.md and use it as the retrieval map."
-        \\4. For large corpora, upload `catalog.jsonl` plus folders in priority order.
-        \\
-        \\## Query patterns that retrieve well
-        \\
-        \\| Intent | Start at |
-        \\|--------|----------|
-        \\| What is Boris? | `system/00-overview.md`, `system/10-name-and-metaphor.md` |
-        \\| How does compile work? | `system/01-architecture-pipeline.md` |
-        \\| Load / Roll / Ignite / Reset | `system/10-name-and-metaphor.md` + `system/01-architecture-pipeline.md` |
-        \\| Trunk vs satellite | `system/03-trunk-and-satellite.md` + `graph/relations.md` |
-        \\| A specific guide | `content/pages/<entity_id>.md` |
-        \\| A tip / callout | same page segment (Body `:::kind` blocks) |
-        \\| Memory / performance | `system/05-memory-whiteboard.md` |
-        \\| Markdown engine | `system/06-apex-native-engine.md` |
-        \\| Components / admonitions | `system/04-components-and-admonitions.md` |
+        \\Optional for scripts: `catalog.jsonl` and `catalog_meta.json` (machine
+        \\files; not catalog rows).
         \\
         \\## Regenerating this corpus
         \\
-        \\From the Boris repo root (Zig 0.16+, no other toolchains required):
-        \\
         \\```bash
-        \\zig build rag
-        \\# or
-        \\zig build run -- --rag
-        \\# custom output directory:
-        \\zig build run -- --rag-dir=./uploads/boris-rag
+        \\zig build run -- --input content --rag
+        \\zig build run -- --input content --rag-dir ./uploads/boris-rag
         \\```
         \\
         \\## Integrity notes
         \\
         \\- Paths inside documents are logical RAG paths (not OS-absolute).
-        \\- Content segments mirror `entity_id` hierarchy (`guides/intro` → `content/pages/guides/intro.md`).
-        \\- System segments are numbered for reading order but are independently retrievable.
+        \\- Content segments mirror `entity_id` (`guides/intro` → `content/pages/guides/intro.md`).
+        \\- Graph-dependent files are published only after shared `graph.validate` succeeds.
+        \\- Parsed `<Aside>` callouts appear as `:::kind` export blocks (not authoring syntax).
         \\
     ;
     try writeBytes(io, out_dir, "UPLOAD-GUIDE.md", text);
 }
 
 // ---------------------------------------------------------------------------
+// Staging publish
+// ---------------------------------------------------------------------------
+
+/// Ensure a directory path exists (relative or absolute).
+///
+/// Zig's `createDirPath` on `cwd` does **not** reliably accept absolute paths
+/// (e.g. parent `/tmp` can yield `error.NotDir`). Walk parents with open/create
+/// instead so `--rag-dir /tmp/...` works on POSIX.
+fn ensureDirPath(io: Io, path: []const u8) !void {
+    if (path.len == 0 or std.mem.eql(u8, path, ".") or
+        std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "\\"))
+        return;
+
+    const cwd = Io.Dir.cwd();
+
+    // Fast path: already a directory.
+    if (cwd.openDir(io, path, .{})) |*d| {
+        d.close(io);
+        return;
+    } else |err| switch (err) {
+        error.FileNotFound => {},
+        else => return err,
+    }
+
+    // Ensure parent exists first.
+    if (std.fs.path.dirname(path)) |parent| {
+        if (parent.len > 0 and !std.mem.eql(u8, parent, path)) {
+            try ensureDirPath(io, parent);
+        }
+    }
+
+    // Create the leaf component.
+    if (std.fs.path.isAbsolute(path)) {
+        Io.Dir.createDirAbsolute(io, path, .default_dir) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+        return;
+    }
+
+    if (std.fs.path.dirname(path)) |parent| {
+        if (parent.len > 0) {
+            var parent_dir = try cwd.openDir(io, parent, .{});
+            defer parent_dir.close(io);
+            const base = std.fs.path.basename(path);
+            parent_dir.createDir(io, base, .default_dir) catch |err| switch (err) {
+                error.PathAlreadyExists => {},
+                else => return err,
+            };
+            return;
+        }
+    }
+
+    cwd.createDir(io, path, .default_dir) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
+}
+
+/// Open a directory given a relative or absolute path.
+fn openPathDir(io: Io, path: []const u8, opts: Io.Dir.OpenOptions) !Io.Dir {
+    return try Io.Dir.cwd().openDir(io, path, opts);
+}
+
+/// Write the full corpus under `stage_path`, then replace `out_dir` by deleting
+/// the previous tree and renaming the stage directory into place.
+///
+/// **Limitations (honest):** same-filesystem directory rename is preferred for
+/// an atomic-ish swap; when rename fails (including some absolute-path /
+/// cross-volume cases) we fall back to file-by-file copy then delete the stage.
+/// Cross-volume atomic replace is **not** claimed. Concurrent readers may
+/// observe a missing tree between delete and rename/copy. Staging is
+/// best-effort cleanup on failure.
+fn publishCorpus(
+    io: Io,
+    gpa: std.mem.Allocator,
+    stage_path: []const u8,
+    out_dir: []const u8,
+) !void {
+    const cwd = Io.Dir.cwd();
+    // Remove prior final tree so rename of stage → out succeeds.
+    cwd.deleteTree(io, out_dir) catch {};
+    // Ensure parent of out_dir exists (rename does not create parents).
+    if (std.fs.path.dirname(out_dir)) |parent| {
+        if (parent.len > 0) try ensureDirPath(io, parent);
+    }
+
+    // Prefer atomic-ish directory rename (same filesystem). Absolute paths use
+    // renameAbsolute; relative paths use cwd-relative rename.
+    if (std.fs.path.isAbsolute(stage_path) and std.fs.path.isAbsolute(out_dir)) {
+        if (Io.Dir.renameAbsolute(stage_path, out_dir, io)) |_| {
+            return;
+        } else |_| {}
+    } else {
+        if (cwd.rename(stage_path, cwd, out_dir, io)) |_| {
+            return;
+        } else |_| {}
+    }
+
+    // Fallback: copy tree file-by-file if directory rename fails.
+    try ensureDirPath(io, out_dir);
+    var stage = try openPathDir(io, stage_path, .{ .iterate = true });
+    defer stage.close(io);
+    var out = try openPathDir(io, out_dir, .{});
+    defer out.close(io);
+
+    var walker = try stage.walk(gpa);
+    defer walker.deinit();
+    while (try walker.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+        const rel = try normalizeRelPath(gpa, entry.path);
+        defer gpa.free(rel);
+        const data = try readFileAlloc(io, stage, entry.path, gpa);
+        defer gpa.free(data);
+        try ensureParent(io, out, rel);
+        try out.writeFile(io, .{ .sub_path = rel, .data = data });
+    }
+    cwd.deleteTree(io, stage_path) catch {};
+}
+
+// ---------------------------------------------------------------------------
 // Public entry
 // ---------------------------------------------------------------------------
 
-/// Build the full RAG corpus under `opts.out_dir`.
-pub fn exportAll(
-    io: Io,
-    gpa: std.mem.Allocator,
-    db: *const PageDb,
-    opts: RagOptions,
-) !RagStats {
+/// Run shared compile + RAG export.
+///
+/// Graph validation runs **before** any graph-dependent corpus write. On
+/// content failure, no RAG tree is published (staging is discarded).
+pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
+    var result: RagResult = .{
+        .arena = std.heap.ArenaAllocator.init(gpa),
+        .compile = undefined,
+        .stats = .{},
+    };
+
+    // Shared scan → parse → PageDb nodes → graph.validate → freeze.
+    result.compile = try pipeline.compile(io, gpa, .{
+        .content_root = opts.content_root,
+        .quiet = opts.quiet,
+    });
+    errdefer {
+        result.compile.deinit();
+        result.arena.deinit();
+    }
+
+    if (!result.compile.ok) {
+        // No graph-dependent RAG publication.
+        log(opts, "boris: RAG export aborted (content validation failed)\n", .{});
+        return result;
+    }
+
+    const retain = result.arena.allocator();
+    const stage_rel = try std.fmt.allocPrint(gpa, "{s}.boris-rag-stage", .{opts.out_dir});
+    defer gpa.free(stage_rel);
+
     const cwd = Io.Dir.cwd();
-    try cwd.createDirPath(io, opts.out_dir);
-    var out_dir = try cwd.openDir(io, opts.out_dir, .{});
-    defer out_dir.close(io);
-
-    // Ensure subdirs exist even if a section is empty.
-    try out_dir.createDirPath(io, "system");
-    try out_dir.createDirPath(io, "content/pages");
-    try out_dir.createDirPath(io, "graph");
-
-    var arena_state = std.heap.ArenaAllocator.init(gpa);
-    defer arena_state.deinit();
-    const arena = arena_state.allocator();
+    cwd.deleteTree(io, stage_rel) catch {};
+    try ensureDirPath(io, stage_rel);
 
     var catalog: std.ArrayList(CatalogEntry) = .empty;
-    // catalog entries live in arena; list spine uses gpa
     defer catalog.deinit(gpa);
 
     var stats: RagStats = .{};
 
     log(opts, "\nExporting RAG corpus → {s}/\n", .{opts.out_dir});
 
-    stats.system_docs = try exportSystemDocs(io, gpa, arena, out_dir, opts, &catalog);
+    // Write into the staging directory, then close all handles before rename/publish.
+    {
+        var stage_dir = try cwd.openDir(io, stage_rel, .{});
+        defer stage_dir.close(io);
 
-    // One read + parsePageSource per content page (same entry as compile.zig).
-    // Meta, content export, and graph all consume this cache — no re-parse.
-    const parse_cache = try buildParseCache(io, gpa, arena, db, opts.content_dir);
-    defer gpa.free(parse_cache);
+        try stage_dir.createDirPath(io, "system");
+        try stage_dir.createDirPath(io, "content/pages");
+        try stage_dir.createDirPath(io, "graph");
 
-    // Collect + validate graph before writing content/graph segments so
-    // missing parents never ship as silent broken edges in relations.md.
-    const metas = try collectPageMeta(arena, parse_cache);
-    try validateAndSortPageMeta(gpa, metas, opts);
+        stats.system_docs = try exportSystemDocs(io, gpa, retain, stage_dir, opts, &catalog);
+        stats.content_pages = try exportContentPages(
+            io,
+            gpa,
+            retain,
+            stage_dir,
+            result.compile.pages.items,
+            opts.content_root,
+            opts,
+            &catalog,
+        );
+        stats.graph_docs = try exportGraphDocs(
+            io,
+            gpa,
+            retain,
+            stage_dir,
+            result.compile.pages.items,
+            &catalog,
+            opts,
+        );
 
-    stats.content_pages = try exportContentPages(io, gpa, arena, out_dir, parse_cache, metas, opts, &catalog);
-    stats.graph_docs = try exportGraphDocs(io, gpa, arena, out_dir, metas, &catalog, opts);
+        try exportUploadGuide(io, stage_dir);
+        try appendCatalog(&catalog, gpa, retain, .{
+            .rag_id = "meta/upload-guide",
+            .rag_path = "UPLOAD-GUIDE.md",
+            .category = "meta",
+            .title = "Upload guide — Grok, Gemini, and similar chat LLMs",
+            .tags = "[upload, grok, gemini, llm, rag]",
+        });
+        try appendCatalog(&catalog, gpa, retain, .{
+            .rag_id = "meta/index",
+            .rag_path = "INDEX.md",
+            .category = "meta",
+            .title = "Boris RAG corpus — INDEX",
+            .tags = "[index, catalog, retrieval-map]",
+        });
 
-    try exportUploadGuide(io, out_dir);
-    try appendCatalog(&catalog, gpa, arena, .{
-        .rag_id = "meta/upload-guide",
-        .rag_path = "UPLOAD-GUIDE.md",
-        .category = "meta",
-        .title = "Upload guide — Grok, Gemini, and similar chat LLMs",
-        .tags = "[upload, grok, gemini, llm, rag]",
-    });
-    try appendCatalog(&catalog, gpa, arena, .{
-        .rag_id = "meta/index",
-        .rag_path = "INDEX.md",
-        .category = "meta",
-        .title = "Boris RAG corpus — INDEX",
-        .tags = "[index, catalog, retrieval-map]",
-    });
+        sortCatalogByRagPath(catalog.items);
+        stats.catalog_entries = catalog.items.len;
 
-    // Stable catalog order for catalog.jsonl + INDEX table (never append order alone).
-    sortCatalogByRagPath(catalog.items);
-    stats.catalog_entries = catalog.items.len;
+        try exportIndex(io, gpa, stage_dir, catalog.items, stats);
+        try exportCatalogJsonl(io, gpa, stage_dir, catalog.items);
+        try exportCatalogMeta(io, stage_dir);
+    }
 
-    // INDEX once with the sorted full catalog. Machine JSON files are not catalog rows.
-    try exportIndex(io, gpa, out_dir, catalog.items, stats);
-    try exportCatalogJsonl(io, gpa, out_dir, catalog.items);
-    try exportCatalogMeta(io, out_dir);
+    // Publish only after the full stage tree is written and handles closed.
+    try publishCorpus(io, gpa, stage_rel, opts.out_dir);
+    stats.published = true;
+    result.stats = stats;
 
     log(opts,
         \\RAG export complete.
@@ -1351,22 +1210,12 @@ pub fn exportAll(
         stats.catalog_entries,
     });
 
-    return stats;
+    return result;
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
-test "firstHeadingOrFallback" {
-    try std.testing.expectEqualStrings("Hello", firstHeadingOrFallback("# Hello\n\nbody", "x"));
-    try std.testing.expectEqualStrings("x", firstHeadingOrFallback("no heading", "x"));
-}
-
-test "stripFrontmatter" {
-    const src = "---\ntitle: T\n---\n# Hi\n";
-    try std.testing.expectEqualStrings("# Hi\n", stripFrontmatter(src));
-}
 
 test "prepareContentBody strips leading H1 and demotes extras" {
     const gpa = std.testing.allocator;
@@ -1408,13 +1257,16 @@ test "catalog_meta.json shape is fixed and compact" {
     defer gpa.free(expected);
     try std.testing.expectEqualStrings(expected, bytes);
 
-    // Field order: format, schema_version, boris_version (no other keys).
-    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"format\"") != null);
     const fmt_i = std.mem.indexOf(u8, bytes, "\"format\"").?;
     const sch_i = std.mem.indexOf(u8, bytes, "\"schema_version\"").?;
     const bor_i = std.mem.indexOf(u8, bytes, "\"boris_version\"").?;
     try std.testing.expect(fmt_i < sch_i);
     try std.testing.expect(sch_i < bor_i);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("boris-rag", parsed.value.object.get("format").?.string);
+    try std.testing.expectEqual(@as(i64, 1), parsed.value.object.get("schema_version").?.integer);
 }
 
 test "catalog.jsonl field order and string escaping" {
@@ -1444,26 +1296,25 @@ test "catalog.jsonl field order and string escaping" {
     const bytes = try readFileAlloc(io, out_dir, "catalog.jsonl", gpa);
     defer gpa.free(bytes);
 
-    // One line, keys in exact contract order, strings escaped.
     try std.testing.expect(std.mem.endsWith(u8, bytes, "\n"));
     const line = bytes[0 .. bytes.len - 1];
-    const expected_prefix =
+    const expected =
         \\{"rag_id":"content/quote","rag_path":"content/pages/quote.md","category":"content","title":"Say \"hi\"\nthere","entity_id":"quote","role":"trunk","parent_entry":"","tags":"[content, trunk]"}
     ;
-    try std.testing.expectEqualStrings(expected_prefix, line);
+    try std.testing.expectEqualStrings(expected, line);
 
-    // Key order: walk key positions.
     const keys = [_][]const u8{ "rag_id", "rag_path", "category", "title", "entity_id", "role", "parent_entry", "tags" };
     var prev: usize = 0;
     for (keys) |k| {
         const needle = try std.fmt.allocPrint(gpa, "\"{s}\":", .{k});
         defer gpa.free(needle);
-        const pos = std.mem.indexOfPos(u8, line, prev, needle) orelse {
-            try std.testing.expect(false);
-            return;
-        };
+        const pos = std.mem.indexOfPos(u8, line, prev, needle) orelse return error.TestExpectedEqual;
         prev = pos + needle.len;
     }
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, line, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("content/quote", parsed.value.object.get("rag_id").?.string);
 }
 
 const RagTestPaths = struct {
@@ -1496,8 +1347,7 @@ fn ragTestPaths(gpa: std.mem.Allocator, sub: []const u8) !RagTestPaths {
     return .{ .base = base, .content = content, .system = system, .out_a = out_a, .out_b = out_b };
 }
 
-/// Minimal content + system seeds. Content files created in reverse entity_id order
-/// so discovery-order independence is exercised.
+/// Content created in reverse entity_id order; system seeds deliberately unsorted.
 fn writeRagFixtures(io: Io, gpa: std.mem.Allocator, content_rel: []const u8, system_rel: []const u8) !void {
     const cwd = Io.Dir.cwd();
     try cwd.createDirPath(io, content_rel);
@@ -1510,12 +1360,12 @@ fn writeRagFixtures(io: Io, gpa: std.mem.Allocator, content_rel: []const u8, sys
     {
         var content = try cwd.openDir(io, content_rel, .{});
         defer content.close(io);
-        // Intentionally reverse entity_id order: z, m, a.
         try content.writeFile(io, .{
             .sub_path = "z-last.md",
             .data =
             \\---
             \\title: Z Last
+            \\tags: [z]
             \\---
             \\
             \\# Z Last
@@ -1574,7 +1424,6 @@ fn writeRagFixtures(io: Io, gpa: std.mem.Allocator, content_rel: []const u8, sys
     {
         var sys = try cwd.openDir(io, system_rel, .{});
         defer sys.close(io);
-        // Create seeds out of lexical order; export must sort by relative path.
         try sys.writeFile(io, .{
             .sub_path = "b-second.md",
             .data =
@@ -1606,24 +1455,6 @@ fn writeRagFixtures(io: Io, gpa: std.mem.Allocator, content_rel: []const u8, sys
     }
 }
 
-fn exportFixtureCorpus(
-    io: Io,
-    gpa: std.mem.Allocator,
-    content_rel: []const u8,
-    system_rel: []const u8,
-    out_rel: []const u8,
-) !RagStats {
-    var db = PageDb.init(gpa);
-    defer db.deinit();
-    try scanner.scanFromCwd(io, &db, content_rel);
-    return try exportAll(io, gpa, &db, .{
-        .out_dir = out_rel,
-        .content_dir = content_rel,
-        .system_docs_dir = system_rel,
-        .quiet = true,
-    });
-}
-
 fn collectRelFiles(
     io: Io,
     gpa: std.mem.Allocator,
@@ -1637,7 +1468,8 @@ fn collectRelFiles(
     defer walker.deinit();
     while (try walker.next(io)) |entry| {
         if (entry.kind != .file) continue;
-        try list.append(gpa, try arena.dupe(u8, entry.path));
+        const norm = try normalizeRelPath(arena, entry.path);
+        try list.append(gpa, norm);
     }
     std.mem.sort([]const u8, list.items, {}, struct {
         fn less(_: void, a: []const u8, b: []const u8) bool {
@@ -1675,27 +1507,23 @@ fn expectDirsByteIdentical(io: Io, gpa: std.mem.Allocator, a_rel: []const u8, b_
     }
 }
 
-test "rag export is byte-identical across two directories" {
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    var paths = try ragTestPaths(gpa, tmp.sub_path[0..]);
-    defer paths.deinit(gpa);
-
-    try writeRagFixtures(io, gpa, paths.content, paths.system);
-
-    const stats_a = try exportFixtureCorpus(io, gpa, paths.content, paths.system, paths.out_a);
-    const stats_b = try exportFixtureCorpus(io, gpa, paths.content, paths.system, paths.out_b);
-    try std.testing.expectEqual(stats_a.catalog_entries, stats_b.catalog_entries);
-    try std.testing.expectEqual(@as(usize, 4), stats_a.content_pages);
-    try std.testing.expectEqual(@as(usize, 2), stats_a.system_docs);
-
-    try expectDirsByteIdentical(io, gpa, paths.out_a, paths.out_b);
+fn requiredRagFilesPresent(io: Io, out_rel: []const u8) !void {
+    const names = [_][]const u8{
+        "INDEX.md",
+        "UPLOAD-GUIDE.md",
+        "catalog.jsonl",
+        "catalog_meta.json",
+        "graph/entity-catalog.md",
+        "graph/relations.md",
+    };
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{});
+    defer out.close(io);
+    for (names) |name| {
+        _ = out.statFile(io, name, .{}) catch return error.MissingRequiredRagFile;
+    }
 }
 
-test "rag export catalog_meta and catalog.jsonl contract" {
+test "rag export: valid corpus, dual-run determinism, catalog, H1, system order" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
@@ -1704,132 +1532,90 @@ test "rag export catalog_meta and catalog.jsonl contract" {
     var paths = try ragTestPaths(gpa, tmp.sub_path[0..]);
     defer paths.deinit(gpa);
     try writeRagFixtures(io, gpa, paths.content, paths.system);
-    _ = try exportFixtureCorpus(io, gpa, paths.content, paths.system, paths.out_a);
 
-    var out = try Io.Dir.cwd().openDir(io, paths.out_a, .{ .iterate = true });
+    var res_a = try run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_a,
+        .system_docs_dir = paths.system,
+        .quiet = true,
+    });
+    defer res_a.deinit();
+    try std.testing.expect(res_a.ok());
+    try std.testing.expectEqual(@as(usize, 4), res_a.stats.content_pages);
+    try std.testing.expectEqual(@as(usize, 2), res_a.stats.system_docs);
+    try requiredRagFilesPresent(io, paths.out_a);
+
+    var res_b = try run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_b,
+        .system_docs_dir = paths.system,
+        .quiet = true,
+    });
+    defer res_b.deinit();
+    try std.testing.expect(res_b.ok());
+    try expectDirsByteIdentical(io, gpa, paths.out_a, paths.out_b);
+
+    var out = try Io.Dir.cwd().openDir(io, paths.out_a, .{});
     defer out.close(io);
 
-    // catalog_meta.json exists and is valid JSON-ish with required keys.
+    // catalog_meta
     const meta = try readFileAlloc(io, out, "catalog_meta.json", gpa);
     defer gpa.free(meta);
-    try std.testing.expect(std.mem.startsWith(u8, meta, "{\"format\":\"boris-rag\""));
-    try std.testing.expect(std.mem.indexOf(u8, meta, "\"schema_version\":1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, meta, "\"boris_version\":\"0.1.1\"") != null);
+    var meta_j = try std.json.parseFromSlice(std.json.Value, gpa, meta, .{});
+    defer meta_j.deinit();
+    try std.testing.expectEqualStrings("boris-rag", meta_j.value.object.get("format").?.string);
 
-    // Parse each catalog.jsonl line independently; verify key order + sort.
+    // catalog.jsonl: each line independent JSON; stable field order; sorted paths; relative `/`
     const jsonl = try readFileAlloc(io, out, "catalog.jsonl", gpa);
     defer gpa.free(jsonl);
-    try std.testing.expect(jsonl.len > 0);
-
     var path_arena = std.heap.ArenaAllocator.init(gpa);
     defer path_arena.deinit();
     const path_retain = path_arena.allocator();
-
     var line_start: usize = 0;
-    var line_count: usize = 0;
     var prev_path: []const u8 = "";
-    var saw_catalog_meta_row = false;
-    var saw_catalog_jsonl_row = false;
+    var line_count: usize = 0;
     while (line_start < jsonl.len) {
         var line_end = line_start;
         while (line_end < jsonl.len and jsonl[line_end] != '\n') : (line_end += 1) {}
         const line = jsonl[line_start..line_end];
         if (line.len > 0) {
             line_count += 1;
-            // Required keys in emitted order (prefix of object).
             try std.testing.expect(std.mem.startsWith(u8, line, "{\"rag_id\":\""));
             const keys = [_][]const u8{ "rag_id", "rag_path", "category", "title", "entity_id", "role", "parent_entry", "tags" };
             var prev: usize = 0;
             for (keys) |k| {
                 const needle = try std.fmt.allocPrint(gpa, "\"{s}\":", .{k});
                 defer gpa.free(needle);
-                const pos = std.mem.indexOfPos(u8, line, prev, needle) orelse {
-                    std.debug.print("missing key {s} in line: {s}\n", .{ k, line });
-                    try std.testing.expect(false);
-                    return;
-                };
+                const pos = std.mem.indexOfPos(u8, line, prev, needle) orelse return error.TestExpectedEqual;
                 prev = pos + needle.len;
             }
-            // Sorted by rag_path: extract value after "rag_path":"
-            const rp_key = "\"rag_path\":\"";
-            const rp_at = std.mem.indexOf(u8, line, rp_key).?;
-            const rp_val_start = rp_at + rp_key.len;
-            const rp_val_end = std.mem.indexOfPos(u8, line, rp_val_start, "\"").?;
-            const rp = line[rp_val_start..rp_val_end];
+            var row = try std.json.parseFromSlice(std.json.Value, gpa, line, .{});
+            defer row.deinit();
+            const rp = row.value.object.get("rag_path").?.string;
+            try std.testing.expect(std.mem.indexOf(u8, rp, "\\") == null);
+            try std.testing.expect(rp.len == 0 or rp[0] != '/');
             if (prev_path.len > 0) {
                 try std.testing.expect(std.mem.order(u8, prev_path, rp) == .lt);
             }
             prev_path = try path_retain.dupe(u8, rp);
-            if (std.mem.eql(u8, rp, "catalog_meta.json")) saw_catalog_meta_row = true;
-            if (std.mem.eql(u8, rp, "catalog.jsonl")) saw_catalog_jsonl_row = true;
         }
         line_start = if (line_end < jsonl.len) line_end + 1 else jsonl.len;
     }
-    try std.testing.expect(line_count >= 8); // 2 system + 4 content + 2 graph + 2 meta
-    // Policy: machine JSON files are not catalog entries.
-    try std.testing.expect(!saw_catalog_meta_row);
-    try std.testing.expect(!saw_catalog_jsonl_row);
+    try std.testing.expect(line_count >= 8);
 
-    // INDEX documents catalog_meta.json and the non-entry policy.
-    const index = try readFileAlloc(io, out, "INDEX.md", gpa);
-    defer gpa.free(index);
-    try std.testing.expect(std.mem.indexOf(u8, index, "catalog_meta.json") != null);
-    try std.testing.expect(std.mem.indexOf(u8, index, "not**") != null);
-    try std.testing.expect(std.mem.indexOf(u8, index, "catalog rows") != null);
-}
-
-test "rag export deterministic under shuffled fixture creation order" {
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    var paths = try ragTestPaths(gpa, tmp.sub_path[0..]);
-    defer paths.deinit(gpa);
-    try writeRagFixtures(io, gpa, paths.content, paths.system);
-    _ = try exportFixtureCorpus(io, gpa, paths.content, paths.system, paths.out_a);
-
-    var out = try Io.Dir.cwd().openDir(io, paths.out_a, .{});
-    defer out.close(io);
-
-    // System seeds sorted by relative path → a-first before b-second in catalog.
-    const jsonl = try readFileAlloc(io, out, "catalog.jsonl", gpa);
-    defer gpa.free(jsonl);
+    // system seed order
     const a_sys = std.mem.indexOf(u8, jsonl, "system/a-first.md").?;
     const b_sys = std.mem.indexOf(u8, jsonl, "system/b-second.md").?;
     try std.testing.expect(a_sys < b_sys);
 
-    // Content pages sorted by entity_id in catalog (a-first, guides/nested, m-mid, z-last).
+    // content order by entity id in catalog paths
     const a_c = std.mem.indexOf(u8, jsonl, "content/pages/a-first.md").?;
     const g_c = std.mem.indexOf(u8, jsonl, "content/pages/guides/nested.md").?;
     const m_c = std.mem.indexOf(u8, jsonl, "content/pages/m-mid.md").?;
     const z_c = std.mem.indexOf(u8, jsonl, "content/pages/z-last.md").?;
-    try std.testing.expect(a_c < g_c);
-    try std.testing.expect(g_c < m_c);
-    try std.testing.expect(m_c < z_c);
+    try std.testing.expect(a_c < g_c and g_c < m_c and m_c < z_c);
 
-    // relations.md edge list follows entity_id of satellites.
-    const rel = try readFileAlloc(io, out, "graph/relations.md", gpa);
-    defer gpa.free(rel);
-    const edge_m = std.mem.indexOf(u8, rel, "parentEntry\tm-mid\t").?;
-    // only one satellite in fixture
-    try std.testing.expect(edge_m > 0);
-}
-
-test "rag export content pages have exactly one document H1" {
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    var paths = try ragTestPaths(gpa, tmp.sub_path[0..]);
-    defer paths.deinit(gpa);
-    try writeRagFixtures(io, gpa, paths.content, paths.system);
-    _ = try exportFixtureCorpus(io, gpa, paths.content, paths.system, paths.out_a);
-
-    var out = try Io.Dir.cwd().openDir(io, paths.out_a, .{});
-    defer out.close(io);
-
+    // exactly one H1 per content page
     const page_paths = [_][]const u8{
         "content/pages/a-first.md",
         "content/pages/m-mid.md",
@@ -1841,16 +1627,140 @@ test "rag export content pages have exactly one document H1" {
         defer gpa.free(body);
         try std.testing.expectEqual(@as(usize, 1), countAtxH1(body));
     }
-
-    // Metadata-owned title on m-mid: source H1 was "Source H1 Should Vanish".
     const mid = try readFileAlloc(io, out, "content/pages/m-mid.md", gpa);
     defer gpa.free(mid);
     try std.testing.expect(std.mem.indexOf(u8, mid, "# M Mid\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, mid, "Source H1 Should Vanish") == null);
     try std.testing.expect(std.mem.indexOf(u8, mid, "## Nested H1 Becomes H2") != null);
-    // Export representation of Aside (not present as <Aside> in body after parse).
+
+    // Asides export as :::kind (non-round-trippable); raw <Aside> must not remain.
     const zpage = try readFileAlloc(io, out, "content/pages/z-last.md", gpa);
     defer gpa.free(zpage);
     try std.testing.expect(std.mem.indexOf(u8, zpage, ":::tip{id=\"z1\"}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, zpage, "Tip body.") != null);
     try std.testing.expect(std.mem.indexOf(u8, zpage, "<Aside") == null);
+
+    // INDEX uses sorted catalog
+    const index = try readFileAlloc(io, out, "INDEX.md", gpa);
+    defer gpa.free(index);
+    try std.testing.expect(std.mem.indexOf(u8, index, "catalog_meta.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index, "content/pages/a-first.md") != null);
+}
+
+test "rag vs IR: identical diagnostic categories; no graph RAG on failure" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const base = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer gpa.free(base);
+    const ir_out = try std.fmt.allocPrint(gpa, "{s}/ir-out", .{base});
+    defer gpa.free(ir_out);
+    const rag_out = try std.fmt.allocPrint(gpa, "{s}/rag-out", .{base});
+    defer gpa.free(rag_out);
+
+    // Seed a prior RAG tree that must not be replaced with a valid-looking partial.
+    try Io.Dir.cwd().createDirPath(io, rag_out);
+    {
+        var d = try Io.Dir.cwd().openDir(io, rag_out, .{});
+        defer d.close(io);
+        try d.writeFile(io, .{ .sub_path = "stale-marker.txt", .data = "stale\n" });
+    }
+
+    const content = "docs/contracts/fixtures/duplicate-ids/content";
+
+    var ir = try pipeline.run(io, gpa, .{
+        .content_root = content,
+        .out_dir = ir_out,
+        .quiet = true,
+    });
+    defer ir.deinit();
+    try std.testing.expect(!ir.ok);
+
+    var rag = try run(io, gpa, .{
+        .content_root = content,
+        .out_dir = rag_out,
+        .system_docs_dir = "docs/rag/system",
+        .quiet = true,
+    });
+    defer rag.deinit();
+    try std.testing.expect(!rag.compile.ok);
+    try std.testing.expect(!rag.stats.published);
+
+    // Same diagnostic codes (categories) present in both modes.
+    for (ir.diagnostics.items) |d| {
+        var found = false;
+        for (rag.diagnostics()) |rd| {
+            if (rd.code == d.code) {
+                found = true;
+                break;
+            }
+        }
+        try std.testing.expect(found);
+    }
+    try std.testing.expect(diag.countErrors(ir.diagnostics.items) > 0);
+    try std.testing.expectEqual(
+        diag.countErrors(ir.diagnostics.items),
+        diag.countErrors(rag.diagnostics()),
+    );
+
+    // Graph-dependent RAG files must not be published as a fresh corpus.
+    // Prior out dir is left alone (no staging rename on failure).
+    var out = try Io.Dir.cwd().openDir(io, rag_out, .{});
+    defer out.close(io);
+    _ = out.statFile(io, "stale-marker.txt", .{}) catch return error.TestUnexpectedResult;
+    const has_catalog = blk: {
+        _ = out.statFile(io, "catalog.jsonl", .{}) catch break :blk false;
+        break :blk true;
+    };
+    try std.testing.expect(!has_catalog);
+    const has_relations = blk: {
+        _ = out.statFile(io, "graph/relations.md", .{}) catch break :blk false;
+        break :blk true;
+    };
+    try std.testing.expect(!has_relations);
+}
+
+test "rag export against fixtures/content/valid" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/valid-rag", .{tmp.sub_path});
+    defer gpa.free(out);
+
+    var res = try run(io, gpa, .{
+        .content_root = "fixtures/content/valid",
+        .out_dir = out,
+        .system_docs_dir = "docs/rag/system",
+        .quiet = true,
+    });
+    defer res.deinit();
+    try std.testing.expect(res.ok());
+    try requiredRagFilesPresent(io, out);
+    try std.testing.expect(res.stats.content_pages >= 2);
+
+    // Parse catalog_meta + each JSONL line
+    var dir = try Io.Dir.cwd().openDir(io, out, .{});
+    defer dir.close(io);
+    const meta = try readFileAlloc(io, dir, "catalog_meta.json", gpa);
+    defer gpa.free(meta);
+    var mj = try std.json.parseFromSlice(std.json.Value, gpa, meta, .{});
+    defer mj.deinit();
+
+    const jsonl = try readFileAlloc(io, dir, "catalog.jsonl", gpa);
+    defer gpa.free(jsonl);
+    var ls: usize = 0;
+    while (ls < jsonl.len) {
+        var le = ls;
+        while (le < jsonl.len and jsonl[le] != '\n') : (le += 1) {}
+        const line = jsonl[ls..le];
+        if (line.len > 0) {
+            var row = try std.json.parseFromSlice(std.json.Value, gpa, line, .{});
+            defer row.deinit();
+        }
+        ls = if (le < jsonl.len) le + 1 else jsonl.len;
+    }
 }

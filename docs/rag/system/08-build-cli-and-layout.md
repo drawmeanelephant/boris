@@ -19,12 +19,14 @@ related:
 - Executable artifact: `boris`
 - Steps:
   - `zig build` — compile/install
-  - `zig build run` — run with optional args after `--`
-  - `zig build rag` — RAG export convenience step (`--rag` plus forwarded args)
-  - `zig build test` — unit tests
+  - `zig build run -- …` — product CLI (IR default; `--rag` / `--rag-dir` for RAG)
+  - `zig build test` — unit + hardening + fuzz tests
+  - `zig build test-apex-hostile` / `zig build test-apex-sanitize` — Apex extras
+  - `zig build source-rag` — source-code pack tool (not product RAG)
 
-`zig build rag -- …` forwards arguments after `--` to the binary (in addition to
-the baked-in `--rag`).
+**Workshop analogy:** one foreman and one workbench.  
+**Invariant:** single-threaded product path; no worker pools or shared mutable
+graph state across threads.
 
 ## Layout contract
 

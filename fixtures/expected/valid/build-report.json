@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "0.1.0",
+  "ok": true,
+  "contentRoot": "fixtures/content/valid",
+  "outDir": "fixtures/expected/valid",
+  "pageCount": 4,
+  "errorCount": 0,
+  "diagnostics": []
+}

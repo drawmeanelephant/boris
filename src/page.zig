@@ -1,4 +1,4 @@
-//! Discovery metadata and parsed-document views (milestones 4–5).
+//! Discovery metadata, parsed-document views, and durable PageDb (m4–m6).
 //!
 //! ## Milestone 4 — discovery `Page`
 //!
@@ -10,13 +10,14 @@
 //! `FrontmatterView` / `Status` hold **parsed** fields as slices into the
 //! caller's source buffer (or closed enums). They are **not** owned by a
 //! long-lived retain allocator. Callers that need durable storage must dupe
-//! into PageDb later; see `parser.zig` ownership notes.
+//! into PageDb; see `parser.zig` ownership notes.
 //!
-//! ## Allocator ownership (discovery)
+//! ## Milestone 6 — PageDb (durable promoted metadata)
 //!
-//! All string fields on `Page` are owned by the caller's **long-lived retain
-//! allocator** (typically a build-session arena). The list spine is owned by a
-//! separate list allocator (often the same GPA used for temporary walk state).
+//! After parse, only durable fields are copied into a retain arena:
+//! entity_id, title, parent, source_path, output_path, status, tags,
+//! body_offset, kind. Parser slices into temporary file buffers must never
+//! be retained after that buffer is freed.
 
 const std = @import("std");
 const identity = @import("identity.zig");
@@ -153,6 +154,147 @@ pub fn sortPages(pages: []Page) void {
     std.mem.sort(Page, pages, {}, pageLessThan);
 }
 
+// ---------------------------------------------------------------------------
+// Durable PageDb (milestone 6)
+// ---------------------------------------------------------------------------
+
+/// Trunk / Satellite role after graph classification.
+pub const Role = enum {
+    trunk,
+    satellite,
+
+    pub fn name(self: Role) []const u8 {
+        return @tagName(self);
+    }
+};
+
+/// Durable page metadata retained for the compile session.
+///
+/// **All string fields are owned by the PageDb retain allocator.** Never store
+/// parser source-buffer slices here without first duplicating them.
+pub const DurablePage = struct {
+    /// Final entity id (path-derived or frontmatter `id:` override).
+    entity_id: []const u8,
+    title: ?[]const u8 = null,
+    parent: ?[]const u8 = null,
+    source_path: []const u8,
+    output_path: []const u8,
+    status: ?Status = null,
+    /// Retain-owned tag strings (may be empty slice).
+    tags: []const []const u8 = &.{},
+    kind: ContentKind = .md,
+    /// Byte offset of body start in the source file (not a live buffer).
+    body_offset: usize = 0,
+
+    // Graph fields — provisional until freeze; stable after freeze.
+    role: Role = .trunk,
+    index: u32 = 0,
+    parent_index: ?u32 = null,
+};
+
+/// Long-lived page database for one compile run.
+///
+/// - `list_gpa` owns the `ArrayList` spine.
+/// - `retain` (typically a build-session arena) owns every string on each page.
+pub const PageDb = struct {
+    list_gpa: std.mem.Allocator,
+    retain: std.mem.Allocator,
+    pages: std.ArrayList(DurablePage) = .empty,
+
+    pub fn init(list_gpa: std.mem.Allocator, retain: std.mem.Allocator) PageDb {
+        return .{
+            .list_gpa = list_gpa,
+            .retain = retain,
+            .pages = .empty,
+        };
+    }
+
+    pub fn deinit(self: *PageDb) void {
+        self.pages.deinit(self.list_gpa);
+        self.* = undefined;
+    }
+
+    pub fn append(self: *PageDb, page: DurablePage) !void {
+        try self.pages.append(self.list_gpa, page);
+    }
+
+    pub fn items(self: *const PageDb) []const DurablePage {
+        return self.pages.items;
+    }
+
+    pub fn itemsMut(self: *PageDb) []DurablePage {
+        return self.pages.items;
+    }
+
+    pub fn len(self: *const PageDb) usize {
+        return self.pages.items.len;
+    }
+
+    /// Duplicate a string into the retain arena.
+    pub fn dupe(self: *PageDb, s: []const u8) ![]u8 {
+        return try self.retain.dupe(u8, s);
+    }
+
+    /// Duplicate optional string (null stays null).
+    pub fn dupeOpt(self: *PageDb, s: ?[]const u8) !?[]const u8 {
+        if (s) |v| return try self.retain.dupe(u8, v);
+        return null;
+    }
+
+    /// Promote discovery + parsed frontmatter into a durable page.
+    ///
+    /// All string data is copied onto `retain`. Callers may free the source
+    /// buffer immediately after this returns.
+    ///
+    /// `path_entity_id` / `source_path` / `output_path` / `kind` come from
+    /// discovery (already retain-owned or duped by the caller). When the
+    /// caller passes discovery slices that already live on `retain`, they are
+    /// re-used without a second copy when equal-owner is not detectable — the
+    /// pipeline always re-dupes path strings that came from a separate scan
+    /// arena into the PageDb retain arena for a single owner.
+    pub fn promote(
+        self: *PageDb,
+        discovery: Page,
+        /// Final entity id (after optional frontmatter override).
+        entity_id: []const u8,
+        meta: FrontmatterView,
+        body_offset: usize,
+    ) !void {
+        const tags_src = meta.tagsSlice();
+        var tags_owned: []const []const u8 = &.{};
+        if (tags_src.len > 0) {
+            const buf = try self.retain.alloc([]const u8, tags_src.len);
+            for (tags_src, 0..) |t, i| {
+                buf[i] = try self.retain.dupe(u8, t);
+            }
+            tags_owned = buf;
+        }
+
+        // Recompute output path from final entity id when id was overridden.
+        const output_path = if (std.mem.eql(u8, entity_id, discovery.entity_id))
+            try self.retain.dupe(u8, discovery.output_path)
+        else
+            try identity.safeOutputRelativePath(self.retain, entity_id);
+
+        try self.append(.{
+            .entity_id = try self.retain.dupe(u8, entity_id),
+            .title = try self.dupeOpt(meta.title),
+            .parent = try self.dupeOpt(meta.parent),
+            .source_path = try self.retain.dupe(u8, discovery.source_path),
+            .output_path = output_path,
+            .status = meta.status,
+            .tags = tags_owned,
+            .kind = discovery.kind,
+            .body_offset = body_offset,
+            .role = if (meta.parent != null) .satellite else .trunk,
+        });
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 test "pageLessThan sort key entity_id then source_path" {
     const pages = [_]Page{
         .{ .source_path = "z.md", .entity_id = "z", .output_path = "z.html", .kind = .md },
@@ -183,4 +325,64 @@ test "Status.parse closed vocabulary" {
     try std.testing.expect(Status.parse("archived").? == .archived);
     try std.testing.expect(Status.parse("Draft") == null);
     try std.testing.expect(Status.parse("") == null);
+}
+
+test "PageDb.promote owns strings after source buffer free" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+
+    var db = PageDb.init(gpa, retain);
+    defer db.deinit();
+
+    // Simulate a temporary source buffer that will be freed.
+    const source = try gpa.dupe(u8,
+        \\---
+        \\title: Durable Title
+        \\parent: home
+        \\status: draft
+        \\tags: [a, b]
+        \\---
+        \\
+        \\body
+    );
+    // Parse views into source (manual view to avoid depending on parser here).
+    const title_view = source[std.mem.indexOf(u8, source, "Durable Title").? ..][0.."Durable Title".len];
+    const parent_view = source[std.mem.indexOf(u8, source, "home").? ..][0.."home".len];
+    const tag_a = source[std.mem.indexOf(u8, source, "[a, b]").? + 1 ..][0..1];
+    const tag_b = source[std.mem.indexOf(u8, source, "b]").? ..][0..1];
+
+    var meta: FrontmatterView = .{
+        .title = title_view,
+        .parent = parent_view,
+        .status = .draft,
+        .tag_count = 2,
+    };
+    meta.tags[0] = tag_a;
+    meta.tags[1] = tag_b;
+
+    const discovery: Page = .{
+        .source_path = "child.md",
+        .entity_id = "child",
+        .output_path = "child.html",
+        .kind = .md,
+    };
+
+    try db.promote(discovery, "child", meta, 64);
+
+    // Free the temporary source — promoted strings must remain valid.
+    gpa.free(source);
+
+    const p = db.items()[0];
+    try std.testing.expectEqualStrings("child", p.entity_id);
+    try std.testing.expectEqualStrings("Durable Title", p.title.?);
+    try std.testing.expectEqualStrings("home", p.parent.?);
+    try std.testing.expectEqualStrings("child.md", p.source_path);
+    try std.testing.expectEqualStrings("child.html", p.output_path);
+    try std.testing.expect(p.status.? == .draft);
+    try std.testing.expectEqual(@as(usize, 2), p.tags.len);
+    try std.testing.expectEqualStrings("a", p.tags[0]);
+    try std.testing.expectEqualStrings("b", p.tags[1]);
+    try std.testing.expect(p.role == .satellite);
 }
