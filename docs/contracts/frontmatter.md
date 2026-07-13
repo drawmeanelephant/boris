@@ -1,23 +1,36 @@
 # Frontmatter grammar (v0.1)
 
-**Status:** normative contract for future compiler implementation  
-**Milestone:** 2 (contracts + fixtures). Parsing is **not** implemented on the
-default CLI yet.
+**Status:** normative contract  
+**Milestone:** 5 implements the library parser (`src/parser.zig`) and fixture
+coverage. The default CLI still does **not** invoke the parser until a later
+pipeline milestone.
 
 Boris frontmatter is a **deliberately closed, bounded grammar**. It is **not**
-general YAML. Implementations must not grow into a YAML 1.1/1.2 subset by
-accident.
+general YAML and must never be documented or implemented as “YAML support.”
+Implementations must not grow into a YAML 1.1/1.2 subset by accident.
 
 ---
 
-## Encoding
+## Encoding and BOM policy
 
 1. Source must be **valid UTF-8** before any frontmatter or body handling.
-2. A UTF-8 **BOM** (`EF BB BF`) is **rejected** (never stripped) →
-   [`EINVALIDUTF8`](diagnostics.md).
-3. Invalid UTF-8 sequences anywhere in the file → [`EINVALIDUTF8`](diagnostics.md).
-4. Line endings: **LF** and **CRLF** are accepted. Isolated CR without LF is
-   treated as part of the line content (not a line break).
+2. **BOM policy (chosen):** a leading UTF-8 BOM (`EF BB BF`) is **rejected**
+   (never stripped, never tolerated mid-file as a “second BOM”) →
+   [`EINVALIDUTF8`](diagnostics.md). There is no “optional one BOM” mode.
+3. Invalid UTF-8 sequences **anywhere** in the file → [`EINVALIDUTF8`](diagnostics.md).
+4. Line endings: **LF** and **CRLF** are accepted on fence and field lines.
+   Isolated CR without LF is treated as part of the line content (not a line
+   break). Body bytes after the closing fence are returned **verbatim** (no
+   line-ending rewrite).
+
+---
+
+## Ownership of parsed metadata
+
+At the parser layer, field values (`id`, `title`, `parent`, tag tokens, and the
+body slice) are **views into the caller-supplied source buffer**. The parser
+does not allocate copies of field text. Callers that need durable storage
+(PageDb / retain arena) must **dupe** before releasing the source buffer.
 
 ---
 
@@ -27,15 +40,19 @@ Frontmatter is **optional**.
 
 - Recognized **only** when an opening fence is a **complete first line** of the
   file: exactly `---` at **byte zero / column zero** (optional trailing `\r`
-  before the line’s `\n`).
+  before the line’s `\n`). Because BOM is rejected first, “byte zero” is also
+  the first content byte of a BOM-free file.
 - Files that do not begin that way have **no** frontmatter; the entire file is
-  body (`bodyOffset` = `0`).
+  body (`body_offset` = `0`).
 - A leading space (or any non-fence first line) means “no frontmatter” — **not**
   an error.
 - Closing fence: a complete line that is exactly `---` at column zero
   (optional trailing `\r`).
-- Body begins at the first byte after the closing fence’s newline.
+- Body begins at the first byte after the closing fence’s newline (the byte
+  immediately following `\n`, including when the line was `---\r\n`).
 - Missing closing fence ⇒ unclosed frontmatter → [`EFRONTMATTER`](diagnostics.md).
+- A file that is only `---` (no newline / no close) is unclosed →
+  [`EFRONTMATTER`](diagnostics.md).
 - Empty frontmatter (open + immediate close) is valid; fields default as below.
 
 ```text
@@ -158,9 +175,9 @@ A **Satellite** has **exactly one** `parent` naming a Trunk entity id.
 
 | Field | Default |
 |-------|---------|
-| `title` | `null` (no derived title from filename in v0.1) |
-| `parent` | `null` → page is a **Trunk** |
-| `id` | path-derived entity id ([identity-and-paths.md](identity-and-paths.md)) |
+| `title` | `null` — **not** derived from filename or Markdown headings in v0.1 |
+| `parent` | `null` → page is a **Trunk** (role resolution is a later stage) |
+| `id` | `null` at parse time; pipeline later uses path-derived entity id ([identity-and-paths.md](identity-and-paths.md)) |
 | `status` | `null` (unset) |
 | `tags` | empty list |
 
@@ -193,12 +210,22 @@ compiler surface.
 
 ## Limits (normative bounds)
 
+All limit overflows use a **stable category** (not a distinct code per limit).
+Unless noted, overflow → [`EFRONTMATTER`](diagnostics.md).
+
 | Limit | Bound | On overflow |
 |-------|------:|-------------|
-| Title bytes | 512 | value rejected → [`EFRONTMATTER`](diagnostics.md) |
-| Entity id / parent / id bytes | 255 | value rejected → [`EFRONTMATTER`](diagnostics.md) or [`EINVALIDPATH`](diagnostics.md) for id shape |
-| Frontmatter block bytes | 64 KiB | → [`EFRONTMATTER`](diagnostics.md) |
-| Frontmatter field count | 32 | → [`EFRONTMATTER`](diagnostics.md) |
+| Total source size accepted by parser | 1 MiB (1 048 576 bytes) | [`EFRONTMATTER`](diagnostics.md) |
+| Frontmatter block bytes (inside fences, excluding fence lines) | 64 KiB | [`EFRONTMATTER`](diagnostics.md) |
+| Frontmatter field count (non-blank field lines) | 32 | [`EFRONTMATTER`](diagnostics.md) |
+| Title bytes | 512 | [`EFRONTMATTER`](diagnostics.md) |
+| Entity id / parent value bytes | 255 | length → [`EFRONTMATTER`](diagnostics.md); illegal **id** shape → [`EINVALIDPATH`](diagnostics.md) |
+| Tag count | 32 | [`EFRONTMATTER`](diagnostics.md) |
+| Tag token bytes (after quote strip) | 64 | [`EFRONTMATTER`](diagnostics.md) |
+
+Constants live on `page.zig` (`max_source_bytes`, `max_frontmatter_bytes`,
+`max_frontmatter_fields`, `max_title_bytes`, `max_entity_id_bytes`,
+`max_tag_count`, `max_tag_bytes`) and are re-exported by `parser.zig`.
 
 ---
 

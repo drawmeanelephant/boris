@@ -155,8 +155,10 @@ Rules:
 6. On content failure the pipeline should still write `build-report.json` with
    diagnostics when it can; that does **not** make the exit code `0`.
 
-**Milestone 1 CLI (current implementation):** only exit `0` (help) and `2`
-(usage). Codes `1` and `3` are reserved for the compiler pipeline.
+**Milestone 3 CLI (current implementation):** exit `0` (help or valid-mode
+stub), `2` (usage/flag conflicts), and `3` (arg allocation / process I/O
+failures at the entry point). Code `1` is reserved until the content pipeline
+emits validation diagnostics.
 
 ---
 

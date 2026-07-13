@@ -1,13 +1,15 @@
 const std = @import("std");
 
 /// Boris build graph.
-/// Product CLI is a help stub (m1). Milestone 2 adds fixture inventory tests.
-/// Separate tool: `boris-source-rag` for source packs.
+/// Product CLI: typed options + exit codes (m3); pipeline still stubbed.
+/// Milestone 4: deterministic scanner + identity.
+/// Milestone 5: bounded frontmatter parser + body splitter.
+/// Fixture inventory (m2). Separate tool: `boris-source-rag`.
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // --- Product CLI (milestone 1 stub) ------------------------------------
+    // --- Product CLI (milestone 3 typed surface) ---------------------------
     const root_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -47,6 +49,34 @@ pub fn build(b: *std.Build) void {
     // Resolve fixtures/ relative to the package root, not the zig-cache cwd.
     run_fixtures_tests.setCwd(b.path("."));
 
+    // --- Scanner + identity tests (milestone 4) ----------------------------
+    // Root is scanner.zig so its @import("identity.zig") / page.zig pull in
+    // the full discovery unit graph (and their embedded tests).
+    const scanner_mod = b.createModule(.{
+        .root_source_file = b.path("src/scanner.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const scanner_tests = b.addTest(.{
+        .root_module = scanner_mod,
+    });
+    const run_scanner_tests = b.addRunArtifact(scanner_tests);
+    run_scanner_tests.setCwd(b.path("."));
+
+    // --- Frontmatter parser tests (milestone 5) ----------------------------
+    // Root is parser.zig → page.zig + identity.zig. Cwd is package root so
+    // fixture-driven tests can open fixtures/content/**.
+    const parser_mod = b.createModule(.{
+        .root_source_file = b.path("src/parser.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const parser_tests = b.addTest(.{
+        .root_module = parser_mod,
+    });
+    const run_parser_tests = b.addRunArtifact(parser_tests);
+    run_parser_tests.setCwd(b.path("."));
+
     // --- Standalone source RAG tool (not product pipeline) -----------------
     const source_rag_mod = b.createModule(.{
         .root_source_file = b.path("tools/source-rag/main.zig"),
@@ -81,5 +111,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_fixtures_tests.step);
+    test_step.dependOn(&run_scanner_tests.step);
+    test_step.dependOn(&run_parser_tests.step);
     test_step.dependOn(&run_source_rag_tests.step);
 }

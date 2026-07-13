@@ -22,6 +22,7 @@ proof that scanning, parsing, graph validation, Apex, RAG, or HTML output works.
 |----------|-------|
 | [frontmatter.md](frontmatter.md) | Closed frontmatter grammar; keys `id`, `title`, `parent`, `status`, `tags` only |
 | [identity-and-paths.md](identity-and-paths.md) | Source paths, entity ids, `/` separators, `.md`/`.mdx` case rules |
+| [scanner.md](scanner.md) | Deterministic discovery walk, sort key, symlink policy (m4) |
 | [diagnostics.md](diagnostics.md) | Stable categories (`EDUPLICATEID`, …), severity, exit codes |
 | [ir-schema.md](ir-schema.md) | Trunk/Satellite graph, deterministic JSON under `.boris/` |
 | [rag-export.md](rag-export.md) | Optional future RAG export; schema versioning; `:::kind` as export-only |

@@ -1,75 +1,59 @@
-//! Boris — early CLI stub (milestone 1).
+//! Boris — product CLI entry (milestone 3).
 //!
-//! Accepted flags: `--help` / `-h` only.
-//! Does not scan the filesystem or run any content pipeline.
+//! Typed flag parsing + exit-code model. Content pipelines are not wired yet:
+//! valid build modes print a controlled "pipeline not implemented" stub and
+//! exit 0 until later milestones.
 
 const std = @import("std");
+const cli = @import("cli.zig");
+const diagnostic = @import("diagnostic.zig");
 
-/// Process exit codes for the milestone-1 CLI surface.
-pub const ExitCode = enum(u8) {
-    success = 0,
-    usage = 2,
+pub const ExitCode = diagnostic.ExitCode;
+pub const Options = cli.Options;
+pub const Mode = cli.Mode;
+pub const parseOptions = cli.parseOptions;
 
-    pub fn int(self: ExitCode) u8 {
-        return @intFromEnum(self);
+/// Production runner: help text + not-yet-implemented pipeline stub.
+/// Methods are `pub` so `cli.execute` can call them via `anytype` across modules.
+const ProdRunner = struct {
+    pub fn printHelp(_: *const @This()) void {
+        cli.printUsage();
+    }
+
+    pub fn reportUsage(_: *const @This(), err: cli.ParseError, bad_arg: ?[]const u8) void {
+        cli.printParseError(err, bad_arg);
+        cli.printUsage();
+    }
+
+    pub fn run(_: *const @This(), opts: Options) ExitCode {
+        return runPipelineStub(opts).exitCode();
     }
 };
 
-pub const Options = struct {
-    /// When true, print help and exit successfully.
-    help: bool = false,
-};
-
-pub const ParseError = error{
-    UnknownFlag,
-};
-
-/// Parse argv into `Options`. Does not print or exit.
-///
-/// `args[0]` is the program name when present (skipped).
-/// Only `--help` and `-h` are accepted. Any other argument is `error.UnknownFlag`.
-pub fn parseOptions(args: []const []const u8) ParseError!Options {
-    var opts: Options = .{};
-
-    var i: usize = if (args.len > 0) 1 else 0;
-    while (i < args.len) : (i += 1) {
-        const a = args[i];
-        if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
-            opts.help = true;
-            // Help short-circuits: remaining flags are not required for success.
-            return opts;
-        } else {
-            return error.UnknownFlag;
+/// Stub until milestone 6 wires discovery / IR / RAG. Never scans content.
+pub fn runPipelineStub(opts: Options) diagnostic.RunResult {
+    if (!opts.quiet) {
+        switch (opts.mode) {
+            .ir => std.debug.print(
+                "pipeline not implemented (IR mode; input={s}, out={s})\n",
+                .{ opts.input_dir, opts.out_dir orelse default_out },
+            ),
+            .rag => std.debug.print(
+                "pipeline not implemented (RAG mode; input={s}, rag-dir={s})\n",
+                .{ opts.input_dir, opts.rag_dir orelse default_rag },
+            ),
         }
     }
-
-    return opts;
+    return diagnostic.RunResult.success();
 }
 
-fn printUsage() void {
-    std.debug.print(
-        \\Boris — early Zig project foundation (milestone 1)
-        \\
-        \\Usage: boris [--help | -h]
-        \\
-        \\  -h, --help    Show this help and exit 0
-        \\
-        \\No other flags are accepted yet. Exit codes: 0 success, 2 usage.
-        \\
-    , .{});
-}
+const default_out = ".boris";
+const default_rag = "rag";
 
-fn logUsage(err: ParseError, bad_arg: ?[]const u8) void {
-    switch (err) {
-        error.UnknownFlag => {
-            if (bad_arg) |a| {
-                std.log.err("unknown argument: {s} (try --help)", .{a});
-            } else {
-                std.log.err("unknown argument (try --help)", .{});
-            }
-        },
-    }
-    printUsage();
+/// Pure dispatch used by `main` and tests (no `std.process.Init` required).
+pub fn runArgs(args: []const []const u8) u8 {
+    const runner: ProdRunner = .{};
+    return cli.runArgs(args, &runner);
 }
 
 /// Zig 0.16 entry: main receives `std.process.Init` (gpa, arena, io, …).
@@ -77,70 +61,88 @@ pub fn main(init: std.process.Init) u8 {
     const cold = init.arena.allocator();
 
     const args_z = init.minimal.args.toSlice(cold) catch {
-        std.log.err("failed to read process arguments", .{});
-        return ExitCode.usage.int();
+        std.debug.print("error: failed to read process arguments\n", .{});
+        return ExitCode.io_error.int();
     };
 
     // toSlice yields [:0]const u8; parseOptions wants []const []const u8.
     var args_list: std.ArrayList([]const u8) = .empty;
     defer args_list.deinit(cold);
     args_list.ensureTotalCapacity(cold, args_z.len) catch {
-        std.log.err("out of memory parsing arguments", .{});
-        return ExitCode.usage.int();
+        std.debug.print("error: out of memory parsing arguments\n", .{});
+        return ExitCode.io_error.int();
     };
     for (args_z) |a| {
         args_list.appendAssumeCapacity(a);
     }
 
-    const opts = parseOptions(args_list.items) catch |err| {
-        if (err == error.UnknownFlag) {
-            var i: usize = if (args_list.items.len > 0) 1 else 0;
-            while (i < args_list.items.len) : (i += 1) {
-                const a = args_list.items[i];
-                if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) continue;
-                logUsage(err, a);
-                return ExitCode.usage.int();
-            }
-        }
-        logUsage(err, null);
-        return ExitCode.usage.int();
-    };
-
-    // Bare invocation (no flags) or explicit help: print usage and exit 0.
-    // Does not touch the filesystem.
-    _ = opts.help;
-    printUsage();
-    return ExitCode.success.int();
+    return runArgs(args_list.items);
 }
 
-// --- CLI unit tests --------------------------------------------------------
+// --- main-level exit-code mapping tests ------------------------------------
 
-test "parseOptions: bare invocation is ok (no flags)" {
-    const opts = try parseOptions(&.{"boris"});
-    try std.testing.expect(!opts.help);
+/// Silent runner for tests: no help/usage/stub I/O.
+const SilentRunner = struct {
+    pipeline_calls: usize = 0,
+
+    pub fn printHelp(self: *@This()) void {
+        _ = self;
+    }
+
+    pub fn reportUsage(self: *@This(), err: cli.ParseError, bad_arg: ?[]const u8) void {
+        _ = self;
+        _ = @errorName(err);
+        _ = bad_arg;
+    }
+
+    pub fn run(self: *@This(), opts: Options) ExitCode {
+        _ = opts;
+        self.pipeline_calls += 1;
+        return .success;
+    }
+};
+
+test "runArgs: documented exit code mapping" {
+    var runner: SilentRunner = .{};
+
+    // Help → 0, never runs pipeline
+    try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--help" }, &runner));
+    try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "-h" }, &runner));
+    try std.testing.expectEqual(@as(usize, 0), runner.pipeline_calls);
+
+    // Valid build modes → 0
+    try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{"boris"}, &runner));
+    try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--quiet" }, &runner));
+    try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--no-rag" }, &runner));
+    try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--rag" }, &runner));
+    try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--rag-dir", "x" }, &runner));
+    try std.testing.expect(runner.pipeline_calls >= 5);
+
+    // Usage → 2, still no extra pipeline
+    const before = runner.pipeline_calls;
+    try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--rag", "--no-rag" }, &runner));
+    try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--rag", "--out", "x" }, &runner));
+    try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--no-rag", "--rag-dir", "x" }, &runner));
+    try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--unknown" }, &runner));
+    try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--input" }, &runner));
+    try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "positional" }, &runner));
+    try std.testing.expectEqual(before, runner.pipeline_calls);
 }
 
-test "parseOptions: --help and -h set help" {
-    const opts = try parseOptions(&.{ "boris", "--help" });
-    try std.testing.expect(opts.help);
-
-    const opts2 = try parseOptions(&.{ "boris", "-h" });
-    try std.testing.expect(opts2.help);
+test "runPipelineStub: success and quiet" {
+    const r = runPipelineStub(.{
+        .mode = .ir,
+        .input_dir = "content",
+        .out_dir = ".boris",
+        .rag_dir = null,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(ExitCode.success, r.exitCode());
 }
 
-test "parseOptions: help short-circuits remaining args" {
-    // --help wins even if junk follows (usage path never sees the junk).
-    const opts = try parseOptions(&.{ "boris", "--help", "--not-a-real-flag" });
-    try std.testing.expect(opts.help);
-}
-
-test "parseOptions: unknown flag is usage error" {
-    try std.testing.expectError(error.UnknownFlag, parseOptions(&.{ "boris", "--unknown" }));
-    try std.testing.expectError(error.UnknownFlag, parseOptions(&.{ "boris", "--wat" }));
-    try std.testing.expectError(error.UnknownFlag, parseOptions(&.{ "boris", "content" }));
-}
-
-test "ExitCode values" {
+test "ExitCode contract surface" {
     try std.testing.expectEqual(@as(u8, 0), ExitCode.success.int());
+    try std.testing.expectEqual(@as(u8, 1), ExitCode.content_error.int());
     try std.testing.expectEqual(@as(u8, 2), ExitCode.usage.int());
+    try std.testing.expectEqual(@as(u8, 3), ExitCode.io_error.int());
 }

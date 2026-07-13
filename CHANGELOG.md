@@ -31,6 +31,55 @@ How to use going forward:
 - Track curated seeds under `docs/rag/system/` (gitignore now only ignores root
   `/rag/` generated corpus, not `docs/rag/`).
 
+### Milestone 5 — bounded frontmatter parser and body splitter
+
+- Strict, iterative frontmatter + body parser in [`src/parser.zig`](src/parser.zig)
+  (not YAML; closed key set only). UTF-8 gate; **reject** leading BOM
+  (`EINVALIDUTF8`); LF/CRLF fences and fields; body slice after closing fence
+  preserved verbatim.
+- Source-view metadata ownership: field values and body are slices into the
+  caller buffer; `FrontmatterView` / bounds constants on
+  [`src/page.zig`](src/page.zig). Absent `title` stays `null` (no heading/filename
+  guess).
+- Explicit bounds: source 1 MiB, frontmatter 64 KiB, 32 fields, title 512,
+  id/parent 255, 32 tags × 64 bytes — limit overflows → `EFRONTMATTER`.
+- Unit + fixture-driven tests assert diagnostic **categories** (`EFRONTMATTER`,
+  `EINVALIDUTF8`, `EINVALIDPATH`); exercises `fixtures/content/valid/*` and
+  parser-invalid suites under `fixtures/content/invalid/`.
+- Contract precision: [`docs/contracts/frontmatter.md`](docs/contracts/frontmatter.md)
+  (BOM policy, ownership, limits).
+
+### Milestone 4 — content discovery and identity
+
+- Deterministic recursive scanner [`src/scanner.zig`](src/scanner.zig): content
+  root walk, case-sensitive `.md`/`.mdx` only, sort by `entity_id` then
+  `source_path`, reject directory and page-file symlinks (never follow).
+- Centralized identity/path derivation [`src/identity.zig`](src/identity.zig):
+  single `canonicalEntityId`; `safeOutputRelativePath` cannot escape output
+  roots. Logical metadata uses `/` only (no host absolute paths).
+- Discovery-only [`src/page.zig`](src/page.zig) records (`source_path`,
+  `entity_id`, `output_path`, `kind`) with explicit retain vs list ownership.
+- Fixture + unit tests for recursive scan, sort stability, path rejection,
+  `.txt`/`.MD` ignore, and symlink policy (skip on Windows / denied create).
+- Contracts: [`docs/contracts/scanner.md`](docs/contracts/scanner.md); updates to
+  [`identity-and-paths.md`](docs/contracts/identity-and-paths.md).
+
+### Milestone 3 — typed CLI and exit codes
+
+- Typed CLI parser in [`src/cli.zig`](src/cli.zig): single canonical `Options`
+  (`mode: ir | rag`, `input_dir`, optional `out_dir` / `rag_dir`, `quiet`,
+  `help`). Defaults: `--input content`, `--out .boris`, RAG dir `rag`.
+- Mode rules: default and `--no-rag` → IR; `--rag` and `--rag-dir` → RAG-only;
+  conflicts (`--rag`+`--no-rag`, `--no-rag`+`--rag-dir`, explicit `--out` with
+  RAG flags) exit **2** (never silently ignore `--out`). Empty values, unknown
+  flags, missing values, positionals, and duplicate flags are usage errors.
+- Exit-code model in [`src/diagnostic.zig`](src/diagnostic.zig): `0` success,
+  `1` content, `2` usage, `3` I/O. Valid modes print “pipeline not implemented”
+  and exit 0 until the content pipeline lands.
+- `--help` / `-h` exit 0 without filesystem access (injectable runner in tests).
+- Table-driven parser tests for valid modes and every conflict/missing-value
+  case; main-level exit-code mapping tests.
+- README command examples match actual behavior.
 
 ### Milestone 2 — contracts and fixture corpus
 

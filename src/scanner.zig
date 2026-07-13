@@ -1,59 +1,59 @@
-//! Phase 1: recursive content/ directory walker (HTML / RAG compile path).
+//! Deterministic recursive content discovery (milestone 4).
 //!
-//! Scans exactly once, populates the in-memory Page database, and performs
-//! no rendering. Paths and entity ids are allocated in the PageDb arena.
+//! Walks a content root once, collects page files (`.md` / `.mdx` only),
+//! derives identity via `identity.canonicalEntityId`, and sorts results
+//! before any caller processes them.
 //!
-//! Aligns with `discover.zig` / `pathutil.zig` policy:
-//! - **Entity ids** via `pathutil.canonicalEntityId` (case-preserving, `/` only)
-//! - **HTML output paths** via `pathutil.htmlOutputPath` (validated entity ids only)
-//! - **Symlinks** rejected (directory and page-file); never follow directory links
-//! - **Deterministic order**: sort pages by entity_id after scan
+//! ## Policies (see docs/contracts/scanner.md)
+//!
+//! - **Extensions:** case-sensitive lowercase `.md` and `.mdx` only.
+//! - **Paths:** logical metadata uses `/` only; no host absolute paths.
+//! - **Identity:** single derivation function `identity.canonicalEntityId`.
+//! - **Sort key:** `entity_id` ascending, then `source_path`.
+//! - **Symlinks:** do **not** follow directory symlinks; **reject** (error)
+//!   directory and page-file symlinks under the content root.
+//! - **Duplicates:** both pages kept when entity ids collide so later graph
+//!   validation can emit a precise `EDUPLICATEID` diagnostic.
+//!
+//! No frontmatter parse, graph resolve, RAG, Apex, HTML render, or concurrency.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
+const identity = @import("identity.zig");
 const page_mod = @import("page.zig");
-const pathutil = @import("pathutil.zig");
-const Page = page_mod.Page;
-const PageDb = page_mod.PageDb;
+
+pub const Page = page_mod.Page;
+pub const PageList = page_mod.PageList;
+pub const ContentKind = page_mod.ContentKind;
 
 pub const ScanError = error{
     ContentDirMissing,
-    ContentDirNotIterable,
-    /// Directory walk revisited a previously seen directory inode.
-    SymlinkCycle,
     /// Symlinked directory or page file under content root (v0.1 rejects both).
     SymlinkRejected,
-    /// Two source paths / entity ids differ only in letter case.
-    EntityCaseCollision,
-    /// Hard-linked (or equivalent) page discovered under two paths.
-    DuplicatePhysicalFile,
-} || Allocator.Error || Io.Dir.OpenError || Io.Dir.Walker.Error || Io.Dir.StatError || Io.Dir.StatFileError || Io.File.OpenError || Io.File.Reader.Error;
+    /// Directory walk revisited a previously seen directory inode.
+    SymlinkCycle,
+    /// Path or identity cannot be represented safely.
+    InvalidPath,
+} || std.mem.Allocator.Error || Io.Dir.OpenError || Io.Dir.SelectiveWalker.Error || Io.Dir.StatError || Io.Dir.StatFileError || identity.PathError;
 
-const Allocator = std.mem.Allocator;
+/// Options for a content-root scan.
+pub const Options = struct {
+    /// Content root relative to process CWD (or absolute — only used to open;
+    /// never stored in page logical metadata).
+    content_root: []const u8 = "content",
+};
 
-/// content/guides/intro.md -> guides/intro.html via validated entity id.
-pub fn outputPathFromSource(allocator: Allocator, source_rel: []const u8) ![]u8 {
-    const entity_id = try pathutil.canonicalEntityId(allocator, source_rel);
-    defer allocator.free(entity_id);
-    return pathutil.htmlOutputPath(allocator, entity_id);
-}
-
-/// content/guides/intro.md -> guides/intro (entity key for Trunk/Satellite graph)
-pub fn entityIdFromSource(allocator: Allocator, source_rel: []const u8) ![]u8 {
-    return pathutil.canonicalEntityId(allocator, source_rel);
-}
-
-/// Composite filesystem identity for cycle / hard-link detection.
+/// Composite filesystem identity for cycle detection (inode when available).
 const FsIdentity = struct {
-    dev: u64,
     ino: u64,
 
     fn fromStat(st: Io.File.Stat) FsIdentity {
-        return .{ .dev = 0, .ino = @intCast(st.inode) };
+        return .{ .ino = @intCast(st.inode) };
     }
 
     fn eql(a: FsIdentity, b: FsIdentity) bool {
-        return a.dev == b.dev and a.ino == b.ino;
+        return a.ino == b.ino;
     }
 };
 
@@ -64,24 +64,32 @@ fn identitySeen(list: []const FsIdentity, id: FsIdentity) bool {
     return false;
 }
 
-/// Walk `content/` exactly once and append a Page for every markdown page file.
-/// Does not read file bodies (that happens in the compile/parse phase so the
-/// whiteboard arena can own transient work). Paths are stored permanently.
+/// Walk `options.content_root` and append discovered pages to `out`.
 ///
-/// Aborts with `error.SymlinkRejected` on content symlinks and
-/// `error.SymlinkCycle` if a directory inode is visited twice.
-pub fn scanContentDir(
-    io: Io,
-    content_dir: Io.Dir,
-    db: *PageDb,
-) !void {
-    const arena = db.allocator();
-    const list_gpa = db.arena.child_allocator;
+/// Ownership:
+/// - `out.list_gpa` owns the ArrayList spine and temporary walk state.
+/// - `out.retain` owns every string on each `Page`.
+///
+/// On success, `out.pages` is sorted by (`entity_id`, `source_path`).
+/// Logical metadata never contains host absolute paths.
+pub fn scan(io: Io, options: Options, out: *PageList) ScanError!void {
+    const cwd = Io.Dir.cwd();
+    var content_dir = cwd.openDir(io, options.content_root, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound, error.NotDir => return error.ContentDirMissing,
+        else => return err,
+    };
+    defer content_dir.close(io);
+
+    try scanDir(io, content_dir, out);
+}
+
+/// Scan an already-open content directory handle.
+pub fn scanDir(io: Io, content_dir: Io.Dir, out: *PageList) ScanError!void {
+    const list_gpa = out.list_gpa;
+    const retain = out.retain;
 
     var visited_dirs: std.ArrayList(FsIdentity) = .empty;
     defer visited_dirs.deinit(list_gpa);
-    var visited_files: std.ArrayList(FsIdentity) = .empty;
-    defer visited_files.deinit(list_gpa);
 
     const root_st = try content_dir.stat(io);
     try visited_dirs.append(list_gpa, FsIdentity.fromStat(root_st));
@@ -90,24 +98,15 @@ pub fn scanContentDir(
     defer walker.deinit();
 
     while (true) {
-        const entry = walker.next(io) catch |err| switch (err) {
-            error.AccessDenied,
-            error.PermissionDenied,
-            error.SystemResources,
-            error.Unexpected,
-            => {
-                std.log.err("directory walk error: {s}", .{@errorName(err)});
-                return err;
-            },
-            else => return err,
-        } orelse break;
+        const entry = try walker.next(io) orelse break;
 
-        // v0.1: never follow symlinks (dirs or page files).
+        // --- Symlinks: never follow; reject under content root -------------
         if (entry.kind == .sym_link) {
-            std.log.err("symlink rejected under content root: '{s}'", .{entry.path});
+            // Do not enter directory symlinks; do not register symlink pages.
             return error.SymlinkRejected;
         }
 
+        // --- Real directories: enter once per inode ------------------------
         if (entry.kind == .directory) {
             const st = entry.dir.statFile(io, entry.basename, .{ .follow_symlinks = false }) catch |err| switch (err) {
                 error.FileNotFound, error.AccessDenied, error.PermissionDenied => continue,
@@ -115,145 +114,343 @@ pub fn scanContentDir(
             };
             if (st.kind != .directory) continue;
 
-            const identity = FsIdentity.fromStat(st);
-            if (identitySeen(visited_dirs.items, identity)) {
-                std.log.err(
-                    "symlink cycle: directory inode already visited at '{s}'",
-                    .{entry.path},
-                );
+            const fs_id = FsIdentity.fromStat(st);
+            if (identitySeen(visited_dirs.items, fs_id)) {
                 return error.SymlinkCycle;
             }
-            try visited_dirs.append(list_gpa, identity);
+            try visited_dirs.append(list_gpa, fs_id);
             walker.enter(io, entry) catch |err| switch (err) {
-                error.SymLinkLoop => {
-                    std.log.err("symlink cycle at '{s}'", .{entry.path});
-                    return error.SymlinkCycle;
-                },
+                error.SymLinkLoop => return error.SymlinkCycle,
                 else => return err,
             };
             continue;
         }
 
         if (entry.kind != .file) continue;
-        if (!pathutil.isPageFile(entry.basename)) continue;
+        // Non-page files (.txt, .MD, assets, …) are ignored.
+        if (!identity.isPageFile(entry.basename)) continue;
 
+        // Double-check: not a symlink disguised as a file entry.
         const st = entry.dir.statFile(io, entry.basename, .{ .follow_symlinks = false }) catch |err| switch (err) {
-            error.FileNotFound, error.AccessDenied, error.PermissionDenied => null,
+            error.FileNotFound, error.AccessDenied, error.PermissionDenied => continue,
             else => return err,
         };
-        if (st) |s| {
-            const identity = FsIdentity.fromStat(s);
-            if (identitySeen(visited_files.items, identity)) {
-                std.log.err(
-                    "duplicate physical file at '{s}' (hard link or equivalent)",
-                    .{entry.path},
-                );
-                return error.DuplicatePhysicalFile;
-            }
-            try visited_files.append(list_gpa, identity);
-        }
+        if (st.kind == .sym_link) return error.SymlinkRejected;
+        if (st.kind != .file) continue;
 
-        // entry.path is relative to content_dir and is invalidated on next next().
-        const source_path = pathutil.canonicalize(arena, entry.path) catch |err| {
-            std.log.err("illegal source path '{s}': {s}", .{ entry.path, @errorName(err) });
-            return err;
-        };
-        const entity_id = pathutil.canonicalEntityId(arena, source_path) catch |err| {
-            std.log.err("cannot derive entity id from '{s}': {s}", .{ source_path, @errorName(err) });
-            return err;
-        };
-        const output_path = pathutil.htmlOutputPath(arena, entity_id) catch |err| {
-            std.log.err("cannot derive output path for '{s}': {s}", .{ entity_id, @errorName(err) });
-            return err;
-        };
-
-        try db.append(.{
-            .source_path = source_path,
-            .output_path = output_path,
-            .entity_id = entity_id,
-        });
+        // entry.path is relative to content_dir; invalidated on next next().
+        try registerPage(retain, out, entry.path);
     }
 
     // Deterministic order independent of filesystem enumeration.
-    std.mem.sort(Page, db.pages.items, {}, struct {
-        fn less(_: void, a: Page, b: Page) bool {
-            const id_ord = std.mem.order(u8, a.entity_id, b.entity_id);
-            if (id_ord != .eq) return id_ord == .lt;
-            return std.mem.order(u8, a.source_path, b.source_path) == .lt;
-        }
-    }.less);
-
-    try diagnoseCaseCollisions(db);
+    page_mod.sortPages(out.pages.items);
 }
 
-fn diagnoseCaseCollisions(db: *PageDb) !void {
-    const pages = db.items();
-    var i: usize = 0;
-    while (i < pages.len) : (i += 1) {
-        var j: usize = 0;
-        while (j < i) : (j += 1) {
-            const path_case = pathutil.pathsDifferOnlyInCase(pages[i].source_path, pages[j].source_path);
-            const id_case = pathutil.pathsDifferOnlyInCase(pages[i].entity_id, pages[j].entity_id);
-            if (!path_case and !id_case) continue;
-            std.log.err(
-                "entity case collision: '{s}' ({s}) and '{s}' ({s})",
-                .{ pages[i].source_path, pages[i].entity_id, pages[j].source_path, pages[j].entity_id },
-            );
-            return error.EntityCaseCollision;
-        }
-    }
-}
-
-/// Open `content/` with iterate capability and scan into `db`.
-pub fn scanFromCwd(io: Io, db: *PageDb, content_subdir: []const u8) !void {
-    const cwd = Io.Dir.cwd();
-    var content_dir = cwd.openDir(io, content_subdir, .{ .iterate = true }) catch |err| switch (err) {
-        error.FileNotFound => {
-            std.log.err("content directory '{s}' not found", .{content_subdir});
-            return error.ContentDirMissing;
-        },
-        else => return err,
+fn registerPage(retain: std.mem.Allocator, out: *PageList, walk_path: []const u8) ScanError!void {
+    // Canonicalize first so identity derivation sees a stable form.
+    const source_path = identity.canonicalize(retain, walk_path) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidPath,
     };
-    defer content_dir.close(io);
 
-    try scanContentDir(io, content_dir, db);
+    // Single centralized derivation function.
+    const entity_id = identity.canonicalEntityId(retain, source_path) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidPath,
+    };
+
+    const output_path = identity.safeOutputRelativePath(retain, entity_id) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidPath,
+    };
+
+    const kind = identity.contentKind(source_path) catch return error.InvalidPath;
+
+    // Note: duplicate entity_ids are intentionally kept so a later graph stage
+    // can emit EDUPLICATEID with both source paths. Discovery does not mask them.
+    try out.append(.{
+        .source_path = source_path,
+        .entity_id = entity_id,
+        .output_path = output_path,
+        .kind = kind,
+    });
 }
 
-/// Print every mapped page path (phase 1 verification).
-pub fn printMappedPages(pages: []const Page) void {
-    std.debug.print("Boris content database: {d} page(s)\n", .{pages.len});
-    for (pages) |p| {
-        std.debug.print(
-            "  entity={s}  source={s}  output={s}\n",
-            .{ p.entity_id, p.source_path, p.output_path },
-        );
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+const testing = std.testing;
+
+fn tmpContentRoot(gpa: std.mem.Allocator, io: Io, tmp: *std.testing.TmpDir) ![]u8 {
+    const cwd = Io.Dir.cwd();
+    const base = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    errdefer gpa.free(base);
+    const content_rel = try std.fmt.allocPrint(gpa, "{s}/content", .{base});
+    errdefer gpa.free(content_rel);
+    try cwd.createDirPath(io, content_rel);
+    gpa.free(base);
+    return content_rel;
+}
+
+test "scan: recursive fixtures/content/valid" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    var list = PageList.init(gpa, arena.allocator());
+    defer list.deinit();
+
+    try scan(io, .{ .content_root = "fixtures/content/valid" }, &list);
+
+    // empty-no-fm.md, nested/deep/page.md, satellite-child.md, trunk-root.md
+    try testing.expectEqual(@as(usize, 4), list.len());
+
+    // Sorted by entity_id.
+    try testing.expectEqualStrings("empty-no-fm", list.items()[0].entity_id);
+    try testing.expectEqualStrings("nested/deep/page", list.items()[1].entity_id);
+    try testing.expectEqualStrings("satellite-child", list.items()[2].entity_id);
+    try testing.expectEqualStrings("trunk-root", list.items()[3].entity_id);
+
+    // Logical paths only — no host absolute prefixes.
+    for (list.items()) |p| {
+        try testing.expect(p.source_path.len > 0);
+        try testing.expect(p.source_path[0] != '/');
+        try testing.expect(std.mem.indexOfScalar(u8, p.source_path, '\\') == null);
+        try testing.expect(std.mem.indexOfScalar(u8, p.entity_id, '\\') == null);
+        try testing.expect(std.mem.endsWith(u8, p.output_path, ".html"));
+        try testing.expect(!std.mem.startsWith(u8, p.output_path, "/"));
+        try testing.expect(std.mem.indexOf(u8, p.output_path, "..") == null);
+    }
+
+    try testing.expectEqualStrings("nested/deep/page.md", list.items()[1].source_path);
+    try testing.expectEqualStrings("nested/deep/page.html", list.items()[1].output_path);
+    try testing.expect(list.items()[1].kind == .md);
+}
+
+test "scan: recursive fixtures/content discovers nested invalid suites" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    var list = PageList.init(gpa, arena.allocator());
+    defer list.deinit();
+
+    try scan(io, .{ .content_root = "fixtures/content" }, &list);
+    try testing.expect(list.len() >= 4 + 10); // valid + many invalid pages
+
+    // Deterministic: sorted by entity_id.
+    var i: usize = 1;
+    while (i < list.len()) : (i += 1) {
+        const prev = list.items()[i - 1];
+        const cur = list.items()[i];
+        const ord = std.mem.order(u8, prev.entity_id, cur.entity_id);
+        if (ord == .eq) {
+            try testing.expect(std.mem.order(u8, prev.source_path, cur.source_path) != .gt);
+        } else {
+            try testing.expect(ord == .lt);
+        }
     }
 }
 
-test "outputPathFromSource" {
-    const gpa = std.testing.allocator;
-    const out = try outputPathFromSource(gpa, "guides/intro.md");
-    defer gpa.free(out);
-    try std.testing.expectEqualStrings("guides/intro.html", out);
+test "scan: stable sorted order independent of creation order" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const content_rel = try tmpContentRoot(gpa, io, &tmp);
+    defer gpa.free(content_rel);
+
+    {
+        const cwd = Io.Dir.cwd();
+        var content = try cwd.openDir(io, content_rel, .{});
+        defer content.close(io);
+        // Create in reverse of expected entity_id order.
+        try content.writeFile(io, .{ .sub_path = "z-last.md", .data = "# z\n" });
+        try content.writeFile(io, .{ .sub_path = "a-first.md", .data = "# a\n" });
+        try content.writeFile(io, .{ .sub_path = "m-mid.md", .data = "# m\n" });
+        try content.createDirPath(io, "nested");
+        try content.writeFile(io, .{ .sub_path = "nested/z-nested.md", .data = "# nz\n" });
+        try content.writeFile(io, .{ .sub_path = "nested/a-nested.md", .data = "# na\n" });
+    }
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var list = PageList.init(gpa, arena.allocator());
+    defer list.deinit();
+
+    try scan(io, .{ .content_root = content_rel }, &list);
+    try testing.expectEqual(@as(usize, 5), list.len());
+    try testing.expectEqualStrings("a-first", list.items()[0].entity_id);
+    try testing.expectEqualStrings("m-mid", list.items()[1].entity_id);
+    try testing.expectEqualStrings("nested/a-nested", list.items()[2].entity_id);
+    try testing.expectEqualStrings("nested/z-nested", list.items()[3].entity_id);
+    try testing.expectEqualStrings("z-last", list.items()[4].entity_id);
 }
 
-test "outputPathFromSource normalizes backslash and preserves case" {
-    const gpa = std.testing.allocator;
-    const out = try outputPathFromSource(gpa, "Guides\\Intro.md");
-    defer gpa.free(out);
-    try std.testing.expectEqualStrings("Guides/Intro.html", out);
+test "scan: ignores .txt and case-variant .MD extensions" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const content_rel = try tmpContentRoot(gpa, io, &tmp);
+    defer gpa.free(content_rel);
+
+    {
+        const cwd = Io.Dir.cwd();
+        var content = try cwd.openDir(io, content_rel, .{});
+        defer content.close(io);
+        try content.writeFile(io, .{ .sub_path = "keep.md", .data = "# keep\n" });
+        try content.writeFile(io, .{ .sub_path = "keep.mdx", .data = "# mdx\n" });
+        try content.writeFile(io, .{ .sub_path = "notes.txt", .data = "not a page\n" });
+        try content.writeFile(io, .{ .sub_path = "README.MD", .data = "# wrong case\n" });
+        try content.writeFile(io, .{ .sub_path = "Page.MDX", .data = "# wrong case\n" });
+        try content.writeFile(io, .{ .sub_path = "notes.Md", .data = "# wrong case\n" });
+    }
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var list = PageList.init(gpa, arena.allocator());
+    defer list.deinit();
+
+    try scan(io, .{ .content_root = content_rel }, &list);
+    try testing.expectEqual(@as(usize, 2), list.len());
+    try testing.expectEqualStrings("keep", list.items()[0].entity_id);
+    try testing.expect(list.items()[0].kind == .md);
+    try testing.expectEqualStrings("keep", list.items()[1].entity_id);
+    try testing.expect(list.items()[1].kind == .mdx);
+    // Same entity_id from .md and .mdx — both retained for later EDUPLICATEID.
+    try testing.expectEqualStrings("keep.md", list.items()[0].source_path);
+    try testing.expectEqualStrings("keep.mdx", list.items()[1].source_path);
 }
 
-test "entityIdFromSource" {
-    const gpa = std.testing.allocator;
-    const id = try entityIdFromSource(gpa, "guides/intro.md");
-    defer gpa.free(id);
-    try std.testing.expectEqualStrings("guides/intro", id);
+test "scan: missing content root" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var list = PageList.init(gpa, arena.allocator());
+    defer list.deinit();
+    try testing.expectError(
+        error.ContentDirMissing,
+        scan(io, .{ .content_root = "fixtures/content/does-not-exist-m4" }, &list),
+    );
 }
 
-test "entityIdFromSource preserves case and uses slash separators" {
-    const gpa = std.testing.allocator;
-    const id = try entityIdFromSource(gpa, "Guides\\Intro.md");
-    defer gpa.free(id);
-    try std.testing.expectEqualStrings("Guides/Intro", id);
+test "scan: rejects directory symlink without following" {
+    if (builtin.os.tag == .windows) return;
+
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const content_rel = try tmpContentRoot(gpa, io, &tmp);
+    defer gpa.free(content_rel);
+    const real_rel = try std.fmt.allocPrint(gpa, "{s}/real", .{content_rel});
+    defer gpa.free(real_rel);
+
+    {
+        const cwd = Io.Dir.cwd();
+        try cwd.createDirPath(io, real_rel);
+        var real = try cwd.openDir(io, real_rel, .{});
+        defer real.close(io);
+        try real.writeFile(io, .{ .sub_path = "page.md", .data = "# page\n" });
+
+        var content = try cwd.openDir(io, content_rel, .{});
+        defer content.close(io);
+        content.symLink(io, "real", "link", .{ .is_directory = true }) catch |err| switch (err) {
+            error.AccessDenied, error.PermissionDenied => return, // skip when FS denies
+            else => return err,
+        };
+        try content.writeFile(io, .{ .sub_path = "root.md", .data = "# root\n" });
+    }
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var list = PageList.init(gpa, arena.allocator());
+    defer list.deinit();
+
+    // Policy: reject on symlink encounter (do not follow into link/).
+    try testing.expectError(
+        error.SymlinkRejected,
+        scan(io, .{ .content_root = content_rel }, &list),
+    );
+}
+
+test "scan: rejects page-file symlink" {
+    if (builtin.os.tag == .windows) return;
+
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const content_rel = try tmpContentRoot(gpa, io, &tmp);
+    defer gpa.free(content_rel);
+
+    {
+        const cwd = Io.Dir.cwd();
+        var content = try cwd.openDir(io, content_rel, .{});
+        defer content.close(io);
+        try content.writeFile(io, .{ .sub_path = "real.md", .data = "# real\n" });
+        content.symLink(io, "real.md", "alias.md", .{}) catch |err| switch (err) {
+            error.AccessDenied, error.PermissionDenied => return,
+            else => return err,
+        };
+    }
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var list = PageList.init(gpa, arena.allocator());
+    defer list.deinit();
+
+    try testing.expectError(
+        error.SymlinkRejected,
+        scan(io, .{ .content_root = content_rel }, &list),
+    );
+}
+
+test "scan: duplicate entity ids preserved for later diagnostics" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const content_rel = try tmpContentRoot(gpa, io, &tmp);
+    defer gpa.free(content_rel);
+
+    // Two different source paths that cannot share an id without different stems —
+    // use .md and .mdx with same stem (same path-derived id).
+    {
+        const cwd = Io.Dir.cwd();
+        var content = try cwd.openDir(io, content_rel, .{});
+        defer content.close(io);
+        try content.writeFile(io, .{ .sub_path = "same.md", .data = "# a\n" });
+        try content.writeFile(io, .{ .sub_path = "same.mdx", .data = "# b\n" });
+    }
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var list = PageList.init(gpa, arena.allocator());
+    defer list.deinit();
+
+    try scan(io, .{ .content_root = content_rel }, &list);
+    try testing.expectEqual(@as(usize, 2), list.len());
+    try testing.expectEqualStrings("same", list.items()[0].entity_id);
+    try testing.expectEqualStrings("same", list.items()[1].entity_id);
+    // Tie-break: source_path order.
+    try testing.expectEqualStrings("same.md", list.items()[0].source_path);
+    try testing.expectEqualStrings("same.mdx", list.items()[1].source_path);
 }
