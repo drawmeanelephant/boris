@@ -19,6 +19,19 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Name and metaphor (narrative / roll-forward)
+
+- Document project namesake and compile rhythm **Load → Roll → Ignite → Reset**
+  in [`docs/rag/system/10-name-and-metaphor.md`](docs/rag/system/10-name-and-metaphor.md)
+  (folk Zouave / Boris temperament; no commercial brand affiliation). Wired into
+  system seeds + light identity notes in `AGENTS.md`.
+- Forward notes under **To be implemented / roll forward** in
+  [`docs/STATUS.md`](docs/STATUS.md) so later milestones can fold metaphor into
+  real surfaces gradually. Local `SUPPORT/` gitignored (private scratch).
+- Track curated seeds under `docs/rag/system/` (gitignore now only ignores root
+  `/rag/` generated corpus, not `docs/rag/`).
+
+
 ### Milestone 2 — contracts and fixture corpus
 
 - Normative contracts under [`docs/contracts/`](docs/contracts/):

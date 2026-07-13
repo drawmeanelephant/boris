@@ -184,8 +184,9 @@ Boris is a Zig + native Apex project; do not assume Node/React unless asked.
 
 | Intent | Start at |
 |--------|----------|
-| What is Boris? | `system/00-overview.md` |
+| What is Boris? | `system/00-overview.md`, `system/10-name-and-metaphor.md` |
 | How does the pipeline work? | `system/01-architecture-pipeline.md` |
+| Load / Roll / Ignite / Reset | `system/10-name-and-metaphor.md` + `system/01-architecture-pipeline.md` |
 | Trunk vs satellite | `system/03-trunk-and-satellite.md` + `graph/relations.md` |
 | This guide / a site page | `content/pages/<entity_id>.md` |
 | A tip or callout | same page segment (`:::kind` in Body) |

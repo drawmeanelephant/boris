@@ -1088,7 +1088,7 @@ fn exportIndex(
     try doc.appendSlice(gpa,
         \\## How to retrieve (suggested order)
         \\
-        \\1. **What is Boris / how does it work?** → `system/00-overview.md`, then other `system/*`
+        \\1. **What is Boris / how does it work?** → `system/00-overview.md`, `system/10-name-and-metaphor.md`, then other `system/*`
         \\2. **Site content / guides?** → `content/pages/**`, then satellites via `graph/relations.md`
         \\3. **Callouts / tips?** → stay on the parent page segment (inlined `:::kind` blocks in Body)
         \\4. **Entity list / parentEntry edges?** → `graph/entity-catalog.md`, `graph/relations.md`
@@ -1235,8 +1235,9 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir) !void {
         \\
         \\| Intent | Start at |
         \\|--------|----------|
-        \\| What is Boris? | `system/00-overview.md` |
+        \\| What is Boris? | `system/00-overview.md`, `system/10-name-and-metaphor.md` |
         \\| How does compile work? | `system/01-architecture-pipeline.md` |
+        \\| Load / Roll / Ignite / Reset | `system/10-name-and-metaphor.md` + `system/01-architecture-pipeline.md` |
         \\| Trunk vs satellite | `system/03-trunk-and-satellite.md` + `graph/relations.md` |
         \\| A specific guide | `content/pages/<entity_id>.md` |
         \\| A tip / callout | same page segment (Body `:::kind` blocks) |

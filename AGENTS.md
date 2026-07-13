@@ -26,12 +26,19 @@ This file is binding project policy for AI coding agents (and humans pairing wit
 
 **Boris is a Zig-native content compiler that is growing into an Apex-native static site generator.**
 
+Named for the folk **Zouave** improviser known as **Boris** (calm under fire,
+practical chain-thinking, wipe-and-continue) — an independent software homage,
+**not** affiliated with any commercial tobacco or rolling-paper brand. Teaching
+rhythm for the pipeline: **Load → Roll → Ignite → Reset**. Narrative seed:
+[`docs/rag/system/10-name-and-metaphor.md`](docs/rag/system/10-name-and-metaphor.md).
+
 - **v0.1 product surface (default CLI):** discover Markdown → bounded frontmatter → Trunk/Satellite graph validation → deterministic JSON under `.boris/` (`manifest.json`, `graph.json`, `build-report.json`). Optional `--rag` export.
 - **Long-term product surface:** full documentation SSG — Apex HTML render, layouts, asides, zero-copy assemble to `dist/`, graph-aware navigation. Modules for this path exist but are **not** v0.1 acceptance.
 - Implementation language for the product: **Zig** (currently targeting Zig **0.16+**).
 - Markdown rendering (when used): **Apex**, linked **in-process** as a **C ABI** library (`@cImport`, `build.zig` C sources). **Not** a subprocess, **not** a JS markdown pipeline.
 - Content model: in-memory **Page** graph with **Trunk / Satellite** relations and optional in-page **asides/admonitions** (component tokens, not graph nodes).
 - Performance shape: single-threaded monolith first; whiteboard `ArenaAllocator`; zero-copy layout splice to `dist/` when the HTML path is active.
+- **Metaphor → engineering (do not invent branded component names):** Load = discover; Roll = frontmatter + bottom-up graph; Ignite = emit/render; Reset = whiteboard `free_all`. Asides stay in document order; no “Broside”-style product jargon.
 
 ### Where to edit by task
 
@@ -174,4 +181,4 @@ validation, output schemas, and integration tests are correct and benchmarked.
 
 ## One-line north star
 
-**Boris is a Zig static-site compiler for Markdown documentation, with validated content metadata, graph-aware navigation, semantic admonitions, and an explicit extension path for custom components — not a polyglot web framework.**
+**Boris is a Zig static-site compiler for Markdown documentation — load, roll, ignite, reset — with validated content metadata, graph-aware navigation, semantic admonitions, and an explicit extension path for custom components — not a polyglot web framework.**

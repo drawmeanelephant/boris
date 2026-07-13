@@ -1,6 +1,6 @@
-# Project status — Boris milestone 2
+# Project status — Boris milestone 5
 
-**As of:** 2026-07-13 (product **0.0.1** foundation + contracts)  
+**As of:** 2026-07-13 (product **0.0.1** parser + discovery + CLI surface + contracts)  
 **Zig target:** 0.16.0 (`build.zig.zon` / CI pin **0.16.0**)
 
 This file is the living **“where we are”** note. Prefer it (and
@@ -11,9 +11,10 @@ starting a session.
 
 ## One-line product (current phase)
 
-**Boris milestone 2 freezes normative contracts and a fixture inventory** for the
-future content compiler. The default CLI remains a `--help` stub; no scanner or
-parser is shipped yet.
+**Boris milestone 5 ships a strict, bounded frontmatter parser and Markdown
+body splitter** (library surface + fixture tests). The default CLI still stubs
+the full pipeline (does not scan or parse on every invocation until later
+wiring). Graph IR and product RAG remain future work.
 
 ---
 
@@ -22,47 +23,39 @@ parser is shipped yet.
 | Capability | Status | Notes |
 |------------|--------|--------|
 | `zig build` → `boris` executable | **Shipped** | `zig-out/bin/boris` |
-| `zig build run -- [args]` | **Shipped** | Forwards args after `--` |
-| `zig build test` | **Shipped** | CLI + **fixture inventory** + source-rag tool tests |
-| CLI `--help` / `-h` | **Shipped** | Usage on stdout; exit 0; no filesystem scan |
-| Unknown CLI args | **Shipped** | Usage + exit 2 |
-| Normative contracts | **Shipped (docs)** | [`docs/contracts/`](contracts/) — design law, not binary proof |
-| Fixture corpus | **Shipped (inventory)** | [`fixtures/`](../fixtures/) + `src/fixtures_test.zig` |
-| Source RAG tool (`boris-source-rag`) | **Shipped** | Standalone; `zig build source-rag` → `source-rag/` |
-| Content discovery / frontmatter | **Not started** | Contracts written; implementation next |
+| Typed CLI options | **Shipped** | m3: `--input`, `--out`, `--rag`, … |
+| Deterministic scanner | **Shipped** | `src/scanner.zig` — `.md`/`.mdx`, sorted, symlink reject |
+| Canonical identity | **Shipped** | `src/identity.zig` — single `canonicalEntityId` |
+| Discovery `Page` metadata | **Shipped** | `src/page.zig` — paths/id + frontmatter view types |
+| Bounded frontmatter parser | **Shipped** | `src/parser.zig` — not YAML; body split; source views |
+| `zig build test` | **Shipped** | CLI + fixtures + scanner/identity + **parser** + source-rag |
+| Normative contracts | **Shipped (docs)** | + [frontmatter.md](contracts/frontmatter.md) precision |
+| Fixture corpus | **Shipped** | Inventory + exercised by parser fixture tests |
+| Source RAG tool | **Shipped** | `zig build source-rag` |
+| Frontmatter on default CLI | **Not wired** | library only until pipeline milestone |
 | Parent graph / JSON IR | **Not started** | |
-| Product RAG export (`boris-rag`) | **Not started** | Contract: [contracts/rag-export.md](contracts/rag-export.md) |
-| Apex / HTML assemble | **Not started** (default product) | Tree may contain experimental modules; not wired into default CLI |
-| Watch / incremental / parallel workers | **Not started** | |
+| Product RAG export | **Not started** | |
+| Apex / HTML assemble | **Not started** (default product) | |
 
 ### How to run
 
 ```bash
-zig build                 # binary → zig-out/bin/boris (+ boris-source-rag)
-zig build run -- --help   # usage; exit 0
-zig build test            # unit tests (includes fixture inventory)
-zig build source-rag      # source-code pack for LLM upload → source-rag/
+zig build
+zig build test                     # includes parser + scanner + identity tests
+zig build run -- --help
+zig build source-rag
 ```
 
-Exit codes (milestone 1 product CLI): `0` success, `2` usage/flags.  
-Future compiler: `1` content validation, `3` I/O — see
-[contracts/diagnostics.md](contracts/diagnostics.md).  
-Source-rag tool also uses `3` for I/O failures.
+### Parser (library surface)
 
-### Source RAG (standalone — not product pipeline)
-
-Pack repo sources for LLM notebooks. Details: [`tools/source-rag/README.md`](../tools/source-rag/README.md).
-
-```bash
-zig build source-rag                    # → source-rag/
-zig build source-rag -- --out=./uploads/source-rag
-zig-out/bin/boris-source-rag --help
+```text
+const r = parser.parse(source_bytes);
+// r.isOk() / r.category() → EFRONTMATTER | EINVALIDUTF8 | EINVALIDPATH
+// r.doc.meta.* and r.doc.body are views into source_bytes
 ```
 
-| Product `rag/` (if present) | `source-rag/` from this tool |
-|-----------------------------|------------------------------|
-| Site content + narrative seeds | `src/**`, docs, build files, tools, … |
-| Not regenerable on m1 CLI | Regenerable anytime via `zig build source-rag` |
+BOM: **rejected** (`EINVALIDUTF8`). Line endings: LF and CRLF.  
+Absent title: `null` (no derivation from headings or filename).
 
 ---
 
@@ -70,34 +63,63 @@ zig-out/bin/boris-source-rag --help
 
 | Doc | Role |
 |-----|------|
-| `README.md` | Human front door; implemented vs planned |
-| `AGENTS.md` | Long-term direction and hard constraints |
-| `docs/contracts/` | **Normative** v0.1 contracts (frontmatter, paths, IR, diagnostics, RAG plan) |
-| `fixtures/` | Content fixture inventory + expected category list |
-| `tools/source-rag/README.md` | Source RAG tool (LLM codebase pack) |
-| `docs/RELEASE-GATE.md` | Checklist (mostly unchecked at m2) |
+| `README.md` | Human front door |
+| `AGENTS.md` | Hard constraints |
+| `docs/contracts/` | Normative contracts |
+| `docs/contracts/frontmatter.md` | Bounded FM grammar, bounds, ownership |
+| `docs/contracts/scanner.md` | Discovery walk + symlink policy |
+| `docs/contracts/identity-and-paths.md` | Id/path rules |
+| `docs/rag/system/` | Narrative seeds (incl. name / Load·Roll·Ignite·Reset) |
+| `fixtures/` | Content fixture corpus |
 | `CHANGELOG.md` | What changed |
-
-### Normative contract index
-
-| File | Topic |
-|------|-------|
-| [frontmatter.md](contracts/frontmatter.md) | Closed grammar; five keys only; no `parentEntry` |
-| [identity-and-paths.md](contracts/identity-and-paths.md) | Ids, `/` paths, case-sensitive `.md`/`.mdx` |
-| [diagnostics.md](contracts/diagnostics.md) | `EDUPLICATEID`, `EPARENT*`, `EFRONTMATTER`, … |
-| [ir-schema.md](contracts/ir-schema.md) | Trunk/Satellite; `.boris/` JSON IR |
-| [rag-export.md](contracts/rag-export.md) | Optional future export; `:::kind` export-only |
+| This file § To be implemented | Forward notes to fold into code later |
 
 ---
 
-## Known gaps (expected at m2)
+## Known gaps (expected at m5)
 
-- No scanner, parser, graph, IR emit, or diagnostics pipeline on the default CLI
-- Fixtures are **inventory-tested only** — not compiler-validated
-- No Apex C-ABI product path on the default CLI
-- No **product** RAG export (`boris --rag`), HTML `dist/`, or configuration framework
-- Source RAG tool is available; product content RAG is not
-- Release-gate checklist items beyond foundation remain unchecked
-- Experimental modules may exist under `src/` / `docs/contracts/fixtures/` from
-  earlier exploration; they are **not** the m2 fixture surface (use root
-  `fixtures/`) and are **not** wired into the default CLI
+- Default CLI does not yet invoke the scanner or parser (pipeline stub from m3)
+- No graph validation, IR emit, or product RAG on the default CLI
+- Symlink unit tests skipped on Windows / when symlink create is denied
+- Experimental modules under `src/` (compile/harness/HTML path) may still assume
+  a richer pre-m4/m5 surface; they are not the default product surface
+
+---
+
+## To be implemented / roll forward
+
+Living scratch for product work still ahead. Not contracts. Append notes here as
+they arrive; fold into modules/contracts when a milestone actually lands them.
+
+### Pipeline wiring (m6+)
+
+- Wire scanner + parser into the default CLI (`pipeline.run`, not stub)
+- Parent graph validation + freeze
+- Deterministic JSON IR under `.boris/` (`manifest`, `graph`, `build-report`)
+- Optional product RAG export (`--rag`) against contracts
+- HTML/Apex assemble remains experimental until explicitly promoted
+
+### Identity metaphor (narrative → code over time)
+
+Seed already drafted: [`docs/rag/system/10-name-and-metaphor.md`](rag/system/10-name-and-metaphor.md).
+**More notes will land here.** Prefer rolling metaphors into real surfaces
+gradually (docs first, then comments/log language, never trademarked branding).
+
+| Teaching beat | Target meaning when implemented |
+|---------------|----------------------------------|
+| **Load** | Discover / scan / identity — deterministic content set |
+| **Roll** | Frontmatter + body shape + bottom-up Trunk/Satellite graph freeze |
+| **Ignite** | Validate + emit IR / optional RAG / experimental HTML (in-process Apex) |
+| **Reset** | Whiteboard arena `free_all` per page on HTML path; clean finish on IR path |
+
+**Constraints while rolling this in:**
+
+- Namesake = folk Zouave improviser known as Boris — independent homage, **not**
+  affiliated with any commercial tobacco / rolling-paper brand or their marks.
+- Do **not** invent branded component names (no “Broside”); use Aside / admonition / component.
+- Do **not** frame the product as a pre-processor for Astro/Next or any JS SSG.
+- Do **not** claim multi-thread / zero-lock pools until the monolith is correct and STATUS says so.
+- Load/Roll/Ignite/Reset are teaching names, not CLI flags or IR field names, unless a later design deliberately promotes them.
+
+**Private drop:** local `SUPPORT/` is gitignored (scratch images/notes). Not
+source of truth; do not commit it.

@@ -5,10 +5,13 @@
 .zig-cache/
 *.a
 *.o
-dist/
-rag/
-rag1/
-rag2/
-source-rag/
-test-output/
-zig-out/
+/dist/
+/rag/
+/rag1/
+/rag2/
+/source-rag/
+/test-output/
+/zig-out/
+
+# Local scratch / private drop (images, notes dumps) — not product source
+/SUPPORT/
