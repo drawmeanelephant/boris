@@ -19,6 +19,10 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Bounded Parallel HTML Page Rendering (P3.1)
+
+- Add opt-in bounded parallel rendering support (`--jobs N`) for independent HTML page compilation, achieving safe, deterministic thread-pool execution using `std.Io.Mutex` and explicit work coordination.
+
 ### Explicit Incremental HTML Build Mode (P2.4)
 
 - Add opt-in incremental HTML mode (`--incremental`), which computes in-memory fingerprints, skips unchanged page generation, cleans up stale assets from `dist/`, and publishes safely and atomically.
