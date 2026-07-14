@@ -35,6 +35,8 @@ pub const Options = struct {
     html_dir: ?[]const u8 = null,
     /// Explicit incremental HTML build mode. Valid only with --html/--html-dir.
     incremental: bool = false,
+    /// Bounded parallel rendering worker count (HTML mode only).
+    jobs: usize = 1,
 };
 
 pub const ParseError = error{
@@ -44,6 +46,7 @@ pub const ParseError = error{
     UnexpectedPositional,
     ConflictingFlags,
     DuplicateFlag,
+    InvalidValue,
 };
 
 const default_input_dir = "content";
@@ -71,6 +74,8 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
     var saw_html = false;
     var saw_html_dir = false;
     var saw_incremental = false;
+    var saw_jobs = false;
+    var jobs: usize = 1;
 
     var i: usize = if (args.len > 0) 1 else 0;
     while (i < args.len) : (i += 1) {
@@ -117,6 +122,24 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
         if (std.mem.eql(u8, a, "--incremental")) {
             if (saw_incremental) return error.DuplicateFlag;
             saw_incremental = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--jobs") or std.mem.startsWith(u8, a, "--jobs=") or
+            std.mem.eql(u8, a, "-j") or std.mem.startsWith(u8, a, "-j=")) {
+            if (saw_jobs) return error.DuplicateFlag;
+            saw_jobs = true;
+            const val_str = if (std.mem.startsWith(u8, a, "-j"))
+                try takeValue(args, &i, a, "-j")
+            else
+                try takeValue(args, &i, a, "--jobs");
+            const parsed_val = std.fmt.parseInt(usize, val_str, 10) catch {
+                return error.InvalidValue;
+            };
+            if (parsed_val < 1 or parsed_val > 64) {
+                return error.InvalidValue;
+            }
+            jobs = parsed_val;
             continue;
         }
 
@@ -167,6 +190,10 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
     if (saw_incremental and !(saw_html or saw_html_dir)) {
         return error.ConflictingFlags;
     }
+    // Jobs option is valid only when combined with HTML mode.
+    if (saw_jobs and !(saw_html or saw_html_dir)) {
+        return error.ConflictingFlags;
+    }
 
     // Mode selection:
     // 1. Default → IR
@@ -208,6 +235,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             .rag_dir = null,
             .html_dir = html_dir,
             .incremental = saw_incremental,
+            .jobs = jobs,
         },
     };
 }
@@ -322,6 +350,13 @@ pub fn printParseError(err: ParseError, bad_arg: ?[]const u8) void {
                 std.debug.print("error: duplicate option\n", .{});
             }
         },
+        error.InvalidValue => {
+            if (bad_arg) |a| {
+                std.debug.print("error: invalid value for {s}\n", .{a});
+            } else {
+                std.debug.print("error: invalid option value\n", .{});
+            }
+        },
     }
 }
 
@@ -342,7 +377,9 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
         if (std.mem.eql(u8, a, "--input") or
             std.mem.eql(u8, a, "--out") or
             std.mem.eql(u8, a, "--rag-dir") or
-            std.mem.eql(u8, a, "--html-dir"))
+            std.mem.eql(u8, a, "--html-dir") or
+            std.mem.eql(u8, a, "--jobs") or
+            std.mem.eql(u8, a, "-j"))
         {
             // Value may be missing or empty — report the flag name.
             return a;
@@ -350,7 +387,9 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
         if (std.mem.startsWith(u8, a, "--input=") or
             std.mem.startsWith(u8, a, "--out=") or
             std.mem.startsWith(u8, a, "--rag-dir=") or
-            std.mem.startsWith(u8, a, "--html-dir="))
+            std.mem.startsWith(u8, a, "--html-dir=") or
+            std.mem.startsWith(u8, a, "--jobs=") or
+            std.mem.startsWith(u8, a, "-j="))
         {
             return a;
         }
@@ -419,6 +458,7 @@ test "parse: valid modes table" {
         rag: ?[]const u8,
         html: ?[]const u8,
         quiet: bool,
+        jobs: usize = 1,
     };
 
     const cases = [_]Case{
@@ -548,6 +588,26 @@ test "parse: valid modes table" {
             .html = "dist",
             .quiet = true,
         },
+        .{
+            .args = &.{ "boris", "--html", "--jobs", "4" },
+            .mode = .html,
+            .input = "content",
+            .out = null,
+            .rag = null,
+            .html = "dist",
+            .quiet = false,
+            .jobs = 4,
+        },
+        .{
+            .args = &.{ "boris", "--html-dir", "custom-dist", "-j=8" },
+            .mode = .html,
+            .input = "content",
+            .out = null,
+            .rag = null,
+            .html = "custom-dist",
+            .quiet = false,
+            .jobs = 8,
+        },
     };
 
     for (cases) |c| {
@@ -555,6 +615,7 @@ test "parse: valid modes table" {
         try expectEqual(c.mode, o.mode);
         try expectEqualStrings(c.input, o.input_dir);
         try expectEqual(c.quiet, o.quiet);
+        try expectEqual(c.jobs, o.jobs);
         if (c.out) |want| {
             try expectEqualStrings(want, o.out_dir.?);
         } else {
@@ -628,6 +689,16 @@ test "parse: conflicts and missing values table" {
         .{ .args = &.{ "boris", "--out", "a", "--out", "b" }, .err = error.DuplicateFlag },
         .{ .args = &.{ "boris", "--rag-dir", "a", "--rag-dir", "b" }, .err = error.DuplicateFlag },
         .{ .args = &.{ "boris", "--html-dir", "a", "--html-dir", "b" }, .err = error.DuplicateFlag },
+        // Jobs option tests
+        .{ .args = &.{ "boris", "--jobs", "4" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--html", "--jobs", "0" }, .err = error.InvalidValue },
+        .{ .args = &.{ "boris", "--html", "--jobs", "65" }, .err = error.InvalidValue },
+        .{ .args = &.{ "boris", "--html", "--jobs", "abc" }, .err = error.InvalidValue },
+        .{ .args = &.{ "boris", "--html", "--jobs", "" }, .err = error.EmptyValue },
+        .{ .args = &.{ "boris", "--html", "--jobs=" }, .err = error.EmptyValue },
+        .{ .args = &.{ "boris", "--html", "--jobs" }, .err = error.MissingValue },
+        .{ .args = &.{ "boris", "--html", "-j" }, .err = error.MissingValue },
+        .{ .args = &.{ "boris", "--html", "--jobs", "4", "--jobs", "8" }, .err = error.DuplicateFlag },
     };
 
     for (cases) |c| {

@@ -133,6 +133,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .layout_path = default_layout,
         .incremental = opts.incremental,
         .quiet = opts.quiet,
+        .jobs = opts.jobs,
     }) catch |err| {
         return mapHtmlError(err, opts.quiet);
     };

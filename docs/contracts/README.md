@@ -38,6 +38,7 @@ per topic:
 | Aside / components | [components.md](components.md) |
 | Apex C ABI | [apex-abi.md](apex-abi.md) |
 | Experimental HTML output | [html-output.md](html-output.md) |
+| Parallel rendering | [parallel-rendering.md](parallel-rendering.md) |
 
 ### Normative documents (v0.1) — full list
 
@@ -52,6 +53,7 @@ per topic:
 | [components.md](components.md) | Constrained `<Aside>` tokenizer, kinds, id grammar, nested policy (m10) |
 | [apex-abi.md](apex-abi.md) | In-process Apex C ABI, allocator lifetime, Zig error rules (m8) |
 | [html-output.md](html-output.md) | Experimental HTML Whiteboard, Aside stream, layout splice, Atomic publish |
+| [parallel-rendering.md](parallel-rendering.md) | Bounded worker pool parallel rendering, thread/memory isolation, deterministic order |
 
 ## Redirect / compatibility paths (non-normative)
 

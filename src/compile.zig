@@ -71,6 +71,8 @@ pub const CompileOptions = struct {
     incremental: bool = false,
     /// When set, inject failure before publishing cache manifest to test rollback.
     test_fail_cache_publish: bool = false,
+    /// Bounded parallel rendering worker count.
+    jobs: usize = 1,
 };
 
 fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Allocator) ![]u8 {
@@ -353,6 +355,80 @@ pub fn compileHtmlSite(
     return try compilePages(io, gpa, &db, layout, options);
 }
 
+const ParallelContext = struct {
+    gpa: std.mem.Allocator,
+    io: Io,
+    content_dir: Io.Dir,
+    dist_dir: Io.Dir,
+    db: *PageDb,
+    layout: assemble.Layout,
+    options: CompileOptions,
+    is_dirty: []const bool,
+
+    // Thread coordination
+    mutex: std.Io.Mutex = std.Io.Mutex.init,
+    next_page_index: usize = 0,
+    shared_error: ?anyerror = null,
+
+    // Statistics (mutex-protected)
+    pages_written: usize = 0,
+    peak_whiteboard_capacity: usize = 0,
+};
+
+fn parallelWorker(ctx: *ParallelContext) void {
+    var doc_arena = std.heap.ArenaAllocator.init(ctx.gpa);
+    defer doc_arena.deinit();
+
+    while (true) {
+        ctx.mutex.lockUncancelable(ctx.io);
+        if (ctx.shared_error != null) {
+            ctx.mutex.unlock(ctx.io);
+            break;
+        }
+
+        if (ctx.next_page_index >= ctx.db.len()) {
+            ctx.mutex.unlock(ctx.io);
+            break;
+        }
+
+        const page_index = ctx.next_page_index;
+        ctx.next_page_index += 1;
+        ctx.mutex.unlock(ctx.io);
+
+        if (ctx.is_dirty[page_index]) {
+            const page = &ctx.db.items()[page_index];
+            renderAndPublishPage(
+                ctx.io,
+                ctx.content_dir,
+                ctx.dist_dir,
+                page,
+                ctx.layout,
+                &doc_arena,
+                ctx.options,
+                page_index,
+            ) catch |err| {
+                ctx.mutex.lockUncancelable(ctx.io);
+                if (ctx.shared_error == null) {
+                    ctx.shared_error = err;
+                }
+                ctx.mutex.unlock(ctx.io);
+                _ = doc_arena.reset(.free_all);
+                break;
+            };
+
+            const cap = doc_arena.queryCapacity();
+            ctx.mutex.lockUncancelable(ctx.io);
+            ctx.pages_written += 1;
+            if (cap > ctx.peak_whiteboard_capacity) {
+                ctx.peak_whiteboard_capacity = cap;
+            }
+            ctx.mutex.unlock(ctx.io);
+        }
+
+        _ = doc_arena.reset(.free_all);
+    }
+}
+
 /// Compile already-promoted PageDb pages to HTML under `options.dist_dir`.
 ///
 /// `db` strings must outlive this call (retain arena). Whiteboard is local.
@@ -530,33 +606,93 @@ pub fn compilePages(
     }
 
     // Compile loop
-    var doc_arena = std.heap.ArenaAllocator.init(gpa);
-    defer doc_arena.deinit();
-
     var stats: CompileStats = .{};
 
-    for (db.items(), 0..) |*page, page_index| {
-        defer {
-            _ = doc_arena.reset(.free_all);
-            stats.last_reset_capacity = doc_arena.queryCapacity();
+    if (options.jobs > 1) {
+        var ctx = ParallelContext{
+            .gpa = gpa,
+            .io = io,
+            .content_dir = content_dir,
+            .dist_dir = dist_dir,
+            .db = db,
+            .layout = layout,
+            .options = options,
+            .is_dirty = is_dirty,
+        };
+
+        const num_workers = @min(options.jobs, db.len());
+        var threads = try gpa.alloc(std.Thread, num_workers);
+        defer gpa.free(threads);
+
+        var spawned_count: usize = 0;
+        errdefer {
+            ctx.mutex.lockUncancelable(io);
+            ctx.shared_error = error.ThreadSpawnFailed;
+            ctx.mutex.unlock(io);
+            for (threads[0..spawned_count]) |t| {
+                t.join();
+            }
         }
 
-        stats.pages_attempted += 1;
-
-        if (is_dirty[page_index]) {
-            try renderAndPublishPage(io, content_dir, dist_dir, page, layout, &doc_arena, options, page_index);
-            stats.pages_written += 1;
-            if (!options.quiet) {
-                std.debug.print("  wrote {s}/{s}\n", .{ options.dist_dir, page.output_path });
-            }
-        } else {
-            if (!options.quiet) {
-                std.debug.print("  cached {s}/{s}\n", .{ options.dist_dir, page.output_path });
-            }
+        for (threads[0..num_workers]) |*t| {
+            t.* = try std.Thread.spawn(.{}, parallelWorker, .{&ctx});
+            spawned_count += 1;
         }
 
-        const cap = doc_arena.queryCapacity();
-        if (cap > stats.peak_whiteboard_capacity) stats.peak_whiteboard_capacity = cap;
+        const spawned_threads = threads[0..spawned_count];
+        spawned_count = 0; // Disable errdefer joining
+
+        for (spawned_threads) |t| {
+            t.join();
+        }
+
+        if (ctx.shared_error) |err| {
+            return err;
+        }
+
+        stats.pages_attempted = db.len();
+        stats.pages_written = ctx.pages_written;
+        stats.peak_whiteboard_capacity = ctx.peak_whiteboard_capacity;
+        stats.last_reset_capacity = 0;
+
+        for (db.items(), 0..) |page, page_idx| {
+            if (is_dirty[page_idx]) {
+                if (!options.quiet) {
+                    std.debug.print("  wrote {s}/{s}\n", .{ options.dist_dir, page.output_path });
+                }
+            } else {
+                if (!options.quiet) {
+                    std.debug.print("  cached {s}/{s}\n", .{ options.dist_dir, page.output_path });
+                }
+            }
+        }
+    } else {
+        var doc_arena = std.heap.ArenaAllocator.init(gpa);
+        defer doc_arena.deinit();
+
+        for (db.items(), 0..) |*page, page_index| {
+            defer {
+                _ = doc_arena.reset(.free_all);
+                stats.last_reset_capacity = doc_arena.queryCapacity();
+            }
+
+            stats.pages_attempted += 1;
+
+            if (is_dirty[page_index]) {
+                try renderAndPublishPage(io, content_dir, dist_dir, page, layout, &doc_arena, options, page_index);
+                stats.pages_written += 1;
+                if (!options.quiet) {
+                    std.debug.print("  wrote {s}/{s}\n", .{ options.dist_dir, page.output_path });
+                }
+            } else {
+                if (!options.quiet) {
+                    std.debug.print("  cached {s}/{s}\n", .{ options.dist_dir, page.output_path });
+                }
+            }
+
+            const cap = doc_arena.queryCapacity();
+            if (cap > stats.peak_whiteboard_capacity) stats.peak_whiteboard_capacity = cap;
+        }
     }
 
     // Write Cache manifest atomically on success if in incremental mode
@@ -1370,6 +1506,134 @@ test "incremental HTML build mode - full verification suite" {
             .quiet = true,
         });
         try std.testing.expectError(error.TestInjectedCachePublishFailure, res);
+    }
+}
+
+test "compilePages: parallel rendering success, determinism, and error paths" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer gpa.free(work);
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist_seq = try std.fmt.allocPrint(gpa, "{s}/dist-seq", .{work});
+    defer gpa.free(dist_seq);
+    const dist_par = try std.fmt.allocPrint(gpa, "{s}/dist-par", .{work});
+    defer gpa.free(dist_par);
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+
+    // Write a set of pages to render
+    try writeTreeFile(io, work, "content/alpha.md",
+        \\---
+        \\title: Alpha
+        \\---
+        \\# Alpha page content
+    );
+    try writeTreeFile(io, work, "content/beta.md",
+        \\---
+        \\title: Beta
+        \\---
+        \\# Beta page content
+    );
+    try writeTreeFile(io, work, "content/gamma.md",
+        \\---
+        \\title: Gamma
+        \\---
+        \\# Gamma page content
+    );
+
+    // Run sequential build
+    var stats_seq: CompileStats = undefined;
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+
+        stats_seq = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist_seq,
+            .layout_path = layout_path,
+            .jobs = 1,
+            .quiet = true,
+        });
+        try std.testing.expectEqual(@as(usize, 3), stats_seq.pages_written);
+    }
+
+    // Run parallel build
+    var stats_par: CompileStats = undefined;
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+
+        stats_par = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist_par,
+            .layout_path = layout_path,
+            .jobs = 4,
+            .quiet = true,
+        });
+        try std.testing.expectEqual(@as(usize, 3), stats_par.pages_written);
+    }
+
+    // Verify output determinism and byte-for-byte correctness
+    const files = [_][]const u8{ "alpha.html", "beta.html", "gamma.html" };
+    for (files) |f| {
+        const path_seq = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dist_seq, f });
+        defer gpa.free(path_seq);
+        const path_par = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dist_par, f });
+        defer gpa.free(path_par);
+
+        const bytes_seq = try readFileAlloc(io, cwd, path_seq, gpa);
+        defer gpa.free(bytes_seq);
+        const bytes_par = try readFileAlloc(io, cwd, path_par, gpa);
+        defer gpa.free(bytes_par);
+
+        try std.testing.expectEqualStrings(bytes_seq, bytes_par);
+    }
+
+    // Run parallel build with injected render failure
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+
+        const res = compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist_par,
+            .layout_path = layout_path,
+            .jobs = 4,
+            .test_fail_render_at = 1,
+            .quiet = true,
+        });
+        try std.testing.expectError(error.TestInjectedRenderFailure, res);
     }
 }
 
