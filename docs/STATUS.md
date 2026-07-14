@@ -50,6 +50,7 @@ use.
 | CI matrix Linux + macOS | **Implemented & tested** | GitHub Actions |
 | Content-addressed cache fingerprints (P2.3) | **Implemented & tested** | SHA256 fingerprints on layout, page, and transitively resolved includes |
 | Explicit Incremental HTML build mode (P2.4) | **Implemented & tested** | `--incremental` skips unchanged renders, cleans stale assets safely and atomically |
+| Bounded Parallel HTML page rendering (P3.1) | **Implemented & tested** | `--jobs N` enables opt-in parallel rendering of independent HTML pages using `std.Io.Mutex` |
 | HTML as default CLI (replacing IR) | **Intentionally deferred** | IR remains default; HTML is opt-in |
 | Full YAML / MDX / concurrency / watch | **Intentionally deferred** | See non-goals |
 
