@@ -9,6 +9,13 @@ This file is binding project policy for AI coding agents (and humans pairing wit
 3. For compiler semantics, open the relevant file under [`docs/contracts/`](docs/contracts/) — those docs are **normative**.
 4. Run `zig build test` (or `./scripts/release-gate.sh` for IR-facing work) before and after substantive changes.
 
+## Git and Sandbox Safety
+
+- **Commit early, commit often:** To prevent automated environment or sandbox sync events from resetting local progress, make small, incremental git commits as milestones are reached rather than waiting for the entire milestone to finish.
+- **Recovery of lost work:** If the working copy is accidentally reset or wiped, remember that the IDE preserves a byte-perfect, chronological history of every single code write and replacement chunk under:
+  `<appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript_full.jsonl`
+  Run or write a quick Python script to parse and replay the chronological `write_to_file` and `replace_file_content` calls to automatically heal the workspace.
+
 | Doc | Role |
 |-----|------|
 | `README.md` | Human front door: quick start, layout, links |
