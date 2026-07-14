@@ -14,5 +14,9 @@
 /test-output/
 /zig-out/
 
+
 # Local scratch / private drop (images, notes dumps) — not product source
 /SUPPORT/
+
+# Local smoke kit / agent kit
+/boris-agent-kit/

@@ -81,7 +81,7 @@ Use `--rag-dir` to choose the RAG corpus directory.
 | `--rag` | RAG export only (default dir: `rag/`) |
 | `--no-rag` | Explicit IR-only (default; mutually exclusive with `--rag` / `--rag-dir`) |
 | `--rag-dir=DIR` | RAG output directory (**implies RAG-only**) |
-| `--quiet` | Less progress logging |
+| `--quiet` | Suppress progress + diagnostic stderr (exit codes/artifacts unchanged) |
 | `-h`, `--help` | Print usage and exit `0` **without** scanning content |
 
 Malformed empty values for `--input=`, `--out=`, or `--rag-dir=` are usage

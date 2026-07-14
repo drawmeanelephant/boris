@@ -15,6 +15,8 @@ pub const Mode = enum {
     ir,
     /// RAG-only export under `--rag-dir` (default `rag`).
     rag,
+    /// HTML site render under `--html-dir` (default `dist`).
+    html,
 };
 
 /// Canonical parsed options. Strings are views into argv (or static defaults).
@@ -29,6 +31,8 @@ pub const Options = struct {
     out_dir: ?[]const u8 = null,
     /// RAG corpus directory. Set for RAG mode only (default `rag`).
     rag_dir: ?[]const u8 = null,
+    /// HTML output directory. Set for HTML mode only (default `dist`).
+    html_dir: ?[]const u8 = null,
 };
 
 pub const ParseError = error{
@@ -43,6 +47,7 @@ pub const ParseError = error{
 const default_input_dir = "content";
 const default_out_dir = ".boris";
 const default_rag_dir = "rag";
+const default_html_dir = "dist";
 
 /// Parse argv into `Options`. Does not print, exit, or touch the filesystem.
 ///
@@ -53,6 +58,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
     var input_dir: []const u8 = default_input_dir;
     var out_dir: []const u8 = default_out_dir;
     var rag_dir: []const u8 = default_rag_dir;
+    var html_dir: []const u8 = default_html_dir;
 
     var saw_quiet = false;
     var saw_input = false;
@@ -60,6 +66,8 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
     var saw_rag = false;
     var saw_no_rag = false;
     var saw_rag_dir = false;
+    var saw_html = false;
+    var saw_html_dir = false;
 
     var i: usize = if (args.len > 0) 1 else 0;
     while (i < args.len) : (i += 1) {
@@ -74,6 +82,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
                 .input_dir = input_dir,
                 .out_dir = out_dir,
                 .rag_dir = null,
+                .html_dir = null,
             };
         }
 
@@ -93,6 +102,12 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
         if (std.mem.eql(u8, a, "--no-rag")) {
             if (saw_no_rag) return error.DuplicateFlag;
             saw_no_rag = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--html")) {
+            if (saw_html) return error.DuplicateFlag;
+            saw_html = true;
             continue;
         }
 
@@ -117,6 +132,13 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             continue;
         }
 
+        if (std.mem.eql(u8, a, "--html-dir") or std.mem.startsWith(u8, a, "--html-dir=")) {
+            if (saw_html_dir) return error.DuplicateFlag;
+            saw_html_dir = true;
+            html_dir = try takeValue(args, &i, a, "--html-dir");
+            continue;
+        }
+
         if (std.mem.startsWith(u8, a, "-")) {
             return error.UnknownFlag;
         }
@@ -128,13 +150,22 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
     if (saw_no_rag and saw_rag_dir) return error.ConflictingFlags;
     // Explicit --out must never be combined with RAG-only selection.
     if (saw_out and (saw_rag or saw_rag_dir)) return error.ConflictingFlags;
+    // HTML/SSG mode owns its output destination; refuse IR/RAG output flags.
+    if ((saw_html or saw_html_dir) and (saw_rag or saw_rag_dir or saw_out)) {
+        return error.ConflictingFlags;
+    }
 
     // Mode selection:
     // 1. Default → IR
     // 2. --no-rag → IR
-    // 3. --rag → RAG-only
-    // 4. --rag-dir → RAG-only
-    const mode: Mode = if (saw_rag or saw_rag_dir) .rag else .ir;
+    // 3. --rag / --rag-dir → RAG-only
+    // 4. --html / --html-dir → HTML site
+    const mode: Mode = if (saw_html or saw_html_dir)
+        .html
+    else if (saw_rag or saw_rag_dir)
+        .rag
+    else
+        .ir;
 
     return switch (mode) {
         .ir => .{
@@ -144,6 +175,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             .input_dir = input_dir,
             .out_dir = out_dir,
             .rag_dir = null,
+            .html_dir = null,
         },
         .rag => .{
             .help = false,
@@ -152,6 +184,16 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             .input_dir = input_dir,
             .out_dir = null,
             .rag_dir = rag_dir,
+            .html_dir = null,
+        },
+        .html => .{
+            .help = false,
+            .quiet = quiet,
+            .mode = .html,
+            .input_dir = input_dir,
+            .out_dir = null,
+            .rag_dir = null,
+            .html_dir = html_dir,
         },
     };
 }
@@ -180,7 +222,7 @@ fn takeValue(
 
 pub fn printUsage() void {
     std.debug.print(
-        \\Boris — Zig content compiler (IR + optional RAG, milestone 7)
+        \\Boris — Zig content compiler (IR + optional RAG + opt-in HTML)
         \\
         \\Usage: boris [options]
         \\
@@ -189,12 +231,15 @@ pub fn printUsage() void {
         \\  --no-rag            Explicit IR mode
         \\  --rag               RAG-only mode → corpus under --rag-dir (default rag)
         \\  --rag-dir <DIR>     RAG-only mode with output directory DIR
+        \\  --html              HTML site mode → pages under --html-dir (default dist)
+        \\  --html-dir <DIR>    HTML site mode with output directory DIR
         \\
         \\Options:
         \\  --input <DIR>       Content root (default: content)
         \\  --out <DIR>         IR output directory (default: .boris; IR mode only)
         \\  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
-        \\  --quiet             Suppress progress logging only (not artifacts/diagnostics)
+        \\  --html-dir <DIR>    HTML output directory (implies HTML; default: dist)
+        \\  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
         \\  -h, --help          Show this help and exit 0
         \\
         \\IR artifacts (success):
@@ -204,14 +249,18 @@ pub fn printUsage() void {
         \\  INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json
         \\  system/**  content/pages/**  graph/entity-catalog.md  graph/relations.md
         \\
+        \\HTML artifacts (success; Apex + layout splice; layout: layouts/main.html):
+        \\  <html-dir>/**/*.html
+        \\
         \\Conflicts (exit 2):
         \\  --rag with --no-rag
         \\  --no-rag with --rag-dir
         \\  explicit --out with --rag or --rag-dir
+        \\  --html / --html-dir with --rag, --rag-dir, or explicit --out
         \\
         \\Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
         \\
-        \\Note: Apex/HTML render is not the default product surface.
+        \\Note: HTML is opt-in via --html / --html-dir; default remains IR.
         \\
     , .{});
 }
@@ -267,16 +316,25 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
     while (i < args.len) : (i += 1) {
         const a = args[i];
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) continue;
-        if (std.mem.eql(u8, a, "--quiet") or std.mem.eql(u8, a, "--rag") or std.mem.eql(u8, a, "--no-rag")) {
+        if (std.mem.eql(u8, a, "--quiet") or
+            std.mem.eql(u8, a, "--rag") or
+            std.mem.eql(u8, a, "--no-rag") or
+            std.mem.eql(u8, a, "--html"))
+        {
             continue;
         }
-        if (std.mem.eql(u8, a, "--input") or std.mem.eql(u8, a, "--out") or std.mem.eql(u8, a, "--rag-dir")) {
+        if (std.mem.eql(u8, a, "--input") or
+            std.mem.eql(u8, a, "--out") or
+            std.mem.eql(u8, a, "--rag-dir") or
+            std.mem.eql(u8, a, "--html-dir"))
+        {
             // Value may be missing or empty — report the flag name.
             return a;
         }
         if (std.mem.startsWith(u8, a, "--input=") or
             std.mem.startsWith(u8, a, "--out=") or
-            std.mem.startsWith(u8, a, "--rag-dir="))
+            std.mem.startsWith(u8, a, "--rag-dir=") or
+            std.mem.startsWith(u8, a, "--html-dir="))
         {
             return a;
         }
@@ -333,6 +391,7 @@ test "parse: default is IR mode" {
     try expectEqualStrings(default_input_dir, o.input_dir);
     try expectEqualStrings(default_out_dir, o.out_dir.?);
     try expect(o.rag_dir == null);
+    try expect(o.html_dir == null);
 }
 
 test "parse: valid modes table" {
@@ -342,6 +401,7 @@ test "parse: valid modes table" {
         input: []const u8,
         out: ?[]const u8,
         rag: ?[]const u8,
+        html: ?[]const u8,
         quiet: bool,
     };
 
@@ -352,6 +412,7 @@ test "parse: valid modes table" {
             .input = "content",
             .out = ".boris",
             .rag = null,
+            .html = null,
             .quiet = false,
         },
         .{
@@ -360,6 +421,7 @@ test "parse: valid modes table" {
             .input = "content",
             .out = null,
             .rag = "rag",
+            .html = null,
             .quiet = false,
         },
         .{
@@ -368,6 +430,7 @@ test "parse: valid modes table" {
             .input = "content",
             .out = null,
             .rag = "uploads/rag",
+            .html = null,
             .quiet = false,
         },
         .{
@@ -376,6 +439,7 @@ test "parse: valid modes table" {
             .input = "content",
             .out = null,
             .rag = "x",
+            .html = null,
             .quiet = false,
         },
         .{
@@ -384,6 +448,7 @@ test "parse: valid modes table" {
             .input = "content",
             .out = null,
             .rag = "custom",
+            .html = null,
             .quiet = false,
         },
         .{
@@ -392,6 +457,7 @@ test "parse: valid modes table" {
             .input = "docs",
             .out = "build/ir",
             .rag = null,
+            .html = null,
             .quiet = true,
         },
         .{
@@ -400,6 +466,7 @@ test "parse: valid modes table" {
             .input = "site",
             .out = ".boris",
             .rag = null,
+            .html = null,
             .quiet = false,
         },
         .{
@@ -408,6 +475,7 @@ test "parse: valid modes table" {
             .input = "c",
             .out = null,
             .rag = "rag",
+            .html = null,
             .quiet = true,
         },
         .{
@@ -416,7 +484,53 @@ test "parse: valid modes table" {
             .input = "c",
             .out = null,
             .rag = "out-rag",
+            .html = null,
             .quiet = false,
+        },
+        .{
+            .args = &.{ "boris", "--html" },
+            .mode = .html,
+            .input = "content",
+            .out = null,
+            .rag = null,
+            .html = "dist",
+            .quiet = false,
+        },
+        .{
+            .args = &.{ "boris", "--html-dir", "site/out" },
+            .mode = .html,
+            .input = "content",
+            .out = null,
+            .rag = null,
+            .html = "site/out",
+            .quiet = false,
+        },
+        .{
+            .args = &.{ "boris", "--html-dir=x" },
+            .mode = .html,
+            .input = "content",
+            .out = null,
+            .rag = null,
+            .html = "x",
+            .quiet = false,
+        },
+        .{
+            .args = &.{ "boris", "--html", "--html-dir", "custom-dist" },
+            .mode = .html,
+            .input = "content",
+            .out = null,
+            .rag = null,
+            .html = "custom-dist",
+            .quiet = false,
+        },
+        .{
+            .args = &.{ "boris", "--html", "--input", "docs", "--quiet" },
+            .mode = .html,
+            .input = "docs",
+            .out = null,
+            .rag = null,
+            .html = "dist",
+            .quiet = true,
         },
     };
 
@@ -434,6 +548,11 @@ test "parse: valid modes table" {
             try expectEqualStrings(want, o.rag_dir.?);
         } else {
             try expect(o.rag_dir == null);
+        }
+        if (c.html) |want| {
+            try expectEqualStrings(want, o.html_dir.?);
+        } else {
+            try expect(o.html_dir == null);
         }
     }
 }
@@ -457,13 +576,24 @@ test "parse: conflicts and missing values table" {
         .{ .args = &.{ "boris", "--rag-dir", "r", "--out", "x" }, .err = error.ConflictingFlags },
         .{ .args = &.{ "boris", "--out=x", "--rag-dir=r" }, .err = error.ConflictingFlags },
         .{ .args = &.{ "boris", "--out", "x", "--rag", "--rag-dir", "r" }, .err = error.ConflictingFlags },
+        // HTML exclusive of RAG and explicit --out
+        .{ .args = &.{ "boris", "--html", "--rag" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--html", "--rag-dir", "r" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--html", "--out", "x" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--html-dir", "d", "--rag" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--html-dir", "d", "--rag-dir", "r" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--html-dir", "d", "--out", "x" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--out=x", "--html" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--rag-dir=r", "--html-dir=d" }, .err = error.ConflictingFlags },
         // Rule 8: empty values
         .{ .args = &.{ "boris", "--input", "" }, .err = error.EmptyValue },
         .{ .args = &.{ "boris", "--out", "" }, .err = error.EmptyValue },
         .{ .args = &.{ "boris", "--rag-dir", "" }, .err = error.EmptyValue },
+        .{ .args = &.{ "boris", "--html-dir", "" }, .err = error.EmptyValue },
         .{ .args = &.{ "boris", "--input=" }, .err = error.EmptyValue },
         .{ .args = &.{ "boris", "--out=" }, .err = error.EmptyValue },
         .{ .args = &.{ "boris", "--rag-dir=" }, .err = error.EmptyValue },
+        .{ .args = &.{ "boris", "--html-dir=" }, .err = error.EmptyValue },
         // Rule 9: unknown, missing value, positional, duplicates
         .{ .args = &.{ "boris", "--unknown" }, .err = error.UnknownFlag },
         .{ .args = &.{ "boris", "-v" }, .err = error.UnknownFlag },
@@ -471,14 +601,17 @@ test "parse: conflicts and missing values table" {
         .{ .args = &.{ "boris", "--input" }, .err = error.MissingValue },
         .{ .args = &.{ "boris", "--out" }, .err = error.MissingValue },
         .{ .args = &.{ "boris", "--rag-dir" }, .err = error.MissingValue },
+        .{ .args = &.{ "boris", "--html-dir" }, .err = error.MissingValue },
         .{ .args = &.{ "boris", "content" }, .err = error.UnexpectedPositional },
         .{ .args = &.{ "boris", "extra", "args" }, .err = error.UnexpectedPositional },
         .{ .args = &.{ "boris", "--rag", "--rag" }, .err = error.DuplicateFlag },
         .{ .args = &.{ "boris", "--no-rag", "--no-rag" }, .err = error.DuplicateFlag },
+        .{ .args = &.{ "boris", "--html", "--html" }, .err = error.DuplicateFlag },
         .{ .args = &.{ "boris", "--quiet", "--quiet" }, .err = error.DuplicateFlag },
         .{ .args = &.{ "boris", "--input", "a", "--input", "b" }, .err = error.DuplicateFlag },
         .{ .args = &.{ "boris", "--out", "a", "--out", "b" }, .err = error.DuplicateFlag },
         .{ .args = &.{ "boris", "--rag-dir", "a", "--rag-dir", "b" }, .err = error.DuplicateFlag },
+        .{ .args = &.{ "boris", "--html-dir", "a", "--html-dir", "b" }, .err = error.DuplicateFlag },
     };
 
     for (cases) |c| {
@@ -569,9 +702,12 @@ test "runArgs: usage errors exit 2; help exits 0" {
 
     try expectEqual(@as(u8, 2), runArgs(&.{ "boris", "--rag", "--no-rag" }, &spy));
     try expectEqual(@as(u8, 2), runArgs(&.{ "boris", "--rag", "--out", "x" }, &spy));
+    try expectEqual(@as(u8, 2), runArgs(&.{ "boris", "--html", "--rag" }, &spy));
+    try expectEqual(@as(u8, 2), runArgs(&.{ "boris", "--html", "--out", "x" }, &spy));
     try expectEqual(@as(u8, 2), runArgs(&.{ "boris", "--unknown" }, &spy));
     try expectEqual(@as(usize, 0), spy.pipeline_calls);
 
     try expectEqual(@as(u8, 0), runArgs(&.{ "boris", "--rag-dir", "x" }, &spy));
-    try expectEqual(@as(usize, 1), spy.pipeline_calls);
+    try expectEqual(@as(u8, 0), runArgs(&.{ "boris", "--html" }, &spy));
+    try expectEqual(@as(usize, 2), spy.pipeline_calls);
 }

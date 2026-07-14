@@ -1,8 +1,9 @@
-//! Boris — product CLI entry (milestone 7: IR + optional RAG).
+//! Boris — product CLI entry (IR + optional RAG + opt-in HTML).
 //!
 //! Typed flag parsing + exit-code model. IR mode runs the content compiler
 //! pipeline (scan → parse → PageDb → graph validate → deterministic JSON IR).
 //! RAG mode reuses `pipeline.compile` + exports a deterministic corpus.
+//! HTML mode calls the Apex + Whiteboard site compiler under `dist/` (opt-in).
 
 const std = @import("std");
 const Io = std.Io;
@@ -10,6 +11,7 @@ const cli = @import("cli.zig");
 const diagnostic = @import("diagnostic.zig");
 const pipeline = @import("pipeline.zig");
 const rag = @import("rag.zig");
+const compile = @import("compile.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const Options = cli.Options;
@@ -18,8 +20,10 @@ pub const parseOptions = cli.parseOptions;
 
 const default_out = ".boris";
 const default_rag = "rag";
+const default_html = "dist";
+const default_layout = "layouts/main.html";
 
-/// Production runner: help text + IR / RAG pipelines.
+/// Production runner: help text + IR / RAG / HTML pipelines.
 const ProdRunner = struct {
     gpa: std.mem.Allocator,
     io: Io,
@@ -46,6 +50,7 @@ const ProdRunner = struct {
 pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     switch (opts.mode) {
         .rag => return runRag(io, gpa, opts),
+        .html => return runHtml(io, gpa, opts),
         .ir => {},
     }
 
@@ -56,12 +61,14 @@ pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .out_dir = out_dir,
         .quiet = opts.quiet,
     }) catch |err| {
-        std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        if (!opts.quiet) {
+            std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        }
         return .io_error;
     };
     defer result.deinit();
 
-    if (result.diagnostics.items.len > 0) {
+    if (result.diagnostics.items.len > 0 and !opts.quiet) {
         pipeline.printDiagnostics(gpa, result.diagnostics.items) catch {
             return .io_error;
         };
@@ -90,12 +97,14 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .system_docs_dir = "docs/rag/system",
         .quiet = opts.quiet,
     }) catch |err| {
-        std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        if (!opts.quiet) {
+            std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        }
         return .io_error;
     };
     defer result.deinit();
 
-    if (result.diagnostics().len > 0) {
+    if (result.diagnostics().len > 0 and !opts.quiet) {
         pipeline.printDiagnostics(gpa, result.diagnostics()) catch {
             return .io_error;
         };
@@ -112,6 +121,49 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .io => .io_error,
         .content, .none => .content_error,
     };
+}
+
+/// Opt-in HTML site render via Apex C-ABI + whiteboard arena (compile path).
+pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    const html_dir = opts.html_dir orelse default_html;
+
+    const stats = compile.compileHtmlSite(io, gpa, .{
+        .content_root = opts.input_dir,
+        .dist_dir = html_dir,
+        .layout_path = default_layout,
+        .quiet = opts.quiet,
+    }) catch |err| {
+        return mapHtmlError(err, opts.quiet);
+    };
+
+    if (!opts.quiet) {
+        std.debug.print("ok: wrote HTML under {s} ({d} page(s))\n", .{ html_dir, stats.pages_written });
+    }
+    return .success;
+}
+
+/// Map HTML compile failures to process exit codes.
+/// Content/layout/component faults → 1; missing content root and I/O → 3.
+/// When `quiet`, skip stderr text (exit code and artifacts still convey failure).
+fn mapHtmlError(err: anyerror, quiet: bool) ExitCode {
+    switch (err) {
+        error.ParseFailed,
+        error.ComponentFailed,
+        error.LayoutMissingMarker,
+        error.LayoutDuplicateMarker,
+        => {
+            if (!quiet) {
+                std.debug.print("error: content or layout failure: {s}\n", .{@errorName(err)});
+            }
+            return .content_error;
+        },
+        else => {
+            if (!quiet) {
+                std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+            }
+            return .io_error;
+        },
+    }
 }
 
 /// Pure dispatch used by tests (injectable runner; no process.Init required).
@@ -181,12 +233,17 @@ test "runArgs: documented exit code mapping" {
     try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--no-rag" }, &runner));
     try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--rag" }, &runner));
     try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--rag-dir", "x" }, &runner));
-    try std.testing.expect(runner.pipeline_calls >= 5);
+    try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--html" }, &runner));
+    try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--html-dir", "x" }, &runner));
+    try std.testing.expect(runner.pipeline_calls >= 7);
 
     const before = runner.pipeline_calls;
     try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--rag", "--no-rag" }, &runner));
     try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--rag", "--out", "x" }, &runner));
     try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--no-rag", "--rag-dir", "x" }, &runner));
+    try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--html", "--rag" }, &runner));
+    try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--html", "--out", "x" }, &runner));
+    try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--html-dir", "d", "--rag-dir", "r" }, &runner));
     try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--unknown" }, &runner));
     try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "--input" }, &runner));
     try std.testing.expectEqual(@as(u8, 2), cli.runArgs(&.{ "boris", "positional" }, &runner));
@@ -288,4 +345,67 @@ test "runPipeline: RAG invalid graph exits 1" {
         .quiet = true,
     });
     try std.testing.expectEqual(ExitCode.content_error, code);
+}
+
+test "runPipeline: HTML fixture exits 0" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cli-html", .{tmp.sub_path});
+    defer gpa.free(out);
+
+    // Uses repo `layouts/main.html` (default_layout) + HTML content fixture.
+    const code = runPipeline(io, gpa, .{
+        .mode = .html,
+        .input_dir = "test/fixtures/html/content",
+        .out_dir = null,
+        .rag_dir = null,
+        .html_dir = out,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(ExitCode.success, code);
+
+    // Smoke-check that a page landed under the HTML output root.
+    const cwd = Io.Dir.cwd();
+    const index_path = try std.fmt.allocPrint(gpa, "{s}/index.html", .{out});
+    defer gpa.free(index_path);
+    var file = try cwd.openFile(io, index_path, .{});
+    defer file.close(io);
+}
+
+test "runPipeline: HTML missing content root exits 3" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cli-html-noroot", .{tmp.sub_path});
+    defer gpa.free(out);
+
+    const code = runPipeline(io, gpa, .{
+        .mode = .html,
+        .input_dir = "docs/contracts/fixtures/__no_such_html_root__",
+        .out_dir = null,
+        .rag_dir = null,
+        .html_dir = out,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(ExitCode.io_error, code);
+}
+
+test "parseOptions: HTML mode defaults and exclusive dirs" {
+    const o = try parseOptions(&.{ "boris", "--html" });
+    try std.testing.expectEqual(Mode.html, o.mode);
+    try std.testing.expectEqualStrings("dist", o.html_dir.?);
+    try std.testing.expect(o.out_dir == null);
+    try std.testing.expect(o.rag_dir == null);
+
+    try std.testing.expectError(
+        error.ConflictingFlags,
+        parseOptions(&.{ "boris", "--html", "--out", ".boris" }),
+    );
+    try std.testing.expectError(
+        error.ConflictingFlags,
+        parseOptions(&.{ "boris", "--html-dir", "d", "--rag" }),
+    );
 }

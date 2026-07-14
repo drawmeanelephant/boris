@@ -19,6 +19,22 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Quiet mode suppresses diagnostic stderr
+
+- `--quiet` now suppresses diagnostic and I/O error text on stderr in addition
+  to progress lines (IR / RAG / HTML entry points). Exit codes and on-disk
+  artifacts (including `build-report.json` diagnostics) are unchanged. Unit
+  tests already used `quiet: true`, so `zig build test` no longer prints
+  expected failure diagnostics as if the suite failed.
+  Contract: [docs/contracts/diagnostics.md](docs/contracts/diagnostics.md).
+
+### Opt-in HTML CLI mode
+
+- Default CLI gains opt-in SSG mode: `--html` and `--html-dir <DIR>` (default
+  `dist`). Wires to `compile.compileHtmlSite` with layout `layouts/main.html`.
+  Mutually exclusive with `--rag`, `--rag-dir`, and explicit `--out` so HTML
+  owns its output destination. Default remains IR under `.boris/`.
+
 ### Review package step
 
 - Add `zig build package` (`boris-package`): deterministic tar under

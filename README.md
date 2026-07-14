@@ -61,7 +61,7 @@ rolling-paper brand.
 | `--rag` | — | Select RAG-only mode |
 | `--no-rag` | — | Explicit IR mode |
 | `--rag-dir <DIR>` | `rag` (when RAG) | Implies RAG-only mode |
-| `--quiet` | off | Suppress progress logging only (not diagnostics/IR) |
+| `--quiet` | off | Suppress progress + diagnostic stderr (exit codes/artifacts unchanged) |
 | `-h`, `--help` | — | Help; exit 0 |
 
 Also accepted: `--input=DIR`, `--out=DIR`, `--rag-dir=DIR`.

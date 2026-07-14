@@ -80,7 +80,7 @@ Useful flags:
 - `--input=DIR` / `--out=DIR` — IR path (defaults `content` / `.boris`)
 - `--rag` / `--rag-dir=PATH` — RAG-only export (implies no IR; not HTML+RAG)
 - `--no-rag` — explicit IR-only (default)
-- `--quiet` — less progress logging
+- `--quiet` — suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
 
 ## One-sentence summary for retrieval
 

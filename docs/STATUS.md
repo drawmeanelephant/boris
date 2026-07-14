@@ -13,9 +13,10 @@ starting a session.
 
 **Boris v0.1 ships a single-threaded content compiler** with validated JSON IR,
 optional deterministic RAG (including `:::kind` Aside export), constrained
-`<Aside>` tokenization on the shared compile path, and an experimental HTML
-render path (Apex + Whiteboard + layout splice). Default CLI is still IR or RAG
-only — HTML is library/test surface, not default product mode.
+`<Aside>` tokenization on the shared compile path, and an **opt-in HTML** site
+mode (`--html` / `--html-dir`, Apex + Whiteboard + layout splice). Default CLI
+remains IR; HTML is not the default product surface but is wired for deliberate
+use.
 
 ---
 
@@ -35,7 +36,7 @@ only — HTML is library/test surface, not default product mode.
 | Capability | Status | Notes |
 |------------|--------|--------|
 | `zig build` → `boris` executable | **Implemented & tested** | Apex C linked in-process |
-| Typed CLI (`--input`, `--out`, `--rag`, …) | **Implemented & tested** | Exit 0/1/2/3 |
+| Typed CLI (`--input`, `--out`, `--rag`, `--html`, …) | **Implemented & tested** | Exit 0/1/2/3 |
 | Deterministic scanner | **Implemented & tested** | Sort by entity id; symlink reject |
 | Canonical identity + safe output paths | **Implemented & tested** | No `..` escape |
 | Bounded frontmatter parser | **Implemented & tested** | Not YAML |
@@ -44,9 +45,9 @@ only — HTML is library/test surface, not default product mode.
 | Deterministic JSON IR | **Implemented & tested** | `.boris/` staging publish |
 | Optional RAG + `:::kind` Aside export | **Implemented & tested** | Non-round-trippable export form |
 | Apex C ABI + Zig wrapper | **Implemented & tested** | Hostile + opt-in sanitizer |
-| Experimental HTML + Aside stream | **Implemented & tested** | Not default CLI |
+| Experimental HTML + Aside stream | **Implemented & tested** | Opt-in via `--html` / `--html-dir` |
 | CI matrix Linux + macOS | **Implemented & tested** | GitHub Actions |
-| HTML `dist/` default CLI | **Intentionally deferred** | Modules/tests only |
+| HTML as default CLI (replacing IR) | **Intentionally deferred** | IR remains default; HTML is opt-in |
 | Full YAML / MDX / concurrency / watch | **Intentionally deferred** | See non-goals |
 
 ### How to run
@@ -59,6 +60,7 @@ zig build test-apex-sanitize   # opt-in; skips cleanly if unavailable
 zig build run -- --help
 zig build run -- --input fixtures/content/valid --out /tmp/boris-ir
 zig build run -- --input fixtures/content/valid --rag-dir /tmp/boris-rag
+zig build run -- --input test/fixtures/html/content --html-dir /tmp/boris-dist
 zig build run -- --input docs/contracts/fixtures/valid/content --out .boris
 zig build source-rag
 zig build package                  # optional review tar → packages/
@@ -75,7 +77,7 @@ Ignite → graph.validate (+ freeze when clean)
 Reset → retain arena lifetime ends with Result.deinit
 ```
 
-**Experimental HTML:**
+**Opt-in HTML (`--html` / `--html-dir`):**
 
 ```text
 Layout load → PageDb promote → per page:

@@ -156,8 +156,9 @@ Rules:
 6. On content failure the pipeline writes `build-report.json` with diagnostics
    and does **not** publish graph-dependent IR; that does **not** make the exit
    code `0`.
-7. `--quiet` suppresses **progress** logging only — not artifacts and not
-   diagnostics.
+7. `--quiet` suppresses **progress** logging and **diagnostic text on stderr**.
+   Exit codes, IR/RAG artifacts, and `build-report.json` diagnostics are
+   unchanged.
 
 ---
 
