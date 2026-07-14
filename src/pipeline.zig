@@ -17,7 +17,7 @@ const page_mod = @import("page.zig");
 pub const schema_version = "0.1.0";
 pub const compiler_id = "boris/0.1.1";
 /// Product version string (package / catalog_meta.boris_version).
-pub const boris_version = "0.0.1";
+pub const boris_version = "0.1.1";
 
 pub const Options = struct {
     content_root: []const u8 = "content",
@@ -170,9 +170,23 @@ pub fn renderManifest(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
     return try buf.toOwnedSlice(gpa);
 }
 
+fn writeU32Array(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, values: []const u32) !void {
+    try buf.append(gpa, '[');
+    for (values, 0..) |v, i| {
+        if (i > 0) try buf.appendSlice(gpa, ", ");
+        try json_out.writeUsize(buf, gpa, v);
+    }
+    try buf.append(gpa, ']');
+}
+
 pub fn renderGraph(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(gpa);
+
+    // Nav is derived only from the frozen node list (parent_index / role).
+    // Not published when validation failed (caller does not write graph.json).
+    const nav = try graph_mod.buildNav(gpa, result.pages.items);
+    defer graph_mod.freeNav(gpa, nav);
 
     try buf.appendSlice(gpa, "{\n");
     try json_out.indent(&buf, gpa, 1);
@@ -260,6 +274,40 @@ pub fn renderGraph(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
         try json_out.indent(&buf, gpa, 2);
         try buf.append(gpa, '}');
         if (i + 1 < result.edges.items.len) try buf.append(gpa, ',');
+        try buf.append(gpa, '\n');
+    }
+    try json_out.indent(&buf, gpa, 1);
+    try buf.appendSlice(gpa, "],\n");
+
+    // Key order after edges: nav (derived, id-sorted parallel to nodes).
+    try json_out.indent(&buf, gpa, 1);
+    try buf.appendSlice(gpa, "\"nav\": [\n");
+    for (nav, 0..) |entry, i| {
+        try json_out.indent(&buf, gpa, 2);
+        try buf.appendSlice(gpa, "{\n");
+        try json_out.indent(&buf, gpa, 3);
+        try buf.appendSlice(gpa, "\"index\": ");
+        try json_out.writeUsize(&buf, gpa, entry.index);
+        try buf.appendSlice(gpa, ",\n");
+        try json_out.indent(&buf, gpa, 3);
+        try buf.appendSlice(gpa, "\"id\": ");
+        try json_out.writeString(&buf, gpa, entry.id);
+        try buf.appendSlice(gpa, ",\n");
+        try json_out.indent(&buf, gpa, 3);
+        try buf.appendSlice(gpa, "\"breadcrumb\": ");
+        try writeU32Array(&buf, gpa, entry.breadcrumb);
+        try buf.appendSlice(gpa, ",\n");
+        try json_out.indent(&buf, gpa, 3);
+        try buf.appendSlice(gpa, "\"children\": ");
+        try writeU32Array(&buf, gpa, entry.children);
+        try buf.appendSlice(gpa, ",\n");
+        try json_out.indent(&buf, gpa, 3);
+        try buf.appendSlice(gpa, "\"siblings\": ");
+        try writeU32Array(&buf, gpa, entry.siblings);
+        try buf.appendSlice(gpa, "\n");
+        try json_out.indent(&buf, gpa, 2);
+        try buf.append(gpa, '}');
+        if (i + 1 < nav.len) try buf.append(gpa, ',');
         try buf.append(gpa, '\n');
     }
     try json_out.indent(&buf, gpa, 1);
@@ -788,6 +836,37 @@ test "e2e valid fixture builds three JSON artifacts" {
     try std.testing.expectEqualStrings("guides/intro", nodes[0].object.get("id").?.string);
     try std.testing.expectEqualStrings("guides/intro-tips", nodes[1].object.get("id").?.string);
     try std.testing.expectEqualStrings("index", nodes[2].object.get("id").?.string);
+
+    // Graph-aware nav (from frozen parent_index only).
+    const nav = graph_parsed.value.object.get("nav").?.array.items;
+    try std.testing.expectEqual(@as(usize, 3), nav.len);
+    // guides/intro (trunk): breadcrumb [0], children [1], siblings []
+    try std.testing.expectEqualStrings("guides/intro", nav[0].object.get("id").?.string);
+    try std.testing.expectEqual(@as(usize, 1), nav[0].object.get("breadcrumb").?.array.items.len);
+    try std.testing.expectEqual(@as(i64, 0), nav[0].object.get("breadcrumb").?.array.items[0].integer);
+    try std.testing.expectEqual(@as(usize, 1), nav[0].object.get("children").?.array.items.len);
+    try std.testing.expectEqual(@as(i64, 1), nav[0].object.get("children").?.array.items[0].integer);
+    try std.testing.expectEqual(@as(usize, 0), nav[0].object.get("siblings").?.array.items.len);
+    // guides/intro-tips (satellite): breadcrumb [0,1], children [], siblings []
+    try std.testing.expectEqualStrings("guides/intro-tips", nav[1].object.get("id").?.string);
+    try std.testing.expectEqual(@as(usize, 2), nav[1].object.get("breadcrumb").?.array.items.len);
+    try std.testing.expectEqual(@as(i64, 0), nav[1].object.get("breadcrumb").?.array.items[0].integer);
+    try std.testing.expectEqual(@as(i64, 1), nav[1].object.get("breadcrumb").?.array.items[1].integer);
+    try std.testing.expectEqual(@as(usize, 0), nav[1].object.get("children").?.array.items.len);
+    try std.testing.expectEqual(@as(usize, 0), nav[1].object.get("siblings").?.array.items.len);
+    // index (lonely trunk)
+    try std.testing.expectEqualStrings("index", nav[2].object.get("id").?.string);
+    try std.testing.expectEqual(@as(usize, 1), nav[2].object.get("breadcrumb").?.array.items.len);
+    try std.testing.expectEqual(@as(i64, 2), nav[2].object.get("breadcrumb").?.array.items[0].integer);
+    try std.testing.expectEqual(@as(usize, 0), nav[2].object.get("children").?.array.items.len);
+
+    // Root key order: schemaVersion, frozen, nodes, edges, nav
+    const k_schema = std.mem.indexOf(u8, graph_bytes, "\"schemaVersion\"").?;
+    const k_frozen = std.mem.indexOf(u8, graph_bytes, "\"frozen\"").?;
+    const k_nodes = std.mem.indexOf(u8, graph_bytes, "\"nodes\"").?;
+    const k_edges = std.mem.indexOf(u8, graph_bytes, "\"edges\"").?;
+    const k_nav = std.mem.indexOf(u8, graph_bytes, "\"nav\"").?;
+    try std.testing.expect(k_schema < k_frozen and k_frozen < k_nodes and k_nodes < k_edges and k_edges < k_nav);
 
     // No absolute paths in outputs.
     try std.testing.expect(std.mem.indexOf(u8, man_bytes, "/Users/") == null);

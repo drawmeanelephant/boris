@@ -221,18 +221,18 @@ run_bad() {
   fi
 }
 
-run_bad missing-parent E_PARENT_MISSING
-run_bad self-parent E_PARENT_SELF
-run_bad cycles E_PARENT_CYCLE
-run_bad longer-cycle E_PARENT_CYCLE
-run_bad satellite-of-satellite E_PARENT_NOT_TRUNK
-run_bad duplicate-ids E_DUP_ID
-run_bad malformed-frontmatter E_FRONTMATTER
-run_bad duplicate-key E_FRONTMATTER_DUP_KEY
-run_bad invalid-status E_FRONTMATTER_VALUE
-run_bad invalid-tags E_FRONTMATTER_VALUE
-run_bad invalid-id E_FRONTMATTER_VALUE
-run_bad unsupported-syntax E_FRONTMATTER
+run_bad missing-parent EPARENTMISSING
+run_bad self-parent EPARENTSELF
+run_bad cycles EPARENTCYCLE
+run_bad longer-cycle EPARENTCYCLE
+run_bad satellite-of-satellite EPARENTNOTTRUNK
+run_bad duplicate-ids EDUPLICATEID
+run_bad malformed-frontmatter EFRONTMATTER
+run_bad duplicate-key EFRONTMATTER
+run_bad invalid-status EFRONTMATTER
+run_bad invalid-tags EFRONTMATTER
+run_bad invalid-id EFRONTMATTER
+run_bad unsupported-syntax EFRONTMATTER
 
 # --- 7. No untracked generated output except approved directories -------------
 # Intent: product *output* (dist/rag/.boris/…) must not be committed, and any

@@ -43,6 +43,7 @@ use.
 | Aside component tokenizer | **Implemented & tested** | `src/aside.zig`; `ECOMPONENT` |
 | Graph validate + freeze (shared IR/RAG) | **Implemented & tested** | One entry point |
 | Deterministic JSON IR | **Implemented & tested** | `.boris/` staging publish |
+| Graph-aware nav in IR (`graph.json` → `nav`) | **Implemented & tested** | From frozen graph only; not HTML/RAG |
 | Optional RAG + `:::kind` Aside export | **Implemented & tested** | Non-round-trippable export form |
 | Apex C ABI + Zig wrapper | **Implemented & tested** | Hostile + opt-in sanitizer |
 | Experimental HTML + Aside stream | **Implemented & tested** | Opt-in via `--html` / `--html-dir` |
@@ -140,7 +141,7 @@ parallelism.
 | Priority | Item | Why this order |
 |----------|------|----------------|
 | **P1.1** | **Promote experimental HTML to opt-in CLI** (e.g. explicit flag; still not default over IR) | Path already tested (Whiteboard, Aside stream, Atomic publish); natural m11 without new languages |
-| P1.2 | Graph-aware navigation / TOC from frozen Trunk–Satellite graph | Uses existing IR; no reverse index required yet |
+| P1.2 | Graph-aware navigation from frozen Trunk–Satellite graph | **IR done:** `graph.json` → `nav` (breadcrumb / children / siblings). HTML/TOC render still deferred |
 | P1.3 | Apex markdown fidelity (stub → real docs needs) | HTML quality bottleneck; keep C ABI, no child-process renderers |
 | P1.4 | Layout / asset dependency edges (typed, validated) | First step toward long-term dependency graph; still sequential |
 

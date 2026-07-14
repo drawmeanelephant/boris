@@ -45,5 +45,28 @@
       "to": 0,
       "kind": "parent"
     }
+  ],
+  "nav": [
+    {
+      "index": 0,
+      "id": "guides/intro",
+      "breadcrumb": [0],
+      "children": [1],
+      "siblings": []
+    },
+    {
+      "index": 1,
+      "id": "guides/intro-tips",
+      "breadcrumb": [0, 1],
+      "children": [],
+      "siblings": []
+    },
+    {
+      "index": 2,
+      "id": "index",
+      "breadcrumb": [2],
+      "children": [],
+      "siblings": []
+    }
   ]
 }

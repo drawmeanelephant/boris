@@ -57,5 +57,35 @@
       "to": 1,
       "kind": "parent"
     }
+  ],
+  "nav": [
+    {
+      "index": 0,
+      "id": "empty-no-fm",
+      "breadcrumb": [0],
+      "children": [],
+      "siblings": []
+    },
+    {
+      "index": 1,
+      "id": "home",
+      "breadcrumb": [1],
+      "children": [3],
+      "siblings": []
+    },
+    {
+      "index": 2,
+      "id": "nested/deep/page",
+      "breadcrumb": [2],
+      "children": [],
+      "siblings": []
+    },
+    {
+      "index": 3,
+      "id": "satellite-child",
+      "breadcrumb": [1, 3],
+      "children": [],
+      "siblings": []
+    }
   ]
 }

@@ -23,7 +23,8 @@ content/
 
 - `schemaVersion` is `"0.1.0"` on `manifest.json`, `graph.json`, and `build-report.json`
 - Pages/nodes sorted by `id` as in the table order above
-- `graph.json` has `frozen: true` and one `parent` edge
+- `graph.json` has `frozen: true`, one `parent` edge, and `nav` derived from
+  the frozen graph (breadcrumb / children / siblings by node index)
 - Nodes carry `bodyOffset` (not full body text)
 - `build-report.json` has `ok: true`, `errorCount: 0`, empty diagnostics
 - Committed shapes: [`expected/`](expected/) (paths match the release-gate run)

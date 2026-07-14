@@ -17,7 +17,7 @@ output directory (CLI default `.boris/`):
 ```text
 .boris/
   manifest.json       # required — page summaries
-  graph.json          # required — frozen nodes + parent edges
+  graph.json          # required — frozen nodes + parent edges + nav
   build-report.json   # required — ok flag, errorCount, diagnostics
 ```
 
@@ -41,7 +41,7 @@ No HTML, no RAG tree, no per-page fragment files under this IR contract.
 | File | On success (`ok: true`) | On content failure (`ok: false`) |
 |------|-------------------------|-----------------------------------|
 | `manifest.json` | Full page list, sorted by `id` | **Not published** |
-| `graph.json` | `frozen: true`, nodes + edges | **Not published** |
+| `graph.json` | `frozen: true`, nodes + edges + nav | **Not published** |
 | `build-report.json` | `ok: true`, empty diagnostics | `ok: false`, non-empty diagnostics |
 
 ---
@@ -258,7 +258,7 @@ Example (shape only):
 Key order (root):
 
 ```text
-schemaVersion, frozen, nodes, edges
+schemaVersion, frozen, nodes, edges, nav
 ```
 
 | Field | Type | Description |
@@ -267,6 +267,25 @@ schemaVersion, frozen, nodes, edges
 | `frozen` | boolean | `true` only after successful graph freeze |
 | `nodes` | array | Full node objects, sorted by `id` |
 | `edges` | array | Parent edges after freeze (sorted by `from`, then `to`) |
+| `nav` | array | Per-page navigation derived from the frozen graph (see below) |
+
+### Ownership: why `nav` lives on `graph.json`
+
+| Artifact | Owns |
+|----------|------|
+| `manifest.json` | Lightweight page **summaries** (role, parent id, title, status) for inventory |
+| `graph.json` | Frozen **topology** — nodes, parent edges, and derived navigation |
+| `build-report.json` | Success flag + diagnostics only |
+
+`nav` is computed **only** from the already-validated, already-frozen node list
+(`parent_index` / role). It is not page inventory metadata, so it does **not**
+belong on `manifest.json`. It is published only when `frozen: true` (same
+gate as `nodes` / `edges`); on content failure, `graph.json` is not published
+and no nav is emitted.
+
+**Non-goals for this field:** no filesystem re-walk, no frontmatter re-parse,
+no reverse dependency index, no incremental rebuild data, no HTML or RAG
+consumption requirements.
 
 ### Node object
 
@@ -301,7 +320,77 @@ Key order: `from`, `to`, `kind`
 | `to` | integer | Parent node index |
 | `kind` | string | `"parent"` in v0.1 |
 
-v0.1 does **not** require a derived `children` array on page objects.
+v0.1 does **not** put a derived `children` array on node objects. Child and
+sibling lists live only under the top-level `nav` array.
+
+### `nav` entry object
+
+One entry per page, **same order as `nodes`** (entity id ascending). Index
+arrays reference stable node indices (post-freeze).
+
+Key order:
+
+```text
+index, id, breadcrumb, children, siblings
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `index` | integer | Same as the page’s node `index` |
+| `id` | string | Entity id (redundant with `nodes[i].id`; stable for consumers) |
+| `breadcrumb` | array of integer | Parent chain **root → self** (inclusive), node indices |
+| `children` | array of integer | Direct child node indices, entity id ascending |
+| `siblings` | array of integer | Same-Trunk satellite peers **excluding self**, id ascending; **empty for Trunk** |
+
+#### Normative rules
+
+1. **Input:** frozen nodes only (`parent_index` remapped after id sort). No I/O.
+2. **Breadcrumb:** walk `parent_index` from the page to the root Trunk, then
+   emit root → self. For a Trunk this is `[selfIndex]`. For a Satellite in the
+   v0.1 one-level forest this is `[parentIndex, selfIndex]`.
+3. **Children:** every node `c` with `c.parentIndex == page.index`, ordered by
+   entity id. Equivalent to scanning the id-sorted node array once and
+   appending — **do not** sort via hash-map iteration.
+4. **Siblings:** if the page is a Satellite with parent `P`, the direct
+   children of `P` excluding self (id order). If the page is a Trunk,
+   `siblings` is `[]` (other roots are **not** siblings).
+5. **Empty arrays** are written as `[]`, never omitted.
+6. v0.1 forests are one-level: satellites never have children under valid
+   graphs; multi-hop chains remain hard errors at validate time.
+
+Example (shape only; matches the valid contract fixture):
+
+```json
+{
+  "schemaVersion": "0.1.0",
+  "frozen": true,
+  "nodes": [ "…" ],
+  "edges": [ "…" ],
+  "nav": [
+    {
+      "index": 0,
+      "id": "guides/intro",
+      "breadcrumb": [0],
+      "children": [1],
+      "siblings": []
+    },
+    {
+      "index": 1,
+      "id": "guides/intro-tips",
+      "breadcrumb": [0, 1],
+      "children": [],
+      "siblings": []
+    },
+    {
+      "index": 2,
+      "id": "index",
+      "breadcrumb": [2],
+      "children": [],
+      "siblings": []
+    }
+  ]
+}
+```
 
 ---
 
@@ -351,10 +440,11 @@ On I/O/system failure (CLI exit `3`), files may be missing or partial.
 
 Consumers of `"0.1.0"` may rely on:
 
-- Required keys listed above
+- Required keys listed above (including `graph.json` → `nav` on success)
 - Deterministic sort and key order **on a given host**
 - Role/parent invariants after `ok: true` and `frozen: true`
 - The single parent key name **`parent`** (never `parentEntry`)
+- `nav` arrays ordered by entity id; indices consistent with `nodes` / `edges`
 
 Consumers must not require HTML fields, full body text, RAG paths, or
 component lists under this schema version.

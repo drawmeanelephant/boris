@@ -35,6 +35,21 @@ pub const Edge = struct {
     kind: []const u8 = "parent",
 };
 
+/// Per-page navigation derived from a frozen Trunk/Satellite graph.
+///
+/// All index arrays use stable node indices (post-freeze, id-sorted). Arrays
+/// are ordered by entity id ascending — never by hash-map iteration.
+pub const NavEntry = struct {
+    index: u32,
+    id: []const u8,
+    /// Parent chain from root Trunk to self (inclusive), node indices.
+    breadcrumb: []const u32,
+    /// Direct children (satellites naming this page as parent), id order.
+    children: []const u32,
+    /// Same-Trunk satellite peers excluding self; empty for Trunk pages.
+    siblings: []const u32,
+};
+
 pub const Graph = struct {
     nodes: []Node = &.{},
     edges: []Edge = &.{},
@@ -385,6 +400,131 @@ pub fn freeze(
     };
 }
 
+/// Free a `buildNav` result (spine + per-entry index arrays).
+pub fn freeNav(list_gpa: std.mem.Allocator, nav: []NavEntry) void {
+    for (nav) |e| {
+        list_gpa.free(e.breadcrumb);
+        list_gpa.free(e.children);
+        list_gpa.free(e.siblings);
+    }
+    list_gpa.free(nav);
+}
+
+/// Build per-page navigation from an already-frozen node list.
+///
+/// Preconditions (same as post-`freeze`):
+/// - `nodes` sorted by entity id ascending
+/// - each `nodes[i].index == i`
+/// - `parent_index` remapped to sorted indices
+///
+/// Does **not** re-scan the filesystem or re-parse frontmatter. Uses only
+/// `parent_index` / `role` on the frozen nodes. Child and sibling lists are
+/// produced by a single ordered pass over the id-sorted node array (no map
+/// iteration in output order).
+///
+/// Caller owns the returned slice; free with `freeNav`.
+pub fn buildNav(list_gpa: std.mem.Allocator, nodes: []const Node) ![]NavEntry {
+    // Reverse adjacency: children_of[parent_index] in id order.
+    // Nodes are already id-sorted, so appending while scanning 0..n-1 yields
+    // id-sorted child lists without a separate sort.
+    var child_lists = try list_gpa.alloc(std.ArrayList(u32), nodes.len);
+    defer {
+        for (child_lists) |*cl| cl.deinit(list_gpa);
+        list_gpa.free(child_lists);
+    }
+    for (child_lists) |*cl| cl.* = .empty;
+
+    for (nodes) |n| {
+        if (n.parent_index) |pi| {
+            try child_lists[pi].append(list_gpa, n.index);
+        }
+    }
+
+    var nav = try list_gpa.alloc(NavEntry, nodes.len);
+    var built: usize = 0;
+    errdefer {
+        var j: usize = 0;
+        while (j < built) : (j += 1) {
+            list_gpa.free(nav[j].breadcrumb);
+            list_gpa.free(nav[j].children);
+            list_gpa.free(nav[j].siblings);
+        }
+        list_gpa.free(nav);
+    }
+
+    for (nodes, 0..) |n, i| {
+        // Explicit catch cleanup only — do not errdefer inside the loop after
+        // ownership transfers to nav[i] (would double-free with the outer path).
+        const breadcrumb = try buildBreadcrumb(list_gpa, nodes, i);
+        const children = list_gpa.dupe(u32, child_lists[i].items) catch |err| {
+            list_gpa.free(breadcrumb);
+            return err;
+        };
+        const siblings = buildSiblings(list_gpa, child_lists, n) catch |err| {
+            list_gpa.free(breadcrumb);
+            list_gpa.free(children);
+            return err;
+        };
+
+        nav[i] = .{
+            .index = n.index,
+            .id = n.id,
+            .breadcrumb = breadcrumb,
+            .children = children,
+            .siblings = siblings,
+        };
+        built += 1;
+    }
+
+    return nav;
+}
+
+/// Root → self node-index chain. v0.1 graphs are one-level forests (depth ≤ 2),
+/// but the walk follows `parent_index` generically without assuming depth.
+fn buildBreadcrumb(list_gpa: std.mem.Allocator, nodes: []const Node, start: usize) ![]u32 {
+    var chain: std.ArrayList(u32) = .empty;
+    errdefer chain.deinit(list_gpa);
+
+    var cur: usize = start;
+    // Guard against residual cycles (should not exist after validate+freeze).
+    var guard: usize = 0;
+    const max_hops = nodes.len + 1;
+    while (true) {
+        try chain.append(list_gpa, @intCast(cur));
+        if (nodes[cur].parent_index) |pi| {
+            cur = pi;
+            guard += 1;
+            if (guard > max_hops) break; // defensive: stop pathological walks
+        } else {
+            break;
+        }
+    }
+
+    // chain is self → … → root; reverse to root → self.
+    std.mem.reverse(u32, chain.items);
+    return try chain.toOwnedSlice(list_gpa);
+}
+
+/// Trunk-level siblings: other direct children of the same parent, excluding self.
+/// Empty for Trunk pages (no parent) and for nodes with an unresolved parent.
+fn buildSiblings(
+    list_gpa: std.mem.Allocator,
+    child_lists: []const std.ArrayList(u32),
+    n: Node,
+) ![]u32 {
+    const pi = n.parent_index orelse {
+        return try list_gpa.alloc(u32, 0);
+    };
+    const peers = child_lists[pi].items;
+    var out: std.ArrayList(u32) = .empty;
+    errdefer out.deinit(list_gpa);
+    try out.ensureTotalCapacity(list_gpa, peers.len);
+    for (peers) |ci| {
+        if (ci != n.index) try out.append(list_gpa, ci);
+    }
+    return try out.toOwnedSlice(list_gpa);
+}
+
 fn expectCodeCount(diags: []const diag.Diagnostic, code: diag.Code, want: usize) !void {
     var n: usize = 0;
     for (diags) |d| {
@@ -556,4 +696,65 @@ test "validateTopology satellite-of-satellite is hard error EPARENTNOTTRUNK" {
 test "resolve is alias of validateTopology" {
     // Topology helper remains; product paths use `validate` (dups + topology).
     try std.testing.expect(@TypeOf(resolve) == @TypeOf(validateTopology));
+}
+
+test "buildNav breadcrumb children siblings from frozen graph" {
+    const gpa = std.testing.allocator;
+    // Two trunks; trunk `t` has satellites s-a, s-b (id order after freeze).
+    var nodes = [_]Node{
+        .{ .id = "s-a", .source_path = "s-a.md", .parent = "t" },
+        .{ .id = "s-b", .source_path = "s-b.md", .parent = "t" },
+        .{ .id = "t", .source_path = "t.md" },
+        .{ .id = "u", .source_path = "u.md" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+    try validate(gpa, gpa, &nodes, &diags);
+    try std.testing.expectEqual(@as(usize, 0), diag.countErrors(diags.items));
+    const g = try freeze(gpa, &nodes);
+    defer gpa.free(g.edges);
+
+    // Freeze id order: s-a, s-b, t, u
+    try std.testing.expectEqualStrings("s-a", g.nodes[0].id);
+    try std.testing.expectEqualStrings("s-b", g.nodes[1].id);
+    try std.testing.expectEqualStrings("t", g.nodes[2].id);
+    try std.testing.expectEqualStrings("u", g.nodes[3].id);
+
+    const nav = try buildNav(gpa, g.nodes);
+    defer freeNav(gpa, nav);
+    try std.testing.expectEqual(@as(usize, 4), nav.len);
+
+    // Trunk t: breadcrumb [self], children [s-a, s-b], no siblings
+    try std.testing.expectEqual(@as(u32, 2), nav[2].index);
+    try std.testing.expectEqual(@as(usize, 1), nav[2].breadcrumb.len);
+    try std.testing.expectEqual(@as(u32, 2), nav[2].breadcrumb[0]);
+    try std.testing.expectEqual(@as(usize, 2), nav[2].children.len);
+    try std.testing.expectEqual(@as(u32, 0), nav[2].children[0]);
+    try std.testing.expectEqual(@as(u32, 1), nav[2].children[1]);
+    try std.testing.expectEqual(@as(usize, 0), nav[2].siblings.len);
+
+    // Satellite s-a: breadcrumb [t, s-a], no children, sibling s-b
+    try std.testing.expectEqual(@as(usize, 2), nav[0].breadcrumb.len);
+    try std.testing.expectEqual(@as(u32, 2), nav[0].breadcrumb[0]);
+    try std.testing.expectEqual(@as(u32, 0), nav[0].breadcrumb[1]);
+    try std.testing.expectEqual(@as(usize, 0), nav[0].children.len);
+    try std.testing.expectEqual(@as(usize, 1), nav[0].siblings.len);
+    try std.testing.expectEqual(@as(u32, 1), nav[0].siblings[0]);
+
+    // Satellite s-b: sibling s-a (id order)
+    try std.testing.expectEqual(@as(usize, 1), nav[1].siblings.len);
+    try std.testing.expectEqual(@as(u32, 0), nav[1].siblings[0]);
+
+    // Lonely trunk u
+    try std.testing.expectEqual(@as(usize, 1), nav[3].breadcrumb.len);
+    try std.testing.expectEqual(@as(u32, 3), nav[3].breadcrumb[0]);
+    try std.testing.expectEqual(@as(usize, 0), nav[3].children.len);
+    try std.testing.expectEqual(@as(usize, 0), nav[3].siblings.len);
+}
+
+test "buildNav empty graph" {
+    const gpa = std.testing.allocator;
+    const nav = try buildNav(gpa, &.{});
+    defer freeNav(gpa, nav);
+    try std.testing.expectEqual(@as(usize, 0), nav.len);
 }

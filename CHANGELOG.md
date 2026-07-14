@@ -19,6 +19,16 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Graph-aware navigation in IR (`graph.json` → `nav`)
+
+- Emit a top-level `nav` array on successful `graph.json` (not manifest): per
+  page `breadcrumb` (root → self), `children`, and trunk-level `siblings` for
+  satellites. Computed only from the frozen Trunk/Satellite graph
+  (`parent_index`); no filesystem re-walk, no frontmatter re-parse, no HTML /
+  RAG / CLI changes. Sort = entity id order (same as nodes).
+  Contract: [docs/contracts/ir-schema.md](docs/contracts/ir-schema.md).
+  Implementation: `graph.buildNav` + `pipeline.renderGraph`.
+
 ### Quiet mode suppresses diagnostic stderr
 
 - `--quiet` now suppresses diagnostic and I/O error text on stderr in addition
