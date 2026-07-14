@@ -33,6 +33,8 @@ pub const Options = struct {
     rag_dir: ?[]const u8 = null,
     /// HTML output directory. Set for HTML mode only (default `dist`).
     html_dir: ?[]const u8 = null,
+    /// Explicit incremental HTML build mode. Valid only with --html/--html-dir.
+    incremental: bool = false,
 };
 
 pub const ParseError = error{
@@ -68,6 +70,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
     var saw_rag_dir = false;
     var saw_html = false;
     var saw_html_dir = false;
+    var saw_incremental = false;
 
     var i: usize = if (args.len > 0) 1 else 0;
     while (i < args.len) : (i += 1) {
@@ -108,6 +111,12 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
         if (std.mem.eql(u8, a, "--html")) {
             if (saw_html) return error.DuplicateFlag;
             saw_html = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--incremental")) {
+            if (saw_incremental) return error.DuplicateFlag;
+            saw_incremental = true;
             continue;
         }
 
@@ -154,6 +163,10 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
     if ((saw_html or saw_html_dir) and (saw_rag or saw_rag_dir or saw_out)) {
         return error.ConflictingFlags;
     }
+    // Incremental option is valid only when combined with HTML mode.
+    if (saw_incremental and !(saw_html or saw_html_dir)) {
+        return error.ConflictingFlags;
+    }
 
     // Mode selection:
     // 1. Default → IR
@@ -194,6 +207,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             .out_dir = null,
             .rag_dir = null,
             .html_dir = html_dir,
+            .incremental = saw_incremental,
         },
     };
 }
@@ -239,6 +253,7 @@ pub fn printUsage() void {
         \\  --out <DIR>         IR output directory (default: .boris; IR mode only)
         \\  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
         \\  --html-dir <DIR>    HTML output directory (implies HTML; default: dist)
+        \\  --incremental       Opt-in to fast, content-addressed incremental HTML rendering (requires HTML mode)
         \\  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
         \\  -h, --help          Show this help and exit 0
         \\
@@ -319,7 +334,8 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
         if (std.mem.eql(u8, a, "--quiet") or
             std.mem.eql(u8, a, "--rag") or
             std.mem.eql(u8, a, "--no-rag") or
-            std.mem.eql(u8, a, "--html"))
+            std.mem.eql(u8, a, "--html") or
+            std.mem.eql(u8, a, "--incremental"))
         {
             continue;
         }

@@ -19,6 +19,14 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Explicit Incremental HTML Build Mode (P2.4)
+
+- Add opt-in incremental HTML mode (`--incremental`), which computes in-memory fingerprints, skips unchanged page generation, cleans up stale assets from `dist/`, and publishes safely and atomically.
+
+### Cache fingerprints and affected-page query (P2.3)
+
+- Implement content-addressed cache fingerprints (using in-process SHA256) and transitive reverse-dependency affected-set queries under `src/cache.zig` with complete unit tests for same-input stability, single-page change boundaries, shared include/layout transitive impact, and alphabetical sorting.
+
 ### Layout edges on freeze
 
 - `graph.Edge` gains optional `target`; `freeze` accepts `layout_path: ?[]const u8`.

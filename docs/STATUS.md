@@ -48,6 +48,8 @@ use.
 | Apex C ABI + Zig wrapper | **Implemented & tested** | Hostile + opt-in sanitizer |
 | Experimental HTML + Aside stream | **Implemented & tested** | Opt-in via `--html` / `--html-dir` |
 | CI matrix Linux + macOS | **Implemented & tested** | GitHub Actions |
+| Content-addressed cache fingerprints (P2.3) | **Implemented & tested** | SHA256 fingerprints on layout, page, and transitively resolved includes |
+| Explicit Incremental HTML build mode (P2.4) | **Implemented & tested** | `--incremental` skips unchanged renders, cleans stale assets safely and atomically |
 | HTML as default CLI (replacing IR) | **Intentionally deferred** | IR remains default; HTML is opt-in |
 | Full YAML / MDX / concurrency / watch | **Intentionally deferred** | See non-goals |
 
@@ -145,14 +147,14 @@ parallelism.
 | P1.3 | Apex markdown fidelity (stub → real docs needs) | HTML quality bottleneck; keep C ABI, no child-process renderers |
 | P1.4 | Layout / asset dependency edges (typed, validated) | First step toward long-term dependency graph; still sequential |
 
-### P2 — graph-native build foundations (before incremental / parallel)
+### P2 — graph-native build foundations (before incremental / parallel) — COMPLETED
 
-| Priority | Item | Gate |
-|----------|------|------|
-| P2.1 | Forward + reverse dependency indexes (pages, layouts, includes, assets) | Design + implement sequentially; freeze after validate |
-| P2.2 | Includes / transclusion as first-class edges | Only with deterministic discovery + cycle rules |
-| P2.3 | Content-addressed cache keys + affected-set calculation | After indexes exist and are tested |
-| P2.4 | Incremental rebuild | **After** P2.1–P2.3; do not ship partial “maybe stale” caches |
+| Priority | Item | Status | Notes |
+|----------|------|--------|-------|
+| P2.1 | Forward + reverse dependency indexes (pages, layouts, includes, assets) | **Implemented & tested** | Indexes created sequentially; frozen after validation |
+| P2.2 | Includes / transclusion as first-class edges | **Implemented & tested** | Includes scanned transitively with cycle check / protection |
+| P2.3 | Content-addressed cache keys + affected-set calculation | **Implemented & tested** | SHA256 fingerprints computed deterministically |
+| P2.4 | Incremental rebuild | **Implemented & tested** | Opt-in `--incremental` rebuild skipping identical page renders |
 
 ### P3 — scale-out (only after sequential correctness + benchmarks)
 

@@ -335,6 +335,29 @@ pub fn build(b: *std.Build) void {
     const run_package_tests = b.addRunArtifact(package_tests);
     run_package_tests.setCwd(b.path("."));
 
+    // --- Dependency & Cache tests (Milestone P2.1 & P2.3) ------------------
+    const dependency_mod = b.createModule(.{
+        .root_source_file = b.path("src/dependency.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const dependency_tests = b.addTest(.{
+        .root_module = dependency_mod,
+    });
+    const run_dependency_tests = b.addRunArtifact(dependency_tests);
+    run_dependency_tests.setCwd(b.path("."));
+
+    const cache_mod = b.createModule(.{
+        .root_source_file = b.path("src/cache.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const cache_tests = b.addTest(.{
+        .root_module = cache_mod,
+    });
+    const run_cache_tests = b.addRunArtifact(cache_tests);
+    run_cache_tests.setCwd(b.path("."));
+
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_fixtures_tests.step);
@@ -351,6 +374,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_fuzz_tests.step);
     test_step.dependOn(&run_source_rag_tests.step);
     test_step.dependOn(&run_package_tests.step);
+    test_step.dependOn(&run_dependency_tests.step);
+    test_step.dependOn(&run_cache_tests.step);
 
     const test_harness_step = b.step(
         "test-harness",

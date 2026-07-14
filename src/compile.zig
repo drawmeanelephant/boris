@@ -39,6 +39,8 @@ const apex = @import("apex.zig");
 const assemble = @import("assemble.zig");
 const scanner = @import("scanner.zig");
 const identity = @import("identity.zig");
+const cache = @import("cache.zig");
+const dependency = @import("dependency.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -65,6 +67,10 @@ pub const CompileOptions = struct {
     /// When set, inject `assemble` publish failure for page `N` after a prior
     /// successful write of that path (caller should seed the final first).
     test_fail_publish_at: ?usize = null,
+    /// Opt-in to fast incremental rendering.
+    incremental: bool = false,
+    /// When set, inject failure before publishing cache manifest to test rollback.
+    test_fail_cache_publish: bool = false,
 };
 
 fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Allocator) ![]u8 {
@@ -182,6 +188,145 @@ pub fn renderAndPublishPage(
     });
 }
 
+pub const CacheEntry = struct {
+    entity_id: []const u8,
+    fingerprint: []const u8,
+    output_path: []const u8,
+};
+
+pub const CacheManifest = struct {
+    format_version: []const u8 = "boris-cache-v1",
+    entries: []const CacheEntry,
+};
+
+pub const ParsedCacheEntry = struct {
+    entity_id: []const u8,
+    fingerprint: []const u8,
+    output_path: []const u8,
+};
+
+pub const ParsedCacheManifest = struct {
+    format_version: []const u8,
+    entries: []ParsedCacheEntry,
+};
+
+fn compareStrings(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.order(u8, a, b) == .lt;
+}
+
+fn scanIncludes(allocator: std.mem.Allocator, bytes: []const u8, list: *std.ArrayList([]const u8)) !void {
+    var i: usize = 0;
+    while (i < bytes.len) {
+        const prefix = "includes/";
+        if (std.mem.startsWith(u8, bytes[i..], prefix)) {
+            var j = i + prefix.len;
+            while (j < bytes.len) {
+                const c = bytes[j];
+                if (std.ascii.isAlphanumeric(c) or c == '.' or c == '/' or c == '_' or c == '-') {
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            if (j > i + prefix.len) {
+                const path = bytes[i..j];
+                var exists = false;
+                for (list.items) |existing| {
+                    if (std.mem.eql(u8, existing, path)) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    try list.append(allocator, try allocator.dupe(u8, path));
+                }
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+}
+
+fn scanIncludesRecursively(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    include_path: []const u8,
+    dep_index: *dependency.DependencyIndex,
+    visited: *std.StringHashMapUnmanaged(void),
+    inc_alloc: std.mem.Allocator,
+) !void {
+    if (visited.contains(include_path)) return;
+    try visited.put(gpa, include_path, {});
+
+    const inc_bytes = readFileAlloc(io, content_dir, include_path, gpa) catch |err| {
+        if (err == error.FileNotFound) return;
+        return err;
+    };
+    defer gpa.free(inc_bytes);
+
+    var sub_includes: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (sub_includes.items) |sub| gpa.free(sub);
+        sub_includes.deinit(gpa);
+    }
+    try scanIncludes(gpa, inc_bytes, &sub_includes);
+
+    for (sub_includes.items) |sub_path| {
+        const owned_inc = try inc_alloc.dupe(u8, include_path);
+        const owned_sub = try inc_alloc.dupe(u8, sub_path);
+        try dep_index.addDependency(owned_inc, owned_sub, .include);
+        try scanIncludesRecursively(io, gpa, content_dir, owned_sub, dep_index, visited, inc_alloc);
+    }
+}
+
+fn collectTransitIncludes(
+    gpa: std.mem.Allocator,
+    source: []const u8,
+    dep_index: *const dependency.DependencyIndex,
+    list: *std.ArrayList([]const u8),
+    visited: *std.StringHashMapUnmanaged(void),
+) !void {
+    if (visited.contains(source)) return;
+    try visited.put(gpa, source, {});
+
+    if (dep_index.forward.get(source)) |deps| {
+        for (deps.items) |dep| {
+            if (dep.kind == .include) {
+                var exists = false;
+                for (list.items) |item| {
+                    if (std.mem.eql(u8, item, dep.path)) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    try list.append(gpa, try gpa.dupe(u8, dep.path));
+                }
+                try collectTransitIncludes(gpa, dep.path, dep_index, list, visited);
+            }
+        }
+    }
+}
+
+fn writeCacheManifest(writer: anytype, manifest: CacheManifest) !void {
+    try writer.writeAll("{\n  \"format_version\": \"boris-cache-v1\",\n  \"entries\": [\n");
+    for (manifest.entries, 0..) |entry, i| {
+        try writer.print("    {{\n      \"entity_id\": \"{s}\",\n      \"fingerprint\": \"{s}\",\n      \"output_path\": \"{s}\"\n    }}", .{
+            entry.entity_id,
+            entry.fingerprint,
+            entry.output_path,
+        });
+        if (i + 1 < manifest.entries.len) {
+            try writer.writeAll(",\n");
+        } else {
+            try writer.writeAll("\n");
+        }
+    }
+    try writer.writeAll("  ]\n}\n");
+}
+
 /// Experimental site compile: layout → promote PageDb → whiteboard loop → dist/.
 ///
 /// Single-threaded. Does not mutate default IR semantics.
@@ -227,6 +372,24 @@ pub fn compilePages(
     var dist_dir = try cwd.openDir(io, options.dist_dir, .{});
     defer dist_dir.close(io);
 
+    // Load and parse prior manifest if in incremental mode
+    var manifest_bytes: ?[]u8 = null;
+    defer {
+        if (manifest_bytes) |mb| gpa.free(mb);
+    }
+    var parsed_manifest: ?std.json.Parsed(ParsedCacheManifest) = null;
+    defer {
+        if (parsed_manifest) |pm| pm.deinit();
+    }
+
+    if (options.incremental) {
+        if (readFileAlloc(io, dist_dir, ".boris-cache/manifest.json", gpa)) |bytes| {
+            manifest_bytes = bytes;
+            parsed_manifest = std.json.parseFromSlice(ParsedCacheManifest, gpa, bytes, .{ .ignore_unknown_fields = true }) catch null;
+        } else |_| {}
+    }
+
+    // Precreate output directories
     {
         var paths: std.ArrayList([]const u8) = .empty;
         defer paths.deinit(gpa);
@@ -235,15 +398,144 @@ pub fn compilePages(
         try assemble.precreateOutputDirs(io, dist_dir, gpa, paths.items);
     }
 
+    // Build the DependencyIndex and scan includes
+    var include_path_arena = std.heap.ArenaAllocator.init(gpa);
+    defer include_path_arena.deinit();
+    const inc_alloc = include_path_arena.allocator();
+
+    var dep_index = dependency.DependencyIndex.init(gpa);
+    defer dep_index.deinit();
+
+    var visited_includes = std.StringHashMapUnmanaged(void).empty;
+    defer visited_includes.deinit(gpa);
+
+    for (db.items()) |p| {
+        try dep_index.addDependency(p.source_path, options.layout_path, .layout);
+
+        const src_bytes = try readFileAlloc(io, content_dir, p.source_path, gpa);
+        defer gpa.free(src_bytes);
+
+        var page_includes = std.ArrayList([]const u8).empty;
+        defer {
+            for (page_includes.items) |inc| gpa.free(inc);
+            page_includes.deinit(gpa);
+        }
+        try scanIncludes(gpa, src_bytes, &page_includes);
+
+        for (page_includes.items) |inc_path| {
+            const owned_src = try inc_alloc.dupe(u8, p.source_path);
+            const owned_inc = try inc_alloc.dupe(u8, inc_path);
+            try dep_index.addDependency(owned_src, owned_inc, .include);
+            try scanIncludesRecursively(io, gpa, content_dir, owned_inc, &dep_index, &visited_includes, inc_alloc);
+        }
+    }
+
+    // Read layout bytes once for fingerprinting
+    const layout_bytes = try readFileAlloc(io, cwd, options.layout_path, gpa);
+    defer gpa.free(layout_bytes);
+
+    // Compute fingerprints and determine which pages are dirty
+    const fingerprints = try gpa.alloc([]const u8, db.len());
+    for (fingerprints) |*fp| fp.* = &.{};
+    defer {
+        for (fingerprints) |fp| {
+            if (fp.len > 0) gpa.free(fp);
+        }
+        gpa.free(fingerprints);
+    }
+
+    const is_dirty = try gpa.alloc(bool, db.len());
+    @memset(is_dirty, false);
+    defer gpa.free(is_dirty);
+
+    for (db.items(), 0..) |page, page_idx| {
+        const src_bytes = try readFileAlloc(io, content_dir, page.source_path, gpa);
+        defer gpa.free(src_bytes);
+
+        var transit_includes = std.ArrayList([]const u8).empty;
+        defer {
+            for (transit_includes.items) |inc| gpa.free(inc);
+            transit_includes.deinit(gpa);
+        }
+        var visited_transit = std.StringHashMapUnmanaged(void).empty;
+        defer visited_transit.deinit(gpa);
+
+        try collectTransitIncludes(gpa, page.source_path, &dep_index, &transit_includes, &visited_transit);
+        std.mem.sort([]const u8, transit_includes.items, {}, compareStrings);
+
+        var include_bytes_list = std.ArrayList([]const u8).empty;
+        defer {
+            for (include_bytes_list.items) |bytes| gpa.free(bytes);
+            include_bytes_list.deinit(gpa);
+        }
+        for (transit_includes.items) |inc_path| {
+            const bytes = try readFileAlloc(io, content_dir, inc_path, gpa);
+            try include_bytes_list.append(gpa, bytes);
+        }
+
+        const fp_bytes = cache.computePageFingerprint(page.entity_id, src_bytes, include_bytes_list.items, layout_bytes);
+        var fp_hex: [64]u8 = undefined;
+        const hex_chars = "0123456789abcdef";
+        for (fp_bytes, 0..) |b, i| {
+            fp_hex[i * 2] = hex_chars[b >> 4];
+            fp_hex[i * 2 + 1] = hex_chars[b & 0x0f];
+        }
+        fingerprints[page_idx] = try gpa.dupe(u8, &fp_hex);
+
+        var output_exists = false;
+        if (dist_dir.openFile(io, page.output_path, .{})) |file| {
+            if (file.stat(io)) |st| {
+                if (st.size > 0) {
+                    output_exists = true;
+                }
+            } else |_| {}
+            file.close(io);
+        } else |_| {}
+
+        var skip_render = false;
+        if (options.incremental) {
+            if (parsed_manifest) |pm| {
+                for (pm.value.entries) |entry| {
+                    if (std.mem.eql(u8, entry.entity_id, page.entity_id) and
+                        std.mem.eql(u8, entry.output_path, page.output_path) and
+                        std.mem.eql(u8, entry.fingerprint, fingerprints[page_idx]))
+                    {
+                        if (output_exists) {
+                            skip_render = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        is_dirty[page_idx] = !skip_render;
+    }
+
+    // Delete stale files
+    if (options.incremental) {
+        if (parsed_manifest) |pm| {
+            for (pm.value.entries) |entry| {
+                var still_exists = false;
+                for (db.items()) |p| {
+                    if (std.mem.eql(u8, p.entity_id, entry.entity_id)) {
+                        still_exists = true;
+                        break;
+                    }
+                }
+                if (!still_exists) {
+                    dist_dir.deleteFile(io, entry.output_path) catch {};
+                }
+            }
+        }
+    }
+
+    // Compile loop
     var doc_arena = std.heap.ArenaAllocator.init(gpa);
     defer doc_arena.deinit();
 
     var stats: CompileStats = .{};
 
     for (db.items(), 0..) |*page, page_index| {
-        // Always wipe Whiteboard after this iteration — success or error.
-        // Reset runs only after renderAndPublishPage returns (flush+publish
-        // finished, no live Whiteboard slice needed by caller).
         defer {
             _ = doc_arena.reset(.free_all);
             stats.last_reset_capacity = doc_arena.queryCapacity();
@@ -251,18 +543,54 @@ pub fn compilePages(
 
         stats.pages_attempted += 1;
 
-        renderAndPublishPage(io, content_dir, dist_dir, page, layout, &doc_arena, options, page_index) catch |err| {
-            // defer still resets the Whiteboard.
-            return err;
-        };
+        if (is_dirty[page_index]) {
+            try renderAndPublishPage(io, content_dir, dist_dir, page, layout, &doc_arena, options, page_index);
+            stats.pages_written += 1;
+            if (!options.quiet) {
+                std.debug.print("  wrote {s}/{s}\n", .{ options.dist_dir, page.output_path });
+            }
+        } else {
+            if (!options.quiet) {
+                std.debug.print("  cached {s}/{s}\n", .{ options.dist_dir, page.output_path });
+            }
+        }
 
         const cap = doc_arena.queryCapacity();
         if (cap > stats.peak_whiteboard_capacity) stats.peak_whiteboard_capacity = cap;
+    }
 
-        stats.pages_written += 1;
-        if (!options.quiet) {
-            std.debug.print("  wrote {s}/{s}\n", .{ options.dist_dir, page.output_path });
+    // Write Cache manifest atomically on success if in incremental mode
+    if (options.incremental) {
+        if (options.test_fail_cache_publish) {
+            return error.TestInjectedCachePublishFailure;
         }
+
+        var dpath_buf: [256]u8 = undefined;
+        const cache_dir_path = std.fmt.bufPrint(&dpath_buf, "{s}/.boris-cache", .{options.dist_dir}) catch unreachable;
+        cwd.createDirPath(io, cache_dir_path) catch {};
+
+        var cache_entries = try gpa.alloc(CacheEntry, db.len());
+        defer gpa.free(cache_entries);
+        for (db.items(), 0..) |page, page_idx| {
+            cache_entries[page_idx] = .{
+                .entity_id = page.entity_id,
+                .fingerprint = fingerprints[page_idx],
+                .output_path = page.output_path,
+            };
+        }
+
+        var atomic_manifest = try dist_dir.createFileAtomic(io, ".boris-cache/manifest.json", .{
+            .replace = true,
+            .make_path = true,
+        });
+        defer atomic_manifest.deinit(io);
+
+        var m_buf: [4096]u8 = undefined;
+        var m_writer = atomic_manifest.file.writer(io, &m_buf);
+        try writeCacheManifest(&m_writer.interface, .{ .entries = cache_entries });
+        try m_writer.flush();
+
+        try atomic_manifest.replace(io);
     }
 
     return stats;
@@ -768,3 +1096,280 @@ test "flush-before-reset: compile defers free_all only after writePage" {
     try std.testing.expect(std.mem.endsWith(u8, got, "T"));
     try std.testing.expect(std.mem.indexOf(u8, got, "<h1>") != null);
 }
+
+test "incremental HTML build mode - full verification suite" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    const work = "zig-cache/boris-m9-incremental-suite";
+    try cwd.createDirPath(io, work);
+    defer cwd.deleteTree(io, work) catch {};
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    // Write initial layouts and content files
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/alpha.md",
+        \\---
+        \\title: Alpha Page
+        \\---
+        \\# Alpha
+        \\
+        \\This page includes includes/sidebar.html
+        \\
+    );
+    try writeTreeFile(io, work, "content/beta.md",
+        \\---
+        \\title: Beta Page
+        \\---
+        \\# Beta
+        \\
+        \\No includes here.
+        \\
+    );
+    try writeTreeFile(io, work, "content/includes/sidebar.html", "Sidebar includes includes/widget.html content.");
+    try writeTreeFile(io, work, "content/includes/widget.html", "Widget nested content.");
+
+    // ---- 1. Cold cache / first run ----
+    // This is the first incremental run: must render all pages (2) and write manifest.json
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+
+        const stats = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout_path,
+            .incremental = true,
+            .quiet = true,
+        });
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_attempted);
+    }
+
+    // Verify manifest was written
+    {
+        var dist_dir = try cwd.openDir(io, dist, .{});
+        defer dist_dir.close(io);
+        const manifest_bytes = try readAllFile(io, dist_dir, ".boris-cache/manifest.json", gpa);
+        defer gpa.free(manifest_bytes);
+        try std.testing.expect(std.mem.indexOf(u8, manifest_bytes, "boris-cache-v1") != null);
+    }
+
+    // ---- 2. Subsequent unchanged run ----
+    // No files have changed, output exists, so zero pages should be rendered.
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+
+        const stats = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout_path,
+            .incremental = true,
+            .quiet = true,
+        });
+        try std.testing.expectEqual(@as(usize, 0), stats.pages_written);
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_attempted);
+    }
+
+    // ---- 3. Modifying one page source ----
+    // Edit beta.md. Only beta.md should re-render.
+    try writeTreeFile(io, work, "content/beta.md",
+        \\---
+        \\title: Beta Page Edited
+        \\---
+        \\# Beta
+        \\
+        \\No includes here. Some edited content!
+        \\
+    );
+
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+
+        const stats = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout_path,
+            .incremental = true,
+            .quiet = true,
+        });
+        try std.testing.expectEqual(@as(usize, 1), stats.pages_written);
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_attempted);
+    }
+
+    // ---- 4. Modifying a transitive include file ----
+    // Edit content/includes/widget.html.
+    // Since alpha.md depends on includes/sidebar.html which depends on includes/widget.html,
+    // editing widget.html should trigger a re-render of alpha.md but NOT beta.md!
+    try writeTreeFile(io, work, "content/includes/widget.html", "Widget nested content edited!");
+
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+
+        const stats = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout_path,
+            .incremental = true,
+            .quiet = true,
+        });
+        try std.testing.expectEqual(@as(usize, 1), stats.pages_written);
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_attempted);
+    }
+
+    // ---- 5. Modifying the layout template ----
+    // Changing layouts/main.html. All layout-dependent pages (both alpha and beta) must re-render.
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>Layout changed! {{content}}</body></html>");
+
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+
+        const stats = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout_path,
+            .incremental = true,
+            .quiet = true,
+        });
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_attempted);
+    }
+
+    // ---- 6. Page deletion cleans up output file and cache entry ----
+    // Delete content/beta.md. The output file beta.html and its cache entry should be removed.
+    {
+        var content_dir = try cwd.openDir(io, content, .{});
+        defer content_dir.close(io);
+        try content_dir.deleteFile(io, "beta.md");
+    }
+
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+        try std.testing.expectEqual(@as(usize, 1), db.len());
+
+        const stats = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout_path,
+            .incremental = true,
+            .quiet = true,
+        });
+        try std.testing.expectEqual(@as(usize, 0), stats.pages_written);
+        try std.testing.expectEqual(@as(usize, 1), stats.pages_attempted);
+
+        // Verify beta.html output file is deleted
+        var dist_dir = try cwd.openDir(io, dist, .{});
+        defer dist_dir.close(io);
+        try std.testing.expectError(error.FileNotFound, dist_dir.openFile(io, "beta.html", .{}));
+    }
+
+    // ---- 7. Malformed cache metadata fallback ----
+    // Corrupt the manifest.json file. Run again. It should safely fall back and re-render everything (1 page left).
+    {
+        try writeTreeFile(io, dist, ".boris-cache/manifest.json", "{ malformed json }");
+    }
+
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+
+        const stats = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout_path,
+            .incremental = true,
+            .quiet = true,
+        });
+        // Falls back to cold build, so it re-renders alpha.md (1 page)
+        try std.testing.expectEqual(@as(usize, 1), stats.pages_written);
+        try std.testing.expectEqual(@as(usize, 1), stats.pages_attempted);
+    }
+
+    // ---- 8. Fault injection: compile failure leaves manifest/output intact ----
+    // Modify alpha.md to trigger a compilation error, and inject test_fail_cache_publish.
+    // Verify that the failure does NOT save/publish the manifest.
+    try writeTreeFile(io, work, "content/alpha.md", "Modified again!");
+
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+
+        const res = compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout_path,
+            .incremental = true,
+            .test_fail_cache_publish = true,
+            .quiet = true,
+        });
+        try std.testing.expectError(error.TestInjectedCachePublishFailure, res);
+    }
+}
+

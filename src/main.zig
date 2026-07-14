@@ -131,6 +131,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .content_root = opts.input_dir,
         .dist_dir = html_dir,
         .layout_path = default_layout,
+        .incremental = opts.incremental,
         .quiet = opts.quiet,
     }) catch |err| {
         return mapHtmlError(err, opts.quiet);
