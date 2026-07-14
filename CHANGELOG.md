@@ -19,6 +19,14 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Layout edges on freeze
+
+- `graph.Edge` gains optional `target`; `freeze` accepts `layout_path: ?[]const u8`.
+  When set, each node gets a `kind = "layout"` edge with `to == from` and
+  `target = layout_path` (layouts are not graph nodes). Edge sort is
+  `(from, kind, to)`. Pipeline passes `null` until IR options carry a path.
+- Align `release-gate.sh` expected diagnostics for the `invalid-id` fixture with `docs/contracts/diagnostics.md` (expecting `EINVALIDPATH`).
+
 ### Graph-aware navigation in IR (`graph.json` → `nav`)
 
 - Emit a top-level `nav` array on successful `graph.json` (not manifest): per

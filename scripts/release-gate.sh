@@ -231,7 +231,7 @@ run_bad malformed-frontmatter EFRONTMATTER
 run_bad duplicate-key EFRONTMATTER
 run_bad invalid-status EFRONTMATTER
 run_bad invalid-tags EFRONTMATTER
-run_bad invalid-id EFRONTMATTER
+run_bad invalid-id EINVALIDPATH
 run_bad unsupported-syntax EFRONTMATTER
 
 # --- 7. No untracked generated output except approved directories -------------

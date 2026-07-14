@@ -33,6 +33,9 @@ pub const Edge = struct {
     from: u32,
     to: u32,
     kind: []const u8 = "parent",
+    /// Optional external target (e.g. layout path). Layout edges use `to == from`
+    /// because layouts are not graph nodes.
+    target: ?[]const u8 = null,
 };
 
 /// Per-page navigation derived from a frozen Trunk/Satellite graph.
@@ -346,11 +349,15 @@ pub const resolve = validateTopology;
 /// Sort nodes by id, assign stable indices, rebuild parent_index and edges.
 /// Marks graph frozen. Nodes slice is reordered in place.
 ///
+/// When `layout_path` is non-null, appends one `kind = "layout"` edge per node
+/// with `to == from` and `target = layout_path` (layouts are not graph nodes).
+///
 /// Call only after `validate` reports zero errors. Do not claim the structure
 /// is a frozen DAG (or forest) until this returns successfully.
 pub fn freeze(
     list_gpa: std.mem.Allocator,
     nodes: []Node,
+    layout_path: ?[]const u8,
 ) !Graph {
     std.mem.sort(Node, nodes, {}, struct {
         fn less(_: void, a: Node, b: Node) bool {
@@ -385,10 +392,22 @@ pub fn freeze(
             });
         }
     }
-    // Deterministic edge order: by from, then to.
+    if (layout_path) |lp| {
+        for (nodes) |n| {
+            try edges.append(list_gpa, .{
+                .from = n.index,
+                .to = n.index,
+                .kind = "layout",
+                .target = lp,
+            });
+        }
+    }
+    // Deterministic edge order: by from, then kind, then to.
     std.mem.sort(Edge, edges.items, {}, struct {
         fn less(_: void, a: Edge, b: Edge) bool {
             if (a.from != b.from) return a.from < b.from;
+            const kind_ord = std.mem.order(u8, a.kind, b.kind);
+            if (kind_ord != .eq) return kind_ord == .lt;
             return a.to < b.to;
         }
     }.less);
@@ -648,7 +667,7 @@ test "freeze assigns indices by id order" {
     defer diags.deinit(gpa);
     // parent_index before freeze uses array positions after validate
     try validate(gpa, gpa, &nodes, &diags);
-    const g = try freeze(gpa, &nodes);
+    const g = try freeze(gpa, &nodes, null);
     defer gpa.free(g.edges);
     try std.testing.expect(g.frozen);
     try std.testing.expectEqualStrings("a", g.nodes[0].id);
@@ -659,6 +678,42 @@ test "freeze assigns indices by id order" {
     try std.testing.expectEqual(@as(usize, 1), g.edges.len);
     try std.testing.expect(g.edges[0].from == 0);
     try std.testing.expect(g.edges[0].to == 1);
+}
+
+test "freeze emits layout edges when layout_path set" {
+    const gpa = std.testing.allocator;
+    var nodes = [_]Node{
+        .{ .id = "z", .source_path = "z.md" },
+        .{ .id = "a", .source_path = "a.md", .parent = "z" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+    try validate(gpa, gpa, &nodes, &diags);
+    const g = try freeze(gpa, &nodes, "layouts/main.html");
+    defer gpa.free(g.edges);
+
+    // 1 parent + 2 layout edges
+    try std.testing.expectEqual(@as(usize, 3), g.edges.len);
+    var layout_count: usize = 0;
+    for (g.edges) |e| {
+        if (std.mem.eql(u8, e.kind, "layout")) {
+            layout_count += 1;
+            try std.testing.expect(e.from == e.to);
+            try std.testing.expectEqualStrings("layouts/main.html", e.target.?);
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2), layout_count);
+    // Each node has a layout edge
+    for (g.nodes) |n| {
+        var found = false;
+        for (g.edges) |e| {
+            if (e.from == n.index and std.mem.eql(u8, e.kind, "layout")) {
+                found = true;
+                break;
+            }
+        }
+        try std.testing.expect(found);
+    }
 }
 
 test "validateTopology satellite-of-satellite is hard error EPARENTNOTTRUNK" {
@@ -711,7 +766,7 @@ test "buildNav breadcrumb children siblings from frozen graph" {
     defer diags.deinit(gpa);
     try validate(gpa, gpa, &nodes, &diags);
     try std.testing.expectEqual(@as(usize, 0), diag.countErrors(diags.items));
-    const g = try freeze(gpa, &nodes);
+    const g = try freeze(gpa, &nodes, null);
     defer gpa.free(g.edges);
 
     // Freeze id order: s-a, s-b, t, u

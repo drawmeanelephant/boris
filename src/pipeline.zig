@@ -707,7 +707,8 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     }
 
     // --- 6. Freeze only after clean validation ------------------------------
-    const frozen = try graph_mod.freeze(gpa, result.pages.items);
+    // TODO: wire layout_path when CompileOptions gains one; layouts not on IR options yet.
+    const frozen = try graph_mod.freeze(gpa, result.pages.items, null);
     result.edges.deinit(gpa);
     result.edges = std.ArrayList(graph_mod.Edge).fromOwnedSlice(frozen.edges);
     result.graph_frozen = frozen.frozen;
