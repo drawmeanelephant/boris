@@ -105,7 +105,13 @@ error: EINCLUDEMISSING: path/to/page.md:line:col: message [remediation]
 ```
 
 - Codes above map from include/wiki failures (not bare `@errorName`).
-- Fields are **retain-owned** (duped off temporary file/body buffers before print).
+- Fields are **retain-owned** (copied into fail buffers / duped for print; no
+  views into temporary include file bytes).
+- **Locus:** nested include/wiki failures report the fragment path where the
+  directive or wiki-link actually appears (e.g. `includes/outer.md:2:1`), not
+  only the parent page. Root-page failures keep the page source path.
+- Line/column are relative to the **body** of that locus file (after closed
+  frontmatter strip when present).
 - Printed at **plan-time** (`SharedCompileState` transitive include collect) and
   at **render-time** (expand / wiki rewrite) and fingerprint wiki material when
   a missing/malformed reference is discovered.

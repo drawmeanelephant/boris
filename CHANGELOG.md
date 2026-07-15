@@ -44,6 +44,10 @@ How to use going forward:
 - Render-path include I/O uses the real GPA (no `page_allocator`). CLI
   `mapHtmlError` skips double-noise stderr for `IncludeFailed` /
   `ReferenceFailed` / `GraphValidationFailed` after structured diags.
+- Nested include/wiki failures report the **fragment locus** (file + line/col)
+  via owned fail buffers; fingerprint missing-wiki keeps include-body locations.
+- Incremental e2e: renaming a page title dirties parents that only wiki-link to
+  it through an include (control page stays cached).
 
 ### Docs — sample content polish for v0.2.0
 

@@ -493,6 +493,8 @@ const SharedCompileState = struct {
     source_bytes: [][]u8,
     /// Per-page transitive include file contents in stable sorted path order (GPA-owned).
     include_bytes: [][][]u8,
+    /// Paths parallel to `include_bytes` (GPA-owned strings; same order).
+    include_paths: [][][]u8,
 
     fn deinit(self: *SharedCompileState) void {
         for (self.include_bytes) |list| {
@@ -500,6 +502,11 @@ const SharedCompileState = struct {
             self.gpa.free(list);
         }
         self.gpa.free(self.include_bytes);
+        for (self.include_paths) |list| {
+            for (list) |p| self.gpa.free(p);
+            self.gpa.free(list);
+        }
+        self.gpa.free(self.include_paths);
         for (self.source_bytes) |b| self.gpa.free(b);
         self.gpa.free(self.source_bytes);
         self.dep_index.deinit();
@@ -571,7 +578,7 @@ const SharedCompileState = struct {
                 const inc_body = include_mod.bodyOfSource(inc_file);
                 var nested_hits: std.ArrayList(include_mod.ScanHit) = .empty;
                 defer nested_hits.deinit(gpa);
-                include_mod.scanIncludeDirectives(inc_body, gpa, &nested_hits, null) catch continue;
+                include_mod.scanIncludeDirectives(inc_body, gpa, &nested_hits, null, inc_path) catch continue;
                 for (nested_hits.items) |hit| {
                     const owned_from = try inc_alloc.dupe(u8, inc_path);
                     const owned_to = try inc_alloc.dupe(u8, hit.path);
@@ -581,6 +588,7 @@ const SharedCompileState = struct {
         }
 
         const include_bytes = try gpa.alloc([][]u8, db.len());
+        const include_paths = try gpa.alloc([][]u8, db.len());
         var includes_filled: usize = 0;
         errdefer {
             for (include_bytes[0..includes_filled]) |list| {
@@ -588,6 +596,11 @@ const SharedCompileState = struct {
                 gpa.free(list);
             }
             gpa.free(include_bytes);
+            for (include_paths[0..includes_filled]) |list| {
+                for (list) |p| gpa.free(p);
+                gpa.free(list);
+            }
+            gpa.free(include_paths);
         }
 
         for (db.items(), 0..) |page, page_idx| {
@@ -603,15 +616,20 @@ const SharedCompileState = struct {
             std.mem.sort([]const u8, transit_includes.items, {}, compareStrings);
 
             var list = try gpa.alloc([]u8, transit_includes.items.len);
+            var path_list = try gpa.alloc([]u8, transit_includes.items.len);
             var j: usize = 0;
             errdefer {
                 for (list[0..j]) |b| gpa.free(b);
                 gpa.free(list);
+                for (path_list[0..j]) |p| gpa.free(p);
+                gpa.free(path_list);
             }
             while (j < transit_includes.items.len) : (j += 1) {
                 list[j] = try readFileAlloc(io, content_dir, transit_includes.items[j], gpa);
+                path_list[j] = try gpa.dupe(u8, transit_includes.items[j]);
             }
             include_bytes[page_idx] = list;
+            include_paths[page_idx] = path_list;
             includes_filled = page_idx + 1;
         }
 
@@ -621,6 +639,7 @@ const SharedCompileState = struct {
             .dep_index = dep_index,
             .source_bytes = source_bytes,
             .include_bytes = include_bytes,
+            .include_paths = include_paths,
         };
     }
 };
@@ -1016,14 +1035,19 @@ fn compilePagesInner(
         // Wiki reference material from page body + transitive include fragment bodies
         // so title/path renames dirty parents that only wiki-link via includes.
         const body_for_wiki = include_mod.bodyOfSource(shared.source_bytes[page_idx]);
+        const inc_paths = shared.include_paths[page_idx];
         var wiki_bodies = try gpa.alloc([]const u8, 1 + inc_owned.len);
         defer gpa.free(wiki_bodies);
+        var wiki_paths = try gpa.alloc([]const u8, 1 + inc_owned.len);
+        defer gpa.free(wiki_paths);
         wiki_bodies[0] = body_for_wiki;
+        wiki_paths[0] = page.source_path;
         for (inc_owned, 0..) |inc_file, j| {
             wiki_bodies[1 + j] = include_mod.bodyOfSource(inc_file);
+            wiki_paths[1 + j] = inc_paths[j];
         }
         var wiki_fail: wikilink.FailInfo = .{};
-        const ref_material = wikilink.referenceMaterialMulti(gpa, wiki_bodies, site.nodes, &wiki_fail) catch |err| {
+        const ref_material = wikilink.referenceMaterialMulti(gpa, wiki_bodies, wiki_paths, site.nodes, &wiki_fail) catch |err| {
             if (err == error.ReferenceMissing or err == error.ReferenceSyntax or err == error.PathError) {
                 if (!options.quiet) {
                     wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail);
@@ -1951,6 +1975,40 @@ test "Feature 7 HTML: fail-loud include cycle" {
     }));
 }
 
+test "Feature 7 HTML: nested include missing reports fragment locus" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    const work = "zig-cache/boris-f7-nested-locus";
+    try cwd.createDirPath(io, work);
+    defer cwd.deleteTree(io, work) catch {};
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\{{include includes/outer.md}}
+        \\
+    );
+    try writeTreeFile(io, work, "content/includes/outer.md", "line1\n{{include includes/nope.md}}\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    // Plan-time collect fails; FailInfo locus is the outer fragment (unit-tested).
+    try std.testing.expectError(error.IncludeFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    }));
+}
+
 test "Feature 7 HTML: fail-loud missing wiki target" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -2080,6 +2138,132 @@ test "flush-before-reset: compile defers free_all only after writePage" {
     try std.testing.expect(std.mem.endsWith(u8, got, "T"));
     // Real Apex emits header ids: <h1 id="...">
     try std.testing.expect(std.mem.indexOf(u8, got, "<h1") != null);
+}
+
+test "Feature 7 incremental: title rename dirties parent that only wiki-links via include" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f7-wiki-via-include", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    // alpha: wiki only via include (no direct [[beta]])
+    try writeTreeFile(io, work, "content/alpha.md",
+        \\---
+        \\title: Alpha
+        \\---
+        \\# Alpha
+        \\
+        \\{{include includes/blurb.md}}
+        \\
+    );
+    try writeTreeFile(io, work, "content/beta.md",
+        \\---
+        \\title: Beta Original
+        \\---
+        \\# Beta
+        \\
+    );
+    // gamma: control page — must stay cached when only beta title changes
+    try writeTreeFile(io, work, "content/gamma.md",
+        \\---
+        \\title: Gamma
+        \\---
+        \\# Gamma independent
+        \\
+    );
+    try writeTreeFile(io, work, "content/includes/blurb.md", "See [[beta]] from include.\n");
+
+    // Cold build
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+        const stats = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout_path,
+            .incremental = true,
+            .quiet = true,
+        });
+        try std.testing.expectEqual(@as(usize, 3), stats.pages_written);
+    }
+
+    // Unchanged → zero writes
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+        const stats = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout_path,
+            .incremental = true,
+            .quiet = true,
+        });
+        try std.testing.expectEqual(@as(usize, 0), stats.pages_written);
+    }
+
+    // Rename beta title only — beta source dirty + alpha via multi-body wiki material.
+    // gamma must remain cached.
+    try writeTreeFile(io, work, "content/beta.md",
+        \\---
+        \\title: Beta Renamed
+        \\---
+        \\# Beta
+        \\
+    );
+
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+        const stats = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout_path,
+            .incremental = true,
+            .quiet = true,
+        });
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
+        try std.testing.expectEqual(@as(usize, 3), stats.pages_attempted);
+    }
+
+    // alpha HTML should show the new wiki label from the renamed title
+    {
+        var dist_dir = try cwd.openDir(io, dist, .{});
+        defer dist_dir.close(io);
+        const alpha_html = try readAllFile(io, dist_dir, "alpha.html", gpa);
+        defer gpa.free(alpha_html);
+        try std.testing.expect(std.mem.indexOf(u8, alpha_html, "Beta Renamed") != null);
+        try std.testing.expect(std.mem.indexOf(u8, alpha_html, "href=\"beta.html\"") != null);
+    }
 }
 
 test "incremental HTML build mode - full verification suite" {

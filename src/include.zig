@@ -22,13 +22,46 @@ pub const IncludeError = error{
     ReadFailed,
 };
 
-/// Location + detail for the first include failure (views into scan body unless noted).
+/// Max bytes retained for fail detail / locus paths (content-root-relative).
+pub const max_fail_str: usize = 512;
+
+/// Location + detail for the first include failure.
+/// Strings are **copied into inline buffers** so nested file buffers can be freed safely.
 pub const FailInfo = struct {
     line: u32 = 1,
     column: u32 = 1,
-    /// Include path related to the error, or empty. Borrowed; dupe before freeing source.
-    detail: []const u8 = "",
+    detail_len: usize = 0,
+    detail_buf: [max_fail_str]u8 = undefined,
+    /// File where line/col apply (e.g. nested include path). Empty → caller page path.
+    locus_len: usize = 0,
+    locus_buf: [max_fail_str]u8 = undefined,
+
+    pub fn detail(self: *const FailInfo) []const u8 {
+        return self.detail_buf[0..self.detail_len];
+    }
+
+    pub fn locus(self: *const FailInfo) []const u8 {
+        return self.locus_buf[0..self.locus_len];
+    }
+
+    pub fn set(self: *FailInfo, line: u32, column: u32, detail_s: []const u8, locus_s: []const u8) void {
+        self.line = line;
+        self.column = column;
+        self.detail_len = copyCap(&self.detail_buf, detail_s);
+        self.locus_len = copyCap(&self.locus_buf, locus_s);
+    }
+
+    pub fn setAt(self: *FailInfo, body: []const u8, offset: usize, detail_s: []const u8, locus_s: []const u8) void {
+        const lc = lineColAt(body, offset);
+        self.set(lc.line, lc.column, detail_s, locus_s);
+    }
 };
+
+fn copyCap(buf: *[max_fail_str]u8, s: []const u8) usize {
+    const n = @min(s.len, buf.len);
+    if (n > 0) @memcpy(buf[0..n], s[0..n]);
+    return n;
+}
 
 pub const ScanHit = struct {
     path: []const u8,
@@ -121,20 +154,19 @@ fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Alloc
     return reader.interface.allocRemaining(allocator, .unlimited) catch return error.ReadFailed;
 }
 
-fn setFail(fail_out: ?*FailInfo, body: []const u8, offset: usize, detail: []const u8) void {
-    if (fail_out) |f| {
-        const lc = lineColAt(body, offset);
-        f.* = .{ .line = lc.line, .column = lc.column, .detail = detail };
-    }
+fn setFail(fail_out: ?*FailInfo, body: []const u8, offset: usize, detail_s: []const u8, locus_s: []const u8) void {
+    if (fail_out) |f| f.setAt(body, offset, detail_s, locus_s);
 }
 
 /// Scan body for `{{include path}}` outside fences. Paths are views into `body`.
 /// On syntax/path errors, fills `fail_out` when provided.
+/// `locus_path` is the content-root path of this body (page or include fragment).
 pub fn scanIncludeDirectives(
     body: []const u8,
     allocator: std.mem.Allocator,
     out: *std.ArrayList(ScanHit),
     fail_out: ?*FailInfo,
+    locus_path: []const u8,
 ) IncludeError!void {
     var i: usize = 0;
     var fence_ch: u8 = 0;
@@ -183,13 +215,13 @@ pub fn scanIncludeDirectives(
             var path_end = i;
             while (path_end > path_start and isSpace(body[path_end - 1])) : (path_end -= 1) {}
             if (i + 1 >= body.len or body[i] != '}' or body[i + 1] != '}') {
-                setFail(fail_out, body, start, "");
+                setFail(fail_out, body, start, "", locus_path);
                 return error.IncludeSyntax;
             }
             i += 2;
             const path = body[path_start..path_end];
             if (path.len == 0 or !validateIncludePath(path)) {
-                setFail(fail_out, body, start, path);
+                setFail(fail_out, body, start, path, locus_path);
                 return error.InvalidPath;
             }
             const lc = lineColAt(body, start);
@@ -221,7 +253,8 @@ pub fn collectTransitiveIncludes(
     var seen: std.StringHashMapUnmanaged(void) = .{};
     defer seen.deinit(allocator);
 
-    try walkIncludes(io, content_dir, allocator, root_body, &stack, &seen, out_paths, 0, fail_out);
+    // Root body locus is empty: caller supplies the page source_path when printing.
+    try walkIncludes(io, content_dir, allocator, root_body, "", &stack, &seen, out_paths, 0, fail_out);
 }
 
 fn walkIncludes(
@@ -229,6 +262,8 @@ fn walkIncludes(
     content_dir: Io.Dir,
     allocator: std.mem.Allocator,
     body: []const u8,
+    /// Content-root path of `body` (empty at page root; include path when nested).
+    locus_path: []const u8,
     stack: *std.ArrayList([]const u8),
     seen: *std.StringHashMapUnmanaged(void),
     out_paths: *std.ArrayList([]const u8),
@@ -236,18 +271,18 @@ fn walkIncludes(
     fail_out: ?*FailInfo,
 ) IncludeError!void {
     if (depth > max_include_depth) {
-        if (fail_out) |f| f.* = .{ .line = 1, .column = 1, .detail = "" };
+        if (fail_out) |f| f.set(1, 1, "", locus_path);
         return error.DepthExceeded;
     }
 
     var hits: std.ArrayList(ScanHit) = .empty;
     defer hits.deinit(allocator);
-    try scanIncludeDirectives(body, allocator, &hits, fail_out);
+    try scanIncludeDirectives(body, allocator, &hits, fail_out, locus_path);
 
     for (hits.items) |hit| {
         for (stack.items) |s| {
             if (std.mem.eql(u8, s, hit.path)) {
-                if (fail_out) |f| f.* = .{ .line = hit.line, .column = hit.column, .detail = hit.path };
+                if (fail_out) |f| f.set(hit.line, hit.column, hit.path, locus_path);
                 return error.IncludeCycle;
             }
         }
@@ -267,7 +302,7 @@ fn walkIncludes(
         try seen.put(allocator, hit.path, {});
 
         const file_bytes = readFileAlloc(io, content_dir, hit.path, allocator) catch |err| {
-            if (fail_out) |f| f.* = .{ .line = hit.line, .column = hit.column, .detail = hit.path };
+            if (fail_out) |f| f.set(hit.line, hit.column, hit.path, locus_path);
             return err;
         };
         defer allocator.free(file_bytes);
@@ -276,13 +311,10 @@ fn walkIncludes(
         try stack.append(allocator, hit.path);
         defer _ = stack.pop();
 
-        // Nested errors: include file buffers are freed on return, so do not borrow
-        // nested FailInfo.detail. Report the parent directive site; detail is the
-        // child path viewed from the still-live parent body.
-        walkIncludes(io, content_dir, allocator, nested, stack, seen, out_paths, depth + 1, null) catch |err| {
-            if (fail_out) |f| {
-                f.* = .{ .line = hit.line, .column = hit.column, .detail = hit.path };
-            }
+        // Nested FailInfo copies strings into inline buffers before file_bytes free.
+        var nested_fail: FailInfo = .{};
+        walkIncludes(io, content_dir, allocator, nested, hit.path, stack, seen, out_paths, depth + 1, &nested_fail) catch |err| {
+            if (fail_out) |f| f.* = nested_fail;
             return err;
         };
     }
@@ -301,7 +333,8 @@ pub fn expandIncludes(
     var stack: std.ArrayList([]const u8) = .empty;
     defer stack.deinit(gpa);
     try stack.append(gpa, owner_path);
-    return expandRecursive(io, content_dir, gpa, arena, body, &stack, 0, fail_out);
+    // Root expansion: locus empty so diagnostics use owner_path from the caller.
+    return expandRecursive(io, content_dir, gpa, arena, body, "", &stack, 0, fail_out);
 }
 
 fn expandRecursive(
@@ -310,12 +343,13 @@ fn expandRecursive(
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
     body: []const u8,
+    locus_path: []const u8,
     stack: *std.ArrayList([]const u8),
     depth: usize,
     fail_out: ?*FailInfo,
 ) IncludeError![]u8 {
     if (depth > max_include_depth) {
-        if (fail_out) |f| f.* = .{ .line = 1, .column = 1, .detail = "" };
+        if (fail_out) |f| f.set(1, 1, "", locus_path);
         return error.DepthExceeded;
     }
 
@@ -370,19 +404,19 @@ fn expandRecursive(
             var path_end = j;
             while (path_end > path_start and isSpace(body[path_end - 1])) : (path_end -= 1) {}
             if (j + 1 >= body.len or body[j] != '}' or body[j + 1] != '}') {
-                setFail(fail_out, body, start, "");
+                setFail(fail_out, body, start, "", locus_path);
                 return error.IncludeSyntax;
             }
             j += 2;
             const path = body[path_start..path_end];
             if (path.len == 0 or !validateIncludePath(path)) {
-                setFail(fail_out, body, start, path);
+                setFail(fail_out, body, start, path, locus_path);
                 return error.InvalidPath;
             }
 
             for (stack.items) |s| {
                 if (std.mem.eql(u8, s, path)) {
-                    setFail(fail_out, body, start, path);
+                    setFail(fail_out, body, start, path, locus_path);
                     return error.IncludeCycle;
                 }
             }
@@ -390,17 +424,18 @@ fn expandRecursive(
             try out.appendSlice(arena, body[copy_from..start]);
 
             const file_bytes = readFileAlloc(io, content_dir, path, gpa) catch |err| {
-                setFail(fail_out, body, start, path);
+                setFail(fail_out, body, start, path, locus_path);
                 return err;
             };
             defer gpa.free(file_bytes);
             const nested_body = bodyOfSource(file_bytes);
 
             try stack.append(gpa, path);
-            // Nested FailInfo would borrow into file_bytes (freed below); map to parent site.
-            const expanded = expandRecursive(io, content_dir, gpa, arena, nested_body, stack, depth + 1, null) catch |err| {
+            var nested_fail: FailInfo = .{};
+            const expanded = expandRecursive(io, content_dir, gpa, arena, nested_body, path, stack, depth + 1, &nested_fail) catch |err| {
                 _ = stack.pop();
-                setFail(fail_out, body, start, path);
+                // nested_fail owns its strings; copy before nested buffers go out of scope.
+                if (fail_out) |f| f.* = nested_fail;
                 return err;
             };
             _ = stack.pop();
@@ -440,31 +475,33 @@ pub fn remediationFor(code: diag.Code) []const u8 {
     };
 }
 
-fn messageFor(retain: std.mem.Allocator, err: IncludeError, fail: FailInfo) ![]const u8 {
+fn messageFor(retain: std.mem.Allocator, err: IncludeError, fail: *const FailInfo) ![]const u8 {
+    const det = fail.detail();
     return switch (err) {
         error.IncludeSyntax => try retain.dupe(u8, "malformed {{include …}} directive"),
-        error.IncludeMissing => if (fail.detail.len > 0)
-            try std.fmt.allocPrint(retain, "include target \"{s}\" not found or unreadable", .{fail.detail})
+        error.IncludeMissing => if (det.len > 0)
+            try std.fmt.allocPrint(retain, "include target \"{s}\" not found or unreadable", .{det})
         else
             try retain.dupe(u8, "include target not found or unreadable"),
-        error.IncludeCycle => if (fail.detail.len > 0)
-            try std.fmt.allocPrint(retain, "include cycle involving \"{s}\"", .{fail.detail})
+        error.IncludeCycle => if (det.len > 0)
+            try std.fmt.allocPrint(retain, "include cycle involving \"{s}\"", .{det})
         else
             try retain.dupe(u8, "include cycle among nested fragments"),
-        error.InvalidPath => if (fail.detail.len > 0)
-            try std.fmt.allocPrint(retain, "illegal include path \"{s}\"", .{fail.detail})
+        error.InvalidPath => if (det.len > 0)
+            try std.fmt.allocPrint(retain, "illegal include path \"{s}\"", .{det})
         else
             try retain.dupe(u8, "illegal include path"),
         error.DepthExceeded => try retain.dupe(u8, "include nesting depth exceeded"),
         error.OutOfMemory => try retain.dupe(u8, "out of memory while resolving includes"),
-        error.ReadFailed => if (fail.detail.len > 0)
-            try std.fmt.allocPrint(retain, "failed to read include \"{s}\"", .{fail.detail})
+        error.ReadFailed => if (det.len > 0)
+            try std.fmt.allocPrint(retain, "failed to read include \"{s}\"", .{det})
         else
             try retain.dupe(u8, "failed to read include file"),
     };
 }
 
 /// Build a retain-owned diagnostic for an include failure (no UAF from temp buffers).
+/// When `fail.locus()` is non-empty (nested fragment), it is used as `source_path`.
 pub fn makeDiagnostic(
     retain: std.mem.Allocator,
     err: IncludeError,
@@ -472,15 +509,17 @@ pub fn makeDiagnostic(
     fail: FailInfo,
 ) !diag.Diagnostic {
     const code = errorCode(err);
+    const path = if (fail.locus().len > 0) fail.locus() else source_path;
+    const det = fail.detail();
     return .{
         .severity = .error_,
         .code = code,
-        .message = try messageFor(retain, err, fail),
+        .message = try messageFor(retain, err, &fail),
         .remediation = try retain.dupe(u8, remediationFor(code)),
-        .source_path = try retain.dupe(u8, source_path),
+        .source_path = try retain.dupe(u8, path),
         .line = fail.line,
         .column = fail.column,
-        .id = if (fail.detail.len > 0) try retain.dupe(u8, fail.detail) else "",
+        .id = if (det.len > 0) try retain.dupe(u8, det) else "",
     };
 }
 
@@ -525,7 +564,7 @@ test "scanIncludeDirectives finds one and skips backtick fences" {
     ;
     var list: std.ArrayList(ScanHit) = .empty;
     defer list.deinit(std.testing.allocator);
-    try scanIncludeDirectives(body, std.testing.allocator, &list, null);
+    try scanIncludeDirectives(body, std.testing.allocator, &list, null, "");
     try std.testing.expectEqual(@as(usize, 2), list.items.len);
     try std.testing.expectEqualStrings("includes/a.md", list.items[0].path);
     try std.testing.expectEqualStrings("includes/b.md", list.items[1].path);
@@ -542,7 +581,7 @@ test "scanIncludeDirectives skips tilde fences" {
     ;
     var list: std.ArrayList(ScanHit) = .empty;
     defer list.deinit(std.testing.allocator);
-    try scanIncludeDirectives(body, std.testing.allocator, &list, null);
+    try scanIncludeDirectives(body, std.testing.allocator, &list, null, "");
     try std.testing.expectEqual(@as(usize, 2), list.items.len);
     try std.testing.expectEqualStrings("includes/a.md", list.items[0].path);
     try std.testing.expectEqualStrings("includes/b.md", list.items[1].path);
@@ -553,20 +592,19 @@ test "scanIncludeDirectives rejects empty path with FailInfo" {
     var list: std.ArrayList(ScanHit) = .empty;
     defer list.deinit(std.testing.allocator);
     var fail: FailInfo = .{};
-    try std.testing.expectError(error.InvalidPath, scanIncludeDirectives(body, std.testing.allocator, &list, &fail));
+    try std.testing.expectError(error.InvalidPath, scanIncludeDirectives(body, std.testing.allocator, &list, &fail, "page.md"));
     try std.testing.expectEqual(@as(u32, 1), fail.line);
     try std.testing.expectEqual(@as(u32, 1), fail.column);
+    try std.testing.expectEqualStrings("page.md", fail.locus());
 }
 
 test "makeDiagnostic is retain-owned and maps codes" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
-    const d = try makeDiagnostic(arena.allocator(), error.IncludeMissing, "guides/a.md", .{
-        .line = 3,
-        .column = 5,
-        .detail = "includes/missing.md",
-    });
+    var fail: FailInfo = .{};
+    fail.set(3, 5, "includes/missing.md", "");
+    const d = try makeDiagnostic(arena.allocator(), error.IncludeMissing, "guides/a.md", fail);
     try std.testing.expect(d.code == .EINCLUDEMISSING);
     try std.testing.expectEqualStrings("guides/a.md", d.source_path);
     try std.testing.expect(d.line.? == 3);
@@ -578,6 +616,16 @@ test "makeDiagnostic is retain-owned and maps codes" {
     defer gpa.free(line);
     try std.testing.expect(std.mem.indexOf(u8, line, "EINCLUDEMISSING") != null);
     try std.testing.expect(std.mem.indexOf(u8, line, "guides/a.md:3:5") != null);
+}
+
+test "makeDiagnostic prefers nested locus path" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var fail: FailInfo = .{};
+    fail.set(1, 1, "includes/deep.md", "includes/mid.md");
+    const d = try makeDiagnostic(arena.allocator(), error.IncludeMissing, "page.md", fail);
+    try std.testing.expectEqualStrings("includes/mid.md", d.source_path);
 }
 
 test "bodyOfSource strips frontmatter" {
@@ -626,13 +674,24 @@ test "expandIncludes simple nested and cycle" {
         error.IncludeCycle,
         expandIncludes(io, content_dir, gpa, a, "{{include includes/c.md}}", "page.md", &cycle_fail),
     );
-    try std.testing.expect(cycle_fail.detail.len > 0);
+    try std.testing.expect(cycle_fail.detail().len > 0);
 
     var miss_fail: FailInfo = .{};
     try std.testing.expectError(
         error.IncludeMissing,
         expandIncludes(io, content_dir, gpa, a, "{{include includes/nope.md}}", "page.md", &miss_fail),
     );
-    try std.testing.expectEqualStrings("includes/nope.md", miss_fail.detail);
+    try std.testing.expectEqualStrings("includes/nope.md", miss_fail.detail());
     try std.testing.expectEqual(@as(u32, 1), miss_fail.line);
+
+    // Nested missing: locus is the include fragment that holds the bad directive.
+    try cwd.writeFile(io, .{ .sub_path = work ++ "/content/includes/outer.md", .data = "x\n{{include includes/nope.md}}\n" });
+    var nested_miss: FailInfo = .{};
+    try std.testing.expectError(
+        error.IncludeMissing,
+        expandIncludes(io, content_dir, gpa, a, "{{include includes/outer.md}}", "page.md", &nested_miss),
+    );
+    try std.testing.expectEqualStrings("includes/nope.md", nested_miss.detail());
+    try std.testing.expectEqualStrings("includes/outer.md", nested_miss.locus());
+    try std.testing.expectEqual(@as(u32, 2), nested_miss.line);
 }
