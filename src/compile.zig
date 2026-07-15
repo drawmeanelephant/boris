@@ -386,8 +386,10 @@ pub const CacheEntry = struct {
     entity_id: []const u8,
     fingerprint: []const u8,
     output_path: []const u8,
-    /// On-disk output size at last successful publish; used for incremental freshness.
+    /// On-disk output size at last successful publish (cheap prefilter).
     output_size: u64 = 0,
+    /// Lowercase hex SHA-256 of published HTML bytes; empty forces re-render.
+    output_digest: []const u8 = "",
 };
 
 pub const CacheManifest = struct {
@@ -399,8 +401,10 @@ pub const ParsedCacheEntry = struct {
     entity_id: []const u8,
     fingerprint: []const u8,
     output_path: []const u8,
-    /// Optional for older manifests; missing/zero forces re-render when paired with size check.
+    /// Optional for older manifests; missing/zero is a cheap prefilter only.
     output_size: u64 = 0,
+    /// Optional for older manifests; missing/empty forces re-render.
+    output_digest: []const u8 = "",
 };
 
 pub const ParsedCacheManifest = struct {
@@ -459,6 +463,8 @@ fn writeCacheManifest(writer: anytype, manifest: CacheManifest) !void {
         try json_out.writeString(&buf, gpa, entry.output_path);
         try buf.appendSlice(gpa, ",\n      \"output_size\": ");
         try json_out.writeUsize(&buf, gpa, @intCast(entry.output_size));
+        try buf.appendSlice(gpa, ",\n      \"output_digest\": ");
+        try json_out.writeString(&buf, gpa, entry.output_digest);
         try buf.appendSlice(gpa, "\n    }");
         if (i + 1 < manifest.entries.len) {
             try buf.appendSlice(gpa, ",\n");
@@ -1147,11 +1153,20 @@ fn compilePagesInner(
                         std.mem.eql(u8, entry.output_path, page.output_path) and
                         std.mem.eql(u8, entry.fingerprint, fingerprints[page_idx]))
                     {
-                        // Freshness requires non-empty output whose size matches
-                        // the size recorded at last publish (guards truncated/corrupt files).
-                        if (output_exists and entry.output_size > 0 and entry.output_size == output_size) {
-                            skip_render = true;
-                            break;
+                        // Content-addressed output freshness: require a non-empty
+                        // digest that matches on-disk HTML. Size is a cheap
+                        // prefilter only (same-size corruption still fails digest).
+                        if (output_exists and entry.output_digest.len > 0 and
+                            (entry.output_size == 0 or entry.output_size == output_size))
+                        {
+                            if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |out_bytes| {
+                                defer gpa.free(out_bytes);
+                                const dig_hex = cache.hexDigest(cache.hashBytes(out_bytes));
+                                if (std.mem.eql(u8, entry.output_digest, &dig_hex)) {
+                                    skip_render = true;
+                                    break;
+                                }
+                            } else |_| {}
                         }
                     }
                 }
@@ -1266,23 +1281,36 @@ fn compilePagesInner(
 
         var cache_entries = try gpa.alloc(CacheEntry, db.len());
         defer gpa.free(cache_entries);
+        // Owned hex digests live only for the manifest write below.
+        var output_digests = try gpa.alloc([]u8, db.len());
+        for (output_digests) |*d| d.* = &.{};
+        defer {
+            for (output_digests) |d| {
+                if (d.len > 0) gpa.free(d);
+            }
+            gpa.free(output_digests);
+        }
         for (db.items(), 0..) |page, page_idx| {
             var out_size: u64 = 0;
-            // Prefer staged (just-written) size; fall back to final dist for cached pages.
-            if (stage_dir.openFile(io, page.output_path, .{})) |file| {
-                if (file.stat(io)) |st| out_size = st.size else |_| {}
-                file.close(io);
-            } else |_| {
-                if (dist_dir.openFile(io, page.output_path, .{})) |file| {
-                    if (file.stat(io)) |st| out_size = st.size else |_| {}
-                    file.close(io);
-                } else |_| {}
+            var out_digest: []const u8 = "";
+            // Prefer staged (just-written) bytes; fall back to final dist for cached pages.
+            const maybe_bytes: ?[]u8 = if (readFileAlloc(io, stage_dir, page.output_path, gpa)) |b|
+                b
+            else |_|
+                if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |b| b else |_| null;
+            if (maybe_bytes) |bytes| {
+                defer gpa.free(bytes);
+                out_size = bytes.len;
+                const dig_hex = cache.hexDigest(cache.hashBytes(bytes));
+                output_digests[page_idx] = try gpa.dupe(u8, &dig_hex);
+                out_digest = output_digests[page_idx];
             }
             cache_entries[page_idx] = .{
                 .entity_id = page.entity_id,
                 .fingerprint = fingerprints[page_idx],
                 .output_path = page.output_path,
                 .output_size = out_size,
+                .output_digest = out_digest,
             };
         }
 
@@ -2766,6 +2794,195 @@ test "incremental HTML build mode - full verification suite" {
             .quiet = true,
         });
         try std.testing.expectError(error.TestInjectedCachePublishFailure, res);
+    }
+}
+
+test "P4 cache freshness: same-size corruption, truncation, reuse, full=inc, manifest determinism" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-p4-cache-freshness", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const dist_full = try std.fmt.allocPrint(gpa, "{s}/dist-full", .{work});
+    defer gpa.free(dist_full);
+    const dist_inc = try std.fmt.allocPrint(gpa, "{s}/dist-inc", .{work});
+    defer gpa.free(dist_inc);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/alpha.md",
+        \\---
+        \\title: Alpha
+        \\---
+        \\# Alpha
+        \\
+        \\Body line one.
+        \\
+    );
+    try writeTreeFile(io, work, "content/beta.md",
+        \\---
+        \\title: Beta
+        \\---
+        \\# Beta
+        \\
+        \\Stable body.
+        \\
+    );
+
+    const runHtml = struct {
+        fn call(
+            gpa_: std.mem.Allocator,
+            io_: Io,
+            content_: []const u8,
+            dist_: []const u8,
+            layout_path_: []const u8,
+            incremental: bool,
+        ) !CompileStats {
+            const cwd_ = Io.Dir.cwd();
+            var layout_arena = std.heap.ArenaAllocator.init(gpa_);
+            defer layout_arena.deinit();
+            const layout = try loadLayoutOnce(io_, cwd_, layout_path_, layout_arena.allocator());
+            var retain_arena = std.heap.ArenaAllocator.init(gpa_);
+            defer retain_arena.deinit();
+            var db = PageDb.init(gpa_, retain_arena.allocator());
+            defer db.deinit();
+            try loadAndPromote(io_, gpa_, &db, content_);
+            return try compilePages(io_, gpa_, &db, layout, .{
+                .content_root = content_,
+                .dist_dir = dist_,
+                .layout_path = layout_path_,
+                .incremental = incremental,
+                .quiet = true,
+            });
+        }
+    }.call;
+
+    // Cold incremental build writes both pages and records output digests.
+    {
+        const stats = try runHtml(gpa, io, content, dist, layout_path, true);
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
+        var dist_dir = try cwd.openDir(io, dist, .{});
+        defer dist_dir.close(io);
+        const man = try readAllFile(io, dist_dir, ".boris-cache/manifest.json", gpa);
+        defer gpa.free(man);
+        try std.testing.expect(std.mem.indexOf(u8, man, "output_digest") != null);
+        try std.testing.expect(std.mem.indexOf(u8, man, cache.CACHE_FORMAT_VERSION) != null);
+    }
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const alpha_clean = try readAllFile(io, dist_dir, "alpha.html", gpa);
+    defer gpa.free(alpha_clean);
+    try std.testing.expect(alpha_clean.len >= 2);
+
+    // Same-size corruption must re-render only the corrupted page.
+    {
+        var corrupted = try gpa.dupe(u8, alpha_clean);
+        defer gpa.free(corrupted);
+        corrupted[0] = if (corrupted[0] == 'X') 'Y' else 'X';
+        if (corrupted.len > 1) corrupted[1] = if (corrupted[1] == 'Z') 'W' else 'Z';
+        const alpha_path = try std.fmt.allocPrint(gpa, "{s}/alpha.html", .{dist});
+        defer gpa.free(alpha_path);
+        try cwd.writeFile(io, .{ .sub_path = alpha_path, .data = corrupted });
+
+        const stats = try runHtml(gpa, io, content, dist, layout_path, true);
+        try std.testing.expectEqual(@as(usize, 1), stats.pages_written);
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_attempted);
+        const restored = try readAllFile(io, dist_dir, "alpha.html", gpa);
+        defer gpa.free(restored);
+        try std.testing.expectEqualStrings(alpha_clean, restored);
+    }
+
+    // Truncation / replacement must re-render.
+    {
+        const alpha_path = try std.fmt.allocPrint(gpa, "{s}/alpha.html", .{dist});
+        defer gpa.free(alpha_path);
+        try cwd.writeFile(io, .{ .sub_path = alpha_path, .data = "x" });
+        const stats = try runHtml(gpa, io, content, dist, layout_path, true);
+        try std.testing.expectEqual(@as(usize, 1), stats.pages_written);
+        const restored = try readAllFile(io, dist_dir, "alpha.html", gpa);
+        defer gpa.free(restored);
+        try std.testing.expectEqualStrings(alpha_clean, restored);
+    }
+
+    // Intact outputs are reused.
+    {
+        const stats = try runHtml(gpa, io, content, dist, layout_path, true);
+        try std.testing.expectEqual(@as(usize, 0), stats.pages_written);
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_attempted);
+    }
+
+    // Manifest is byte-identical across two no-op incremental runs.
+    {
+        const man1 = try readAllFile(io, dist_dir, ".boris-cache/manifest.json", gpa);
+        defer gpa.free(man1);
+        const stats = try runHtml(gpa, io, content, dist, layout_path, true);
+        try std.testing.expectEqual(@as(usize, 0), stats.pages_written);
+        const man2 = try readAllFile(io, dist_dir, ".boris-cache/manifest.json", gpa);
+        defer gpa.free(man2);
+        try std.testing.expectEqualStrings(man1, man2);
+    }
+
+    // After source / include / layout edits, full and incremental trees match.
+    try writeTreeFile(io, work, "content/alpha.md",
+        \\---
+        \\title: Alpha Edited
+        \\---
+        \\# Alpha
+        \\
+        \\Body line one edited.
+        \\
+    );
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body class=\"v2\">{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/includes/note.md", "shared note");
+    try writeTreeFile(io, work, "content/beta.md",
+        \\---
+        \\title: Beta
+        \\---
+        \\# Beta
+        \\
+        \\{{include includes/note.md}}
+        \\
+    );
+
+    _ = try runHtml(gpa, io, content, dist_full, layout_path, false);
+    _ = try runHtml(gpa, io, content, dist_inc, layout_path, true);
+
+    const files = [_][]const u8{ "alpha.html", "beta.html" };
+    for (files) |f| {
+        var dir_f = try cwd.openDir(io, dist_full, .{});
+        defer dir_f.close(io);
+        var dir_i = try cwd.openDir(io, dist_inc, .{});
+        defer dir_i.close(io);
+        const bf = try readAllFile(io, dir_f, f, gpa);
+        defer gpa.free(bf);
+        const bi = try readAllFile(io, dir_i, f, gpa);
+        defer gpa.free(bi);
+        try std.testing.expectEqualStrings(bf, bi);
+    }
+
+    // Dirty rebuild from an older cache also matches the full-tree baseline.
+    {
+        const stats = try runHtml(gpa, io, content, dist, layout_path, true);
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
+        for (files) |f| {
+            var dir_f = try cwd.openDir(io, dist_full, .{});
+            defer dir_f.close(io);
+            const bf = try readAllFile(io, dir_f, f, gpa);
+            defer gpa.free(bf);
+            const bd = try readAllFile(io, dist_dir, f, gpa);
+            defer gpa.free(bd);
+            try std.testing.expectEqualStrings(bf, bd);
+        }
     }
 }
 

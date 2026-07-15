@@ -174,6 +174,40 @@ page dirties every page that uses that layout (full forest is global chrome).
 Layouts without `{{nav}}` keep the prior page-local fingerprint inputs
 (source, includes, layout bytes, entity id, target identity).
 
+### Incremental cache freshness (output digest)
+
+On `--incremental`, a page is **reused** only when all of the following hold:
+
+1. Prior `dist/.boris-cache/manifest.json` parses and its `format_version`
+   equals the fingerprint discriminator (`boris-cache-v1-multitarget`).
+2. A manifest entry matches the page’s `entity_id`, `output_path`, and current
+   **input** fingerprint (source / includes / layout / target / nav material).
+3. The on-disk HTML file exists and is non-empty.
+4. The file’s **SHA-256** (lowercase hex) equals the entry’s `output_digest`.
+
+`output_size` is recorded as a **cheap prefilter** only. Same-length
+corruption of published HTML must still fail the digest check and force a
+re-render. Missing or empty `output_digest` (older manifests under the same
+format version) forces re-render — deliberate forward-compatible fail-closed
+behavior without bumping `format_version` or reshaping input fingerprints.
+
+Manifest entry shape (deterministic field order; entries follow PageDb order):
+
+```json
+{
+  "entity_id": "guides/intro",
+  "fingerprint": "<64 hex chars>",
+  "output_path": "guides/intro.html",
+  "output_size": 1234,
+  "output_digest": "<64 hex chars>"
+}
+```
+
+Two incremental runs with identical inputs and intact outputs must produce
+byte-identical manifests. Truncation, replacement, or same-size bit flips of
+published HTML must re-render the affected page while leaving truly unchanged
+siblings cached.
+
 ### Includes and wiki-links (pre-Apex)
 
 Before Aside tokenize and Apex, the HTML path:
@@ -279,6 +313,7 @@ On the OS/filesystem where `zig build test` runs:
 | PageDb metadata survives each free_all | `compile` |
 | Many small + one large (allocator observation) | `compile.observeWhiteboardLifecycle` |
 | Fixture goldens | `test/fixtures/html/` |
+| Incremental same-size corruption / truncation / reuse / full=inc / manifest determinism | `compile` P4 cache freshness test |
 
 Run: `zig build test` (includes assemble + compile modules).
 
