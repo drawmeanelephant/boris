@@ -49,9 +49,14 @@ On any rendering or write failure:
 
 Workers call in-process Apex via thread-local Whiteboards and a stack-scoped
 allocator. Boris does **not** claim a full formal proof that every ApexMarkdown
-global (extension registry, optional plugin paths) is thread-safe under **all**
-upstream options. Product default keeps plugins/includes/highlighters off
-(`vendor/apex/apex.c`).
+global (extension registry, optional plugin paths) is re-entrant under
+simultaneous `apex_render` calls. Product default keeps plugins/includes/
+highlighters off (`vendor/apex/apex.c`).
+
+**Host serialization:** `apex.render` holds a process-wide mutex around the C
+`apex_render` entry point. Parallel `--jobs` workers still own independent
+Whiteboards and output paths; only engine entry is serialized. This is a
+correctness fence for the current pin, not a claim that Apex is lock-free.
 
 **CLI default remains `--jobs 1` (sequential).** `--jobs N` is supported and
 smoke-validated for the product Apex configuration; it is not the silent

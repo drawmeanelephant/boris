@@ -35,6 +35,9 @@ How to use going forward:
 - Fix U18 D4 smoke: concurrent worker arenas use `page_allocator` (not
   `std.testing.allocator`) so multi-thread Apex stress does not race the
   testing GPA on CI.
+- Serialize `apex_render` behind a host mutex (D4): product Apex is not
+  re-entrant; parallel `--jobs` keeps per-thread Whiteboards but one C entry
+  at a time. Contract note in `docs/contracts/parallel-rendering.md`.
 
 ---
 
