@@ -19,6 +19,11 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Hygiene
+
+- Removed `sandboxes/content-dogfood/` (abandoned agent draft). Root `content/`
+  remains the sample docs site.
+
 ### Feature 7 — Boris-mediated includes + wiki-links — **Done**
 
 - Author `{{include path}}` expands in Zig before Apex (fence-aware; nested;
