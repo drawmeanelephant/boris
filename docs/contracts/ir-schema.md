@@ -1,7 +1,7 @@
 # Intermediate representation (IR) schema (v0.1)
 
 **Status:** normative contract — **implemented** by the milestone 6 default CLI  
-**Compiler id:** `boris/0.1.1`  
+**Compiler id:** `boris/0.2.0`  
 **schemaVersion:** `0.1.0`
 
 Default v0.1 product output is **deterministic JSON IR** under `.boris/` (or
@@ -61,7 +61,7 @@ Every top-level IR document **must** include:
 | Breaking change | New `schemaVersion`; old writers must not silently emit new shapes under `"0.1.0"` |
 
 Also required on success paths: a compiler id string of the form `boris/<product-version>`
-(currently `boris/0.1.1`). Product patch bumps may update this string; IR
+(currently `boris/0.2.0`). Product version bumps may update this string; IR
 `schemaVersion` stays `"0.1.0"` until the emit shape breaks.
 
 ---
@@ -201,7 +201,7 @@ schemaVersion, compiler, contentRoot, pageCount, pages
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `schemaVersion` | string | yes | `"0.1.0"` |
-| `compiler` | string | yes | e.g. `"boris/0.1.1"` |
+| `compiler` | string | yes | e.g. `"boris/0.2.0"` |
 | `contentRoot` | string | yes | Content root path string as passed to the pipeline (no trailing slash) |
 | `pageCount` | integer | yes | `pages.length` |
 | `pages` | array | yes | Summary entries sorted by `id` |
@@ -227,7 +227,7 @@ Example (shape only):
 ```json
 {
   "schemaVersion": "0.1.0",
-  "compiler": "boris/0.1.1",
+  "compiler": "boris/0.2.0",
   "contentRoot": "content",
   "pageCount": 2,
   "pages": [

@@ -3,9 +3,9 @@
 All notable changes to Boris are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
-Versioning: product **v0.1.x** with IR `schemaVersion` **`0.1.0`** and compiler id
-**`boris/0.1.1`**. Breaking IR changes must bump `schemaVersion` and update
-`docs/contracts/`. Product patch bumps may update `compiler_id` / `boris_version`
+Versioning: product **v0.2.0** with IR `schemaVersion` **`0.1.0`** and compiler id
+**`boris/0.2.0`**. Breaking IR changes must bump `schemaVersion` and update
+`docs/contracts/`. Product version bumps may update `compiler_id` / `boris_version`
 without changing IR schema.
 
 How to use going forward:
@@ -18,6 +18,31 @@ How to use going forward:
 ---
 
 ## [Unreleased]
+
+---
+
+## [0.2.0] — 2026-07-15
+
+Product cut that packages the HTML-default site compiler: ApexMarkdown Unified
+(Feature 1), HTML as default CLI (Feature 2), graph-aware nav + in-page TOC
+(Feature 6), and P2/P3 incremental / watch / jobs / multi-target on the HTML
+path. **IR `schemaVersion` remains `"0.1.0"`** (emit shape unchanged).
+
+| Field | Value |
+|-------|-------|
+| Package / product | `0.2.0` (`build.zig.zon`) |
+| Compiler id | `boris/0.2.0` |
+| RAG `boris_version` | `0.2.0` |
+| IR `schemaVersion` | `"0.1.0"` (unchanged) |
+| RAG format / schema | `boris-rag` / `1` (unchanged) |
+
+### What 0.2 is
+
+- **Default:** `boris` → HTML site under `dist/` (not IR).
+- **Markdown:** real ApexMarkdown Unified in-process (tables, footnotes, callouts, …).
+- **Structure:** Trunk/Satellite graph validation; layout `{{nav}}` / breadcrumb / title / `{{toc}}`.
+- **Scale path:** `--incremental`, `--watch`, `--jobs N`, `--target` multi-output.
+- **Also:** JSON IR (`--out` / `--no-rag`), RAG pack (`--rag`). IR schema still `0.1.0`.
 
 ### Feature 6 follow-on — in-page heading `{{toc}}` — **Done**
 
@@ -711,7 +736,8 @@ gaps still listed in `docs/STATUS.md`.
 | Tag / section | Meaning |
 |---------------|---------|
 | `[Unreleased]` | Landed on main, not yet cut as a release note block |
+| `[0.2.0]` | HTML-default product cut: Features 1+2+6, P2/P3; product `boris/0.2.0` |
 | `[0.1.1]` | Doc↔code reconciliation + release gate; product `boris/0.1.1` |
 | `[0.1.0]` | First content-compiler checkpoint |
-| Later `0.1.x` | Fixes/docs within same IR minor if schema stays `"0.1.0"` |
-| `0.2.0` / new `schemaVersion` | Deliberate IR or product phase bump |
+| Later `0.2.x` | Fixes/docs within same product minor if IR schema stays `"0.1.0"` |
+| New `schemaVersion` | Deliberate IR shape break (not required for product 0.2) |

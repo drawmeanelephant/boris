@@ -71,5 +71,5 @@ to H2. Parsed `<Aside>` callouts are emitted as `:::kind` blocks
 ### catalog_meta.json
 
 ```json
-{"format":"boris-rag","schema_version":1,"boris_version":"0.1.1"}
+{"format":"boris-rag","schema_version":1,"boris_version":"0.2.0"}
 ```

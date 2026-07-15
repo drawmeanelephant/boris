@@ -14,8 +14,13 @@ affiliated with any commercial tobacco or rolling-paper brand.
 | | |
 |--|--|
 | Language | Zig **0.16.0** (`build.zig.zon` / CI pin) |
-| Product | **0.0.1** / compiler **boris/0.1.1** |
+| Product | **0.2.0** / compiler **boris/0.2.0** |
+| IR schema | **0.1.0** (unchanged; emit shape stable) |
 | License | [MIT](LICENSE) |
+
+**v0.2.0** is the first HTML-default product cut: ApexMarkdown Unified, graph-aware
+nav + TOC, incremental/watch/jobs/multi-target — same IR schema as 0.1.x. See
+[`CHANGELOG.md`](CHANGELOG.md) and [`docs/STATUS.md`](docs/STATUS.md).
 
 ---
 

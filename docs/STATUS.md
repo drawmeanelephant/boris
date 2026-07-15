@@ -1,11 +1,18 @@
 # Project status — Boris
 
-**As of:** 2026-07-15 · product **0.0.1** / compiler **boris/0.1.1** · Zig **0.16.0**  
-**Phase:** HTML-default site compiler with real ApexMarkdown Unified.  
-P2/P3 foundations, Feature 1 (Apex), and Feature 2 (HTML default) are **Done**.
+**As of:** 2026-07-15 · product **0.2.0** / compiler **boris/0.2.0** · Zig **0.16.0**  
+**Phase:** **v0.2.0** HTML-default site compiler (ApexMarkdown Unified, Feature 6 nav+toc, P2/P3).  
+IR `schemaVersion` remains **`0.1.0`**.
 
 Living snapshot for agents and humans. Prefer this and [`CHANGELOG.md`](../CHANGELOG.md)
 over archaeology. Normative behavior: [`docs/contracts/`](contracts/).
+
+### What 0.2 is
+
+Product **0.2.0** packages the shippable docs compiler: bare `boris` → `dist/`
+HTML; real ApexMarkdown; Trunk/Satellite graph; layout nav/breadcrumb/title/toc;
+incremental, watch, jobs, multi-target. IR and RAG stay opt-in; IR shape is still
+schema **0.1.0**. Tag: `v0.2.0`.
 
 ---
 
@@ -102,13 +109,14 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | Priority | Item | Why |
 |----------|------|-----|
 | **Now** | Polish sample content as product evolves | Keep `content/` green with nav + toc + Apex reality |
-| **Next** | v0.2.0 product cut | Package Feature 1+2+6 (nav + toc) + P2/P3 under a real version bump (`schemaVersion` stays `0.1.0` unless IR shape changes) |
+| **Later** | IR schema bump only if emit shape changes | Do not bump `schemaVersion` for product-only work |
 | **Hygiene** | Historical campaign notes | Removed from tree (`archive/`); do not reintroduce as default agent context |
 
 ### Shipped (do not re-open as greenfield)
 
 | # | Feature | Note |
 |---|---------|------|
+| — | **Product v0.2.0** | Version package of Features 1+2+6 + P2/P3; tag `v0.2.0` |
 | 1 | ApexMarkdown Unified | Real engine under host ABI |
 | 2 | HTML default CLI | Bare `boris` → `dist/`; IR via `--out` |
 | 3 | `--jobs N` | Parallel independent page renders |

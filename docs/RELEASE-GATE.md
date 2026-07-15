@@ -1,4 +1,4 @@
-# Release gate — Boris (v0.1 / post-P3)
+# Release gate — Boris (v0.2.0)
 
 Mechanical checklist before tagging a release or claiming a milestone complete.
 

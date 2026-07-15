@@ -1,7 +1,7 @@
 # Multi-Target Isolated Output & Cache Namespaces Contract (P3.3)
 
 **Status:** normative contract  
-**Version:** Boris/0.1.1 v0.1
+**Version:** Boris/0.2.0 · IR schema 0.1.0
 
 This document specifies the CLI grammar, target validation, structural cache isolation, scheduling, and error boundaries for multi-target HTML site generation in Boris.
 
