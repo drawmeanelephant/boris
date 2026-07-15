@@ -6,11 +6,14 @@
 //! Normative: `docs/contracts/includes-and-wiki-links.md`.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const parser = @import("parser.zig");
 const diag = @import("diag.zig");
 
 pub const max_include_depth: usize = 32;
+pub const max_expanded_bytes: usize = 16 * 1024 * 1024;
+pub const max_include_expansions: usize = 4096;
 
 pub const IncludeError = error{
     IncludeSyntax,
@@ -18,6 +21,7 @@ pub const IncludeError = error{
     IncludeCycle,
     InvalidPath,
     DepthExceeded,
+    ExpansionBudgetExceeded,
     OutOfMemory,
     ReadFailed,
 };
@@ -85,6 +89,7 @@ pub fn validateIncludePath(path: []const u8) bool {
             const seg = path[seg_start..i];
             if (seg.len == 0) return false;
             if (std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, "..")) return false;
+            if (seg[0] == '.') return false;
             for (seg) |ch| {
                 const ok = (ch >= 'A' and ch <= 'Z') or
                     (ch >= 'a' and ch <= 'z') or
@@ -148,10 +153,37 @@ pub fn bodyOfSource(source: []const u8) []const u8 {
 }
 
 fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Allocator) IncludeError![]u8 {
-    var file = dir.openFile(io, path, .{}) catch return error.IncludeMissing;
+    // Resolve every directory component through a no-follow handle. A no-follow
+    // open only on the final file would still permit an intermediate symlink.
+    const last_slash = std.mem.lastIndexOfScalar(u8, path, '/');
+    var current_dir = dir;
+    var owned_dir: ?Io.Dir = null;
+    defer if (owned_dir) |d| d.close(io);
+
+    if (last_slash) |last| {
+        var segments = std.mem.splitScalar(u8, path[0..last], '/');
+        while (segments.next()) |segment| {
+            const next_dir = current_dir.openDir(io, segment, .{
+                .follow_symlinks = false,
+            }) catch return error.IncludeMissing;
+            if (owned_dir) |d| d.close(io);
+            owned_dir = next_dir;
+            current_dir = next_dir;
+        }
+    }
+
+    const basename = if (last_slash) |last| path[last + 1 ..] else path;
+    var file = current_dir.openFile(io, basename, .{
+        .follow_symlinks = false,
+        .resolve_beneath = true,
+    }) catch return error.IncludeMissing;
     defer file.close(io);
     var reader = file.reader(io, &.{});
-    return reader.interface.allocRemaining(allocator, .unlimited) catch return error.ReadFailed;
+    return reader.interface.allocRemaining(allocator, .limited(max_expanded_bytes)) catch |err| switch (err) {
+        error.StreamTooLong => error.ExpansionBudgetExceeded,
+        error.OutOfMemory => error.OutOfMemory,
+        else => error.ReadFailed,
+    };
 }
 
 fn setFail(fail_out: ?*FailInfo, body: []const u8, offset: usize, detail_s: []const u8, locus_s: []const u8) void {
@@ -330,11 +362,44 @@ pub fn expandIncludes(
     owner_path: []const u8,
     fail_out: ?*FailInfo,
 ) IncludeError![]u8 {
+    var budget: ExpansionBudget = .{};
+    return expandIncludesWithBudget(io, content_dir, gpa, arena, body, owner_path, fail_out, &budget);
+}
+
+const ExpansionBudget = struct {
+    byte_limit: usize = max_expanded_bytes,
+    expansion_limit: usize = max_include_expansions,
+    bytes: usize = 0,
+    expansions: usize = 0,
+
+    fn chargeExpansion(self: *ExpansionBudget) IncludeError!void {
+        if (self.expansions >= self.expansion_limit) return error.ExpansionBudgetExceeded;
+        self.expansions += 1;
+    }
+
+    fn chargeBytes(self: *ExpansionBudget, count: usize) IncludeError!void {
+        if (count > self.byte_limit -| self.bytes) return error.ExpansionBudgetExceeded;
+        self.bytes += count;
+    }
+};
+
+fn expandIncludesWithBudget(
+    io: Io,
+    content_dir: Io.Dir,
+    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    owner_path: []const u8,
+    fail_out: ?*FailInfo,
+    budget: *ExpansionBudget,
+) IncludeError![]u8 {
     var stack: std.ArrayList([]const u8) = .empty;
     defer stack.deinit(gpa);
+    var cache: std.StringHashMapUnmanaged([]const u8) = .{};
+    defer cache.deinit(gpa);
     try stack.append(gpa, owner_path);
     // Root expansion: locus empty so diagnostics use owner_path from the caller.
-    return expandRecursive(io, content_dir, gpa, arena, body, "", &stack, 0, fail_out);
+    return expandRecursive(io, content_dir, gpa, arena, body, "", &stack, &cache, budget, 0, fail_out);
 }
 
 fn expandRecursive(
@@ -345,6 +410,8 @@ fn expandRecursive(
     body: []const u8,
     locus_path: []const u8,
     stack: *std.ArrayList([]const u8),
+    cache: *std.StringHashMapUnmanaged([]const u8),
+    budget: *ExpansionBudget,
     depth: usize,
     fail_out: ?*FailInfo,
 ) IncludeError![]u8 {
@@ -421,24 +488,39 @@ fn expandRecursive(
                 }
             }
 
-            try out.appendSlice(arena, body[copy_from..start]);
-
-            const file_bytes = readFileAlloc(io, content_dir, path, gpa) catch |err| {
+            budget.chargeExpansion() catch |err| {
                 setFail(fail_out, body, start, path, locus_path);
                 return err;
             };
-            defer gpa.free(file_bytes);
-            const nested_body = bodyOfSource(file_bytes);
 
-            try stack.append(gpa, path);
-            var nested_fail: FailInfo = .{};
-            const expanded = expandRecursive(io, content_dir, gpa, arena, nested_body, path, stack, depth + 1, &nested_fail) catch |err| {
+            try out.appendSlice(arena, body[copy_from..start]);
+
+            const expanded = cache.get(path) orelse expanded: {
+                const file_bytes = readFileAlloc(io, content_dir, path, gpa) catch |err| {
+                    setFail(fail_out, body, start, path, locus_path);
+                    return err;
+                };
+                defer gpa.free(file_bytes);
+                const nested_body = bodyOfSource(file_bytes);
+
+                try stack.append(gpa, path);
+                var nested_fail: FailInfo = .{};
+                const value = expandRecursive(io, content_dir, gpa, arena, nested_body, path, stack, cache, budget, depth + 1, &nested_fail) catch |err| {
+                    _ = stack.pop();
+                    // nested_fail owns its strings; copy before nested buffers go out of scope.
+                    if (fail_out) |f| f.* = nested_fail;
+                    return err;
+                };
                 _ = stack.pop();
-                // nested_fail owns its strings; copy before nested buffers go out of scope.
-                if (fail_out) |f| f.* = nested_fail;
+
+                const cache_key = try arena.dupe(u8, path);
+                try cache.put(gpa, cache_key, value);
+                break :expanded value;
+            };
+            budget.chargeBytes(expanded.len) catch |err| {
+                setFail(fail_out, body, start, path, locus_path);
                 return err;
             };
-            _ = stack.pop();
             try out.appendSlice(arena, expanded);
 
             copy_from = j;
@@ -459,6 +541,7 @@ pub fn errorCode(err: IncludeError) diag.Code {
         error.IncludeCycle => .EINCLUDECYCLE,
         error.InvalidPath => .EINVALIDPATH,
         error.DepthExceeded => .EINCLUDECYCLE,
+        error.ExpansionBudgetExceeded => .EINCLUDECYCLE,
         error.OutOfMemory => .EIO,
         error.ReadFailed => .EIO,
     };
@@ -468,8 +551,8 @@ pub fn remediationFor(code: diag.Code) []const u8 {
     return switch (code) {
         .EINCLUDESYNTAX => "Use {{include path/to/file.md}} with whitespace before the path and closing }}",
         .EINCLUDEMISSING => "Create the include file under the content root or fix the path",
-        .EINCLUDECYCLE => "Break the cycle by removing a circular {{include}} among nested fragments",
-        .EINVALIDPATH => "Use content-root-relative segments [A-Za-z0-9._-]; no .., absolute, or backslash",
+        .EINCLUDECYCLE => "Break cycles or reduce nested/fan-out include expansion",
+        .EINVALIDPATH => "Use content-root-relative non-dotfile segments [A-Za-z0-9._-]; no .., absolute, or backslash",
         .EIO => "Check filesystem permissions and path spelling",
         else => "Fix the include directive",
     };
@@ -492,6 +575,7 @@ fn messageFor(retain: std.mem.Allocator, err: IncludeError, fail: *const FailInf
         else
             try retain.dupe(u8, "illegal include path"),
         error.DepthExceeded => try retain.dupe(u8, "include nesting depth exceeded"),
+        error.ExpansionBudgetExceeded => try retain.dupe(u8, "include expansion budget exceeded"),
         error.OutOfMemory => try retain.dupe(u8, "out of memory while resolving includes"),
         error.ReadFailed => if (det.len > 0)
             try std.fmt.allocPrint(retain, "failed to read include \"{s}\"", .{det})
@@ -550,6 +634,9 @@ test "validateIncludePath accepts relative fragments" {
     try std.testing.expect(!validateIncludePath("../x.md"));
     try std.testing.expect(!validateIncludePath("a/../b.md"));
     try std.testing.expect(!validateIncludePath("a//b.md"));
+    try std.testing.expect(!validateIncludePath(".secret.md"));
+    try std.testing.expect(!validateIncludePath("includes/.secret.md"));
+    try std.testing.expect(!validateIncludePath(".hidden/fragment.md"));
 }
 
 test "scanIncludeDirectives finds one and skips backtick fences" {
@@ -694,4 +781,102 @@ test "expandIncludes simple nested and cycle" {
     try std.testing.expectEqualStrings("includes/nope.md", nested_miss.detail());
     try std.testing.expectEqualStrings("includes/outer.md", nested_miss.locus());
     try std.testing.expectEqual(@as(u32, 2), nested_miss.line);
+}
+
+test "expandIncludes bounds exponential fan-out" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const cwd = Io.Dir.cwd();
+    const work = "zig-cache/boris-include-budget";
+    try cwd.createDirPath(io, work);
+    defer cwd.deleteTree(io, work) catch {};
+
+    try cwd.createDirPath(io, work ++ "/content/includes");
+    try cwd.writeFile(io, .{ .sub_path = work ++ "/content/includes/level-00.md", .data = "x" });
+
+    var level: usize = 1;
+    while (level <= 12) : (level += 1) {
+        var name_buf: [96]u8 = undefined;
+        const name = try std.fmt.bufPrint(&name_buf, work ++ "/content/includes/level-{d:0>2}.md", .{level});
+        var body_buf: [128]u8 = undefined;
+        const body_text = try std.fmt.bufPrint(
+            &body_buf,
+            "{{{{include includes/level-{d:0>2}.md}}}}{{{{include includes/level-{d:0>2}.md}}}}",
+            .{ level - 1, level - 1 },
+        );
+        try cwd.writeFile(io, .{ .sub_path = name, .data = body_text });
+    }
+
+    var content_dir = try cwd.openDir(io, work ++ "/content", .{});
+    defer content_dir.close(io);
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var budget: ExpansionBudget = .{
+        .byte_limit = 1024,
+        .expansion_limit = 10_000,
+    };
+    var fail: FailInfo = .{};
+
+    try std.testing.expectError(
+        error.ExpansionBudgetExceeded,
+        expandIncludesWithBudget(
+            io,
+            content_dir,
+            gpa,
+            arena.allocator(),
+            "{{include includes/level-12.md}}",
+            "page.md",
+            &fail,
+            &budget,
+        ),
+    );
+    try std.testing.expect(errorCode(error.ExpansionBudgetExceeded) == .EINCLUDECYCLE);
+    try std.testing.expect(fail.detail().len > 0);
+    try std.testing.expect(budget.bytes <= budget.byte_limit);
+}
+
+test "expandIncludes rejects symlink targets and symlink path components" {
+    if (builtin.os.tag == .windows) return;
+
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const cwd = Io.Dir.cwd();
+    const work = "zig-cache/boris-include-symlink";
+    try cwd.createDirPath(io, work);
+    defer cwd.deleteTree(io, work) catch {};
+
+    try cwd.createDirPath(io, work ++ "/content/includes");
+    try cwd.createDirPath(io, work ++ "/content/real");
+    try cwd.writeFile(io, .{ .sub_path = work ++ "/content/includes/real.md", .data = "secret\n" });
+    try cwd.writeFile(io, .{ .sub_path = work ++ "/content/real/secret.md", .data = "secret\n" });
+
+    var includes_dir = try cwd.openDir(io, work ++ "/content/includes", .{});
+    defer includes_dir.close(io);
+    includes_dir.symLink(io, "real.md", "alias.md", .{}) catch |err| switch (err) {
+        error.AccessDenied, error.PermissionDenied => return,
+        else => return err,
+    };
+
+    var content_dir = try cwd.openDir(io, work ++ "/content", .{});
+    defer content_dir.close(io);
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    var file_fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.IncludeMissing,
+        expandIncludes(io, content_dir, gpa, arena.allocator(), "{{include includes/alias.md}}", "page.md", &file_fail),
+    );
+    try std.testing.expectEqualStrings("includes/alias.md", file_fail.detail());
+
+    content_dir.symLink(io, "real", "linked", .{ .is_directory = true }) catch |err| switch (err) {
+        error.AccessDenied, error.PermissionDenied => return,
+        else => return err,
+    };
+    var dir_fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.IncludeMissing,
+        expandIncludes(io, content_dir, gpa, arena.allocator(), "{{include linked/secret.md}}", "page.md", &dir_fail),
+    );
+    try std.testing.expectEqualStrings("linked/secret.md", dir_fail.detail());
 }
