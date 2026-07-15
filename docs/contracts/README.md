@@ -24,7 +24,7 @@ is **not** proof that every surface is the default CLI product.
 | Multi-target isolated outputs | **Implemented** — CLI, isolation, stage commit, selective watch (P3.3) |
 | HTML `dist/` default CLI | **Implemented** (Feature 2) |
 | Includes + wiki-links (HTML) | **Implemented** — pre-Apex; see `includes-and-wiki-links.md` |
-| IR 0.2 dependency edges + reverse index | **Contracted (F8.0)** — implementation pending F8.1–F8.2; current binary remains IR 0.1 |
+| IR 0.2 dependency edges + reverse index | **Implemented (F8.1–F8.2 shipped)** — `--out` emits typed edges and `reverseIndex`; F8.3 dirty-set consumption remains pending |
 
 ## Canonical ownership (one document per topic)
 
