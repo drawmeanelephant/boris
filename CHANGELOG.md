@@ -19,6 +19,13 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Docs — sample dogfood site under `content/`
+
+- Rebuild the sample site for HTML-default + Apex Unified + Trunk/Satellite:
+  home, getting started, guides (overview, graph, asides, CLI, Apex, RAG), and
+  frontmatter reference. Aside docs avoid bare tags outside fences so the
+  component tokenizer stays green. Three modes (`boris`, `--out`, `--rag`) pass.
+
 ### Hygiene — remove `archive/` from the tree
 
 - Delete top-level `archive/` (historical Feature 1 reviews, P3 notes, AUDIT-v0.1).

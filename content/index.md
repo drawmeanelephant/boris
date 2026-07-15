@@ -1,16 +1,27 @@
 ---
-title: Home
+title: Boris Docs Compiler
+status: published
+tags: [home, zig]
 ---
-
 # Welcome to Boris
 
-This site was compiled by **Boris**, a standalone Zig static site generator.
+Boris is a **Zig static-site compiler** for Markdown documentation. 
 
-It walks `content/` once, parses Trunk/Satellite relations, renders markdown
-through the native Apex C-ABI engine (including in-page asides/admonitions),
-and streams HTML with zero-copy layout splicing.
+Our philosophy is simple: **Load → Roll → Ignite → Reset**. We provide a validated content metadata model, graph-aware navigation, and semantic admonitions out of the box.
 
-## Guides
+<Aside kind="info">
+Boris now defaults to an HTML site build under `dist/` and uses real **ApexMarkdown Unified** for rendering. No more "IR-first" generic claims. We are a docs site builder.
+</Aside>
 
-- [Introduction](guides/intro.md) — Trunk and Satellite content model
-- [RAG export command](guides/rag-export.md) — export an LLM knowledge corpus with `zig build rag`
+## Why Boris?
+
+Unlike traditional SSGs, Boris isn't a polyglot web framework. There's no Node SSG stack, no React, no Webpack. 
+
+### Core Features
+
+- **Blazing Fast**: Written in Zig 0.16+.
+- **Validated Graph**: Strict Trunk/Satellite content model ensures you never have dangling docs.
+- **Apex Markdown**: Fully featured markdown via C ABI host adapter.
+- **Zero-JS by Default**: Layouts are pure HTML splices, keeping the payload lean.
+
+Check out [Getting Started](getting-started.html) to begin, or dive into our [Apex Showcase](guides/apex-markdown.html) to see the renderer in action!

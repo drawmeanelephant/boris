@@ -101,8 +101,8 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
-| **Now** | Sample / dogfood content under `content/` | `content/AGENT-DIRECTIVE.txt` — match HTML-default + Apex + graph nav; keep graph/Aside valid |
-| **Next** | Feature 6 follow-on — in-page heading `{{toc}}` | Per-page outline from body headings |
+| **Now** | Feature 6 follow-on — in-page heading `{{toc}}` | Per-page outline from body headings |
+| **Next** | Polish sample content as product evolves | Keep `content/` green with nav + Apex reality |
 | **Later** | v0.2.0 product cut | Package Feature 1+2+6 MVP + P2/P3 under a real version bump (`schemaVersion` stays `0.1.0` unless IR shape changes) |
 | **Hygiene** | Historical campaign notes | Removed from tree (`archive/`); do not reintroduce as default agent context |
 
