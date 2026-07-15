@@ -1,6 +1,6 @@
 # Feature 1 — Real ApexMarkdown engine (Unified mode)
 
-**Status:** revised 2026-07-14 — **corrects a wrong engine target**  
+**Status:** revised 2026-07-14 — **corrects a wrong engine target**; **campaign Chat 1 pin landed 2026-07-15**  
 **Priority:** highest authoring-quality work after P2/P3  
 **Product intent:** Keep **Apex** (the real one). Do **not** “yeet Apex” for plain cmark-gfm.
 
@@ -346,7 +346,7 @@ Update stub-era HTML goldens with reasons.
 
 ## 10. Definition of done
 
-- [ ] ApexMarkdown/apex vendored & pinned; licenses present
+- [x] ApexMarkdown/apex vendored & pinned; licenses present *(Chat 1: `vendor/apex-markdown` @ v1.1.11 + `VENDOR.md`; host still stub)*
 - [ ] Host `apex_render` uses real Apex Unified (fragment HTML)
 - [ ] File includes / plugins / external highlighters off at Boris boundary
 - [ ] Whiteboard path: copy-in + `apex_free_string`; no arena free via libc

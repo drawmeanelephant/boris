@@ -1,7 +1,7 @@
 # Feature 1 — Apex fidelity (handoff pointer)
 
-**Status:** corrected target — real ApexMarkdown Unified  
-**Date:** 2026-07-14
+**Status:** corrected target — real ApexMarkdown Unified; **Chat 1 pin landed**  
+**Date:** 2026-07-14 (pointer); pin 2026-07-15
 
 ## Authority
 
@@ -15,6 +15,11 @@
 and call it from Boris’s host `apex_render` adapter in **`APEX_MODE_UNIFIED`**
 (default). See [Modes](https://github.com/ApexMarkdown/apex/wiki/Modes) and
 [C API](https://github.com/ApexMarkdown/apex/wiki/C-API).
+
+**Pin (Chat 1 done):**
+
+[`vendor/apex-markdown/VENDOR.md`](../../vendor/apex-markdown/VENDOR.md) — v1.1.11 snapshot.
+Host still stub; next is Chat 2 (`build.zig` Strategy A link).
 
 **ABI contract (Boris host lifetime rules still win):**
 

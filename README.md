@@ -40,9 +40,10 @@ rolling-paper brand.
 | Multi-target isolated outputs (`--target`) | **Implemented** — per-target cache/stage isolation ([multi-target](docs/contracts/multi-target-isolated-output.md)) |
 | `zig build test` | **Implemented** — CLI + fixtures + scanner + parser + pipeline + RAG + Apex + HTML |
 | Normative contracts under [`docs/contracts/`](docs/contracts/) | **Normative + implemented** (see ownership map) |
-| Apex C ABI (in-process) | **Implemented** — linked + tested; **minimal stub ≠ CommonMark** ([contract](docs/contracts/apex-abi.md)) |
+| Apex C ABI (in-process) | **Implemented** — linked + tested; **host stub** today ([contract](docs/contracts/apex-abi.md)) |
+| ApexMarkdown Unified pin | **Pinned** — `vendor/apex-markdown/` @ v1.1.11 ([VENDOR.md](vendor/apex-markdown/VENDOR.md)); **not linked yet** (Feature 1 Chat 2+) |
 | HTML `dist/` as **default** CLI (no flags) | **Roadmap** — bare `boris` remains IR-first today |
-| Full CommonMark / GFM Apex fidelity | **Roadmap** — replace vendor stub under existing `apex.h` |
+| Real ApexMarkdown Unified fidelity | **In progress** — host adapter + link under existing `apex.h` ([APEX-Feature1-plan.md](APEX-Feature1-plan.md)) |
 | Full YAML / MDX | **Out of scope** for v0.1 |
 
 ## What works today (CLI)

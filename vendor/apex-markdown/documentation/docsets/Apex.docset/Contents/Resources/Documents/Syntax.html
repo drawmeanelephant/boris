@@ -1,0 +1,3981 @@
+<!DOCTYPE html>
+<html lang="en">
+
+  <head>
+
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <meta name="generator" content="Apex 0.1.49">
+      <title>Document</title>
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+          line-height: 1.6;
+          max-width: 800px;
+          margin: 2rem auto;
+          padding: 0 1rem;
+          color: #333;
+        }
+        pre { background: #f5f5f5; padding: 1rem; overflow-x: auto; }
+        code { background: #f0f0f0; padding: 0.2em 0.4em; border-radius: 3px; }
+        blockquote { border-left: 4px solid #ddd; margin: 0; padding-left: 1rem; color: #666; }
+        table { border-collapse: collapse; width: 100%%; }
+        th, td { border: 1px solid #ddd; padding: 0.5rem; }
+        th { background: #f5f5f5; }
+        tfoot td { background: #e8e8e8; }
+        figure.table-figure { width: fit-content; margin: 1em 0; }
+        figure.table-figure table { width: auto; }
+        figcaption { text-align: center; font-weight: bold; font-size: 0.8em; }
+        .page-break { page-break-after: always; }
+        .callout { padding: 1rem; margin: 1rem 0; border-left: 4px solid; }
+        .callout-note { border-color: #3b82f6; background: #eff6ff; }
+        .callout-warning { border-color: #f59e0b; background: #fffbeb; }
+        .callout-tip { border-color: #10b981; background: #f0fdf4; }
+        .callout-danger { border-color: #ef4444; background: #fef2f2; }
+        ins { background: #d4fcbc; text-decoration: none; }
+        del { background: #fbb6c2; text-decoration: line-through; }
+        mark { background: #fff3cd; }
+        .critic.comment { background: #e7e7e7; color: #666; font-style: italic; }
+      </style>
+  <style>
+/* Base styles */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 17px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.65;
+  color: #1e293b;
+  background-color: #fff;
+}
+
+/* Sidebar / Main TOC - wider on larger screens */
+.main-toc,
+.sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: auto;
+  min-width: 180px;
+  max-width: 250px;
+  height: 100vh;
+  overflow-y: auto;
+  background: #1e293b;
+  color: rgba(255, 255, 255, 0.9);
+  border-right: 2px solid rgba(255, 255, 255, 0.1);
+  padding: 24px 20px 130px;
+  font-size: 14px;
+  z-index: 100;
+  margin-right: 1rem;
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.08);
+  transition: transform 0.3s ease;
+}
+
+.main-toc ul,
+.sidebar ul {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+  padding-bottom: 80px;
+}
+
+.main-toc ul::after,
+.sidebar ul::after {
+  content: "";
+  display: block;
+  height: 80px;
+}
+
+.main-toc li,
+.sidebar li {
+  margin: 0.25em 0;
+}
+
+.main-toc a,
+.sidebar a {
+  color: rgba(255, 255, 255, 0.85);
+  text-decoration: none;
+  display: block;
+  padding: 6px 12px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.main-toc a:hover,
+.sidebar a:hover {
+  background: #334155;
+  color: #fff;
+}
+
+.sidebar a.active {
+  color: #0ea5e9;
+  font-weight: 500;
+}
+
+/* Body margin for sidebar */
+body {
+  margin-left: 270px;
+}
+
+/* Hamburger menu button */
+.hamburger-menu {
+  display: none;
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 200;
+  background: #1e293b;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 10px;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 20px;
+  line-height: 1;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s ease;
+  opacity: 0.2;
+}
+
+.hamburger-menu:hover {
+  background: #334155;
+  color: #fff;
+  opacity: 1;
+}
+
+/* Move hamburger to the right of the sidebar when menu is open */
+.hamburger-menu.active {
+  left: calc(
+    250px + 12px
+  ); /* Position just to the right of sidebar (max-width 250px + 12px padding) */
+}
+
+.hamburger-menu.active {
+  background: #0ea5e9;
+}
+
+.hamburger-menu::before {
+  content: "☰";
+}
+
+.hamburger-menu.active::before {
+  content: "✕";
+}
+
+/* Mobile menu overlay */
+.mobile-menu-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 150;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.mobile-menu-overlay.active {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Page TOC */
+.page-toc {
+  background: #f9f9f9;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 1rem;
+  margin: 1.5rem 0;
+}
+
+.page-toc ul {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+.page-toc > ul {
+  padding-left: 0;
+}
+
+.page-toc li {
+  margin: 0.25em 0;
+}
+
+.page-toc a {
+  color: #0066cc;
+  text-decoration: none;
+  display: block;
+  padding: 0.25em 0.5em;
+  border-radius: 3px;
+}
+
+.page-toc a:hover {
+  background: #e0e0e0;
+  color: #004499;
+}
+
+.page-toc ul ul {
+  list-style: none;
+  padding-left: 1.5em;
+  margin-top: 0.25em;
+  margin-left: 0;
+}
+
+.page-toc ul ul ul {
+  padding-left: 1.5em;
+}
+
+.page-toc ul ul a {
+  font-size: 0.9em;
+  color: #555;
+}
+
+.page-toc ul ul ul a {
+  font-size: 0.85em;
+  color: #666;
+}
+
+/* Floating TOC */
+.floating-toc {
+  position: fixed;
+  top: 0;
+  left: 270px;
+  right: 0;
+  z-index: 50;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+  pointer-events: none;
+  display: flex;
+  justify-content: flex-end;
+  padding-right: 2rem;
+}
+
+.floating-toc.visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.floating-toc-container {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid #ddd;
+  border-radius: 0 0 12px 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  width: fit-content;
+  max-width: 400px;
+  min-width: 200px;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.floating-toc-header {
+  padding: 8px 16px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.floating-toc-header:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.floating-toc-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.floating-toc-container:hover .floating-toc-content {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.floating-toc-content ul {
+  list-style: none;
+  padding: 8px 16px 16px;
+  margin: 0;
+}
+
+.floating-toc-content li {
+  margin: 0.1em 0;
+}
+
+.floating-toc-content a {
+  color: #0066cc;
+  text-decoration: none;
+  display: block;
+  padding: 0.2em 0.5em;
+  border-radius: 4px;
+  font-size: 13px;
+  transition: background 0.15s ease;
+}
+
+.floating-toc-content a:hover {
+  background: #e0e0e0;
+  color: #004499;
+}
+
+.floating-toc-content ul ul {
+  padding-left: 1.2em;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.floating-toc-content ul ul ul {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.floating-toc-content ul ul a {
+  font-size: 12px;
+  color: #555;
+}
+
+.floating-toc-content ul ul ul a {
+  font-size: 11px;
+  color: #666;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Code blocks */
+code {
+  background: #f0f0f0;
+  padding: 0.2em 0.4em;
+  border-radius: 3px;
+  font-family: "Monaco", "Menlo", "Ubuntu Mono", monospace;
+  font-size: 0.9em;
+  margin: 0 0.1em;
+}
+
+pre {
+  background: #f5f5f5;
+  padding: 1rem;
+  overflow-x: auto;
+  border-radius: 4px;
+  margin: 1em 0;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  margin: 0;
+}
+
+/* Rouge syntax highlighting - GitHub theme, scoped to .highlight containers */
+.highlight {
+  color: #24292e;
+}
+
+.highlight .c {
+  color: #6a737d;
+  font-style: italic;
+} /* Comment */
+.highlight .err {
+  color: #a61717;
+  background-color: #e3d2d2;
+} /* Error */
+.highlight .k {
+  color: #d73a49;
+  font-weight: bold;
+} /* Keyword */
+.highlight .l {
+  color: #032f62;
+} /* Literal */
+.highlight .n {
+  color: #24292e;
+} /* Name */
+.highlight .o {
+  color: #d73a49;
+} /* Operator */
+.highlight .p {
+  color: #24292e;
+} /* Punctuation */
+.highlight .cm {
+  color: #6a737d;
+  font-style: italic;
+} /* Comment.Multiline */
+.highlight .cp {
+  color: #6a737d;
+  font-weight: bold;
+} /* Comment.Preproc */
+.highlight .c1 {
+  color: #6a737d;
+  font-style: italic;
+} /* Comment.Single */
+.highlight .cs {
+  color: #6a737d;
+  font-weight: bold;
+  font-style: italic;
+} /* Comment.Special */
+.highlight .gd {
+  color: #24292e;
+  background-color: #ffeef0;
+} /* Generic.Deleted */
+.highlight .ge {
+  color: #24292e;
+  font-style: italic;
+} /* Generic.Emph */
+.highlight .gr {
+  color: #aa0000;
+} /* Generic.Error */
+.highlight .gh {
+  color: #999999;
+  font-weight: bold;
+} /* Generic.Heading */
+.highlight .gi {
+  color: #24292e;
+  background-color: #f0fff4;
+} /* Generic.Inserted */
+.highlight .go {
+  color: #888888;
+} /* Generic.Output */
+.highlight .gp {
+  color: #555555;
+} /* Generic.Prompt */
+.highlight .gs {
+  font-weight: bold;
+} /* Generic.Strong */
+.highlight .gu {
+  color: #aaaaaa;
+} /* Generic.Subheading */
+.highlight .gt {
+  color: #aa0000;
+} /* Generic.Traceback */
+.highlight .kc {
+  color: #d73a49;
+  font-weight: bold;
+} /* Keyword.Constant */
+.highlight .kd {
+  color: #d73a49;
+  font-weight: bold;
+} /* Keyword.Declaration */
+.highlight .kn {
+  color: #d73a49;
+  font-weight: bold;
+} /* Keyword.Namespace */
+.highlight .kp {
+  color: #d73a49;
+  font-weight: bold;
+} /* Keyword.Pseudo */
+.highlight .kr {
+  color: #d73a49;
+  font-weight: bold;
+} /* Keyword.Reserved */
+.highlight .kt {
+  color: #d73a49;
+  font-weight: bold;
+} /* Keyword.Type */
+.highlight .ld {
+  color: #032f62;
+} /* Literal.Date */
+.highlight .m {
+  color: #005cc5;
+} /* Literal.Number */
+.highlight .s {
+  color: #032f62;
+} /* Literal.String */
+.highlight .na {
+  color: #6f42c1;
+} /* Name.Attribute */
+.highlight .nb {
+  color: #005cc5;
+} /* Name.Builtin */
+.highlight .nc {
+  color: #6f42c1;
+  font-weight: bold;
+} /* Name.Class */
+.highlight .no {
+  color: #005cc5;
+} /* Name.Constant */
+.highlight .nd {
+  color: #6f42c1;
+  font-weight: bold;
+} /* Name.Decorator */
+.highlight .ni {
+  color: #800080;
+} /* Name.Entity */
+.highlight .ne {
+  color: #990000;
+  font-weight: bold;
+} /* Name.Exception */
+.highlight .nf {
+  color: #6f42c1;
+} /* Name.Function */
+.highlight .nl {
+  color: #990000;
+} /* Name.Label */
+.highlight .nn {
+  color: #555555;
+} /* Name.Namespace */
+.highlight .nx {
+  color: #6f42c1;
+} /* Name.Other */
+.highlight .py {
+  color: #990000;
+} /* Name.Property */
+.highlight .nt {
+  color: #22863a;
+} /* Name.Tag */
+.highlight .nv {
+  color: #e36209;
+} /* Name.Variable */
+.highlight .ow {
+  color: #d73a49;
+  font-weight: bold;
+} /* Operator.Word */
+.highlight .w {
+  color: #bbbbbb;
+} /* Text.Whitespace */
+.highlight .mf {
+  color: #005cc5;
+} /* Literal.Number.Float */
+.highlight .mh {
+  color: #005cc5;
+} /* Literal.Number.Hex */
+.highlight .mi {
+  color: #005cc5;
+} /* Literal.Number.Integer */
+.highlight .mo {
+  color: #005cc5;
+} /* Literal.Number.Oct */
+.highlight .sb {
+  color: #032f62;
+} /* Literal.String.Backtick */
+.highlight .sc {
+  color: #032f62;
+} /* Literal.String.Char */
+.highlight .sd {
+  color: #032f62;
+} /* Literal.String.Doc */
+.highlight .s2 {
+  color: #032f62;
+} /* Literal.String.Double */
+.highlight .se {
+  color: #032f62;
+} /* Literal.String.Escape */
+.highlight .sh {
+  color: #032f62;
+} /* Literal.String.Heredoc */
+.highlight .si {
+  color: #032f62;
+} /* Literal.String.Interpol */
+.highlight .sx {
+  color: #032f62;
+} /* Literal.String.Other */
+.highlight .sr {
+  color: #22863a;
+} /* Literal.String.Regex */
+.highlight .s1 {
+  color: #032f62;
+} /* Literal.String.Single */
+.highlight .ss {
+  color: #032f62;
+} /* Literal.String.Symbol */
+.highlight .bp {
+  color: #005cc5;
+} /* Name.Builtin.Pseudo */
+.highlight .vc {
+  color: #e36209;
+} /* Name.Variable.Class */
+.highlight .vg {
+  color: #e36209;
+} /* Name.Variable.Global */
+.highlight .vi {
+  color: #e36209;
+} /* Name.Variable.Instance */
+.highlight .il {
+  color: #005cc5;
+} /* Literal.Number.Integer.Long */
+
+/* Additional Rouge token classes that may be used */
+.highlight .token {
+  color: #5670a0;
+}
+.highlight .token.list {
+  color: #546e9f;
+}
+.highlight .token.punctuation {
+  color: #3e8dad;
+}
+.highlight .token.list.punctuation {
+  color: #e05b78;
+}
+.highlight .token.content {
+  padding: 0;
+}
+
+/* Nested lists in page content */
+ul ul,
+ol ol,
+ul ol,
+ol ul {
+  padding-left: 1.5em;
+  margin-top: 0.25em;
+}
+
+/* Page footer */
+.page-footer {
+  background: #f5f5f5;
+  border-top: 1px solid #ddd;
+  padding: 1.5rem;
+  margin-top: 3rem;
+  color: #666;
+  font-size: 0.9em;
+}
+
+.page-footer p {
+  margin: 0.5em 0;
+}
+
+.page-footer a {
+  color: #0066cc;
+  text-decoration: none;
+}
+
+.page-footer a:hover {
+  text-decoration: underline;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .hamburger-menu {
+    display: flex;
+  }
+
+  .main-toc,
+  .sidebar {
+    transform: translateX(-100%);
+    z-index: 175;
+  }
+
+  .main-toc.mobile-open,
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  body {
+    margin-left: 0;
+  }
+
+  .floating-toc {
+    left: 0;
+  }
+}
+
+</style></head>
+
+  <body>
+<div class="floating-toc" id="floating-toc">
+  <div class="floating-toc-container">
+    <div class="floating-toc-header">
+      <span>Table of Contents 🔻</span>
+    </div>
+    <div class="floating-toc-content" id="floating-toc-content">
+      <!-- Content will be populated by JavaScript -->
+    </div>
+  </div>
+</div>
+
+<button class="hamburger-menu" id="hamburger-menu" aria-label="Toggle navigation"></button>
+<div class="mobile-menu-overlay" id="mobile-menu-overlay"></div>
+
+<nav class="main-toc"><ul><li><a href="Home.html">Home</a></li><li><a href="Getting-Started.html">Getting Started</a></li><li><a href="Installation.html">Installation</a></li><li><a href="Usage.html">Usage</a></li><li><a href="Syntax.html">Syntax</a></li><li><a href="Inline-Attribute-Lists.html">Inline Attribute Lists</a></li><li><a href="Modes.html">Modes</a></li><li><a href="Command-Line-Options.html">Command Line Options</a></li><li><a href="Multi-File-Documents.html">Multi-file Documents</a></li><li><a href="Citations.html">Citations</a></li><li><a href="Metadata-Transforms.html">Metadata Transforms</a></li><li><a href="Pandoc-Integration.html">Integrating with Pandoc</a></li><li><a href="Header-IDs.html">Header IDs</a></li><li><a href="C-API.html">C API</a></li><li><a href="Xcode-Integration.html">Xcode Integration</a></li><li><a href="Examples.html">Examples</a></li><li><a href="Plugins.html">Plugins</a></li><li><a href="Troubleshooting.html">Troubleshooting</a></li><li><a href="Credits.html">Credits</a></li></ul></nav>
+
+    <h1 id="syntax-reference">
+      Syntax Reference
+    </h1>
+<nav class="page-toc" id="page-toc-top"><ul><li><a href="#syntax-reference">Syntax Reference</a><ul><li><a href="#basic-markdown">Basic Markdown</a><ul><li><a href="#headers">Headers</a></li><li><a href="#emphasis">Emphasis</a></li><li><a href="#superscript-and-subscript">Superscript and Subscript</a></li><li><a href="#lists">Lists</a></li><li><a href="#links-and-images">Links and Images</a></li><li><a href="#code">Code</a></li><li><a href="#blockquotes">Blockquotes</a></li><li><a href="#horizontal-rules">Horizontal Rules</a></li></ul></li><li><a href="#tables">Tables</a><ul><li><a href="#standard-tables">Standard Tables</a></li><li><a href="#relaxed-tables">Relaxed Tables</a></li><li><a href="#headerless-tables">Headerless Tables</a><ul><li><a href="#row-header-columns">Row header columns</a></li></ul></li><li><a href="#inline-tables-from-csvtsv">Inline Tables from CSV/TSV</a><ul><li><a href="#fenced-csvtsv-tables">Fenced CSV/TSV tables</a></li><li><a href="#alignment-rows-in-csvtsv-tables">Alignment rows in CSV/TSV tables</a></li><li><a href="#table-markers">&lt;!--TABLE--&gt; markers</a></li></ul></li></ul></li><li><a href="#footnotes">Footnotes</a><ul><li><a href="#reference-style">Reference Style</a></li><li><a href="#inline-style-kramdown">Inline Style (Kramdown)</a></li><li><a href="#inline-style-multimarkdown">Inline Style (MultiMarkdown)</a></li></ul></li><li><a href="#definition-lists">Definition Lists</a></li><li><a href="#citations">Citations</a><ul><li><a href="#pandoc-citation-syntax">Pandoc Citation Syntax</a></li><li><a href="#multimarkdown-citation-syntax">MultiMarkdown Citation Syntax</a></li><li><a href="#mmark-citation-syntax">mmark Citation Syntax</a></li><li><a href="#bibliography">Bibliography</a></li></ul></li><li><a href="#indices">Indices</a><ul><li><a href="#mmark-index-syntax">mmark Index Syntax</a></li><li><a href="#textindex-syntax">TextIndex Syntax</a></li><li><a href="#index-generation">Index Generation</a></li></ul></li><li><a href="#math">Math</a></li><li><a href="#wiki-links">Wiki Links</a></li><li><a href="#critic-markup">Critic Markup</a></li><li><a href="#callouts">Callouts</a></li><li><a href="#file-includes">File Includes</a><ul><li><a href="#apexoptions">apex_options</a></li></ul></li><li><a href="#core-functions">Core Functions</a><ul><li><a href="#apexoptionsdefault">apex_options_default</a></li><li><a href="#apexoptionsformode">apex_options_for_mode</a></li><li><a href="#apexmarkdowntohtml">apex_markdown_to_html</a></li><li><a href="#apexfreestring">apex_free_string</a></li><li><a href="#apexwraphtmldocument">apex_wrap_html_document</a></li><li><a href="#apexprettyprinthtml">apex_pretty_print_html</a></li></ul></li><li><a href="#version-functions">Version Functions</a><ul><li><a href="#apexversionstring">apex_version_string</a></li><li><a href="#apexversionmajor-apexversionminor-apexversionpatch">apex_version_major / apex_version_minor / apex_version_patch</a></li></ul></li><li><a href="#list-options">List Options</a><ul><li><a href="#mixed-list-markers">Mixed List Markers</a></li><li><a href="#alpha-lists">Alpha Lists</a></li></ul></li><li><a href="#feature-flags">Feature Flags</a></li><li><a href="#metadata-options">Metadata Options</a></li><li><a href="#file-inclusion">File Inclusion</a></li><li><a href="#output-options">Output Options</a></li><li><a href="#line-break-options">Line Break Options</a></li><li><a href="#header-id-options">Header ID Options</a></li><li><a href="#table-options">Table Options</a></li><li><a href="#complete-example">Complete Example</a></li><li><a href="#compiling-and-linking">Compiling and Linking</a><ul><li><a href="#with-cmake">With CMake</a></li><li><a href="#manual-compilation">Manual Compilation</a></li><li><a href="#static-linking">Static Linking</a></li></ul></li><li><a href="#thread-safety">Thread Safety</a></li><li><a href="#memory-management">Memory Management</a></li><li><a href="#error-handling">Error Handling</a></li><li><a href="#performance-tips">Performance Tips</a></li><li><a href="#related">Related</a><ul><li><a href="#address-syntax-for-file-includes">Address Syntax for File Includes</a></li><li><a href="#address-syntax-for-file-includes">Address Syntax for File Includes</a></li></ul></li><li><a href="#metadata">Metadata</a><ul><li><a href="#yaml-front-matter">YAML Front Matter</a></li><li><a href="#multimarkdown-metadata">MultiMarkdown Metadata</a></li><li><a href="#pandoc-title-block">Pandoc Title Block</a></li><li><a href="#metadata-variables">Metadata Variables</a></li></ul></li><li><a href="#abbreviations">Abbreviations</a></li><li><a href="#inline-attribute-lists-ial">Inline Attribute Lists (IAL)</a></li><li><a href="#table-of-contents">Table of Contents</a></li><li><a href="#smart-typography">Smart Typography</a></li><li><a href="#github-emoji">GitHub Emoji</a></li><li><a href="#special-markers">Special Markers</a></li><li><a href="#html">HTML</a><ul><li><a href="#markdown-inside-html-blocks">Markdown Inside HTML Blocks</a></li><li><a href="#pandoc-fenced-divs">Pandoc Fenced Divs</a></li></ul></li><li><a href="#related">Related</a></li></ul></li></ul></nav>
+
+    <p>
+      This page documents all syntax features available in <strong>unified mode</strong>. For mode-specific syntax, see <a href="Modes.html">Modes</a>.
+    </p>
+
+    <h2 id="basic-markdown">
+      Basic Markdown
+    </h2>
+
+    <h3 id="headers">
+      Headers
+    </h3>
+
+    <p>
+<strong>      ATX-style headers:</strong>
+    </p>
+
+<pre><code class="highlight language-markdown"><span class="gh"># H1</span>
+<span class="gu">## H2</span>
+<span class="gu">### H3</span>
+<span class="gu">#### H4</span>
+<span class="gu">##### H5</span>
+<span class="gu">###### H6</span>
+</code></pre>
+
+  <p>
+<strong>    Setext-style headers:</strong>
+  </p>
+
+<pre><code class="highlight language-markdown"><span class="gu">H1 Alternative
+==============
+</span>
+<span class="gh">H2 Alternative
+--------------
+</span></code></pre>
+
+<p>
+<strong>  Multi-line setext headers (<abbr title="MultiMarkdown">MMD</abbr> 6):</strong>
+  Setext headers can span multiple lines before the underline. This is supported in <strong>unified</strong> and <strong>MultiMarkdown</strong> modes:
+</p>
+
+<pre><code class="highlight language-markdown">This is
+a multi-line
+<span class="gu">setext header
+========
+</span>
+Another
+header
+with
+multiple
+<span class="gh">lines
+--------
+</span></code></pre>
+
+<h3 id="emphasis">
+  Emphasis
+</h3>
+
+<pre><code class="highlight language-markdown"><span class="ge">*italic*</span>
+<span class="ge">_italic_</span>
+<span class="gs">**bold**</span>
+<span class="gs">__bold__</span>
+<span class="ges">***bold italic***</span>
+<span class="gs">___bold italic__</span>_
+</code></pre>
+
+<h3 id="superscript-and-subscript">
+  Superscript and Subscript
+</h3>
+
+<p>
+  MultiMarkdown-style superscript and subscript syntax:
+</p>
+
+<pre><code class="highlight language-markdown">H~2~O          # H₂O (subscript - tildes within word)
+m^2             # m² (superscript)
+x^2 + y^2       # x² + y²
+H~2~SO~4~       # H₂SO₄ (multiple subscripts within word)
+~h2o~           # <span class="nt">&lt;u&gt;</span>h2o<span class="nt">&lt;/u&gt;</span> (underline - tildes at word boundaries)
+</code></pre>
+
+<p>
+<strong>  Syntax rules:</strong>
+</p>
+
+<ul>
+
+  <li>
+    The <code>^</code> character creates superscript for the text immediately following it. The superscript stops at the first space, punctuation, or newline.
+  </li>
+
+  <li>
+    The <code>~</code> character creates subscript when used <strong>within a word/identifier</strong> with paired tildes (e.g., <code>H~2~O</code>). The subscript ends at the second tilde.
+  </li>
+
+  <li>
+    When tildes are at word boundaries (e.g., <code>~text~</code>), they create underline instead of subscript. This prevents interference with underline/strikethrough syntax.
+  </li>
+
+</ul>
+
+<p>
+<strong>  Examples:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">Water: H~2~O           # H₂O (subscript - tildes within word)
+Area: m^2              # m² (superscript)
+Formula: E = mc^2      # E = mc² (superscript)
+Chemical: H~2~SO~4~    # H₂SO₄ (multiple subscripts within word)
+~h2o~                  # <span class="nt">&lt;u&gt;</span>h2o<span class="nt">&lt;/u&gt;</span> (underline - tildes at word boundaries)
+</code></pre>
+
+<p>
+  This feature is enabled by default in <strong>MultiMarkdown</strong> and <strong>unified</strong> modes. In other modes, use the <code>--sup-sub</code> flag to enable it. Use <code>--no-sup-sub</code> to disable it in unified or MultiMarkdown modes.
+</p>
+
+<h3 id="lists">
+  Lists
+</h3>
+
+<p>
+<strong>  Unordered:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="p">-</span> Item 1
+<span class="p">-</span> Item 2
+<span class="p">  -</span> Nested item
+<span class="p">  -</span> Another nested
+<span class="p">-</span> Item 3
+</code></pre>
+
+<p>
+<strong>  Ordered:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="p">1.</span> First item
+<span class="p">2.</span> Second item
+<span class="p">   1.</span> Nested item
+<span class="p">   2.</span> Another nested
+<span class="p">3.</span> Third item
+</code></pre>
+
+<p>
+<strong>  Mixed Markers (Unified &amp; MultiMarkdown modes):</strong>
+  In unified and MultiMarkdown modes, you can mix different list marker types at the same indentation level. The list will inherit the type from the first item:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="p">1.</span> First numbered item
+<span class="p">*</span> Second item (becomes numbered)
+<span class="p">*</span> Third item (becomes numbered)
+<span class="p">
+*</span> First bullet item
+<span class="p">1.</span> Second item (becomes bullet)
+<span class="p">2.</span> Third item (becomes bullet)
+</code></pre>
+
+<p>
+  By default, CommonMark and GFM modes create separate lists when marker types change. Use <code>--mixed-lists</code> to enable this behavior in other modes, or <code>--no-mixed-lists</code> to disable it in unified/MultiMarkdown modes.
+</p>
+
+<p>
+<strong>  Alpha Lists (Unified mode):</strong>
+  In unified mode, you can use alphabetic markers for ordered lists:
+</p>
+
+<pre><code class="highlight language-markdown">[apex-alpha-list:lower]
+<span class="p">
+1.</span>  First item
+<span class="p">2.</span>  Second item
+<span class="p">3.</span>  Third item
+
+[apex-alpha-list:upper]
+<span class="p">
+1.</span>  First item (uppercase)
+<span class="p">2.</span>  Second item (uppercase)
+<span class="p">3.</span>  Third item (uppercase)
+</code></pre>
+
+<p>
+  Alpha lists are automatically converted to <abbr title="Hypertext Markup Language">HTML</abbr> with <code>style=&quot;list-style-type: lower-alpha&quot;</code> or <code>style=&quot;list-style-type: upper-alpha&quot;</code>. This feature is enabled by default in unified mode. Use <code>--alpha-lists</code> to enable in other modes, or <code>--no-alpha-lists</code> to disable in unified mode.
+</p>
+
+<p>
+<strong>  Task Lists:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="p">-</span> [ ] Todo item
+<span class="p">-</span> [x] Completed item
+<span class="p">-</span> [ ] Another todo
+</code></pre>
+
+<h3 id="links-and-images">
+  Links and Images
+</h3>
+
+<p>
+<strong>  Standard Markdown links:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="p">[</span><span class="nv">Link text</span><span class="p">](</span><span class="sx">https://example.com</span><span class="p">)</span>
+<span class="p">[</span><span class="nv">Link with title</span><span class="p">](</span><span class="sx">https://example.com</span> <span class="nn">"Title"</span><span class="p">)</span>
+</code></pre>
+
+<p>
+<strong>  Link titles with different quote styles (<abbr title="MultiMarkdown">MMD</abbr> 6):</strong>
+  Link and image titles can use single quotes, double quotes, or parentheses. This is supported in <strong>unified</strong> and <strong>MultiMarkdown</strong> modes:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="p">[</span><span class="nv">Link with double quotes</span><span class="p">](</span><span class="sx">https://example.com</span> <span class="nn">"Title"</span><span class="p">)</span>
+<span class="p">[</span><span class="nv">Link with single quotes</span><span class="p">](</span><span class="sx">https://example.com</span> <span class="nn">'Title'</span><span class="p">)</span>
+<span class="p">[</span><span class="nv">Link with parentheses</span><span class="p">](</span><span class="sx">https://example.com</span> <span class="nn">(Title)</span><span class="p">)</span>
+</code></pre>
+
+<p>
+<strong>  Images:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="p">![</span><span class="nv">Alt text</span><span class="p">](</span><span class="sx">image.png</span><span class="p">)</span>
+<span class="p">![</span><span class="nv">Alt with title</span><span class="p">](</span><span class="sx">image.png</span> <span class="nn">"Image title"</span><span class="p">)</span>
+</code></pre>
+
+<p>
+<strong>  Image titles with different quote styles (<abbr title="MultiMarkdown">MMD</abbr> 6):</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="p">![</span><span class="nv">Image</span><span class="p">](</span><span class="sx">image.png</span> <span class="nn">"Double quote title"</span><span class="p">)</span>
+<span class="p">![</span><span class="nv">Image</span><span class="p">](</span><span class="sx">image.png</span> <span class="nn">'Single quote title'</span><span class="p">)</span>
+<span class="p">![</span><span class="nv">Image</span><span class="p">](</span><span class="sx">image.png</span> <span class="nn">(Parentheses title)</span><span class="p">)</span>
+</code></pre>
+
+<p>
+<strong>  Reference-style links and images:</strong>
+  Reference-style links and images also support all three quote styles for titles:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="p">[</span><span class="nv">Link text</span><span class="p">][</span><span class="ss">ref1</span><span class="p">]</span>
+<span class="p">![</span><span class="nv">Image</span><span class="p">][</span><span class="ss">img1</span><span class="p">]</span>
+
+<span class="p">[</span><span class="ss">ref1</span><span class="p">]:</span> <span class="sx">https://example.com</span> <span class="nn">"Reference title"</span>
+<span class="p">[</span><span class="ss">ref2</span><span class="p">]:</span> <span class="sx">https://example.com</span> <span class="nn">'Reference title'</span>
+<span class="p">[</span><span class="ss">ref3</span><span class="p">]:</span> <span class="sx">https://example.com</span> <span class="nn">(Reference title)</span>
+
+<span class="p">[</span><span class="ss">img1</span><span class="p">]:</span> <span class="sx">image.png</span> <span class="nn">"Image title"</span>
+<span class="p">[</span><span class="ss">img2</span><span class="p">]:</span> <span class="sx">image.png</span> <span class="nn">'Image title'</span>
+<span class="p">[</span><span class="ss">img3</span><span class="p">]:</span> <span class="sx">image.png</span> <span class="nn">(Image title)</span>
+</code></pre>
+
+<p>
+<strong>  Autolinks:</strong>
+</p>
+
+<p>
+  Apex can automatically convert URLs and email addresses into clickable links. Autolinking is enabled by default in <strong>GFM</strong>, <strong>MultiMarkdown</strong>, <strong>Kramdown</strong>, and <strong>unified</strong> modes. It is disabled by default in <strong>CommonMark</strong> mode.
+</p>
+
+<p>
+<strong>  Angle-bracket autolinks:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="nv">&lt;https://example.com&gt;</span>
+<span class="nv">&lt;http://example.com&gt;</span>
+<span class="nv">&lt;mailto:user@example.com&gt;</span>
+</code></pre>
+
+<p>
+<strong>  Bare URL autolinks:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">Visit https://example.com for more info.
+Check out http://example.com too.
+</code></pre>
+
+<p>
+<strong>  Email autolinks:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">Contact me@example.com for details.
+Send to user@example.com.
+</code></pre>
+
+<p>
+<strong>  Important notes:</strong>
+</p>
+
+<ul>
+
+  <li>
+    Autolinks are <strong>not</strong> processed inside code spans (<code>`code`</code>) or code blocks (<code> </code> ```)
+  </li>
+
+  <li>
+    Use <code>--autolink</code> to enable autolinking in modes where it’s disabled by default
+  </li>
+
+  <li>
+    Use <code>--no-autolink</code> to disable autolinking in modes where it’s enabled by default
+  </li>
+
+  <li>
+    Angle-bracket autolinks (<code>&lt;url&gt;</code>) are converted to standard Markdown links during preprocessing
+  </li>
+
+  <li>
+    Bare URLs and email addresses are also converted to Markdown links during preprocessing
+  </li>
+
+</ul>
+
+<h3 id="code">
+  Code
+</h3>
+
+<p>
+<strong>  Inline code:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">Use <span class="sb">`code`</span> in text.
+</code></pre>
+
+<p>
+<strong>  Fenced code blocks:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="p">```</span><span class="nl">python
+</span><span class="k">def</span> <span class="nf">hello</span><span class="p">():</span>
+    <span class="nf">print</span><span class="p">(</span><span class="sh">"</span><span class="s">Hello, World!</span><span class="sh">"</span><span class="p">)</span>
+<span class="p">```</span>
+</code></pre>
+
+<p>
+<strong>  Indented code blocks:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">    def hello():
+        print("Hello, World!")
+</code></pre>
+
+<h3 id="blockquotes">
+  Blockquotes
+</h3>
+
+<pre><code class="highlight language-markdown"><span class="gt">&gt; This is a quote.</span>
+<span class="gt">&gt; It can span multiple lines.</span>
+<span class="gt">&gt;</span>
+<span class="gt">&gt; &gt; Nested quotes are supported.</span>
+</code></pre>
+
+<p>
+<strong>  Lists and definition lists in blockquotes:</strong>
+</p>
+
+<p>
+  Blockquotes can contain lists and definition lists:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="gt">&gt; 1. First item</span>
+<span class="gt">&gt; 2. Second item</span>
+<span class="gt">&gt;</span>
+<span class="gt">&gt; - Unordered item</span>
+<span class="gt">&gt; - Another item</span>
+<span class="gt">&gt;</span>
+<span class="gt">&gt; Term</span>
+<span class="gt">&gt; : Definition</span>
+</code></pre>
+
+<p>
+  Nested blockquotes also support these features:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="gt">&gt; &gt; Nested quote</span>
+<span class="gt">&gt; &gt; 1. List item</span>
+<span class="gt">&gt; &gt; Term</span>
+<span class="gt">&gt; &gt; : Definition</span>
+</code></pre>
+
+<h3 id="horizontal-rules">
+  Horizontal Rules
+</h3>
+
+<pre><code class="highlight language-markdown"><span class="p">---</span>
+<span class="p">***</span>
+<span class="ge">__</span>_
+</code></pre>
+
+<h2 id="tables">
+  Tables
+</h2>
+
+<h3 id="standard-tables">
+  Standard Tables
+</h3>
+
+<pre><code class="highlight language-markdown">| Header 1 | Header 2 | Header 3 |
+| -------- | :------: | -------: |
+| Left     |  Center  |    Right |
+| --- | --- | --- |
+| Data     |   Data   |     Data |
+</code></pre>
+
+<p>
+  Column alignment:
+</p>
+
+<ul>
+
+  <li>
+<code>:---</code> or <code>---</code> - Left (default)
+  </li>
+
+  <li>
+<code>:---:</code> - Center
+  </li>
+
+  <li>
+<code>---:</code> - Right
+  </li>
+
+</ul>
+
+<h3 id="relaxed-tables">
+  Relaxed Tables
+</h3>
+
+<p>
+  In unified and kramdown modes, tables don’t require separator rows:
+</p>
+
+<pre><code class="highlight language-markdown">one | two | three
+---|---|---|
+1 | 2 | 3
+4 | 5 | 6
+</code></pre>
+
+<p>
+  This automatically becomes a table. See <a href="Modes.html">Modes</a> for details.
+</p>
+
+<h3 id="headerless-tables">
+  Headerless Tables
+</h3>
+
+<p>
+  Apex supports tables that start with alignment rows (separator rows) without header rows. The alignment specified in the separator row is automatically applied to all columns:
+</p>
+
+<pre><code class="highlight language-markdown">|  |  |  |
+| --- | --- | --- |
+| a   | b   | c   |
+| --- | --- | --- |
+| 1   | 2   | 3   |
+</code></pre>
+
+<p>
+  Alignment specifiers work as usual:
+</p>
+
+<pre><code class="highlight language-markdown">|  |  |  |
+|:---|:---:|---:|
+| left | center | right |
+</code></pre>
+
+<p>
+  In this case, the first row (the alignment row) specifies the column alignment, and all subsequent data rows inherit that alignment. The empty header row that would normally be required is automatically handled.
+</p>
+
+<h4 id="row-header-columns">
+  Row header columns
+</h4>
+
+<p>
+  You can also mark the <strong>first column</strong> as a row-header column by starting the header row with an <strong>empty first cell</strong>:
+</p>
+
+<pre><code class="highlight language-markdown">|   | Header 1 | Header 2 |
+| --- | --- | --- |
+| Row 1 | data 1.1 | data 1.2 |
+| Row 2 | data 2.1 | data 2.2 |
+</code></pre>
+
+<p>
+  When the first header cell is empty (for example, <code>| |</code> or <code>|   |</code>), Apex will:
+</p>
+
+<ul>
+
+  <li>
+    Treat the rest of the header row as usual column headers.
+  </li>
+
+  <li>
+    Render the first cell of each body row as a <strong>row header</strong> using <code>&lt;th scope=&quot;row&quot;&gt;Row 1&lt;/th&gt;</code>, <code>&lt;th scope=&quot;row&quot;&gt;Row 2&lt;/th&gt;</code>, etc.
+  </li>
+
+</ul>
+
+<p>
+  Notes:
+</p>
+
+<ul>
+
+  <li>
+    The row-header behavior only applies to the <strong>first column</strong> and only when the <strong>first header cell is empty</strong>.
+  </li>
+
+  <li>
+    Tables that start with <code>|data|data|</code> or <code>data|data</code> do <strong>not</strong> enable row headers.
+  </li>
+
+  <li>
+    This works together with all other table features (relaxed tables, headerless tables, colspans/rowspans, captions, etc.).
+  </li>
+
+</ul>
+
+<h3 id="inline-tables-from-csvtsv">
+  Inline Tables from CSV/TSV
+</h3>
+
+<p>
+  In addition to regular pipe tables, Apex can convert inline CSV/TSV text into tables.
+</p>
+
+<h4 id="fenced-csvtsv-tables">
+  Fenced CSV/TSV tables
+</h4>
+
+<p>
+  Use a fenced code block with the info string <code>table</code>. The delimiter is detected automatically:
+</p>
+
+<ul>
+
+  <li>
+    If any non-blank line contains a <strong>tab</strong>, the block is treated as TSV.
+  </li>
+
+  <li>
+    Otherwise, if any non-blank line contains a <strong>comma</strong>, the block is treated as CSV.
+  </li>
+
+  <li>
+    If no tabs or commas are found, the block is left unchanged as a normal <code>table</code>-info code block (useful for showing literal CSV/TSV).
+  </li>
+
+</ul>
+
+<pre><code class="highlight language-table">header 1,header 2,header 3
+data 1,data 2,data 3
+,,data 2c
+</code></pre>
+
+<p>
+  You can also use TSV with real tab characters:
+</p>
+
+<pre><code class="highlight language-table">col1\tcol2\tcol3
+val1\tval2\tval3
+</code></pre>
+
+<h4 id="alignment-rows-in-csvtsv-tables">
+  Alignment rows in CSV/TSV tables
+</h4>
+
+<p>
+  CSV/TSV inline tables can specify column alignment using a row of <strong>alignment keywords</strong>:
+</p>
+
+<pre><code class="highlight language-table">H1,H2,H3
+left,center,right
+a,b,c
+</code></pre>
+
+<p>
+  The alignment row is not rendered as data; it is converted to the equivalent Markdown alignment row:
+</p>
+
+<ul>
+
+  <li>
+<code>left</code> → <code>:---</code>
+  </li>
+
+  <li>
+<code>center</code> → <code>:---:</code>
+  </li>
+
+  <li>
+<code>right</code> → <code>---:</code>
+  </li>
+
+  <li>
+<code>auto</code> → <code>---</code>
+  </li>
+
+</ul>
+
+<p>
+  If the first row contains only alignment keywords, it becomes a <strong>headless table</strong>: the alignment row is emitted first and all following rows become body rows. If there is <strong>no alignment row at all</strong>, Apex emits a default <code>---</code> separator row so that relaxed/headless table handling still works as expected.
+</p>
+
+<h4 id="table-markers">
+<code>&lt;!--TABLE--&gt;</code> markers
+</h4>
+
+<p>
+  You can also start an inline CSV/TSV table with an <abbr title="Hypertext Markup Language">HTML</abbr> comment:
+</p>
+
+<pre><code class="highlight language-markdown">| header 1 | header 2 | header 3 |
+| --- | --- | --- |
+| data 1 | data 2 | data 3 |
+| --- | --- | --- |
+|  |  | data 2c |
+| <span class="sb">``` |  |  |
+
+`| ` consumes the following **contiguous non-blank lines** as table data (stopping at the first blank line) |  applies the same delimiter detection and optional alignment-row handling |  and converts the block into a table. If no tabs or commas are found |  the comment and lines are left unchanged. |
+| --- | --- | --- | --- |
+
+### Advanced Table Features
+
+**Column spans (empty cells):**
+```</span>markdown
+| A   | B   | C   |
+| --- | --- | --- |
+| D   |     |     |
+</code></pre>
+
+<p>
+  Empty cells merge with the previous cell.
+</p>
+
+<p>
+<strong>  Row spans:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">| A   | B   |
+| --- | --- |
+| C   | D   |
+| --- | --- |
+| ^^  | E   |
+</code></pre>
+
+<p>
+  The <code>^^</code> marker creates a row span on the cell above. Consecutive <code>^^</code> markers stack to create larger row spans.
+</p>
+
+<p>
+<strong>  Table footers (tfoot):</strong>
+</p>
+
+<pre><code class="highlight language-markdown">| h1  |  h2   | h3  |
+| --- | :---: | --- |
+| d1  |  d2   | d3  |
+| --- | --- | --- |
+| d1  |  d2   | d3  |
+| === |  ===  | === |
+| d-4 |  d-5  | d-6 |
+</code></pre>
+
+<p>
+  A row where every cell contains only <code>===</code> (three or more equals, with optional extra <code>=</code> and whitespace) is treated as a <strong>footer divider</strong>. That row is removed from the output and all following rows are rendered inside <code>&lt;tfoot&gt;</code>.
+</p>
+
+<p>
+<strong>  Individual cell alignment:</strong>
+</p>
+
+<p>
+  Table cells can be aligned individually using colons, similar to Jekyll Spaceship:
+</p>
+
+<pre><code class="highlight language-markdown">| Header | Header | Header |
+| --- | --- | --- |
+| :Left | Center: | ♋ |
+| --- | --- | --- |
+| Right: | Normal | :Left |
+</code></pre>
+
+<ul>
+
+  <li>
+<code>:Text</code> or <code>: Text</code> - Left align (leading colon)
+  </li>
+
+  <li>
+<code>Text:</code> or <code>Text :</code> - Right align (trailing colon)
+  </li>
+
+  <li>
+<code>⛺</code> or <code>: Text :</code> - Center align (both colons)
+  </li>
+
+</ul>
+
+<p>
+  The colons are removed from the output, and the alignment is applied via <abbr title="Cascading Style Sheets">CSS</abbr> <code>text-align</code> styles. Escaped colons (<code>\:</code>) are not treated as alignment markers.
+</p>
+
+<p>
+<strong>  Combined row and column spans:</strong>
+</p>
+
+<p>
+  You can mix rowspans and colspans in the same table to create more complex layouts:
+</p>
+
+<pre><code class="highlight language-markdown">[Employee Performance Q4]
+| Department  | Employee | Q1-Q2 Average | Q3     | Q4  | Overall |
+| ----------- | -------- | ------------- | ------ | --- | ------- |
+| Engineering | Alice    | 93.5          | 94     | 96  | 94.25   |
+| --- | --- | --- | --- | --- | --- |
+| ^^          | Bob      | 89.0          | 87     | 91  | 89.00   |
+| Marketing   | Charlie  | 92.0          | Absent |     | 92.00   |
+| Sales       | Diana    | 87.5          | 88     | 90  | 88.50   |
+| ^^          | Eve      | 93.0          | 95     | 93  | 93.50   |
+
+{: .performance-table #q4-results}
+</code></pre>
+
+<p>
+  Here <code>^^</code> creates rowspans for the <code>Department</code> column, while empty cells in the “Absent” row allow the “Q4” value to span visually.
+</p>
+
+<p>
+<strong>  Table captions:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">[Table Caption]
+
+| A   | B   |
+| --- | --- |
+| C   | D   |
+</code></pre>
+
+<p>
+  Captions can appear <strong>before or after</strong> a table. They must be contiguous with the table (no other content between them), but a blank line is allowed:
+</p>
+
+<pre><code class="highlight language-markdown">| A   | B   |
+| --- | --- |
+
+| C   | D   |
+
+[Caption after table]
+</code></pre>
+
+<p>
+  In addition, Apex supports <strong>Pandoc-style captions</strong>:
+</p>
+
+<pre><code class="highlight language-markdown">| A   | B   |
+| --- | --- |
+
+| C   | D   |
+
+[Caption after table]
+</code></pre>
+
+<p>
+  Pandoc-style <code>Table: Caption</code> lines are normalized to <code>[Caption]</code> before parsing, so they work with the same caption rendering as MultiMarkdown captions.
+</p>
+
+<p>
+  Apex also supports <strong>Pandoc table_attributes extension</strong> using the <code>: Caption</code> syntax:
+</p>
+
+<pre><code class="highlight language-markdown">| Key | Value |
+| --- | :---: |
+| one |   1   |
+| --- | --- |
+| two |   2   |
+
+[Key value table] {#table-id .testing key="value"}
+</code></pre>
+
+<p>
+  The <code>: Caption</code> format (with optional IAL attributes) is recognized when it appears immediately before or after a table. IAL attributes in the caption are extracted and applied to the table element itself. This supports both Kramdown-style IALs (<code>{: #id .class}</code>) and Pandoc-style IALs without the colon (<code>{#id .class}</code>).
+</p>
+
+<p>
+<strong>  Note:</strong> The <code>: Caption</code> syntax only works when adjacent to a table to avoid conflicts with definition list syntax. If a line starting with <code>:</code> is not next to a table, it will be processed as a definition list item.
+</p>
+
+<p>
+<strong>  Caption position:</strong> By default, captions appear <strong>below</strong> the table. Use the <code>--captions above</code> option to place captions above the table instead. The <code>--captions below</code> option (or default) places them below. See <a href="Command-Line-Options.html">Command Line Options</a> for details.
+</p>
+
+<h2 id="footnotes">
+  Footnotes
+</h2>
+
+<h3 id="reference-style">
+  Reference Style
+</h3>
+
+<pre><code class="highlight language-markdown">Here's a footnote[^1] and another[^note].
+
+<span class="p">[</span><span class="ss">^1</span><span class="p">]:</span> <span class="sx">First</span> footnote content.
+<span class="p">[</span><span class="ss">^note</span><span class="p">]:</span> <span class="sx">Second</span> footnote with custom ID.
+</code></pre>
+
+<h3 id="inline-style-kramdown">
+  Inline Style (Kramdown)
+</h3>
+
+<pre><code class="highlight language-markdown">This is a footnote[^fn1].
+</code></pre>
+
+<h3 id="inline-style-multimarkdown">
+  Inline Style (MultiMarkdown)
+</h3>
+
+<pre><code class="highlight language-markdown">This is a footnote[^fn2].
+</code></pre>
+
+<h2 id="definition-lists">
+  Definition Lists
+</h2>
+
+<pre><code class="highlight language-markdown">Term
+: Definition text with <span class="gs">**Markdown**</span> support
+
+Apple
+: A fruit
+: A company
+
+Term with multiple definitions
+: First definition
+: Second definition
+</code></pre>
+
+<p>
+<strong>  Definition lists in blockquotes:</strong>
+</p>
+
+<p>
+  Definition lists work inside blockquotes, including nested blockquotes:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="gt">&gt; Term 1</span>
+<span class="gt">&gt; : Definition 1</span>
+<span class="gt">&gt; Term 2</span>
+<span class="gt">&gt; : Definition 2</span>
+<span class="gt">
+&gt; &gt; Nested blockquote</span>
+<span class="gt">&gt; &gt; Term</span>
+<span class="gt">&gt; &gt; : Definition</span>
+</code></pre>
+
+<p>
+  This allows you to create quoted definitions and maintain proper nesting structure.
+</p>
+
+<h2 id="citations">
+  Citations
+</h2>
+
+<p>
+<strong>  Note:</strong> Citations are supported in <strong>MultiMarkdown</strong> and <strong>unified</strong> modes. A bibliography file must be provided via <code>--bibliography</code> flag or document metadata.
+</p>
+
+<h3 id="pandoc-citation-syntax">
+  Pandoc Citation Syntax
+</h3>
+
+<p>
+<strong>  Basic citation:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">See [@doe99] for details.
+</code></pre>
+
+<p>
+<strong>  Multiple citations:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">See [@doe99; @smith2000; @smith2004] for more information.
+</code></pre>
+
+<p>
+<strong>  Author in text:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">@smith04 says blah.
+</code></pre>
+
+<p>
+<strong>  Author suppressed:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">Smith says blah [-@smith04].
+</code></pre>
+
+<p>
+<strong>  With locator:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">@smith04 [p. 33] says blah.
+</code></pre>
+
+<h3 id="multimarkdown-citation-syntax">
+  MultiMarkdown Citation Syntax
+</h3>
+
+<p>
+<strong>  Basic citation:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">This is a statement[#Doe:2006].
+</code></pre>
+
+<p>
+<strong>  With locator:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">This is a statement<span class="p">[</span><span class="nv">p. 23</span><span class="p">][</span><span class="ss">#Doe:2006</span><span class="p">]</span>.
+</code></pre>
+
+<p>
+<strong>  Inline citation:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">As per Doe.[#John Doe. <span class="ge">*A Totally Fake Book 1*</span>. Vanity Press, 2006.]
+</code></pre>
+
+<h3 id="mmark-citation-syntax">
+  mmark Citation Syntax
+</h3>
+
+<p>
+<strong>  Basic citation:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">This references [@RFC2535].
+</code></pre>
+
+<p>
+<strong>  Normative citation:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">This references [@!RFC1034] (normative).
+</code></pre>
+
+<p>
+<strong>  Multiple citations:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">Multiple citations: [@RFC1034;@RFC1035].
+</code></pre>
+
+<p>
+<strong>  Combined reference:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">Combined reference: [@RFC1034@STD3].
+</code></pre>
+
+<h3 id="bibliography">
+  Bibliography
+</h3>
+
+<p>
+  Bibliography is automatically generated from cited entries and inserted at the <code>&lt;!-- REFERENCES --&gt;</code> marker or appended to the end of the document.
+</p>
+
+<p>
+<strong>  Bibliography marker:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="gu">## References</span>
+
+<span class="c">&lt;!-- REFERENCES --&gt;</span>
+</code></pre>
+
+<p>
+<strong>  Bibliography in metadata:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="nn">---</span>
+<span class="na">bibliography</span><span class="pi">:</span> <span class="s">references.bib</span>
+<span class="nn">---</span>
+
+See [@doe99] for details.
+</code></pre>
+
+<p>
+<strong>  Multiple bibliography files:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="nn">---</span>
+<span class="na">bibliography</span><span class="pi">:</span>
+  <span class="pi">-</span> <span class="s">refs1.bib</span>
+  <span class="pi">-</span> <span class="s">refs2.bib</span>
+<span class="nn">---</span>
+</code></pre>
+
+<p>
+  For complete documentation of citations and bibliography, see <a href="Citations.html">Citations</a>.
+</p>
+
+<h2 id="indices">
+  Indices
+</h2>
+
+<p>
+<strong>  Note:</strong> Indices are supported in <strong>MultiMarkdown</strong> and <strong>unified</strong> modes. Enabled by default in these modes.
+</p>
+
+<h3 id="mmark-index-syntax">
+  mmark Index Syntax
+</h3>
+
+<p>
+<strong>  Basic index entry:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">This is about protocols (!Protocol).
+</code></pre>
+
+<p>
+<strong>  Sub-item entry:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">HTTP/1.1 (!HTTP, HTTP/1.1) is a protocol version.
+</code></pre>
+
+<p>
+<strong>  Primary entry (bold in index):</strong>
+</p>
+
+<pre><code class="highlight language-markdown">This is a primary topic (!!Primary Topic, Sub Topic).
+</code></pre>
+
+<p>
+<strong>  Multiple entries:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">Protocols (!Protocol) and implementations (!Implementation) are important.
+</code></pre>
+
+<h3 id="textindex-syntax">
+  TextIndex Syntax
+</h3>
+
+<p>
+<strong>  Basic syntax (indexes preceding word):</strong>
+</p>
+
+<pre><code class="highlight language-markdown">Most mechanical keyboard firmware{<span class="nt">&lt;sup&gt;</span>}<span class="nt">&lt;/sup&gt;</span> supports key combinations.
+</code></pre>
+
+<p>
+<strong>  Explicit term:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">This uses <span class="nt">&lt;span&gt;</span>key combinations<span class="nt">&lt;/span&gt;</span>
+ for indexing.
+</code></pre>
+
+<p>
+<strong>  With parameters:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">Term{<span class="nt">&lt;sup&gt;</span>param1<span class="nt">&lt;/sup&gt;</span> param2}
+</code></pre>
+
+<h3 id="index-generation">
+  Index Generation
+</h3>
+
+<p>
+  The index is automatically generated at the end of the document or at the <code>&lt;!--INDEX--&gt;</code> marker if present:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="gh"># Document</span>
+
+This is about protocols (!Protocol).
+
+<span class="c">&lt;!--INDEX--&gt;</span>
+
+More content after the index.
+</code></pre>
+
+<p>
+<strong>  Index features:</strong>
+</p>
+
+<ul>
+
+  <li>
+    Entries are sorted alphabetically
+  </li>
+
+  <li>
+    Can be grouped by first letter (default)
+  </li>
+
+  <li>
+    Sub-items are nested under main terms
+  </li>
+
+  <li>
+    Primary entries are marked (typically bold)
+  </li>
+
+  <li>
+    Each entry links back to its location in the document
+  </li>
+
+</ul>
+
+<p>
+<strong>  Suppress index:</strong>
+  Use <code>--no-index</code> to suppress index generation while still creating index markers.
+</p>
+
+<h2 id="math">
+  Math
+</h2>
+
+<p>
+<strong>  Inline math:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">The equation $E = mc^2$ is famous.
+</code></pre>
+
+<p>
+<strong>  Display math:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">$$
+<span class="se">\i</span>nt_{-<span class="se">\i</span>nfty}^{<span class="se">\i</span>nfty} e^{-x^2} dx = <span class="se">\s</span>qrt{<span class="se">\p</span>i}
+$$
+</code></pre>
+
+<p>
+  Math is wrapped in spans with appropriate classes for MathJax or KaTeX.
+</p>
+
+<h2 id="wiki-links">
+  Wiki Links
+</h2>
+
+<p>
+<strong>  Note:</strong> Wiki links are <strong>disabled by default</strong> in all modes. Use <code>--wikilinks</code> to enable.
+</p>
+
+<pre><code class="highlight language-markdown">[[Page Name]]                   # Link to page
+[[Page Name|Display Text]]      # Custom display text
+
+[[Page Name#Section]]           # Link to section
+
+[[Page Name#Section|Display]]   # Custom display with section
+</code></pre>
+
+<p>
+<strong>  Example:</strong>
+</p>
+
+<pre><code class="highlight language-bash">apex document.md <span class="nt">--wikilinks</span>
+</code></pre>
+
+<h2 id="critic-markup">
+  Critic Markup
+</h2>
+
+<p>
+  Track changes and annotations:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="nt">&lt;ins</span> <span class="na">class=</span><span class="s">"critic"</span><span class="nt">&gt;</span>addition<span class="nt">&lt;/ins&gt;</span>              # Added text
+<span class="nt">&lt;del</span> <span class="na">class=</span><span class="s">"critic"</span><span class="nt">&gt;</span>deletion<span class="nt">&lt;/del&gt;</span>              # Deleted text
+<span class="nt">&lt;del</span> <span class="na">class=</span><span class="s">"critic break"</span><span class="nt">&gt;</span>old text<span class="nt">&lt;/del&gt;&lt;ins</span> <span class="na">class=</span><span class="s">"critic break"</span><span class="nt">&gt;</span>new text<span class="nt">&lt;/ins&gt;</span>    # Substitution
+<span class="nt">&lt;mark</span> <span class="na">class=</span><span class="s">"critic"</span><span class="nt">&gt;</span>highlighted<span class="nt">&lt;/mark&gt;</span>           # Highlighted text
+<span class="nt">&lt;span</span> <span class="na">class=</span><span class="s">"critic comment"</span><span class="nt">&gt;</span>comment text<span class="nt">&lt;/span&gt;</span>         # Comment/annotation
+</code></pre>
+
+<p>
+  See <a href="Command-Line-Options.html">Command Line Options</a> for <code>--accept</code> and <code>--reject</code> modes.
+</p>
+
+<h2 id="callouts">
+  Callouts
+</h2>
+
+<p>
+  Bear/Obsidian/Xcode Playground syntax:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="gt">&gt; [!NOTE] Title</span>
+<span class="gt">&gt; This is a note callout</span>
+<span class="gt">
+&gt; [!WARNING] Be Careful</span>
+<span class="gt">&gt; Warning content</span>
+<span class="gt">
+&gt; [!TIP] Pro Tip</span>
+<span class="gt">&gt; Helpful advice</span>
+<span class="gt">
+&gt; [!DANGER] Critical</span>
+<span class="gt">&gt; Dangerous operation</span>
+<span class="gt">
+&gt; [!INFO] Information</span>
+<span class="gt">&gt; Informational content</span>
+</code></pre>
+
+<p>
+<strong>  Collapsible callouts:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="gt">&gt; [!NOTE]+ Expandable</span>
+<span class="gt">&gt; Defaults to open</span>
+<span class="gt">
+&gt; [!NOTE]- Collapsed</span>
+<span class="gt">&gt; Defaults to closed</span>
+</code></pre>
+
+<h2 id="file-includes">
+  File Includes
+</h2>
+
+<p>
+<strong>  Marked syntax:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">      # Include and process Markdown
+      # Include as code block
+     # Include raw <span class="nt">&lt;abbr</span> <span class="na">title=</span><span class="s">"Hypertext Markup Language"</span><span class="nt">&gt;</span>HTML<span class="nt">&lt;/abbr&gt;</span>
+</code></pre>
+
+<p>
+<strong>  MultiMarkdown transclusion:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">{{file.md}}      # Include file
+{{file.<span class="err">*</span>}}       # Prefer file.html, file.md, file.txt, file.tex (in that order)
+<span class="gh"># C API</span>
+
+Apex provides a simple C API for programmatic Markdown to <span class="nt">&lt;abbr</span> <span class="na">title=</span><span class="s">"Hypertext Markup Language"</span><span class="nt">&gt;</span>HTML<span class="nt">&lt;/abbr&gt;</span> conversion.
+
+<span class="gu">## Overview</span>
+
+The Apex C API is thread-safe and designed for integration into C and C++ applications. All functions are declared in <span class="sb">`apex/apex.h`</span>.
+
+<span class="gu">## Core Types</span>
+
+<span class="gu">### apex_mode_t</span>
+
+Processor compatibility modes:
+
+<span class="p">```</span><span class="nl">c
+</span><span class="k">typedef</span> <span class="k">enum</span> <span class="p">{</span>
+    <span class="n">APEX_MODE_COMMONMARK</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>      <span class="cm">/* Pure CommonMark spec */</span>
+    <span class="n">APEX_MODE_GFM</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>              <span class="cm">/* GitHub Flavored Markdown */</span>
+    <span class="n">APEX_MODE_MULTIMARKDOWN</span> <span class="o">=</span> <span class="mi">2</span><span class="p">,</span>    <span class="cm">/* MultiMarkdown compatibility */</span>
+    <span class="n">APEX_MODE_KRAMDOWN</span> <span class="o">=</span> <span class="mi">3</span><span class="p">,</span>         <span class="cm">/* Kramdown compatibility */</span>
+    <span class="n">APEX_MODE_UNIFIED</span> <span class="o">=</span> <span class="mi">4</span>           <span class="cm">/* All features enabled */</span>
+<span class="p">}</span> <span class="n">apex_mode_t</span><span class="p">;</span>
+</code></pre>
+
+<h3 id="apexoptions">
+  apex_options
+</h3>
+
+<p>
+  Configuration structure for processing:
+</p>
+
+<pre><code class="highlight language-c"><span class="k">typedef</span> <span class="k">struct</span> <span class="p">{</span>
+    <span class="n">apex_mode_t</span> <span class="n">mode</span><span class="p">;</span>
+
+    <span class="cm">/* Feature flags */</span>
+    <span class="n">bool</span> <span class="n">enable_tables</span><span class="p">;</span>
+    <span class="n">bool</span> <span class="n">enable_footnotes</span><span class="p">;</span>
+    <span class="n">bool</span> <span class="n">enable_definition_lists</span><span class="p">;</span>
+    <span class="n">bool</span> <span class="n">enable_smart_typography</span><span class="p">;</span>
+    <span class="n">bool</span> <span class="n">enable_math</span><span class="p">;</span>
+    <span class="n">bool</span> <span class="n">enable_critic_markup</span><span class="p">;</span>
+    <span class="n">bool</span> <span class="n">enable_wiki_links</span><span class="p">;</span>
+    <span class="n">bool</span> <span class="n">enable_task_lists</span><span class="p">;</span>
+    <span class="n">bool</span> <span class="n">enable_attributes</span><span class="p">;</span>
+    <span class="n">bool</span> <span class="n">enable_callouts</span><span class="p">;</span>
+    <span class="n">bool</span> <span class="n">enable_marked_extensions</span><span class="p">;</span>
+
+    <span class="cm">/* Critic markup mode */</span>
+    <span class="kt">int</span> <span class="n">critic_mode</span><span class="p">;</span>  <span class="cm">/* 0=accept, 1=reject, 2=markup (default) */</span>
+
+    <span class="cm">/* Metadata handling */</span>
+    <span class="n">bool</span> <span class="n">strip_metadata</span><span class="p">;</span>
+    <span class="n">bool</span> <span class="n">enable_metadata_variables</span><span class="p">;</span>
+
+    <span class="cm">/* File inclusion */</span>
+    <span class="n">bool</span> <span class="n">enable_file_includes</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">max_include_depth</span><span class="p">;</span>
+    <span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">base_directory</span><span class="p">;</span>
+
+    <span class="cm">/* Output options */</span>
+    <span class="n">bool</span> <span class="n">unsafe</span><span class="p">;</span>  <span class="cm">/* Allow raw &lt;abbr title="Hypertext Markup Language"&gt;HTML&lt;/abbr&gt; */</span>
+    <span class="n">bool</span> <span class="n">validate_utf8</span><span class="p">;</span>
+    <span class="n">bool</span> <span class="n">github_pre_lang</span><span class="p">;</span>
+    <span class="n">bool</span> <span class="n">standalone</span><span class="p">;</span>  <span class="cm">/* Generate complete &lt;abbr title="Hypertext Markup Language"&gt;HTML&lt;/abbr&gt; document */</span>
+    <span class="n">bool</span> <span class="n">pretty</span><span class="p">;</span>      <span class="cm">/* Pretty-print &lt;abbr title="Hypertext Markup Language"&gt;HTML&lt;/abbr&gt; */</span>
+    <span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">stylesheet_path</span><span class="p">;</span>
+    <span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">document_title</span><span class="p">;</span>
+
+    <span class="cm">/* Line break handling */</span>
+    <span class="n">bool</span> <span class="n">hardbreaks</span><span class="p">;</span>  <span class="cm">/* Treat newlines as hard breaks */</span>
+    <span class="n">bool</span> <span class="n">nobreaks</span><span class="p">;</span>    <span class="cm">/* Render soft breaks as spaces */</span>
+
+    <span class="cm">/* Header ID generation */</span>
+    <span class="n">bool</span> <span class="n">generate_header_ids</span><span class="p">;</span>
+    <span class="n">bool</span> <span class="n">header_anchors</span><span class="p">;</span>  <span class="cm">/* Generate &lt;a&gt; tags instead of id attributes */</span>
+    <span class="kt">int</span> <span class="n">id_format</span><span class="p">;</span>  <span class="cm">/* 0=GFM, 1=&lt;abbr title="MultiMarkdown"&gt;MMD&lt;/abbr&gt;, 2=Kramdown */</span>
+
+    <span class="cm">/* Table options */</span>
+    <span class="n">bool</span> <span class="n">relaxed_tables</span><span class="p">;</span>
+
+    <span class="cm">/* List options */</span>
+    <span class="n">bool</span> <span class="n">allow_mixed_list_markers</span><span class="p">;</span>  <span class="cm">/* Allow mixed list markers at same level (inherit type from first item) */</span>
+    <span class="n">bool</span> <span class="n">allow_alpha_lists</span><span class="p">;</span>  <span class="cm">/* Support alpha list markers (a., b., c. and A., B., C.) */</span>
+<span class="p">}</span> <span class="n">apex_options</span><span class="p">;</span>
+</code></pre>
+
+<h2 id="core-functions">
+  Core Functions
+</h2>
+
+<h3 id="apexoptionsdefault">
+  apex_options_default
+</h3>
+
+<p>
+  Get default options with all features enabled (unified mode).
+</p>
+
+<pre><code class="highlight language-c"><span class="n">apex_options</span> <span class="nf">apex_options_default</span><span class="p">(</span><span class="kt">void</span><span class="p">);</span>
+</code></pre>
+
+<p>
+<strong>  Returns:</strong> Default options structure
+</p>
+
+<p>
+<strong>  Example:</strong>
+</p>
+
+<pre><code class="highlight language-c"><span class="n">apex_options</span> <span class="n">opts</span> <span class="o">=</span> <span class="n">apex_options_default</span><span class="p">();</span>
+<span class="n">opts</span><span class="p">.</span><span class="n">enable_math</span> <span class="o">=</span> <span class="nb">true</span><span class="p">;</span>
+<span class="n">opts</span><span class="p">.</span><span class="n">pretty</span> <span class="o">=</span> <span class="nb">true</span><span class="p">;</span>
+</code></pre>
+
+<h3 id="apexoptionsformode">
+  apex_options_for_mode
+</h3>
+
+<p>
+  Get options configured for a specific processor mode.
+</p>
+
+<pre><code class="highlight language-c"><span class="n">apex_options</span> <span class="nf">apex_options_for_mode</span><span class="p">(</span><span class="n">apex_mode_t</span> <span class="n">mode</span><span class="p">);</span>
+</code></pre>
+
+<p>
+<strong>  Parameters:</strong>
+</p>
+
+<ul>
+
+  <li>
+<code>mode</code> - Desired processor mode
+  </li>
+
+</ul>
+
+<p>
+<strong>  Returns:</strong> Options configured for the specified mode
+</p>
+
+<p>
+<strong>  Example:</strong>
+</p>
+
+<pre><code class="highlight language-c"><span class="n">apex_options</span> <span class="n">gfm_opts</span> <span class="o">=</span> <span class="n">apex_options_for_mode</span><span class="p">(</span><span class="n">APEX_MODE_GFM</span><span class="p">);</span>
+<span class="n">apex_options</span> <span class="n">mmd_opts</span> <span class="o">=</span> <span class="n">apex_options_for_mode</span><span class="p">(</span><span class="n">APEX_MODE_MULTIMARKDOWN</span><span class="p">);</span>
+</code></pre>
+
+<h3 id="apexmarkdowntohtml">
+  apex_markdown_to_html
+</h3>
+
+<p>
+  Main conversion function - converts Markdown to <abbr title="Hypertext Markup Language">HTML</abbr>.
+</p>
+
+<pre><code class="highlight language-c"><span class="kt">char</span> <span class="o">*</span><span class="nf">apex_markdown_to_html</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">markdown</span><span class="p">,</span> <span class="kt">size_t</span> <span class="n">len</span><span class="p">,</span>
+                            <span class="k">const</span> <span class="n">apex_options</span> <span class="o">*</span><span class="n">options</span><span class="p">);</span>
+</code></pre>
+
+<p>
+<strong>  Parameters:</strong>
+</p>
+
+<ul>
+
+  <li>
+<code>markdown</code> - Input Markdown text (UTF-8)
+  </li>
+
+  <li>
+<code>len</code> - Length of input text (use <code>strlen()</code> if null-terminated)
+  </li>
+
+  <li>
+<code>options</code> - Processing options (NULL for defaults)
+  </li>
+
+</ul>
+
+<p>
+<strong>  Returns:</strong> Newly allocated <abbr title="Hypertext Markup Language">HTML</abbr> string (must be freed with <code>apex_free_string</code>), or NULL on error
+</p>
+
+<p>
+<strong>  Example:</strong>
+</p>
+
+<pre><code class="highlight language-c"><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">markdown</span> <span class="o">=</span> <span class="s">"# Hello</span><span class="se">\n\n</span><span class="s">This is **bold**."</span><span class="p">;</span>
+<span class="n">apex_options</span> <span class="n">opts</span> <span class="o">=</span> <span class="n">apex_options_default</span><span class="p">();</span>
+<span class="kt">char</span> <span class="o">*</span><span class="n">html</span> <span class="o">=</span> <span class="n">apex_markdown_to_html</span><span class="p">(</span><span class="n">markdown</span><span class="p">,</span> <span class="n">strlen</span><span class="p">(</span><span class="n">markdown</span><span class="p">),</span> <span class="o">&amp;</span><span class="n">opts</span><span class="p">);</span>
+
+<span class="k">if</span> <span class="p">(</span><span class="n">html</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">"%s</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">html</span><span class="p">);</span>
+    <span class="n">apex_free_string</span><span class="p">(</span><span class="n">html</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre>
+
+<h3 id="apexfreestring">
+  apex_free_string
+</h3>
+
+<p>
+  Free a string allocated by Apex.
+</p>
+
+<pre><code class="highlight language-c"><span class="kt">void</span> <span class="nf">apex_free_string</span><span class="p">(</span><span class="kt">char</span> <span class="o">*</span><span class="n">str</span><span class="p">);</span>
+</code></pre>
+
+<p>
+<strong>  Parameters:</strong>
+</p>
+
+<ul>
+
+  <li>
+<code>str</code> - String to free (can be NULL, safe to call on NULL)
+  </li>
+
+</ul>
+
+<p>
+<strong>  Example:</strong>
+</p>
+
+<pre><code class="highlight language-c"><span class="kt">char</span> <span class="o">*</span><span class="n">html</span> <span class="o">=</span> <span class="n">apex_markdown_to_html</span><span class="p">(</span><span class="n">markdown</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+ <span class="n">Use</span> <span class="n">html</span><span class="p">...</span>
+<span class="n">apex_free_string</span><span class="p">(</span><span class="n">html</span><span class="p">);</span>
+</code></pre>
+
+<h3 id="apexwraphtmldocument">
+  apex_wrap_html_document
+</h3>
+
+<p>
+  Wrap <abbr title="Hypertext Markup Language">HTML</abbr> content in a complete HTML5 document structure.
+</p>
+
+<pre><code class="highlight language-c"><span class="kt">char</span> <span class="o">*</span><span class="nf">apex_wrap_html_document</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">content</span><span class="p">,</span> <span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">title</span><span class="p">,</span>
+                              <span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">stylesheet_path</span><span class="p">);</span>
+</code></pre>
+
+<p>
+<strong>  Parameters:</strong>
+</p>
+
+<ul>
+
+  <li>
+<code>content</code> - <abbr title="Hypertext Markup Language">HTML</abbr> content to wrap
+  </li>
+
+  <li>
+<code>title</code> - Document title (NULL for default “Document”)
+  </li>
+
+  <li>
+<code>stylesheet_path</code> - Path to <abbr title="Cascading Style Sheets">CSS</abbr> file to link (NULL for none)
+  </li>
+
+</ul>
+
+<p>
+<strong>  Returns:</strong> Newly allocated <abbr title="Hypertext Markup Language">HTML</abbr> document string (must be freed with <code>apex_free_string</code>)
+</p>
+
+<p>
+<strong>  Example:</strong>
+</p>
+
+<pre><code class="highlight language-c"><span class="kt">char</span> <span class="o">*</span><span class="n">fragment</span> <span class="o">=</span> <span class="n">apex_markdown_to_html</span><span class="p">(</span><span class="n">markdown</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">opts</span><span class="p">);</span>
+<span class="kt">char</span> <span class="o">*</span><span class="n">document</span> <span class="o">=</span> <span class="n">apex_wrap_html_document</span><span class="p">(</span><span class="n">fragment</span><span class="p">,</span> <span class="s">"My Document"</span><span class="p">,</span> <span class="s">"style.css"</span><span class="p">);</span>
+<span class="n">apex_free_string</span><span class="p">(</span><span class="n">fragment</span><span class="p">);</span>
+ <span class="n">Use</span> <span class="n">document</span><span class="p">...</span>
+<span class="n">apex_free_string</span><span class="p">(</span><span class="n">document</span><span class="p">);</span>
+</code></pre>
+
+<h3 id="apexprettyprinthtml">
+  apex_pretty_print_html
+</h3>
+
+<p>
+  Pretty-print <abbr title="Hypertext Markup Language">HTML</abbr> with proper indentation.
+</p>
+
+<pre><code class="highlight language-c"><span class="kt">char</span> <span class="o">*</span><span class="nf">apex_pretty_print_html</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">html</span><span class="p">);</span>
+</code></pre>
+
+<p>
+<strong>  Parameters:</strong>
+</p>
+
+<ul>
+
+  <li>
+<code>html</code> - <abbr title="Hypertext Markup Language">HTML</abbr> to format
+  </li>
+
+</ul>
+
+<p>
+<strong>  Returns:</strong> Newly allocated formatted <abbr title="Hypertext Markup Language">HTML</abbr> string (must be freed with <code>apex_free_string</code>)
+</p>
+
+<p>
+<strong>  Example:</strong>
+</p>
+
+<pre><code class="highlight language-c"><span class="kt">char</span> <span class="o">*</span><span class="n">html</span> <span class="o">=</span> <span class="n">apex_markdown_to_html</span><span class="p">(</span><span class="n">markdown</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">opts</span><span class="p">);</span>
+<span class="kt">char</span> <span class="o">*</span><span class="n">pretty</span> <span class="o">=</span> <span class="n">apex_pretty_print_html</span><span class="p">(</span><span class="n">html</span><span class="p">);</span>
+<span class="n">apex_free_string</span><span class="p">(</span><span class="n">html</span><span class="p">);</span>
+ <span class="n">Use</span> <span class="n">pretty</span><span class="p">...</span>
+<span class="n">apex_free_string</span><span class="p">(</span><span class="n">pretty</span><span class="p">);</span>
+</code></pre>
+
+<h2 id="version-functions">
+  Version Functions
+</h2>
+
+<h3 id="apexversionstring">
+  apex_version_string
+</h3>
+
+<p>
+  Get version string.
+</p>
+
+<pre><code class="highlight language-c"><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="nf">apex_version_string</span><span class="p">(</span><span class="kt">void</span><span class="p">);</span>
+</code></pre>
+
+<p>
+<strong>  Returns:</strong> Version string (e.g., “0.1.0”)
+</p>
+
+<h3 id="apexversionmajor-apexversionminor-apexversionpatch">
+  apex_version_major / apex_version_minor / apex_version_patch
+</h3>
+
+<p>
+  Get individual version components.
+</p>
+
+<pre><code class="highlight language-c"><span class="kt">int</span> <span class="nf">apex_version_major</span><span class="p">(</span><span class="kt">void</span><span class="p">);</span>
+<span class="kt">int</span> <span class="nf">apex_version_minor</span><span class="p">(</span><span class="kt">void</span><span class="p">);</span>
+<span class="kt">int</span> <span class="nf">apex_version_patch</span><span class="p">(</span><span class="kt">void</span><span class="p">);</span>
+</code></pre>
+
+<p>
+<strong>  Returns:</strong> Version component as integer
+</p>
+
+<h2 id="list-options">
+  List Options
+</h2>
+
+<h3 id="mixed-list-markers">
+  Mixed List Markers
+</h3>
+
+<p>
+  When <code>allow_mixed_list_markers</code> is enabled, lists with different marker types at the same indentation level will inherit the type from the first item. This is enabled by default in <strong>MultiMarkdown</strong> and <strong>Unified</strong> modes.
+</p>
+
+<pre><code class="highlight language-c"><span class="n">apex_options</span> <span class="n">opts</span> <span class="o">=</span> <span class="n">apex_options_for_mode</span><span class="p">(</span><span class="n">APEX_MODE_UNIFIED</span><span class="p">);</span>
+ <span class="n">opts</span><span class="p">.</span><span class="n">allow_mixed_list_markers</span> <span class="n">is</span> <span class="nb">true</span> <span class="n">by</span> <span class="k">default</span>
+
+ <span class="n">To</span> <span class="n">enable</span> <span class="n">in</span> <span class="n">other</span> <span class="n">modes</span><span class="o">:</span>
+<span class="n">opts</span><span class="p">.</span><span class="n">allow_mixed_list_markers</span> <span class="o">=</span> <span class="nb">true</span><span class="p">;</span>
+
+ <span class="n">To</span> <span class="n">disable</span> <span class="n">in</span> <span class="n">unified</span><span class="o">/</span><span class="n">multimarkdown</span> <span class="n">modes</span><span class="o">:</span>
+<span class="n">opts</span><span class="p">.</span><span class="n">allow_mixed_list_markers</span> <span class="o">=</span> <span class="nb">false</span><span class="p">;</span>
+</code></pre>
+
+<p>
+<strong>  Example markdown:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="p">1.</span> First numbered item
+<span class="p">*</span> Second item (becomes numbered)
+<span class="p">*</span> Third item (becomes numbered)
+</code></pre>
+
+<h3 id="alpha-lists">
+  Alpha Lists
+</h3>
+
+<p>
+  When <code>allow_alpha_lists</code> is enabled, alphabetic markers (<code>a.</code>, <code>b.</code>, <code>c.</code> for lower-alpha and <code>A.</code>, <code>B.</code>, <code>C.</code> for upper-alpha) are converted to <abbr title="Hypertext Markup Language">HTML</abbr> lists with appropriate <code>list-style-type</code> <abbr title="Cascading Style Sheets">CSS</abbr>. This is enabled by default in <strong>Unified</strong> mode only.
+</p>
+
+<pre><code class="highlight language-c"><span class="n">apex_options</span> <span class="n">opts</span> <span class="o">=</span> <span class="n">apex_options_for_mode</span><span class="p">(</span><span class="n">APEX_MODE_UNIFIED</span><span class="p">);</span>
+ <span class="n">opts</span><span class="p">.</span><span class="n">allow_alpha_lists</span> <span class="n">is</span> <span class="nb">true</span> <span class="n">by</span> <span class="k">default</span>
+
+ <span class="n">To</span> <span class="n">enable</span> <span class="n">in</span> <span class="n">other</span> <span class="n">modes</span><span class="o">:</span>
+<span class="n">opts</span><span class="p">.</span><span class="n">allow_alpha_lists</span> <span class="o">=</span> <span class="nb">true</span><span class="p">;</span>
+
+ <span class="n">To</span> <span class="n">disable</span> <span class="n">in</span> <span class="n">unified</span> <span class="n">mode</span><span class="o">:</span>
+<span class="n">opts</span><span class="p">.</span><span class="n">allow_alpha_lists</span> <span class="o">=</span> <span class="nb">false</span><span class="p">;</span>
+</code></pre>
+
+<p>
+<strong>  Example markdown:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">[apex-alpha-list:lower]
+<span class="p">
+1.</span>  First item
+<span class="p">2.</span>  Second item
+<span class="p">3.</span>  Third item
+</code></pre>
+
+<p>
+  This produces <abbr title="Hypertext Markup Language">HTML</abbr> with <code>style=&quot;list-style-type: lower-alpha&quot;</code> on the <code>&lt;ol&gt;</code> tag.
+</p>
+
+<h2 id="feature-flags">
+  Feature Flags
+</h2>
+
+<p>
+  All feature flags control whether specific Markdown extensions are enabled:
+</p>
+
+<ul>
+
+  <li>
+<code>enable_tables</code> - GFM-style tables
+  </li>
+
+  <li>
+<code>enable_footnotes</code> - Reference and inline footnotes
+  </li>
+
+  <li>
+<code>enable_definition_lists</code> - Definition lists (term: definition)
+  </li>
+
+  <li>
+<code>enable_smart_typography</code> - Smart quotes, dashes, ellipsis
+  </li>
+
+  <li>
+<code>enable_math</code> - LaTeX math (inline <code>$...$</code> and display <code>$$...$$</code>)
+  </li>
+
+  <li>
+<code>enable_critic_markup</code> - Critic Markup for change tracking
+  </li>
+
+  <li>
+<code>enable_wiki_links</code> - <code>[[WikiLink]]</code> syntax
+  </li>
+
+  <li>
+<code>enable_task_lists</code> - GFM task lists (<code>- [ ]</code> and <code>- [x]</code>)
+  </li>
+
+  <li>
+<code>enable_attributes</code> - Inline Attribute Lists (IAL)
+  </li>
+
+  <li>
+<code>enable_callouts</code> - Bear/Obsidian-style callouts
+  </li>
+
+  <li>
+<code>enable_marked_extensions</code> - Marked app extensions (TOC, page breaks, etc.)
+  </li>
+
+</ul>
+
+<p>
+  These are typically enabled/disabled based on the selected mode, but can be overridden.
+</p>
+
+<h2 id="metadata-options">
+  Metadata Options
+</h2>
+
+<ul>
+
+  <li>
+<code>strip_metadata</code> - Remove metadata from output (default: true)
+  </li>
+
+  <li>
+<code>enable_metadata_variables</code> - Enable <code>[%key]</code> variable replacement (default: true in <abbr title="MultiMarkdown">MMD</abbr>/Kramdown/Unified modes)
+  </li>
+
+</ul>
+
+<h2 id="file-inclusion">
+  File Inclusion
+</h2>
+
+<ul>
+
+  <li>
+<code>enable_file_includes</code> - Enable file inclusion syntax (``, <code>{{file.md}}</code>, `/file.md`)
+  </li>
+
+  <li>
+<code>max_include_depth</code> - Maximum nesting depth for includes (default: 10)
+  </li>
+
+  <li>
+<code>base_directory</code> - Base directory for resolving relative include paths (NULL = current directory)
+  </li>
+
+</ul>
+
+<h2 id="output-options">
+  Output Options
+</h2>
+
+<ul>
+
+  <li>
+<code>unsafe</code> - Allow raw <abbr title="Hypertext Markup Language">HTML</abbr> in output (default: true)
+  </li>
+
+  <li>
+<code>validate_utf8</code> - Validate UTF-8 encoding (default: true)
+  </li>
+
+  <li>
+<code>github_pre_lang</code> - Use GitHub-style code block language format (default: true)
+  </li>
+
+  <li>
+<code>standalone</code> - Generate complete <abbr title="Hypertext Markup Language">HTML</abbr> document with <code>&lt;html&gt;</code>, <code>&lt;head&gt;</code>, <code>&lt;body&gt;</code> (default: false)
+  </li>
+
+  <li>
+<code>pretty</code> - Pretty-print <abbr title="Hypertext Markup Language">HTML</abbr> with indentation (default: false)
+  </li>
+
+  <li>
+<code>stylesheet_path</code> - Path to <abbr title="Cascading Style Sheets">CSS</abbr> file to link in <code>&lt;head&gt;</code> (requires <code>standalone</code>)
+  </li>
+
+  <li>
+<code>document_title</code> - Title for <abbr title="Hypertext Markup Language">HTML</abbr> document (requires <code>standalone</code>)
+  </li>
+
+</ul>
+
+<h2 id="line-break-options">
+  Line Break Options
+</h2>
+
+<ul>
+
+  <li>
+<code>hardbreaks</code> - Treat newlines as hard breaks (<code>&lt;br&gt;</code>) like GFM (default: false, true in GFM mode)
+  </li>
+
+  <li>
+<code>nobreaks</code> - Render soft breaks as spaces instead of newlines (default: false)
+  </li>
+
+</ul>
+
+<h2 id="header-id-options">
+  Header ID Options
+</h2>
+
+<ul>
+
+  <li>
+<code>generate_header_ids</code> - Automatically generate IDs for headers (default: true)
+  </li>
+
+  <li>
+<code>header_anchors</code> - Generate <code>&lt;a&gt;</code> anchor tags instead of <code>id</code> attributes (default: false)
+  </li>
+
+  <li>
+<code>id_format</code> - ID format: <code>0</code> = GFM (with dashes), <code>1</code> = <abbr title="MultiMarkdown">MMD</abbr> (no dashes), <code>2</code> = Kramdown
+  </li>
+
+</ul>
+
+<h2 id="table-options">
+  Table Options
+</h2>
+
+<ul>
+
+  <li>
+<code>relaxed_tables</code> - Support tables without separator rows (Kramdown-style, default: true in Unified/Kramdown modes)
+  </li>
+
+</ul>
+
+<h2 id="complete-example">
+  Complete Example
+</h2>
+
+<pre><code class="highlight language-c"><span class="cp">#include</span> <span class="cpf">&lt;apex/apex.h&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;stdio.h&gt;</span><span class="cp">
+#include</span> <span class="cpf">&lt;string.h&gt;</span><span class="cp">
+</span>
+<span class="kt">int</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">markdown</span> <span class="o">=</span>
+        <span class="s">"---</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"title: Test Document</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"author: John Doe</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"---</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"# [%title]</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"By [%author]</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"This has **bold** and a [[WikiLink]].</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"Math: $E = mc^2$</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"1. Mixed markers</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"* Second item</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"a. Alpha list</span><span class="se">\n</span><span class="s">"</span>
+        <span class="s">"b. Second alpha</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+
+    <span class="c1">// Use unified mode with all features</span>
+    <span class="n">apex_options</span> <span class="n">opts</span> <span class="o">=</span> <span class="n">apex_options_for_mode</span><span class="p">(</span><span class="n">APEX_MODE_UNIFIED</span><span class="p">);</span>
+    <span class="c1">// Mixed markers and alpha lists are enabled by default in unified mode</span>
+    <span class="n">opts</span><span class="p">.</span><span class="n">pretty</span> <span class="o">=</span> <span class="nb">true</span><span class="p">;</span>
+    <span class="n">opts</span><span class="p">.</span><span class="n">standalone</span> <span class="o">=</span> <span class="nb">true</span><span class="p">;</span>
+    <span class="n">opts</span><span class="p">.</span><span class="n">document_title</span> <span class="o">=</span> <span class="s">"Test Document"</span><span class="p">;</span>
+
+    <span class="c1">// Convert to &lt;abbr title="Hypertext Markup Language"&gt;HTML&lt;/abbr&gt;</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">html</span> <span class="o">=</span> <span class="n">apex_markdown_to_html</span><span class="p">(</span><span class="n">markdown</span><span class="p">,</span> <span class="n">strlen</span><span class="p">(</span><span class="n">markdown</span><span class="p">),</span> <span class="o">&amp;</span><span class="n">opts</span><span class="p">);</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">html</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">printf</span><span class="p">(</span><span class="s">"%s</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="n">html</span><span class="p">);</span>
+        <span class="n">apex_free_string</span><span class="p">(</span><span class="n">html</span><span class="p">);</span>
+        <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="n">fprintf</span><span class="p">(</span><span class="n">stderr</span><span class="p">,</span> <span class="s">"Conversion failed</span><span class="se">\n</span><span class="s">"</span><span class="p">);</span>
+        <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre>
+
+<h2 id="compiling-and-linking">
+  Compiling and Linking
+</h2>
+
+<h3 id="with-cmake">
+  With CMake
+</h3>
+
+<pre><code class="highlight language-cmake"><span class="c1"># In your CMakeLists.txt</span>
+<span class="nb">find_package</span><span class="p">(</span>apex REQUIRED<span class="p">)</span>
+<span class="nb">target_link_libraries</span><span class="p">(</span>your_app apex<span class="p">)</span>
+</code></pre>
+
+<h3 id="manual-compilation">
+  Manual Compilation
+</h3>
+
+<pre><code class="highlight language-bash"><span class="c"># Compile</span>
+gcc <span class="nt">-c</span> <span class="nt">-I</span>/usr/local/include your_app.c
+
+<span class="c"># Link</span>
+gcc your_app.o <span class="nt">-L</span>/usr/local/lib <span class="nt">-lapex</span> <span class="nt">-o</span> your_app
+
+<span class="c"># Run (may need library path)</span>
+<span class="nv">DYLD_LIBRARY_PATH</span><span class="o">=</span>/usr/local/lib ./your_app  <span class="c"># macOS</span>
+<span class="nv">LD_LIBRARY_PATH</span><span class="o">=</span>/usr/local/lib ./your_app    <span class="c"># Linux</span>
+</code></pre>
+
+<h3 id="static-linking">
+  Static Linking
+</h3>
+
+<pre><code class="highlight language-bash">gcc your_app.c <span class="nt">-I</span>/usr/local/include <span class="nt">-L</span>/usr/local/lib <span class="nt">-lapex</span> <span class="nt">-static</span> <span class="nt">-o</span> your_app
+</code></pre>
+
+<h2 id="thread-safety">
+  Thread Safety
+</h2>
+
+<p>
+  Apex is thread-safe as long as:
+</p>
+
+<ol>
+
+  <li>
+    Each thread uses its own <code>apex_options</code> structure
+  </li>
+
+  <li>
+    Document nodes are not shared between threads
+  </li>
+
+  <li>
+    The conversion function can be called from multiple threads simultaneously
+  </li>
+
+</ol>
+
+<p>
+<strong>  Example:</strong>
+</p>
+
+<pre><code class="highlight language-c"> <span class="n">Thread</span><span class="o">-</span><span class="n">safe</span><span class="o">:</span> <span class="n">each</span> <span class="kr">thread</span> <span class="n">has</span> <span class="n">its</span> <span class="n">own</span> <span class="n">options</span>
+<span class="kt">void</span> <span class="o">*</span><span class="nf">thread_func</span><span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="n">arg</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">apex_options</span> <span class="n">opts</span> <span class="o">=</span> <span class="n">apex_options_default</span><span class="p">();</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">html</span> <span class="o">=</span> <span class="n">apex_markdown_to_html</span><span class="p">(</span><span class="n">markdown</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">opts</span><span class="p">);</span>
+    <span class="c1">// Use html...</span>
+    <span class="n">apex_free_string</span><span class="p">(</span><span class="n">html</span><span class="p">);</span>
+    <span class="k">return</span> <span class="nb">NULL</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre>
+
+<h2 id="memory-management">
+  Memory Management
+</h2>
+
+<ul>
+
+  <li>
+    All strings returned by Apex must be freed with <code>apex_free_string()</code>
+  </li>
+
+  <li>
+<code>apex_options</code> structures are typically stack-allocated (no freeing needed)
+  </li>
+
+  <li>
+    Safe to call <code>apex_free_string(NULL)</code>
+  </li>
+
+  <li>
+    Always check return values before use
+  </li>
+
+</ul>
+
+<h2 id="error-handling">
+  Error Handling
+</h2>
+
+<ul>
+
+  <li>
+    Functions return <code>NULL</code> or empty strings on error
+  </li>
+
+  <li>
+    Check return values before use
+  </li>
+
+  <li>
+    Errors are generally due to:
+    <ul>
+
+      <li>
+        Memory allocation failures
+      </li>
+
+      <li>
+        Invalid input
+      </li>
+
+      <li>
+        Missing dependencies
+      </li>
+
+    </ul>
+
+  </li>
+
+</ul>
+
+<p>
+<strong>  Example:</strong>
+</p>
+
+<pre><code class="highlight language-c"><span class="kt">char</span> <span class="o">*</span><span class="n">html</span> <span class="o">=</span> <span class="n">apex_markdown_to_html</span><span class="p">(</span><span class="n">markdown</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">opts</span><span class="p">);</span>
+<span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">html</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">fprintf</span><span class="p">(</span><span class="n">stderr</span><span class="p">,</span> <span class="s">"Conversion failed</span><span class="se">\n</span><span class="s">"</span><span class="p">);</span>
+    <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+<span class="p">}</span>
+ <span class="n">Use</span> <span class="n">html</span><span class="p">...</span>
+<span class="n">apex_free_string</span><span class="p">(</span><span class="n">html</span><span class="p">);</span>
+</code></pre>
+
+<h2 id="performance-tips">
+  Performance Tips
+</h2>
+
+<ol>
+
+  <li>
+<strong>    Reuse options</strong>: Create <code>apex_options</code> once and reuse for multiple conversions
+  </li>
+
+  <li>
+<strong>    Provide accurate length</strong>: Avoid unnecessary <code>strlen()</code> calls
+  </li>
+
+  <li>
+<strong>    Disable unused features</strong>: Turn off extensions you don’t need
+  </li>
+
+  <li>
+<strong>    Batch processing</strong>: Process multiple documents in parallel (thread-safe)
+  </li>
+
+</ol>
+
+<p>
+<strong>  Example:</strong>
+</p>
+
+<pre><code class="highlight language-c"> <span class="nl">Good:</span> <span class="n">reuse</span> <span class="n">options</span>
+<span class="n">apex_options</span> <span class="n">opts</span> <span class="o">=</span> <span class="n">apex_options_default</span><span class="p">();</span>
+<span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">count</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">html</span> <span class="o">=</span> <span class="n">apex_markdown_to_html</span><span class="p">(</span><span class="n">docs</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">lens</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="o">&amp;</span><span class="n">opts</span><span class="p">);</span>
+    <span class="c1">// Process...</span>
+    <span class="n">apex_free_string</span><span class="p">(</span><span class="n">html</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre>
+
+<h2 id="related">
+  Related
+</h2>
+
+<ul>
+
+  <li>
+
+    <p>
+<a href="Xcode-Integration.html">      Xcode Integration</a> - Using Apex in Xcode projects
+    </p>
+
+  </li>
+
+  <li>
+
+    <p>
+<a href="Modes.html">      Modes</a> - Understanding processor modes
+    </p>
+
+  </li>
+
+  <li>
+
+    <p>
+<a href="Header-IDs.html">      Header IDs</a> - Header ID generation options
+    </p>
+
+<pre><code class="highlight ">   # Glob include (first matching .md file)
+</code></pre>
+
+</li>
+
+</ul>
+
+<p>
+  {{c?de.py}}      # ? wildcard (e.g. resolves to code.py)
+</p>
+
+<pre><code class="highlight ">
+`{{file.*}}` implements MultiMarkdown-style wildcard resolution, trying common extensions in a preferred order.
+Patterns containing `*`, `?`, `[]`, or `{}` are treated as glob patterns and resolved relative to the current transclude base (see metadata `transclude base`).
+
+**iA Writer syntax:**
+```markdown
+/image.png       # Intelligent include (detects type)
+/code.py         # Auto-detects as code block
+/document.md     # Auto-detects as Markdown
+</code></pre>
+
+<p>
+  CSV and TSV files automatically convert to tables.
+</p>
+
+<h3 id="address-syntax-for-file-includes">
+  Address Syntax for File Includes
+</h3>
+
+<p>
+  File includes support mmark-style address syntax to include specific line ranges or sections. This works with <code>{{file}}</code> and <code>, </code>, `` syntaxes, but <strong>not</strong> with iA Writer <code>/file</code> syntax.
+</p>
+
+<p>
+<strong>  Line number ranges:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">{{file.md}}[3,5]        # Include lines 3 to 5 (exclusive of 5)
+{{file.md}}[3,]         # Include from line 3 to end of file
+       # Include lines 1 to 10 in Marked syntax
+       # Include lines 5 to 15 in code block
+</code></pre>
+
+<p>
+<strong>  Regular expression ranges:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">{{file.md}}[/START/,/END/]     # Include lines between regex matches
+{{file.md}}[/<span class="nt">&lt;sup&gt;</span>##<span class="nt">&lt;/sup&gt;</span> /,/<span class="nt">&lt;sup&gt;</span>##<span class="nt">&lt;/sup&gt;</span> /]     # Include between heading markers
+   # Include from function to closing brace
+</code></pre>
+
+<p>
+<strong>  Prefix option:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">{{file.md}}[3,5;prefix="C: "]   # Prefix each line with "C: "
+{{code.py}}[1,10;prefix="  "]  # Indent included lines
+</code></pre>
+
+<p>
+<strong>  Combined examples:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="gh"># Include lines 10-20 with prefix</span>
+{{example.py}}[10,20;prefix="    "]
+
+<span class="gh"># Include from regex match to end</span>
+{{config.md}}[/<span class="nt">&lt;sup&gt;</span>##<span class="nt">&lt;/sup&gt;</span> Config/,]
+
+<span class="gh"># Include between patterns with prefix</span>
+{{script.sh}}[/# START/,/# END/;prefix="# "]
+</code></pre>
+
+<p>
+<strong>  Notes:</strong>
+</p>
+
+<ul>
+
+  <li>
+    Line numbers are 1-based
+  </li>
+
+  <li>
+    End line is exclusive (e.g., <code>[3,5]</code> includes lines 3 and 4, not 5)
+  </li>
+
+  <li>
+    Regex patterns use POSIX extended regular expressions
+  </li>
+
+  <li>
+    If start pattern is not found, empty content is returned
+  </li>
+
+  <li>
+    If end pattern is not found, content from start to end of file is included
+  </li>
+
+  <li>
+    Prefix is applied to each included line
+  </li>
+
+</ul>
+
+<h3 id="address-syntax-for-file-includes">
+  Address Syntax for File Includes
+</h3>
+
+<p>
+  Apex supports mmark-style address syntax for specifying line ranges and applying prefixes to included files. This works with <code>{{file}}</code> and `` syntaxes (but not iA Writer <code>/file</code> syntax).
+</p>
+
+<p>
+<strong>  Line number ranges:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">{{file.md}}[3,5]      # Include lines 3 to 5 (exclusive of 5)
+{{file.md}}[3,]       # Include from line 3 to end of file
+     # Include lines 1 to 10
+     # Include lines 5 to 15 from code file
+</code></pre>
+
+<p>
+<strong>  Regular expression ranges:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">{{file.md}}[/START/,/END/]           # Include lines between regex matches
+{{file.md}}[/<span class="nt">&lt;sup&gt;</span>##<span class="nt">&lt;/sup&gt;</span> Section/,/<span class="nt">&lt;sup&gt;</span>##<span class="nt">&lt;/sup&gt;</span> /]     # Include from section to next section
+            # Include between BEGIN and END markers
+</code></pre>
+
+<p>
+<strong>  Prefix option:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">{{file.md}}[3,5;prefix="C: "]         # Prefix each line with "C: "
+{{file.md}}[prefix="&gt; "]              # Prefix all lines with "&gt; "
+      # Prefix with 4 spaces (indentation)
+</code></pre>
+
+<p>
+<strong>  Combined examples:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">{{config.py}}[/def setup/,/<span class="nt">&lt;sup&gt;</span>def<span class="nt">&lt;/sup&gt;</span> /;prefix="# "]
+<span class="gh"># Includes lines from "def setup" to next "def", with "# " prefix</span>
+
+<span class="gh"># Includes lines 10-20 with blockquote prefix</span>
+</code></pre>
+
+<p>
+<strong>  Notes:</strong>
+</p>
+
+<ul>
+
+  <li>
+    Line numbers are 1-based
+  </li>
+
+  <li>
+    End line is exclusive (e.g., <code>[3,5]</code> includes lines 3 and 4, not 5)
+  </li>
+
+  <li>
+    Regex patterns use POSIX extended regular expressions
+  </li>
+
+  <li>
+    Prefix is applied to each included line
+  </li>
+
+  <li>
+    Address syntax does not apply to iA Writer syntax (<code>/file</code>)
+  </li>
+
+</ul>
+
+<h2 id="metadata">
+  Metadata
+</h2>
+
+<h3 id="yaml-front-matter">
+  YAML Front Matter
+</h3>
+
+<pre><code class="highlight language-yaml"><span class="nn">---</span>
+<span class="na">title</span><span class="pi">:</span> <span class="s">My Document</span>
+<span class="na">author</span><span class="pi">:</span> <span class="s">John Doe</span>
+<span class="na">date</span><span class="pi">:</span> <span class="s">2025-12-06</span>
+<span class="nn">---</span>
+</code></pre>
+
+<h3 id="multimarkdown-metadata">
+  MultiMarkdown Metadata
+</h3>
+
+<pre><code class="highlight language-markdown">Title: My Document
+Author: John Doe
+Date: 2025-12-06
+
+</code></pre>
+
+<h3 id="pandoc-title-block">
+  Pandoc Title Block
+</h3>
+
+<pre><code class="highlight language-markdown">% My Document
+% John Doe
+% 2025-12-06
+</code></pre>
+
+<h3 id="metadata-variables">
+  Metadata Variables
+</h3>
+
+<p>
+  Use <code>[%key]</code> to insert metadata values anywhere:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="nn">---</span>
+<span class="na">title</span><span class="pi">:</span> <span class="s">Apex Guide</span>
+<span class="na">version</span><span class="pi">:</span> <span class="s">0.1.0</span>
+<span class="nn">---</span>
+
+<span class="gh"># [%title]</span>
+
+Version: [%version]
+</code></pre>
+
+<p>
+  You can also transform metadata values using the <code>[%key:transform]</code> syntax. See <a href="Metadata-Transforms.html">Metadata Transforms</a> for a complete guide to available transforms.
+</p>
+
+<p>
+<strong>  External Metadata Sources:</strong>
+</p>
+
+<p>
+  Metadata can also be loaded from external files or specified on the command line:
+</p>
+
+<ul>
+
+  <li>
+<strong><code>--meta-file FILE</code></strong>: Load metadata from an external file (YAML, <abbr title="MultiMarkdown">MMD</abbr>, or Pandoc format, auto-detected)
+  </li>
+
+  <li>
+<strong><code>--meta KEY=VALUE</code></strong>: Set metadata from the command line (supports multiple flags and comma-separated pairs)
+  </li>
+
+</ul>
+
+<p>
+  Metadata precedence (highest to lowest):
+</p>
+
+<ol>
+
+  <li>
+    Command-line metadata (<code>--meta</code>)
+  </li>
+
+  <li>
+    Document metadata (in the document)
+  </li>
+
+  <li>
+    File metadata (<code>--meta-file</code>)
+  </li>
+
+</ol>
+
+<p>
+<strong>  Reusable Metadata Files:</strong>
+</p>
+
+<p>
+  You can create reusable metadata files for common settings like language and quotes language. This is especially useful for maintaining consistent settings across multiple documents.
+</p>
+
+<p>
+<strong>  Example metadata file (<code>lang-fr.yml</code>):</strong>
+</p>
+
+<pre><code class="highlight language-yaml"><span class="nn">---</span>
+<span class="na">language</span><span class="pi">:</span> <span class="s">fr</span>
+<span class="na">quoteslanguage</span><span class="pi">:</span> <span class="s">french</span>
+<span class="nn">---</span>
+</code></pre>
+
+<p>
+<strong>  Note:</strong> In YAML, keys with spaces must be quoted (e.g., <code>&quot;Quotes Language&quot;: french</code>). Since Apex normalizes metadata keys (removes spaces, case-insensitive), you can use keys without spaces for cleaner YAML syntax. Both <code>quoteslanguage</code> and <code>&quot;Quotes Language&quot;</code> will work.
+</p>
+
+<p>
+<strong>  Example metadata file (<code>lang-de.mmd</code>):</strong>
+</p>
+
+<pre><code class="highlight ">Language: de
+Quotes Language: german
+</code></pre>
+
+<p>
+<strong>  Note:</strong> MultiMarkdown format allows spaces in keys, so <code>Quotes Language</code> works without quotes.
+</p>
+
+<p>
+<strong>  Usage:</strong>
+</p>
+
+<pre><code class="highlight language-bash"><span class="c"># Use French language settings for all documents</span>
+apex document1.md <span class="nt">--meta-file</span> lang-fr.yml
+apex document2.md <span class="nt">--meta-file</span> lang-fr.yml
+</code></pre>
+
+<p>
+<strong>  Benefits:</strong>
+</p>
+
+<ul>
+
+  <li>
+<strong>    Consistency</strong>: Ensure all documents use the same language settings
+  </li>
+
+  <li>
+<strong>    Reusability</strong>: Define language and quotes language once, use across many documents
+  </li>
+
+  <li>
+<strong>    Maintainability</strong>: Update language settings in one place
+  </li>
+
+  <li>
+<strong>    Automatic fallback</strong>: If <code>Quotes Language</code> is not specified, it automatically uses the <code>language</code> value
+  </li>
+
+</ul>
+
+<p>
+<strong>  Controlling Command-Line Options via Metadata:</strong>
+</p>
+
+<p>
+  Most command-line options can be controlled via metadata, allowing per-document configuration. Boolean options accept <code>true</code>/<code>false</code>, <code>yes</code>/<code>no</code>, or <code>1</code>/<code>0</code> (case-insensitive). String options use the value directly.
+</p>
+
+<p>
+<strong>  Example:</strong>
+</p>
+
+<pre><code class="highlight language-yaml"><span class="nn">---</span>
+<span class="na">indices</span><span class="pi">:</span> <span class="kc">false</span>
+<span class="na">wikilinks</span><span class="pi">:</span> <span class="kc">true</span>
+<span class="na">bibliography</span><span class="pi">:</span> <span class="s">references.bib</span>
+<span class="na">title</span><span class="pi">:</span> <span class="s">My Research Paper</span>
+<span class="na">pretty</span><span class="pi">:</span> <span class="kc">true</span>
+<span class="na">standalone</span><span class="pi">:</span> <span class="kc">true</span>
+<span class="nn">---</span>
+</code></pre>
+
+<p>
+  This enables batch processing where each file can have its own configuration. See <a href="Command-Line-Options.html">Command Line Options</a> for complete documentation of metadata options and which options can be controlled via metadata.
+</p>
+
+<h2 id="abbreviations">
+  Abbreviations
+</h2>
+
+<p>
+<strong>  Classic <abbr title="MultiMarkdown">MMD</abbr> syntax:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">
+<span class="nt">&lt;abbr</span> <span class="na">title=</span><span class="s">"Hypertext Markup Language"</span><span class="nt">&gt;</span>HTML<span class="nt">&lt;/abbr&gt;</span> and <span class="nt">&lt;abbr</span> <span class="na">title=</span><span class="s">"Cascading Style Sheets"</span><span class="nt">&gt;</span>CSS<span class="nt">&lt;/abbr&gt;</span> are essential.
+</code></pre>
+
+<p>
+<strong><abbr title="MultiMarkdown">  MMD</abbr> 6 reference syntax:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">
+Using <span class="nt">&lt;abbr</span> <span class="na">title=</span><span class="s">"MultiMarkdown"</span><span class="nt">&gt;</span>MMD<span class="nt">&lt;/abbr&gt;</span> here and <span class="nt">&lt;abbr</span> <span class="na">title=</span><span class="s">"MultiMarkdown"</span><span class="nt">&gt;</span>MMD<span class="nt">&lt;/abbr&gt;</span> again.
+</code></pre>
+
+<p>
+<strong><abbr title="MultiMarkdown">  MMD</abbr> 6 inline syntax:</strong>
+</p>
+
+<pre><code class="highlight language-markdown">This is MD and <span class="nt">&lt;abbr</span> <span class="na">title=</span><span class="s">"Cascading Style Sheets"</span><span class="nt">&gt;</span>CSS<span class="nt">&lt;/abbr&gt;</span>.
+</code></pre>
+
+<h2 id="inline-attribute-lists-ial">
+  Inline Attribute Lists (IAL)
+</h2>
+
+<p>
+  Kramdown and Pandoc syntax for adding <abbr title="Hypertext Markup Language">HTML</abbr> attributes (IDs, classes, and custom key-value pairs) to Markdown elements.
+</p>
+
+<p>
+  Apex supports both <strong>Kramdown-style IALs</strong> (<code>{: ...}</code>) and <strong>Pandoc-style IALs</strong> (<code>{#id .class}</code>). Both formats work identically throughout the document.
+</p>
+
+<p>
+<strong>  Block-level IALs</strong> appear on the line immediately after the element:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="gh"># Header</span>
+
+{: #custom-id}
+
+<span class="gh"># Another Header</span>
+
+{#custom-id-2 .highlight}
+
+Paragraph with class.
+
+{: .important}
+
+<span class="gu">## Another Header</span>
+
+{: #section-2 .highlight title="Section Title" lang="en"}
+</code></pre>
+
+<p>
+<strong>  Inline IALs</strong> appear immediately after the element within the paragraph:
+</p>
+
+<pre><code class="highlight language-markdown">Here's a <span class="p">[</span><span class="nv">styled link</span><span class="p">](</span><span class="sx">url</span><span class="p">)</span>{:.button} with a class.
+
+Here's a <span class="p">[</span><span class="nv">Pandoc-style link</span><span class="p">](</span><span class="sx">url</span><span class="p">)</span>{#link-id .button} with attributes.
+
+This has <span class="gs">**bold text**</span>{:.bold-style} and <span class="ge">*italic text*</span>{:.italic-style}.
+</code></pre>
+
+<p>
+<strong>  Key-value pairs</strong> allow custom attributes:
+</p>
+
+<pre><code class="highlight language-markdown">Paragraph.
+
+{: title="Important Note" lang="en" data-custom="value"}
+
+<span class="p">[</span><span class="nv">Link</span><span class="p">](</span><span class="sx">url</span><span class="p">)</span>{:rel="nofollow" target="_blank"}
+</code></pre>
+
+<p>
+<strong>  Attribute List Definitions (ALDs)</strong> define reusable attribute sets:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="gh"># Header 1</span>
+
+{:my-style}
+
+<span class="gh"># Header 2</span>
+
+{:my-style}
+
+</code></pre>
+
+<p>
+<strong>  ALD references can be combined with additional attributes</strong> in the same IAL. Additional attributes override or extend the ALD:
+</p>
+
+<pre><code class="highlight language-markdown">
+<span class="gh"># Heading 1</span>
+
+{:base-style}
+
+<span class="gh"># Heading 2</span>
+
+{:base-style .class3}
+
+<span class="gh"># Heading 3</span>
+
+{:base-style #override-id}
+
+<span class="gh"># Heading 4</span>
+
+{:base-style .class3 rel="nofollow"}
+</code></pre>
+
+<p>
+<strong>  Behavior:</strong>
+</p>
+
+<ul>
+
+  <li>
+<strong>    Classes</strong>: Additional classes are appended to the ALD classes
+  </li>
+
+  <li>
+<strong>    IDs</strong>: If an ID is specified in the IAL, it overrides the ALD’s ID
+  </li>
+
+  <li>
+<strong>    Key-value attributes</strong>: If a key exists in both ALD and IAL, the IAL value overrides the ALD value
+  </li>
+
+</ul>
+
+<p>
+  For complete documentation with examples, see <a href="Inline-Attribute-Lists.html">Inline Attribute Lists</a>.
+</p>
+
+<h2 id="table-of-contents">
+  Table of Contents
+</h2>
+
+<p>
+  Multiple marker formats:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="c">&lt;!--TOC--&gt;</span>              # Basic TOC
+<span class="c">&lt;!--TOC max2 min1--&gt;</span>    # With depth control
+<span class="nt">&lt;nav</span> <span class="na">class=</span><span class="s">"toc"</span><span class="nt">&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#basic-markdown"</span><span class="nt">&gt;</span>Basic Markdown<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#headers"</span><span class="nt">&gt;</span>Headers<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#emphasis"</span><span class="nt">&gt;</span>Emphasis<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#superscript-and-subscript"</span><span class="nt">&gt;</span>Superscript and Subscript<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#lists"</span><span class="nt">&gt;</span>Lists<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#links-and-images"</span><span class="nt">&gt;</span>Links and Images<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#code"</span><span class="nt">&gt;</span>Code<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#blockquotes"</span><span class="nt">&gt;</span>Blockquotes<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#horizontal-rules"</span><span class="nt">&gt;</span>Horizontal Rules<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;/ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#tables"</span><span class="nt">&gt;</span>Tables<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#standard-tables"</span><span class="nt">&gt;</span>Standard Tables<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#relaxed-tables"</span><span class="nt">&gt;</span>Relaxed Tables<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#headerless-tables"</span><span class="nt">&gt;</span>Headerless Tables<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#row-header-columns"</span><span class="nt">&gt;</span>Row header columns<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;/ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#inline-tables-from-csvtsv"</span><span class="nt">&gt;</span>Inline Tables from CSV/TSV<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#fenced-csvtsv-tables"</span><span class="nt">&gt;</span>Fenced CSV/TSV tables<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#alignment-rows-in-csvtsv-tables"</span><span class="nt">&gt;</span>Alignment rows in CSV/TSV tables<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#table-markers"</span><span class="nt">&gt;</span><span class="c">&lt;!--TABLE--&gt;</span> markers<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;/ul&gt;</span>
+<span class="nt">&lt;/ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#footnotes"</span><span class="nt">&gt;</span>Footnotes<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#reference-style"</span><span class="nt">&gt;</span>Reference Style<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#inline-style-kramdown"</span><span class="nt">&gt;</span>Inline Style (Kramdown)<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#inline-style-multimarkdown"</span><span class="nt">&gt;</span>Inline Style (MultiMarkdown)<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;/ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#definition-lists"</span><span class="nt">&gt;</span>Definition Lists<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#citations"</span><span class="nt">&gt;</span>Citations<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#pandoc-citation-syntax"</span><span class="nt">&gt;</span>Pandoc Citation Syntax<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#multimarkdown-citation-syntax"</span><span class="nt">&gt;</span>MultiMarkdown Citation Syntax<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#mmark-citation-syntax"</span><span class="nt">&gt;</span>mmark Citation Syntax<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#bibliography"</span><span class="nt">&gt;</span>Bibliography<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;/ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#indices"</span><span class="nt">&gt;</span>Indices<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#mmark-index-syntax"</span><span class="nt">&gt;</span>mmark Index Syntax<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#textindex-syntax"</span><span class="nt">&gt;</span>TextIndex Syntax<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#index-generation"</span><span class="nt">&gt;</span>Index Generation<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;/ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#math"</span><span class="nt">&gt;</span>Math<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#wiki-links"</span><span class="nt">&gt;</span>Wiki Links<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#critic-markup"</span><span class="nt">&gt;</span>Critic Markup<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#callouts"</span><span class="nt">&gt;</span>Callouts<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#file-includes"</span><span class="nt">&gt;</span>File Includes<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#apexoptions"</span><span class="nt">&gt;</span>apex_options<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;/ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#core-functions"</span><span class="nt">&gt;</span>Core Functions<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#apexoptionsdefault"</span><span class="nt">&gt;</span>apex_options_default<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#apexoptionsformode"</span><span class="nt">&gt;</span>apex_options_for_mode<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#apexmarkdowntohtml"</span><span class="nt">&gt;</span>apex_markdown_to_html<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#apexfreestring"</span><span class="nt">&gt;</span>apex_free_string<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#apexwraphtmldocument"</span><span class="nt">&gt;</span>apex_wrap_html_document<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#apexprettyprinthtml"</span><span class="nt">&gt;</span>apex_pretty_print_html<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;/ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#version-functions"</span><span class="nt">&gt;</span>Version Functions<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#apexversionstring"</span><span class="nt">&gt;</span>apex_version_string<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#apexversionmajor-apexversionminor-apexversionpatch"</span><span class="nt">&gt;</span>apex_version_major / apex_version_minor / apex_version_patch<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;/ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#list-options"</span><span class="nt">&gt;</span>List Options<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#mixed-list-markers"</span><span class="nt">&gt;</span>Mixed List Markers<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#alpha-lists"</span><span class="nt">&gt;</span>Alpha Lists<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;/ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#feature-flags"</span><span class="nt">&gt;</span>Feature Flags<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#metadata-options"</span><span class="nt">&gt;</span>Metadata Options<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#file-inclusion"</span><span class="nt">&gt;</span>File Inclusion<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#output-options"</span><span class="nt">&gt;</span>Output Options<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#line-break-options"</span><span class="nt">&gt;</span>Line Break Options<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#header-id-options"</span><span class="nt">&gt;</span>Header ID Options<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#table-options"</span><span class="nt">&gt;</span>Table Options<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#complete-example"</span><span class="nt">&gt;</span>Complete Example<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#compiling-and-linking"</span><span class="nt">&gt;</span>Compiling and Linking<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#with-cmake"</span><span class="nt">&gt;</span>With CMake<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#manual-compilation"</span><span class="nt">&gt;</span>Manual Compilation<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#static-linking"</span><span class="nt">&gt;</span>Static Linking<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;/ul&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#thread-safety"</span><span class="nt">&gt;</span>Thread Safety<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#memory-management"</span><span class="nt">&gt;</span>Memory Management<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#error-handling"</span><span class="nt">&gt;</span>Error Handling<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#performance-tips"</span><span class="nt">&gt;</span>Performance Tips<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;li&gt;&lt;a</span> <span class="na">href=</span><span class="s">"#related"</span><span class="nt">&gt;</span>Related<span class="nt">&lt;/a&gt;&lt;/li&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+                 # <span class="nt">&lt;abbr</span> <span class="na">title=</span><span class="s">"MultiMarkdown"</span><span class="nt">&gt;</span>MMD<span class="nt">&lt;/abbr&gt;</span> style
+{{TOC:2-4}}            # With range
+{:toc}                  # Kramdown IAL marker (uses same TOC engine)
+</code></pre>
+
+<p>
+  Headings with the <code>.no_toc</code> class are excluded from the generated TOC:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="gh"># Contents</span>
+
+{:.no_toc}
+
+<span class="c">&lt;!--TOC--&gt;</span>
+</code></pre>
+
+<h2 id="smart-typography">
+  Smart Typography
+</h2>
+
+<p>
+  Automatic conversion:
+</p>
+
+<ul>
+
+  <li>
+<code>&quot;text&quot;</code> → <code>&quot;text&quot;</code> (smart quotes)
+  </li>
+
+  <li>
+<code>'text'</code> → <code>'text'</code> (smart apostrophes)
+  </li>
+
+  <li>
+<code>--</code> → <code>–</code> (en dash)
+  </li>
+
+  <li>
+<code>---</code> → <code>—</code> (em dash)
+  </li>
+
+  <li>
+<code>...</code> → <code>…</code> (ellipsis)
+  </li>
+
+  <li>
+<code>&lt;&lt;</code> → <code>«</code> (left guillemet)
+  </li>
+
+  <li>
+<code>&gt;&gt;</code> → <code>»</code> (right guillemet)
+  </li>
+
+</ul>
+
+<h2 id="github-emoji">
+  GitHub Emoji
+</h2>
+
+<pre><code class="highlight language-markdown">Success! 🚀 🎉 ✨
+I ❤️ Markdown!
+</code></pre>
+
+<p>
+  Supports 350+ GitHub emoji, converted to Unicode characters.
+</p>
+
+<h2 id="special-markers">
+  Special Markers
+</h2>
+
+<p>
+<strong>  Page breaks:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"page-break"</span> <span class="na">style=</span><span class="s">"page-break-after: always;"</span><span class="nt">&gt;&lt;/div&gt;</span>            # <span class="nt">&lt;abbr</span> <span class="na">title=</span><span class="s">"Hypertext Markup Language"</span><span class="nt">&gt;</span>HTML<span class="nt">&lt;/abbr&gt;</span> comment style
+<span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"page-break"</span> <span class="na">style=</span><span class="s">"page-break-after: always;"</span><span class="nt">&gt;&lt;/div&gt;</span>         # Kramdown style
+</code></pre>
+
+<p>
+<strong>  Autoscroll pauses:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"autoscroll-pause"</span> <span class="na">data-pause=</span><span class="s">"5"</span><span class="nt">&gt;&lt;/div&gt;</span>          # Pause for 5 seconds
+</code></pre>
+
+<p>
+<strong>  End-of-block marker:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="p">-</span> Item 1
+
+​
+<span class="p">
+-</span> Item 2
+</code></pre>
+
+<p>
+  Forces list separation.
+</p>
+
+<h2 id="html">
+<abbr title="Hypertext Markup Language">  HTML</abbr>
+</h2>
+
+<p>
+  Raw <abbr title="Hypertext Markup Language">HTML</abbr> is supported (when <code>unsafe</code> option is enabled, which is default):
+</p>
+
+<pre><code class="highlight language-markdown"><span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"custom"</span><span class="nt">&gt;</span>
+  <span class="nt">&lt;p&gt;</span>This is raw <span class="nt">&lt;abbr</span> <span class="na">title=</span><span class="s">"Hypertext Markup Language"</span><span class="nt">&gt;</span>HTML<span class="nt">&lt;/abbr&gt;</span> inside Markdown.<span class="nt">&lt;/p&gt;</span>
+<span class="nt">&lt;/div&gt;</span>
+</code></pre>
+
+<h3 id="markdown-inside-html-blocks">
+  Markdown Inside <abbr title="Hypertext Markup Language">HTML</abbr> Blocks
+</h3>
+
+<p>
+  By default, Markdown inside <abbr title="Hypertext Markup Language">HTML</abbr> blocks is <strong>not</strong> parsed unless the <abbr title="Hypertext Markup Language">HTML</abbr> block contains blank lines. This follows the CommonMark specification:
+</p>
+
+<ul>
+
+  <li>
+
+    <p>
+<strong><abbr title="Hypertext Markup Language">      HTML</abbr> blocks without blank lines</strong>: Content is treated as raw <abbr title="Hypertext Markup Language">HTML</abbr> and Markdown is not parsed
+    </p>
+
+<pre><code class="highlight language-markdown"><span class="nt">&lt;div&gt;</span><span class="gs">**This is not bold**</span><span class="nt">&lt;/div&gt;</span>
+</code></pre>
+
+  <p>
+    Output: <code>&lt;div&gt;**This is not bold**&lt;/div&gt;</code>
+  </p>
+
+</li>
+
+<li>
+
+  <p>
+<strong><abbr title="Hypertext Markup Language">    HTML</abbr> blocks with blank lines</strong>: Content can be parsed as Markdown
+  </p>
+
+<pre><code class="highlight language-markdown"><span class="nt">&lt;div&gt;</span>
+
+<span class="gs">**This is bold**</span>
+
+<span class="nt">&lt;/div&gt;</span>
+</code></pre>
+
+<p>
+  Output: <code>&lt;div&gt;&lt;p&gt;&lt;strong&gt;This is bold&lt;/strong&gt;&lt;/p&gt;&lt;/div&gt;</code>
+</p>
+
+</li>
+
+</ul>
+
+<p>
+  To explicitly enable Markdown parsing inside <abbr title="Hypertext Markup Language">HTML</abbr> blocks, use the <code>markdown</code> attribute (GFM extension):
+</p>
+
+<pre><code class="highlight language-markdown"><span class="nt">&lt;div&gt;&lt;h2&gt;</span>This is a heading<span class="nt">&lt;/h2&gt;</span>
+<span class="nt">&lt;ul&gt;</span>
+<span class="nt">&lt;li&gt;</span>List item<span class="nt">&lt;/li&gt;</span>
+<span class="nt">&lt;/ul&gt;</span>
+<span class="nt">&lt;/div&gt;</span>
+
+</code></pre>
+
+<p>
+  The <code>markdown</code> attribute accepts:
+</p>
+
+<ul>
+
+  <li>
+<code>markdown=&quot;1&quot;</code> or <code>markdown=&quot;block&quot;</code> - Parse block-level Markdown
+  </li>
+
+  <li>
+<code>markdown=&quot;span&quot;</code> - Parse inline Markdown only
+  </li>
+
+</ul>
+
+<h3 id="pandoc-fenced-divs">
+  Pandoc Fenced Divs
+</h3>
+
+<p>
+  Apex supports Pandoc’s fenced divs extension, which allows you to create <abbr title="Hypertext Markup Language">HTML</abbr> <code>&lt;div&gt;</code> elements with attributes using a special fence syntax. This feature is available in <strong>unified mode only</strong> and is enabled by default.
+</p>
+
+<p>
+<strong>  Basic syntax:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="nt">&lt;div</span> <span class="na">id=</span><span class="s">"special"</span> <span class="na">class=</span><span class="s">"sidebar"</span><span class="nt">&gt;&lt;p&gt;</span>Here is a paragraph.<span class="nt">&lt;/p&gt;</span>
+<span class="nt">&lt;p&gt;</span>And another.<span class="nt">&lt;/p&gt;</span>
+<span class="nt">&lt;/div&gt;</span>
+</code></pre>
+
+<p>
+<strong>  Opening fences:</strong>
+</p>
+
+<ul>
+
+  <li>
+    Must contain at least 3 consecutive colons (<code>:::</code>)
+  </li>
+
+  <li>
+    Must have attributes (ID, classes, or custom attributes)
+  </li>
+
+  <li>
+    Attributes can optionally be followed by another string of consecutive colons
+  </li>
+
+</ul>
+
+<p>
+<strong>  Closing fences:</strong>
+</p>
+
+<ul>
+
+  <li>
+    Must contain at least 3 consecutive colons (<code>:::</code>)
+  </li>
+
+  <li>
+    No attributes needed
+  </li>
+
+  <li>
+    Number of colons doesn’t need to match the opening fence
+  </li>
+
+</ul>
+
+<p>
+<strong>  Attributes:</strong>
+  Attributes use the same syntax as fenced code blocks:
+</p>
+
+<ul>
+
+  <li>
+<code>{#id}</code> - ID attribute
+  </li>
+
+  <li>
+<code>{.class}</code> - Class attribute (can have multiple)
+  </li>
+
+  <li>
+<code>key=&quot;value&quot;</code> - Custom attributes with quoted values
+  </li>
+
+  <li>
+<code>key='value'</code> - Custom attributes with single quotes
+  </li>
+
+  <li>
+    Single unbraced word is treated as a class name
+  </li>
+
+</ul>
+
+<p>
+<strong>  Examples:</strong>
+</p>
+
+<pre><code class="highlight language-markdown"><span class="nt">&lt;div</span> <span class="na">id=</span><span class="s">"mydiv"</span> <span class="na">class=</span><span class="s">"container"</span><span class="nt">&gt;&lt;p&gt;</span>Content here<span class="nt">&lt;/p&gt;</span>
+<span class="nt">&lt;/div&gt;</span>
+
+<span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"sidebar"</span><span class="nt">&gt;&lt;p&gt;</span>Single unbraced word becomes a class<span class="nt">&lt;/p&gt;</span>
+<span class="nt">&lt;/div&gt;</span>
+
+<span class="nt">&lt;div</span> <span class="na">id=</span><span class="s">"special"</span> <span class="na">class=</span><span class="s">"warning important"</span> <span class="na">key=</span><span class="s">"value"</span><span class="nt">&gt;&lt;p&gt;</span>Div with ID, multiple classes, and custom attribute<span class="nt">&lt;/p&gt;</span>
+<span class="nt">&lt;/div&gt;</span>
+
+<span class="nt">&lt;div</span> <span class="na">id=</span><span class="s">"special"</span> <span class="na">class=</span><span class="s">"sidebar"</span><span class="nt">&gt;&lt;p&gt;</span>Trailing colons after attributes are allowed<span class="nt">&lt;/p&gt;</span>
+<span class="nt">&lt;/div&gt;</span>
+</code></pre>
+
+<p>
+<strong>  Nested divs:</strong>
+  Fenced divs can be nested. Opening fences must have attributes:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"Warning"</span><span class="nt">&gt;&lt;p&gt;</span>This is a warning.<span class="nt">&lt;/p&gt;</span>
+<span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"Danger"</span><span class="nt">&gt;&lt;p&gt;</span>This is a warning within a warning.<span class="nt">&lt;/p&gt;</span>
+<span class="nt">&lt;/div&gt;</span>
+<span class="nt">&lt;/div&gt;</span>
+</code></pre>
+
+<p>
+<strong>  Block types:</strong>
+  By default, fenced divs create <code>&lt;div&gt;</code> elements. You can specify different <abbr title="Hypertext Markup Language">HTML</abbr> block elements using the <code>&gt;blocktype</code> syntax:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="nt">&lt;aside</span> <span class="na">class=</span><span class="s">"sidebar"</span> <span class="na">markdown=</span><span class="s">"1"</span><span class="nt">&gt;</span>This creates an <span class="nt">&lt;aside&gt;</span> element instead of a <span class="nt">&lt;div&gt;</span>.
+<span class="nt">&lt;/aside&gt;</span>
+<span class="nt">&lt;article</span> <span class="na">id=</span><span class="s">"post"</span> <span class="na">class=</span><span class="s">"main"</span> <span class="na">markdown=</span><span class="s">"1"</span><span class="nt">&gt;</span>This creates an <span class="nt">&lt;article&gt;</span> element.
+<span class="nt">&lt;/article&gt;</span>
+<span class="nt">&lt;section</span> <span class="na">class=</span><span class="s">"container"</span> <span class="na">markdown=</span><span class="s">"1"</span><span class="nt">&gt;</span>This creates a <span class="nt">&lt;section&gt;</span> element.
+<span class="nt">&lt;/section&gt;</span><span class="sb">```
+
+**Common block types:**
+- `&gt;div` - Default, creates a `&lt;div&gt;` element
+- `&gt;aside` - Creates an `&lt;aside&gt;` element (sidebars, callouts)
+- `&gt;article` - Creates an `&lt;article&gt;` element (main content)
+- `&gt;section` - Creates a `&lt;section&gt;` element (document sections)
+- `&gt;details` - Creates a `&lt;details&gt;` element (collapsible content)
+- `&gt;summary` - Creates a `&lt;summary&gt;` element (for use inside `&lt;details&gt;`)
+
+**Nested block types:**
+You can nest different block types:
+```</span>markdown
+<span class="nt">&lt;details</span> <span class="na">class=</span><span class="s">"warning"</span><span class="nt">&gt;&lt;summary&gt;&lt;p&gt;</span>This is a summary<span class="nt">&lt;/p&gt;</span>
+<span class="nt">&lt;/summary&gt;</span>
+This is the content of the details block
+<span class="nt">&lt;/details&gt;</span>
+
+<span class="nt">&lt;section</span> <span class="na">class=</span><span class="s">"outer"</span><span class="nt">&gt;&lt;p&gt;</span>Outer section content.<span class="nt">&lt;/p&gt;</span>
+<span class="nt">&lt;aside</span> <span class="na">class=</span><span class="s">"inner"</span><span class="nt">&gt;&lt;p&gt;</span>Inner aside content.<span class="nt">&lt;/p&gt;</span>
+<span class="nt">&lt;/aside&gt;</span>
+<span class="nt">&lt;p&gt;</span>More outer content.<span class="nt">&lt;/p&gt;</span>
+<span class="nt">&lt;/section&gt;</span>
+</code></pre>
+
+<p>
+<strong>  Block type with unbraced class:</strong>
+  The block type syntax works with unbraced class names:
+</p>
+
+<pre><code class="highlight language-markdown"><span class="nt">&lt;aside</span> <span class="na">class=</span><span class="s">"Warning"</span><span class="nt">&gt;&lt;p&gt;</span>Warning content here<span class="nt">&lt;/p&gt;</span>
+<span class="nt">&lt;/aside&gt;</span>
+</code></pre>
+
+<p>
+  This creates <code>&lt;aside class=&quot;Warning&quot;&gt;...&lt;/aside&gt;</code>.
+</p>
+
+<p>
+<strong>  Note:</strong> Fenced divs should be separated by blank lines from preceding and following blocks for best results.
+</p>
+
+<p>
+<strong>  Control:</strong>
+</p>
+
+<ul>
+
+  <li>
+    Use <code>--divs</code> to explicitly enable (default in unified mode)
+  </li>
+
+  <li>
+    Use <code>--no-divs</code> to disable fenced divs processing
+  </li>
+
+</ul>
+
+<h2 id="related">
+  Related
+</h2>
+
+<ul>
+
+  <li>
+<a href="Modes.html">    Modes</a> - Which syntax is available in each mode
+  </li>
+
+  <li>
+<a href="Header-IDs.html">    Header IDs</a> - Automatic header ID generation
+  </li>
+
+  <li>
+<a href="Command-Line-Options.html">    Command Line Options</a> - Feature flags including <code>--[no-]autolink</code>, <code>--[no-]mixed-lists</code>, <code>--[no-]alpha-lists</code>, <code>--[no-]sup-sub</code>, and <code>--[no-]divs</code>
+  </li>
+
+</ul>
+
+<script>
+// Hamburger menu functionality
+(function() {
+  function initHamburgerMenu() {
+    var hamburger = document.getElementById('hamburger-menu');
+    var sidebar = document.querySelector('.main-toc, .sidebar');
+    var overlay = document.getElementById('mobile-menu-overlay');
+
+    if (!hamburger || !sidebar) return;
+
+    function toggleMenu() {
+      var isOpen = sidebar.classList.contains('mobile-open');
+      if (isOpen) {
+        sidebar.classList.remove('mobile-open');
+        hamburger.classList.remove('active');
+        if (overlay) overlay.classList.remove('active');
+      } else {
+        sidebar.classList.add('mobile-open');
+        hamburger.classList.add('active');
+        if (overlay) overlay.classList.add('active');
+      }
+    }
+
+    hamburger.addEventListener('click', function(e) {
+      e.stopPropagation();
+      toggleMenu();
+    });
+
+    if (overlay) {
+      overlay.addEventListener('click', function() {
+        toggleMenu();
+      });
+    }
+
+    // Close menu when clicking on a sidebar link (mobile only)
+    if (window.innerWidth <= 768) {
+      var sidebarLinks = sidebar.querySelectorAll('a');
+      sidebarLinks.forEach(function(link) {
+        link.addEventListener('click', function() {
+          setTimeout(function() {
+            sidebar.classList.remove('mobile-open');
+            hamburger.classList.remove('active');
+            if (overlay) overlay.classList.remove('active');
+          }, 100);
+        });
+      });
+    }
+
+    // Close menu on window resize if going to desktop
+    window.addEventListener('resize', function() {
+      if (window.innerWidth > 768) {
+        sidebar.classList.remove('mobile-open');
+        hamburger.classList.remove('active');
+        if (overlay) overlay.classList.remove('active');
+      }
+    });
+  }
+
+  // Initialize when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initHamburgerMenu);
+  } else {
+    initHamburgerMenu();
+  }
+})();
+
+</script>
+<script>
+  (function() {
+    // Clone the page TOC for floating TOC
+    function initFloatingTOC() {
+      var pageTOC = document.getElementById('page-toc-top');
+      var floatingTOCContent = document.getElementById('floating-toc-content');
+      var floatingTOC = document.getElementById('floating-toc');
+
+      if (!pageTOC || !floatingTOCContent || !floatingTOC) return;
+
+      // Clone the TOC structure
+      var tocClone = pageTOC.cloneNode(true);
+      tocClone.id = 'floating-toc-clone';
+      floatingTOCContent.appendChild(tocClone);
+
+      // Update all links to use smooth scrolling
+      var allTOCLinks = document.querySelectorAll('.page-toc a, .floating-toc-content a');
+      allTOCLinks.forEach(function(link) {
+        link.addEventListener('click', function(e) {
+          var href = this.getAttribute('href');
+          if (href && href.startsWith('#')) {
+            e.preventDefault();
+            var targetId = href.substring(1);
+            var targetElement = document.getElementById(targetId);
+            if (targetElement) {
+              var offset = 20; // Offset from top
+
+              // Function to calculate absolute position from document top
+              function getAbsoluteTop(element) {
+                var top = 0;
+                while (element) {
+                  top += element.offsetTop;
+                  element = element.offsetParent;
+                }
+                return top;
+              }
+
+              var absoluteTop = getAbsoluteTop(targetElement);
+              var scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+              var offsetPosition = absoluteTop - offset;
+
+              // Only scroll if we're not already at the target position
+              if (Math.abs(scrollTop - offsetPosition) > 10) {
+                window.scrollTo({
+                  top: Math.max(0, offsetPosition),
+                  behavior: 'smooth'
+                });
+              }
+
+              // Update URL hash without triggering scroll
+              if (history.pushState) {
+                history.pushState(null, null, href);
+              }
+            }
+          }
+        });
+      });
+
+      // Handle scroll to show/hide floating TOC
+      var tocTop = pageTOC.getBoundingClientRect().top + window.pageYOffset;
+      var tocBottom = tocTop + pageTOC.offsetHeight;
+
+      function updateFloatingTOC() {
+        var scrollY = window.pageYOffset || document.documentElement.scrollTop;
+
+        if (scrollY > tocBottom) {
+          floatingTOC.classList.add('visible');
+        } else {
+          floatingTOC.classList.remove('visible');
+        }
+      }
+
+      // Throttle scroll events
+      var ticking = false;
+      window.addEventListener('scroll', function() {
+        if (!ticking) {
+          window.requestAnimationFrame(function() {
+            updateFloatingTOC();
+            ticking = false;
+          });
+          ticking = true;
+        }
+      });
+
+      // Initial check
+      updateFloatingTOC();
+    }
+
+    // Initialize when DOM is ready
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initFloatingTOC);
+    } else {
+      initFloatingTOC();
+    }
+  })();
+</script>
+<footer class="page-footer"><p>Copyright 2025 Brett Terpstra, All Rights Reserved | MIT License</p></footer></body>
+
+</html>
+

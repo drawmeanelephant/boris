@@ -19,6 +19,17 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Feature 1 — ApexMarkdown pin (campaign Chat 1)
+
+- Vendor real **[ApexMarkdown/apex](https://github.com/ApexMarkdown/apex)** as a
+  flat source snapshot under `vendor/apex-markdown/` @ **v1.1.11**
+  (`47d25d594b04143cdd747922d7fee8d66b3c5082`), including cmark-gfm and libyaml
+  trees at recorded SHAs. Pin record:
+  [`vendor/apex-markdown/VENDOR.md`](vendor/apex-markdown/VENDOR.md).
+- Product still links the **host stub** only (`vendor/apex/apex.c`); no adapter
+  or `build.zig` link yet (Chat 2+). CMake noted as future compile-time host
+  tool for Strategy A static lib. No IR schema or CLI default changes.
+
 ### Docs — residual post-P3 audit cleanup
 
 - Fix underscore diagnostic codes in contract fixture READMEs/prose and RAG
@@ -28,10 +39,11 @@ How to use going forward:
   `fixtures/expected/rag/system/` goldens for 03/09.
 - Remove ghost **v0.4.0** “P3.3 complete” release trigger from
   `docs/STATUS.md` versioning table (P3.3 already landed; packaging stays under
-  0.2/0.3). No runtime or IR schema changes. Feature 1 (cmark) still not started.
+  0.2/0.3). No runtime or IR schema changes.
 - Feature 1 implementer handoff:
   [`docs/reviews/feature-1-apex-fidelity-spec.md`](docs/reviews/feature-1-apex-fidelity-spec.md)
-  (cmark-gfm under frozen `apex.h`; gates, allocator risks, out-of-scope).
+  and authority plan [`APEX-Feature1-plan.md`](APEX-Feature1-plan.md)
+  (real ApexMarkdown Unified under frozen host `apex.h` — not cmark-as-product).
 
 ### Docs — post-P3 reconciliation
 
