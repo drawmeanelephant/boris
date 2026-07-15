@@ -14,30 +14,58 @@ Product callouts with document-order guarantees use the registered
 [[guides/asides|Aside]] component. Apex also supports `> [!NOTE]`-style callouts;
 see [Apex callouts](#apex-callouts) for the difference.
 
+### Pending samples (not live yet)
+
+Anything from the broader Apex Unified surface that is **not** dogfooded live
+here sits in a fenced `text` block marked `APEX-PENDING`. Apex will expand some
+constructs even inside ordinary fences, so those lines stay **backslash-inert**
+(`\:::`, `\[@key]`, …).
+
+**To enable a sample when ready:**
+
+1. Copy the body out of the `text` fence into the live section above it.
+2. Strip the leading `\` on inert lines.
+3. Delete the `APEX-PENDING` fence.
+4. Rebuild (`boris --quiet`) and check the section still renders cleanly.
+
+`PRODUCT-OFF` samples are deliberate Boris non-goals (do not enable without a
+product decision). See also [Pending Apex samples](#pending-apex-samples).
+
 ## At a glance
 
-| Construct | Jump | Notes |
+| Construct | Status | Jump |
 | :--- | :---: | :--- |
-| Emphasis / strong / strike | [Inline](#inline-formatting) | `*`, `**`, `~~` |
-| Inline code | [Inline](#inline-formatting) | Single backticks |
-| Sub / superscript | [Inline](#inline-formatting) | `H~2~O`, `e=mc^2^` |
-| Smart typography | [Inline](#inline-formatting) | Quotes, dashes, ellipses |
-| Headings + IAL ids/classes | [Headings](#headings-and-attributes) | `{#id .class}` |
-| Nested lists | [Lists](#lists) | Ordered + unordered |
-| Task lists | [Task lists](#task-lists) | `- [x]` checkboxes |
-| Blockquotes | [Blockquotes](#blockquotes) | `>` |
-| Apex callouts | [Callouts](#apex-callouts) | `> [!NOTE]` family |
-| Fenced code | [Code](#fenced-code) | Language tags; HTML escaped |
-| GFM tables | [Tables](#tables) | Alignment markers |
-| Definition lists | [Definition lists](#definition-lists) | Term + colon definition |
-| Math | [Math](#math) | `$…$` and `$$…$$` |
-| Footnotes | [Footnotes](#footnotes) | Refs mid-page; defs at end |
-| Abbreviations | [Abbreviations](#abbreviations-and-emoji) | abbreviation definitions |
-| Emoji | [Abbreviations](#abbreviations-and-emoji) | Glyphs and shortcodes |
-| Links and images | [Links](#links-and-images) | Inline, autolink, image |
-| Horizontal rules | [Breaks](#paragraphs-breaks-and-rules) | `***` / `___` |
-| Trusted raw HTML | [Raw HTML](#raw-html-trusted-authors) | Host allows it for authors |
-| Fenced divs | [Fenced divs](#fenced-divs) | `::: {.class}` syntax |
+| Emphasis / strong / strike | **Live** | [Inline](#inline-formatting) |
+| Inline code | **Live** | [Inline](#inline-formatting) |
+| Sub / superscript | **Live** | [Inline](#inline-formatting) |
+| Smart typography | **Live** | [Inline](#inline-formatting) |
+| Headings + IAL ids/classes | **Live** | [Headings](#headings-and-attributes) |
+| Nested lists | **Live** | [Lists](#lists) |
+| Task lists | **Live** | [Task lists](#task-lists) |
+| Blockquotes | **Live** | [Blockquotes](#blockquotes) |
+| Apex callouts (`> [!NOTE]`) | **Live** | [Callouts](#apex-callouts) |
+| Collapsible / alt callout syntaxes | Pending | [Callouts](#apex-callouts) |
+| Fenced code (no external highlighter) | **Live** | [Code](#fenced-code) |
+| Syntax highlighting (Pygments/…) | Product-off | [Code](#fenced-code) |
+| GFM tables (basic align) | **Live** | [Tables](#tables) |
+| Advanced tables (rowspan/colspan/caption) | Pending | [Tables](#tables) |
+| Definition lists | **Live** | [Definition lists](#definition-lists) |
+| Math | **Live** | [Math](#math) |
+| Footnotes (reference style) | **Live** | [Footnotes](#footnotes) |
+| Alternate footnote syntaxes | Pending | [Footnotes](#footnotes) |
+| Abbreviations + emoji | **Live** | [Abbreviations](#abbreviations-and-emoji) |
+| Links and images | **Live** | [Links](#links-and-images) |
+| Image IAL / size attrs | Pending | [Links](#links-and-images) |
+| Bracketed spans | Pending | [Pending](#pending-apex-samples) |
+| Horizontal rules | **Live** | [Breaks](#paragraphs-breaks-and-rules) |
+| Trusted raw HTML | **Live** (sample fenced) | [Raw HTML](#raw-html-trusted-authors) |
+| Fenced divs (`:::`) | Pending live | [Fenced divs](#fenced-divs) |
+| Critic Markup | Pending | [Pending](#pending-apex-samples) |
+| Citations / bibliography | Pending | [Pending](#pending-apex-samples) |
+| Indices | Pending | [Pending](#pending-apex-samples) |
+| Apex TOC markers | Pending / product-off | [Pending](#pending-apex-samples) |
+| Apex file includes | Product-off | [Pending](#pending-apex-samples) |
+| Apex-native wiki + `#section` | Pending / product | [Pending](#pending-apex-samples) |
 
 ## Headings and attributes
 
@@ -114,6 +142,15 @@ you ship a real site; external URLs work for demos:
 
 ![Zig logo](https://ziglang.org/img/zig-logo-dark.svg)
 
+```text
+# APEX-PENDING: image-ial | enable when image attribute dogfood is wanted
+# Strip leading \ on the image line when enabling.
+
+![Zig logo](https://ziglang.org/img/zig-logo-dark.svg)\{width=120px .screenshot}
+
+![also](https://ziglang.org/img/zig-logo-dark.svg){: width="50%" }
+```
+
 ## Blockquotes
 
 > Simple pull-quote. Nested formatting works: **strong**, `code`, and
@@ -147,6 +184,24 @@ and not the registered Aside component.
 
 > [!CAUTION]
 > Intentionally broken parents must not live under `content/` — use fixtures.
+
+```text
+# APEX-PENDING: collapsible-callout | enable when collapsible callouts are dogfood-ready
+
+> [!NOTE]-
+> Collapsed by default (trailing hyphen on the marker). Expand in the browser.
+
+> [!TIP]+
+> Expanded by default (trailing plus on the marker).
+```
+
+```text
+# APEX-PENDING: python-md-callout | optional Apex flag; not product default
+# Strip \ on the bang-line when enabling (only if host enables !!! callouts).
+
+\!!! note "Python-Markdown style"
+    Body only if the engine flag is on — Boris does not advertise this dialect.
+```
 
 Boris product callouts with document-order guarantees use Aside instead. Syntax
 (fenced so the tokenizer does not treat this sample as a live component):
@@ -237,6 +292,15 @@ Indented code (four spaces) is CommonMark-compatible:
 
     fn indented() void {}
 
+```text
+# PRODUCT-OFF: syntax-highlight | AGENTS: no external highlighter / subprocess
+# Apex can call Pygments, Skylighting, or Shiki with --code-highlight.
+# Boris host keeps highlighters off. Do not enable without a product decision.
+#
+# Example (not live): a language-tagged fence under --code-highlight would
+# emit span-styled tokens. Prefer CSS class hooks on plain <pre><code> instead.
+```
+
 ## Tables
 
 GFM pipe tables with column alignment:
@@ -250,6 +314,36 @@ GFM pipe tables with column alignment:
 | Includes + wiki-links | Yes | Before Apex; fences stay raw |
 
 Cells may contain *emphasis*, `code`, and [links](https://ziglang.org).
+
+```text
+# APEX-PENDING: advanced-tables | rowspan / colspan / caption / per-cell align
+# Enable when advanced table dogfood is wanted (verify long-page stability).
+
+| Left | Mid | Right |
+| ---: | :---: | :--- |
+| A | B | C |
+| ^^ | spans up | D |
+| E | << | (colspan into empty/left) |
+
+Table: Advanced caption example
+
+: Caption below (MMD-style)
+
+| :Left | Right: | :Center: |
+| --- | --- | --- |
+| L | R | C |
+```
+
+```text
+# APEX-PENDING: grid-tables | opt-in Apex --grid-tables; not product-default
+# Strip nothing special; only enable if host exposes grid tables.
+
++-------+-------+
+| Hello | World |
++=======+=======+
+| A     | B     |
++-------+-------+
+```
 
 ## Definition lists
 
@@ -295,6 +389,15 @@ with back-refs.[^syntax] Keep labels unique for clarity.[^second]
 
 Put footnote *definitions* at the **end of the page** (after all other
 sections). Mid-document definitions can swallow following headings.
+
+```text
+# APEX-PENDING: footnote-alt-syntax | Kramdown / MMD inline forms
+# Reference-style (live above) is enough for most docs. Enable extras carefully.
+
+Kramdown-style inline: Here is a footnote.^[Inline footnote body.]
+
+MultiMarkdown-style inline: Here is another.[^Inline body for MMD.]
+```
 
 ## Abbreviations and emoji
 
@@ -365,10 +468,152 @@ behavior). Live forms appear on [[getting-started]] and [[guides/overview]].
 
 Apex Unified supports Pandoc-style fenced divs: a line of three colons with a
 brace-class attribute, a body, and a closing line of three colons. The engine
-emits a `div` with that class (covered by host fidelity tests). Prefer
+emits a `div` with that class (covered by host fidelity tests U12). Prefer
 [[guides/asides|Aside]] for product callouts with diagnostics — on long pages,
 live `:::` blocks can interact poorly with following headings, so this showcase
-documents the feature without stacking one after every other demo.
+keeps samples **pending** (inert) until that is safer.
+
+```text
+# APEX-PENDING: fenced-div-live | long-page next-heading quirk; fidelity U12 passes
+# To enable: remove this fence, strip "\" before each ::: line, paste above See also.
+
+\::: {.warning}
+This block should render as a div with class warning.
+\:::
+
+\::: {.note}
+Fenced divs are useful for custom CSS hooks. Not a graph node.
+\:::
+```
+
+```text
+# APEX-PENDING: fenced-div-blocktype | ::: >aside / section / details, etc.
+
+\::: >aside {.sidebar}
+Sidebar-like aside element (block type syntax), not Boris Aside component.
+\:::
+
+\::: >details
+\::: >summary
+Click to expand
+\:::
+Hidden details body.
+\:::
+```
+
+## Pending Apex samples
+
+Inventory of broader Apex Unified surface not live on this page. Same enable
+rules as above. Inventory tracks upstream Apex capabilities vs what this dogfood
+site exercises — not every row is a Boris roadmap commitment.
+
+### Bracketed spans and IAL
+
+```text
+# APEX-PENDING: bracketed-spans | [text]{attrs} → span
+# Strip backslashes when enabling.
+
+A \[highlighted phrase]\{.mark #span-1} inside a sentence.
+
+Paragraph with trailing Kramdown IAL:
+
+Some paragraph.
+\{: #para-id .lede}
+```
+
+### Critic Markup
+
+```text
+# APEX-PENDING: critic-markup | track changes / annotations
+# Critic expands even inside fences. Inert form uses a space after "{".
+# To enable: remove those spaces → {++added text++} etc.
+
+{ ++added text++ }
+{ --deleted text-- }
+{ ~~old~>new~~ }
+{ ==highlight== }
+{ >>comment<< }
+```
+
+### Citations and bibliography
+
+```text
+# APEX-PENDING: citations | needs bib data + product decision
+
+See Pandoc-style \[@smith2020] and MultiMarkdown-style \[#smith2020].
+
+# PRODUCT-OFF unless bibliography packaging is designed for HTML/RAG.
+```
+
+### Indices
+
+```text
+# APEX-PENDING: indices | mmark / TextIndex; auto index generation
+# Strip \ when enabling.
+
+An indexed term\(!primary entry).
+A subentry\(!primary, secondary).
+
+TextIndex form: term\{^} and \[display]\{^}.
+
+\<!--INDEX-->
+```
+
+### Apex TOC markers
+
+```text
+# APEX-PENDING: apex-toc-markers | Boris already has layout {{toc}} (Feature 6)
+# These are Apex-in-body TOC markers — usually redundant with layout chrome.
+
+\<!--TOC-->
+
+\{{TOC}}
+
+\{{TOC:2-3}}
+
+\{:toc}
+```
+
+### Apex-native wiki-links and section targets
+
+```text
+# APEX-PENDING: apex-wiki-section | Boris Feature 7 uses entity ids, not Apex wiki
+# Boris resolves [[entity-id]] pre-Apex. Apex [[Page#Section]] / space rules differ.
+# Section fragments [[id#heading]] are not MVP (see includes-and-wiki-links contract).
+
+\[[Some Page]]
+\[[Some Page|label]]
+\[[Some Page#Section]]
+```
+
+### Metadata variables (Apex document metadata)
+
+```text
+# PRODUCT-OFF: apex-metadata-vars | Boris closed frontmatter is not Apex metadata
+# Apex [%key] / [%key:transform] need engine metadata blocks — not product FM.
+
+Title would be: \[%title]
+Upper: \[%title:upper]
+```
+
+### Apex file includes (engine FS)
+
+```text
+# PRODUCT-OFF: apex-file-includes | host enable_file_includes=false always
+# Boris expands {{include path}} in Zig before Apex. Do not turn Apex FS on.
+
+\{{include does-not-exist.md}}
+\<<[also-not-used.md]
+```
+
+### Special markers
+
+```text
+# APEX-PENDING: special-markers | page break / pause — only if site chrome needs them
+
+\<!--BREAK-->
+\<!--PAUSE:2-->
+```
 
 [^syntax]: Footnote definition lines use a caret label and a colon, then the note body. Apex hoists them into a footnotes list with back-refs.
 [^second]: Second note to demonstrate ordered footnote lists and back-refs.

@@ -184,6 +184,8 @@ Quality bar:
 - [ ] Clone URL / first-build commands match `README.md`
 - [ ] `guides/apex-markdown.md` is a real Unified gallery (tables, footnotes,
       math, callouts, IAL, lists, code, definition lists, …) — not a stub
+- [ ] Apex features not yet dogfooded live stay in `APEX-PENDING` / `PRODUCT-OFF`
+      inert `text` fences (backslash-escape hot syntax; strip `\` when enabling)
 - [ ] At least one table, one footnote, multiple fences, ≥3 asides site-wide
 - [ ] Internal links resolve under `dist/` (including wiki → real `<a href>`)
 - [ ] Expanded include text appears in rendered HTML (not only source)
