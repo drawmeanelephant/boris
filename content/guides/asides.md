@@ -67,3 +67,6 @@ Notes are the default kind when you omit `kind`.
 
 RAG packs may contain `:::kind` fences. That form is **export packaging only**,
 not an authoring dialect. In `content/` always use the Aside tags shown above.
+
+Related: [[guides/overview|content model]], [[guides/apex-markdown|Apex showcase]],
+and [[reference/frontmatter|frontmatter]].

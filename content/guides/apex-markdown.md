@@ -29,6 +29,7 @@ Subscript and superscript: H~2~O, e=mc^2^.
 - [x] Feature 1 — ApexMarkdown Unified
 - [x] Feature 2 — HTML default CLI
 - [x] Feature 6 — graph-aware nav + in-page TOC
+- [x] Feature 7 — includes + wiki-links (pre-Apex on HTML path)
 - [x] P2/P3 — incremental, watch, jobs, multi-target
 
 ## Math
@@ -49,6 +50,7 @@ $$
 | Graph validation | Yes | Trunk / Satellite |
 | Nested asides | No | Contract forbids |
 | Site nav + TOC | Yes | Layout markers in v0.2 |
+| Includes + wiki-links | Yes | Before Apex; fences stay raw |
 
 ## Definition lists
 
@@ -80,9 +82,12 @@ Product callouts use the registered Aside component — not unrestricted MDX. �
 <Aside kind="info">
 
 This is Boris’s supported Aside — tips, warnings, and notes that stay in
-document order. Full syntax: [Using Asides](asides.html).
+document order. Full syntax: [[guides/asides|Using Asides]].
 
 </Aside>
 
 Document the tag syntax inside fenced code on the asides page so the tokenizer
 does not treat examples as nested components.
+
+For graph structure and closed keys, see [[guides/overview|the content model]]
+and [[reference/frontmatter]].

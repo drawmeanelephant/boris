@@ -57,5 +57,10 @@ status: published
 | Extra keys | `EFRONTMATTER` |
 
 RAG export may still *emit* a field named `parent_entry` in catalogs — export
-packaging only, never author grammar. See [RAG export](../guides/rag-export.html)
-and [Trunk/Satellite](../guides/trunk-satellite.html).
+packaging only, never author grammar. See [[guides/rag-export|RAG export]] and
+[[guides/trunk-satellite|Trunk/Satellite]].
+
+Entity ids from this table are also the targets of wiki-links (for example
+[[reference/frontmatter|this page]]). Shared fragments live under
+`content/includes/` and are pulled in with include directives — see
+[[getting-started]] and [[guides/overview|the content model]].

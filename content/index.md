@@ -17,6 +17,7 @@ Teaching beat (narrative, not CLI flags): **Load → Roll → Ignite → Reset**
 **Product v0.2.0.** Bare `boris` builds HTML under `dist/` with **ApexMarkdown
 Unified**. The default layout ships graph-aware **site nav**, **breadcrumb**,
 and an in-page **table of contents** — look at the chrome around this page.
+Includes and wiki-links expand on this path before Apex runs.
 
 </Aside>
 
@@ -31,11 +32,12 @@ and an in-page **table of contents** — look at the chrome around this page.
 
 | Page | What you’ll learn |
 |------|-------------------|
-| [Getting started](getting-started.html) | Build Boris, first site, three modes |
-| [CLI and modes](guides/cli-and-modes.html) | HTML default vs `--out` vs `--rag` |
-| [Content model](guides/overview.html) | Pipeline + Trunk/Satellite |
-| [Apex showcase](guides/apex-markdown.html) | Unified Markdown features |
-| [Frontmatter reference](reference/frontmatter.html) | Closed author keys |
+| [[getting-started|Getting started]] | Build Boris, first site, three modes |
+| [[guides/cli-and-modes|CLI and modes]] | HTML default vs `--out` vs `--rag` |
+| [[guides/overview|Content model]] | Pipeline + Trunk/Satellite |
+| [[guides/apex-markdown|Apex showcase]] | Unified Markdown features |
+| [[reference/frontmatter|Frontmatter reference]] | Closed author keys |
 
 This tree under `content/` is **dogfood**: it is the sample docs site compiled by
-the product itself.
+the product itself. Real includes and wiki-links appear on pages such as
+[[getting-started]] and [[guides/overview]].

@@ -37,6 +37,9 @@ Multi-target isolated outputs:
 | `--watch` | off | Debounced rebuild; implies incremental |
 | `--html-layout PATH` | `layouts/main.html` | Must contain `{{content}}` once |
 
+On this path Boris also expands includes and wiki-links before Apex (see
+[[getting-started]] and [[guides/overview|content model]]).
+
 ## 2. JSON IR
 
 ```bash
@@ -63,7 +66,7 @@ changes.
 ```
 
 There is **no** `zig build rag` product step. Details:
-[RAG export](rag-export.html).
+[[guides/rag-export|RAG export]].
 
 ## Conflicts
 
@@ -74,3 +77,5 @@ Incompatible mode combinations exit **2** (usage). Example:
 ```
 
 Exit codes: `0` ok · `1` content · `2` usage · `3` I/O.
+
+Back to [[getting-started|Getting started]].

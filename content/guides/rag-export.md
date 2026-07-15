@@ -47,4 +47,8 @@ rag/
 
 Never copy export-only field names or `:::kind` authoring back into `content/`.
 
+For day-to-day site builds use bare `boris` → `dist/` (see
+[[guides/cli-and-modes|CLI and modes]]). Frontmatter rules:
+[[reference/frontmatter]].
+
 Normative contract: `docs/contracts/rag-export.md` in the repository.

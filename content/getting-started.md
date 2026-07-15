@@ -41,7 +41,7 @@ see site nav on the left, breadcrumb, and a page TOC when the body has headings.
 <Aside kind="tip">
 
 HTML helpers (valid alone, no extra mode flag): `--watch`, `--incremental`,
-`--jobs N` (default jobs is still 1). See [CLI and modes](guides/cli-and-modes.html).
+`--jobs N` (default jobs is still 1). See [[guides/cli-and-modes|CLI and modes]].
 
 </Aside>
 
@@ -49,10 +49,12 @@ HTML helpers (valid alone, no extra mode flag): `--watch`, `--incremental`,
 
 1. Markdown under `content/` (case-sensitive `.md` / `.mdx`).
 2. Closed frontmatter — only `id`, `title`, `parent`, `status`, `tags`
-   ([reference](reference/frontmatter.html)).
+   ([[reference/frontmatter|frontmatter reference]]).
 3. Optional layout chrome in `layouts/main.html` (`{{content}}` required;
    `{{nav}}` / `{{breadcrumb}}` / `{{title}}` / `{{toc}}` optional).
-4. Optional includes and wiki-links (expanded before Apex):
+4. Optional **includes** and **wiki-links** (Boris expands them on the HTML path
+   **before** Apex). Syntax examples stay raw inside fences; live forms below
+   resolve at compile time.
 
 ```markdown
 {{include includes/shared-tip.md}}
@@ -61,6 +63,8 @@ See also [[guides/overview|the content model]].
 ```
 
 {{include includes/shared-tip.md}}
+
+{{include includes/authoring-note.md}}
 
 Next: the [[guides/overview|content model]] or jump straight to
 [[guides/trunk-satellite|Trunk vs Satellite]].

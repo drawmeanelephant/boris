@@ -55,5 +55,7 @@ Site `{{nav}}` and `{{breadcrumb}}` are derived from the frozen Trunk/Satellite
 forest. Changing a title or parent dirties pages that embed the forest when
 incremental builds include nav material in fingerprints.
 
-See also: [frontmatter reference](../reference/frontmatter.html),
-[content model overview](overview.html).
+Wiki-links use the same entity-id space as `parent`. A bare link to
+[[guides/overview]] resolves to this section’s trunk. See
+[[reference/frontmatter|frontmatter reference]] and the
+[[guides/overview|content model overview]].
