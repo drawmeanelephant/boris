@@ -50,6 +50,7 @@ const html_nav = @import("html_nav.zig");
 const html_toc = @import("html_toc.zig");
 const include_mod = @import("include.zig");
 const wikilink = @import("wikilink.zig");
+const json_out = @import("json_out.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -384,6 +385,8 @@ pub const CacheEntry = struct {
     entity_id: []const u8,
     fingerprint: []const u8,
     output_path: []const u8,
+    /// On-disk output size at last successful publish; used for incremental freshness.
+    output_size: u64 = 0,
 };
 
 pub const CacheManifest = struct {
@@ -395,6 +398,8 @@ pub const ParsedCacheEntry = struct {
     entity_id: []const u8,
     fingerprint: []const u8,
     output_path: []const u8,
+    /// Optional for older manifests; missing/zero forces re-render when paired with size check.
+    output_size: u64 = 0,
 };
 
 pub const ParsedCacheManifest = struct {
@@ -436,20 +441,32 @@ fn collectTransitIncludes(
 }
 
 fn writeCacheManifest(writer: anytype, manifest: CacheManifest) !void {
-    try writer.print("{{\n  \"format_version\": \"{s}\",\n  \"entries\": [\n", .{manifest.format_version});
+    // Buffer via ArrayList so entity_id / paths / fingerprints go through json_out escaping.
+    const gpa = std.heap.page_allocator;
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+
+    try buf.appendSlice(gpa, "{\n  \"format_version\": ");
+    try json_out.writeString(&buf, gpa, manifest.format_version);
+    try buf.appendSlice(gpa, ",\n  \"entries\": [\n");
     for (manifest.entries, 0..) |entry, i| {
-        try writer.print("    {{\n      \"entity_id\": \"{s}\",\n      \"fingerprint\": \"{s}\",\n      \"output_path\": \"{s}\"\n    }}", .{
-            entry.entity_id,
-            entry.fingerprint,
-            entry.output_path,
-        });
+        try buf.appendSlice(gpa, "    {\n      \"entity_id\": ");
+        try json_out.writeString(&buf, gpa, entry.entity_id);
+        try buf.appendSlice(gpa, ",\n      \"fingerprint\": ");
+        try json_out.writeString(&buf, gpa, entry.fingerprint);
+        try buf.appendSlice(gpa, ",\n      \"output_path\": ");
+        try json_out.writeString(&buf, gpa, entry.output_path);
+        try buf.appendSlice(gpa, ",\n      \"output_size\": ");
+        try json_out.writeUsize(&buf, gpa, @intCast(entry.output_size));
+        try buf.appendSlice(gpa, "\n    }");
         if (i + 1 < manifest.entries.len) {
-            try writer.writeAll(",\n");
+            try buf.appendSlice(gpa, ",\n");
         } else {
-            try writer.writeAll("\n");
+            try buf.append(gpa, '\n');
         }
     }
-    try writer.writeAll("  ]\n}\n");
+    try buf.appendSlice(gpa, "  ]\n}\n");
+    try writer.writeAll(buf.items);
 }
 
 /// Site compile: layout → promote PageDb → graph freeze → whiteboard loop → dist/.
@@ -476,7 +493,7 @@ pub fn compileHtmlSite(
     try loadAndPromote(io, gpa, &db, options.content_root);
 
     // 3. Graph validate + freeze (shared rules with IR/RAG; Feature 6 nav).
-    var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav);
+    var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title);
     defer site.deinit();
 
     return try compilePagesWithSite(io, gpa, &db, layout, options, &site);
@@ -862,7 +879,7 @@ pub fn compilePages(
 ) !CompileStats {
     // Content-only layouts can compile without graph chrome; still freeze so
     // invalid parents fail loud on the HTML path.
-    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav);
+    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title);
     defer site.deinit();
     return compilePagesWithSite(io, gpa, db, layout, options, &site);
 }
@@ -891,7 +908,7 @@ pub fn compilePagesWithShared(
     shared: *const SharedCompileState,
     layout_bytes: []const u8,
 ) !CompileStats {
-    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav);
+    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title);
     defer site.deinit();
     return compilePagesInner(io, gpa, db, layout, options, shared, layout_bytes, &site);
 }
@@ -980,6 +997,8 @@ fn compilePagesInner(
     defer content_dir.close(io);
 
     try cwd.createDirPath(io, options.dist_dir);
+    // Re-check for symlink swap after validation (TOCTOU shrink — issue #11).
+    try target_mod.rejectSymlinkAlongPath(io, cwd, gpa, options.dist_dir);
     var dist_dir = try cwd.openDir(io, options.dist_dir, .{ .iterate = true });
     defer dist_dir.close(io);
 
@@ -992,6 +1011,7 @@ fn compilePagesInner(
     cwd.deleteTree(io, stage_rel) catch {};
     try cwd.createDirPath(io, stage_rel);
     errdefer cwd.deleteTree(io, stage_rel) catch {};
+    try target_mod.rejectSymlinkAlongPath(io, cwd, gpa, stage_rel);
 
     var stage_dir = try cwd.openDir(io, stage_rel, .{ .iterate = true });
     defer stage_dir.close(io);
@@ -1058,7 +1078,9 @@ fn compilePagesInner(
         defer gpa.free(inc_views);
         for (inc_owned, 0..) |b, j| inc_views[j] = b;
 
-        const nav_material: []const u8 = if (layout.has_nav) site.site_nav_material else "";
+        // Graph chrome (nav, breadcrumb, title) all depend on frozen site material.
+        const needs_site_material = layout.has_nav or layout.has_breadcrumb or layout.has_title;
+        const nav_material: []const u8 = if (needs_site_material) site.site_nav_material else "";
         // Wiki reference material from page body + transitive include fragment bodies
         // so title/path renames dirty parents that only wiki-link via includes.
         const body_for_wiki = include_mod.bodyOfSource(shared.source_bytes[page_idx]);
@@ -1103,11 +1125,13 @@ fn compilePagesInner(
         );
         fingerprints[page_idx] = try fingerprintHex(fp_bytes, gpa);
 
+        var output_size: u64 = 0;
         var output_exists = false;
         if (dist_dir.openFile(io, page.output_path, .{})) |file| {
             if (file.stat(io)) |st| {
                 if (st.size > 0) {
                     output_exists = true;
+                    output_size = st.size;
                 }
             } else |_| {}
             file.close(io);
@@ -1121,7 +1145,9 @@ fn compilePagesInner(
                         std.mem.eql(u8, entry.output_path, page.output_path) and
                         std.mem.eql(u8, entry.fingerprint, fingerprints[page_idx]))
                     {
-                        if (output_exists) {
+                        // Freshness requires non-empty output whose size matches
+                        // the size recorded at last publish (guards truncated/corrupt files).
+                        if (output_exists and entry.output_size > 0 and entry.output_size == output_size) {
                             skip_render = true;
                             break;
                         }
@@ -1232,10 +1258,22 @@ fn compilePagesInner(
         var cache_entries = try gpa.alloc(CacheEntry, db.len());
         defer gpa.free(cache_entries);
         for (db.items(), 0..) |page, page_idx| {
+            var out_size: u64 = 0;
+            // Prefer staged (just-written) size; fall back to final dist for cached pages.
+            if (stage_dir.openFile(io, page.output_path, .{})) |file| {
+                if (file.stat(io)) |st| out_size = st.size else |_| {}
+                file.close(io);
+            } else |_| {
+                if (dist_dir.openFile(io, page.output_path, .{})) |file| {
+                    if (file.stat(io)) |st| out_size = st.size else |_| {}
+                    file.close(io);
+                } else |_| {}
+            }
             cache_entries[page_idx] = .{
                 .entity_id = page.entity_id,
                 .fingerprint = fingerprints[page_idx],
                 .output_path = page.output_path,
+                .output_size = out_size,
             };
         }
 
@@ -1259,19 +1297,32 @@ fn compilePagesInner(
     // Commit: rename staged files into final dist (final untouched until this point).
     try publishStageTree(io, gpa, stage_dir, dist_dir);
 
-    // Stale cleanup on final only after successful commit
-    if (options.incremental) {
+    // Stale cleanup: drop published HTML for pages no longer in PageDb.
+    // Prefer prior incremental manifest when present; otherwise scan dist/*.html
+    // against current output_path set so --watch without --incremental still prunes.
+    {
+        var live_paths: std.StringHashMapUnmanaged(void) = .{};
+        defer live_paths.deinit(gpa);
+        for (db.items()) |p| {
+            try live_paths.put(gpa, p.output_path, {});
+        }
+
         if (parsed_manifest) |pm| {
             for (pm.value.entries) |entry| {
-                var still_exists = false;
-                for (db.items()) |p| {
-                    if (std.mem.eql(u8, p.entity_id, entry.entity_id)) {
-                        still_exists = true;
-                        break;
-                    }
-                }
-                if (!still_exists) {
+                if (!live_paths.contains(entry.output_path)) {
                     dist_dir.deleteFile(io, entry.output_path) catch {};
+                }
+            }
+        } else if (!options.incremental) {
+            // Full rebuild: remove html outputs under dist that are not in this build.
+            var walker = try dist_dir.walk(gpa);
+            defer walker.deinit();
+            while (try walker.next(io)) |entry| {
+                if (entry.kind != .file) continue;
+                if (!std.mem.endsWith(u8, entry.path, ".html")) continue;
+                if (std.mem.startsWith(u8, entry.path, ".boris-cache")) continue;
+                if (!live_paths.contains(entry.path)) {
+                    dist_dir.deleteFile(io, entry.path) catch {};
                 }
             }
         }

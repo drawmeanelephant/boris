@@ -38,10 +38,19 @@ How to use going forward:
 
 ### Fixed
 
-- CLI/Apex/TOC hygiene: preserve exit 3 for per-file and multi-target I/O
-  failures, map ambiguous upstream Apex NULL results to render failure rather
-  than OOM, parse heading tags across quoted `>` attributes, and free stripped
-  heading text when TOC collection append fails.
+- Adversarial backlog (issues #8–#28 remaining after #7/#23): include expansion
+  already landed in #29; this cut hardens cache fingerprints (little-endian
+  length prefixes, JSON-escaped manifest, output size freshness, page→page
+  affected walk), TOC attribute-aware tag ends + OOM free, IR per-file read
+  exit code `.io`, Apex NULL≠OOM, aside O(N) line/col cursor, graph freeze O(n)
+  id index + per-cycle EPARENTCYCLE messages, wiki O(1) node map, frontmatter
+  helper YAML rejection, watch mtime+size / transient poll recovery / debounce
+  burst cap / scan dir skips, layout cwd root avoidance, stale HTML prune on
+  full rebuild, and pre-open symlink re-check on dist/stage.
+- CLI/Apex/TOC hygiene follow-on: multi-target I/O vs content failure split
+  (`MultiTargetIoFailed` → exit 3), reserved Apex render status for upstream
+  NULL, attribute-aware TOC `id` extraction (not substring), and alloc-failure
+  coverage for heading text free-on-OOM.
 - Graph validation rejects case-only entity id collisions (`guides/intro` vs
   `GUIDES/INTRO`) with `EINVALIDPATH` — prevents silent output overwrite on
   case-insensitive filesystems. Wires

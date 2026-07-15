@@ -72,7 +72,7 @@ pub fn collectHeadings(
         };
         const inner = html[gt + 1 .. close];
         const text = try stripTags(allocator, inner);
-
+        // Free on append OOM only — after a successful append, list owns `text`.
         out.append(allocator, .{
             .level = level,
             .id = id,
@@ -230,6 +230,25 @@ test "collectHeadings h1-h3 with ids; skip h4" {
     try std.testing.expectEqualStrings("Sub &amp; More", list.items[1].text);
     try std.testing.expectEqual(@as(u8, 3), list.items[2].level);
     try std.testing.expectEqualStrings("deep", list.items[2].id);
+}
+
+test "collectHeadings ignores > inside attribute values" {
+    const gpa = std.testing.allocator;
+    const html =
+        \\<h2 id="x" title="a>b">Real</h2>
+        \\<h2 title="a>b" id="y">Also Real</h2>
+    ;
+    var list: std.ArrayList(Heading) = .empty;
+    defer {
+        for (list.items) |h| gpa.free(h.text);
+        list.deinit(gpa);
+    }
+    try collectHeadings(gpa, html, &list);
+    try std.testing.expectEqual(@as(usize, 2), list.items.len);
+    try std.testing.expectEqualStrings("x", list.items[0].id);
+    try std.testing.expectEqualStrings("Real", list.items[0].text);
+    try std.testing.expectEqualStrings("y", list.items[1].id);
+    try std.testing.expectEqualStrings("Also Real", list.items[1].text);
 }
 
 test "renderToc empty when no headings" {
