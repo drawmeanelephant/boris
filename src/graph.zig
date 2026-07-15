@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const diag = @import("diag.zig");
+const identity = @import("identity.zig");
 
 pub const Role = enum {
     trunk,
@@ -80,7 +81,13 @@ fn buildIdIndex(list_gpa: std.mem.Allocator, nodes: []const Node) !std.StringHas
 }
 
 /// Detect duplicate ids among provisional nodes (by id string).
-/// Does not remove nodes; records EDUPLICATEID on later occurrences (sorted by source_path first).
+///
+/// - Byte-exact duplicates → `EDUPLICATEID` (later occurrence, source_path order).
+/// - Case-only collisions (`guides/intro` vs `GUIDES/INTRO`) → `EINVALIDPATH`,
+///   because case-insensitive filesystems silently collide on output paths.
+///   See fixture `docs/contracts/fixtures/case-id-collision/`.
+///
+/// Does not remove nodes.
 pub fn diagnoseDuplicateIds(
     list_gpa: std.mem.Allocator,
     retain: std.mem.Allocator,
@@ -100,16 +107,20 @@ pub fn diagnoseDuplicateIds(
 
     for (order.items, 0..) |ni, pos| {
         const n = nodes[ni];
-        var earlier: ?usize = null;
+        var earlier_exact: ?usize = null;
+        var earlier_case: ?usize = null;
         var j: usize = 0;
         while (j < pos) : (j += 1) {
             const oj = order.items[j];
             if (std.mem.eql(u8, nodes[oj].id, n.id)) {
-                earlier = oj;
+                earlier_exact = oj;
                 break;
             }
+            if (earlier_case == null and identity.pathsDifferOnlyInCase(nodes[oj].id, n.id)) {
+                earlier_case = oj;
+            }
         }
-        if (earlier) |ei| {
+        if (earlier_exact) |ei| {
             const msg = try std.fmt.allocPrint(
                 retain,
                 "duplicate id \"{s}\" (also {s})",
@@ -120,6 +131,22 @@ pub fn diagnoseDuplicateIds(
                 .code = .EDUPLICATEID,
                 .message = msg,
                 .remediation = try retain.dupe(u8, "Give each document a unique id (path-derived or id: override)"),
+                .source_path = n.source_path,
+                .line = 1,
+                .column = 1,
+                .id = n.id,
+            });
+        } else if (earlier_case) |ei| {
+            const msg = try std.fmt.allocPrint(
+                retain,
+                "entity ids differ only in case: \"{s}\" ({s}) and \"{s}\" ({s})",
+                .{ n.id, n.source_path, nodes[ei].id, nodes[ei].source_path },
+            );
+            try diags.append(list_gpa, .{
+                .severity = .error_,
+                .code = .EINVALIDPATH,
+                .message = msg,
+                .remediation = try retain.dupe(u8, "Rename one id so entity ids are unique ignoring case (output paths collide on case-insensitive filesystems)"),
                 .source_path = n.source_path,
                 .line = 1,
                 .column = 1,
@@ -751,6 +778,39 @@ test "validateTopology satellite-of-satellite is hard error EPARENTNOTTRUNK" {
 test "resolve is alias of validateTopology" {
     // Topology helper remains; product paths use `validate` (dups + topology).
     try std.testing.expect(@TypeOf(resolve) == @TypeOf(validateTopology));
+}
+
+test "diagnoseDuplicateIds detects case-only id collisions" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+    var nodes = [_]Node{
+        .{ .id = "guides/intro", .source_path = "lower.md" },
+        .{ .id = "GUIDES/INTRO", .source_path = "upper.md" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+    try diagnoseDuplicateIds(gpa, retain, &nodes, &diags);
+    try std.testing.expectEqual(@as(usize, 1), diags.items.len);
+    try std.testing.expect(diags.items[0].code == .EINVALIDPATH);
+    try std.testing.expect(diag.countErrors(diags.items) == 1);
+}
+
+test "diagnoseDuplicateIds byte-exact still EDUPLICATEID" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+    var nodes = [_]Node{
+        .{ .id = "shared", .source_path = "alpha.md" },
+        .{ .id = "shared", .source_path = "beta.md" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+    try diagnoseDuplicateIds(gpa, retain, &nodes, &diags);
+    try std.testing.expectEqual(@as(usize, 1), diags.items.len);
+    try std.testing.expect(diags.items[0].code == .EDUPLICATEID);
 }
 
 test "buildNav breadcrumb children siblings from frozen graph" {

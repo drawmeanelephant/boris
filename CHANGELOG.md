@@ -19,6 +19,14 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Fixed
+
+- Graph validation rejects case-only entity id collisions (`guides/intro` vs
+  `GUIDES/INTRO`) with `EINVALIDPATH` — prevents silent output overwrite on
+  case-insensitive filesystems. Wires
+  `docs/contracts/fixtures/case-id-collision/`. Removes unused `src/discover.zig`
+  (divergent dead discovery path that held the unused case-collision helper).
+
 ### Docs
 
 - Apex showcase: enable live dogfood for collapsible callouts, image IAL,

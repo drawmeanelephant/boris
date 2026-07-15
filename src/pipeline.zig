@@ -939,6 +939,7 @@ test "invalid graph fixtures emit stable categories" {
         .{ .root = "docs/contracts/fixtures/satellite-of-satellite/content", .code = .EPARENTNOTTRUNK },
         .{ .root = "docs/contracts/fixtures/cycles/content", .code = .EPARENTCYCLE },
         .{ .root = "docs/contracts/fixtures/longer-cycle/content", .code = .EPARENTCYCLE },
+        .{ .root = "docs/contracts/fixtures/case-id-collision/content", .code = .EINVALIDPATH },
         .{ .root = "fixtures/content/invalid/duplicate-id", .code = .EDUPLICATEID },
         .{ .root = "fixtures/content/invalid/cycle", .code = .EPARENTCYCLE },
         .{ .root = "fixtures/content/invalid/satellite-of-satellite", .code = .EPARENTNOTTRUNK },

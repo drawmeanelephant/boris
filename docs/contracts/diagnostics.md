@@ -98,7 +98,7 @@ must emit exactly these strings (no underscore variants such as `E_DUP_ID`).
 | `EPARENTCYCLE` | error | Cycle in parent edges | `graph.validateTopology` |
 | `EFRONTMATTER` | error | Unclosed fence, bad line, unknown key, duplicate key, unsupported syntax, empty/oversize value, invalid status/tags | `parser.parse` → pipeline |
 | `EINVALIDUTF8` | error | Source not valid UTF-8, or leading UTF-8 BOM | `parser.parse` → pipeline |
-| `EINVALIDPATH` | error | Path or entity id cannot be canonicalized; illegal segments; absolute path; empty / `.` / `..` components; invalid frontmatter `id:` | scanner / `parser.parse` → pipeline |
+| `EINVALIDPATH` | error | Path or entity id cannot be canonicalized; illegal segments; absolute path; empty / `.` / `..` components; invalid frontmatter `id:`; **or** two pages’ entity ids differ only in letter case (output collision on case-insensitive FS) | scanner / `parser.parse` / `graph.diagnoseDuplicateIds` → pipeline |
 | `ECOMPONENT` | error | Aside / component tokenizer failure (unknown PascalCase tag, nested Aside, invalid kind/id, bad attributes, unterminated Aside) | `aside.tokenizeBody` → pipeline |
 | `EINCLUDESYNTAX` | error | Malformed `{{include …}}` directive | `include` → HTML compile |
 | `EINCLUDEMISSING` | error | Include target path not found / unreadable | `include` → HTML compile |
@@ -116,6 +116,7 @@ must emit exactly these strings (no underscore variants such as `E_DUP_ID`).
 | Nested mapping / unsupported YAML form | `EFRONTMATTER` |
 | Unclosed frontmatter | `EFRONTMATTER` |
 | Frontmatter `id:` with `..` or absolute shape | `EINVALIDPATH` |
+| Case-only entity id pair (`a` vs `A`) | `EINVALIDPATH` |
 | Content root missing | `EIO` |
 | Symlink under content root | `EIO` |
 
@@ -192,7 +193,7 @@ categories** and non-publication of graph IR on failure.
 | `EPARENTCYCLE` | `cycle`, contract `cycles` / `longer-cycle` |
 | `EFRONTMATTER` | `duplicate-key`, `unclosed-frontmatter`, `nested-mapping` |
 | `EINVALIDUTF8` | `invalid-utf8` |
-| `EINVALIDPATH` | `invalid-path-id`, contract `invalid-id` |
+| `EINVALIDPATH` | `invalid-path-id`, contract `invalid-id`, contract `case-id-collision` |
 
 `EUSAGE` and `EIO` are CLI/runtime categories; content-tree fixtures do not
 cover them except missing content root (`EIO`).
