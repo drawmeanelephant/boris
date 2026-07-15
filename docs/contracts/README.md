@@ -24,6 +24,7 @@ is **not** proof that every surface is the default CLI product.
 | Multi-target isolated outputs | **Implemented** — CLI, isolation, stage commit, selective watch (P3.3) |
 | HTML `dist/` default CLI | **Implemented** (Feature 2) |
 | Includes + wiki-links (HTML) | **Implemented** — pre-Apex; see `includes-and-wiki-links.md` |
+| IR 0.2 dependency edges + reverse index | **Contracted (F8.0)** — implementation pending F8.1–F8.2; current binary remains IR 0.1 |
 
 ## Canonical ownership (one document per topic)
 
@@ -47,7 +48,7 @@ per topic:
 | Multi-target isolated outputs | [multi-target-isolated-output.md](multi-target-isolated-output.md) |
 | Includes + wiki-links | [includes-and-wiki-links.md](includes-and-wiki-links.md) |
 
-### Normative documents (v0.1) — full list
+### Normative documents (IR v0.2 target) — full list
 
 | Document | Topic |
 |----------|-------|
@@ -55,7 +56,7 @@ per topic:
 | [identity-and-paths.md](identity-and-paths.md) | Source paths, entity ids, `/` separators, `.md`/`.mdx` case rules |
 | [scanner.md](scanner.md) | Deterministic discovery walk, sort key, symlink policy (m4) |
 | [diagnostics.md](diagnostics.md) | Stable categories (`EDUPLICATEID`, …), severity, exit codes |
-| [ir-schema.md](ir-schema.md) | Trunk/Satellite graph, deterministic JSON under `.boris/` |
+| [ir-schema.md](ir-schema.md) | Trunk/Satellite graph, typed dependency edges, reverse index, deterministic JSON under `.boris/` |
 | [rag-export.md](rag-export.md) | Optional RAG export; schema versioning; `:::kind` export-only |
 | [components.md](components.md) | Constrained `<Aside>` tokenizer, kinds, id grammar, nested policy (m10) |
 | [apex-abi.md](apex-abi.md) | In-process Apex C ABI, allocator lifetime, Zig error rules (m8) |
@@ -63,7 +64,7 @@ per topic:
 | [parallel-rendering.md](parallel-rendering.md) | Bounded worker pool parallel rendering, thread/memory isolation, deterministic order |
 | [watch-mode.md](watch-mode.md) | Opt-in watch mode, event coalescing/normalization, rebuild serialization, safe recovery |
 | [multi-target-isolated-output.md](multi-target-isolated-output.md) | Multi-target CLI/config, output isolation, cache namespaces (P3.3) |
-| [includes-and-wiki-links.md](includes-and-wiki-links.md) | `{{include}}` + `[[wiki]]` pre-Apex; cycles; `includes/` fragment tree |
+| [includes-and-wiki-links.md](includes-and-wiki-links.md) | `{{include}}` + `[[wiki]]` pre-Apex; cycles; fragment tree; IR 0.2 edge projection |
 
 ## Redirect / compatibility paths (non-normative)
 

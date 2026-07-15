@@ -1,6 +1,7 @@
 # Diagnostics, severity, exit behavior, source locations
 
-**Status:** normative contract — **implemented** by the milestone 6 IR pipeline  
+**Status:** normative contract — core implemented; Feature 8 extends existing
+include/reference categories to IR dependency resolution without adding codes
 **Emitted by:** `src/diag.zig` (codes), `src/parser.zig` (parse categories),
 `src/graph.zig` (graph codes), `src/pipeline.zig` (aggregation + stderr)
 
@@ -23,7 +24,7 @@
 | `warning` | Suspicious but allowed; compile may succeed | no (exit 0 if no errors) |
 | `info` | Informational | no |
 
-v0.1 ships almost all issues as **`error`**. Warnings are reserved; none are
+v0.2 ships almost all issues as **`error`**. Warnings are reserved; none are
 required by acceptance fixtures unless noted later.
 
 ---
@@ -31,7 +32,7 @@ required by acceptance fixtures unless noted later.
 ## Diagnostic object
 
 Used on stderr (text form) and in `build-report.json` (JSON form). Diagnostics
-are **not** embedded on `manifest.json` in v0.1.
+are **not** embedded on `manifest.json` in v0.2.
 
 ### JSON fields (key order)
 
@@ -47,7 +48,7 @@ severity, code, message, remediation, sourcePath, line, column, id
 | `remediation` | string | yes | Author guidance; may be empty string |
 | `sourcePath` | string \| null | yes | Content-relative path, or null if N/A |
 | `line` | integer \| null | yes | **1-based** line in source file; null if N/A |
-| `column` | integer \| null | yes | **1-based** column (v0.1: **byte offset within line**); null if N/A |
+| `column` | integer \| null | yes | **1-based** column (v0.2: **byte offset within line**); null if N/A |
 | `id` | string \| null | yes | Related entity id when known |
 
 ### Text form (stderr)
@@ -84,7 +85,7 @@ string first), then `line`, `column`, `code`, `message` — all ascending.
 
 ---
 
-## Error categories (v0.1 closed set)
+## Error categories (v0.2 closed set)
 
 These codes are the **stable machine-readable categories**. Implementations
 must emit exactly these strings (no underscore variants such as `E_DUP_ID`).
@@ -100,11 +101,11 @@ must emit exactly these strings (no underscore variants such as `E_DUP_ID`).
 | `EINVALIDUTF8` | error | Source not valid UTF-8, or leading UTF-8 BOM | `parser.parse` → pipeline |
 | `EINVALIDPATH` | error | Path or entity id cannot be canonicalized; illegal segments; absolute path; empty / `.` / `..` components; invalid frontmatter `id:`; **or** two pages’ entity ids differ only in letter case (output collision on case-insensitive FS) | scanner / `parser.parse` / `graph.diagnoseDuplicateIds` → pipeline |
 | `ECOMPONENT` | error | Aside / component tokenizer failure (unknown PascalCase tag, nested Aside, invalid kind/id, bad attributes, unterminated Aside) | `aside.tokenizeBody` → pipeline |
-| `EINCLUDESYNTAX` | error | Malformed `{{include …}}` directive | `include` → HTML compile |
-| `EINCLUDEMISSING` | error | Include target path not found / unreadable | `include` → HTML compile |
-| `EINCLUDECYCLE` | error | Transclusion cycle among includes (or depth exceeded) | `include` → HTML compile |
-| `EREFERENCESYNTAX` | error | Malformed `[[…]]` wiki-link | `wikilink` → HTML compile |
-| `EREFERENCEMISSING` | error | Wiki-link target entity id not in the page graph | `wikilink` → HTML compile |
+| `EINCLUDESYNTAX` | error | Malformed `{{include …}}` directive | `include` → HTML / IR dependency resolution |
+| `EINCLUDEMISSING` | error | Include target path not found / unreadable | `include` → HTML / IR dependency resolution |
+| `EINCLUDECYCLE` | error | Transclusion cycle among includes (or depth exceeded) | `include` → HTML / IR dependency resolution |
+| `EREFERENCESYNTAX` | error | Malformed `[[…]]` wiki-link | `wikilink` → HTML / IR dependency resolution |
+| `EREFERENCEMISSING` | error | Wiki-link target entity id not in the page graph | `wikilink` → HTML / IR dependency resolution |
 | `EUSAGE` | error | CLI usage / flag error (unknown flag, conflicts, malformed options) | CLI (exit 2; not in build-report) |
 | `EIO` | error | I/O or system failure (missing content root, unreadable file, unexpected runtime) | pipeline / CLI (exit 3 when pure I/O) |
 
@@ -120,7 +121,7 @@ must emit exactly these strings (no underscore variants such as `E_DUP_ID`).
 | Content root missing | `EIO` |
 | Symlink under content root | `EIO` |
 
-Unknown codes must not be invented by the v0.1 compiler without a contract
+Unknown codes must not be invented by the v0.2 compiler without a contract
 amendment. Implementations may later **subdivide** messages under the same
 category but must keep the `code` string stable.
 
@@ -133,8 +134,8 @@ category but must keep the `code` string stable.
 | Duplicate id | First line of the later file in `sourcePath` order (report both paths in `message`) |
 | Unclosed frontmatter | Line of opening `---` (1:1) or EOF line |
 | Unknown / bad key | Start of that field line |
-| Missing parent | Page source (line/column from validation; v0.1 often `1:1`) |
-| Cycle | Each involved file (`1:1` in v0.1) with full cycle path in message |
+| Missing parent | Page source (line/column from validation; v0.2 often `1:1`) |
+| Cycle | Each involved file (`1:1` in v0.2) with full cycle path in message |
 | Encoding | `1:1` of the file |
 | Invalid path/id | The offending path or the `id:` field line |
 
@@ -173,7 +174,7 @@ Rules:
 | Stream | Content |
 |--------|---------|
 | **stderr** | Diagnostics (text form); optional progress logs (`boris: load/roll/ignite/reset`) |
-| **stdout** | Reserved; v0.1 prints nothing on the success path (progress uses stderr via `std.debug`) |
+| **stdout** | Reserved; v0.2 prints nothing on the success path (progress uses stderr via `std.debug`) |
 
 ---
 

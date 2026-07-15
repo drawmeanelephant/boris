@@ -1,6 +1,7 @@
 # Includes and wiki-links (Boris-mediated)
 
-**Status:** normative contract — **implemented** on the HTML path (product v0.2+)  
+**Status:** normative contract — HTML implemented (product v0.2+); IR 0.2 edge
+publication contracted for Feature 8 and pending F8.1–F8.2
 **Modules:** [`src/include.zig`](../../src/include.zig), [`src/wikilink.zig`](../../src/wikilink.zig),
 wired from [`src/compile.zig`](../../src/compile.zig)  
 **Related:** [html-output.md](html-output.md), [diagnostics.md](diagnostics.md),
@@ -14,8 +15,10 @@ wired from [`src/compile.zig`](../../src/compile.zig)
 - Keep Apex sandboxed: `enable_file_includes = false` always (never engine FS reads).
 - Fail loud on missing targets, illegal paths, and include cycles.
 - Include file bytes contribute to the parent page’s HTML cache fingerprint.
-- Do **not** publish include/reference edges in IR `graph.json` under
-  `schemaVersion` `0.1.0` (internal `DependencyIndex` only).
+- Preserve schema `0.1.0` exactly: it never publishes include/reference edges.
+- Under IR schema `0.2.0`, validate these dependencies before freeze and publish
+  direct `include` / `reference` edges plus the canonical reverse index defined
+  by [ir-schema.md](ir-schema.md).
 
 ---
 
@@ -72,6 +75,34 @@ stay sequential. Workers only render with precomputed deps.
 
 ---
 
+## IR 0.2 dependency projection
+
+IR dependency discovery is fence-aware and uses the same syntax, target
+resolution, depth bound, and diagnostic categories as HTML planning. It runs
+sequentially before graph freeze and does not render Markdown.
+
+| Authored locus | Syntax | IR edge |
+|----------------|--------|---------|
+| Discovered page body | `{{include path}}` | `page:<entity-id>` → `source:<canonical-path>` (`include`) |
+| Included source body | `{{include path}}` | `source:<locus-path>` → `source:<canonical-path>` (`include`) |
+| Discovered page body | `[[entity-id]]` | `page:<source-id>` → `page:<target-id>` (`reference`) |
+| Included source body | `[[entity-id]]` | `source:<locus-path>` → `page:<target-id>` (`reference`) |
+
+The `page:` / `source:` notation above is explanatory shorthand. JSON uses
+typed endpoint objects (`{"type":"page","value":"…"}`), as specified by
+the IR contract.
+
+- Edges represent direct active syntax only; nested/transitive dependency
+  closure is recovered by reverse traversal.
+- Repeated directives to the same target in one locus do not duplicate an edge.
+- Wiki labels do not affect edge identity.
+- Include targets remain source endpoints and are not discovered as page nodes
+  merely because they occur in the IR graph.
+- Any include/wiki diagnostic prevents `graph.json` publication, matching other
+  graph validation failures.
+
+---
+
 ## Fingerprints
 
 Page fingerprint inputs (see `cache.computePageFingerprint`) include:
@@ -123,7 +154,7 @@ error: EINCLUDEMISSING: path/to/page.md:line:col: message [remediation]
 
 ## Non-goals (this contract)
 
-- IR `graph.json` edge kinds for include/reference (would require schema bump).
 - Apex-native includes or wiki plugins.
 - Soft warnings for broken links.
 - Heading-fragment wiki targets (`#section`).
+- Emitting internal `layout` or `asset` dependency kinds in IR 0.2.
