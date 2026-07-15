@@ -34,6 +34,8 @@ pub const Options = struct {
     rag_dir: ?[]const u8 = null,
     /// HTML output directory. Set for HTML mode only (default `dist`).
     html_dir: ?[]const u8 = null,
+    /// Global HTML layout template (default `layouts/main.html`).
+    html_layout: []const u8 = "layouts/main.html",
     /// Explicit incremental HTML build mode. Valid only with --html/--html-dir.
     incremental: bool = false,
     /// Bounded parallel rendering worker count (HTML mode only).
@@ -63,6 +65,7 @@ const default_input_dir = "content";
 const default_out_dir = ".boris";
 const default_rag_dir = "rag";
 const default_html_dir = "dist";
+const default_html_layout = "layouts/main.html";
 
 /// Parse argv into `Options`. Does not print, exit, or touch the filesystem.
 ///
@@ -83,13 +86,18 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_rag_dir = false;
     var saw_html = false;
     var saw_html_dir = false;
+    var saw_html_layout = false;
     var saw_incremental = false;
     var saw_jobs = false;
     var saw_watch = false;
     var jobs: usize = 1;
+    var html_layout: []const u8 = default_html_layout;
 
     var targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 };
     errdefer targets.deinit(gpa);
+    // Pending --target-layout NAME=PATH applied after targets are known.
+    var target_layouts: std.ArrayListUnmanaged(struct { name: []const u8, path: []const u8 }) = .{ .items = &.{}, .capacity = 0 };
+    errdefer target_layouts.deinit(gpa);
 
     var i: usize = if (args.len > 0) 1 else 0;
     while (i < args.len) : (i += 1) {
@@ -167,7 +175,30 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             try targets.append(gpa, .{
                 .name = name,
                 .output_dir = output_dir,
+                .layout_path = null,
             });
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--target-layout") or std.mem.startsWith(u8, a, "--target-layout=")) {
+            const val = try takeValue(args, &i, a, "--target-layout");
+            const eq_idx = std.mem.indexOfScalar(u8, val, '=') orelse {
+                return error.InvalidValue;
+            };
+            const name = val[0..eq_idx];
+            const path = val[eq_idx + 1 ..];
+            if (name.len == 0 or path.len == 0) {
+                return error.InvalidValue;
+            }
+            if (!target_mod.isValidTargetName(name)) {
+                return error.InvalidValue;
+            }
+            for (target_layouts.items) |existing| {
+                if (std.mem.eql(u8, existing.name, name)) {
+                    return error.DuplicateFlag;
+                }
+            }
+            try target_layouts.append(gpa, .{ .name = name, .path = path });
             continue;
         }
 
@@ -217,14 +248,22 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        if (std.mem.eql(u8, a, "--html-layout") or std.mem.startsWith(u8, a, "--html-layout=")) {
+            if (saw_html_layout) return error.DuplicateFlag;
+            saw_html_layout = true;
+            html_layout = try takeValue(args, &i, a, "--html-layout");
+            continue;
+        }
+
         if (std.mem.startsWith(u8, a, "-")) {
             return error.UnknownFlag;
         }
         return error.UnexpectedPositional;
     }
 
-    const has_targets = targets.items.len > 0;
-    const is_html_mode = saw_html or saw_html_dir or has_targets;
+    const has_explicit_targets = targets.items.len > 0;
+    const has_target_layouts = target_layouts.items.len > 0;
+    const is_html_mode = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts;
 
     // --- conflict matrix ---------------------------------------------------
     if (saw_rag and saw_no_rag) return error.ConflictingFlags;
@@ -236,7 +275,11 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         return error.ConflictingFlags;
     }
     // Target conflict rules
-    if (has_targets and saw_html_dir) return error.ConflictingFlags;
+    if (has_explicit_targets and saw_html_dir) return error.ConflictingFlags;
+    // --target-layout requires HTML targets
+    if (has_target_layouts and !has_explicit_targets and !(saw_html or saw_html_dir)) {
+        return error.ConflictingFlags;
+    }
 
     // Incremental option is valid only when combined with HTML mode.
     if (saw_incremental and !is_html_mode) {
@@ -250,14 +293,34 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     if (saw_watch and !is_html_mode) {
         return error.ConflictingFlags;
     }
+    // Layout-only flags without HTML mode
+    if ((saw_html_layout or has_target_layouts) and !is_html_mode) {
+        return error.ConflictingFlags;
+    }
 
     // Default target mapping for legacy compatibility
-    if (!has_targets and (saw_html or saw_html_dir)) {
+    if (!has_explicit_targets and (saw_html or saw_html_dir or saw_html_layout)) {
         try targets.append(gpa, .{
             .name = "default",
             .output_dir = if (saw_html_dir) html_dir else "dist",
+            .layout_path = null,
         });
     }
+
+    // Apply --target-layout NAME=PATH onto matching targets
+    for (target_layouts.items) |tl| {
+        var found = false;
+        for (targets.items) |*t| {
+            if (std.mem.eql(u8, t.name, tl.name)) {
+                if (t.layout_path != null) return error.DuplicateFlag;
+                t.layout_path = tl.path;
+                found = true;
+                break;
+            }
+        }
+        if (!found) return error.InvalidValue;
+    }
+    target_layouts.deinit(gpa);
 
     // Mode selection:
     // 1. Default → IR
@@ -299,7 +362,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .input_dir = input_dir,
             .out_dir = null,
             .rag_dir = null,
-            .html_dir = if (has_targets) null else html_dir,
+            .html_dir = if (has_explicit_targets) null else html_dir,
+            .html_layout = html_layout,
             .incremental = saw_incremental or saw_watch,
             .jobs = jobs,
             .watch = saw_watch,
@@ -350,7 +414,9 @@ pub fn printUsage() void {
         \\  --out <DIR>         IR output directory (default: .boris; IR mode only)
         \\  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
         \\  --html-dir <DIR>    HTML output directory (implies HTML; default: dist)
+        \\  --html-layout PATH  Global layout template (default: layouts/main.html)
         \\  --target NAME=DIR   Named HTML output root (repeatable; exclusive with --html-dir)
+        \\  --target-layout N=P Per-target layout override (NAME=PATH; target must exist)
         \\  --incremental       Opt-in to fast, content-addressed incremental HTML rendering (requires HTML mode)
         \\  --watch             Opt-in local-development watch mode for HTML builds (implies --incremental)
         \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; requires HTML mode; default 1)
@@ -364,9 +430,10 @@ pub fn printUsage() void {
         \\  INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json
         \\  system/**  content/pages/**  graph/entity-catalog.md  graph/relations.md
         \\
-        \\HTML artifacts (success; Apex + layout splice; layout: layouts/main.html):
+        \\HTML artifacts (success; Apex + layout splice):
         \\  <html-dir>/**/*.html   or   <each-target-dir>/**/*.html
         \\  <target-dir>/.boris-cache/manifest.json  (with --incremental / --watch)
+        \\  Staging: <target-dir>.boris-stage (ephemeral; committed only on full target success)
         \\
         \\Conflicts (exit 2):
         \\  --rag with --no-rag
@@ -459,7 +526,9 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.eql(u8, a, "--out") or
             std.mem.eql(u8, a, "--rag-dir") or
             std.mem.eql(u8, a, "--html-dir") or
+            std.mem.eql(u8, a, "--html-layout") or
             std.mem.eql(u8, a, "--target") or
+            std.mem.eql(u8, a, "--target-layout") or
             std.mem.eql(u8, a, "--jobs") or
             std.mem.eql(u8, a, "-j"))
         {
@@ -470,7 +539,9 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.startsWith(u8, a, "--out=") or
             std.mem.startsWith(u8, a, "--rag-dir=") or
             std.mem.startsWith(u8, a, "--html-dir=") or
+            std.mem.startsWith(u8, a, "--html-layout=") or
             std.mem.startsWith(u8, a, "--target=") or
+            std.mem.startsWith(u8, a, "--target-layout=") or
             std.mem.startsWith(u8, a, "--jobs=") or
             std.mem.startsWith(u8, a, "-j="))
         {
@@ -951,10 +1022,32 @@ test "parse: --target flag parsing and conflict checks" {
 
     // Duplicate target flag
     try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "--target", "prod=dist/prod1", "--target", "prod=dist/prod2" }));
+
+    // Global + per-target layouts
+    {
+        var o = try parseOptions(std.testing.allocator, &.{
+            "boris",
+            "--target", "prod=dist/prod",
+            "--target", "stage=dist/stage",
+            "--html-layout", "layouts/main.html",
+            "--target-layout", "stage=layouts/stage.html",
+        });
+        defer o.deinit(std.testing.allocator);
+        try expectEqualStrings("layouts/main.html", o.html_layout);
+        try expect(o.targets.items[0].layout_path == null);
+        try expectEqualStrings("layouts/stage.html", o.targets.items[1].layout_path.?);
+    }
+
+    // Unknown target-layout name
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{
+        "boris", "--target", "prod=dist/prod", "--target-layout", "nope=layouts/x.html",
+    }));
 }
 
 test "findBadArg reports --target" {
     try expectEqualStrings("--target", findBadArg(&.{ "boris", "--target" }).?);
     try expectEqualStrings("--target=", findBadArg(&.{ "boris", "--target=" }).?);
     try expectEqualStrings("--target=bad", findBadArg(&.{ "boris", "--target=bad" }).?);
+    try expectEqualStrings("--html-layout", findBadArg(&.{ "boris", "--html-layout" }).?);
+    try expectEqualStrings("--target-layout", findBadArg(&.{ "boris", "--target-layout" }).?);
 }

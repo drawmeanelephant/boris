@@ -254,7 +254,7 @@ re-opened as greenfield tickets.
 | **Landed slice** | CLI `--target NAME=DIR`; `--html`/`--html-dir` → target `default`; path-boundary workspace/nest checks; content+layout non-overlap; sequential sorted compile; per-target `.boris-cache` + multitarget fingerprints; watch multi-root ignore |
 | **Modules** | `src/cli.zig`, `src/main.zig`, `src/target.zig`, `src/compile.zig`, `src/cache.zig`, `src/watch.zig` |
 | **Acceptance** | (1) Two targets compile both outputs; (2) cache namespaces isolated under each output root; (3) validation failures exit 2 |
-| **Known residual (optional)** | Per-target layouts / selective watch fan-out; full tree-atomic target commit (still per-page atomic) |
+| **Known residual (optional)** | Cross-volume stage rename not claimed; per-target content roots still out of scope |
 | **Dependencies** | Stable incremental + watch path (landed) |
 | **Contract / schema** | `docs/contracts/multi-target-isolated-output.md` · review: `docs/reviews/p3.3-multi-target-review.md` |
 

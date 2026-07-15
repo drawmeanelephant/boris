@@ -5,6 +5,7 @@ const builtin = @import("builtin");
 const Io = std.Io;
 const compile = @import("compile.zig");
 const cli = @import("cli.zig");
+const target_mod = @import("target.zig");
 
 /// Debounce window after the first change is observed (ms).
 pub const debounce_ms: i64 = 100;
@@ -306,11 +307,77 @@ pub fn normalizePath(allocator: std.mem.Allocator, raw_path: []const u8) ![]cons
 /// `path` and `html_dir` must already use forward slashes (normalized).
 pub fn isIgnored(path: []const u8, html_dir: []const u8) bool {
     if (hasPathPrefix(path, html_dir)) return true;
+    // Sibling staging tree: `{html_dir}.boris-stage`
+    if (std.mem.endsWith(u8, path, ".boris-stage") or
+        std.mem.indexOf(u8, path, ".boris-stage/") != null)
+    {
+        return true;
+    }
     if (std.mem.endsWith(u8, path, ".tmp") or std.mem.containsAtLeast(u8, path, 1, ".tmp.")) return true;
     // Component-aware so content names like `about-boris.md` are not dropped.
     if (hasPathComponent(path, ".boris-cache")) return true;
     if (hasPathComponent(path, ".boris")) return true;
     return false;
+}
+
+/// Select which targets must rebuild for a batch of changed keys (watch fan-out).
+///
+/// - Content/include/unknown paths → all targets
+/// - Paths that equal a target's effective layout file → only those targets
+///
+/// Returns a GPA-owned slice of TargetSpec copies (string fields still borrow argv).
+/// Caller frees the slice only.
+pub fn selectTargetsForRebuild(
+    gpa: std.mem.Allocator,
+    changed_keys: []const []const u8,
+    all_targets: []const target_mod.TargetSpec,
+    default_layout: []const u8,
+) ![]const target_mod.TargetSpec {
+    if (all_targets.len == 0 or changed_keys.len == 0) {
+        return try gpa.dupe(target_mod.TargetSpec, all_targets);
+    }
+
+    var rebuild_all = false;
+    var need = try gpa.alloc(bool, all_targets.len);
+    defer gpa.free(need);
+    @memset(need, false);
+
+    for (changed_keys) |key| {
+        var matched_any_layout = false;
+        for (all_targets, 0..) |t, i| {
+            const lp = target_mod.effectiveLayout(t, default_layout);
+            if (std.mem.eql(u8, key, lp)) {
+                need[i] = true;
+                matched_any_layout = true;
+            }
+        }
+        if (!matched_any_layout) {
+            rebuild_all = true;
+            break;
+        }
+    }
+
+    if (rebuild_all) {
+        return try gpa.dupe(target_mod.TargetSpec, all_targets);
+    }
+
+    var count: usize = 0;
+    for (need) |n| {
+        if (n) count += 1;
+    }
+    if (count == 0) {
+        return try gpa.dupe(target_mod.TargetSpec, all_targets);
+    }
+
+    var out = try gpa.alloc(target_mod.TargetSpec, count);
+    var o: usize = 0;
+    for (all_targets, 0..) |t, i| {
+        if (need[i]) {
+            out[o] = t;
+            o += 1;
+        }
+    }
+    return out;
 }
 
 /// Translate raw relative/absolute path to the dependency-index/PageDb key.
@@ -371,7 +438,8 @@ pub const WatchCoordinator = struct {
     /// Normalized forward-slash output roots, computed once at init.
     ignored_output_roots: []const []const u8,
 
-    /// Build the ignore-root list once for the coordinator lifetime.
+    /// Build the ignore-root list once for the coordinator lifetime
+    /// (final outs + sibling `.boris-stage` trees).
     fn buildIgnoredOutputRoots(gpa: std.mem.Allocator, options: cli.Options) ![]const []const u8 {
         var roots: std.ArrayList([]const u8) = .empty;
         errdefer {
@@ -380,13 +448,19 @@ pub const WatchCoordinator = struct {
         }
 
         if (options.targets.items.len > 0) {
-            try roots.ensureTotalCapacity(gpa, options.targets.items.len);
+            try roots.ensureTotalCapacity(gpa, options.targets.items.len * 2);
             for (options.targets.items) |tgt| {
-                try roots.append(gpa, try normalizePath(gpa, tgt.output_dir));
+                const out = try normalizePath(gpa, tgt.output_dir);
+                try roots.append(gpa, out);
+                const stage = try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{out});
+                try roots.append(gpa, stage);
             }
         } else {
             const html_raw = options.html_dir orelse "dist";
-            try roots.append(gpa, try normalizePath(gpa, html_raw));
+            const out = try normalizePath(gpa, html_raw);
+            try roots.append(gpa, out);
+            const stage = try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{out});
+            try roots.append(gpa, stage);
         }
         return try roots.toOwnedSlice(gpa);
     }
@@ -492,10 +566,27 @@ pub const WatchCoordinator = struct {
 
         // Full rediscovery + content-addressed incremental render (event paths
         // trigger the rebuild; dirty-set comes from fingerprints inside compile).
+        // Layout-only changes fan out to affected targets only.
+        const layout_default = self.options.html_layout;
         if (self.options.targets.items.len > 0) {
-            compile.compileHtmlSiteMulti(self.io, self.gpa, self.options.targets.items, .{
+            const subset = try selectTargetsForRebuild(
+                self.gpa,
+                paths.items,
+                self.options.targets.items,
+                layout_default,
+            );
+            defer self.gpa.free(subset);
+
+            if (!self.options.quiet and subset.len < self.options.targets.items.len) {
+                std.debug.print("watch: selective rebuild of {d}/{d} target(s)\n", .{
+                    subset.len,
+                    self.options.targets.items.len,
+                });
+            }
+
+            compile.compileHtmlSiteMulti(self.io, self.gpa, subset, .{
                 .content_root = self.options.input_dir,
-                .layout_path = default_watch_layout,
+                .layout_path = layout_default,
                 .incremental = self.options.incremental,
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
@@ -515,7 +606,7 @@ pub const WatchCoordinator = struct {
             _ = compile.compileHtmlSite(self.io, self.gpa, .{
                 .content_root = self.options.input_dir,
                 .dist_dir = self.options.html_dir orelse "dist",
-                .layout_path = default_watch_layout,
+                .layout_path = layout_default,
                 .incremental = self.options.incremental,
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
@@ -547,10 +638,11 @@ pub const WatchCoordinator = struct {
 
         var initial_success = true;
         var stats: compile.CompileStats = .{ .pages_written = 0, .peak_whiteboard_capacity = 0 };
+        const layout_default = self.options.html_layout;
         if (self.options.targets.items.len > 0) {
             compile.compileHtmlSiteMulti(self.io, self.gpa, self.options.targets.items, .{
                 .content_root = self.options.input_dir,
-                .layout_path = default_watch_layout,
+                .layout_path = layout_default,
                 .incremental = self.options.incremental,
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
@@ -571,7 +663,7 @@ pub const WatchCoordinator = struct {
             if (compile.compileHtmlSite(self.io, self.gpa, .{
                 .content_root = self.options.input_dir,
                 .dist_dir = self.options.html_dir orelse "dist",
-                .layout_path = default_watch_layout,
+                .layout_path = layout_default,
                 .incremental = self.options.incremental,
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
@@ -726,8 +818,9 @@ test "FakeWatcher and Coordinator Event Coalescing" {
     }, fake.watcher());
     defer coord.deinit();
 
-    try std.testing.expectEqual(@as(usize, 1), coord.ignored_output_roots.len);
+    try std.testing.expectEqual(@as(usize, 2), coord.ignored_output_roots.len);
     try std.testing.expectEqualStrings("dist", coord.ignored_output_roots[0]);
+    try std.testing.expectEqualStrings("dist.boris-stage", coord.ignored_output_roots[1]);
 
     // Push chaotic events
     try fake.pushEvent("content/guides/intro.md", .modify);
@@ -758,6 +851,7 @@ test "processEvents ignores output and staging paths" {
     defer coord.deinit();
 
     try std.testing.expectEqualStrings("dist", coord.ignored_output_roots[0]);
+    try std.testing.expectEqualStrings("dist.boris-stage", coord.ignored_output_roots[1]);
 
     try fake.pushEvent("dist/index.html", .modify);
     try fake.pushEvent("./dist/page.html", .create);
@@ -829,15 +923,50 @@ test "processEvents ignores multi-target output paths" {
     var coord = try WatchCoordinator.init(gpa, io, options, fake.watcher());
     defer coord.deinit();
 
-    try std.testing.expectEqual(@as(usize, 2), coord.ignored_output_roots.len);
+    try std.testing.expectEqual(@as(usize, 4), coord.ignored_output_roots.len);
 
     try fake.pushEvent("dist_a/index.html", .modify);
     try fake.pushEvent("dist_b/page.html", .create);
+    try fake.pushEvent("dist_a.boris-stage/x.html", .create);
     try fake.pushEvent("content/real.md", .modify);
 
     try coord.processEvents();
 
     try std.testing.expectEqual(@as(usize, 1), coord.pending_changes.count());
     try std.testing.expect(coord.pending_changes.contains("real.md"));
+}
+
+test "selectTargetsForRebuild layout vs content fan-out" {
+    const gpa = std.testing.allocator;
+    const targets = [_]target_mod.TargetSpec{
+        .{ .name = "prod", .output_dir = "dist/prod", .layout_path = null },
+        .{ .name = "stage", .output_dir = "dist/stage", .layout_path = "layouts/stage.html" },
+    };
+
+    // Content change → all targets
+    {
+        const keys = [_][]const u8{"guides/intro.md"};
+        const subset = try selectTargetsForRebuild(gpa, &keys, &targets, "layouts/main.html");
+        defer gpa.free(subset);
+        try std.testing.expectEqual(@as(usize, 2), subset.len);
+    }
+
+    // Shared default layout → only targets using that layout (prod)
+    {
+        const keys = [_][]const u8{"layouts/main.html"};
+        const subset = try selectTargetsForRebuild(gpa, &keys, &targets, "layouts/main.html");
+        defer gpa.free(subset);
+        try std.testing.expectEqual(@as(usize, 1), subset.len);
+        try std.testing.expectEqualStrings("prod", subset[0].name);
+    }
+
+    // Stage-only layout → only stage
+    {
+        const keys = [_][]const u8{"layouts/stage.html"};
+        const subset = try selectTargetsForRebuild(gpa, &keys, &targets, "layouts/main.html");
+        defer gpa.free(subset);
+        try std.testing.expectEqual(@as(usize, 1), subset.len);
+        try std.testing.expectEqualStrings("stage", subset[0].name);
+    }
 }
 

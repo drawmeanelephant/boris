@@ -128,6 +128,8 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     const html_dir = opts.html_dir orelse default_html;
 
+    const layout_path = opts.html_layout;
+
     if (opts.watch) {
         const watch = @import("watch.zig");
         var watcher = watch.PollingWatcher.init(gpa, io);
@@ -136,10 +138,29 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         watcher.addRoot(opts.input_dir) catch |err| {
             return mapHtmlError(err, opts.quiet);
         };
-        const layout_dir = std.fs.path.dirname(default_layout) orelse ".";
-        watcher.addRoot(layout_dir) catch |err| {
+
+        // Watch unique layout parent directories (global + per-target overrides).
+        var layout_roots: std.StringHashMapUnmanaged(void) = .{};
+        defer layout_roots.deinit(gpa);
+        const add_layout_root = struct {
+            fn go(w: *watch.PollingWatcher, map: *std.StringHashMapUnmanaged(void), gpa_: std.mem.Allocator, lp: []const u8) !void {
+                const dir = std.fs.path.dirname(lp) orelse ".";
+                const gop = try map.getOrPut(gpa_, dir);
+                if (!gop.found_existing) {
+                    try w.addRoot(dir);
+                }
+            }
+        }.go;
+        add_layout_root(&watcher, &layout_roots, gpa, layout_path) catch |err| {
             return mapHtmlError(err, opts.quiet);
         };
+        for (opts.targets.items) |t| {
+            if (t.layout_path) |lp| {
+                add_layout_root(&watcher, &layout_roots, gpa, lp) catch |err| {
+                    return mapHtmlError(err, opts.quiet);
+                };
+            }
+        }
 
         var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher()) catch |err| {
             return mapHtmlError(err, opts.quiet);
@@ -156,7 +177,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     if (opts.targets.items.len > 0) {
         compile.compileHtmlSiteMulti(io, gpa, opts.targets.items, .{
             .content_root = opts.input_dir,
-            .layout_path = default_layout,
+            .layout_path = layout_path,
             .incremental = opts.incremental,
             .quiet = opts.quiet,
             .jobs = opts.jobs,
@@ -165,13 +186,13 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         };
 
         if (!opts.quiet) {
-            std.debug.print("ok: wrote HTML for {d} target(s)\n", .{ opts.targets.items.len });
+            std.debug.print("ok: wrote HTML for {d} target(s)\n", .{opts.targets.items.len});
         }
     } else {
         const stats = compile.compileHtmlSite(io, gpa, .{
             .content_root = opts.input_dir,
             .dist_dir = html_dir,
-            .layout_path = default_layout,
+            .layout_path = layout_path,
             .incremental = opts.incremental,
             .quiet = opts.quiet,
             .jobs = opts.jobs,

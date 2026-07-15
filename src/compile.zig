@@ -357,13 +357,13 @@ pub fn compileHtmlSite(
     return try compilePages(io, gpa, &db, layout, options);
 }
 
-/// Shared, target-independent fingerprint inputs built once for multi-target runs.
+/// Shared, layout-independent fingerprint inputs built once for multi-target runs.
+/// Layout path/bytes are applied per target (supports per-target layouts).
 /// Owns all buffers; `dep_index` path strings live on `path_arena`.
 const SharedCompileState = struct {
     gpa: std.mem.Allocator,
     path_arena: std.heap.ArenaAllocator,
     dep_index: dependency.DependencyIndex,
-    layout_bytes: []u8,
     /// Per-page source bytes (GPA-owned).
     source_bytes: [][]u8,
     /// Per-page transitive include file contents in stable sorted path order (GPA-owned).
@@ -377,7 +377,6 @@ const SharedCompileState = struct {
         self.gpa.free(self.include_bytes);
         for (self.source_bytes) |b| self.gpa.free(b);
         self.gpa.free(self.source_bytes);
-        self.gpa.free(self.layout_bytes);
         self.dep_index.deinit();
         self.path_arena.deinit();
     }
@@ -387,10 +386,10 @@ const SharedCompileState = struct {
         gpa: std.mem.Allocator,
         db: *PageDb,
         content_root: []const u8,
-        layout_path: []const u8,
     ) !SharedCompileState {
         const cwd = Io.Dir.cwd();
-        var content_dir = try cwd.openDir(io, content_root, .{});
+        _ = cwd;
+        var content_dir = try Io.Dir.cwd().openDir(io, content_root, .{});
         defer content_dir.close(io);
 
         var path_arena = std.heap.ArenaAllocator.init(gpa);
@@ -411,8 +410,6 @@ const SharedCompileState = struct {
         }
 
         for (db.items(), 0..) |p, i| {
-            try dep_index.addDependency(p.source_path, layout_path, .layout);
-
             const src = try readFileAlloc(io, content_dir, p.source_path, gpa);
             source_bytes[i] = src;
             sources_filled = i + 1;
@@ -455,13 +452,10 @@ const SharedCompileState = struct {
             std.mem.sort([]const u8, transit_includes.items, {}, compareStrings);
 
             var list = try gpa.alloc([]u8, transit_includes.items.len);
-            errdefer {
-                // Only free elements already filled on this page before rethrow.
-                gpa.free(list);
-            }
             var j: usize = 0;
             errdefer {
                 for (list[0..j]) |b| gpa.free(b);
+                gpa.free(list);
             }
             while (j < transit_includes.items.len) : (j += 1) {
                 list[j] = try readFileAlloc(io, content_dir, transit_includes.items[j], gpa);
@@ -470,23 +464,27 @@ const SharedCompileState = struct {
             includes_filled = page_idx + 1;
         }
 
-        const layout_bytes = try readFileAlloc(io, cwd, layout_path, gpa);
-        errdefer gpa.free(layout_bytes);
-
         return .{
             .gpa = gpa,
             .path_arena = path_arena,
             .dep_index = dep_index,
-            .layout_bytes = layout_bytes,
             .source_bytes = source_bytes,
             .include_bytes = include_bytes,
         };
     }
 };
 
+const CachedLayout = struct {
+    layout: assemble.Layout,
+    bytes: []u8,
+};
+
 /// Orchestrate multiple HTML build targets with complete isolation and sorted sequence.
 /// Enforces validate-all-first, single discovery, then sequential rendering.
 /// Returns error.MultiTargetCompilationFailed if any target fails.
+///
+/// `targets` may be a subset (watch selective fan-out). `base_options.layout_path` is the
+/// global default used when a target has no layout override.
 pub fn compileHtmlSiteMulti(
     io: Io,
     gpa: std.mem.Allocator,
@@ -509,27 +507,58 @@ pub fn compileHtmlSiteMulti(
 
     try loadAndPromote(io, gpa, &db, base_options.content_root);
 
-    // Shared layout + fingerprint inputs once for all targets.
+    // Shared content/include fingerprint inputs once for all targets.
+    var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root);
+    defer shared.deinit();
+
+    // Layout templates cached by path (per-target layouts share the same arena).
     var layout_arena = std.heap.ArenaAllocator.init(gpa);
     defer layout_arena.deinit();
-    const layout = try loadLayoutOnce(io, Io.Dir.cwd(), base_options.layout_path, layout_arena.allocator());
-
-    var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root, base_options.layout_path);
-    defer shared.deinit();
+    var layout_cache: std.StringHashMapUnmanaged(CachedLayout) = .{};
+    defer layout_cache.deinit(gpa);
 
     var any_failed = false;
     for (plans) |plan| {
         var target_options = base_options;
         target_options.target_name = plan.name;
         target_options.dist_dir = plan.output_dir;
+        target_options.layout_path = plan.layout_path;
 
-        _ = compilePagesWithShared(io, gpa, &db, layout, target_options, &shared) catch |err| {
+        const gop = try layout_cache.getOrPut(gpa, plan.layout_path);
+        if (!gop.found_existing) {
+            const layout = loadLayoutOnce(io, Io.Dir.cwd(), plan.layout_path, layout_arena.allocator()) catch |err| {
+                if (!base_options.quiet) {
+                    std.debug.print("error: target '{s}' failed to load layout: {s}\n", .{ plan.name, @errorName(err) });
+                }
+                any_failed = true;
+                _ = layout_cache.remove(plan.layout_path);
+                continue;
+            };
+            const bytes = readFileAlloc(io, Io.Dir.cwd(), plan.layout_path, gpa) catch |err| {
+                if (!base_options.quiet) {
+                    std.debug.print("error: target '{s}' failed to read layout: {s}\n", .{ plan.name, @errorName(err) });
+                }
+                any_failed = true;
+                _ = layout_cache.remove(plan.layout_path);
+                continue;
+            };
+            gop.value_ptr.* = .{ .layout = layout, .bytes = bytes };
+        }
+
+        const cached = layout_cache.get(plan.layout_path).?;
+        _ = compilePagesWithShared(io, gpa, &db, cached.layout, target_options, &shared, cached.bytes) catch |err| {
             if (!base_options.quiet) {
                 std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
             }
             any_failed = true;
             continue;
         };
+    }
+
+    // Free layout bytes (arena owns Layout views into raw; bytes are GPA).
+    var it = layout_cache.iterator();
+    while (it.next()) |entry| {
+        gpa.free(entry.value_ptr.bytes);
     }
 
     if (any_failed) {
@@ -622,11 +651,13 @@ pub fn compilePages(
     layout: assemble.Layout,
     options: CompileOptions,
 ) !CompileStats {
-    return compilePagesInner(io, gpa, db, layout, options, null);
+    const layout_bytes = try readFileAlloc(io, Io.Dir.cwd(), options.layout_path, gpa);
+    defer gpa.free(layout_bytes);
+    return compilePagesInner(io, gpa, db, layout, options, null, layout_bytes);
 }
 
-/// Like `compilePages` but reuses shared layout/source/include fingerprint inputs
-/// (multi-target path: prepare once, render each target).
+/// Like `compilePages` but reuses shared content/include fingerprint inputs
+/// (multi-target path: prepare once, render each target with its layout bytes).
 pub fn compilePagesWithShared(
     io: Io,
     gpa: std.mem.Allocator,
@@ -634,8 +665,9 @@ pub fn compilePagesWithShared(
     layout: assemble.Layout,
     options: CompileOptions,
     shared: *const SharedCompileState,
+    layout_bytes: []const u8,
 ) !CompileStats {
-    return compilePagesInner(io, gpa, db, layout, options, shared);
+    return compilePagesInner(io, gpa, db, layout, options, shared, layout_bytes);
 }
 
 fn fingerprintHex(fp_bytes: [32]u8, gpa: std.mem.Allocator) ![]u8 {
@@ -648,6 +680,38 @@ fn fingerprintHex(fp_bytes: [32]u8, gpa: std.mem.Allocator) ![]u8 {
     return try gpa.dupe(u8, &fp_hex);
 }
 
+/// Sibling staging directory for a target: `{dist_dir}.boris-stage`.
+fn stageRelForDist(gpa: std.mem.Allocator, dist_dir: []const u8) ![]u8 {
+    return try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{dist_dir});
+}
+
+/// Publish all files under `stage_dir` into `final_dir` via same-parent rename.
+/// Creates intermediate directories under `final_dir` as needed.
+fn publishStageTree(
+    io: Io,
+    gpa: std.mem.Allocator,
+    stage_dir: Io.Dir,
+    final_dir: Io.Dir,
+) !void {
+    var walker = try stage_dir.walkSelectively(gpa);
+    defer walker.deinit();
+
+    while (try walker.next(io)) |entry| {
+        if (entry.kind == .directory) {
+            try walker.enter(io, entry);
+            continue;
+        }
+        if (entry.kind != .file) continue;
+
+        if (std.fs.path.dirname(entry.path)) |parent| {
+            if (parent.len > 0) {
+                final_dir.createDirPath(io, parent) catch {};
+            }
+        }
+        try entry.dir.rename(entry.basename, final_dir, entry.path, io);
+    }
+}
+
 fn compilePagesInner(
     io: Io,
     gpa: std.mem.Allocator,
@@ -655,6 +719,7 @@ fn compilePagesInner(
     layout: assemble.Layout,
     options: CompileOptions,
     shared_opt: ?*const SharedCompileState,
+    layout_bytes: []const u8,
 ) !CompileStats {
     const cwd = Io.Dir.cwd();
 
@@ -668,15 +733,25 @@ fn compilePagesInner(
     // Best-effort: remove orphan createFileAtomic temps left by interrupted runs.
     assemble.scrubStaleAtomicTemps(io, dist_dir, gpa);
 
+    // Sibling staging: render dirty pages here; commit only after full target success.
+    const stage_rel = try stageRelForDist(gpa, options.dist_dir);
+    defer gpa.free(stage_rel);
+    cwd.deleteTree(io, stage_rel) catch {};
+    try cwd.createDirPath(io, stage_rel);
+    errdefer cwd.deleteTree(io, stage_rel) catch {};
+
+    var stage_dir = try cwd.openDir(io, stage_rel, .{ .iterate = true });
+    defer stage_dir.close(io);
+
     // Own shared state when the caller did not supply one (single-target).
     var local_shared: ?SharedCompileState = null;
     defer if (local_shared) |*s| s.deinit();
     const shared: *const SharedCompileState = if (shared_opt) |s| s else blk: {
-        local_shared = try SharedCompileState.init(io, gpa, db, options.content_root, options.layout_path);
+        local_shared = try SharedCompileState.init(io, gpa, db, options.content_root);
         break :blk &(local_shared.?);
     };
 
-    // Load and parse prior manifest if in incremental mode
+    // Load and parse prior manifest if in incremental mode (from final dist).
     var manifest_bytes: ?[]u8 = null;
     defer {
         if (manifest_bytes) |mb| gpa.free(mb);
@@ -700,13 +775,13 @@ fn compilePagesInner(
         } else |_| {}
     }
 
-    // Precreate output directories
+    // Precreate output directories under staging
     {
         var paths: std.ArrayList([]const u8) = .empty;
         defer paths.deinit(gpa);
         try paths.ensureTotalCapacity(gpa, db.len());
         for (db.items()) |p| try paths.append(gpa, p.output_path);
-        try assemble.precreateOutputDirs(io, dist_dir, gpa, paths.items);
+        try assemble.precreateOutputDirs(io, stage_dir, gpa, paths.items);
     }
 
     // Compute fingerprints and determine which pages are dirty
@@ -736,7 +811,7 @@ fn compilePagesInner(
             page.entity_id,
             shared.source_bytes[page_idx],
             inc_views,
-            shared.layout_bytes,
+            layout_bytes,
         );
         fingerprints[page_idx] = try fingerprintHex(fp_bytes, gpa);
 
@@ -769,25 +844,7 @@ fn compilePagesInner(
         is_dirty[page_idx] = !skip_render;
     }
 
-    // Delete stale files
-    if (options.incremental) {
-        if (parsed_manifest) |pm| {
-            for (pm.value.entries) |entry| {
-                var still_exists = false;
-                for (db.items()) |p| {
-                    if (std.mem.eql(u8, p.entity_id, entry.entity_id)) {
-                        still_exists = true;
-                        break;
-                    }
-                }
-                if (!still_exists) {
-                    dist_dir.deleteFile(io, entry.output_path) catch {};
-                }
-            }
-        }
-    }
-
-    // Compile loop
+    // Compile loop — dirty pages write into staging only
     var stats: CompileStats = .{};
 
     if (options.jobs > 1) {
@@ -795,7 +852,7 @@ fn compilePagesInner(
             .gpa = gpa,
             .io = io,
             .content_dir = content_dir,
-            .dist_dir = dist_dir,
+            .dist_dir = stage_dir,
             .db = db,
             .layout = layout,
             .options = options,
@@ -861,7 +918,7 @@ fn compilePagesInner(
             stats.pages_attempted += 1;
 
             if (is_dirty[page_index]) {
-                try renderAndPublishPage(io, content_dir, dist_dir, page, layout, &doc_arena, options, page_index);
+                try renderAndPublishPage(io, content_dir, stage_dir, page, layout, &doc_arena, options, page_index);
                 stats.pages_written += 1;
                 if (!options.quiet) {
                     std.debug.print("  wrote {s}/{s}\n", .{ options.dist_dir, page.output_path });
@@ -877,15 +934,11 @@ fn compilePagesInner(
         }
     }
 
-    // Write Cache manifest atomically on success if in incremental mode
+    // Write cache manifest into staging (committed with the rest of the target).
     if (options.incremental) {
         if (options.test_fail_cache_publish) {
             return error.TestInjectedCachePublishFailure;
         }
-
-        var dpath_buf: [256]u8 = undefined;
-        const cache_dir_path = std.fmt.bufPrint(&dpath_buf, "{s}/.boris-cache", .{options.dist_dir}) catch unreachable;
-        cwd.createDirPath(io, cache_dir_path) catch {};
 
         var cache_entries = try gpa.alloc(CacheEntry, db.len());
         defer gpa.free(cache_entries);
@@ -897,7 +950,7 @@ fn compilePagesInner(
             };
         }
 
-        var atomic_manifest = try dist_dir.createFileAtomic(io, ".boris-cache/manifest.json", .{
+        var atomic_manifest = try stage_dir.createFileAtomic(io, ".boris-cache/manifest.json", .{
             .replace = true,
             .make_path = true,
         });
@@ -913,6 +966,30 @@ fn compilePagesInner(
 
         try atomic_manifest.replace(io);
     }
+
+    // Commit: rename staged files into final dist (final untouched until this point).
+    try publishStageTree(io, gpa, stage_dir, dist_dir);
+
+    // Stale cleanup on final only after successful commit
+    if (options.incremental) {
+        if (parsed_manifest) |pm| {
+            for (pm.value.entries) |entry| {
+                var still_exists = false;
+                for (db.items()) |p| {
+                    if (std.mem.eql(u8, p.entity_id, entry.entity_id)) {
+                        still_exists = true;
+                        break;
+                    }
+                }
+                if (!still_exists) {
+                    dist_dir.deleteFile(io, entry.output_path) catch {};
+                }
+            }
+        }
+    }
+
+    // Drop staging tree (errdefer also cleans on earlier failure).
+    cwd.deleteTree(io, stage_rel) catch {};
 
     return stats;
 }

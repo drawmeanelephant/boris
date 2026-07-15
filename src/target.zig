@@ -7,6 +7,8 @@ const Io = std.Io;
 pub const TargetSpec = struct {
     name: []const u8,
     output_dir: []const u8,
+    /// Optional per-target layout override. When null, use global `--html-layout`.
+    layout_path: ?[]const u8 = null,
 };
 
 /// Fully resolved and validated execution target plan.
@@ -14,7 +16,14 @@ pub const TargetPlan = struct {
     name: []const u8,
     output_dir: []const u8,
     resolved_output_dir: []const u8,
+    /// Effective layout path (global default or per-target override). Not owned.
+    layout_path: []const u8,
 };
+
+/// Effective layout for a target given the global default.
+pub fn effectiveLayout(target: TargetSpec, default_layout: []const u8) []const u8 {
+    return target.layout_path orelse default_layout;
+}
 
 /// True when `path` equals `prefix` or is `prefix/` + more.
 /// Both paths must already use `/` separators and must not end with `/`
@@ -123,8 +132,7 @@ pub fn isValidTargetName(name: []const u8) bool {
 pub const ValidateTargetsOptions = struct {
     /// Content root (e.g. `--input`). Targets must not equal or nest with this directory.
     content_root: []const u8 = "content",
-    /// Global layout file path. Targets must not equal or nest with its parent directory
-    /// (when that parent is not the workspace root).
+    /// Global default layout path (`--html-layout`). Used when a target has no override.
     layout_path: []const u8 = "layouts/main.html",
 };
 
@@ -191,29 +199,39 @@ pub fn validateTargets(
             return error.TargetOutputCollision;
         }
 
+        const layout = effectiveLayout(target, options.layout_path);
+        if (layout.len == 0) return error.EmptyTargetDirectory;
+
         try plans.append(gpa, .{
             .name = target.name,
             .output_dir = target.output_dir,
             .resolved_output_dir = normalized,
+            .layout_path = layout,
         });
     }
 
-    // 3. Protected roots: content tree and layout directory
+    // 3. Protected roots: content tree and every effective layout path/dir
     const content_abs = try resolveNormalized(gpa, cwd_path, options.content_root);
     defer gpa.free(content_abs);
 
-    var layout_dir_abs: ?[]u8 = null;
-    defer if (layout_dir_abs) |p| gpa.free(p);
-
-    if (std.fs.path.dirname(options.layout_path)) |layout_parent| {
-        if (layout_parent.len > 0 and !std.mem.eql(u8, layout_parent, ".")) {
-            layout_dir_abs = try resolveNormalized(gpa, cwd_path, layout_parent);
-        }
+    var protected_layouts: std.ArrayList([]u8) = .empty;
+    defer {
+        for (protected_layouts.items) |p| gpa.free(p);
+        protected_layouts.deinit(gpa);
     }
 
-    // Also protect the layout file path itself (target must not land on the file path)
-    const layout_file_abs = try resolveNormalized(gpa, cwd_path, options.layout_path);
-    defer gpa.free(layout_file_abs);
+    for (plans.items) |plan| {
+        const layout_file_abs = try resolveNormalized(gpa, cwd_path, plan.layout_path);
+        try protected_layouts.append(gpa, layout_file_abs);
+
+        if (std.fs.path.dirname(plan.layout_path)) |layout_parent| {
+            if (layout_parent.len > 0 and !std.mem.eql(u8, layout_parent, ".")) {
+                const ld = try resolveNormalized(gpa, cwd_path, layout_parent);
+                try protected_layouts.append(gpa, ld);
+            }
+        }
+        try rejectSymlinkAlongPath(io, cwd_dir, gpa, plan.layout_path);
+    }
 
     // 4. Overlap, parent/child nesting, protected roots, symlink detection
     for (plans.items, 0..) |plan, i| {
@@ -222,13 +240,10 @@ pub fn validateTargets(
         if (pathsNestOrEqual(path_a, content_abs, case_insensitive)) {
             return error.TargetOutputCollision;
         }
-        if (layout_dir_abs) |ld| {
-            if (pathsNestOrEqual(path_a, ld, case_insensitive)) {
+        for (protected_layouts.items) |prot| {
+            if (pathsNestOrEqual(path_a, prot, case_insensitive)) {
                 return error.TargetOutputCollision;
             }
-        }
-        if (pathsNestOrEqual(path_a, layout_file_abs, case_insensitive)) {
-            return error.TargetOutputCollision;
         }
 
         // Reject symlink at the target root or any intermediate component.
