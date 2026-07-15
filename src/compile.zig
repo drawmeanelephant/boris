@@ -1493,7 +1493,8 @@ test "flush-before-reset: compile defers free_all only after writePage" {
     defer gpa.free(got);
     try std.testing.expect(std.mem.startsWith(u8, got, "H"));
     try std.testing.expect(std.mem.endsWith(u8, got, "T"));
-    try std.testing.expect(std.mem.indexOf(u8, got, "<h1>") != null);
+    // Real Apex emits header ids: <h1 id="...">
+    try std.testing.expect(std.mem.indexOf(u8, got, "<h1") != null);
 }
 
 test "incremental HTML build mode - full verification suite" {
@@ -1949,8 +1950,8 @@ test "compileHtmlSiteMulti - success, validation, and isolation" {
         const alpha_b = try readAllFile(io, dir_b, "alpha.html", gpa);
         defer gpa.free(alpha_b);
 
-        try std.testing.expectEqualStrings("L<h1>Alpha</h1>\n", alpha_a);
-        try std.testing.expectEqualStrings("L<h1>Alpha</h1>\n", alpha_b);
+        try std.testing.expectEqualStrings("L<h1 id=\"alpha\">Alpha</h1>\n", alpha_a);
+        try std.testing.expectEqualStrings("L<h1 id=\"alpha\">Alpha</h1>\n", alpha_b);
 
         // Verify separate cache namespaces
         if (dir_a.openFile(io, ".boris-cache/manifest.json", .{})) |file| {

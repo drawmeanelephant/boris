@@ -162,22 +162,38 @@ Flags: `link_libc`, include `vendor/apex`, C11 sources. No child-process markdow
 
 ---
 
-## Stub vs production
+## Engine: ApexMarkdown Unified adapter
 
-`vendor/apex/apex.c` is a **minimal stub** (ATX headings, paragraphs, `**bold**`, `*italic*`, `` `code` ``, raw HTML lines). It does **not** claim CommonMark compatibility. A production library may replace the `.c` while keeping this header ABI **and** the lifetime contracts above.
+`vendor/apex/apex.c` is a **thin host adapter** (Feature 1 Chat 3), not a
+hand-rolled markdown parser. It keeps this host ABI and implements:
 
-**Next engine (specified, not landed):** Feature 1 vendors real
-**[ApexMarkdown/apex](https://github.com/ApexMarkdown/apex)** and drives it from a
-thin host adapter (`apex_render` → `apex_markdown_to_html`) in **Unified mode**.
-Keep this host ABI (Whiteboard / allocator lifetime). Do **not** replace Apex
-with cmark-gfm-as-product (cmark-gfm is only Apex’s upstream dependency).
-Implement from [`APEX-Feature1-plan.md`](../../APEX-Feature1-plan.md).
+```text
+apex_render → apex_markdown_to_html (APEX_MODE_UNIFIED, fragment HTML)
+           → copy into host allocator (Whiteboard / libc path)
+           → apex_free_string (release upstream heap; no Apex ptrs retained)
+```
+
+| Boundary setting | Value | Why |
+|------------------|-------|-----|
+| Mode | `APEX_MODE_UNIFIED` | Product default (all Apex features) |
+| `standalone` | false | Layout splice owns chrome |
+| `pretty` | false | Stable compact HTML |
+| `unsafe` | true | Trusted author content; raw HTML allowed |
+| File includes | off | Boris has its own include graph |
+| Plugins | off | Subprocess / untrusted code risk |
+| External highlighters | off | AGENTS forbids MD CLI spawn |
+
+Real engine sources: `vendor/apex-markdown/` ([VENDOR.md](../../vendor/apex-markdown/VENDOR.md)).
+cmark-gfm is **only** Apex’s upstream substrate — not Boris’s public renderer.
+Host include guard is `BORIS_APEX_HOST_H` (not `APEX_H`) so the adapter can
+include both host and upstream headers. Authority plan:
+[`APEX-Feature1-plan.md`](../../APEX-Feature1-plan.md).
 
 ---
 
 ## Explicit non-goals (m8)
 
 - Wiring Apex into default IR emit or RAG export
-- HTML layout assemble / `dist/` publication
+- HTML layout assemble / `dist/` publication as the default CLI (Feature 2)
 - Spawning external markdown processes
-- Full ApexMarkdown feature surface (see Feature 1 plan; stub is not that surface)
+- Exposing every Apex mode/option on the CLI (Feature 1 is Unified-only)

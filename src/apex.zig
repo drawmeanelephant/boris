@@ -299,6 +299,10 @@ fn skipIfHostileEngine() !void {
 test "apex version linked" {
     const v = version();
     try std.testing.expect(v.len > 0);
+    if (!build_options.hostile_apex) {
+        try std.testing.expect(std.mem.indexOf(u8, v, "apex-markdown") != null);
+        try std.testing.expect(std.mem.indexOf(u8, v, "unified") != null);
+    }
 }
 
 test "apex render heading in-process" {
@@ -307,9 +311,22 @@ test "apex render heading in-process" {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const html = try render("# Hello **world**\n\nParagraph.\n", &arena);
-    try std.testing.expect(std.mem.indexOf(u8, html.bytes, "<h1>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html.bytes, "<h1") != null);
     try std.testing.expect(std.mem.indexOf(u8, html.bytes, "<strong>world</strong>") != null);
     try std.testing.expect(std.mem.indexOf(u8, html.bytes, "<p>") != null);
+}
+
+test "apex dual-run HTML is byte-identical on one host" {
+    try skipIfHostileEngine();
+    const gpa = std.testing.allocator;
+    var arena_a = std.heap.ArenaAllocator.init(gpa);
+    defer arena_a.deinit();
+    var arena_b = std.heap.ArenaAllocator.init(gpa);
+    defer arena_b.deinit();
+    const md = "# Dual\n\n**bold** and *em*\n";
+    const a = try render(md, &arena_a);
+    const b = try render(md, &arena_b);
+    try std.testing.expectEqualStrings(a.bytes, b.bytes);
 }
 
 test "apex render empty md is zero-copy ptr+len path" {
@@ -343,7 +360,8 @@ test "apex html slice is a view of whiteboard memory" {
     // Slice is non-empty and points at real bytes Apex wrote (not a Zig dupe
     // of a temporary). After free_all the arena no longer retains capacity.
     try std.testing.expect(html.bytes.len > 0);
-    try std.testing.expect(std.mem.indexOf(u8, html.bytes, "<h2>") != null);
+    // Real Apex emits header ids: <h2 id="..."> — match open tag prefix.
+    try std.testing.expect(std.mem.indexOf(u8, html.bytes, "<h2") != null);
     // Pointer must be non-null — constructed as out_ptr[0..out_len].
     try std.testing.expect(@intFromPtr(html.bytes.ptr) != 0);
 
@@ -387,7 +405,7 @@ test "apex large input within bounded test limit" {
 
     const html = try render(md_buf.items, &arena);
     try std.testing.expect(html.bytes.len > 0);
-    try std.testing.expect(std.mem.indexOf(u8, html.bytes, "<h1>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html.bytes, "<h1") != null);
     try std.testing.expect(std.mem.indexOf(u8, html.bytes, "<strong>bold</strong>") != null);
 }
 
@@ -469,7 +487,7 @@ test "apex free callback is no-op under arena (html survives resizes)" {
     const html = try render(md_buf.items, &arena);
     try std.testing.expect(html.bytes.len > 256);
     // Still readable after intermediate C free callbacks (no-op).
-    try std.testing.expect(std.mem.indexOf(u8, html.bytes, "<h1>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html.bytes, "<h1") != null);
     try std.testing.expect(std.mem.indexOf(u8, html.bytes, "<strong>bold</strong>") != null);
 
     // Reclaim only via arena — never apex_free.

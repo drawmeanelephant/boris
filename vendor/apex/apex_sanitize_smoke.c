@@ -87,7 +87,8 @@ int main(void) {
         apex_render(md, sizeof(md) - 1, &out, &out_len, NULL),
         APEX_OK);
     fails += expect_true("small non-empty", out != NULL && out_len > 0);
-    fails += expect_true("has h1", out && strstr(out, "<h1>") != NULL);
+    /* Real Apex emits <h1 id="..."> — match open-tag prefix. */
+    fails += expect_true("has h1", out && strstr(out, "<h1") != NULL);
     apex_free(out, out_len);
 
     /* --- custom allocator OOM --- */

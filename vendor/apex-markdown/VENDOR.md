@@ -12,7 +12,7 @@ ABI (`vendor/apex/apex.h`). See [`APEX-Feature1-plan.md`](../../APEX-Feature1-pl
 | **VERSION file** | `1.1.11` |
 | **License** | MIT (`LICENSE`) — Copyright (c) 2026 Brett Terpstra |
 | **Pinned for Boris** | 2026-07-15 (Feature 1 campaign Chat 1) |
-| **Product role** | Static libs linked into product (Chat 2); host `apex_render` still stub until Chat 3 adapter |
+| **Product role** | Static libs linked; host `apex_render` is Unified adapter (Chat 3) |
 
 ## Nested upstream dependencies (snapshot SHAs)
 
@@ -46,9 +46,10 @@ produced as a compile-time sub-step:
    - `build/vendor/cmark-gfm/extensions/libcmark-gfm-extensions.a`
    - `build/vendor/cmark-gfm/src/libcmark-gfm.a`
 4. Manual: `zig build build-apex`
-5. Host adapter `vendor/apex/apex.c` still **stub** until Chat 3
-   (`apex_markdown_to_html` + copy + `apex_free_string`).
-6. Zig continues to `@cImport` **only** Boris host `vendor/apex/apex.h`.
+5. Host adapter `vendor/apex/apex.c` calls
+   `apex_markdown_to_html` + copy + `apex_free_string` (Chat 3).
+6. Zig continues to `@cImport` **only** Boris host `vendor/apex/apex.h`
+   (host include guard: `BORIS_APEX_HOST_H`, not upstream `APEX_H`).
 7. Hostile path (`test-apex-hostile`) does **not** link ApexMarkdown.
 
 ## Modes (product default)

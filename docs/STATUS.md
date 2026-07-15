@@ -48,7 +48,7 @@ remains IR; HTML is not yet the default product surface.
 | Deterministic JSON IR | **Implemented & tested** | `.boris/` staging publish |
 | Graph-aware nav in IR (`graph.json` → `nav`) | **Implemented & tested** | From frozen graph only; not HTML/RAG |
 | Optional RAG + `:::kind` Aside export | **Implemented & tested** | Non-round-trippable export form |
-| Apex C ABI + Zig wrapper | **Implemented & tested** | Hostile + opt-in sanitizer; **host stub ≠ real ApexMarkdown Unified** |
+| Apex C ABI + Zig wrapper | **Implemented & tested** | Hostile + opt-in sanitizer; **real ApexMarkdown Unified** via host adapter |
 | Opt-in HTML + Aside stream | **Implemented & tested** | Opt-in via `--html` / `--html-dir` |
 | CI matrix Linux + macOS | **Implemented & tested** | GitHub Actions |
 | Content-addressed cache fingerprints (P2.3) | **Implemented & tested** | SHA256 fingerprints on layout, page, and transitively resolved includes |
@@ -57,7 +57,7 @@ remains IR; HTML is not yet the default product surface.
 | Opt-in Local Development Watch Mode (P3.2) | **Implemented & tested** | `--watch` enables live, debounced, coalesced, serialized HTML rebuilds |
 | Multi-target isolated outputs (P3.3) | **Implemented & tested** | `--target`, `--html-layout`, `--target-layout`; path-boundary isolation; stage commit; selective watch fan-out; review `docs/reviews/p3.3-multi-target-review.md` |
 | HTML as default CLI (replacing IR) | **Now** (roadmap) | IR remains default until Feature 2 lands |
-| Real ApexMarkdown Unified fidelity | **In progress** (Feature 1) | Pin + **static link** landed; host `apex_render` still stub; Chat 3 adapter next |
+| Real ApexMarkdown Unified fidelity | **In progress** (Feature 1) | Pin + link + **Unified adapter** landed; Chat 4 fidelity suite + goldens next |
 | Full YAML / MDX / mmap | **Intentionally deferred** | See non-goals / Not Now |
 
 ### How to run
@@ -214,7 +214,7 @@ re-opened as greenfield tickets.
 | Field | Detail |
 |-------|--------|
 | **Priority** | **Now** (authoring fidelity bottleneck) — **campaign in progress** |
-| **Campaign status** | **Chat 1–2 done:** pin @ v1.1.11; `build.zig` Strategy A links `libapex.a` + cmark-gfm; hostile isolated. Host still stub. Next: **Chat 3** adapter. |
+| **Campaign status** | **Chat 1–3 done:** pin @ v1.1.11; static link; host `apex_render` → Unified adapter (copy + `apex_free_string`). Next: **Chat 4** U1–U17 fidelity suite. |
 | **User-visible payoff** | Authors get full **Apex Unified** Markdown (tables, footnotes, def lists, math, callouts, IAL, …) — real [ApexMarkdown/apex](https://github.com/ApexMarkdown/apex), not a stub and not “cmark instead of Apex” |
 | **Smallest shippable vertical slice** | Vendor ApexMarkdown/apex; host `apex_render` adapter → `apex_markdown_to_html` with **`APEX_MODE_UNIFIED`**; keep Boris host ABI / Whiteboard |
 | **Modules** | host `vendor/apex` (or `vendor/boris-apex`), `vendor/apex-markdown/*`, `build.zig`, `src/apex.zig` tests |
@@ -298,7 +298,8 @@ re-opened as greenfield tickets.
 * **Campaign:** 7-chat Feature 1 push (pin → link → adapter → fidelity → docs → internal review → external audit).
 * **Chat 1 (done):** Pin `vendor/apex-markdown` @ v1.1.11; `VENDOR.md`.
 * **Chat 2 (done):** Strategy A cmake static lib via `scripts/build-apex-markdown.sh` + `build.zig` link; CI installs cmake; hostile isolation.
-* **Next (Chat 3):** Host `apex_render` → Unified `apex_markdown_to_html` + copy/`apex_free_string`.
+* **Chat 3 (done):** Host `apex_render` → Unified `apex_markdown_to_html` + copy/`apex_free_string`; version `boris-apex/apex-markdown-1.1.11+unified`.
+* **Next (Chat 4):** U1–U17 fidelity suite + remaining golden updates + Aside regression.
 * **Scope:** Vendor [ApexMarkdown/apex](https://github.com/ApexMarkdown/apex); host adapter `apex_render` → `apex_markdown_to_html` in **Unified** mode; keep Boris host ABI.
 * **Acceptance:** Plan definition of done; `zig build test`, `test-apex-hostile`, Unified constructs, release-gate.
 * **Out of scope here:** Feature 2; optional `--apex-mode` (later).
@@ -356,7 +357,7 @@ not by themselves change IR schema.
 
 ## Open risks (track; not automatic next tickets)
 
-1. Host Apex stub ≠ real ApexMarkdown Unified — fidelity gap for authoring (**Feature 1**).
+1. Feature 1 residual: broad Unified fidelity suite (U1–U17) and author-facing docs still landing (Chats 4–5); adapter itself is live.
 2. Publication atomicity across volumes/OSes not fully proven.
 3. Residual dual-helper surface: product IR/RAG/HTML input uses `parser.zig` with
    author key **`parent` only** (`parentEntry` / `parent_entry` rejected).

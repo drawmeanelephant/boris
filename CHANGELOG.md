@@ -19,7 +19,7 @@ How to use going forward:
 
 ## [Unreleased]
 
-### Feature 1 — ApexMarkdown pin + static link (campaign Chat 1–2)
+### Feature 1 — ApexMarkdown Unified adapter (campaign Chat 1–3)
 
 - Vendor real **[ApexMarkdown/apex](https://github.com/ApexMarkdown/apex)** as a
   flat source snapshot under `vendor/apex-markdown/` @ **v1.1.11**
@@ -29,8 +29,13 @@ How to use going forward:
 - **Chat 2:** `scripts/build-apex-markdown.sh` + `zig build build-apex` build
   static `libapex.a` (and cmark-gfm) via CMake; `build.zig` links them into
   product modules. Hostile path does not link real Apex. CI installs CMake.
-  Host `apex_render` remains the **minimal stub** until Chat 3 adapter. No IR
-  schema or CLI default changes.
+- **Chat 3:** Host `vendor/apex/apex.c` is a real adapter:
+  `apex_render` → Unified `apex_markdown_to_html` → copy into host allocator →
+  `apex_free_string`. Version string
+  `boris-apex/apex-markdown-1.1.11+unified`. File includes/plugins/external
+  highlighters off. Host include guard renamed to `BORIS_APEX_HOST_H` so both
+  host and upstream headers can be included. HTML goldens updated for header
+  ids. No IR schema or CLI default changes.
 
 ### Docs — residual post-P3 audit cleanup
 

@@ -347,15 +347,15 @@ Update stub-era HTML goldens with reasons.
 ## 10. Definition of done
 
 - [x] ApexMarkdown/apex vendored & pinned; licenses present *(Chat 1: `vendor/apex-markdown` @ v1.1.11 + `VENDOR.md`)*
-- [x] Static ApexMarkdown linked from `zig build` *(Chat 2: cmake Strategy A; host body still stub)*
-- [ ] Host `apex_render` uses real Apex Unified (fragment HTML)
-- [ ] File includes / plugins / external highlighters off at Boris boundary
-- [ ] Whiteboard path: copy-in + `apex_free_string`; no arena free via libc
-- [ ] Hostile tests still green
-- [ ] Fidelity tests for Unified constructs green
-- [ ] `zig build test` + release-gate green
-- [ ] Docs claim **ApexMarkdown Unified**, not cmark-gfm-as-product
-- [ ] No Feature 2; no accidental mode sprawl
+- [x] Static ApexMarkdown linked from `zig build` *(Chat 2: cmake Strategy A)*
+- [x] Host `apex_render` uses real Apex Unified (fragment HTML) *(Chat 3)*
+- [x] File includes / plugins / external highlighters off at Boris boundary *(Chat 3)*
+- [x] Whiteboard path: copy-in + `apex_free_string`; no arena free via libc *(Chat 3)*
+- [x] Hostile tests still green *(Chat 3)*
+- [ ] Fidelity tests for Unified constructs green *(Chat 4)*
+- [ ] `zig build test` + release-gate green *(Chat 5 full gate; tests green through Chat 3)*
+- [ ] Docs claim **ApexMarkdown Unified**, not cmark-gfm-as-product *(Chat 5 final pass; partial Chat 3)*
+- [x] No Feature 2; no accidental mode sprawl
 
 ---
 

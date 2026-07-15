@@ -40,10 +40,10 @@ rolling-paper brand.
 | Multi-target isolated outputs (`--target`) | **Implemented** — per-target cache/stage isolation ([multi-target](docs/contracts/multi-target-isolated-output.md)) |
 | `zig build test` | **Implemented** — CLI + fixtures + scanner + parser + pipeline + RAG + Apex + HTML |
 | Normative contracts under [`docs/contracts/`](docs/contracts/) | **Normative + implemented** (see ownership map) |
-| Apex C ABI (in-process) | **Implemented** — linked + tested; **host stub** today ([contract](docs/contracts/apex-abi.md)) |
-| ApexMarkdown Unified pin + static link | **Pinned + linked** — `vendor/apex-markdown/` @ v1.1.11; CMake builds static libs on `zig build` ([VENDOR.md](vendor/apex-markdown/VENDOR.md)) |
+| Apex C ABI (in-process) | **Implemented** — real ApexMarkdown Unified via host adapter ([contract](docs/contracts/apex-abi.md)) |
+| ApexMarkdown Unified pin + link + adapter | **Landed** — `vendor/apex-markdown/` @ v1.1.11; CMake static libs; Unified `apex_render` adapter ([VENDOR.md](vendor/apex-markdown/VENDOR.md)) |
 | HTML `dist/` as **default** CLI (no flags) | **Roadmap** — bare `boris` remains IR-first today |
-| Real ApexMarkdown Unified fidelity | **In progress** — libs linked; host `apex_render` still stub until Chat 3 adapter ([APEX-Feature1-plan.md](APEX-Feature1-plan.md)) |
+| Broad Unified fidelity suite (tables, footnotes, …) | **In progress** — Chat 4 ([APEX-Feature1-plan.md](APEX-Feature1-plan.md)) |
 | Full YAML / MDX | **Out of scope** for v0.1 |
 
 ## What works today (CLI)

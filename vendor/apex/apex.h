@@ -50,8 +50,10 @@
  *
  * Other non-zero values are reserved; hosts should treat any non-zero as failure.
  */
-#ifndef APEX_H
-#define APEX_H
+/* Guard must NOT be APEX_H — that is the include guard of upstream
+ * ApexMarkdown include/apex/apex.h. The host adapter includes both. */
+#ifndef BORIS_APEX_HOST_H
+#define BORIS_APEX_HOST_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -134,4 +136,4 @@ const char *apex_version(void);
 }
 #endif
 
-#endif /* APEX_H */
+#endif /* BORIS_APEX_HOST_H */

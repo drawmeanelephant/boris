@@ -228,11 +228,11 @@ pub fn build(b: *std.Build) void {
     );
     test_apex_hostile_step.dependOn(&run_apex_hostile_tests.step);
 
-    // Optional ASan+UBSan C smoke (real engine, not the product binary).
+    // Optional ASan+UBSan C smoke (host adapter + real ApexMarkdown, not product binary).
     // Hosts without sanitizer runtime get a documented skip (exit 0), not a fake pass.
     const sanitize_step = b.step(
         "test-apex-sanitize",
-        "Optional ASan+UBSan smoke for vendor/apex (skips if unavailable)",
+        "Optional ASan+UBSan smoke for vendor/apex adapter (skips if unavailable)",
     );
     const sanitize_run = b.addSystemCommand(&.{
         "bash",
@@ -242,8 +242,16 @@ pub fn build(b: *std.Build) void {
         \\LOG="${TMPDIR:-/tmp}/boris-apex-sanitize-build-$$.log"
         \\cleanup() { rm -f "$OUT" "$LOG"; }
         \\trap cleanup EXIT
+        \\bash scripts/build-apex-markdown.sh >/dev/null
         \\if ! zig cc -std=c11 -fsanitize=address,undefined -fno-omit-frame-pointer -g \
-        \\    -I vendor/apex vendor/apex/apex.c vendor/apex/apex_sanitize_smoke.c \
+        \\    -I vendor/apex \
+        \\    -I vendor/apex-markdown/include \
+        \\    -I vendor/apex-markdown/vendor/cmark-gfm/src \
+        \\    -I vendor/apex-markdown/build/vendor/cmark-gfm/src \
+        \\    vendor/apex/apex.c vendor/apex/apex_sanitize_smoke.c \
+        \\    vendor/apex-markdown/build/libapex.a \
+        \\    vendor/apex-markdown/build/vendor/cmark-gfm/extensions/libcmark-gfm-extensions.a \
+        \\    vendor/apex-markdown/build/vendor/cmark-gfm/src/libcmark-gfm.a \
         \\    -o "$OUT" >"$LOG" 2>&1; then
         \\  echo "test-apex-sanitize: NOT AVAILABLE on this host (sanitizer build failed)"
         \\  echo "--- zig cc log (first 40 lines) ---"
@@ -419,15 +427,21 @@ pub fn build(b: *std.Build) void {
 
 /// Compile and link host Apex C into a Zig module (in-process; never a subprocess).
 ///
-/// - `hostile == false`: host `vendor/apex/apex.c` + static ApexMarkdown libs
-///   (libapex + cmark-gfm). Chat 2 links the real engine; Chat 3 adapters it.
+/// - `hostile == false`: host adapter `vendor/apex/apex.c` + static ApexMarkdown
+///   libs (libapex + cmark-gfm). Upstream headers are compile-private to the C TU.
 /// - `hostile == true`: `apex_hostile.c` only — no real ApexMarkdown.
 fn linkApex(mod: *std.Build.Module, b: *std.Build, hostile: bool) void {
     mod.link_libc = true;
+    // Zig @cImport sees only the Boris host ABI header.
     mod.addIncludePath(b.path("vendor/apex"));
 
     if (!hostile) {
-        // Upstream headers are NOT added for Zig @cImport (host apex.h only).
+        // Adapter C TU includes <apex/apex.h>; paths are LazyPath so zig cc
+        // resolves them regardless of compile cwd. Zig @cImport still only
+        // needs vendor/apex (host ABI) — do not @cInclude upstream headers.
+        mod.addIncludePath(b.path("vendor/apex-markdown/include"));
+        mod.addIncludePath(b.path("vendor/apex-markdown/vendor/cmark-gfm/src"));
+        mod.addIncludePath(b.path("vendor/apex-markdown/build/vendor/cmark-gfm/src"));
         // Static archives from scripts/build-apex-markdown.sh:
         mod.addObjectFile(b.path("vendor/apex-markdown/build/libapex.a"));
         mod.addObjectFile(b.path("vendor/apex-markdown/build/vendor/cmark-gfm/extensions/libcmark-gfm-extensions.a"));
@@ -438,23 +452,12 @@ fn linkApex(mod: *std.Build.Module, b: *std.Build, hostile: bool) void {
         "vendor/apex/apex_hostile.c"
     else
         "vendor/apex/apex.c";
-    const flags: []const []const u8 = if (hostile)
-        &.{
-            "-std=c11",
-            "-Wall",
-            "-Wextra",
-        }
-    else
-        &.{
-            "-std=c11",
-            "-Wall",
-            "-Wextra",
-            // Keep ApexMarkdown symbols in the product link graph while the host
-            // body is still the stub (Chat 2). Chat 3 replaces the stub body.
-            "-DBORIS_LINK_APEX_MARKDOWN=1",
-        };
     mod.addCSourceFile(.{
         .file = b.path(c_file),
-        .flags = flags,
+        .flags = &.{
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+        },
     });
 }
