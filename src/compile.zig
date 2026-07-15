@@ -47,6 +47,7 @@ const target_mod = @import("target.zig");
 const graph_mod = @import("graph.zig");
 const diag = @import("diag.zig");
 const html_nav = @import("html_nav.zig");
+const html_toc = @import("html_toc.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -263,6 +264,7 @@ pub fn loadAndPromote(
 ///
 /// When `site` is non-null and the layout has nav/breadcrumb/title slots, those
 /// fragments are rendered from the frozen graph on the Whiteboard.
+/// `{{toc}}` is built from rendered body HTML (page-local; no graph required).
 pub fn renderAndPublishPage(
     io: Io,
     content_dir: Io.Dir,
@@ -320,6 +322,10 @@ pub fn renderAndPublishPageWithSite(
 
     var slots: assemble.SlotValues = .{ .content = html };
 
+    if (layout.has_toc) {
+        slots.toc = try html_toc.renderToc(arena, html);
+    }
+
     if (site) |s| {
         const gi = s.indexOf(page.entity_id) orelse return error.GraphValidationFailed;
         const node = s.nodes[gi];
@@ -333,7 +339,7 @@ pub fn renderAndPublishPageWithSite(
             slots.title = try html_nav.renderTitle(arena, node);
         }
     } else if (layout.has_nav or layout.has_breadcrumb or layout.has_title) {
-        // Layout requests chrome but no frozen site — treat as internal error.
+        // Layout requests graph chrome but no frozen site — treat as internal error.
         return error.GraphValidationFailed;
     }
 
@@ -1697,6 +1703,71 @@ test "HTML path emits site nav and breadcrumb for forest" {
     try std.testing.expect(std.mem.indexOf(u8, child, "../index.html") != null);
     try std.testing.expect(std.mem.indexOf(u8, child, "breadcrumb") != null);
     try std.testing.expect(std.mem.indexOf(u8, child, "<title>Child</title>") != null);
+}
+
+test "HTML path emits page toc from body headings" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    const work = "zig-cache/boris-f6-toc-emit";
+    try cwd.createDirPath(io, work);
+    defer cwd.deleteTree(io, work) catch {};
+
+    try writeTreeFile(io, work, "layouts/main.html",
+        \\<html>{{toc}}<main>{{content}}</main></html>
+    );
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Outline
+        \\---
+        \\
+        \\# Top Level
+        \\
+        \\Intro paragraph.
+        \\
+        \\## Section One
+        \\
+        \\### Nested
+        \\
+        \\## Section Two
+        \\
+        \\#### Skipped depth
+        \\
+    );
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 1), stats.pages_written);
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const page = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(page);
+
+    try std.testing.expect(std.mem.indexOf(u8, page, "page-toc") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "aria-label=\"On this page\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "href=\"#top-level\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "href=\"#section-one\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "href=\"#nested\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "href=\"#section-two\"") != null);
+    // h4 is not in toc.
+    try std.testing.expect(std.mem.indexOf(u8, page, "skipped-depth") == null or
+        std.mem.indexOf(u8, page, "href=\"#skipped-depth\"") == null);
+    // Body still has the h4 id for in-page anchors.
+    try std.testing.expect(std.mem.indexOf(u8, page, "id=\"skipped-depth\"") != null);
+    // TOC anchors match body heading ids.
+    try std.testing.expect(std.mem.indexOf(u8, page, "id=\"section-one\"") != null);
 }
 
 test "html fixture golden: expected/ matches compile output" {

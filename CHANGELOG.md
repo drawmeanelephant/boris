@@ -19,6 +19,16 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Feature 6 follow-on — in-page heading `{{toc}}` — **Done**
+
+- Layout marker `{{toc}}` (optional, at most once) emits a per-page outline from
+  rendered body HTML: `h1`–`h3` with Apex `id` attributes, document order.
+- Anchors match body ids (scan HTML after Apex + Aside; no independent slug
+  rewrite). Empty fragment when no qualifying headings. h4–h6 omitted from TOC.
+- Module: `src/html_toc.zig`. Wired in `assemble` multi-slot + `compile` render.
+- Default `layouts/main.html` includes `{{toc}}` with light CSS indent classes.
+- Contracts: `docs/contracts/html-output.md`. Page-local; no global nav fingerprint.
+
 ### Hygiene — residual risks D2/D3/D4 + publish/dialect/migration
 
 - **D2:** Apex CMake configure disables system libyaml / PkgConfig discovery so

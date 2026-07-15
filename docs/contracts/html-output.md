@@ -108,6 +108,7 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
    | `{{nav}}` | Full site forest (Trunks id-ascending, nested Satellites id-ascending) |
    | `{{breadcrumb}}` | Parent chain root → current page (inclusive) |
    | `{{title}}` | Page title, or entity id when title is absent (HTML-escaped text) |
+   | `{{toc}}` | In-page outline from **this page’s** body headings (h1–h3 with `id`) |
 
 4. Missing `{{content}}` → hard error **before** content compilation.
 5. Duplicate of any known marker → hard error **before** content compilation.
@@ -115,7 +116,7 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
 7. Split into an ordered list of **static** slices and **slot** placeholders
    (`assemble.Layout`), all views into the long-lived layout buffer.
 8. Final assembly streams sequential writes only: static segments and per-page
-   slot fragments (content, and nav/breadcrumb/title when those slots exist).
+   slot fragments (content, and nav/breadcrumb/title/toc when those slots exist).
    **No** full-page mega-string concatenation in the product assembly path.
 
 ### Graph gate (HTML path)
@@ -173,6 +174,38 @@ page dirties every page that uses that layout (full forest is global chrome).
 Layouts without `{{nav}}` keep the prior page-local fingerprint inputs
 (source, includes, layout bytes, entity id, target identity).
 
+`{{toc}}` is **page-local** (derived from that page’s body). It does **not**
+add global fingerprint material; source/layout inputs already cover heading
+edits on the same page.
+
+### In-page `{{toc}}` (normative shape)
+
+When `{{toc}}` is present, after body render (Apex + Aside stream):
+
+1. Scan the **rendered body HTML** for `h1`–`h3` elements that have an `id`
+   attribute (document order). Do **not** re-slug Markdown independently —
+   anchors must match Apex-emitted ids.
+2. Levels `h4`–`h6` are omitted from the outline (still render in the body).
+3. Headings without `id` are omitted.
+4. When zero qualifying headings exist, emit an **empty** fragment (no empty
+   chrome wrapper).
+5. Otherwise emit:
+
+```html
+<nav class="page-toc" aria-label="On this page">
+  <ul>
+    <li class="page-toc__lN"><a href="#ID">TEXT</a></li>
+  </ul>
+</nav>
+```
+
+- `N` is the heading level (`1`–`3`).
+- `ID` is HTML-escaped for the attribute.
+- `TEXT` is the heading’s inner text with tags stripped; HTML entities already
+  present in the body (e.g. `&amp;`) are **not** double-escaped.
+- Nested `<ul>` structure is **not** required in v0; level classes allow CSS
+  indent. Flat list preserves document order.
+
 ---
 
 ## Publication
@@ -225,6 +258,7 @@ On the OS/filesystem where `zig build test` runs:
 | Unknown / multi-slot layout markers | `assemble` multi-slot tests |
 | Graph gate on HTML (bad parent) | `compile` Feature 6 tests |
 | Site nav + breadcrumb + relative href | `html_nav` + `compile` Feature 6 tests |
+| In-page `{{toc}}` from body heading ids | `html_toc` + `compile` Feature 6 follow-on tests |
 | Output equals prefix + HTML + suffix | `compile` + `assemble` (content-only layouts) |
 | Premature invalidation before flush fails | `assemble.HoldUntilFlush` |
 | Correct flush-then-reset succeeds | `assemble` + `compile` |

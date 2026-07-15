@@ -2,8 +2,8 @@
 //!
 //! Layout is loaded once at **startup** (before content compile) and split into
 //! ordered static / slot segments. Required marker: `{{content}}`. Optional:
-//! `{{nav}}`, `{{breadcrumb}}`, `{{title}}`. Final HTML is streamed with
-//! sequential writes — no full-page mega-string concatenation.
+//! `{{nav}}`, `{{breadcrumb}}`, `{{title}}`, `{{toc}}`. Final HTML is streamed
+//! with sequential writes — no full-page mega-string concatenation.
 //!
 //! ## I/O invariants
 //!
@@ -43,8 +43,9 @@ pub const content_marker = "{{content}}";
 pub const nav_marker = "{{nav}}";
 pub const breadcrumb_marker = "{{breadcrumb}}";
 pub const title_marker = "{{title}}";
+pub const toc_marker = "{{toc}}";
 
-/// Max static+slot pieces in one layout (4 slots + 5 static regions is typical).
+/// Max static+slot pieces in one layout (5 slots + static regions is typical).
 pub const max_segments: usize = 16;
 
 /// Stack buffer size for the page writer — large enough that most pages need
@@ -64,6 +65,7 @@ pub const Slot = enum {
     nav,
     breadcrumb,
     title,
+    toc,
 };
 
 pub const Segment = union(enum) {
@@ -77,6 +79,7 @@ pub const SlotValues = struct {
     nav: []const u8 = "",
     breadcrumb: []const u8 = "",
     title: []const u8 = "",
+    toc: []const u8 = "",
 
     pub fn forSlot(self: SlotValues, slot: Slot) []const u8 {
         return switch (slot) {
@@ -84,6 +87,7 @@ pub const SlotValues = struct {
             .nav => self.nav,
             .breadcrumb => self.breadcrumb,
             .title => self.title,
+            .toc => self.toc,
         };
     }
 };
@@ -100,6 +104,7 @@ pub const Layout = struct {
     has_nav: bool = false,
     has_breadcrumb: bool = false,
     has_title: bool = false,
+    has_toc: bool = false,
 
     /// Content-only convenience: bytes before the single `{{content}}`.
     /// Empty when the layout has other slots (use `segments` instead).
@@ -114,6 +119,7 @@ pub const Layout = struct {
         var seen_nav = false;
         var seen_breadcrumb = false;
         var seen_title = false;
+        var seen_toc = false;
 
         var pos: usize = 0;
         while (pos < raw.len) {
@@ -152,6 +158,11 @@ pub const Layout = struct {
                 seen_title = true;
                 layout.has_title = true;
                 try layout.appendSlot(.title);
+            } else if (std.mem.eql(u8, token, toc_marker)) {
+                if (seen_toc) return error.DuplicateLayoutMarker;
+                seen_toc = true;
+                layout.has_toc = true;
+                try layout.appendSlot(.toc);
             } else {
                 return error.UnknownLayoutMarker;
             }
@@ -161,7 +172,7 @@ pub const Layout = struct {
         if (!seen_content) return error.MissingContentMarker;
 
         // Content-only convenience prefix/suffix for legacy three-write tests.
-        if (!layout.has_nav and !layout.has_breadcrumb and !layout.has_title) {
+        if (!layout.has_nav and !layout.has_breadcrumb and !layout.has_title and !layout.has_toc) {
             if (layout.segment_count == 3 and
                 layout.segments[0] == .static and
                 layout.segments[1] == .slot and layout.segments[1].slot == .content and
@@ -541,19 +552,23 @@ test "layout duplicate content marker is hard error" {
     try std.testing.expectError(error.DuplicateContentMarker, Layout.split(raw));
 }
 
-test "layout multi-slot nav breadcrumb title" {
+test "layout multi-slot nav breadcrumb title toc" {
     const raw =
-        \\<html><title>{{title}}</title>{{nav}}{{breadcrumb}}{{content}}</html>
+        \\<html><title>{{title}}</title>{{nav}}{{breadcrumb}}{{toc}}{{content}}</html>
     ;
     const layout = try Layout.split(raw);
     try std.testing.expect(layout.has_nav);
     try std.testing.expect(layout.has_breadcrumb);
     try std.testing.expect(layout.has_title);
+    try std.testing.expect(layout.has_toc);
     try std.testing.expectEqual(@as(usize, 0), layout.prefix.len); // multi-slot: no content-only prefix
-    try std.testing.expect(layout.segment_count >= 5);
+    try std.testing.expect(layout.segment_count >= 6);
 
-    try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{toc}}{{content}}"));
+    const toc_only = try Layout.split("{{toc}}{{content}}");
+    try std.testing.expect(toc_only.has_toc);
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{toc}}{{toc}}{{content}}"));
     try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{nav}}{{nav}}{{content}}"));
+    try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{nope}}{{content}}"));
 }
 
 test "static layout fixtures missing and duplicate" {
