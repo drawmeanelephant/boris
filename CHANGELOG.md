@@ -26,6 +26,9 @@ How to use going forward:
   case-insensitive filesystems. Wires
   `docs/contracts/fixtures/case-id-collision/`. Removes unused `src/discover.zig`
   (divergent dead discovery path that held the unused case-collision helper).
+- RAG publish no longer deletes the previous corpus before the new tree is
+  installed: move-aside + restore-on-failure, then delete the old tree only
+  after a successful swap (`src/rag.zig` `publishCorpus`).
 
 ### Docs
 

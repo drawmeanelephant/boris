@@ -1038,46 +1038,24 @@ fn openPathDir(io: Io, path: []const u8, opts: Io.Dir.OpenOptions) !Io.Dir {
     return try Io.Dir.cwd().openDir(io, path, opts);
 }
 
-/// Write the full corpus under `stage_path`, then replace `out_dir` by deleting
-/// the previous tree and renaming the stage directory into place.
-///
-/// **Limitations (honest):** same-filesystem directory rename is preferred for
-/// an atomic-ish swap; when rename fails (including some absolute-path /
-/// cross-volume cases) we fall back to file-by-file copy then delete the stage.
-/// Cross-volume atomic replace is **not** claimed. Concurrent readers may
-/// observe a missing tree between delete and rename/copy. Staging is
-/// best-effort cleanup on failure.
-fn publishCorpus(
-    io: Io,
-    gpa: std.mem.Allocator,
-    stage_path: []const u8,
-    out_dir: []const u8,
-) !void {
+/// Try to rename directory `from` → `to` (absolute or cwd-relative).
+/// Returns true on success, false on any rename failure (caller falls back).
+fn tryRenameDir(io: Io, from: []const u8, to: []const u8) bool {
     const cwd = Io.Dir.cwd();
-    // Remove prior final tree so rename of stage → out succeeds.
-    cwd.deleteTree(io, out_dir) catch {};
-    // Ensure parent of out_dir exists (rename does not create parents).
-    if (std.fs.path.dirname(out_dir)) |parent| {
-        if (parent.len > 0) try ensureDirPath(io, parent);
+    if (std.fs.path.isAbsolute(from) and std.fs.path.isAbsolute(to)) {
+        Io.Dir.renameAbsolute(from, to, io) catch return false;
+        return true;
     }
+    cwd.rename(from, cwd, to, io) catch return false;
+    return true;
+}
 
-    // Prefer atomic-ish directory rename (same filesystem). Absolute paths use
-    // renameAbsolute; relative paths use cwd-relative rename.
-    if (std.fs.path.isAbsolute(stage_path) and std.fs.path.isAbsolute(out_dir)) {
-        if (Io.Dir.renameAbsolute(stage_path, out_dir, io)) |_| {
-            return;
-        } else |_| {}
-    } else {
-        if (cwd.rename(stage_path, cwd, out_dir, io)) |_| {
-            return;
-        } else |_| {}
-    }
-
-    // Fallback: copy tree file-by-file if directory rename fails.
-    try ensureDirPath(io, out_dir);
-    var stage = try openPathDir(io, stage_path, .{ .iterate = true });
+/// Copy every file under `src_root` into `dst_root` (created if needed).
+fn copyTreeFiles(io: Io, gpa: std.mem.Allocator, src_root: []const u8, dst_root: []const u8) !void {
+    try ensureDirPath(io, dst_root);
+    var stage = try openPathDir(io, src_root, .{ .iterate = true });
     defer stage.close(io);
-    var out = try openPathDir(io, out_dir, .{});
+    var out = try openPathDir(io, dst_root, .{});
     defer out.close(io);
 
     var walker = try stage.walk(gpa);
@@ -1091,6 +1069,68 @@ fn publishCorpus(
         try ensureParent(io, out, rel);
         try out.writeFile(io, .{ .sub_path = rel, .data = data });
     }
+}
+
+/// Write the full corpus under `stage_path`, then install it at `out_dir`.
+///
+/// **Never deletes `out_dir` before the new corpus is ready.** Order:
+/// 1. Prefer rename `stage` → `out` when `out` is free.
+/// 2. Else move `out` → `out.boris-rag-prev`, rename `stage` → `out`, then
+///    delete the previous tree. On install failure, restore the previous tree.
+/// 3. Else copy `stage` → `out.boris-rag-next` and swap via the same move-aside
+///    dance (cross-volume / rename-of-stage failure path).
+///
+/// Cross-volume **atomic** replace is still not claimed. Concurrent readers may
+/// briefly observe the previous tree moved aside during the swap window.
+fn publishCorpus(
+    io: Io,
+    gpa: std.mem.Allocator,
+    stage_path: []const u8,
+    out_dir: []const u8,
+) !void {
+    const cwd = Io.Dir.cwd();
+    // Ensure parent of out_dir exists (rename does not create parents).
+    if (std.fs.path.dirname(out_dir)) |parent| {
+        if (parent.len > 0) try ensureDirPath(io, parent);
+    }
+
+    // Fast path: out free → rename stage into place.
+    if (tryRenameDir(io, stage_path, out_dir)) return;
+
+    const prev_path = try std.fmt.allocPrint(gpa, "{s}.boris-rag-prev", .{out_dir});
+    defer gpa.free(prev_path);
+    const next_path = try std.fmt.allocPrint(gpa, "{s}.boris-rag-next", .{out_dir});
+    defer gpa.free(next_path);
+
+    // Drop leftovers from a previous interrupted publish.
+    cwd.deleteTree(io, prev_path) catch {};
+    cwd.deleteTree(io, next_path) catch {};
+
+    // Move existing out aside only after stage is complete (caller already
+    // finished writing stage). Install stage; restore on failure.
+    const had_prev = tryRenameDir(io, out_dir, prev_path);
+    if (tryRenameDir(io, stage_path, out_dir)) {
+        if (had_prev) cwd.deleteTree(io, prev_path) catch {};
+        return;
+    }
+    if (had_prev) {
+        // Stage rename failed after moving out aside — put the old corpus back.
+        if (!tryRenameDir(io, prev_path, out_dir)) {
+            // Catastrophic: both stage and prev may be orphaned; leave both.
+            return error.RagPublishSwapFailed;
+        }
+    }
+
+    // Rename of stage failed (cross-volume, etc.): materialize a full next tree
+    // beside out, then swap. Never delete out until next is fully written.
+    try copyTreeFiles(io, gpa, stage_path, next_path);
+    const moved = tryRenameDir(io, out_dir, prev_path);
+    if (!tryRenameDir(io, next_path, out_dir)) {
+        if (moved) _ = tryRenameDir(io, prev_path, out_dir);
+        cwd.deleteTree(io, next_path) catch {};
+        return error.RagPublishSwapFailed;
+    }
+    if (moved) cwd.deleteTree(io, prev_path) catch {};
     cwd.deleteTree(io, stage_path) catch {};
 }
 
@@ -1741,6 +1781,31 @@ test "rag export against fixtures/content/valid" {
     try std.testing.expect(res.ok());
     try requiredRagFilesPresent(io, out);
     try std.testing.expect(res.stats.content_pages >= 2);
+
+    // Second publish must replace via move-aside, not delete-before-install.
+    var res2 = try run(io, gpa, .{
+        .content_root = "fixtures/content/valid",
+        .out_dir = out,
+        .system_docs_dir = "docs/rag/system",
+        .quiet = true,
+    });
+    defer res2.deinit();
+    try std.testing.expect(res2.ok());
+    try requiredRagFilesPresent(io, out);
+    // Leftover swap dirs must not linger after a successful second publish.
+    const cwd = Io.Dir.cwd();
+    const prev = try std.fmt.allocPrint(gpa, "{s}.boris-rag-prev", .{out});
+    defer gpa.free(prev);
+    const next = try std.fmt.allocPrint(gpa, "{s}.boris-rag-next", .{out});
+    defer gpa.free(next);
+    if (cwd.openDir(io, prev, .{})) |*d| {
+        d.close(io);
+        return error.TestUnexpectedResult;
+    } else |_| {}
+    if (cwd.openDir(io, next, .{})) |*d| {
+        d.close(io);
+        return error.TestUnexpectedResult;
+    } else |_| {}
 
     // Parse catalog_meta + each JSONL line
     var dir = try Io.Dir.cwd().openDir(io, out, .{});
