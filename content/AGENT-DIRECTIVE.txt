@@ -12,10 +12,12 @@
 Keep `content/` a **living sample documentation site** that:
 
 1. Matches **Boris product reality as of v0.2.0** (HTML default, Apex Unified,
-   Feature 6 nav + toc, P2/P3 HTML helpers).
+   Feature 6 nav + toc, Feature 7 includes + wiki-links, P2/P3 HTML helpers).
 2. Exercises the real compile path end-to-end: frontmatter → Trunk/Satellite
-   graph → ApexMarkdown Unified → `<Aside>` stream → layout splice → `dist/`.
-3. Gives maintainers **accurate fixtures to click through** (nav, TOC, modes).
+   graph → includes/wiki (HTML) → ApexMarkdown Unified → `<Aside>` stream →
+   layout splice → `dist/`.
+3. Gives maintainers **accurate fixtures to click through** (nav, TOC, modes,
+   expanded includes, wiki `<a href>` links).
 4. Stays **contract-correct** so `boris` / `boris --out` / `boris --rag` stay green.
 
 You are rewriting **author content**, not the Zig compiler. Prefer editing
@@ -33,7 +35,8 @@ user separately asks.
 | `docs/contracts/frontmatter.md` | Closed FM grammar; **`parent` only** |
 | `docs/contracts/components.md` | Constrained `<Aside>` only |
 | `docs/contracts/html-output.md` | Default HTML path, layout markers, nav/toc |
-| `README.md` | Human CLI table |
+| `docs/contracts/includes-and-wiki-links.md` | `{{include}}` + `[[entity-id]]` (HTML path) |
+| `README.md` | Human CLI table + clone commands |
 | `layouts/main.html` | `{{nav}}` / `{{breadcrumb}}` / `{{toc}}` / `{{content}}` |
 | `AGENTS.md` | Hard constraints |
 
@@ -55,6 +58,11 @@ There is **no** `zig build rag` product step.
 - Bodies: **ApexMarkdown Unified** in-process (not a stub, not a subprocess).
 - Layout: graph-aware **`{{nav}}`**, **`{{breadcrumb}}`**, **`{{title}}`**,
   in-page **`{{toc}}`** (h1–h3 from body ids) — Feature 6 shipped.
+- **Feature 7 (required dogfood):** `{{include path}}` expands and
+  `[[entity-id]]` / `[[entity-id|label]]` rewrite **before Apex** on the HTML
+  path. Content-root **`includes/`** is **not** discovered as pages. Fenced
+  code keeps raw syntax (no expand/rewrite). Fail loud on missing targets /
+  cycles — do not ship broken demos under `content/`.
 - Trusted-author HTML passthrough in the Apex adapter; prefer markdown + Aside.
 
 ---
@@ -80,16 +88,36 @@ Kinds: `note`, `tip`, `info`, `warning`, `danger`. Double-quoted attrs.
 Close tag at line start. No nested asides. No invented tags.
 `:::kind` is RAG **export only**, never authoring.
 
+### Includes + wiki-links (Feature 7 dogfood)
+
+- Keep at least **one live** `{{include includes/…}}` outside fenced examples
+  (recommended: `getting-started` and/or `guides/overview`).
+- Keep **several live** `[[entity-id]]` / labeled wiki-links between real pages.
+- Keep **fenced syntax examples** so authors see the raw form (those must NOT
+  expand — correct fence behavior). Only **fenced** code blocks suppress
+  expansion; single-backtick inline code does **not**.
+- Do **not** put example `{{include …}}` or `[[fake-id]]` outside fences (or
+  inside fragments that get included) — Boris will try to resolve them and
+  fail loud. Describe in prose, or fence the example.
+- Wiki labels must be single-line (newlines inside `[[id|label]]` are errors).
+- Fragments live under `content/includes/**`. Short fragments; frontmatter on
+  fragments is optional (body-only if present). Never treat `includes/` as a
+  page tree.
+- Wiki targets are exact **entity ids** (same space as `parent`). No
+  `[[id#heading]]` in this MVP.
+
 ### Links
 
-Prefer site-relative HTML links that survive publish
-(`[Getting started](getting-started.html)`, nested `guides/…html`).
+Prefer site-relative HTML links **or** wiki-links that resolve to the same
+entity ids (`[[getting-started]]`, nested `guides/…`). Both are fine; wiki is
+preferred where you want Feature 7 dogfood.
 
 ### Voice
 
 Product name **Boris**. Load → Roll → Ignite → Reset is fine as narrative.
 No branded component jargon. Honest about phase: do not claim features the
 layout or CLI do not ship. Prefer measured claims over “blazing fast.”
+Read like a real 0.2 docs site — not a feature-checklist graveyard.
 
 ---
 
@@ -99,9 +127,12 @@ layout or CLI do not ship. Prefer measured claims over “blazing fast.”
 content/
   AGENT-DIRECTIVE.txt          # this file — keep; do not compile
   index.md                     # Trunk — home / product pitch
-  getting-started.md           # Trunk — install + modes
+  getting-started.md           # Trunk — install + modes + Feature 7 demo
+  includes/
+    shared-tip.md              # Fragment — NOT a page
+    authoring-note.md          # Fragment — NOT a page
   guides/
-    overview.md                # Trunk — content model + pipeline
+    overview.md                # Trunk — content model + pipeline + Feature 7
     trunk-satellite.md         # Satellite of overview
     asides.md                  # Satellite of overview
     apex-markdown.md           # Trunk — Unified showcase
@@ -112,7 +143,8 @@ content/
 ```
 
 Minimum bar: ≥6 pages, ≥2 trunks, ≥3 satellites; home, getting started, graph,
-Aside, CLI modes, Apex showcase, accurate RAG.
+Aside, CLI modes, Apex showcase, accurate RAG; **live include + multi-page
+wiki-links**; fenced raw examples preserved.
 
 ---
 
@@ -123,6 +155,7 @@ Aside, CLI modes, Apex showcase, accurate RAG.
 - Broken pages under `content/` “for education.”
 - Embedded HTTP server; committing `dist/` / `.boris/` / `rag/`.
 - Renaming this directive to `*.md`.
+- Publishing `includes/` as site pages (scanner must keep skipping that dir).
 
 ---
 
@@ -143,11 +176,15 @@ test -f rag/INDEX.md && test -d rag/content/pages
 Quality bar:
 
 - [ ] No `parentEntry` / `parent_entry` in source frontmatter
-- [ ] Graph valid; CLI docs match HTML default
+- [ ] Graph valid; CLI docs match HTML default (bare `boris` → `dist/`)
 - [ ] Apex described as ApexMarkdown Unified
 - [ ] Feature 6 nav/toc described accurately (not “still roadmap”)
+- [ ] Feature 7 dogfood: live `{{include}}` + several `[[wiki]]` links; fences
+      keep raw syntax; `includes/` fragments are not pages
+- [ ] Clone URL / first-build commands match `README.md`
 - [ ] At least one table, one footnote, multiple fences, ≥3 asides site-wide
-- [ ] Internal links resolve under `dist/`
+- [ ] Internal links resolve under `dist/` (including wiki → real `<a href>`)
+- [ ] Expanded include text appears in rendered HTML (not only source)
 - [ ] This `AGENT-DIRECTIVE.txt` still present and non-`.md`
 
 ---
@@ -155,5 +192,5 @@ Quality bar:
 ## One-line north star
 
 **`content/` is the dogfood docs site for Boris itself — accurate to HTML-default
-v0.2 + Apex Unified + Trunk/Satellite + Aside + nav/toc, and strict enough that
-the real compiler stays the gate.**
+v0.2 + Apex Unified + Trunk/Satellite + Aside + nav/toc + includes/wiki, and
+strict enough that the real compiler stays the gate.**
