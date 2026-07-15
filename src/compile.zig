@@ -199,7 +199,7 @@ pub const CacheEntry = struct {
 };
 
 pub const CacheManifest = struct {
-    format_version: []const u8 = "boris-cache-v1",
+    format_version: []const u8 = cache.CACHE_FORMAT_VERSION,
     entries: []const CacheEntry,
 };
 
@@ -315,7 +315,7 @@ fn collectTransitIncludes(
 }
 
 fn writeCacheManifest(writer: anytype, manifest: CacheManifest) !void {
-    try writer.writeAll("{\n  \"format_version\": \"boris-cache-v1\",\n  \"entries\": [\n");
+    try writer.print("{{\n  \"format_version\": \"{s}\",\n  \"entries\": [\n", .{manifest.format_version});
     for (manifest.entries, 0..) |entry, i| {
         try writer.print("    {{\n      \"entity_id\": \"{s}\",\n      \"fingerprint\": \"{s}\",\n      \"output_path\": \"{s}\"\n    }}", .{
             entry.entity_id,
@@ -366,7 +366,10 @@ pub fn compileHtmlSiteMulti(
     targets: []const target_mod.TargetSpec,
     base_options: CompileOptions,
 ) !void {
-    const plans = try target_mod.validateTargets(io, gpa, targets);
+    const plans = try target_mod.validateTargets(io, gpa, targets, .{
+        .content_root = base_options.content_root,
+        .layout_path = base_options.layout_path,
+    });
     defer {
         for (plans) |plan| gpa.free(plan.resolved_output_dir);
         gpa.free(plans);
@@ -515,7 +518,14 @@ pub fn compilePages(
     if (options.incremental) {
         if (readFileAlloc(io, dist_dir, ".boris-cache/manifest.json", gpa)) |bytes| {
             manifest_bytes = bytes;
-            parsed_manifest = std.json.parseFromSlice(ParsedCacheManifest, gpa, bytes, .{ .ignore_unknown_fields = true }) catch null;
+            if (std.json.parseFromSlice(ParsedCacheManifest, gpa, bytes, .{ .ignore_unknown_fields = true })) |pm| {
+                // Reject pre-P3.3 or foreign manifests so fingerprints cannot be misread.
+                if (std.mem.eql(u8, pm.value.format_version, cache.CACHE_FORMAT_VERSION)) {
+                    parsed_manifest = pm;
+                } else {
+                    pm.deinit();
+                }
+            } else |_| {}
         } else |_| {}
     }
 
@@ -777,7 +787,10 @@ pub fn compilePages(
 
         var m_buf: [4096]u8 = undefined;
         var m_writer = atomic_manifest.file.writer(io, &m_buf);
-        try writeCacheManifest(&m_writer.interface, .{ .entries = cache_entries });
+        try writeCacheManifest(&m_writer.interface, .{
+            .format_version = cache.CACHE_FORMAT_VERSION,
+            .entries = cache_entries,
+        });
         try m_writer.flush();
 
         try atomic_manifest.replace(io);
@@ -1357,7 +1370,7 @@ test "incremental HTML build mode - full verification suite" {
         defer dist_dir.close(io);
         const manifest_bytes = try readAllFile(io, dist_dir, ".boris-cache/manifest.json", gpa);
         defer gpa.free(manifest_bytes);
-        try std.testing.expect(std.mem.indexOf(u8, manifest_bytes, "boris-cache-v1") != null);
+        try std.testing.expect(std.mem.indexOf(u8, manifest_bytes, cache.CACHE_FORMAT_VERSION) != null);
     }
 
     // ---- 2. Subsequent unchanged run ----

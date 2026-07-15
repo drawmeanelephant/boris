@@ -343,12 +343,14 @@ pub fn printUsage() void {
         \\  --rag-dir <DIR>     RAG-only mode with output directory DIR
         \\  --html              HTML site mode → pages under --html-dir (default dist)
         \\  --html-dir <DIR>    HTML site mode with output directory DIR
+        \\  --target NAME=DIR   HTML multi-target mode (repeatable); implies HTML
         \\
         \\Options:
         \\  --input <DIR>       Content root (default: content)
         \\  --out <DIR>         IR output directory (default: .boris; IR mode only)
         \\  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
         \\  --html-dir <DIR>    HTML output directory (implies HTML; default: dist)
+        \\  --target NAME=DIR   Named HTML output root (repeatable; exclusive with --html-dir)
         \\  --incremental       Opt-in to fast, content-addressed incremental HTML rendering (requires HTML mode)
         \\  --watch             Opt-in local-development watch mode for HTML builds (implies --incremental)
         \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; requires HTML mode; default 1)
@@ -363,18 +365,22 @@ pub fn printUsage() void {
         \\  system/**  content/pages/**  graph/entity-catalog.md  graph/relations.md
         \\
         \\HTML artifacts (success; Apex + layout splice; layout: layouts/main.html):
-        \\  <html-dir>/**/*.html
+        \\  <html-dir>/**/*.html   or   <each-target-dir>/**/*.html
+        \\  <target-dir>/.boris-cache/manifest.json  (with --incremental / --watch)
         \\
         \\Conflicts (exit 2):
         \\  --rag with --no-rag
         \\  --no-rag with --rag-dir
         \\  explicit --out with --rag or --rag-dir
-        \\  --html / --html-dir with --rag, --rag-dir, or explicit --out
-        \\  --watch, --incremental, or --jobs without --html / --html-dir
+        \\  --html / --html-dir / --target with --rag, --rag-dir, or explicit --out
+        \\  --target with --html-dir
+        \\  --watch, --incremental, or --jobs without HTML mode
+        \\  Invalid target names, output collisions, workspace escape, content/layout overlap
         \\
         \\Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
         \\
-        \\Note: HTML is opt-in via --html / --html-dir; default remains IR.
+        \\Note: HTML is opt-in via --html / --html-dir / --target; default remains IR.
+        \\      --html / --html-dir map to a single target named "default".
         \\
     , .{});
 }

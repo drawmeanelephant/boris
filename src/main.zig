@@ -189,6 +189,20 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 /// When `quiet`, skip stderr text (exit code and artifacts still convey failure).
 fn mapHtmlError(err: anyerror, quiet: bool) ExitCode {
     switch (err) {
+        // Target configuration / path isolation — usage (exit 2), not I/O.
+        error.NoTargetsSpecified,
+        error.InvalidTargetName,
+        error.DuplicateTargetName,
+        error.EmptyTargetDirectory,
+        error.TargetOutputCollision,
+        error.TargetOutputSymlink,
+        error.WorkspaceEscape,
+        => {
+            if (!quiet) {
+                std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
+            }
+            return .usage;
+        },
         error.ParseFailed,
         error.ComponentFailed,
         error.LayoutMissingMarker,

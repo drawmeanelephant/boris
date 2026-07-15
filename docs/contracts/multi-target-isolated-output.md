@@ -34,14 +34,17 @@ Before starting any source discovery, page rendering, cache mutation, cleanup, o
 - Must not be `.` or `..`.
 
 ### Path Overlap & Safety Rules:
-To guarantee absolute directory isolation, we resolve all target output directories to absolute paths relative to the current working directory (lexically resolving `.` and `..` segments, normalizing separators, and preserving letter-case matching semantics of the target platform).
+To guarantee absolute directory isolation, we resolve all target output directories to absolute paths relative to the current working directory (lexically resolving `.` and `..` segments, normalizing separators to `/`, stripping a trailing `/`, and preserving letter-case matching semantics of the target platform).
 We enforce:
 1. **Unique Target Names:** Duplicate target names are strictly rejected (`error.DuplicateTargetName`).
 2. **No Output Root Overlap:**
    - Absolute path equality is rejected (`error.TargetOutputCollision`).
-   - Parent/child nesting collisions are rejected (`error.TargetOutputCollision`). A path $A$ is a parent of $B$ if $B$ starts with $A$ and is followed by a path separator.
-   - Output paths must not escape the workspace using `..` or absolute tricks.
-3. **No Symlinks as Target Roots:** To prevent identity safety issues, target output directories must not contain symlinks to escape validation constraints, aligning with the core content scanning policies.
+   - Parent/child nesting collisions are rejected (`error.TargetOutputCollision`). A path $A$ is a parent of $B$ if $B$ equals $A$ or is $A$ followed by a path separator (path-boundary prefix; sibling prefixes such as `dist` vs `dist-prod` are allowed).
+   - Output paths must not escape the workspace. Workspace membership is also path-boundary prefix (rejects sibling false positives such as `/ws` vs `/ws-evil`).
+   - Targeting the workspace root itself is rejected (`error.TargetOutputCollision`).
+3. **No Content / Layout Overlap:** Target output roots must not equal or nest with the resolved `--input` content root, the resolved layout file path, or the layout file’s parent directory when that parent is not the workspace root (`error.TargetOutputCollision`). This prevents writing HTML into the source tree and prevents watch mode from ignoring content edits.
+4. **No Symlinks as Target Roots:** When a target output path exists and is a symlink, it is rejected (`error.TargetOutputSymlink`). Intermediate path-component symlink walks are not required for this slice.
+5. **Validation failures are usage errors:** Any of the above validation failures must abort before discovery/render and map to process exit code **2**.
 
 ---
 
@@ -72,6 +75,7 @@ This ensures that:
 - Target A's cache manifest cannot be read or overwritten by Target B.
 - Accidental cache hits cannot leak across targets if their configuration, layouts, or settings differ.
 - Old or pre-P3 cache directories (lacking a matching configuration/format discriminator) are safely invalidated, triggering a clean cold rebuild.
+- On-disk `manifest.json` `format_version` must equal the fingerprint discriminator (currently `boris-cache-v1-multitarget`). Manifests with any other version string are ignored (cold rebuild for that target).
 
 ---
 

@@ -21,12 +21,13 @@ How to use going forward:
 
 ### Multi-Target Isolated Output Directories & Cache Namespaces (P3.3)
 
-- Support configuring multiple explicitly named HTML build targets using `--html-target <name>=<dir>` and `--html-layout <path>` flags, normalization of legacy single-target option into target `default`.
-- Implement rigorous pre-render validation checking for workspace escapes, overlapping/parent-child target directory nests, duplicate target names, target directory collisions, and layout symlinks, rejecting the compile run before rendering.
-- Ensure 100% isolated output directories, configuration hashes, cache namespaces, and staging/temporary directories for each target.
-- Update cache-fingerprinting scheme with cache version/discriminator `boris-cache-v1-multitarget` and incorporate target name, layout path, and layout template bytes into the config identity hash.
-- Refactor compiler engine with sequential sorted compilation orchestration, robust error aggregation, and target failure policy.
-- Update development watch mode to monitor and ignore events originating from all configured target output directories and perform sorted target rebuild fan-out.
+- Support multiple explicitly named HTML build targets via repeatable `--target <NAME>=<OUTPUT_DIR>` (implies HTML). Legacy `--html` / `--html-dir` map to a single target named `default` (mutually exclusive with `--target` + `--html-dir`).
+- Shared global layout for this slice: `layouts/main.html` (no per-target layout flag).
+- Pre-render validation: duplicate names, output equality/nesting (path-boundary prefix), workspace membership with path-boundary checks, workspace-root rejection, target-root symlink rejection when the path exists, and **no overlap with content root or layout path/dir**. Validation failures abort before discovery and exit **2**.
+- Isolated output trees and structural cache namespaces: `<target-out>/.boris-cache/manifest.json` per target; sequential sorted target execution with aggregate failure (`MultiTargetCompilationFailed`).
+- Cache fingerprints use discriminator `boris-cache-v1-multitarget` and include target name, layout path, and layout template bytes. On-disk manifest `format_version` matches that discriminator; foreign/old versions are ignored (cold rebuild).
+- Watch mode ignores events under every configured target output root and rebuilds all targets in sorted order after a debounced change batch.
+- Review record and hardening notes: [`docs/reviews/p3.3-multi-target-review.md`](docs/reviews/p3.3-multi-target-review.md).
 
 ### Docs — status roadmap refresh (post-P2 / closing P3)
 

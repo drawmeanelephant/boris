@@ -55,7 +55,7 @@ default product surface.
 | Explicit Incremental HTML build mode (P2.4) | **Implemented & tested** | `--incremental` skips unchanged renders, cleans stale assets safely and atomically |
 | Bounded Parallel HTML page rendering (P3.1) | **Implemented & tested** | `--jobs N` enables opt-in parallel rendering of independent HTML pages |
 | Opt-in Local Development Watch Mode (P3.2) | **Implemented & tested** | `--watch` enables live, debounced, coalesced, serialized HTML rebuilds |
-| Multi-target isolated outputs (P3.3) | **Implemented & tested** | Isolated directories, cache namespaces, and staging lifecycles |
+| Multi-target isolated outputs (P3.3) | **Implemented & tested** | `--target NAME=DIR`; path-boundary validation; per-target `.boris-cache`; review hardening in `docs/reviews/p3.3-multi-target-review.md` |
 | HTML as default CLI (replacing IR) | **Now** (roadmap) | IR remains default until Feature 2 lands |
 | Full CommonMark Apex fidelity | **Now** (roadmap) | Stub engine is minimal markdown subset |
 | Full YAML / MDX / mmap | **Intentionally deferred** | See non-goals / Not Now |
@@ -73,6 +73,7 @@ zig build run -- --input fixtures/content/valid --rag-dir /tmp/boris-rag
 zig build run -- --input test/fixtures/html/content --html-dir /tmp/boris-dist
 zig build run -- --input test/fixtures/html/content --html --jobs 4
 zig build run -- --input test/fixtures/html/content --html --watch
+zig build run -- --input test/fixtures/html/content --target prod=dist/prod --target stage=dist/stage
 zig build run -- --input docs/contracts/fixtures/valid/content --out .boris
 zig build source-rag
 zig build package                  # optional review tar → packages/
@@ -248,13 +249,14 @@ re-opened as greenfield tickets.
 
 | Field | Detail |
 |-------|--------|
-| **Priority** | **Next** (last P3 gate; in progress) |
+| **Priority** | **Done** (landed; post-land hardening 2026-07-14) |
 | **User-visible payoff** | Maintainers can build distinct site variants (e.g. internal draft vs public production) from the same content root with isolated configs and separate cache manifests |
-| **Smallest shippable vertical slice** | Target grammar / config (CLI `--target` and/or `boris.json` / TOML per contract) mapping targets to unique `content_root` / `dist_dir` / cache namespaces; sequential per-target runs with isolated staging |
-| **Modules** | `src/cli.zig`, `src/main.zig`, new `src/config.zig` (as needed) |
-| **Acceptance** | (1) Config / CLI with two targets compiles both outputs correctly; (2) draft-only invalidation leaves production target cache untouched |
+| **Landed slice** | CLI `--target NAME=DIR`; `--html`/`--html-dir` → target `default`; path-boundary workspace/nest checks; content+layout non-overlap; sequential sorted compile; per-target `.boris-cache` + multitarget fingerprints; watch multi-root ignore |
+| **Modules** | `src/cli.zig`, `src/main.zig`, `src/target.zig`, `src/compile.zig`, `src/cache.zig`, `src/watch.zig` |
+| **Acceptance** | (1) Two targets compile both outputs; (2) cache namespaces isolated under each output root; (3) validation failures exit 2 |
+| **Known residual (optional)** | Watch ignore-root precompute; shared fingerprint/dep prep across targets; orphan atomic-temp scrub; intermediate symlink walk; per-target layouts |
 | **Dependencies** | Stable incremental + watch path (landed) |
-| **Contract / schema** | **CLI & configuration schema** — `docs/contracts/multi-target-isolated-output.md` |
+| **Contract / schema** | `docs/contracts/multi-target-isolated-output.md` · review: `docs/reviews/p3.3-multi-target-review.md` |
 
 ### Feature 6 — In-Page Navigation (TOC)
 
@@ -275,7 +277,7 @@ re-opened as greenfield tickets.
 | 2 | **HTML as default CLI mode** (promote opt-in SSG to default) | **Now** | Layout edges on freeze (landed) |
 | 3 | **Bounded worker pool** (parallel rendering) | **Done** | Dirty-set / incremental path (landed) |
 | 4 | **Watch mode** (FS events → dirty-set run) | **Done** | Worker pool / incremental (landed) |
-| 5 | **Multi-target isolated outputs** (config / `--target`) | **Next** | Watch + incremental (landed); contract present |
+| 5 | **Multi-target isolated outputs** (config / `--target`) | **Done** | Watch + incremental (landed); contract + post-land hardening |
 | 6 | **In-page navigation (TOC)** (`{{toc}}` splice) | **Later** | None hard |
 
 ---
