@@ -53,6 +53,10 @@ How to use going forward:
   `unsafe=true` notice; STATUS tracks D2/D3/D4 with resolve triggers;
   source-rag skips `build`/`CMakeFiles`; full review SHA + sanitizer PASS vs
   SKIP clarification; AUDIT-v0.1 Feature-1 supersession note.
+- **Chat 7 follow-through (pay-forward residual):** D4 concurrent Apex evidence
+  (U18 multi-thread Unified smoke + parallel Unified site compile under
+  `--jobs 8`); Linux CI requires real ASan/UBSan smoke via
+  `BORIS_REQUIRE_SANITIZE=1` (macOS remains opt-in skip).
 
 ### Docs — residual post-P3 audit cleanup
 

@@ -44,3 +44,19 @@ On any rendering or write failure:
 - **Stop Scheduling:** The coordinator and other threads MUST stop scheduling new pages.
 - **Worker Join:** The coordinator MUST block and wait (`join`) for all currently running workers to complete before returning.
 - **Cleanup:** Only the failing operation's temporary files (created via `createFileAtomic`) are discarded. Prior successfully published files MUST remain intact. No intermediate corrupt or partially written files may be promoted.
+
+## Apex concurrency residual (D4)
+
+Workers call in-process Apex via thread-local Whiteboards and a stack-scoped
+allocator. Boris does **not** claim a full formal proof that every ApexMarkdown
+global (extension registry, optional plugin paths) is thread-safe under all
+options. Product default keeps plugins/includes/highlighters off.
+
+Evidence gates (not proofs):
+
+- `src/apex.zig` **U18** — concurrent Unified renders vs sequential baselines +
+  cross-talk markers
+- `src/compile.zig` — `compilePages: parallel Unified constructs stable under
+  jobs (D4)` — seq vs `--jobs 8` byte-identical site HTML + dual parallel runs
+
+If either gate fails, treat concurrent Apex as broken for the pin under test.

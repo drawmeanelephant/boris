@@ -939,3 +939,134 @@ test "U17 include syntax does not pull disk when includes disabled" {
     try fidelityContains(html, "Before");
     try fidelityContains(html, "after");
 }
+
+// =============================================================================
+// D4 smoke — concurrent Unified renders vs sequential baselines
+// Not a formal proof of all Apex globals; catches cross-talk / non-determinism
+// under simultaneous apex_render (product --jobs path stress).
+// =============================================================================
+
+test "U18 concurrent Unified renders match sequential baselines (D4 smoke)" {
+    try skipIfHostileEngine();
+    const gpa = std.testing.allocator;
+
+    // Distinctive tokens per sample catch cross-talk if threads share engine state.
+    const samples = [_][]const u8{
+        \\| a | b |
+        \\|---|---|
+        \\| TBL-ALPHA | 2 |
+        \\
+        ,
+        \\Hi[^1] FOOT-BETA.
+        \\
+        \\[^1]: note body FOOT-BETA
+        \\
+        ,
+        \\Inline $x$ MATH-GAMMA and
+        \\
+        \\$$
+        \\y
+        \\$$
+        \\
+        ,
+        \\> [!NOTE]
+        \\> callout body CALL-DELTA
+        \\
+        ,
+        \\- item LIST-EPSILON
+        \\  - nested LIST-EPSILON
+        \\
+        ,
+        \\```c
+        \\int CODE_ZETA = 1 < 2;
+        \\```
+        \\
+        ,
+        \\Term DL-ETA
+        \\: Definition DL-ETA
+        \\
+        ,
+        \\~~strike STRIKE-THETA~~ and `code STRIKE-THETA`
+        \\
+    };
+
+    var baselines: [samples.len][]u8 = undefined;
+    {
+        var i: usize = 0;
+        errdefer {
+            for (baselines[0..i]) |b| gpa.free(b);
+        }
+        while (i < samples.len) : (i += 1) {
+            var arena = std.heap.ArenaAllocator.init(gpa);
+            defer arena.deinit();
+            const html = try fidelityRender(samples[i], &arena);
+            baselines[i] = try gpa.dupe(u8, html);
+        }
+    }
+    defer for (baselines) |b| gpa.free(b);
+
+    // Unique markers must appear in their own baseline (test setup sanity).
+    try fidelityContains(baselines[0], "TBL-ALPHA");
+    try fidelityContains(baselines[1], "FOOT-BETA");
+    try fidelityContains(baselines[2], "MATH-GAMMA");
+    try fidelityContains(baselines[3], "CALL-DELTA");
+
+    const Worker = struct {
+        samples: []const []const u8,
+        baselines: []const []const u8,
+        gpa: std.mem.Allocator,
+        failed: std.atomic.Value(bool) = .init(false),
+
+        fn run(self: *@This()) void {
+            var arena = std.heap.ArenaAllocator.init(self.gpa);
+            defer arena.deinit();
+            var round: usize = 0;
+            while (round < 24) : (round += 1) {
+                for (self.samples, 0..) |md, i| {
+                    if (self.failed.load(.acquire)) return;
+                    _ = arena.reset(.free_all);
+                    const html = render(md, &arena) catch {
+                        self.failed.store(true, .release);
+                        return;
+                    };
+                    if (!std.mem.eql(u8, html.bytes, self.baselines[i])) {
+                        self.failed.store(true, .release);
+                        return;
+                    }
+                    // Cross-talk: no foreign marker in this sample's HTML.
+                    const foreign = [_][]const u8{
+                        "TBL-ALPHA", "FOOT-BETA", "MATH-GAMMA", "CALL-DELTA",
+                        "LIST-EPSILON", "CODE_ZETA", "DL-ETA", "STRIKE-THETA",
+                    };
+                    for (foreign, 0..) |tok, fi| {
+                        if (fi == i) continue;
+                        if (std.mem.indexOf(u8, html.bytes, tok) != null) {
+                            self.failed.store(true, .release);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    var worker = Worker{
+        .samples = &samples,
+        .baselines = &baselines,
+        .gpa = gpa,
+    };
+
+    const thread_count = 8;
+    var threads: [thread_count]std.Thread = undefined;
+    var spawned: usize = 0;
+    errdefer {
+        for (threads[0..spawned]) |t| t.join();
+    }
+    for (&threads) |*t| {
+        t.* = try std.Thread.spawn(.{}, Worker.run, .{&worker});
+        spawned += 1;
+    }
+    for (threads[0..spawned]) |t| t.join();
+
+    try std.testing.expect(!worker.failed.load(.acquire));
+}

@@ -53,11 +53,17 @@ jobs:
             nm zig-out/bin/boris 2>/dev/null | grep -q _apex_version_string || \
             echo "note: nm symbol check skipped or stripped; libapex.a presence is required"
 
-      # Optional ASan+UBSan smoke: opt-in only.
-      # Not in default CI because sanitizer runtimes and zig cc flags vary by
-      # host (especially macOS Apple Silicon). Local: zig build test-apex-sanitize
-      # (exits 0 with a documented skip when sanitizers are unavailable).
-      - name: Document sanitizer policy
+      # ASan+UBSan smoke: required on Linux (reproducible CI green), opt-in on
+      # macOS (Apple Silicon sanitizer/zig-cc variance). Local default still
+      # skips cleanly when unavailable; BORIS_REQUIRE_SANITIZE=1 fails the skip.
+      - name: Apex sanitizer smoke (Linux required)
+        if: runner.os == 'Linux'
+        env:
+          BORIS_REQUIRE_SANITIZE: "1"
+        run: zig build test-apex-sanitize
+
+      - name: Document sanitizer policy (macOS)
+        if: runner.os == 'macOS'
         run: |
-          echo "C sanitizers are opt-in: zig build test-apex-sanitize"
-          echo "CI does not require a green sanitizer run (host-dependent runtime)."
+          echo "C sanitizers required on Linux CI via BORIS_REQUIRE_SANITIZE=1."
+          echo "macOS: opt-in local zig build test-apex-sanitize (may skip)."

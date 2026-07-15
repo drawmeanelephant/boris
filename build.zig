@@ -255,6 +255,10 @@ pub fn build(b: *std.Build) void {
         \\  echo "test-apex-sanitize: NOT AVAILABLE on this host (sanitizer build failed)"
         \\  echo "--- zig cc log (first 40 lines) ---"
         \\  head -40 "$LOG" || true
+        \\  if [ "${BORIS_REQUIRE_SANITIZE:-}" = "1" ]; then
+        \\    echo "BORIS_REQUIRE_SANITIZE=1: failing (not a documented skip)."
+        \\    exit 1
+        \\  fi
         \\  echo "Documented skip — not counted as a green sanitizer run."
         \\  exit 0
         \\fi

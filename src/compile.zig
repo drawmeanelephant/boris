@@ -1903,6 +1903,172 @@ test "compilePages: parallel rendering success, determinism, and error paths" {
     }
 }
 
+// D4 product-path smoke: Unified-rich pages under `--jobs` must match sequential
+// HTML and two parallel runs must be byte-identical. Distinctive markers detect
+// cross-talk if concurrent Apex renders share mutable engine state.
+test "compilePages: parallel Unified constructs stable under jobs (D4)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer gpa.free(work);
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist_seq = try std.fmt.allocPrint(gpa, "{s}/dist-seq", .{work});
+    defer gpa.free(dist_seq);
+    const dist_par_a = try std.fmt.allocPrint(gpa, "{s}/dist-par-a", .{work});
+    defer gpa.free(dist_par_a);
+    const dist_par_b = try std.fmt.allocPrint(gpa, "{s}/dist-par-b", .{work});
+    defer gpa.free(dist_par_b);
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+
+    try writeTreeFile(io, work, "content/table.md",
+        \\---
+        \\title: Table
+        \\---
+        \\| a | b |
+        \\|---|---|
+        \\| TBL-PAGE | 2 |
+        \\
+    );
+    try writeTreeFile(io, work, "content/footnote.md",
+        \\---
+        \\title: Footnote
+        \\---
+        \\Hi[^1] FOOT-PAGE.
+        \\
+        \\[^1]: note body FOOT-PAGE
+        \\
+    );
+    try writeTreeFile(io, work, "content/math.md",
+        \\---
+        \\title: Math
+        \\---
+        \\Inline $x$ MATH-PAGE
+        \\
+        \\$$
+        \\y
+        \\$$
+        \\
+    );
+    try writeTreeFile(io, work, "content/callout.md",
+        \\---
+        \\title: Callout
+        \\---
+        \\> [!NOTE]
+        \\> callout body CALL-PAGE
+        \\
+    );
+    try writeTreeFile(io, work, "content/lists.md",
+        \\---
+        \\title: Lists
+        \\---
+        \\- item LIST-PAGE
+        \\  - nested LIST-PAGE
+        \\
+        \\```c
+        \\int CODE_PAGE = 1 < 2;
+        \\```
+        \\
+    );
+    try writeTreeFile(io, work, "content/deflist.md",
+        \\---
+        \\title: DefList
+        \\---
+        \\Term DL-PAGE
+        \\: Definition DL-PAGE
+        \\
+        \\~~strike STRIKE-PAGE~~
+        \\
+    );
+
+    const out_files = [_][]const u8{
+        "table.html",
+        "footnote.html",
+        "math.html",
+        "callout.html",
+        "lists.html",
+        "deflist.html",
+    };
+    const markers = [_][]const u8{
+        "TBL-PAGE",
+        "FOOT-PAGE",
+        "MATH-PAGE",
+        "CALL-PAGE",
+        "LIST-PAGE",
+        "DL-PAGE",
+    };
+
+    const runOnce = struct {
+        fn go(
+            io_: Io,
+            gpa_: std.mem.Allocator,
+            content_: []const u8,
+            dist: []const u8,
+            layout_path_: []const u8,
+            jobs: usize,
+        ) !void {
+            const cwd_ = Io.Dir.cwd();
+            var layout_arena = std.heap.ArenaAllocator.init(gpa_);
+            defer layout_arena.deinit();
+            const layout = try loadLayoutOnce(io_, cwd_, layout_path_, layout_arena.allocator());
+
+            var retain_arena = std.heap.ArenaAllocator.init(gpa_);
+            defer retain_arena.deinit();
+            var db = PageDb.init(gpa_, retain_arena.allocator());
+            defer db.deinit();
+            try loadAndPromote(io_, gpa_, &db, content_);
+
+            const stats = try compilePages(io_, gpa_, &db, layout, .{
+                .content_root = content_,
+                .dist_dir = dist,
+                .layout_path = layout_path_,
+                .jobs = jobs,
+                .quiet = true,
+            });
+            try std.testing.expectEqual(@as(usize, 6), stats.pages_written);
+        }
+    }.go;
+
+    try runOnce(io, gpa, content, dist_seq, layout_path, 1);
+    try runOnce(io, gpa, content, dist_par_a, layout_path, 8);
+    try runOnce(io, gpa, content, dist_par_b, layout_path, 8);
+
+    for (out_files, 0..) |f, fi| {
+        const path_seq = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dist_seq, f });
+        defer gpa.free(path_seq);
+        const path_a = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dist_par_a, f });
+        defer gpa.free(path_a);
+        const path_b = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dist_par_b, f });
+        defer gpa.free(path_b);
+
+        const bytes_seq = try readFileAlloc(io, cwd, path_seq, gpa);
+        defer gpa.free(bytes_seq);
+        const bytes_a = try readFileAlloc(io, cwd, path_a, gpa);
+        defer gpa.free(bytes_a);
+        const bytes_b = try readFileAlloc(io, cwd, path_b, gpa);
+        defer gpa.free(bytes_b);
+
+        try std.testing.expectEqualStrings(bytes_seq, bytes_a);
+        try std.testing.expectEqualStrings(bytes_a, bytes_b);
+        try std.testing.expect(std.mem.indexOf(u8, bytes_a, markers[fi]) != null);
+
+        // Foreign markers must not appear (cross-talk).
+        for (markers, 0..) |tok, mi| {
+            if (mi == fi) continue;
+            try std.testing.expect(std.mem.indexOf(u8, bytes_a, tok) == null);
+        }
+    }
+}
+
 test "compileHtmlSiteMulti - success, validation, and isolation" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;

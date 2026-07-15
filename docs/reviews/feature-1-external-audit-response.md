@@ -153,6 +153,16 @@ fidelity risk; historical open-risk bullets remain for archive fidelity.
 
 ---
 
+## Follow-through after response (pay-forward residual)
+
+The audit was heavy on celebrating already-landed work. Residual tooth that
+actually paid to close after the paper response:
+
+| Item | Action |
+|------|--------|
+| **D4 / `--jobs`** | Evidence gates: `apex.zig` U18 concurrent Unified vs baselines + cross-talk markers; `compile.zig` parallel Unified site under jobs=8 vs sequential and dual parallel. Contract note in `parallel-rendering.md`. Still not a formal proof of all Apex globals. |
+| **F-007 sanitizer CI** | Linux CI runs `zig build test-apex-sanitize` with `BORIS_REQUIRE_SANITIZE=1` (fail on documented skip). macOS stays opt-in. |
+
 ## Recommendation
 
 Feature 1 remains **Done**. External-audit conditions for ship are addressed

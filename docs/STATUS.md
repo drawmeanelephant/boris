@@ -376,7 +376,7 @@ not by themselves change IR schema.
 |----|------|--------------------|-------|
 | **D2** | Host may pick up system **libyaml** during cmake → non-reproducible `libapex.a` feature surface | **Before** any YAML metadata is passed into `apex_render` / Apex markdown options | Body-fragment HTML path does not require YAML today |
 | **D3** | `ensure_apex.has_side_effects = true` re-invokes cmake script every `zig build` | When CI/dev build time or step-graph caching becomes a measured pain | Correct first; wire input/output hashing / file-existence step later |
-| **D4** | Upstream Apex not formally proven **thread-safe** under `--jobs N` | **Before** `--jobs N` becomes the default or recommended product path | Workers use thread-local Whiteboards; adapter is sync/stack-local; upstream global extension registry not audited |
+| **D4** | Upstream Apex not formally proven **thread-safe** under `--jobs N` | **Before** `--jobs N` becomes the default or recommended product path; re-check on Apex pin upgrades | **Mitigated by evidence, not closed as proof:** U18 concurrent smoke + compile parallel Unified job test + contract note in `parallel-rendering.md`. Workers use thread-local Whiteboards; plugins/includes off. Full global-registry audit still deferred. |
 
 **North star:** Zig Markdown documentation compiler — load, roll, ignite, reset —
 validated metadata and graph-aware docs, not a polyglot web framework.

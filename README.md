@@ -275,5 +275,6 @@ Optional Apex checks:
 
 ```bash
 zig build test-apex-hostile
-zig build test-apex-sanitize   # documents skip if sanitizers unavailable
+zig build test-apex-sanitize   # ASan+UBSan smoke; skip if unavailable
+BORIS_REQUIRE_SANITIZE=1 zig build test-apex-sanitize  # fail instead of skip (Linux CI)
 ```
