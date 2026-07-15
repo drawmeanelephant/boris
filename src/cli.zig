@@ -459,6 +459,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.eql(u8, a, "--out") or
             std.mem.eql(u8, a, "--rag-dir") or
             std.mem.eql(u8, a, "--html-dir") or
+            std.mem.eql(u8, a, "--target") or
             std.mem.eql(u8, a, "--jobs") or
             std.mem.eql(u8, a, "-j"))
         {
@@ -469,6 +470,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.startsWith(u8, a, "--out=") or
             std.mem.startsWith(u8, a, "--rag-dir=") or
             std.mem.startsWith(u8, a, "--html-dir=") or
+            std.mem.startsWith(u8, a, "--target=") or
             std.mem.startsWith(u8, a, "--jobs=") or
             std.mem.startsWith(u8, a, "-j="))
         {
@@ -949,4 +951,10 @@ test "parse: --target flag parsing and conflict checks" {
 
     // Duplicate target flag
     try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "--target", "prod=dist/prod1", "--target", "prod=dist/prod2" }));
+}
+
+test "findBadArg reports --target" {
+    try expectEqualStrings("--target", findBadArg(&.{ "boris", "--target" }).?);
+    try expectEqualStrings("--target=", findBadArg(&.{ "boris", "--target=" }).?);
+    try expectEqualStrings("--target=bad", findBadArg(&.{ "boris", "--target=bad" }).?);
 }

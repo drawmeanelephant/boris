@@ -141,7 +141,9 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             return mapHtmlError(err, opts.quiet);
         };
 
-        var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher());
+        var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher()) catch |err| {
+            return mapHtmlError(err, opts.quiet);
+        };
         defer coord.deinit();
 
         coord.run() catch |err| {

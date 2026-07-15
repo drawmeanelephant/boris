@@ -43,7 +43,7 @@ We enforce:
    - Output paths must not escape the workspace. Workspace membership is also path-boundary prefix (rejects sibling false positives such as `/ws` vs `/ws-evil`).
    - Targeting the workspace root itself is rejected (`error.TargetOutputCollision`).
 3. **No Content / Layout Overlap:** Target output roots must not equal or nest with the resolved `--input` content root, the resolved layout file path, or the layout file’s parent directory when that parent is not the workspace root (`error.TargetOutputCollision`). This prevents writing HTML into the source tree and prevents watch mode from ignoring content edits.
-4. **No Symlinks as Target Roots:** When a target output path exists and is a symlink, it is rejected (`error.TargetOutputSymlink`). Intermediate path-component symlink walks are not required for this slice.
+4. **No Symlinks as Target Roots:** Target output paths must not be or pass through a symlink component. Boris walks progressive relative path components of each target `output_dir` and rejects any existing symlink (`error.TargetOutputSymlink`). Absolute / drive-letter forms that cannot be stated relative to cwd are still subject to resolved workspace membership checks.
 5. **Validation failures are usage errors:** Any of the above validation failures must abort before discovery/render and map to process exit code **2**.
 
 ---
@@ -99,14 +99,16 @@ graph TD
 |---|---|
 | Content roots | One shared `--input` content root |
 | Graph/parser | Discover, parse, validate, and freeze once per invocation |
-| Layout | One global layout path (`layouts/main.html` or custom) |
+| Layout | One global layout path (`layouts/main.html` or custom); loaded once per multi-target invocation |
+| Fingerprint inputs | Source, include graph, and layout bytes prepared once and reused across sequential targets |
 | Generated output as input | Forbidden; target output trees are never dependency roots |
 | Cross-target dependencies | Forbidden |
 | Target order | Sorted alphabetically by canonical target name before execution / commit |
 | Legacy mode | `--html` / `--html-dir` maps to `default` target |
 | Target mode | `--target NAME=DIR` implies HTML mode |
 | Cache | Target-owned cache namespace and manifest |
-| Watch | One change batch maps to all affected targets; target output events are ignored globally |
+| Staging temps | Per-page atomic temps; best-effort scrub of orphan hex/`*.tmp` files at each target start |
+| Watch | One change batch maps to all targets; ignore roots normalized once at coordinator init |
 
 ### Failure Policy:
 1. **Validate All Targets First:** Before source discovery, rendering, cache mutation, cleanup, or publication, validate all target declarations and path isolation.

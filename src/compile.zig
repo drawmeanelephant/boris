@@ -357,6 +357,133 @@ pub fn compileHtmlSite(
     return try compilePages(io, gpa, &db, layout, options);
 }
 
+/// Shared, target-independent fingerprint inputs built once for multi-target runs.
+/// Owns all buffers; `dep_index` path strings live on `path_arena`.
+const SharedCompileState = struct {
+    gpa: std.mem.Allocator,
+    path_arena: std.heap.ArenaAllocator,
+    dep_index: dependency.DependencyIndex,
+    layout_bytes: []u8,
+    /// Per-page source bytes (GPA-owned).
+    source_bytes: [][]u8,
+    /// Per-page transitive include file contents in stable sorted path order (GPA-owned).
+    include_bytes: [][][]u8,
+
+    fn deinit(self: *SharedCompileState) void {
+        for (self.include_bytes) |list| {
+            for (list) |b| self.gpa.free(b);
+            self.gpa.free(list);
+        }
+        self.gpa.free(self.include_bytes);
+        for (self.source_bytes) |b| self.gpa.free(b);
+        self.gpa.free(self.source_bytes);
+        self.gpa.free(self.layout_bytes);
+        self.dep_index.deinit();
+        self.path_arena.deinit();
+    }
+
+    fn init(
+        io: Io,
+        gpa: std.mem.Allocator,
+        db: *PageDb,
+        content_root: []const u8,
+        layout_path: []const u8,
+    ) !SharedCompileState {
+        const cwd = Io.Dir.cwd();
+        var content_dir = try cwd.openDir(io, content_root, .{});
+        defer content_dir.close(io);
+
+        var path_arena = std.heap.ArenaAllocator.init(gpa);
+        errdefer path_arena.deinit();
+        const inc_alloc = path_arena.allocator();
+
+        var dep_index = dependency.DependencyIndex.init(gpa);
+        errdefer dep_index.deinit();
+
+        var visited_includes = std.StringHashMapUnmanaged(void).empty;
+        defer visited_includes.deinit(gpa);
+
+        const source_bytes = try gpa.alloc([]u8, db.len());
+        var sources_filled: usize = 0;
+        errdefer {
+            for (source_bytes[0..sources_filled]) |s| gpa.free(s);
+            gpa.free(source_bytes);
+        }
+
+        for (db.items(), 0..) |p, i| {
+            try dep_index.addDependency(p.source_path, layout_path, .layout);
+
+            const src = try readFileAlloc(io, content_dir, p.source_path, gpa);
+            source_bytes[i] = src;
+            sources_filled = i + 1;
+
+            var page_includes = std.ArrayList([]const u8).empty;
+            defer {
+                for (page_includes.items) |inc| gpa.free(inc);
+                page_includes.deinit(gpa);
+            }
+            try scanIncludes(gpa, src, &page_includes);
+
+            for (page_includes.items) |inc_path| {
+                const owned_src = try inc_alloc.dupe(u8, p.source_path);
+                const owned_inc = try inc_alloc.dupe(u8, inc_path);
+                try dep_index.addDependency(owned_src, owned_inc, .include);
+                try scanIncludesRecursively(io, gpa, content_dir, owned_inc, &dep_index, &visited_includes, inc_alloc);
+            }
+        }
+
+        const include_bytes = try gpa.alloc([][]u8, db.len());
+        var includes_filled: usize = 0;
+        errdefer {
+            for (include_bytes[0..includes_filled]) |list| {
+                for (list) |b| gpa.free(b);
+                gpa.free(list);
+            }
+            gpa.free(include_bytes);
+        }
+
+        for (db.items(), 0..) |page, page_idx| {
+            var transit_includes = std.ArrayList([]const u8).empty;
+            defer {
+                for (transit_includes.items) |inc| gpa.free(inc);
+                transit_includes.deinit(gpa);
+            }
+            var visited_transit = std.StringHashMapUnmanaged(void).empty;
+            defer visited_transit.deinit(gpa);
+
+            try collectTransitIncludes(gpa, page.source_path, &dep_index, &transit_includes, &visited_transit);
+            std.mem.sort([]const u8, transit_includes.items, {}, compareStrings);
+
+            var list = try gpa.alloc([]u8, transit_includes.items.len);
+            errdefer {
+                // Only free elements already filled on this page before rethrow.
+                gpa.free(list);
+            }
+            var j: usize = 0;
+            errdefer {
+                for (list[0..j]) |b| gpa.free(b);
+            }
+            while (j < transit_includes.items.len) : (j += 1) {
+                list[j] = try readFileAlloc(io, content_dir, transit_includes.items[j], gpa);
+            }
+            include_bytes[page_idx] = list;
+            includes_filled = page_idx + 1;
+        }
+
+        const layout_bytes = try readFileAlloc(io, cwd, layout_path, gpa);
+        errdefer gpa.free(layout_bytes);
+
+        return .{
+            .gpa = gpa,
+            .path_arena = path_arena,
+            .dep_index = dep_index,
+            .layout_bytes = layout_bytes,
+            .source_bytes = source_bytes,
+            .include_bytes = include_bytes,
+        };
+    }
+};
+
 /// Orchestrate multiple HTML build targets with complete isolation and sorted sequence.
 /// Enforces validate-all-first, single discovery, then sequential rendering.
 /// Returns error.MultiTargetCompilationFailed if any target fails.
@@ -382,23 +509,21 @@ pub fn compileHtmlSiteMulti(
 
     try loadAndPromote(io, gpa, &db, base_options.content_root);
 
+    // Shared layout + fingerprint inputs once for all targets.
+    var layout_arena = std.heap.ArenaAllocator.init(gpa);
+    defer layout_arena.deinit();
+    const layout = try loadLayoutOnce(io, Io.Dir.cwd(), base_options.layout_path, layout_arena.allocator());
+
+    var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root, base_options.layout_path);
+    defer shared.deinit();
+
     var any_failed = false;
     for (plans) |plan| {
         var target_options = base_options;
         target_options.target_name = plan.name;
         target_options.dist_dir = plan.output_dir;
 
-        var layout_arena = std.heap.ArenaAllocator.init(gpa);
-        defer layout_arena.deinit();
-        const layout = loadLayoutOnce(io, Io.Dir.cwd(), target_options.layout_path, layout_arena.allocator()) catch |err| {
-            if (!base_options.quiet) {
-                std.debug.print("error: target '{s}' failed to load layout: {s}\n", .{ plan.name, @errorName(err) });
-            }
-            any_failed = true;
-            continue;
-        };
-
-        _ = compilePages(io, gpa, &db, layout, target_options) catch |err| {
+        _ = compilePagesWithShared(io, gpa, &db, layout, target_options, &shared) catch |err| {
             if (!base_options.quiet) {
                 std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
             }
@@ -489,6 +614,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
 /// Compile already-promoted PageDb pages to HTML under `options.dist_dir`.
 ///
 /// `db` strings must outlive this call (retain arena). Whiteboard is local.
+/// Builds fingerprint inputs locally (single-target path).
 pub fn compilePages(
     io: Io,
     gpa: std.mem.Allocator,
@@ -496,14 +622,59 @@ pub fn compilePages(
     layout: assemble.Layout,
     options: CompileOptions,
 ) !CompileStats {
+    return compilePagesInner(io, gpa, db, layout, options, null);
+}
+
+/// Like `compilePages` but reuses shared layout/source/include fingerprint inputs
+/// (multi-target path: prepare once, render each target).
+pub fn compilePagesWithShared(
+    io: Io,
+    gpa: std.mem.Allocator,
+    db: *PageDb,
+    layout: assemble.Layout,
+    options: CompileOptions,
+    shared: *const SharedCompileState,
+) !CompileStats {
+    return compilePagesInner(io, gpa, db, layout, options, shared);
+}
+
+fn fingerprintHex(fp_bytes: [32]u8, gpa: std.mem.Allocator) ![]u8 {
+    var fp_hex: [64]u8 = undefined;
+    const hex_chars = "0123456789abcdef";
+    for (fp_bytes, 0..) |b, i| {
+        fp_hex[i * 2] = hex_chars[b >> 4];
+        fp_hex[i * 2 + 1] = hex_chars[b & 0x0f];
+    }
+    return try gpa.dupe(u8, &fp_hex);
+}
+
+fn compilePagesInner(
+    io: Io,
+    gpa: std.mem.Allocator,
+    db: *PageDb,
+    layout: assemble.Layout,
+    options: CompileOptions,
+    shared_opt: ?*const SharedCompileState,
+) !CompileStats {
     const cwd = Io.Dir.cwd();
 
     var content_dir = try cwd.openDir(io, options.content_root, .{});
     defer content_dir.close(io);
 
     try cwd.createDirPath(io, options.dist_dir);
-    var dist_dir = try cwd.openDir(io, options.dist_dir, .{});
+    var dist_dir = try cwd.openDir(io, options.dist_dir, .{ .iterate = true });
     defer dist_dir.close(io);
+
+    // Best-effort: remove orphan createFileAtomic temps left by interrupted runs.
+    assemble.scrubStaleAtomicTemps(io, dist_dir, gpa);
+
+    // Own shared state when the caller did not supply one (single-target).
+    var local_shared: ?SharedCompileState = null;
+    defer if (local_shared) |*s| s.deinit();
+    const shared: *const SharedCompileState = if (shared_opt) |s| s else blk: {
+        local_shared = try SharedCompileState.init(io, gpa, db, options.content_root, options.layout_path);
+        break :blk &(local_shared.?);
+    };
 
     // Load and parse prior manifest if in incremental mode
     var manifest_bytes: ?[]u8 = null;
@@ -538,42 +709,6 @@ pub fn compilePages(
         try assemble.precreateOutputDirs(io, dist_dir, gpa, paths.items);
     }
 
-    // Build the DependencyIndex and scan includes
-    var include_path_arena = std.heap.ArenaAllocator.init(gpa);
-    defer include_path_arena.deinit();
-    const inc_alloc = include_path_arena.allocator();
-
-    var dep_index = dependency.DependencyIndex.init(gpa);
-    defer dep_index.deinit();
-
-    var visited_includes = std.StringHashMapUnmanaged(void).empty;
-    defer visited_includes.deinit(gpa);
-
-    for (db.items()) |p| {
-        try dep_index.addDependency(p.source_path, options.layout_path, .layout);
-
-        const src_bytes = try readFileAlloc(io, content_dir, p.source_path, gpa);
-        defer gpa.free(src_bytes);
-
-        var page_includes = std.ArrayList([]const u8).empty;
-        defer {
-            for (page_includes.items) |inc| gpa.free(inc);
-            page_includes.deinit(gpa);
-        }
-        try scanIncludes(gpa, src_bytes, &page_includes);
-
-        for (page_includes.items) |inc_path| {
-            const owned_src = try inc_alloc.dupe(u8, p.source_path);
-            const owned_inc = try inc_alloc.dupe(u8, inc_path);
-            try dep_index.addDependency(owned_src, owned_inc, .include);
-            try scanIncludesRecursively(io, gpa, content_dir, owned_inc, &dep_index, &visited_includes, inc_alloc);
-        }
-    }
-
-    // Read layout bytes once for fingerprinting
-    const layout_bytes = try readFileAlloc(io, cwd, options.layout_path, gpa);
-    defer gpa.free(layout_bytes);
-
     // Compute fingerprints and determine which pages are dirty
     const fingerprints = try gpa.alloc([]const u8, db.len());
     for (fingerprints) |*fp| fp.* = &.{};
@@ -589,38 +724,21 @@ pub fn compilePages(
     defer gpa.free(is_dirty);
 
     for (db.items(), 0..) |page, page_idx| {
-        const src_bytes = try readFileAlloc(io, content_dir, page.source_path, gpa);
-        defer gpa.free(src_bytes);
+        // Convert owned []u8 include lists to []const u8 views for the hasher.
+        const inc_owned = shared.include_bytes[page_idx];
+        const inc_views = try gpa.alloc([]const u8, inc_owned.len);
+        defer gpa.free(inc_views);
+        for (inc_owned, 0..) |b, j| inc_views[j] = b;
 
-        var transit_includes = std.ArrayList([]const u8).empty;
-        defer {
-            for (transit_includes.items) |inc| gpa.free(inc);
-            transit_includes.deinit(gpa);
-        }
-        var visited_transit = std.StringHashMapUnmanaged(void).empty;
-        defer visited_transit.deinit(gpa);
-
-        try collectTransitIncludes(gpa, page.source_path, &dep_index, &transit_includes, &visited_transit);
-        std.mem.sort([]const u8, transit_includes.items, {}, compareStrings);
-
-        var include_bytes_list = std.ArrayList([]const u8).empty;
-        defer {
-            for (include_bytes_list.items) |bytes| gpa.free(bytes);
-            include_bytes_list.deinit(gpa);
-        }
-        for (transit_includes.items) |inc_path| {
-            const bytes = try readFileAlloc(io, content_dir, inc_path, gpa);
-            try include_bytes_list.append(gpa, bytes);
-        }
-
-        const fp_bytes = cache.computePageFingerprint(options.target_name, options.layout_path, page.entity_id, src_bytes, include_bytes_list.items, layout_bytes);
-        var fp_hex: [64]u8 = undefined;
-        const hex_chars = "0123456789abcdef";
-        for (fp_bytes, 0..) |b, i| {
-            fp_hex[i * 2] = hex_chars[b >> 4];
-            fp_hex[i * 2 + 1] = hex_chars[b & 0x0f];
-        }
-        fingerprints[page_idx] = try gpa.dupe(u8, &fp_hex);
+        const fp_bytes = cache.computePageFingerprint(
+            options.target_name,
+            options.layout_path,
+            page.entity_id,
+            shared.source_bytes[page_idx],
+            inc_views,
+            shared.layout_bytes,
+        );
+        fingerprints[page_idx] = try fingerprintHex(fp_bytes, gpa);
 
         var output_exists = false;
         if (dist_dir.openFile(io, page.output_path, .{})) |file| {

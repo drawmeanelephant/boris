@@ -275,6 +275,16 @@ fn readAllFile(io: Io, dir: Io.Dir, path: []const u8, gpa: std.mem.Allocator) ![
     return try reader.interface.allocRemaining(gpa, .unlimited);
 }
 
+/// True when `name` looks like a Zig `createFileAtomic` temp (exactly 16 hex chars).
+pub fn isAtomicTempName(name: []const u8) bool {
+    if (name.len != 16) return false;
+    for (name) |c| {
+        const is_hex = (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
+        if (!is_hex) return false;
+    }
+    return true;
+}
+
 /// Count directory entries that look like createFileAtomic temps (16 hex chars).
 /// `dir` must be opened with `.iterate = true`.
 fn countHexTempNames(io: Io, dir: Io.Dir) !usize {
@@ -282,24 +292,77 @@ fn countHexTempNames(io: Io, dir: Io.Dir) !usize {
     var n: usize = 0;
     while (try it.next(io)) |entry| {
         if (entry.kind != .file) continue;
-        const name = entry.name;
-        if (name.len != 16) continue;
-        var ok = true;
-        for (name) |c| {
-            const is_hex = (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
-            if (!is_hex) {
-                ok = false;
-                break;
-            }
-        }
-        if (ok) n += 1;
+        if (isAtomicTempName(entry.name)) n += 1;
     }
     return n;
+}
+
+/// Best-effort recursive scrub of orphan atomic temps and `*.tmp` files under `dist_dir`.
+/// Safe after interrupted builds (SIGKILL) where `Atomic.deinit` never ran.
+/// Never fails the compile: all errors are swallowed.
+///
+/// `dist_dir` should be opened with `.iterate = true` when possible; if not
+/// iterable, this is a no-op.
+pub fn scrubStaleAtomicTemps(io: Io, dist_dir: Io.Dir, gpa: std.mem.Allocator) void {
+    scrubStaleAtomicTempsRec(io, dist_dir, gpa) catch {};
+}
+
+fn scrubStaleAtomicTempsRec(io: Io, dir: Io.Dir, gpa: std.mem.Allocator) !void {
+    var walker = try dir.walkSelectively(gpa);
+    defer walker.deinit();
+
+    while (try walker.next(io)) |entry| {
+        if (entry.kind == .directory) {
+            try walker.enter(io, entry);
+            continue;
+        }
+        if (entry.kind != .file) continue;
+
+        const name = entry.basename;
+        const is_tmp_suffix = std.mem.endsWith(u8, name, ".tmp") or
+            std.mem.containsAtLeast(u8, name, 1, ".tmp.");
+        if (!isAtomicTempName(name) and !is_tmp_suffix) continue;
+
+        entry.dir.deleteFile(io, name) catch {};
+    }
 }
 
 // =============================================================================
 // Tests
 // =============================================================================
+
+test "isAtomicTempName" {
+    try std.testing.expect(isAtomicTempName("0123456789abcdef"));
+    try std.testing.expect(isAtomicTempName("ABCDEF0123456789"));
+    try std.testing.expect(!isAtomicTempName("0123456789abcde")); // 15
+    try std.testing.expect(!isAtomicTempName("0123456789abcdef0")); // 17
+    try std.testing.expect(!isAtomicTempName("index.html"));
+    try std.testing.expect(!isAtomicTempName("g123456789abcdef")); // non-hex
+}
+
+test "scrubStaleAtomicTemps removes orphan hex and .tmp files" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    const work = "zig-cache/boris-scrub-temps";
+    try cwd.createDirPath(io, work);
+    defer cwd.deleteTree(io, work) catch {};
+
+    try cwd.writeFile(io, .{ .sub_path = work ++ "/0123456789abcdef", .data = "orphan" });
+    try cwd.writeFile(io, .{ .sub_path = work ++ "/page.html.tmp", .data = "tmp" });
+    try cwd.writeFile(io, .{ .sub_path = work ++ "/keep.html", .data = "keep" });
+    try cwd.createDirPath(io, work ++ "/nested");
+    try cwd.writeFile(io, .{ .sub_path = work ++ "/nested/fedcba9876543210", .data = "nested-orphan" });
+
+    var dir = try cwd.openDir(io, work, .{ .iterate = true });
+    defer dir.close(io);
+    scrubStaleAtomicTemps(io, dir, gpa);
+
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, work ++ "/0123456789abcdef", .{}));
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, work ++ "/page.html.tmp", .{}));
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, work ++ "/nested/fedcba9876543210", .{}));
+    try cwd.access(io, work ++ "/keep.html", .{});
+}
 
 test "layout split is zero-copy into raw" {
     const raw = "<html>{{content}}</html>";

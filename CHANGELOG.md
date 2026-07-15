@@ -28,6 +28,7 @@ How to use going forward:
 - Cache fingerprints use discriminator `boris-cache-v1-multitarget` and include target name, layout path, and layout template bytes. On-disk manifest `format_version` matches that discriminator; foreign/old versions are ignored (cold rebuild).
 - Watch mode ignores events under every configured target output root and rebuilds all targets in sorted order after a debounced change batch.
 - Review record and hardening notes: [`docs/reviews/p3.3-multi-target-review.md`](docs/reviews/p3.3-multi-target-review.md).
+- P3.3 follow-ups: watch ignore roots precomputed once; shared multi-target fingerprint/dep prep (one layout load + source/include scan); best-effort orphan atomic-temp scrub; intermediate symlink component walk on target paths; `--target` in usage/`findBadArg`.
 
 ### Docs — status roadmap refresh (post-P2 / closing P3)
 

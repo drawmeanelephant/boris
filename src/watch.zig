@@ -358,6 +358,9 @@ fn sleepMs(io: Io, ms: i64) !void {
     _ = try d.sleep(io);
 }
 
+/// Default layout path used by watch rebuilds (shared global layout for this slice).
+pub const default_watch_layout: []const u8 = "layouts/main.html";
+
 /// Coordinator running the debounced watch and serialized rebuild cycles.
 pub const WatchCoordinator = struct {
     gpa: std.mem.Allocator,
@@ -365,14 +368,42 @@ pub const WatchCoordinator = struct {
     options: cli.Options,
     watcher: Watcher,
     pending_changes: std.StringHashMap(void),
+    /// Normalized forward-slash output roots, computed once at init.
+    ignored_output_roots: []const []const u8,
 
-    pub fn init(gpa: std.mem.Allocator, io: Io, options: cli.Options, watcher: Watcher) WatchCoordinator {
+    /// Build the ignore-root list once for the coordinator lifetime.
+    fn buildIgnoredOutputRoots(gpa: std.mem.Allocator, options: cli.Options) ![]const []const u8 {
+        var roots: std.ArrayList([]const u8) = .empty;
+        errdefer {
+            for (roots.items) |r| gpa.free(r);
+            roots.deinit(gpa);
+        }
+
+        if (options.targets.items.len > 0) {
+            try roots.ensureTotalCapacity(gpa, options.targets.items.len);
+            for (options.targets.items) |tgt| {
+                try roots.append(gpa, try normalizePath(gpa, tgt.output_dir));
+            }
+        } else {
+            const html_raw = options.html_dir orelse "dist";
+            try roots.append(gpa, try normalizePath(gpa, html_raw));
+        }
+        return try roots.toOwnedSlice(gpa);
+    }
+
+    pub fn init(gpa: std.mem.Allocator, io: Io, options: cli.Options, watcher: Watcher) !WatchCoordinator {
+        const ignored = try buildIgnoredOutputRoots(gpa, options);
+        errdefer {
+            for (ignored) |r| gpa.free(r);
+            gpa.free(ignored);
+        }
         return .{
             .gpa = gpa,
             .io = io,
             .options = options,
             .watcher = watcher,
             .pending_changes = std.StringHashMap(void).init(gpa),
+            .ignored_output_roots = ignored,
         };
     }
 
@@ -382,6 +413,10 @@ pub const WatchCoordinator = struct {
             self.gpa.free(entry.key_ptr.*);
         }
         self.pending_changes.deinit();
+        for (self.ignored_output_roots) |r| {
+            self.gpa.free(r);
+        }
+        self.gpa.free(self.ignored_output_roots);
     }
 
     /// Read, normalize, filter, and deduplicate events into pending_changes.
@@ -401,21 +436,10 @@ pub const WatchCoordinator = struct {
             defer self.gpa.free(normalized);
 
             var ignored = false;
-            if (self.options.targets.items.len > 0) {
-                for (self.options.targets.items) |tgt| {
-                    const norm_tgt = try normalizePath(self.gpa, tgt.output_dir);
-                    defer self.gpa.free(norm_tgt);
-                    if (isIgnored(normalized, norm_tgt)) {
-                        ignored = true;
-                        break;
-                    }
-                }
-            } else {
-                const html_raw = self.options.html_dir orelse "dist";
-                const html_norm = try normalizePath(self.gpa, html_raw);
-                defer self.gpa.free(html_norm);
-                if (isIgnored(normalized, html_norm)) {
+            for (self.ignored_output_roots) |root| {
+                if (isIgnored(normalized, root)) {
                     ignored = true;
+                    break;
                 }
             }
 
@@ -471,7 +495,7 @@ pub const WatchCoordinator = struct {
         if (self.options.targets.items.len > 0) {
             compile.compileHtmlSiteMulti(self.io, self.gpa, self.options.targets.items, .{
                 .content_root = self.options.input_dir,
-                .layout_path = "layouts/main.html",
+                .layout_path = default_watch_layout,
                 .incremental = self.options.incremental,
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
@@ -491,7 +515,7 @@ pub const WatchCoordinator = struct {
             _ = compile.compileHtmlSite(self.io, self.gpa, .{
                 .content_root = self.options.input_dir,
                 .dist_dir = self.options.html_dir orelse "dist",
-                .layout_path = "layouts/main.html",
+                .layout_path = default_watch_layout,
                 .incremental = self.options.incremental,
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
@@ -526,7 +550,7 @@ pub const WatchCoordinator = struct {
         if (self.options.targets.items.len > 0) {
             compile.compileHtmlSiteMulti(self.io, self.gpa, self.options.targets.items, .{
                 .content_root = self.options.input_dir,
-                .layout_path = "layouts/main.html",
+                .layout_path = default_watch_layout,
                 .incremental = self.options.incremental,
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
@@ -547,7 +571,7 @@ pub const WatchCoordinator = struct {
             if (compile.compileHtmlSite(self.io, self.gpa, .{
                 .content_root = self.options.input_dir,
                 .dist_dir = self.options.html_dir orelse "dist",
-                .layout_path = "layouts/main.html",
+                .layout_path = default_watch_layout,
                 .incremental = self.options.incremental,
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
@@ -693,7 +717,7 @@ test "FakeWatcher and Coordinator Event Coalescing" {
     var fake = FakeWatcher.init(gpa);
     defer fake.deinit();
 
-    var coord = WatchCoordinator.init(gpa, io, .{
+    var coord = try WatchCoordinator.init(gpa, io, .{
         .mode = .html,
         .input_dir = "content",
         .html_dir = "dist",
@@ -701,6 +725,9 @@ test "FakeWatcher and Coordinator Event Coalescing" {
         .watch = true,
     }, fake.watcher());
     defer coord.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), coord.ignored_output_roots.len);
+    try std.testing.expectEqualStrings("dist", coord.ignored_output_roots[0]);
 
     // Push chaotic events
     try fake.pushEvent("content/guides/intro.md", .modify);
@@ -721,7 +748,7 @@ test "processEvents ignores output and staging paths" {
     var fake = FakeWatcher.init(gpa);
     defer fake.deinit();
 
-    var coord = WatchCoordinator.init(gpa, io, .{
+    var coord = try WatchCoordinator.init(gpa, io, .{
         .mode = .html,
         .input_dir = "content",
         .html_dir = "./dist",
@@ -729,6 +756,8 @@ test "processEvents ignores output and staging paths" {
         .watch = true,
     }, fake.watcher());
     defer coord.deinit();
+
+    try std.testing.expectEqualStrings("dist", coord.ignored_output_roots[0]);
 
     try fake.pushEvent("dist/index.html", .modify);
     try fake.pushEvent("./dist/page.html", .create);
@@ -750,7 +779,7 @@ test "processEvents follow-up coalescing after drain" {
     var fake = FakeWatcher.init(gpa);
     defer fake.deinit();
 
-    var coord = WatchCoordinator.init(gpa, io, .{
+    var coord = try WatchCoordinator.init(gpa, io, .{
         .mode = .html,
         .input_dir = "content",
         .html_dir = "dist",
@@ -797,8 +826,10 @@ test "processEvents ignores multi-target output paths" {
     try options.targets.append(gpa, .{ .name = "target_b", .output_dir = "dist_b" });
     defer options.targets.deinit(gpa);
 
-    var coord = WatchCoordinator.init(gpa, io, options, fake.watcher());
+    var coord = try WatchCoordinator.init(gpa, io, options, fake.watcher());
     defer coord.deinit();
+
+    try std.testing.expectEqual(@as(usize, 2), coord.ignored_output_roots.len);
 
     try fake.pushEvent("dist_a/index.html", .modify);
     try fake.pushEvent("dist_b/page.html", .create);
