@@ -305,6 +305,27 @@ pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeRes
     var fence_ch: u8 = 0;
     var fence_run: usize = 0;
     var open: ?OpenState = null;
+    // Incremental line/column cursor — O(N) total instead of lineColAt rescans.
+    var pos_index: usize = 0;
+    var line: u32 = 1;
+    var col: u32 = 1;
+    const syncPos = struct {
+        fn go(src: []const u8, index: usize, pi: *usize, ln: *u32, cl: *u32) void {
+            if (index < pi.*) {
+                pi.* = 0;
+                ln.* = 1;
+                cl.* = 1;
+            }
+            while (pi.* < index and pi.* < src.len) : (pi.* += 1) {
+                if (src[pi.*] == '\n') {
+                    ln.* += 1;
+                    cl.* = 1;
+                } else {
+                    cl.* += 1;
+                }
+            }
+        }
+    }.go;
 
     while (i < body.len) {
         // Fence open/close only at line starts, and only when not mid-tag open wait.
@@ -387,9 +408,7 @@ pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeRes
             }
             const name = body[name_start..name_end];
             if (isPascalComponentName(name) and tagNameBoundaryOk(body, name_end)) {
-                const lc = lineColAt(body, i);
-                const line = lc[0];
-                const col = lc[1];
+                syncPos(body, i, &pos_index, &line, &col);
 
                 // Find closing '>'. Attributes are single-line: a newline resets
                 // quote mode so an unmatched `"` cannot suppress `<` early-exit

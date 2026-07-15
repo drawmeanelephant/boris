@@ -113,9 +113,9 @@ int apex_render(
 
     if (html == NULL) {
         /* Upstream returns NULL for alloc failure and some internal errors.
-         * Map to OOM so Zig's status table stays small; rare non-OOM NULLs
-         * still surface as failure without dirty outs. */
-        return APEX_ERR_OOM;
+         * Contract: APEX_ERR_OOM is allocation-only. Unspecified NULL is a
+         * render failure, not OOM (hosts map non-OOM non-zero → RenderFailed). */
+        return APEX_ERR_ARGS;
     }
 
     size_t len = strlen(html);

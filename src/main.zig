@@ -144,20 +144,33 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         var layout_roots: std.StringHashMapUnmanaged(void) = .{};
         defer layout_roots.deinit(gpa);
         const add_layout_root = struct {
-            fn go(w: *watch.PollingWatcher, map: *std.StringHashMapUnmanaged(void), gpa_: std.mem.Allocator, lp: []const u8) !void {
-                const dir = std.fs.path.dirname(lp) orelse ".";
+            fn go(w: *watch.PollingWatcher, map: *std.StringHashMapUnmanaged(void), gpa_: std.mem.Allocator, lp: []const u8, input_dir: []const u8) !void {
+                // Bare filename (no dirname) — watch the file via its parent only when
+                // that parent is not the whole cwd (which would scan .git/dist every poll).
+                // Prefer not adding "." when content is already watched under input_dir.
+                const dir = std.fs.path.dirname(lp) orelse {
+                    // Layout sits at repo root as a bare name: do not addRoot(".") —
+                    // the layout file is still picked up if it lives under a watched root;
+                    // otherwise watch only that single path's parent when it equals input_dir.
+                    if (std.mem.eql(u8, input_dir, ".") or std.mem.eql(u8, input_dir, "./")) {
+                        return; // content root already covers cwd
+                    }
+                    return; // skip cwd-wide layout root (issue #18)
+                };
+                // Skip layout parent if it is already covered by content root.
+                if (std.mem.eql(u8, dir, input_dir)) return;
                 const gop = try map.getOrPut(gpa_, dir);
                 if (!gop.found_existing) {
                     try w.addRoot(dir);
                 }
             }
         }.go;
-        add_layout_root(&watcher, &layout_roots, gpa, layout_path) catch |err| {
+        add_layout_root(&watcher, &layout_roots, gpa, layout_path, opts.input_dir) catch |err| {
             return mapHtmlError(err, opts.quiet);
         };
         for (opts.targets.items) |t| {
             if (t.layout_path) |lp| {
-                add_layout_root(&watcher, &layout_roots, gpa, lp) catch |err| {
+                add_layout_root(&watcher, &layout_roots, gpa, lp, opts.input_dir) catch |err| {
                     return mapHtmlError(err, opts.quiet);
                 };
             }
@@ -232,6 +245,8 @@ fn mapHtmlError(err: anyerror, quiet: bool) ExitCode {
         error.GraphValidationFailed,
         error.IncludeFailed,
         error.ReferenceFailed,
+        // Multi-target wrap can mix content and I/O; prefer content for graph/include
+        // failures already printed, but treat pure layout load I/O as exit 3 via FileNotFound etc.
         error.MultiTargetCompilationFailed,
         => return .content_error,
         error.ParseFailed,

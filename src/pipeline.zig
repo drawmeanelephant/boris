@@ -616,6 +616,8 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
                 .line = 1,
                 .column = 1,
             });
+            // Per-file read failure is I/O (exit 3), not content validation (exit 1).
+            result.failure = .io;
             continue;
         };
         defer gpa.free(source);
@@ -709,7 +711,10 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     const err_count = diag.countErrors(result.diagnostics.items);
     result.ok = err_count == 0;
     if (!result.ok) {
-        result.failure = .content;
+        // Preserve .io if a per-file read already failed; otherwise content/graph.
+        if (result.failure != .io) {
+            result.failure = .content;
+        }
         result.graph_frozen = false;
         logCompile(options.quiet, "boris: content validation failed ({d} error(s))\n", .{err_count});
         return result;
