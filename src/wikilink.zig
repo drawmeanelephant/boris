@@ -18,6 +18,14 @@ pub const WikiError = error{
     PathError,
 };
 
+/// Location + detail for the first wiki-link failure (views into scan body).
+pub const FailInfo = struct {
+    line: u32 = 1,
+    column: u32 = 1,
+    /// Entity id related to the error, or empty. Borrowed; dupe before freeing source.
+    detail: []const u8 = "",
+};
+
 pub const WikiHit = struct {
     entity_id: []const u8,
     label: ?[]const u8,
@@ -56,8 +64,21 @@ fn isEntityIdChar(c: u8) bool {
         c == '/' or c == '_' or c == '-' or c == '.';
 }
 
+fn setFail(fail_out: ?*FailInfo, body: []const u8, offset: usize, detail: []const u8) void {
+    if (fail_out) |f| {
+        const lc = include_mod.lineColAt(body, offset);
+        f.* = .{ .line = lc.line, .column = lc.column, .detail = detail };
+    }
+}
+
 /// Scan body for wiki-links outside fences. Views into `body`.
-pub fn scanWikiLinks(body: []const u8, allocator: std.mem.Allocator, out: *std.ArrayList(WikiHit)) WikiError!void {
+/// On syntax errors, fills `fail_out` when provided.
+pub fn scanWikiLinks(
+    body: []const u8,
+    allocator: std.mem.Allocator,
+    out: *std.ArrayList(WikiHit),
+    fail_out: ?*FailInfo,
+) WikiError!void {
     var i: usize = 0;
     var fence_ch: u8 = 0;
     var fence_run: usize = 0;
@@ -93,25 +114,41 @@ pub fn scanWikiLinks(body: []const u8, allocator: std.mem.Allocator, out: *std.A
             i += 2;
             const id_start = i;
             while (i < body.len and isEntityIdChar(body[i])) : (i += 1) {}
-            if (i == id_start) return error.ReferenceSyntax;
+            if (i == id_start) {
+                setFail(fail_out, body, start, "");
+                return error.ReferenceSyntax;
+            }
             const entity_id = body[id_start..i];
-            if (!identity.validateEntityId(entity_id)) return error.ReferenceSyntax;
+            if (!identity.validateEntityId(entity_id)) {
+                setFail(fail_out, body, start, entity_id);
+                return error.ReferenceSyntax;
+            }
 
             // No section anchors in MVP
-            if (i < body.len and body[i] == '#') return error.ReferenceSyntax;
+            if (i < body.len and body[i] == '#') {
+                setFail(fail_out, body, start, entity_id);
+                return error.ReferenceSyntax;
+            }
 
             var label: ?[]const u8 = null;
             if (i < body.len and body[i] == '|') {
                 i += 1;
                 const lab_start = i;
                 while (i < body.len and !(body[i] == ']' and i + 1 < body.len and body[i + 1] == ']')) : (i += 1) {
-                    if (body[i] == '\n' or body[i] == '\r') return error.ReferenceSyntax;
+                    if (body[i] == '\n' or body[i] == '\r') {
+                        setFail(fail_out, body, start, entity_id);
+                        return error.ReferenceSyntax;
+                    }
                 }
-                if (i == lab_start) return error.ReferenceSyntax;
+                if (i == lab_start) {
+                    setFail(fail_out, body, start, entity_id);
+                    return error.ReferenceSyntax;
+                }
                 label = body[lab_start..i];
             }
 
             if (i + 1 >= body.len or body[i] != ']' or body[i + 1] != ']') {
+                setFail(fail_out, body, start, entity_id);
                 return error.ReferenceSyntax;
             }
             i += 2;
@@ -157,10 +194,11 @@ pub fn rewriteWikiLinks(
     body: []const u8,
     nodes: []const graph_mod.Node,
     current_output_path: []const u8,
+    fail_out: ?*FailInfo,
 ) WikiError![]u8 {
     var hits: std.ArrayList(WikiHit) = .empty;
     defer hits.deinit(allocator);
-    try scanWikiLinks(body, allocator, &hits);
+    try scanWikiLinks(body, allocator, &hits, fail_out);
 
     if (hits.items.len == 0) {
         return try allocator.dupe(u8, body);
@@ -171,12 +209,21 @@ pub fn rewriteWikiLinks(
     var copy_from: usize = 0;
 
     for (hits.items) |hit| {
-        const node = findNode(nodes, hit.entity_id) orelse return error.ReferenceMissing;
+        const node = findNode(nodes, hit.entity_id) orelse {
+            if (fail_out) |f| f.* = .{ .line = hit.line, .column = hit.column, .detail = hit.entity_id };
+            return error.ReferenceMissing;
+        };
         try out.appendSlice(allocator, body[copy_from..hit.offset]);
 
-        const to_out = identity.htmlOutputPath(allocator, node.id) catch return error.PathError;
+        const to_out = identity.htmlOutputPath(allocator, node.id) catch {
+            if (fail_out) |f| f.* = .{ .line = hit.line, .column = hit.column, .detail = hit.entity_id };
+            return error.PathError;
+        };
         defer allocator.free(to_out);
-        const href = identity.relativeHref(allocator, current_output_path, to_out) catch return error.PathError;
+        const href = identity.relativeHref(allocator, current_output_path, to_out) catch {
+            if (fail_out) |f| f.* = .{ .line = hit.line, .column = hit.column, .detail = hit.entity_id };
+            return error.PathError;
+        };
         defer allocator.free(href);
 
         const raw_label = hit.label orelse (node.title orelse node.id);
@@ -195,30 +242,39 @@ pub fn rewriteWikiLinks(
     return try out.toOwnedSlice(allocator);
 }
 
-/// Stable fingerprint material for referenced entities (sorted by id).
-pub fn referenceMaterial(
-    allocator: std.mem.Allocator,
+fn appendUniqueId(ids: *std.ArrayList([]const u8), allocator: std.mem.Allocator, id: []const u8) !void {
+    for (ids.items) |existing| {
+        if (std.mem.eql(u8, existing, id)) return;
+    }
+    try ids.append(allocator, id);
+}
+
+fn collectIdsFromBody(
     body: []const u8,
-    nodes: []const graph_mod.Node,
-) WikiError![]u8 {
+    allocator: std.mem.Allocator,
+    ids: *std.ArrayList([]const u8),
+    fail_out: ?*FailInfo,
+) WikiError!void {
     var hits: std.ArrayList(WikiHit) = .empty;
     defer hits.deinit(allocator);
-    try scanWikiLinks(body, allocator, &hits);
-    if (hits.items.len == 0) return try allocator.dupe(u8, "");
-
-    var ids: std.ArrayList([]const u8) = .empty;
-    defer ids.deinit(allocator);
+    try scanWikiLinks(body, allocator, &hits, fail_out);
     for (hits.items) |h| {
-        var exists = false;
-        for (ids.items) |id| {
-            if (std.mem.eql(u8, id, h.entity_id)) {
-                exists = true;
-                break;
-            }
-        }
-        if (!exists) try ids.append(allocator, h.entity_id);
+        try appendUniqueId(ids, allocator, h.entity_id);
     }
-    std.mem.sort([]const u8, ids.items, {}, struct {
+}
+
+fn materialFromIds(
+    allocator: std.mem.Allocator,
+    ids: []const []const u8,
+    nodes: []const graph_mod.Node,
+    fail_out: ?*FailInfo,
+) WikiError![]u8 {
+    if (ids.len == 0) return try allocator.dupe(u8, "");
+
+    const sorted = try allocator.alloc([]const u8, ids.len);
+    defer allocator.free(sorted);
+    @memcpy(sorted, ids);
+    std.mem.sort([]const u8, sorted, {}, struct {
         fn less(_: void, a: []const u8, b: []const u8) bool {
             return std.mem.order(u8, a, b) == .lt;
         }
@@ -226,9 +282,15 @@ pub fn referenceMaterial(
 
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
-    for (ids.items) |id| {
-        const node = findNode(nodes, id) orelse return error.ReferenceMissing;
-        const out_path = identity.htmlOutputPath(allocator, node.id) catch return error.PathError;
+    for (sorted) |id| {
+        const node = findNode(nodes, id) orelse {
+            if (fail_out) |f| f.* = .{ .line = 1, .column = 1, .detail = id };
+            return error.ReferenceMissing;
+        };
+        const out_path = identity.htmlOutputPath(allocator, node.id) catch {
+            if (fail_out) |f| f.* = .{ .line = 1, .column = 1, .detail = id };
+            return error.PathError;
+        };
         defer allocator.free(out_path);
         try out.appendSlice(allocator, id);
         try out.append(allocator, 0);
@@ -240,6 +302,31 @@ pub fn referenceMaterial(
     return try out.toOwnedSlice(allocator);
 }
 
+/// Stable fingerprint material for referenced entities in one body (sorted by id).
+pub fn referenceMaterial(
+    allocator: std.mem.Allocator,
+    body: []const u8,
+    nodes: []const graph_mod.Node,
+) WikiError![]u8 {
+    return referenceMaterialMulti(allocator, &.{body}, nodes, null);
+}
+
+/// Union wiki targets from multiple bodies (page + transitive include fragments).
+/// Title/path renames of targets linked only via includes still dirty the parent.
+pub fn referenceMaterialMulti(
+    allocator: std.mem.Allocator,
+    bodies: []const []const u8,
+    nodes: []const graph_mod.Node,
+    fail_out: ?*FailInfo,
+) WikiError![]u8 {
+    var ids: std.ArrayList([]const u8) = .empty;
+    defer ids.deinit(allocator);
+    for (bodies) |body| {
+        try collectIdsFromBody(body, allocator, &ids, fail_out);
+    }
+    return materialFromIds(allocator, ids.items, nodes, fail_out);
+}
+
 pub fn errorCode(err: WikiError) diag.Code {
     return switch (err) {
         error.ReferenceSyntax => .EREFERENCESYNTAX,
@@ -247,6 +334,69 @@ pub fn errorCode(err: WikiError) diag.Code {
         error.OutOfMemory => .EIO,
         error.PathError => .EINVALIDPATH,
     };
+}
+
+pub fn remediationFor(code: diag.Code) []const u8 {
+    return switch (code) {
+        .EREFERENCESYNTAX => "Use [[entity-id]] or [[entity-id|label]]; section anchors (#heading) are not supported yet",
+        .EREFERENCEMISSING => "Point the wiki-link at an existing page entity id (same space as parent)",
+        .EINVALIDPATH => "Fix the target entity id so its output path is valid",
+        .EIO => "Check memory and path spelling",
+        else => "Fix the wiki-link",
+    };
+}
+
+fn messageFor(retain: std.mem.Allocator, err: WikiError, fail: FailInfo) ![]const u8 {
+    return switch (err) {
+        error.ReferenceSyntax => if (fail.detail.len > 0)
+            try std.fmt.allocPrint(retain, "malformed wiki-link near \"{s}\"", .{fail.detail})
+        else
+            try retain.dupe(u8, "malformed [[…]] wiki-link"),
+        error.ReferenceMissing => if (fail.detail.len > 0)
+            try std.fmt.allocPrint(retain, "wiki-link target \"{s}\" not found in the page graph", .{fail.detail})
+        else
+            try retain.dupe(u8, "wiki-link target not found in the page graph"),
+        error.OutOfMemory => try retain.dupe(u8, "out of memory while resolving wiki-links"),
+        error.PathError => if (fail.detail.len > 0)
+            try std.fmt.allocPrint(retain, "cannot build output path for wiki target \"{s}\"", .{fail.detail})
+        else
+            try retain.dupe(u8, "cannot build output path for wiki target"),
+    };
+}
+
+/// Build a retain-owned diagnostic for a wiki-link failure.
+pub fn makeDiagnostic(
+    retain: std.mem.Allocator,
+    err: WikiError,
+    source_path: []const u8,
+    fail: FailInfo,
+) !diag.Diagnostic {
+    const code = errorCode(err);
+    return .{
+        .severity = .error_,
+        .code = code,
+        .message = try messageFor(retain, err, fail),
+        .remediation = try retain.dupe(u8, remediationFor(code)),
+        .source_path = try retain.dupe(u8, source_path),
+        .line = fail.line,
+        .column = fail.column,
+        .id = if (fail.detail.len > 0) try retain.dupe(u8, fail.detail) else "",
+    };
+}
+
+/// Print one structured wiki-link diagnostic to stderr via `diag.formatText`.
+pub fn printDiagnostic(
+    gpa: std.mem.Allocator,
+    err: WikiError,
+    source_path: []const u8,
+    fail: FailInfo,
+) void {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const d = makeDiagnostic(arena.allocator(), err, source_path, fail) catch return;
+    const line = diag.formatText(d, gpa) catch return;
+    defer gpa.free(line);
+    std.debug.print("{s}\n", .{line});
 }
 
 // ---------------------------------------------------------------------------
@@ -263,11 +413,40 @@ test "scanWikiLinks basic and fence skip" {
     ;
     var list: std.ArrayList(WikiHit) = .empty;
     defer list.deinit(std.testing.allocator);
-    try scanWikiLinks(body, std.testing.allocator, &list);
+    try scanWikiLinks(body, std.testing.allocator, &list, null);
     try std.testing.expectEqual(@as(usize, 2), list.items.len);
     try std.testing.expectEqualStrings("guides/overview", list.items[0].entity_id);
     try std.testing.expect(list.items[0].label == null);
     try std.testing.expectEqualStrings("Overview", list.items[1].label.?);
+}
+
+test "scanWikiLinks skips tilde fences" {
+    const body =
+        \\[[guides/a]]
+        \\~~~md
+        \\[[fenced/skip]]
+        \\~~~
+        \\[[guides/b]]
+        \\
+    ;
+    var list: std.ArrayList(WikiHit) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try scanWikiLinks(body, std.testing.allocator, &list, null);
+    try std.testing.expectEqual(@as(usize, 2), list.items.len);
+    try std.testing.expectEqualStrings("guides/a", list.items[0].entity_id);
+    try std.testing.expectEqualStrings("guides/b", list.items[1].entity_id);
+}
+
+test "scanWikiLinks syntax FailInfo" {
+    var list: std.ArrayList(WikiHit) = .empty;
+    defer list.deinit(std.testing.allocator);
+    var fail: FailInfo = .{};
+    try std.testing.expectError(
+        error.ReferenceSyntax,
+        scanWikiLinks("bad [[#only-hash]]", std.testing.allocator, &list, &fail),
+    );
+    // Empty id before # → syntax at the [[
+    try std.testing.expectEqual(@as(u32, 1), fail.line);
 }
 
 test "rewriteWikiLinks relative href" {
@@ -289,17 +468,67 @@ test "rewriteWikiLinks relative href" {
         },
     };
     const body = "Go to [[guides/overview]] please.";
-    const out = try rewriteWikiLinks(gpa, body, &nodes, "getting-started.html");
+    const out = try rewriteWikiLinks(gpa, body, &nodes, "getting-started.html", null);
     defer gpa.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "[Content Model](guides/overview.html)") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "[[") == null);
 }
 
-test "rewriteWikiLinks missing target" {
+test "rewriteWikiLinks missing target with FailInfo" {
     const gpa = std.testing.allocator;
     const nodes = [_]graph_mod.Node{};
+    var fail: FailInfo = .{};
     try std.testing.expectError(
         error.ReferenceMissing,
-        rewriteWikiLinks(gpa, "[[missing/page]]", &nodes, "index.html"),
+        rewriteWikiLinks(gpa, "See [[missing/page]] here", &nodes, "index.html", &fail),
     );
+    try std.testing.expectEqualStrings("missing/page", fail.detail);
+    try std.testing.expectEqual(@as(u32, 1), fail.line);
+}
+
+test "makeDiagnostic maps ReferenceMissing" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const d = try makeDiagnostic(arena.allocator(), error.ReferenceMissing, "a.md", .{
+        .line = 2,
+        .column = 4,
+        .detail = "missing/id",
+    });
+    try std.testing.expect(d.code == .EREFERENCEMISSING);
+    const line = try diag.formatText(d, gpa);
+    defer gpa.free(line);
+    try std.testing.expect(std.mem.indexOf(u8, line, "EREFERENCEMISSING") != null);
+    try std.testing.expect(std.mem.indexOf(u8, line, "a.md:2:4") != null);
+}
+
+test "referenceMaterialMulti unions page and include bodies" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{
+        .{
+            .id = "alpha",
+            .source_path = "alpha.md",
+            .title = "Alpha",
+            .role = .trunk,
+            .index = 0,
+        },
+        .{
+            .id = "beta",
+            .source_path = "beta.md",
+            .title = "Beta",
+            .role = .trunk,
+            .index = 1,
+        },
+    };
+    const page_body = "Page links [[alpha]] only.";
+    const include_body = "Fragment links [[beta]] only.";
+    const multi = try referenceMaterialMulti(gpa, &.{ page_body, include_body }, &nodes, null);
+    defer gpa.free(multi);
+    try std.testing.expect(std.mem.indexOf(u8, multi, "alpha") != null);
+    try std.testing.expect(std.mem.indexOf(u8, multi, "beta") != null);
+
+    const page_only = try referenceMaterial(gpa, page_body, &nodes);
+    defer gpa.free(page_only);
+    try std.testing.expect(std.mem.indexOf(u8, page_only, "alpha") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page_only, "beta") == null);
 }

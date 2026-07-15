@@ -22,6 +22,14 @@ pub const IncludeError = error{
     ReadFailed,
 };
 
+/// Location + detail for the first include failure (views into scan body unless noted).
+pub const FailInfo = struct {
+    line: u32 = 1,
+    column: u32 = 1,
+    /// Include path related to the error, or empty. Borrowed; dupe before freeing source.
+    detail: []const u8 = "",
+};
+
 pub const ScanHit = struct {
     path: []const u8,
     offset: usize,
@@ -113,8 +121,21 @@ fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Alloc
     return reader.interface.allocRemaining(allocator, .unlimited) catch return error.ReadFailed;
 }
 
+fn setFail(fail_out: ?*FailInfo, body: []const u8, offset: usize, detail: []const u8) void {
+    if (fail_out) |f| {
+        const lc = lineColAt(body, offset);
+        f.* = .{ .line = lc.line, .column = lc.column, .detail = detail };
+    }
+}
+
 /// Scan body for `{{include path}}` outside fences. Paths are views into `body`.
-pub fn scanIncludeDirectives(body: []const u8, allocator: std.mem.Allocator, out: *std.ArrayList(ScanHit)) IncludeError!void {
+/// On syntax/path errors, fills `fail_out` when provided.
+pub fn scanIncludeDirectives(
+    body: []const u8,
+    allocator: std.mem.Allocator,
+    out: *std.ArrayList(ScanHit),
+    fail_out: ?*FailInfo,
+) IncludeError!void {
     var i: usize = 0;
     var fence_ch: u8 = 0;
     var fence_run: usize = 0;
@@ -162,11 +183,13 @@ pub fn scanIncludeDirectives(body: []const u8, allocator: std.mem.Allocator, out
             var path_end = i;
             while (path_end > path_start and isSpace(body[path_end - 1])) : (path_end -= 1) {}
             if (i + 1 >= body.len or body[i] != '}' or body[i + 1] != '}') {
+                setFail(fail_out, body, start, "");
                 return error.IncludeSyntax;
             }
             i += 2;
             const path = body[path_start..path_end];
             if (path.len == 0 or !validateIncludePath(path)) {
+                setFail(fail_out, body, start, path);
                 return error.InvalidPath;
             }
             const lc = lineColAt(body, start);
@@ -183,21 +206,22 @@ pub fn scanIncludeDirectives(body: []const u8, allocator: std.mem.Allocator, out
 }
 
 /// Collect unique transitive include paths starting from a page body.
-/// On cycle / missing / syntax error, returns the matching IncludeError.
-/// Paths in `out_paths` are allocator-owned duplicates.
+/// On cycle / missing / syntax error, returns the matching IncludeError and
+/// fills `fail_out` when provided. Paths in `out_paths` are allocator-owned duplicates.
 pub fn collectTransitiveIncludes(
     io: Io,
     content_dir: Io.Dir,
     allocator: std.mem.Allocator,
     root_body: []const u8,
     out_paths: *std.ArrayList([]const u8),
+    fail_out: ?*FailInfo,
 ) IncludeError!void {
     var stack: std.ArrayList([]const u8) = .empty;
     defer stack.deinit(allocator);
     var seen: std.StringHashMapUnmanaged(void) = .{};
     defer seen.deinit(allocator);
 
-    try walkIncludes(io, content_dir, allocator, root_body, &stack, &seen, out_paths, 0);
+    try walkIncludes(io, content_dir, allocator, root_body, &stack, &seen, out_paths, 0, fail_out);
 }
 
 fn walkIncludes(
@@ -209,16 +233,23 @@ fn walkIncludes(
     seen: *std.StringHashMapUnmanaged(void),
     out_paths: *std.ArrayList([]const u8),
     depth: usize,
+    fail_out: ?*FailInfo,
 ) IncludeError!void {
-    if (depth > max_include_depth) return error.DepthExceeded;
+    if (depth > max_include_depth) {
+        if (fail_out) |f| f.* = .{ .line = 1, .column = 1, .detail = "" };
+        return error.DepthExceeded;
+    }
 
     var hits: std.ArrayList(ScanHit) = .empty;
     defer hits.deinit(allocator);
-    try scanIncludeDirectives(body, allocator, &hits);
+    try scanIncludeDirectives(body, allocator, &hits, fail_out);
 
     for (hits.items) |hit| {
         for (stack.items) |s| {
-            if (std.mem.eql(u8, s, hit.path)) return error.IncludeCycle;
+            if (std.mem.eql(u8, s, hit.path)) {
+                if (fail_out) |f| f.* = .{ .line = hit.line, .column = hit.column, .detail = hit.path };
+                return error.IncludeCycle;
+            }
         }
 
         var already = false;
@@ -235,14 +266,25 @@ fn walkIncludes(
         if (seen.contains(hit.path)) continue;
         try seen.put(allocator, hit.path, {});
 
-        const file_bytes = try readFileAlloc(io, content_dir, hit.path, allocator);
+        const file_bytes = readFileAlloc(io, content_dir, hit.path, allocator) catch |err| {
+            if (fail_out) |f| f.* = .{ .line = hit.line, .column = hit.column, .detail = hit.path };
+            return err;
+        };
         defer allocator.free(file_bytes);
         const nested = bodyOfSource(file_bytes);
 
         try stack.append(allocator, hit.path);
         defer _ = stack.pop();
 
-        try walkIncludes(io, content_dir, allocator, nested, stack, seen, out_paths, depth + 1);
+        // Nested errors: include file buffers are freed on return, so do not borrow
+        // nested FailInfo.detail. Report the parent directive site; detail is the
+        // child path viewed from the still-live parent body.
+        walkIncludes(io, content_dir, allocator, nested, stack, seen, out_paths, depth + 1, null) catch |err| {
+            if (fail_out) |f| {
+                f.* = .{ .line = hit.line, .column = hit.column, .detail = hit.path };
+            }
+            return err;
+        };
     }
 }
 
@@ -254,11 +296,12 @@ pub fn expandIncludes(
     arena: std.mem.Allocator,
     body: []const u8,
     owner_path: []const u8,
+    fail_out: ?*FailInfo,
 ) IncludeError![]u8 {
     var stack: std.ArrayList([]const u8) = .empty;
     defer stack.deinit(gpa);
     try stack.append(gpa, owner_path);
-    return expandRecursive(io, content_dir, gpa, arena, body, &stack, 0);
+    return expandRecursive(io, content_dir, gpa, arena, body, &stack, 0, fail_out);
 }
 
 fn expandRecursive(
@@ -269,8 +312,12 @@ fn expandRecursive(
     body: []const u8,
     stack: *std.ArrayList([]const u8),
     depth: usize,
+    fail_out: ?*FailInfo,
 ) IncludeError![]u8 {
-    if (depth > max_include_depth) return error.DepthExceeded;
+    if (depth > max_include_depth) {
+        if (fail_out) |f| f.* = .{ .line = 1, .column = 1, .detail = "" };
+        return error.DepthExceeded;
+    }
 
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(arena);
@@ -323,24 +370,39 @@ fn expandRecursive(
             var path_end = j;
             while (path_end > path_start and isSpace(body[path_end - 1])) : (path_end -= 1) {}
             if (j + 1 >= body.len or body[j] != '}' or body[j + 1] != '}') {
+                setFail(fail_out, body, start, "");
                 return error.IncludeSyntax;
             }
             j += 2;
             const path = body[path_start..path_end];
-            if (path.len == 0 or !validateIncludePath(path)) return error.InvalidPath;
+            if (path.len == 0 or !validateIncludePath(path)) {
+                setFail(fail_out, body, start, path);
+                return error.InvalidPath;
+            }
 
             for (stack.items) |s| {
-                if (std.mem.eql(u8, s, path)) return error.IncludeCycle;
+                if (std.mem.eql(u8, s, path)) {
+                    setFail(fail_out, body, start, path);
+                    return error.IncludeCycle;
+                }
             }
 
             try out.appendSlice(arena, body[copy_from..start]);
 
-            const file_bytes = try readFileAlloc(io, content_dir, path, gpa);
+            const file_bytes = readFileAlloc(io, content_dir, path, gpa) catch |err| {
+                setFail(fail_out, body, start, path);
+                return err;
+            };
             defer gpa.free(file_bytes);
             const nested_body = bodyOfSource(file_bytes);
 
             try stack.append(gpa, path);
-            const expanded = try expandRecursive(io, content_dir, gpa, arena, nested_body, stack, depth + 1);
+            // Nested FailInfo would borrow into file_bytes (freed below); map to parent site.
+            const expanded = expandRecursive(io, content_dir, gpa, arena, nested_body, stack, depth + 1, null) catch |err| {
+                _ = stack.pop();
+                setFail(fail_out, body, start, path);
+                return err;
+            };
             _ = stack.pop();
             try out.appendSlice(arena, expanded);
 
@@ -367,6 +429,76 @@ pub fn errorCode(err: IncludeError) diag.Code {
     };
 }
 
+pub fn remediationFor(code: diag.Code) []const u8 {
+    return switch (code) {
+        .EINCLUDESYNTAX => "Use {{include path/to/file.md}} with whitespace before the path and closing }}",
+        .EINCLUDEMISSING => "Create the include file under the content root or fix the path",
+        .EINCLUDECYCLE => "Break the cycle by removing a circular {{include}} among nested fragments",
+        .EINVALIDPATH => "Use content-root-relative segments [A-Za-z0-9._-]; no .., absolute, or backslash",
+        .EIO => "Check filesystem permissions and path spelling",
+        else => "Fix the include directive",
+    };
+}
+
+fn messageFor(retain: std.mem.Allocator, err: IncludeError, fail: FailInfo) ![]const u8 {
+    return switch (err) {
+        error.IncludeSyntax => try retain.dupe(u8, "malformed {{include …}} directive"),
+        error.IncludeMissing => if (fail.detail.len > 0)
+            try std.fmt.allocPrint(retain, "include target \"{s}\" not found or unreadable", .{fail.detail})
+        else
+            try retain.dupe(u8, "include target not found or unreadable"),
+        error.IncludeCycle => if (fail.detail.len > 0)
+            try std.fmt.allocPrint(retain, "include cycle involving \"{s}\"", .{fail.detail})
+        else
+            try retain.dupe(u8, "include cycle among nested fragments"),
+        error.InvalidPath => if (fail.detail.len > 0)
+            try std.fmt.allocPrint(retain, "illegal include path \"{s}\"", .{fail.detail})
+        else
+            try retain.dupe(u8, "illegal include path"),
+        error.DepthExceeded => try retain.dupe(u8, "include nesting depth exceeded"),
+        error.OutOfMemory => try retain.dupe(u8, "out of memory while resolving includes"),
+        error.ReadFailed => if (fail.detail.len > 0)
+            try std.fmt.allocPrint(retain, "failed to read include \"{s}\"", .{fail.detail})
+        else
+            try retain.dupe(u8, "failed to read include file"),
+    };
+}
+
+/// Build a retain-owned diagnostic for an include failure (no UAF from temp buffers).
+pub fn makeDiagnostic(
+    retain: std.mem.Allocator,
+    err: IncludeError,
+    source_path: []const u8,
+    fail: FailInfo,
+) !diag.Diagnostic {
+    const code = errorCode(err);
+    return .{
+        .severity = .error_,
+        .code = code,
+        .message = try messageFor(retain, err, fail),
+        .remediation = try retain.dupe(u8, remediationFor(code)),
+        .source_path = try retain.dupe(u8, source_path),
+        .line = fail.line,
+        .column = fail.column,
+        .id = if (fail.detail.len > 0) try retain.dupe(u8, fail.detail) else "",
+    };
+}
+
+/// Print one structured include diagnostic to stderr via `diag.formatText`.
+pub fn printDiagnostic(
+    gpa: std.mem.Allocator,
+    err: IncludeError,
+    source_path: []const u8,
+    fail: FailInfo,
+) void {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const d = makeDiagnostic(arena.allocator(), err, source_path, fail) catch return;
+    const line = diag.formatText(d, gpa) catch return;
+    defer gpa.free(line);
+    std.debug.print("{s}\n", .{line});
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -381,7 +513,7 @@ test "validateIncludePath accepts relative fragments" {
     try std.testing.expect(!validateIncludePath("a//b.md"));
 }
 
-test "scanIncludeDirectives finds one and skips fences" {
+test "scanIncludeDirectives finds one and skips backtick fences" {
     const body =
         \\Before
         \\{{include includes/a.md}}
@@ -393,17 +525,59 @@ test "scanIncludeDirectives finds one and skips fences" {
     ;
     var list: std.ArrayList(ScanHit) = .empty;
     defer list.deinit(std.testing.allocator);
-    try scanIncludeDirectives(body, std.testing.allocator, &list);
+    try scanIncludeDirectives(body, std.testing.allocator, &list, null);
     try std.testing.expectEqual(@as(usize, 2), list.items.len);
     try std.testing.expectEqualStrings("includes/a.md", list.items[0].path);
     try std.testing.expectEqualStrings("includes/b.md", list.items[1].path);
 }
 
-test "scanIncludeDirectives rejects empty path" {
+test "scanIncludeDirectives skips tilde fences" {
+    const body =
+        \\{{include includes/a.md}}
+        \\~~~
+        \\{{include includes/skipped.md}}
+        \\~~~
+        \\{{include includes/b.md}}
+        \\
+    ;
+    var list: std.ArrayList(ScanHit) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try scanIncludeDirectives(body, std.testing.allocator, &list, null);
+    try std.testing.expectEqual(@as(usize, 2), list.items.len);
+    try std.testing.expectEqualStrings("includes/a.md", list.items[0].path);
+    try std.testing.expectEqualStrings("includes/b.md", list.items[1].path);
+}
+
+test "scanIncludeDirectives rejects empty path with FailInfo" {
     const body = "{{include   }}";
     var list: std.ArrayList(ScanHit) = .empty;
     defer list.deinit(std.testing.allocator);
-    try std.testing.expectError(error.InvalidPath, scanIncludeDirectives(body, std.testing.allocator, &list));
+    var fail: FailInfo = .{};
+    try std.testing.expectError(error.InvalidPath, scanIncludeDirectives(body, std.testing.allocator, &list, &fail));
+    try std.testing.expectEqual(@as(u32, 1), fail.line);
+    try std.testing.expectEqual(@as(u32, 1), fail.column);
+}
+
+test "makeDiagnostic is retain-owned and maps codes" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const d = try makeDiagnostic(arena.allocator(), error.IncludeMissing, "guides/a.md", .{
+        .line = 3,
+        .column = 5,
+        .detail = "includes/missing.md",
+    });
+    try std.testing.expect(d.code == .EINCLUDEMISSING);
+    try std.testing.expectEqualStrings("guides/a.md", d.source_path);
+    try std.testing.expect(d.line.? == 3);
+    try std.testing.expect(d.column.? == 5);
+    try std.testing.expect(std.mem.indexOf(u8, d.message, "includes/missing.md") != null);
+    try std.testing.expect(d.remediation.len > 0);
+
+    const line = try diag.formatText(d, gpa);
+    defer gpa.free(line);
+    try std.testing.expect(std.mem.indexOf(u8, line, "EINCLUDEMISSING") != null);
+    try std.testing.expect(std.mem.indexOf(u8, line, "guides/a.md:3:5") != null);
 }
 
 test "bodyOfSource strips frontmatter" {
@@ -440,20 +614,25 @@ test "expandIncludes simple nested and cycle" {
     const a = arena.allocator();
 
     const body = "Start {{include includes/a.md}} End";
-    const out = try expandIncludes(io, content_dir, gpa, a, body, "page.md");
+    const out = try expandIncludes(io, content_dir, gpa, a, body, "page.md", null);
     try std.testing.expect(std.mem.indexOf(u8, out, "FROM_A") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "FROM_B") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "Start") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "End") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "{{include") == null);
 
+    var cycle_fail: FailInfo = .{};
     try std.testing.expectError(
         error.IncludeCycle,
-        expandIncludes(io, content_dir, gpa, a, "{{include includes/c.md}}", "page.md"),
+        expandIncludes(io, content_dir, gpa, a, "{{include includes/c.md}}", "page.md", &cycle_fail),
     );
+    try std.testing.expect(cycle_fail.detail.len > 0);
 
+    var miss_fail: FailInfo = .{};
     try std.testing.expectError(
         error.IncludeMissing,
-        expandIncludes(io, content_dir, gpa, a, "{{include includes/nope.md}}", "page.md"),
+        expandIncludes(io, content_dir, gpa, a, "{{include includes/nope.md}}", "page.md", &miss_fail),
     );
+    try std.testing.expectEqualStrings("includes/nope.md", miss_fail.detail);
+    try std.testing.expectEqual(@as(u32, 1), miss_fail.line);
 }
