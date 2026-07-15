@@ -151,19 +151,35 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         return .success;
     }
 
-    const stats = compile.compileHtmlSite(io, gpa, .{
-        .content_root = opts.input_dir,
-        .dist_dir = html_dir,
-        .layout_path = default_layout,
-        .incremental = opts.incremental,
-        .quiet = opts.quiet,
-        .jobs = opts.jobs,
-    }) catch |err| {
-        return mapHtmlError(err, opts.quiet);
-    };
+    if (opts.targets.items.len > 0) {
+        compile.compileHtmlSiteMulti(io, gpa, opts.targets.items, .{
+            .content_root = opts.input_dir,
+            .layout_path = default_layout,
+            .incremental = opts.incremental,
+            .quiet = opts.quiet,
+            .jobs = opts.jobs,
+        }) catch |err| {
+            return mapHtmlError(err, opts.quiet);
+        };
 
-    if (!opts.quiet) {
-        std.debug.print("ok: wrote HTML under {s} ({d} page(s))\n", .{ html_dir, stats.pages_written });
+        if (!opts.quiet) {
+            std.debug.print("ok: wrote HTML for {d} target(s)\n", .{ opts.targets.items.len });
+        }
+    } else {
+        const stats = compile.compileHtmlSite(io, gpa, .{
+            .content_root = opts.input_dir,
+            .dist_dir = html_dir,
+            .layout_path = default_layout,
+            .incremental = opts.incremental,
+            .quiet = opts.quiet,
+            .jobs = opts.jobs,
+        }) catch |err| {
+            return mapHtmlError(err, opts.quiet);
+        };
+
+        if (!opts.quiet) {
+            std.debug.print("ok: wrote HTML under {s} ({d} page(s))\n", .{ html_dir, stats.pages_written });
+        }
     }
     return .success;
 }
@@ -177,6 +193,7 @@ fn mapHtmlError(err: anyerror, quiet: bool) ExitCode {
         error.ComponentFailed,
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
+        error.MultiTargetCompilationFailed,
         => {
             if (!quiet) {
                 std.debug.print("error: content or layout failure: {s}\n", .{@errorName(err)});
@@ -419,8 +436,46 @@ test "runPipeline: HTML missing content root exits 3" {
     try std.testing.expectEqual(ExitCode.io_error, code);
 }
 
+test "runPipeline: multi-target HTML build success and validation exits" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const out_a = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cli-multi-a", .{tmp.sub_path});
+    defer gpa.free(out_a);
+    const out_b = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cli-multi-b", .{tmp.sub_path});
+    defer gpa.free(out_b);
+
+    var opts = Options{
+        .mode = .html,
+        .input_dir = "test/fixtures/html/content",
+        .quiet = true,
+    };
+    try opts.targets.append(gpa, .{ .name = "t_b", .output_dir = out_b });
+    try opts.targets.append(gpa, .{ .name = "t_a", .output_dir = out_a });
+    defer opts.targets.deinit(gpa);
+
+    const code = runPipeline(io, gpa, opts);
+    try std.testing.expectEqual(ExitCode.success, code);
+
+    // Verify index.html in both
+    const cwd = Io.Dir.cwd();
+    const path_a = try std.fmt.allocPrint(gpa, "{s}/index.html", .{out_a});
+    defer gpa.free(path_a);
+    const path_b = try std.fmt.allocPrint(gpa, "{s}/index.html", .{out_b});
+    defer gpa.free(path_b);
+
+    var file_a = try cwd.openFile(io, path_a, .{});
+    file_a.close(io);
+    var file_b = try cwd.openFile(io, path_b, .{});
+    file_b.close(io);
+}
+
+
 test "parseOptions: HTML mode defaults and exclusive dirs" {
-    const o = try parseOptions(&.{ "boris", "--html" });
+    var o = try parseOptions(std.testing.allocator, &.{ "boris", "--html" });
+    defer o.deinit(std.testing.allocator);
     try std.testing.expectEqual(Mode.html, o.mode);
     try std.testing.expectEqualStrings("dist", o.html_dir.?);
     try std.testing.expect(o.out_dir == null);
@@ -428,11 +483,11 @@ test "parseOptions: HTML mode defaults and exclusive dirs" {
 
     try std.testing.expectError(
         error.ConflictingFlags,
-        parseOptions(&.{ "boris", "--html", "--out", ".boris" }),
+        parseOptions(std.testing.allocator, &.{ "boris", "--html", "--out", ".boris" }),
     );
     try std.testing.expectError(
         error.ConflictingFlags,
-        parseOptions(&.{ "boris", "--html-dir", "d", "--rag" }),
+        parseOptions(std.testing.allocator, &.{ "boris", "--html-dir", "d", "--rag" }),
     );
 }
 

@@ -6,20 +6,22 @@ implementations must match.
 
 ## Status note
 
-Normative contracts are in force. Implementation status is tracked in
-[`docs/STATUS.md`](../STATUS.md). Presence of a contract is **not** proof that
-every surface is implemented (e.g. HTML `dist/` remains experimental).
+Normative contracts are in force. Implementation status and the post-P2/P3
+roadmap are tracked in [`docs/STATUS.md`](../STATUS.md). Presence of a contract
+is **not** proof that every surface is the default CLI product.
 
-| Layer | Status (m10 / v0.1 harden) |
+| Layer | Status (post-P2 / closing P3) |
 |-------|-------------|
 | Normative docs under `docs/contracts/` | **In force** |
 | Fixture corpus under `fixtures/` | **Inventory + IR/RAG goldens + tests** |
-| Compiler IR on default CLI | **Implemented** |
+| Compiler IR on default CLI | **Implemented** (still the bare-`boris` default) |
 | Optional product RAG (`--rag`) | **Implemented** (includes `:::kind` export) |
 | Aside component tokenizer | **Implemented** (`components.md`) |
-| Apex C ABI + Zig wrapper | **Implemented** (linked + tested; not default pipeline) |
-| Experimental HTML path | **Implemented** (Aside stream; not default CLI) |
-| HTML `dist/` default CLI | **Not** default product |
+| Apex C ABI + Zig wrapper | **Implemented** (linked + tested; stub ≠ CommonMark) |
+| Opt-in HTML path | **Implemented** (`--html` / `--html-dir`; Aside stream) |
+| Parallel HTML workers / watch | **Implemented** (`--jobs`, `--watch`; see contracts below) |
+| Multi-target isolated outputs | **Contract present** — implementation in progress (P3.3) |
+| HTML `dist/` default CLI | **Not** default product (roadmap **Now** in STATUS) |
 
 ## Canonical ownership (one document per topic)
 
@@ -40,6 +42,7 @@ per topic:
 | Experimental HTML output | [html-output.md](html-output.md) |
 | Parallel rendering | [parallel-rendering.md](parallel-rendering.md) |
 | Watch Mode | [watch-mode.md](watch-mode.md) |
+| Multi-target isolated outputs | [multi-target-isolated-output.md](multi-target-isolated-output.md) |
 
 ### Normative documents (v0.1) — full list
 
@@ -56,6 +59,7 @@ per topic:
 | [html-output.md](html-output.md) | Experimental HTML Whiteboard, Aside stream, layout splice, Atomic publish |
 | [parallel-rendering.md](parallel-rendering.md) | Bounded worker pool parallel rendering, thread/memory isolation, deterministic order |
 | [watch-mode.md](watch-mode.md) | Opt-in watch mode, event coalescing/normalization, rebuild serialization, safe recovery |
+| [multi-target-isolated-output.md](multi-target-isolated-output.md) | Multi-target CLI/config, output isolation, cache namespaces (P3.3) |
 
 ## Redirect / compatibility paths (non-normative)
 
@@ -76,7 +80,7 @@ Supporting / historical drafts may also remain in this tree. Prefer linking the
 |----------------------------|------|
 | [acceptance.md](acceptance.md) | v0.1 acceptance checklist |
 | [v0.1-overview.md](v0.1-overview.md) | Orientation; points at canonical contracts |
-| [../STATUS.md](../STATUS.md) | Living status + post-m10 priority list |
+| [../STATUS.md](../STATUS.md) | Living status + post-P2/P3 roadmap and implementation cards |
 
 ## Fixture corpus
 

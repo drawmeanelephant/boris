@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const diagnostic = @import("diagnostic.zig");
+const target_mod = @import("target.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const RunResult = diagnostic.RunResult;
@@ -39,6 +40,12 @@ pub const Options = struct {
     jobs: usize = 1,
     /// Opt-in local-development watch mode for HTML builds.
     watch: bool = false,
+    /// Dynamic target list.
+    targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 },
+
+    pub fn deinit(self: *Options, gpa: std.mem.Allocator) void {
+        self.targets.deinit(gpa);
+    }
 };
 
 pub const ParseError = error{
@@ -49,6 +56,7 @@ pub const ParseError = error{
     ConflictingFlags,
     DuplicateFlag,
     InvalidValue,
+    OutOfMemory,
 };
 
 const default_input_dir = "content";
@@ -60,7 +68,7 @@ const default_html_dir = "dist";
 ///
 /// `args[0]` is the program name when present (skipped).
 /// `--help` / `-h` short-circuit: remaining args are not validated.
-pub fn parseOptions(args: []const []const u8) ParseError!Options {
+pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError!Options {
     var quiet = false;
     var input_dir: []const u8 = default_input_dir;
     var out_dir: []const u8 = default_out_dir;
@@ -80,6 +88,9 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
     var saw_watch = false;
     var jobs: usize = 1;
 
+    var targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 };
+    errdefer targets.deinit(gpa);
+
     var i: usize = if (args.len > 0) 1 else 0;
     while (i < args.len) : (i += 1) {
         const a = args[i];
@@ -94,6 +105,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
                 .out_dir = out_dir,
                 .rag_dir = null,
                 .html_dir = null,
+                .targets = .{ .items = &.{}, .capacity = 0 },
             };
         }
 
@@ -131,6 +143,31 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
         if (std.mem.eql(u8, a, "--watch")) {
             if (saw_watch) return error.DuplicateFlag;
             saw_watch = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--target") or std.mem.startsWith(u8, a, "--target=")) {
+            const val = try takeValue(args, &i, a, "--target");
+            const eq_idx = std.mem.indexOfScalar(u8, val, '=') orelse {
+                return error.InvalidValue;
+            };
+            const name = val[0..eq_idx];
+            const output_dir = val[eq_idx + 1 ..];
+            if (name.len == 0 or output_dir.len == 0) {
+                return error.InvalidValue;
+            }
+            if (!target_mod.isValidTargetName(name)) {
+                return error.InvalidValue;
+            }
+            for (targets.items) |existing| {
+                if (std.mem.eql(u8, existing.name, name)) {
+                    return error.DuplicateFlag;
+                }
+            }
+            try targets.append(gpa, .{
+                .name = name,
+                .output_dir = output_dir,
+            });
             continue;
         }
 
@@ -186,34 +223,48 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
         return error.UnexpectedPositional;
     }
 
+    const has_targets = targets.items.len > 0;
+    const is_html_mode = saw_html or saw_html_dir or has_targets;
+
     // --- conflict matrix ---------------------------------------------------
     if (saw_rag and saw_no_rag) return error.ConflictingFlags;
     if (saw_no_rag and saw_rag_dir) return error.ConflictingFlags;
     // Explicit --out must never be combined with RAG-only selection.
     if (saw_out and (saw_rag or saw_rag_dir)) return error.ConflictingFlags;
     // HTML/SSG mode owns its output destination; refuse IR/RAG output flags.
-    if ((saw_html or saw_html_dir) and (saw_rag or saw_rag_dir or saw_out)) {
+    if (is_html_mode and (saw_rag or saw_rag_dir or saw_out)) {
         return error.ConflictingFlags;
     }
+    // Target conflict rules
+    if (has_targets and saw_html_dir) return error.ConflictingFlags;
+
     // Incremental option is valid only when combined with HTML mode.
-    if (saw_incremental and !(saw_html or saw_html_dir)) {
+    if (saw_incremental and !is_html_mode) {
         return error.ConflictingFlags;
     }
     // Jobs option is valid only when combined with HTML mode.
-    if (saw_jobs and !(saw_html or saw_html_dir)) {
+    if (saw_jobs and !is_html_mode) {
         return error.ConflictingFlags;
     }
     // Watch option is valid only when combined with HTML mode.
-    if (saw_watch and !(saw_html or saw_html_dir)) {
+    if (saw_watch and !is_html_mode) {
         return error.ConflictingFlags;
+    }
+
+    // Default target mapping for legacy compatibility
+    if (!has_targets and (saw_html or saw_html_dir)) {
+        try targets.append(gpa, .{
+            .name = "default",
+            .output_dir = if (saw_html_dir) html_dir else "dist",
+        });
     }
 
     // Mode selection:
     // 1. Default → IR
     // 2. --no-rag → IR
     // 3. --rag / --rag-dir → RAG-only
-    // 4. --html / --html-dir → HTML site
-    const mode: Mode = if (saw_html or saw_html_dir)
+    // 4. --html / --html-dir / --target → HTML site
+    const mode: Mode = if (is_html_mode)
         .html
     else if (saw_rag or saw_rag_dir)
         .rag
@@ -229,6 +280,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             .out_dir = out_dir,
             .rag_dir = null,
             .html_dir = null,
+            .targets = targets,
         },
         .rag => .{
             .help = false,
@@ -238,6 +290,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             .out_dir = null,
             .rag_dir = rag_dir,
             .html_dir = null,
+            .targets = targets,
         },
         .html => .{
             .help = false,
@@ -246,10 +299,11 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             .input_dir = input_dir,
             .out_dir = null,
             .rag_dir = null,
-            .html_dir = html_dir,
+            .html_dir = if (has_targets) null else html_dir,
             .incremental = saw_incremental or saw_watch,
             .jobs = jobs,
             .watch = saw_watch,
+            .targets = targets,
         },
     };
 }
@@ -374,6 +428,9 @@ pub fn printParseError(err: ParseError, bad_arg: ?[]const u8) void {
                 std.debug.print("error: invalid option value\n", .{});
             }
         },
+        error.OutOfMemory => {
+            std.debug.print("error: out of memory\n", .{});
+        },
     }
 }
 
@@ -435,7 +492,8 @@ pub fn execute(opts: Options, runner: anytype) ExitCode {
 /// On parse failure, calls `runner.reportUsage(err, bad_arg)` when that method
 /// exists; otherwise falls back to `printParseError` + `printUsage`.
 pub fn runArgs(args: []const []const u8, runner: anytype) u8 {
-    const opts = parseOptions(args) catch |err| {
+    const gpa = if (@hasField(@TypeOf(runner.*), "gpa")) runner.gpa else std.testing.allocator;
+    var opts = parseOptions(gpa, args) catch |err| {
         const bad = findBadArg(args);
         const Runner = @TypeOf(runner.*);
         if (@hasDecl(Runner, "reportUsage")) {
@@ -446,6 +504,7 @@ pub fn runArgs(args: []const []const u8, runner: anytype) u8 {
         }
         return ExitCode.usage.int();
     };
+    defer opts.deinit(gpa);
     return execute(opts, runner).int();
 }
 
@@ -457,7 +516,8 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 const expectError = std.testing.expectError;
 
 test "parse: default is IR mode" {
-    const o = try parseOptions(&.{"boris"});
+    var o = try parseOptions(std.testing.allocator, &.{ "boris" });
+    defer o.deinit(std.testing.allocator);
     try expect(!o.help);
     try expect(!o.quiet);
     try expectEqual(Mode.ir, o.mode);
@@ -629,7 +689,8 @@ test "parse: valid modes table" {
     };
 
     for (cases) |c| {
-        const o = try parseOptions(c.args);
+        var o = try parseOptions(std.testing.allocator, c.args);
+        errdefer o.deinit(std.testing.allocator);
         try expectEqual(c.mode, o.mode);
         try expectEqualStrings(c.input, o.input_dir);
         try expectEqual(c.quiet, o.quiet);
@@ -649,6 +710,7 @@ test "parse: valid modes table" {
         } else {
             try expect(o.html_dir == null);
         }
+        o.deinit(std.testing.allocator);
     }
 }
 
@@ -726,18 +788,20 @@ test "parse: conflicts and missing values table" {
     };
 
     for (cases) |c| {
-        try expectError(c.err, parseOptions(c.args));
+        try expectError(c.err, parseOptions(std.testing.allocator, c.args));
     }
 }
 
 test "parse: --watch with HTML implies incremental" {
-    const o = try parseOptions(&.{ "boris", "--html", "--watch" });
+    var o = try parseOptions(std.testing.allocator, &.{ "boris", "--html", "--watch" });
+    defer o.deinit(std.testing.allocator);
     try expectEqual(Mode.html, o.mode);
     try expect(o.watch);
     try expect(o.incremental);
     try expectEqualStrings(default_html_dir, o.html_dir.?);
 
-    const o2 = try parseOptions(&.{ "boris", "--html-dir", "site", "--watch", "--jobs", "2" });
+    var o2 = try parseOptions(std.testing.allocator, &.{ "boris", "--html-dir", "site", "--watch", "--jobs", "2" });
+    defer o2.deinit(std.testing.allocator);
     try expectEqual(Mode.html, o2.mode);
     try expect(o2.watch);
     try expect(o2.incremental);
@@ -745,16 +809,19 @@ test "parse: --watch with HTML implies incremental" {
     try expectEqualStrings("site", o2.html_dir.?);
 
     // Explicit --incremental with --watch remains valid
-    const o3 = try parseOptions(&.{ "boris", "--html", "--watch", "--incremental" });
+    var o3 = try parseOptions(std.testing.allocator, &.{ "boris", "--html", "--watch", "--incremental" });
+    defer o3.deinit(std.testing.allocator);
     try expect(o3.watch);
     try expect(o3.incremental);
 }
 
 test "parse: help short-circuits and does not validate trailing junk" {
-    const o = try parseOptions(&.{ "boris", "--help", "--not-a-real-flag", "--rag", "--no-rag" });
+    var o = try parseOptions(std.testing.allocator, &.{ "boris", "--help", "--not-a-real-flag", "--rag", "--no-rag" });
+    defer o.deinit(std.testing.allocator);
     try expect(o.help);
 
-    const o2 = try parseOptions(&.{ "boris", "-h" });
+    var o2 = try parseOptions(std.testing.allocator, &.{ "boris", "-h" });
+    defer o2.deinit(std.testing.allocator);
     try expect(o2.help);
 }
 
@@ -775,7 +842,8 @@ test "execute: help does not invoke pipeline (dependency injection)" {
     };
 
     var spy: Spy = .{};
-    const opts = try parseOptions(&.{ "boris", "--help" });
+    var opts = try parseOptions(std.testing.allocator, &.{ "boris", "--help" });
+    defer opts.deinit(std.testing.allocator);
     const code = execute(opts, &spy);
     try expectEqual(ExitCode.success, code);
     try expectEqual(@as(usize, 1), spy.help_calls);
@@ -799,7 +867,8 @@ test "execute: build mode invokes pipeline once" {
     };
 
     var spy: Spy = .{};
-    const opts = try parseOptions(&.{ "boris", "--rag-dir", "x" });
+    var opts = try parseOptions(std.testing.allocator, &.{ "boris", "--rag-dir", "x" });
+    defer opts.deinit(std.testing.allocator);
     const code = execute(opts, &spy);
     try expectEqual(ExitCode.success, code);
     try expectEqual(@as(usize, 1), spy.pipeline_calls);
@@ -808,6 +877,7 @@ test "execute: build mode invokes pipeline once" {
 
 test "runArgs: usage errors exit 2; help exits 0" {
     const Spy = struct {
+        gpa: std.mem.Allocator = std.testing.allocator,
         pipeline_calls: usize = 0,
 
         pub fn printHelp(self: *@This()) void {
@@ -841,4 +911,36 @@ test "runArgs: usage errors exit 2; help exits 0" {
     try expectEqual(@as(u8, 0), runArgs(&.{ "boris", "--rag-dir", "x" }, &spy));
     try expectEqual(@as(u8, 0), runArgs(&.{ "boris", "--html" }, &spy));
     try expectEqual(@as(usize, 2), spy.pipeline_calls);
+}
+
+test "parse: --target flag parsing and conflict checks" {
+    // Normal multi-target parsing
+    {
+        var o = try parseOptions(std.testing.allocator, &.{ "boris", "--target", "prod=dist/prod", "--target", "stage=dist/stage" });
+        defer o.deinit(std.testing.allocator);
+        try expectEqual(Mode.html, o.mode);
+        try expectEqual(@as(usize, 2), o.targets.items.len);
+        try expectEqualStrings("prod", o.targets.items[0].name);
+        try expectEqualStrings("dist/prod", o.targets.items[0].output_dir);
+        try expectEqualStrings("stage", o.targets.items[1].name);
+        try expectEqualStrings("dist/stage", o.targets.items[1].output_dir);
+    }
+
+    // Conflict with --html-dir
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--target", "prod=dist/prod", "--html-dir", "custom" }));
+
+    // Conflict with --out
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--target", "prod=dist/prod", "--out", "x" }));
+
+    // Conflict with --rag
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--target", "prod=dist/prod", "--rag" }));
+
+    // Invalid values
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--target", "prod" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--target", "=dist/prod" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--target", "prod=" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--target", "prod/site=dist" }));
+
+    // Duplicate target flag
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "--target", "prod=dist/prod1", "--target", "prod=dist/prod2" }));
 }

@@ -52,7 +52,7 @@ pub fn validateTargets(io: Io, gpa: Allocator, targets: []const TargetSpec) ![]c
         }
     }
 
-    const cwd_path = try std.process.getCwdAlloc(gpa);
+    const cwd_path = try std.process.currentPathAlloc(io, gpa);
     defer gpa.free(cwd_path);
 
     var plans = try std.ArrayList(TargetPlan).initCapacity(gpa, targets.len);
@@ -60,7 +60,7 @@ pub fn validateTargets(io: Io, gpa: Allocator, targets: []const TargetSpec) ![]c
         for (plans.items) |plan| {
             gpa.free(plan.resolved_output_dir);
         }
-        plans.deinit();
+        plans.deinit(gpa);
     }
 
     // Normalize CWD path separators to forward slashes
@@ -81,10 +81,10 @@ pub fn validateTargets(io: Io, gpa: Allocator, targets: []const TargetSpec) ![]c
         }
 
         const abs_path = try std.fs.path.resolve(gpa, &[_][]const u8{ cwd_path, target.output_dir });
-        errdefer gpa.free(abs_path);
-
-        // Normalize separators to forward slashes for cross-platform equivalence
-        const normalized = try gpa.dupe(u8, abs_path);
+        const normalized = gpa.dupe(u8, abs_path) catch |err| {
+            gpa.free(abs_path);
+            return err;
+        };
         gpa.free(abs_path);
         errdefer gpa.free(normalized);
 
@@ -118,7 +118,7 @@ pub fn validateTargets(io: Io, gpa: Allocator, targets: []const TargetSpec) ![]c
             return error.TargetOutputCollision;
         }
 
-        try plans.append(.{
+        try plans.append(gpa, .{
             .name = target.name,
             .output_dir = target.output_dir,
             .resolved_output_dir = normalized,
@@ -175,7 +175,7 @@ pub fn validateTargets(io: Io, gpa: Allocator, targets: []const TargetSpec) ![]c
         }
     }.less);
 
-    return try plans.toOwnedSlice();
+    return try plans.toOwnedSlice(gpa);
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +195,7 @@ test "isValidTargetName validation rules" {
 }
 
 test "validateTargets overlap, nesting, sort, and escape checks" {
-    const io = Io.init();
+    const io = std.testing.io;
     const gpa = std.testing.allocator;
 
     // Normal successful case with sorting

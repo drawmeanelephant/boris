@@ -396,15 +396,30 @@ pub const WatchCoordinator = struct {
 
         try self.watcher.poll(&events);
 
-        const html_raw = self.options.html_dir orelse "dist";
-        const html_norm = try normalizePath(self.gpa, html_raw);
-        defer self.gpa.free(html_norm);
-
         for (events.items) |event| {
             const normalized = try normalizePath(self.gpa, event.path);
             defer self.gpa.free(normalized);
 
-            if (isIgnored(normalized, html_norm)) {
+            var ignored = false;
+            if (self.options.targets.items.len > 0) {
+                for (self.options.targets.items) |tgt| {
+                    const norm_tgt = try normalizePath(self.gpa, tgt.output_dir);
+                    defer self.gpa.free(norm_tgt);
+                    if (isIgnored(normalized, norm_tgt)) {
+                        ignored = true;
+                        break;
+                    }
+                }
+            } else {
+                const html_raw = self.options.html_dir orelse "dist";
+                const html_norm = try normalizePath(self.gpa, html_raw);
+                defer self.gpa.free(html_norm);
+                if (isIgnored(normalized, html_norm)) {
+                    ignored = true;
+                }
+            }
+
+            if (ignored) {
                 continue;
             }
 
@@ -453,25 +468,46 @@ pub const WatchCoordinator = struct {
 
         // Full rediscovery + content-addressed incremental render (event paths
         // trigger the rebuild; dirty-set comes from fingerprints inside compile).
-        _ = compile.compileHtmlSite(self.io, self.gpa, .{
-            .content_root = self.options.input_dir,
-            .dist_dir = self.options.html_dir orelse "dist",
-            .layout_path = "layouts/main.html",
-            .incremental = self.options.incremental,
-            .quiet = self.options.quiet,
-            .jobs = self.options.jobs,
-        }) catch |err| {
-            if (isRecoverableBuildError(err)) {
-                if (!self.options.quiet) {
-                    std.debug.print("error: rebuild failed: {s}. Waiting for correction...\n", .{@errorName(err)});
+        if (self.options.targets.items.len > 0) {
+            compile.compileHtmlSiteMulti(self.io, self.gpa, self.options.targets.items, .{
+                .content_root = self.options.input_dir,
+                .layout_path = "layouts/main.html",
+                .incremental = self.options.incremental,
+                .quiet = self.options.quiet,
+                .jobs = self.options.jobs,
+            }) catch |err| {
+                if (isRecoverableBuildError(err) or err == error.MultiTargetCompilationFailed) {
+                    if (!self.options.quiet) {
+                        std.debug.print("error: rebuild failed: {s}. Waiting for correction...\n", .{@errorName(err)});
+                    }
+                    return;
                 }
-                return;
-            }
-            if (!self.options.quiet) {
-                std.debug.print("error: rebuild failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
-            }
-            return err;
-        };
+                if (!self.options.quiet) {
+                    std.debug.print("error: rebuild failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
+                }
+                return err;
+            };
+        } else {
+            _ = compile.compileHtmlSite(self.io, self.gpa, .{
+                .content_root = self.options.input_dir,
+                .dist_dir = self.options.html_dir orelse "dist",
+                .layout_path = "layouts/main.html",
+                .incremental = self.options.incremental,
+                .quiet = self.options.quiet,
+                .jobs = self.options.jobs,
+            }) catch |err| {
+                if (isRecoverableBuildError(err)) {
+                    if (!self.options.quiet) {
+                        std.debug.print("error: rebuild failed: {s}. Waiting for correction...\n", .{@errorName(err)});
+                    }
+                    return;
+                }
+                if (!self.options.quiet) {
+                    std.debug.print("error: rebuild failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
+                }
+                return err;
+            };
+        }
 
         if (!self.options.quiet) {
             std.debug.print("watch: rebuild succeeded.\n", .{});
@@ -487,26 +523,48 @@ pub const WatchCoordinator = struct {
 
         var initial_success = true;
         var stats: compile.CompileStats = .{ .pages_written = 0, .peak_whiteboard_capacity = 0 };
-        if (compile.compileHtmlSite(self.io, self.gpa, .{
-            .content_root = self.options.input_dir,
-            .dist_dir = self.options.html_dir orelse "dist",
-            .layout_path = "layouts/main.html",
-            .incremental = self.options.incremental,
-            .quiet = self.options.quiet,
-            .jobs = self.options.jobs,
-        })) |st| {
-            stats = st;
-        } else |err| {
-            initial_success = false;
-            if (isRecoverableBuildError(err)) {
-                if (!self.options.quiet) {
-                    std.debug.print("error: initial build failed: {s}. Continuing to watch...\n", .{@errorName(err)});
+        if (self.options.targets.items.len > 0) {
+            compile.compileHtmlSiteMulti(self.io, self.gpa, self.options.targets.items, .{
+                .content_root = self.options.input_dir,
+                .layout_path = "layouts/main.html",
+                .incremental = self.options.incremental,
+                .quiet = self.options.quiet,
+                .jobs = self.options.jobs,
+            }) catch |err| {
+                initial_success = false;
+                if (isRecoverableBuildError(err) or err == error.MultiTargetCompilationFailed) {
+                    if (!self.options.quiet) {
+                        std.debug.print("error: initial build failed: {s}. Continuing to watch...\n", .{@errorName(err)});
+                    }
+                } else {
+                    if (!self.options.quiet) {
+                        std.debug.print("error: initial build failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
+                    }
+                    return err;
                 }
-            } else {
-                if (!self.options.quiet) {
-                    std.debug.print("error: initial build failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
+            };
+        } else {
+            if (compile.compileHtmlSite(self.io, self.gpa, .{
+                .content_root = self.options.input_dir,
+                .dist_dir = self.options.html_dir orelse "dist",
+                .layout_path = "layouts/main.html",
+                .incremental = self.options.incremental,
+                .quiet = self.options.quiet,
+                .jobs = self.options.jobs,
+            })) |st| {
+                stats = st;
+            } else |err| {
+                initial_success = false;
+                if (isRecoverableBuildError(err)) {
+                    if (!self.options.quiet) {
+                        std.debug.print("error: initial build failed: {s}. Continuing to watch...\n", .{@errorName(err)});
+                    }
+                } else {
+                    if (!self.options.quiet) {
+                        std.debug.print("error: initial build failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
+                    }
+                    return err;
                 }
-                return err;
             }
         }
 
@@ -721,3 +779,34 @@ test "processEvents follow-up coalescing after drain" {
     try std.testing.expect(coord.pending_changes.contains("a.md"));
     try std.testing.expect(coord.pending_changes.contains("b.md"));
 }
+
+test "processEvents ignores multi-target output paths" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var fake = FakeWatcher.init(gpa);
+    defer fake.deinit();
+
+    var options = cli.Options{
+        .mode = .html,
+        .input_dir = "content",
+        .quiet = true,
+        .watch = true,
+    };
+    try options.targets.append(gpa, .{ .name = "target_a", .output_dir = "dist_a" });
+    try options.targets.append(gpa, .{ .name = "target_b", .output_dir = "dist_b" });
+    defer options.targets.deinit(gpa);
+
+    var coord = WatchCoordinator.init(gpa, io, options, fake.watcher());
+    defer coord.deinit();
+
+    try fake.pushEvent("dist_a/index.html", .modify);
+    try fake.pushEvent("dist_b/page.html", .create);
+    try fake.pushEvent("content/real.md", .modify);
+
+    try coord.processEvents();
+
+    try std.testing.expectEqual(@as(usize, 1), coord.pending_changes.count());
+    try std.testing.expect(coord.pending_changes.contains("real.md"));
+}
+

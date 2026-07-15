@@ -19,6 +19,23 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Multi-Target Isolated Output Directories & Cache Namespaces (P3.3)
+
+- Support configuring multiple explicitly named HTML build targets using `--html-target <name>=<dir>` and `--html-layout <path>` flags, normalization of legacy single-target option into target `default`.
+- Implement rigorous pre-render validation checking for workspace escapes, overlapping/parent-child target directory nests, duplicate target names, target directory collisions, and layout symlinks, rejecting the compile run before rendering.
+- Ensure 100% isolated output directories, configuration hashes, cache namespaces, and staging/temporary directories for each target.
+- Update cache-fingerprinting scheme with cache version/discriminator `boris-cache-v1-multitarget` and incorporate target name, layout path, and layout template bytes into the config identity hash.
+- Refactor compiler engine with sequential sorted compilation orchestration, robust error aggregation, and target failure policy.
+- Update development watch mode to monitor and ignore events originating from all configured target output directories and perform sorted target rebuild fan-out.
+
+### Docs — status roadmap refresh (post-P2 / closing P3)
+
+- Refresh `docs/STATUS.md` with audit snapshot (P2 complete; P3.1–P3.2 landed;
+  P3.3 in flight), post-P3 prioritized feature roadmap (Apex fidelity + HTML
+  default as **Now**, multi-target as last P3, TOC later), active implementation
+  cards, Not Now list, and v0.2–v0.4 release boundary notes. Align
+  `docs/contracts/README.md` status table with the same phase.
+
 ### Opt-in Local Development Watch Mode (P3.2)
 
 - Implement opt-in development watch mode via `--watch` flag, bringing real-time, debounced, coalesced filesystem events to local HTML builds.

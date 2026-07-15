@@ -41,6 +41,7 @@ const scanner = @import("scanner.zig");
 const identity = @import("identity.zig");
 const cache = @import("cache.zig");
 const dependency = @import("dependency.zig");
+const target_mod = @import("target.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -56,6 +57,7 @@ pub const CompileStats = struct {
 };
 
 pub const CompileOptions = struct {
+    target_name: []const u8 = "default",
     content_root: []const u8 = "content",
     dist_dir: []const u8 = "dist",
     layout_path: []const u8 = "layouts/main.html",
@@ -355,6 +357,58 @@ pub fn compileHtmlSite(
     return try compilePages(io, gpa, &db, layout, options);
 }
 
+/// Orchestrate multiple HTML build targets with complete isolation and sorted sequence.
+/// Enforces validate-all-first, single discovery, then sequential rendering.
+/// Returns error.MultiTargetCompilationFailed if any target fails.
+pub fn compileHtmlSiteMulti(
+    io: Io,
+    gpa: std.mem.Allocator,
+    targets: []const target_mod.TargetSpec,
+    base_options: CompileOptions,
+) !void {
+    const plans = try target_mod.validateTargets(io, gpa, targets);
+    defer {
+        for (plans) |plan| gpa.free(plan.resolved_output_dir);
+        gpa.free(plans);
+    }
+
+    var retain_arena = std.heap.ArenaAllocator.init(gpa);
+    defer retain_arena.deinit();
+    var db = PageDb.init(gpa, retain_arena.allocator());
+    defer db.deinit();
+
+    try loadAndPromote(io, gpa, &db, base_options.content_root);
+
+    var any_failed = false;
+    for (plans) |plan| {
+        var target_options = base_options;
+        target_options.target_name = plan.name;
+        target_options.dist_dir = plan.output_dir;
+
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = loadLayoutOnce(io, Io.Dir.cwd(), target_options.layout_path, layout_arena.allocator()) catch |err| {
+            if (!base_options.quiet) {
+                std.debug.print("error: target '{s}' failed to load layout: {s}\n", .{ plan.name, @errorName(err) });
+            }
+            any_failed = true;
+            continue;
+        };
+
+        _ = compilePages(io, gpa, &db, layout, target_options) catch |err| {
+            if (!base_options.quiet) {
+                std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
+            }
+            any_failed = true;
+            continue;
+        };
+    }
+
+    if (any_failed) {
+        return error.MultiTargetCompilationFailed;
+    }
+}
+
 const ParallelContext = struct {
     gpa: std.mem.Allocator,
     io: Io,
@@ -549,7 +603,7 @@ pub fn compilePages(
             try include_bytes_list.append(gpa, bytes);
         }
 
-        const fp_bytes = cache.computePageFingerprint(page.entity_id, src_bytes, include_bytes_list.items, layout_bytes);
+        const fp_bytes = cache.computePageFingerprint(options.target_name, options.layout_path, page.entity_id, src_bytes, include_bytes_list.items, layout_bytes);
         var fp_hex: [64]u8 = undefined;
         const hex_chars = "0123456789abcdef";
         for (fp_bytes, 0..) |b, i| {
@@ -1638,4 +1692,84 @@ test "compilePages: parallel rendering success, determinism, and error paths" {
         try std.testing.expectError(error.TestInjectedRenderFailure, res);
     }
 }
+
+test "compileHtmlSiteMulti - success, validation, and isolation" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    const work = "zig-cache/boris-multi-compile-test";
+    try cwd.createDirPath(io, work);
+    defer cwd.deleteTree(io, work) catch {};
+
+    try writeTreeFile(io, work, "layouts/main.html", "L{{content}}");
+    try writeTreeFile(io, work, "content/alpha.md", "# Alpha\n");
+    try writeTreeFile(io, work, "content/beta.md", "# Beta\n");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+
+    const dist_a = try std.fmt.allocPrint(gpa, "{s}/dist_a", .{work});
+    defer gpa.free(dist_a);
+    const dist_b = try std.fmt.allocPrint(gpa, "{s}/dist_b", .{work});
+    defer gpa.free(dist_b);
+
+    // 1. Success case: compile target_a and target_b sequentially
+    {
+        const targets = [_]target_mod.TargetSpec{
+            .{ .name = "target_b", .output_dir = dist_b },
+            .{ .name = "target_a", .output_dir = dist_a },
+        };
+
+        try compileHtmlSiteMulti(io, gpa, &targets, .{
+            .content_root = content_path,
+            .layout_path = layout_path,
+            .incremental = true,
+            .quiet = true,
+        });
+
+        // Verify outputs in both directories
+        var dir_a = try cwd.openDir(io, dist_a, .{});
+        defer dir_a.close(io);
+        var dir_b = try cwd.openDir(io, dist_b, .{});
+        defer dir_b.close(io);
+
+        const alpha_a = try readAllFile(io, dir_a, "alpha.html", gpa);
+        defer gpa.free(alpha_a);
+        const alpha_b = try readAllFile(io, dir_b, "alpha.html", gpa);
+        defer gpa.free(alpha_b);
+
+        try std.testing.expectEqualStrings("L<h1>Alpha</h1>\n", alpha_a);
+        try std.testing.expectEqualStrings("L<h1>Alpha</h1>\n", alpha_b);
+
+        // Verify separate cache namespaces
+        if (dir_a.openFile(io, ".boris-cache/manifest.json", .{})) |file| {
+            file.close(io);
+        } else |_| {
+            try std.testing.expect(false);
+        }
+        if (dir_b.openFile(io, ".boris-cache/manifest.json", .{})) |file| {
+            file.close(io);
+        } else |_| {
+            try std.testing.expect(false);
+        }
+    }
+
+    // 2. Validation failure: target collision
+    {
+        const targets = [_]target_mod.TargetSpec{
+            .{ .name = "target_a", .output_dir = dist_a },
+            .{ .name = "target_b", .output_dir = dist_a }, // duplicate out dir
+        };
+
+        const res = compileHtmlSiteMulti(io, gpa, &targets, .{
+            .content_root = content_path,
+            .layout_path = layout_path,
+            .quiet = true,
+        });
+        try std.testing.expectError(error.TargetOutputCollision, res);
+    }
+}
+
 

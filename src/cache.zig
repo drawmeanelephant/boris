@@ -4,10 +4,11 @@ const dependency = @import("dependency.zig");
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
 /// Fixed renderer/cache format version constant.
-pub const CACHE_FORMAT_VERSION = "boris-cache-v1";
+pub const CACHE_FORMAT_VERSION = "boris-cache-v1-multitarget";
 
 /// Compute a deterministic fingerprint for an HTML page from:
 /// - a fixed renderer/cache format version constant
+/// - target configuration identity (name and layout path)
 /// - normalized page identity (entity_id)
 /// - source bytes
 /// - resolved include dependency bytes, in stable dependency order
@@ -16,6 +17,8 @@ pub const CACHE_FORMAT_VERSION = "boris-cache-v1";
 /// Ensures no timestamps, absolute paths, hostnames, pointer addresses,
 /// random values, or unstable map iterations are factored in.
 pub fn computePageFingerprint(
+    target_name: []const u8,
+    layout_path: []const u8,
     entity_id: []const u8,
     source_bytes: []const u8,
     include_deps: []const []const u8,
@@ -25,6 +28,15 @@ pub fn computePageFingerprint(
 
     // 1. Format version
     hasher.update(CACHE_FORMAT_VERSION);
+
+    // 1.5. Target configuration identity
+    const target_len: u64 = target_name.len;
+    hasher.update(std.mem.asBytes(&target_len));
+    hasher.update(target_name);
+
+    const path_len: u64 = layout_path.len;
+    hasher.update(std.mem.asBytes(&path_len));
+    hasher.update(layout_path);
 
     // 2. Normalized page identity (entity_id)
     const id_len: u64 = entity_id.len;
@@ -144,21 +156,33 @@ pub fn getAffectedPages(
 // ---------------------------------------------------------------------------
 
 test "Same inputs produce the same key across runs" {
-    const key1 = computePageFingerprint("guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
-    const key2 = computePageFingerprint("guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
+    const key1 = computePageFingerprint("default", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
+    const key2 = computePageFingerprint("default", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
     try std.testing.expectEqualSlices(u8, &key1, &key2);
 }
 
 test "Source change changes only that page's key" {
-    const key1 = computePageFingerprint("guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
-    const key2 = computePageFingerprint("guides/intro", "modified source", &.{"inc1", "inc2"}, "layout content");
+    const key1 = computePageFingerprint("default", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
+    const key2 = computePageFingerprint("default", "layouts/main.html", "guides/intro", "modified source", &.{"inc1", "inc2"}, "layout content");
 
     // Changing source changes the key
     try std.testing.expect(!std.mem.eql(u8, &key1, &key2));
 
     // Changing page ID changes the key
-    const key3 = computePageFingerprint("guides/outro", "source data", &.{"inc1", "inc2"}, "layout content");
+    const key3 = computePageFingerprint("default", "layouts/main.html", "guides/outro", "source data", &.{"inc1", "inc2"}, "layout content");
     try std.testing.expect(!std.mem.eql(u8, &key1, &key3));
+}
+
+test "Target configuration changes isolate page keys" {
+    const key_prod = computePageFingerprint("prod", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
+    const key_stage = computePageFingerprint("stage", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
+    const key_ref = computePageFingerprint("prod", "layouts/ref.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
+
+    // Different target name produces different key
+    try std.testing.expect(!std.mem.eql(u8, &key_prod, &key_stage));
+
+    // Different layout path produces different key
+    try std.testing.expect(!std.mem.eql(u8, &key_prod, &key_ref));
 }
 
 test "Affected pages query scenarios" {
