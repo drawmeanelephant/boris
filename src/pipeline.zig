@@ -15,9 +15,9 @@ const json_out = @import("json_out.zig");
 const page_mod = @import("page.zig");
 
 pub const schema_version = "0.1.0";
-pub const compiler_id = "boris/0.2.0";
+pub const compiler_id = "boris/0.2.1";
 /// Product version string (package / catalog_meta.boris_version).
-pub const boris_version = "0.2.0";
+pub const boris_version = "0.2.1";
 
 pub const Options = struct {
     content_root: []const u8 = "content",

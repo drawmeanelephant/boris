@@ -1,19 +1,21 @@
 # Project status — Boris
 
-**As of:** 2026-07-15 · product **0.2.0** / compiler **boris/0.2.0** · Zig **0.16.0**  
-**Phase:** **post-v0.2.0** — Feature 7 (includes + wiki) landed on main, not yet cut as a product tag.  
+**As of:** 2026-07-15 · product **0.2.1** / compiler **boris/0.2.1** · Zig **0.16.0**  
+**Phase:** **v0.2.1** — HTML-default site compiler + Feature 7 includes/wiki.  
 IR `schemaVersion` remains **`0.1.0`**.
 
 Living snapshot for agents and humans. Prefer this and [`CHANGELOG.md`](../CHANGELOG.md)
 over archaeology. Normative behavior: [`docs/contracts/`](contracts/).
 
-### What 0.2 is
+### What 0.2.1 is
 
-Product **0.2.0** packages the shippable docs compiler: bare `boris` → `dist/`
-HTML; real ApexMarkdown; Trunk/Satellite graph; layout nav/breadcrumb/title/toc;
-incremental, watch, jobs, multi-target. IR and RAG stay opt-in; IR shape is still
-schema **0.1.0**. Tag: `v0.2.0`. **Since the tag:** Feature 7 + sample-content dogfood
-live on `main` under `[Unreleased]` (candidate for a small **0.2.1** cut).
+Product **0.2.1** is a minor cut on top of **0.2.0**: Boris-mediated
+`{{include}}` + `[[entity-id]]` wiki-links on the HTML path (Feature 7), sample
+content dogfood, and diagnostics/fingerprint polish. Still bare `boris` →
+`dist/` HTML; IR/RAG opt-in; IR shape still schema **0.1.0**. Tag: `v0.2.1`.
+
+**0.2.0** packaged ApexMarkdown Unified, HTML default CLI, graph-aware nav +
+TOC, and P2/P3 incremental / watch / jobs / multi-target. Tag: `v0.2.0`.
 
 ---
 
@@ -24,6 +26,7 @@ live on `main` under `[Unreleased]` (candidate for a small **0.2.1** cut).
 | A docs site from Markdown | HTML under `dist/` | `boris` (default) |
 | Tables, footnotes, callouts, real Markdown | ApexMarkdown Unified, not a toy stub | Feature 1 — in-process render |
 | Callouts that stay in the page | Constrained `<Aside>` in document order | Shared compile path |
+| Shared fragments + internal page links | `{{include}}` + `[[entity-id]]` (HTML) | Feature 7 — pre-Apex |
 | “Did my graph still make sense?” | Fail-loud Trunk/Satellite validation | Exit **1** + diagnostics |
 | Machine-readable graph/IR | JSON under `.boris/` | `boris --out .boris` |
 | LLM knowledge pack of this project | Deterministic `rag/` corpus | `boris --rag` |
@@ -110,17 +113,17 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
-| **Now** | Cut **0.2.1** (or keep stacking under Unreleased) | Feature 7 + dogfood + F7 polish are on `main` post-tag |
 | **Later** | IR-visible include/reference edges | Would require `schemaVersion` bump; MVP keeps deps HTML-internal |
 | **Later** | Wiki `[[id#heading]]` section targets | Needs heading-id contract |
 | **Hygiene** | Sample content honesty as features land | Root `content/` is current for F7; re-check after next feature |
-| **Hygiene** | No parallel content sandboxes by default | Failed `sandboxes/content-dogfood` draft removed; root `content/` is SoT |
+| **Hygiene** | No parallel content sandboxes by default | Failed draft removed; root `content/` is SoT |
 
 ### Shipped (do not re-open as greenfield)
 
 | # | Feature | Note |
 |---|---------|------|
-| — | **Product v0.2.0** | Version package of Features 1+2+6 + P2/P3; tag `v0.2.0` |
+| — | **Product v0.2.1** | Feature 7 + dogfood + F7 polish; tag `v0.2.1` |
+| — | **Product v0.2.0** | Features 1+2+6 + P2/P3; tag `v0.2.0` |
 | 1 | ApexMarkdown Unified | Real engine under host ABI |
 | 2 | HTML default CLI | Bare `boris` → `dist/`; IR via `--out` |
 | 3 | `--jobs N` | Parallel independent page renders |
@@ -128,7 +131,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | 5 | `--target` multi-output | Isolated roots + caches |
 | 6 | Graph-aware HTML nav (MVP) | `{{nav}}` forest + breadcrumb + title; HTML graph gate |
 | 6b | In-page `{{toc}}` | h1–h3 outline from rendered body ids (`src/html_toc.zig`) |
-| 7 | Includes + wiki-links | **On main (unreleased vs tag)** — `{{include}}` + `[[entity-id]]` pre-Apex; cycles/missing fail loud; `includes/` not pages |
+| 7 | Includes + wiki-links | `{{include}}` + `[[entity-id]]` pre-Apex; cycles/missing fail loud; `includes/` not pages |
 
 P2 (fingerprints, incremental, layout edges) and P3 scale-out are **complete**
 on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.

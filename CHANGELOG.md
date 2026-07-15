@@ -3,8 +3,8 @@
 All notable changes to Boris are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
-Versioning: product **v0.2.0** with IR `schemaVersion` **`0.1.0`** and compiler id
-**`boris/0.2.0`**. Breaking IR changes must bump `schemaVersion` and update
+Versioning: product **v0.2.1** with IR `schemaVersion` **`0.1.0`** and compiler id
+**`boris/0.2.1`**. Breaking IR changes must bump `schemaVersion` and update
 `docs/contracts/`. Product version bumps may update `compiler_id` / `boris_version`
 without changing IR schema.
 
@@ -19,12 +19,28 @@ How to use going forward:
 
 ## [Unreleased]
 
-### Hygiene
+---
 
-- Removed `sandboxes/content-dogfood/` (abandoned agent draft). Root `content/`
-  remains the sample docs site.
-- Ignore local `zig-cache/` smoke dirs (alongside `.zig-cache/`). Drop dead
-  sandbox `out/` ignore entry. Refresh `docs/STATUS.md` for post-0.2.0 / Feature 7.
+## [0.2.1] — 2026-07-15
+
+Minor product cut after **v0.2.0**: Feature 7 (Boris-mediated includes + wiki-links)
+on the HTML path, sample-content dogfood, F7 diagnostics/fingerprint polish, and
+sandbox hygiene. **IR `schemaVersion` remains `"0.1.0"`** (emit shape unchanged).
+
+| Field | Value |
+|-------|-------|
+| Package / product | `0.2.1` (`build.zig.zon`) |
+| Compiler id | `boris/0.2.1` |
+| RAG `boris_version` | `0.2.1` |
+| IR `schemaVersion` | `"0.1.0"` (unchanged) |
+| RAG format / schema | `boris-rag` / `1` (unchanged) |
+
+### What 0.2.1 adds
+
+- **`{{include path}}`** — Zig expand before Apex (fence-aware; nested; fail loud).
+- **`[[entity-id]]` / labeled wiki** — rewrite from the frozen graph on the HTML path.
+- **Dogfood sample site** under `content/` with live includes + wiki-links.
+- Apex FS includes stay off; IR does not yet expose include/reference edges.
 
 ### Feature 7 — Boris-mediated includes + wiki-links — **Done**
 
@@ -56,12 +72,14 @@ How to use going forward:
 - Incremental e2e: renaming a page title dirties parents that only wiki-link to
   it through an include (control page stays cached).
 
-### Docs — sample content polish for v0.2.0
+### Docs — sample content + hygiene
 
 - Refresh dogfood site under `content/` for product 0.2: HTML default, Apex
   Unified, Feature 6 nav/toc, P2/P3 helpers; closed frontmatter accuracy
-  (title optional; not full YAML); real clone URL; drop stale “Feature 6
-  unchecked” / IR-first wording. Update `content/AGENT-DIRECTIVE.txt` brief.
+  (title optional; not full YAML); real clone URL; Feature 7 live includes/wiki;
+  Apex showcase with live / `APEX-PENDING` / `PRODUCT-OFF` samples.
+- Removed abandoned `sandboxes/content-dogfood/` agent draft.
+- Ignore local `zig-cache/` smoke dirs (alongside `.zig-cache/`).
 
 ---
 

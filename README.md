@@ -14,12 +14,13 @@ affiliated with any commercial tobacco or rolling-paper brand.
 | | |
 |--|--|
 | Language | Zig **0.16.0** (`build.zig.zon` / CI pin) |
-| Product | **0.2.0** / compiler **boris/0.2.0** |
+| Product | **0.2.1** / compiler **boris/0.2.1** |
 | IR schema | **0.1.0** (unchanged; emit shape stable) |
 | License | [MIT](LICENSE) |
 
-**v0.2.0** is the first HTML-default product cut: ApexMarkdown Unified, graph-aware
-nav + TOC, incremental/watch/jobs/multi-target — same IR schema as 0.1.x. See
+**v0.2.1** adds Boris-mediated includes + wiki-links on the HTML path (Feature 7)
+on top of the **v0.2.0** HTML-default cut (ApexMarkdown Unified, graph-aware
+nav + TOC, incremental/watch/jobs/multi-target). Same IR schema as 0.1.x. See
 [`CHANGELOG.md`](CHANGELOG.md) and [`docs/STATUS.md`](docs/STATUS.md).
 
 ---
@@ -192,6 +193,7 @@ See [frontmatter.md](docs/contracts/frontmatter.md).
 ## Status (short)
 
 - **Shipped:** content graph, IR, RAG, Asides, real Apex Unified, HTML default,
-  incremental/watch/jobs/multi-target, graph nav + in-page `{{toc}}`.
-- **Next:** polish sample content; then v0.2.0 product cut. Detail:
+  incremental/watch/jobs/multi-target, graph nav + in-page `{{toc}}`,
+  includes + wiki-links (Feature 7). Product **v0.2.1**.
+- **Next:** optional IR include edges / wiki `#heading` targets — see
   [`docs/STATUS.md`](docs/STATUS.md).

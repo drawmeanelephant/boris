@@ -1,4 +1,4 @@
-# Release gate — Boris (v0.2.0)
+# Release gate — Boris (v0.2.1)
 
 Mechanical checklist before tagging a release or claiming a milestone complete.
 
@@ -78,8 +78,8 @@ verified. Do not check an item because a design doc exists.
 
 **Default CLI is HTML** under `dist/` (Feature 2). IR remains available via
 `--out` / `--no-rag`. **P2 and P3 scale-out on the HTML path are complete.**
-**Feature 1 (ApexMarkdown Unified)** and **Feature 2 (HTML default)** are Done —
-see [`docs/STATUS.md`](STATUS.md).
+**Features 1–7** (Apex Unified, HTML default, jobs/watch/target, nav/toc,
+includes + wiki) are Done — see [`docs/STATUS.md`](STATUS.md). Product **v0.2.1**.
 
 **Compile-time host tool:** CMake is required for static ApexMarkdown
 (`scripts/build-apex-markdown.sh` / `zig build build-apex`).
