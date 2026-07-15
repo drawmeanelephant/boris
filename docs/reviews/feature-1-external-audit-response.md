@@ -145,8 +145,11 @@ fidelity risk; historical open-risk bullets remain for archive fidelity.
 | Gate | Result |
 |------|--------|
 | `zig build test` | PASS (incl. golden fidelity pins) |
-| `zig build test-apex-hostile` | (run as part of release gate when used) |
+| `zig build test-apex-hostile` | PASS |
+| `./scripts/release-gate.sh` | PASS |
+| `nm` / `strings` product binary | PASS (`apex_markdown_to_html`, `boris-apex/apex-markdown-1.1.11+unified`) |
 | Full SHA at response start | `c24d4db4ab794e1f4a5aa3ab14425d73fa69a5a3` |
+| Response commit | `67b66c1` (Chat 7) |
 
 ---
 
