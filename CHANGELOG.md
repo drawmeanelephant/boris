@@ -31,6 +31,20 @@ How to use going forward:
   `EREFERENCESYNTAX`, `EREFERENCEMISSING`. Contract:
   `docs/contracts/includes-and-wiki-links.md`. IR `schemaVersion` unchanged.
 
+### Feature 7 polish — structured diags, multi-body wiki fingerprints, tests
+
+- HTML path prints retain-owned structured diagnostics (`diag.formatText`) with
+  code, path, line/column, and remediation for include/wiki failures at plan-time
+  and render-time (not bare `@errorName`).
+- Wiki fingerprint material unions targets from page body **and** transitive
+  include fragment bodies (`referenceMaterialMulti`).
+- E2E HTML tests: expand + relative href; missing include/cycle/wiki fail-loud;
+  fenced `{{include}}` / `[[wiki]]` stay literal. Unit tests cover tilde fences
+  and diagnose helpers.
+- Render-path include I/O uses the real GPA (no `page_allocator`). CLI
+  `mapHtmlError` skips double-noise stderr for `IncludeFailed` /
+  `ReferenceFailed` / `GraphValidationFailed` after structured diags.
+
 ### Docs — sample content polish for v0.2.0
 
 - Refresh dogfood site under `content/` for product 0.2: HTML default, Apex

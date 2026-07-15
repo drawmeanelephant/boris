@@ -78,8 +78,11 @@ Page fingerprint inputs (see `cache.computePageFingerprint`) include:
 
 - Source file bytes (directives still present in source).
 - Transitive include **file** bytes (stable path order).
-- Optional compact **reference material** for wiki targets (entity id, output
-  path, title) so title/path renames dirty pages that link to them.
+- Compact **reference material** for wiki targets: entity id, output path, and
+  title, sorted by id. Targets are the **union** of wiki-links in the page body
+  **and** in every transitive include fragment body (`referenceMaterialMulti`).
+  A title/path rename of a page that is only wiki-linked via an include still
+  dirties the including parent.
 - Layout bytes and optional site-nav material when `{{nav}}` is present.
 
 ---
@@ -95,7 +98,20 @@ Page fingerprint inputs (see `cache.computePageFingerprint`) include:
 | `EREFERENCEMISSING` | Wiki target entity id not in graph |
 | `EINVALIDPATH` | Illegal include path segments |
 
-HTML content failure → process exit **1**.
+HTML path emits **structured** text diagnostics via `diag.formatText`:
+
+```text
+error: EINCLUDEMISSING: path/to/page.md:line:col: message [remediation]
+```
+
+- Codes above map from include/wiki failures (not bare `@errorName`).
+- Fields are **retain-owned** (duped off temporary file/body buffers before print).
+- Printed at **plan-time** (`SharedCompileState` transitive include collect) and
+  at **render-time** (expand / wiki rewrite) and fingerprint wiki material when
+  a missing/malformed reference is discovered.
+- Process exit **1** for content failures. CLI does not re-print a generic
+  `IncludeFailed` / `ReferenceFailed` / `GraphValidationFailed` line after a
+  structured diagnostic has already been written.
 
 ---
 
