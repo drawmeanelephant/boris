@@ -225,7 +225,7 @@ re-opened as greenfield tickets.
 | **Acceptance** | Met: Unified constructs (U1–U17); `test-apex-hostile`; includes/plugins/highlighters off; Whiteboard copy + `apex_free_string` |
 | **Dependencies** | **CMake** compile-time host tool — [`VENDOR.md`](../vendor/apex-markdown/VENDOR.md) |
 | **Contract / schema** | `docs/contracts/apex-abi.md` — host ABI unchanged |
-| **Authority** | [`APEX-Feature1-plan.md`](../APEX-Feature1-plan.md) |
+| **Archive notes** | [`feature-1-apex-fidelity-spec.md`](reviews/feature-1-apex-fidelity-spec.md) (plan retired) |
 
 ### Feature 2 — Promoting HTML to the Default CLI Surface (`dist/` product mode)
 
@@ -285,7 +285,7 @@ re-opened as greenfield tickets.
 
 | # | Feature | Priority | Phase gate / dependency |
 |---|---------|----------|-------------------------|
-| 1 | **ApexMarkdown Unified** (real engine under host `apex.h` ABI) | **Done** | Chats 1–5; plan + `apex-abi.md` |
+| 1 | **ApexMarkdown Unified** (real engine under host `apex.h` ABI) | **Done** | Chats 1–7; `apex-abi.md` + archive notes |
 | 2 | **HTML as default CLI mode** (promote opt-in SSG to default) | **Now** | Layout edges on freeze (landed); Feature 1 Done |
 | 3 | **Bounded worker pool** (parallel rendering) | **Done** | Dirty-set / incremental path (landed) |
 | 4 | **Watch mode** (FS events → dirty-set run) | **Done** | Worker pool / incremental (landed) |
@@ -298,9 +298,9 @@ re-opened as greenfield tickets.
 
 ### Card 1 — Real ApexMarkdown Unified (`src/apex-fidelity`) — **Done**
 
-* **Plan:** [`APEX-Feature1-plan.md`](../APEX-Feature1-plan.md) §10 DoD checked (Chats 1–5).
-* **Landed:** pin v1.1.11 · cmake static link · Unified adapter · U1–U17 · docs.
-* **Chat 6 (done):** Internal review + residual doc/adapter hardenings — [feature-1-internal-review.md](reviews/feature-1-internal-review.md).
+* **Archive notes:** [feature-1-apex-fidelity-spec.md](reviews/feature-1-apex-fidelity-spec.md) (root plan deleted after ship).
+* **Landed:** pin v1.1.11 · cmake static link · Unified adapter · U1–U18 · docs · Chat 6/7 review response.
+* **Chat 6 (done):** Internal review — [feature-1-internal-review.md](reviews/feature-1-internal-review.md).
 * **Chat 7 (done):** External audit response — [feature-1-external-audit-response.md](reviews/feature-1-external-audit-response.md).
 * **Out of scope (still):** Feature 2; `--apex-mode`; Strategy B pure zig-cc.
 
@@ -398,8 +398,7 @@ validated metadata and graph-aware docs, not a polyglot web framework.
 | `docs/contracts/multi-target-isolated-output.md` | P3.3 multi-target (normative; implemented) |
 | `docs/AUDIT-v0.1.md` | Self-audit report (m10 historical) |
 | `docs/reviews/post-p3-reconciliation.md` | Post-P3 docs reconciliation audit |
-| `APEX-Feature1-plan.md` | Feature 1 authority (real ApexMarkdown Unified) — product Done |
-| `docs/reviews/feature-1-apex-fidelity-spec.md` | Feature 1 handoff pointer |
+| `docs/reviews/feature-1-apex-fidelity-spec.md` | Feature 1 archived campaign notes (plan retired) |
 | `docs/reviews/feature-1-internal-review.md` | Feature 1 Chat 6 internal review record |
 | `docs/reviews/feature-1-external-audit-response.md` | Feature 1 Chat 7 external audit dispositions |
 | `docs/rag/system/` | Narrative seeds (RAG system segment) |

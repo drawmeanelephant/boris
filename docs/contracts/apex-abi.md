@@ -187,8 +187,8 @@ apex_render → apex_markdown_to_html (APEX_MODE_UNIFIED, fragment HTML)
 Real engine sources: `vendor/apex-markdown/` ([VENDOR.md](../../vendor/apex-markdown/VENDOR.md)).
 cmark-gfm is **only** Apex’s upstream substrate — not Boris’s public renderer.
 Host include guard is `BORIS_APEX_HOST_H` (not `APEX_H`) so the adapter can
-include both host and upstream headers. Authority plan:
-[`APEX-Feature1-plan.md`](../../APEX-Feature1-plan.md).
+include both host and upstream headers. Campaign archive (plan retired):
+[`feature-1-apex-fidelity-spec.md`](../reviews/feature-1-apex-fidelity-spec.md).
 
 ---
 

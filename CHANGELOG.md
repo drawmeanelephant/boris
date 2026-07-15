@@ -60,6 +60,9 @@ How to use going forward:
 - **Second external opinion (micro-fixes):** pin `remainingAbiAssumptions`
   count to exact 8; `SECURITY` comment on adapter `unsafe=true`; U15b Apex
   callout inside Aside body.
+- Retire root `APEX-Feature1-plan.md` after ship: campaign bullets archived in
+  [`docs/reviews/feature-1-apex-fidelity-spec.md`](docs/reviews/feature-1-apex-fidelity-spec.md);
+  pointers updated to contracts + reviews.
 
 ### Docs — residual post-P3 audit cleanup
 
@@ -71,10 +74,10 @@ How to use going forward:
 - Remove ghost **v0.4.0** “P3.3 complete” release trigger from
   `docs/STATUS.md` versioning table (P3.3 already landed; packaging stays under
   0.2/0.3). No runtime or IR schema changes.
-- Feature 1 implementer handoff:
+- Feature 1 implementer handoff / archive:
   [`docs/reviews/feature-1-apex-fidelity-spec.md`](docs/reviews/feature-1-apex-fidelity-spec.md)
-  and authority plan [`APEX-Feature1-plan.md`](APEX-Feature1-plan.md)
-  (real ApexMarkdown Unified under frozen host `apex.h` — not cmark-as-product).
+  (real ApexMarkdown Unified under frozen host `apex.h` — not cmark-as-product;
+  root plan retired after ship).
 
 ### Docs — post-P3 reconciliation
 

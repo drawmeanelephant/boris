@@ -5,8 +5,8 @@
 fidelity → docs Done; Chat 6 tip)  
 **HEAD at review tip (full SHA):**
 `c24d4db4ab794e1f4a5aa3ab14425d73fa69a5a3`  
-**Authority:** [`APEX-Feature1-plan.md`](../../APEX-Feature1-plan.md) §10–§12,
-[`docs/contracts/apex-abi.md`](../contracts/apex-abi.md)  
+**Authority:** [`docs/contracts/apex-abi.md`](../contracts/apex-abi.md);
+campaign archive [`feature-1-apex-fidelity-spec.md`](feature-1-apex-fidelity-spec.md)  
 **Verdict:** **Ship-intent accepted** after P1 doc drift cleanup and two small
 adapter hardenings in this review session.
 

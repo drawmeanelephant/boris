@@ -1,31 +1,62 @@
-# Feature 1 — Apex fidelity (handoff pointer)
+# Feature 1 — ApexMarkdown Unified (archived notes)
 
-**Status:** **Feature 1 product Done** (Chats 1–5); optional Chats 6–7 review  
-**Date:** 2026-07-14 (pointer); implemented 2026-07-15
+**Status:** **Done** (2026-07-15)  
+**Campaign:** Chats 1–5 product land · Chat 6 internal review · Chat 7 external audit response  
 
-## Authority
+The root campaign plan (`APEX-Feature1-plan.md`) was retired after ship. Normative
+rules live in contracts and pin docs below; this page keeps the campaign intent
+as bullets only.
 
-**Implementation plan:**
+## Intent (what Feature 1 was)
 
-[`APEX-Feature1-plan.md`](../../APEX-Feature1-plan.md) (repository root)
+- Link real **[ApexMarkdown/apex](https://github.com/ApexMarkdown/apex)** under a
+  **frozen Boris host ABI** (`vendor/apex/apex.h` / `apex-abi.md`) — not
+  “yeet Apex for plain cmark-gfm.”
+- Default engine mode: **`APEX_MODE_UNIFIED` only** (no `--apex-mode` in this
+  campaign).
+- Host adapter (`vendor/apex/apex.c`): `apex_render` → Unified
+  `apex_markdown_to_html` → copy into host/Whiteboard allocator →
+  `apex_free_string`. Never `apex_free` on arena HTML.
+- SSG boundary forced off: file includes, plugins, external plugin detection,
+  external highlighters.
+- **Aside stays Zig** (`aside.zig`); Apex callouts are a separate author syntax.
+- Bare CLI stays **IR-first** (Feature 2 out of scope); no IR `schemaVersion` bump.
+- CMake is a **compile-time** host tool only; `zig build` remains the entrypoint.
 
-**Do not** implement “replace Apex with cmark-gfm.” That was a mistaken draft.
+## Landed (Chats 1–7)
 
-**Correct goal:** vendor and link **[ApexMarkdown/apex](https://github.com/ApexMarkdown/apex)**
-and call it from Boris’s host `apex_render` adapter in **`APEX_MODE_UNIFIED`**
-(default). See [Modes](https://github.com/ApexMarkdown/apex/wiki/Modes) and
-[C API](https://github.com/ApexMarkdown/apex/wiki/C-API).
+- Pin `vendor/apex-markdown` @ **v1.1.11** — [`VENDOR.md`](../../vendor/apex-markdown/VENDOR.md)
+- Static link via `scripts/build-apex-markdown.sh` + `build.zig` `linkApex`
+- Structural fidelity **U1–U17** (+ goldens on table/footnote/math/callout; U18
+  concurrent D4 smoke; U15b callout-in-Aside)
+- Hostile isolation: `test-apex-hostile` does not link real Apex
+- Linux CI required ASan smoke (`BORIS_REQUIRE_SANITIZE=1`); macOS opt-in
+- Reviews: [internal](feature-1-internal-review.md) ·
+  [external response](feature-1-external-audit-response.md)
 
-**Product land (Chat 1–5 done):**
+## Where truth lives now
 
-[`vendor/apex-markdown/VENDOR.md`](../../vendor/apex-markdown/VENDOR.md) — v1.1.11;
-static link; Unified adapter; U1–U17; docs/STATUS Done. Optional: internal review
-(`docs/reviews/feature-1-internal-review.md`) and external audit response.
+| Doc | Role |
+|-----|------|
+| [`docs/contracts/apex-abi.md`](../contracts/apex-abi.md) | Host ABI + adapter boundary (normative) |
+| [`vendor/apex-markdown/VENDOR.md`](../../vendor/apex-markdown/VENDOR.md) | Pin SHA, build, what is not committed |
+| [`docs/STATUS.md`](../STATUS.md) | Living Done status + D2/D3/D4 residuals |
+| [`docs/contracts/parallel-rendering.md`](../contracts/parallel-rendering.md) | `--jobs` + Apex D4 residual note |
 
-**ABI contract (Boris host lifetime rules still win):**
+## Explicit non-goals (still)
 
-[`docs/contracts/apex-abi.md`](../contracts/apex-abi.md)
+- Strategy B (pure `zig cc`, no CMake)
+- Full upstream Apex 1800-test suite as product gate
+- `--apex-mode` / multi-mode product surface
+- HTML as default CLI (Feature 2)
+- Trimming vendor tree for bloat (offline pin preferred)
 
-## Prompt seed
+## Gates (still valid)
 
-See `APEX-Feature1-plan.md` §11.
+```bash
+zig build
+zig build test
+zig build test-apex-hostile
+zig build test-apex-sanitize   # Linux CI requires real run via BORIS_REQUIRE_SANITIZE=1
+./scripts/release-gate.sh
+```
