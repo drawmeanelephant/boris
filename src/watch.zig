@@ -224,6 +224,9 @@ pub const PollingWatcher = struct {
 };
 
 /// True when a directory component should not be walked during poll scans.
+/// Staging trees are filtered by path-prefix ignore roots in `processEvents`,
+/// not by basename suffix — so a legitimate content dir whose name contains
+/// `.boris-stage` is still scanned.
 fn shouldSkipScanDir(name: []const u8) bool {
     if (std.mem.eql(u8, name, ".git")) return true;
     if (std.mem.eql(u8, name, "node_modules")) return true;
@@ -232,7 +235,6 @@ fn shouldSkipScanDir(name: []const u8) bool {
     if (std.mem.eql(u8, name, "zig-out")) return true;
     if (std.mem.eql(u8, name, ".boris-cache")) return true;
     if (std.mem.eql(u8, name, ".boris")) return true;
-    if (std.mem.endsWith(u8, name, ".boris-stage")) return true;
     return false;
 }
 
@@ -311,46 +313,76 @@ pub fn hasPathComponent(path: []const u8, needle: []const u8) bool {
     return false;
 }
 
-/// Normalize path to use forward slashes and trim leading ./ or trailing /
+/// Normalize path for watch comparisons: forward slashes, strip redundant
+/// leading `./`, trailing `/`, empty segments, and `.` components. `..`
+/// components pop the previous segment when possible so equivalent layout
+/// spellings (`./layouts/main.html`, `layouts/./main.html`) compare equal.
 pub fn normalizePath(allocator: std.mem.Allocator, raw_path: []const u8) ![]const u8 {
-    var path = try allocator.dupe(u8, raw_path);
-    errdefer allocator.free(path);
+    var scratch = try allocator.alloc(u8, raw_path.len);
+    errdefer allocator.free(scratch);
+    for (raw_path, 0..) |c, i| {
+        scratch[i] = if (c == '\\') '/' else c;
+    }
 
-    for (path) |*c| {
-        if (c.* == '\\') {
-            c.* = '/';
-        }
-    }
+    var result: std.ArrayList(u8) = .empty;
+    errdefer result.deinit(allocator);
+
     var start: usize = 0;
-    while (start < path.len) {
-        if (std.mem.startsWith(u8, path[start..], "./")) {
-            start += 2;
-        } else {
-            break;
+    var i: usize = 0;
+    while (i <= scratch.len) : (i += 1) {
+        if (i != scratch.len and scratch[i] != '/') continue;
+        const seg = scratch[start..i];
+        start = i + 1;
+        if (seg.len == 0 or std.mem.eql(u8, seg, ".")) continue;
+        if (std.mem.eql(u8, seg, "..")) {
+            // Pop previous segment when present; otherwise keep leading "..".
+            if (result.items.len == 0) {
+                try result.appendSlice(allocator, "..");
+                continue;
+            }
+            if (std.mem.eql(u8, result.items, "..") or
+                std.mem.endsWith(u8, result.items, "/.."))
+            {
+                try result.append(allocator, '/');
+                try result.appendSlice(allocator, "..");
+                continue;
+            }
+            if (std.mem.lastIndexOfScalar(u8, result.items, '/')) |slash| {
+                result.shrinkRetainingCapacity(slash);
+            } else {
+                result.clearRetainingCapacity();
+            }
+            continue;
         }
+        if (result.items.len > 0) try result.append(allocator, '/');
+        try result.appendSlice(allocator, seg);
     }
-    var end = path.len;
-    while (end > start and path[end - 1] == '/') {
-        end -= 1;
-    }
-    if (start == 0 and end == path.len) {
-        return path;
-    }
-    const final_path = try allocator.dupe(u8, path[start..end]);
-    allocator.free(path);
-    return final_path;
+
+    allocator.free(scratch);
+    return try result.toOwnedSlice(allocator);
+}
+
+/// True when `path` is the sibling staging tree of `html_dir`
+/// (`{html_dir}.boris-stage` or a path under it). Path-boundary only — not a
+/// substring search — so content paths containing the text `.boris-stage` stay live.
+pub fn isSiblingStagePath(path: []const u8, html_dir: []const u8) bool {
+    if (html_dir.len == 0) return false;
+    if (!std.mem.startsWith(u8, path, html_dir)) return false;
+    const rest = path[html_dir.len..];
+    const stage_suffix = ".boris-stage";
+    if (!std.mem.startsWith(u8, rest, stage_suffix)) return false;
+    const after = rest[stage_suffix.len..];
+    return after.len == 0 or after[0] == '/';
 }
 
 /// Ignore output, temp, staging, or cache directory files to prevent loops.
 /// `path` and `html_dir` must already use forward slashes (normalized).
+/// Staging is matched only as the sibling tree of this `html_dir`, not by
+/// arbitrary `.boris-stage` substrings in author paths.
 pub fn isIgnored(path: []const u8, html_dir: []const u8) bool {
     if (hasPathPrefix(path, html_dir)) return true;
-    // Sibling staging tree: `{html_dir}.boris-stage`
-    if (std.mem.endsWith(u8, path, ".boris-stage") or
-        std.mem.indexOf(u8, path, ".boris-stage/") != null)
-    {
-        return true;
-    }
+    // Sibling staging tree for this output root: `{html_dir}.boris-stage`
+    if (isSiblingStagePath(path, html_dir)) return true;
     if (std.mem.endsWith(u8, path, ".tmp") or std.mem.containsAtLeast(u8, path, 1, ".tmp.")) return true;
     // Component-aware so content names like `about-boris.md` are not dropped.
     if (hasPathComponent(path, ".boris-cache")) return true;
@@ -361,7 +393,8 @@ pub fn isIgnored(path: []const u8, html_dir: []const u8) bool {
 /// Select which targets must rebuild for a batch of changed keys (watch fan-out).
 ///
 /// - Content/include/unknown paths → all targets
-/// - Paths that equal a target's effective layout file → only those targets
+/// - Paths that equal a target's effective layout file (after path normalization)
+///   → only those targets
 ///
 /// Returns a GPA-owned slice of TargetSpec copies (string fields still borrow argv).
 /// Caller frees the slice only.
@@ -375,16 +408,30 @@ pub fn selectTargetsForRebuild(
         return try gpa.dupe(target_mod.TargetSpec, all_targets);
     }
 
+    // Normalize effective layouts once so `./layouts/main.html` and
+    // `layouts/./main.html` match event keys the same way.
+    var layout_norms = try gpa.alloc([]const u8, all_targets.len);
+    defer {
+        for (layout_norms) |p| gpa.free(p);
+        gpa.free(layout_norms);
+    }
+    for (all_targets, 0..) |t, i| {
+        const lp = target_mod.effectiveLayout(t, default_layout);
+        layout_norms[i] = try normalizePath(gpa, lp);
+    }
+
     var rebuild_all = false;
     var need = try gpa.alloc(bool, all_targets.len);
     defer gpa.free(need);
     @memset(need, false);
 
     for (changed_keys) |key| {
+        const norm_key = try normalizePath(gpa, key);
+        defer gpa.free(norm_key);
+
         var matched_any_layout = false;
-        for (all_targets, 0..) |t, i| {
-            const lp = target_mod.effectiveLayout(t, default_layout);
-            if (std.mem.eql(u8, key, lp)) {
+        for (layout_norms, 0..) |norm_lp, i| {
+            if (std.mem.eql(u8, norm_key, norm_lp)) {
                 need[i] = true;
                 matched_any_layout = true;
             }
@@ -796,6 +843,22 @@ test "normalizePath helper" {
     const p4 = try normalizePath(gpa, "./dist");
     defer gpa.free(p4);
     try std.testing.expectEqualStrings("dist", p4);
+
+    // Equivalent layout spellings collapse to the same key
+    const p5 = try normalizePath(gpa, "./layouts/main.html");
+    defer gpa.free(p5);
+    const p6 = try normalizePath(gpa, "layouts/./main.html");
+    defer gpa.free(p6);
+    const p7 = try normalizePath(gpa, "layouts/main.html");
+    defer gpa.free(p7);
+    try std.testing.expectEqualStrings("layouts/main.html", p5);
+    try std.testing.expectEqualStrings("layouts/main.html", p6);
+    try std.testing.expectEqualStrings(p5, p6);
+    try std.testing.expectEqualStrings(p5, p7);
+
+    const p8 = try normalizePath(gpa, "layouts/foo/../main.html");
+    defer gpa.free(p8);
+    try std.testing.expectEqualStrings("layouts/main.html", p8);
 }
 
 test "hasPathPrefix boundary" {
@@ -829,6 +892,15 @@ test "isIgnored helper" {
     // Content names containing "boris" must not be ignored
     try std.testing.expect(!isIgnored("content/about-boris.md", "dist"));
     try std.testing.expect(!isIgnored("content/foo.boris.md", "dist"));
+    // Sibling stage of this output root is ignored (path-boundary, not substring)
+    try std.testing.expect(isIgnored("dist.boris-stage", "dist"));
+    try std.testing.expect(isIgnored("dist.boris-stage/x.html", "dist"));
+    try std.testing.expect(isSiblingStagePath("dist.boris-stage/x.html", "dist"));
+    // Legitimate source paths that merely contain the text `.boris-stage` stay live
+    try std.testing.expect(!isIgnored("content/notes.boris-stage/readme.md", "dist"));
+    try std.testing.expect(!isIgnored("content/about.boris-stage.md", "dist"));
+    try std.testing.expect(!isIgnored("content/foo.boris-stage", "dist"));
+    try std.testing.expect(!isSiblingStagePath("content/notes.boris-stage/readme.md", "dist"));
 }
 
 test "translateToKey helper" {
@@ -1021,3 +1093,204 @@ test "selectTargetsForRebuild layout vs content fan-out" {
     }
 }
 
+test "selectTargetsForRebuild normalizes layout path spellings" {
+    const gpa = std.testing.allocator;
+    const targets = [_]target_mod.TargetSpec{
+        .{ .name = "prod", .output_dir = "dist/prod", .layout_path = null },
+        .{ .name = "stage", .output_dir = "dist/stage", .layout_path = "./layouts/stage.html" },
+    };
+
+    // Event key and default layout use different but equivalent spellings
+    {
+        const keys = [_][]const u8{"./layouts/main.html"};
+        const subset = try selectTargetsForRebuild(gpa, &keys, &targets, "layouts/./main.html");
+        defer gpa.free(subset);
+        try std.testing.expectEqual(@as(usize, 1), subset.len);
+        try std.testing.expectEqualStrings("prod", subset[0].name);
+    }
+    {
+        const keys = [_][]const u8{"layouts/./stage.html"};
+        const subset = try selectTargetsForRebuild(gpa, &keys, &targets, "layouts/main.html");
+        defer gpa.free(subset);
+        try std.testing.expectEqual(@as(usize, 1), subset.len);
+        try std.testing.expectEqualStrings("stage", subset[0].name);
+    }
+    {
+        const keys = [_][]const u8{"layouts/foo/../main.html"};
+        const subset = try selectTargetsForRebuild(gpa, &keys, &targets, "./layouts/main.html");
+        defer gpa.free(subset);
+        try std.testing.expectEqual(@as(usize, 1), subset.len);
+        try std.testing.expectEqualStrings("prod", subset[0].name);
+    }
+}
+
+test "processEvents does not ignore legitimate .boris-stage source paths" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var fake = FakeWatcher.init(gpa);
+    defer fake.deinit();
+
+    var coord = try WatchCoordinator.init(gpa, io, .{
+        .mode = .html,
+        .input_dir = "content",
+        .html_dir = "dist",
+        .quiet = true,
+        .watch = true,
+    }, fake.watcher());
+    defer coord.deinit();
+
+    // Real staging tree is ignored
+    try fake.pushEvent("dist.boris-stage/page.html", .create);
+    // Author paths that contain the text must still queue
+    try fake.pushEvent("content/notes.boris-stage/readme.md", .modify);
+    try fake.pushEvent("content/about.boris-stage.md", .modify);
+    try fake.pushEvent("content/foo.boris-stage", .create);
+
+    try coord.processEvents();
+
+    try std.testing.expectEqual(@as(usize, 3), coord.pending_changes.count());
+    try std.testing.expect(coord.pending_changes.contains("notes.boris-stage/readme.md"));
+    try std.testing.expect(coord.pending_changes.contains("about.boris-stage.md"));
+    try std.testing.expect(coord.pending_changes.contains("foo.boris-stage"));
+}
+
+test "processEvents custom input root maps relative keys" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var fake = FakeWatcher.init(gpa);
+    defer fake.deinit();
+
+    var coord = try WatchCoordinator.init(gpa, io, .{
+        .mode = .html,
+        .input_dir = "./docs/src",
+        .html_dir = "dist",
+        .quiet = true,
+        .watch = true,
+    }, fake.watcher());
+    defer coord.deinit();
+
+    try fake.pushEvent("docs/src/guides/intro.md", .modify);
+    try fake.pushEvent("./docs/src/index.md", .create);
+    try fake.pushEvent("docs/src/./nested.md", .modify);
+    try fake.pushEvent("layouts/main.html", .modify);
+    try fake.pushEvent("dist/index.html", .modify); // ignored
+
+    try coord.processEvents();
+
+    try std.testing.expectEqual(@as(usize, 4), coord.pending_changes.count());
+    try std.testing.expect(coord.pending_changes.contains("guides/intro.md"));
+    try std.testing.expect(coord.pending_changes.contains("index.md"));
+    try std.testing.expect(coord.pending_changes.contains("nested.md"));
+    try std.testing.expect(coord.pending_changes.contains("layouts/main.html"));
+}
+
+test "processEvents target-specific layout keys stay outside content strip" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var fake = FakeWatcher.init(gpa);
+    defer fake.deinit();
+
+    var options = cli.Options{
+        .mode = .html,
+        .input_dir = "content",
+        .html_layout = "./layouts/main.html",
+        .quiet = true,
+        .watch = true,
+    };
+    try options.targets.append(gpa, .{ .name = "prod", .output_dir = "dist/prod", .layout_path = null });
+    try options.targets.append(gpa, .{
+        .name = "stage",
+        .output_dir = "dist/stage",
+        .layout_path = "layouts/./stage.html",
+    });
+    defer options.targets.deinit(gpa);
+
+    var coord = try WatchCoordinator.init(gpa, io, options, fake.watcher());
+    defer coord.deinit();
+
+    try fake.pushEvent("content/shared.md", .modify);
+    try fake.pushEvent("./layouts/main.html", .modify);
+    try fake.pushEvent("layouts/./stage.html", .modify);
+    try fake.pushEvent("dist/prod/index.html", .modify);
+    try fake.pushEvent("dist/stage.boris-stage/x.html", .create);
+
+    try coord.processEvents();
+
+    try std.testing.expectEqual(@as(usize, 3), coord.pending_changes.count());
+    try std.testing.expect(coord.pending_changes.contains("shared.md"));
+    try std.testing.expect(coord.pending_changes.contains("layouts/main.html"));
+    try std.testing.expect(coord.pending_changes.contains("layouts/stage.html"));
+
+    // Shared content → all targets; each layout → only matching target
+    {
+        const keys = [_][]const u8{"shared.md"};
+        const subset = try selectTargetsForRebuild(gpa, &keys, options.targets.items, options.html_layout);
+        defer gpa.free(subset);
+        try std.testing.expectEqual(@as(usize, 2), subset.len);
+    }
+    {
+        const keys = [_][]const u8{"layouts/main.html"};
+        const subset = try selectTargetsForRebuild(gpa, &keys, options.targets.items, options.html_layout);
+        defer gpa.free(subset);
+        try std.testing.expectEqual(@as(usize, 1), subset.len);
+        try std.testing.expectEqualStrings("prod", subset[0].name);
+    }
+    {
+        const keys = [_][]const u8{"layouts/stage.html"};
+        const subset = try selectTargetsForRebuild(gpa, &keys, options.targets.items, options.html_layout);
+        defer gpa.free(subset);
+        try std.testing.expectEqual(@as(usize, 1), subset.len);
+        try std.testing.expectEqualStrings("stage", subset[0].name);
+    }
+}
+
+test "watch recovery: pending drains and follow-up events still queue" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var fake = FakeWatcher.init(gpa);
+    defer fake.deinit();
+
+    var coord = try WatchCoordinator.init(gpa, io, .{
+        .mode = .html,
+        .input_dir = "content",
+        .html_dir = "dist",
+        .quiet = true,
+        .watch = true,
+    }, fake.watcher());
+    defer coord.deinit();
+
+    // First burst (e.g. content failure path still clears pending at rebuild start)
+    try fake.pushEvent("content/bad.md", .modify);
+    try coord.processEvents();
+    try std.testing.expectEqual(@as(usize, 1), coord.pending_changes.count());
+
+    var it = coord.pending_changes.iterator();
+    while (it.next()) |entry| {
+        gpa.free(entry.key_ptr.*);
+    }
+    coord.pending_changes.clearRetainingCapacity();
+
+    // Author corrects file; watcher must accept the next event without restart
+    try fake.pushEvent("content/bad.md", .modify);
+    try fake.pushEvent("content/ok.md", .create);
+    try coord.processEvents();
+
+    try std.testing.expectEqual(@as(usize, 2), coord.pending_changes.count());
+    try std.testing.expect(coord.pending_changes.contains("bad.md"));
+    try std.testing.expect(coord.pending_changes.contains("ok.md"));
+}
+
+test "isRecoverableBuildError classification stays content-only" {
+    // Mirrors WatchCoordinator recovery policy: content/layout errors continue;
+    // hard I/O does not. Keep this aligned with isRecoverableBuildError.
+    try std.testing.expect(isRecoverableBuildError(error.ParseFailed));
+    try std.testing.expect(isRecoverableBuildError(error.ComponentFailed));
+    try std.testing.expect(isRecoverableBuildError(error.LayoutMissingMarker));
+    try std.testing.expect(isRecoverableBuildError(error.LayoutDuplicateMarker));
+    try std.testing.expect(!isRecoverableBuildError(error.FileNotFound));
+    try std.testing.expect(!isRecoverableBuildError(error.AccessDenied));
+}
