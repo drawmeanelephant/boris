@@ -297,6 +297,7 @@ pub fn printUsage() void {
         \\  --html-dir <DIR>    HTML output directory (implies HTML; default: dist)
         \\  --incremental       Opt-in to fast, content-addressed incremental HTML rendering (requires HTML mode)
         \\  --watch             Opt-in local-development watch mode for HTML builds (implies --incremental)
+        \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; requires HTML mode; default 1)
         \\  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
         \\  -h, --help          Show this help and exit 0
         \\
@@ -315,6 +316,7 @@ pub fn printUsage() void {
         \\  --no-rag with --rag-dir
         \\  explicit --out with --rag or --rag-dir
         \\  --html / --html-dir with --rag, --rag-dir, or explicit --out
+        \\  --watch, --incremental, or --jobs without --html / --html-dir
         \\
         \\Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
         \\
@@ -715,11 +717,37 @@ test "parse: conflicts and missing values table" {
         .{ .args = &.{ "boris", "--html", "--jobs" }, .err = error.MissingValue },
         .{ .args = &.{ "boris", "--html", "-j" }, .err = error.MissingValue },
         .{ .args = &.{ "boris", "--html", "--jobs", "4", "--jobs", "8" }, .err = error.DuplicateFlag },
+        // Watch option tests
+        .{ .args = &.{ "boris", "--watch" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--watch", "--input", "content" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--html", "--watch", "--watch" }, .err = error.DuplicateFlag },
+        .{ .args = &.{ "boris", "--html", "--watch", "--rag" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--html", "--watch", "--out", "x" }, .err = error.ConflictingFlags },
     };
 
     for (cases) |c| {
         try expectError(c.err, parseOptions(c.args));
     }
+}
+
+test "parse: --watch with HTML implies incremental" {
+    const o = try parseOptions(&.{ "boris", "--html", "--watch" });
+    try expectEqual(Mode.html, o.mode);
+    try expect(o.watch);
+    try expect(o.incremental);
+    try expectEqualStrings(default_html_dir, o.html_dir.?);
+
+    const o2 = try parseOptions(&.{ "boris", "--html-dir", "site", "--watch", "--jobs", "2" });
+    try expectEqual(Mode.html, o2.mode);
+    try expect(o2.watch);
+    try expect(o2.incremental);
+    try expectEqual(@as(usize, 2), o2.jobs);
+    try expectEqualStrings("site", o2.html_dir.?);
+
+    // Explicit --incremental with --watch remains valid
+    const o3 = try parseOptions(&.{ "boris", "--html", "--watch", "--incremental" });
+    try expect(o3.watch);
+    try expect(o3.incremental);
 }
 
 test "parse: help short-circuits and does not validate trailing junk" {

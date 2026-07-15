@@ -24,7 +24,9 @@ How to use going forward:
 - Implement opt-in development watch mode via `--watch` flag, bringing real-time, debounced, coalesced filesystem events to local HTML builds.
 - Support event coalescing within a fixed 100ms debounce window and deterministic serialization of subsequent rebuilds to prevent concurrent compilation.
 - Isolate the watcher behind a clean, testable `Watcher` interface, providing both an in-memory `FakeWatcher` for 100% deterministic test execution and a portable, recursive `PollingWatcher` fallback.
-- Support graceful shutdown via POSIX signal handlers (`SIGINT`, `SIGTERM`), cleanly releasing all IO and watcher resources.
+- Support graceful shutdown via POSIX signal handlers (`SIGINT`, `SIGTERM`) using an async-signal-visible atomic flag, cleanly releasing watcher resources after the in-flight rebuild finishes.
+- Harden path handling: path-boundary ignore/translate (no `dist`/`distribution` false positives), normalize `./html-dir`, component-aware `.boris` / `.boris-cache` filters, and a 500ms idle poll interval for cheaper full-tree scans.
+- Align rebuild error policy with the initial build (content/layout errors keep watching; unrecoverable I/O exits).
 
 ### Bounded Parallel HTML Page Rendering (P3.1)
 

@@ -17,56 +17,60 @@ Watch mode is an opt-in local development feature that monitors source and layou
 
 ## 2. Watched Roots & Exclusions
 
-One Boris process owns exactly one watched target/output root.
+One Boris process owns exactly one watched HTML output root (`--html-dir`).
 
 ### Watched Roots
-- **Content Root**: The directory passed to `--input` (default: `content/`).
-- **Layout Root**: The parent directory of the template file passed to `--layout-path` (default: `layouts/`).
+- **Content Root**: The directory passed to `--input` (default: `content`).
+- **Layout Root**: The parent directory of the active layout template (currently fixed at `layouts/` for `layouts/main.html`).
 
 ### Exclusions (Self-Trigger Protection)
 The following directories and files must be explicitly ignored to prevent feedback loops:
-- The HTML output directory (`--html-dir`, default: `dist/`).
-- Cache directories (such as `.boris-cache/`).
+- The HTML output directory (`--html-dir`, default: `dist`), matched with a **path-component boundary** after normalization (so `dist` does not match `distribution/…`, and `./dist` is equivalent to `dist`).
+- Cache directories as **path components** (e.g. `.boris-cache/`, `.boris/`) — not arbitrary substrings inside content filenames.
 - Staging and temporary atomic files (e.g. files ending with `.tmp` or containing `.tmp.`).
+
+Nested output under a watched content root is supported only when exclusion matching is correct; authors should prefer an output tree outside the content root.
 
 ### Symlink Policy
 - Consistent with the scanner, watch mode **does not follow directory symlinks**.
-- Events on symlink files under the content root are ignored or trigger a clean fallback, matching scanner rejection semantics.
+- Events on symlink files under the content root are ignored, matching scanner rejection semantics.
 
 ## 3. Event Handling, Normalization, & Coalescing
 
 ### Normalization
 - All paths are normalized to use forward slashes `/`.
-- Paths are made relative to the current working directory.
-- Files inside the content root are mapped to their relative path within the content root (e.g. `content/guides/intro.md` -> `guides/intro.md`), matching `PageDb` and `DependencyIndex` keys.
+- Leading `./` and trailing `/` are stripped.
+- Files inside the content root are mapped to their relative path within the content root (e.g. `content/guides/intro.md` → `guides/intro.md`), matching `PageDb` and `DependencyIndex` keys. Stripping requires a true path-prefix boundary (`content` does not match `content2/…`).
 
 ### Coalescing and Debouncing
-- To handle bursts of filesystem events (such as multiple writes or multi-file renames), the watch loop coalesces events within a **debounce window** of `100ms` (by default, adjustable or fixed for stability).
-- Changed paths are sorted alphabetically before planning to guarantee deterministic ordering.
+- The watch loop coalesces events within a **debounce window** of `100ms` after the first change in a burst is observed.
+- When idle (no pending changes), the portable polling backend rescans on a longer **idle interval** (default `500ms`) to limit full-tree scan cost.
+- Changed paths are sorted alphabetically for **deterministic logging**. Rebuild dirty-set selection is performed by the existing content-addressed incremental HTML path (fingerprints), not by treating the event list as an affected-set plan.
 
 ### Fallback Mapping
-- For platform-ambiguous events (such as complex renames), the watcher falls back to a full scan of the affected tree rather than guessing stale dependency edges.
+- The portable `PollingWatcher` always rescans watched roots and diffs mtimes; platform-ambiguous renames are handled as delete/create or modify pairs rather than guessed dependency edges.
 
 ## 4. Rebuild Serialization & Concurrency
 
-- **No Concurrent Builds**: At most one build/rebuild cycle may be active at any time.
-- **Serialization**: If filesystem events arrive while a rebuild is already in progress, those events are queued/coalesced. Once the active rebuild finishes, a **single follow-up rebuild** is executed with the queued changes. This ensures that no changes are missed, and we avoid compounding build loops.
-- **Fresh State**: Rebuilds re-run discovery and validation over the fresh state to prevent operating on an invalid or partially updated graph.
+- **No Concurrent Builds**: At most one build/rebuild cycle may be active at any time (single-threaded coordinator loop).
+- **Serialization**: Filesystem changes that occur during a rebuild are observed on the **next poll** after the active rebuild finishes, producing **one follow-up rebuild** with the newly coalesced set. The coordinator does not run concurrent compiles.
+- **Fresh State**: Rebuilds re-run discovery and validation over the fresh state, then use incremental fingerprints to skip unchanged pages when `--incremental` is active (implied by `--watch`).
 
 ## 5. Error Recovery & Diagnostics
 
-- **Graceful Failure**: If a rebuild fails due to content validation, frontmatter grammar, or layout markers, the error is printed to stderr (unless `--quiet` is set). The watcher **does not exit**; it continues watching so the developer can correct the file and recover.
+- **Graceful Failure**: If a rebuild fails due to content validation, frontmatter grammar, components, or layout markers, the error is printed to stderr (unless `--quiet` is set). The watcher **does not exit**; it continues watching so the developer can correct the file and recover.
+- **Unrecoverable I/O**: Missing content roots and other hard I/O/system failures exit the process (same policy as a non-watch HTML build), rather than spinning forever on a dead tree.
 - **Output Preservation**: A failed rebuild must **never** destroy previously published valid HTML output. This is guaranteed by the atomic file publication mechanism.
 - **Successful Recovery**: A subsequent successful build after a correction fully recovers without process restart.
 
 ## 6. Shutdown
 
-- **Signals**: Watch mode supports graceful exit on `Ctrl-C` (SIGINT) and `SIGTERM`.
-- **Cleanup**: On shutdown, the watcher stops accepting events, finishes or cancels the current rebuild safely, waits for/joins any active worker threads, and releases all watcher handles and resources cleanly.
+- **Signals**: Watch mode supports graceful exit on `Ctrl-C` (SIGINT) and `SIGTERM` via an async-signal-safe atomic flag.
+- **Cleanup**: On shutdown, the watcher finishes the current rebuild if one is in progress (no mid-render cancel), joins any active parallel HTML workers through the normal compile path, then releases watcher handles and coordinator memory on process teardown.
 
 ## 7. Portability
 
 - **Interface**: The watch backend is isolated behind a small, testable `Watcher` interface.
 - **Backends**:
-  - `FakeWatcher`: An in-memory, thread-safe mock backend for 100% deterministic, non-timing-dependent unit and integration tests.
-  - `PollingWatcher`: A highly robust, portable fallback watcher that compares `mtime` and handles recursive trees without kqueue file-descriptor exhaustion.
+  - `FakeWatcher`: An in-memory, **single-threaded** mock backend for deterministic, non-timing-dependent unit and integration tests.
+  - `PollingWatcher`: A portable fallback watcher that compares `mtime` and handles recursive trees without kqueue/inotify file-descriptor exhaustion.

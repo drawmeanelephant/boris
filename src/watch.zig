@@ -6,6 +6,12 @@ const Io = std.Io;
 const compile = @import("compile.zig");
 const cli = @import("cli.zig");
 
+/// Debounce window after the first change is observed (ms).
+pub const debounce_ms: i64 = 100;
+/// Idle poll interval when no changes are pending (ms). Longer than the
+/// debounce window to keep full-tree polling cheap on large content roots.
+pub const idle_poll_ms: i64 = 500;
+
 pub const EventKind = enum {
     create,
     modify,
@@ -37,7 +43,8 @@ pub const Watcher = struct {
     }
 };
 
-/// In-memory mock watcher for deterministic, non-timing-dependent unit/integration tests.
+/// In-memory mock watcher for deterministic, non-timing-dependent unit tests.
+/// Single-threaded; not safe for concurrent push/poll from multiple threads.
 pub const FakeWatcher = struct {
     allocator: std.mem.Allocator,
     queued_events: std.ArrayList(Event) = .empty,
@@ -90,7 +97,7 @@ pub const FakeWatcher = struct {
     };
 };
 
-/// Portable Polling-based file watcher backend comparing filesystem mtime.
+/// Portable polling file watcher comparing recursive filesystem mtimes.
 pub const PollingWatcher = struct {
     allocator: std.mem.Allocator,
     io: Io,
@@ -120,6 +127,7 @@ pub const PollingWatcher = struct {
 
     pub fn addRoot(self: *PollingWatcher, root_path: []const u8) !void {
         const dup = try self.allocator.dupe(u8, root_path);
+        errdefer self.allocator.free(dup);
         try self.roots.append(self.allocator, dup);
         try scanFiles(self.io, self.allocator, dup, &self.file_map);
     }
@@ -163,10 +171,12 @@ pub const PollingWatcher = struct {
                     if (self.file_map.get(path)) |old_mtime| {
                         if (old_mtime != mtime) {
                             const dup = try self.allocator.dupe(u8, path);
+                            errdefer self.allocator.free(dup);
                             try events.append(self.allocator, .{ .path = dup, .kind = .modify });
                         }
                     } else {
                         const dup = try self.allocator.dupe(u8, path);
+                        errdefer self.allocator.free(dup);
                         try events.append(self.allocator, .{ .path = dup, .kind = .create });
                     }
                 }
@@ -177,6 +187,7 @@ pub const PollingWatcher = struct {
                     const path = entry.key_ptr.*;
                     if (!new_map.contains(path)) {
                         const dup = try self.allocator.dupe(u8, path);
+                        errdefer self.allocator.free(dup);
                         try events.append(self.allocator, .{ .path = dup, .kind = .delete });
                     }
                 }
@@ -194,6 +205,8 @@ pub const PollingWatcher = struct {
 };
 
 /// Recursively scan files under root using Io.Dir.walkSelectively and populate file_map.
+/// Keys are allocator-owned; callers free them. Duplicate paths free the new key and
+/// keep the existing map entry (update mtime only).
 pub fn scanFiles(
     io: Io,
     allocator: std.mem.Allocator,
@@ -224,13 +237,46 @@ pub fn scanFiles(
         const full_path = try std.fs.path.join(allocator, &.{ root_path, entry.path });
         errdefer allocator.free(full_path);
 
-        try file_map.put(full_path, @intCast(stat.mtime.nanoseconds));
+        const gop = try file_map.getOrPut(full_path);
+        if (gop.found_existing) {
+            allocator.free(full_path);
+            gop.value_ptr.* = @intCast(stat.mtime.nanoseconds);
+        } else {
+            gop.value_ptr.* = @intCast(stat.mtime.nanoseconds);
+        }
     }
+}
+
+/// True when `path` equals `prefix` or is `prefix/` + more (forward-slash paths).
+pub fn hasPathPrefix(path: []const u8, prefix: []const u8) bool {
+    if (prefix.len == 0) return false;
+    if (!std.mem.startsWith(u8, path, prefix)) return false;
+    return path.len == prefix.len or path[prefix.len] == '/';
+}
+
+/// True when `needle` appears as a full path component of a forward-slash path.
+pub fn hasPathComponent(path: []const u8, needle: []const u8) bool {
+    if (needle.len == 0) return false;
+    if (std.mem.eql(u8, path, needle)) return true;
+    if (std.mem.startsWith(u8, path, needle) and path.len > needle.len and path[needle.len] == '/') {
+        return true;
+    }
+    var start: usize = 0;
+    while (start < path.len) {
+        const slash = std.mem.indexOfScalarPos(u8, path, start, '/') orelse path.len;
+        const component = path[start..slash];
+        if (std.mem.eql(u8, component, needle)) return true;
+        if (slash >= path.len) break;
+        start = slash + 1;
+    }
+    return false;
 }
 
 /// Normalize path to use forward slashes and trim leading ./ or trailing /
 pub fn normalizePath(allocator: std.mem.Allocator, raw_path: []const u8) ![]const u8 {
     var path = try allocator.dupe(u8, raw_path);
+    errdefer allocator.free(path);
+
     for (path) |*c| {
         if (c.* == '\\') {
             c.* = '/';
@@ -248,26 +294,32 @@ pub fn normalizePath(allocator: std.mem.Allocator, raw_path: []const u8) ![]cons
     while (end > start and path[end - 1] == '/') {
         end -= 1;
     }
+    if (start == 0 and end == path.len) {
+        return path;
+    }
     const final_path = try allocator.dupe(u8, path[start..end]);
     allocator.free(path);
     return final_path;
 }
 
 /// Ignore output, temp, staging, or cache directory files to prevent loops.
+/// `path` and `html_dir` must already use forward slashes (normalized).
 pub fn isIgnored(path: []const u8, html_dir: []const u8) bool {
-    if (std.mem.startsWith(u8, path, html_dir)) return true;
+    if (hasPathPrefix(path, html_dir)) return true;
     if (std.mem.endsWith(u8, path, ".tmp") or std.mem.containsAtLeast(u8, path, 1, ".tmp.")) return true;
-    if (std.mem.containsAtLeast(u8, path, 1, ".boris-cache")) return true;
-    if (std.mem.containsAtLeast(u8, path, 1, ".boris")) return true;
+    // Component-aware so content names like `about-boris.md` are not dropped.
+    if (hasPathComponent(path, ".boris-cache")) return true;
+    if (hasPathComponent(path, ".boris")) return true;
     return false;
 }
 
 /// Translate raw relative/absolute path to the dependency-index/PageDb key.
+/// Strips `content_root` only on a true path-prefix boundary (`content` ≠ `content2`).
 pub fn translateToKey(allocator: std.mem.Allocator, path: []const u8, content_root: []const u8) ![]const u8 {
     const normalized_root = try normalizePath(allocator, content_root);
     defer allocator.free(normalized_root);
 
-    if (std.mem.startsWith(u8, path, normalized_root)) {
+    if (hasPathPrefix(path, normalized_root)) {
         var sub = path[normalized_root.len..];
         if (sub.len > 0 and sub[0] == '/') {
             sub = sub[1..];
@@ -277,12 +329,24 @@ pub fn translateToKey(allocator: std.mem.Allocator, path: []const u8, content_ro
     return try allocator.dupe(u8, path);
 }
 
-/// Global volatile flag for POSIX shutdown.
-pub var should_shutdown_global: bool = false;
+/// Async-signal-visible shutdown latch for SIGINT/SIGTERM.
+pub var should_shutdown_global: std.atomic.Value(bool) = .init(false);
 
 fn handleSigInt(sig: std.posix.SIG) callconv(.c) void {
     _ = sig;
-    should_shutdown_global = true;
+    should_shutdown_global.store(true, .unordered);
+}
+
+/// Content/layout failures that keep the watcher running for author recovery.
+fn isRecoverableBuildError(err: anyerror) bool {
+    return switch (err) {
+        error.ParseFailed,
+        error.ComponentFailed,
+        error.LayoutMissingMarker,
+        error.LayoutDuplicateMarker,
+        => true,
+        else => false,
+    };
 }
 
 /// Native helper using std.Io Clock.Duration to sleep portably.
@@ -300,11 +364,6 @@ pub const WatchCoordinator = struct {
     io: Io,
     options: cli.Options,
     watcher: Watcher,
-
-    // Loop State
-    should_shutdown: bool = false,
-    rebuild_pending: bool = false,
-    rebuild_in_progress: bool = false,
     pending_changes: std.StringHashMap(void),
 
     pub fn init(gpa: std.mem.Allocator, io: Io, options: cli.Options, watcher: Watcher) WatchCoordinator {
@@ -337,26 +396,32 @@ pub const WatchCoordinator = struct {
 
         try self.watcher.poll(&events);
 
+        const html_raw = self.options.html_dir orelse "dist";
+        const html_norm = try normalizePath(self.gpa, html_raw);
+        defer self.gpa.free(html_norm);
+
         for (events.items) |event| {
             const normalized = try normalizePath(self.gpa, event.path);
             defer self.gpa.free(normalized);
 
-            if (isIgnored(normalized, self.options.html_dir orelse "dist")) {
+            if (isIgnored(normalized, html_norm)) {
                 continue;
             }
 
             const key = try translateToKey(self.gpa, normalized, self.options.input_dir);
             errdefer self.gpa.free(key);
 
-            if (!self.pending_changes.contains(key)) {
-                try self.pending_changes.put(key, {});
-            } else {
+            const gop = try self.pending_changes.getOrPut(key);
+            if (gop.found_existing) {
                 self.gpa.free(key);
+            } else {
+                gop.key_ptr.* = key;
             }
         }
     }
 
-    /// Triggers compileHtmlSite, recovery, and serialization follow-ups.
+    /// Drain pending paths (sorted for deterministic logging), then rebuild.
+    /// Recoverable content/layout errors keep the watch loop alive; other errors propagate.
     pub fn triggerRebuild(self: *WatchCoordinator) !void {
         var paths: std.ArrayList([]const u8) = .empty;
         defer {
@@ -364,12 +429,14 @@ pub const WatchCoordinator = struct {
             paths.deinit(self.gpa);
         }
 
+        // Move ownership of pending keys into `paths` (no second copy of the set).
         var it = self.pending_changes.iterator();
         while (it.next()) |entry| {
-            try paths.append(self.gpa, try self.gpa.dupe(u8, entry.key_ptr.*));
+            try paths.append(self.gpa, entry.key_ptr.*);
         }
+        self.pending_changes.clearRetainingCapacity();
 
-        // Alphabetical sort of paths for absolute determinism
+        // Alphabetical sort of paths for deterministic log ordering
         std.mem.sort([]const u8, paths.items, {}, struct {
             fn less(_: void, a: []const u8, b: []const u8) bool {
                 return std.mem.order(u8, a, b) == .lt;
@@ -384,16 +451,8 @@ pub const WatchCoordinator = struct {
             std.debug.print("watch: triggering incremental rebuild...\n", .{});
         }
 
-        // Free pending changes before rebuild so we capture new events during render
-        var it_clean = self.pending_changes.iterator();
-        while (it_clean.next()) |entry| {
-            self.gpa.free(entry.key_ptr.*);
-        }
-        self.pending_changes.clearRetainingCapacity();
-
-        self.rebuild_in_progress = true;
-        defer { self.rebuild_in_progress = false; }
-
+        // Full rediscovery + content-addressed incremental render (event paths
+        // trigger the rebuild; dirty-set comes from fingerprints inside compile).
         _ = compile.compileHtmlSite(self.io, self.gpa, .{
             .content_root = self.options.input_dir,
             .dist_dir = self.options.html_dir orelse "dist",
@@ -402,10 +461,16 @@ pub const WatchCoordinator = struct {
             .quiet = self.options.quiet,
             .jobs = self.options.jobs,
         }) catch |err| {
-            if (!self.options.quiet) {
-                std.debug.print("error: rebuild failed: {s}. Waiting for correction...\n", .{@errorName(err)});
+            if (isRecoverableBuildError(err)) {
+                if (!self.options.quiet) {
+                    std.debug.print("error: rebuild failed: {s}. Waiting for correction...\n", .{@errorName(err)});
+                }
+                return;
             }
-            return;
+            if (!self.options.quiet) {
+                std.debug.print("error: rebuild failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
+            }
+            return err;
         };
 
         if (!self.options.quiet) {
@@ -433,22 +498,15 @@ pub const WatchCoordinator = struct {
             stats = st;
         } else |err| {
             initial_success = false;
-            switch (err) {
-                error.ParseFailed,
-                error.ComponentFailed,
-                error.LayoutMissingMarker,
-                error.LayoutDuplicateMarker,
-                => {
-                    if (!self.options.quiet) {
-                        std.debug.print("error: initial build failed: {s}. Continuing to watch...\n", .{@errorName(err)});
-                    }
-                },
-                else => {
-                    if (!self.options.quiet) {
-                        std.debug.print("error: initial build failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
-                    }
-                    return err;
+            if (isRecoverableBuildError(err)) {
+                if (!self.options.quiet) {
+                    std.debug.print("error: initial build failed: {s}. Continuing to watch...\n", .{@errorName(err)});
                 }
+            } else {
+                if (!self.options.quiet) {
+                    std.debug.print("error: initial build failed with unrecoverable I/O error: {s}\n", .{@errorName(err)});
+                }
+                return err;
             }
         }
 
@@ -467,23 +525,22 @@ pub const WatchCoordinator = struct {
             std.posix.sigaction(std.posix.SIG.TERM, &act, null);
         }
 
-        should_shutdown_global = false;
+        should_shutdown_global.store(false, .unordered);
 
-        while (!self.should_shutdown and !should_shutdown_global) {
+        while (!should_shutdown_global.load(.unordered)) {
             try self.processEvents();
 
             if (self.pending_changes.count() > 0) {
-                // Debounce window sleep
-                try sleepMs(self.io, 100);
+                // Debounce window: coalesce trailing events in the burst
+                try sleepMs(self.io, debounce_ms);
 
-                // Fetch any additional trailing events
+                // Fetch any additional trailing events, then one serialized rebuild.
+                // FS changes during rebuild are observed on the next poll (follow-up).
                 try self.processEvents();
-
-                // Trigger serialized rebuild
                 try self.triggerRebuild();
+            } else {
+                try sleepMs(self.io, idle_poll_ms);
             }
-
-            try sleepMs(self.io, 50);
         }
 
         if (!self.options.quiet) {
@@ -510,14 +567,43 @@ test "normalizePath helper" {
     const p3 = try normalizePath(gpa, "content");
     defer gpa.free(p3);
     try std.testing.expectEqualStrings("content", p3);
+
+    const p4 = try normalizePath(gpa, "./dist");
+    defer gpa.free(p4);
+    try std.testing.expectEqualStrings("dist", p4);
+}
+
+test "hasPathPrefix boundary" {
+    try std.testing.expect(hasPathPrefix("dist", "dist"));
+    try std.testing.expect(hasPathPrefix("dist/index.html", "dist"));
+    try std.testing.expect(!hasPathPrefix("distribution/x.md", "dist"));
+    try std.testing.expect(!hasPathPrefix("content/x.md", "dist"));
+    try std.testing.expect(hasPathPrefix("content/out/x.html", "content/out"));
+    try std.testing.expect(!hasPathPrefix("content/out2/x.html", "content/out"));
+}
+
+test "hasPathComponent" {
+    try std.testing.expect(hasPathComponent(".boris-cache/manifest.json", ".boris-cache"));
+    try std.testing.expect(hasPathComponent("dist/.boris-cache/manifest.json", ".boris-cache"));
+    try std.testing.expect(hasPathComponent(".boris/manifest.json", ".boris"));
+    try std.testing.expect(!hasPathComponent("content/about-boris.md", ".boris"));
+    try std.testing.expect(!hasPathComponent("content/foo.boris.md", ".boris"));
 }
 
 test "isIgnored helper" {
     try std.testing.expect(isIgnored("dist/index.html", "dist"));
+    try std.testing.expect(isIgnored("dist", "dist"));
     try std.testing.expect(isIgnored("dist/guides/intro.html.tmp", "dist"));
+    try std.testing.expect(isIgnored("dist/.boris-cache/manifest.json", "dist"));
     try std.testing.expect(isIgnored(".boris-cache/manifest.json", "dist"));
     try std.testing.expect(!isIgnored("content/guides/intro.md", "dist"));
     try std.testing.expect(!isIgnored("layouts/main.html", "dist"));
+    // Prefix false positives must not ignore sibling trees
+    try std.testing.expect(!isIgnored("distribution/x.md", "dist"));
+    try std.testing.expect(!isIgnored("output/x.html", "out"));
+    // Content names containing "boris" must not be ignored
+    try std.testing.expect(!isIgnored("content/about-boris.md", "dist"));
+    try std.testing.expect(!isIgnored("content/foo.boris.md", "dist"));
 }
 
 test "translateToKey helper" {
@@ -530,9 +616,19 @@ test "translateToKey helper" {
     const k2 = try translateToKey(gpa, "layouts/main.html", "content");
     defer gpa.free(k2);
     try std.testing.expectEqualStrings("layouts/main.html", k2);
+
+    // Sibling prefix must not strip
+    const k3 = try translateToKey(gpa, "content2/a.md", "content");
+    defer gpa.free(k3);
+    try std.testing.expectEqualStrings("content2/a.md", k3);
+
+    // Trailing slash on root is normalized
+    const k4 = try translateToKey(gpa, "content/index.md", "content/");
+    defer gpa.free(k4);
+    try std.testing.expectEqualStrings("index.md", k4);
 }
 
-test "FakeWatcher and Coordinator Event Coalescing & Stable Sort" {
+test "FakeWatcher and Coordinator Event Coalescing" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
 
@@ -558,4 +654,70 @@ test "FakeWatcher and Coordinator Event Coalescing & Stable Sort" {
     try std.testing.expectEqual(@as(usize, 2), coord.pending_changes.count());
     try std.testing.expect(coord.pending_changes.contains("guides/intro.md"));
     try std.testing.expect(coord.pending_changes.contains("index.md"));
+}
+
+test "processEvents ignores output and staging paths" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var fake = FakeWatcher.init(gpa);
+    defer fake.deinit();
+
+    var coord = WatchCoordinator.init(gpa, io, .{
+        .mode = .html,
+        .input_dir = "content",
+        .html_dir = "./dist",
+        .quiet = true,
+        .watch = true,
+    }, fake.watcher());
+    defer coord.deinit();
+
+    try fake.pushEvent("dist/index.html", .modify);
+    try fake.pushEvent("./dist/page.html", .create);
+    try fake.pushEvent("dist/index.html.tmp", .create);
+    try fake.pushEvent("content/real.md", .modify);
+    try fake.pushEvent("distribution/not-output.md", .modify);
+
+    try coord.processEvents();
+
+    try std.testing.expectEqual(@as(usize, 2), coord.pending_changes.count());
+    try std.testing.expect(coord.pending_changes.contains("real.md"));
+    try std.testing.expect(coord.pending_changes.contains("distribution/not-output.md"));
+}
+
+test "processEvents follow-up coalescing after drain" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var fake = FakeWatcher.init(gpa);
+    defer fake.deinit();
+
+    var coord = WatchCoordinator.init(gpa, io, .{
+        .mode = .html,
+        .input_dir = "content",
+        .html_dir = "dist",
+        .quiet = true,
+        .watch = true,
+    }, fake.watcher());
+    defer coord.deinit();
+
+    try fake.pushEvent("content/a.md", .modify);
+    try coord.processEvents();
+    try std.testing.expectEqual(@as(usize, 1), coord.pending_changes.count());
+
+    // Simulate drain before rebuild (ownership move)
+    var it = coord.pending_changes.iterator();
+    while (it.next()) |entry| {
+        gpa.free(entry.key_ptr.*);
+    }
+    coord.pending_changes.clearRetainingCapacity();
+
+    // Events that would land after a rebuild starts / during debounce tail
+    try fake.pushEvent("content/b.md", .modify);
+    try fake.pushEvent("content/a.md", .modify);
+    try coord.processEvents();
+
+    try std.testing.expectEqual(@as(usize, 2), coord.pending_changes.count());
+    try std.testing.expect(coord.pending_changes.contains("a.md"));
+    try std.testing.expect(coord.pending_changes.contains("b.md"));
 }
