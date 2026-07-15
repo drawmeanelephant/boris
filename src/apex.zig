@@ -567,6 +567,12 @@ test "mapRenderResult: unknown nonzero status ignores null and nonzero len" {
     try std.testing.expectError(error.RenderFailed, r);
 }
 
+test "mapRenderResult: reserved upstream NULL status is render failure, not OOM" {
+    const upstream_null_status: c_int = 3;
+    const r = mapRenderResult(upstream_null_status, null, 0);
+    try std.testing.expectError(error.RenderFailed, r);
+}
+
 test "mapRenderResult: success null with nonzero len is rejected" {
     const r = mapRenderResult(c.APEX_OK, null, 42);
     try std.testing.expectError(error.RenderFailed, r);

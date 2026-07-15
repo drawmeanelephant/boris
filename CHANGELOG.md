@@ -31,6 +31,10 @@ How to use going forward:
 
 ### Fixed
 
+- CLI/Apex/TOC hygiene: preserve exit 3 for per-file and multi-target I/O
+  failures, map ambiguous upstream Apex NULL results to render failure rather
+  than OOM, parse heading tags across quoted `>` attributes, and free stripped
+  heading text when TOC collection append fails.
 - Graph validation rejects case-only entity id collisions (`guides/intro` vs
   `GUIDES/INTRO`) with `EINVALIDPATH` — prevents silent output overwrite on
   case-insensitive filesystems. Wires
