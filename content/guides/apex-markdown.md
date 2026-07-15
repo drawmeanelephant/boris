@@ -526,7 +526,7 @@ Some paragraph.
 ```text
 # APEX-PENDING: critic-markup | track changes / annotations
 # Critic expands even inside fences. Inert form uses a space after "{".
-# To enable: remove those spaces → {++added text++} etc.
+# To enable: delete the space after each opening brace (add/del/sub/mark/comment).
 
 { ++added text++ }
 { --deleted text-- }
