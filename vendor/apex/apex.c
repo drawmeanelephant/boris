@@ -40,7 +40,10 @@ static void boris_apex_options(apex_options *opts) {
     opts->output_format = APEX_OUTPUT_HTML;
     opts->standalone = false; /* fragment only — Boris layouts wrap pages */
     opts->pretty = false;     /* stable, compact HTML for goldens/cache */
-    opts->unsafe = true;      /* trusted author content; raw HTML allowed */
+    /* SECURITY: unsafe=true assumes trusted author content only — raw HTML
+     * is passed through unescaped. Do not enable the HTML path for untrusted
+     * input without a separate sanitization layer. See docs/contracts/apex-abi.md. */
+    opts->unsafe = true;
     opts->validate_utf8 = true;
 
     /* SSG safety / avoid double systems */

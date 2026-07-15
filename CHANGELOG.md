@@ -57,6 +57,9 @@ How to use going forward:
   (U18 multi-thread Unified smoke + parallel Unified site compile under
   `--jobs 8`); Linux CI requires real ASan/UBSan smoke via
   `BORIS_REQUIRE_SANITIZE=1` (macOS remains opt-in skip).
+- **Second external opinion (micro-fixes):** pin `remainingAbiAssumptions`
+  count to exact 8; `SECURITY` comment on adapter `unsafe=true`; U15b Apex
+  callout inside Aside body.
 
 ### Docs — residual post-P3 audit cleanup
 

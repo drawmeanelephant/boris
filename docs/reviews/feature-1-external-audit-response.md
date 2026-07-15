@@ -163,6 +163,21 @@ actually paid to close after the paper response:
 | **D4 / `--jobs`** | Evidence gates: `apex.zig` U18 concurrent Unified vs baselines + cross-talk markers; `compile.zig` parallel Unified site under jobs=8 vs sequential and dual parallel. Contract note in `parallel-rendering.md`. Still not a formal proof of all Apex globals. |
 | **F-007 sanitizer CI** | Linux CI runs `zig build test-apex-sanitize` with `BORIS_REQUIRE_SANITIZE=1` (fail on documented skip). macOS stays opt-in. |
 
+## Second external opinion (same day; still docs-only)
+
+Second Perplexity pass largely re-litigated Chat 6 tip / corpus. Net-new
+disposals on top of Chat 7:
+
+| Claim | Disposition |
+|-------|-------------|
+| Loose `remainingAbiAssumptions.len >= 5` | **Fixed** — exact count `8` |
+| Louder `unsafe=true` in adapter | **Fixed** — `SECURITY` comment in `vendor/apex/apex.c` (docs already present) |
+| Callout inside Aside body untested | **Fixed** — U15b in `aside.zig` (U15 already covered table-in-Aside) |
+| Goldens / sanitize CI / D4 | Already closed in Chat 7 stack (re-landed after local reset to origin) |
+| Vendor `build/*.a` maybe committed | **Reject** — already gitignored + documented in `VENDOR.md` |
+| D1 vendor bloat trim | **Defer** — offline pin preferred |
+| D3 ensure_apex hashing | **Defer** — STATUS D3 |
+
 ## Recommendation
 
 Feature 1 remains **Done**. External-audit conditions for ship are addressed

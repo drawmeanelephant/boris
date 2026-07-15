@@ -989,3 +989,52 @@ test "U15 Aside document order with real Apex stream" {
     try std.testing.expect(std.mem.indexOf(u8, html, "<table") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "<Aside") == null);
 }
+
+// Aside body is re-rendered via apex.render — Unified callouts must survive
+// (not double-escaped or dropped). Complements U15 table-in-Aside coverage.
+test "U15b Apex callout inside Aside body renders through" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const body =
+        \\BEFORE
+        \\
+        \\<Aside kind="tip" id="t-call">
+        \\> [!NOTE]
+        \\> CALL-IN-ASIDE body
+        \\</Aside>
+        \\
+        \\AFTER
+        \\
+    ;
+    const tok = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(tok.diagnostics.len == 0);
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(gpa);
+    for (tok.segments) |seg| {
+        switch (seg) {
+            .markdown => |md| {
+                if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
+                const h = try apex.render(md, &arena);
+                try out.appendSlice(gpa, h.bytes);
+            },
+            .aside => |a| {
+                const h = try renderHtml(a, &arena);
+                try out.appendSlice(gpa, h);
+            },
+        }
+    }
+    const html = out.items;
+    const i_before = std.mem.indexOf(u8, html, "BEFORE") orelse return error.TestUnexpectedResult;
+    const i_tip = std.mem.indexOf(u8, html, "admonition--tip") orelse return error.TestUnexpectedResult;
+    const i_call = std.mem.indexOf(u8, html, "callout") orelse return error.TestUnexpectedResult;
+    const i_body = std.mem.indexOf(u8, html, "CALL-IN-ASIDE") orelse return error.TestUnexpectedResult;
+    const i_after = std.mem.indexOf(u8, html, "AFTER") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(i_before < i_tip);
+    try std.testing.expect(i_tip < i_call);
+    try std.testing.expect(i_call < i_body or i_tip < i_body);
+    try std.testing.expect(i_body < i_after);
+    try std.testing.expect(std.mem.indexOf(u8, html, "id=\"t-call\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<Aside") == null);
+}

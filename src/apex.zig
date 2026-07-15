@@ -613,8 +613,8 @@ test "prepareMdForC non-empty preserves pointer and length" {
 }
 
 test "remaining ABI assumptions are non-empty audit list" {
-    try std.testing.expect(remainingAbiAssumptions.len >= 5);
-    // Ensure each entry is non-empty documentation.
+    // Exact count: bump deliberately when adding/removing an assumption entry.
+    try std.testing.expectEqual(@as(usize, 8), remainingAbiAssumptions.len);
     for (remainingAbiAssumptions) |line| {
         try std.testing.expect(line.len > 10);
     }
