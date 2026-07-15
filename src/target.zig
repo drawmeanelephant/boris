@@ -25,6 +25,32 @@ pub fn effectiveLayout(target: TargetSpec, default_layout: []const u8) []const u
     return target.layout_path orelse default_layout;
 }
 
+/// Lexicographic order on target names (byte order). Used for canonical CLI
+/// configuration and execution order.
+pub fn targetNameLess(_: void, a: TargetSpec, b: TargetSpec) bool {
+    return std.mem.order(u8, a.name, b.name) == .lt;
+}
+
+/// Sort target specs in place by canonical target name (ascending).
+/// Equivalent argv permutations must produce the same ordered slice after parse.
+pub fn sortTargetSpecsByName(specs: []TargetSpec) void {
+    std.mem.sort(TargetSpec, specs, {}, targetNameLess);
+}
+
+/// Print one line per target in slice order (caller supplies canonical order).
+/// Format: `  target <name>: out=<output_dir> layout=<effective_layout>`
+/// Uses `std.debug.print` (same channel as other CLI diagnostics).
+pub fn printTargetConfigLines(specs: []const TargetSpec, default_layout: []const u8) void {
+    for (specs) |spec| {
+        const layout = effectiveLayout(spec, default_layout);
+        std.debug.print("  target {s}: out={s} layout={s}\n", .{
+            spec.name,
+            spec.output_dir,
+            layout,
+        });
+    }
+}
+
 /// True when `path` equals `prefix` or is `prefix/` + more.
 /// Both paths must already use `/` separators and must not end with `/`
 /// (except a bare root, which we do not produce here).
@@ -288,6 +314,20 @@ test "isValidTargetName validation rules" {
     try std.testing.expect(!isValidTargetName("prod?"));
 }
 
+test "sortTargetSpecsByName is deterministic" {
+    var specs = [_]TargetSpec{
+        .{ .name = "staging", .output_dir = "dist/stage", .layout_path = "layouts/stage.html" },
+        .{ .name = "prod", .output_dir = "dist/prod", .layout_path = null },
+        .{ .name = "alpha", .output_dir = "dist/alpha", .layout_path = "layouts/a.html" },
+    };
+    sortTargetSpecsByName(&specs);
+    try std.testing.expectEqualSlices(u8, "alpha", specs[0].name);
+    try std.testing.expectEqualSlices(u8, "prod", specs[1].name);
+    try std.testing.expectEqualSlices(u8, "staging", specs[2].name);
+    try std.testing.expectEqualSlices(u8, "layouts/a.html", specs[0].layout_path.?);
+    try std.testing.expect(specs[1].layout_path == null);
+}
+
 test "hasAbsPathPrefix boundary" {
     try std.testing.expect(hasAbsPathPrefix("/tmp/ws/dist", "/tmp/ws", false));
     try std.testing.expect(hasAbsPathPrefix("/tmp/ws", "/tmp/ws", false));
@@ -421,5 +461,35 @@ test "validateTargets overlap, nesting, sort, and escape checks" {
             gpa.free(plans);
         }
         try std.testing.expectEqual(@as(usize, 1), plans.len);
+    }
+
+    // Input order of specs must not change canonical plan order or effective layouts
+    {
+        const a = [_]TargetSpec{
+            .{ .name = "z", .output_dir = "dist/z", .layout_path = "layouts/z.html" },
+            .{ .name = "a", .output_dir = "dist/a", .layout_path = null },
+        };
+        const b = [_]TargetSpec{
+            .{ .name = "a", .output_dir = "dist/a", .layout_path = null },
+            .{ .name = "z", .output_dir = "dist/z", .layout_path = "layouts/z.html" },
+        };
+        const plans_a = try validateTargets(io, gpa, &a, opts);
+        defer {
+            for (plans_a) |plan| gpa.free(plan.resolved_output_dir);
+            gpa.free(plans_a);
+        }
+        const plans_b = try validateTargets(io, gpa, &b, opts);
+        defer {
+            for (plans_b) |plan| gpa.free(plan.resolved_output_dir);
+            gpa.free(plans_b);
+        }
+        try std.testing.expectEqual(@as(usize, 2), plans_a.len);
+        try std.testing.expectEqualSlices(u8, plans_a[0].name, plans_b[0].name);
+        try std.testing.expectEqualSlices(u8, plans_a[1].name, plans_b[1].name);
+        try std.testing.expectEqualSlices(u8, plans_a[0].layout_path, plans_b[0].layout_path);
+        try std.testing.expectEqualSlices(u8, plans_a[1].layout_path, plans_b[1].layout_path);
+        try std.testing.expectEqualSlices(u8, "a", plans_a[0].name);
+        try std.testing.expectEqualSlices(u8, "layouts/main.html", plans_a[0].layout_path);
+        try std.testing.expectEqualSlices(u8, "layouts/z.html", plans_a[1].layout_path);
     }
 }

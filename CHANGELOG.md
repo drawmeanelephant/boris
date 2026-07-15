@@ -19,6 +19,18 @@ How to use going forward:
 
 ## [Unreleased]
 
+### P4 — multi-target CLI ergonomics
+
+- `--target` / `--target-layout` argument order is independent: parsed targets
+  are sorted by name so equivalent permutations produce the same configuration.
+- Bare HTML / `--html` / `--html-dir` still map to synthetic target `"default"`;
+  `--target-layout default=PATH` attaches without requiring `--html`.
+- Diagnostics and success output list targets in canonical name order with
+  effective `out=` and `layout=` paths. Invalid target configuration (names,
+  collisions, workspace escape, content/layout overlap) consistently exits **2**.
+- `--target` combines with `--watch` and `--incremental` as documented. Contract:
+  `docs/contracts/multi-target-isolated-output.md`.
+
 ### Feature 8 — graph-native dependency IR
 
 - **F8.0 contracts:** pin target IR `schemaVersion` `0.2.0` and target compiler

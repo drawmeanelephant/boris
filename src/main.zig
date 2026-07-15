@@ -137,7 +137,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         defer watcher.deinit();
 
         watcher.addRoot(opts.input_dir) catch |err| {
-            return mapHtmlError(err, opts.quiet);
+            return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
         };
 
         // Watch unique layout parent directories (global + per-target overrides).
@@ -166,23 +166,23 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             }
         }.go;
         add_layout_root(&watcher, &layout_roots, gpa, layout_path, opts.input_dir) catch |err| {
-            return mapHtmlError(err, opts.quiet);
+            return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
         };
         for (opts.targets.items) |t| {
             if (t.layout_path) |lp| {
                 add_layout_root(&watcher, &layout_roots, gpa, lp, opts.input_dir) catch |err| {
-                    return mapHtmlError(err, opts.quiet);
+                    return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
                 };
             }
         }
 
         var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher()) catch |err| {
-            return mapHtmlError(err, opts.quiet);
+            return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
         };
         defer coord.deinit();
 
         coord.run() catch |err| {
-            return mapHtmlError(err, opts.quiet);
+            return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
         };
 
         return .success;
@@ -196,11 +196,13 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             .quiet = opts.quiet,
             .jobs = opts.jobs,
         }) catch |err| {
-            return mapHtmlError(err, opts.quiet);
+            return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
         };
 
         if (!opts.quiet) {
-            std.debug.print("ok: wrote HTML for {d} target(s)\n", .{opts.targets.items.len});
+            // Canonical order + effective paths (parse already sorts by name).
+            std.debug.print("ok: wrote HTML for {d} target(s):\n", .{opts.targets.items.len});
+            target.printTargetConfigLines(opts.targets.items, layout_path);
         }
     } else {
         const stats = compile.compileHtmlSite(io, gpa, .{
@@ -211,7 +213,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             .quiet = opts.quiet,
             .jobs = opts.jobs,
         }) catch |err| {
-            return mapHtmlError(err, opts.quiet);
+            return mapHtmlError(err, opts.quiet, &.{}, layout_path);
         };
 
         if (!opts.quiet) {
@@ -222,9 +224,15 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 }
 
 /// Map HTML compile failures to process exit codes.
-/// Content/layout/component faults → 1; missing content root and I/O → 3.
-/// When `quiet`, skip stderr text (exit code and artifacts still convey failure).
-fn mapHtmlError(err: anyerror, quiet: bool) ExitCode {
+/// Target configuration / path isolation → 2; content/layout/component → 1;
+/// missing content root and I/O → 3. When `quiet`, skip stderr text (exit codes
+/// and artifacts still convey failure).
+fn mapHtmlError(
+    err: anyerror,
+    quiet: bool,
+    targets: []const target.TargetSpec,
+    global_layout: []const u8,
+) ExitCode {
     switch (err) {
         // Target configuration / path isolation — usage (exit 2), not I/O.
         error.NoTargetsSpecified,
@@ -237,6 +245,10 @@ fn mapHtmlError(err: anyerror, quiet: bool) ExitCode {
         => {
             if (!quiet) {
                 std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
+                if (targets.len > 0) {
+                    std.debug.print("configured targets (canonical order):\n", .{});
+                    target.printTargetConfigLines(targets, global_layout);
+                }
             }
             return .usage;
         },
@@ -367,7 +379,20 @@ test "ExitCode contract surface" {
 }
 
 test "mapHtmlError: multi-target I/O failure exits 3" {
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.MultiTargetIoFailed, true));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.MultiTargetIoFailed, true, &.{}, default_layout));
+}
+
+test "mapHtmlError: target configuration failures exit 2" {
+    const specs = [_]target.TargetSpec{
+        .{ .name = "prod", .output_dir = "dist/prod" },
+    };
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.TargetOutputCollision, true, &specs, default_layout));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.WorkspaceEscape, true, &specs, default_layout));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.DuplicateTargetName, true, &specs, default_layout));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.InvalidTargetName, true, &specs, default_layout));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.TargetOutputSymlink, true, &specs, default_layout));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.EmptyTargetDirectory, true, &specs, default_layout));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.NoTargetsSpecified, true, &.{}, default_layout));
 }
 
 test "runPipeline: valid fixture exits 0" {
@@ -540,6 +565,53 @@ test "runPipeline: multi-target HTML build success and validation exits" {
     file_a.close(io);
     var file_b = try cwd.openFile(io, path_b, .{});
     file_b.close(io);
+}
+
+test "runPipeline: multi-target path collision and content overlap exit 2" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const shared = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cli-collide", .{tmp.sub_path});
+    defer gpa.free(shared);
+
+    // Equal output roots
+    {
+        var opts = Options{
+            .mode = .html,
+            .input_dir = "test/fixtures/html/content",
+            .quiet = true,
+        };
+        try opts.targets.append(gpa, .{ .name = "a", .output_dir = shared });
+        try opts.targets.append(gpa, .{ .name = "b", .output_dir = shared });
+        defer opts.targets.deinit(gpa);
+        try std.testing.expectEqual(ExitCode.usage, runPipeline(io, gpa, opts));
+    }
+
+    // Workspace escape
+    {
+        var opts = Options{
+            .mode = .html,
+            .input_dir = "test/fixtures/html/content",
+            .quiet = true,
+        };
+        try opts.targets.append(gpa, .{ .name = "escaped", .output_dir = "../outside-boris-target" });
+        defer opts.targets.deinit(gpa);
+        try std.testing.expectEqual(ExitCode.usage, runPipeline(io, gpa, opts));
+    }
+
+    // Content root overlap
+    {
+        var opts = Options{
+            .mode = .html,
+            .input_dir = "test/fixtures/html/content",
+            .quiet = true,
+        };
+        try opts.targets.append(gpa, .{ .name = "bad", .output_dir = "test/fixtures/html/content" });
+        defer opts.targets.deinit(gpa);
+        try std.testing.expectEqual(ExitCode.usage, runPipeline(io, gpa, opts));
+    }
 }
 
 
