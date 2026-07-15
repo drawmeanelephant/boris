@@ -1237,9 +1237,11 @@ test "incremental HTML build mode - full verification suite" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-m9-incremental-suite";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-m9-incremental-suite", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
     defer gpa.free(layout_path);

@@ -127,6 +127,29 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     const html_dir = opts.html_dir orelse default_html;
 
+    if (opts.watch) {
+        const watch = @import("watch.zig");
+        var watcher = watch.PollingWatcher.init(gpa, io);
+        defer watcher.deinit();
+
+        watcher.addRoot(opts.input_dir) catch |err| {
+            return mapHtmlError(err, opts.quiet);
+        };
+        const layout_dir = std.fs.path.dirname(default_layout) orelse ".";
+        watcher.addRoot(layout_dir) catch |err| {
+            return mapHtmlError(err, opts.quiet);
+        };
+
+        var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher());
+        defer coord.deinit();
+
+        coord.run() catch |err| {
+            return mapHtmlError(err, opts.quiet);
+        };
+
+        return .success;
+    }
+
     const stats = compile.compileHtmlSite(io, gpa, .{
         .content_root = opts.input_dir,
         .dist_dir = html_dir,
@@ -410,4 +433,8 @@ test "parseOptions: HTML mode defaults and exclusive dirs" {
         error.ConflictingFlags,
         parseOptions(&.{ "boris", "--html-dir", "d", "--rag" }),
     );
+}
+
+test {
+    _ = @import("watch.zig");
 }

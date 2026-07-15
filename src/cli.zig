@@ -37,6 +37,8 @@ pub const Options = struct {
     incremental: bool = false,
     /// Bounded parallel rendering worker count (HTML mode only).
     jobs: usize = 1,
+    /// Opt-in local-development watch mode for HTML builds.
+    watch: bool = false,
 };
 
 pub const ParseError = error{
@@ -75,6 +77,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
     var saw_html_dir = false;
     var saw_incremental = false;
     var saw_jobs = false;
+    var saw_watch = false;
     var jobs: usize = 1;
 
     var i: usize = if (args.len > 0) 1 else 0;
@@ -122,6 +125,12 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
         if (std.mem.eql(u8, a, "--incremental")) {
             if (saw_incremental) return error.DuplicateFlag;
             saw_incremental = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--watch")) {
+            if (saw_watch) return error.DuplicateFlag;
+            saw_watch = true;
             continue;
         }
 
@@ -194,6 +203,10 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
     if (saw_jobs and !(saw_html or saw_html_dir)) {
         return error.ConflictingFlags;
     }
+    // Watch option is valid only when combined with HTML mode.
+    if (saw_watch and !(saw_html or saw_html_dir)) {
+        return error.ConflictingFlags;
+    }
 
     // Mode selection:
     // 1. Default → IR
@@ -234,8 +247,9 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             .out_dir = null,
             .rag_dir = null,
             .html_dir = html_dir,
-            .incremental = saw_incremental,
+            .incremental = saw_incremental or saw_watch,
             .jobs = jobs,
+            .watch = saw_watch,
         },
     };
 }
@@ -282,6 +296,7 @@ pub fn printUsage() void {
         \\  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
         \\  --html-dir <DIR>    HTML output directory (implies HTML; default: dist)
         \\  --incremental       Opt-in to fast, content-addressed incremental HTML rendering (requires HTML mode)
+        \\  --watch             Opt-in local-development watch mode for HTML builds (implies --incremental)
         \\  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
         \\  -h, --help          Show this help and exit 0
         \\
@@ -370,7 +385,8 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.eql(u8, a, "--rag") or
             std.mem.eql(u8, a, "--no-rag") or
             std.mem.eql(u8, a, "--html") or
-            std.mem.eql(u8, a, "--incremental"))
+            std.mem.eql(u8, a, "--incremental") or
+            std.mem.eql(u8, a, "--watch"))
         {
             continue;
         }
