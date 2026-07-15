@@ -66,6 +66,7 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | CI Linux + macOS | **Done** |
 | Graph-aware HTML nav (`{{nav}}` / breadcrumb / title) | **Done** (Feature 6 MVP) |
 | In-page heading `{{toc}}` | **Done** (Feature 6 follow-on) |
+| Boris-mediated includes + wiki-links | **Next** (foundation only today) |
 | Full YAML / MDX / embedded HTTP server | **Not now** |
 
 ### Commands
@@ -108,9 +109,21 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
+| **Next** | **Boris-mediated includes + wiki-links** | Resolve includes and wiki-link targets (entity id) in Zig from the frozen dependency graph **before** Apex; detect transclusion cycles at the Boris graph level; included bytes must contribute to the parent page’s cache fingerprint. Apex stays sandboxed: `enable_file_includes = false` always (never Apex FS reads). |
 | **Now** | Keep sample content honest as features land | `content/` dogfood refreshed for v0.2.0; re-check after next feature |
 | **Later** | IR schema bump only if emit shape changes | Do not bump `schemaVersion` for product-only work |
 | **Hygiene** | Historical campaign notes | Removed from tree (`archive/`); do not reintroduce as default agent context |
+
+### Foundation already present (not the full feature)
+
+P2 left plumbing only — do not claim product includes/wiki-links:
+
+| Piece | Where | What it does **not** do |
+|-------|--------|-------------------------|
+| Apex includes off | `vendor/apex/apex.c`, U17 | Engine never pulls disk files |
+| `DependencyKind.include` + reverse index | `src/dependency.zig` | No authoring syntax, no splice |
+| Fingerprint can hash include bytes | `src/cache.zig` | Only when deps are registered |
+| Crude `includes/` path scan | `src/compile.zig` | Dep edges for dirty-set — **no** body expansion before `apex.render` |
 
 ### Shipped (do not re-open as greenfield)
 

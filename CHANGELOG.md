@@ -19,6 +19,13 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Docs — STATUS roadmap: includes + wiki-links
+
+- Record **Next**: Boris-mediated includes and wiki-link resolution (pre-Apex,
+  graph edges, cycle detection, fingerprint contribution). Apex FS includes
+  stay forbidden. Note P2 foundation only (dep kinds / crude `includes/` scan;
+  no product transclusion yet).
+
 ### Docs — sample content polish for v0.2.0
 
 - Refresh dogfood site under `content/` for product 0.2: HTML default, Apex
