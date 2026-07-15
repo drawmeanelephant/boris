@@ -1,0 +1,18 @@
+HARD FORBID LIST — content-dogfood agent
+
+If you open or edit any of these, you are out of scope:
+
+  src/
+  build.zig
+  build.zig.zon
+  vendor/
+  docs/contracts/
+  docs/STATUS.md          (unless the human explicitly asks)
+  layouts/main.html       at repo root (use sandboxes/content-dogfood/layouts/)
+  content/                at repo root (use sandboxes/content-dogfood/content/)
+  scripts/                (except invoking verify.sh)
+  .github/
+  tools/
+
+When compile fails: fix Markdown under sandboxes/content-dogfood/content/.
+Never "fix" the Aside tokenizer, graph validator, or layout assembler.
