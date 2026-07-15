@@ -114,7 +114,7 @@ else
   # requiring keys and values rather than exact whitespace.
   if grep -q '"format"[[:space:]]*:[[:space:]]*"boris-rag"' "${META}" \
     && grep -q '"schema_version"[[:space:]]*:[[:space:]]*1' "${META}" \
-    && grep -q '"boris_version"[[:space:]]*:[[:space:]]*"0\.3\.0"' "${META}"; then
+    && grep -q '"boris_version"[[:space:]]*:[[:space:]]*"0\.3\.1"' "${META}"; then
     pass "catalog_meta.json fields (format/schema_version/boris_version)"
   else
     fail "catalog_meta.json shape mismatch: $(cat "${META}")"
