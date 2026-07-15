@@ -47,7 +47,7 @@ No HTML, no RAG tree, no per-page fragment files under this IR contract.
 | File | On success (`ok: true`) | On content failure (`ok: false`) |
 |------|-------------------------|-----------------------------------|
 | `manifest.json` | Full page list, sorted by `id` | **Not published** |
-| `graph.json` | `frozen: true`, nodes + edges + nav | **Not published** |
+| `graph.json` | `frozen: true`, nodes + edges + reverseIndex + nav | **Not published** |
 | `build-report.json` | `ok: true`, empty diagnostics | `ok: false`, non-empty diagnostics |
 
 ---
@@ -385,8 +385,10 @@ schema compatibility decision.
 
 #### Edge production and order
 
-1. Emit only **direct authored edges**. Do not emit transitive include closure;
-   derive it by walking `reverseIndex`.
+1. Emit only **direct authored edges**. Do not emit transitive include closure
+   as extra edges. Forward dependents of a target are recovered via
+   `reverseIndex` (then `edges[i]`); what a locus transitively includes is
+   recovered by walking the sorted `edges` array outward from that locus.
 2. Ignore directives/wiki syntax inside fenced code exactly as the Feature 7
    contract requires.
 3. Repeated occurrences of the exact `(from, to, kind)` tuple produce one edge.
@@ -421,9 +423,12 @@ the dependent endpoint and edge kind from `edges[incomingEdges[i]]`; the index
 does not duplicate or weaken edge semantics.
 
 Reverse traversal is kind-aware. Starting from a changed `source` endpoint or
-changed `page` entity, follow incoming edges through `source` endpoints until
-page dependents are reached. F8.3 may use this frozen index for incremental
-dirty sets; it must not rebuild a second, divergent dependency graph.
+changed `page` entity, follow `incomingEdges` to recover each dependent
+`from` and `kind`, then continue through intermediate `source` endpoints until
+page dependents are reached. Forward walks (e.g. “what does this page
+transitively include?”) use the sorted `edges` array, not `reverseIndex`
+alone. F8.3 may use this frozen pair for incremental dirty sets; it must not
+rebuild a second, divergent dependency graph.
 
 ### `nav` entry object
 
