@@ -3,7 +3,7 @@
 This directory is a **source snapshot** of the real Apex Markdown processor,
 owned by Boris for offline / reproducible builds. It is **not** the Boris host
 ABI (`vendor/apex/apex.h`). Campaign archive:
-[`docs/reviews/feature-1-apex-fidelity-spec.md`](../../docs/reviews/feature-1-apex-fidelity-spec.md).
+[`archive/docs/reviews/feature-1-apex-fidelity-spec.md`](../../archive/docs/reviews/feature-1-apex-fidelity-spec.md).
 
 | Field | Value |
 |-------|--------|

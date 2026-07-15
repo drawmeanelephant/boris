@@ -8,11 +8,13 @@ tags: [assembly, layout, zero-copy, html, dist]
 
 # Zero-copy layout splicing
 
-Traditional SSGs concatenate `header + content + footer` into one huge string.
-Boris forbids that for final assembly.
+**Outcome:** each page hits disk without building one mega “header + body +
+footer” string first — layout chrome and rendered body stream as slices. That
+keeps memory steady and publish predictable as page count grows (design intent;
+measure before quoting absolute speed).
 
 **Workshop analogy:** letterhead / body / footer conveyor — three sequential
-writes, never one mega-string assembly.  
+writes.  
 **Invariant:** layout split once on `{{content}}`; each page streams
 `prefix | html | suffix` via `assemble.writePage`.
 

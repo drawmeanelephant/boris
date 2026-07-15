@@ -187,14 +187,13 @@ apex_render → apex_markdown_to_html (APEX_MODE_UNIFIED, fragment HTML)
 Real engine sources: `vendor/apex-markdown/` ([VENDOR.md](../../vendor/apex-markdown/VENDOR.md)).
 cmark-gfm is **only** Apex’s upstream substrate — not Boris’s public renderer.
 Host include guard is `BORIS_APEX_HOST_H` (not `APEX_H`) so the adapter can
-include both host and upstream headers. Campaign archive (plan retired):
-[`feature-1-apex-fidelity-spec.md`](../reviews/feature-1-apex-fidelity-spec.md).
+include both host and upstream headers. Historical campaign notes (optional):
+[`archive/docs/reviews/feature-1-apex-fidelity-spec.md`](../../archive/docs/reviews/feature-1-apex-fidelity-spec.md).
 
 ---
 
-## Explicit non-goals (m8)
+## Explicit non-goals (m8 / host ABI)
 
-- Wiring Apex into default IR emit or RAG export
-- HTML layout assemble / `dist/` publication as the default CLI (Feature 2)
+- Wiring Apex into IR emit or RAG export (HTML path only)
 - Spawning external markdown processes
-- Exposing every Apex mode/option on the CLI (Feature 1 is Unified-only)
+- Exposing every Apex mode/option on the CLI (product is Unified-only)

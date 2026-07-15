@@ -8,37 +8,34 @@ tags: [boris, overview, content-compiler, zig]
 
 # Boris overview
 
-Boris is a **Zig content compiler for Markdown documentation** that is growing
-into a full Apex-native static site generator. The **default product surface**
-is: discover content → bounded frontmatter → Trunk/Satellite graph validation →
-HTML site under `dist/` (Apex + Whiteboard + layout splice). Optional: JSON IR
-via `--out` / `--no-rag`, or an LLM RAG corpus via `--rag` / `--rag-dir`.
+**Write Markdown. Run `boris`. Get a docs site** under `dist/`. Same binary can
+also emit validated JSON IR (`--out`) or an LLM knowledge pack (`--rag`).
 
-The project is named for the folk **Zouave** improviser known as **Boris** —
-resourceful under constraint, chain-minded, wipe-and-continue. Teaching rhythm
-for the compile loop: **Load → Roll → Ignite → Reset** (see
-[system/10-name-and-metaphor.md](10-name-and-metaphor.md)). Narrative only; not
-affiliated with any commercial tobacco or rolling-paper brand.
+Boris is a Zig documentation compiler — not a Node/React SSG. Teaching rhythm
+(narrative only): **Load → Roll → Ignite → Reset** (see
+[system/10-name-and-metaphor.md](10-name-and-metaphor.md)). Named for the folk
+**Zouave** improviser known as **Boris**; not affiliated with any commercial
+tobacco or rolling-paper brand.
 
-## What Boris is for
+## What you get
 
-- Build a markdown documentation site into HTML under `dist/` (default CLI)
-- Compile the same tree into validated **JSON IR** via `--out` (manifest, graph, report)
-- Model content as a **Trunk and Satellite graph** (relational foreign keys)
-- Support a **closed frontmatter grammar** (not general YAML)
-- Optionally export an **LLM-friendly RAG corpus** under `rag/`
-- Keep hard constraints: Zig core, in-process Apex when rendering, no Node SSG stack
+- A **static docs site** from Markdown (default CLI → `dist/`)
+- **Real ApexMarkdown Unified** (tables, footnotes, modern constructs) in-process
+- **Callouts on the page** via constrained `<Aside>` (document order)
+- A **Trunk/Satellite graph** that fails loud when parents/cycles break
+- Optional **JSON IR** and **deterministic RAG** from the same content tree
+- **Lean rebuilds** when you opt in: skip unchanged pages, parallel page work,
+  stream layout+body instead of one giant HTML string (design intent; measure
+  your tree before quoting numbers)
 
-## Implemented product surface
+## How it works (short)
 
-- **Aside** tokenizer on the shared compile path (`ECOMPONENT` on failure)
-- Optional RAG corpus with `:::kind` **export** blocks for parsed Asides
-- **HTML default:** Apex + Aside stream + Whiteboard + layout splice to `dist/`
-  (and named multi-target roots), with `--incremental`, `--jobs`, and `--watch`
-- Apex engine is in-process C ABI via **ApexMarkdown Unified** (Feature 1)
+Discover content → closed frontmatter → graph validate → emit HTML, IR, or RAG.
+Normative detail: `docs/contracts/`. Living phase: `docs/STATUS.md`. Historical
+campaign notes may live under `archive/` and are not required reading.
 
-Normative contracts: `docs/contracts/`. Narrative seeds here must not
-overclaim untested guarantees (see STATUS and RELEASE-GATE).
+Narrative seeds must not overclaim untested guarantees (see STATUS and
+RELEASE-GATE).
 
 ## Non-goals
 
@@ -84,4 +81,6 @@ Useful flags:
 
 ## One-sentence summary for retrieval
 
-Boris is a Zig documentation compiler (named for the folk Zouave improviser Boris) that **loads** Markdown under `content/`, **rolls** a Trunk/Satellite graph, **ignites** an HTML site under `dist/` by default (or JSON IR / RAG on request), and **resets** page scratch on the HTML path with real ApexMarkdown Unified rendering.
+Boris is a Zig documentation compiler that turns Markdown into a validated
+Trunk/Satellite site under `dist/` by default (or JSON IR / RAG on request),
+with real ApexMarkdown Unified rendering and constrained in-page Asides.

@@ -8,7 +8,7 @@
 //! - `zig build test` (includes hardening + fuzz)
 //! - `zig build test-harness` → hardening subset only
 //!
-//! See `test/README.md` and `docs/AUDIT-v0.1.md`.
+//! See `test/README.md` and `archive/docs/AUDIT-v0.1.md` (historical).
 
 const std = @import("std");
 const Io = std.Io;

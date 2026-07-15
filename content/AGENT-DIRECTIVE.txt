@@ -1,0 +1,322 @@
+# content/AGENT-DIRECTIVE — sample site rebuild brief
+#
+# INTENTIONALLY NOT a `.md` / `.mdx` page.
+# Boris's scanner only discovers case-sensitive `.md` / `.mdx` under content/.
+# This file is instructions for a coding agent (or human) rebuilding demo content.
+# Do not rename this to `.md` unless you mean it to become a site page.
+
+---
+
+## Mission
+
+Rebuild `content/` into a **living sample documentation site** that:
+
+1. Matches **Boris product reality as of Feature 1 + Feature 2** (not the old
+   IR-first / stub-Apex story).
+2. Exercises the real compile path end-to-end: frontmatter → Trunk/Satellite
+   graph → ApexMarkdown Unified → `<Aside>` stream → layout splice → `dist/`.
+3. Gives maintainers and future agents **high-quality fixtures to click through**
+   while we work on HTML depth (nav, TOC, polish) — not throwaway lorem ipsum.
+4. Keeps authoring **contract-correct** so `boris` / `boris --out` / `boris --rag`
+   all stay green.
+
+You are rewriting **author content**, not the Zig compiler. Prefer editing
+markdown under `content/` and, only if needed, small layout copy under
+`layouts/`. Do **not** change IR schema, CLI defaults, or contracts unless the
+user separately asks.
+
+---
+
+## Current state (why this exists)
+
+`content/` today is a thin scaffold with **stale claims**:
+
+| File | Problem |
+|------|---------|
+| `index.md` | Still sounds IR/SSG-generic; links use raw `.md` paths; understates HTML default |
+| `guides/intro.md` | Minimal; no real Unified Markdown showcase |
+| `guides/intro-tips.md` | OK satellite shape, thin body |
+| `guides/rag-export.md` | Long but **wrong CLI surface**: `zig build rag` is not a product step; default path is no longer “JSON IR first”; Feature 2 migration missing |
+
+Treat the existing pages as **draft inventory**, not goldens. You may rewrite,
+split, rename, or replace them as long as the acceptance checks below pass.
+
+---
+
+## Product reality (authoritative; do not invent)
+
+Read these before writing (normative first):
+
+| Doc | Why |
+|-----|-----|
+| `docs/STATUS.md` | Living phase; Feature 1 + 2 Done; HTML default |
+| `docs/contracts/frontmatter.md` | Closed FM grammar; **`parent` only** |
+| `docs/contracts/components.md` | Constrained `<Aside>` only |
+| `docs/contracts/html-output.md` | Default HTML path, Whiteboard, layout |
+| `docs/contracts/scanner.md` + `identity-and-paths.md` | What becomes a page / entity id |
+| `docs/contracts/ir-schema.md` (graph rules) | Trunk vs Satellite validation |
+| `docs/contracts/rag-export.md` | Optional RAG path (export ≠ authoring) |
+| `README.md` | Human CLI table after Feature 2 |
+| `layouts/main.html` | Only layout; single `{{content}}` marker |
+| `AGENTS.md` (repo root) | Hard constraints (Zig-only product, no MDX, no subprocess markdown) |
+
+### CLI truth (Feature 2)
+
+```text
+boris                         → HTML site under dist/          (DEFAULT)
+boris --html / --html-dir D   → same, explicit
+boris --out DIR / --no-rag    → JSON IR only
+boris --rag / --rag-dir DIR   → RAG corpus only
+boris --jobs N / --watch / --incremental  → HTML helpers (valid alone)
+```
+
+There is **no** `zig build rag` step. Correct forms:
+
+```bash
+zig build
+./zig-out/bin/boris --quiet                    # site → dist/
+./zig-out/bin/boris --out .boris --quiet       # IR
+./zig-out/bin/boris --rag --quiet              # RAG → rag/
+./zig-out/bin/boris --rag-dir ./uploads/rag --quiet
+```
+
+### Engine truth (Feature 1)
+
+HTML bodies are rendered by **real ApexMarkdown Unified** (vendored pin), not a
+minimal stub. Sample content should **show** Unified constructs that matter for
+docs sites (see “Showcase requirements” below). Do not claim CommonMark-only
+limitations or “stub engine.”
+
+Trusted-author HTML: the host adapter allows raw HTML passthrough. Prefer
+markdown + `<Aside>`; do not dump untrusted third-party HTML.
+
+---
+
+## Authoring rules (hard — compile will fail if broken)
+
+### Frontmatter — closed set only
+
+Allowed keys **exactly**: `id`, `title`, `parent`, `status`, `tags`.
+
+```md
+---
+title: My page title
+parent: guides/intro
+status: published
+tags: [guides, graph]
+---
+```
+
+**Forbidden** (unknown key → `EFRONTMATTER`):
+
+- `parentEntry`, `parent_entry` (export-only name in RAG catalogs — never author FM)
+- nested YAML, multiline scalars, anchors, arbitrary keys, unquoted `kind=tip`
+
+Rules of thumb:
+
+- **Trunk** = omit `parent` (or never set it).
+- **Satellite** = set `parent: <trunk-entity-id>` where the id is the parent’s
+  path-derived id (e.g. `guides/intro` for `guides/intro.md`), unless parent
+  used an explicit `id:` override — then match that.
+- No satellite-of-satellite, no self-parent, no missing parent, no cycles.
+- Entity ids come from path minus `.md` by default (`guides/rag-export.md` →
+  `guides/rag-export`). Prefer path-derived ids; only use `id:` when intentional.
+- `status`: only `draft` | `published` | `archived` if present.
+- `tags`: only `[a, b, "c"]` list form.
+
+### Aside — only registered component
+
+```md
+<Aside kind="tip" id="stable-anchor">
+
+Body markdown here. Close tag must start a line.
+
+</Aside>
+```
+
+- Kinds: `note`, `tip`, `info`, `warning`, `danger` (default `note`).
+- Optional `id`: `[A-Za-z0-9][A-Za-z0-9_-]*` max 64.
+- Values **double-quoted**. No nested asides. No `<Figure>`, `<Broside>`, etc.
+- Asides stay **in document order** on the page — not graph nodes, not separate HTML pages.
+- Inside fenced code, `<Aside` is literal (good for docs-about-docs).
+
+### Markdown / Apex showcase
+
+Use real Unified features where they teach the product:
+
+| Feature | Use in sample content? |
+|---------|------------------------|
+| Headings, lists, links, emphasis | Yes (baseline) |
+| Fenced code + language tags | Yes |
+| Tables | Yes (at least one real table) |
+| Footnotes | Yes (at least one page) |
+| Task lists / nested lists | Yes where natural |
+| Math (if sensible for a short aside) | Optional; one small example OK |
+| Apex callouts / IAL / fenced divs | Optional; prefer `<Aside>` for product callouts |
+| Arbitrary MDX / JSX / executable components | **No** |
+| `:::kind` as **authoring** | **No** — that form is RAG **export** only |
+
+### Links and paths
+
+- Site output: `guides/intro.md` → `dist/guides/intro.html`.
+- Prefer **site-relative HTML-ish links** that survive publish, e.g.
+  `[Introduction](guides/intro.html)` or root-relative style consistent across
+  the sample. Do **not** leave author-facing CTAs that only work as raw
+  `.md` GitHub links unless you also note “source path.”
+- Do not invent a second content root. Default is `content/`.
+
+### Voice and branding
+
+- Product name: **Boris**. Metaphor Load → Roll → Ignite → Reset is fine in
+  narrative; do not invent branded component names.
+- Honest about phase: HTML default + real Apex shipped; graph-aware HTML nav /
+  TOC still roadmap (Feature 6) — don’t claim auto sidebars if layout doesn’t
+  have them.
+- `layouts/main.html` is minimal chrome (title “Boris Site”, basic admonition CSS).
+  Content must read well inside that layout without requiring a design system.
+
+---
+
+## Target information architecture
+
+Build a small but **coherent docs site**, not a single dump page. Suggested
+shape (you may refine names as long as graph rules hold):
+
+```text
+content/
+  AGENT-DIRECTIVE.txt          # this file — keep; do not compile
+  index.md                     # Trunk — home / product pitch (HTML-default era)
+  getting-started.md           # Trunk — install, first build, modes table
+  guides/
+    overview.md                # Trunk — content model + pipeline teaching beat
+    trunk-satellite.md         # Trunk or satellite under overview — graph rules
+    asides.md                  # Satellite — Aside authoring contract in prose
+    apex-markdown.md           # Trunk or satellite — Unified showcase page
+    cli-and-modes.md           # Satellite — Feature 2 CLI modes (HTML / IR / RAG)
+    rag-export.md              # Satellite — correct RAG commands + corpus map
+  reference/
+    frontmatter.md             # Trunk — closed keys cheat-sheet for authors
+    diagnostics.md             # Optional satellite — exit codes / common errors
+```
+
+Minimum viable if you need to ship smaller: **≥6 pages**, **≥2 trunks**,
+**≥3 satellites**, covering home, getting started, graph model, Aside, CLI
+modes, and Apex showcase.
+
+### Page goals (must land)
+
+1. **Home (`index`)** — What Boris is *now*: Zig docs compiler; default `boris`
+   → `dist/`; Apex Unified; Trunk/Satellite; no Node SSG. Clear links into guides.
+2. **Getting started** — Zig 0.16 + CMake note (compile-time for Apex),
+   `zig build`, first HTML build, `--out` for IR, `--rag` for corpus, `--watch`.
+3. **Content model** — Trunk vs Satellite with real examples pointing at sibling
+   pages; `parent` only; what fails validation (cycle, missing parent, etc.) in
+   prose — do not add broken fixture pages under `content/` that fail the default build.
+4. **Asides** — Authoring syntax, kinds, document-order rule, export-only `:::kind`.
+5. **CLI modes** — Table for HTML default / IR / RAG; migration from bare-IR habit;
+   conflict examples (`--out` + `--rag` → exit 2).
+6. **Apex showcase** — One page that is deliberately “pretty markdown”: table,
+   footnote, nested list, code fence, at least two `<Aside>` kinds.
+7. **RAG** — Accurate commands (`boris --rag`), tree layout, shared graph
+   validation, **not** `zig build rag` unless you verify a step exists (it does not).
+
+---
+
+## What to delete / replace
+
+- Rewrite or remove claims that bare `boris` emits `.boris/` IR by default.
+- Rewrite or remove `zig build rag` as the primary RAG entry (use
+  `boris --rag` / `zig build run -- --rag`).
+- Replace hollow “Welcome to Boris” boilerplate with concrete, accurate prose.
+- Do not leave wrong flag matrices that predate Feature 2.
+- Keep this `AGENT-DIRECTIVE.txt` file at `content/AGENT-DIRECTIVE.txt`.
+
+---
+
+## Out of scope (do not do)
+
+- Changing Zig modules, contracts, CLI defaults, or Apex vendor pin.
+- Adding Node/React/Vite, subprocess markdown, full YAML FM, or MDX.
+- Nested asides / multi-component registry / executable content.
+- Broken pages under `content/` that fail graph validation “for education”
+  (put intentional fail cases under `docs/contracts/fixtures/` or
+  `fixtures/content/invalid/`, not the demo site).
+- Embedding an HTTP server or claiming watch is a full live-reload browser tool.
+- Committing generated trees (`dist/`, `.boris/`, `rag/`) unless the user asks.
+- Renaming this directive to `*.md` (would become a site page).
+
+---
+
+## Acceptance criteria (agent must verify)
+
+Run from repo root after content work:
+
+```bash
+zig build
+# Default product path — must succeed and write HTML
+./zig-out/bin/boris --quiet
+test -f dist/index.html
+
+# Every showcase page you added should exist under dist/ with nested dirs
+# e.g. dist/guides/*.html
+
+# IR path still works (contracts / tooling)
+./zig-out/bin/boris --out .boris --quiet
+test -f .boris/manifest.json
+test -f .boris/graph.json
+
+# RAG path still works
+./zig-out/bin/boris --rag --quiet
+test -f rag/INDEX.md
+test -d rag/content/pages
+
+# Optional visual smoke
+# open dist/index.html   # or python -m http.server in dist/
+```
+
+Content quality bar:
+
+- [ ] No `parentEntry` / `parent_entry` in source frontmatter
+- [ ] Graph: all satellites resolve to existing trunks; no cycles
+- [ ] At least one table, one footnote, multiple code fences, ≥3 asides site-wide
+- [ ] CLI docs match Feature 2 (HTML default, IR via `--out`)
+- [ ] Apex described as ApexMarkdown Unified (not “stub”)
+- [ ] Internal links resolve under `dist/` (no obvious 404s for linked sample pages)
+- [ ] Prose is accurate enough to onboard a new contributor without reading STATUS first
+- [ ] `content/AGENT-DIRECTIVE.txt` still present and non-`.md`
+
+If default `boris` fails with content diagnostics, **fix the content** — do not
+weaken the compiler.
+
+---
+
+## Implementation taste
+
+- Prefer fewer excellent pages over many empty stubs.
+- Prefer teaching by example (show a table; show an Aside) over only describing them.
+- Match existing markdown tone: direct, technical, complete sentences.
+- Use `status: published` on finished sample pages; `draft` only if you leave a WIP page and say so.
+- After substantive edits, re-run the three modes (HTML / IR / RAG) before declaring done.
+- Optional: short bullet under `CHANGELOG.md` `[Unreleased]` if the sample site
+  is user-visible enough to mention (“expand demo content under content/”).
+
+---
+
+## Suggested agent workflow
+
+1. Read STATUS + frontmatter + components + html-output contracts (skim).
+2. Inventory current `content/**/*.md` and list stale claims.
+3. Propose IA (trunk/satellite map) — then implement without waiting if the map
+   matches this brief.
+4. Write/replace pages; keep FM and Aside valid at every step.
+5. Run acceptance commands; fix graph/FM errors.
+6. Skim `dist/*.html` for broken links and unrendered surprises.
+7. Summarize for the user: page map, commands run, any intentional deferrals.
+
+---
+
+## One-line north star for this folder
+
+**`content/` is the dogfood docs site for Boris itself — accurate to HTML-default
++ Apex Unified + Trunk/Satellite + Aside, useful to click while building the
+SSG meat, and strict enough that the real compiler stays the gate.**

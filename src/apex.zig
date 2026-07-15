@@ -642,7 +642,7 @@ test "status constants match documented C ABI" {
 
 // =============================================================================
 // Feature 1 Chat 4 — Unified fidelity (structural asserts, not full Apex suite)
-// Plan IDs U1–U17 (Feature 1 campaign; see docs/reviews/feature-1-apex-fidelity-spec.md).
+// Plan IDs U1–U17 (Feature 1 campaign; archive/docs/reviews/feature-1-apex-fidelity-spec.md).
 // =============================================================================
 
 fn fidelityContains(hay: []const u8, needle: []const u8) !void {

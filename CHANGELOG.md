@@ -19,6 +19,14 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Docs — living tree hygiene (post Feature 2)
+
+- Lead **README** / **STATUS** with user outcomes (site, graph, lean rebuilds)
+  before internal mechanics; keep contracts normative and precise.
+- Move historical reviews + m10 audit to top-level [`archive/`](archive/)
+  (safe to delete or relocate off-tree). Active docs: STATUS, contracts,
+  RELEASE-GATE, rag seeds only under `docs/`.
+
 ### Feature 2 — HTML as default CLI surface — **Done**
 
 - Bare `boris` (no mode flags) builds an HTML site under `dist/` instead of
@@ -57,12 +65,12 @@ How to use going forward:
   Unified**; Feature 1 marked Done; release-gate green. No IR schema or CLI
   default changes (Feature 2 still roadmap).
 - **Chat 6:** Internal review
-  ([`docs/reviews/feature-1-internal-review.md`](docs/reviews/feature-1-internal-review.md)):
+  ([`archive/docs/reviews/feature-1-internal-review.md`](archive/docs/reviews/feature-1-internal-review.md)):
   residual stub wording closed; adapter forces
   `allow_external_plugin_detection=false`; reject `md_len` wrap before NUL
   copy.
 - **Chat 7:** External audit response
-  ([`docs/reviews/feature-1-external-audit-response.md`](docs/reviews/feature-1-external-audit-response.md)):
+  ([`archive/docs/reviews/feature-1-external-audit-response.md`](archive/docs/reviews/feature-1-external-audit-response.md)):
   golden HTML pins for table/footnote/math/callout; trusted-author
   `unsafe=true` notice; STATUS tracks D2/D3/D4 with resolve triggers;
   source-rag skips `build`/`CMakeFiles`; full review SHA + sanitizer PASS vs
@@ -75,7 +83,7 @@ How to use going forward:
   count to exact 8; `SECURITY` comment on adapter `unsafe=true`; U15b Apex
   callout inside Aside body.
 - Retire root `APEX-Feature1-plan.md` after ship: campaign bullets archived in
-  [`docs/reviews/feature-1-apex-fidelity-spec.md`](docs/reviews/feature-1-apex-fidelity-spec.md);
+  [`archive/docs/reviews/feature-1-apex-fidelity-spec.md`](archive/docs/reviews/feature-1-apex-fidelity-spec.md);
   pointers updated to contracts + reviews.
 
 ### Docs — residual post-P3 audit cleanup
@@ -89,7 +97,7 @@ How to use going forward:
   `docs/STATUS.md` versioning table (P3.3 already landed; packaging stays under
   0.2/0.3). No runtime or IR schema changes.
 - Feature 1 implementer handoff / archive:
-  [`docs/reviews/feature-1-apex-fidelity-spec.md`](docs/reviews/feature-1-apex-fidelity-spec.md)
+  [`archive/docs/reviews/feature-1-apex-fidelity-spec.md`](archive/docs/reviews/feature-1-apex-fidelity-spec.md)
   (real ApexMarkdown Unified under frozen host `apex.h` — not cmark-as-product;
   root plan retired after ship).
 
@@ -101,7 +109,7 @@ How to use going forward:
   non-support wording, RAG narrative seeds, AUDIT historical banner, AGENTS
   concurrency guidance, and `compile.zig` module header. No runtime or IR schema
   changes. Bare CLI remains IR-first; Apex remains a minimal stub ≠ CommonMark.
-  Audit note: [`docs/reviews/post-p3-reconciliation.md`](docs/reviews/post-p3-reconciliation.md).
+  Audit note: [`archive/docs/reviews/post-p3-reconciliation.md`](archive/docs/reviews/post-p3-reconciliation.md).
 
 ### Multi-Target Isolated Output Directories & Cache Namespaces (P3.3)
 
@@ -111,7 +119,7 @@ How to use going forward:
 - Isolated output trees and structural cache namespaces: `<target-out>/.boris-cache/manifest.json` per target; sequential sorted target execution with aggregate failure (`MultiTargetCompilationFailed`).
 - Cache fingerprints use discriminator `boris-cache-v1-multitarget` and include target name, layout path, and layout template bytes. On-disk manifest `format_version` matches that discriminator; foreign/old versions are ignored (cold rebuild).
 - Watch mode ignores events under every configured target output root and rebuilds all targets in sorted order after a debounced change batch.
-- Review record and hardening notes: [`docs/reviews/p3.3-multi-target-review.md`](docs/reviews/p3.3-multi-target-review.md).
+- Review record and hardening notes: [`archive/docs/reviews/p3.3-multi-target-review.md`](archive/docs/reviews/p3.3-multi-target-review.md).
 - P3.3 follow-ups: watch ignore roots precomputed once; shared multi-target fingerprint/dep prep (source/include scan once); best-effort orphan atomic-temp scrub; intermediate symlink component walk on target paths; `--target` in usage/`findBadArg`.
 - P3.3 completion: `--html-layout` + `--target-layout NAME=PATH`; selective watch fan-out (layout-only → affected targets); sibling `{dist}.boris-stage` tree commit (discard on failure). Mark P3 scale-out complete in STATUS.
 
@@ -231,7 +239,7 @@ How to use going forward:
 - CI matrix: Linux + macOS; Apex sanitizer remains opt-in local
   (`zig build test-apex-sanitize`).
 - Contract: [`docs/contracts/components.md`](docs/contracts/components.md).
-- Self-audit: [`docs/AUDIT-v0.1.md`](docs/AUDIT-v0.1.md).
+- Self-audit: [`archive/docs/AUDIT-v0.1.md`](archive/docs/AUDIT-v0.1.md).
 - Docs/seeds synchronized; publishing-workshop analogies paired with invariants.
 
 ### Milestone 9 — experimental HTML path (Whiteboard + layout splice)

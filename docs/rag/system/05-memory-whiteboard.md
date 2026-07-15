@@ -12,17 +12,20 @@ related:
 
 # Memory: the Whiteboard strategy
 
-When compiling many pages on the HTML path, a global heap of micro-allocations
-fragments and grows. Boris uses a **document-local arena** (the whiteboard)
-backed by Zig’s `std.heap.ArenaAllocator`.
+**Outcome:** each HTML page gets a temporary scratch pad that is wiped when
+that page finishes — building later pages does not keep earlier render junk
+alive. Durable metadata (title, parent, paths) lives separately on PageDb.
+
+When compiling many pages, a global heap of micro-allocations fragments and
+grows. Boris uses a **document-local arena** (the whiteboard) backed by Zig’s
+`std.heap.ArenaAllocator`.
 
 **Workshop analogy:** reusable workbench — wipe only after every user of this
 page’s scratch is finished.  
 **Invariant:** `free_all` only after Apex return, flush, temp finalize, and
 publish attempt; no caller retains Whiteboard slices.
 
-This path is the **default product CLI** HTML surface (bare `boris` → `dist/`).
-Whiteboard behavior is exercised by tests in `src/compile.zig` and
+Default HTML path: bare `boris` → `dist/`. Tests: `src/compile.zig`,
 `src/hardening_test.zig`.
 
 ## Loop shape (`src/compile.zig`)

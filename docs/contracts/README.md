@@ -40,7 +40,7 @@ per topic:
 | RAG export | [rag-export.md](rag-export.md) |
 | Aside / components | [components.md](components.md) |
 | Apex C ABI | [apex-abi.md](apex-abi.md) |
-| Experimental HTML output | [html-output.md](html-output.md) |
+| HTML output (default CLI) | [html-output.md](html-output.md) |
 | Parallel rendering | [parallel-rendering.md](parallel-rendering.md) |
 | Watch Mode | [watch-mode.md](watch-mode.md) |
 | Multi-target isolated outputs | [multi-target-isolated-output.md](multi-target-isolated-output.md) |
@@ -81,7 +81,8 @@ Supporting / historical drafts may also remain in this tree. Prefer linking the
 |----------------------------|------|
 | [acceptance.md](acceptance.md) | v0.1 acceptance checklist |
 | [v0.1-overview.md](v0.1-overview.md) | Orientation; points at canonical contracts |
-| [../STATUS.md](../STATUS.md) | Living status + post-P2/post-P3 roadmap and implementation cards |
+| [../STATUS.md](../STATUS.md) | Living status + next work |
+| [`../../archive/`](../../archive/) | Historical reviews/audits (not normative; optional) |
 
 ## Fixture corpus
 

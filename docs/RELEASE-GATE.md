@@ -93,35 +93,13 @@ Platform-qualified (do not overclaim):
   are not universally claimed
 - Sanitizer smoke: host-dependent; skip is not a pass
 
-## Milestone 10 scope (historical)
+## Historical milestones (pointer only)
 
-Constrained `<Aside>` tokenizer, `ECOMPONENT`, RAG `:::kind` export,
-HTML Aside stream, hardening tests, CI Linux+macOS, self-audit
-`docs/AUDIT-v0.1.md`. Sanitizer remains opt-in (`zig build test-apex-sanitize`).
+m7–m10 / Feature 1–2 campaign detail lives in `CHANGELOG.md` and optional
+`archive/docs/`. Self-audit snapshot: `archive/docs/AUDIT-v0.1.md`.
 
-## Milestone 9 scope (historical)
-
-Experimental single-threaded HTML path — Apex, Whiteboard, PageDb, layout
-splice, Atomic publish. Later work wired HTML as **opt-in CLI** and added
-P2/P3 capabilities on that path.
-
-**Still deferred:** mmap, child-process markdown (forbidden), embedded HTTP dev
-server. ApexMarkdown Unified is the linked engine (Feature 1 Done). HTML is the
-bare-`boris` default (Feature 2 Done).
-
-## Milestone 8 scope (prior; extended by Feature 1)
-
-Native in-process Apex host ABI (`vendor/apex/`), defensive Zig wrapper
-(`src/apex.zig`), C compilation/linking in `build.zig`, hostile ABI tests,
-optional sanitizer smoke, normative ABI contract. Feature 1 replaced the host
-stub body with an ApexMarkdown Unified adapter and vendored static engine.
-
-## Milestone 7 scope (prior)
-
-Optional deterministic product RAG export (`--rag` / `--rag-dir`) reusing
-scanner, parser, PageDb, and `graph.validate`; staging publication; catalog
-schema; dual-export determinism tests; contract
-`docs/contracts/rag-export.md`.
+**Still deferred:** mmap, child-process markdown (forbidden), embedded HTTP
+dev server. Sanitizer remains opt-in (`zig build test-apex-sanitize`).
 
 ## Failure policy
 

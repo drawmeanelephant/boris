@@ -18,34 +18,40 @@ This file is binding project policy for AI coding agents (and humans pairing wit
 
 | Doc | Role |
 |-----|------|
-| `README.md` | Human front door: quick start, layout, links |
+| `README.md` | Human front door — outcomes + CLI |
 | `AGENTS.md` (this file) | Hard constraints and long-term direction |
-| `docs/STATUS.md` | Living “where we are” snapshot |
+| `docs/STATUS.md` | Living “where we are” + next work |
 | `docs/RELEASE-GATE.md` | Mechanical ship checks; `scripts/release-gate.sh` |
 | `CHANGELOG.md` | What changed; add bullets under Unreleased as you land work |
-| `docs/contracts/` | Normative v0.1 IR, frontmatter, graph, diagnostics, fixtures |
-| `docs/rag/system/` | Curated narrative seeds (architecture story for product RAG) |
+| `docs/contracts/` | Normative IR, frontmatter, graph, diagnostics, fixtures |
+| `docs/rag/system/` | Curated narrative seeds (product RAG) |
+| `content/AGENT-DIRECTIVE.txt` | Sample-content rebuild brief (not a site page) |
+| `archive/` | Historical reviews/audits — **not** default context; safe to move out |
 | `rag/` | **Generated** product corpus — do not treat as source of truth |
-| `tools/source-rag/` | Standalone **source-code** RAG tool for LLM dumps (`zig build source-rag`) |
-| `source-rag/` | **Generated** source pack — gitignored; not product IR |
+| `tools/source-rag/` | Standalone **source-code** RAG tool (`zig build source-rag`) |
+| `source-rag/` | **Generated** source pack — gitignored |
 
 ## Identity
 
-**Boris is a Zig-native content compiler that is growing into an Apex-native static site generator.**
+**Boris is a Zig documentation compiler:** Markdown in → validated graph → HTML
+site (default), JSON IR, or RAG pack. Not a Node SSG stack.
 
 Named for the folk **Zouave** improviser known as **Boris** (calm under fire,
-practical chain-thinking, wipe-and-continue) — an independent software homage,
-**not** affiliated with any commercial tobacco or rolling-paper brand. Teaching
-rhythm for the pipeline: **Load → Roll → Ignite → Reset**. Narrative seed:
+practical chain-thinking, wipe-and-continue) — independent homage, **not**
+affiliated with any commercial tobacco or rolling-paper brand. Teaching rhythm:
+**Load → Roll → Ignite → Reset**. Narrative:
 [`docs/rag/system/10-name-and-metaphor.md`](docs/rag/system/10-name-and-metaphor.md).
 
-- **Default product surface (CLI):** discover Markdown → bounded frontmatter → Trunk/Satellite graph validation → HTML site under `dist/` (Apex + Whiteboard + layout splice). JSON IR via `--out` / `--no-rag` under `.boris/` (`manifest.json`, `graph.json`, `build-report.json`). Optional `--rag` export.
-- **Long-term product surface:** full documentation SSG — graph-aware navigation, TOC, asides, zero-copy assemble, multi-target. Core HTML path is the default CLI (Feature 2).
-- Implementation language for the product: **Zig** (currently targeting Zig **0.16+**).
-- Markdown rendering (when used): **Apex**, linked **in-process** as a **C ABI** library (`@cImport`, `build.zig` C sources). **Not** a subprocess, **not** a JS markdown pipeline.
-- Content model: in-memory **Page** graph with **Trunk / Satellite** relations and optional in-page **asides/admonitions** (component tokens, not graph nodes).
-- Performance shape: single-threaded monolith first; whiteboard `ArenaAllocator`; zero-copy layout splice to `dist/` when the HTML path is active.
-- **Metaphor → engineering (do not invent branded component names):** Load = discover; Roll = frontmatter + bottom-up graph; Ignite = emit/render; Reset = whiteboard `free_all`. Asides stay in document order; no “Broside”-style product jargon.
+- **User outcomes first:** a shippable `dist/` site, real Apex Markdown, fail-loud
+  Trunk/Satellite graph, optional IR/RAG — see README/STATUS, not spark-plug tours.
+- **Default CLI:** `boris` → HTML under `dist/`. IR via `--out` / `--no-rag`. RAG via `--rag`.
+- **Language:** Zig **0.16+**. Markdown: **Apex** linked **in-process** (C ABI host
+  adapter). **Not** a subprocess, **not** a JS markdown pipeline.
+- **Content model:** Trunk / Satellite pages + in-page **Aside** tokens (not graph nodes).
+- **Performance shape:** lean per-page publish (stream layout + body; wipe page
+  scratch; optional incremental/parallel). Prefer measured claims over slogans.
+- **Metaphor → engineering:** Load = discover; Roll = frontmatter + graph; Ignite =
+  emit/render; Reset = free page scratch. No branded component jargon (“Broside”).
 
 ### Where to edit by task
 
