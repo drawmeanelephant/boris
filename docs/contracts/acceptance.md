@@ -39,7 +39,8 @@ Claim **v0.1 content-compiler acceptance** only when all of the following hold:
 - HTML `dist/` as the **default** product CLI mode (bare `boris` remains IR)
 - Markdown-native `:::` **authoring** (export representation only)
 - Full YAML, MDX, nested asides, multi-component registry
-- CommonMark-complete Apex (vendor engine is still a minimal stub)
+- Full upstream Apex test suite import (product uses structural U1–U17 fidelity;
+  real ApexMarkdown Unified is already the engine)
 
 **Landed after m10 (HTML path; not part of the content-compiler acceptance bar)**
 

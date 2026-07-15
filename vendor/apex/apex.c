@@ -21,8 +21,14 @@
 /* Upstream ApexMarkdown public API (guard APEX_H). Include paths via build.zig. */
 #include <apex/apex.h>
 
+#include <limits.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifndef SIZE_MAX
+#define SIZE_MAX ((size_t)-1)
+#endif
 
 const char *apex_version(void) {
     return "boris-apex/apex-markdown-1.1.11+unified";
@@ -40,6 +46,7 @@ static void boris_apex_options(apex_options *opts) {
     /* SSG safety / avoid double systems */
     opts->enable_file_includes = false;
     opts->enable_plugins = false;
+    opts->allow_external_plugin_detection = false; /* no CWD/.apex probe */
     opts->code_highlighter = NULL;
     opts->ast_filter_count = 0;
     opts->ast_filter_commands = NULL;
@@ -81,6 +88,10 @@ int apex_render(
     if (md_len == 0) {
         md_for_apex = "";
     } else {
+        /* Reject size_t wrap on md_len + 1 before malloc. */
+        if (md_len > SIZE_MAX - 1u) {
+            return APEX_ERR_ARGS;
+        }
         nul_md = (char *)malloc(md_len + 1);
         if (nul_md == NULL) {
             return APEX_ERR_OOM;

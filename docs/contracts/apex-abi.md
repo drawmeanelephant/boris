@@ -181,6 +181,7 @@ apex_render → apex_markdown_to_html (APEX_MODE_UNIFIED, fragment HTML)
 | `unsafe` | true | Trusted author content; raw HTML allowed |
 | File includes | off | Boris has its own include graph |
 | Plugins | off | Subprocess / untrusted code risk |
+| External plugin detection | off | No CWD/global `.apex/plugins` probe |
 | External highlighters | off | AGENTS forbids MD CLI spawn |
 
 Real engine sources: `vendor/apex-markdown/` ([VENDOR.md](../../vendor/apex-markdown/VENDOR.md)).

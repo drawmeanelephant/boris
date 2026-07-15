@@ -17,7 +17,7 @@ is **not** proof that every surface is the default CLI product.
 | Compiler IR on default CLI | **Implemented** (still the bare-`boris` default) |
 | Optional product RAG (`--rag`) | **Implemented** (includes `:::kind` export) |
 | Aside component tokenizer | **Implemented** (`components.md`) |
-| Apex C ABI + Zig wrapper | **Implemented** (linked + tested; stub ≠ CommonMark) |
+| Apex C ABI + Zig wrapper | **Implemented** (ApexMarkdown Unified host adapter; U1–U17 tested) |
 | Opt-in HTML path | **Implemented** (`--html` / `--html-dir` / `--target`; Aside stream) |
 | P2 dependency indexes / incremental HTML | **Implemented** (`--incremental`; fingerprints + affected set) |
 | Parallel HTML workers / watch | **Implemented** (`--jobs`, `--watch`; see contracts below) |

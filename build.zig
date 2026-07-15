@@ -10,9 +10,8 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Feature 1 Chat 2: build static ApexMarkdown (cmake host tool only).
-    // Product host ABI remains vendor/apex; adapter body lands in Chat 3.
-    // See vendor/apex-markdown/VENDOR.md and scripts/build-apex-markdown.sh.
+    // Feature 1: build static ApexMarkdown (cmake host tool only).
+    // Host ABI: vendor/apex; engine: vendor/apex-markdown (see VENDOR.md).
     const ensure_apex = b.addSystemCommand(&.{
         "bash",
         "scripts/build-apex-markdown.sh",

@@ -19,7 +19,7 @@ How to use going forward:
 
 ## [Unreleased]
 
-### Feature 1 — ApexMarkdown Unified (campaign Chats 1–5) — **Done**
+### Feature 1 — ApexMarkdown Unified (campaign Chats 1–6) — **Done**
 
 - Vendor real **[ApexMarkdown/apex](https://github.com/ApexMarkdown/apex)** as a
   flat source snapshot under `vendor/apex-markdown/` @ **v1.1.11**
@@ -42,6 +42,11 @@ How to use going forward:
 - **Chat 5:** STATUS/README/contracts/RAG narrative claim **ApexMarkdown
   Unified**; Feature 1 marked Done; release-gate green. No IR schema or CLI
   default changes (Feature 2 still roadmap).
+- **Chat 6:** Internal review
+  ([`docs/reviews/feature-1-internal-review.md`](docs/reviews/feature-1-internal-review.md)):
+  residual stub wording closed; adapter forces
+  `allow_external_plugin_detection=false`; reject `md_len` wrap before NUL
+  copy.
 
 ### Docs — residual post-P3 audit cleanup
 

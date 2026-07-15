@@ -76,9 +76,12 @@ verified. Do not check an item because a design doc exists.
 ## Current phase notes
 
 **v0.1 content-compiler surface** remains the bare CLI default (IR under
-`.boris/`). **P2 and P3 scale-out on the HTML path are complete.** Next product
-work is Apex CommonMark fidelity and promoting HTML to the default CLI — see
-[`docs/STATUS.md`](STATUS.md).
+`.boris/`). **P2 and P3 scale-out on the HTML path are complete.** **Feature 1
+(ApexMarkdown Unified)** is Done. Next product work is promoting HTML to the
+default CLI (Feature 2) — see [`docs/STATUS.md`](STATUS.md).
+
+**Compile-time host tool:** CMake is required for static ApexMarkdown
+(`scripts/build-apex-markdown.sh` / `zig build build-apex`).
 
 Platform-qualified (do not overclaim):
 
@@ -101,14 +104,16 @@ Experimental single-threaded HTML path — Apex, Whiteboard, PageDb, layout
 splice, Atomic publish. Later work wired HTML as **opt-in CLI** and added
 P2/P3 capabilities on that path.
 
-**Still deferred as product defaults / fidelity:** HTML as bare-`boris` default
-CLI mode, CommonMark-complete Apex, mmap, child-process markdown (forbidden).
+**Still deferred as product defaults:** HTML as bare-`boris` default CLI mode
+(Feature 2), mmap, child-process markdown (forbidden). ApexMarkdown Unified is
+the linked engine (Feature 1 Done).
 
-## Milestone 8 scope (prior)
+## Milestone 8 scope (prior; extended by Feature 1)
 
-Native in-process Apex C engine (`vendor/apex/`), defensive Zig wrapper
+Native in-process Apex host ABI (`vendor/apex/`), defensive Zig wrapper
 (`src/apex.zig`), C compilation/linking in `build.zig`, hostile ABI tests,
-optional sanitizer smoke, normative ABI contract.
+optional sanitizer smoke, normative ABI contract. Feature 1 replaced the host
+stub body with an ApexMarkdown Unified adapter and vendored static engine.
 
 ## Milestone 7 scope (prior)
 

@@ -216,7 +216,7 @@ re-opened as greenfield tickets.
 | Field | Detail |
 |-------|--------|
 | **Priority** | **Done** (implementation Chats 1–5; internal/external review Chats 6–7 optional hardening) |
-| **Campaign status** | **Done for product:** pin @ v1.1.11; Strategy A cmake static link; host adapter Unified; U1–U17 fidelity; docs honest. Residual: Chats 6–7 review only. |
+| **Campaign status** | **Done for product** + **Chat 6 internal review** ([feature-1-internal-review.md](reviews/feature-1-internal-review.md)). Residual: Chat 7 external audit only. |
 | **User-visible payoff** | Authors get full **Apex Unified** Markdown (tables, footnotes, def lists, math, callouts, IAL, …) — real [ApexMarkdown/apex](https://github.com/ApexMarkdown/apex) under frozen host `apex.h` |
 | **Modules** | `vendor/apex/*` (host ABI + adapter), `vendor/apex-markdown/*`, `scripts/build-apex-markdown.sh`, `build.zig`, `src/apex.zig` / `aside.zig` tests |
 | **Acceptance** | Met: Unified constructs (U1–U17); `test-apex-hostile`; includes/plugins/highlighters off; Whiteboard copy + `apex_free_string` |
@@ -297,7 +297,8 @@ re-opened as greenfield tickets.
 
 * **Plan:** [`APEX-Feature1-plan.md`](../APEX-Feature1-plan.md) §10 DoD checked (Chats 1–5).
 * **Landed:** pin v1.1.11 · cmake static link · Unified adapter · U1–U17 · docs.
-* **Optional residual:** Chat 6 internal review record; Chat 7 external audit response.
+* **Chat 6 (done):** Internal review + residual doc/adapter hardenings — [feature-1-internal-review.md](reviews/feature-1-internal-review.md).
+* **Optional residual:** Chat 7 external audit response.
 * **Out of scope (still):** Feature 2; `--apex-mode`; Strategy B pure zig-cc.
 
 ### Card 2 — HTML default CLI mode (`src/html-default-cli`)
@@ -353,7 +354,7 @@ not by themselves change IR schema.
 
 ## Open risks (track; not automatic next tickets)
 
-1. Feature 1 product land is Done; optional Chats 6–7 (internal/external review) for audit hardening only.
+1. Feature 1 product land + internal review Done; optional Chat 7 for external audit fielding only.
 2. Publication atomicity across volumes/OSes not fully proven.
 3. Residual dual-helper surface: product IR/RAG/HTML input uses `parser.zig` with
    author key **`parent` only** (`parentEntry` / `parent_entry` rejected).
@@ -385,8 +386,9 @@ validated metadata and graph-aware docs, not a polyglot web framework.
 | `docs/contracts/multi-target-isolated-output.md` | P3.3 multi-target (normative; implemented) |
 | `docs/AUDIT-v0.1.md` | Self-audit report (m10 historical) |
 | `docs/reviews/post-p3-reconciliation.md` | Post-P3 docs reconciliation audit |
-| `APEX-Feature1-plan.md` | Feature 1 authority (real ApexMarkdown Unified) |
-| `docs/reviews/feature-1-apex-fidelity-spec.md` | Feature 1 pointer — implement only when assigned |
+| `APEX-Feature1-plan.md` | Feature 1 authority (real ApexMarkdown Unified) — product Done |
+| `docs/reviews/feature-1-apex-fidelity-spec.md` | Feature 1 handoff pointer |
+| `docs/reviews/feature-1-internal-review.md` | Feature 1 Chat 6 internal review record |
 | `docs/rag/system/` | Narrative seeds (RAG system segment) |
 | `CHANGELOG.md` | What changed |
 | This file | Living status + priority / roadmap list |
