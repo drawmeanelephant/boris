@@ -54,6 +54,11 @@ How to use going forward:
 
 ### Fixed
 
+- Test isolation: compile/assemble filesystem tests no longer use fixed
+  `zig-cache/boris-*` workdirs. Parallel `zig build test` executables that
+  re-import those modules raced on the same paths and failed with
+  `FileNotFound` (layout open / scrub). Paths now use `std.testing.tmpDir`.
+
 - Adversarial backlog (issues #8–#28 remaining after #7/#23): include expansion
   already landed in #29; this cut hardens cache fingerprints (little-endian
   length prefixes, JSON-escaped manifest, output size freshness, page→page

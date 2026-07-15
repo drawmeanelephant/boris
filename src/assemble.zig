@@ -513,24 +513,38 @@ test "scrubStaleAtomicTemps removes orphan hex and .tmp files" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-scrub-temps";
+    // Unique tmp path: fixed zig-cache/* dirs race across parallel test executables.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-scrub-temps", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
-    try cwd.writeFile(io, .{ .sub_path = work ++ "/0123456789abcdef", .data = "orphan" });
-    try cwd.writeFile(io, .{ .sub_path = work ++ "/page.html.tmp", .data = "tmp" });
-    try cwd.writeFile(io, .{ .sub_path = work ++ "/keep.html", .data = "keep" });
-    try cwd.createDirPath(io, work ++ "/nested");
-    try cwd.writeFile(io, .{ .sub_path = work ++ "/nested/fedcba9876543210", .data = "nested-orphan" });
+    const orphan = try std.fmt.allocPrint(gpa, "{s}/0123456789abcdef", .{work});
+    defer gpa.free(orphan);
+    const page_tmp = try std.fmt.allocPrint(gpa, "{s}/page.html.tmp", .{work});
+    defer gpa.free(page_tmp);
+    const keep = try std.fmt.allocPrint(gpa, "{s}/keep.html", .{work});
+    defer gpa.free(keep);
+    const nested = try std.fmt.allocPrint(gpa, "{s}/nested", .{work});
+    defer gpa.free(nested);
+    const nested_orphan = try std.fmt.allocPrint(gpa, "{s}/nested/fedcba9876543210", .{work});
+    defer gpa.free(nested_orphan);
+
+    try cwd.writeFile(io, .{ .sub_path = orphan, .data = "orphan" });
+    try cwd.writeFile(io, .{ .sub_path = page_tmp, .data = "tmp" });
+    try cwd.writeFile(io, .{ .sub_path = keep, .data = "keep" });
+    try cwd.createDirPath(io, nested);
+    try cwd.writeFile(io, .{ .sub_path = nested_orphan, .data = "nested-orphan" });
 
     var dir = try cwd.openDir(io, work, .{ .iterate = true });
     defer dir.close(io);
     scrubStaleAtomicTemps(io, dir, gpa);
 
-    try std.testing.expectError(error.FileNotFound, cwd.access(io, work ++ "/0123456789abcdef", .{}));
-    try std.testing.expectError(error.FileNotFound, cwd.access(io, work ++ "/page.html.tmp", .{}));
-    try std.testing.expectError(error.FileNotFound, cwd.access(io, work ++ "/nested/fedcba9876543210", .{}));
-    try cwd.access(io, work ++ "/keep.html", .{});
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, orphan, .{}));
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, page_tmp, .{}));
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, nested_orphan, .{}));
+    try cwd.access(io, keep, .{});
 }
 
 test "layout split is zero-copy into raw" {
@@ -609,9 +623,11 @@ test "writePage destination replacement over prior output" {
     const io = std.testing.io;
 
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-assemble-replace";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-assemble-replace", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
     var out = try cwd.openDir(io, work, .{ .iterate = true });
     defer out.close(io);
 
@@ -631,9 +647,11 @@ test "failed write keeps prior output intact" {
     const io = std.testing.io;
 
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-assemble-fail-keep";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-assemble-fail-keep", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
     var out = try cwd.openDir(io, work, .{});
     defer out.close(io);
 
@@ -658,9 +676,11 @@ test "temp-file cleanup on failed write" {
     const io = std.testing.io;
 
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-assemble-temp-cleanup";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-assemble-temp-cleanup", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
     var out = try cwd.openDir(io, work, .{ .iterate = true });
     defer out.close(io);
 
@@ -689,9 +709,11 @@ test "writePage sequential splice does not concatenate in memory" {
     const io = std.testing.io;
 
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-assemble-splice";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-assemble-splice", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
     var out = try cwd.openDir(io, work, .{});
     defer out.close(io);
 

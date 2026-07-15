@@ -1413,9 +1413,11 @@ test "layout missing marker aborts before content compile" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-m9-missing-layout";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-m9-missing-layout", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "<html>no marker</html>");
     try writeTreeFile(io, work, "content/index.md", "# Hi\n");
@@ -1444,9 +1446,11 @@ test "layout duplicate marker aborts before content compile" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-m9-dup-layout";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-m9-dup-layout", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "<a>{{content}}</a>{{content}}");
     try writeTreeFile(io, work, "content/index.md", "# Hi\n");
@@ -1470,9 +1474,11 @@ test "valid layout output equals prefix + rendered html + suffix" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-m9-splice";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-m9-splice", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     const layout_raw = "PRE-{{content}}-SUF";
     try writeTreeFile(io, work, "layouts/main.html", layout_raw);
@@ -1523,9 +1529,11 @@ test "render failure: whiteboard resets and no final output published" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-m9-render-fail";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-m9-render-fail", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "<html>{{content}}</html>");
     try writeTreeFile(io, work, "content/index.md", "# Never published\n");
@@ -1583,9 +1591,11 @@ test "write failure: prior final remains and temp cleaned" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-m9-write-fail";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-m9-write-fail", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "<x>{{content}}</x>");
     try writeTreeFile(io, work, "content/index.md", "# Page\n\nbody text\n");
@@ -1636,9 +1646,11 @@ test "success publish then whiteboard reset; PageDb metadata intact" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-m9-pagedb";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-m9-pagedb", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
     try writeTreeFile(io, work, "content/alpha.md",
@@ -1733,9 +1745,11 @@ test "output paths use identity.safeOutputRelativePath (via PageDb)" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-m9-paths";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-m9-paths", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "{{content}}");
     try writeTreeFile(io, work, "content/nested/deep/page.md", "# Deep\n");
@@ -1776,9 +1790,11 @@ test "HTML path rejects invalid parent (graph gate)" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-f6-graph-gate";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f6-graph-gate", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "<html>{{nav}}{{content}}</html>");
     try writeTreeFile(io, work, "content/orphan.md", "---\ntitle: Orphan\nparent: missing-trunk\n---\n\n# Orphan\n");
@@ -1802,9 +1818,11 @@ test "HTML path emits site nav and breadcrumb for forest" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-f6-nav-emit";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f6-nav-emit", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html",
         \\<html><title>{{title}}</title>{{nav}}{{breadcrumb}}{{content}}</html>
@@ -1842,9 +1860,11 @@ test "HTML path emits page toc from body headings" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-f6-toc-emit";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f6-toc-emit", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html",
         \\<html>{{toc}}<main>{{content}}</main></html>
@@ -1907,9 +1927,11 @@ test "html fixture golden: expected/ matches compile output" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-m9-golden";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-m9-golden", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
     defer gpa.free(dist);
@@ -1941,9 +1963,11 @@ test "Feature 7 HTML: include expands and wiki becomes relative href" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-f7-include-wiki-ok";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f7-include-wiki-ok", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
     try writeTreeFile(io, work, "content/index.md",
@@ -2000,9 +2024,11 @@ test "Feature 7 HTML: fail-loud missing include" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-f7-missing-include";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f7-missing-include", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
     try writeTreeFile(io, work, "content/index.md",
@@ -2032,9 +2058,11 @@ test "Feature 7 HTML: fail-loud include cycle" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-f7-include-cycle";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f7-include-cycle", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
     try writeTreeFile(io, work, "content/index.md",
@@ -2066,9 +2094,11 @@ test "Feature 7 HTML: nested include missing reports fragment locus" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-f7-nested-locus";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f7-nested-locus", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
     try writeTreeFile(io, work, "content/index.md",
@@ -2100,9 +2130,11 @@ test "Feature 7 HTML: fail-loud missing wiki target" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-f7-missing-wiki";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f7-missing-wiki", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
     try writeTreeFile(io, work, "content/index.md",
@@ -2132,9 +2164,11 @@ test "Feature 7 HTML: fenced include and wiki stay literal" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-f7-fences";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f7-fences", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
     try writeTreeFile(io, work, "content/index.md",
@@ -2195,9 +2229,11 @@ test "flush-before-reset: compile defers free_all only after writePage" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-m9-flush-order";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-m9-flush-order", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "H{{content}}T");
     try writeTreeFile(io, work, "content/p.md", "# Title\n\nParagraph.\n");
@@ -3031,9 +3067,11 @@ test "compileHtmlSiteMulti - success, validation, and isolation" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-multi-compile-test";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-multi-compile-test", .{tmp.sub_path});
+    defer gpa.free(work);
     try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
 
     try writeTreeFile(io, work, "layouts/main.html", "L{{content}}");
     try writeTreeFile(io, work, "content/alpha.md", "# Alpha\n");
