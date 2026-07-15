@@ -49,6 +49,15 @@ No configuration files. No environment variables. No frontmatter parse at this s
 |--------|-----------|
 | `.md`  | **yes** (case-sensitive) |
 | `.mdx` | **yes** (case-sensitive) |
+
+### Reserved fragment tree
+
+The content-root directory **`includes/`** is **not** entered during discovery.
+Files under `content/includes/**` are available to Boris-mediated
+`{{include path}}` expansion but are never pages (no entity id, no HTML
+output). Nested directories named `includes` under other paths (e.g.
+`guides/includes/`) are **not** reserved and remain normal page trees.
+See [includes-and-wiki-links.md](includes-and-wiki-links.md).
 | `.MD`, `.Md`, `.MDX`, `.Mdx`, … | **no** (ignored) |
 | `.txt` and all other | **no** (ignored) |
 

@@ -234,6 +234,8 @@ fn mapHtmlError(err: anyerror, quiet: bool) ExitCode {
         error.LayoutUnknownMarker,
         error.GraphValidationFailed,
         error.MultiTargetCompilationFailed,
+        error.IncludeFailed,
+        error.ReferenceFailed,
         => {
             if (!quiet) {
                 std.debug.print("error: content or layout failure: {s}\n", .{@errorName(err)});

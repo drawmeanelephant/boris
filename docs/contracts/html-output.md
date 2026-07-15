@@ -174,6 +174,17 @@ page dirties every page that uses that layout (full forest is global chrome).
 Layouts without `{{nav}}` keep the prior page-local fingerprint inputs
 (source, includes, layout bytes, entity id, target identity).
 
+### Includes and wiki-links (pre-Apex)
+
+Before Aside tokenize and Apex, the HTML path:
+
+1. Expands `{{include path}}` (Boris-mediated; Apex FS includes stay off).
+2. Rewrites `[[entity-id]]` wiki-links to relative Markdown links.
+
+Included headings participate in `{{toc}}` (TOC is built from rendered body
+HTML after expansion). Normative syntax and errors:
+[includes-and-wiki-links.md](includes-and-wiki-links.md).
+
 `{{toc}}` is **page-local** (derived from that page’s body). It does **not**
 add global fingerprint material; source/layout inputs already cover heading
 edits on the same page.

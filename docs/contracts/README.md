@@ -23,6 +23,7 @@ is **not** proof that every surface is the default CLI product.
 | Parallel HTML workers / watch | **Implemented** (`--jobs`, `--watch`; see contracts below) |
 | Multi-target isolated outputs | **Implemented** — CLI, isolation, stage commit, selective watch (P3.3) |
 | HTML `dist/` default CLI | **Implemented** (Feature 2) |
+| Includes + wiki-links (HTML) | **Implemented** — pre-Apex; see `includes-and-wiki-links.md` |
 
 ## Canonical ownership (one document per topic)
 
@@ -44,6 +45,7 @@ per topic:
 | Parallel rendering | [parallel-rendering.md](parallel-rendering.md) |
 | Watch Mode | [watch-mode.md](watch-mode.md) |
 | Multi-target isolated outputs | [multi-target-isolated-output.md](multi-target-isolated-output.md) |
+| Includes + wiki-links | [includes-and-wiki-links.md](includes-and-wiki-links.md) |
 
 ### Normative documents (v0.1) — full list
 
@@ -61,6 +63,7 @@ per topic:
 | [parallel-rendering.md](parallel-rendering.md) | Bounded worker pool parallel rendering, thread/memory isolation, deterministic order |
 | [watch-mode.md](watch-mode.md) | Opt-in watch mode, event coalescing/normalization, rebuild serialization, safe recovery |
 | [multi-target-isolated-output.md](multi-target-isolated-output.md) | Multi-target CLI/config, output isolation, cache namespaces (P3.3) |
+| [includes-and-wiki-links.md](includes-and-wiki-links.md) | `{{include}}` + `[[wiki]]` pre-Apex; cycles; `includes/` fragment tree |
 
 ## Redirect / compatibility paths (non-normative)
 

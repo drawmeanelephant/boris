@@ -179,7 +179,7 @@ apex_render → apex_markdown_to_html (APEX_MODE_UNIFIED, fragment HTML)
 | `standalone` | false | Layout splice owns chrome |
 | `pretty` | false | Stable compact HTML |
 | `unsafe` | true | Trusted author content; raw HTML allowed |
-| File includes | off | Boris has its own include graph |
+| File includes | off | Boris expands `{{include}}` in Zig before Apex; never enable Apex FS includes |
 | Plugins | off | Subprocess / untrusted code risk |
 | External plugin detection | off | No CWD/global `.apex/plugins` probe |
 | External highlighters | off | AGENTS forbids MD CLI spawn |

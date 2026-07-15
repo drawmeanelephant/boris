@@ -365,6 +365,28 @@ pub fn build(b: *std.Build) void {
     run_package_tests.setCwd(b.path("."));
 
     // --- Dependency & Cache tests (Milestone P2.1 & P2.3) ------------------
+    const include_mod = b.createModule(.{
+        .root_source_file = b.path("src/include.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const include_tests = b.addTest(.{
+        .root_module = include_mod,
+    });
+    const run_include_tests = b.addRunArtifact(include_tests);
+    run_include_tests.setCwd(b.path("."));
+
+    const wikilink_mod = b.createModule(.{
+        .root_source_file = b.path("src/wikilink.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const wikilink_tests = b.addTest(.{
+        .root_module = wikilink_mod,
+    });
+    const run_wikilink_tests = b.addRunArtifact(wikilink_tests);
+    run_wikilink_tests.setCwd(b.path("."));
+
     const dependency_mod = b.createModule(.{
         .root_source_file = b.path("src/dependency.zig"),
         .target = target,
@@ -405,6 +427,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_package_tests.step);
     test_step.dependOn(&run_dependency_tests.step);
     test_step.dependOn(&run_cache_tests.step);
+    test_step.dependOn(&run_include_tests.step);
+    test_step.dependOn(&run_wikilink_tests.step);
 
     const test_harness_step = b.step(
         "test-harness",

@@ -100,6 +100,11 @@ must emit exactly these strings (no underscore variants such as `E_DUP_ID`).
 | `EINVALIDUTF8` | error | Source not valid UTF-8, or leading UTF-8 BOM | `parser.parse` → pipeline |
 | `EINVALIDPATH` | error | Path or entity id cannot be canonicalized; illegal segments; absolute path; empty / `.` / `..` components; invalid frontmatter `id:` | scanner / `parser.parse` → pipeline |
 | `ECOMPONENT` | error | Aside / component tokenizer failure (unknown PascalCase tag, nested Aside, invalid kind/id, bad attributes, unterminated Aside) | `aside.tokenizeBody` → pipeline |
+| `EINCLUDESYNTAX` | error | Malformed `{{include …}}` directive | `include` → HTML compile |
+| `EINCLUDEMISSING` | error | Include target path not found / unreadable | `include` → HTML compile |
+| `EINCLUDECYCLE` | error | Transclusion cycle among includes (or depth exceeded) | `include` → HTML compile |
+| `EREFERENCESYNTAX` | error | Malformed `[[…]]` wiki-link | `wikilink` → HTML compile |
+| `EREFERENCEMISSING` | error | Wiki-link target entity id not in the page graph | `wikilink` → HTML compile |
 | `EUSAGE` | error | CLI usage / flag error (unknown flag, conflicts, malformed options) | CLI (exit 2; not in build-report) |
 | `EIO` | error | I/O or system failure (missing content root, unreadable file, unexpected runtime) | pipeline / CLI (exit 3 when pure I/O) |
 

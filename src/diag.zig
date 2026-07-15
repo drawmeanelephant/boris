@@ -24,7 +24,7 @@ pub const Severity = enum {
     }
 };
 
-/// Closed diagnostic codes for v0.1 (normative: docs/contracts/diagnostics.md).
+/// Closed diagnostic codes (normative: docs/contracts/diagnostics.md).
 pub const Code = enum {
     EDUPLICATEID,
     EPARENTMISSING,
@@ -36,6 +36,16 @@ pub const Code = enum {
     EINVALIDPATH,
     /// Aside / registered-component tokenizer failures (milestone 10).
     ECOMPONENT,
+    /// Malformed `{{include …}}` directive.
+    EINCLUDESYNTAX,
+    /// Include target path not found / unreadable.
+    EINCLUDEMISSING,
+    /// Transclusion cycle among includes.
+    EINCLUDECYCLE,
+    /// Malformed `[[…]]` wiki-link.
+    EREFERENCESYNTAX,
+    /// Wiki-link target entity id not in the page graph.
+    EREFERENCEMISSING,
     EUSAGE,
     EIO,
 
@@ -154,6 +164,11 @@ test "Code names match contract strings" {
     try std.testing.expectEqualStrings("EINVALIDUTF8", Code.EINVALIDUTF8.name());
     try std.testing.expectEqualStrings("EINVALIDPATH", Code.EINVALIDPATH.name());
     try std.testing.expectEqualStrings("ECOMPONENT", Code.ECOMPONENT.name());
+    try std.testing.expectEqualStrings("EINCLUDESYNTAX", Code.EINCLUDESYNTAX.name());
+    try std.testing.expectEqualStrings("EINCLUDEMISSING", Code.EINCLUDEMISSING.name());
+    try std.testing.expectEqualStrings("EINCLUDECYCLE", Code.EINCLUDECYCLE.name());
+    try std.testing.expectEqualStrings("EREFERENCESYNTAX", Code.EREFERENCESYNTAX.name());
+    try std.testing.expectEqualStrings("EREFERENCEMISSING", Code.EREFERENCEMISSING.name());
     try std.testing.expectEqualStrings("EUSAGE", Code.EUSAGE.name());
     try std.testing.expectEqualStrings("EIO", Code.EIO.name());
 }

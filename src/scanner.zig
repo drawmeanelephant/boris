@@ -108,6 +108,13 @@ pub fn scanDir(io: Io, content_dir: Io.Dir, out: *PageList) ScanError!void {
 
         // --- Real directories: enter once per inode ------------------------
         if (entry.kind == .directory) {
+            // Fragment library for `{{include}}` — never discovered as pages.
+            // Only the content-root `includes/` tree is reserved (not nested
+            // `guides/includes/`).
+            if (std.mem.eql(u8, entry.path, "includes")) {
+                continue;
+            }
+
             const st = entry.dir.statFile(io, entry.basename, .{ .follow_symlinks = false }) catch |err| switch (err) {
                 error.FileNotFound, error.AccessDenied, error.PermissionDenied => continue,
                 else => return err,
@@ -129,6 +136,10 @@ pub fn scanDir(io: Io, content_dir: Io.Dir, out: *PageList) ScanError!void {
         if (entry.kind != .file) continue;
         // Non-page files (.txt, .MD, assets, …) are ignored.
         if (!identity.isPageFile(entry.basename)) continue;
+        // Defense in depth if includes/ were ever entered.
+        if (std.mem.eql(u8, entry.path, "includes") or std.mem.startsWith(u8, entry.path, "includes/")) {
+            continue;
+        }
 
         // Double-check: not a symlink disguised as a file entry.
         const st = entry.dir.statFile(io, entry.basename, .{ .follow_symlinks = false }) catch |err| switch (err) {
@@ -292,6 +303,38 @@ test "scan: stable sorted order independent of creation order" {
     try testing.expectEqualStrings("nested/a-nested", list.items()[2].entity_id);
     try testing.expectEqualStrings("nested/z-nested", list.items()[3].entity_id);
     try testing.expectEqualStrings("z-last", list.items()[4].entity_id);
+}
+
+test "scan: skips content-root includes/ fragment library" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const content_rel = try tmpContentRoot(gpa, io, &tmp);
+    defer gpa.free(content_rel);
+
+    {
+        const cwd = Io.Dir.cwd();
+        var content = try cwd.openDir(io, content_rel, .{});
+        defer content.close(io);
+        try content.writeFile(io, .{ .sub_path = "page.md", .data = "# page\n" });
+        try content.createDirPath(io, "includes");
+        try content.writeFile(io, .{ .sub_path = "includes/frag.md", .data = "fragment\n" });
+        try content.createDirPath(io, "guides/includes");
+        try content.writeFile(io, .{ .sub_path = "guides/includes/keep.md", .data = "# keep nested\n" });
+    }
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var list = PageList.init(gpa, arena.allocator());
+    defer list.deinit();
+
+    try scan(io, .{ .content_root = content_rel }, &list);
+    try testing.expectEqual(@as(usize, 2), list.len());
+    try testing.expectEqualStrings("guides/includes/keep", list.items()[0].entity_id);
+    try testing.expectEqualStrings("page", list.items()[1].entity_id);
 }
 
 test "scan: ignores .txt and case-variant .MD extensions" {

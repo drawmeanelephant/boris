@@ -19,12 +19,17 @@ How to use going forward:
 
 ## [Unreleased]
 
-### Docs — STATUS roadmap: includes + wiki-links
+### Feature 7 — Boris-mediated includes + wiki-links — **Done**
 
-- Record **Next**: Boris-mediated includes and wiki-link resolution (pre-Apex,
-  graph edges, cycle detection, fingerprint contribution). Apex FS includes
-  stay forbidden. Note P2 foundation only (dep kinds / crude `includes/` scan;
-  no product transclusion yet).
+- Author `{{include path}}` expands in Zig before Apex (fence-aware; nested;
+  cycle/missing fail loud). Content-root `includes/` is not discovered as pages.
+- Author `[[entity-id]]` / `[[entity-id|label]]` rewrite to relative Markdown
+  links from the frozen graph. Apex FS includes stay off.
+- Modules: `src/include.zig`, `src/wikilink.zig`; wired in HTML compile;
+  fingerprints hash include bytes + wiki reference material.
+- Diagnostics: `EINCLUDESYNTAX`, `EINCLUDEMISSING`, `EINCLUDECYCLE`,
+  `EREFERENCESYNTAX`, `EREFERENCEMISSING`. Contract:
+  `docs/contracts/includes-and-wiki-links.md`. IR `schemaVersion` unchanged.
 
 ### Docs — sample content polish for v0.2.0
 

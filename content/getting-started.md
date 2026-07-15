@@ -52,6 +52,15 @@ HTML helpers (valid alone, no extra mode flag): `--watch`, `--incremental`,
    ([reference](reference/frontmatter.html)).
 3. Optional layout chrome in `layouts/main.html` (`{{content}}` required;
    `{{nav}}` / `{{breadcrumb}}` / `{{title}}` / `{{toc}}` optional).
+4. Optional includes and wiki-links (expanded before Apex):
 
-Next: the [content model](guides/overview.html) or jump straight to
-[Trunk vs Satellite](guides/trunk-satellite.html).
+```markdown
+{{include includes/shared-tip.md}}
+
+See also [[guides/overview|the content model]].
+```
+
+{{include includes/shared-tip.md}}
+
+Next: the [[guides/overview|content model]] or jump straight to
+[[guides/trunk-satellite|Trunk vs Satellite]].

@@ -48,6 +48,8 @@ const graph_mod = @import("graph.zig");
 const diag = @import("diag.zig");
 const html_nav = @import("html_nav.zig");
 const html_toc = @import("html_toc.zig");
+const include_mod = @import("include.zig");
+const wikilink = @import("wikilink.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -299,9 +301,41 @@ pub fn renderAndPublishPageWithSite(
         if (idx == page_index) return error.TestInjectedRenderFailure;
     }
 
+    // Pre-Apex: expand {{include}} then rewrite [[wiki]] (Boris-mediated; Apex FS off).
+    const expanded = include_mod.expandIncludes(
+        io,
+        content_dir,
+        // Temporary file reads use a short-lived GPA region via the arena's child...
+        // expandIncludes uses `gpa` for file reads and `arena` for output.
+        // Page render only has doc_arena — use a dedicated GPA for file buffers.
+        std.heap.page_allocator,
+        arena,
+        parsed.doc.body,
+        page.source_path,
+    ) catch |err| {
+        if (!options.quiet) {
+            std.debug.print("error: {s}: include resolve failed: {s}\n", .{
+                page.source_path,
+                @errorName(err),
+            });
+        }
+        return error.IncludeFailed;
+    };
+
+    const nodes: []const graph_mod.Node = if (site) |s| s.nodes else &.{};
+    const with_wiki = wikilink.rewriteWikiLinks(arena, expanded, nodes, page.output_path) catch |err| {
+        if (!options.quiet) {
+            std.debug.print("error: {s}: wiki-link resolve failed: {s}\n", .{
+                page.source_path,
+                @errorName(err),
+            });
+        }
+        return error.ReferenceFailed;
+    };
+
     // Body stream: markdown segments via Apex, Aside via aside.renderHtml.
     // Document order preserved; all HTML lives on the Whiteboard only.
-    const tok = try aside.tokenizeBody(parsed.doc.body, arena);
+    const tok = try aside.tokenizeBody(with_wiki, arena);
     if (tok.hasErrors()) return error.ComponentFailed;
 
     var html_buf: std.ArrayList(u8) = .empty;
@@ -373,73 +407,6 @@ pub const ParsedCacheManifest = struct {
 
 fn compareStrings(_: void, a: []const u8, b: []const u8) bool {
     return std.mem.order(u8, a, b) == .lt;
-}
-
-fn scanIncludes(allocator: std.mem.Allocator, bytes: []const u8, list: *std.ArrayList([]const u8)) !void {
-    var i: usize = 0;
-    while (i < bytes.len) {
-        const prefix = "includes/";
-        if (std.mem.startsWith(u8, bytes[i..], prefix)) {
-            var j = i + prefix.len;
-            while (j < bytes.len) {
-                const c = bytes[j];
-                if (std.ascii.isAlphanumeric(c) or c == '.' or c == '/' or c == '_' or c == '-') {
-                    j += 1;
-                } else {
-                    break;
-                }
-            }
-            if (j > i + prefix.len) {
-                const path = bytes[i..j];
-                var exists = false;
-                for (list.items) |existing| {
-                    if (std.mem.eql(u8, existing, path)) {
-                        exists = true;
-                        break;
-                    }
-                }
-                if (!exists) {
-                    try list.append(allocator, try allocator.dupe(u8, path));
-                }
-            }
-            i = j;
-        } else {
-            i += 1;
-        }
-    }
-}
-
-fn scanIncludesRecursively(
-    io: Io,
-    gpa: std.mem.Allocator,
-    content_dir: Io.Dir,
-    include_path: []const u8,
-    dep_index: *dependency.DependencyIndex,
-    visited: *std.StringHashMapUnmanaged(void),
-    inc_alloc: std.mem.Allocator,
-) !void {
-    if (visited.contains(include_path)) return;
-    try visited.put(gpa, include_path, {});
-
-    const inc_bytes = readFileAlloc(io, content_dir, include_path, gpa) catch |err| {
-        if (err == error.FileNotFound) return;
-        return err;
-    };
-    defer gpa.free(inc_bytes);
-
-    var sub_includes: std.ArrayList([]const u8) = .empty;
-    defer {
-        for (sub_includes.items) |sub| gpa.free(sub);
-        sub_includes.deinit(gpa);
-    }
-    try scanIncludes(gpa, inc_bytes, &sub_includes);
-
-    for (sub_includes.items) |sub_path| {
-        const owned_inc = try inc_alloc.dupe(u8, include_path);
-        const owned_sub = try inc_alloc.dupe(u8, sub_path);
-        try dep_index.addDependency(owned_inc, owned_sub, .include);
-        try scanIncludesRecursively(io, gpa, content_dir, owned_sub, dep_index, visited, inc_alloc);
-    }
 }
 
 fn collectTransitIncludes(
@@ -560,9 +527,6 @@ const SharedCompileState = struct {
         var dep_index = dependency.DependencyIndex.init(gpa);
         errdefer dep_index.deinit();
 
-        var visited_includes = std.StringHashMapUnmanaged(void).empty;
-        defer visited_includes.deinit(gpa);
-
         const source_bytes = try gpa.alloc([]u8, db.len());
         var sources_filled: usize = 0;
         errdefer {
@@ -575,18 +539,41 @@ const SharedCompileState = struct {
             source_bytes[i] = src;
             sources_filled = i + 1;
 
-            var page_includes = std.ArrayList([]const u8).empty;
+            const body = include_mod.bodyOfSource(src);
+            var page_includes: std.ArrayList([]const u8) = .empty;
             defer {
                 for (page_includes.items) |inc| gpa.free(inc);
                 page_includes.deinit(gpa);
             }
-            try scanIncludes(gpa, src, &page_includes);
+            include_mod.collectTransitiveIncludes(io, content_dir, gpa, body, &page_includes) catch |err| {
+                if (err == error.IncludeMissing or err == error.IncludeCycle or
+                    err == error.IncludeSyntax or err == error.InvalidPath or
+                    err == error.DepthExceeded)
+                {
+                    return error.IncludeFailed;
+                }
+                return err;
+            };
 
+            // Page → every transitive include (fingerprint + reverse dirty-set).
             for (page_includes.items) |inc_path| {
                 const owned_src = try inc_alloc.dupe(u8, p.source_path);
                 const owned_inc = try inc_alloc.dupe(u8, inc_path);
                 try dep_index.addDependency(owned_src, owned_inc, .include);
-                try scanIncludesRecursively(io, gpa, content_dir, owned_inc, &dep_index, &visited_includes, inc_alloc);
+            }
+            // Include → include edges for nested reverse walks.
+            for (page_includes.items) |inc_path| {
+                const inc_file = readFileAlloc(io, content_dir, inc_path, gpa) catch continue;
+                defer gpa.free(inc_file);
+                const inc_body = include_mod.bodyOfSource(inc_file);
+                var nested_hits: std.ArrayList(include_mod.ScanHit) = .empty;
+                defer nested_hits.deinit(gpa);
+                include_mod.scanIncludeDirectives(inc_body, gpa, &nested_hits) catch continue;
+                for (nested_hits.items) |hit| {
+                    const owned_from = try inc_alloc.dupe(u8, inc_path);
+                    const owned_to = try inc_alloc.dupe(u8, hit.path);
+                    try dep_index.addDependency(owned_from, owned_to, .include);
+                }
             }
         }
 
@@ -1019,12 +1006,29 @@ fn compilePagesInner(
         for (inc_owned, 0..) |b, j| inc_views[j] = b;
 
         const nav_material: []const u8 = if (layout.has_nav) site.site_nav_material else "";
+        // Wiki reference material (target title/path) so renames dirty dependents.
+        const body_for_wiki = include_mod.bodyOfSource(shared.source_bytes[page_idx]);
+        const ref_material = wikilink.referenceMaterial(gpa, body_for_wiki, site.nodes) catch |err| {
+            if (err == error.ReferenceMissing or err == error.ReferenceSyntax) {
+                return error.ReferenceFailed;
+            }
+            return err;
+        };
+        defer gpa.free(ref_material);
+
+        var inc_with_ref = try gpa.alloc([]const u8, inc_views.len + if (ref_material.len > 0) @as(usize, 1) else 0);
+        defer gpa.free(inc_with_ref);
+        @memcpy(inc_with_ref[0..inc_views.len], inc_views);
+        if (ref_material.len > 0) {
+            inc_with_ref[inc_views.len] = ref_material;
+        }
+
         const fp_bytes = cache.computePageFingerprint(
             options.target_name,
             options.layout_path,
             page.entity_id,
             shared.source_bytes[page_idx],
-            inc_views,
+            inc_with_ref,
             layout_bytes,
             nav_material,
         );
@@ -1868,7 +1872,7 @@ test "incremental HTML build mode - full verification suite" {
         \\---
         \\# Alpha
         \\
-        \\This page includes includes/sidebar.html
+        \\{{include includes/sidebar.md}}
         \\
     );
     try writeTreeFile(io, work, "content/beta.md",
@@ -1880,8 +1884,8 @@ test "incremental HTML build mode - full verification suite" {
         \\No includes here.
         \\
     );
-    try writeTreeFile(io, work, "content/includes/sidebar.html", "Sidebar includes includes/widget.html content.");
-    try writeTreeFile(io, work, "content/includes/widget.html", "Widget nested content.");
+    try writeTreeFile(io, work, "content/includes/sidebar.md", "Sidebar {{include includes/widget.md}} content.");
+    try writeTreeFile(io, work, "content/includes/widget.md", "Widget nested content.");
 
     // ---- 1. Cold cache / first run ----
     // This is the first incremental run: must render all pages (2) and write manifest.json
@@ -1975,10 +1979,10 @@ test "incremental HTML build mode - full verification suite" {
     }
 
     // ---- 4. Modifying a transitive include file ----
-    // Edit content/includes/widget.html.
-    // Since alpha.md depends on includes/sidebar.html which depends on includes/widget.html,
-    // editing widget.html should trigger a re-render of alpha.md but NOT beta.md!
-    try writeTreeFile(io, work, "content/includes/widget.html", "Widget nested content edited!");
+    // Edit content/includes/widget.md.
+    // Since alpha.md depends on includes/sidebar.md which depends on includes/widget.md,
+    // editing widget.md should trigger a re-render of alpha.md but NOT beta.md!
+    try writeTreeFile(io, work, "content/includes/widget.md", "Widget nested content edited!");
 
     {
         var layout_arena = std.heap.ArenaAllocator.init(gpa);
