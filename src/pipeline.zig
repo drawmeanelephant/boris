@@ -308,7 +308,6 @@ fn resolveDependencies(
     }
 }
 
-/// Populate the HTML/cache dependency index from the same direct dependency
 /// resolver used by IR 0.2. Page endpoints are keyed by entity id and source
 /// endpoints by content-root-relative path, matching `getAffectedPages`.
 /// Layout/asset dependencies remain HTML-internal and are added by that path.

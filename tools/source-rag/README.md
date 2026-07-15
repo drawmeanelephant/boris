@@ -57,6 +57,10 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
 source-rag/
   INDEX.md              # retrieval map — start here in a chat
   UPLOAD-GUIDE.md       # how to upload / query
+  boris-source-1.md     # first sorted-path half of non-docs/content files
+  boris-source-2.md     # second sorted-path half of non-docs/content files
+  boris-docs.md         # all packed docs/** files
+  boris-content.md      # all packed content/** files
   catalog.jsonl         # one JSON object per document
   catalog_meta.json     # format + schema_version + tool_version
   files/**              # one markdown document per source path
@@ -100,6 +104,17 @@ rag_id, rag_path, category, title, source_path, lang, bytes
 Rows are sorted by `rag_path`. Machine files (`catalog.jsonl`,
 `catalog_meta.json`) are **not** catalog rows; meta docs `INDEX.md` and
 `UPLOAD-GUIDE.md` **are** rows (`category: meta`).
+
+### Combined upload bundles
+
+The four `boris-*.md` files are additive convenience bundles for LLM uploads;
+the per-file `files/**` corpus and catalog remain unchanged. `boris-docs.md`
+contains all packed `docs/**` files, and `boris-content.md` contains all packed
+`content/**` files. The source corpus is split into `boris-source-1.md` and
+`boris-source-2.md` at a whole-document boundary near half of the packed body
+bytes in sorted source-path order. This keeps output deterministic and avoids
+splitting or reordering a source file, though a large indivisible file may make
+the byte sizes differ. Empty groups are still emitted with valid bundle metadata.
 
 ---
 

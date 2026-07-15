@@ -2436,6 +2436,8 @@ test "incremental HTML build mode - full verification suite" {
     defer gpa.free(content);
     const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
     defer gpa.free(dist);
+    const full_dist = try std.fmt.allocPrint(gpa, "{s}/dist-full", .{work});
+    defer gpa.free(full_dist);
 
     // Write initial layouts and content files
     try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
@@ -2482,6 +2484,39 @@ test "incremental HTML build mode - full verification suite" {
         });
         try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
         try std.testing.expectEqual(@as(usize, 2), stats.pages_attempted);
+    }
+
+    // A cold incremental build must be byte-equivalent to a full build.
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+        const stats = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = full_dist,
+            .layout_path = layout_path,
+            .incremental = false,
+            .quiet = true,
+        });
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
+    }
+    {
+        var inc_dir = try cwd.openDir(io, dist, .{});
+        defer inc_dir.close(io);
+        var full_dir = try cwd.openDir(io, full_dist, .{});
+        defer full_dir.close(io);
+        for ([_][]const u8{ "alpha.html", "beta.html" }) |path| {
+            const incremental = try readAllFile(io, inc_dir, path, gpa);
+            defer gpa.free(incremental);
+            const full = try readAllFile(io, full_dir, path, gpa);
+            defer gpa.free(full);
+            try std.testing.expectEqualSlices(u8, full, incremental);
+        }
     }
 
     // Verify manifest was written

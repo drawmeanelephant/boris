@@ -206,6 +206,7 @@ fn printUsage() void {
         \\
         \\Output tree:
         \\  INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json
+        \\  boris-source-1.md  boris-source-2.md  boris-docs.md  boris-content.md
         \\  files/**  (one markdown document per source path)
         \\
         \\Exit codes: 0 success, 2 usage, 3 I/O error
@@ -514,6 +515,190 @@ fn renderSourceDocument(
     return try doc.toOwnedSlice(gpa);
 }
 
+const PackedSource = struct {
+    rag_id: []const u8,
+    rag_path: []const u8,
+    source_path: []const u8,
+    lang: []const u8,
+    body: []u8,
+};
+
+const BundleKind = enum {
+    source,
+    docs,
+    content,
+};
+
+fn bundleKindForPath(source_path: []const u8) BundleKind {
+    if (std.mem.startsWith(u8, source_path, "docs/")) return .docs;
+    if (std.mem.startsWith(u8, source_path, "content/")) return .content;
+    return .source;
+}
+
+fn bundleKindName(kind: BundleKind) []const u8 {
+    return switch (kind) {
+        .source => "source",
+        .docs => "docs",
+        .content => "content",
+    };
+}
+
+/// Source bundle parts are contiguous sorted-path halves. Choose the boundary
+/// nearest half of the packed body bytes without splitting a document. Ties
+/// prefer the earlier boundary for deterministic output.
+fn sourceBundleSplitIndex(files: []const PackedSource) usize {
+    if (files.len <= 1) return files.len;
+    const total = bundleByteCount(files);
+    const target = (total + 1) / 2;
+    var prefix: usize = 0;
+    var best_index: usize = 1;
+    var best_distance: usize = std.math.maxInt(usize);
+    for (files[0 .. files.len - 1], 0..) |file, index| {
+        prefix += file.body.len;
+        const distance = if (prefix >= target) prefix - target else target - prefix;
+        if (distance < best_distance) {
+            best_distance = distance;
+            best_index = index + 1;
+        }
+    }
+    return best_index;
+}
+
+fn bundleFileName(kind: BundleKind, part: usize) []const u8 {
+    return switch (kind) {
+        .source => switch (part) {
+            1 => "boris-source-1.md",
+            2 => "boris-source-2.md",
+            else => unreachable,
+        },
+        .docs => "boris-docs.md",
+        .content => "boris-content.md",
+    };
+}
+
+fn bundleByteCount(files: []const PackedSource) usize {
+    var total: usize = 0;
+    for (files) |file| total += file.body.len;
+    return total;
+}
+
+fn renderBundle(
+    gpa: std.mem.Allocator,
+    file_name: []const u8,
+    kind: BundleKind,
+    part: ?usize,
+    parts: ?usize,
+    files: []const PackedSource,
+) ![]u8 {
+    var doc: std.ArrayList(u8) = .empty;
+    errdefer doc.deinit(gpa);
+
+    try doc.appendSlice(gpa, "---\nrag_id: bundle/");
+    try doc.appendSlice(gpa, file_name);
+    try doc.appendSlice(gpa, "\nrag_path: ");
+    try doc.appendSlice(gpa, file_name);
+    try doc.appendSlice(gpa, "\ncategory: bundle\nbundle_kind: ");
+    try doc.appendSlice(gpa, bundleKindName(kind));
+    if (part) |p| {
+        try doc.appendSlice(gpa, "\npart: ");
+        var num_buf: [32]u8 = undefined;
+        const num = try std.fmt.bufPrint(&num_buf, "{d}", .{p});
+        try doc.appendSlice(gpa, num);
+    }
+    if (parts) |count| {
+        try doc.appendSlice(gpa, "\nparts: ");
+        var num_buf: [32]u8 = undefined;
+        const num = try std.fmt.bufPrint(&num_buf, "{d}", .{count});
+        try doc.appendSlice(gpa, num);
+    }
+    try doc.appendSlice(gpa, "\ndocuments: ");
+    {
+        var num_buf: [32]u8 = undefined;
+        const num = try std.fmt.bufPrint(&num_buf, "{d}", .{files.len});
+        try doc.appendSlice(gpa, num);
+    }
+    try doc.appendSlice(gpa, "\nbytes: ");
+    {
+        var num_buf: [32]u8 = undefined;
+        const num = try std.fmt.bufPrint(&num_buf, "{d}", .{bundleByteCount(files)});
+        try doc.appendSlice(gpa, num);
+    }
+    try doc.appendSlice(gpa, "\n---\n\n# Boris ");
+    try doc.appendSlice(gpa, bundleKindName(kind));
+    if (part) |p| {
+        try doc.appendSlice(gpa, " bundle ");
+        var num_buf: [32]u8 = undefined;
+        const num = try std.fmt.bufPrint(&num_buf, "{d}", .{p});
+        try doc.appendSlice(gpa, num);
+        if (parts) |count| {
+            try doc.appendSlice(gpa, "/");
+            const count_text = try std.fmt.bufPrint(&num_buf, "{d}", .{count});
+            try doc.appendSlice(gpa, count_text);
+        }
+    } else {
+        try doc.appendSlice(gpa, " bundle");
+    }
+    try doc.appendSlice(gpa, "\n\nEach packed source below is a whole document. Its per-document frontmatter and fenced body retain the original `source_path`, language, and byte count.\n");
+
+    if (files.len == 0) {
+        try doc.appendSlice(gpa, "\nNo packed documents are in this bundle.\n");
+        return try doc.toOwnedSlice(gpa);
+    }
+
+    for (files, 0..) |file, index| {
+        try doc.appendSlice(gpa, "\n\n## Packed document ");
+        var num_buf: [32]u8 = undefined;
+        const num = try std.fmt.bufPrint(&num_buf, "{d}", .{index + 1});
+        try doc.appendSlice(gpa, num);
+        try doc.appendSlice(gpa, ": `");
+        try doc.appendSlice(gpa, file.source_path);
+        try doc.appendSlice(gpa, "`\n\n");
+
+        const segment = try renderSourceDocument(
+            gpa,
+            file.rag_id,
+            file.rag_path,
+            file.source_path,
+            file.lang,
+            file.body,
+        );
+        defer gpa.free(segment);
+        try doc.appendSlice(gpa, segment);
+    }
+
+    return try doc.toOwnedSlice(gpa);
+}
+
+fn exportBundle(
+    io: Io,
+    gpa: std.mem.Allocator,
+    out_dir: Io.Dir,
+    file_name: []const u8,
+    kind: BundleKind,
+    part: ?usize,
+    parts: ?usize,
+    files: []const PackedSource,
+) !void {
+    const doc = try renderBundle(gpa, file_name, kind, part, parts, files);
+    defer gpa.free(doc);
+    try writeBytes(io, out_dir, file_name, doc);
+}
+
+fn exportBundles(
+    io: Io,
+    gpa: std.mem.Allocator,
+    out_dir: Io.Dir,
+    source_files: []const PackedSource,
+    docs_files: []const PackedSource,
+    content_files: []const PackedSource,
+) !void {
+    const split = sourceBundleSplitIndex(source_files);
+    try exportBundle(io, gpa, out_dir, bundleFileName(.source, 1), .source, 1, 2, source_files[0..split]);
+    try exportBundle(io, gpa, out_dir, bundleFileName(.source, 2), .source, 2, 2, source_files[split..]);
+    try exportBundle(io, gpa, out_dir, bundleFileName(.docs, 0), .docs, null, null, docs_files);
+    try exportBundle(io, gpa, out_dir, bundleFileName(.content, 0), .content, null, null, content_files);
+}
+
 fn exportCatalogMeta(io: Io, out_dir: Io.Dir) !void {
     var buf: [128]u8 = undefined;
     const line = try std.fmt.bufPrint(
@@ -604,6 +789,23 @@ fn exportIndex(
         \\4. Prefer `files/docs/contracts/**` for IR / machine contracts.
         \\5. Cite `source_path` from document frontmatter when answering.
         \\
+        \\## Combined upload bundles
+        \\
+        \\These root-level Markdown files are additive convenience bundles; the
+        \\per-file `files/**` documents and catalog remain unchanged:
+        \\
+        \\| File | Contents |
+        \\|------|----------|
+        \\| `boris-source-1.md` | First sorted-path half of packed non-docs/content sources |
+        \\| `boris-source-2.md` | Second sorted-path half of packed non-docs/content sources |
+        \\| `boris-docs.md` | All packed `docs/**` files |
+        \\| `boris-content.md` | All packed `content/**` files |
+        \\
+        \\The two source parts use whole documents and a deterministic boundary
+        \\nearest half of the packed body bytes. A large indivisible file may
+        \\still make the byte sizes uneven. Empty bundles are still emitted with
+        \\metadata explaining that they contain no files.
+        \\
         \\## Full catalog
         \\
         \\| rag_path | lang | source_path | bytes |
@@ -668,6 +870,23 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir) !void {
         \\2. `files/src/**`
         \\3. `files/docs/contracts/**` (if present)
         \\4. `files/AGENTS.md` / `files/README.md` (if present)
+        \\
+        \\## Combined bundles
+        \\
+        \\For a small number of uploads, use the four root-level combined Markdown
+        \\files:
+        \\
+        \\- `boris-source-1.md` and `boris-source-2.md` contain all packed sources
+        \\  outside `docs/**` and `content/**`, including root `AGENTS.md`,
+        \\  `README.md`, `CHANGELOG.md`, and build files.
+        \\- `boris-docs.md` contains all packed `docs/**` files.
+        \\- `boris-content.md` contains all packed `content/**` files.
+        \\
+        \\Each entry is a whole Markdown document with `source_path` frontmatter and
+        \\a fence chosen to remain safe for the original body. The source pair is
+        \\split near half of the packed body bytes in sorted source-path order.
+        \\The boundary never splits a file or reorders documents, and empty groups
+        \\are emitted as valid bundles.
         \\
         \\## Suggested system prompt
         \\
@@ -735,6 +954,22 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     var catalog: std.ArrayList(CatalogEntry) = .empty;
     defer catalog.deinit(gpa);
 
+    var packed_source: std.ArrayList(PackedSource) = .empty;
+    defer {
+        for (packed_source.items) |file| gpa.free(file.body);
+        packed_source.deinit(gpa);
+    }
+    var packed_docs: std.ArrayList(PackedSource) = .empty;
+    defer {
+        for (packed_docs.items) |file| gpa.free(file.body);
+        packed_docs.deinit(gpa);
+    }
+    var packed_content: std.ArrayList(PackedSource) = .empty;
+    defer {
+        for (packed_content.items) |file| gpa.free(file.body);
+        packed_content.deinit(gpa);
+    }
+
     var stats: ExportStats = .{};
 
     log(opts, "\nSource RAG → {s}/  (root={s})\n", .{ opts.out_dir, opts.root_dir });
@@ -775,9 +1010,24 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
             .lang = lang,
             .bytes = data.len,
         });
+
+        const packed_file = PackedSource{
+            .rag_id = rag_id,
+            .rag_path = rag_path,
+            .source_path = source_path,
+            .lang = lang,
+            .body = try gpa.dupe(u8, data),
+        };
+        switch (bundleKindForPath(source_path)) {
+            .source => try packed_source.append(gpa, packed_file),
+            .docs => try packed_docs.append(gpa, packed_file),
+            .content => try packed_content.append(gpa, packed_file),
+        }
         stats.source_files += 1;
         log(opts, "  source     {s}\n", .{source_path});
     }
+
+    try exportBundles(io, gpa, out, packed_source.items, packed_docs.items, packed_content.items);
 
     // Meta documents (not source rows until we add them to catalog).
     try exportUploadGuide(io, out);
@@ -940,6 +1190,25 @@ test "fenceLenFor handles nested fences" {
     try std.testing.expectEqual(@as(usize, 5), fenceLenFor("```` longer"));
 }
 
+test "bundle partition and classification are deterministic" {
+    const files = [_]PackedSource{
+        .{ .rag_id = "a", .rag_path = "a", .source_path = "a", .lang = "text", .body = @constCast("10 bytes") },
+        .{ .rag_id = "b", .rag_path = "b", .source_path = "b", .lang = "text", .body = @constCast("20 bytes here") },
+        .{ .rag_id = "c", .rag_path = "c", .source_path = "c", .lang = "text", .body = @constCast("30 bytes here, yes") },
+    };
+    try std.testing.expectEqual(@as(usize, 0), sourceBundleSplitIndex(&.{}));
+    try std.testing.expectEqual(@as(usize, 1), sourceBundleSplitIndex(files[0..1]));
+    try std.testing.expectEqual(@as(usize, 2), sourceBundleSplitIndex(files[0..]));
+    try std.testing.expectEqual(BundleKind.docs, bundleKindForPath("docs/contracts/ir-schema.md"));
+    try std.testing.expectEqual(BundleKind.content, bundleKindForPath("content/index.md"));
+    try std.testing.expectEqual(BundleKind.source, bundleKindForPath("src/pipeline.zig"));
+    try std.testing.expectEqual(BundleKind.source, bundleKindForPath("README.md"));
+    try std.testing.expectEqualStrings("boris-source-1.md", bundleFileName(.source, 1));
+    try std.testing.expectEqualStrings("boris-source-2.md", bundleFileName(.source, 2));
+    try std.testing.expectEqualStrings("boris-docs.md", bundleFileName(.docs, 0));
+    try std.testing.expectEqualStrings("boris-content.md", bundleFileName(.content, 0));
+}
+
 test "looksBinary" {
     try std.testing.expect(!looksBinary("hello\n"));
     try std.testing.expect(looksBinary(&[_]u8{ 'a', 0, 'b' }));
@@ -1006,4 +1275,17 @@ test "exportCorpus mini fixture" {
     const catalog = try readFileAlloc(io, out, "catalog.jsonl", gpa);
     defer gpa.free(catalog);
     try std.testing.expect(std.mem.indexOf(u8, catalog, "src/hello.zig") != null);
+
+    const source_one = try readFileAlloc(io, out, "boris-source-1.md", gpa);
+    defer gpa.free(source_one);
+    try std.testing.expect(std.mem.indexOf(u8, source_one, "source_path: README.md") != null);
+    const source_two = try readFileAlloc(io, out, "boris-source-2.md", gpa);
+    defer gpa.free(source_two);
+    try std.testing.expect(std.mem.indexOf(u8, source_two, "source_path: src/hello.zig") != null);
+    const docs_bundle = try readFileAlloc(io, out, "boris-docs.md", gpa);
+    defer gpa.free(docs_bundle);
+    try std.testing.expect(std.mem.indexOf(u8, docs_bundle, "No packed documents") != null);
+    const content_bundle = try readFileAlloc(io, out, "boris-content.md", gpa);
+    defer gpa.free(content_bundle);
+    try std.testing.expect(std.mem.indexOf(u8, content_bundle, "No packed documents") != null);
 }
