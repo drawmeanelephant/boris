@@ -616,10 +616,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
                 .line = 1,
                 .column = 1,
             });
-            // Preserve the I/O failure class through later aggregate content
-            // validation. Otherwise the final error-count gate below turns a
-            // per-file read failure into exit 1 even though its diagnostic is
-            // EIO and the diagnostics contract requires exit 3.
+            // Per-file read failure is I/O (exit 3), not content validation (exit 1).
             result.failure = .io;
             continue;
         };
@@ -714,7 +711,10 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     const err_count = diag.countErrors(result.diagnostics.items);
     result.ok = err_count == 0;
     if (!result.ok) {
-        if (result.failure != .io) result.failure = .content;
+        // Preserve .io if a per-file read already failed; otherwise content/graph.
+        if (result.failure != .io) {
+            result.failure = .content;
+        }
         result.graph_frozen = false;
         logCompile(options.quiet, "boris: content validation failed ({d} error(s))\n", .{err_count});
         return result;

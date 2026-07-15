@@ -168,6 +168,32 @@ fn findNode(nodes: []const graph_mod.Node, id: []const u8) ?graph_mod.Node {
     return null;
 }
 
+fn buildNodeMap(allocator: std.mem.Allocator, nodes: []const graph_mod.Node) !std.StringHashMapUnmanaged(graph_mod.Node) {
+    var map: std.StringHashMapUnmanaged(graph_mod.Node) = .{};
+    errdefer map.deinit(allocator);
+    try map.ensureTotalCapacity(allocator, @intCast(nodes.len));
+    for (nodes) |n| {
+        const gop = try map.getOrPut(allocator, n.id);
+        if (!gop.found_existing) gop.value_ptr.* = n;
+    }
+    return map;
+}
+
+fn findNodeMap(map: *const std.StringHashMapUnmanaged(graph_mod.Node), id: []const u8) ?graph_mod.Node {
+    return map.get(id);
+}
+
+fn appendUniqueIdLocHashed(
+    locs: *std.ArrayList(IdLoc),
+    seen: *std.StringHashMapUnmanaged(void),
+    allocator: std.mem.Allocator,
+    loc: IdLoc,
+) !void {
+    const gop = try seen.getOrPut(allocator, loc.id);
+    if (gop.found_existing) return;
+    try locs.append(allocator, loc);
+}
+
 fn escapeMdLabel(allocator: std.mem.Allocator, label: []const u8) ![]u8 {
     // Minimal: escape `]` and `\` in link text.
     var out: std.ArrayList(u8) = .empty;
@@ -198,12 +224,15 @@ pub fn rewriteWikiLinks(
         return try allocator.dupe(u8, body);
     }
 
+    var node_map = try buildNodeMap(allocator, nodes);
+    defer node_map.deinit(allocator);
+
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     var copy_from: usize = 0;
 
     for (hits.items) |hit| {
-        const node = findNode(nodes, hit.entity_id) orelse {
+        const node = findNodeMap(&node_map, hit.entity_id) orelse {
             if (fail_out) |f| f.set(hit.line, hit.column, hit.entity_id, "");
             return error.ReferenceMissing;
         };
@@ -257,13 +286,14 @@ fn collectIdsFromBody(
     body_path: []const u8,
     allocator: std.mem.Allocator,
     locs: *std.ArrayList(IdLoc),
+    seen: *std.StringHashMapUnmanaged(void),
     fail_out: ?*FailInfo,
 ) WikiError!void {
     var hits: std.ArrayList(WikiHit) = .empty;
     defer hits.deinit(allocator);
     try scanWikiLinks(body, allocator, &hits, fail_out, body_path);
     for (hits.items) |h| {
-        try appendUniqueIdLoc(locs, allocator, .{
+        try appendUniqueIdLocHashed(locs, seen, allocator, .{
             .id = h.entity_id,
             .line = h.line,
             .column = h.column,
@@ -289,10 +319,13 @@ fn materialFromIdLocs(
         }
     }.less);
 
+    var node_map = try buildNodeMap(allocator, nodes);
+    defer node_map.deinit(allocator);
+
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     for (sorted) |loc| {
-        const node = findNode(nodes, loc.id) orelse {
+        const node = findNodeMap(&node_map, loc.id) orelse {
             if (fail_out) |f| f.set(loc.line, loc.column, loc.id, loc.locus);
             return error.ReferenceMissing;
         };
@@ -338,9 +371,11 @@ pub fn referenceMaterialMulti(
     }
     var locs: std.ArrayList(IdLoc) = .empty;
     defer locs.deinit(allocator);
+    var seen: std.StringHashMapUnmanaged(void) = .{};
+    defer seen.deinit(allocator);
     for (bodies, 0..) |body, i| {
         const path = if (body_paths) |paths| paths[i] else "";
-        try collectIdsFromBody(body, path, allocator, &locs, fail_out);
+        try collectIdsFromBody(body, path, allocator, &locs, &seen, fail_out);
     }
     return materialFromIdLocs(allocator, locs.items, nodes, fail_out);
 }

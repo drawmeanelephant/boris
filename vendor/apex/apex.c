@@ -117,6 +117,8 @@ int apex_render(
     nul_md = NULL;
 
     if (html == NULL) {
+        /* Upstream NULL is not necessarily OOM. Use reserved render status
+         * (hosts map non-OOM non-zero → RenderFailed). */
         return BORIS_APEX_ERR_RENDER;
     }
 

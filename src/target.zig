@@ -81,7 +81,10 @@ fn resolveNormalized(gpa: Allocator, cwd_path: []const u8, rel: []const u8) ![]u
 /// Best-effort: missing path components are ignored; absolute-path edge cases on
 /// Windows that cannot be stated relative to cwd are skipped (workspace resolve
 /// still applies).
-fn rejectSymlinkAlongPath(io: Io, cwd: Io.Dir, gpa: Allocator, rel_path: []const u8) !void {
+/// Reject any existing symlink component on a relative output/layout path.
+/// Call at validate time and again immediately before opening output dirs
+/// to shrink the TOCTOU window after validateTargets.
+pub fn rejectSymlinkAlongPath(io: Io, cwd: Io.Dir, gpa: Allocator, rel_path: []const u8) !void {
     if (rel_path.len == 0) return;
 
     var norm = try gpa.dupe(u8, rel_path);

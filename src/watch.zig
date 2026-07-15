@@ -9,9 +9,18 @@ const target_mod = @import("target.zig");
 
 /// Debounce window after the first change is observed (ms).
 pub const debounce_ms: i64 = 100;
+/// Maximum time spent coalescing a continuous change burst before forcing a rebuild (ms).
+pub const max_debounce_burst_ms: i64 = 2000;
 /// Idle poll interval when no changes are pending (ms). Longer than the
 /// debounce window to keep full-tree polling cheap on large content roots.
 pub const idle_poll_ms: i64 = 500;
+
+/// File identity used for change detection (mtime alone is insufficient on
+/// coarse-granularity FS and mtime-preserving writes).
+pub const FileStamp = struct {
+    mtime_ns: i128,
+    size: u64,
+};
 
 pub const EventKind = enum {
     create,
@@ -98,18 +107,18 @@ pub const FakeWatcher = struct {
     };
 };
 
-/// Portable polling file watcher comparing recursive filesystem mtimes.
+/// Portable polling file watcher comparing recursive filesystem mtime+size.
 pub const PollingWatcher = struct {
     allocator: std.mem.Allocator,
     io: Io,
     roots: std.ArrayList([]const u8) = .empty,
-    file_map: std.StringHashMap(i128),
+    file_map: std.StringHashMap(FileStamp),
 
     pub fn init(allocator: std.mem.Allocator, io: Io) PollingWatcher {
         return .{
             .allocator = allocator,
             .io = io,
-            .file_map = std.StringHashMap(i128).init(allocator),
+            .file_map = std.StringHashMap(FileStamp).init(allocator),
         };
     }
 
@@ -151,7 +160,7 @@ pub const PollingWatcher = struct {
             fn poll(ptr: *anyopaque, events: *std.ArrayList(Event)) anyerror!void {
                 const self: *PollingWatcher = @alignCast(@ptrCast(ptr));
 
-                var new_map = std.StringHashMap(i128).init(self.allocator);
+                var new_map = std.StringHashMap(FileStamp).init(self.allocator);
                 errdefer {
                     var it = new_map.iterator();
                     while (it.next()) |entry| {
@@ -161,16 +170,25 @@ pub const PollingWatcher = struct {
                 }
 
                 for (self.roots.items) |r| {
-                    try scanFiles(self.io, self.allocator, r, &new_map);
+                    scanFiles(self.io, self.allocator, r, &new_map) catch |err| switch (err) {
+                        // Transient FS errors: keep the previous snapshot; do not kill watch.
+                        error.AccessDenied,
+                        error.SystemFdQuotaExceeded,
+                        error.ProcessFdQuotaExceeded,
+                        error.NameTooLong,
+                        error.Unexpected,
+                        => continue,
+                        else => return err,
+                    };
                 }
 
                 // creations & modifications
                 var new_it = new_map.iterator();
                 while (new_it.next()) |entry| {
                     const path = entry.key_ptr.*;
-                    const mtime = entry.value_ptr.*;
-                    if (self.file_map.get(path)) |old_mtime| {
-                        if (old_mtime != mtime) {
+                    const stamp = entry.value_ptr.*;
+                    if (self.file_map.get(path)) |old| {
+                        if (old.mtime_ns != stamp.mtime_ns or old.size != stamp.size) {
                             const dup = try self.allocator.dupe(u8, path);
                             errdefer self.allocator.free(dup);
                             try events.append(self.allocator, .{ .path = dup, .kind = .modify });
@@ -205,14 +223,27 @@ pub const PollingWatcher = struct {
     };
 };
 
+/// True when a directory component should not be walked during poll scans.
+fn shouldSkipScanDir(name: []const u8) bool {
+    if (std.mem.eql(u8, name, ".git")) return true;
+    if (std.mem.eql(u8, name, "node_modules")) return true;
+    if (std.mem.eql(u8, name, ".zig-cache")) return true;
+    if (std.mem.eql(u8, name, "zig-cache")) return true;
+    if (std.mem.eql(u8, name, "zig-out")) return true;
+    if (std.mem.eql(u8, name, ".boris-cache")) return true;
+    if (std.mem.eql(u8, name, ".boris")) return true;
+    if (std.mem.endsWith(u8, name, ".boris-stage")) return true;
+    return false;
+}
+
 /// Recursively scan files under root using Io.Dir.walkSelectively and populate file_map.
 /// Keys are allocator-owned; callers free them. Duplicate paths free the new key and
-/// keep the existing map entry (update mtime only).
+/// keep the existing map entry (update stamp only).
 pub fn scanFiles(
     io: Io,
     allocator: std.mem.Allocator,
     root_path: []const u8,
-    file_map: *std.StringHashMap(i128),
+    file_map: *std.StringHashMap(FileStamp),
 ) !void {
     const cwd = Io.Dir.cwd();
     var dir = cwd.openDir(io, root_path, .{ .iterate = true }) catch |err| switch (err) {
@@ -224,10 +255,13 @@ pub fn scanFiles(
     var walker = try dir.walkSelectively(allocator);
     defer walker.deinit();
 
-    while (try walker.next(io)) |entry| {
+    while (true) {
+        const next_entry = walker.next(io) catch continue; // skip transient walk errors
+        const entry = next_entry orelse break;
         if (entry.kind == .sym_link) continue;
         if (entry.kind == .directory) {
-            try walker.enter(io, entry);
+            if (shouldSkipScanDir(entry.basename)) continue;
+            walker.enter(io, entry) catch continue;
             continue;
         }
         if (entry.kind != .file) continue;
@@ -238,12 +272,16 @@ pub fn scanFiles(
         const full_path = try std.fs.path.join(allocator, &.{ root_path, entry.path });
         errdefer allocator.free(full_path);
 
+        const stamp = FileStamp{
+            .mtime_ns = @intCast(stat.mtime.nanoseconds),
+            .size = stat.size,
+        };
         const gop = try file_map.getOrPut(full_path);
         if (gop.found_existing) {
             allocator.free(full_path);
-            gop.value_ptr.* = @intCast(stat.mtime.nanoseconds);
+            gop.value_ptr.* = stamp;
         } else {
-            gop.value_ptr.* = @intCast(stat.mtime.nanoseconds);
+            gop.value_ptr.* = stamp;
         }
     }
 }
@@ -702,15 +740,28 @@ pub const WatchCoordinator = struct {
         should_shutdown_global.store(false, .unordered);
 
         while (!should_shutdown_global.load(.unordered)) {
-            try self.processEvents();
+            self.processEvents() catch |err| {
+                // Transient poll failures must not kill the session (#15).
+                if (!self.options.quiet) {
+                    std.debug.print("watch: poll error ({s}); retrying...\n", .{@errorName(err)});
+                }
+                try sleepMs(self.io, idle_poll_ms);
+                continue;
+            };
 
             if (self.pending_changes.count() > 0) {
-                // Debounce window: coalesce trailing events in the burst
-                try sleepMs(self.io, debounce_ms);
+                // Coalesce trailing events up to a hard burst cap so a file that
+                // keeps changing faster than a rebuild cannot loop forever (#17).
+                var coalesced: i64 = 0;
+                while (coalesced < max_debounce_burst_ms) {
+                    try sleepMs(self.io, debounce_ms);
+                    coalesced += debounce_ms;
+                    const before = self.pending_changes.count();
+                    self.processEvents() catch break;
+                    if (self.pending_changes.count() == before) break;
+                }
 
-                // Fetch any additional trailing events, then one serialized rebuild.
                 // FS changes during rebuild are observed on the next poll (follow-up).
-                try self.processEvents();
                 try self.triggerRebuild();
             } else {
                 try sleepMs(self.io, idle_poll_ms);

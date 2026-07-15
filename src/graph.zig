@@ -105,19 +105,32 @@ pub fn diagnoseDuplicateIds(
         }
     }.less);
 
+    // O(n) exact-id first-wins via hashmap; case collisions still need a scan of
+    // prior ids in source_path order (bounded; case-fold compare is cheap vs n² eql).
+    var first_by_id: std.StringHashMapUnmanaged(usize) = .empty;
+    defer first_by_id.deinit(list_gpa);
+    try first_by_id.ensureTotalCapacity(list_gpa, @intCast(nodes.len));
+
     for (order.items, 0..) |ni, pos| {
         const n = nodes[ni];
         var earlier_exact: ?usize = null;
         var earlier_case: ?usize = null;
-        var j: usize = 0;
-        while (j < pos) : (j += 1) {
-            const oj = order.items[j];
-            if (std.mem.eql(u8, nodes[oj].id, n.id)) {
-                earlier_exact = oj;
-                break;
-            }
-            if (earlier_case == null and identity.pathsDifferOnlyInCase(nodes[oj].id, n.id)) {
-                earlier_case = oj;
+
+        const gop = try first_by_id.getOrPut(list_gpa, n.id);
+        if (gop.found_existing) {
+            earlier_exact = gop.value_ptr.*;
+        } else {
+            gop.value_ptr.* = ni;
+        }
+
+        if (earlier_exact == null) {
+            var j: usize = 0;
+            while (j < pos) : (j += 1) {
+                const oj = order.items[j];
+                if (identity.pathsDifferOnlyInCase(nodes[oj].id, n.id)) {
+                    earlier_case = oj;
+                    break;
+                }
             }
         }
         if (earlier_exact) |ei| {
@@ -281,14 +294,19 @@ pub fn validateTopology(
     defer list_gpa.free(colors);
     @memset(colors, .white);
 
-    var cycle_nodes: std.ArrayList(usize) = .empty;
-    defer cycle_nodes.deinit(list_gpa);
-
     var stack: std.ArrayList(usize) = .empty;
     defer stack.deinit(list_gpa);
 
+    // One diagnostic set per distinct cycle (do not merge independent cycles).
+    var emitted_cycles: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (emitted_cycles.items) |p| list_gpa.free(p);
+        emitted_cycles.deinit(list_gpa);
+    }
+
     for (nodes, 0..) |_, start| {
         if (colors[start] != .white) continue;
+        stack.clearRetainingCapacity();
         var cur: usize = start;
         while (colors[cur] == .white) {
             colors[cur] = .gray;
@@ -296,11 +314,49 @@ pub fn validateTopology(
             if (nodes[cur].parent_index) |pi| {
                 const p: usize = pi;
                 if (colors[p] == .gray) {
-                    // Cycle: from p along stack back to p.
+                    // Cycle path: stack from p back to top, then close on p.
+                    var cycle_ids: std.ArrayList([]const u8) = .empty;
+                    defer cycle_ids.deinit(list_gpa);
                     var started = false;
                     for (stack.items) |s| {
                         if (s == p) started = true;
-                        if (started) try cycle_nodes.append(list_gpa, s);
+                        if (started) try cycle_ids.append(list_gpa, nodes[s].id);
+                    }
+                    // Stable message: sort participant ids then rebuild path in walk order.
+                    var path_buf: std.ArrayList(u8) = .empty;
+                    defer path_buf.deinit(list_gpa);
+                    for (cycle_ids.items, 0..) |id, idx| {
+                        if (idx > 0) try path_buf.appendSlice(list_gpa, " -> ");
+                        try path_buf.appendSlice(list_gpa, id);
+                    }
+                    if (cycle_ids.items.len > 0) {
+                        try path_buf.appendSlice(list_gpa, " -> ");
+                        try path_buf.appendSlice(list_gpa, cycle_ids.items[0]);
+                    }
+                    const path_owned = try retain.dupe(u8, path_buf.items);
+                    // Dedup identical cycle messages (same walk may re-hit).
+                    var already = false;
+                    for (emitted_cycles.items) |prev| {
+                        if (std.mem.eql(u8, prev, path_owned)) {
+                            already = true;
+                            break;
+                        }
+                    }
+                    if (!already) {
+                        try emitted_cycles.append(list_gpa, try list_gpa.dupe(u8, path_owned));
+                        for (cycle_ids.items) |id| {
+                            const ni = findIndexById(nodes, id).?;
+                            try diags.append(list_gpa, .{
+                                .severity = .error_,
+                                .code = .EPARENTCYCLE,
+                                .message = try std.fmt.allocPrint(retain, "parent cycle involving {s}", .{path_owned}),
+                                .remediation = try retain.dupe(u8, "Break the cycle by changing or removing a parent link"),
+                                .source_path = nodes[ni].source_path,
+                                .line = 1,
+                                .column = 1,
+                                .id = nodes[ni].id,
+                            });
+                        }
                     }
                     break;
                 } else if (colors[p] == .white) {
@@ -312,54 +368,6 @@ pub fn validateTopology(
         }
         while (stack.pop()) |s| {
             colors[s] = .black;
-        }
-    }
-
-    if (cycle_nodes.items.len > 0) {
-        // Unique + sort by id for stable message.
-        std.mem.sort(usize, cycle_nodes.items, nodes, struct {
-            fn less(ns: []const Node, a: usize, b: usize) bool {
-                return std.mem.order(u8, ns[a].id, ns[b].id) == .lt;
-            }
-        }.less);
-
-        var path_buf: std.ArrayList(u8) = .empty;
-        defer path_buf.deinit(list_gpa);
-        var seen: std.ArrayList([]const u8) = .empty;
-        defer seen.deinit(list_gpa);
-
-        for (cycle_nodes.items) |ci| {
-            const id = nodes[ci].id;
-            var already = false;
-            for (seen.items) |s| {
-                if (std.mem.eql(u8, s, id)) {
-                    already = true;
-                    break;
-                }
-            }
-            if (already) continue;
-            try seen.append(list_gpa, id);
-            if (path_buf.items.len > 0) try path_buf.appendSlice(list_gpa, " -> ");
-            try path_buf.appendSlice(list_gpa, id);
-        }
-        if (seen.items.len > 0) {
-            try path_buf.appendSlice(list_gpa, " -> ");
-            try path_buf.appendSlice(list_gpa, seen.items[0]);
-        }
-        const path_owned = try retain.dupe(u8, path_buf.items);
-
-        for (seen.items) |id| {
-            const ni = findIndexById(nodes, id).?;
-            try diags.append(list_gpa, .{
-                .severity = .error_,
-                .code = .EPARENTCYCLE,
-                .message = try std.fmt.allocPrint(retain, "parent cycle involving {s}", .{path_owned}),
-                .remediation = try retain.dupe(u8, "Break the cycle by changing or removing a parent link"),
-                .source_path = nodes[ni].source_path,
-                .line = 1,
-                .column = 1,
-                .id = nodes[ni].id,
-            });
         }
     }
 }
@@ -391,10 +399,12 @@ pub fn freeze(
         n.index = @intCast(i);
     }
 
-    // Remap parent_index by id lookup after sort.
+    // Remap parent_index by id via O(n) hashmap (not linear findIndexById per node).
+    var id_index = try buildIdIndex(list_gpa, nodes);
+    defer id_index.deinit(list_gpa);
     for (nodes) |*n| {
         if (n.parent) |p| {
-            if (findIndexById(nodes, p)) |pi| {
+            if (id_index.get(p)) |pi| {
                 n.parent_index = @intCast(pi);
             } else {
                 n.parent_index = null;
