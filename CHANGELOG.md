@@ -19,7 +19,7 @@ How to use going forward:
 
 ## [Unreleased]
 
-### Feature 1 — ApexMarkdown Unified adapter (campaign Chat 1–3)
+### Feature 1 — ApexMarkdown Unified (campaign Chat 1–4)
 
 - Vendor real **[ApexMarkdown/apex](https://github.com/ApexMarkdown/apex)** as a
   flat source snapshot under `vendor/apex-markdown/` @ **v1.1.11**
@@ -35,7 +35,10 @@ How to use going forward:
   `boris-apex/apex-markdown-1.1.11+unified`. File includes/plugins/external
   highlighters off. Host include guard renamed to `BORIS_APEX_HOST_H` so both
   host and upstream headers can be included. HTML goldens updated for header
-  ids. No IR schema or CLI default changes.
+  ids.
+- **Chat 4:** Structural Unified fidelity tests U1–U17 (tables, nested lists,
+  footnotes, math, callouts, IAL, fenced divs, dual-run, include-off, Aside
+  document order). No IR schema or CLI default changes.
 
 ### Docs — residual post-P3 audit cleanup
 

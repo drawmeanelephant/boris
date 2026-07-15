@@ -43,7 +43,7 @@ rolling-paper brand.
 | Apex C ABI (in-process) | **Implemented** — real ApexMarkdown Unified via host adapter ([contract](docs/contracts/apex-abi.md)) |
 | ApexMarkdown Unified pin + link + adapter | **Landed** — `vendor/apex-markdown/` @ v1.1.11; CMake static libs; Unified `apex_render` adapter ([VENDOR.md](vendor/apex-markdown/VENDOR.md)) |
 | HTML `dist/` as **default** CLI (no flags) | **Roadmap** — bare `boris` remains IR-first today |
-| Broad Unified fidelity suite (tables, footnotes, …) | **In progress** — Chat 4 ([APEX-Feature1-plan.md](APEX-Feature1-plan.md)) |
+| Broad Unified fidelity suite (tables, footnotes, …) | **Landed** — U1–U17 structural tests ([APEX-Feature1-plan.md](APEX-Feature1-plan.md)); Chat 5 docs/Done remaining |
 | Full YAML / MDX | **Out of scope** for v0.1 |
 
 ## What works today (CLI)

@@ -352,9 +352,9 @@ Update stub-era HTML goldens with reasons.
 - [x] File includes / plugins / external highlighters off at Boris boundary *(Chat 3)*
 - [x] Whiteboard path: copy-in + `apex_free_string`; no arena free via libc *(Chat 3)*
 - [x] Hostile tests still green *(Chat 3)*
-- [ ] Fidelity tests for Unified constructs green *(Chat 4)*
-- [ ] `zig build test` + release-gate green *(Chat 5 full gate; tests green through Chat 3)*
-- [ ] Docs claim **ApexMarkdown Unified**, not cmark-gfm-as-product *(Chat 5 final pass; partial Chat 3)*
+- [x] Fidelity tests for Unified constructs green *(Chat 4: U1–U17 structural)*
+- [ ] `zig build test` + release-gate green *(Chat 5 full gate; tests green through Chat 4)*
+- [ ] Docs claim **ApexMarkdown Unified**, not cmark-gfm-as-product *(Chat 5 final pass; partial Chats 3–4)*
 - [x] No Feature 2; no accidental mode sprawl
 
 ---

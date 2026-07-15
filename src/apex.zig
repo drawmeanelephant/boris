@@ -634,3 +634,244 @@ test "status constants match documented C ABI" {
     try std.testing.expectEqual(@as(c_int, 1), c.APEX_ERR_ARGS);
     try std.testing.expectEqual(@as(c_int, 2), c.APEX_ERR_OOM);
 }
+
+// =============================================================================
+// Feature 1 Chat 4 — Unified fidelity (structural asserts, not full Apex suite)
+// Plan IDs U1–U17 from APEX-Feature1-plan.md §7.2.
+// =============================================================================
+
+fn fidelityContains(hay: []const u8, needle: []const u8) !void {
+    if (std.mem.indexOf(u8, hay, needle) == null) {
+        std.debug.print("fidelity: missing {s} in:\n{s}\n", .{ needle, hay });
+        return error.TestExpectedEqual;
+    }
+}
+
+fn fidelityRender(md: []const u8, arena: *std.heap.ArenaAllocator) ![]const u8 {
+    const html = try render(md, arena);
+    return html.bytes;
+}
+
+test "U1 Unified GFM table emits table markup" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const html = try fidelityRender(
+        \\| a | b |
+        \\|---|---|
+        \\| 1 | 2 |
+        \\
+    , &arena);
+    try fidelityContains(html, "<table");
+    try fidelityContains(html, "<td");
+}
+
+test "U2 Unified nested lists" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const html = try fidelityRender(
+        \\- item
+        \\  - nested
+        \\
+    , &arena);
+    try fidelityContains(html, "<ul>");
+    // Nested list inside a list item.
+    try fidelityContains(html, "<li>item\n<ul>");
+}
+
+test "U3 Unified blockquote" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const html = try fidelityRender("> quote\n", &arena);
+    try fidelityContains(html, "<blockquote");
+    try fidelityContains(html, "quote");
+}
+
+test "U4 Unified fenced code is escaped in pre/code" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const html = try fidelityRender(
+        \\```c
+        \\int x = 1 < 2;
+        \\```
+        \\
+    , &arena);
+    try fidelityContains(html, "<pre");
+    try fidelityContains(html, "<code");
+    try fidelityContains(html, "int x = 1");
+    // Angle brackets must not open raw tags from code content.
+    try std.testing.expect(std.mem.indexOf(u8, html, "< 2") == null or
+        std.mem.indexOf(u8, html, "&lt;") != null);
+}
+
+test "U5 Unified strikethrough" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const html = try fidelityRender("~~strike~~\n", &arena);
+    try fidelityContains(html, "<del>");
+    try fidelityContains(html, "strike");
+}
+
+test "U6 Unified task list checkbox markup" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const html = try fidelityRender(
+        \\- [ ] task
+        \\- [x] done
+        \\
+    , &arena);
+    try fidelityContains(html, "checkbox");
+    try fidelityContains(html, "checked");
+}
+
+test "U7 Unified footnote ref and backref" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const html = try fidelityRender(
+        \\Hi[^1].
+        \\
+        \\[^1]: note body
+        \\
+    , &arena);
+    try fidelityContains(html, "footnote");
+    try fidelityContains(html, "fnref");
+    try fidelityContains(html, "note body");
+}
+
+test "U8 Unified definition list" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const html = try fidelityRender(
+        \\Term
+        \\: Definition
+        \\
+    , &arena);
+    try fidelityContains(html, "<dl");
+    try fidelityContains(html, "<dt");
+    try fidelityContains(html, "<dd");
+}
+
+test "U9 Unified math delimiters" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const html = try fidelityRender(
+        \\Inline $x$ and
+        \\
+        \\$$
+        \\y
+        \\$$
+        \\
+    , &arena);
+    try fidelityContains(html, "math");
+    // Apex emits KaTeX-style delimiters in spans.
+    try fidelityContains(html, "\\(x\\)");
+}
+
+test "U10 Unified callout NOTE" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const html = try fidelityRender(
+        \\> [!NOTE]
+        \\> callout body
+        \\
+    , &arena);
+    try fidelityContains(html, "callout");
+    try fidelityContains(html, "callout body");
+}
+
+test "U11 Unified IAL heading attributes" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const html = try fidelityRender("## Heading {#custom-id .cls}\n", &arena);
+    try fidelityContains(html, "id=\"custom-id\"");
+    try fidelityContains(html, "class=\"cls\"");
+}
+
+test "U12 Unified fenced div" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const html = try fidelityRender(
+        \\::: {.warning}
+        \\fenced div
+        \\:::
+        \\
+    , &arena);
+    try fidelityContains(html, "<div");
+    try fidelityContains(html, "warning");
+    try fidelityContains(html, "fenced div");
+}
+
+test "U13 empty and non-NUL-terminated input bounded" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const empty = try fidelityRender("", &arena);
+    try std.testing.expectEqual(@as(usize, 0), empty.len);
+
+    var storage = "Hi **there**\nPOISON\xff\xff".*;
+    const md: []const u8 = storage[0..13];
+    const html = try fidelityRender(md, &arena);
+    try std.testing.expect(std.mem.indexOf(u8, html, "POISON") == null);
+    try fidelityContains(html, "there");
+}
+
+test "U14 custom allocator OOM path safe" {
+    try skipIfHostileEngine();
+    var tiny: [64]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&tiny);
+    var arena = std.heap.ArenaAllocator.init(fba.allocator());
+    defer arena.deinit();
+    const md =
+        \\# Title
+        \\
+        \\Paragraph with **bold** and enough text that HTML exceeds the tiny arena.
+        \\More words more words more words more words more words.
+        \\
+    ;
+    try std.testing.expectError(error.OutOfMemory, render(md, &arena));
+}
+
+test "U16 dual-run HTML byte-identical (fidelity alias)" {
+    try skipIfHostileEngine();
+    var arena_a = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_a.deinit();
+    var arena_b = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_b.deinit();
+    const md =
+        \\| a | b |
+        \\|---|---|
+        \\| 1 | 2 |
+        \\
+        \\~~x~~ and `code`
+        \\
+    ;
+    const a = try fidelityRender(md, &arena_a);
+    const b = try fidelityRender(md, &arena_b);
+    try std.testing.expectEqualStrings(a, b);
+}
+
+test "U17 include syntax does not pull disk when includes disabled" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    // Adapter forces enable_file_includes=false. Include-like syntax must stay
+    // literal text — not expand to missing-file errors or sibling disk content.
+    const html = try fidelityRender(
+        \\Before {{include does-not-exist-anywhere.md}} after
+        \\
+    , &arena);
+    try fidelityContains(html, "{{include does-not-exist-anywhere.md}}");
+    try fidelityContains(html, "Before");
+    try fidelityContains(html, "after");
+}

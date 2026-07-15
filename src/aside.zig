@@ -938,3 +938,54 @@ test "tokenize rejects invalid UTF-8" {
     const bad = [_]u8{ 0xFF, 0xFE, '<', 'A', 's', 'i', 'd', 'e', '>' };
     try std.testing.expectError(error.InvalidUtf8, tokenizeBody(&bad, gpa));
 }
+
+// U15: Zig Aside stream stays in document order under real Apex Unified.
+// Mirrors compile's segment walk: markdown → apex.render, aside → renderHtml.
+test "U15 Aside document order with real Apex stream" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const body =
+        \\AAA_MARKER
+        \\
+        \\<Aside kind="note" id="n1">
+        \\INNER **bold** and a table:
+        \\
+        \\| a | b |
+        \\|---|---|
+        \\| 1 | 2 |
+        \\</Aside>
+        \\
+        \\BBB_MARKER
+        \\
+    ;
+    const tok = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(tok.diagnostics.len == 0);
+    try std.testing.expect(tok.segments.len >= 3);
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(gpa);
+    for (tok.segments) |seg| {
+        switch (seg) {
+            .markdown => |md| {
+                if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
+                const h = try apex.render(md, &arena);
+                try out.appendSlice(gpa, h.bytes);
+            },
+            .aside => |a| {
+                const h = try renderHtml(a, &arena);
+                try out.appendSlice(gpa, h);
+            },
+        }
+    }
+    const html = out.items;
+    const i_aaa = std.mem.indexOf(u8, html, "AAA_MARKER") orelse return error.TestUnexpectedResult;
+    const i_aside = std.mem.indexOf(u8, html, "admonition--note") orelse return error.TestUnexpectedResult;
+    const i_bbb = std.mem.indexOf(u8, html, "BBB_MARKER") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(i_aaa < i_aside);
+    try std.testing.expect(i_aside < i_bbb);
+    try std.testing.expect(std.mem.indexOf(u8, html, "id=\"n1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<strong>bold</strong>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<table") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<Aside") == null);
+}
