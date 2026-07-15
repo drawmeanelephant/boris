@@ -23,6 +23,8 @@ How to use going forward:
 
 - Removed `sandboxes/content-dogfood/` (abandoned agent draft). Root `content/`
   remains the sample docs site.
+- Ignore local `zig-cache/` smoke dirs (alongside `.zig-cache/`). Drop dead
+  sandbox `out/` ignore entry. Refresh `docs/STATUS.md` for post-0.2.0 / Feature 7.
 
 ### Feature 7 — Boris-mediated includes + wiki-links — **Done**
 

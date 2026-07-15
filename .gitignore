@@ -3,6 +3,7 @@
 .DS_Store
 .release-gate/
 .zig-cache/
+zig-cache/
 *.a
 *.o
 /dist/
@@ -24,6 +25,3 @@
 
 # Local smoke kit / agent kit
 /boris-agent-kit/
-
-# Content agent sandbox outputs (local)
-sandboxes/content-dogfood/out/

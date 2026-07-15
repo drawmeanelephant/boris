@@ -1,7 +1,7 @@
 # Project status — Boris
 
 **As of:** 2026-07-15 · product **0.2.0** / compiler **boris/0.2.0** · Zig **0.16.0**  
-**Phase:** **v0.2.0** HTML-default site compiler (ApexMarkdown Unified, Feature 6 nav+toc, P2/P3).  
+**Phase:** **post-v0.2.0** — Feature 7 (includes + wiki) landed on main, not yet cut as a product tag.  
 IR `schemaVersion` remains **`0.1.0`**.
 
 Living snapshot for agents and humans. Prefer this and [`CHANGELOG.md`](../CHANGELOG.md)
@@ -12,7 +12,8 @@ over archaeology. Normative behavior: [`docs/contracts/`](contracts/).
 Product **0.2.0** packages the shippable docs compiler: bare `boris` → `dist/`
 HTML; real ApexMarkdown; Trunk/Satellite graph; layout nav/breadcrumb/title/toc;
 incremental, watch, jobs, multi-target. IR and RAG stay opt-in; IR shape is still
-schema **0.1.0**. Tag: `v0.2.0`.
+schema **0.1.0**. Tag: `v0.2.0`. **Since the tag:** Feature 7 + sample-content dogfood
+live on `main` under `[Unreleased]` (candidate for a small **0.2.1** cut).
 
 ---
 
@@ -66,7 +67,7 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | CI Linux + macOS | **Done** |
 | Graph-aware HTML nav (`{{nav}}` / breadcrumb / title) | **Done** (Feature 6 MVP) |
 | In-page heading `{{toc}}` | **Done** (Feature 6 follow-on) |
-| Boris-mediated includes + wiki-links | **Done** (HTML path; Apex FS includes off) |
+| Boris-mediated includes + wiki-links | **Done** (Feature 7; HTML path; Apex FS includes off) |
 | Full YAML / MDX / embedded HTTP server | **Not now** |
 
 ### Commands
@@ -109,10 +110,11 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
-| **Now** | Keep sample content honest as features land | Dogfood includes/wiki; re-check after each feature |
+| **Now** | Cut **0.2.1** (or keep stacking under Unreleased) | Feature 7 + dogfood + F7 polish are on `main` post-tag |
 | **Later** | IR-visible include/reference edges | Would require `schemaVersion` bump; MVP keeps deps HTML-internal |
 | **Later** | Wiki `[[id#heading]]` section targets | Needs heading-id contract |
-| **Hygiene** | Historical campaign notes | Removed from tree (`archive/`); do not reintroduce as default agent context |
+| **Hygiene** | Sample content honesty as features land | Root `content/` is current for F7; re-check after next feature |
+| **Hygiene** | No parallel content sandboxes by default | Failed `sandboxes/content-dogfood` draft removed; root `content/` is SoT |
 
 ### Shipped (do not re-open as greenfield)
 
@@ -126,7 +128,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | 5 | `--target` multi-output | Isolated roots + caches |
 | 6 | Graph-aware HTML nav (MVP) | `{{nav}}` forest + breadcrumb + title; HTML graph gate |
 | 6b | In-page `{{toc}}` | h1–h3 outline from rendered body ids (`src/html_toc.zig`) |
-| 7 | Includes + wiki-links | `{{include}}` + `[[entity-id]]` pre-Apex; cycles/missing fail loud; `includes/` not pages |
+| 7 | Includes + wiki-links | **On main (unreleased vs tag)** — `{{include}}` + `[[entity-id]]` pre-Apex; cycles/missing fail loud; `includes/` not pages |
 
 P2 (fingerprints, incremental, layout edges) and P3 scale-out are **complete**
 on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
