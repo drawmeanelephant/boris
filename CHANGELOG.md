@@ -29,7 +29,7 @@ How to use going forward:
 - Watch mode ignores events under every configured target output root and rebuilds all targets in sorted order after a debounced change batch.
 - Review record and hardening notes: [`docs/reviews/p3.3-multi-target-review.md`](docs/reviews/p3.3-multi-target-review.md).
 - P3.3 follow-ups: watch ignore roots precomputed once; shared multi-target fingerprint/dep prep (source/include scan once); best-effort orphan atomic-temp scrub; intermediate symlink component walk on target paths; `--target` in usage/`findBadArg`.
-- P3.3 completion: `--html-layout` + `--target-layout NAME=PATH`; selective watch fan-out (layout-only → affected targets); sibling `{dist}.boris-stage` tree commit (discard on failure).
+- P3.3 completion: `--html-layout` + `--target-layout NAME=PATH`; selective watch fan-out (layout-only → affected targets); sibling `{dist}.boris-stage` tree commit (discard on failure). Mark P3 scale-out complete in STATUS.
 
 ### Docs — status roadmap refresh (post-P2 / closing P3)
 

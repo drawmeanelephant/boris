@@ -1,6 +1,6 @@
 # Project status — Boris (post-P2 / closing P3)
 
-**As of:** 2026-07-15 (product **0.0.1** / compiler **boris/0.1.1** IR + RAG + Aside + Apex + opt-in HTML; P2 complete; P3 complete)  
+**As of:** 2026-07-15 (product **0.0.1** / compiler **boris/0.1.1** IR + RAG + Aside + Apex + opt-in HTML; **P2 + P3 complete**)  
 **Zig target:** 0.16.0 (`build.zig.zon` / CI pin **0.16.0**)
 
 This file is the living **“where we are”** note. Prefer it (and
@@ -14,10 +14,10 @@ starting a session.
 **Boris v0.1 ships a single-threaded content compiler** with validated JSON IR,
 optional deterministic RAG (including `:::kind` Aside export), constrained
 `<Aside>` tokenization on the shared compile path, and an **opt-in HTML** site
-mode (`--html` / `--html-dir`, Apex + Whiteboard + layout splice). Graph-native
-foundations (P2) and scale-out primitives (P3.1 parallel jobs, P3.2 watch) are
-**implemented** on the HTML path. Default CLI remains IR; HTML is not yet the
-default product surface.
+mode (`--html` / `--html-dir` / `--target`, Apex + Whiteboard + layout splice).
+Graph-native foundations (P2) and scale-out primitives (P3.1 jobs, P3.2 watch,
+P3.3 multi-target isolation) are **implemented** on the HTML path. Default CLI
+remains IR; HTML is not yet the default product surface.
 
 ---
 
@@ -55,7 +55,7 @@ default product surface.
 | Explicit Incremental HTML build mode (P2.4) | **Implemented & tested** | `--incremental` skips unchanged renders, cleans stale assets safely and atomically |
 | Bounded Parallel HTML page rendering (P3.1) | **Implemented & tested** | `--jobs N` enables opt-in parallel rendering of independent HTML pages |
 | Opt-in Local Development Watch Mode (P3.2) | **Implemented & tested** | `--watch` enables live, debounced, coalesced, serialized HTML rebuilds |
-| Multi-target isolated outputs (P3.3) | **Implemented & tested** | `--target NAME=DIR`; path-boundary validation; per-target `.boris-cache`; review hardening in `docs/reviews/p3.3-multi-target-review.md` |
+| Multi-target isolated outputs (P3.3) | **Implemented & tested** | `--target`, `--html-layout`, `--target-layout`; path-boundary isolation; stage commit; selective watch fan-out; review `docs/reviews/p3.3-multi-target-review.md` |
 | HTML as default CLI (replacing IR) | **Now** (roadmap) | IR remains default until Feature 2 lands |
 | Full CommonMark Apex fidelity | **Now** (roadmap) | Stub engine is minimal markdown subset |
 | Full YAML / MDX / mmap | **Intentionally deferred** | See non-goals / Not Now |
@@ -74,6 +74,8 @@ zig build run -- --input test/fixtures/html/content --html-dir /tmp/boris-dist
 zig build run -- --input test/fixtures/html/content --html --jobs 4
 zig build run -- --input test/fixtures/html/content --html --watch
 zig build run -- --input test/fixtures/html/content --target prod=dist/prod --target stage=dist/stage
+zig build run -- --input test/fixtures/html/content --target prod=dist/prod --target stage=dist/stage \
+  --html-layout layouts/main.html --target-layout stage=layouts/main.html
 zig build run -- --input docs/contracts/fixtures/valid/content --out .boris
 zig build source-rag
 zig build package                  # optional review tar → packages/
@@ -143,22 +145,21 @@ An audit of `src/cache.zig`, `src/dependency.zig`, `src/compile.zig`,
 | **Layout edges on freeze** | **Landed** — layout dependencies integrated into the frozen graph |
 | **P3.1** bounded worker pool (`--jobs N`) | **Complete** (opt-in HTML path) |
 | **P3.2** watch mode (`--watch`) | **Complete** (opt-in HTML path) |
-| **P3.3** multi-target isolated outputs | **Last P3 item** — design contract present; implementation in flight |
+| **P3.3** multi-target isolated outputs | **Complete** — CLI, validation, cache namespaces, stage commit, selective watch fan-out |
 
-That leaves two concurrent tracks after / while finishing P3.3:
+P3 scale-out is closed. Concurrent product tracks:
 
 1. **Close immediate usability gaps** in the sequential SSG pipeline (minimal Markdown rendering stub; CLI defaults still IR-first).
-2. **Ship remaining scale-out surface** (P3.3 multi-target), then product depth (TOC, Apex fidelity packaging).
+2. **Product depth** (Apex fidelity, HTML as default, TOC).
 
 ---
 
-## Priority list (post-P2 reevaluation)
+## Priority list (post-P2 / post-P3 reevaluation)
 
 **Phase context:** v0.1 content-compiler surface is **in force**. Graph-native
-foundations (P2) and parallel/watch scale-out (P3.1–P3.2) have landed on the
-HTML path. Next work should **not** reopen polyglot frameworks, subprocess
-markdown, or unrestricted MDX. Prefer authoring fidelity and product ergonomics
-while finishing multi-target isolation.
+foundations (P2) and scale-out (P3.1–P3.3) have landed on the HTML path. Next
+work should **not** reopen polyglot frameworks, subprocess markdown, or
+unrestricted MDX. Prefer authoring fidelity and product ergonomics.
 
 ### P0 — finish / keep clean (low blast radius)
 
@@ -193,13 +194,13 @@ while finishing multi-target isolation.
 |----------|------|--------|-------|
 | P3.1 | Bounded worker pool for independent render jobs | **Implemented & tested** | `--jobs N`; thread-local Whiteboard; deterministic vs sequential |
 | P3.2 | Watch mode | **Implemented & tested** | `--watch`; debounced, coalesced, serialized rebuilds (`src/watch.zig`) |
-| P3.3 | Multi-target isolated output dirs / cache namespaces | **In progress** | Contract: `multi-target-isolated-output.md`; last P3 gate |
+| P3.3 | Multi-target isolated output dirs / cache namespaces | **Implemented & tested** | Contract: `multi-target-isolated-output.md`; review: `docs/reviews/p3.3-multi-target-review.md` |
 
 ---
 
 ## Post-P3 prioritized feature roadmap
 
-Priorities below are **product/authoring** work relative to the landed P2/P3.1–P3.2
+Priorities below are **product/authoring** work relative to the landed P2/P3
 foundation. Features already shipped are marked complete so they are not
 re-opened as greenfield tickets.
 
@@ -304,15 +305,12 @@ re-opened as greenfield tickets.
   * Update `scripts/release-gate.sh` (and help text) for the new default.
 * **Acceptance:** Invoking `boris` with no arguments produces a navigable site under `dist/`.
 
-### Card 3 — Multi-target isolated outputs (`src/multi-target` / P3.3)
+### Card 3 — Multi-target isolated outputs (P3.3) — **Done**
 
-* **Scope:** Finish the last P3 item: isolated targets with separate output dirs and cache namespaces.
-* **Tasks:**
-  * Implement CLI / config grammar per `docs/contracts/multi-target-isolated-output.md`.
-  * Validate unique names and non-overlapping output roots before any render.
-  * Namespace cache fingerprints per target; run targets sequentially with isolated staging.
-  * Keep `--watch` / `--jobs` / `--incremental` global semantics as specified.
-* **Acceptance:** Two-target build succeeds; draft invalidation does not touch production target cache.
+Landed: `--target` / `--html-layout` / `--target-layout`, path-boundary validation,
+per-target cache namespaces, sibling stage commit, selective watch fan-out.
+See `docs/contracts/multi-target-isolated-output.md` and
+`docs/reviews/p3.3-multi-target-review.md`.
 
 ---
 
@@ -380,7 +378,7 @@ validated metadata and graph-aware docs, not a polyglot web framework.
 | `docs/contracts/components.md` | Aside tokenizer (m10) |
 | `docs/contracts/parallel-rendering.md` | P3.1 parallel HTML workers |
 | `docs/contracts/watch-mode.md` | P3.2 watch mode |
-| `docs/contracts/multi-target-isolated-output.md` | P3.3 multi-target (design / in progress) |
+| `docs/contracts/multi-target-isolated-output.md` | P3.3 multi-target (normative; implemented) |
 | `docs/AUDIT-v0.1.md` | Self-audit report |
 | `docs/rag/system/` | Narrative seeds (RAG system segment) |
 | `CHANGELOG.md` | What changed |
