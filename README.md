@@ -163,7 +163,7 @@ See [frontmatter.md](docs/contracts/frontmatter.md).
 | [`content/AGENT-DIRECTIVE.txt`](content/AGENT-DIRECTIVE.txt) | Brief for rebuilding sample `content/` |
 | [`AGENTS.md`](AGENTS.md) | Contributor / agent hard constraints |
 | [`CHANGELOG.md`](CHANGELOG.md) | What changed |
-| [`archive/`](archive/) | Historical reviews & audits — not required reading |
+
 
 ### Normative contracts (canonical)
 

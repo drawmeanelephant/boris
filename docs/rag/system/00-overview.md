@@ -37,7 +37,7 @@ tobacco or rolling-paper brand.
 
 Discover content → closed frontmatter → graph validate → emit HTML, IR, or RAG.
 Normative detail: `docs/contracts/`. Living phase: `docs/STATUS.md`. Historical
-campaign notes may live under `archive/` and are not required reading.
+historical campaign notes were removed from the tree and are not required reading.
 
 Narrative seeds must not overclaim untested guarantees (see STATUS and
 RELEASE-GATE).

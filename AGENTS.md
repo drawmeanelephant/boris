@@ -26,7 +26,7 @@ This file is binding project policy for AI coding agents (and humans pairing wit
 | `docs/contracts/` | Normative IR, frontmatter, graph, diagnostics, fixtures |
 | `docs/rag/system/` | Curated narrative seeds (product RAG) |
 | `content/AGENT-DIRECTIVE.txt` | Sample-content rebuild brief (not a site page) |
-| `archive/` | Historical reviews/audits — **not** default context; safe to move out |
+| ~~`archive/`~~ | **Removed** — historical reviews/audits no longer in-tree |
 | `rag/` | **Generated** product corpus — do not treat as source of truth |
 | `tools/source-rag/` | Standalone **source-code** RAG tool (`zig build source-rag`) |
 | `source-rag/` | **Generated** source pack — gitignored |

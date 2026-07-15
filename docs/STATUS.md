@@ -104,7 +104,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | **Now** | Sample / dogfood content under `content/` | `content/AGENT-DIRECTIVE.txt` — match HTML-default + Apex + graph nav; keep graph/Aside valid |
 | **Next** | Feature 6 follow-on — in-page heading `{{toc}}` | Per-page outline from body headings |
 | **Later** | v0.2.0 product cut | Package Feature 1+2+6 MVP + P2/P3 under a real version bump (`schemaVersion` stays `0.1.0` unless IR shape changes) |
-| **Hygiene** | Keep archive out of default agent context | Historical reviews live under [`archive/`](../archive/) |
+| **Hygiene** | Historical campaign notes | Removed from tree (`archive/`); do not reintroduce as default agent context |
 
 ### Shipped (do not re-open as greenfield)
 
@@ -160,7 +160,6 @@ on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 | [`docs/RELEASE-GATE.md`](RELEASE-GATE.md) | Ship checklist / `release-gate.sh` |
 | [`docs/rag/system/`](rag/system/) | RAG narrative seeds (not contracts) |
 | [`content/AGENT-DIRECTIVE.txt`](../content/AGENT-DIRECTIVE.txt) | Sample-content rebuild brief |
-| [`archive/`](../archive/) | Historical reviews/audits — safe to ignore or move out |
 
 ---
 

@@ -19,6 +19,12 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Hygiene — remove `archive/` from the tree
+
+- Delete top-level `archive/` (historical Feature 1 reviews, P3 notes, AUDIT-v0.1).
+  Living docs and contracts remain the source of truth; do not treat deleted
+  campaign notes as required reading.
+
 ### Feature 6 MVP — graph-aware HTML site nav — **Done**
 
 - HTML path runs the same Trunk/Satellite `graph.validate` + freeze as IR/RAG

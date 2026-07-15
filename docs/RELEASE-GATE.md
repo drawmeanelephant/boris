@@ -96,7 +96,8 @@ Platform-qualified (do not overclaim):
 ## Historical milestones (pointer only)
 
 m7–m10 / Feature 1–2 campaign detail lives in `CHANGELOG.md` and optional
-`archive/docs/`. Self-audit snapshot: `archive/docs/AUDIT-v0.1.md`.
+Historical campaign notes formerly under `archive/` were removed from the tree;
+living contracts + STATUS are authoritative.
 
 **Still deferred:** mmap, child-process markdown (forbidden), embedded HTTP
 dev server. Sanitizer remains opt-in (`zig build test-apex-sanitize`).
