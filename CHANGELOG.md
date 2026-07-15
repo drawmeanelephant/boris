@@ -19,6 +19,13 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Docs
+
+- Apex showcase: enable live dogfood for collapsible callouts, image IAL,
+  advanced tables, inline footnotes, bracketed spans / paragraph IAL, and Critic
+  Markup (verified under product Apex options). Fenced divs stay pending on the
+  long page (next-heading quirk).
+
 ---
 
 ## [0.2.1] — 2026-07-15

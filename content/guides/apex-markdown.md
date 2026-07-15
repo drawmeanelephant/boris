@@ -14,22 +14,23 @@ Product callouts with document-order guarantees use the registered
 [[guides/asides|Aside]] component. Apex also supports `> [!NOTE]`-style callouts;
 see [Apex callouts](#apex-callouts) for the difference.
 
-### Pending samples (not live yet)
+### Pending / product-off samples
 
-Anything from the broader Apex Unified surface that is **not** dogfooded live
-here sits in a fenced `text` block marked `APEX-PENDING`. Apex will expand some
-constructs even inside ordinary fences, so those lines stay **backslash-inert**
-(`\:::`, `\[@key]`, …).
+Broader Apex Unified constructs that are **not** dogfooded live (or are
+deliberate non-goals) sit in fenced `text` blocks marked `APEX-PENDING` or
+`PRODUCT-OFF`. Apex expands some constructs even inside ordinary fences, so
+those lines stay **backslash-inert** (`\:::`, `\[@key]`, …).
 
-**To enable a sample when ready:**
+**To enable a pending sample when ready:**
 
-1. Copy the body out of the `text` fence into the live section above it.
+1. Copy the body out of the `text` fence into a live section.
 2. Strip the leading `\` on inert lines.
 3. Delete the `APEX-PENDING` fence.
-4. Rebuild (`boris --quiet`) and check the section still renders cleanly.
+4. Rebuild (`boris --quiet`) and check the section still renders cleanly
+   (especially headings after fenced divs on long pages).
 
 `PRODUCT-OFF` samples are deliberate Boris non-goals (do not enable without a
-product decision). See also [Pending Apex samples](#pending-apex-samples).
+product decision). Remaining inventory: [Pending Apex samples](#pending-apex-samples).
 
 ## At a glance
 
@@ -44,24 +45,25 @@ product decision). See also [Pending Apex samples](#pending-apex-samples).
 | Task lists | **Live** | [Task lists](#task-lists) |
 | Blockquotes | **Live** | [Blockquotes](#blockquotes) |
 | Apex callouts (`> [!NOTE]`) | **Live** | [Callouts](#apex-callouts) |
-| Collapsible / alt callout syntaxes | Pending | [Callouts](#apex-callouts) |
+| Collapsible callouts (`-` / `+`) | **Live** | [Callouts](#apex-callouts) |
+| Python-Markdown `!!!` callouts | Product-off | [Callouts](#apex-callouts) |
 | Fenced code (no external highlighter) | **Live** | [Code](#fenced-code) |
 | Syntax highlighting (Pygments/…) | Product-off | [Code](#fenced-code) |
 | GFM tables (basic align) | **Live** | [Tables](#tables) |
-| Advanced tables (rowspan/colspan/caption) | Pending | [Tables](#tables) |
+| Advanced tables (rowspan/colspan/caption) | **Live** | [Tables](#tables) |
+| Grid tables | Pending (engine flag) | [Tables](#tables) |
 | Definition lists | **Live** | [Definition lists](#definition-lists) |
 | Math | **Live** | [Math](#math) |
-| Footnotes (reference style) | **Live** | [Footnotes](#footnotes) |
-| Alternate footnote syntaxes | Pending | [Footnotes](#footnotes) |
+| Footnotes (reference + inline) | **Live** | [Footnotes](#footnotes) |
 | Abbreviations + emoji | **Live** | [Abbreviations](#abbreviations-and-emoji) |
 | Links and images | **Live** | [Links](#links-and-images) |
-| Image IAL / size attrs | Pending | [Links](#links-and-images) |
-| Bracketed spans | Pending | [Pending](#pending-apex-samples) |
+| Image IAL / size attrs | **Live** | [Links](#links-and-images) |
+| Bracketed spans + paragraph IAL | **Live** | [Spans and IAL](#bracketed-spans-and-paragraph-ial) |
 | Horizontal rules | **Live** | [Breaks](#paragraphs-breaks-and-rules) |
 | Trusted raw HTML | **Live** (sample fenced) | [Raw HTML](#raw-html-trusted-authors) |
-| Fenced divs (`:::`) | Pending live | [Fenced divs](#fenced-divs) |
-| Critic Markup | Pending | [Pending](#pending-apex-samples) |
-| Citations / bibliography | Pending | [Pending](#pending-apex-samples) |
+| Fenced divs (`:::`) | Pending (long-page quirk) | [Fenced divs](#fenced-divs) |
+| Critic Markup | **Live** | [Critic Markup](#critic-markup) |
+| Citations / bibliography | Pending / product-off | [Pending](#pending-apex-samples) |
 | Indices | Pending | [Pending](#pending-apex-samples) |
 | Apex TOC markers | Pending / product-off | [Pending](#pending-apex-samples) |
 | Apex file includes | Product-off | [Pending](#pending-apex-samples) |
@@ -134,22 +136,11 @@ Use rules sparingly between major blocks; prefer headings for navigation.
 - Wiki-link (Boris, pre-Apex): [[getting-started|Getting started]]
 
 Images use ordinary Markdown. Prefer local assets under your content tree when
-you ship a real site; external URLs work for demos:
+you ship a real site; external URLs work for demos. IAL can set width/class:
 
-```markdown
-![Zig logo](https://ziglang.org/img/zig-logo-dark.svg)
-```
-
-![Zig logo](https://ziglang.org/img/zig-logo-dark.svg)
-
-```text
-# APEX-PENDING: image-ial | enable when image attribute dogfood is wanted
-# Strip leading \ on the image line when enabling.
-
-![Zig logo](https://ziglang.org/img/zig-logo-dark.svg)\{width=120px .screenshot}
+![Zig logo](https://ziglang.org/img/zig-logo-dark.svg){width=120px .screenshot}
 
 ![also](https://ziglang.org/img/zig-logo-dark.svg){: width="50%" }
-```
 
 ## Blockquotes
 
@@ -185,19 +176,18 @@ and not the registered Aside component.
 > [!CAUTION]
 > Intentionally broken parents must not live under `content/` — use fixtures.
 
-```text
-# APEX-PENDING: collapsible-callout | enable when collapsible callouts are dogfood-ready
+Collapsible variants use a trailing `-` (collapsed) or `+` (open) on the marker.
+They render as HTML `<details>` under product Apex options:
 
 > [!NOTE]-
 > Collapsed by default (trailing hyphen on the marker). Expand in the browser.
 
 > [!TIP]+
 > Expanded by default (trailing plus on the marker).
-```
 
 ```text
-# APEX-PENDING: python-md-callout | optional Apex flag; not product default
-# Strip \ on the bang-line when enabling (only if host enables !!! callouts).
+# PRODUCT-OFF: python-md-callout | optional Apex flag; not product default
+# Strip \ on the bang-line only if host enables !!! callouts.
 
 \!!! note "Python-Markdown style"
     Body only if the engine flag is on — Boris does not advertise this dialect.
@@ -315,9 +305,9 @@ GFM pipe tables with column alignment:
 
 Cells may contain *emphasis*, `code`, and [links](https://ziglang.org).
 
-```text
-# APEX-PENDING: advanced-tables | rowspan / colspan / caption / per-cell align
-# Enable when advanced table dogfood is wanted (verify long-page stability).
+### Advanced tables
+
+Rowspan (`^^`), colspan (`<<`), and a `Table:` caption line:
 
 | Left | Mid | Right |
 | ---: | :---: | :--- |
@@ -327,16 +317,15 @@ Cells may contain *emphasis*, `code`, and [links](https://ziglang.org).
 
 Table: Advanced caption example
 
-: Caption below (MMD-style)
+Per-cell alignment markers in the header row:
 
 | :Left | Right: | :Center: |
 | --- | --- | --- |
 | L | R | C |
-```
 
 ```text
 # APEX-PENDING: grid-tables | opt-in Apex --grid-tables; not product-default
-# Strip nothing special; only enable if host exposes grid tables.
+# Only enable if the host exposes grid tables (not product default).
 
 +-------+-------+
 | Hello | World |
@@ -387,17 +376,13 @@ Docs often need side notes without breaking the main sentence flow. Apex
 supports footnote references and hoists definitions into a footnotes section
 with back-refs.[^syntax] Keep labels unique for clarity.[^second]
 
-Put footnote *definitions* at the **end of the page** (after all other
+Put *named* footnote definitions at the **end of the page** (after all other
 sections). Mid-document definitions can swallow following headings.
 
-```text
-# APEX-PENDING: footnote-alt-syntax | Kramdown / MMD inline forms
-# Reference-style (live above) is enough for most docs. Enable extras carefully.
+Inline forms do not need a named definition block:
 
-Kramdown-style inline: Here is a footnote.^[Inline footnote body.]
-
-MultiMarkdown-style inline: Here is another.[^Inline body for MMD.]
-```
+- Kramdown-style: Here is a footnote.^[Inline footnote body.]
+- MultiMarkdown-style: Here is another.[^Inline body for MMD.]
 
 ## Abbreviations and emoji
 
@@ -457,25 +442,37 @@ behavior). Live forms appear on [[getting-started]] and [[guides/overview]].
 | Unrestricted MDX / JS expressions | Aside registry only |
 | Nested Asides | Contract forbids |
 
-## See also
+## Bracketed spans and paragraph IAL
 
-- [[guides/asides|Using Asides]] — product callouts
-- [[guides/overview|Content model]] — pipeline and graph
-- [[guides/cli-and-modes|CLI and modes]] — HTML / IR / RAG
-- [[reference/frontmatter|Frontmatter reference]] — closed author keys
+Inline spans take attributes in braces; trailing Kramdown IAL can mark a
+paragraph:
+
+A [highlighted phrase]{.mark #span-1} inside a sentence.
+
+Some paragraph with a trailing IAL.
+{: #para-id .lede}
+
+## Critic Markup
+
+Inline track-changes annotations (render as `<ins>` / `<del>` / `<mark>`):
+
+{++added text++}
+{--deleted text--}
+{~~old~>new~~}
+{==highlight==}
+{>>editorial comment<<}
 
 ## Fenced divs
 
-Apex Unified supports Pandoc-style fenced divs: a line of three colons with a
-brace-class attribute, a body, and a closing line of three colons. The engine
-emits a `div` with that class (covered by host fidelity tests U12). Prefer
-[[guides/asides|Aside]] for product callouts with diagnostics — on long pages,
-live `:::` blocks can interact poorly with following headings, so this showcase
-keeps samples **pending** (inert) until that is safer.
+Apex Unified supports Pandoc-style fenced divs (three colons + brace attributes).
+Host fidelity test U12 covers them. Prefer [[guides/asides|Aside]] for product
+callouts. **Live samples stay pending on this long page:** a closing `:::` can
+leave following headings unparsed (and inert samples must keep colon-lines
+backslash-escaped even inside fences).
 
 ```text
-# APEX-PENDING: fenced-div-live | long-page next-heading quirk; fidelity U12 passes
-# To enable: remove this fence, strip "\" before each ::: line, paste above See also.
+# APEX-PENDING: fenced-div-live | long-page next-heading quirk; U12 passes
+# Strip leading \ on each colon-line when enabling on a short page.
 
 \::: {.warning}
 This block should render as a div with class warning.
@@ -487,11 +484,7 @@ Fenced divs are useful for custom CSS hooks. Not a graph node.
 ```
 
 ```text
-# APEX-PENDING: fenced-div-blocktype | ::: >aside / section / details, etc.
-
-\::: >aside {.sidebar}
-Sidebar-like aside element (block type syntax), not Boris Aside component.
-\:::
+# APEX-PENDING: fenced-div-blocktype | ::: >aside / section / details
 
 \::: >details
 \::: >summary
@@ -501,39 +494,18 @@ Hidden details body.
 \:::
 ```
 
+## See also
+
+- [[guides/asides|Using Asides]] — product callouts
+- [[guides/overview|Content model]] — pipeline and graph
+- [[guides/cli-and-modes|CLI and modes]] — HTML / IR / RAG
+- [[reference/frontmatter|Frontmatter reference]] — closed author keys
+
 ## Pending Apex samples
 
-Inventory of broader Apex Unified surface not live on this page. Same enable
-rules as above. Inventory tracks upstream Apex capabilities vs what this dogfood
+Inventory of broader Apex Unified surface still not product-dogfooded (or
+deliberately off). Inventory tracks upstream Apex capabilities vs what this
 site exercises — not every row is a Boris roadmap commitment.
-
-### Bracketed spans and IAL
-
-```text
-# APEX-PENDING: bracketed-spans | [text]{attrs} → span
-# Strip backslashes when enabling.
-
-A \[highlighted phrase]\{.mark #span-1} inside a sentence.
-
-Paragraph with trailing Kramdown IAL:
-
-Some paragraph.
-\{: #para-id .lede}
-```
-
-### Critic Markup
-
-```text
-# APEX-PENDING: critic-markup | track changes / annotations
-# Critic expands even inside fences. Inert form uses a space after "{".
-# To enable: delete the space after each opening brace (add/del/sub/mark/comment).
-
-{ ++added text++ }
-{ --deleted text-- }
-{ ~~old~>new~~ }
-{ ==highlight== }
-{ >>comment<< }
-```
 
 ### Citations and bibliography
 
@@ -614,6 +586,7 @@ Upper: \[%title:upper]
 \<!--BREAK-->
 \<!--PAUSE:2-->
 ```
+
 
 [^syntax]: Footnote definition lines use a caret label and a colon, then the note body. Apex hoists them into a footnotes list with back-refs.
 [^second]: Second note to demonstrate ordered footnote lists and back-refs.
