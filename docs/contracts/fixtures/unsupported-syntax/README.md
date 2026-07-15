@@ -1,3 +1,3 @@
 # Fixture: unsupported frontmatter key
 
-**Expect:** exit `1`, `E_FRONTMATTER`.
+**Expect:** exit `1`, `EFRONTMATTER`.

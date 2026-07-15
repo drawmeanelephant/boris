@@ -5,4 +5,4 @@ unknown: y
 
 # Bad key
 
-E_FRONTMATTER
+EFRONTMATTER

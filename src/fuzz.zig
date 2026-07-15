@@ -529,7 +529,7 @@ pub fn runGraphTopologyFuzz(seed: u64, iterations: usize) !void {
         try std.testing.expectEqual(ref.self_parent, prod.self_parent);
         try std.testing.expectEqual(ref.missing_parent, prod.missing_parent);
 
-        // not_trunk: production reports E_PARENT_NOT_TRUNK when parent has a parent.
+        // not_trunk: production reports EPARENTNOTTRUNK when parent has a parent.
         // Cycles that are also chains may interact; require: if ref.not_trunk and
         // not a pure cycle-only two-node swap, prod should see not_trunk OR cycle.
         if (ref.not_trunk and !ref.cycle) {
@@ -540,7 +540,7 @@ pub fn runGraphTopologyFuzz(seed: u64, iterations: usize) !void {
         }
 
         // Cycles: when ref detects a cycle (and no dups that obscure indexing),
-        // production should report E_PARENT_CYCLE unless satellite-of-satellite
+        // production should report EPARENTCYCLE unless satellite-of-satellite
         // short-circuits parent_index for multi-hop (still should see not_trunk).
         if (ref.cycle and !ref.dup_id) {
             try std.testing.expect(prod.cycle or prod.not_trunk or prod.self_parent);

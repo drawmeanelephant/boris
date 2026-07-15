@@ -5,4 +5,4 @@ title: Bad Id
 
 # Body
 
-→ E_FRONTMATTER_VALUE (invalid canonical id)
+→ EINVALIDPATH (invalid canonical id)

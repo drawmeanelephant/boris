@@ -46,11 +46,11 @@ Both the IR compiler (`pipeline.zig`) and RAG export (`rag.zig`) call the shared
 
 | Case | Severity | Code |
 |------|----------|------|
-| Parent id missing from the page set | **error** | `E_PARENT_MISSING` |
-| Parent equals own id | **error** | `E_PARENT_SELF` |
-| Parent exists but is itself a satellite (multi-hop) | **error** | `E_PARENT_NOT_TRUNK` |
-| Cycle in parent edges | **error** | `E_PARENT_CYCLE` |
-| Duplicate entity id | **error** | `E_DUP_ID` |
+| Parent id missing from the page set | **error** | `EPARENTMISSING` |
+| Parent equals own id | **error** | `EPARENTSELF` |
+| Parent exists but is itself a satellite (multi-hop) | **error** | `EPARENTNOTTRUNK` |
+| Cycle in parent edges | **error** | `EPARENTCYCLE` |
+| Duplicate entity id | **error** | `EDUPLICATEID` |
 
 v0.1 is **one-level only**: satellites attach to trunks. Satellite-of-satellite
 is a hard error, not a multi-hop tree feature.

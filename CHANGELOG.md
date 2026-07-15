@@ -19,6 +19,17 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Docs — residual post-P3 audit cleanup
+
+- Fix underscore diagnostic codes in contract fixture READMEs/prose and RAG
+  seed `03-trunk-and-satellite.md` to canonical forms (`EDUPLICATEID`,
+  `EPARENTMISSING`, `EPARENTSELF`, `EPARENTNOTTRUNK`, `EPARENTCYCLE`,
+  `EFRONTMATTER`, `EINVALIDPATH` for invalid-id). Align
+  `fixtures/expected/rag/system/` goldens for 03/09.
+- Remove ghost **v0.4.0** “P3.3 complete” release trigger from
+  `docs/STATUS.md` versioning table (P3.3 already landed; packaging stays under
+  0.2/0.3). No runtime or IR schema changes. Feature 1 (cmark) still not started.
+
 ### Docs — post-P3 reconciliation
 
 - Reconcile human-facing and normative docs with landed P2/P3: README CLI

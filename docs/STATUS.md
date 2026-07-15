@@ -337,9 +337,8 @@ product cuts once acceptance is green:
 
 | Version | Trigger | Notes |
 |---------|---------|--------|
-| **v0.2.0** — Apex fidelity & default HTML surface | Features 1 + 2 land (CommonMark integration + HTML default CLI) | Update `compiler` / product id toward `boris/0.2.0`. **`schemaVersion` stays `"0.1.0"`** unless JSON IR shape changes. May also package already-landed P2/P3.1–P3.2 Unreleased work if not cut earlier. |
-| **v0.3.0** — Parallel scale & watch (if not already cut with 0.2) | Stable Feature 3 + 4 packaging / docs polish | CLI documents `--jobs N` and `--watch` as supported product flags. *If these ship inside 0.2.0, this cut can collapse or become a polish release.* |
-| **v0.4.0** — Multi-target configuration | Feature 5 / P3.3 complete | Introduces normative configuration / target grammar as product surface (`multi-target-isolated-output.md`). |
+| **v0.2.0** — Apex fidelity & default HTML surface | Features 1 + 2 land (CommonMark integration + HTML default CLI) | Update `compiler` / product id toward `boris/0.2.0`. **`schemaVersion` stays `"0.1.0"`** unless JSON IR shape changes. May also package already-landed P2/P3 Unreleased work (including multi-target) if not cut earlier. |
+| **v0.3.0** — P2/P3 packaging polish (if not already cut with 0.2) | Docs/release polish for `--incremental`, `--jobs`, `--watch`, `--target` as stable product flags | *If these ship inside 0.2.0, this cut can collapse or become a polish-only release.* P3.3 itself is **already implemented** — this row is packaging, not a greenfield trigger. |
 
 **IR rule (unchanged):** Breaking IR changes must bump `schemaVersion` and update
 `docs/contracts/` in the same change set. CLI-default flips and flag additions do

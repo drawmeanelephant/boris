@@ -1,6 +1,6 @@
 # Fixture: longer parent cycle (3 nodes)
 
-**Expect:** exit `1`, `E_PARENT_CYCLE`.
+**Expect:** exit `1`, `EPARENTCYCLE`.
 
 ## Layout
 

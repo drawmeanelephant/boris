@@ -5,4 +5,4 @@ title: Beta
 
 # Beta
 
-Also claims id `shared` → E_DUP_ID.
+Also claims id `shared` → EDUPLICATEID.

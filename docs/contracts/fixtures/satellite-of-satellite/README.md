@@ -1,6 +1,6 @@
 # Fixture: satellite-of-satellite (multi-hop)
 
-**Expect:** exit `1`, `E_PARENT_NOT_TRUNK`.
+**Expect:** exit `1`, `EPARENTNOTTRUNK`.
 
 ## Layout
 

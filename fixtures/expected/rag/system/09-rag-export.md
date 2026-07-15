@@ -55,9 +55,9 @@ Identical inputs produce **byte-identical** corpora. System seeds are sorted by 
 
 RAG export validates the content graph before writing page/graph segments:
 
-- Missing parent → hard fail (`E_PARENT_MISSING`)
-- Satellite-of-satellite → hard fail (`E_PARENT_NOT_TRUNK`)
-- Cycles → hard fail (`E_PARENT_CYCLE`) via DFS visiting set
+- Missing parent → hard fail (`EPARENTMISSING`)
+- Satellite-of-satellite → hard fail (`EPARENTNOTTRUNK`)
+- Cycles → hard fail (`EPARENTCYCLE`) via DFS visiting set
 - Trunk hubs + satellite lists sorted by `entity_id` for deterministic `relations.md`
 
 ## Segment categories

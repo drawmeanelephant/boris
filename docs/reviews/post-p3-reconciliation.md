@@ -40,9 +40,23 @@
 Historical CHANGELOG sections that describe *past* milestones (e.g. early
 “pipeline not implemented”) were left intact.
 
+## Residual cleanup (2026-07-14, docs-only follow-up)
+
+A later corpus audit restated several items already fixed above, plus real
+residuals that this follow-up closed without touching Feature 1 (cmark):
+
+| Item | Disposition |
+|------|-------------|
+| RELEASE-GATE title / P2–P3 checklist | Already fixed in this recon pass |
+| acceptance / AUDIT deferred wording | Already fixed |
+| RAG seeds for `--jobs` / `--watch` / `--target` | Already fixed |
+| Underscore diagnostic codes in contract fixture READMEs + seed `03` | **Fixed** in residual pass (`EDUPLICATEID`, `EPARENT*`, `EFRONTMATTER`, …) |
+| STATUS v0.4.0 ghost “P3.3 complete” trigger | **Fixed** — packaging only under 0.2/0.3 |
+
 ## Remaining known gaps
 
-1. **CommonMark / Apex fidelity** — vendor `apex.c` is still a minimal stub.
+1. **CommonMark / Apex fidelity** — vendor `apex.c` is still a minimal stub
+   (Feature 1 proposal only; not started).
 2. **HTML as default CLI mode** — bare `boris` remains IR-first (`--out` IR).
 3. **In-page TOC** — explicitly later (benefits from Apex fidelity first).
 4. **Platform-qualified publication** — not whole-tree atomic on every volume;
@@ -50,3 +64,5 @@ Historical CHANGELOG sections that describe *past* milestones (e.g. early
 5. **Dual frontmatter helper containment** — product path `parser.zig` + `parent`
    only; residual `frontmatter.zig` (fuzz) / historical `harness.zig` / RAG export
    field name `parent_entry` must not reintroduce a second author dialect.
+   Historical `harness.zig` still uses pre-canonical enum-style names and is not
+   on the default test graph.

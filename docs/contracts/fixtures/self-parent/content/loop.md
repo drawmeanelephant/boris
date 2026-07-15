@@ -5,4 +5,4 @@ parent: loop
 
 # Loop
 
-parent equals path-derived id → E_PARENT_SELF.
+parent equals path-derived id → EPARENTSELF.

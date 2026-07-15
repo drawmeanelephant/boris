@@ -5,4 +5,4 @@ tags: not-a-list
 
 # Body
 
-→ E_FRONTMATTER_VALUE (tags must be [a, b])
+→ EFRONTMATTER (tags must be [a, b])

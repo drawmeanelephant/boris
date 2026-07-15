@@ -1,6 +1,6 @@
 # Fixture: parent cycle
 
-**Expect:** exit `1`, `E_PARENT_CYCLE`.
+**Expect:** exit `1`, `EPARENTCYCLE`.
 
 ## Layout
 
@@ -17,7 +17,7 @@ Cycle: `a → b → a`.
 At least one error of the form:
 
 ```text
-error: E_PARENT_CYCLE: a.md:3:1: parent cycle involving a -> b -> a
+error: EPARENTCYCLE: a.md:3:1: parent cycle involving a -> b -> a
 ```
 
 or equivalent that lists both ids in stable sorted order, e.g.
@@ -26,5 +26,5 @@ or equivalent that lists both ids in stable sorted order, e.g.
 ## Notes
 
 - Both files also have valid frontmatter grammar; failure is graph-only.
-- Self-parent is a separate code (`E_PARENT_SELF`); this fixture is a
+- Self-parent is a separate code (`EPARENTSELF`); this fixture is a
   two-node cycle.
