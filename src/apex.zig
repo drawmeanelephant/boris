@@ -948,7 +948,12 @@ test "U17 include syntax does not pull disk when includes disabled" {
 
 test "U18 concurrent Unified renders match sequential baselines (D4 smoke)" {
     try skipIfHostileEngine();
+    // Sequential baseline capture may use the testing GPA. Concurrent worker
+    // arenas must NOT: std.testing.allocator is not thread-safe and races under
+    // U18 (CI Linux/macOS ABRT / segfault on join). page_allocator is safe as
+    // a shared parent for per-thread ArenaAllocators.
     const gpa = std.testing.allocator;
+    const concurrent_gpa = std.heap.page_allocator;
 
     // Distinctive tokens per sample catch cross-talk if threads share engine state.
     const samples = [_][]const u8{
@@ -1053,20 +1058,23 @@ test "U18 concurrent Unified renders match sequential baselines (D4 smoke)" {
     var worker = Worker{
         .samples = &samples,
         .baselines = &baselines,
-        .gpa = gpa,
+        .gpa = concurrent_gpa,
     };
 
     const thread_count = 8;
     var threads: [thread_count]std.Thread = undefined;
     var spawned: usize = 0;
     errdefer {
+        // Only join handles still owned by errdefer (spawn partial failure).
         for (threads[0..spawned]) |t| t.join();
     }
     for (&threads) |*t| {
         t.* = try std.Thread.spawn(.{}, Worker.run, .{&worker});
         spawned += 1;
     }
-    for (threads[0..spawned]) |t| t.join();
+    const to_join = spawned;
+    spawned = 0; // prevent double-join if later expects fail
+    for (threads[0..to_join]) |t| t.join();
 
     try std.testing.expect(!worker.failed.load(.acquire));
 }
