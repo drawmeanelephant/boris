@@ -346,7 +346,8 @@ Update stub-era HTML goldens with reasons.
 
 ## 10. Definition of done
 
-- [x] ApexMarkdown/apex vendored & pinned; licenses present *(Chat 1: `vendor/apex-markdown` @ v1.1.11 + `VENDOR.md`; host still stub)*
+- [x] ApexMarkdown/apex vendored & pinned; licenses present *(Chat 1: `vendor/apex-markdown` @ v1.1.11 + `VENDOR.md`)*
+- [x] Static ApexMarkdown linked from `zig build` *(Chat 2: cmake Strategy A; host body still stub)*
 - [ ] Host `apex_render` uses real Apex Unified (fragment HTML)
 - [ ] File includes / plugins / external highlighters off at Boris boundary
 - [ ] Whiteboard path: copy-in + `apex_free_string`; no arena free via libc

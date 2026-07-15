@@ -12,7 +12,7 @@ ABI (`vendor/apex/apex.h`). See [`APEX-Feature1-plan.md`](../../APEX-Feature1-pl
 | **VERSION file** | `1.1.11` |
 | **License** | MIT (`LICENSE`) — Copyright (c) 2026 Brett Terpstra |
 | **Pinned for Boris** | 2026-07-15 (Feature 1 campaign Chat 1) |
-| **Product role** | Real engine behind host `apex_render` adapter (Feature 1); **not** linked until Chat 2 |
+| **Product role** | Static libs linked into product (Chat 2); host `apex_render` still stub until Chat 3 adapter |
 
 ## Nested upstream dependencies (snapshot SHAs)
 
@@ -33,21 +33,23 @@ engine substrate only — **not** Boris’s public Markdown product surface.
 | `*.a` / `*.o` | Repo-root `.gitignore`; never commit prebuilt archives |
 | Nested `.git` | Snapshot ownership; pin recorded in this file |
 
-## How Boris will build this (Strategy A — Chat 2+)
+## How Boris builds this (Strategy A — Chat 2+)
 
-User entrypoint remains **`zig build`**. Feature 1 links a **static** Apex
-library produced as a compile-time sub-step:
+User entrypoint remains **`zig build`**. Feature 1 links **static** archives
+produced as a compile-time sub-step:
 
-1. Host tool: **CMake** (optional Ninja) — build-time only, not a runtime dep.
-2. Configure/build static `libapex` (+ cmark-gfm) from this tree into zig-cache
-   or a build-graph output dir.
-3. Host adapter `vendor/apex/apex.c` calls upstream
-   `apex_markdown_to_html` / `apex_free_string` (Chat 3).
-4. Zig continues to `@cImport` **only** Boris host `vendor/apex/apex.h`.
-
-Until Chat 2 lands, product binaries still link the **host stub** only
-(`vendor/apex/apex.c` minimal engine). This pin exists so Chat 2 has a stable
-tree.
+1. Host tool: **CMake** — build-time only, not a runtime dep.
+2. `scripts/build-apex-markdown.sh` configures/builds `apex_static` into
+   `vendor/apex-markdown/build/` (gitignored).
+3. `build.zig` `linkApex` adds:
+   - `build/libapex.a`
+   - `build/vendor/cmark-gfm/extensions/libcmark-gfm-extensions.a`
+   - `build/vendor/cmark-gfm/src/libcmark-gfm.a`
+4. Manual: `zig build build-apex`
+5. Host adapter `vendor/apex/apex.c` still **stub** until Chat 3
+   (`apex_markdown_to_html` + copy + `apex_free_string`).
+6. Zig continues to `@cImport` **only** Boris host `vendor/apex/apex.h`.
+7. Hostile path (`test-apex-hostile`) does **not** link ApexMarkdown.
 
 ## Modes (product default)
 

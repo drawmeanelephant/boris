@@ -19,16 +19,18 @@ How to use going forward:
 
 ## [Unreleased]
 
-### Feature 1 — ApexMarkdown pin (campaign Chat 1)
+### Feature 1 — ApexMarkdown pin + static link (campaign Chat 1–2)
 
 - Vendor real **[ApexMarkdown/apex](https://github.com/ApexMarkdown/apex)** as a
   flat source snapshot under `vendor/apex-markdown/` @ **v1.1.11**
   (`47d25d594b04143cdd747922d7fee8d66b3c5082`), including cmark-gfm and libyaml
   trees at recorded SHAs. Pin record:
   [`vendor/apex-markdown/VENDOR.md`](vendor/apex-markdown/VENDOR.md).
-- Product still links the **host stub** only (`vendor/apex/apex.c`); no adapter
-  or `build.zig` link yet (Chat 2+). CMake noted as future compile-time host
-  tool for Strategy A static lib. No IR schema or CLI default changes.
+- **Chat 2:** `scripts/build-apex-markdown.sh` + `zig build build-apex` build
+  static `libapex.a` (and cmark-gfm) via CMake; `build.zig` links them into
+  product modules. Hostile path does not link real Apex. CI installs CMake.
+  Host `apex_render` remains the **minimal stub** until Chat 3 adapter. No IR
+  schema or CLI default changes.
 
 ### Docs — residual post-P3 audit cleanup
 

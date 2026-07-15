@@ -57,7 +57,7 @@ remains IR; HTML is not yet the default product surface.
 | Opt-in Local Development Watch Mode (P3.2) | **Implemented & tested** | `--watch` enables live, debounced, coalesced, serialized HTML rebuilds |
 | Multi-target isolated outputs (P3.3) | **Implemented & tested** | `--target`, `--html-layout`, `--target-layout`; path-boundary isolation; stage commit; selective watch fan-out; review `docs/reviews/p3.3-multi-target-review.md` |
 | HTML as default CLI (replacing IR) | **Now** (roadmap) | IR remains default until Feature 2 lands |
-| Real ApexMarkdown Unified fidelity | **In progress** (Feature 1) | **Pin landed** (`vendor/apex-markdown` @ v1.1.11); host still stub; link+adapter Chat 2–3 |
+| Real ApexMarkdown Unified fidelity | **In progress** (Feature 1) | Pin + **static link** landed; host `apex_render` still stub; Chat 3 adapter next |
 | Full YAML / MDX / mmap | **Intentionally deferred** | See non-goals / Not Now |
 
 ### How to run
@@ -82,9 +82,9 @@ zig build package                  # optional review tar → packages/
 ./scripts/release-gate.sh
 ```
 
-**Feature 1 host tools (not required until Chat 2 links real Apex):** CMake
-(and optional Ninja) as **compile-time** dependencies only — `zig build` stays
-the user entrypoint. Pin record:
+**Feature 1 host tools:** **CMake** is required as a **compile-time** dependency
+to build static ApexMarkdown (`scripts/build-apex-markdown.sh` / `zig build
+build-apex`). Not a runtime dep; `zig build` stays the user entrypoint. Pin:
 [`vendor/apex-markdown/VENDOR.md`](../vendor/apex-markdown/VENDOR.md).
 
 ### Shared pipeline surface
@@ -214,7 +214,7 @@ re-opened as greenfield tickets.
 | Field | Detail |
 |-------|--------|
 | **Priority** | **Now** (authoring fidelity bottleneck) — **campaign in progress** |
-| **Campaign status** | **Chat 1 done:** `vendor/apex-markdown` pinned @ **v1.1.11** + [`VENDOR.md`](../vendor/apex-markdown/VENDOR.md). Host still stub. Next: Chat 2 link (`build.zig` Strategy A). |
+| **Campaign status** | **Chat 1–2 done:** pin @ v1.1.11; `build.zig` Strategy A links `libapex.a` + cmark-gfm; hostile isolated. Host still stub. Next: **Chat 3** adapter. |
 | **User-visible payoff** | Authors get full **Apex Unified** Markdown (tables, footnotes, def lists, math, callouts, IAL, …) — real [ApexMarkdown/apex](https://github.com/ApexMarkdown/apex), not a stub and not “cmark instead of Apex” |
 | **Smallest shippable vertical slice** | Vendor ApexMarkdown/apex; host `apex_render` adapter → `apex_markdown_to_html` with **`APEX_MODE_UNIFIED`**; keep Boris host ABI / Whiteboard |
 | **Modules** | host `vendor/apex` (or `vendor/boris-apex`), `vendor/apex-markdown/*`, `build.zig`, `src/apex.zig` tests |
@@ -296,8 +296,9 @@ re-opened as greenfield tickets.
 
 * **Plan (authority):** [`APEX-Feature1-plan.md`](../APEX-Feature1-plan.md)
 * **Campaign:** 7-chat Feature 1 push (pin → link → adapter → fidelity → docs → internal review → external audit).
-* **Chat 1 (done):** Pin `vendor/apex-markdown` @ v1.1.11; `VENDOR.md`; no product link yet.
-* **Next (Chat 2):** Strategy A cmake static lib from `build.zig`; CI cmake; hostile isolation.
+* **Chat 1 (done):** Pin `vendor/apex-markdown` @ v1.1.11; `VENDOR.md`.
+* **Chat 2 (done):** Strategy A cmake static lib via `scripts/build-apex-markdown.sh` + `build.zig` link; CI installs cmake; hostile isolation.
+* **Next (Chat 3):** Host `apex_render` → Unified `apex_markdown_to_html` + copy/`apex_free_string`.
 * **Scope:** Vendor [ApexMarkdown/apex](https://github.com/ApexMarkdown/apex); host adapter `apex_render` → `apex_markdown_to_html` in **Unified** mode; keep Boris host ABI.
 * **Acceptance:** Plan definition of done; `zig build test`, `test-apex-hostile`, Unified constructs, release-gate.
 * **Out of scope here:** Feature 2; optional `--apex-mode` (later).

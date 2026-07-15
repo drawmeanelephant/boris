@@ -26,8 +26,19 @@
 #endif
 
 const char *apex_version(void) {
-    return "apex-stub/0.1.0";
+    return "apex-stub/0.1.0+apex-markdown-linked";
 }
+
+#if defined(BORIS_LINK_APEX_MARKDOWN)
+/* Feature 1 Chat 2: force ApexMarkdown into the product link graph while this
+ * TU is still the minimal stub. Chat 3 replaces apex_render with the real
+ * adapter (apex_markdown_to_html + copy + apex_free_string). No upstream
+ * headers here — host ABI isolation for Zig @cImport stays intact. */
+extern const char *apex_version_string(void);
+__attribute__((used)) static const char *boris_apex_markdown_link_anchor(void) {
+    return apex_version_string();
+}
+#endif
 
 static void *default_alloc(void *ctx, size_t size) {
     (void)ctx;

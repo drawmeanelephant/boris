@@ -16,10 +16,11 @@ and call it from Boris’s host `apex_render` adapter in **`APEX_MODE_UNIFIED`**
 (default). See [Modes](https://github.com/ApexMarkdown/apex/wiki/Modes) and
 [C API](https://github.com/ApexMarkdown/apex/wiki/C-API).
 
-**Pin (Chat 1 done):**
+**Pin + link (Chat 1–2 done):**
 
-[`vendor/apex-markdown/VENDOR.md`](../../vendor/apex-markdown/VENDOR.md) — v1.1.11 snapshot.
-Host still stub; next is Chat 2 (`build.zig` Strategy A link).
+[`vendor/apex-markdown/VENDOR.md`](../../vendor/apex-markdown/VENDOR.md) — v1.1.11 snapshot;
+`scripts/build-apex-markdown.sh` + `build.zig` link static libs. Host still stub;
+next is Chat 3 (adapter).
 
 **ABI contract (Boris host lifetime rules still win):**
 

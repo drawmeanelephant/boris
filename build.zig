@@ -10,6 +10,22 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Feature 1 Chat 2: build static ApexMarkdown (cmake host tool only).
+    // Product host ABI remains vendor/apex; adapter body lands in Chat 3.
+    // See vendor/apex-markdown/VENDOR.md and scripts/build-apex-markdown.sh.
+    const ensure_apex = b.addSystemCommand(&.{
+        "bash",
+        "scripts/build-apex-markdown.sh",
+    });
+    ensure_apex.setCwd(b.path("."));
+    // cmake --build is incremental; always invoke the script so configure/build stay fresh.
+    ensure_apex.has_side_effects = true;
+    const build_apex_step = b.step(
+        "build-apex",
+        "Build ApexMarkdown static libraries via CMake (host tool: cmake)",
+    );
+    build_apex_step.dependOn(&ensure_apex.step);
+
     // build_options: hostile_apex swaps the C engine for ABI hostility tests.
     const apex_opts = b.addOptions();
     apex_opts.addOption(bool, "hostile_apex", false);
@@ -382,23 +398,63 @@ pub fn build(b: *std.Build) void {
         "Run hardening integration tests (alias subset of zig build test)",
     );
     test_harness_step.dependOn(&run_hardening_tests.step);
+
+    // Product Apex path requires cmake static libs before compile/link.
+    // Hostile double intentionally does NOT depend on or link real ApexMarkdown.
+    const apex_needing = [_]*std.Build.Step{
+        &exe.step,
+        &unit_tests.step,
+        &pipeline_tests.step,
+        &aside_tests.step,
+        &rag_tests.step,
+        &apex_tests.step,
+        &compile_tests.step,
+        &hardening_tests.step,
+        &fuzz_tests.step,
+        &package_exe.step,
+        &package_tests.step,
+    };
+    for (apex_needing) |s| s.dependOn(&ensure_apex.step);
 }
 
-/// Compile and link Apex C into a Zig module (in-process; never a subprocess).
-/// `hostile` selects `apex_hostile.c` instead of the real stub engine.
+/// Compile and link host Apex C into a Zig module (in-process; never a subprocess).
+///
+/// - `hostile == false`: host `vendor/apex/apex.c` + static ApexMarkdown libs
+///   (libapex + cmark-gfm). Chat 2 links the real engine; Chat 3 adapters it.
+/// - `hostile == true`: `apex_hostile.c` only — no real ApexMarkdown.
 fn linkApex(mod: *std.Build.Module, b: *std.Build, hostile: bool) void {
     mod.link_libc = true;
     mod.addIncludePath(b.path("vendor/apex"));
+
+    if (!hostile) {
+        // Upstream headers are NOT added for Zig @cImport (host apex.h only).
+        // Static archives from scripts/build-apex-markdown.sh:
+        mod.addObjectFile(b.path("vendor/apex-markdown/build/libapex.a"));
+        mod.addObjectFile(b.path("vendor/apex-markdown/build/vendor/cmark-gfm/extensions/libcmark-gfm-extensions.a"));
+        mod.addObjectFile(b.path("vendor/apex-markdown/build/vendor/cmark-gfm/src/libcmark-gfm.a"));
+    }
+
     const c_file = if (hostile)
         "vendor/apex/apex_hostile.c"
     else
         "vendor/apex/apex.c";
-    mod.addCSourceFile(.{
-        .file = b.path(c_file),
-        .flags = &.{
+    const flags: []const []const u8 = if (hostile)
+        &.{
             "-std=c11",
             "-Wall",
             "-Wextra",
-        },
+        }
+    else
+        &.{
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            // Keep ApexMarkdown symbols in the product link graph while the host
+            // body is still the stub (Chat 2). Chat 3 replaces the stub body.
+            "-DBORIS_LINK_APEX_MARKDOWN=1",
+        };
+    mod.addCSourceFile(.{
+        .file = b.path(c_file),
+        .flags = flags,
     });
 }
