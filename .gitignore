@@ -3,6 +3,7 @@
 .DS_Store
 .release-gate/
 .zig-cache/
+.zig-global-cache/
 zig-cache/
 *.a
 *.o

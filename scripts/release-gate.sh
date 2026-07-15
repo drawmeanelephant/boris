@@ -108,13 +108,13 @@ if [[ ! -f "${META}" ]]; then
   fail "missing catalog_meta.json"
 else
   # Fixed compact shape (schema v1)
-  EXPECT_META='{"format":"boris-rag","schema_version":1,"boris_version":"0.2.1"}'
+  EXPECT_META='{"format":"boris-rag","schema_version":1,"boris_version":"0.3.0"}'
   GOT_META="$(tr -d '\n' < "${META}" | sed 's/[[:space:]]//g')"
   # Allow trailing newline already stripped; tolerate pretty vs compact by
   # requiring keys and values rather than exact whitespace.
   if grep -q '"format"[[:space:]]*:[[:space:]]*"boris-rag"' "${META}" \
     && grep -q '"schema_version"[[:space:]]*:[[:space:]]*1' "${META}" \
-    && grep -q '"boris_version"[[:space:]]*:[[:space:]]*"0\.2\.1"' "${META}"; then
+    && grep -q '"boris_version"[[:space:]]*:[[:space:]]*"0\.3\.0"' "${META}"; then
     pass "catalog_meta.json fields (format/schema_version/boris_version)"
   else
     fail "catalog_meta.json shape mismatch: $(cat "${META}")"
@@ -184,6 +184,18 @@ if diff -u "${VALID_EXPECTED}/build-report.json" "${IR_OUT}/build-report.json"; 
   pass "build-report.json matches golden"
 else
   fail "build-report.json golden mismatch"
+fi
+
+note "4a. Graph-native dependency IR golden"
+GRAPH_NATIVE_CONTENT="docs/contracts/fixtures/graph-native-dependencies/content"
+GRAPH_NATIVE_EXPECTED="docs/contracts/fixtures/graph-native-dependencies/expected/graph.json"
+GRAPH_NATIVE_OUT="${GATE_DIR}/ir-graph-native"
+rm -rf "${GRAPH_NATIVE_OUT}"
+"${BORIS}" --input="${GRAPH_NATIVE_CONTENT}" --out="${GRAPH_NATIVE_OUT}" --quiet
+if diff -u "${GRAPH_NATIVE_EXPECTED}" "${GRAPH_NATIVE_OUT}/graph.json"; then
+  pass "graph-native graph.json matches typed-edge + reverseIndex golden"
+else
+  fail "graph-native graph.json golden mismatch"
 fi
 # Feature 2: bare-style default HTML (relative html-dir under gate dir)
 note "4b. Default HTML surface (Feature 2)"

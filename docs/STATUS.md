@@ -1,25 +1,23 @@
 # Project status — Boris
 
-**As of:** 2026-07-15 · product **0.2.1** / compiler **boris/0.2.1** · Zig **0.16.0**  
-**Phase:** **v0.2.1** — HTML-default site compiler + Feature 7 includes/wiki.  
-IR `schemaVersion` remains **`0.1.0`**.
+**As of:** 2026-07-15 · product **0.3.0** / compiler **boris/0.3.0** · Zig **0.16.0**<br>
+**Phase:** **v0.3.0** — Feature 8.1–8.2 graph-native dependency IR.<br>
+IR `schemaVersion` is **`0.2.0`**.
 
-**Active contract transition (F8.0):** `docs/contracts/ir-schema.md` now pins the
-next IR shape as `0.2.0` with target product `0.3.0` / compiler
-`boris/0.3.0`. The current
-binary intentionally remains `boris/0.2.1` / IR `0.1.0` until F8.1–F8.2
-implement dependency freeze and JSON emission. Do not advertise IR 0.2 as
-shipped during this contracts-first interval.
+**Feature 8 status:** F8.0 contracts and F8.1–F8.2 resolution/freeze/emission
+are complete. IR 0.2 publishes typed `parent` / `include` / `reference` edges
+and deterministic `reverseIndex`. F8.3 incremental dirty-set consumption is
+not shipped; its cache-manifest determinism prerequisite is not yet on `main`.
 
 Living snapshot for agents and humans. Prefer this and [`CHANGELOG.md`](../CHANGELOG.md)
 over archaeology. Normative behavior: [`docs/contracts/`](contracts/).
 
-### What 0.2.1 is
+### What 0.3.0 is
 
-Product **0.2.1** is a minor cut on top of **0.2.0**: Boris-mediated
-`{{include}}` + `[[entity-id]]` wiki-links on the HTML path (Feature 7), sample
-content dogfood, and diagnostics/fingerprint polish. Still bare `boris` →
-`dist/` HTML; IR/RAG opt-in; IR shape still schema **0.1.0**. Tag: `v0.2.1`.
+Product **0.3.0** projects direct parent/include/reference dependencies into
+IR 0.2 with typed page/source endpoints, canonical edge ordering, and a target-
+keyed reverse index. Include/wiki failures now gate IR/RAG graph freeze. Bare
+`boris` remains HTML → `dist/`; IR/RAG remain opt-in.
 
 **0.2.0** packaged ApexMarkdown Unified, HTML default CLI, graph-aware nav +
 TOC, and P2/P3 incremental / watch / jobs / multi-target. Tag: `v0.2.0`.
@@ -120,7 +118,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
-| **Active — F8.0** | IR 0.2 graph-native dependencies | Contracted typed `parent` / `include` / `reference` edges + reverse index; implementation follows in F8.1–F8.3 |
+| **Follow-up — F8.3** | Incremental dirty-set consumes frozen dependencies | Wait for cache-manifest determinism prerequisite on `main`; do not build a divergent graph |
 | **Later** | Wiki `[[id#heading]]` section targets | Needs heading-id contract |
 | **Hygiene** | Sample content honesty as features land | Root `content/` is current for F7; re-check after next feature |
 | **Hygiene** | No parallel content sandboxes by default | Failed draft removed; root `content/` is SoT |
@@ -129,8 +127,11 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | # | Feature | Note |
 |---|---------|------|
+| — | **Product v0.3.0** | Feature 8.1–8.2 / IR 0.2 graph-native dependencies |
 | — | **Product v0.2.1** | Feature 7 + dogfood + F7 polish; tag `v0.2.1` |
 | — | **Product v0.2.0** | Features 1+2+6 + P2/P3; tag `v0.2.0` |
+| 8.0 | IR 0.2 contracts | Typed endpoint, edge order, reverse-index, and fixture contract frozen |
+| 8.1–8.2 | Graph-native IR | Resolve/freeze direct dependencies; emit IR 0.2; full golden + release gate |
 | 1 | ApexMarkdown Unified | Real engine under host ABI |
 | 2 | HTML default CLI | Bare `boris` → `dist/`; IR via `--out` |
 | 3 | `--jobs N` | Parallel independent page renders |

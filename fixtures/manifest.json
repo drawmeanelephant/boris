@@ -1,6 +1,6 @@
 {
-  "schemaVersion": "0.1.0",
-  "note": "Fixture inventory only. Compiler validation of these trees is not implemented yet.",
+  "schemaVersion": "0.2.0",
+  "note": "Fixture inventory for compiler validation trees.",
   "valid": [
     {
       "path": "content/valid/trunk-root.md",

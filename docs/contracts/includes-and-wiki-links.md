@@ -1,7 +1,7 @@
 # Includes and wiki-links (Boris-mediated)
 
 **Status:** normative contract — HTML implemented (product v0.2+); IR 0.2 edge
-publication contracted for Feature 8 and pending F8.1–F8.2
+publication implemented in Feature 8.1–F8.2
 **Modules:** [`src/include.zig`](../../src/include.zig), [`src/wikilink.zig`](../../src/wikilink.zig),
 wired from [`src/compile.zig`](../../src/compile.zig)  
 **Related:** [html-output.md](html-output.md), [diagnostics.md](diagnostics.md),
@@ -15,7 +15,7 @@ wired from [`src/compile.zig`](../../src/compile.zig)
 - Keep Apex sandboxed: `enable_file_includes = false` always (never engine FS reads).
 - Fail loud on missing targets, illegal paths, and include cycles.
 - Include file bytes contribute to the parent page’s HTML cache fingerprint.
-- Preserve schema `0.1.0` exactly: it never publishes include/reference edges.
+- Under historical IR schema `0.1.0`, include/reference edges were not published.
 - Under IR schema `0.2.0`, validate these dependencies before freeze and publish
   direct `include` / `reference` edges plus the canonical reverse index defined
   by [ir-schema.md](ir-schema.md).

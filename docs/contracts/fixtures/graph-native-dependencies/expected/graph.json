@@ -1,0 +1,152 @@
+{
+  "schemaVersion": "0.2.0",
+  "frozen": true,
+  "nodes": [
+    {
+      "index": 0,
+      "id": "guides/child",
+      "sourcePath": "guides/child.md",
+      "role": "satellite",
+      "parent": "index",
+      "parentIndex": 2,
+      "title": "Child",
+      "status": null,
+      "tags": [],
+      "bodyOffset": 35
+    },
+    {
+      "index": 1,
+      "id": "guides/target",
+      "sourcePath": "guides/target.md",
+      "role": "trunk",
+      "parent": null,
+      "parentIndex": null,
+      "title": "Reference Target",
+      "status": null,
+      "tags": [],
+      "bodyOffset": 32
+    },
+    {
+      "index": 2,
+      "id": "index",
+      "sourcePath": "index.md",
+      "role": "trunk",
+      "parent": null,
+      "parentIndex": null,
+      "title": "Dependency Home",
+      "status": "published",
+      "tags": [],
+      "bodyOffset": 49
+    }
+  ],
+  "edges": [
+    {
+      "from": {
+        "type": "page",
+        "value": "guides/child"
+      },
+      "to": {
+        "type": "page",
+        "value": "index"
+      },
+      "kind": "parent"
+    },
+    {
+      "from": {
+        "type": "page",
+        "value": "index"
+      },
+      "to": {
+        "type": "page",
+        "value": "guides/target"
+      },
+      "kind": "reference"
+    },
+    {
+      "from": {
+        "type": "page",
+        "value": "index"
+      },
+      "to": {
+        "type": "source",
+        "value": "includes/shared.md"
+      },
+      "kind": "include"
+    },
+    {
+      "from": {
+        "type": "source",
+        "value": "includes/shared.md"
+      },
+      "to": {
+        "type": "page",
+        "value": "guides/target"
+      },
+      "kind": "reference"
+    },
+    {
+      "from": {
+        "type": "source",
+        "value": "includes/shared.md"
+      },
+      "to": {
+        "type": "source",
+        "value": "includes/nested.md"
+      },
+      "kind": "include"
+    }
+  ],
+  "reverseIndex": [
+    {
+      "target": {
+        "type": "page",
+        "value": "guides/target"
+      },
+      "incomingEdges": [1, 3]
+    },
+    {
+      "target": {
+        "type": "page",
+        "value": "index"
+      },
+      "incomingEdges": [0]
+    },
+    {
+      "target": {
+        "type": "source",
+        "value": "includes/nested.md"
+      },
+      "incomingEdges": [4]
+    },
+    {
+      "target": {
+        "type": "source",
+        "value": "includes/shared.md"
+      },
+      "incomingEdges": [2]
+    }
+  ],
+  "nav": [
+    {
+      "index": 0,
+      "id": "guides/child",
+      "breadcrumb": [2, 0],
+      "children": [],
+      "siblings": []
+    },
+    {
+      "index": 1,
+      "id": "guides/target",
+      "breadcrumb": [1],
+      "children": [],
+      "siblings": []
+    },
+    {
+      "index": 2,
+      "id": "index",
+      "breadcrumb": [2],
+      "children": [0],
+      "siblings": []
+    }
+  ]
+}

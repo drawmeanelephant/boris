@@ -1,7 +1,6 @@
 # Intermediate representation (IR) schema (v0.2)
 
-**Status:** normative Feature 8 target — contract frozen; implementation lands
-in F8.1–F8.2
+**Status:** normative Feature 8 contract — F8.1–F8.2 implemented
 **Target product / compiler id:** `0.3.0` / `boris/0.3.0`
 **schemaVersion:** `0.2.0`
 
@@ -9,9 +8,8 @@ IR is explicit (`--out DIR` / `--no-rag`) and deterministic. Bare `boris`
 continues to emit HTML under `dist/`; this schema does not change CLI mode
 selection.
 
-The checked-in v0.2.1 compiler still emits schema `0.1.0`. F8.0 deliberately
-lands this contract first. Writers MUST NOT emit the v0.2 dependency shape
-until they also emit `schemaVersion: "0.2.0"` and compiler id `boris/0.3.0`.
+The v0.3.0 compiler emits this dependency shape with
+`schemaVersion: "0.2.0"` and compiler id `boris/0.3.0`.
 
 ---
 

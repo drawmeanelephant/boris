@@ -3,8 +3,8 @@
 All notable changes to Boris are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
-Versioning: product **v0.2.1** with IR `schemaVersion` **`0.1.0`** and compiler id
-**`boris/0.2.1`**. Breaking IR changes must bump `schemaVersion` and update
+Versioning: product **v0.3.0** with IR `schemaVersion` **`0.2.0`** and compiler id
+**`boris/0.3.0`**. Breaking IR changes must bump `schemaVersion` and update
 `docs/contracts/`. Product version bumps may update `compiler_id` / `boris_version`
 without changing IR schema.
 
@@ -24,10 +24,17 @@ How to use going forward:
 - **F8.0 contracts:** pin target IR `schemaVersion` `0.2.0` and target compiler
   `boris/0.3.0`; define typed `page` / `source` endpoints, direct `parent` /
   `include` / `reference` edges, deterministic `reverseIndex`, validation and
-  sorting rules, and a contracts-first fixture skeleton. The current binary
-  remains `boris/0.2.1` / IR `0.1.0` until F8.1–F8.2 implement the shape.
-  Graph success artifact list includes `reverseIndex`; forward vs reverse
-  dependency walks are spelled out for F8.1 implementers.
+  sorting rules, and a contracts-first fixture skeleton. Graph success artifact
+  list includes `reverseIndex`; forward vs reverse dependency walks are explicit.
+- **F8.1 resolve + freeze:** after page topology validation, resolve fence-aware
+  direct include/reference dependencies from pages and reachable include
+  sources; deduplicate and canonically sort typed edges; build the target-keyed
+  `reverseIndex`. Existing include/wiki diagnostics block graph publication.
+- **F8.2 emit + version:** emit IR `0.2.0` / compiler `boris/0.3.0`, bump product
+  and RAG version to `0.3.0`, promote the graph-native fixture to a full golden,
+  and enforce it in tests and the release gate.
+- **F8.3 remains follow-up:** cache-manifest determinism is not yet on `main`,
+  so incremental dirty-set consumption is deliberately not claimed here.
 
 ### Fixed
 

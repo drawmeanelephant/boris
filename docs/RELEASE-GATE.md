@@ -1,4 +1,4 @@
-# Release gate — Boris (v0.2.1)
+# Release gate — Boris (v0.3.0)
 
 Mechanical checklist before tagging a release or claiming a milestone complete.
 
@@ -37,7 +37,8 @@ verified. Do not check an item because a design doc exists.
       pipeline integration fixtures)
 - [x] **Deterministic IR test** — JSON IR emit is byte-stable across dual runs
       on the same host (pipeline dual-export diff of `manifest.json` /
-      `graph.json`)
+      `graph.json`); the F8 fixture pins typed parent/include/reference edges
+      and `reverseIndex`
 - [x] **RAG determinism test** — dual RAG export to distinct dirs is
       byte-identical (`src/rag.zig` full-tree compare); shared
       `pipeline.compile` / `graph.validate` with IR for invalid fixtures
@@ -79,7 +80,9 @@ verified. Do not check an item because a design doc exists.
 **Default CLI is HTML** under `dist/` (Feature 2). IR remains available via
 `--out` / `--no-rag`. **P2 and P3 scale-out on the HTML path are complete.**
 **Features 1–7** (Apex Unified, HTML default, jobs/watch/target, nav/toc,
-includes + wiki) are Done — see [`docs/STATUS.md`](STATUS.md). Product **v0.2.1**.
+includes + wiki) and **F8.1–F8.2** graph-native IR are Done — see
+[`docs/STATUS.md`](STATUS.md). Product **v0.3.0** / IR **0.2.0**. F8.3 remains
+a follow-up and is not claimed by this gate.
 
 **Compile-time host tool:** CMake is required for static ApexMarkdown
 (`scripts/build-apex-markdown.sh` / `zig build build-apex`).

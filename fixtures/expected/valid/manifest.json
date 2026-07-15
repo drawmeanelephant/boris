@@ -1,6 +1,6 @@
 {
-  "schemaVersion": "0.1.0",
-  "compiler": "boris/0.2.1",
+  "schemaVersion": "0.2.0",
+  "compiler": "boris/0.3.0",
   "contentRoot": "fixtures/content/valid",
   "pageCount": 4,
   "pages": [
