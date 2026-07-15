@@ -1,0 +1,90 @@
+{
+  "schemaVersion": "0.2.0",
+  "edges": [
+    {
+      "from": {
+        "type": "page",
+        "value": "guides/child"
+      },
+      "to": {
+        "type": "page",
+        "value": "index"
+      },
+      "kind": "parent"
+    },
+    {
+      "from": {
+        "type": "page",
+        "value": "index"
+      },
+      "to": {
+        "type": "page",
+        "value": "guides/target"
+      },
+      "kind": "reference"
+    },
+    {
+      "from": {
+        "type": "page",
+        "value": "index"
+      },
+      "to": {
+        "type": "source",
+        "value": "includes/shared.md"
+      },
+      "kind": "include"
+    },
+    {
+      "from": {
+        "type": "source",
+        "value": "includes/shared.md"
+      },
+      "to": {
+        "type": "page",
+        "value": "guides/target"
+      },
+      "kind": "reference"
+    },
+    {
+      "from": {
+        "type": "source",
+        "value": "includes/shared.md"
+      },
+      "to": {
+        "type": "source",
+        "value": "includes/nested.md"
+      },
+      "kind": "include"
+    }
+  ],
+  "reverseIndex": [
+    {
+      "target": {
+        "type": "page",
+        "value": "guides/target"
+      },
+      "incomingEdges": [1, 3]
+    },
+    {
+      "target": {
+        "type": "page",
+        "value": "index"
+      },
+      "incomingEdges": [0]
+    },
+    {
+      "target": {
+        "type": "source",
+        "value": "includes/nested.md"
+      },
+      "incomingEdges": [4]
+    },
+    {
+      "target": {
+        "type": "source",
+        "value": "includes/shared.md"
+      },
+      "incomingEdges": [2]
+    }
+  ]
+}

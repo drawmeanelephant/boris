@@ -10,6 +10,7 @@ This document defines the normative behavior, constraints, CLI options, and fail
   - frontmatter parsing,
   - include / layout dependency resolution,
   - graph validation and freezing,
+  - dependency-edge sorting and reverse-index construction,
   - content-addressed cache fingerprinting,
   - and affected-set calculation
   MUST remain strictly single-threaded, executed sequentially by a single coordinator before any worker begins.
@@ -26,7 +27,9 @@ This document defines the normative behavior, constraints, CLI options, and fail
 
 ## Thread & Memory Isolation
 
-1. **Immutable Inputs:** The resolved graph, frozen `PageDb` metadata, layout template, and pre-computed `is_dirty` set are completely immutable once workers are spawned.
+1. **Immutable Inputs:** The resolved graph (including Feature 8 dependency
+   edges/reverse index), frozen `PageDb` metadata, layout template, and
+   pre-computed `is_dirty` set are completely immutable once workers are spawned.
 2. **Independent Output Paths:** Workers write exclusively to unique, non-overlapping destination paths (guaranteed by the safe output path module).
 3. **Whiteboard Allocation:** Each worker thread owns its own `std.heap.ArenaAllocator` ("Whiteboard") for page-local rendering. No thread may access or share another thread's `ArenaAllocator`.
 4. **Lifetime Contract:** A worker's local `ArenaAllocator` MUST only be reset (`.free_all`) after the `renderAndPublishPage` function has fully returned and all buffered output bytes have been completely flushed and published.

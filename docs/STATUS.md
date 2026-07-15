@@ -4,6 +4,13 @@
 **Phase:** **v0.2.1** — HTML-default site compiler + Feature 7 includes/wiki.  
 IR `schemaVersion` remains **`0.1.0`**.
 
+**Active contract transition (F8.0):** `docs/contracts/ir-schema.md` now pins the
+next IR shape as `0.2.0` with target product `0.3.0` / compiler
+`boris/0.3.0`. The current
+binary intentionally remains `boris/0.2.1` / IR `0.1.0` until F8.1–F8.2
+implement dependency freeze and JSON emission. Do not advertise IR 0.2 as
+shipped during this contracts-first interval.
+
 Living snapshot for agents and humans. Prefer this and [`CHANGELOG.md`](../CHANGELOG.md)
 over archaeology. Normative behavior: [`docs/contracts/`](contracts/).
 
@@ -113,7 +120,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
-| **Later** | IR-visible include/reference edges | Would require `schemaVersion` bump; MVP keeps deps HTML-internal |
+| **Active — F8.0** | IR 0.2 graph-native dependencies | Contracted typed `parent` / `include` / `reference` edges + reverse index; implementation follows in F8.1–F8.3 |
 | **Later** | Wiki `[[id#heading]]` section targets | Needs heading-id contract |
 | **Hygiene** | Sample content honesty as features land | Root `content/` is current for F7; re-check after next feature |
 | **Hygiene** | No parallel content sandboxes by default | Failed draft removed; root `content/` is SoT |

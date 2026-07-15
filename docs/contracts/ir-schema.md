@@ -1,11 +1,17 @@
-# Intermediate representation (IR) schema (v0.1)
+# Intermediate representation (IR) schema (v0.2)
 
-**Status:** normative contract — **implemented** by the milestone 6 default CLI  
-**Compiler id:** `boris/0.2.1`  
-**schemaVersion:** `0.1.0`
+**Status:** normative Feature 8 target — contract frozen; implementation lands
+in F8.1–F8.2
+**Target product / compiler id:** `0.3.0` / `boris/0.3.0`
+**schemaVersion:** `0.2.0`
 
-Default v0.1 product output is **deterministic JSON IR** under `.boris/` (or
-`--out`). **HTML is not** a default product surface for v0.1 acceptance.
+IR is explicit (`--out DIR` / `--no-rag`) and deterministic. Bare `boris`
+continues to emit HTML under `dist/`; this schema does not change CLI mode
+selection.
+
+The checked-in v0.2.1 compiler still emits schema `0.1.0`. F8.0 deliberately
+lands this contract first. Writers MUST NOT emit the v0.2 dependency shape
+until they also emit `schemaVersion: "0.2.0"` and compiler id `boris/0.3.0`.
 
 ---
 
@@ -17,7 +23,7 @@ output directory (CLI default `.boris/`):
 ```text
 .boris/
   manifest.json       # required — page summaries
-  graph.json          # required — frozen nodes + parent edges + nav
+  graph.json          # required — frozen nodes + dependency edges + reverse index + nav
   build-report.json   # required — ok flag, errorCount, diagnostics
 ```
 
@@ -32,7 +38,7 @@ On **I/O/system failure** (exit **3**), files may be missing or partial;
 `build-report.json` may still be written when the failure is detected after
 output setup.
 
-There is **no** `pages.json`. Full page body text is **not** emitted in v0.1
+There is **no** `pages.json`. Full page body text is **not** emitted in v0.2
 IR; nodes carry `bodyOffset` only (byte offset of body start in the source
 file). Consumers that need raw body re-read source from `sourcePath`.
 
@@ -41,7 +47,7 @@ No HTML, no RAG tree, no per-page fragment files under this IR contract.
 | File | On success (`ok: true`) | On content failure (`ok: false`) |
 |------|-------------------------|-----------------------------------|
 | `manifest.json` | Full page list, sorted by `id` | **Not published** |
-| `graph.json` | `frozen: true`, nodes + edges + nav | **Not published** |
+| `graph.json` | `frozen: true`, nodes + edges + reverseIndex + nav | **Not published** |
 | `build-report.json` | `ok: true`, empty diagnostics | `ok: false`, non-empty diagnostics |
 
 ---
@@ -51,18 +57,33 @@ No HTML, no RAG tree, no per-page fragment files under this IR contract.
 Every top-level IR document **must** include:
 
 ```json
-"schemaVersion": "0.1.0"
+"schemaVersion": "0.2.0"
 ```
 
 | Rule | Detail |
 |------|--------|
 | Type | JSON string |
-| v0.1 value | exactly `"0.1.0"` |
-| Breaking change | New `schemaVersion`; old writers must not silently emit new shapes under `"0.1.0"` |
+| v0.2 value | exactly `"0.2.0"` |
+| Breaking change | Typed dependency endpoints and `reverseIndex`; old writers must not silently emit these under `"0.1.0"` |
 
-Also required on success paths: a compiler id string of the form `boris/<product-version>`
-(currently `boris/0.2.1`). Product version bumps may update this string; IR
-`schemaVersion` stays `"0.1.0"` until the emit shape breaks.
+Also required on success paths: a compiler id string of the form
+`boris/<product-version>` (target `boris/0.3.0`). Product version bumps may
+update this string without changing the IR schema, but this breaking IR change
+requires both the schema and compiler/product bumps.
+
+### v0.1 → v0.2 migration
+
+| Surface | `0.1.0` | `0.2.0` |
+|---------|---------|---------|
+| `manifest.json` pages | unchanged shape | unchanged shape; document version + compiler bump |
+| `graph.json` nodes/nav | page nodes + nav | unchanged page node/nav shape |
+| `graph.json` edges | numeric page indices; `parent` only | typed endpoints; `parent`, `include`, `reference` |
+| Reverse dependencies | not emitted | required `reverseIndex` over every emitted edge |
+| Include/wiki validation in IR | not performed | required before freeze/publication |
+| `build-report.json` | schema `0.1.0` | same shape, schema `0.2.0` |
+
+Consumers MUST branch on `schemaVersion`; they must not infer the edge shape
+from the compiler id.
 
 ---
 
@@ -73,11 +94,12 @@ Also required on success paths: a compiler id string of the form `boris/<product
 | 1 | Discover | content root on disk | set of source paths (`.md` / `.mdx`) |
 | 2 | Identify | source paths | `sourcePath` + path-derived `id` per page |
 | 3 | Parse + promote | file bytes | durable PageDb fields + `bodyOffset` |
-| 4 | Validate | pages + `parent` fields | diagnostics; **no freeze yet** |
-| 5 | Freeze | only if zero errors | stable indices + edges; `frozen: true` |
-| 6 | Emit | pages + edges + diagnostics | JSON under `--out` (see publication) |
+| 4 | Validate pages | pages + `parent` fields | identity/topology diagnostics; **no freeze yet** |
+| 5 | Resolve + validate dependencies | validated page id set + page bodies + reachable include sources | direct include/reference edges + diagnostics |
+| 6 | Freeze | only if zero errors | stable indices, sorted edges + reverse index; `frozen: true` |
+| 7 | Emit | pages + frozen graph + diagnostics | JSON under `--out` (see publication) |
 
-IR emit stages run **sequentially** in a single process. (Bounded HTML page
+IR discovery, dependency resolution, freeze, and emit run **sequentially** in a single process. (Bounded HTML page
 workers via `--jobs` are out of IR scope — see
 [parallel-rendering.md](parallel-rendering.md).)
 
@@ -130,6 +152,8 @@ Every page has exactly one role after resolution:
 4. [`EPARENTMISSING`](diagnostics.md)
 5. [`EPARENTNOTTRUNK`](diagnostics.md)
 6. After all pages processed: [`EPARENTCYCLE`](diagnostics.md) (global)
+7. Include/reference diagnostics in stable locus order after page identity and
+   topology are known valid
 
 Diagnostics are sorted for emit by (`sourcePath`, `line`, `column`, `code`,
 `message`) — deterministic and non-duplicative for a given content tree.
@@ -151,14 +175,16 @@ the CLI, same compiler version, and the **same host OS/filesystem semantics**:
 1. Byte-for-byte identical `manifest.json` and `graph.json` (LF, same key order).
 2. `build-report.json` identical when `outDir` / `contentRoot` strings match.
 3. **Sorted** `pages` / `nodes` by `id` ascending (unsigned byte order of UTF-8).
-4. **Stable key order** within each object (order listed below).
-5. No wall-clock timestamps, hostnames, absolute machine paths for **source**
+4. **Sorted** `edges` and `reverseIndex` by their canonical endpoint comparators;
+   reverse entries contain ascending final edge indices.
+5. **Stable key order** within each object (order listed below).
+6. No wall-clock timestamps, hostnames, absolute machine paths for **source**
    identity, or random IDs in the IR (`sourcePath` is content-root-relative;
    `contentRoot` / `outDir` are the CLI path strings as passed).
-6. Newlines: **LF only**. Pretty-print with **2-space indent**, no trailing
+7. Newlines: **LF only**. Pretty-print with **2-space indent**, no trailing
    spaces, final newline at EOF.
-7. Integers only where specified (no floats).
-8. Do **not** iterate a hash map while serializing; arrays are built from
+8. Integers only where specified (no floats).
+9. Do **not** iterate a hash map while serializing; arrays are built from
    sorted lists.
 
 **Not claimed:** bit-identical IR across operating systems without
@@ -200,8 +226,8 @@ schemaVersion, compiler, contentRoot, pageCount, pages
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `schemaVersion` | string | yes | `"0.1.0"` |
-| `compiler` | string | yes | e.g. `"boris/0.2.1"` |
+| `schemaVersion` | string | yes | `"0.2.0"` |
+| `compiler` | string | yes | e.g. `"boris/0.3.0"` |
 | `contentRoot` | string | yes | Content root path string as passed to the pipeline (no trailing slash) |
 | `pageCount` | integer | yes | `pages.length` |
 | `pages` | array | yes | Summary entries sorted by `id` |
@@ -226,8 +252,8 @@ Example (shape only):
 
 ```json
 {
-  "schemaVersion": "0.1.0",
-  "compiler": "boris/0.2.1",
+  "schemaVersion": "0.2.0",
+  "compiler": "boris/0.3.0",
   "contentRoot": "content",
   "pageCount": 2,
   "pages": [
@@ -260,15 +286,16 @@ Example (shape only):
 Key order (root):
 
 ```text
-schemaVersion, frozen, nodes, edges, nav
+schemaVersion, frozen, nodes, edges, reverseIndex, nav
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `schemaVersion` | string | `"0.1.0"` |
+| `schemaVersion` | string | `"0.2.0"` |
 | `frozen` | boolean | `true` only after successful graph freeze |
 | `nodes` | array | Full node objects, sorted by `id` |
-| `edges` | array | Parent edges after freeze (sorted by `from`, then `to`) |
+| `edges` | array | Direct dependency edges after freeze (canonical order below) |
+| `reverseIndex` | array | Target-keyed incoming-edge index in canonical endpoint order |
 | `nav` | array | Per-page navigation derived from the frozen graph (see below) |
 
 ### Ownership: why `nav` lives on `graph.json`
@@ -276,7 +303,7 @@ schemaVersion, frozen, nodes, edges, nav
 | Artifact | Owns |
 |----------|------|
 | `manifest.json` | Lightweight page **summaries** (role, parent id, title, status) for inventory |
-| `graph.json` | Frozen **topology** — nodes, parent edges, and derived navigation |
+| `graph.json` | Frozen **topology** — page nodes, dependency edges, reverse index, and derived navigation |
 | `build-report.json` | Success flag + diagnostics only |
 
 `nav` is computed **only** from the already-validated, already-frozen node list
@@ -285,9 +312,9 @@ belong on `manifest.json`. It is published only when `frozen: true` (same
 gate as `nodes` / `edges`); on content failure, `graph.json` is not published
 and no nav is emitted.
 
-**Non-goals for this field:** no filesystem re-walk, no frontmatter re-parse,
-no reverse dependency index, no incremental rebuild data, no HTML or RAG
-consumption requirements.
+**Non-goals for `nav`:** no filesystem re-walk, no frontmatter re-parse, no
+HTML or RAG consumption requirements. Dependency topology and reverse lookup
+live beside `nav`; they are not duplicated into nav entries.
 
 ### Node object
 
@@ -312,18 +339,96 @@ index, id, sourcePath, role, parent, parentIndex, title, status, tags, bodyOffse
 
 **No `body` field.** Re-read the file when raw body is needed.
 
+### Dependency endpoints
+
+Edges do not overload numeric page indices for non-page inputs. Every endpoint
+has one fixed object shape and key order:
+
+```text
+type, value
+```
+
+| `type` | `value` | Meaning |
+|--------|---------|---------|
+| `"page"` | canonical entity id | A discovered page node in the same `graph.json` |
+| `"source"` | canonical content-root-relative path | File bytes consumed through `{{include}}`; the file is not promoted to a page node merely because it is an endpoint |
+
+Endpoint values never contain an absolute path. `source` uses `/` separators
+and the same beneath-content-root safety policy as include resolution. A file
+that is both a discovered page and an include target may legitimately have two
+identities: `page` represents its entity semantics; `source` represents its
+bytes as a transclusion target.
+
+For directives in the normally compiled body of a page, `from` is that
+`page` endpoint. When a reachable file body is inspected as an included
+fragment, `from` is its `source` endpoint, even if that file is also a page.
+
 ### Edge object
 
-Key order: `from`, `to`, `kind`
+Key order: `from`, `to`, `kind`. Endpoint object key order is `type`, `value`.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `from` | integer | Child node index |
-| `to` | integer | Parent node index |
-| `kind` | string | `"parent"` in v0.1 |
+| `from` | endpoint object | Direct dependent/consumer |
+| `to` | endpoint object | Direct dependency/target |
+| `kind` | string | Closed v0.2 edge kind below |
 
-v0.1 does **not** put a derived `children` array on node objects. Child and
-sibling lists live only under the top-level `nav` array.
+| `kind` | Allowed `from` | Required `to` | Meaning |
+|--------|----------------|---------------|---------|
+| `"parent"` | `page` | `page` | Satellite depends on its Trunk parent |
+| `"include"` | `page` or `source` | `source` | Body directly contains an active include of target bytes |
+| `"reference"` | `page` or `source` | `page` | Body directly contains an active wiki-link to target entity |
+
+`layout` and `asset` may exist in internal dependency code, but are not valid
+IR v0.2 edge kinds. Adding an emitted kind requires a contract amendment and a
+schema compatibility decision.
+
+#### Edge production and order
+
+1. Emit only **direct authored edges**. Do not emit transitive include closure
+   as extra edges. Forward dependents of a target are recovered via
+   `reverseIndex` (then `edges[i]`); what a locus transitively includes is
+   recovered by walking the sorted `edges` array outward from that locus.
+2. Ignore directives/wiki syntax inside fenced code exactly as the Feature 7
+   contract requires.
+3. Repeated occurrences of the exact `(from, to, kind)` tuple produce one edge.
+   A `parent` and `reference` between the same two pages remain distinct.
+4. Sort by (`from.type`, `from.value`, `to.type`, `to.value`, `kind`) using
+   unsigned UTF-8 byte order. The array position after this sort is the stable
+   **edge index** used by `reverseIndex`.
+5. Missing/malformed include or reference targets produce the existing stable
+   diagnostics and prevent freeze/publication; no partial dependency graph is
+   emitted.
+
+v0.2 does **not** put dependency arrays on node objects. Child and sibling lists
+remain only under `nav`.
+
+### Reverse dependency index
+
+`reverseIndex` contains one entry for every distinct endpoint that appears as
+an edge `to`. Targets with no incoming edge are omitted. Entry key order:
+
+```text
+target, incomingEdges
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `target` | endpoint object | Exact target endpoint represented by this entry |
+| `incomingEdges` | array of integer | Ascending indices into the final sorted `edges` array |
+
+Entries sort by (`target.type`, `target.value`) in unsigned UTF-8 byte order.
+`incomingEdges` is never omitted and contains no duplicates. Consumers recover
+the dependent endpoint and edge kind from `edges[incomingEdges[i]]`; the index
+does not duplicate or weaken edge semantics.
+
+Reverse traversal is kind-aware. Starting from a changed `source` endpoint or
+changed `page` entity, follow `incomingEdges` to recover each dependent
+`from` and `kind`, then continue through intermediate `source` endpoints until
+page dependents are reached. Forward walks (e.g. “what does this page
+transitively include?”) use the sorted `edges` array, not `reverseIndex`
+alone. F8.3 may use this frozen pair for incremental dirty sets; it must not
+rebuild a second, divergent dependency graph.
 
 ### `nav` entry object
 
@@ -349,7 +454,7 @@ index, id, breadcrumb, children, siblings
 1. **Input:** frozen nodes only (`parent_index` remapped after id sort). No I/O.
 2. **Breadcrumb:** walk `parent_index` from the page to the root Trunk, then
    emit root → self. For a Trunk this is `[selfIndex]`. For a Satellite in the
-   v0.1 one-level forest this is `[parentIndex, selfIndex]`.
+   v0.2 one-level forest this is `[parentIndex, selfIndex]`.
 3. **Children:** every node `c` with `c.parentIndex == page.index`, ordered by
    entity id. Equivalent to scanning the id-sorted node array once and
    appending — **do not** sort via hash-map iteration.
@@ -357,17 +462,30 @@ index, id, breadcrumb, children, siblings
    children of `P` excluding self (id order). If the page is a Trunk,
    `siblings` is `[]` (other roots are **not** siblings).
 5. **Empty arrays** are written as `[]`, never omitted.
-6. v0.1 forests are one-level: satellites never have children under valid
-   graphs; multi-hop chains remain hard errors at validate time.
+6. v0.2 forests are one-level: satellites never have children under valid
+graphs; multi-hop chains remain hard errors at validate time.
 
-Example (shape only; matches the valid contract fixture):
+Example (dependency fields abbreviated; the F8 fixture pins the complete edge
+and reverse-index skeleton):
 
 ```json
 {
-  "schemaVersion": "0.1.0",
+  "schemaVersion": "0.2.0",
   "frozen": true,
   "nodes": [ "…" ],
-  "edges": [ "…" ],
+  "edges": [
+    {
+      "from": {"type": "page", "value": "index"},
+      "to": {"type": "source", "value": "includes/shared.md"},
+      "kind": "include"
+    }
+  ],
+  "reverseIndex": [
+    {
+      "target": {"type": "source", "value": "includes/shared.md"},
+      "incomingEdges": [0]
+    }
+  ],
   "nav": [
     {
       "index": 0,
@@ -406,7 +524,7 @@ schemaVersion, ok, contentRoot, outDir, pageCount, errorCount, diagnostics
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `schemaVersion` | string | `"0.1.0"` |
+| `schemaVersion` | string | `"0.2.0"` |
 | `ok` | boolean | `true` iff zero error diagnostics and freeze succeeded |
 | `contentRoot` | string | Same string as pipeline option |
 | `outDir` | string | Same string as pipeline option |
@@ -440,20 +558,21 @@ On I/O/system failure (CLI exit `3`), files may be missing or partial.
 
 ## Consumer expectations
 
-Consumers of `"0.1.0"` may rely on:
+Consumers of `"0.2.0"` may rely on:
 
-- Required keys listed above (including `graph.json` → `nav` on success)
+- Required keys listed above (including `graph.json` → `reverseIndex` and `nav` on success)
 - Deterministic sort and key order **on a given host**
 - Role/parent invariants after `ok: true` and `frozen: true`
 - The single parent key name **`parent`** (never `parentEntry`)
-- `nav` arrays ordered by entity id; indices consistent with `nodes` / `edges`
+- `nav` arrays ordered by entity id; indices consistent with `nodes`
+- Typed dependency endpoints, direct-edge semantics, and reverse edge indices
 
 Consumers must not require HTML fields, full body text, RAG paths, or
 component lists under this schema version.
 
 ---
 
-## Explicit non-support in default v0.1 IR
+## Explicit non-support in v0.2 IR
 
 | Feature | Status |
 |---------|--------|
