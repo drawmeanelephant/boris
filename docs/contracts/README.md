@@ -10,7 +10,7 @@ Normative contracts are in force. Implementation status and the post-P2/P3
 roadmap are tracked in [`docs/STATUS.md`](../STATUS.md). Presence of a contract
 is **not** proof that every surface is the default CLI product.
 
-| Layer | Status (post-P2 / closing P3) |
+| Layer | Status (post-P2 / post-P3) |
 |-------|-------------|
 | Normative docs under `docs/contracts/` | **In force** |
 | Fixture corpus under `fixtures/` | **Inventory + IR/RAG goldens + tests** |
@@ -18,7 +18,8 @@ is **not** proof that every surface is the default CLI product.
 | Optional product RAG (`--rag`) | **Implemented** (includes `:::kind` export) |
 | Aside component tokenizer | **Implemented** (`components.md`) |
 | Apex C ABI + Zig wrapper | **Implemented** (linked + tested; stub ≠ CommonMark) |
-| Opt-in HTML path | **Implemented** (`--html` / `--html-dir`; Aside stream) |
+| Opt-in HTML path | **Implemented** (`--html` / `--html-dir` / `--target`; Aside stream) |
+| P2 dependency indexes / incremental HTML | **Implemented** (`--incremental`; fingerprints + affected set) |
 | Parallel HTML workers / watch | **Implemented** (`--jobs`, `--watch`; see contracts below) |
 | Multi-target isolated outputs | **Implemented** — CLI, isolation, stage commit, selective watch (P3.3) |
 | HTML `dist/` default CLI | **Not** default product (roadmap **Now** in STATUS) |
@@ -80,7 +81,7 @@ Supporting / historical drafts may also remain in this tree. Prefer linking the
 |----------------------------|------|
 | [acceptance.md](acceptance.md) | v0.1 acceptance checklist |
 | [v0.1-overview.md](v0.1-overview.md) | Orientation; points at canonical contracts |
-| [../STATUS.md](../STATUS.md) | Living status + post-P2/P3 roadmap and implementation cards |
+| [../STATUS.md](../STATUS.md) | Living status + post-P2/post-P3 roadmap and implementation cards |
 
 ## Fixture corpus
 
@@ -114,8 +115,11 @@ runs against contract fixtures / hardening suites separately (`pipeline`,
 
 ## Explicit non-goals (remaining)
 
-- HTML `dist/` as default product CLI (experimental path exists; not default)
+- HTML `dist/` as **default** product CLI (opt-in HTML path exists via `--html` /
+  `--html-dir` / `--target`; bare `boris` remains IR-first)
 - Markdown-native `:::` **authoring** (export representation only)
-- Generic multi-component systems / MDX / concurrency
+- Generic multi-component systems / MDX / unrestricted executable content
 - Full YAML frontmatter
 - Child-process markdown rendering (forbidden; see apex-abi.md)
+- Unbounded shared-mutable concurrency outside the documented HTML `--jobs`
+  contract (IR/RAG and pre-render coordinator phases stay sequential)

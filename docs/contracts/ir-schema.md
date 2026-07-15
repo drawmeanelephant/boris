@@ -77,7 +77,9 @@ Also required on success paths: a compiler id string of the form `boris/<product
 | 5 | Freeze | only if zero errors | stable indices + edges; `frozen: true` |
 | 6 | Emit | pages + edges + diagnostics | JSON under `--out` (see publication) |
 
-Stages run **sequentially** in a single process. No concurrency in v0.1.
+IR emit stages run **sequentially** in a single process. (Bounded HTML page
+workers via `--jobs` are out of IR scope — see
+[parallel-rendering.md](parallel-rendering.md).)
 
 **Ownership rule:** after promote, no parser slice into a temporary file buffer
 may be retained. PageDb strings live on a long-lived retain arena.
@@ -455,9 +457,9 @@ component lists under this schema version.
 
 | Feature | Status |
 |---------|--------|
-| HTML `dist/` as default output | **Not** default product surface |
+| HTML `dist/` as default output | **Not** default product surface (opt-in HTML is separate) |
 | Apex markdown render | Out of IR acceptance |
-| Product RAG export | Optional future; separate [rag-export.md](rag-export.md) |
+| Product RAG export | Optional product path; separate [rag-export.md](rag-export.md) |
 | Full YAML frontmatter | Rejected — [frontmatter.md](frontmatter.md) |
-| Concurrency / worker pools | Out of scope for v0.1 |
+| Concurrency / worker pools | **Out of IR emit** — HTML-only via [parallel-rendering.md](parallel-rendering.md) |
 | `parentEntry` in IR fields | **Forbidden** — use `parent` only |

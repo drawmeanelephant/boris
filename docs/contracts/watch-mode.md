@@ -8,26 +8,33 @@ Watch mode is an opt-in local development feature that monitors source and layou
 
 ### Option Signature
 - **Flag**: `--watch`
-- **Requires**: HTML mode (`--html` or `--html-dir`).
+- **Requires**: HTML mode (`--html`, `--html-dir`, or `--target`).
 - **Implication**: When `--watch` is specified, `--incremental` is automatically implied/enabled to guarantee fast rebuilding.
-- **Conflicts**: 
+- **Conflicts**:
   - `--watch` combined with `--rag` or `--rag-dir` is a usage error (Exit 2).
   - `--watch` combined with `--out` (IR mode) is a usage error (Exit 2).
-  - `--watch` without `--html` or `--html-dir` is a usage error (Exit 2).
+  - `--watch` without HTML mode is a usage error (Exit 2).
 
 ## 2. Watched Roots & Exclusions
 
-One Boris process owns exactly one watched HTML output root (`--html-dir`).
+One Boris process owns one watch session for a configured HTML build (single
+target via `--html` / `--html-dir`, or multi-target via repeatable `--target`).
+See [multi-target-isolated-output.md](multi-target-isolated-output.md) for
+selective fan-out and multi-root ignore behavior.
 
 ### Watched Roots
 - **Content Root**: The directory passed to `--input` (default: `content`).
-- **Layout Root**: The parent directory of the active layout template (currently fixed at `layouts/` for `layouts/main.html`).
+- **Layout Root(s)**: Parent directories of active layout template(s)
+  (global `--html-layout` and any `--target-layout` overrides).
 
 ### Exclusions (Self-Trigger Protection)
 The following directories and files must be explicitly ignored to prevent feedback loops:
-- The HTML output directory (`--html-dir`, default: `dist`), matched with a **path-component boundary** after normalization (so `dist` does not match `distribution/…`, and `./dist` is equivalent to `dist`).
+- Every configured HTML output root (`--html-dir` or each `--target` output),
+  matched with a **path-component boundary** after normalization (so `dist`
+  does not match `distribution/…`, and `./dist` is equivalent to `dist`).
 - Cache directories as **path components** (e.g. `.boris-cache/`, `.boris/`) — not arbitrary substrings inside content filenames.
-- Staging and temporary atomic files (e.g. files ending with `.tmp` or containing `.tmp.`).
+- Staging trees (e.g. sibling `{out}.boris-stage`) and temporary atomic files
+  (e.g. files ending with `.tmp` or containing `.tmp.`).
 
 Nested output under a watched content root is supported only when exclusion matching is correct; authors should prefer an output tree outside the content root.
 

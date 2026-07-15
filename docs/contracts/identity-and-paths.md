@@ -174,5 +174,5 @@ and [scanner.md](scanner.md).
 - No slug maps or alias tables
 - No automatic `index.md` → bare-directory URL rewriting
 - No following of content-tree symlinks
-- No watch mode / concurrent discovery
+- No concurrent discovery (scanner remains sequential; product `--watch` rebuilds, it does not race discovery)
 - No case-insensitive extension matching

@@ -24,9 +24,10 @@ related:
   - `zig build test-apex-hostile` / `zig build test-apex-sanitize` — Apex extras
   - `zig build source-rag` — source-code pack tool (not product RAG)
 
-**Workshop analogy:** one foreman and one workbench.  
-**Invariant:** single-threaded product path; no worker pools or shared mutable
-graph state across threads.
+**Workshop analogy:** one foreman and one workbench (or a small crew for HTML
+page jobs).  
+**Invariant:** coordinator phases stay sequential; HTML page workers (when
+`--jobs N` > 1) never share Whiteboards or mutate the frozen graph.
 
 ## Layout contract
 
@@ -63,14 +64,16 @@ Admonition styles use classes such as `.admonition`, `.admonition--tip`,
 |------|-------|--------|
 | **IR (default)** | *(none)* or `--no-rag` | JSON under `--out` (default `.boris`) |
 | **RAG-only** | `--rag` and/or `--rag-dir=DIR` | Corpus under RAG dir (default `rag/`) |
+| **HTML (opt-in)** | `--html`, `--html-dir=DIR`, and/or `--target NAME=DIR` | Site under each HTML output root |
 
 **Decision:** `--rag-dir=DIR` **implies RAG-only**. It is **not** “HTML plus RAG”
-and **not** “IR plus RAG”. HTML site generation remains an in-tree experiment
-(`compile` / `assemble`) and is not the default CLI path.
+and **not** “IR plus RAG”. HTML is an **opt-in** CLI surface (not the bare
+default); IR remains the no-flag product mode until a documented default flip.
 
 `--out` applies **only** to the IR path. An explicit `--out=…` combined with
-`--rag` or `--rag-dir` is a **usage error** (exit 2) — never silently ignored.
-Use `--rag-dir` to choose the RAG corpus directory.
+`--rag`, `--rag-dir`, `--html`, `--html-dir`, or `--target` is a **usage error**
+(exit 2) — never silently ignored. Use `--rag-dir` for RAG corpus directory and
+`--html-dir` / `--target` for HTML roots.
 
 ## CLI flags
 
@@ -81,11 +84,16 @@ Use `--rag-dir` to choose the RAG corpus directory.
 | `--rag` | RAG export only (default dir: `rag/`) |
 | `--no-rag` | Explicit IR-only (default; mutually exclusive with `--rag` / `--rag-dir`) |
 | `--rag-dir=DIR` | RAG output directory (**implies RAG-only**) |
+| `--html` / `--html-dir=DIR` | HTML site mode (single target `default`; dir default `dist`) |
+| `--target NAME=DIR` | Multi-target HTML (repeatable; exclusive with `--html-dir`) |
+| `--html-layout=PATH` / `--target-layout NAME=PATH` | Layout selection |
+| `--incremental` | Content-addressed incremental HTML (requires HTML) |
+| `--watch` | Debounced HTML rebuild loop (implies `--incremental`; requires HTML) |
+| `--jobs N` / `-j N` | Bounded parallel HTML page workers `1–64` (requires HTML) |
 | `--quiet` | Suppress progress + diagnostic stderr (exit codes/artifacts unchanged) |
 | `-h`, `--help` | Print usage and exit `0` **without** scanning content |
 
-Malformed empty values for `--input=`, `--out=`, or `--rag-dir=` are usage
-errors (exit 2).
+Malformed empty values for path options are usage errors (exit 2).
 
 ## Exit codes
 
@@ -104,7 +112,8 @@ zig build run -- --input=content --out=.boris
 zig build run -- --no-rag
 zig build run -- --rag
 zig build run -- --rag-dir=./uploads/boris-rag
-zig build rag
-zig build rag -- --rag-dir=./uploads/boris-rag
-zig build rag -- --help
+zig build run -- --html
+zig build run -- --html --jobs 4
+zig build run -- --html --watch
+zig build run -- --target prod=dist/prod --target stage=dist/stage
 ```

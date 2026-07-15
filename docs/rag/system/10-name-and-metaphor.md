@@ -52,7 +52,7 @@ CLI flags and not IR field names.
 ```text
 LOAD   → gather sources (discover / scan / identity)
 ROLL   → shape the payload (frontmatter, body split, graph freeze)
-IGNITE → fire the work (validate, emit IR / RAG / experimental HTML)
+IGNITE → fire the work (validate, emit IR / RAG / opt-in HTML)
 RESET  → free page scratch; next page starts clean
 ```
 
@@ -82,7 +82,7 @@ Do the irreversible-looking work only after shape and validation:
 |---------|----------------|
 | v0.1 default | Emit deterministic JSON under `.boris/` |
 | Optional | Package product RAG under `rag/` |
-| Experimental | Apex render + zero-copy layout writes to `dist/` |
+| Opt-in HTML | Apex render + zero-copy layout writes to `dist/` (or multi-target roots) |
 
 Ignite is **not** “spawn a markdown process farm.” When markdown becomes HTML,
 Apex is in-process C ABI.
@@ -107,19 +107,19 @@ discipline is the same: **deterministic finish, no leftover intermediate soup.**
 | Interleaved chain | Bottom-up parent edges, reverse index | Trademarked package product names |
 | Improvised splice | Zero-copy prefix \| body \| suffix | “Bypass Astro / hand off to JS SSG” framing |
 | Tools on the belt | Aside, admonition, registered component | Branded component names (e.g. “Broside”) |
-| Clear the trench | Whiteboard / `ArenaAllocator` reset | Claiming multi-thread zero-lock pools as current fact |
+| Clear the trench | Whiteboard / `ArenaAllocator` reset | Claiming lock-free shared mutable pools beyond documented `--jobs` isolation |
 
 ## Status honesty
 
 Metaphors describe **intent and long-term shape**. Current milestone status lives
-in `docs/STATUS.md`. As of the living status note, the default CLI is still
-growing toward full IR emit; whiteboard + zero-copy are strongest on the
-experimental HTML path. Do not treat this seed as a claim that every stage is
-fully wired on every CLI mode.
+in `docs/STATUS.md`. Bare CLI remains IR-first; opt-in HTML uses whiteboard +
+zero-copy assemble (with bounded `--jobs` workers and optional `--watch`). Do not
+treat this seed as a claim that every stage is fully wired on every CLI mode, or
+that Apex is CommonMark-complete.
 
 ## One-sentence summary for retrieval
 
 Boris the compiler is named for the folk Zouave improviser known as Boris:
 **load** sources, **roll** a validated Trunk/Satellite payload, **ignite**
-deterministic emit (IR, optional RAG, experimental HTML), **reset** page scratch
+deterministic emit (IR, optional RAG, opt-in HTML), **reset** page scratch
 and go again — independent software, not a commercial brand extension.

@@ -19,6 +19,16 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Docs — post-P3 reconciliation
+
+- Reconcile human-facing and normative docs with landed P2/P3: README CLI
+  surface (`--html`, `--jobs`, `--watch`, `--target`, …), RELEASE-GATE checklist,
+  contracts ownership/status/non-goals, acceptance/overview, HTML + watch + IR
+  non-support wording, RAG narrative seeds, AUDIT historical banner, AGENTS
+  concurrency guidance, and `compile.zig` module header. No runtime or IR schema
+  changes. Bare CLI remains IR-first; Apex remains a minimal stub ≠ CommonMark.
+  Audit note: [`docs/reviews/post-p3-reconciliation.md`](docs/reviews/post-p3-reconciliation.md).
+
 ### Multi-Target Isolated Output Directories & Cache Namespaces (P3.3)
 
 - Support multiple explicitly named HTML build targets via repeatable `--target <NAME>=<OUTPUT_DIR>` (implies HTML). Legacy `--html` / `--html-dir` map to a single target named `default` (mutually exclusive with `--target` + `--html-dir`).

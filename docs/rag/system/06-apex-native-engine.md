@@ -15,10 +15,12 @@ related:
 **Invariant:** synchronous C ABI call; no retained pointers after `apex_render`
 returns; never a child-process markdown renderer.
 
-Apex is the markdown renderer used by the **experimental HTML** path (and
+Apex is the markdown renderer used by the **opt-in HTML** path (and
 Aside inner bodies). It is compiled as C, linked into the binary, and called
 through Zig `@cImport`. The default v0.1 CLI (JSON IR) and the RAG export path
-do **not** call Apex.
+do **not** call Apex. The current vendor engine is a **minimal stub**, not a
+CommonMark-complete library — fidelity upgrade is roadmap work under the same
+`apex.h` ABI.
 
 ## Why not spawn processes
 

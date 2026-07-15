@@ -77,7 +77,7 @@ No `prefix ++ html ++ suffix` allocation exists in application memory.
   destination may see `error.AccessDenied` during replace
 - Atomic replacement for **IR** JSON under `.boris/` (those use ordinary `writeFile`)
 
-This module is **HTML path only** and is not the default v0.1 CLI surface.
+This module is **HTML path only** and is not the bare-`boris` default v0.1 CLI surface.
 
 ## Flush-before-reset (cross-cutting invariant)
 

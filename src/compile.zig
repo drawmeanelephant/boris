@@ -1,8 +1,9 @@
-//! Experimental single-threaded HTML rendering path (milestone 9).
+//! Opt-in HTML rendering path (milestone 9 + P2/P3 extensions).
 //!
-//! **Not** the default v0.1 CLI surface (IR under `.boris/`, optional RAG).
-//! This module is opt-in / test-driven until a documented CLI contract extends
-//! it deliberately. No concurrency.
+//! **Not** the bare-`boris` default v0.1 CLI surface (IR under `.boris/`, optional
+//! RAG). Wired via `--html` / `--html-dir` / `--target`. Coordinator phases are
+//! sequential; independent page render may use bounded `--jobs` workers with
+//! thread-local Whiteboards (see `docs/contracts/parallel-rendering.md`).
 //!
 //! ## Memory model
 //!

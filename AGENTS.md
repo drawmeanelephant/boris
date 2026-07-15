@@ -190,8 +190,10 @@ Multiple build targets may share a worker pool but must have isolated output
 directories, configuration hashes, cache namespaces, and explicit cross-target
 dependency rules.
 
-Do not add concurrency or low-level I/O optimization until sequential builds,
-validation, output schemas, and integration tests are correct and benchmarked.
+Bounded HTML page workers (`--jobs`) are the only product concurrency path;
+coordinator phases (discover, parse, graph freeze, fingerprint, dirty-set) stay
+sequential. Do not add uncoordinated shared-mutable concurrency or low-level
+I/O optimization without contracts, tests, and measured need.
 
 ## One-line north star
 

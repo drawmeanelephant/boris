@@ -30,16 +30,29 @@ Claim **v0.1 content-compiler acceptance** only when all of the following hold:
 | 3 | Closed diagnostics set for content failures; process exits **0 / 1 / 2 / 3** as documented | [diagnostics.md](diagnostics.md); CLI tests |
 | 4 | Constrained `<Aside>` tokenizer on shared IR/RAG compile path (`ECOMPONENT`) | [components.md](components.md); `src/aside.zig` |
 | 5 | Apex linked in-process (C ABI); hostile ABI tests green; sanitizer opt-in | [apex-abi.md](apex-abi.md); `test-apex-hostile` |
-| 6 | Experimental HTML path tested (Whiteboard + Aside stream); **not** required as default CLI | [html-output.md](html-output.md) |
+| 6 | Opt-in HTML path tested (Whiteboard + Aside stream); **not** required as bare-`boris` default | [html-output.md](html-output.md) |
 | 7 | CI on Linux + macOS; release-gate script runnable | `.github/workflows/ci.yml`; `scripts/release-gate.sh` |
 | 8 | Contracts + STATUS + CHANGELOG describe reality (no “pipeline not implemented” drift) | this tree |
 
-**Explicitly not required for v0.1 acceptance**
+**Explicitly not required for v0.1 content-compiler acceptance**
 
-- HTML `dist/` as default product CLI mode
+- HTML `dist/` as the **default** product CLI mode (bare `boris` remains IR)
 - Markdown-native `:::` **authoring** (export representation only)
 - Full YAML, MDX, nested asides, multi-component registry
-- Incremental rebuild, reverse dependency index, concurrency, watch mode
+- CommonMark-complete Apex (vendor engine is still a minimal stub)
+
+**Landed after m10 (HTML path; not part of the content-compiler acceptance bar)**
+
+These are **implemented & tested** opt-in capabilities — do not document them as
+deferred. They are also **not** required to claim the v0.1 IR/RAG acceptance row
+above:
+
+- P2: dependency indexes, includes, fingerprints, `--incremental`
+- P3.1: bounded `--jobs` parallel HTML render
+- P3.2: `--watch` (debounced/coalesced; portable polling fallback)
+- P3.3: multi-target `--target` / layouts / isolated cache + stage commit
+
+See [`docs/STATUS.md`](../STATUS.md) and the contracts below.
 
 ---
 
@@ -57,7 +70,10 @@ Cite these — not redirects or this checklist — for acceptance rules:
 | RAG export | [rag-export.md](rag-export.md) |
 | Aside / components | [components.md](components.md) |
 | Apex C ABI | [apex-abi.md](apex-abi.md) |
-| Experimental HTML | [html-output.md](html-output.md) |
+| Opt-in HTML | [html-output.md](html-output.md) |
+| Parallel HTML workers | [parallel-rendering.md](parallel-rendering.md) |
+| Watch mode | [watch-mode.md](watch-mode.md) |
+| Multi-target outputs | [multi-target-isolated-output.md](multi-target-isolated-output.md) |
 
 Index and redirects: [README.md](README.md).
 

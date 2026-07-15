@@ -1,10 +1,14 @@
-# HTML output contract (experimental — milestone 9)
+# HTML output contract (opt-in — milestone 9 + P2/P3 extensions)
 
-**Status:** experimental / opt-in / test-driven  
-**Not** the default v0.1 product CLI surface (IR under `.boris/`, optional RAG).  
-Default IR semantics are unchanged. Single-threaded only — no concurrency.
+**Status:** opt-in product CLI / test-driven  
+**Not** the bare-`boris` default v0.1 product surface (default remains IR under
+`.boris/`; optional RAG). Default IR semantics are unchanged.
 
-This document is **normative for the experimental HTML path** implemented in
+Coordinator phases (discover, parse, graph freeze, fingerprint, dirty-set) are
+**sequential**. Independent HTML page render/publish may use bounded workers
+when `--jobs N` is set — see [parallel-rendering.md](parallel-rendering.md).
+
+This document is **normative for the HTML path** implemented in
 `src/compile.zig` and `src/assemble.zig`. Claims below distinguish **mechanically
 tested** behavior from **platform-qualified** publication notes.
 
@@ -14,13 +18,13 @@ tested** behavior from **platform-qualified** publication notes.
 
 | In scope | Out of scope |
 |----------|--------------|
-| Layout load + `{{content}}` split | Default CLI flag for `dist/` |
+| Layout load + `{{content}}` split | Bare-`boris` default mode writing `dist/` |
 | Whiteboard per-page arena lifecycle | Process-RSS guarantees |
 | Ordered body stream: Apex(markdown) + Aside HTML | Generic component HTML / MDX |
 | Three-write layout splice | Mega-string assembly |
 | Temp-file publish via Zig 0.16 Atomic API | Cross-volume atomic rename claims |
-| PageDb durable metadata only | Graph validation required for HTML |
-| Fixture goldens under `test/fixtures/html/` | Multi-OS CI atomicity matrix |
+| PageDb durable metadata only | Full CommonMark (Apex stub is minimal) |
+| Fixture goldens under `test/fixtures/html/` | Multi-OS CI atomicity matrix for every FS |
 
 Modules:
 
@@ -28,10 +32,15 @@ Modules:
 - `src/assemble.zig` — layout split, zero-copy splice, Atomic publish
 - `layouts/main.html` — default template (exactly one `{{content}}`)
 - `src/apex.zig` — in-process markdown → HTML (m8)
+- `src/cache.zig` / `src/dependency.zig` — fingerprints and indexes (P2)
+- `src/watch.zig` — opt-in watch loop (P3.2)
+- `src/target.zig` — multi-target isolation (P3.3)
 
-Entry points are library/test APIs (`compile.compileHtmlSite`, …). They are
-**not** wired into `boris` default modes unless a future CLI contract extends
-them deliberately (`compile.experimental == true`).
+CLI entry: `boris --html` / `--html-dir` / `--target` (and related flags).
+Library API: `compile.compileHtmlSite` (and multi-target helpers). Related
+contracts: [parallel-rendering.md](parallel-rendering.md),
+[watch-mode.md](watch-mode.md),
+[multi-target-isolated-output.md](multi-target-isolated-output.md).
 
 ---
 

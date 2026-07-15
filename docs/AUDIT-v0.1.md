@@ -5,7 +5,10 @@
 **Auditor:** automated implementation pass + local mechanical verification  
 
 This document records **repository facts as verified on the host that ran the
-commands below**. It does not invent features.
+commands below** as of the m10 audit date. It is a **historical snapshot**, not
+the living roadmap. For current phase status (including P2/P3 HTML scale-out
+that landed after this audit), see [`STATUS.md`](STATUS.md) and
+[`CHANGELOG.md`](../CHANGELOG.md).
 
 ---
 
@@ -199,13 +202,19 @@ on the audit host.
 4. Dual frontmatter helper (`frontmatter.zig` vs `parser.zig`) still exists for
    legacy harness-style callers — product path uses `parser.zig`.
 
-### Intentionally deferred (v0.1)
+### Intentionally deferred (as of m10 audit — historical)
 
-- Default CLI HTML `dist/` product mode
+At audit time these were deferred. **Several landed later on the opt-in HTML
+path** (P2 fingerprints/incremental; P3.1 `--jobs`; P3.2 `--watch`; P3.3
+multi-target). Do not treat this list as current truth — see `STATUS.md`.
+
+Still accurate non-goals / residual gaps after post-P3 work:
+
+- Default CLI HTML `dist/` product mode (bare `boris` remains IR-first)
+- CommonMark-complete Apex (stub remains minimal)
 - `:::` authoring (export-only today)
 - Nested asides / multi-component registry / MDX
-- Incremental rebuild / reverse dependency index
-- Concurrency, watch mode, worker pools, mmap
+- mmap
 - Full YAML frontmatter
 
 ---

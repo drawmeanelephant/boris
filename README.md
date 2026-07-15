@@ -1,8 +1,9 @@
 # Boris
 
-**Zig-native content compiler** with IR + optional deterministic RAG export (m7):
+**Zig-native content compiler** growing into an Apex-native static site generator:
 deterministic scan → bounded frontmatter → PageDb → Trunk/Satellite graph →
-JSON IR under `.boris/`, or RAG corpus under `rag/`.
+JSON IR under `.boris/`, optional RAG under `rag/`, or opt-in HTML under `dist/`
+(and named multi-target output roots).
 
 Named for the folk **Zouave** figure known as **Boris** — improvise under
 constraint, chain the next leaf, clear the slate. Compile rhythm (narrative,
@@ -21,7 +22,7 @@ rolling-paper brand.
 
 | Behavior | Status |
 |----------|--------|
-| Typed CLI (`--input`, `--out`, `--rag`, …) | **Implemented** |
+| Typed CLI (`--input`, `--out`, `--rag`, `--html`, `--jobs`, `--watch`, `--target`, …) | **Implemented** |
 | `boris --help` / `-h` | **Implemented** — exit 0; no FS |
 | Flag conflicts / unknown args | **Implemented** — exit **2** |
 | Exit codes 0 / 1 / 2 / 3 | **Implemented** |
@@ -32,23 +33,35 @@ rolling-paper brand.
 | Deterministic JSON IR under `.boris/` | **Implemented** — `src/pipeline.zig` |
 | Optional product RAG export (`--rag`) | **Implemented** — `src/rag.zig` ([contract](docs/contracts/rag-export.md)) |
 | Content discovery wired into default CLI | **Implemented** (IR and RAG modes) |
-| `zig build test` | **Implemented** — CLI + fixtures + scanner + parser + pipeline + RAG + Apex ABI |
-| Normative contracts under [`docs/contracts/`](docs/contracts/) | **Normative + implemented** |
-| Apex C ABI (in-process) | **Implemented** — linked + tested; **not** on default IR/RAG path ([contract](docs/contracts/apex-abi.md)) |
-| Apex HTML `dist/` assemble | **Not** default product surface for v0.1 |
-| Concurrency / watch / full YAML | **Out of scope** for v0.1 |
+| Opt-in HTML site mode (`--html` / `--html-dir` / `--target`) | **Implemented** — Apex + Whiteboard + layout splice ([html-output](docs/contracts/html-output.md)) |
+| Incremental HTML (`--incremental`) | **Implemented** — content-addressed fingerprints + dirty-set |
+| Bounded parallel HTML render (`--jobs N`) | **Implemented** — opt-in workers ([parallel-rendering](docs/contracts/parallel-rendering.md)) |
+| Watch mode (`--watch`) | **Implemented** — debounced/coalesced; portable polling fallback ([watch-mode](docs/contracts/watch-mode.md)) |
+| Multi-target isolated outputs (`--target`) | **Implemented** — per-target cache/stage isolation ([multi-target](docs/contracts/multi-target-isolated-output.md)) |
+| `zig build test` | **Implemented** — CLI + fixtures + scanner + parser + pipeline + RAG + Apex + HTML |
+| Normative contracts under [`docs/contracts/`](docs/contracts/) | **Normative + implemented** (see ownership map) |
+| Apex C ABI (in-process) | **Implemented** — linked + tested; **minimal stub ≠ CommonMark** ([contract](docs/contracts/apex-abi.md)) |
+| HTML `dist/` as **default** CLI (no flags) | **Roadmap** — bare `boris` remains IR-first today |
+| Full CommonMark / GFM Apex fidelity | **Roadmap** — replace vendor stub under existing `apex.h` |
+| Full YAML / MDX | **Out of scope** for v0.1 |
 
 ## What works today (CLI)
 
 | Command | Behavior |
 |---------|----------|
 | `boris --help` / `boris -h` | Print usage; exit **0** (no directories opened) |
-| `boris` | IR mode: scan `content/` → write `.boris/` JSON IR |
+| `boris` | **IR mode (default):** scan `content/` → write `.boris/` JSON IR |
 | `boris --input DIR --out DIR` | IR mode with custom paths |
 | `boris --no-rag` | Explicit IR mode |
 | `boris --rag` | RAG-only: shared graph validation → corpus under `rag/` |
 | `boris --rag-dir DIR` | RAG-only with output directory `DIR` |
-| content validation failure | Diagnostics on stderr; exit **1** (IR and RAG) |
+| `boris --html` | HTML site under `dist/` (single target named `default`) |
+| `boris --html-dir DIR` | HTML site under `DIR` |
+| `boris --html --jobs 4` | HTML with bounded parallel page workers |
+| `boris --html --watch` | HTML watch mode (implies `--incremental`) |
+| `boris --html --incremental` | Opt-in content-addressed incremental HTML |
+| `boris --target prod=dist/prod --target stage=dist/stage` | Multi-target HTML (isolated outputs/caches) |
+| content validation failure | Diagnostics on stderr; exit **1** (IR, RAG, HTML) |
 | conflicting / unknown flags | Print usage; exit **2** |
 | missing content root / I/O | Exit **3** |
 
@@ -57,35 +70,48 @@ rolling-paper brand.
 | Option | Default | Notes |
 |--------|---------|--------|
 | `--input <DIR>` | `content` | Content root |
-| `--out <DIR>` | `.boris` | IR output (IR mode only) |
+| `--out <DIR>` | `.boris` | IR output (**IR mode only**) |
 | `--rag` | — | Select RAG-only mode |
 | `--no-rag` | — | Explicit IR mode |
 | `--rag-dir <DIR>` | `rag` (when RAG) | Implies RAG-only mode |
+| `--html` | — | HTML site mode → `--html-dir` (default `dist`) |
+| `--html-dir <DIR>` | `dist` (when HTML) | Implies HTML; single target `default` |
+| `--html-layout <PATH>` | `layouts/main.html` | Global layout template (HTML mode) |
+| `--target NAME=DIR` | — | Named HTML output root (repeatable; exclusive with `--html-dir`) |
+| `--target-layout NAME=PATH` | — | Per-target layout override |
+| `--incremental` | off | Content-addressed incremental HTML (requires HTML mode) |
+| `--watch` | off | Debounced HTML rebuild loop (implies `--incremental`; requires HTML) |
+| `--jobs N` / `-j N` | `1` | Bounded parallel HTML workers `1–64` (requires HTML) |
 | `--quiet` | off | Suppress progress + diagnostic stderr (exit codes/artifacts unchanged) |
 | `-h`, `--help` | — | Help; exit 0 |
 
-Also accepted: `--input=DIR`, `--out=DIR`, `--rag-dir=DIR`.
+Also accepted: `--input=DIR`, `--out=DIR`, `--rag-dir=DIR`, `--html-dir=DIR`,
+`--html-layout=PATH`, `--target=NAME=DIR`, `--target-layout=NAME=PATH`,
+`--jobs=N`, `-j=N`.
 
 ### Mode rules
 
-1. Default mode is **IR**.
+1. Default mode is **IR** (bare `boris` writes `.boris/`; HTML default is roadmap).
 2. `--no-rag` explicitly selects IR mode.
 3. `--rag` selects **RAG-only** mode.
 4. `--rag-dir DIR` implies **RAG-only** mode.
-5. `--rag` and `--no-rag` together → usage error (exit 2).
-6. `--no-rag` and `--rag-dir` together → usage error (exit 2).
-7. Explicit `--out` with `--rag` or `--rag-dir` → usage error (exit 2); never silently ignored.
-8. Empty values for `--input`, `--out`, `--rag-dir` → usage error (exit 2).
-9. Unknown options, missing values, positionals, duplicate flags → usage error (exit 2).
-10. `--help` / `-h` exit 0 without opening directories or scanning content.
+5. `--html`, `--html-dir`, or `--target` select **HTML** mode.
+6. `--rag` and `--no-rag` together → usage error (exit 2).
+7. `--no-rag` and `--rag-dir` together → usage error (exit 2).
+8. Explicit `--out` with `--rag`, `--rag-dir`, `--html`, `--html-dir`, or `--target` → usage error (exit 2).
+9. `--target` with `--html-dir` → usage error (exit 2).
+10. `--watch`, `--incremental`, or `--jobs` without HTML mode → usage error (exit 2).
+11. Empty values for path options → usage error (exit 2).
+12. Unknown options, missing values, positionals, duplicate flags → usage error (exit 2).
+13. `--help` / `-h` exit 0 without opening directories or scanning content.
 
 ### Exit codes
 
 | Code | Meaning |
 |-----:|---------|
-| `0` | Success (help, valid IR, or valid RAG export) |
+| `0` | Success (help, valid IR, valid RAG, or valid HTML) |
 | `1` | Content validation error (shared graph/frontmatter diagnostics) |
-| `2` | Usage / CLI error |
+| `2` | Usage / CLI error (including target validation) |
 | `3` | I/O or system error |
 
 ### RAG output (success)
@@ -101,6 +127,20 @@ export uses `:::kind` / `:::kind{id="…"}` form (non-round-trippable; not an
 authoring syntax). See
 [docs/contracts/rag-export.md](docs/contracts/rag-export.md).
 
+### HTML output (success)
+
+```text
+dist/**/*.html                    # or each --target output root
+<target>/.boris-cache/manifest.json   # with --incremental / --watch
+```
+
+Apex renders markdown in-process (current engine is a **minimal stub**, not
+CommonMark-complete). Layout default: `layouts/main.html` with one `{{content}}`
+splice. See [docs/contracts/html-output.md](docs/contracts/html-output.md),
+[parallel-rendering.md](docs/contracts/parallel-rendering.md),
+[watch-mode.md](docs/contracts/watch-mode.md), and
+[multi-target-isolated-output.md](docs/contracts/multi-target-isolated-output.md).
+
 ## Quick start
 
 ```bash
@@ -109,18 +149,22 @@ zig build                          # install → zig-out/bin/boris (+ boris-sour
 zig build run -- --help            # usage; exit 0
 zig build run -- --input fixtures/content/valid --out /tmp/boris-ir --quiet
 zig build run -- --input fixtures/content/valid --rag-dir /tmp/boris-rag --quiet
+zig build run -- --input test/fixtures/html/content --html-dir /tmp/boris-dist --quiet
+zig build run -- --input test/fixtures/html/content --html --jobs 4 --quiet
 zig build run -- --rag --no-rag    # usage conflict; exit 2
 zig build run -- --rag --out x     # usage conflict; exit 2
-zig build test                     # unit tests (CLI + fixtures + scanner + pipeline + RAG)
+zig build test                     # unit tests (CLI + fixtures + scanner + pipeline + RAG + HTML)
 zig build source-rag               # source pack for LLM upload → source-rag/
-zig build package                  # review tar → packages/boris-package.tar (IR + RAG + version + SHA256SUMS)
+zig build package                  # review tar → packages/boris-package.tar
+./scripts/release-gate.sh          # mechanical ship checks
 ```
 
 ```bash
 zig-out/bin/boris --help
 zig-out/bin/boris --input content --out .boris --quiet
 zig-out/bin/boris --rag --input content --quiet
-zig-out/bin/boris --rag-dir ./uploads/boris-rag --quiet
+zig-out/bin/boris --html --input test/fixtures/html/content --quiet
+zig-out/bin/boris --target prod=dist/prod --target stage=dist/stage --quiet
 zig-out/bin/boris --rag --no-rag   # exits 2
 zig-out/bin/boris --rag --out x    # exits 2
 ```
@@ -137,6 +181,8 @@ the shell typically sees exit `1` from `zig build` itself. Prefer
 | `zig build` | Build and install `boris`, `boris-source-rag`, and `boris-package` |
 | `zig build run -- [args]` | Run `boris` with optional arguments after `--` |
 | `zig build test` | Run unit tests (includes fixture inventory) |
+| `zig build test-apex-hostile` | Hostile Apex ABI double tests |
+| `zig build test-apex-sanitize` | Optional ASan+UBSan smoke (skips cleanly if unavailable) |
 | `zig build source-rag` | Generate a **source-code** RAG pack for LLM upload |
 | `zig build package` | Deterministic review tar under `packages/` (IR + optional RAG) |
 
@@ -171,15 +217,15 @@ binary under `tools/source-rag/` — not wired into the product `boris` CLI.
 
 | Doc | Role |
 |-----|------|
-| [`docs/STATUS.md`](docs/STATUS.md) | Living “where we are” snapshot |
-| [`docs/contracts/`](docs/contracts/) | **Normative** machine contracts (frontmatter, paths, IR, diagnostics, RAG export, Apex ABI) |
+| [`docs/STATUS.md`](docs/STATUS.md) | Living “where we are” snapshot + post-P3 roadmap |
+| [`docs/contracts/`](docs/contracts/) | **Normative** machine contracts (ownership map in README) |
 | [`docs/rag/system/`](docs/rag/system/) | Narrative architecture seeds (incl. name / Load·Roll·Ignite·Reset) |
 | [`fixtures/`](fixtures/) | Content fixture corpus + manifest (inventory tests only) |
 | [`docs/RELEASE-GATE.md`](docs/RELEASE-GATE.md) | Release checklist |
 | [`tools/source-rag/README.md`](tools/source-rag/README.md) | Source RAG tool |
 | [`AGENTS.md`](AGENTS.md) | Long-term direction and hard constraints for contributors |
 
-### Normative contracts (milestone 2)
+### Normative contracts (canonical)
 
 | Contract | Topic |
 |----------|-------|
@@ -188,8 +234,15 @@ binary under `tools/source-rag/` — not wired into the product `boris` CLI.
 | [scanner.md](docs/contracts/scanner.md) | Deterministic discovery, sort key, symlink policy |
 | [diagnostics.md](docs/contracts/diagnostics.md) | Stable codes (`EDUPLICATEID`, …), exit behavior |
 | [ir-schema.md](docs/contracts/ir-schema.md) | Trunk/Satellite graph; JSON IR under `.boris/` |
-| [rag-export.md](docs/contracts/rag-export.md) | Optional RAG export; `:::kind` is export-only / deferred |
-| [apex-abi.md](docs/contracts/apex-abi.md) | In-process Apex C ABI + Zig wrapper (m8; not default CLI) |
+| [rag-export.md](docs/contracts/rag-export.md) | Optional RAG export; `:::kind` is export-only |
+| [components.md](docs/contracts/components.md) | Constrained `<Aside>` tokenizer |
+| [apex-abi.md](docs/contracts/apex-abi.md) | In-process Apex C ABI + Zig wrapper (stub ≠ CommonMark) |
+| [html-output.md](docs/contracts/html-output.md) | Opt-in HTML Whiteboard, Aside stream, layout splice, Atomic publish |
+| [parallel-rendering.md](docs/contracts/parallel-rendering.md) | Bounded `--jobs` HTML workers |
+| [watch-mode.md](docs/contracts/watch-mode.md) | Opt-in `--watch` rebuild loop |
+| [multi-target-isolated-output.md](docs/contracts/multi-target-isolated-output.md) | Multi-target outputs and cache namespaces |
+
+Full ownership map: [docs/contracts/README.md](docs/contracts/README.md).
 
 **Author-facing parent key is only `parent`.** Do not use `parentEntry` or
 `parent_entry` in source frontmatter (rejected as `EFRONTMATTER`). RAG catalog
@@ -199,9 +252,12 @@ column `parent_entry` is export packaging only — see
 
 ## Status
 
-- **Milestones 1–7:** CLI, scanner, frontmatter, IR JSON, optional RAG export.
-- **Milestone 8:** in-process Apex C ABI + defensive Zig wrapper (linked and
-  tested; default IR/RAG paths do not call Apex). See
+- **Milestones 1–10 / v0.1 content-compiler bar:** CLI, scanner, frontmatter, IR
+  JSON, optional RAG, Aside, Apex ABI, hardening, dual-OS CI.
+- **P2 (complete):** dependency indexes, includes, fingerprints, `--incremental`.
+- **P3 (complete):** `--jobs`, `--watch`, multi-target isolation (`--target`,
+  layouts, stage commit, selective watch fan-out).
+- **Next:** Apex CommonMark fidelity, then HTML as default CLI mode. See
   [`docs/STATUS.md`](docs/STATUS.md).
 
 Optional Apex checks:

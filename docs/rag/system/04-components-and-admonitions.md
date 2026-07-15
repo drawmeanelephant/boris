@@ -52,7 +52,7 @@ inside fences stays literal. Normative detail: `docs/contracts/components.md`.
 
 ## HTML and RAG
 
-- HTML (experimental path): ordered stream → Apex for markdown, `aside.renderHtml`
+- HTML (opt-in path): ordered stream → Apex for markdown, `aside.renderHtml`
   for callouts → semantic `<aside class="admonition admonition--{kind}">`.
 - RAG: export representation `:::kind` / `:::kind{id="…"}` only — **not**
   round-trippable authoring syntax.

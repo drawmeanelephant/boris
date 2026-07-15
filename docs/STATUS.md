@@ -1,6 +1,6 @@
-# Project status — Boris (post-P2 / closing P3)
+# Project status — Boris (post-P2 / post-P3)
 
-**As of:** 2026-07-15 (product **0.0.1** / compiler **boris/0.1.1** IR + RAG + Aside + Apex + opt-in HTML; **P2 + P3 complete**)  
+**As of:** 2026-07-14 (product **0.0.1** / compiler **boris/0.1.1** IR + RAG + Aside + Apex + opt-in HTML; **P2 + P3 complete**)  
 **Zig target:** 0.16.0 (`build.zig.zon` / CI pin **0.16.0**)
 
 This file is the living **“where we are”** note. Prefer it (and
@@ -166,7 +166,7 @@ unrestricted MDX. Prefer authoring fidelity and product ergonomics.
 | Priority | Item | Why now |
 |----------|------|---------|
 | P0.1 | Contract navigation & stale planning notes | Contributors must not treat redirects or m2 stubs as truth; ownership is in `docs/contracts/README.md` |
-| P0.2 | Fix remaining doc drift | STATUS/contracts/README must match landed P2/P3 reality |
+| P0.2 | Fix remaining doc drift | **Done** (post-P3 reconciliation pass: README, RELEASE-GATE, contracts, narrative seeds) |
 | P0.3 | Point code comments at canonical contracts | Avoid citing non-normative redirects |
 | P0.4 | Dual frontmatter path clarity | Product path is `parser.zig` + **`parent` only** (rejects `parentEntry` / `parent_entry` as `EFRONTMATTER`). Residual: RAG export field name `parent_entry`; non-product `frontmatter.zig` (fuzz) + historical `harness.zig` — must not reintroduce a second author dialect |
 
@@ -379,7 +379,8 @@ validated metadata and graph-aware docs, not a polyglot web framework.
 | `docs/contracts/parallel-rendering.md` | P3.1 parallel HTML workers |
 | `docs/contracts/watch-mode.md` | P3.2 watch mode |
 | `docs/contracts/multi-target-isolated-output.md` | P3.3 multi-target (normative; implemented) |
-| `docs/AUDIT-v0.1.md` | Self-audit report |
+| `docs/AUDIT-v0.1.md` | Self-audit report (m10 historical) |
+| `docs/reviews/post-p3-reconciliation.md` | Post-P3 docs reconciliation audit |
 | `docs/rag/system/` | Narrative seeds (RAG system segment) |
 | `CHANGELOG.md` | What changed |
 | This file | Living status + priority / roadmap list |

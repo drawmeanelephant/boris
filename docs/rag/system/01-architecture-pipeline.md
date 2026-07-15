@@ -15,32 +15,33 @@ related:
 
 # Architecture and compile pipeline
 
-Boris is built in phased layers. The runtime remains a **single-threaded monolith**
-so memory and ordering stay predictable.
+Boris is built in phased layers. IR/RAG and pre-render coordination stay
+**sequential**; HTML page render may use bounded `--jobs` workers with
+thread-local Whiteboards so ordering and isolation stay predictable.
 
 ## Teaching rhythm: Load · Roll · Ignite · Reset
 
 Narrative names for the same work (not CLI flags). Full lore:
 [system/10-name-and-metaphor.md](10-name-and-metaphor.md).
 
-| Beat | Meaning | v0.1 IR (default) | HTML path (experimental) |
-|------|---------|-------------------|--------------------------|
+| Beat | Meaning | v0.1 IR (default) | HTML path (opt-in) |
+|------|---------|-------------------|--------------------|
 | **Load** | Gather sources in deterministic order | `discover` | `scanner` + identity |
 | **Roll** | Shape frontmatter, body, graph | frontmatter + `graph.validate` freeze | `parser` + graph |
-| **Ignite** | Emit / render / package | JSON under `.boris/` (+ optional RAG) | Apex + `assemble` → `dist/` |
-| **Reset** | Drop page scratch; next unit clean | finish emit without leftover soup | whiteboard `arena.reset` |
+| **Ignite** | Emit / render / package | JSON under `.boris/` (+ optional RAG) | Apex + `assemble` → `dist/` (or multi-target roots) |
+| **Reset** | Drop page scratch; next unit clean | finish emit without leftover soup | whiteboard `arena.reset` (per worker when parallel) |
 
 ```text
 LOAD ──► ROLL ──► IGNITE ──► RESET ──► (next page / next build unit)
 ```
 
-## Two product surfaces
+## Product surfaces
 
 | Surface | Default? | Modules | Output |
 |---------|----------|---------|--------|
 | **Content compiler (v0.1)** | **yes** | `pipeline`, `discover`, `frontmatter`, `graph`, `diag`, `json_out` | `.boris/{manifest,graph,build-report}.json` |
 | **RAG export** | opt-in (`--rag`) | `scanner`, `parser`, `rag` (+ shared `graph.validate`) | `rag/` corpus |
-| **HTML site** | experimental | `scanner`, `parser`, `apex`, `aside`, `compile`, `assemble` | `dist/` (unit-tested; not default CLI) |
+| **HTML site** | opt-in (`--html` / `--html-dir` / `--target`) | `scanner`, `parser`, `apex`, `aside`, `compile`, `assemble`, `cache`, `watch`, `target` | `dist/` or named target roots (not bare default) |
 
 ## v0.1 IR pipeline (default)
 
@@ -54,7 +55,7 @@ main
      # RESET: no per-page whiteboard on this path yet; emit is the clean finish
 ```
 
-## Experimental HTML pipeline (modules present)
+## Opt-in HTML pipeline (modules present)
 
 | Phase | Beat | Module | Responsibility |
 |------:|------|--------|----------------|

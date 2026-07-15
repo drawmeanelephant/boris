@@ -1,8 +1,9 @@
 //! Fixture inventory tests (milestone 2).
 //!
 //! Verifies that the fixture corpus and manifest are present and consistent.
-//! Does **not** run a content compiler against the fixtures — that pipeline
-//! is not implemented on the default CLI yet.
+//! Does **not** run a content compiler against these root fixtures — compiler
+//! goldens and validation live under `docs/contracts/fixtures/` and
+//! `src/hardening_test.zig` (see release-gate).
 
 const std = @import("std");
 const Io = std.Io;
