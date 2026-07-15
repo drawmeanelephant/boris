@@ -39,6 +39,7 @@ per topic:
 | Apex C ABI | [apex-abi.md](apex-abi.md) |
 | Experimental HTML output | [html-output.md](html-output.md) |
 | Parallel rendering | [parallel-rendering.md](parallel-rendering.md) |
+| Watch Mode | [watch-mode.md](watch-mode.md) |
 
 ### Normative documents (v0.1) — full list
 
@@ -54,6 +55,7 @@ per topic:
 | [apex-abi.md](apex-abi.md) | In-process Apex C ABI, allocator lifetime, Zig error rules (m8) |
 | [html-output.md](html-output.md) | Experimental HTML Whiteboard, Aside stream, layout splice, Atomic publish |
 | [parallel-rendering.md](parallel-rendering.md) | Bounded worker pool parallel rendering, thread/memory isolation, deterministic order |
+| [watch-mode.md](watch-mode.md) | Opt-in watch mode, event coalescing/normalization, rebuild serialization, safe recovery |
 
 ## Redirect / compatibility paths (non-normative)
 
