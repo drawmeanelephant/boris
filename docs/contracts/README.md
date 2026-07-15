@@ -20,7 +20,7 @@ is **not** proof that every surface is the default CLI product.
 | Apex C ABI + Zig wrapper | **Implemented** (linked + tested; stub ≠ CommonMark) |
 | Opt-in HTML path | **Implemented** (`--html` / `--html-dir`; Aside stream) |
 | Parallel HTML workers / watch | **Implemented** (`--jobs`, `--watch`; see contracts below) |
-| Multi-target isolated outputs | **Contract present** — implementation in progress (P3.3) |
+| Multi-target isolated outputs | **Implemented** — CLI, isolation, stage commit, selective watch (P3.3) |
 | HTML `dist/` default CLI | **Not** default product (roadmap **Now** in STATUS) |
 
 ## Canonical ownership (one document per topic)
