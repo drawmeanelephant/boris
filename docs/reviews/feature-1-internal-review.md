@@ -1,8 +1,10 @@
 # Feature 1 — Internal review (campaign Chat 6)
 
 **Date:** 2026-07-15  
-**Range reviewed:** `9f6c538..HEAD` (Chats 1–5 land: pin → link → adapter →
-fidelity → docs Done)  
+**Range reviewed:** `9f6c538..c24d4db` (Chats 1–5 land: pin → link → adapter →
+fidelity → docs Done; Chat 6 tip)  
+**HEAD at review tip (full SHA):**
+`c24d4db4ab794e1f4a5aa3ab14425d73fa69a5a3`  
 **Authority:** [`APEX-Feature1-plan.md`](../../APEX-Feature1-plan.md) §10–§12,
 [`docs/contracts/apex-abi.md`](../contracts/apex-abi.md)  
 **Verdict:** **Ship-intent accepted** after P1 doc drift cleanup and two small
@@ -17,8 +19,15 @@ adapter hardenings in this review session.
 | `zig build` | PASS |
 | `zig build test` | PASS |
 | `zig build test-apex-hostile` | PASS |
-| `zig build test-apex-sanitize` | PASS |
+| `zig build test-apex-sanitize` | PASS on review host (see note) |
 | `./scripts/release-gate.sh` | PASS |
+
+**Sanitizer note (F-007):** `test-apex-sanitize` is opt-in. On hosts without
+ASan/UBSan the step **exits 0 with a documented skip** and must not be recorded
+as a green sanitizer run. The Chat 6 “PASS” above means the step completed
+successfully on the review host; it does **not** by itself prove ASan linked
+and exercised. Prefer CI with guaranteed sanitizer availability when claiming
+a true sanitizer PASS.
 
 ---
 
@@ -102,5 +111,7 @@ Zig src/apex.zig  →  host apex_render (vendor/apex/apex.h)
 | Role | Result |
 |------|--------|
 | Internal reviewer (this chat) | Accept with listed deferrals |
-| Gates | All green (see table) |
+| Gates | All green (see table); sanitizer PASS vs SKIP distinguished above |
 | Fixes committed with this review | F1–F4 |
+| Review tip commit (full SHA) | `c24d4db4ab794e1f4a5aa3ab14425d73fa69a5a3` |
+| External audit response | [`feature-1-external-audit-response.md`](feature-1-external-audit-response.md) |

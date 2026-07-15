@@ -159,7 +159,12 @@ pub fn forbidApexFree(_: Html) noreturn {
 }
 
 /// Stable non-null pointer for empty markdown (C requires non-NULL `md` even
-/// when `md_len == 0`). Not read when length is zero.
+/// when `md_len == 0`).
+///
+/// - File-scope `const` → program-lifetime address (not a stack temp).
+/// - Apex must bound all reads by `md_len`; with `md_len == 0` the sentinel
+///   byte is never read (it is `\0` if a buggy engine peeks one byte).
+/// - Safe only because the ABI forbids Apex retaining pointers after return.
 const empty_md_sentinel: [1]u8 = .{0};
 
 /// Validate Zig→C pointer/length assumptions before calling `apex_render`.
@@ -652,6 +657,19 @@ fn fidelityRender(md: []const u8, arena: *std.heap.ArenaAllocator) ![]const u8 {
     return html.bytes;
 }
 
+/// Pin exact HTML for high-value Unified constructs (table / footnote / math /
+/// callout). Substring structural checks remain for the rest of U1–U17; these
+/// goldens catch Apex version-drift in attribute shape and nesting.
+///
+/// Pin: ApexMarkdown v1.1.11 Unified via host adapter (Feature 1 Chat 4 +
+/// external audit F-004). Update only when intentionally upgrading the pin.
+fn fidelityEqualGolden(hay: []const u8, golden: []const u8) !void {
+    if (!std.mem.eql(u8, hay, golden)) {
+        std.debug.print("fidelity golden mismatch:\n--- got ---\n{s}\n--- want ---\n{s}\n", .{ hay, golden });
+        return error.TestExpectedEqual;
+    }
+}
+
 test "U1 Unified GFM table emits table markup" {
     try skipIfHostileEngine();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -664,6 +682,21 @@ test "U1 Unified GFM table emits table markup" {
     , &arena);
     try fidelityContains(html, "<table");
     try fidelityContains(html, "<td");
+    try fidelityEqualGolden(html,
+        \\<table>
+        \\<tbody>
+        \\<tr>
+        \\<td>a</td>
+        \\<td>b</td>
+        \\</tr>
+        \\<tr>
+        \\<td>1</td>
+        \\<td>2</td>
+        \\</tr>
+        \\</tbody>
+        \\</table>
+        \\
+    );
 }
 
 test "U2 Unified nested lists" {
@@ -742,6 +775,17 @@ test "U7 Unified footnote ref and backref" {
     try fidelityContains(html, "footnote");
     try fidelityContains(html, "fnref");
     try fidelityContains(html, "note body");
+    try fidelityEqualGolden(html,
+        \\<p>Hi<sup class="footnote-ref"><a href="#fn-1" id="fnref-1" data-footnote-ref>1</a></sup>.</p>
+        \\<section class="footnotes" data-footnotes>
+        \\<ol>
+        \\<li id="fn-1">
+        \\<p>note body <a href="#fnref-1" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="1" aria-label="Back to reference 1">↩</a></p>
+        \\</li>
+        \\</ol>
+        \\</section>
+        \\
+    );
 }
 
 test "U8 Unified definition list" {
@@ -773,6 +817,13 @@ test "U9 Unified math delimiters" {
     try fidelityContains(html, "math");
     // Apex emits KaTeX-style delimiters in spans.
     try fidelityContains(html, "\\(x\\)");
+    try fidelityEqualGolden(html,
+        \\<p>Inline <span class="math inline">\(x\)</span> and</p>
+        \\<p><span class="math display">\[
+        \\y
+        \\\]</span></p>
+        \\
+    );
 }
 
 test "U10 Unified callout NOTE" {
@@ -786,6 +837,19 @@ test "U10 Unified callout NOTE" {
     , &arena);
     try fidelityContains(html, "callout");
     try fidelityContains(html, "callout body");
+    try fidelityEqualGolden(html,
+        \\<div class="callout callout-note">
+        \\<div class="callout-title">note</div>
+        \\<div class="callout-content">
+        \\<blockquote>
+        \\<p>
+        \\callout body</p>
+        \\</blockquote>
+        \\
+        \\</div>
+        \\</div>
+        \\
+    );
 }
 
 test "U11 Unified IAL heading attributes" {

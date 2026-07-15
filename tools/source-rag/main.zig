@@ -82,6 +82,10 @@ const skip_dir_names = [_][]const u8{
     ".release-gate",
     "node_modules",
     ".DS_Store",
+    // CMake/local object trees (e.g. vendor/apex-markdown/build/) — host-specific
+    // and gitignored; must not enter LLM source packs / external audit corpora.
+    "build",
+    "CMakeFiles",
 };
 
 /// Top-level product / cache trees only (repo-relative path equals or is under).
@@ -907,6 +911,8 @@ test "langFromPath and extensions" {
     try std.testing.expect(hasIncludedExtension("LICENSE"));
     try std.testing.expect(!hasIncludedExtension("photo.png"));
     try std.testing.expect(isSkippedDirName("zig-out"));
+    try std.testing.expect(isSkippedDirName("build")); // cmake trees e.g. vendor/apex-markdown/build
+    try std.testing.expect(isSkippedDirName("CMakeFiles"));
     try std.testing.expect(!isSkippedDirName("source-rag")); // tool lives at tools/source-rag
     try std.testing.expect(isUnderOutDir("source-rag", "source-rag"));
     try std.testing.expect(isUnderOutDir("source-rag/INDEX.md", "source-rag"));

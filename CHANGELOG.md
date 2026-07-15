@@ -19,7 +19,7 @@ How to use going forward:
 
 ## [Unreleased]
 
-### Feature 1 — ApexMarkdown Unified (campaign Chats 1–6) — **Done**
+### Feature 1 — ApexMarkdown Unified (campaign Chats 1–7) — **Done**
 
 - Vendor real **[ApexMarkdown/apex](https://github.com/ApexMarkdown/apex)** as a
   flat source snapshot under `vendor/apex-markdown/` @ **v1.1.11**
@@ -47,6 +47,12 @@ How to use going forward:
   residual stub wording closed; adapter forces
   `allow_external_plugin_detection=false`; reject `md_len` wrap before NUL
   copy.
+- **Chat 7:** External audit response
+  ([`docs/reviews/feature-1-external-audit-response.md`](docs/reviews/feature-1-external-audit-response.md)):
+  golden HTML pins for table/footnote/math/callout; trusted-author
+  `unsafe=true` notice; STATUS tracks D2/D3/D4 with resolve triggers;
+  source-rag skips `build`/`CMakeFiles`; full review SHA + sanitizer PASS vs
+  SKIP clarification; AUDIT-v0.1 Feature-1 supersession note.
 
 ### Docs — residual post-P3 audit cleanup
 

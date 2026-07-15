@@ -10,6 +10,13 @@ the living roadmap. For current phase status (including P2/P3 HTML scale-out
 that landed after this audit), see [`STATUS.md`](STATUS.md) and
 [`CHANGELOG.md`](../CHANGELOG.md).
 
+> **NOTE (post-Feature-1):** Feature 1 (real ApexMarkdown Unified under the
+> frozen host `apex.h` ABI) landed after this audit. The “Apex stub markdown
+> fidelity vs CommonMark” open-risk item and “CommonMark-complete Apex stub
+> remains minimal” non-goal wording below are **resolved / obsolete**. See
+> [`reviews/feature-1-internal-review.md`](reviews/feature-1-internal-review.md)
+> and [`STATUS.md`](STATUS.md).
+
 ---
 
 ## 1. Repository facts and commands run

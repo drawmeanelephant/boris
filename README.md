@@ -137,8 +137,15 @@ dist/**/*.html                    # or each --target output root
 Apex renders markdown in-process via real **ApexMarkdown Unified** (host
 `apex_render` adapter; pin `vendor/apex-markdown` @ v1.1.11). **CMake** is
 required at compile time to build static libs. Layout default:
-`layouts/main.html` with one `{{content}}` splice. See
-[docs/contracts/html-output.md](docs/contracts/html-output.md),
+`layouts/main.html` with one `{{content}}` splice.
+
+**Trusted-author HTML:** Boris passes author HTML through unescaped
+(`unsafe=true` on the Apex adapter). Content is assumed to come from trusted
+authors. Do not use the HTML path with untrusted contributor content without a
+separate sanitization layer. See [apex-abi.md](docs/contracts/apex-abi.md).
+
+Further contracts:
+[html-output.md](docs/contracts/html-output.md),
 [apex-abi.md](docs/contracts/apex-abi.md),
 [parallel-rendering.md](docs/contracts/parallel-rendering.md),
 [watch-mode.md](docs/contracts/watch-mode.md), and
@@ -260,7 +267,8 @@ column `parent_entry` is export packaging only — see
 - **P2 (complete):** dependency indexes, includes, fingerprints, `--incremental`.
 - **P3 (complete):** `--jobs`, `--watch`, multi-target isolation (`--target`,
   layouts, stage commit, selective watch fan-out).
-- **Next:** Apex CommonMark fidelity, then HTML as default CLI mode. See
+- **Feature 1 Done:** real ApexMarkdown Unified (not a CommonMark stub).
+- **Next:** HTML as default CLI mode (Feature 2). See
   [`docs/STATUS.md`](docs/STATUS.md).
 
 Optional Apex checks:

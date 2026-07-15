@@ -130,6 +130,9 @@ Exit codes: `0` success, `1` content, `2` usage, `3` I/O.
 - Hostile double tests mechanical wrapper rules; full C non-retention against
   arbitrary engines remains a contract (see `docs/contracts/apex-abi.md`)
 - **CMake** is a compile-time host dependency for static lib build
+- **Trusted-author HTML:** adapter sets `unsafe=true` (raw HTML passthrough).
+  Content is assumed trusted. Do not feed untrusted contributor content through
+  the HTML path without a separate sanitization layer.
 
 ## Intentionally deferred (current non-goals)
 
@@ -216,7 +219,7 @@ re-opened as greenfield tickets.
 | Field | Detail |
 |-------|--------|
 | **Priority** | **Done** (implementation Chats 1–5; internal/external review Chats 6–7 optional hardening) |
-| **Campaign status** | **Done for product** + **Chat 6 internal review** ([feature-1-internal-review.md](reviews/feature-1-internal-review.md)). Residual: Chat 7 external audit only. |
+| **Campaign status** | **Done for product** + Chat 6 internal review + Chat 7 external audit response ([feature-1-internal-review.md](reviews/feature-1-internal-review.md), [feature-1-external-audit-response.md](reviews/feature-1-external-audit-response.md)). |
 | **User-visible payoff** | Authors get full **Apex Unified** Markdown (tables, footnotes, def lists, math, callouts, IAL, …) — real [ApexMarkdown/apex](https://github.com/ApexMarkdown/apex) under frozen host `apex.h` |
 | **Modules** | `vendor/apex/*` (host ABI + adapter), `vendor/apex-markdown/*`, `scripts/build-apex-markdown.sh`, `build.zig`, `src/apex.zig` / `aside.zig` tests |
 | **Acceptance** | Met: Unified constructs (U1–U17); `test-apex-hostile`; includes/plugins/highlighters off; Whiteboard copy + `apex_free_string` |
@@ -298,7 +301,7 @@ re-opened as greenfield tickets.
 * **Plan:** [`APEX-Feature1-plan.md`](../APEX-Feature1-plan.md) §10 DoD checked (Chats 1–5).
 * **Landed:** pin v1.1.11 · cmake static link · Unified adapter · U1–U17 · docs.
 * **Chat 6 (done):** Internal review + residual doc/adapter hardenings — [feature-1-internal-review.md](reviews/feature-1-internal-review.md).
-* **Optional residual:** Chat 7 external audit response.
+* **Chat 7 (done):** External audit response — [feature-1-external-audit-response.md](reviews/feature-1-external-audit-response.md).
 * **Out of scope (still):** Feature 2; `--apex-mode`; Strategy B pure zig-cc.
 
 ### Card 2 — HTML default CLI mode (`src/html-default-cli`)
@@ -354,7 +357,8 @@ not by themselves change IR schema.
 
 ## Open risks (track; not automatic next tickets)
 
-1. Feature 1 product land + internal review Done; optional Chat 7 for external audit fielding only.
+1. Feature 1 product land + Chat 6 internal review + Chat 7 external audit
+   response Done. Residual Apex hygiene tracked below (D2/D3/D4).
 2. Publication atomicity across volumes/OSes not fully proven.
 3. Residual dual-helper surface: product IR/RAG/HTML input uses `parser.zig` with
    author key **`parent` only** (`parentEntry` / `parent_entry` rejected).
@@ -365,6 +369,14 @@ not by themselves change IR schema.
 4. Root `fixtures_test.zig` is inventory-only; compiler goldens live under contract fixtures + hardening tests (wording must stay honest).
 5. Default CLI flip (Feature 2) will break scripts that assume bare `boris` ⇒ IR;
    preserve `--out` and document migration.
+
+### Feature 1 deferred risks (explicit triggers)
+
+| ID | Risk | Trigger to resolve | Notes |
+|----|------|--------------------|-------|
+| **D2** | Host may pick up system **libyaml** during cmake → non-reproducible `libapex.a` feature surface | **Before** any YAML metadata is passed into `apex_render` / Apex markdown options | Body-fragment HTML path does not require YAML today |
+| **D3** | `ensure_apex.has_side_effects = true` re-invokes cmake script every `zig build` | When CI/dev build time or step-graph caching becomes a measured pain | Correct first; wire input/output hashing / file-existence step later |
+| **D4** | Upstream Apex not formally proven **thread-safe** under `--jobs N` | **Before** `--jobs N` becomes the default or recommended product path | Workers use thread-local Whiteboards; adapter is sync/stack-local; upstream global extension registry not audited |
 
 **North star:** Zig Markdown documentation compiler — load, roll, ignite, reset —
 validated metadata and graph-aware docs, not a polyglot web framework.
@@ -389,6 +401,7 @@ validated metadata and graph-aware docs, not a polyglot web framework.
 | `APEX-Feature1-plan.md` | Feature 1 authority (real ApexMarkdown Unified) — product Done |
 | `docs/reviews/feature-1-apex-fidelity-spec.md` | Feature 1 handoff pointer |
 | `docs/reviews/feature-1-internal-review.md` | Feature 1 Chat 6 internal review record |
+| `docs/reviews/feature-1-external-audit-response.md` | Feature 1 Chat 7 external audit dispositions |
 | `docs/rag/system/` | Narrative seeds (RAG system segment) |
 | `CHANGELOG.md` | What changed |
 | This file | Living status + priority / roadmap list |
