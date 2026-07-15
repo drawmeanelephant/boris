@@ -3,7 +3,7 @@
 **Status:** normative for optional product RAG export  
 **Format id:** `boris-rag`  
 **Schema version:** `1` (integer in `catalog_meta.json`)  
-**Product version field:** `boris_version` (package version string, currently `0.3.0`)
+**Product version field:** `boris_version` (package version string, currently `0.3.1`)
 **Milestone:** 7 implements this contract via `src/rag.zig` + CLI `--rag` / `--rag-dir`.
 
 RAG is an **optional** export with explicit schema versioning. It is **not**
@@ -98,7 +98,7 @@ Default root: `rag/` (override with `--rag-dir=DIR`).
 Emitted on **every successful** RAG export as `catalog_meta.json`:
 
 ```json
-{"format":"boris-rag","schema_version":1,"boris_version":"0.3.0"}
+{"format":"boris-rag","schema_version":1,"boris_version":"0.3.1"}
 ```
 
 | Field | Type | Notes |

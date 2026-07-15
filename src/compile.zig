@@ -51,6 +51,7 @@ const html_toc = @import("html_toc.zig");
 const include_mod = @import("include.zig");
 const wikilink = @import("wikilink.zig");
 const json_out = @import("json_out.zig");
+const pipeline = @import("pipeline.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -560,49 +561,25 @@ const SharedCompileState = struct {
             const src = try readFileAlloc(io, content_dir, p.source_path, gpa);
             source_bytes[i] = src;
             sources_filled = i + 1;
-
-            const body = include_mod.bodyOfSource(src);
-            var page_includes: std.ArrayList([]const u8) = .empty;
-            defer {
-                for (page_includes.items) |inc| gpa.free(inc);
-                page_includes.deinit(gpa);
-            }
-            var include_fail: include_mod.FailInfo = .{};
-            include_mod.collectTransitiveIncludes(io, content_dir, gpa, body, &page_includes, &include_fail) catch |err| {
-                if (err == error.IncludeMissing or err == error.IncludeCycle or
-                    err == error.IncludeSyntax or err == error.InvalidPath or
-                    err == error.DepthExceeded)
-                {
-                    // Plan-time structured diag (retain-owned strings inside printDiagnostic).
-                    if (!quiet) {
-                        include_mod.printDiagnostic(gpa, err, p.source_path, include_fail);
-                    }
-                    return error.IncludeFailed;
-                }
-                return err;
-            };
-
-            // Page → every transitive include (fingerprint + reverse dirty-set).
-            for (page_includes.items) |inc_path| {
-                const owned_src = try inc_alloc.dupe(u8, p.source_path);
-                const owned_inc = try inc_alloc.dupe(u8, inc_path);
-                try dep_index.addDependency(owned_src, owned_inc, .include);
-            }
-            // Include → include edges for nested reverse walks.
-            for (page_includes.items) |inc_path| {
-                const inc_file = readFileAlloc(io, content_dir, inc_path, gpa) catch continue;
-                defer gpa.free(inc_file);
-                const inc_body = include_mod.bodyOfSource(inc_file);
-                var nested_hits: std.ArrayList(include_mod.ScanHit) = .empty;
-                defer nested_hits.deinit(gpa);
-                include_mod.scanIncludeDirectives(inc_body, gpa, &nested_hits, null, inc_path) catch continue;
-                for (nested_hits.items) |hit| {
-                    const owned_from = try inc_alloc.dupe(u8, inc_path);
-                    const owned_to = try inc_alloc.dupe(u8, hit.path);
-                    try dep_index.addDependency(owned_from, owned_to, .include);
-                }
-            }
         }
+
+        // F8.3: use the IR 0.2 resolver for direct parent/include/reference
+        // edges. Forward include walks below derive transitive fingerprint input;
+        // reverse walks later derive the affected page set.
+        var dep_nodes = try gpa.alloc(graph_mod.Node, db.len());
+        defer gpa.free(dep_nodes);
+        for (db.items(), 0..) |p, i| {
+            dep_nodes[i] = .{
+                .id = p.entity_id,
+                .source_path = p.source_path,
+                .title = p.title,
+                .parent = p.parent,
+                .status = if (p.status) |s| s.name() else null,
+                .tags = p.tags,
+                .body_offset = p.body_offset,
+            };
+        }
+        try pipeline.populateDependencyIndex(io, gpa, inc_alloc, content_root, dep_nodes, quiet, &dep_index);
 
         const include_bytes = try gpa.alloc([][]u8, db.len());
         const include_paths = try gpa.alloc([][]u8, db.len());
@@ -629,7 +606,7 @@ const SharedCompileState = struct {
             var visited_transit = std.StringHashMapUnmanaged(void).empty;
             defer visited_transit.deinit(gpa);
 
-            try collectTransitIncludes(gpa, page.source_path, &dep_index, &transit_includes, &visited_transit);
+            try collectTransitIncludes(gpa, page.entity_id, &dep_index, &transit_includes, &visited_transit);
             std.mem.sort([]const u8, transit_includes.items, {}, compareStrings);
 
             var list = try gpa.alloc([]u8, transit_includes.items.len);
@@ -936,6 +913,31 @@ fn fingerprintHex(fp_bytes: [32]u8, gpa: std.mem.Allocator) ![]u8 {
     return try gpa.dupe(u8, &fp_hex);
 }
 
+fn expandDirtySet(
+    gpa: std.mem.Allocator,
+    is_dirty: []bool,
+    pages: []const DurablePage,
+    nodes: []const graph_mod.Node,
+    dep_index: *const dependency.DependencyIndex,
+) !void {
+    for (pages, 0..) |page, page_idx| {
+        if (!is_dirty[page_idx]) continue;
+        const affected = try cache.getAffectedPages(gpa, page.source_path, nodes, dep_index);
+        defer {
+            for (affected) |id| gpa.free(id);
+            gpa.free(affected);
+        }
+        for (affected) |id| {
+            for (pages, 0..) |candidate, candidate_idx| {
+                if (std.mem.eql(u8, candidate.entity_id, id)) {
+                    is_dirty[candidate_idx] = true;
+                    break;
+                }
+            }
+        }
+    }
+}
+
 /// Sibling staging directory for a target: `{dist_dir}.boris-stage`.
 fn stageRelForDist(gpa: std.mem.Allocator, dist_dir: []const u8) ![]u8 {
     return try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{dist_dir});
@@ -1156,6 +1158,13 @@ fn compilePagesInner(
             }
         }
         is_dirty[page_idx] = !skip_render;
+    }
+
+    // Fingerprints identify changed page inputs; the shared frozen reverse
+    // dependency story expands those seeds to parent/reference dependents.
+    // This happens before workers and mutates only coordinator-owned state.
+    if (options.incremental) {
+        try expandDirtySet(gpa, is_dirty, db.items(), site.nodes, &shared.dep_index);
     }
 
     // Compile loop — dirty pages write into staging only
@@ -2344,6 +2353,73 @@ test "Feature 7 incremental: title rename dirties parent that only wiki-links vi
     }
 }
 
+test "F8.3 incremental: changed page expands through parent and reference reverse edges" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f8-3-page-reverse", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md", "---\ntitle: Home\n---\n\n# Home\nOriginal body.\n");
+    try writeTreeFile(io, work, "content/child.md", "---\ntitle: Child\nparent: index\n---\n\n# Child\nSee [[index]].\n");
+    try writeTreeFile(io, work, "content/control.md", "---\ntitle: Control\n---\n\n# Control\nIndependent.\n");
+
+    // Cold build and unchanged control run establish a valid cache.
+    for ([_]usize{ 3, 0 }) |expected_writes| {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+        const stats = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout_path,
+            .incremental = true,
+            .quiet = true,
+        });
+        try std.testing.expectEqual(expected_writes, stats.pages_written);
+    }
+
+    // Body-only target change does not alter the child's own fingerprint
+    // material. The frozen reverse parent/reference edges must still dirty it;
+    // the unrelated control remains cached.
+    try writeTreeFile(io, work, "content/index.md", "---\ntitle: Home\n---\n\n# Home\nEdited body only.\n");
+    {
+        var layout_arena = std.heap.ArenaAllocator.init(gpa);
+        defer layout_arena.deinit();
+        const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+        var retain_arena = std.heap.ArenaAllocator.init(gpa);
+        defer retain_arena.deinit();
+        var db = PageDb.init(gpa, retain_arena.allocator());
+        defer db.deinit();
+        try loadAndPromote(io, gpa, &db, content);
+        const stats = try compilePages(io, gpa, &db, layout, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout_path,
+            .incremental = true,
+            .quiet = true,
+        });
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
+        try std.testing.expectEqual(@as(usize, 3), stats.pages_attempted);
+    }
+}
+
 test "incremental HTML build mode - full verification suite" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -2994,5 +3070,3 @@ test "compileHtmlSiteMulti - success, validation, and isolation" {
         try std.testing.expectError(error.TargetOutputCollision, res);
     }
 }
-
-

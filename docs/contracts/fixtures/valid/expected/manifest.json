@@ -1,6 +1,6 @@
 {
   "schemaVersion": "0.2.0",
-  "compiler": "boris/0.3.0",
+  "compiler": "boris/0.3.1",
   "contentRoot": "docs/contracts/fixtures/valid/content",
   "pageCount": 3,
   "pages": [
