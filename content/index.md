@@ -3,25 +3,39 @@ title: Boris Docs Compiler
 status: published
 tags: [home, zig]
 ---
+
 # Welcome to Boris
 
-Boris is a **Zig static-site compiler** for Markdown documentation. 
+Boris is a **Zig documentation compiler**: Markdown in, validated Trunk/Satellite
+graph, HTML site out (default). Same binary also emits JSON IR or a RAG pack
+when you ask.
 
-Our philosophy is simple: **Load → Roll → Ignite → Reset**. We provide a validated content metadata model, graph-aware navigation, and semantic admonitions out of the box.
+Teaching beat (narrative, not CLI flags): **Load → Roll → Ignite → Reset**.
 
 <Aside kind="info">
-Boris now defaults to an HTML site build under `dist/` and uses real **ApexMarkdown Unified** for rendering. No more "IR-first" generic claims. We are a docs site builder.
+
+**Product v0.2.0.** Bare `boris` builds HTML under `dist/` with **ApexMarkdown
+Unified**. The default layout ships graph-aware **site nav**, **breadcrumb**,
+and an in-page **table of contents** — look at the chrome around this page.
+
 </Aside>
 
 ## Why Boris?
 
-Unlike traditional SSGs, Boris isn't a polyglot web framework. There's no Node SSG stack, no React, no Webpack. 
+- **One Zig binary** — no Node SSG stack, no bundler, no React runtime for the compile.
+- **Strict content graph** — Trunk/Satellite parents fail loud (exit 1) instead of shipping broken links.
+- **Real Markdown** — ApexMarkdown Unified in-process (tables, footnotes, callouts, …).
+- **Lean HTML path** — layout + body stream to disk; optional `--incremental`, `--watch`, `--jobs N`.
 
-### Core Features
+## Start here
 
-- **Blazing Fast**: Written in Zig 0.16+.
-- **Validated Graph**: Strict Trunk/Satellite content model ensures you never have dangling docs.
-- **Apex Markdown**: Fully featured markdown via C ABI host adapter.
-- **Zero-JS by Default**: Layouts are pure HTML splices, keeping the payload lean.
+| Page | What you’ll learn |
+|------|-------------------|
+| [Getting started](getting-started.html) | Build Boris, first site, three modes |
+| [CLI and modes](guides/cli-and-modes.html) | HTML default vs `--out` vs `--rag` |
+| [Content model](guides/overview.html) | Pipeline + Trunk/Satellite |
+| [Apex showcase](guides/apex-markdown.html) | Unified Markdown features |
+| [Frontmatter reference](reference/frontmatter.html) | Closed author keys |
 
-Check out [Getting Started](getting-started.html) to begin, or dive into our [Apex Showcase](guides/apex-markdown.html) to see the renderer in action!
+This tree under `content/` is **dogfood**: it is the sample docs site compiled by
+the product itself.

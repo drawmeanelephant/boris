@@ -19,6 +19,13 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Docs — sample content polish for v0.2.0
+
+- Refresh dogfood site under `content/` for product 0.2: HTML default, Apex
+  Unified, Feature 6 nav/toc, P2/P3 helpers; closed frontmatter accuracy
+  (title optional; not full YAML); real clone URL; drop stale “Feature 6
+  unchecked” / IR-first wording. Update `content/AGENT-DIRECTIVE.txt` brief.
+
 ---
 
 ## [0.2.0] — 2026-07-15

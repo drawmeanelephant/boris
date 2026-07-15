@@ -4,26 +4,47 @@ parent: guides/overview
 status: published
 tags: [rag, ai]
 ---
+
 # RAG Export Packaging
 
-Boris can produce an AI-ready product RAG (Retrieval-Augmented Generation) corpus.
+Boris can emit a deterministic product **RAG** (retrieval) corpus from the same
+content graph used for HTML and IR.
 
-## Generating the Corpus
-
-<Aside kind="danger">
-**There is no `zig build rag` step.** This was an old myth.
-</Aside>
-
-To generate the RAG corpus, simply use the `--rag` flag:
+## Generate the corpus
 
 ```bash
 ./zig-out/bin/boris --rag --quiet
+./zig-out/bin/boris --rag-dir ./uploads/rag --quiet
 ```
 
-This generates output in the `rag/` directory (or wherever `--rag-dir` specifies).
+<Aside kind="danger">
 
-## Output Shape
+There is **no** `zig build rag` product step. Use `boris --rag` (or
+`zig build run -- --rag`).
 
-The generated corpus flattens the Trunk/Satellite graph into LLM-friendly chunks and injects export-only `:::kind` metadata and `parent_entry` fields into the catalog. 
+</Aside>
 
-These outputs are *strictly for export* and should **never** be copied back into the `content/` source directory. The authoring frontmatter contract is completely separate from the RAG export schema.
+## Output shape (high level)
+
+Typical tree under `rag/`:
+
+```text
+rag/
+  INDEX.md
+  README.md
+  UPLOAD-GUIDE.md
+  catalog_meta.json      # format + schema_version + boris_version
+  catalog.jsonl          # one row per catalogued page
+  content/pages/…        # exported page markdown
+  graph/                 # graph snapshot for consumers
+  system/                # curated narrative seeds
+```
+
+- Shared **graph validation** with IR/HTML: broken parents fail RAG too.
+- Catalog may use export field name `parent_entry` for the parent id — that is
+  **not** author frontmatter. Author key remains **`parent` only**.
+- Asides may appear as `:::kind` in export packaging only.
+
+Never copy export-only field names or `:::kind` authoring back into `content/`.
+
+Normative contract: `docs/contracts/rag-export.md` in the repository.

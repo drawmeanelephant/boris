@@ -3,23 +3,28 @@ title: Frontmatter Reference
 status: published
 tags: [reference, authoring]
 ---
+
 # Frontmatter Reference
 
-Boris uses a strictly validated, closed set of frontmatter keys. Any unknown keys (like `parentEntry`) will result in an `EFRONTMATTER` compiler error.
+Boris accepts a **closed set** of frontmatter keys. Unknown keys (including
+legacy `parentEntry` / `parent_entry`) fail with **`EFRONTMATTER`**.
 
-## Allowed Keys
+This is **not** full YAML: no nested maps, multiline scalars, anchors, or
+arbitrary keys. Bracket `tags` lists are the only list form.
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `id` | String | Optional override for the entity ID. Defaults to file path. |
-| `title` | String | The page title. (Required) |
-| `parent` | String | The entity ID of the parent Trunk page. (Required for Satellites) |
-| `status` | String | Must be `published`, `draft`, or `archived`. |
-| `tags` | List | Standard YAML list format: `[a, b, c]`. |
+## Allowed keys
+
+| Key | Required | Value |
+|-----|----------|--------|
+| `id` | no | Override path-derived entity id |
+| `title` | no | Page title (≤512 UTF-8 bytes) |
+| `parent` | no | Entity id of parent **Trunk** (satellites only) |
+| `status` | no | `draft` \| `published` \| `archived` |
+| `tags` | no | `[a, b, "c"]` list form only |
 
 ## Examples
 
-### Trunk Page
+### Trunk
 
 ```yaml
 ---
@@ -29,7 +34,9 @@ tags: [guides]
 ---
 ```
 
-### Satellite Page
+Omit `parent`. Entity id defaults to the file path without extension.
+
+### Satellite
 
 ```yaml
 ---
@@ -38,3 +45,17 @@ parent: guides/overview
 status: published
 ---
 ```
+
+`parent` must name an existing trunk id. No satellite-of-satellite, no cycles.
+
+## Forbidden
+
+| Form | Result |
+|------|--------|
+| `parentEntry` / `parent_entry` | `EFRONTMATTER` (unknown key) |
+| Nested YAML / multiline scalars | `EFRONTMATTER` |
+| Extra keys | `EFRONTMATTER` |
+
+RAG export may still *emit* a field named `parent_entry` in catalogs — export
+packaging only, never author grammar. See [RAG export](../guides/rag-export.html)
+and [Trunk/Satellite](../guides/trunk-satellite.html).

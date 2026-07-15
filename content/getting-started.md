@@ -3,42 +3,55 @@ title: Getting Started with Boris
 status: published
 tags: [setup, cli]
 ---
+
 # Getting Started
 
-Ready to ignite your docs? Let's get Boris running.
+Build Boris, compile this sample site, and try the three product modes.
 
 ## Prerequisites
 
-- **Zig 0.16+**
-- **CMake** (required at compile-time for the Apex Markdown C ABI)
+- **Zig 0.16+** (CI pin: 0.16.0)
+- **CMake** at *compile time only* (builds vendored ApexMarkdown static libs)
 
-## Installation & First Build
+## First site build
 
-1. **Clone the repo**
-   ```bash
-   git clone https://github.com/your-org/boris.git
-   cd boris
-   ```
-2. **Build Boris**
-   ```bash
-   zig build
-   ```
-3. **Build the Demo Site**
-   ```bash
-   ./zig-out/bin/boris --quiet
-   ```
-   *Your site is now available in `dist/`!*
+```bash
+git clone https://github.com/drawmeanelephant/boris.git
+cd boris
+zig build
+./zig-out/bin/boris --quiet          # HTML → dist/
+```
 
-## Run Modes
+Open `dist/index.html` (or serve `dist/` with any static file server). You should
+see site nav on the left, breadcrumb, and a page TOC when the body has headings.
 
-Boris has three primary run modes to fit your workflow:
+## Three modes
 
-| Mode | Command | Output | Use Case |
-|------|---------|--------|----------|
-| **HTML (Default)** | `./zig-out/bin/boris` | `dist/` | Standard static site generation. |
-| **JSON IR** | `./zig-out/bin/boris --out .boris` | `.boris/` | Machine-readable Intermediate Representation. |
-| **RAG Corpus** | `./zig-out/bin/boris --rag` | `rag/` | AI-ready product RAG packaging. |
+| Mode | Command | Output |
+|------|---------|--------|
+| **HTML (default)** | `./zig-out/bin/boris` | `dist/` |
+| **JSON IR** | `./zig-out/bin/boris --out .boris` | `.boris/` |
+| **RAG corpus** | `./zig-out/bin/boris --rag` | `rag/` |
+
+```bash
+./zig-out/bin/boris --out .boris --quiet
+./zig-out/bin/boris --rag --quiet
+```
 
 <Aside kind="tip">
-You can also use `--watch` and `--jobs N` for faster, incremental HTML builds during authoring!
+
+HTML helpers (valid alone, no extra mode flag): `--watch`, `--incremental`,
+`--jobs N` (default jobs is still 1). See [CLI and modes](guides/cli-and-modes.html).
+
 </Aside>
+
+## What you need as an author
+
+1. Markdown under `content/` (case-sensitive `.md` / `.mdx`).
+2. Closed frontmatter — only `id`, `title`, `parent`, `status`, `tags`
+   ([reference](reference/frontmatter.html)).
+3. Optional layout chrome in `layouts/main.html` (`{{content}}` required;
+   `{{nav}}` / `{{breadcrumb}}` / `{{title}}` / `{{toc}}` optional).
+
+Next: the [content model](guides/overview.html) or jump straight to
+[Trunk vs Satellite](guides/trunk-satellite.html).

@@ -108,7 +108,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
-| **Now** | Polish sample content as product evolves | Keep `content/` green with nav + toc + Apex reality |
+| **Now** | Keep sample content honest as features land | `content/` dogfood refreshed for v0.2.0; re-check after next feature |
 | **Later** | IR schema bump only if emit shape changes | Do not bump `schemaVersion` for product-only work |
 | **Hygiene** | Historical campaign notes | Removed from tree (`archive/`); do not reintroduce as default agent context |
 

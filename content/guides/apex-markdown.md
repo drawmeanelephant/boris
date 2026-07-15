@@ -3,18 +3,22 @@ title: Apex Markdown Showcase
 status: published
 tags: [markdown, showcase, apex]
 ---
+
 # Apex Markdown Showcase
 
-Boris uses **ApexMarkdown Unified**, a C ABI host adapter that supports an incredibly rich feature set out of the box. This page serves as a testbed and showcase for these features.
+Boris renders page bodies with **ApexMarkdown Unified** (vendored pin) through
+an in-process C ABI host adapter — not a toy stub and not a subprocess.
 
-## Smart Typography and Formatting
+This page is a living testbed for constructs that matter in docs sites.
 
-We support standard emphasis, **strong text**, and ~~strikethrough~~.
-But we also have smart typography: "curly quotes", em-dashes --- and ellipses...
+## Typography
 
-You can also use H~2~O for subscript and e=mc^2^ for superscript.
+Emphasis, **strong**, and ~~strikethrough~~ work as usual. Smart typography:
+"curly quotes", em-dashes --- and ellipses...
 
-## Lists and Task Lists
+Subscript and superscript: H~2~O, e=mc^2^.
+
+## Lists and task lists
 
 1. Discover content
 2. Parse frontmatter
@@ -22,80 +26,63 @@ You can also use H~2~O for subscript and e=mc^2^ for superscript.
    - Validate nodes
 3. Render HTML
 
-- [x] Feature 1 (Engine)
-- [x] Feature 2 (CLI)
-- [ ] Feature 6 (Graph Nav)
+- [x] Feature 1 — ApexMarkdown Unified
+- [x] Feature 2 — HTML default CLI
+- [x] Feature 6 — graph-aware nav + in-page TOC
+- [x] P2/P3 — incremental, watch, jobs, multi-target
 
-## Math Support
+## Math
 
-Inline math is easy: $a^2 + b^2 = c^2$.
+Inline: $a^2 + b^2 = c^2$.
 
-Block math uses double dollars:
+Block:
 
 $$
 f(x) = \int_{-\infty}^\infty \hat f(\xi)\,e^{2 \pi i \xi x} \,d\xi
 $$
 
-## Tables and Data
-
-### Standard GFM Table
+## Tables
 
 | Feature | Status | Notes |
 | :--- | :---: | ---: |
-| Apex Markdown | ✅ | C ABI Adapter |
-| Graph Validation | ✅ | Trunk/Satellite |
-| Nested Asides | ❌ | Banned by contract |
+| ApexMarkdown Unified | Yes | In-process C ABI |
+| Graph validation | Yes | Trunk / Satellite |
+| Nested asides | No | Contract forbids |
+| Site nav + TOC | Yes | Layout markers in v0.2 |
 
-### Grid Tables (if enabled)
-
-+---------------+---------------+--------------------+
-| Fruit         | Price         | Advantages         |
-+===============+===============+====================+
-| Bananas       | $1.34         | - built-in wrapper |
-|               |               | - bright color     |
-+---------------+---------------+--------------------+
-| Oranges       | $2.10         | - cures scurvy     |
-|               |               | - tasty            |
-+---------------+---------------+--------------------+
-
-## Definition Lists
+## Definition lists
 
 Apple
-:   Pomaceous fruit of plants of the genus Malus in
-    the family Rosaceae.
+:   Pomaceous fruit of plants of the genus Malus.
 
 Orange
-:   The fruit of an evergreen tree of the genus Citrus.
+:   Fruit of an evergreen tree of the genus Citrus.
 
-## Autolinks and Footnotes
+## Autolinks and footnotes
 
-Emails like team@boris-ssg.example.com and URLs like https://ziglang.org auto-link!
+URLs like https://ziglang.org may auto-link depending on engine options.
 
 You can add footnotes for extra context.[^1]
 
-[^1]: This is the footnote text, rendered at the bottom of the page.
+[^1]: Footnote text is rendered with the page body (engine-dependent placement).
 
-## Abbreviations, Emoji, and Callouts
+## Abbreviations and emoji
 
 The HTML specification is maintained by the W3C.
 
-*[HTML]: Hyper Text Markup Language
+*[HTML]: HyperText Markup Language
 *[W3C]: World Wide Web Consortium
 
-I love using Boris! 🎉 It is incredibly fast 🚀.
+Product callouts use the registered Aside component — not unrestricted MDX. 🎉
 
-### Custom component: Aside
+## Aside (product component)
 
 <Aside kind="info">
 
-This is Boris’s officially supported Aside component — use it for tips, warnings, and other callouts that should stay in document order.
+This is Boris’s supported Aside — tips, warnings, and notes that stay in
+document order. Full syntax: [Using Asides](asides.html).
 
 </Aside>
 
-Examples of the tag syntax belong in fenced code on the [Asides](asides.html) guide so the tokenizer does not treat documentation as nested components.
-
-## Images with Captions
-
-![A scenic view of the Zig language logo in the wild](/assets/zig-logo.png "Zig Logo")
-
-*Note: You'll need actual images to see them!*
+Document the tag syntax inside fenced code on the asides page so the tokenizer
+does not treat examples as nested components.
