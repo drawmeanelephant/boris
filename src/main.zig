@@ -12,6 +12,7 @@ const diagnostic = @import("diagnostic.zig");
 const pipeline = @import("pipeline.zig");
 const rag = @import("rag.zig");
 const compile = @import("compile.zig");
+const target = @import("target.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const Options = cli.Options;
