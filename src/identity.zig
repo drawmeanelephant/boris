@@ -236,9 +236,108 @@ pub fn pathsDifferOnlyInCase(a: []const u8, b: []const u8) bool {
     return std.ascii.eqlIgnoreCase(a, b);
 }
 
+/// Relative `href` from a page at `from_output` to a page at `to_output`.
+///
+/// Both paths are site-root-relative with `/` separators and no leading `/`
+/// (e.g. `guides/intro.html`, `index.html`). Result never uses a leading `/`.
+///
+/// Examples:
+/// - `guides/intro.html` → `index.html` ⇒ `../index.html`
+/// - `index.html` → `guides/intro.html` ⇒ `guides/intro.html`
+/// - `guides/a.html` → `guides/b.html` ⇒ `b.html`
+pub fn relativeHref(allocator: std.mem.Allocator, from_output: []const u8, to_output: []const u8) ![]u8 {
+    const from_dir = std.fs.path.dirnamePosix(from_output) orelse "";
+    const to_dir = std.fs.path.dirnamePosix(to_output) orelse "";
+    const to_base = std.fs.path.basenamePosix(to_output);
+
+    // Split directory paths into components (empty dir → zero components).
+    var from_parts: [32][]const u8 = undefined;
+    var to_parts: [32][]const u8 = undefined;
+    const from_n = splitPathComponents(from_dir, &from_parts);
+    const to_n = splitPathComponents(to_dir, &to_parts);
+
+    var common: usize = 0;
+    while (common < from_n and common < to_n) : (common += 1) {
+        if (!std.mem.eql(u8, from_parts[common], to_parts[common])) break;
+    }
+
+    var up = from_n - common;
+    // Build: (../)* + remaining to_dir components + basename
+    var total: usize = 0;
+    total += up * 3; // "../"
+    var i = common;
+    while (i < to_n) : (i += 1) {
+        total += to_parts[i].len + 1; // component + '/'
+    }
+    total += to_base.len;
+
+    if (total == 0) return try allocator.dupe(u8, ".");
+
+    const out = try allocator.alloc(u8, total);
+    errdefer allocator.free(out);
+    var off: usize = 0;
+    while (up > 0) : (up -= 1) {
+        @memcpy(out[off .. off + 3], "../");
+        off += 3;
+    }
+    i = common;
+    while (i < to_n) : (i += 1) {
+        @memcpy(out[off .. off + to_parts[i].len], to_parts[i]);
+        off += to_parts[i].len;
+        out[off] = '/';
+        off += 1;
+    }
+    @memcpy(out[off .. off + to_base.len], to_base);
+    off += to_base.len;
+    std.debug.assert(off == total);
+    return out;
+}
+
+fn splitPathComponents(dir: []const u8, out: [][]const u8) usize {
+    if (dir.len == 0) return 0;
+    var n: usize = 0;
+    var start: usize = 0;
+    var i: usize = 0;
+    while (i <= dir.len) : (i += 1) {
+        if (i == dir.len or dir[i] == '/') {
+            if (i > start) {
+                if (n >= out.len) return n; // truncate defensively
+                out[n] = dir[start..i];
+                n += 1;
+            }
+            start = i + 1;
+        }
+    }
+    return n;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+test "relativeHref same dir one level up and root to nested" {
+    const gpa = std.testing.allocator;
+
+    const same = try relativeHref(gpa, "guides/a.html", "guides/b.html");
+    defer gpa.free(same);
+    try std.testing.expectEqualStrings("b.html", same);
+
+    const up = try relativeHref(gpa, "guides/intro.html", "index.html");
+    defer gpa.free(up);
+    try std.testing.expectEqualStrings("../index.html", up);
+
+    const down = try relativeHref(gpa, "index.html", "guides/intro.html");
+    defer gpa.free(down);
+    try std.testing.expectEqualStrings("guides/intro.html", down);
+
+    const deep = try relativeHref(gpa, "a/b/c.html", "x/y.html");
+    defer gpa.free(deep);
+    try std.testing.expectEqualStrings("../../x/y.html", deep);
+
+    const self = try relativeHref(gpa, "guides/intro.html", "guides/intro.html");
+    defer gpa.free(self);
+    try std.testing.expectEqualStrings("intro.html", self);
+}
 
 test "canonicalize basic and nested" {
     const gpa = std.testing.allocator;

@@ -44,9 +44,119 @@ const identity = @import("identity.zig");
 const cache = @import("cache.zig");
 const dependency = @import("dependency.zig");
 const target_mod = @import("target.zig");
+const graph_mod = @import("graph.zig");
+const diag = @import("diag.zig");
+const html_nav = @import("html_nav.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
+
+/// Long-lived frozen graph + nav for one HTML site compile (Feature 6).
+/// Nodes view retain-owned PageDb strings; edges/nav owned by `gpa`.
+pub const FrozenSite = struct {
+    gpa: std.mem.Allocator,
+    nodes: []graph_mod.Node,
+    edges: []graph_mod.Edge,
+    nav: []graph_mod.NavEntry,
+    /// Site-nav fingerprint material (GPA-owned); empty when layout has no `{{nav}}`.
+    site_nav_material: []const u8 = "",
+
+    pub fn deinit(self: *FrozenSite) void {
+        if (self.site_nav_material.len > 0) self.gpa.free(self.site_nav_material);
+        graph_mod.freeNav(self.gpa, self.nav);
+        self.gpa.free(self.edges);
+        self.gpa.free(self.nodes);
+        self.* = undefined;
+    }
+
+    pub fn indexOf(self: *const FrozenSite, entity_id: []const u8) ?u32 {
+        for (self.nodes, 0..) |n, i| {
+            if (std.mem.eql(u8, n.id, entity_id)) return @intCast(i);
+        }
+        return null;
+    }
+};
+
+/// Build graph nodes from PageDb, validate, freeze, and buildNav.
+/// On graph errors returns `error.GraphValidationFailed` after printing diags
+/// when `quiet` is false.
+pub fn freezeSiteFromPageDb(
+    gpa: std.mem.Allocator,
+    db: *PageDb,
+    quiet: bool,
+    include_nav_material: bool,
+) !FrozenSite {
+    const pages = db.items();
+    const nodes = try gpa.alloc(graph_mod.Node, pages.len);
+    errdefer gpa.free(nodes);
+
+    for (pages, 0..) |p, i| {
+        nodes[i] = .{
+            .id = p.entity_id,
+            .source_path = p.source_path,
+            .title = p.title,
+            .parent = p.parent,
+            .status = if (p.status) |s| s.name() else null,
+            .tags = p.tags,
+            .body_offset = p.body_offset,
+        };
+    }
+
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+    // Diagnostic message/remediation strings live on a short-lived arena.
+    var diag_arena = std.heap.ArenaAllocator.init(gpa);
+    defer diag_arena.deinit();
+    try graph_mod.validate(gpa, diag_arena.allocator(), nodes, &diags);
+    if (diag.countErrors(diags.items) > 0) {
+        if (!quiet) {
+            for (diags.items) |d| {
+                const line = diag.formatText(d, gpa) catch continue;
+                defer gpa.free(line);
+                std.debug.print("{s}\n", .{line});
+            }
+        }
+        return error.GraphValidationFailed;
+    }
+
+    const g = try graph_mod.freeze(gpa, nodes, null);
+    errdefer gpa.free(g.edges);
+
+    const nav = try graph_mod.buildNav(gpa, g.nodes);
+    errdefer graph_mod.freeNav(gpa, nav);
+
+    // Sync durable graph fields onto PageDb by entity id.
+    for (db.itemsMut()) |*p| {
+        if (findNodeById(g.nodes, p.entity_id)) |n| {
+            p.role = switch (n.role) {
+                .trunk => .trunk,
+                .satellite => .satellite,
+            };
+            p.index = n.index;
+            p.parent_index = n.parent_index;
+        }
+    }
+
+    var material: []const u8 = "";
+    if (include_nav_material) {
+        material = try html_nav.siteNavMaterial(gpa, g.nodes);
+    }
+
+    return .{
+        .gpa = gpa,
+        .nodes = g.nodes,
+        .edges = g.edges,
+        .nav = nav,
+        .site_nav_material = material,
+    };
+}
+
+fn findNodeById(nodes: []const graph_mod.Node, id: []const u8) ?graph_mod.Node {
+    for (nodes) |n| {
+        if (std.mem.eql(u8, n.id, id)) return n;
+    }
+    return null;
+}
 
 /// Experimental path marker — keep CLI default off this surface.
 pub const experimental: bool = true;
@@ -100,6 +210,9 @@ pub fn loadLayoutOnce(
     return assemble.loadLayout(io, dir, layout_path, layout_arena) catch |err| switch (err) {
         error.MissingContentMarker => return error.LayoutMissingMarker,
         error.DuplicateContentMarker => return error.LayoutDuplicateMarker,
+        error.DuplicateLayoutMarker => return error.LayoutDuplicateMarker,
+        error.UnknownLayoutMarker => return error.LayoutUnknownMarker,
+        error.TooManyLayoutSegments => return error.LayoutUnknownMarker,
         else => |e| return e,
     };
 }
@@ -147,6 +260,9 @@ pub fn loadAndPromote(
 /// PageDb metadata must already be durable (from `loadAndPromote`). This
 /// function re-reads source for the body only — parse views stay on the
 /// Whiteboard until return.
+///
+/// When `site` is non-null and the layout has nav/breadcrumb/title slots, those
+/// fragments are rendered from the frozen graph on the Whiteboard.
 pub fn renderAndPublishPage(
     io: Io,
     content_dir: Io.Dir,
@@ -156,6 +272,20 @@ pub fn renderAndPublishPage(
     doc_arena: *std.heap.ArenaAllocator,
     options: CompileOptions,
     page_index: usize,
+) !void {
+    return renderAndPublishPageWithSite(io, content_dir, dist_dir, page, layout, doc_arena, options, page_index, null);
+}
+
+pub fn renderAndPublishPageWithSite(
+    io: Io,
+    content_dir: Io.Dir,
+    dist_dir: Io.Dir,
+    page: *const DurablePage,
+    layout: assemble.Layout,
+    doc_arena: *std.heap.ArenaAllocator,
+    options: CompileOptions,
+    page_index: usize,
+    site: ?*const FrozenSite,
 ) !void {
     const arena = doc_arena.allocator();
 
@@ -188,8 +318,27 @@ pub fn renderAndPublishPage(
     }
     const html = html_buf.items;
 
+    var slots: assemble.SlotValues = .{ .content = html };
+
+    if (site) |s| {
+        const gi = s.indexOf(page.entity_id) orelse return error.GraphValidationFailed;
+        const node = s.nodes[gi];
+        if (layout.has_nav) {
+            slots.nav = try html_nav.renderNav(arena, s.nodes, s.nav, gi, page.output_path);
+        }
+        if (layout.has_breadcrumb) {
+            slots.breadcrumb = try html_nav.renderBreadcrumb(arena, s.nodes, s.nav, gi, page.output_path);
+        }
+        if (layout.has_title) {
+            slots.title = try html_nav.renderTitle(arena, node);
+        }
+    } else if (layout.has_nav or layout.has_breadcrumb or layout.has_title) {
+        // Layout requests chrome but no frozen site — treat as internal error.
+        return error.GraphValidationFailed;
+    }
+
     const fail_publish = if (options.test_fail_publish_at) |idx| idx == page_index else false;
-    try assemble.writePageOpts(io, dist_dir, page.output_path, layout, html, .{
+    try assemble.writePageWithSlotsOpts(io, dist_dir, page.output_path, layout, slots, .{
         .fail_before_publish = fail_publish,
     });
 }
@@ -333,7 +482,7 @@ fn writeCacheManifest(writer: anytype, manifest: CacheManifest) !void {
     try writer.writeAll("  ]\n}\n");
 }
 
-/// Site compile: layout → promote PageDb → whiteboard loop → dist/.
+/// Site compile: layout → promote PageDb → graph freeze → whiteboard loop → dist/.
 ///
 /// Single-threaded when `jobs == 1`. Does not mutate IR emit semantics.
 pub fn compileHtmlSite(
@@ -356,7 +505,11 @@ pub fn compileHtmlSite(
 
     try loadAndPromote(io, gpa, &db, options.content_root);
 
-    return try compilePages(io, gpa, &db, layout, options);
+    // 3. Graph validate + freeze (shared rules with IR/RAG; Feature 6 nav).
+    var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav);
+    defer site.deinit();
+
+    return try compilePagesWithSite(io, gpa, &db, layout, options, &site);
 }
 
 /// Shared, layout-independent fingerprint inputs built once for multi-target runs.
@@ -509,6 +662,11 @@ pub fn compileHtmlSiteMulti(
 
     try loadAndPromote(io, gpa, &db, base_options.content_root);
 
+    // Shared graph freeze once for all targets (Feature 6). Always compute nav
+    // material; fingerprint mixes it in only when a layout has `{{nav}}`.
+    var site = try freezeSiteFromPageDb(gpa, &db, base_options.quiet, true);
+    defer site.deinit();
+
     // Shared content/include fingerprint inputs once for all targets.
     var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root);
     defer shared.deinit();
@@ -548,7 +706,7 @@ pub fn compileHtmlSiteMulti(
         }
 
         const cached = layout_cache.get(plan.layout_path).?;
-        _ = compilePagesWithShared(io, gpa, &db, cached.layout, target_options, &shared, cached.bytes) catch |err| {
+        _ = compilePagesWithSharedAndSite(io, gpa, &db, cached.layout, target_options, &shared, cached.bytes, &site) catch |err| {
             if (!base_options.quiet) {
                 std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
             }
@@ -577,6 +735,7 @@ const ParallelContext = struct {
     layout: assemble.Layout,
     options: CompileOptions,
     is_dirty: []const bool,
+    site: ?*const FrozenSite,
 
     // Thread coordination
     mutex: std.Io.Mutex = std.Io.Mutex.init,
@@ -610,7 +769,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
 
         if (ctx.is_dirty[page_index]) {
             const page = &ctx.db.items()[page_index];
-            renderAndPublishPage(
+            renderAndPublishPageWithSite(
                 ctx.io,
                 ctx.content_dir,
                 ctx.dist_dir,
@@ -619,6 +778,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
                 &doc_arena,
                 ctx.options,
                 page_index,
+                ctx.site,
             ) catch |err| {
                 ctx.mutex.lockUncancelable(ctx.io);
                 if (ctx.shared_error == null) {
@@ -646,6 +806,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
 ///
 /// `db` strings must outlive this call (retain arena). Whiteboard is local.
 /// Builds fingerprint inputs locally (single-target path).
+/// Prefer `compilePagesWithSite` when a frozen graph is available.
 pub fn compilePages(
     io: Io,
     gpa: std.mem.Allocator,
@@ -653,9 +814,24 @@ pub fn compilePages(
     layout: assemble.Layout,
     options: CompileOptions,
 ) !CompileStats {
+    // Content-only layouts can compile without graph chrome; still freeze so
+    // invalid parents fail loud on the HTML path.
+    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav);
+    defer site.deinit();
+    return compilePagesWithSite(io, gpa, db, layout, options, &site);
+}
+
+pub fn compilePagesWithSite(
+    io: Io,
+    gpa: std.mem.Allocator,
+    db: *PageDb,
+    layout: assemble.Layout,
+    options: CompileOptions,
+    site: *const FrozenSite,
+) !CompileStats {
     const layout_bytes = try readFileAlloc(io, Io.Dir.cwd(), options.layout_path, gpa);
     defer gpa.free(layout_bytes);
-    return compilePagesInner(io, gpa, db, layout, options, null, layout_bytes);
+    return compilePagesInner(io, gpa, db, layout, options, null, layout_bytes, site);
 }
 
 /// Like `compilePages` but reuses shared content/include fingerprint inputs
@@ -669,7 +845,22 @@ pub fn compilePagesWithShared(
     shared: *const SharedCompileState,
     layout_bytes: []const u8,
 ) !CompileStats {
-    return compilePagesInner(io, gpa, db, layout, options, shared, layout_bytes);
+    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav);
+    defer site.deinit();
+    return compilePagesInner(io, gpa, db, layout, options, shared, layout_bytes, &site);
+}
+
+pub fn compilePagesWithSharedAndSite(
+    io: Io,
+    gpa: std.mem.Allocator,
+    db: *PageDb,
+    layout: assemble.Layout,
+    options: CompileOptions,
+    shared: *const SharedCompileState,
+    layout_bytes: []const u8,
+    site: *const FrozenSite,
+) !CompileStats {
+    return compilePagesInner(io, gpa, db, layout, options, shared, layout_bytes, site);
 }
 
 fn fingerprintHex(fp_bytes: [32]u8, gpa: std.mem.Allocator) ![]u8 {
@@ -722,6 +913,7 @@ fn compilePagesInner(
     options: CompileOptions,
     shared_opt: ?*const SharedCompileState,
     layout_bytes: []const u8,
+    site: *const FrozenSite,
 ) !CompileStats {
     const cwd = Io.Dir.cwd();
 
@@ -807,6 +999,7 @@ fn compilePagesInner(
         defer gpa.free(inc_views);
         for (inc_owned, 0..) |b, j| inc_views[j] = b;
 
+        const nav_material: []const u8 = if (layout.has_nav) site.site_nav_material else "";
         const fp_bytes = cache.computePageFingerprint(
             options.target_name,
             options.layout_path,
@@ -814,6 +1007,7 @@ fn compilePagesInner(
             shared.source_bytes[page_idx],
             inc_views,
             layout_bytes,
+            nav_material,
         );
         fingerprints[page_idx] = try fingerprintHex(fp_bytes, gpa);
 
@@ -859,6 +1053,7 @@ fn compilePagesInner(
             .layout = layout,
             .options = options,
             .is_dirty = is_dirty,
+            .site = site,
         };
 
         const num_workers = @min(options.jobs, db.len());
@@ -920,7 +1115,7 @@ fn compilePagesInner(
             stats.pages_attempted += 1;
 
             if (is_dirty[page_index]) {
-                try renderAndPublishPage(io, content_dir, stage_dir, page, layout, &doc_arena, options, page_index);
+                try renderAndPublishPageWithSite(io, content_dir, stage_dir, page, layout, &doc_arena, options, page_index, site);
                 stats.pages_written += 1;
                 if (!options.quiet) {
                     std.debug.print("  wrote {s}/{s}\n", .{ options.dist_dir, page.output_path });
@@ -1423,6 +1618,72 @@ test "output paths use identity.safeOutputRelativePath (via PageDb)" {
     const got = try readAllFile(io, dist_dir, expected, gpa);
     defer gpa.free(got);
     try std.testing.expect(got.len > 0);
+}
+
+test "HTML path rejects invalid parent (graph gate)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    const work = "zig-cache/boris-f6-graph-gate";
+    try cwd.createDirPath(io, work);
+    defer cwd.deleteTree(io, work) catch {};
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html>{{nav}}{{content}}</html>");
+    try writeTreeFile(io, work, "content/orphan.md", "---\ntitle: Orphan\nparent: missing-trunk\n---\n\n# Orphan\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try std.testing.expectError(error.GraphValidationFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    }));
+}
+
+test "HTML path emits site nav and breadcrumb for forest" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    const work = "zig-cache/boris-f6-nav-emit";
+    try cwd.createDirPath(io, work);
+    defer cwd.deleteTree(io, work) catch {};
+
+    try writeTreeFile(io, work, "layouts/main.html",
+        \\<html><title>{{title}}</title>{{nav}}{{breadcrumb}}{{content}}</html>
+    );
+    try writeTreeFile(io, work, "content/index.md", "---\ntitle: Home\n---\n\n# Home\n");
+    try writeTreeFile(io, work, "content/guides/child.md", "---\ntitle: Child\nparent: index\n---\n\n# Child\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const child = try readAllFile(io, dist_dir, "guides/child.html", gpa);
+    defer gpa.free(child);
+    try std.testing.expect(std.mem.indexOf(u8, child, "site-nav") != null);
+    try std.testing.expect(std.mem.indexOf(u8, child, "site-nav__satellite is-current") != null);
+    try std.testing.expect(std.mem.indexOf(u8, child, "../index.html") != null);
+    try std.testing.expect(std.mem.indexOf(u8, child, "breadcrumb") != null);
+    try std.testing.expect(std.mem.indexOf(u8, child, "<title>Child</title>") != null);
 }
 
 test "html fixture golden: expected/ matches compile output" {

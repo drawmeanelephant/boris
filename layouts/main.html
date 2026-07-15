@@ -3,10 +3,61 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Boris Site</title>
+  <title>{{title}} · Boris</title>
   <style>
     :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-    body { max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.55; }
+    body {
+      max-width: 56rem;
+      margin: 0 auto;
+      padding: 1.5rem 1rem 3rem;
+      line-height: 1.55;
+      display: grid;
+      gap: 1.5rem;
+    }
+    @media (min-width: 48rem) {
+      body {
+        grid-template-columns: 14rem minmax(0, 1fr);
+        align-items: start;
+      }
+      .site-nav { grid-column: 1; grid-row: 1 / span 2; }
+      .breadcrumb { grid-column: 2; }
+      main { grid-column: 2; }
+    }
+    .site-nav {
+      font-size: 0.9rem;
+      position: sticky;
+      top: 1rem;
+    }
+    .site-nav ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .site-nav > ul > li { margin: 0.35rem 0; }
+    .site-nav ul ul {
+      margin: 0.25rem 0 0.5rem 0.75rem;
+      padding-left: 0.5rem;
+      border-left: 2px solid color-mix(in srgb, CanvasText 15%, transparent);
+    }
+    .site-nav a { text-decoration: none; color: inherit; }
+    .site-nav a:hover { text-decoration: underline; }
+    .site-nav .is-current > a { font-weight: 700; }
+    .breadcrumb ol {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      font-size: 0.85rem;
+      opacity: 0.85;
+    }
+    .breadcrumb li:not(:last-child)::after {
+      content: "/";
+      margin-left: 0.35rem;
+      opacity: 0.5;
+    }
+    .breadcrumb a { color: inherit; }
     .admonition {
       margin: 1.25rem 0;
       padding: 0.75rem 1rem;
@@ -32,6 +83,8 @@
   </style>
 </head>
 <body>
+{{nav}}
+{{breadcrumb}}
 <main>
 {{content}}
 </main>

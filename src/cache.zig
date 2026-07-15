@@ -13,6 +13,7 @@ pub const CACHE_FORMAT_VERSION = "boris-cache-v1-multitarget";
 /// - source bytes
 /// - resolved include dependency bytes, in stable dependency order
 /// - resolved layout bytes
+/// - optional site-nav material (when layout has `{{nav}}`; empty otherwise)
 ///
 /// Ensures no timestamps, absolute paths, hostnames, pointer addresses,
 /// random values, or unstable map iterations are factored in.
@@ -23,6 +24,7 @@ pub fn computePageFingerprint(
     source_bytes: []const u8,
     include_deps: []const []const u8,
     layout_bytes: []const u8,
+    site_nav_material: []const u8,
 ) [32]u8 {
     var hasher = Sha256.init(.{});
 
@@ -59,6 +61,14 @@ pub fn computePageFingerprint(
     const layout_len: u64 = layout_bytes.len;
     hasher.update(std.mem.asBytes(&layout_len));
     hasher.update(layout_bytes);
+
+    // 6. Site nav material (Feature 6) — only when non-empty so content-only
+    // layouts keep prior fingerprint inputs.
+    if (site_nav_material.len > 0) {
+        const nav_len: u64 = site_nav_material.len;
+        hasher.update(std.mem.asBytes(&nav_len));
+        hasher.update(site_nav_material);
+    }
 
     var digest: [32]u8 = undefined;
     hasher.final(&digest);
@@ -156,27 +166,27 @@ pub fn getAffectedPages(
 // ---------------------------------------------------------------------------
 
 test "Same inputs produce the same key across runs" {
-    const key1 = computePageFingerprint("default", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
-    const key2 = computePageFingerprint("default", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
+    const key1 = computePageFingerprint("default", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content", "");
+    const key2 = computePageFingerprint("default", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content", "");
     try std.testing.expectEqualSlices(u8, &key1, &key2);
 }
 
 test "Source change changes only that page's key" {
-    const key1 = computePageFingerprint("default", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
-    const key2 = computePageFingerprint("default", "layouts/main.html", "guides/intro", "modified source", &.{"inc1", "inc2"}, "layout content");
+    const key1 = computePageFingerprint("default", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content", "");
+    const key2 = computePageFingerprint("default", "layouts/main.html", "guides/intro", "modified source", &.{"inc1", "inc2"}, "layout content", "");
 
     // Changing source changes the key
     try std.testing.expect(!std.mem.eql(u8, &key1, &key2));
 
     // Changing page ID changes the key
-    const key3 = computePageFingerprint("default", "layouts/main.html", "guides/outro", "source data", &.{"inc1", "inc2"}, "layout content");
+    const key3 = computePageFingerprint("default", "layouts/main.html", "guides/outro", "source data", &.{"inc1", "inc2"}, "layout content", "");
     try std.testing.expect(!std.mem.eql(u8, &key1, &key3));
 }
 
 test "Target configuration changes isolate page keys" {
-    const key_prod = computePageFingerprint("prod", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
-    const key_stage = computePageFingerprint("stage", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
-    const key_ref = computePageFingerprint("prod", "layouts/ref.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content");
+    const key_prod = computePageFingerprint("prod", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content", "");
+    const key_stage = computePageFingerprint("stage", "layouts/main.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content", "");
+    const key_ref = computePageFingerprint("prod", "layouts/ref.html", "guides/intro", "source data", &.{"inc1", "inc2"}, "layout content", "");
 
     // Different target name produces different key
     try std.testing.expect(!std.mem.eql(u8, &key_prod, &key_stage));

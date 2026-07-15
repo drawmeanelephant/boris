@@ -26,3 +26,4 @@ pub const safeOutputRelativePath = identity.safeOutputRelativePath;
 pub const htmlOutputPath = identity.htmlOutputPath;
 pub const ragPagePath = identity.ragPagePath;
 pub const pathsDifferOnlyInCase = identity.pathsDifferOnlyInCase;
+pub const relativeHref = identity.relativeHref;

@@ -57,7 +57,8 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | RAG export (`--rag` / `--rag-dir`) | **Done** |
 | Incremental / watch / `--jobs` / multi-target | **Done** (P2–P3 on HTML path) |
 | CI Linux + macOS | **Done** |
-| Graph-aware HTML nav / `{{toc}}` | **Later** (Feature 6) |
+| Graph-aware HTML nav (`{{nav}}` / breadcrumb / title) | **Done** (Feature 6 MVP) |
+| In-page heading `{{toc}}` | **Later** (Feature 6 follow-on) |
 | Full YAML / MDX / embedded HTTP server | **Not now** |
 
 ### Commands
@@ -100,9 +101,9 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
-| **Now** | Sample / dogfood content under `content/` | `content/AGENT-DIRECTIVE.txt` — match HTML-default + Apex reality |
-| **Next** | Feature 6 — in-page TOC / graph-aware HTML nav | Authors feel structure in the site, not only in `graph.json` |
-| **Later** | v0.2.0 product cut | Package Feature 1+2 + P2/P3 under a real version bump (`schemaVersion` stays `0.1.0` unless IR shape changes) |
+| **Now** | Sample / dogfood content under `content/` | `content/AGENT-DIRECTIVE.txt` — match HTML-default + Apex + graph nav; keep graph/Aside valid |
+| **Next** | Feature 6 follow-on — in-page heading `{{toc}}` | Per-page outline from body headings |
+| **Later** | v0.2.0 product cut | Package Feature 1+2+6 MVP + P2/P3 under a real version bump (`schemaVersion` stays `0.1.0` unless IR shape changes) |
 | **Hygiene** | Keep archive out of default agent context | Historical reviews live under [`archive/`](../archive/) |
 
 ### Shipped (do not re-open as greenfield)
@@ -114,6 +115,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | 3 | `--jobs N` | Parallel independent page renders |
 | 4 | `--watch` | Debounced rebuild loop |
 | 5 | `--target` multi-output | Isolated roots + caches |
+| 6 | Graph-aware HTML nav (MVP) | `{{nav}}` forest + breadcrumb + title; HTML graph gate |
 
 P2 (fingerprints, incremental, layout edges) and P3 scale-out are **complete**
 on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.

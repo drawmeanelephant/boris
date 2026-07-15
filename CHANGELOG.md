@@ -19,6 +19,19 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Feature 6 MVP — graph-aware HTML site nav — **Done**
+
+- HTML path runs the same Trunk/Satellite `graph.validate` + freeze as IR/RAG
+  before render (invalid parents fail the site build, exit 1).
+- Layout markers: required `{{content}}`; optional `{{nav}}` (full site forest),
+  `{{breadcrumb}}`, `{{title}}`. Multi-slot stream assembly (no page mega-string).
+- Default `layouts/main.html` ships nav + breadcrumb + titled chrome with
+  relative `href`s from nested pages.
+- When `{{nav}}` is present, incremental fingerprints include site-nav material
+  so title/parent changes dirty every page that embeds the forest.
+- Contracts: `docs/contracts/html-output.md`. In-page heading `{{toc}}` still
+  deferred.
+
 ### Docs — living tree hygiene (post Feature 2)
 
 - Lead **README** / **STATUS** with user outcomes (site, graph, lean rebuilds)

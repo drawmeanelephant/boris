@@ -231,6 +231,8 @@ fn mapHtmlError(err: anyerror, quiet: bool) ExitCode {
         error.ComponentFailed,
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
+        error.LayoutUnknownMarker,
+        error.GraphValidationFailed,
         error.MultiTargetCompilationFailed,
         => {
             if (!quiet) {

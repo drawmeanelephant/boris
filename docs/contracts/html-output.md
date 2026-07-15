@@ -98,19 +98,80 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
 
 ## Layout
 
-1. Template (e.g. `layouts/main.html`) contains **exactly one** literal
-   `{{content}}` marker.
-2. Load layout once at startup into **long-lived** ownership.
-3. Split into immutable `prefix` / `suffix` slices referencing the long-lived
-   layout buffer (`assemble.Layout`).
-4. Missing marker → hard error **before** content compilation.
-5. Duplicate marker → hard error **before** content compilation.
-6. Final assembly writes, in three sequential writes only:
-   - prefix
-   - page HTML
-   - suffix
-7. **No** `prefix ++ html ++ suffix` (or equivalent full-page mega-string) in
-   the product assembly path.
+1. Template (e.g. `layouts/main.html`) is scanned once for **known** markers.
+   Load layout once at startup into **long-lived** ownership.
+2. **Required marker:** exactly one `{{content}}` (page body: Apex + Aside HTML).
+3. **Optional markers** (each at most once):
+
+   | Marker | Value |
+   |--------|--------|
+   | `{{nav}}` | Full site forest (Trunks id-ascending, nested Satellites id-ascending) |
+   | `{{breadcrumb}}` | Parent chain root → current page (inclusive) |
+   | `{{title}}` | Page title, or entity id when title is absent (HTML-escaped text) |
+
+4. Missing `{{content}}` → hard error **before** content compilation.
+5. Duplicate of any known marker → hard error **before** content compilation.
+6. Unknown `{{…}}` token → hard error **before** content compilation (fail loud).
+7. Split into an ordered list of **static** slices and **slot** placeholders
+   (`assemble.Layout`), all views into the long-lived layout buffer.
+8. Final assembly streams sequential writes only: static segments and per-page
+   slot fragments (content, and nav/breadcrumb/title when those slots exist).
+   **No** full-page mega-string concatenation in the product assembly path.
+
+### Graph gate (HTML path)
+
+Before any page render, the HTML path:
+
+1. Maps promoted PageDb metadata to graph nodes (views into retain-owned strings).
+2. Runs the same `graph.validate` rules as IR/RAG (`EPARENT*`, duplicates, cycles).
+3. On any error diagnostic: **do not** publish HTML pages; exit **1** (content).
+4. On success: freeze the graph, `buildNav`, and use the frozen snapshot for
+   `{{nav}}` / `{{breadcrumb}}` (and fingerprint material when `{{nav}}` is present).
+
+### Site nav HTML (normative shape)
+
+When `{{nav}}` is present, emit a deterministic forest (no hash-map order):
+
+```html
+<nav class="site-nav" aria-label="Site">
+  <ul>
+    <li class="site-nav__trunk[ is-current]"><a href="REL">TITLE</a>
+      <ul>
+        <li class="site-nav__satellite[ is-current]"><a href="REL">TITLE</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+```
+
+- `REL` is a **site-relative path from the current page’s output path** to the
+  target (e.g. from `guides/x.html` to `index.html` → `../index.html`). Never
+  a leading-`/` site-absolute path.
+- Titles (and link text) are HTML-escaped (`& < > "`).
+- `is-current` marks the `li` for the page being rendered; the current link may
+  use `aria-current="page"`.
+
+When `{{breadcrumb}}` is present:
+
+```html
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <ol>
+    <li><a href="REL">TITLE</a></li>
+    <li aria-current="page">TITLE</li>
+  </ol>
+</nav>
+```
+
+Last crumb is the current page (unlinked text). Earlier crumbs are links.
+
+### Incremental fingerprints and `{{nav}}`
+
+When the layout contains `{{nav}}`, each page fingerprint includes a **site nav
+material** digest derived from the frozen ordered list of
+`(id, title, parent, role)` for every page. A title or parent change on any
+page dirties every page that uses that layout (full forest is global chrome).
+Layouts without `{{nav}}` keep the prior page-local fingerprint inputs
+(source, includes, layout bytes, entity id, target identity).
 
 ---
 
@@ -160,7 +221,10 @@ On the OS/filesystem where `zig build test` runs:
 |------|----------|
 | Layout missing marker | `assemble` + `compile` tests; `test/fixtures/layouts/` |
 | Layout duplicate marker | same |
-| Output equals prefix + HTML + suffix | `compile` + `assemble` |
+| Unknown / multi-slot layout markers | `assemble` multi-slot tests |
+| Graph gate on HTML (bad parent) | `compile` Feature 6 tests |
+| Site nav + breadcrumb + relative href | `html_nav` + `compile` Feature 6 tests |
+| Output equals prefix + HTML + suffix | `compile` + `assemble` (content-only layouts) |
 | Premature invalidation before flush fails | `assemble.HoldUntilFlush` |
 | Correct flush-then-reset succeeds | `assemble` + `compile` |
 | Render failure: free_all + no final publish | `compile` |

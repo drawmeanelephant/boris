@@ -1,16 +1,17 @@
-//! Experimental zero-copy layout splicing for the HTML path (milestone 9).
+//! Zero-copy layout splicing for the HTML path (milestone 9 + Feature 6 nav).
 //!
 //! Layout is loaded once at **startup** (before content compile) and split into
-//! immutable prefix/suffix slices around a single `{{content}}` marker.
-//! Final HTML is streamed with sequential writes — no Header+Content+Footer
-//! mega-string concatenation in application memory.
+//! ordered static / slot segments. Required marker: `{{content}}`. Optional:
+//! `{{nav}}`, `{{breadcrumb}}`, `{{title}}`. Final HTML is streamed with
+//! sequential writes — no full-page mega-string concatenation.
 //!
 //! ## I/O invariants
 //!
-//! - Missing or **duplicate** `{{content}}` is a hard error at layout load time.
-//! - `Layout.prefix` and `Layout.suffix` are `[]const u8` views into `Layout.raw`.
-//!   The owning `Layout` (and its raw buffer) must outlive every `writePage` call.
-//! - Page bytes are written as three sequential segments: prefix | body | suffix.
+//! - Missing `{{content}}`, duplicate known markers, or unknown `{{…}}` tokens
+//!   are hard errors at layout load time.
+//! - Segment slices are views into `Layout.raw`. The owning `Layout` (and its
+//!   raw buffer) must outlive every `writePage` call.
+//! - Page bytes are written as N sequential segments (static + slot values).
 //! - Publish uses Zig 0.16 `Dir.createFileAtomic` + `File.Atomic.replace`:
 //!   a unique temporary name (hex u64, scoped to the destination directory) is
 //!   created, fully written and flushed, then renamed into the final path.
@@ -37,6 +38,12 @@ const std = @import("std");
 const Io = std.Io;
 
 pub const content_marker = "{{content}}";
+pub const nav_marker = "{{nav}}";
+pub const breadcrumb_marker = "{{breadcrumb}}";
+pub const title_marker = "{{title}}";
+
+/// Max static+slot pieces in one layout (4 slots + 5 static regions is typical).
+pub const max_segments: usize = 16;
 
 /// Stack buffer size for the page writer — large enough that most pages need
 /// one underlying write path per splice segment. **Not** Whiteboard memory.
@@ -45,33 +52,159 @@ pub const write_buffer_size = 64 * 1024;
 pub const LayoutError = error{
     MissingContentMarker,
     DuplicateContentMarker,
+    DuplicateLayoutMarker,
+    UnknownLayoutMarker,
+    TooManyLayoutSegments,
 };
 
-/// Immutable split of a layout template (e.g. `layouts/main.html`).
-///
-/// `prefix` and `suffix` are `[]const u8` slices into `raw`. Keep the `Layout`
-/// (and the allocator that owns `raw`) alive for the full duration of all
-/// `writePage` calls that reference it.
-pub const Layout = struct {
-    /// Full template bytes (kept so prefix/suffix remain valid).
-    raw: []const u8,
-    /// Bytes before `{{content}}` (view into `raw`).
-    prefix: []const u8,
-    /// Bytes after `{{content}}` (view into `raw`).
-    suffix: []const u8,
+pub const Slot = enum {
+    content,
+    nav,
+    breadcrumb,
+    title,
+};
 
-    /// Split on exactly one `{{content}}`. Missing or duplicate → hard error.
-    pub fn split(raw: []const u8) LayoutError!Layout {
-        const idx = std.mem.indexOf(u8, raw, content_marker) orelse return error.MissingContentMarker;
-        const after_first = idx + content_marker.len;
-        if (std.mem.indexOf(u8, raw[after_first..], content_marker) != null) {
-            return error.DuplicateContentMarker;
-        }
-        return .{
-            .raw = raw,
-            .prefix = raw[0..idx],
-            .suffix = raw[after_first..],
+pub const Segment = union(enum) {
+    static: []const u8,
+    slot: Slot,
+};
+
+/// Per-page values for layout slots. Static layout bytes come from `Layout`.
+pub const SlotValues = struct {
+    content: []const u8,
+    nav: []const u8 = "",
+    breadcrumb: []const u8 = "",
+    title: []const u8 = "",
+
+    pub fn forSlot(self: SlotValues, slot: Slot) []const u8 {
+        return switch (slot) {
+            .content => self.content,
+            .nav => self.nav,
+            .breadcrumb => self.breadcrumb,
+            .title => self.title,
         };
+    }
+};
+
+/// Immutable multi-slot split of a layout template (e.g. `layouts/main.html`).
+///
+/// Segment slices are views into `raw`. Keep the `Layout` (and the allocator
+/// that owns `raw`) alive for the full duration of all `writePage` calls.
+pub const Layout = struct {
+    /// Full template bytes (kept so segment slices remain valid).
+    raw: []const u8,
+    segments: [max_segments]Segment = undefined,
+    segment_count: usize = 0,
+    has_nav: bool = false,
+    has_breadcrumb: bool = false,
+    has_title: bool = false,
+
+    /// Content-only convenience: bytes before the single `{{content}}`.
+    /// Empty when the layout has other slots (use `segments` instead).
+    prefix: []const u8 = "",
+    /// Content-only convenience: bytes after the single `{{content}}`.
+    suffix: []const u8 = "",
+
+    /// Split known markers. Missing/duplicate/unknown → hard error.
+    pub fn split(raw: []const u8) LayoutError!Layout {
+        var layout: Layout = .{ .raw = raw };
+        var seen_content = false;
+        var seen_nav = false;
+        var seen_breadcrumb = false;
+        var seen_title = false;
+
+        var pos: usize = 0;
+        while (pos < raw.len) {
+            const open = std.mem.indexOfPos(u8, raw, pos, "{{") orelse {
+                // Trailing static.
+                if (pos < raw.len) {
+                    try layout.appendStatic(raw[pos..]);
+                }
+                break;
+            };
+            if (open > pos) {
+                try layout.appendStatic(raw[pos..open]);
+            }
+            const close_rel = std.mem.indexOf(u8, raw[open..], "}}") orelse {
+                // Unclosed `{{` — treat rest as unknown / invalid marker region.
+                return error.UnknownLayoutMarker;
+            };
+            const close = open + close_rel;
+            const token = raw[open .. close + 2];
+            if (std.mem.eql(u8, token, content_marker)) {
+                if (seen_content) return error.DuplicateContentMarker;
+                seen_content = true;
+                try layout.appendSlot(.content);
+            } else if (std.mem.eql(u8, token, nav_marker)) {
+                if (seen_nav) return error.DuplicateLayoutMarker;
+                seen_nav = true;
+                layout.has_nav = true;
+                try layout.appendSlot(.nav);
+            } else if (std.mem.eql(u8, token, breadcrumb_marker)) {
+                if (seen_breadcrumb) return error.DuplicateLayoutMarker;
+                seen_breadcrumb = true;
+                layout.has_breadcrumb = true;
+                try layout.appendSlot(.breadcrumb);
+            } else if (std.mem.eql(u8, token, title_marker)) {
+                if (seen_title) return error.DuplicateLayoutMarker;
+                seen_title = true;
+                layout.has_title = true;
+                try layout.appendSlot(.title);
+            } else {
+                return error.UnknownLayoutMarker;
+            }
+            pos = close + 2;
+        }
+
+        if (!seen_content) return error.MissingContentMarker;
+
+        // Content-only convenience prefix/suffix for legacy three-write tests.
+        if (!layout.has_nav and !layout.has_breadcrumb and !layout.has_title) {
+            if (layout.segment_count == 3 and
+                layout.segments[0] == .static and
+                layout.segments[1] == .slot and layout.segments[1].slot == .content and
+                layout.segments[2] == .static)
+            {
+                layout.prefix = layout.segments[0].static;
+                layout.suffix = layout.segments[2].static;
+            } else if (layout.segment_count == 2 and
+                layout.segments[0] == .static and
+                layout.segments[1] == .slot and layout.segments[1].slot == .content)
+            {
+                layout.prefix = layout.segments[0].static;
+                layout.suffix = "";
+            } else if (layout.segment_count == 2 and
+                layout.segments[0] == .slot and layout.segments[0].slot == .content and
+                layout.segments[1] == .static)
+            {
+                layout.prefix = "";
+                layout.suffix = layout.segments[1].static;
+            } else if (layout.segment_count == 1 and
+                layout.segments[0] == .slot and layout.segments[0].slot == .content)
+            {
+                layout.prefix = "";
+                layout.suffix = "";
+            }
+        }
+
+        return layout;
+    }
+
+    fn appendStatic(self: *Layout, bytes: []const u8) LayoutError!void {
+        if (bytes.len == 0) return;
+        if (self.segment_count >= max_segments) return error.TooManyLayoutSegments;
+        self.segments[self.segment_count] = .{ .static = bytes };
+        self.segment_count += 1;
+    }
+
+    fn appendSlot(self: *Layout, slot: Slot) LayoutError!void {
+        if (self.segment_count >= max_segments) return error.TooManyLayoutSegments;
+        self.segments[self.segment_count] = .{ .slot = slot };
+        self.segment_count += 1;
+    }
+
+    pub fn segmentsSlice(self: *const Layout) []const Segment {
+        return self.segments[0..self.segment_count];
     }
 };
 
@@ -122,23 +255,18 @@ pub const WritePageOptions = struct {
     fail_before_publish: bool = false,
 };
 
-/// Stream prefix | html | suffix with no concatenation, then publish.
+/// Stream layout segments with no full-page concatenation, then publish.
 ///
 /// Uses a unique temporary name in the destination directory (`createFileAtomic`),
-/// writes three sequential slices, flushes, then `Atomic.replace` into
-/// `output_path`. On failure, only this operation's temp is deleted; any prior
-/// final file at `output_path` is preserved.
+/// writes sequential slices, flushes, then `Atomic.replace` into `output_path`.
+/// On failure, only this operation's temp is deleted; any prior final file at
+/// `output_path` is preserved.
 ///
 /// ## Flush-before-reset contract
 ///
-/// `html_body` is typically a slice into the document Whiteboard arena.
-/// The writer buffer is **stack** storage. Source slices must remain valid until
-/// this function returns (flush + replace included). Callers must only
+/// Slot value slices (typically Whiteboard) must remain valid until this
+/// function returns (flush + replace included). Callers must only
 /// `arena.reset(.free_all)` **after** return.
-///
-/// Publication API (Zig 0.16): `Io.Dir.createFileAtomic` → write/flush →
-/// `Io.File.Atomic.replace` (same-directory rename). See module docs for
-/// platform-qualified guarantees.
 pub fn writePage(
     io: Io,
     out_dir: Io.Dir,
@@ -158,33 +286,54 @@ pub fn writePageOpts(
     html_body: []const u8,
     options: WritePageOptions,
 ) !void {
-    // Unique temp name scoped to the destination directory (Zig std hex u64).
+    return writePageWithSlotsOpts(io, out_dir, output_path, layout, .{
+        .content = html_body,
+    }, options);
+}
+
+/// Stream multi-slot layout values then publish (Feature 6).
+pub fn writePageWithSlots(
+    io: Io,
+    out_dir: Io.Dir,
+    output_path: []const u8,
+    layout: Layout,
+    slots: SlotValues,
+) !void {
+    return writePageWithSlotsOpts(io, out_dir, output_path, layout, slots, .{});
+}
+
+/// Same as `writePageWithSlots` with testable options (fault injection).
+pub fn writePageWithSlotsOpts(
+    io: Io,
+    out_dir: Io.Dir,
+    output_path: []const u8,
+    layout: Layout,
+    slots: SlotValues,
+    options: WritePageOptions,
+) !void {
     var atomic_file = try out_dir.createFileAtomic(io, output_path, .{
         .replace = true,
         .make_path = true,
     });
-    // On success after replace, deinit is a no-op for the temp; on failure it
-    // deletes only this operation's temporary file.
     defer atomic_file.deinit(io);
 
-    // Stack-backed buffer — never aliases the document arena.
     var buf: [write_buffer_size]u8 = undefined;
     var file_writer = atomic_file.file.writer(io, &buf);
     const w = &file_writer.interface;
 
-    // Three sequential writes of existing slices — zero-copy assembly.
-    // No `prefix ++ html ++ suffix` allocation.
-    try w.writeAll(layout.prefix);
-    try w.writeAll(html_body);
-    try w.writeAll(layout.suffix);
-    // Full flush before publish so free_all cannot race in-flight bytes.
+    // Sequential writes of existing slices — no full-page mega-string.
+    for (layout.segmentsSlice()) |seg| {
+        switch (seg) {
+            .static => |s| try w.writeAll(s),
+            .slot => |slot| try w.writeAll(slots.forSlot(slot)),
+        }
+    }
     try w.flush();
 
     if (options.fail_before_publish) {
         return error.TestInjectedWriteFailure;
     }
 
-    // Destination replacement on the same volume (see module docs for limits).
     try atomic_file.replace(io);
 }
 
@@ -199,9 +348,9 @@ pub fn writePageOpts(
 /// `writeAll` detect invalidation (e.g. Whiteboard wipe / in-place destroy)
 /// before flush — without relying on use-after-free reads of freed pages.
 pub const HoldUntilFlush = struct {
-    parts: [3]?[]const u8 = .{ null, null, null },
+    parts: [max_segments]?[]const u8 = .{null} ** max_segments,
     /// Wyhash of each part at `writeAll` time (stable fingerprint).
-    fingerprints: [3]u64 = .{ 0, 0, 0 },
+    fingerprints: [max_segments]u64 = .{0} ** max_segments,
     n: usize = 0,
     materialized: ?[]u8 = null,
     gpa: std.mem.Allocator,
@@ -259,12 +408,19 @@ pub const HoldUntilFlush = struct {
     }
 };
 
-/// Splice layout + body into a `HoldUntilFlush` (three writes, then flush).
+/// Splice layout + body into a `HoldUntilFlush` (sequential writes, then flush).
 /// Production `writePage` follows the same ordering against a file writer.
 pub fn spliceToHold(layout: Layout, html_body: []const u8, sink: *HoldUntilFlush) !void {
-    try sink.writeAll(layout.prefix);
-    try sink.writeAll(html_body);
-    try sink.writeAll(layout.suffix);
+    return spliceToHoldSlots(layout, .{ .content = html_body }, sink);
+}
+
+pub fn spliceToHoldSlots(layout: Layout, slots: SlotValues, sink: *HoldUntilFlush) !void {
+    for (layout.segmentsSlice()) |seg| {
+        switch (seg) {
+            .static => |s| try sink.writeAll(s),
+            .slot => |slot| try sink.writeAll(slots.forSlot(slot)),
+        }
+    }
     try sink.flush();
 }
 
@@ -381,6 +537,21 @@ test "layout missing content marker is hard error" {
 test "layout duplicate content marker is hard error" {
     const raw = "<a>{{content}}</a>{{content}}";
     try std.testing.expectError(error.DuplicateContentMarker, Layout.split(raw));
+}
+
+test "layout multi-slot nav breadcrumb title" {
+    const raw =
+        \\<html><title>{{title}}</title>{{nav}}{{breadcrumb}}{{content}}</html>
+    ;
+    const layout = try Layout.split(raw);
+    try std.testing.expect(layout.has_nav);
+    try std.testing.expect(layout.has_breadcrumb);
+    try std.testing.expect(layout.has_title);
+    try std.testing.expectEqual(@as(usize, 0), layout.prefix.len); // multi-slot: no content-only prefix
+    try std.testing.expect(layout.segment_count >= 5);
+
+    try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{toc}}{{content}}"));
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{nav}}{{nav}}{{content}}"));
 }
 
 test "static layout fixtures missing and duplicate" {

@@ -131,7 +131,8 @@ See [frontmatter.md](docs/contracts/frontmatter.md).
 | IR + RAG export | **Done** |
 | Incremental, watch, parallel jobs, multi-target | **Done** |
 | CI Linux + macOS | **Done** |
-| In-page TOC / graph-aware HTML nav | **Roadmap** (Feature 6) |
+| Graph-aware HTML nav (`{{nav}}` / breadcrumb) | **Done** (Feature 6 MVP) |
+| In-page heading `{{toc}}` | **Roadmap** (Feature 6 follow-on) |
 | Full YAML / MDX | **Out of scope** |
 
 ---
@@ -187,5 +188,5 @@ See [frontmatter.md](docs/contracts/frontmatter.md).
 
 - **Shipped:** content graph, IR, RAG, Asides, real Apex Unified, HTML default,
   incremental/watch/jobs/multi-target.
-- **Next:** dogfood sample content (`content/AGENT-DIRECTIVE.txt`); then Feature 6
-  (TOC / HTML nav). Detail: [`docs/STATUS.md`](docs/STATUS.md).
+- **Next:** dogfood sample content (`content/AGENT-DIRECTIVE.txt`); then in-page
+  `{{toc}}`. Detail: [`docs/STATUS.md`](docs/STATUS.md).
