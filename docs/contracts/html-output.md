@@ -213,7 +213,9 @@ siblings cached.
 Before Aside tokenize and Apex, the HTML path:
 
 1. Expands `{{include path}}` (Boris-mediated; Apex FS includes stay off).
-2. Rewrites `[[entity-id]]` wiki-links to relative Markdown links.
+2. Rewrites `[[entity-id]]` / `[[entity-id#heading-id]]` wiki-links to relative
+   Markdown links (fragments match Apex-rendered heading ids; see
+   [heading-ids.md](heading-ids.md)).
 
 Included headings participate in `{{toc}}` (TOC is built from rendered body
 HTML after expansion). Normative syntax and errors:

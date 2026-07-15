@@ -47,6 +47,7 @@ per topic:
 | Watch Mode | [watch-mode.md](watch-mode.md) |
 | Multi-target isolated outputs | [multi-target-isolated-output.md](multi-target-isolated-output.md) |
 | Includes + wiki-links | [includes-and-wiki-links.md](includes-and-wiki-links.md) |
+| Heading IDs + wiki fragments | [heading-ids.md](heading-ids.md) |
 
 ### Normative documents (IR v0.2 target) — full list
 
@@ -65,6 +66,7 @@ per topic:
 | [watch-mode.md](watch-mode.md) | Opt-in watch mode, event coalescing/normalization, rebuild serialization, safe recovery |
 | [multi-target-isolated-output.md](multi-target-isolated-output.md) | Multi-target CLI/config, output isolation, cache namespaces (P3.3) |
 | [includes-and-wiki-links.md](includes-and-wiki-links.md) | `{{include}}` + `[[wiki]]` pre-Apex; cycles; fragment tree; IR 0.2 edge projection |
+| [heading-ids.md](heading-ids.md) | Apex heading `id` harvest; `[[entity#heading]]` match + URL rules |
 
 ## Redirect / compatibility paths (non-normative)
 

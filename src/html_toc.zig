@@ -11,6 +11,10 @@ const html_nav = @import("html_nav.zig");
 pub const toc_min_level: u8 = 1;
 pub const toc_max_level: u8 = 3;
 
+/// Inclusive levels harvested for wiki fragment targets (h1–h6).
+pub const fragment_min_level: u8 = 1;
+pub const fragment_max_level: u8 = 6;
+
 pub const Heading = struct {
     level: u8,
     id: []const u8,
@@ -18,11 +22,25 @@ pub const Heading = struct {
     text: []const u8,
 };
 
-/// Collect h1–h3 headings that have an `id` attribute, document order.
-/// Slices point into `html` (or into `scratch` for stripped text when tags appear).
-pub fn collectHeadings(
+fn closePattern(level: u8) []const u8 {
+    return switch (level) {
+        1 => "</h1>",
+        2 => "</h2>",
+        3 => "</h3>",
+        4 => "</h4>",
+        5 => "</h5>",
+        6 => "</h6>",
+        else => unreachable,
+    };
+}
+
+/// Collect headings in `[min_level, max_level]` that have an `id` attribute.
+/// Slices for `id` point into `html`; `text` is allocator-owned.
+pub fn collectHeadingsInRange(
     allocator: std.mem.Allocator,
     html: []const u8,
+    min_level: u8,
+    max_level: u8,
     out: *std.ArrayList(Heading),
 ) !void {
     var i: usize = 0;
@@ -43,7 +61,7 @@ pub fn collectHeadings(
                 continue;
             }
         }
-        if (level < toc_min_level or level > toc_max_level) {
+        if (level < min_level or level > max_level) {
             // Skip to after this heading to avoid nested false matches.
             if (std.mem.indexOfPos(u8, html, open, "</h")) |close_h| {
                 i = close_h + 1;
@@ -60,12 +78,7 @@ pub fn collectHeadings(
             continue;
         };
 
-        const close_pat = switch (level) {
-            1 => "</h1>",
-            2 => "</h2>",
-            3 => "</h3>",
-            else => unreachable,
-        };
+        const close_pat = closePattern(level);
         const close = std.mem.indexOfPos(u8, html, gt + 1, close_pat) orelse {
             i = gt + 1;
             continue;
@@ -82,6 +95,46 @@ pub fn collectHeadings(
             return err;
         };
         i = close + close_pat.len;
+    }
+}
+
+/// Collect h1–h3 headings that have an `id` attribute, document order.
+/// Slices point into `html` (or into `scratch` for stripped text when tags appear).
+pub fn collectHeadings(
+    allocator: std.mem.Allocator,
+    html: []const u8,
+    out: *std.ArrayList(Heading),
+) !void {
+    return collectHeadingsInRange(allocator, html, toc_min_level, toc_max_level, out);
+}
+
+/// Collect unique non-empty heading `id` attributes for h1–h6 (wiki fragment set).
+/// Each returned id is allocator-owned; free with `allocator.free` per entry.
+pub fn collectHeadingIds(
+    allocator: std.mem.Allocator,
+    html: []const u8,
+    out: *std.ArrayList([]const u8),
+) !void {
+    var headings: std.ArrayList(Heading) = .empty;
+    defer {
+        for (headings.items) |h| allocator.free(h.text);
+        headings.deinit(allocator);
+    }
+    try collectHeadingsInRange(allocator, html, fragment_min_level, fragment_max_level, &headings);
+
+    var seen: std.StringHashMapUnmanaged(void) = .{};
+    defer seen.deinit(allocator);
+
+    for (headings.items) |h| {
+        if (h.id.len == 0) continue;
+        const gop = try seen.getOrPut(allocator, h.id);
+        if (gop.found_existing) continue;
+        // Own a copy: `h.id` views into `html`, which may outlive the caller’s buffer.
+        const owned = try allocator.dupe(u8, h.id);
+        errdefer allocator.free(owned);
+        // Re-key seen with owned pointer so the map does not point at `html`.
+        gop.key_ptr.* = owned;
+        try out.append(allocator, owned);
     }
 }
 
@@ -313,4 +366,24 @@ test "collectHeadings frees stripped text when append allocation fails" {
         collectHeadingsAllocationFailureCase,
         .{},
     );
+}
+
+test "collectHeadingIds h1-h6 unique set includes h4" {
+    const gpa = std.testing.allocator;
+    const html =
+        \\<h1 id="top">Top</h1>
+        \\<h2 id="sec">Sec</h2>
+        \\<h2 id="sec">Dup sec</h2>
+        \\<h4 id="deep">Deep</h4>
+    ;
+    var ids: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (ids.items) |id| gpa.free(id);
+        ids.deinit(gpa);
+    }
+    try collectHeadingIds(gpa, html, &ids);
+    try std.testing.expectEqual(@as(usize, 3), ids.items.len);
+    try std.testing.expectEqualStrings("top", ids.items[0]);
+    try std.testing.expectEqualStrings("sec", ids.items[1]);
+    try std.testing.expectEqualStrings("deep", ids.items[2]);
 }

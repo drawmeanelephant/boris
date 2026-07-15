@@ -19,7 +19,18 @@ How to use going forward:
 
 ## [Unreleased]
 
-No changes yet.
+### Feature 9 — heading-target wiki links
+
+- Wiki links accept section fragments: `[[entity-id#heading-id]]` and
+  `[[entity-id#heading-id|label]]`. Fragments match **exact Apex-rendered**
+  heading `id` attributes on the target page (no second slugger; same harvest
+  approach as `{{toc}}`). Missing or empty fragments fail loud with
+  `EREFERENCEMISSING` / `EREFERENCESYNTAX` — no silent page-only fall-back.
+  Validation is fail-closed without a heading index; only fragment-target pages
+  are rendered for the index. Page-only `[[entity-id]]` is unchanged. IR/RAG
+  edge shape unchanged (IR does not check heading membership). Contract:
+  `docs/contracts/heading-ids.md`. Sample content dogfoods one section link on
+  `content/guides/overview.md`.
 
 ## [0.3.1] — 2026-07-15
 

@@ -295,6 +295,34 @@ pub fn renderAndPublishPageWithSite(
     page_index: usize,
     site: ?*const FrozenSite,
 ) !void {
+    return renderAndPublishPageWithSiteAndHeadings(
+        io,
+        gpa,
+        content_dir,
+        dist_dir,
+        page,
+        layout,
+        doc_arena,
+        options,
+        page_index,
+        site,
+        null,
+    );
+}
+
+pub fn renderAndPublishPageWithSiteAndHeadings(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    dist_dir: Io.Dir,
+    page: *const DurablePage,
+    layout: assemble.Layout,
+    doc_arena: *std.heap.ArenaAllocator,
+    options: CompileOptions,
+    page_index: usize,
+    site: ?*const FrozenSite,
+    heading_index: ?*const wikilink.HeadingIndex,
+) !void {
     const arena = doc_arena.allocator();
 
     const source = try readFileAlloc(io, content_dir, page.source_path, arena);
@@ -325,7 +353,10 @@ pub fn renderAndPublishPageWithSite(
 
     const nodes: []const graph_mod.Node = if (site) |s| s.nodes else &.{};
     var wiki_fail: wikilink.FailInfo = .{};
-    const with_wiki = wikilink.rewriteWikiLinks(arena, expanded, nodes, page.output_path, &wiki_fail) catch |err| {
+    const with_wiki = wikilink.rewriteWikiLinksOpts(arena, expanded, nodes, page.output_path, &wiki_fail, .{
+        .heading_index = heading_index,
+        .validate_fragments = heading_index != null,
+    }) catch |err| {
         if (!options.quiet) {
             wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail);
         }
@@ -781,6 +812,7 @@ const ParallelContext = struct {
     options: CompileOptions,
     is_dirty: []const bool,
     site: ?*const FrozenSite,
+    heading_index: ?*const wikilink.HeadingIndex,
 
     // Thread coordination
     mutex: std.Io.Mutex = std.Io.Mutex.init,
@@ -814,7 +846,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
 
         if (ctx.is_dirty[page_index]) {
             const page = &ctx.db.items()[page_index];
-            renderAndPublishPageWithSite(
+            renderAndPublishPageWithSiteAndHeadings(
                 ctx.io,
                 ctx.gpa,
                 ctx.content_dir,
@@ -825,6 +857,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
                 ctx.options,
                 page_index,
                 ctx.site,
+                ctx.heading_index,
             ) catch |err| {
                 ctx.mutex.lockUncancelable(ctx.io);
                 if (ctx.shared_error == null) {
@@ -917,6 +950,150 @@ fn fingerprintHex(fp_bytes: [32]u8, gpa: std.mem.Allocator) ![]u8 {
         fp_hex[i * 2 + 1] = hex_chars[b & 0x0f];
     }
     return try gpa.dupe(u8, &fp_hex);
+}
+
+/// Collect owned entity ids that are targets of any `[[entity#heading]]` in the site
+/// (page bodies + transitive include bodies). Empty when no fragment links exist.
+fn collectFragmentTargetSet(
+    gpa: std.mem.Allocator,
+    db: *const PageDb,
+    shared: *const SharedCompileState,
+) !std.StringHashMapUnmanaged(void) {
+    var targets: std.StringHashMapUnmanaged(void) = .{};
+    errdefer {
+        var it = targets.keyIterator();
+        while (it.next()) |k| gpa.free(k.*);
+        targets.deinit(gpa);
+    }
+
+    var seen: std.StringHashMapUnmanaged(void) = .{};
+    defer seen.deinit(gpa);
+    var raw_ids: std.ArrayList([]const u8) = .empty;
+    defer raw_ids.deinit(gpa);
+
+    for (db.items(), 0..) |page, page_idx| {
+        raw_ids.clearRetainingCapacity();
+        seen.clearRetainingCapacity();
+
+        const body = include_mod.bodyOfSource(shared.source_bytes[page_idx]);
+        var fail: wikilink.FailInfo = .{};
+        try wikilink.collectFragmentTargetIds(body, gpa, &raw_ids, &seen, &fail, page.source_path);
+
+        const inc_owned = shared.include_bytes[page_idx];
+        const inc_paths = shared.include_paths[page_idx];
+        for (inc_owned, 0..) |inc_file, j| {
+            const inc_body = include_mod.bodyOfSource(inc_file);
+            try wikilink.collectFragmentTargetIds(inc_body, gpa, &raw_ids, &seen, &fail, inc_paths[j]);
+        }
+
+        for (raw_ids.items) |id| {
+            const gop = try targets.getOrPut(gpa, id);
+            if (!gop.found_existing) {
+                gop.key_ptr.* = try gpa.dupe(u8, id);
+            }
+        }
+    }
+    return targets;
+}
+
+/// Harvest Apex-rendered heading ids for pages that are wiki-fragment targets.
+/// Reuses the same pre-Apex + Apex body pipeline as publish (no second slugger).
+/// Wiki fragments are emitted but not validated here (index bootstrapping).
+/// When no fragment links exist, returns an empty index (no Apex work).
+fn buildSiteHeadingIndex(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    db: *const PageDb,
+    site: *const FrozenSite,
+    shared: *const SharedCompileState,
+    quiet: bool,
+) !wikilink.HeadingIndex {
+    var index: wikilink.HeadingIndex = .{};
+    errdefer index.deinit(gpa);
+
+    var needed = try collectFragmentTargetSet(gpa, db, shared);
+    defer {
+        var it = needed.keyIterator();
+        while (it.next()) |k| gpa.free(k.*);
+        needed.deinit(gpa);
+    }
+    if (needed.count() == 0) return index;
+
+    var doc_arena = std.heap.ArenaAllocator.init(gpa);
+    defer doc_arena.deinit();
+
+    for (db.items()) |page| {
+        if (!needed.contains(page.entity_id)) continue;
+
+        _ = doc_arena.reset(.free_all);
+        const arena = doc_arena.allocator();
+
+        const source = try readFileAlloc(io, content_dir, page.source_path, arena);
+        const parsed = parser.parse(source);
+        if (parsed.diagnostic != null) return error.ParseFailed;
+
+        var include_fail: include_mod.FailInfo = .{};
+        const expanded = include_mod.expandIncludes(
+            io,
+            content_dir,
+            gpa,
+            arena,
+            parsed.doc.body,
+            page.source_path,
+            &include_fail,
+        ) catch |err| {
+            if (!quiet) {
+                include_mod.printDiagnostic(gpa, err, page.source_path, include_fail);
+            }
+            return error.IncludeFailed;
+        };
+
+        var wiki_fail: wikilink.FailInfo = .{};
+        // Do not validate fragments while building the index they depend on.
+        const with_wiki = wikilink.rewriteWikiLinksOpts(
+            arena,
+            expanded,
+            site.nodes,
+            page.output_path,
+            &wiki_fail,
+            .{ .heading_index = null, .validate_fragments = false },
+        ) catch |err| {
+            if (!quiet) {
+                wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail);
+            }
+            return error.ReferenceFailed;
+        };
+
+        const tok = try aside.tokenizeBody(with_wiki, arena);
+        if (tok.hasErrors()) return error.ComponentFailed;
+
+        var html_buf: std.ArrayList(u8) = .empty;
+        for (tok.segments) |seg| {
+            switch (seg) {
+                .markdown => |md| {
+                    if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
+                    const h = try apex.render(md, &doc_arena);
+                    try html_buf.appendSlice(arena, h.bytes);
+                },
+                .aside => |c| {
+                    const h = try aside.renderHtml(c, &doc_arena);
+                    try html_buf.appendSlice(arena, h);
+                },
+            }
+        }
+
+        var ids: std.ArrayList([]const u8) = .empty;
+        defer {
+            for (ids.items) |id| gpa.free(id);
+            ids.deinit(gpa);
+        }
+        // collectHeadingIds allocates id copies on gpa (not the page arena).
+        try html_toc.collectHeadingIds(gpa, html_buf.items, &ids);
+        try index.putOwned(gpa, page.entity_id, ids.items);
+    }
+
+    return index;
 }
 
 fn expandDirtySet(
@@ -1032,6 +1209,11 @@ fn compilePagesInner(
         break :blk &(local_shared.?);
     };
 
+    // Heading id index for wiki `[[entity#heading]]` (Apex-rendered ids only;
+    // only pages that are fragment targets are rendered for the index).
+    var heading_index = try buildSiteHeadingIndex(io, gpa, content_dir, db, site, shared, options.quiet);
+    defer heading_index.deinit(gpa);
+
     // Load and parse prior manifest if in incremental mode (from final dist).
     var manifest_bytes: ?[]u8 = null;
     defer {
@@ -1104,7 +1286,14 @@ fn compilePagesInner(
             wiki_paths[1 + j] = inc_paths[j];
         }
         var wiki_fail: wikilink.FailInfo = .{};
-        const ref_material = wikilink.referenceMaterialMulti(gpa, wiki_bodies, wiki_paths, site.nodes, &wiki_fail) catch |err| {
+        const ref_material = wikilink.referenceMaterialMulti(
+            gpa,
+            wiki_bodies,
+            wiki_paths,
+            site.nodes,
+            &wiki_fail,
+            .{ .heading_index = &heading_index, .validate_fragments = true },
+        ) catch |err| {
             if (err == error.ReferenceMissing or err == error.ReferenceSyntax or err == error.PathError) {
                 if (!options.quiet) {
                     wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail);
@@ -1196,6 +1385,7 @@ fn compilePagesInner(
             .options = options,
             .is_dirty = is_dirty,
             .site = site,
+            .heading_index = &heading_index,
         };
 
         const num_workers = @min(options.jobs, db.len());
@@ -1257,7 +1447,19 @@ fn compilePagesInner(
             stats.pages_attempted += 1;
 
             if (is_dirty[page_index]) {
-                try renderAndPublishPageWithSite(io, gpa, content_dir, stage_dir, page, layout, &doc_arena, options, page_index, site);
+                try renderAndPublishPageWithSiteAndHeadings(
+                    io,
+                    gpa,
+                    content_dir,
+                    stage_dir,
+                    page,
+                    layout,
+                    &doc_arena,
+                    options,
+                    page_index,
+                    site,
+                    &heading_index,
+                );
                 stats.pages_written += 1;
                 if (!options.quiet) {
                     std.debug.print("  wrote {s}/{s}\n", .{ options.dist_dir, page.output_path });
@@ -3359,4 +3561,568 @@ test "compileHtmlSiteMulti - success, validation, and isolation" {
         });
         try std.testing.expectError(error.TargetOutputCollision, res);
     }
+}
+
+test "Feature 9 HTML: heading fragment wiki links resolve to rendered ids" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f9-heading-ok", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+        \\Page-only: [[guides/target]].
+        \\
+        \\Fragment: [[guides/target#section-one]].
+        \\
+        \\Labeled: [[guides/target#code-x-y|Code heading]].
+        \\
+        \\Dup: [[guides/target#dup]].
+        \\
+        \\Unicode: [[guides/target#caf-rsum]].
+        \\
+        \\Punctuation: [[guides/target#hello-world]].
+        \\
+        \\Via include:
+        \\
+        \\{{include includes/blurb.md}}
+        \\
+    );
+    try writeTreeFile(io, work, "content/guides/target.md",
+        \\---
+        \\title: Target
+        \\parent: index
+        \\---
+        \\
+        \\# Target Page
+        \\
+        \\## Section One
+        \\
+        \\## Code `x` Y
+        \\
+        \\## Café résumé
+        \\
+        \\## Hello, World!
+        \\
+        \\## Dup
+        \\
+        \\## Dup
+        \\
+        \\### Nested Deep
+        \\
+        \\#### Deep Four
+        \\
+        \\See trunk [[index#home]].
+        \\
+    );
+    try writeTreeFile(io, work, "content/guides/from.md",
+        \\---
+        \\title: From Satellite
+        \\parent: index
+        \\---
+        \\
+        \\# From Satellite
+        \\
+        \\[[index#home]] and [[guides/target#nested-deep]] and [[guides/target#deep-four]].
+        \\
+    );
+    try writeTreeFile(io, work, "content/includes/blurb.md", "Include-borne: [[guides/target#section-one|Section from include]].\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 3), stats.pages_written);
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+
+    const index_html = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(index_html);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "href=\"guides/target.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "href=\"guides/target.html#section-one\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "href=\"guides/target.html#code-x-y\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "href=\"guides/target.html#dup\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "href=\"guides/target.html#caf-rsum\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "href=\"guides/target.html#hello-world\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "[[") == null);
+
+    const target_html = try readAllFile(io, dist_dir, "guides/target.html", gpa);
+    defer gpa.free(target_html);
+    try std.testing.expect(std.mem.indexOf(u8, target_html, "id=\"section-one\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, target_html, "id=\"code-x-y\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, target_html, "id=\"caf-rsum\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, target_html, "id=\"dup\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, target_html, "href=\"../index.html#home\"") != null);
+
+    const from_html = try readAllFile(io, dist_dir, "guides/from.html", gpa);
+    defer gpa.free(from_html);
+    try std.testing.expect(std.mem.indexOf(u8, from_html, "href=\"../index.html#home\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, from_html, "href=\"target.html#nested-deep\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, from_html, "href=\"target.html#deep-four\"") != null);
+
+    // Determinism: second full build matches first.
+    const dist2 = try std.fmt.allocPrint(gpa, "{s}/dist2", .{work});
+    defer gpa.free(dist2);
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist2,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+    var dist2_dir = try cwd.openDir(io, dist2, .{});
+    defer dist2_dir.close(io);
+    const index2 = try readAllFile(io, dist2_dir, "index.html", gpa);
+    defer gpa.free(index2);
+    try std.testing.expectEqualStrings(index_html, index2);
+
+    // Incremental rebuild is byte-identical for unchanged pages.
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .incremental = true,
+        .quiet = true,
+    });
+    const index_inc = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(index_inc);
+    try std.testing.expectEqualStrings(index_html, index_inc);
+}
+
+test "Feature 9 HTML: missing heading fragment fails loud" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f9-heading-missing", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+        \\Broken: [[guides/target#does-not-exist]].
+        \\
+    );
+    try writeTreeFile(io, work, "content/guides/target.md",
+        \\---
+        \\title: Target
+        \\parent: index
+        \\---
+        \\
+        \\# Target Page
+        \\
+        \\## Real Section
+        \\
+    );
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try std.testing.expectError(error.ReferenceFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    }));
+}
+
+test "Feature 9 HTML: empty fragment is syntax failure" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f9-empty-frag", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+        \\Bad: [[index#]].
+        \\
+    );
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try std.testing.expectError(error.ReferenceFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    }));
+}
+
+test "Feature 9 HTML: missing entity still fails" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f9-missing-entity", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+        \\[[no/such/page#heading]].
+        \\
+    );
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try std.testing.expectError(error.ReferenceFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    }));
+}
+
+test "Feature 9 HTML: fenced fragment wiki stays literal" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f9-fence", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+        \\Live: [[index#home]].
+        \\
+        \\```
+        \\[[index#home]]
+        \\```
+        \\
+    );
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const page = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(page);
+    try std.testing.expect(std.mem.indexOf(u8, page, "href=\"index.html#home\"") != null);
+    // Fenced form remains as author text (escaped or raw in code block).
+    try std.testing.expect(std.mem.indexOf(u8, page, "[[index#home]]") != null);
+}
+
+test "Feature 9 HTML: jobs path resolves fragments" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f9-jobs", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+        \\[[guides/a#alpha]] [[guides/b#beta]]
+        \\
+    );
+    try writeTreeFile(io, work, "content/guides/a.md",
+        \\---
+        \\title: A
+        \\parent: index
+        \\---
+        \\
+        \\# A
+        \\
+        \\## Alpha
+        \\
+    );
+    try writeTreeFile(io, work, "content/guides/b.md",
+        \\---
+        \\title: B
+        \\parent: index
+        \\---
+        \\
+        \\# B
+        \\
+        \\## Beta
+        \\
+    );
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .jobs = 4,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 3), stats.pages_written);
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const page = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(page);
+    try std.testing.expect(std.mem.indexOf(u8, page, "href=\"guides/a.html#alpha\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "href=\"guides/b.html#beta\"") != null);
+}
+
+test "Feature 9 HTML: include-borne missing fragment reports locus" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f9-inc-miss", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+        \\{{include includes/bad.md}}
+        \\
+    );
+    try writeTreeFile(io, work, "content/includes/bad.md", "See [[index#no-such-heading]].\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try std.testing.expectError(error.ReferenceFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    }));
+}
+
+test "Feature 9 HTML: manual heading id with slash is percent-encoded in href" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f9-manual-id", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+        \\## Manual {#has/slash}
+        \\
+        \\Link: [[index#has/slash]].
+        \\
+    );
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const page = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(page);
+    try std.testing.expect(std.mem.indexOf(u8, page, "id=\"has/slash\"") != null);
+    // Destination uses percent-encoding; browsers decode back to the id.
+    try std.testing.expect(std.mem.indexOf(u8, page, "href=\"index.html#has%2Fslash\"") != null);
+}
+
+test "Feature 9 HTML: heading introduced by include is a valid target" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f9-inc-heading", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+        \\{{include includes/extra.md}}
+        \\
+        \\Jump: [[index#from-include]].
+        \\
+    );
+    try writeTreeFile(io, work, "content/includes/extra.md", "## From Include\n\nBlurb.\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const page = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(page);
+    try std.testing.expect(std.mem.indexOf(u8, page, "id=\"from-include\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "href=\"index.html#from-include\"") != null);
+}
+
+test "Feature 9 HTML: no fragment links skips heading-index Apex work path" {
+    // Regression: pages with only page-only wiki still compile; empty index ok.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f9-no-frag", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+        \\See [[guides/a]].
+        \\
+    );
+    try writeTreeFile(io, work, "content/guides/a.md",
+        \\---
+        \\title: A
+        \\parent: index
+        \\---
+        \\
+        \\# A
+        \\
+    );
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
 }
