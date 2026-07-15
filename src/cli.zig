@@ -284,13 +284,14 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     }
     // Target conflict rules
     if (has_explicit_targets and saw_html_dir) return error.ConflictingFlags;
-    // --target-layout requires named targets (or --html / --html-dir for default).
-    if (has_target_layouts and !has_explicit_targets and !(saw_html or saw_html_dir)) {
-        return error.ConflictingFlags;
-    }
+    // --target-layout attaches to a named --target, or to the synthetic "default"
+    // target on bare HTML / --html / --html-dir. Unknown layout names are rejected
+    // after the default target is synthesized (InvalidValue). Combined with --out
+    // or RAG selectors, has_target_layouts forces explicit_html and hits the
+    // HTML-vs-IR/RAG conflict above when --out / --rag / --rag-dir is present.
 
     // Mode selection:
-    // 1. Explicit HTML flags / --target → HTML
+    // 1. Explicit HTML flags / --target / --target-layout → HTML
     // 2. --rag / --rag-dir → RAG-only
     // 3. --out / --no-rag → IR
     // 4. Default (no mode flags) → HTML site under dist/
@@ -303,7 +304,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     else
         .html;
 
-    // Single-target HTML (default or --html / --html-dir) maps to target "default".
+    // Single-target HTML (bare CLI, --html, or --html-dir) maps to target "default".
+    // --target-layout NAME=PATH may attach to this synthetic target.
     if (mode == .html and !has_explicit_targets) {
         try targets.append(gpa, .{
             .name = "default",
@@ -312,7 +314,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         });
     }
 
-    // Apply --target-layout NAME=PATH onto matching targets
+    // Apply --target-layout NAME=PATH onto matching targets. Flag order relative
+    // to --target does not matter (layouts are collected first, applied here).
     for (target_layouts.items) |tl| {
         var found = false;
         for (targets.items) |*t| {
@@ -326,6 +329,13 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (!found) return error.InvalidValue;
     }
     target_layouts.deinit(gpa);
+
+    // Canonical target order: equivalent --target argv permutations produce the
+    // same Options.targets sequence (sorted by name). Execution/diagnostics use
+    // the same order via validateTargets.
+    if (targets.items.len > 1) {
+        target_mod.sortTargetSpecsByName(targets.items);
+    }
 
     return switch (mode) {
         .ir => .{
@@ -397,7 +407,7 @@ pub fn printUsage() void {
         \\  (default)           HTML site → pages under dist/ (content/ + layouts/main.html)
         \\  --html              Explicit HTML site mode → --html-dir (default dist)
         \\  --html-dir <DIR>    HTML site mode with output directory DIR
-        \\  --target NAME=DIR   HTML multi-target mode (repeatable); implies HTML
+        \\  --target NAME=DIR   HTML multi-target mode (repeatable; order-independent); implies HTML
         \\  --out <DIR>         IR mode → write JSON under DIR (default .boris when --no-rag)
         \\  --no-rag            Explicit IR mode (JSON under --out, default .boris)
         \\  --rag               RAG-only mode → corpus under --rag-dir (default rag)
@@ -410,7 +420,7 @@ pub fn printUsage() void {
         \\  --html-dir <DIR>    HTML output directory (implies HTML; default: dist)
         \\  --html-layout PATH  Global layout template (default: layouts/main.html)
         \\  --target NAME=DIR   Named HTML output root (repeatable; exclusive with --html-dir)
-        \\  --target-layout N=P Per-target layout override (NAME=PATH; target must exist)
+        \\  --target-layout N=P Per-target layout (NAME=PATH; may precede or follow --target)
         \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
         \\  --watch             Local-development watch mode for HTML builds (implies --incremental)
         \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
@@ -433,15 +443,18 @@ pub fn printUsage() void {
         \\  --rag with --no-rag
         \\  --no-rag with --rag-dir
         \\  explicit --out with --rag or --rag-dir
-        \\  --html / --html-dir / --target with --rag, --rag-dir, or explicit --out
+        \\  --html / --html-dir / --target / --target-layout with --rag, --rag-dir, or explicit --out
         \\  --target with --html-dir
         \\  --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG
-        \\  Invalid target names, output collisions, workspace escape, content/layout overlap
+        \\  Invalid target names, duplicate names, output collisions, workspace escape,
+        \\  content/layout overlap, unknown --target-layout name
         \\
         \\Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
         \\
-        \\Note: Bare `boris` builds HTML under dist/. Use --out for JSON IR.
-        \\      --html / --html-dir map to a single target named "default".
+        \\Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
+        \\      --html / --html-dir / bare CLI map to a single target named "default".
+        \\      Equivalent --target / --target-layout permutations yield the same config
+        \\      (targets sorted by name). --target works with --watch and --incremental.
         \\
     , .{});
 }
@@ -1096,4 +1109,149 @@ test "findBadArg reports --target" {
     try expectEqualStrings("--target=bad", findBadArg(&.{ "boris", "--target=bad" }).?);
     try expectEqualStrings("--html-layout", findBadArg(&.{ "boris", "--html-layout" }).?);
     try expectEqualStrings("--target-layout", findBadArg(&.{ "boris", "--target-layout" }).?);
+}
+
+
+test "parse: equivalent --target order yields equivalent configuration" {
+    var a = try parseOptions(std.testing.allocator, &.{
+        "boris",
+        "--target", "stage=dist/stage",
+        "--target", "prod=dist/prod",
+        "--target-layout", "stage=layouts/stage.html",
+    });
+    defer a.deinit(std.testing.allocator);
+    var b = try parseOptions(std.testing.allocator, &.{
+        "boris",
+        "--target", "prod=dist/prod",
+        "--target", "stage=dist/stage",
+        "--target-layout", "stage=layouts/stage.html",
+    });
+    defer b.deinit(std.testing.allocator);
+
+    try expectEqual(@as(usize, 2), a.targets.items.len);
+    try expectEqual(@as(usize, 2), b.targets.items.len);
+    try expectEqualStrings("prod", a.targets.items[0].name);
+    try expectEqualStrings("stage", a.targets.items[1].name);
+    try expectEqualStrings(a.targets.items[0].name, b.targets.items[0].name);
+    try expectEqualStrings(a.targets.items[1].name, b.targets.items[1].name);
+    try expectEqualStrings(a.targets.items[0].output_dir, b.targets.items[0].output_dir);
+    try expectEqualStrings(a.targets.items[1].output_dir, b.targets.items[1].output_dir);
+    try expect(a.targets.items[0].layout_path == null);
+    try expect(b.targets.items[0].layout_path == null);
+    try expectEqualStrings("layouts/stage.html", a.targets.items[1].layout_path.?);
+    try expectEqualStrings(a.targets.items[1].layout_path.?, b.targets.items[1].layout_path.?);
+}
+
+test "parse: --target-layout order relative to --target is independent" {
+    var before = try parseOptions(std.testing.allocator, &.{
+        "boris",
+        "--target-layout", "prod=layouts/prod.html",
+        "--target", "prod=dist/prod",
+        "--target", "stage=dist/stage",
+    });
+    defer before.deinit(std.testing.allocator);
+    var after = try parseOptions(std.testing.allocator, &.{
+        "boris",
+        "--target", "stage=dist/stage",
+        "--target", "prod=dist/prod",
+        "--target-layout", "prod=layouts/prod.html",
+    });
+    defer after.deinit(std.testing.allocator);
+
+    try expectEqualStrings("prod", before.targets.items[0].name);
+    try expectEqualStrings("stage", before.targets.items[1].name);
+    try expectEqualStrings("layouts/prod.html", before.targets.items[0].layout_path.?);
+    try expect(before.targets.items[1].layout_path == null);
+    try expectEqualStrings(before.targets.items[0].name, after.targets.items[0].name);
+    try expectEqualStrings(before.targets.items[0].layout_path.?, after.targets.items[0].layout_path.?);
+    try expectEqualStrings(before.targets.items[1].output_dir, after.targets.items[1].output_dir);
+}
+
+test "parse: bare HTML and --html map to default target; --target-layout attaches" {
+    var bare = try parseOptions(std.testing.allocator, &.{"boris"});
+    defer bare.deinit(std.testing.allocator);
+    try expectEqual(Mode.html, bare.mode);
+    try expectEqual(@as(usize, 1), bare.targets.items.len);
+    try expectEqualStrings("default", bare.targets.items[0].name);
+    try expectEqualStrings(default_html_dir, bare.targets.items[0].output_dir);
+
+    var html = try parseOptions(std.testing.allocator, &.{ "boris", "--html", "--html-dir", "site-out" });
+    defer html.deinit(std.testing.allocator);
+    try expectEqualStrings("default", html.targets.items[0].name);
+    try expectEqualStrings("site-out", html.targets.items[0].output_dir);
+
+    var layout_only = try parseOptions(std.testing.allocator, &.{
+        "boris", "--target-layout", "default=layouts/alt.html",
+    });
+    defer layout_only.deinit(std.testing.allocator);
+    try expectEqual(Mode.html, layout_only.mode);
+    try expectEqualStrings("default", layout_only.targets.items[0].name);
+    try expectEqualStrings("layouts/alt.html", layout_only.targets.items[0].layout_path.?);
+    try expectEqualStrings(default_html_dir, layout_only.targets.items[0].output_dir);
+}
+
+test "parse: --target with --watch and --incremental" {
+    var o = try parseOptions(std.testing.allocator, &.{
+        "boris",
+        "--target", "prod=dist/prod",
+        "--target", "stage=dist/stage",
+        "--watch",
+        "--incremental",
+        "--jobs", "2",
+    });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(Mode.html, o.mode);
+    try expect(o.watch);
+    try expect(o.incremental);
+    try expectEqual(@as(usize, 2), o.jobs);
+    try expectEqual(@as(usize, 2), o.targets.items.len);
+    try expectEqualStrings("prod", o.targets.items[0].name);
+    try expectEqualStrings("stage", o.targets.items[1].name);
+    try expect(o.html_dir == null);
+
+    var w = try parseOptions(std.testing.allocator, &.{
+        "boris", "--target=a=dist/a", "--watch",
+    });
+    defer w.deinit(std.testing.allocator);
+    try expect(w.watch);
+    try expect(w.incremental);
+    try expectEqualStrings("a", w.targets.items[0].name);
+}
+
+test "runArgs: invalid target parse errors exit 2" {
+    const Spy = struct {
+        gpa: std.mem.Allocator = std.testing.allocator,
+        pipeline_calls: usize = 0,
+
+        pub fn printHelp(self: *@This()) void {
+            _ = self;
+        }
+
+        pub fn reportUsage(self: *@This(), err: ParseError, bad_arg: ?[]const u8) void {
+            _ = self;
+            _ = @errorName(err);
+            _ = bad_arg;
+        }
+
+        pub fn run(self: *@This(), opts: Options) ExitCode {
+            _ = opts;
+            self.pipeline_calls += 1;
+            return .success;
+        }
+    };
+
+    var spy: Spy = .{};
+    try expectEqual(@as(u8, 2), runArgs(&.{ "boris", "--target", "bad/name=dist" }, &spy));
+    try expectEqual(@as(u8, 2), runArgs(&.{ "boris", "--target", "prod" }, &spy));
+    try expectEqual(@as(u8, 2), runArgs(&.{ "boris", "--target", "prod=dist/p", "--target", "prod=dist/q" }, &spy));
+    try expectEqual(@as(u8, 2), runArgs(&.{ "boris", "--target", "prod=dist/p", "--html-dir", "x" }, &spy));
+    try expectEqual(@as(u8, 2), runArgs(&.{ "boris", "--target", "prod=dist/p", "--out", "x" }, &spy));
+    try expectEqual(@as(u8, 2), runArgs(&.{ "boris", "--target", "prod=dist/p", "--target-layout", "nope=x" }, &spy));
+    try expectEqual(@as(u8, 2), runArgs(&.{ "boris", "--target-layout", "nope=layouts/x.html" }, &spy));
+    try expectEqual(@as(usize, 0), spy.pipeline_calls);
+
+    try expectEqual(@as(u8, 0), runArgs(&.{
+        "boris", "--target", "b=dist/b", "--target", "a=dist/a", "--watch", "--incremental",
+    }, &spy));
+    try expectEqual(@as(usize, 1), spy.pipeline_calls);
 }

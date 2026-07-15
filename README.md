@@ -81,7 +81,7 @@ zig build test
 | `boris --out DIR` | **JSON IR** under `DIR` (no HTML) |
 | `boris --no-rag` | Explicit IR (default out `.boris`) |
 | `boris --rag` / `--rag-dir DIR` | **RAG corpus** only |
-| `boris --target name=dir` | Multi-target HTML (repeatable) |
+| `boris --target name=dir` | Multi-target HTML (repeatable; order-independent) |
 | `boris --help` | Usage; exit 0; no filesystem walk |
 
 ### Options (short)
@@ -92,23 +92,25 @@ zig build test
 | `--out <DIR>` | `.boris` when IR | Selects IR mode |
 | `--html-dir <DIR>` | `dist` when HTML | Selects HTML mode |
 | `--html-layout <PATH>` | `layouts/main.html` | Global layout (`{{content}}` once) |
-| `--target NAME=DIR` | — | Named HTML root (not with `--html-dir`) |
-| `--target-layout N=P` | — | Per-target layout |
+| `--target NAME=DIR` | — | Named HTML root (not with `--html-dir`); any order |
+| `--target-layout N=P` | — | Per-target layout; may precede or follow `--target` |
 | `--jobs N` / `-j N` | `1` | Parallel HTML workers `1–64` |
-| `--incremental` / `--watch` | off | Dirty-set rebuilds; watch implies incremental |
+| `--incremental` / `--watch` | off | Dirty-set rebuilds; watch implies incremental; OK with `--target` |
 | `--quiet` | off | Less stderr; exit codes unchanged |
 
 Also accepted: `--input=DIR`, `--out=DIR`, `--rag-dir=DIR`, `--html-dir=DIR`,
-`--jobs=N`, `-j=N`, etc.
+`--jobs=N`, `-j=N`, `--target=NAME=DIR`, etc.
 
 ### Mode rules (essentials)
 
-1. **Default = HTML** (`dist/`).
+1. **Default = HTML** (`dist/` as target `"default"`).
 2. `--out` or `--no-rag` → **IR**.
 3. `--rag` / `--rag-dir` → **RAG-only**.
-4. `--html` / `--html-dir` / `--target` → **HTML** (explicit).
+4. `--html` / `--html-dir` / `--target` / `--target-layout` → **HTML** (explicit).
 5. Mixing IR/RAG flags with HTML selectors → exit **2**.
 6. `--jobs` / `--watch` / `--incremental` with IR or RAG → exit **2**.
+7. Invalid target names, collisions, workspace escape, content/layout overlap → exit **2**.
+8. Equivalent `--target` / `--target-layout` permutations yield the same config (targets sorted by name).
 
 Exit codes: **0** success · **1** content · **2** usage · **3** I/O.
 
