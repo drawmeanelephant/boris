@@ -1,15 +1,15 @@
 # Intermediate representation (IR) schema (v0.2)
 
-**Status:** normative Feature 8 contract — F8.1–F8.2 implemented
-**Target product / compiler id:** `0.3.0` / `boris/0.3.0`
+**Status:** normative Feature 8 contract — F8.1–F8.3 implemented
+**Target product / compiler id:** `0.3.1` / `boris/0.3.1`
 **schemaVersion:** `0.2.0`
 
 IR is explicit (`--out DIR` / `--no-rag`) and deterministic. Bare `boris`
 continues to emit HTML under `dist/`; this schema does not change CLI mode
 selection.
 
-The v0.3.0 compiler emits this dependency shape with
-`schemaVersion: "0.2.0"` and compiler id `boris/0.3.0`.
+The v0.3.1 compiler emits this unchanged dependency shape with
+`schemaVersion: "0.2.0"` and compiler id `boris/0.3.1`.
 
 ---
 
@@ -65,7 +65,7 @@ Every top-level IR document **must** include:
 | Breaking change | Typed dependency endpoints and `reverseIndex`; old writers must not silently emit these under `"0.1.0"` |
 
 Also required on success paths: a compiler id string of the form
-`boris/<product-version>` (target `boris/0.3.0`). Product version bumps may
+`boris/<product-version>` (target `boris/0.3.1`). Product version bumps may
 update this string without changing the IR schema, but this breaking IR change
 requires both the schema and compiler/product bumps.
 
@@ -225,7 +225,7 @@ schemaVersion, compiler, contentRoot, pageCount, pages
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `schemaVersion` | string | yes | `"0.2.0"` |
-| `compiler` | string | yes | e.g. `"boris/0.3.0"` |
+| `compiler` | string | yes | e.g. `"boris/0.3.1"` |
 | `contentRoot` | string | yes | Content root path string as passed to the pipeline (no trailing slash) |
 | `pageCount` | integer | yes | `pages.length` |
 | `pages` | array | yes | Summary entries sorted by `id` |
@@ -251,7 +251,7 @@ Example (shape only):
 ```json
 {
   "schemaVersion": "0.2.0",
-  "compiler": "boris/0.3.0",
+  "compiler": "boris/0.3.1",
   "contentRoot": "content",
   "pageCount": 2,
   "pages": [
@@ -425,8 +425,11 @@ changed `page` entity, follow `incomingEdges` to recover each dependent
 `from` and `kind`, then continue through intermediate `source` endpoints until
 page dependents are reached. Forward walks (e.g. “what does this page
 transitively include?”) use the sorted `edges` array, not `reverseIndex`
-alone. F8.3 may use this frozen pair for incremental dirty sets; it must not
-rebuild a second, divergent dependency graph.
+alone. Since F8.3, incremental HTML builds use this same direct-edge resolver:
+fingerprints identify changed page-input seeds, then the frozen reverse
+semantics expand parent/reference dependents before rendering. Watch retains
+full rediscovery plus fingerprinting. No new IR edge kinds or schema bump are
+introduced by this consumption path.
 
 ### `nav` entry object
 

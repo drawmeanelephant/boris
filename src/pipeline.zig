@@ -18,9 +18,9 @@ const wikilink = @import("wikilink.zig");
 const dependency = @import("dependency.zig");
 
 pub const schema_version = "0.2.0";
-pub const compiler_id = "boris/0.3.0";
+pub const compiler_id = "boris/0.3.1";
 /// Product version string (package / catalog_meta.boris_version).
-pub const boris_version = "0.3.0";
+pub const boris_version = "0.3.1";
 
 pub const Options = struct {
     content_root: []const u8 = "content",
@@ -308,9 +308,9 @@ fn resolveDependencies(
     }
 }
 
-/// Populate the HTML/cache dependency index from the same direct dependency
-/// resolver used by IR 0.2. Page endpoints use entity ids; source endpoints
-/// use content-root-relative paths, matching the cache dirty-set walk.
+/// resolver used by IR 0.2. Page endpoints are keyed by entity id and source
+/// endpoints by content-root-relative path, matching `getAffectedPages`.
+/// Layout/asset dependencies remain HTML-internal and are added by that path.
 pub fn populateDependencyIndex(
     io: Io,
     gpa: std.mem.Allocator,
@@ -348,11 +348,16 @@ pub fn populateDependencyIndex(
         if (page.body_offset > source.len) return error.InvalidBodyOffset;
         try resolver.scanPage(page, source[page.body_offset..]);
         if (page.parent) |parent| {
-            try resolver.appendEdge(.{ .type = .page, .value = page.id }, .{ .type = .page, .value = parent }, "parent");
+            try resolver.appendEdge(
+                .{ .type = .page, .value = page.id },
+                .{ .type = .page, .value = parent },
+                "parent",
+            );
         }
     }
 
     if (diag.countErrors(diagnostics.items) > 0) {
+        var include_failure = false;
         if (!quiet) {
             diag.sortDiagnostics(diagnostics.items);
             for (diagnostics.items) |d| {
@@ -362,9 +367,10 @@ pub fn populateDependencyIndex(
             }
         }
         for (diagnostics.items) |d| switch (d.code) {
-            .EINCLUDESYNTAX, .EINCLUDEMISSING, .EINCLUDECYCLE, .EINVALIDPATH => return error.IncludeFailed,
+            .EINCLUDESYNTAX, .EINCLUDEMISSING, .EINCLUDECYCLE, .EINVALIDPATH => include_failure = true,
             else => {},
         };
+        if (include_failure) return error.IncludeFailed;
         return error.ReferenceFailed;
     }
 
@@ -377,8 +383,16 @@ pub fn populateDependencyIndex(
         }
     }
     edges.items.len = write;
+
     for (edges.items) |edge| {
-        const kind: dependency.DependencyKind = if (std.mem.eql(u8, edge.kind, "parent")) .parent else if (std.mem.eql(u8, edge.kind, "include")) .include else .reference;
+        const kind: dependency.DependencyKind = if (std.mem.eql(u8, edge.kind, "parent"))
+            .parent
+        else if (std.mem.eql(u8, edge.kind, "include"))
+            .include
+        else if (std.mem.eql(u8, edge.kind, "reference"))
+            .reference
+        else
+            unreachable;
         try index.addDependency(edge.from.value, edge.to.value, kind);
     }
 }

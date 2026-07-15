@@ -3,8 +3,8 @@
 All notable changes to Boris are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
-Versioning: product **v0.3.0** with IR `schemaVersion` **`0.2.0`** and compiler id
-**`boris/0.3.0`**. Breaking IR changes must bump `schemaVersion` and update
+Versioning: product **v0.3.1** with IR `schemaVersion` **`0.2.0`** and compiler id
+**`boris/0.3.1`**. Breaking IR changes must bump `schemaVersion` and update
 `docs/contracts/`. Product version bumps may update `compiler_id` / `boris_version`
 without changing IR schema.
 
@@ -33,8 +33,12 @@ How to use going forward:
 - **F8.2 emit + version:** emit IR `0.2.0` / compiler `boris/0.3.0`, bump product
   and RAG version to `0.3.0`, promote the graph-native fixture to a full golden,
   and enforce it in tests and the release gate.
-- **F8.3 remains follow-up:** cache-manifest determinism is not yet on `main`,
-  so incremental dirty-set consumption is deliberately not claimed here.
+- **F8.3 reverse-index dirty-set:** HTML planning now builds direct
+  parent/include/reference dependencies with the IR 0.2 resolver. Fingerprint
+  changes seed the incremental dirty set, then reverse walks expand affected
+  parent/reference dependents before bounded workers run. Nested includes use
+  forward walks of those same direct edges. Product/compiler/RAG version is
+  `0.3.1` / `boris/0.3.1`; IR stays `0.2.0` with no edge-shape change.
 
 ### Fixed
 
