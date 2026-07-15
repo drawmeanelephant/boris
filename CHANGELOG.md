@@ -19,6 +19,10 @@ How to use going forward:
 
 ## [Unreleased]
 
+No changes yet.
+
+## [0.3.1] — 2026-07-15
+
 ### P4 — multi-target CLI ergonomics
 
 - `--target` / `--target-layout` argument order is independent: parsed targets
