@@ -271,7 +271,9 @@ pub fn validateTopology(
         }
     }
 
-    // Cycle detection via parent links (DFS gray = visiting set).
+    // Cycle detection via parent links (iterative DFS; gray = visiting set).
+    // Each node has at most one parent, so the walk is a single chain — still
+    // iterative so a pathological long parent chain cannot blow the C stack.
     // Today cycles need mutual/parent chains; the algorithm stays even if
     // nesting is later allowed so cycles remain proven absent, not assumed.
     const Color = enum { white, gray, black };
@@ -282,41 +284,34 @@ pub fn validateTopology(
     var cycle_nodes: std.ArrayList(usize) = .empty;
     defer cycle_nodes.deinit(list_gpa);
 
-    const Dfs = struct {
-        fn visit(
-            idx: usize,
-            ns: []const Node,
-            cols: []Color,
-            stack: *std.ArrayList(usize),
-            gpa: std.mem.Allocator,
-            out_cycle: *std.ArrayList(usize),
-        ) !void {
-            cols[idx] = .gray;
-            try stack.append(gpa, idx);
-            if (ns[idx].parent_index) |pi| {
+    var stack: std.ArrayList(usize) = .empty;
+    defer stack.deinit(list_gpa);
+
+    for (nodes, 0..) |_, start| {
+        if (colors[start] != .white) continue;
+        var cur: usize = start;
+        while (colors[cur] == .white) {
+            colors[cur] = .gray;
+            try stack.append(list_gpa, cur);
+            if (nodes[cur].parent_index) |pi| {
                 const p: usize = pi;
-                if (cols[p] == .gray) {
+                if (colors[p] == .gray) {
                     // Cycle: from p along stack back to p.
                     var started = false;
                     for (stack.items) |s| {
                         if (s == p) started = true;
-                        if (started) try out_cycle.append(gpa, s);
+                        if (started) try cycle_nodes.append(list_gpa, s);
                     }
-                } else if (cols[p] == .white) {
-                    try visit(p, ns, cols, stack, gpa, out_cycle);
+                    break;
+                } else if (colors[p] == .white) {
+                    cur = p;
+                    continue;
                 }
             }
-            _ = stack.pop();
-            cols[idx] = .black;
+            break;
         }
-    };
-
-    var stack: std.ArrayList(usize) = .empty;
-    defer stack.deinit(list_gpa);
-
-    for (nodes, 0..) |_, i| {
-        if (colors[i] == .white) {
-            try Dfs.visit(i, nodes, colors, &stack, list_gpa, &cycle_nodes);
+        while (stack.pop()) |s| {
+            colors[s] = .black;
         }
     }
 

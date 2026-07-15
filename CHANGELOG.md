@@ -29,6 +29,12 @@ How to use going forward:
 - RAG publish no longer deletes the previous corpus before the new tree is
   installed: move-aside + restore-on-failure, then delete the old tree only
   after a successful swap (`src/rag.zig` `publishCorpus`).
+- Aside open-tag scan: newline ends attribute scan / resets quote mode so an
+  unmatched `"` cannot force O(N²) rescans of the rest of the body.
+- Graph cycle detection walks parent chains iteratively (no deep C-stack
+  recursion on long parent paths).
+- Frontmatter line reader strips trailing `\r` only for CRLF pairs; bare CR at
+  EOF is not treated as a line break.
 
 ### Docs
 

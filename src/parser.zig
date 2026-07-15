@@ -122,14 +122,17 @@ fn isSpace(c: u8) bool {
 
 /// Read one physical line from `source` starting at `start`.
 /// Returns `(content_without_trailing_CR, next_offset, saw_newline)`.
+///
+/// Trailing `\r` is stripped only for a real CRLF pair (line ended in `\n`).
+/// An isolated CR at EOF is **not** a line break and is left on the line.
 fn readPhysicalLine(source: []const u8, start: usize) struct { []const u8, usize, bool } {
     var end = start;
     while (end < source.len and source[end] != '\n') : (end += 1) {}
     var line = source[start..end];
-    if (line.len > 0 and line[line.len - 1] == '\r') {
-        line = line[0 .. line.len - 1];
-    }
     if (end < source.len and source[end] == '\n') {
+        if (line.len > 0 and line[line.len - 1] == '\r') {
+            line = line[0 .. line.len - 1];
+        }
         return .{ line, end + 1, true };
     }
     return .{ line, end, false };
@@ -532,6 +535,15 @@ test "parse: CRLF input" {
     try std.testing.expectEqualStrings("CRLF Title", r.doc.meta.title.?);
     try std.testing.expect(r.doc.meta.status.? == .draft);
     try std.testing.expectEqualStrings("# Body\r\n", r.doc.body);
+}
+
+test "parse: bare CR at EOF does not close frontmatter" {
+    // Isolated CR is not a line break; "---\r" at EOF is not a closing fence.
+    const src = "---\ntitle: X\n---\r";
+    const r = parse(src);
+    try std.testing.expect(!r.isOk());
+    try std.testing.expect(r.category().? == .EFRONTMATTER);
+    try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "unclosed") != null);
 }
 
 test "parse: BOM rejected as EINVALIDUTF8" {

@@ -391,11 +391,17 @@ pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeRes
                 const line = lc[0];
                 const col = lc[1];
 
-                // Find closing '>'.
+                // Find closing '>'. Attributes are single-line: a newline resets
+                // quote mode so an unmatched `"` cannot suppress `<` early-exit
+                // for the rest of the file (O(N²) rescans on malformed tags).
                 var gt = name_end;
                 var in_quote = false;
                 while (gt < body.len) : (gt += 1) {
                     const c = body[gt];
+                    if (c == '\n' or c == '\r') {
+                        in_quote = false;
+                        break; // unclosed tag before EOL
+                    }
                     if (c == '"') in_quote = !in_quote;
                     if (!in_quote and c == '>') break;
                     if (!in_quote and c == '<') break; // nested open / garbage
@@ -408,7 +414,7 @@ pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeRes
                         .message = "component open tag is missing closing '>'",
                         .name = name,
                     });
-                    // Skip the '<' so we make progress.
+                    // Skip the '<' so we make progress (line-bounded scan above).
                     i += 1;
                     continue;
                 }
