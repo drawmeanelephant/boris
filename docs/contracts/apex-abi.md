@@ -166,11 +166,12 @@ Flags: `link_libc`, include `vendor/apex`, C11 sources. No child-process markdow
 
 `vendor/apex/apex.c` is a **minimal stub** (ATX headings, paragraphs, `**bold**`, `*italic*`, `` `code` ``, raw HTML lines). It does **not** claim CommonMark compatibility. A production library may replace the `.c` while keeping this header ABI **and** the lifetime contracts above.
 
-**Next engine (specified, not landed):** Feature 1 will swap the stub body for a
-thin shim over vendored **cmark-gfm** so tables and standard CommonMark constructs
-render under the same ABI. Implement only from
-[`docs/reviews/feature-1-apex-fidelity-spec.md`](../reviews/feature-1-apex-fidelity-spec.md)
-— do not invent a second ABI or a subprocess renderer.
+**Next engine (specified, not landed):** Feature 1 vendors real
+**[ApexMarkdown/apex](https://github.com/ApexMarkdown/apex)** and drives it from a
+thin host adapter (`apex_render` → `apex_markdown_to_html`) in **Unified mode**.
+Keep this host ABI (Whiteboard / allocator lifetime). Do **not** replace Apex
+with cmark-gfm-as-product (cmark-gfm is only Apex’s upstream dependency).
+Implement from [`APEX-Feature1-plan.md`](../../APEX-Feature1-plan.md).
 
 ---
 
@@ -179,4 +180,4 @@ render under the same ABI. Implement only from
 - Wiring Apex into default IR emit or RAG export
 - HTML layout assemble / `dist/` publication
 - Spawning external markdown processes
-- Full CommonMark / GFM
+- Full ApexMarkdown feature surface (see Feature 1 plan; stub is not that surface)

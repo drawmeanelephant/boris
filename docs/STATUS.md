@@ -48,7 +48,7 @@ remains IR; HTML is not yet the default product surface.
 | Deterministic JSON IR | **Implemented & tested** | `.boris/` staging publish |
 | Graph-aware nav in IR (`graph.json` → `nav`) | **Implemented & tested** | From frozen graph only; not HTML/RAG |
 | Optional RAG + `:::kind` Aside export | **Implemented & tested** | Non-round-trippable export form |
-| Apex C ABI + Zig wrapper | **Implemented & tested** | Hostile + opt-in sanitizer; **stub ≠ CommonMark** |
+| Apex C ABI + Zig wrapper | **Implemented & tested** | Hostile + opt-in sanitizer; **host stub ≠ real ApexMarkdown Unified** |
 | Opt-in HTML + Aside stream | **Implemented & tested** | Opt-in via `--html` / `--html-dir` |
 | CI matrix Linux + macOS | **Implemented & tested** | GitHub Actions |
 | Content-addressed cache fingerprints (P2.3) | **Implemented & tested** | SHA256 fingerprints on layout, page, and transitively resolved includes |
@@ -57,7 +57,7 @@ remains IR; HTML is not yet the default product surface.
 | Opt-in Local Development Watch Mode (P3.2) | **Implemented & tested** | `--watch` enables live, debounced, coalesced, serialized HTML rebuilds |
 | Multi-target isolated outputs (P3.3) | **Implemented & tested** | `--target`, `--html-layout`, `--target-layout`; path-boundary isolation; stage commit; selective watch fan-out; review `docs/reviews/p3.3-multi-target-review.md` |
 | HTML as default CLI (replacing IR) | **Now** (roadmap) | IR remains default until Feature 2 lands |
-| Full CommonMark Apex fidelity | **Now** (roadmap) | Stub engine is minimal markdown subset |
+| Real ApexMarkdown Unified fidelity | **Now** (roadmap) | Host stub only; Feature 1 vendors real Apex |
 | Full YAML / MDX / mmap | **Intentionally deferred** | See non-goals / Not Now |
 
 ### How to run
@@ -120,7 +120,7 @@ Exit codes: `0` success, `1` content, `2` usage, `3` I/O.
 
 - Synchronous `apex_render`; no retained pointers after return
 - Custom allocator path; never `apex_free` on whiteboard HTML
-- Stub engine is a **minimal** markdown subset — not CommonMark
+- Host stub is a **minimal** markdown subset — not real ApexMarkdown Unified
 - Hostile double tests mechanical wrapper rules; full C non-retention against
   arbitrary engines remains a contract (see `docs/contracts/apex-abi.md`)
 
@@ -204,18 +204,18 @@ Priorities below are **product/authoring** work relative to the landed P2/P3
 foundation. Features already shipped are marked complete so they are not
 re-opened as greenfield tickets.
 
-### Feature 1 — Upgrading Apex C Engine to Full CommonMark Compliance
+### Feature 1 — Real ApexMarkdown engine (Unified mode)
 
 | Field | Detail |
 |-------|--------|
-| **Priority** | **Now** (authoring fidelity bottleneck) — **spec ready; implement in a dedicated session** |
-| **User-visible payoff** | Authors can write standard documentation structures (tables, nested lists, blockquotes, fenced code blocks) and see them rendered correctly without switching to an external renderer |
-| **Smallest shippable vertical slice** | Thin `apex.c` shim over vendored **cmark-gfm** (tables required), same `apex.h` ABI |
-| **Modules** | `vendor/apex/*`, `vendor/cmark-gfm/*`, `build.zig` |
-| **Acceptance** | (1) Input containing a standard Markdown table compiles to `<table>` elements under `dist/`; (2) `zig build test-apex-hostile` continues to pass |
-| **Dependencies** | None |
-| **Contract / schema** | Conform to `docs/contracts/apex-abi.md` — **do not change ABI** |
-| **Handoff spec** | [`docs/reviews/feature-1-apex-fidelity-spec.md`](reviews/feature-1-apex-fidelity-spec.md) |
+| **Priority** | **Now** (authoring fidelity bottleneck) — **plan corrected; implement in a dedicated session** |
+| **User-visible payoff** | Authors get full **Apex Unified** Markdown (tables, footnotes, def lists, math, callouts, IAL, …) — real [ApexMarkdown/apex](https://github.com/ApexMarkdown/apex), not a stub and not “cmark instead of Apex” |
+| **Smallest shippable vertical slice** | Vendor ApexMarkdown/apex; host `apex_render` adapter → `apex_markdown_to_html` with **`APEX_MODE_UNIFIED`**; keep Boris host ABI / Whiteboard |
+| **Modules** | host `vendor/apex` (or `vendor/boris-apex`), `vendor/apex-markdown/*`, `build.zig`, `src/apex.zig` tests |
+| **Acceptance** | (1) Unified constructs render (tables + at least footnotes/callouts + fenced code); (2) `test-apex-hostile` passes; (3) file includes/plugins/external highlighters off at Boris boundary |
+| **Dependencies** | None (cmake may be a *compile-time* host tool for static lib — see plan) |
+| **Contract / schema** | Conform to `docs/contracts/apex-abi.md` — **do not change host ABI** |
+| **Handoff plan** | [`APEX-Feature1-plan.md`](../APEX-Feature1-plan.md) (authority); [Modes](https://github.com/ApexMarkdown/apex/wiki/Modes) |
 
 ### Feature 2 — Promoting HTML to the Default CLI Surface (`dist/` product mode)
 
@@ -275,7 +275,7 @@ re-opened as greenfield tickets.
 
 | # | Feature | Priority | Phase gate / dependency |
 |---|---------|----------|-------------------------|
-| 1 | **Apex fidelity upgrade** (CommonMark C lib under `apex.h` ABI) | **Now** | Existing `apex-abi.md` contract |
+| 1 | **ApexMarkdown Unified** (real engine under host `apex.h` ABI) | **Now** | `APEX-Feature1-plan.md` + `apex-abi.md` |
 | 2 | **HTML as default CLI mode** (promote opt-in SSG to default) | **Now** | Layout edges on freeze (landed) |
 | 3 | **Bounded worker pool** (parallel rendering) | **Done** | Dirty-set / incremental path (landed) |
 | 4 | **Watch mode** (FS events → dirty-set run) | **Done** | Worker pool / incremental (landed) |
@@ -286,13 +286,13 @@ re-opened as greenfield tickets.
 
 ## First implementation cards (active)
 
-### Card 1 — Replace Apex C stub with cmark-gfm (`src/apex-fidelity`)
+### Card 1 — Real ApexMarkdown Unified (`src/apex-fidelity`)
 
-* **Spec (normative for implementers):** [`docs/reviews/feature-1-apex-fidelity-spec.md`](reviews/feature-1-apex-fidelity-spec.md)
-* **Scope:** Thin `vendor/apex/apex.c` shim + vendored **cmark-gfm** (not plain cmark — tables are acceptance).
-* **Tasks:** See spec (allocator bridge / `realloc` emulate, gates A1–A8, golden churn).
-* **Acceptance:** Spec definition of done; at minimum `zig build test`, `test-apex-hostile`, table → `<table>`, release-gate.
-* **Out of scope here:** Feature 2 (HTML default CLI).
+* **Plan (authority):** [`APEX-Feature1-plan.md`](../APEX-Feature1-plan.md)
+* **Scope:** Vendor [ApexMarkdown/apex](https://github.com/ApexMarkdown/apex); host adapter `apex_render` → `apex_markdown_to_html` in **Unified** mode; keep Boris host ABI.
+* **Tasks:** See plan (pin, static link, copy+`apex_free_string`, SSG-safe option defaults, fidelity tests).
+* **Acceptance:** Plan definition of done; `zig build test`, `test-apex-hostile`, Unified constructs, release-gate.
+* **Out of scope here:** Feature 2; optional `--apex-mode` (later).
 
 ### Card 2 — HTML default CLI mode (`src/html-default-cli`)
 
@@ -336,7 +336,7 @@ product cuts once acceptance is green:
 
 | Version | Trigger | Notes |
 |---------|---------|--------|
-| **v0.2.0** — Apex fidelity & default HTML surface | Features 1 + 2 land (CommonMark integration + HTML default CLI) | Update `compiler` / product id toward `boris/0.2.0`. **`schemaVersion` stays `"0.1.0"`** unless JSON IR shape changes. May also package already-landed P2/P3 Unreleased work (including multi-target) if not cut earlier. |
+| **v0.2.0** — Apex fidelity & default HTML surface | Features 1 + 2 land (real ApexMarkdown Unified + HTML default CLI) | Update `compiler` / product id toward `boris/0.2.0`. **`schemaVersion` stays `"0.1.0"`** unless JSON IR shape changes. May also package already-landed P2/P3 Unreleased work (including multi-target) if not cut earlier. |
 | **v0.3.0** — P2/P3 packaging polish (if not already cut with 0.2) | Docs/release polish for `--incremental`, `--jobs`, `--watch`, `--target` as stable product flags | *If these ship inside 0.2.0, this cut can collapse or become a polish-only release.* P3.3 itself is **already implemented** — this row is packaging, not a greenfield trigger. |
 
 **IR rule (unchanged):** Breaking IR changes must bump `schemaVersion` and update
@@ -347,7 +347,7 @@ not by themselves change IR schema.
 
 ## Open risks (track; not automatic next tickets)
 
-1. Apex stub ≠ CommonMark — fidelity gap for real authoring (**Feature 1**).
+1. Host Apex stub ≠ real ApexMarkdown Unified — fidelity gap for authoring (**Feature 1**).
 2. Publication atomicity across volumes/OSes not fully proven.
 3. Residual dual-helper surface: product IR/RAG/HTML input uses `parser.zig` with
    author key **`parent` only** (`parentEntry` / `parent_entry` rejected).
@@ -379,7 +379,8 @@ validated metadata and graph-aware docs, not a polyglot web framework.
 | `docs/contracts/multi-target-isolated-output.md` | P3.3 multi-target (normative; implemented) |
 | `docs/AUDIT-v0.1.md` | Self-audit report (m10 historical) |
 | `docs/reviews/post-p3-reconciliation.md` | Post-P3 docs reconciliation audit |
-| `docs/reviews/feature-1-apex-fidelity-spec.md` | Feature 1 handoff (cmark-gfm under `apex.h`) — implement only when assigned |
+| `APEX-Feature1-plan.md` | Feature 1 authority (real ApexMarkdown Unified) |
+| `docs/reviews/feature-1-apex-fidelity-spec.md` | Feature 1 pointer — implement only when assigned |
 | `docs/rag/system/` | Narrative seeds (RAG system segment) |
 | `CHANGELOG.md` | What changed |
 | This file | Living status + priority / roadmap list |
