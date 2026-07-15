@@ -25,6 +25,8 @@ How to use going forward:
   advanced tables, inline footnotes, bracketed spans / paragraph IAL, and Critic
   Markup (verified under product Apex options). Fenced divs stay pending on the
   long page (next-heading quirk).
+- Add durable Codex/ChatGPT review rules for scope control, authority ordering,
+  evidence labels, sandbox-aware gate triage, and concurrency/determinism checks.
 
 ---
 

@@ -9,6 +9,67 @@ This file is binding project policy for AI coding agents (and humans pairing wit
 3. For compiler semantics, open the relevant file under [`docs/contracts/`](docs/contracts/) — those docs are **normative**.
 4. Run `zig build test` (or `./scripts/release-gate.sh` for IR-facing work) before and after substantive changes.
 
+## Codex / ChatGPT review rules
+
+Use this protocol for repository audits, release reviews, and reviews based on an
+external AI packet. It supplements the implementation rules below; it does not
+turn a review-only request into permission to edit product code.
+
+### Scope and authority
+
+- Resolve the requested mode first: **review only**, **review plus agent/docs
+  guidance**, or **implement fixes**. In review-only mode, do not patch a defect
+  merely because the fix looks small. Explicitly requested `AGENTS.md` or review
+  guidance may still be edited without widening permission to product code.
+- Treat external review packets as leads, not repository truth. Record their
+  stated release/version, then compare it with code, canonical contracts,
+  `docs/STATUS.md`, and `CHANGELOG.md`. Stale module spellings, commands, or
+  version claims are packet drift, not product defects.
+- Use this evidence order: executable behavior and current code → canonical
+  `docs/contracts/` → this file → `docs/STATUS.md` → `CHANGELOG.md` → release
+  gate docs/scripts → README and narrative RAG seeds → external/historical notes.
+- Do not cite a contract or passing happy-path smoke as proof of implementation.
+  Verify the relevant code path, test, fixture, or black-box behavior.
+
+### Finding discipline
+
+Classify every material observation as exactly one of:
+
+- **Confirmed defect** — reproduced failure, unsafe reachable code path, or a
+  direct code/contract contradiction.
+- **Likely defect** — strong code-path evidence, but no reliable reproduction.
+- **Insufficient evidence** — a material claim cannot be established by the
+  available tests, code, or environment.
+- **Documented limitation** — behavior matches an explicit current limitation.
+- **Non-issue / packet drift** — concern is contradicted by current authoritative
+  evidence or applies only to stale briefing text.
+
+For actionable findings, report: severity, classification, exact locus,
+evidence/reproduction, user or release impact, the smallest remediation card,
+and the verification command. Keep speculative hardening separate from defects.
+
+### Gate and environment handling
+
+- Capture the initial `git status --short`; preserve unrelated work and report
+  whether review commands created ignored/generated artifacts.
+- Run the smallest relevant gates independently before the aggregate gate so a
+  single failure does not hide other evidence. For microreleases, normally check
+  `zig build`, `zig build test`, `zig build test-apex-hostile`,
+  `zig build test-apex-sanitize`, `zig build package`, and then
+  `./scripts/release-gate.sh` when scope permits.
+- Distinguish a real failure from sandbox/tooling interference. A Zig global-cache
+  `PermissionDenied`, unavailable sanitizer, or denied symlink operation is not
+  a product failure; rerun with an allowed cache/location or report the exact
+  evidence boundary. A sanitizer skip is never a sanitizer pass.
+- When a test's cleanup path panics after an earlier assertion/error, report the
+  primary failure and the masking cleanup defect separately. Do not weaken or
+  delete the test to make the gate green; preserve the underlying signal.
+- For concurrency or determinism claims, compare sequential output, parallel
+  output, and a repeated parallel run on the same input. A passing small smoke
+  narrows a stress-test failure but does not overrule it.
+- A required gate that reproducibly fails is a ship blocker until fixed or the
+  release claim is explicitly narrowed in current docs/contracts.
+
 ## Git and Sandbox Safety
 
 - **Commit early, commit often:** To prevent automated environment or sandbox sync events from resetting local progress, make small, incremental git commits as milestones are reached rather than waiting for the entire milestone to finish.
