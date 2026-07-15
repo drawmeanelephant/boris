@@ -108,7 +108,7 @@ if [[ ! -f "${META}" ]]; then
   fail "missing catalog_meta.json"
 else
   # Fixed compact shape (schema v1)
-  EXPECT_META='{"format":"boris-rag","schema_version":1,"boris_version":"0.3.0"}'
+  EXPECT_META='{"format":"boris-rag","schema_version":1,"boris_version":"0.3.1"}'
   GOT_META="$(tr -d '\n' < "${META}" | sed 's/[[:space:]]//g')"
   # Allow trailing newline already stripped; tolerate pretty vs compact by
   # requiring keys and values rather than exact whitespace.

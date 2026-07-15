@@ -1,4 +1,4 @@
-# Release gate — Boris (v0.3.0)
+# Release gate — Boris (v0.3.1)
 
 Mechanical checklist before tagging a release or claiming a milestone complete.
 
@@ -80,9 +80,9 @@ verified. Do not check an item because a design doc exists.
 **Default CLI is HTML** under `dist/` (Feature 2). IR remains available via
 `--out` / `--no-rag`. **P2 and P3 scale-out on the HTML path are complete.**
 **Features 1–7** (Apex Unified, HTML default, jobs/watch/target, nav/toc,
-includes + wiki) and **F8.1–F8.2** graph-native IR are Done — see
-[`docs/STATUS.md`](STATUS.md). Product **v0.3.0** / IR **0.2.0**. F8.3 remains
-a follow-up and is not claimed by this gate.
+includes + wiki) and **F8.1–F8.3** graph-native dependencies are Done — see
+[`docs/STATUS.md`](STATUS.md). Product **v0.3.1** / IR **0.2.0**. Incremental
+HTML uses the shared direct-edge resolver and reverse affected-set semantics.
 
 **Compile-time host tool:** CMake is required for static ApexMarkdown
 (`scripts/build-apex-markdown.sh` / `zig build build-apex`).

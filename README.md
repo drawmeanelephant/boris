@@ -14,12 +14,12 @@ affiliated with any commercial tobacco or rolling-paper brand.
 | | |
 |--|--|
 | Language | Zig **0.16.0** (`build.zig.zon` / CI pin) |
-| Product | **0.3.0** / compiler **boris/0.3.0** |
+| Product | **0.3.1** / compiler **boris/0.3.1** |
 | IR schema | **0.2.0** (typed dependency endpoints + reverse index) |
 | License | [MIT](LICENSE) |
 
-**v0.3.0** projects parent, include, and wiki-reference dependencies into IR
-with typed page/source endpoints and a deterministic reverse index. It builds
+**v0.3.1** uses those same frozen dependencies to expand incremental HTML dirty
+sets; IR remains schema 0.2.0. It builds
 on the **v0.2.1** Feature 7 HTML include/wiki path and the **v0.2.0**
 HTML-default cut. See
 [`CHANGELOG.md`](CHANGELOG.md) and [`docs/STATUS.md`](docs/STATUS.md).
@@ -196,6 +196,6 @@ See [frontmatter.md](docs/contracts/frontmatter.md).
 - **Shipped:** content graph, IR, RAG, Asides, real Apex Unified, HTML default,
   incremental/watch/jobs/multi-target, graph nav + in-page `{{toc}}`,
   includes + wiki-links (Feature 7), typed IR dependency edges + reverse index
-  (Feature 8.1–8.2). Product **v0.3.0**.
-- **Next:** F8.3 incremental dirty-set consumption and wiki `#heading` targets — see
+  (Feature 8.1–8.3). Product **v0.3.1**.
+- **Next:** wiki `#heading` targets and post-F8 build-system productization — see
   [`docs/STATUS.md`](docs/STATUS.md).
