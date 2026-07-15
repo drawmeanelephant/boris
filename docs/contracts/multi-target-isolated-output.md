@@ -130,6 +130,6 @@ graph TD
 ## 5. Watch mode & event fan-out
 
 In `--watch` mode:
-1. **Multi-Target Filter:** WatchCoordinator ignores file events originating from *any* of the target output directories **and** sibling `{output}.boris-stage` trees to avoid infinite reload loops. Ignore roots are normalized once at coordinator init.
-2. **Selective fan-out:** Shared content/include/unknown path edits rebuild **all** targets. A changed path that equals a target’s effective layout file rebuilds **only** targets that use that layout.
-3. **Serialized Rebuilds:** Rebuilds run sequentially in a stable target-name order. No overlapping rebuilds or concurrent multi-target compilation are permitted.
+1. **Multi-Target Filter:** WatchCoordinator ignores file events originating from *any* of the target output directories **and** each target’s sibling `{output}.boris-stage` tree to avoid infinite reload loops. Ignore roots are normalized once at coordinator init. Staging ignore is **path-prefix against those roots only** — not a global substring match on `.boris-stage` — so legitimate content paths that contain that text still trigger rebuilds.
+2. **Selective fan-out:** Shared content/include/unknown path edits rebuild **all** targets. A changed path that equals a target’s effective layout file (after path normalization of both the event key and the layout path, including `./` and `.` segment collapse) rebuilds **only** targets that use that layout. Target-specific `--target-layout` overrides participate in this match independently of the global default.
+3. **Serialized Rebuilds:** Rebuilds run sequentially in a stable target-name order. No overlapping rebuilds or concurrent multi-target compilation are permitted. Content-validation failures keep the watch session alive; the next successful rebuild recovers without process restart.

@@ -33,8 +33,12 @@ The following directories and files must be explicitly ignored to prevent feedba
   matched with a **path-component boundary** after normalization (so `dist`
   does not match `distribution/…`, and `./dist` is equivalent to `dist`).
 - Cache directories as **path components** (e.g. `.boris-cache/`, `.boris/`) — not arbitrary substrings inside content filenames.
-- Staging trees (e.g. sibling `{out}.boris-stage`) and temporary atomic files
-  (e.g. files ending with `.tmp` or containing `.tmp.`).
+- Sibling staging trees for each configured output root only:
+  `{out}.boris-stage` and paths under it, matched with a **path-prefix
+  boundary** against that root (so `dist.boris-stage/…` is ignored when
+  `out=dist`, but author paths such as `content/notes.boris-stage/readme.md`
+  or `content/about.boris-stage.md` are **not** ignored by substring).
+- Temporary atomic files (e.g. files ending with `.tmp` or containing `.tmp.`).
 
 Nested output under a watched content root is supported only when exclusion matching is correct; authors should prefer an output tree outside the content root.
 
@@ -46,8 +50,15 @@ Nested output under a watched content root is supported only when exclusion matc
 
 ### Normalization
 - All paths are normalized to use forward slashes `/`.
-- Leading `./` and trailing `/` are stripped.
-- Files inside the content root are mapped to their relative path within the content root (e.g. `content/guides/intro.md` → `guides/intro.md`), matching `PageDb` and `DependencyIndex` keys. Stripping requires a true path-prefix boundary (`content` does not match `content2/…`).
+- Leading `./`, trailing `/`, empty segments, and `.` components are collapsed.
+  Relative `..` segments pop the previous component when possible so equivalent
+  spellings compare equal (`./layouts/main.html`, `layouts/./main.html`, and
+  `layouts/main.html` are the same key).
+- Files inside the content root are mapped to their relative path within the content root (e.g. `content/guides/intro.md` → `guides/intro.md`), matching `PageDb` and `DependencyIndex` keys. Stripping requires a true path-prefix boundary (`content` does not match `content2/…`). Custom `--input` roots (e.g. `./docs/src`) use the same normalized boundary.
+- Layout fan-out compares **normalized** event keys against each target’s
+  **normalized** effective layout path (global `--html-layout` or
+  `--target-layout`), so spelling variants of the same layout file select the
+  same target subset.
 
 ### Coalescing and Debouncing
 - The watch loop coalesces events within a **debounce window** of `100ms` after the first change in a burst is observed.
