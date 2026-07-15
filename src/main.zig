@@ -249,6 +249,12 @@ fn mapHtmlError(err: anyerror, quiet: bool) ExitCode {
         // failures already printed, but treat pure layout load I/O as exit 3 via FileNotFound etc.
         error.MultiTargetCompilationFailed,
         => return .content_error,
+        error.MultiTargetIoFailed => {
+            if (!quiet) {
+                std.debug.print("error: one or more HTML targets failed due to I/O or a system error\n", .{});
+            }
+            return .io_error;
+        },
         error.ParseFailed,
         error.ComponentFailed,
         error.LayoutMissingMarker,
@@ -358,6 +364,10 @@ test "ExitCode contract surface" {
     try std.testing.expectEqual(@as(u8, 1), ExitCode.content_error.int());
     try std.testing.expectEqual(@as(u8, 2), ExitCode.usage.int());
     try std.testing.expectEqual(@as(u8, 3), ExitCode.io_error.int());
+}
+
+test "mapHtmlError: multi-target I/O failure exits 3" {
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.MultiTargetIoFailed, true));
 }
 
 test "runPipeline: valid fixture exits 0" {

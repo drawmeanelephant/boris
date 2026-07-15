@@ -53,7 +53,7 @@ pub fn collectHeadings(
             continue;
         }
 
-        const gt = findOpenTagEnd(html, open) orelse break;
+        const gt = findTagEnd(html, open) orelse break;
         const open_tag = html[open .. gt + 1];
         const id = extractIdAttr(open_tag) orelse {
             i = gt + 1;
@@ -72,51 +72,80 @@ pub fn collectHeadings(
         };
         const inner = html[gt + 1 .. close];
         const text = try stripTags(allocator, inner);
-        errdefer allocator.free(text);
-
-        try out.append(allocator, .{
+        // Free on append OOM only — after a successful append, list owns `text`.
+        out.append(allocator, .{
             .level = level,
             .id = id,
             .text = text,
-        });
+        }) catch |err| {
+            allocator.free(text);
+            return err;
+        };
         i = close + close_pat.len;
     }
 }
 
-/// Find `>` that ends an HTML open tag, ignoring `>` inside quoted attributes.
-fn findOpenTagEnd(html: []const u8, open: usize) ?usize {
-    var i = open;
+/// Find the closing `>` of an HTML tag, ignoring `>` bytes inside quoted
+/// attribute values. `start` must point at the tag's `<`.
+fn findTagEnd(html: []const u8, start: usize) ?usize {
     var quote: ?u8 = null;
+    var i = start + 1;
     while (i < html.len) : (i += 1) {
-        const c = html[i];
+        const ch = html[i];
         if (quote) |q| {
-            if (c == q) quote = null;
+            if (ch == q) quote = null;
             continue;
         }
-        if (c == '"' or c == '\'') {
-            quote = c;
-            continue;
+        if (ch == '\"' or ch == '\'') {
+            quote = ch;
+        } else if (ch == '>') {
+            return i;
         }
-        if (c == '>') return i;
     }
     return null;
 }
 
 fn extractIdAttr(open_tag: []const u8) ?[]const u8 {
-    // Prefer id="…"; accept id='…'.
-    const key_dq = "id=\"";
-    if (std.mem.indexOf(u8, open_tag, key_dq)) |at| {
-        const start = at + key_dq.len;
-        const end = std.mem.indexOfPos(u8, open_tag, start, "\"") orelse return null;
-        if (end > start) return open_tag[start..end];
-        return null;
-    }
-    const key_sq = "id='";
-    if (std.mem.indexOf(u8, open_tag, key_sq)) |at| {
-        const start = at + key_sq.len;
-        const end = std.mem.indexOfPos(u8, open_tag, start, "'") orelse return null;
-        if (end > start) return open_tag[start..end];
-        return null;
+    // Skip `<hN`, then parse exact attribute names and quoted/unquoted values.
+    // This avoids mistaking `data-id` or `id="..."` text inside another
+    // attribute value for the heading id.
+    if (open_tag.len < 4) return null;
+    var i: usize = 3;
+    while (i < open_tag.len) {
+        while (i < open_tag.len and std.ascii.isWhitespace(open_tag[i])) : (i += 1) {}
+        if (i >= open_tag.len or open_tag[i] == '>') break;
+
+        const name_start = i;
+        while (i < open_tag.len and !std.ascii.isWhitespace(open_tag[i]) and
+            open_tag[i] != '=' and open_tag[i] != '>') : (i += 1)
+        {}
+        if (i == name_start) {
+            i += 1;
+            continue;
+        }
+        const name = open_tag[name_start..i];
+        while (i < open_tag.len and std.ascii.isWhitespace(open_tag[i])) : (i += 1) {}
+        if (i >= open_tag.len or open_tag[i] != '=') continue;
+        i += 1;
+        while (i < open_tag.len and std.ascii.isWhitespace(open_tag[i])) : (i += 1) {}
+        if (i >= open_tag.len) return null;
+
+        const value: []const u8 = value: {
+            if (open_tag[i] == '\"' or open_tag[i] == '\'') {
+                const quote = open_tag[i];
+                i += 1;
+                const start = i;
+                while (i < open_tag.len and open_tag[i] != quote) : (i += 1) {}
+                if (i >= open_tag.len) return null;
+                const parsed = open_tag[start..i];
+                i += 1;
+                break :value parsed;
+            }
+            const start = i;
+            while (i < open_tag.len and !std.ascii.isWhitespace(open_tag[i]) and open_tag[i] != '>') : (i += 1) {}
+            break :value open_tag[start..i];
+        };
+        if (std.ascii.eqlIgnoreCase(name, "id")) return if (value.len > 0) value else null;
     }
     return null;
 }
@@ -131,7 +160,7 @@ fn stripTags(allocator: std.mem.Allocator, inner: []const u8) ![]const u8 {
     var i: usize = 0;
     while (i < inner.len) {
         if (inner[i] == '<') {
-            const end = std.mem.indexOfPos(u8, inner, i + 1, ">") orelse {
+            const end = findTagEnd(inner, i) orelse {
                 // Unclosed tag: drop rest.
                 break;
             };
@@ -253,4 +282,35 @@ test "renderToc skips headings without id" {
     defer gpa.free(toc);
     try std.testing.expect(std.mem.indexOf(u8, toc, "href=\"#has\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, toc, "No id") == null);
+}
+
+test "collectHeadings ignores greater-than inside quoted heading attributes" {
+    const gpa = std.testing.allocator;
+    const html = "<h2 title=\"1 > 0 and id='fake'\" data-id=\"also-fake\" id = 'real'>Real <em title=\"x > y\">Title</em></h2>";
+    var list: std.ArrayList(Heading) = .empty;
+    defer {
+        for (list.items) |h| gpa.free(h.text);
+        list.deinit(gpa);
+    }
+    try collectHeadings(gpa, html, &list);
+    try std.testing.expectEqual(@as(usize, 1), list.items.len);
+    try std.testing.expectEqualStrings("real", list.items[0].id);
+    try std.testing.expectEqualStrings("Real Title", list.items[0].text);
+}
+
+fn collectHeadingsAllocationFailureCase(allocator: std.mem.Allocator) !void {
+    var list: std.ArrayList(Heading) = .empty;
+    defer {
+        for (list.items) |h| allocator.free(h.text);
+        list.deinit(allocator);
+    }
+    try collectHeadings(allocator, "<h2 id=\"one\">One <em>heading</em></h2>", &list);
+}
+
+test "collectHeadings frees stripped text when append allocation fails" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        collectHeadingsAllocationFailureCase,
+        .{},
+    );
 }

@@ -666,9 +666,24 @@ const CachedLayout = struct {
     bytes: []u8,
 };
 
+fn isContentCompileFailure(err: anyerror) bool {
+    return switch (err) {
+        error.GraphValidationFailed,
+        error.IncludeFailed,
+        error.ReferenceFailed,
+        error.ParseFailed,
+        error.ComponentFailed,
+        error.LayoutMissingMarker,
+        error.LayoutDuplicateMarker,
+        error.LayoutUnknownMarker,
+        => true,
+        else => false,
+    };
+}
+
 /// Orchestrate multiple HTML build targets with complete isolation and sorted sequence.
 /// Enforces validate-all-first, single discovery, then sequential rendering.
-/// Returns error.MultiTargetCompilationFailed if any target fails.
+/// Returns a content or I/O sentinel matching the aggregate target failures.
 ///
 /// `targets` may be a subset (watch selective fan-out). `base_options.layout_path` is the
 /// global default used when a target has no layout override.
@@ -710,6 +725,7 @@ pub fn compileHtmlSiteMulti(
     defer layout_cache.deinit(gpa);
 
     var any_failed = false;
+    var any_io_failed = false;
     for (plans) |plan| {
         var target_options = base_options;
         target_options.target_name = plan.name;
@@ -723,6 +739,7 @@ pub fn compileHtmlSiteMulti(
                     std.debug.print("error: target '{s}' failed to load layout: {s}\n", .{ plan.name, @errorName(err) });
                 }
                 any_failed = true;
+                any_io_failed = any_io_failed or !isContentCompileFailure(err);
                 _ = layout_cache.remove(plan.layout_path);
                 continue;
             };
@@ -731,6 +748,7 @@ pub fn compileHtmlSiteMulti(
                     std.debug.print("error: target '{s}' failed to read layout: {s}\n", .{ plan.name, @errorName(err) });
                 }
                 any_failed = true;
+                any_io_failed = true;
                 _ = layout_cache.remove(plan.layout_path);
                 continue;
             };
@@ -746,6 +764,7 @@ pub fn compileHtmlSiteMulti(
                 std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
             }
             any_failed = true;
+            any_io_failed = any_io_failed or !isContentCompileFailure(err);
             continue;
         };
     }
@@ -757,8 +776,16 @@ pub fn compileHtmlSiteMulti(
     }
 
     if (any_failed) {
+        if (any_io_failed) return error.MultiTargetIoFailed;
         return error.MultiTargetCompilationFailed;
     }
+}
+
+test "multi-target failure classification keeps I/O distinct from content" {
+    try std.testing.expect(isContentCompileFailure(error.ParseFailed));
+    try std.testing.expect(isContentCompileFailure(error.LayoutMissingMarker));
+    try std.testing.expect(!isContentCompileFailure(error.AccessDenied));
+    try std.testing.expect(!isContentCompileFailure(error.OutOfMemory));
 }
 
 const ParallelContext = struct {

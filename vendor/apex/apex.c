@@ -30,6 +30,11 @@
 #define SIZE_MAX ((size_t)-1)
 #endif
 
+/* Reserved nonzero host status: upstream returned no HTML but does not expose
+ * whether the cause was allocation, parsing, or another internal failure.
+ * Keep it distinct from APEX_ERR_OOM, which is reserved for allocation failure. */
+#define BORIS_APEX_ERR_RENDER 3
+
 const char *apex_version(void) {
     return "boris-apex/apex-markdown-1.1.11+unified";
 }
@@ -112,10 +117,9 @@ int apex_render(
     nul_md = NULL;
 
     if (html == NULL) {
-        /* Upstream returns NULL for alloc failure and some internal errors.
-         * Contract: APEX_ERR_OOM is allocation-only. Unspecified NULL is a
-         * render failure, not OOM (hosts map non-OOM non-zero → RenderFailed). */
-        return APEX_ERR_ARGS;
+        /* Upstream NULL is not necessarily OOM. Use reserved render status
+         * (hosts map non-OOM non-zero → RenderFailed). */
+        return BORIS_APEX_ERR_RENDER;
     }
 
     size_t len = strlen(html);

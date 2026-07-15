@@ -40,6 +40,10 @@ How to use going forward:
   helper YAML rejection, watch mtime+size / transient poll recovery / debounce
   burst cap / scan dir skips, layout cwd root avoidance, stale HTML prune on
   full rebuild, and pre-open symlink re-check on dist/stage.
+- CLI/Apex/TOC hygiene follow-on: multi-target I/O vs content failure split
+  (`MultiTargetIoFailed` → exit 3), reserved Apex render status for upstream
+  NULL, attribute-aware TOC `id` extraction (not substring), and alloc-failure
+  coverage for heading text free-on-OOM.
 - Graph validation rejects case-only entity id collisions (`guides/intro` vs
   `GUIDES/INTRO`) with `EINVALIDPATH` — prevents silent output overwrite on
   case-insensitive filesystems. Wires

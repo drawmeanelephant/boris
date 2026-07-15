@@ -1136,6 +1136,38 @@ test "missing content root is EIO and does not publish graph IR" {
     try std.testing.expect(!fileExists(io, out, "graph.json"));
 }
 
+test "per-file read failure remains EIO with I/O failure classification" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDir(io, "content", .default_dir);
+    var content = try tmp.dir.openDir(io, "content", .{ .iterate = true });
+    defer content.close(io);
+    try content.writeFile(io, .{ .sub_path = "unreadable.md", .data = "# unreadable\n" });
+    try content.setFilePermissions(io, "unreadable.md", @enumFromInt(0), .{});
+    defer content.setFilePermissions(io, "unreadable.md", .default_file, .{}) catch {};
+
+    // Privileged test processes may still read mode-000 files; in that
+    // environment this filesystem regression cannot be exercised reliably.
+    if (content.openFile(io, "unreadable.md", .{})) |file| {
+        file.close(io);
+        return error.SkipZigTest;
+    } else |_| {}
+
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/content", .{tmp.sub_path});
+    defer gpa.free(root);
+    var result = try compile(io, gpa, .{ .content_root = root, .quiet = true });
+    defer result.deinit();
+
+    try std.testing.expect(!result.ok);
+    try std.testing.expectEqual(FailureKind.io, result.failure);
+    try expectCode(&result, .EIO);
+}
+
 test "golden expected IR shape for valid fixture" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
