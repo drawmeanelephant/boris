@@ -26,6 +26,8 @@ How to use going forward:
   `include` / `reference` edges, deterministic `reverseIndex`, validation and
   sorting rules, and a contracts-first fixture skeleton. The current binary
   remains `boris/0.2.1` / IR `0.1.0` until F8.1–F8.2 implement the shape.
+  Graph success artifact list includes `reverseIndex`; forward vs reverse
+  dependency walks are spelled out for F8.1 implementers.
 
 ### Fixed
 
