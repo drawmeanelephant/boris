@@ -1,7 +1,7 @@
 # Feature 1 — Real ApexMarkdown engine (Unified mode)
 
-**Status:** revised 2026-07-14 — **corrects a wrong engine target**; **campaign Chat 1 pin landed 2026-07-15**  
-**Priority:** highest authoring-quality work after P2/P3  
+**Status:** **Implemented** 2026-07-15 (campaign Chats 1–5; product DoD met)  
+**Priority:** Done for product; optional Chats 6–7 review only  
 **Product intent:** Keep **Apex** (the real one). Do **not** “yeet Apex” for plain cmark-gfm.
 
 | | Wrong plan (previous) | **Correct plan (this)** |
@@ -353,8 +353,8 @@ Update stub-era HTML goldens with reasons.
 - [x] Whiteboard path: copy-in + `apex_free_string`; no arena free via libc *(Chat 3)*
 - [x] Hostile tests still green *(Chat 3)*
 - [x] Fidelity tests for Unified constructs green *(Chat 4: U1–U17 structural)*
-- [ ] `zig build test` + release-gate green *(Chat 5 full gate; tests green through Chat 4)*
-- [ ] Docs claim **ApexMarkdown Unified**, not cmark-gfm-as-product *(Chat 5 final pass; partial Chats 3–4)*
+- [x] `zig build test` + release-gate green *(Chat 5)*
+- [x] Docs claim **ApexMarkdown Unified**, not cmark-gfm-as-product *(Chat 5)*
 - [x] No Feature 2; no accidental mode sprawl
 
 ---

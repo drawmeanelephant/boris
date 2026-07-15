@@ -1,6 +1,6 @@
 # Project status — Boris (post-P2 / post-P3)
 
-**As of:** 2026-07-14 (product **0.0.1** / compiler **boris/0.1.1** IR + RAG + Aside + Apex + opt-in HTML; **P2 + P3 complete**)  
+**As of:** 2026-07-15 (product **0.0.1** / compiler **boris/0.1.1** IR + RAG + Aside + **real ApexMarkdown Unified** + opt-in HTML; **P2 + P3 complete**; **Feature 1 Done**)  
 **Zig target:** 0.16.0 (`build.zig.zon` / CI pin **0.16.0**)
 
 This file is the living **“where we are”** note. Prefer it (and
@@ -57,7 +57,7 @@ remains IR; HTML is not yet the default product surface.
 | Opt-in Local Development Watch Mode (P3.2) | **Implemented & tested** | `--watch` enables live, debounced, coalesced, serialized HTML rebuilds |
 | Multi-target isolated outputs (P3.3) | **Implemented & tested** | `--target`, `--html-layout`, `--target-layout`; path-boundary isolation; stage commit; selective watch fan-out; review `docs/reviews/p3.3-multi-target-review.md` |
 | HTML as default CLI (replacing IR) | **Now** (roadmap) | IR remains default until Feature 2 lands |
-| Real ApexMarkdown Unified fidelity | **In progress** (Feature 1) | Pin + link + adapter + **U1–U17 fidelity suite** landed; Chat 5 docs/Done + release-gate next |
+| Real ApexMarkdown Unified fidelity | **Implemented & tested** | Feature 1 Done: pin @ v1.1.11, cmake static link, Unified host adapter, U1–U17; CMake compile-time host dep |
 | Full YAML / MDX / mmap | **Intentionally deferred** | See non-goals / Not Now |
 
 ### How to run
@@ -123,11 +123,13 @@ Exit codes: `0` success, `1` content, `2` usage, `3` I/O.
 
 ## Vendor contract / assumptions (Apex)
 
-- Synchronous `apex_render`; no retained pointers after return
-- Custom allocator path; never `apex_free` on whiteboard HTML
-- Host stub is a **minimal** markdown subset — not real ApexMarkdown Unified
+- Real **ApexMarkdown Unified** via host adapter (`vendor/apex/apex.c` →
+  `apex_markdown_to_html`); pin `vendor/apex-markdown` @ v1.1.11
+- Synchronous `apex_render`; copy-in + `apex_free_string`; never `apex_free` on
+  Whiteboard HTML
 - Hostile double tests mechanical wrapper rules; full C non-retention against
   arbitrary engines remains a contract (see `docs/contracts/apex-abi.md`)
+- **CMake** is a compile-time host dependency for static lib build
 
 ## Intentionally deferred (current non-goals)
 
@@ -154,8 +156,8 @@ An audit of `src/cache.zig`, `src/dependency.zig`, `src/compile.zig`,
 
 P3 scale-out is closed. Concurrent product tracks:
 
-1. **Close immediate usability gaps** in the sequential SSG pipeline (minimal Markdown rendering stub; CLI defaults still IR-first).
-2. **Product depth** (Apex fidelity, HTML as default, TOC).
+1. **Close immediate usability gaps** — CLI defaults still IR-first (Feature 2).
+2. **Product depth** — TOC / graph-aware HTML nav (Feature 6); Apex fidelity is Done (Feature 1).
 
 ---
 
@@ -181,7 +183,7 @@ unrestricted MDX. Prefer authoring fidelity and product ergonomics.
 |----------|------|--------|
 | P1.1 | Promote experimental HTML to **opt-in** CLI (`--html` / `--html-dir`) | **Implemented & tested** |
 | P1.2 | Graph-aware navigation from frozen Trunk–Satellite graph | **IR done** (`graph.json` → `nav`). HTML/TOC render still deferred |
-| P1.3 | Apex markdown fidelity (stub → real docs needs) | **Now** — see Feature 1 |
+| P1.3 | Apex markdown fidelity (stub → real ApexMarkdown Unified) | **Done** — Feature 1 |
 | P1.4 | Layout / asset dependency edges (typed, validated) | **Implemented** — layout edges on freeze |
 
 ### P2 — graph-native build foundations — COMPLETED
@@ -213,15 +215,14 @@ re-opened as greenfield tickets.
 
 | Field | Detail |
 |-------|--------|
-| **Priority** | **Now** (authoring fidelity bottleneck) — **campaign in progress** |
-| **Campaign status** | **Chat 1–4 done:** pin, static link, Unified adapter, U1–U17 fidelity + Aside order. Next: **Chat 5** docs/STATUS Done + release-gate. |
-| **User-visible payoff** | Authors get full **Apex Unified** Markdown (tables, footnotes, def lists, math, callouts, IAL, …) — real [ApexMarkdown/apex](https://github.com/ApexMarkdown/apex), not a stub and not “cmark instead of Apex” |
-| **Smallest shippable vertical slice** | Vendor ApexMarkdown/apex; host `apex_render` adapter → `apex_markdown_to_html` with **`APEX_MODE_UNIFIED`**; keep Boris host ABI / Whiteboard |
-| **Modules** | host `vendor/apex` (or `vendor/boris-apex`), `vendor/apex-markdown/*`, `build.zig`, `src/apex.zig` tests |
-| **Acceptance** | (1) Unified constructs render (tables + at least footnotes/callouts + fenced code); (2) `test-apex-hostile` passes; (3) file includes/plugins/external highlighters off at Boris boundary |
-| **Dependencies** | CMake as *compile-time* host tool for static lib (Chat 2+) — see plan / VENDOR.md |
-| **Contract / schema** | Conform to `docs/contracts/apex-abi.md` — **do not change host ABI** |
-| **Handoff plan** | [`APEX-Feature1-plan.md`](../APEX-Feature1-plan.md) (authority); [Modes](https://github.com/ApexMarkdown/apex/wiki/Modes) |
+| **Priority** | **Done** (implementation Chats 1–5; internal/external review Chats 6–7 optional hardening) |
+| **Campaign status** | **Done for product:** pin @ v1.1.11; Strategy A cmake static link; host adapter Unified; U1–U17 fidelity; docs honest. Residual: Chats 6–7 review only. |
+| **User-visible payoff** | Authors get full **Apex Unified** Markdown (tables, footnotes, def lists, math, callouts, IAL, …) — real [ApexMarkdown/apex](https://github.com/ApexMarkdown/apex) under frozen host `apex.h` |
+| **Modules** | `vendor/apex/*` (host ABI + adapter), `vendor/apex-markdown/*`, `scripts/build-apex-markdown.sh`, `build.zig`, `src/apex.zig` / `aside.zig` tests |
+| **Acceptance** | Met: Unified constructs (U1–U17); `test-apex-hostile`; includes/plugins/highlighters off; Whiteboard copy + `apex_free_string` |
+| **Dependencies** | **CMake** compile-time host tool — [`VENDOR.md`](../vendor/apex-markdown/VENDOR.md) |
+| **Contract / schema** | `docs/contracts/apex-abi.md` — host ABI unchanged |
+| **Authority** | [`APEX-Feature1-plan.md`](../APEX-Feature1-plan.md) |
 
 ### Feature 2 — Promoting HTML to the Default CLI Surface (`dist/` product mode)
 
@@ -281,8 +282,8 @@ re-opened as greenfield tickets.
 
 | # | Feature | Priority | Phase gate / dependency |
 |---|---------|----------|-------------------------|
-| 1 | **ApexMarkdown Unified** (real engine under host `apex.h` ABI) | **Now** | `APEX-Feature1-plan.md` + `apex-abi.md` |
-| 2 | **HTML as default CLI mode** (promote opt-in SSG to default) | **Now** | Layout edges on freeze (landed) |
+| 1 | **ApexMarkdown Unified** (real engine under host `apex.h` ABI) | **Done** | Chats 1–5; plan + `apex-abi.md` |
+| 2 | **HTML as default CLI mode** (promote opt-in SSG to default) | **Now** | Layout edges on freeze (landed); Feature 1 Done |
 | 3 | **Bounded worker pool** (parallel rendering) | **Done** | Dirty-set / incremental path (landed) |
 | 4 | **Watch mode** (FS events → dirty-set run) | **Done** | Worker pool / incremental (landed) |
 | 5 | **Multi-target isolated outputs** (config / `--target`) | **Done** | Watch + incremental (landed); contract + post-land hardening |
@@ -292,18 +293,12 @@ re-opened as greenfield tickets.
 
 ## First implementation cards (active)
 
-### Card 1 — Real ApexMarkdown Unified (`src/apex-fidelity`)
+### Card 1 — Real ApexMarkdown Unified (`src/apex-fidelity`) — **Done**
 
-* **Plan (authority):** [`APEX-Feature1-plan.md`](../APEX-Feature1-plan.md)
-* **Campaign:** 7-chat Feature 1 push (pin → link → adapter → fidelity → docs → internal review → external audit).
-* **Chat 1 (done):** Pin `vendor/apex-markdown` @ v1.1.11; `VENDOR.md`.
-* **Chat 2 (done):** Strategy A cmake static lib via `scripts/build-apex-markdown.sh` + `build.zig` link; CI installs cmake; hostile isolation.
-* **Chat 3 (done):** Host `apex_render` → Unified `apex_markdown_to_html` + copy/`apex_free_string`; version `boris-apex/apex-markdown-1.1.11+unified`.
-* **Chat 4 (done):** U1–U17 structural fidelity tests in `src/apex.zig` + U15 Aside order in `src/aside.zig`.
-* **Next (Chat 5):** Docs/STATUS Feature 1 Done + release-gate polish.
-* **Scope:** Vendor [ApexMarkdown/apex](https://github.com/ApexMarkdown/apex); host adapter `apex_render` → `apex_markdown_to_html` in **Unified** mode; keep Boris host ABI.
-* **Acceptance:** Plan definition of done; `zig build test`, `test-apex-hostile`, Unified constructs, release-gate.
-* **Out of scope here:** Feature 2; optional `--apex-mode` (later).
+* **Plan:** [`APEX-Feature1-plan.md`](../APEX-Feature1-plan.md) §10 DoD checked (Chats 1–5).
+* **Landed:** pin v1.1.11 · cmake static link · Unified adapter · U1–U17 · docs.
+* **Optional residual:** Chat 6 internal review record; Chat 7 external audit response.
+* **Out of scope (still):** Feature 2; `--apex-mode`; Strategy B pure zig-cc.
 
 ### Card 2 — HTML default CLI mode (`src/html-default-cli`)
 
@@ -358,7 +353,7 @@ not by themselves change IR schema.
 
 ## Open risks (track; not automatic next tickets)
 
-1. Feature 1 residual: author-facing STATUS Done + release-gate packaging (Chat 5); fidelity suite green.
+1. Feature 1 product land is Done; optional Chats 6–7 (internal/external review) for audit hardening only.
 2. Publication atomicity across volumes/OSes not fully proven.
 3. Residual dual-helper surface: product IR/RAG/HTML input uses `parser.zig` with
    author key **`parent` only** (`parentEntry` / `parent_entry` rejected).

@@ -16,11 +16,10 @@ related:
 returns; never a child-process markdown renderer.
 
 Apex is the markdown renderer used by the **opt-in HTML** path (and
-Aside inner bodies). It is compiled as C, linked into the binary, and called
-through Zig `@cImport`. The default v0.1 CLI (JSON IR) and the RAG export path
-do **not** call Apex. The current vendor engine is a **minimal stub**, not a
-CommonMark-complete library — fidelity upgrade is roadmap work under the same
-`apex.h` ABI.
+Aside inner bodies). The Boris **host** ABI (`vendor/apex/apex.h`) is frozen;
+the host adapter calls real **ApexMarkdown Unified** (`vendor/apex-markdown`,
+pinned) via `apex_markdown_to_html`, then copies HTML into the Whiteboard
+allocator. Default v0.1 CLI (JSON IR) and RAG export do **not** call Apex.
 
 ## Why not spawn processes
 
@@ -93,11 +92,14 @@ catch known failure modes and a remaining-assumptions list for auditors.
 ## Build linkage (`build.zig`)
 
 - `link_libc = true`
-- `addCSourceFile(vendor/apex/apex.c)`
-- `addIncludePath(vendor/apex)`
+- CMake sub-step: `scripts/build-apex-markdown.sh` → static `libapex.a` + cmark-gfm
+- `addCSourceFile(vendor/apex/apex.c)` host adapter
+- `addIncludePath(vendor/apex)` for Zig `@cImport` (host ABI only)
+- Product modules link static ApexMarkdown archives; hostile path does not
 
-## Stub vs production
+## Engine: ApexMarkdown Unified adapter
 
-`vendor/apex/apex.c` is a **minimal stub** (headings, paragraphs, bold/italic/code,
-raw HTML lines). A production Apex library can replace the `.c` while keeping the
-same header ABI **and** the lifetime contracts above.
+`vendor/apex/apex.c` is a thin adapter (not a hand-rolled markdown subset).
+Default mode is Unified; file includes, plugins, and external highlighters are
+off at the Boris boundary. See `docs/contracts/apex-abi.md` and
+`vendor/apex-markdown/VENDOR.md`.

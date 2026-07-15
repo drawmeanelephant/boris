@@ -1,7 +1,7 @@
 # Feature 1 — Apex fidelity (handoff pointer)
 
-**Status:** corrected target — real ApexMarkdown Unified; **Chat 1 pin landed**  
-**Date:** 2026-07-14 (pointer); pin 2026-07-15
+**Status:** **Feature 1 product Done** (Chats 1–5); optional Chats 6–7 review  
+**Date:** 2026-07-14 (pointer); implemented 2026-07-15
 
 ## Authority
 
@@ -16,11 +16,11 @@ and call it from Boris’s host `apex_render` adapter in **`APEX_MODE_UNIFIED`**
 (default). See [Modes](https://github.com/ApexMarkdown/apex/wiki/Modes) and
 [C API](https://github.com/ApexMarkdown/apex/wiki/C-API).
 
-**Pin + link + adapter + fidelity (Chat 1–4 done):**
+**Product land (Chat 1–5 done):**
 
-[`vendor/apex-markdown/VENDOR.md`](../../vendor/apex-markdown/VENDOR.md) — v1.1.11 snapshot;
-static link; Unified adapter; U1–U17 structural tests. Next is Chat 5 (docs/STATUS Done +
-release-gate).
+[`vendor/apex-markdown/VENDOR.md`](../../vendor/apex-markdown/VENDOR.md) — v1.1.11;
+static link; Unified adapter; U1–U17; docs/STATUS Done. Optional: internal review
+(`docs/reviews/feature-1-internal-review.md`) and external audit response.
 
 **ABI contract (Boris host lifetime rules still win):**
 

@@ -41,9 +41,8 @@ rolling-paper brand.
 | `zig build test` | **Implemented** — CLI + fixtures + scanner + parser + pipeline + RAG + Apex + HTML |
 | Normative contracts under [`docs/contracts/`](docs/contracts/) | **Normative + implemented** (see ownership map) |
 | Apex C ABI (in-process) | **Implemented** — real ApexMarkdown Unified via host adapter ([contract](docs/contracts/apex-abi.md)) |
-| ApexMarkdown Unified pin + link + adapter | **Landed** — `vendor/apex-markdown/` @ v1.1.11; CMake static libs; Unified `apex_render` adapter ([VENDOR.md](vendor/apex-markdown/VENDOR.md)) |
-| HTML `dist/` as **default** CLI (no flags) | **Roadmap** — bare `boris` remains IR-first today |
-| Broad Unified fidelity suite (tables, footnotes, …) | **Landed** — U1–U17 structural tests ([APEX-Feature1-plan.md](APEX-Feature1-plan.md)); Chat 5 docs/Done remaining |
+| ApexMarkdown Unified (Feature 1) | **Done** — pin @ v1.1.11, CMake static libs, Unified adapter, U1–U17 ([VENDOR.md](vendor/apex-markdown/VENDOR.md)) |
+| HTML `dist/` as **default** CLI (no flags) | **Roadmap** — bare `boris` remains IR-first today (Feature 2) |
 | Full YAML / MDX | **Out of scope** for v0.1 |
 
 ## What works today (CLI)
@@ -135,9 +134,12 @@ dist/**/*.html                    # or each --target output root
 <target>/.boris-cache/manifest.json   # with --incremental / --watch
 ```
 
-Apex renders markdown in-process (current engine is a **minimal stub**, not
-CommonMark-complete). Layout default: `layouts/main.html` with one `{{content}}`
-splice. See [docs/contracts/html-output.md](docs/contracts/html-output.md),
+Apex renders markdown in-process via real **ApexMarkdown Unified** (host
+`apex_render` adapter; pin `vendor/apex-markdown` @ v1.1.11). **CMake** is
+required at compile time to build static libs. Layout default:
+`layouts/main.html` with one `{{content}}` splice. See
+[docs/contracts/html-output.md](docs/contracts/html-output.md),
+[apex-abi.md](docs/contracts/apex-abi.md),
 [parallel-rendering.md](docs/contracts/parallel-rendering.md),
 [watch-mode.md](docs/contracts/watch-mode.md), and
 [multi-target-isolated-output.md](docs/contracts/multi-target-isolated-output.md).
@@ -145,7 +147,7 @@ splice. See [docs/contracts/html-output.md](docs/contracts/html-output.md),
 ## Quick start
 
 ```bash
-# Requires Zig 0.16.0
+# Requires Zig 0.16.0 and CMake (compile-time; builds vendored ApexMarkdown)
 zig build                          # install → zig-out/bin/boris (+ boris-source-rag)
 zig build run -- --help            # usage; exit 0
 zig build run -- --input fixtures/content/valid --out /tmp/boris-ir --quiet
@@ -237,7 +239,7 @@ binary under `tools/source-rag/` — not wired into the product `boris` CLI.
 | [ir-schema.md](docs/contracts/ir-schema.md) | Trunk/Satellite graph; JSON IR under `.boris/` |
 | [rag-export.md](docs/contracts/rag-export.md) | Optional RAG export; `:::kind` is export-only |
 | [components.md](docs/contracts/components.md) | Constrained `<Aside>` tokenizer |
-| [apex-abi.md](docs/contracts/apex-abi.md) | In-process Apex C ABI + Zig wrapper (stub ≠ CommonMark) |
+| [apex-abi.md](docs/contracts/apex-abi.md) | In-process Apex C ABI + Zig wrapper (ApexMarkdown Unified adapter) |
 | [html-output.md](docs/contracts/html-output.md) | Opt-in HTML Whiteboard, Aside stream, layout splice, Atomic publish |
 | [parallel-rendering.md](docs/contracts/parallel-rendering.md) | Bounded `--jobs` HTML workers |
 | [watch-mode.md](docs/contracts/watch-mode.md) | Opt-in `--watch` rebuild loop |

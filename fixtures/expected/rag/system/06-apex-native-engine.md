@@ -8,9 +8,10 @@ tags: [apex, c-abi, markdown, performance, cImport]
 
 # Apex: native C-ABI markdown engine
 
-Apex is the markdown renderer used by the HTML and RAG body paths. In Boris it
-is **not** invoked as a CLI. It is compiled as C, linked into the binary, and
-called through Zig `@cImport`. The default v0.1 CLI (JSON IR) does not call Apex.
+Apex is the markdown renderer used by the opt-in HTML path (and Aside inner
+bodies). The Boris host ABI is frozen; the host adapter calls real ApexMarkdown
+Unified (pinned under vendor/apex-markdown). The default v0.1 CLI (JSON IR) and
+RAG export do not call Apex for page body render.
 
 ## Why not spawn processes
 
@@ -83,11 +84,12 @@ catch known failure modes and a remaining-assumptions list for auditors.
 ## Build linkage (`build.zig`)
 
 - `link_libc = true`
-- `addCSourceFile(vendor/apex/apex.c)`
-- `addIncludePath(vendor/apex)`
+- CMake sub-step builds static ApexMarkdown (`libapex.a` + cmark-gfm)
+- `addCSourceFile(vendor/apex/apex.c)` host adapter
+- `addIncludePath(vendor/apex)` for Zig `@cImport` (host ABI only)
 
-## Stub vs production
+## Engine: ApexMarkdown Unified adapter
 
-`vendor/apex/apex.c` is a **minimal stub** (headings, paragraphs, bold/italic/code,
-raw HTML lines). A production Apex library can replace the `.c` while keeping the
-same header ABI **and** the lifetime contracts above.
+`vendor/apex/apex.c` is a thin adapter (not a hand-rolled markdown subset).
+Default mode is Unified; file includes, plugins, and external highlighters are
+off at the Boris boundary.
