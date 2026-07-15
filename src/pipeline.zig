@@ -15,6 +15,7 @@ const json_out = @import("json_out.zig");
 const page_mod = @import("page.zig");
 const include_mod = @import("include.zig");
 const wikilink = @import("wikilink.zig");
+const dependency = @import("dependency.zig");
 
 pub const schema_version = "0.2.0";
 pub const compiler_id = "boris/0.3.0";
@@ -304,6 +305,81 @@ fn resolveDependencies(
         defer gpa.free(source);
         if (page.body_offset > source.len) return error.InvalidBodyOffset;
         try resolver.scanPage(page, source[page.body_offset..]);
+    }
+}
+
+/// Populate the HTML/cache dependency index from the same direct dependency
+/// resolver used by IR 0.2. Page endpoints use entity ids; source endpoints
+/// use content-root-relative paths, matching the cache dirty-set walk.
+pub fn populateDependencyIndex(
+    io: Io,
+    gpa: std.mem.Allocator,
+    retain: std.mem.Allocator,
+    content_root: []const u8,
+    nodes: []const graph_mod.Node,
+    quiet: bool,
+    index: *dependency.DependencyIndex,
+) !void {
+    var content_dir = try Io.Dir.cwd().openDir(io, content_root, .{});
+    defer content_dir.close(io);
+
+    var edges: std.ArrayList(DependencyEdge) = .empty;
+    defer edges.deinit(gpa);
+    var diagnostics: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diagnostics.deinit(gpa);
+
+    var resolver: DependencyResolver = .{
+        .io = io,
+        .gpa = gpa,
+        .retain = retain,
+        .content_dir = content_dir,
+        .nodes = nodes,
+        .edges = &edges,
+        .diagnostics = &diagnostics,
+    };
+    defer resolver.deinit();
+
+    for (nodes) |page| {
+        const source = readFileAlloc(io, content_dir, page.source_path, gpa) catch |err| {
+            if (!quiet) std.debug.print("error: EIO: failed to read {s}: {s}\n", .{ page.source_path, @errorName(err) });
+            return err;
+        };
+        defer gpa.free(source);
+        if (page.body_offset > source.len) return error.InvalidBodyOffset;
+        try resolver.scanPage(page, source[page.body_offset..]);
+        if (page.parent) |parent| {
+            try resolver.appendEdge(.{ .type = .page, .value = page.id }, .{ .type = .page, .value = parent }, "parent");
+        }
+    }
+
+    if (diag.countErrors(diagnostics.items) > 0) {
+        if (!quiet) {
+            diag.sortDiagnostics(diagnostics.items);
+            for (diagnostics.items) |d| {
+                const line = diag.formatText(d, gpa) catch continue;
+                defer gpa.free(line);
+                std.debug.print("{s}\n", .{line});
+            }
+        }
+        for (diagnostics.items) |d| switch (d.code) {
+            .EINCLUDESYNTAX, .EINCLUDEMISSING, .EINCLUDECYCLE, .EINVALIDPATH => return error.IncludeFailed,
+            else => {},
+        };
+        return error.ReferenceFailed;
+    }
+
+    std.mem.sort(DependencyEdge, edges.items, {}, edgeLess);
+    var write: usize = 0;
+    for (edges.items) |edge| {
+        if (write == 0 or !edgeEql(edges.items[write - 1], edge)) {
+            edges.items[write] = edge;
+            write += 1;
+        }
+    }
+    edges.items.len = write;
+    for (edges.items) |edge| {
+        const kind: dependency.DependencyKind = if (std.mem.eql(u8, edge.kind, "parent")) .parent else if (std.mem.eql(u8, edge.kind, "include")) .include else .reference;
+        try index.addDependency(edge.from.value, edge.to.value, kind);
     }
 }
 
