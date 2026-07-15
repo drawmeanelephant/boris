@@ -51,8 +51,9 @@ use.
 | Content-addressed cache fingerprints (P2.3) | **Implemented & tested** | SHA256 fingerprints on layout, page, and transitively resolved includes |
 | Explicit Incremental HTML build mode (P2.4) | **Implemented & tested** | `--incremental` skips unchanged renders, cleans stale assets safely and atomically |
 | Bounded Parallel HTML page rendering (P3.1) | **Implemented & tested** | `--jobs N` enables opt-in parallel rendering of independent HTML pages using `std.Io.Mutex` |
+| Opt-in Local Development Watch Mode (P3.2) | **Implemented & tested** | `--watch` enables live, debounced, coalesced, serialized HTML rebuilds |
 | HTML as default CLI (replacing IR) | **Intentionally deferred** | IR remains default; HTML is opt-in |
-| Full YAML / MDX / concurrency / watch | **Intentionally deferred** | See non-goals |
+| Full YAML / MDX / mmap | **Intentionally deferred** | See non-goals |
 
 ### How to run
 
@@ -115,9 +116,7 @@ Exit codes: `0` success, `1` content, `2` usage, `3` I/O.
 - Default CLI HTML `dist/` product mode
 - Markdown-native `:::` **authoring** (export representation only)
 - Nested asides, multi-component registry, MDX
-- Incremental rebuild / reverse dependency index
-- Concurrency / worker pools / watch mode / mmap
-- Process RSS flatness claims
+- mmap for large file I/O, process RSS flatness claims
 - Full YAML frontmatter
 
 ---

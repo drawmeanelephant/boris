@@ -19,6 +19,13 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Opt-in Local Development Watch Mode (P3.2)
+
+- Implement opt-in development watch mode via `--watch` flag, bringing real-time, debounced, coalesced filesystem events to local HTML builds.
+- Support event coalescing within a fixed 100ms debounce window and deterministic serialization of subsequent rebuilds to prevent concurrent compilation.
+- Isolate the watcher behind a clean, testable `Watcher` interface, providing both an in-memory `FakeWatcher` for 100% deterministic test execution and a portable, recursive `PollingWatcher` fallback.
+- Support graceful shutdown via POSIX signal handlers (`SIGINT`, `SIGTERM`), cleanly releasing all IO and watcher resources.
+
 ### Bounded Parallel HTML Page Rendering (P3.1)
 
 - Add opt-in bounded parallel rendering support (`--jobs N`) for independent HTML page compilation, achieving safe, deterministic thread-pool execution using `std.Io.Mutex` and explicit work coordination.
