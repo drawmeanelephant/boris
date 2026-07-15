@@ -166,6 +166,12 @@ Flags: `link_libc`, include `vendor/apex`, C11 sources. No child-process markdow
 
 `vendor/apex/apex.c` is a **minimal stub** (ATX headings, paragraphs, `**bold**`, `*italic*`, `` `code` ``, raw HTML lines). It does **not** claim CommonMark compatibility. A production library may replace the `.c` while keeping this header ABI **and** the lifetime contracts above.
 
+**Next engine (specified, not landed):** Feature 1 will swap the stub body for a
+thin shim over vendored **cmark-gfm** so tables and standard CommonMark constructs
+render under the same ABI. Implement only from
+[`docs/reviews/feature-1-apex-fidelity-spec.md`](../reviews/feature-1-apex-fidelity-spec.md)
+— do not invent a second ABI or a subprocess renderer.
+
 ---
 
 ## Explicit non-goals (m8)

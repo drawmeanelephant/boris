@@ -208,13 +208,14 @@ re-opened as greenfield tickets.
 
 | Field | Detail |
 |-------|--------|
-| **Priority** | **Now** (authoring fidelity bottleneck) |
+| **Priority** | **Now** (authoring fidelity bottleneck) — **spec ready; implement in a dedicated session** |
 | **User-visible payoff** | Authors can write standard documentation structures (tables, nested lists, blockquotes, fenced code blocks) and see them rendered correctly without switching to an external renderer |
-| **Smallest shippable vertical slice** | Swap the minimal `vendor/apex/apex.c` stub with a lightweight, compliant C CommonMark library (e.g. `cmark` or `cmark-gfm`) that compiles in-process and adheres strictly to the existing `apex.h` ABI |
-| **Modules** | `vendor/apex/*`, `build.zig` (link new C translation units) |
+| **Smallest shippable vertical slice** | Thin `apex.c` shim over vendored **cmark-gfm** (tables required), same `apex.h` ABI |
+| **Modules** | `vendor/apex/*`, `vendor/cmark-gfm/*`, `build.zig` |
 | **Acceptance** | (1) Input containing a standard Markdown table compiles to `<table>` elements under `dist/`; (2) `zig build test-apex-hostile` continues to pass |
 | **Dependencies** | None |
-| **Contract / schema** | None — conform to `docs/contracts/apex-abi.md` |
+| **Contract / schema** | Conform to `docs/contracts/apex-abi.md` — **do not change ABI** |
+| **Handoff spec** | [`docs/reviews/feature-1-apex-fidelity-spec.md`](reviews/feature-1-apex-fidelity-spec.md) |
 
 ### Feature 2 — Promoting HTML to the Default CLI Surface (`dist/` product mode)
 
@@ -285,15 +286,13 @@ re-opened as greenfield tickets.
 
 ## First implementation cards (active)
 
-### Card 1 — Replace Apex C stub with cmark (`src/apex-fidelity`)
+### Card 1 — Replace Apex C stub with cmark-gfm (`src/apex-fidelity`)
 
-* **Scope:** Swap the minimal C parser inside `vendor/apex/` with a stable CommonMark library.
-* **Tasks:**
-  * Drop in `cmark` (or `cmark-gfm` if tables are required) under `vendor/apex/`.
-  * Map the library’s rendering entry point to `apex_render` and `APEX_*` status codes in `apex.h`.
-  * Respect custom `ApexAllocator` callbacks; do not retain pointers or invoke libc `free` on custom memory.
-  * Update `build.zig` to link the new C source file(s).
-* **Acceptance:** `zig build test` and `zig build test-apex-hostile` pass. Standard Markdown tables and lists render to correct HTML.
+* **Spec (normative for implementers):** [`docs/reviews/feature-1-apex-fidelity-spec.md`](reviews/feature-1-apex-fidelity-spec.md)
+* **Scope:** Thin `vendor/apex/apex.c` shim + vendored **cmark-gfm** (not plain cmark — tables are acceptance).
+* **Tasks:** See spec (allocator bridge / `realloc` emulate, gates A1–A8, golden churn).
+* **Acceptance:** Spec definition of done; at minimum `zig build test`, `test-apex-hostile`, table → `<table>`, release-gate.
+* **Out of scope here:** Feature 2 (HTML default CLI).
 
 ### Card 2 — HTML default CLI mode (`src/html-default-cli`)
 
@@ -380,6 +379,7 @@ validated metadata and graph-aware docs, not a polyglot web framework.
 | `docs/contracts/multi-target-isolated-output.md` | P3.3 multi-target (normative; implemented) |
 | `docs/AUDIT-v0.1.md` | Self-audit report (m10 historical) |
 | `docs/reviews/post-p3-reconciliation.md` | Post-P3 docs reconciliation audit |
+| `docs/reviews/feature-1-apex-fidelity-spec.md` | Feature 1 handoff (cmark-gfm under `apex.h`) — implement only when assigned |
 | `docs/rag/system/` | Narrative seeds (RAG system segment) |
 | `CHANGELOG.md` | What changed |
 | This file | Living status + priority / roadmap list |

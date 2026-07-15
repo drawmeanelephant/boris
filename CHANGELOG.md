@@ -29,6 +29,9 @@ How to use going forward:
 - Remove ghost **v0.4.0** “P3.3 complete” release trigger from
   `docs/STATUS.md` versioning table (P3.3 already landed; packaging stays under
   0.2/0.3). No runtime or IR schema changes. Feature 1 (cmark) still not started.
+- Feature 1 implementer handoff:
+  [`docs/reviews/feature-1-apex-fidelity-spec.md`](docs/reviews/feature-1-apex-fidelity-spec.md)
+  (cmark-gfm under frozen `apex.h`; gates, allocator risks, out-of-scope).
 
 ### Docs — post-P3 reconciliation
 
