@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.1.0",
+  "schemaVersion": "0.2.0",
   "frozen": true,
   "nodes": [
     {
@@ -41,9 +41,24 @@
   ],
   "edges": [
     {
-      "from": 1,
-      "to": 0,
+      "from": {
+        "type": "page",
+        "value": "guides/intro-tips"
+      },
+      "to": {
+        "type": "page",
+        "value": "guides/intro"
+      },
       "kind": "parent"
+    }
+  ],
+  "reverseIndex": [
+    {
+      "target": {
+        "type": "page",
+        "value": "guides/intro"
+      },
+      "incomingEdges": [0]
     }
   ],
   "nav": [

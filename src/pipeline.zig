@@ -1,4 +1,4 @@
-//! Content compiler pipeline (milestone 6–7):
+//! Content compiler pipeline (Feature 8):
 //!   scan → parse frontmatter → promote PageDb → graph validate → freeze
 //!   → IR emit (`run`) or shared compile for RAG (`compile`)
 //!
@@ -13,11 +13,13 @@ const aside = @import("aside.zig");
 const graph_mod = @import("graph.zig");
 const json_out = @import("json_out.zig");
 const page_mod = @import("page.zig");
+const include_mod = @import("include.zig");
+const wikilink = @import("wikilink.zig");
 
-pub const schema_version = "0.1.0";
-pub const compiler_id = "boris/0.2.1";
+pub const schema_version = "0.2.0";
+pub const compiler_id = "boris/0.3.0";
 /// Product version string (package / catalog_meta.boris_version).
-pub const boris_version = "0.2.1";
+pub const boris_version = "0.3.0";
 
 pub const Options = struct {
     content_root: []const u8 = "content",
@@ -33,6 +35,31 @@ pub const CompileOptions = struct {
 
 pub const PageEntry = graph_mod.Node;
 
+pub const EndpointType = enum {
+    page,
+    source,
+
+    pub fn name(self: EndpointType) []const u8 {
+        return @tagName(self);
+    }
+};
+
+pub const Endpoint = struct {
+    type: EndpointType,
+    value: []const u8,
+};
+
+pub const DependencyEdge = struct {
+    from: Endpoint,
+    to: Endpoint,
+    kind: []const u8,
+};
+
+pub const ReverseEntry = struct {
+    target: Endpoint,
+    incoming_edges: []const u32,
+};
+
 /// Pipeline failure class for CLI exit mapping.
 pub const FailureKind = enum {
     none,
@@ -43,7 +70,8 @@ pub const FailureKind = enum {
 pub const Result = struct {
     arena: std.heap.ArenaAllocator,
     pages: std.ArrayList(PageEntry),
-    edges: std.ArrayList(graph_mod.Edge),
+    edges: std.ArrayList(DependencyEdge),
+    reverse_index: std.ArrayList(ReverseEntry),
     diagnostics: std.ArrayList(diag.Diagnostic),
     content_root: []const u8,
     out_dir: []const u8,
@@ -57,6 +85,8 @@ pub const Result = struct {
         const gpa = self.arena.child_allocator;
         self.pages.deinit(gpa);
         self.edges.deinit(gpa);
+        for (self.reverse_index.items) |entry| gpa.free(entry.incoming_edges);
+        self.reverse_index.deinit(gpa);
         self.diagnostics.deinit(gpa);
         self.arena.deinit();
     }
@@ -77,6 +107,258 @@ fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Alloc
     defer file.close(io);
     var reader = file.reader(io, &.{});
     return try reader.interface.allocRemaining(allocator, .unlimited);
+}
+
+fn endpointLess(a: Endpoint, b: Endpoint) bool {
+    const type_order = std.mem.order(u8, a.type.name(), b.type.name());
+    if (type_order != .eq) return type_order == .lt;
+    return std.mem.order(u8, a.value, b.value) == .lt;
+}
+
+fn endpointEql(a: Endpoint, b: Endpoint) bool {
+    return a.type == b.type and std.mem.eql(u8, a.value, b.value);
+}
+
+fn edgeLess(_: void, a: DependencyEdge, b: DependencyEdge) bool {
+    if (!endpointEql(a.from, b.from)) return endpointLess(a.from, b.from);
+    if (!endpointEql(a.to, b.to)) return endpointLess(a.to, b.to);
+    return std.mem.order(u8, a.kind, b.kind) == .lt;
+}
+
+fn edgeEql(a: DependencyEdge, b: DependencyEdge) bool {
+    return endpointEql(a.from, b.from) and endpointEql(a.to, b.to) and
+        std.mem.eql(u8, a.kind, b.kind);
+}
+
+fn findPage(nodes: []const PageEntry, id: []const u8) bool {
+    for (nodes) |node| {
+        if (std.mem.eql(u8, node.id, id)) return true;
+    }
+    return false;
+}
+
+const DependencyResolver = struct {
+    io: Io,
+    gpa: std.mem.Allocator,
+    retain: std.mem.Allocator,
+    content_dir: Io.Dir,
+    nodes: []const PageEntry,
+    edges: *std.ArrayList(DependencyEdge),
+    diagnostics: *std.ArrayList(diag.Diagnostic),
+    scanned_sources: std.StringHashMapUnmanaged(void) = .empty,
+
+    fn deinit(self: *DependencyResolver) void {
+        self.scanned_sources.deinit(self.gpa);
+    }
+
+    fn appendEdge(self: *DependencyResolver, from: Endpoint, to: Endpoint, kind: []const u8) !void {
+        try self.edges.append(self.gpa, .{
+            .from = .{ .type = from.type, .value = try self.retain.dupe(u8, from.value) },
+            .to = .{ .type = to.type, .value = try self.retain.dupe(u8, to.value) },
+            .kind = kind,
+        });
+    }
+
+    fn scanWiki(self: *DependencyResolver, body: []const u8, locus: []const u8, from: Endpoint) !void {
+        var hits: std.ArrayList(wikilink.WikiHit) = .empty;
+        defer hits.deinit(self.gpa);
+        var fail: wikilink.FailInfo = .{};
+        wikilink.scanWikiLinks(body, self.gpa, &hits, &fail, locus) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => {
+                try self.diagnostics.append(self.gpa, try wikilink.makeDiagnostic(self.retain, err, locus, fail));
+                return;
+            },
+        };
+
+        for (hits.items) |hit| {
+            if (!findPage(self.nodes, hit.entity_id)) {
+                fail.set(hit.line, hit.column, hit.entity_id, locus);
+                try self.diagnostics.append(self.gpa, try wikilink.makeDiagnostic(
+                    self.retain,
+                    error.ReferenceMissing,
+                    locus,
+                    fail,
+                ));
+                continue;
+            }
+            try self.appendEdge(from, .{ .type = .page, .value = hit.entity_id }, "reference");
+        }
+    }
+
+    fn scanIncludes(
+        self: *DependencyResolver,
+        body: []const u8,
+        locus: []const u8,
+        from: Endpoint,
+        stack: *std.ArrayList([]const u8),
+        depth: usize,
+    ) !void {
+        var hits: std.ArrayList(include_mod.ScanHit) = .empty;
+        defer hits.deinit(self.gpa);
+        var fail: include_mod.FailInfo = .{};
+        include_mod.scanIncludeDirectives(body, self.gpa, &hits, &fail, locus) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => {
+                try self.diagnostics.append(self.gpa, try include_mod.makeDiagnostic(self.retain, err, locus, fail));
+                return;
+            },
+        };
+
+        for (hits.items) |hit| {
+            try self.appendEdge(from, .{ .type = .source, .value = hit.path }, "include");
+
+            var in_stack = false;
+            for (stack.items) |path| {
+                if (std.mem.eql(u8, path, hit.path)) {
+                    in_stack = true;
+                    break;
+                }
+            }
+            if (in_stack) {
+                fail.set(hit.line, hit.column, hit.path, locus);
+                try self.diagnostics.append(self.gpa, try include_mod.makeDiagnostic(
+                    self.retain,
+                    error.IncludeCycle,
+                    locus,
+                    fail,
+                ));
+                continue;
+            }
+            if (depth + 1 > include_mod.max_include_depth) {
+                fail.set(hit.line, hit.column, hit.path, locus);
+                try self.diagnostics.append(self.gpa, try include_mod.makeDiagnostic(
+                    self.retain,
+                    error.DepthExceeded,
+                    locus,
+                    fail,
+                ));
+                continue;
+            }
+            if (self.scanned_sources.contains(hit.path)) continue;
+
+            const source = include_mod.readSourceAlloc(self.io, self.content_dir, hit.path, self.gpa) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => {
+                    fail.set(hit.line, hit.column, hit.path, locus);
+                    try self.diagnostics.append(self.gpa, try include_mod.makeDiagnostic(self.retain, err, locus, fail));
+                    continue;
+                },
+            };
+            defer self.gpa.free(source);
+
+            try stack.append(self.gpa, hit.path);
+            defer _ = stack.pop();
+            const source_body = include_mod.bodyOfSource(source);
+            const source_from: Endpoint = .{ .type = .source, .value = hit.path };
+            try self.scanWiki(source_body, hit.path, source_from);
+            try self.scanIncludes(source_body, hit.path, source_from, stack, depth + 1);
+
+            const retained_path = try self.retain.dupe(u8, hit.path);
+            try self.scanned_sources.put(self.gpa, retained_path, {});
+        }
+    }
+
+    fn scanPage(self: *DependencyResolver, page: PageEntry, body: []const u8) !void {
+        const from: Endpoint = .{ .type = .page, .value = page.id };
+        try self.scanWiki(body, page.source_path, from);
+        var stack: std.ArrayList([]const u8) = .empty;
+        defer stack.deinit(self.gpa);
+        try stack.append(self.gpa, page.source_path);
+        try self.scanIncludes(body, page.source_path, from, &stack, 0);
+    }
+};
+
+fn resolveDependencies(
+    io: Io,
+    gpa: std.mem.Allocator,
+    retain: std.mem.Allocator,
+    content_dir: Io.Dir,
+    result: *Result,
+) !void {
+    var resolver: DependencyResolver = .{
+        .io = io,
+        .gpa = gpa,
+        .retain = retain,
+        .content_dir = content_dir,
+        .nodes = result.pages.items,
+        .edges = &result.edges,
+        .diagnostics = &result.diagnostics,
+    };
+    defer resolver.deinit();
+
+    for (result.pages.items) |page| {
+        const source = readFileAlloc(io, content_dir, page.source_path, gpa) catch |err| {
+            try result.diagnostics.append(gpa, .{
+                .severity = .error_,
+                .code = .EIO,
+                .message = try std.fmt.allocPrint(retain, "failed to read \"{s}\" while resolving dependencies: {s}", .{ page.source_path, @errorName(err) }),
+                .remediation = try retain.dupe(u8, "Ensure the page source is readable"),
+                .source_path = page.source_path,
+                .line = 1,
+                .column = 1,
+            });
+            result.failure = .io;
+            continue;
+        };
+        defer gpa.free(source);
+        if (page.body_offset > source.len) return error.InvalidBodyOffset;
+        try resolver.scanPage(page, source[page.body_offset..]);
+    }
+}
+
+fn freezeDependencyIndex(gpa: std.mem.Allocator, result: *Result) !void {
+    // Parent edges join resolved authored edges only after page indices/ids are frozen.
+    for (result.pages.items) |page| {
+        if (page.parent) |parent| {
+            try result.edges.append(gpa, .{
+                .from = .{ .type = .page, .value = page.id },
+                .to = .{ .type = .page, .value = parent },
+                .kind = "parent",
+            });
+        }
+    }
+
+    std.mem.sort(DependencyEdge, result.edges.items, {}, edgeLess);
+    var write: usize = 0;
+    for (result.edges.items) |edge| {
+        if (write == 0 or !edgeEql(result.edges.items[write - 1], edge)) {
+            result.edges.items[write] = edge;
+            write += 1;
+        }
+    }
+    result.edges.items.len = write;
+
+    var targets: std.ArrayList(Endpoint) = .empty;
+    defer targets.deinit(gpa);
+    for (result.edges.items) |edge| try targets.append(gpa, edge.to);
+    std.mem.sort(Endpoint, targets.items, {}, struct {
+        fn less(_: void, a: Endpoint, b: Endpoint) bool {
+            return endpointLess(a, b);
+        }
+    }.less);
+    write = 0;
+    for (targets.items) |target| {
+        if (write == 0 or !endpointEql(targets.items[write - 1], target)) {
+            targets.items[write] = target;
+            write += 1;
+        }
+    }
+    targets.items.len = write;
+
+    for (targets.items) |target| {
+        var incoming: std.ArrayList(u32) = .empty;
+        errdefer incoming.deinit(gpa);
+        for (result.edges.items, 0..) |edge, i| {
+            if (endpointEql(edge.to, target)) try incoming.append(gpa, @intCast(i));
+        }
+        const owned_incoming = try incoming.toOwnedSlice(gpa);
+        errdefer gpa.free(owned_incoming);
+        try result.reverse_index.append(gpa, .{
+            .target = target,
+            .incoming_edges = owned_incoming,
+        });
+    }
 }
 
 fn writeOptionalString(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: ?[]const u8) !void {
@@ -179,6 +461,20 @@ fn writeU32Array(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, values: []cons
     try buf.append(gpa, ']');
 }
 
+fn writeEndpoint(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, endpoint: Endpoint, indent_level: usize) !void {
+    try buf.appendSlice(gpa, "{\n");
+    try json_out.indent(buf, gpa, indent_level + 1);
+    try buf.appendSlice(gpa, "\"type\": ");
+    try json_out.writeString(buf, gpa, endpoint.type.name());
+    try buf.appendSlice(gpa, ",\n");
+    try json_out.indent(buf, gpa, indent_level + 1);
+    try buf.appendSlice(gpa, "\"value\": ");
+    try json_out.writeString(buf, gpa, endpoint.value);
+    try buf.append(gpa, '\n');
+    try json_out.indent(buf, gpa, indent_level);
+    try buf.append(gpa, '}');
+}
+
 pub fn renderGraph(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(gpa);
@@ -261,11 +557,11 @@ pub fn renderGraph(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
         try buf.appendSlice(gpa, "{\n");
         try json_out.indent(&buf, gpa, 3);
         try buf.appendSlice(gpa, "\"from\": ");
-        try json_out.writeUsize(&buf, gpa, e.from);
+        try writeEndpoint(&buf, gpa, e.from, 3);
         try buf.appendSlice(gpa, ",\n");
         try json_out.indent(&buf, gpa, 3);
         try buf.appendSlice(gpa, "\"to\": ");
-        try json_out.writeUsize(&buf, gpa, e.to);
+        try writeEndpoint(&buf, gpa, e.to, 3);
         try buf.appendSlice(gpa, ",\n");
         try json_out.indent(&buf, gpa, 3);
         try buf.appendSlice(gpa, "\"kind\": ");
@@ -279,7 +575,28 @@ pub fn renderGraph(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "],\n");
 
-    // Key order after edges: nav (derived, id-sorted parallel to nodes).
+    try json_out.indent(&buf, gpa, 1);
+    try buf.appendSlice(gpa, "\"reverseIndex\": [\n");
+    for (result.reverse_index.items, 0..) |entry, i| {
+        try json_out.indent(&buf, gpa, 2);
+        try buf.appendSlice(gpa, "{\n");
+        try json_out.indent(&buf, gpa, 3);
+        try buf.appendSlice(gpa, "\"target\": ");
+        try writeEndpoint(&buf, gpa, entry.target, 3);
+        try buf.appendSlice(gpa, ",\n");
+        try json_out.indent(&buf, gpa, 3);
+        try buf.appendSlice(gpa, "\"incomingEdges\": ");
+        try writeU32Array(&buf, gpa, entry.incoming_edges);
+        try buf.append(gpa, '\n');
+        try json_out.indent(&buf, gpa, 2);
+        try buf.append(gpa, '}');
+        if (i + 1 < result.reverse_index.items.len) try buf.append(gpa, ',');
+        try buf.append(gpa, '\n');
+    }
+    try json_out.indent(&buf, gpa, 1);
+    try buf.appendSlice(gpa, "],\n");
+
+    // Key order after reverseIndex: nav (derived, id-sorted parallel to nodes).
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"nav\": [\n");
     for (nav, 0..) |entry, i| {
@@ -517,6 +834,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         .arena = std.heap.ArenaAllocator.init(gpa),
         .pages = .empty,
         .edges = .empty,
+        .reverse_index = .empty,
         .diagnostics = .empty,
         .content_root = undefined,
         .out_dir = undefined,
@@ -703,12 +1021,17 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         });
     }
 
-    // --- 5. Validate whole graph once (shared with RAG) ---------------------
+    // --- 5. Validate page identity/topology, then direct dependencies -------
     logCompile(options.quiet, "boris: ignite validating graph\n", .{});
     try graph_mod.validate(gpa, retain, result.pages.items, &result.diagnostics);
     diag.sortDiagnostics(result.diagnostics.items);
 
-    const err_count = diag.countErrors(result.diagnostics.items);
+    var err_count = diag.countErrors(result.diagnostics.items);
+    if (err_count == 0) {
+        try resolveDependencies(io, gpa, retain, content_dir, &result);
+        diag.sortDiagnostics(result.diagnostics.items);
+        err_count = diag.countErrors(result.diagnostics.items);
+    }
     result.ok = err_count == 0;
     if (!result.ok) {
         // Preserve .io if a per-file read already failed; otherwise content/graph.
@@ -723,8 +1046,8 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     // --- 6. Freeze only after clean validation ------------------------------
     // TODO: wire layout_path when CompileOptions gains one; layouts not on IR options yet.
     const frozen = try graph_mod.freeze(gpa, result.pages.items, null);
-    result.edges.deinit(gpa);
-    result.edges = std.ArrayList(graph_mod.Edge).fromOwnedSlice(frozen.edges);
+    defer gpa.free(frozen.edges);
+    try freezeDependencyIndex(gpa, &result);
     result.graph_frozen = frozen.frozen;
     return result;
 }
@@ -834,7 +1157,7 @@ test "e2e valid fixture builds three JSON artifacts" {
     defer gpa.free(man_bytes);
     var man_parsed = try std.json.parseFromSlice(std.json.Value, gpa, man_bytes, .{});
     defer man_parsed.deinit();
-    try std.testing.expectEqualStrings("0.1.0", man_parsed.value.object.get("schemaVersion").?.string);
+    try std.testing.expectEqualStrings(schema_version, man_parsed.value.object.get("schemaVersion").?.string);
     try std.testing.expectEqualStrings(compiler_id, man_parsed.value.object.get("compiler").?.string);
     try std.testing.expectEqual(@as(i64, 3), man_parsed.value.object.get("pageCount").?.integer);
 
@@ -875,19 +1198,85 @@ test "e2e valid fixture builds three JSON artifacts" {
     try std.testing.expectEqual(@as(i64, 2), nav[2].object.get("breadcrumb").?.array.items[0].integer);
     try std.testing.expectEqual(@as(usize, 0), nav[2].object.get("children").?.array.items.len);
 
-    // Root key order: schemaVersion, frozen, nodes, edges, nav
+    // Root key order: schemaVersion, frozen, nodes, edges, reverseIndex, nav
     const k_schema = std.mem.indexOf(u8, graph_bytes, "\"schemaVersion\"").?;
     const k_frozen = std.mem.indexOf(u8, graph_bytes, "\"frozen\"").?;
     const k_nodes = std.mem.indexOf(u8, graph_bytes, "\"nodes\"").?;
     const k_edges = std.mem.indexOf(u8, graph_bytes, "\"edges\"").?;
+    const k_reverse = std.mem.indexOf(u8, graph_bytes, "\"reverseIndex\"").?;
     const k_nav = std.mem.indexOf(u8, graph_bytes, "\"nav\"").?;
-    try std.testing.expect(k_schema < k_frozen and k_frozen < k_nodes and k_nodes < k_edges and k_edges < k_nav);
+    try std.testing.expect(k_schema < k_frozen and k_frozen < k_nodes and k_nodes < k_edges and k_edges < k_reverse and k_reverse < k_nav);
 
     // No absolute paths in outputs.
     try std.testing.expect(std.mem.indexOf(u8, man_bytes, "/Users/") == null);
     try std.testing.expect(std.mem.indexOf(u8, man_bytes, "/tmp/") == null);
     try std.testing.expect(std.mem.indexOf(u8, graph_bytes, "/Users/") == null);
     try std.testing.expect(std.mem.indexOf(u8, graph_bytes, ".boris-stage") == null);
+}
+
+test "F8 graph-native fixture matches full graph golden" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try outRel(gpa, &tmp, "graph-native");
+    defer gpa.free(out);
+
+    var result = try run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/graph-native-dependencies/content",
+        .out_dir = out,
+        .quiet = true,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok and result.graph_frozen);
+    try std.testing.expectEqual(@as(usize, 5), result.edges.items.len);
+    try std.testing.expectEqual(@as(usize, 4), result.reverse_index.items.len);
+
+    const actual = try readOutFile(io, gpa, out, "graph.json");
+    defer gpa.free(actual);
+    const expected = try readFileAlloc(
+        io,
+        Io.Dir.cwd(),
+        "docs/contracts/fixtures/graph-native-dependencies/expected/graph.json",
+        gpa,
+    );
+    defer gpa.free(expected);
+    try std.testing.expectEqualStrings(expected, actual);
+}
+
+test "include and wiki failures prevent dependency graph freeze and publication" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const content = try outRel(gpa, &tmp, "content");
+    defer gpa.free(content);
+    const out = try outRel(gpa, &tmp, "out");
+    defer gpa.free(out);
+
+    const cwd = Io.Dir.cwd();
+    try cwd.createDirPath(io, content);
+    var dir = try cwd.openDir(io, content, .{});
+    defer dir.close(io);
+    try dir.writeFile(io, .{
+        .sub_path = "index.md",
+        .data = "{{include includes/missing.md}}\nSee [[missing/page]].\n",
+    });
+
+    var result = try run(io, gpa, .{
+        .content_root = content,
+        .out_dir = out,
+        .quiet = true,
+    });
+    defer result.deinit();
+    try std.testing.expect(!result.ok);
+    try std.testing.expect(!result.graph_frozen);
+    try std.testing.expect(!result.published_graph_ir);
+    try expectCode(&result, .EINCLUDEMISSING);
+    try expectCode(&result, .EREFERENCEMISSING);
+    try std.testing.expect(!fileExists(io, out, "manifest.json"));
+    try std.testing.expect(!fileExists(io, out, "graph.json"));
+    try std.testing.expect(fileExists(io, out, "build-report.json"));
 }
 
 test "duplicate id fails and does not publish graph-dependent IR" {

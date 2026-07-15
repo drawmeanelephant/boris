@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.1.0",
+  "schemaVersion": "0.2.0",
   "ok": true,
   "contentRoot": "fixtures/content/valid",
   "outDir": "fixtures/expected/valid",

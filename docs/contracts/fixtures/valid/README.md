@@ -21,9 +21,9 @@ content/
 
 ## Checks
 
-- `schemaVersion` is `"0.1.0"` on `manifest.json`, `graph.json`, and `build-report.json`
+- `schemaVersion` is `"0.2.0"` on `manifest.json`, `graph.json`, and `build-report.json`
 - Pages/nodes sorted by `id` as in the table order above
-- `graph.json` has `frozen: true`, one `parent` edge, and `nav` derived from
+- `graph.json` has `frozen: true`, one typed `parent` edge, its `reverseIndex`, and `nav` derived from
   the frozen graph (breadcrumb / children / siblings by node index)
 - Nodes carry `bodyOffset` (not full body text)
 - `build-report.json` has `ok: true`, `errorCount: 0`, empty diagnostics

@@ -1,7 +1,7 @@
 # Fixture skeleton: graph-native dependencies (F8.0)
 
 **Contract target:** IR `schemaVersion` `0.2.0`
-**Current status:** shape-only; not an executable golden until F8.2
+**Current status:** executable F8.2 golden
 
 ## Input topology
 
@@ -16,10 +16,10 @@
 
 ## Expected dependency projection
 
-[`expected/edge-skeleton.json`](expected/edge-skeleton.json) pins the complete
-sorted `edges` and `reverseIndex` arrays for these inputs. It is intentionally
-not named `graph.json`: F8.0 must not claim that the v0.2.1 compiler already
-emits IR 0.2. F8.2 will add the full artifact golden after implementation.
+[`expected/edge-skeleton.json`](expected/edge-skeleton.json) remains the compact
+contract pin for the complete sorted `edges` and `reverseIndex` arrays.
+[`expected/graph.json`](expected/graph.json) is the executable full-artifact
+golden checked by the release gate.
 
 The edge indices used by `reverseIndex` are positions in the final sorted
 `edges` array, not discovery order or hash-map order.

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "0.1.0",
+  "schemaVersion": "0.2.0",
   "frozen": true,
   "nodes": [
     {
@@ -53,9 +53,24 @@
   ],
   "edges": [
     {
-      "from": 3,
-      "to": 1,
+      "from": {
+        "type": "page",
+        "value": "satellite-child"
+      },
+      "to": {
+        "type": "page",
+        "value": "home"
+      },
       "kind": "parent"
+    }
+  ],
+  "reverseIndex": [
+    {
+      "target": {
+        "type": "page",
+        "value": "home"
+      },
+      "incomingEdges": [0]
     }
   ],
   "nav": [

@@ -14,13 +14,14 @@ affiliated with any commercial tobacco or rolling-paper brand.
 | | |
 |--|--|
 | Language | Zig **0.16.0** (`build.zig.zon` / CI pin) |
-| Product | **0.2.1** / compiler **boris/0.2.1** |
-| IR schema | **0.1.0** (unchanged; emit shape stable) |
+| Product | **0.3.0** / compiler **boris/0.3.0** |
+| IR schema | **0.2.0** (typed dependency endpoints + reverse index) |
 | License | [MIT](LICENSE) |
 
-**v0.2.1** adds Boris-mediated includes + wiki-links on the HTML path (Feature 7)
-on top of the **v0.2.0** HTML-default cut (ApexMarkdown Unified, graph-aware
-nav + TOC, incremental/watch/jobs/multi-target). Same IR schema as 0.1.x. See
+**v0.3.0** projects parent, include, and wiki-reference dependencies into IR
+with typed page/source endpoints and a deterministic reverse index. It builds
+on the **v0.2.1** Feature 7 HTML include/wiki path and the **v0.2.0**
+HTML-default cut. See
 [`CHANGELOG.md`](CHANGELOG.md) and [`docs/STATUS.md`](docs/STATUS.md).
 
 ---
@@ -134,7 +135,7 @@ See [frontmatter.md](docs/contracts/frontmatter.md).
 |----------|--------|
 | Default HTML site + real ApexMarkdown Unified | **Done** |
 | Trunk/Satellite graph, closed frontmatter, Asides | **Done** |
-| IR + RAG export | **Done** |
+| IR 0.2 graph-native dependencies + RAG export | **Done** |
 | Incremental, watch, parallel jobs, multi-target | **Done** |
 | CI Linux + macOS | **Done** |
 | Graph-aware HTML nav (`{{nav}}` / breadcrumb) | **Done** (Feature 6 MVP) |
@@ -194,6 +195,7 @@ See [frontmatter.md](docs/contracts/frontmatter.md).
 
 - **Shipped:** content graph, IR, RAG, Asides, real Apex Unified, HTML default,
   incremental/watch/jobs/multi-target, graph nav + in-page `{{toc}}`,
-  includes + wiki-links (Feature 7). Product **v0.2.1**.
-- **Next:** optional IR include edges / wiki `#heading` targets — see
+  includes + wiki-links (Feature 7), typed IR dependency edges + reverse index
+  (Feature 8.1–8.2). Product **v0.3.0**.
+- **Next:** F8.3 incremental dirty-set consumption and wiki `#heading` targets — see
   [`docs/STATUS.md`](docs/STATUS.md).

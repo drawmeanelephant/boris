@@ -11,7 +11,7 @@
 
 Keep `content/` a **living sample documentation site** that:
 
-1. Matches **Boris product reality as of v0.2.1** (HTML default, Apex Unified,
+1. Matches **Boris product reality as of v0.3.0** (HTML default, Apex Unified,
    Feature 6 nav + toc, Feature 7 includes + wiki-links, P2/P3 HTML helpers).
 2. Exercises the real compile path end-to-end: frontmatter → Trunk/Satellite
    graph → includes/wiki (HTML) → ApexMarkdown Unified → `<Aside>` stream →
@@ -31,7 +31,7 @@ user separately asks.
 
 | Doc | Why |
 |-----|-----|
-| `docs/STATUS.md` | Living phase; product **0.2.1** |
+| `docs/STATUS.md` | Living phase; product **0.3.0** |
 | `docs/contracts/frontmatter.md` | Closed FM grammar; **`parent` only** |
 | `docs/contracts/components.md` | Constrained `<Aside>` only |
 | `docs/contracts/html-output.md` | Default HTML path, layout markers, nav/toc |

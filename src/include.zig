@@ -152,7 +152,9 @@ pub fn bodyOfSource(source: []const u8) []const u8 {
     return parsed.doc.body;
 }
 
-fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Allocator) IncludeError![]u8 {
+/// Read one validated content-root-relative include source using the same
+/// no-follow / resolve-beneath policy as HTML expansion and IR resolution.
+pub fn readSourceAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Allocator) IncludeError![]u8 {
     // Resolve every directory component through a no-follow handle. A no-follow
     // open only on the final file would still permit an intermediate symlink.
     const last_slash = std.mem.lastIndexOfScalar(u8, path, '/');
@@ -333,7 +335,7 @@ fn walkIncludes(
         if (seen.contains(hit.path)) continue;
         try seen.put(allocator, hit.path, {});
 
-        const file_bytes = readFileAlloc(io, content_dir, hit.path, allocator) catch |err| {
+        const file_bytes = readSourceAlloc(io, content_dir, hit.path, allocator) catch |err| {
             if (fail_out) |f| f.set(hit.line, hit.column, hit.path, locus_path);
             return err;
         };
@@ -496,7 +498,7 @@ fn expandRecursive(
             try out.appendSlice(arena, body[copy_from..start]);
 
             const expanded = cache.get(path) orelse expanded: {
-                const file_bytes = readFileAlloc(io, content_dir, path, gpa) catch |err| {
+                const file_bytes = readSourceAlloc(io, content_dir, path, gpa) catch |err| {
                     setFail(fail_out, body, start, path, locus_path);
                     return err;
                 };
@@ -730,18 +732,16 @@ test "bodyOfSource strips frontmatter" {
 test "expandIncludes simple nested and cycle" {
     const io = std.testing.io;
     const gpa = std.testing.allocator;
-    const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-include-expand";
-    try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
 
-    try cwd.createDirPath(io, work ++ "/content/includes");
-    try cwd.writeFile(io, .{ .sub_path = work ++ "/content/includes/a.md", .data = "FROM_A {{include includes/b.md}}\n" });
-    try cwd.writeFile(io, .{ .sub_path = work ++ "/content/includes/b.md", .data = "FROM_B\n" });
-    try cwd.writeFile(io, .{ .sub_path = work ++ "/content/includes/c.md", .data = "{{include includes/d.md}}" });
-    try cwd.writeFile(io, .{ .sub_path = work ++ "/content/includes/d.md", .data = "{{include includes/c.md}}" });
+    try tmp.dir.createDirPath(io, "content/includes");
+    try tmp.dir.writeFile(io, .{ .sub_path = "content/includes/a.md", .data = "FROM_A {{include includes/b.md}}\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "content/includes/b.md", .data = "FROM_B\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "content/includes/c.md", .data = "{{include includes/d.md}}" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "content/includes/d.md", .data = "{{include includes/c.md}}" });
 
-    var content_dir = try cwd.openDir(io, work ++ "/content", .{});
+    var content_dir = try tmp.dir.openDir(io, "content", .{});
     defer content_dir.close(io);
 
     var arena = std.heap.ArenaAllocator.init(gpa);
@@ -772,7 +772,7 @@ test "expandIncludes simple nested and cycle" {
     try std.testing.expectEqual(@as(u32, 1), miss_fail.line);
 
     // Nested missing: locus is the include fragment that holds the bad directive.
-    try cwd.writeFile(io, .{ .sub_path = work ++ "/content/includes/outer.md", .data = "x\n{{include includes/nope.md}}\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "content/includes/outer.md", .data = "x\n{{include includes/nope.md}}\n" });
     var nested_miss: FailInfo = .{};
     try std.testing.expectError(
         error.IncludeMissing,
@@ -786,28 +786,26 @@ test "expandIncludes simple nested and cycle" {
 test "expandIncludes bounds exponential fan-out" {
     const io = std.testing.io;
     const gpa = std.testing.allocator;
-    const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-include-budget";
-    try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
 
-    try cwd.createDirPath(io, work ++ "/content/includes");
-    try cwd.writeFile(io, .{ .sub_path = work ++ "/content/includes/level-00.md", .data = "x" });
+    try tmp.dir.createDirPath(io, "content/includes");
+    try tmp.dir.writeFile(io, .{ .sub_path = "content/includes/level-00.md", .data = "x" });
 
     var level: usize = 1;
     while (level <= 12) : (level += 1) {
         var name_buf: [96]u8 = undefined;
-        const name = try std.fmt.bufPrint(&name_buf, work ++ "/content/includes/level-{d:0>2}.md", .{level});
+        const name = try std.fmt.bufPrint(&name_buf, "content/includes/level-{d:0>2}.md", .{level});
         var body_buf: [128]u8 = undefined;
         const body_text = try std.fmt.bufPrint(
             &body_buf,
             "{{{{include includes/level-{d:0>2}.md}}}}{{{{include includes/level-{d:0>2}.md}}}}",
             .{ level - 1, level - 1 },
         );
-        try cwd.writeFile(io, .{ .sub_path = name, .data = body_text });
+        try tmp.dir.writeFile(io, .{ .sub_path = name, .data = body_text });
     }
 
-    var content_dir = try cwd.openDir(io, work ++ "/content", .{});
+    var content_dir = try tmp.dir.openDir(io, "content", .{});
     defer content_dir.close(io);
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -840,24 +838,22 @@ test "expandIncludes rejects symlink targets and symlink path components" {
 
     const io = std.testing.io;
     const gpa = std.testing.allocator;
-    const cwd = Io.Dir.cwd();
-    const work = "zig-cache/boris-include-symlink";
-    try cwd.createDirPath(io, work);
-    defer cwd.deleteTree(io, work) catch {};
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
 
-    try cwd.createDirPath(io, work ++ "/content/includes");
-    try cwd.createDirPath(io, work ++ "/content/real");
-    try cwd.writeFile(io, .{ .sub_path = work ++ "/content/includes/real.md", .data = "secret\n" });
-    try cwd.writeFile(io, .{ .sub_path = work ++ "/content/real/secret.md", .data = "secret\n" });
+    try tmp.dir.createDirPath(io, "content/includes");
+    try tmp.dir.createDirPath(io, "content/real");
+    try tmp.dir.writeFile(io, .{ .sub_path = "content/includes/real.md", .data = "secret\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "content/real/secret.md", .data = "secret\n" });
 
-    var includes_dir = try cwd.openDir(io, work ++ "/content/includes", .{});
+    var includes_dir = try tmp.dir.openDir(io, "content/includes", .{});
     defer includes_dir.close(io);
     includes_dir.symLink(io, "real.md", "alias.md", .{}) catch |err| switch (err) {
         error.AccessDenied, error.PermissionDenied => return,
         else => return err,
     };
 
-    var content_dir = try cwd.openDir(io, work ++ "/content", .{});
+    var content_dir = try tmp.dir.openDir(io, "content", .{});
     defer content_dir.close(io);
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
