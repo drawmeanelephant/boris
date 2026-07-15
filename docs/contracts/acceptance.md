@@ -30,13 +30,12 @@ Claim **v0.1 content-compiler acceptance** only when all of the following hold:
 | 3 | Closed diagnostics set for content failures; process exits **0 / 1 / 2 / 3** as documented | [diagnostics.md](diagnostics.md); CLI tests |
 | 4 | Constrained `<Aside>` tokenizer on shared IR/RAG compile path (`ECOMPONENT`) | [components.md](components.md); `src/aside.zig` |
 | 5 | Apex linked in-process (C ABI); hostile ABI tests green; sanitizer opt-in | [apex-abi.md](apex-abi.md); `test-apex-hostile` |
-| 6 | Opt-in HTML path tested (Whiteboard + Aside stream); **not** required as bare-`boris` default | [html-output.md](html-output.md) |
+| 6 | HTML path tested (Whiteboard + Aside stream); bare `boris` defaults to `dist/` (Feature 2) | [html-output.md](html-output.md) |
 | 7 | CI on Linux + macOS; release-gate script runnable | `.github/workflows/ci.yml`; `scripts/release-gate.sh` |
 | 8 | Contracts + STATUS + CHANGELOG describe reality (no “pipeline not implemented” drift) | this tree |
 
 **Explicitly not required for v0.1 content-compiler acceptance**
 
-- HTML `dist/` as the **default** product CLI mode (bare `boris` remains IR)
 - Markdown-native `:::` **authoring** (export representation only)
 - Full YAML, MDX, nested asides, multi-component registry
 - Full upstream Apex test suite import (product uses structural U1–U17 fidelity;

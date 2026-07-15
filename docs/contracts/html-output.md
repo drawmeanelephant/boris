@@ -1,8 +1,8 @@
-# HTML output contract (opt-in — milestone 9 + P2/P3 extensions)
+# HTML output contract (default CLI — milestone 9 + P2/P3 + Feature 2)
 
-**Status:** opt-in product CLI / test-driven  
-**Not** the bare-`boris` default v0.1 product surface (default remains IR under
-`.boris/`; optional RAG). Default IR semantics are unchanged.
+**Status:** default product CLI surface / test-driven  
+Bare `boris` builds an HTML site under `dist/`. JSON IR remains available via
+`--out` / `--no-rag`. Optional RAG is unchanged (`--rag` / `--rag-dir`).
 
 Coordinator phases (discover, parse, graph freeze, fingerprint, dirty-set) are
 **sequential**. Independent HTML page render/publish may use bounded workers
@@ -18,13 +18,14 @@ tested** behavior from **platform-qualified** publication notes.
 
 | In scope | Out of scope |
 |----------|--------------|
-| Layout load + `{{content}}` split | Bare-`boris` default mode writing `dist/` |
-| Whiteboard per-page arena lifecycle | Process-RSS guarantees |
-| Ordered body stream: Apex(markdown) + Aside HTML | Generic component HTML / MDX |
-| Three-write layout splice | Mega-string assembly |
-| Temp-file publish via Zig 0.16 Atomic API | Cross-volume atomic rename claims |
-| PageDb durable metadata only | Full CommonMark (Apex stub is minimal) |
-| Fixture goldens under `test/fixtures/html/` | Multi-OS CI atomicity matrix for every FS |
+| Layout load + `{{content}}` split | Process-RSS guarantees |
+| Whiteboard per-page arena lifecycle | Generic component HTML / MDX |
+| Ordered body stream: Apex(markdown) + Aside HTML | Mega-string assembly |
+| Three-write layout splice | Cross-volume atomic rename claims |
+| Temp-file publish via Zig 0.16 Atomic API | Full YAML frontmatter / MDX |
+| PageDb durable metadata only | Multi-OS CI atomicity matrix for every FS |
+| Fixture goldens under `test/fixtures/html/` | |
+| Bare `boris` default → `dist/` (Feature 2) | |
 
 Modules:
 
@@ -36,9 +37,9 @@ Modules:
 - `src/watch.zig` — opt-in watch loop (P3.2)
 - `src/target.zig` — multi-target isolation (P3.3)
 
-CLI entry: `boris --html` / `--html-dir` / `--target` (and related flags).
-Library API: `compile.compileHtmlSite` (and multi-target helpers). Related
-contracts: [parallel-rendering.md](parallel-rendering.md),
+CLI entry: bare `boris` (default), or `--html` / `--html-dir` / `--target`
+(and related flags). Library API: `compile.compileHtmlSite` (and multi-target
+helpers). Related contracts: [parallel-rendering.md](parallel-rendering.md),
 [watch-mode.md](watch-mode.md),
 [multi-target-isolated-output.md](multi-target-isolated-output.md).
 
@@ -175,11 +176,16 @@ Run: `zig build test` (includes assemble + compile modules).
 
 ## CLI contract
 
-**Unchanged default:** `boris` without experimental flags still emits IR or RAG
-only. HTML `dist/` is **not** a default product mode in m9.
+**Default (Feature 2):** bare `boris` (and HTML-only flags such as `--jobs`,
+`--watch`, `--incremental`) builds an HTML site under `dist/` (or
+`--html-dir` / `--target` roots).
 
-Future CLI extension requires an explicit flag/docs change and must keep IR
-schemaVersion stable unless IR itself changes.
+**IR opt-in:** `--out <DIR>` or `--no-rag` selects JSON IR under `--out`
+(default `.boris`). Explicit `--html` / `--html-dir` / `--target` with `--out`
+or RAG flags is a usage error (exit 2).
+
+IR `schemaVersion` is unchanged by the default flip unless JSON IR shape
+changes.
 
 ---
 

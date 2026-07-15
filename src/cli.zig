@@ -16,7 +16,7 @@ pub const Mode = enum {
     ir,
     /// RAG-only export under `--rag-dir` (default `rag`).
     rag,
-    /// HTML site render under `--html-dir` (default `dist`).
+    /// HTML site render under `--html-dir` (default `dist`). Default bare CLI.
     html,
 };
 
@@ -25,7 +25,7 @@ pub const Options = struct {
     /// When true, print help and exit successfully (no pipeline).
     help: bool = false,
     quiet: bool = false,
-    mode: Mode = .ir,
+    mode: Mode = .html,
     /// Content root (default `content`).
     input_dir: []const u8 = "content",
     /// IR output directory. Set for IR mode only (default `.boris`).
@@ -36,7 +36,7 @@ pub const Options = struct {
     html_dir: ?[]const u8 = null,
     /// Global HTML layout template (default `layouts/main.html`).
     html_layout: []const u8 = "layouts/main.html",
-    /// Explicit incremental HTML build mode. Valid only with --html/--html-dir.
+    /// Explicit incremental HTML build mode (HTML mode only).
     incremental: bool = false,
     /// Bounded parallel rendering worker count (HTML mode only).
     jobs: usize = 1,
@@ -263,46 +263,51 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
 
     const has_explicit_targets = targets.items.len > 0;
     const has_target_layouts = target_layouts.items.len > 0;
-    const is_html_mode = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts;
+    // Explicit HTML selectors (not the bare default).
+    const explicit_html = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts;
+    const wants_rag = saw_rag or saw_rag_dir;
+    // Explicit IR: --out and/or --no-rag (bare CLI is HTML, not IR).
+    const wants_ir = saw_out or saw_no_rag;
 
     // --- conflict matrix ---------------------------------------------------
     if (saw_rag and saw_no_rag) return error.ConflictingFlags;
     if (saw_no_rag and saw_rag_dir) return error.ConflictingFlags;
     // Explicit --out must never be combined with RAG-only selection.
-    if (saw_out and (saw_rag or saw_rag_dir)) return error.ConflictingFlags;
-    // HTML/SSG mode owns its output destination; refuse IR/RAG output flags.
-    if (is_html_mode and (saw_rag or saw_rag_dir or saw_out)) {
+    if (saw_out and wants_rag) return error.ConflictingFlags;
+    // Explicit HTML selectors own the output destination; refuse IR/RAG flags.
+    if (explicit_html and (wants_rag or saw_out)) {
+        return error.ConflictingFlags;
+    }
+    // HTML-only options conflict with IR or RAG selection (default HTML is fine).
+    if ((saw_jobs or saw_watch or saw_incremental) and (wants_ir or wants_rag)) {
         return error.ConflictingFlags;
     }
     // Target conflict rules
     if (has_explicit_targets and saw_html_dir) return error.ConflictingFlags;
-    // --target-layout requires HTML targets
+    // --target-layout requires named targets (or --html / --html-dir for default).
     if (has_target_layouts and !has_explicit_targets and !(saw_html or saw_html_dir)) {
         return error.ConflictingFlags;
     }
 
-    // Incremental option is valid only when combined with HTML mode.
-    if (saw_incremental and !is_html_mode) {
-        return error.ConflictingFlags;
-    }
-    // Jobs option is valid only when combined with HTML mode.
-    if (saw_jobs and !is_html_mode) {
-        return error.ConflictingFlags;
-    }
-    // Watch option is valid only when combined with HTML mode.
-    if (saw_watch and !is_html_mode) {
-        return error.ConflictingFlags;
-    }
-    // Layout-only flags without HTML mode
-    if ((saw_html_layout or has_target_layouts) and !is_html_mode) {
-        return error.ConflictingFlags;
-    }
+    // Mode selection:
+    // 1. Explicit HTML flags / --target → HTML
+    // 2. --rag / --rag-dir → RAG-only
+    // 3. --out / --no-rag → IR
+    // 4. Default (no mode flags) → HTML site under dist/
+    const mode: Mode = if (explicit_html)
+        .html
+    else if (wants_rag)
+        .rag
+    else if (wants_ir)
+        .ir
+    else
+        .html;
 
-    // Default target mapping for legacy compatibility
-    if (!has_explicit_targets and (saw_html or saw_html_dir or saw_html_layout)) {
+    // Single-target HTML (default or --html / --html-dir) maps to target "default".
+    if (mode == .html and !has_explicit_targets) {
         try targets.append(gpa, .{
             .name = "default",
-            .output_dir = if (saw_html_dir) html_dir else "dist",
+            .output_dir = if (saw_html_dir) html_dir else default_html_dir,
             .layout_path = null,
         });
     }
@@ -321,18 +326,6 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (!found) return error.InvalidValue;
     }
     target_layouts.deinit(gpa);
-
-    // Mode selection:
-    // 1. Default → IR
-    // 2. --no-rag → IR
-    // 3. --rag / --rag-dir → RAG-only
-    // 4. --html / --html-dir / --target → HTML site
-    const mode: Mode = if (is_html_mode)
-        .html
-    else if (saw_rag or saw_rag_dir)
-        .rag
-    else
-        .ir;
 
     return switch (mode) {
         .ir => .{
@@ -396,44 +389,45 @@ fn takeValue(
 
 pub fn printUsage() void {
     std.debug.print(
-        \\Boris — Zig content compiler (IR + optional RAG + opt-in HTML)
+        \\Boris — Zig content compiler (HTML site + IR + optional RAG)
         \\
         \\Usage: boris [options]
         \\
         \\Modes:
-        \\  (default)           IR mode → write JSON under --out (default .boris)
-        \\  --no-rag            Explicit IR mode
-        \\  --rag               RAG-only mode → corpus under --rag-dir (default rag)
-        \\  --rag-dir <DIR>     RAG-only mode with output directory DIR
-        \\  --html              HTML site mode → pages under --html-dir (default dist)
+        \\  (default)           HTML site → pages under dist/ (content/ + layouts/main.html)
+        \\  --html              Explicit HTML site mode → --html-dir (default dist)
         \\  --html-dir <DIR>    HTML site mode with output directory DIR
         \\  --target NAME=DIR   HTML multi-target mode (repeatable); implies HTML
+        \\  --out <DIR>         IR mode → write JSON under DIR (default .boris when --no-rag)
+        \\  --no-rag            Explicit IR mode (JSON under --out, default .boris)
+        \\  --rag               RAG-only mode → corpus under --rag-dir (default rag)
+        \\  --rag-dir <DIR>     RAG-only mode with output directory DIR
         \\
         \\Options:
         \\  --input <DIR>       Content root (default: content)
-        \\  --out <DIR>         IR output directory (default: .boris; IR mode only)
+        \\  --out <DIR>         IR output directory (selects IR mode; default: .boris)
         \\  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
         \\  --html-dir <DIR>    HTML output directory (implies HTML; default: dist)
         \\  --html-layout PATH  Global layout template (default: layouts/main.html)
         \\  --target NAME=DIR   Named HTML output root (repeatable; exclusive with --html-dir)
         \\  --target-layout N=P Per-target layout override (NAME=PATH; target must exist)
-        \\  --incremental       Opt-in to fast, content-addressed incremental HTML rendering (requires HTML mode)
-        \\  --watch             Opt-in local-development watch mode for HTML builds (implies --incremental)
-        \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; requires HTML mode; default 1)
+        \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
+        \\  --watch             Local-development watch mode for HTML builds (implies --incremental)
+        \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1)
         \\  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
         \\  -h, --help          Show this help and exit 0
-        \\
-        \\IR artifacts (success):
-        \\  <out>/manifest.json  <out>/graph.json  <out>/build-report.json
-        \\
-        \\RAG artifacts (success; same graph validation as IR):
-        \\  INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json
-        \\  system/**  content/pages/**  graph/entity-catalog.md  graph/relations.md
         \\
         \\HTML artifacts (success; Apex + layout splice):
         \\  <html-dir>/**/*.html   or   <each-target-dir>/**/*.html
         \\  <target-dir>/.boris-cache/manifest.json  (with --incremental / --watch)
         \\  Staging: <target-dir>.boris-stage (ephemeral; committed only on full target success)
+        \\
+        \\IR artifacts (success; --out or --no-rag):
+        \\  <out>/manifest.json  <out>/graph.json  <out>/build-report.json
+        \\
+        \\RAG artifacts (success; same graph validation as IR):
+        \\  INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json
+        \\  system/**  content/pages/**  graph/entity-catalog.md  graph/relations.md
         \\
         \\Conflicts (exit 2):
         \\  --rag with --no-rag
@@ -441,12 +435,12 @@ pub fn printUsage() void {
         \\  explicit --out with --rag or --rag-dir
         \\  --html / --html-dir / --target with --rag, --rag-dir, or explicit --out
         \\  --target with --html-dir
-        \\  --watch, --incremental, or --jobs without HTML mode
+        \\  --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG
         \\  Invalid target names, output collisions, workspace escape, content/layout overlap
         \\
         \\Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
         \\
-        \\Note: HTML is opt-in via --html / --html-dir / --target; default remains IR.
+        \\Note: Bare `boris` builds HTML under dist/. Use --out for JSON IR.
         \\      --html / --html-dir map to a single target named "default".
         \\
     , .{});
@@ -594,16 +588,28 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualStrings = std.testing.expectEqualStrings;
 const expectError = std.testing.expectError;
 
-test "parse: default is IR mode" {
+test "parse: default is HTML mode" {
     var o = try parseOptions(std.testing.allocator, &.{ "boris" });
     defer o.deinit(std.testing.allocator);
     try expect(!o.help);
     try expect(!o.quiet);
-    try expectEqual(Mode.ir, o.mode);
+    try expectEqual(Mode.html, o.mode);
     try expectEqualStrings(default_input_dir, o.input_dir);
-    try expectEqualStrings(default_out_dir, o.out_dir.?);
+    try expect(o.out_dir == null);
     try expect(o.rag_dir == null);
+    try expectEqualStrings(default_html_dir, o.html_dir.?);
+    try expectEqual(@as(usize, 1), o.targets.items.len);
+    try expectEqualStrings("default", o.targets.items[0].name);
+    try expectEqualStrings(default_html_dir, o.targets.items[0].output_dir);
+}
+
+test "parse: --out selects IR mode" {
+    var o = try parseOptions(std.testing.allocator, &.{ "boris", "--out", ".boris" });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(Mode.ir, o.mode);
+    try expectEqualStrings(".boris", o.out_dir.?);
     try expect(o.html_dir == null);
+    try expect(o.rag_dir == null);
 }
 
 test "parse: valid modes table" {
@@ -765,6 +771,35 @@ test "parse: valid modes table" {
             .quiet = false,
             .jobs = 8,
         },
+        // HTML-only flags without --html are valid under the HTML default.
+        .{
+            .args = &.{ "boris", "--jobs", "4" },
+            .mode = .html,
+            .input = "content",
+            .out = null,
+            .rag = null,
+            .html = "dist",
+            .quiet = false,
+            .jobs = 4,
+        },
+        .{
+            .args = &.{ "boris", "--input", "docs", "--quiet" },
+            .mode = .html,
+            .input = "docs",
+            .out = null,
+            .rag = null,
+            .html = "dist",
+            .quiet = true,
+        },
+        .{
+            .args = &.{ "boris", "--out", ".boris" },
+            .mode = .ir,
+            .input = "content",
+            .out = ".boris",
+            .rag = null,
+            .html = null,
+            .quiet = false,
+        },
     };
 
     for (cases) |c| {
@@ -848,8 +883,10 @@ test "parse: conflicts and missing values table" {
         .{ .args = &.{ "boris", "--out", "a", "--out", "b" }, .err = error.DuplicateFlag },
         .{ .args = &.{ "boris", "--rag-dir", "a", "--rag-dir", "b" }, .err = error.DuplicateFlag },
         .{ .args = &.{ "boris", "--html-dir", "a", "--html-dir", "b" }, .err = error.DuplicateFlag },
-        // Jobs option tests
-        .{ .args = &.{ "boris", "--jobs", "4" }, .err = error.ConflictingFlags },
+        // Jobs option tests (valid alone under HTML default; conflict with IR/RAG)
+        .{ .args = &.{ "boris", "--jobs", "4", "--out", "x" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--jobs", "4", "--rag" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--jobs", "4", "--no-rag" }, .err = error.ConflictingFlags },
         .{ .args = &.{ "boris", "--html", "--jobs", "0" }, .err = error.InvalidValue },
         .{ .args = &.{ "boris", "--html", "--jobs", "65" }, .err = error.InvalidValue },
         .{ .args = &.{ "boris", "--html", "--jobs", "abc" }, .err = error.InvalidValue },
@@ -858,12 +895,14 @@ test "parse: conflicts and missing values table" {
         .{ .args = &.{ "boris", "--html", "--jobs" }, .err = error.MissingValue },
         .{ .args = &.{ "boris", "--html", "-j" }, .err = error.MissingValue },
         .{ .args = &.{ "boris", "--html", "--jobs", "4", "--jobs", "8" }, .err = error.DuplicateFlag },
-        // Watch option tests
-        .{ .args = &.{ "boris", "--watch" }, .err = error.ConflictingFlags },
-        .{ .args = &.{ "boris", "--watch", "--input", "content" }, .err = error.ConflictingFlags },
+        // Watch option tests (valid alone under HTML default; conflict with IR/RAG)
+        .{ .args = &.{ "boris", "--watch", "--out", "x" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--watch", "--rag" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--watch", "--no-rag" }, .err = error.ConflictingFlags },
         .{ .args = &.{ "boris", "--html", "--watch", "--watch" }, .err = error.DuplicateFlag },
         .{ .args = &.{ "boris", "--html", "--watch", "--rag" }, .err = error.ConflictingFlags },
         .{ .args = &.{ "boris", "--html", "--watch", "--out", "x" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--incremental", "--out", "x" }, .err = error.ConflictingFlags },
     };
 
     for (cases) |c| {
@@ -892,6 +931,13 @@ test "parse: --watch with HTML implies incremental" {
     defer o3.deinit(std.testing.allocator);
     try expect(o3.watch);
     try expect(o3.incremental);
+
+    // Bare --watch is valid under HTML default
+    var o4 = try parseOptions(std.testing.allocator, &.{ "boris", "--watch" });
+    defer o4.deinit(std.testing.allocator);
+    try expectEqual(Mode.html, o4.mode);
+    try expect(o4.watch);
+    try expect(o4.incremental);
 }
 
 test "parse: help short-circuits and does not validate trailing junk" {

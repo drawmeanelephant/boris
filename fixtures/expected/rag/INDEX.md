@@ -65,10 +65,11 @@ rag_id, rag_path, category, title, entity_id, role, parent_entry, tags
 Rows sorted by `rag_path`. No timestamps, absolute paths, hostnames,
 or random ids. Content title H1 is metadata-owned (frontmatter `title`
 else entity id). Source leading H1 stripped; remaining ATX H1s demoted
-to H2. Asides are **not** rewritten to `:::kind` in this milestone.
+to H2. Parsed `<Aside>` callouts are emitted as `:::kind` blocks
+(export representation only — not round-trippable authoring syntax).
 
 ### catalog_meta.json
 
 ```json
-{"format":"boris-rag","schema_version":1,"boris_version":"0.0.1"}
+{"format":"boris-rag","schema_version":1,"boris_version":"0.1.1"}
 ```

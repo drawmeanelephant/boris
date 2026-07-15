@@ -21,8 +21,8 @@ page’s scratch is finished.
 **Invariant:** `free_all` only after Apex return, flush, temp finalize, and
 publish attempt; no caller retains Whiteboard slices.
 
-This path is **opt-in relative to the v0.1 default CLI** (IR under
-`.boris/`). Whiteboard behavior is exercised by tests in `src/compile.zig` and
+This path is the **default product CLI** HTML surface (bare `boris` → `dist/`).
+Whiteboard behavior is exercised by tests in `src/compile.zig` and
 `src/hardening_test.zig`.
 
 ## Loop shape (`src/compile.zig`)

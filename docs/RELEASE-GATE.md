@@ -9,9 +9,10 @@ zig build
 zig build test
 zig build test-apex-hostile
 zig build test-apex-sanitize   # optional; documents skip if sanitizers unavailable
-zig build run -- --input fixtures/content/valid --out /tmp/boris-ir
-zig build run -- --input fixtures/content/valid --rag-dir /tmp/boris-rag
-zig build run -- --input test/fixtures/html/content --html-dir /tmp/boris-dist
+zig build run -- --input fixtures/content/valid --out .tmp/boris-ir
+zig build run -- --input fixtures/content/valid --rag-dir .tmp/boris-rag
+zig build run -- --input test/fixtures/html/content --html-dir .tmp/boris-dist
+zig build run -- --input content --quiet   # default HTML → dist/
 zig build package              # optional; review tar under packages/ (not ship-blocking)
 ./scripts/release-gate.sh      # preferred one-shot mechanical gate
 ```
@@ -46,10 +47,10 @@ verified. Do not check an item because a design doc exists.
       - optional ASan+UBSan smoke via `zig build test-apex-sanitize`
         (document skip when unavailable; do not pretend it ran)
       - contract: [`docs/contracts/apex-abi.md`](contracts/apex-abi.md)
-      - **Note:** vendor engine remains a **minimal markdown stub** (not
-        CommonMark); hostile tests cover the ABI boundary, not full fidelity
+      - **Note:** vendor engine is **ApexMarkdown Unified** (Feature 1); hostile
+        tests cover the ABI boundary; structural fidelity via U1–U17
 - [x] **HTML assemble / Whiteboard tests** — arena / whiteboard lifetime contracts
-      on the **opt-in** HTML path (`--html` / `--html-dir` / `--target`):
+      on the HTML path (default CLI + `--html` / `--html-dir` / `--target`):
       - per-page `reset(.free_all)` after flush + publish (`src/compile.zig`)
       - Hold-until-flush proves invalidate-before-flush fails
         (`src/assemble.zig`)
@@ -57,7 +58,7 @@ verified. Do not check an item because a design doc exists.
       - PageDb metadata survives each Whiteboard reset
       - fixture goldens: `test/fixtures/html/`
       - contract: [`docs/contracts/html-output.md`](contracts/html-output.md)
-      - **still not** the bare-`boris` default product surface (IR remains default)
+      - **Feature 2:** bare `boris` defaults to HTML under `dist/`; IR via `--out`
 - [x] **P2 graph-native foundations** — dependency indexes, includes,
       content-addressed fingerprints, opt-in `--incremental` HTML
       (`src/dependency.zig`, `src/cache.zig`, `src/compile.zig`; `zig build test`)
@@ -75,10 +76,10 @@ verified. Do not check an item because a design doc exists.
 
 ## Current phase notes
 
-**v0.1 content-compiler surface** remains the bare CLI default (IR under
-`.boris/`). **P2 and P3 scale-out on the HTML path are complete.** **Feature 1
-(ApexMarkdown Unified)** is Done. Next product work is promoting HTML to the
-default CLI (Feature 2) — see [`docs/STATUS.md`](STATUS.md).
+**Default CLI is HTML** under `dist/` (Feature 2). IR remains available via
+`--out` / `--no-rag`. **P2 and P3 scale-out on the HTML path are complete.**
+**Feature 1 (ApexMarkdown Unified)** and **Feature 2 (HTML default)** are Done —
+see [`docs/STATUS.md`](STATUS.md).
 
 **Compile-time host tool:** CMake is required for static ApexMarkdown
 (`scripts/build-apex-markdown.sh` / `zig build build-apex`).
@@ -104,9 +105,9 @@ Experimental single-threaded HTML path — Apex, Whiteboard, PageDb, layout
 splice, Atomic publish. Later work wired HTML as **opt-in CLI** and added
 P2/P3 capabilities on that path.
 
-**Still deferred as product defaults:** HTML as bare-`boris` default CLI mode
-(Feature 2), mmap, child-process markdown (forbidden). ApexMarkdown Unified is
-the linked engine (Feature 1 Done).
+**Still deferred:** mmap, child-process markdown (forbidden), embedded HTTP dev
+server. ApexMarkdown Unified is the linked engine (Feature 1 Done). HTML is the
+bare-`boris` default (Feature 2 Done).
 
 ## Milestone 8 scope (prior; extended by Feature 1)
 

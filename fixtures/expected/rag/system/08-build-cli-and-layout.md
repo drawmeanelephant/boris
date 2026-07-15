@@ -14,12 +14,15 @@ tags: [cli, build, layout, flags, zig]
 - Executable artifact: `boris`
 - Steps:
   - `zig build` — compile/install
-  - `zig build run` — run with optional args after `--`
-  - `zig build rag` — RAG export convenience step (`--rag` plus forwarded args)
-  - `zig build test` — unit tests
+  - `zig build run -- …` — product CLI (IR default; `--rag` / `--rag-dir` for RAG)
+  - `zig build test` — unit + hardening + fuzz tests
+  - `zig build test-apex-hostile` / `zig build test-apex-sanitize` — Apex extras
+  - `zig build source-rag` — source-code pack tool (not product RAG)
 
-`zig build rag -- …` forwards arguments after `--` to the binary (in addition to
-the baked-in `--rag`).
+**Workshop analogy:** one foreman and one workbench (or a small crew for HTML
+page jobs).  
+**Invariant:** coordinator phases stay sequential; HTML page workers (when
+`--jobs N` > 1) never share Whiteboards or mutate the frozen graph.
 
 ## Layout contract
 
@@ -50,35 +53,42 @@ Admonition styles use classes such as `.admonition`, `.admonition--tip`,
 <Aside kind="tip" id="optional-anchor">…</Aside>
 ```
 
-## CLI modes (v0.1 product surface)
+## CLI modes (product surface)
 
 | Mode | Flags | Writes |
 |------|-------|--------|
-| **IR (default)** | *(none)* or `--no-rag` | JSON under `--out` (default `.boris`) |
+| **HTML (default)** | *(none)*, `--html`, `--html-dir=DIR`, and/or `--target NAME=DIR` | Site under `dist/` or each HTML output root |
+| **IR** | `--out=DIR` and/or `--no-rag` | JSON under `--out` (default `.boris`) |
 | **RAG-only** | `--rag` and/or `--rag-dir=DIR` | Corpus under RAG dir (default `rag/`) |
 
 **Decision:** `--rag-dir=DIR` **implies RAG-only**. It is **not** “HTML plus RAG”
-and **not** “IR plus RAG”. HTML site generation remains an in-tree experiment
-(`compile` / `assemble`) and is not the default CLI path.
+and **not** “IR plus RAG”. Bare `boris` builds HTML under `dist/` (Feature 2).
+JSON IR is opt-in via `--out` / `--no-rag`.
 
 `--out` applies **only** to the IR path. An explicit `--out=…` combined with
-`--rag` or `--rag-dir` is a **usage error** (exit 2) — never silently ignored.
-Use `--rag-dir` to choose the RAG corpus directory.
+`--rag`, `--rag-dir`, `--html`, `--html-dir`, or `--target` is a **usage error**
+(exit 2) — never silently ignored. Use `--rag-dir` for RAG corpus directory and
+`--html-dir` / `--target` for HTML roots.
 
 ## CLI flags
 
 | Flag | Effect |
 |------|--------|
 | `--input=DIR` | Content root (default: `content`) |
-| `--out=DIR` | IR artifact directory (default: `.boris`); IR path only |
+| `--out=DIR` | Selects IR mode; artifact directory (default: `.boris`) |
 | `--rag` | RAG export only (default dir: `rag/`) |
-| `--no-rag` | Explicit IR-only (default; mutually exclusive with `--rag` / `--rag-dir`) |
+| `--no-rag` | Explicit IR-only (mutually exclusive with `--rag` / `--rag-dir`) |
 | `--rag-dir=DIR` | RAG output directory (**implies RAG-only**) |
-| `--quiet` | Less progress logging |
+| `--html` / `--html-dir=DIR` | Explicit HTML site mode (single target `default`; dir default `dist`) |
+| `--target NAME=DIR` | Multi-target HTML (repeatable; exclusive with `--html-dir`) |
+| `--html-layout=PATH` / `--target-layout NAME=PATH` | Layout selection |
+| `--incremental` | Content-addressed incremental HTML (HTML mode) |
+| `--watch` | Debounced HTML rebuild loop (implies `--incremental`; HTML mode) |
+| `--jobs N` / `-j N` | Bounded parallel HTML page workers `1–64` (HTML mode) |
+| `--quiet` | Suppress progress + diagnostic stderr (exit codes/artifacts unchanged) |
 | `-h`, `--help` | Print usage and exit `0` **without** scanning content |
 
-Malformed empty values for `--input=`, `--out=`, or `--rag-dir=` are usage
-errors (exit 2).
+Malformed empty values for path options are usage errors (exit 2).
 
 ## Exit codes
 
@@ -97,7 +107,8 @@ zig build run -- --input=content --out=.boris
 zig build run -- --no-rag
 zig build run -- --rag
 zig build run -- --rag-dir=./uploads/boris-rag
-zig build rag
-zig build rag -- --rag-dir=./uploads/boris-rag
-zig build rag -- --help
+zig build run -- --html
+zig build run -- --jobs 4
+zig build run -- --watch
+zig build run -- --target prod=dist/prod --target stage=dist/stage
 ```

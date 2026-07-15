@@ -36,4 +36,4 @@ zig build run -- --input content --rag-dir ./uploads/boris-rag
 - Paths inside documents are logical RAG paths (not OS-absolute).
 - Content segments mirror `entity_id` (`guides/intro` → `content/pages/guides/intro.md`).
 - Graph-dependent files are published only after shared `graph.validate` succeeds.
-- `:::kind` is **not** emitted in this milestone; asides stay deferred.
+- Parsed `<Aside>` callouts appear as `:::kind` export blocks (not authoring syntax).

@@ -58,17 +58,17 @@ Admonition styles use classes such as `.admonition`, `.admonition--tip`,
 <Aside kind="tip" id="optional-anchor">…</Aside>
 ```
 
-## CLI modes (v0.1 product surface)
+## CLI modes (product surface)
 
 | Mode | Flags | Writes |
 |------|-------|--------|
-| **IR (default)** | *(none)* or `--no-rag` | JSON under `--out` (default `.boris`) |
+| **HTML (default)** | *(none)*, `--html`, `--html-dir=DIR`, and/or `--target NAME=DIR` | Site under `dist/` or each HTML output root |
+| **IR** | `--out=DIR` and/or `--no-rag` | JSON under `--out` (default `.boris`) |
 | **RAG-only** | `--rag` and/or `--rag-dir=DIR` | Corpus under RAG dir (default `rag/`) |
-| **HTML (opt-in)** | `--html`, `--html-dir=DIR`, and/or `--target NAME=DIR` | Site under each HTML output root |
 
 **Decision:** `--rag-dir=DIR` **implies RAG-only**. It is **not** “HTML plus RAG”
-and **not** “IR plus RAG”. HTML is an **opt-in** CLI surface (not the bare
-default); IR remains the no-flag product mode until a documented default flip.
+and **not** “IR plus RAG”. Bare `boris` builds HTML under `dist/` (Feature 2).
+JSON IR is opt-in via `--out` / `--no-rag`.
 
 `--out` applies **only** to the IR path. An explicit `--out=…` combined with
 `--rag`, `--rag-dir`, `--html`, `--html-dir`, or `--target` is a **usage error**
@@ -80,16 +80,16 @@ default); IR remains the no-flag product mode until a documented default flip.
 | Flag | Effect |
 |------|--------|
 | `--input=DIR` | Content root (default: `content`) |
-| `--out=DIR` | IR artifact directory (default: `.boris`); IR path only |
+| `--out=DIR` | Selects IR mode; artifact directory (default: `.boris`) |
 | `--rag` | RAG export only (default dir: `rag/`) |
-| `--no-rag` | Explicit IR-only (default; mutually exclusive with `--rag` / `--rag-dir`) |
+| `--no-rag` | Explicit IR-only (mutually exclusive with `--rag` / `--rag-dir`) |
 | `--rag-dir=DIR` | RAG output directory (**implies RAG-only**) |
-| `--html` / `--html-dir=DIR` | HTML site mode (single target `default`; dir default `dist`) |
+| `--html` / `--html-dir=DIR` | Explicit HTML site mode (single target `default`; dir default `dist`) |
 | `--target NAME=DIR` | Multi-target HTML (repeatable; exclusive with `--html-dir`) |
 | `--html-layout=PATH` / `--target-layout NAME=PATH` | Layout selection |
-| `--incremental` | Content-addressed incremental HTML (requires HTML) |
-| `--watch` | Debounced HTML rebuild loop (implies `--incremental`; requires HTML) |
-| `--jobs N` / `-j N` | Bounded parallel HTML page workers `1–64` (requires HTML) |
+| `--incremental` | Content-addressed incremental HTML (HTML mode) |
+| `--watch` | Debounced HTML rebuild loop (implies `--incremental`; HTML mode) |
+| `--jobs N` / `-j N` | Bounded parallel HTML page workers `1–64` (HTML mode) |
 | `--quiet` | Suppress progress + diagnostic stderr (exit codes/artifacts unchanged) |
 | `-h`, `--help` | Print usage and exit `0` **without** scanning content |
 
@@ -113,7 +113,7 @@ zig build run -- --no-rag
 zig build run -- --rag
 zig build run -- --rag-dir=./uploads/boris-rag
 zig build run -- --html
-zig build run -- --html --jobs 4
-zig build run -- --html --watch
+zig build run -- --jobs 4
+zig build run -- --watch
 zig build run -- --target prod=dist/prod --target stage=dist/stage
 ```

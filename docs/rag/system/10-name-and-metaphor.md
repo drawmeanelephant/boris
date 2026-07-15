@@ -52,7 +52,7 @@ CLI flags and not IR field names.
 ```text
 LOAD   → gather sources (discover / scan / identity)
 ROLL   → shape the payload (frontmatter, body split, graph freeze)
-IGNITE → fire the work (validate, emit IR / RAG / opt-in HTML)
+IGNITE → fire the work (validate, emit HTML / IR / RAG)
 RESET  → free page scratch; next page starts clean
 ```
 
@@ -112,14 +112,14 @@ discipline is the same: **deterministic finish, no leftover intermediate soup.**
 ## Status honesty
 
 Metaphors describe **intent and long-term shape**. Current milestone status lives
-in `docs/STATUS.md`. Bare CLI remains IR-first; opt-in HTML uses whiteboard +
-zero-copy assemble (with bounded `--jobs` workers and optional `--watch`). Do not
-treat this seed as a claim that every stage is fully wired on every CLI mode, or
-that Apex is CommonMark-complete.
+in `docs/STATUS.md`. Bare CLI builds HTML under `dist/` (whiteboard + zero-copy
+assemble, with bounded `--jobs` workers and optional `--watch`); IR is via
+`--out`. Do not treat this seed as a claim that every stage is fully wired on
+every CLI mode.
 
 ## One-sentence summary for retrieval
 
 Boris the compiler is named for the folk Zouave improviser known as Boris:
 **load** sources, **roll** a validated Trunk/Satellite payload, **ignite**
-deterministic emit (IR, optional RAG, opt-in HTML), **reset** page scratch
+deterministic emit (HTML site, IR, or optional RAG), **reset** page scratch
 and go again — independent software, not a commercial brand extension.

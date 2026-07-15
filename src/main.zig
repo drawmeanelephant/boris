@@ -1,9 +1,10 @@
-//! Boris — product CLI entry (IR + optional RAG + opt-in HTML).
+//! Boris — product CLI entry (HTML default + IR + optional RAG).
 //!
-//! Typed flag parsing + exit-code model. IR mode runs the content compiler
-//! pipeline (scan → parse → PageDb → graph validate → deterministic JSON IR).
-//! RAG mode reuses `pipeline.compile` + exports a deterministic corpus.
-//! HTML mode calls the Apex + Whiteboard site compiler under `dist/` (opt-in).
+//! Typed flag parsing + exit-code model. Default mode builds an HTML site
+//! under `dist/` (Apex + Whiteboard + layout splice). IR mode (`--out` /
+//! `--no-rag`) runs the content compiler pipeline (scan → parse → PageDb →
+//! graph validate → deterministic JSON IR). RAG mode reuses `pipeline.compile`
+//! + exports a deterministic corpus.
 
 const std = @import("std");
 const Io = std.Io;
@@ -124,7 +125,7 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     };
 }
 
-/// Opt-in HTML site render via Apex C-ABI + whiteboard arena (compile path).
+/// HTML site render via Apex C-ABI + whiteboard arena (default CLI path).
 pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     const html_dir = opts.html_dir orelse default_html;
 
@@ -517,6 +518,19 @@ test "parseOptions: HTML mode defaults and exclusive dirs" {
     try std.testing.expectEqualStrings("dist", o.html_dir.?);
     try std.testing.expect(o.out_dir == null);
     try std.testing.expect(o.rag_dir == null);
+
+    // Bare argv defaults to HTML (Feature 2).
+    var bare = try parseOptions(std.testing.allocator, &.{"boris"});
+    defer bare.deinit(std.testing.allocator);
+    try std.testing.expectEqual(Mode.html, bare.mode);
+    try std.testing.expectEqualStrings("dist", bare.html_dir.?);
+
+    // Explicit --out selects IR (not HTML).
+    var ir = try parseOptions(std.testing.allocator, &.{ "boris", "--out", ".boris" });
+    defer ir.deinit(std.testing.allocator);
+    try std.testing.expectEqual(Mode.ir, ir.mode);
+    try std.testing.expectEqualStrings(".boris", ir.out_dir.?);
+    try std.testing.expect(ir.html_dir == null);
 
     try std.testing.expectError(
         error.ConflictingFlags,

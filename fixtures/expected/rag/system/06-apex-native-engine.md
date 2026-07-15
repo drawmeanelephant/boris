@@ -8,10 +8,16 @@ tags: [apex, c-abi, markdown, performance, cImport]
 
 # Apex: native C-ABI markdown engine
 
-Apex is the markdown renderer used by the opt-in HTML path (and Aside inner
-bodies). The Boris host ABI is frozen; the host adapter calls real ApexMarkdown
-Unified (pinned under vendor/apex-markdown). The default v0.1 CLI (JSON IR) and
-RAG export do not call Apex for page body render.
+**Workshop analogy:** in-house typesetting machine on the shop floor.  
+**Invariant:** synchronous C ABI call; no retained pointers after `apex_render`
+returns; never a child-process markdown renderer.
+
+Apex is the markdown renderer used by the **HTML** path (default CLI under
+`dist/`, and Aside inner bodies). The Boris **host** ABI (`vendor/apex/apex.h`)
+is frozen; the host adapter calls real **ApexMarkdown Unified**
+(`vendor/apex-markdown`, pinned) via `apex_markdown_to_html`, then copies HTML
+into the Whiteboard allocator. JSON IR (`--out`) and RAG export do **not** call
+Apex.
 
 ## Why not spawn processes
 
@@ -84,12 +90,14 @@ catch known failure modes and a remaining-assumptions list for auditors.
 ## Build linkage (`build.zig`)
 
 - `link_libc = true`
-- CMake sub-step builds static ApexMarkdown (`libapex.a` + cmark-gfm)
+- CMake sub-step: `scripts/build-apex-markdown.sh` → static `libapex.a` + cmark-gfm
 - `addCSourceFile(vendor/apex/apex.c)` host adapter
 - `addIncludePath(vendor/apex)` for Zig `@cImport` (host ABI only)
+- Product modules link static ApexMarkdown archives; hostile path does not
 
 ## Engine: ApexMarkdown Unified adapter
 
 `vendor/apex/apex.c` is a thin adapter (not a hand-rolled markdown subset).
 Default mode is Unified; file includes, plugins, and external highlighters are
-off at the Boris boundary.
+off at the Boris boundary. See `docs/contracts/apex-abi.md` and
+`vendor/apex-markdown/VENDOR.md`.

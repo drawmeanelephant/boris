@@ -12,13 +12,14 @@ When compiling many pages on the HTML path, a global heap of micro-allocations
 fragments and grows. Boris uses a **document-local arena** (the whiteboard)
 backed by Zig’s `std.heap.ArenaAllocator`.
 
-In the project metaphor this is **Reset**: clear the trench after each page so
-the next **Load / Roll / Ignite** does not inherit scratch. See
-[system/10-name-and-metaphor.md](10-name-and-metaphor.md).
+**Workshop analogy:** reusable workbench — wipe only after every user of this
+page’s scratch is finished.  
+**Invariant:** `free_all` only after Apex return, flush, temp finalize, and
+publish attempt; no caller retains Whiteboard slices.
 
-This path is **experimental relative to the v0.1 default CLI** (IR under
-`.boris/`). Whiteboard behavior is exercised by unit/harness tests in
-`src/compile.zig` and `src/harness.zig`.
+This path is the **default product CLI** HTML surface (bare `boris` → `dist/`).
+Whiteboard behavior is exercised by tests in `src/compile.zig` and
+`src/hardening_test.zig`.
 
 ## Loop shape (`src/compile.zig`)
 
@@ -28,21 +29,21 @@ for each page:
     defer arena.reset(.free_all)    # always wipe, success or error
     a = arena.allocator()
     source  = read file into a
-    parsed  = parse into a
-    promote title/parent_entry → PageDb.dupe  # before free_all
-    html    = render segments (apex + components) into a
+    parsed  = frontmatter parse + Aside tokenize into a
+    html    = Apex(markdown segments) + aside.renderHtml → a
     writePage(...); flush completes before return
     # then defer free_all — never reset while buffered write is in flight
 ```
 
 ## What survives the reset
 
-Only data promoted into `PageDb`’s long-lived arena:
+Only data promoted into `PageDb`’s long-lived retain arena:
 
-- `source_path`, `output_path`, `entity_id` (allocated at scan via `dupe`)
-- `title`, `parent_entry` (duplicated out of document arena at promote time)
+- `source_path`, `output_path`, `entity_id`
+- `title`, `parent`, `status`, `tags` (duplicated at promote)
 
-**Never** store a raw parse slice (sub-slice of document-arena source) on `Page`.
+**Workshop analogy:** permanent card catalog vs temporary workbench notes.  
+**Invariant:** never store a raw parse slice on PageDb.
 
 Transient data that dies each iteration:
 

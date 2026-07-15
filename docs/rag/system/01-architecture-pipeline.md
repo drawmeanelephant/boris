@@ -41,7 +41,7 @@ LOAD ──► ROLL ──► IGNITE ──► RESET ──► (next page / next
 |---------|----------|---------|--------|
 | **Content compiler (v0.1)** | **yes** | `pipeline`, `discover`, `frontmatter`, `graph`, `diag`, `json_out` | `.boris/{manifest,graph,build-report}.json` |
 | **RAG export** | opt-in (`--rag`) | `scanner`, `parser`, `rag` (+ shared `graph.validate`) | `rag/` corpus |
-| **HTML site** | opt-in (`--html` / `--html-dir` / `--target`) | `scanner`, `parser`, `apex`, `aside`, `compile`, `assemble`, `cache`, `watch`, `target` | `dist/` or named target roots (not bare default) |
+| **HTML site** | default CLI; also `--html` / `--html-dir` / `--target` | `scanner`, `parser`, `apex`, `aside`, `compile`, `assemble`, `cache`, `watch`, `target` | `dist/` or named target roots |
 
 ## v0.1 IR pipeline (default)
 

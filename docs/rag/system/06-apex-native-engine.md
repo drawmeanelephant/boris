@@ -15,11 +15,12 @@ related:
 **Invariant:** synchronous C ABI call; no retained pointers after `apex_render`
 returns; never a child-process markdown renderer.
 
-Apex is the markdown renderer used by the **opt-in HTML** path (and
-Aside inner bodies). The Boris **host** ABI (`vendor/apex/apex.h`) is frozen;
-the host adapter calls real **ApexMarkdown Unified** (`vendor/apex-markdown`,
-pinned) via `apex_markdown_to_html`, then copies HTML into the Whiteboard
-allocator. Default v0.1 CLI (JSON IR) and RAG export do **not** call Apex.
+Apex is the markdown renderer used by the **HTML** path (default CLI under
+`dist/`, and Aside inner bodies). The Boris **host** ABI (`vendor/apex/apex.h`)
+is frozen; the host adapter calls real **ApexMarkdown Unified**
+(`vendor/apex-markdown`, pinned) via `apex_markdown_to_html`, then copies HTML
+into the Whiteboard allocator. JSON IR (`--out`) and RAG export do **not** call
+Apex.
 
 ## Why not spawn processes
 

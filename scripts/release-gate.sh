@@ -186,8 +186,18 @@ if diff -u "${VALID_EXPECTED}/build-report.json" "${IR_OUT}/build-report.json"; 
 else
   fail "build-report.json golden mismatch"
 fi
-# HTML is not default CLI; note only
-pass "HTML: covered by zig build test (assemble/compile), not default CLI"
+# Feature 2: bare-style default HTML (relative html-dir under gate dir)
+note "4b. Default HTML surface (Feature 2)"
+HTML_OUT="${GATE_DIR}/html-default"
+rm -rf "${HTML_OUT}"
+"${BORIS}" --input=test/fixtures/html/content --html-dir="${HTML_OUT}" --quiet
+if [[ -f "${HTML_OUT}/index.html" ]]; then
+  pass "HTML default path wrote index.html under ${HTML_OUT}"
+else
+  fail "HTML default path missing index.html"
+fi
+# IR remains opt-in via --out (already exercised above)
+pass "IR: explicit --out path remains contract surface"
 # RAG artifacts already produced in step 3
 pass "RAG: catalog_meta + catalog.jsonl present from step 3"
 

@@ -14,15 +14,15 @@ is **not** proof that every surface is the default CLI product.
 |-------|-------------|
 | Normative docs under `docs/contracts/` | **In force** |
 | Fixture corpus under `fixtures/` | **Inventory + IR/RAG goldens + tests** |
-| Compiler IR on default CLI | **Implemented** (still the bare-`boris` default) |
+| Compiler IR on CLI (`--out` / `--no-rag`) | **Implemented** (opt-in; not bare default) |
 | Optional product RAG (`--rag`) | **Implemented** (includes `:::kind` export) |
 | Aside component tokenizer | **Implemented** (`components.md`) |
 | Apex C ABI + Zig wrapper | **Implemented** (ApexMarkdown Unified host adapter; U1–U17 tested) |
-| Opt-in HTML path | **Implemented** (`--html` / `--html-dir` / `--target`; Aside stream) |
+| HTML path (default CLI) | **Implemented** — bare `boris` → `dist/`; also `--html` / `--html-dir` / `--target` |
 | P2 dependency indexes / incremental HTML | **Implemented** (`--incremental`; fingerprints + affected set) |
 | Parallel HTML workers / watch | **Implemented** (`--jobs`, `--watch`; see contracts below) |
 | Multi-target isolated outputs | **Implemented** — CLI, isolation, stage commit, selective watch (P3.3) |
-| HTML `dist/` default CLI | **Not** default product (roadmap **Now** in STATUS) |
+| HTML `dist/` default CLI | **Implemented** (Feature 2) |
 
 ## Canonical ownership (one document per topic)
 
@@ -57,7 +57,7 @@ per topic:
 | [rag-export.md](rag-export.md) | Optional RAG export; schema versioning; `:::kind` export-only |
 | [components.md](components.md) | Constrained `<Aside>` tokenizer, kinds, id grammar, nested policy (m10) |
 | [apex-abi.md](apex-abi.md) | In-process Apex C ABI, allocator lifetime, Zig error rules (m8) |
-| [html-output.md](html-output.md) | Experimental HTML Whiteboard, Aside stream, layout splice, Atomic publish |
+| [html-output.md](html-output.md) | HTML Whiteboard, Aside stream, layout splice, Atomic publish (default CLI) |
 | [parallel-rendering.md](parallel-rendering.md) | Bounded worker pool parallel rendering, thread/memory isolation, deterministic order |
 | [watch-mode.md](watch-mode.md) | Opt-in watch mode, event coalescing/normalization, rebuild serialization, safe recovery |
 | [multi-target-isolated-output.md](multi-target-isolated-output.md) | Multi-target CLI/config, output isolation, cache namespaces (P3.3) |
@@ -115,8 +115,6 @@ runs against contract fixtures / hardening suites separately (`pipeline`,
 
 ## Explicit non-goals (remaining)
 
-- HTML `dist/` as **default** product CLI (opt-in HTML path exists via `--html` /
-  `--html-dir` / `--target`; bare `boris` remains IR-first)
 - Markdown-native `:::` **authoring** (export representation only)
 - Generic multi-component systems / MDX / unrestricted executable content
 - Full YAML frontmatter

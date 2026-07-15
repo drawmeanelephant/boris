@@ -1,6 +1,6 @@
 # Project status — Boris (post-P2 / post-P3)
 
-**As of:** 2026-07-15 (product **0.0.1** / compiler **boris/0.1.1** IR + RAG + Aside + **real ApexMarkdown Unified** + opt-in HTML; **P2 + P3 complete**; **Feature 1 Done**)  
+**As of:** 2026-07-15 (product **0.0.1** / compiler **boris/0.1.1** IR + RAG + Aside + **real ApexMarkdown Unified** + **HTML default CLI**; **P2 + P3 complete**; **Feature 1 + Feature 2 Done**)  
 **Zig target:** 0.16.0 (`build.zig.zon` / CI pin **0.16.0**)
 
 This file is the living **“where we are”** note. Prefer it (and
@@ -11,13 +11,13 @@ starting a session.
 
 ## One-line product (current phase)
 
-**Boris v0.1 ships a single-threaded content compiler** with validated JSON IR,
-optional deterministic RAG (including `:::kind` Aside export), constrained
-`<Aside>` tokenization on the shared compile path, and an **opt-in HTML** site
-mode (`--html` / `--html-dir` / `--target`, Apex + Whiteboard + layout splice).
-Graph-native foundations (P2) and scale-out primitives (P3.1 jobs, P3.2 watch,
-P3.3 multi-target isolation) are **implemented** on the HTML path. Default CLI
-remains IR; HTML is not yet the default product surface.
+**Boris ships a Zig documentation site compiler** whose **default CLI** builds
+an HTML site under `dist/` (Apex + Whiteboard + layout splice), with validated
+JSON IR via `--out` / `--no-rag`, optional deterministic RAG (including
+`:::kind` Aside export), and constrained `<Aside>` tokenization on the shared
+compile path. Graph-native foundations (P2) and scale-out primitives (P3.1
+jobs, P3.2 watch, P3.3 multi-target isolation) are **implemented** on the HTML
+path.
 
 ---
 
@@ -49,14 +49,14 @@ remains IR; HTML is not yet the default product surface.
 | Graph-aware nav in IR (`graph.json` → `nav`) | **Implemented & tested** | From frozen graph only; not HTML/RAG |
 | Optional RAG + `:::kind` Aside export | **Implemented & tested** | Non-round-trippable export form |
 | Apex C ABI + Zig wrapper | **Implemented & tested** | Hostile + opt-in sanitizer; **real ApexMarkdown Unified** via host adapter |
-| Opt-in HTML + Aside stream | **Implemented & tested** | Opt-in via `--html` / `--html-dir` |
+| HTML site + Aside stream (default CLI) | **Implemented & tested** | Bare `boris` → `dist/`; also `--html` / `--html-dir` / `--target` |
 | CI matrix Linux + macOS | **Implemented & tested** | GitHub Actions |
 | Content-addressed cache fingerprints (P2.3) | **Implemented & tested** | SHA256 fingerprints on layout, page, and transitively resolved includes |
 | Explicit Incremental HTML build mode (P2.4) | **Implemented & tested** | `--incremental` skips unchanged renders, cleans stale assets safely and atomically |
 | Bounded Parallel HTML page rendering (P3.1) | **Implemented & tested** | `--jobs N` enables opt-in parallel rendering of independent HTML pages |
 | Opt-in Local Development Watch Mode (P3.2) | **Implemented & tested** | `--watch` enables live, debounced, coalesced, serialized HTML rebuilds |
 | Multi-target isolated outputs (P3.3) | **Implemented & tested** | `--target`, `--html-layout`, `--target-layout`; path-boundary isolation; stage commit; selective watch fan-out; review `docs/reviews/p3.3-multi-target-review.md` |
-| HTML as default CLI (replacing IR) | **Now** (roadmap) | IR remains default until Feature 2 lands |
+| HTML as default CLI (replacing IR default) | **Implemented & tested** | Feature 2 Done: bare `boris` → `dist/`; IR via `--out` / `--no-rag` |
 | Real ApexMarkdown Unified fidelity | **Implemented & tested** | Feature 1 Done: pin @ v1.1.11, cmake static link, Unified host adapter, U1–U17; CMake compile-time host dep |
 | Full YAML / MDX / mmap | **Intentionally deferred** | See non-goals / Not Now |
 
@@ -68,11 +68,12 @@ zig build test
 zig build test-apex-hostile
 zig build test-apex-sanitize   # opt-in; skips cleanly if unavailable
 zig build run -- --help
-zig build run -- --input fixtures/content/valid --out /tmp/boris-ir
-zig build run -- --input fixtures/content/valid --rag-dir /tmp/boris-rag
-zig build run -- --input test/fixtures/html/content --html-dir /tmp/boris-dist
-zig build run -- --input test/fixtures/html/content --html --jobs 4
-zig build run -- --input test/fixtures/html/content --html --watch
+zig build run --                   # default HTML → dist/ (from content/)
+zig build run -- --input fixtures/content/valid --out .tmp/boris-ir
+zig build run -- --input fixtures/content/valid --rag-dir .tmp/boris-rag
+zig build run -- --input test/fixtures/html/content --html-dir .tmp/boris-dist
+zig build run -- --input test/fixtures/html/content --jobs 4
+zig build run -- --input test/fixtures/html/content --watch
 zig build run -- --input test/fixtures/html/content --target prod=dist/prod --target stage=dist/stage
 zig build run -- --input test/fixtures/html/content --target prod=dist/prod --target stage=dist/stage \
   --html-layout layouts/main.html --target-layout stage=layouts/main.html
@@ -97,7 +98,7 @@ Ignite → graph.validate (+ freeze when clean)
 Reset → retain arena lifetime ends with Result.deinit
 ```
 
-**Opt-in HTML (`--html` / `--html-dir`):**
+**HTML default / explicit (`boris`, `--html` / `--html-dir` / `--target`):**
 
 ```text
 Layout load → PageDb promote → graph freeze (layout edges) → cache / dirty-set
@@ -157,10 +158,8 @@ An audit of `src/cache.zig`, `src/dependency.zig`, `src/compile.zig`,
 | **P3.2** watch mode (`--watch`) | **Complete** (opt-in HTML path) |
 | **P3.3** multi-target isolated outputs | **Complete** — CLI, validation, cache namespaces, stage commit, selective watch fan-out |
 
-P3 scale-out is closed. Concurrent product tracks:
-
-1. **Close immediate usability gaps** — CLI defaults still IR-first (Feature 2).
-2. **Product depth** — TOC / graph-aware HTML nav (Feature 6); Apex fidelity is Done (Feature 1).
+P3 scale-out is closed. Feature 1 (Apex) and Feature 2 (HTML default) are Done.
+Next product depth: TOC / graph-aware HTML nav (Feature 6).
 
 ---
 
@@ -184,7 +183,7 @@ unrestricted MDX. Prefer authoring fidelity and product ergonomics.
 
 | Priority | Item | Status |
 |----------|------|--------|
-| P1.1 | Promote experimental HTML to **opt-in** CLI (`--html` / `--html-dir`) | **Implemented & tested** |
+| P1.1 | Promote experimental HTML to CLI (`--html` / `--html-dir`; now default) | **Implemented & tested** (Feature 2 default flip) |
 | P1.2 | Graph-aware navigation from frozen Trunk–Satellite graph | **IR done** (`graph.json` → `nav`). HTML/TOC render still deferred |
 | P1.3 | Apex markdown fidelity (stub → real ApexMarkdown Unified) | **Done** — Feature 1 |
 | P1.4 | Layout / asset dependency edges (typed, validated) | **Implemented** — layout edges on freeze |
@@ -231,13 +230,13 @@ re-opened as greenfield tickets.
 
 | Field | Detail |
 |-------|--------|
-| **Priority** | **Now** (site-building ergonomics) |
+| **Priority** | **Done** |
 | **User-visible payoff** | Running `boris` with no mode flags generates a navigable HTML site under `dist/` instead of JSON IR under `.boris/` |
-| **Smallest shippable vertical slice** | Default mode `.html` instead of `.ir` in `cli.zig`; preserve `--out` as opt-in JSON IR |
-| **Modules** | `src/cli.zig`, `src/main.zig`, `scripts/release-gate.sh` |
-| **Acceptance** | (1) `boris` with no flags → `dist/index.html` (and nested pages), exit 0; (2) `boris --out .boris` skips HTML and writes only JSON IR |
+| **Landed slice** | Default `Mode.html` in `cli.zig`; `--out` / `--no-rag` select IR; bare `--jobs` / `--watch` / `--incremental` valid under HTML default; help + release-gate + contracts updated |
+| **Modules** | `src/cli.zig`, `src/main.zig`, `scripts/release-gate.sh`, README/STATUS/contracts |
+| **Acceptance** | Met: (1) bare `boris` → `dist/index.html`; (2) `boris --out .boris` writes only JSON IR |
 | **Dependencies** | None (layout edges already landed) |
-| **Contract / schema** | **CLI surface change** (new default; old options preserved) |
+| **Contract / schema** | CLI surface change only; IR `schemaVersion` unchanged |
 
 ### Feature 3 — Bounded Worker Pool for Page Rendering (P3.1)
 
@@ -286,7 +285,7 @@ re-opened as greenfield tickets.
 | # | Feature | Priority | Phase gate / dependency |
 |---|---------|----------|-------------------------|
 | 1 | **ApexMarkdown Unified** (real engine under host `apex.h` ABI) | **Done** | Chats 1–7; `apex-abi.md` + archive notes |
-| 2 | **HTML as default CLI mode** (promote opt-in SSG to default) | **Now** | Layout edges on freeze (landed); Feature 1 Done |
+| 2 | **HTML as default CLI mode** (promote opt-in SSG to default) | **Done** | Layout edges + Feature 1 landed |
 | 3 | **Bounded worker pool** (parallel rendering) | **Done** | Dirty-set / incremental path (landed) |
 | 4 | **Watch mode** (FS events → dirty-set run) | **Done** | Worker pool / incremental (landed) |
 | 5 | **Multi-target isolated outputs** (config / `--target`) | **Done** | Watch + incremental (landed); contract + post-land hardening |
@@ -304,15 +303,11 @@ re-opened as greenfield tickets.
 * **Chat 7 (done):** External audit response — [feature-1-external-audit-response.md](reviews/feature-1-external-audit-response.md).
 * **Out of scope (still):** Feature 2; `--apex-mode`; Strategy B pure zig-cc.
 
-### Card 2 — HTML default CLI mode (`src/html-default-cli`)
+### Card 2 — HTML default CLI mode (`src/html-default-cli`) — **Done**
 
-* **Scope:** Toggle the default compilation mode from IR output to HTML site output.
-* **Tasks:**
-  * Modify `cli.zig` `parseOptions` so omitting mode flags defaults to `Mode.html`.
-  * Ensure `--out <DIR>` continues to select `Mode.ir` for contract/fixture compatibility.
-  * Adjust `main.zig` to invoke `compile.compileHtmlSite` on default runs.
-  * Update `scripts/release-gate.sh` (and help text) for the new default.
-* **Acceptance:** Invoking `boris` with no arguments produces a navigable site under `dist/`.
+* **Landed:** bare `boris` → `Mode.html` / `dist/`; `--out` / `--no-rag` → IR;
+  help, release-gate step 4b, README/STATUS/contracts/RAG seed 08 updated.
+* **Migration:** scripts that assumed bare `boris` ⇒ IR must pass `--out .boris`.
 
 ### Card 3 — Multi-target isolated outputs (P3.3) — **Done**
 
@@ -346,7 +341,7 @@ product cuts once acceptance is green:
 
 | Version | Trigger | Notes |
 |---------|---------|--------|
-| **v0.2.0** — Apex fidelity & default HTML surface | Features 1 + 2 land (real ApexMarkdown Unified + HTML default CLI) | Update `compiler` / product id toward `boris/0.2.0`. **`schemaVersion` stays `"0.1.0"`** unless JSON IR shape changes. May also package already-landed P2/P3 Unreleased work (including multi-target) if not cut earlier. |
+| **v0.2.0** — Apex fidelity & default HTML surface | Features 1 + 2 **landed** (package cut remaining) | Update `compiler` / product id toward `boris/0.2.0`. **`schemaVersion` stays `"0.1.0"`** unless JSON IR shape changes. May also package already-landed P2/P3 Unreleased work (including multi-target). |
 | **v0.3.0** — P2/P3 packaging polish (if not already cut with 0.2) | Docs/release polish for `--incremental`, `--jobs`, `--watch`, `--target` as stable product flags | *If these ship inside 0.2.0, this cut can collapse or become a polish-only release.* P3.3 itself is **already implemented** — this row is packaging, not a greenfield trigger. |
 
 **IR rule (unchanged):** Breaking IR changes must bump `schemaVersion` and update
@@ -367,8 +362,8 @@ not by themselves change IR schema.
    `parent_entry` (export-only; not author frontmatter). Narrative seeds may
    still mention older alias wording — contracts win.
 4. Root `fixtures_test.zig` is inventory-only; compiler goldens live under contract fixtures + hardening tests (wording must stay honest).
-5. Default CLI flip (Feature 2) will break scripts that assume bare `boris` ⇒ IR;
-   preserve `--out` and document migration.
+5. Default CLI flip (Feature 2) **landed** — scripts that assumed bare `boris` ⇒
+   IR must use `--out` / `--no-rag`; documented in README mode rules.
 
 ### Feature 1 deferred risks (explicit triggers)
 

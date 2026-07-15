@@ -9,11 +9,10 @@ tags: [boris, overview, content-compiler, zig]
 # Boris overview
 
 Boris is a **Zig content compiler for Markdown documentation** that is growing
-into a full Apex-native static site generator. In **v0.1** the default product
-surface is: discover content → bounded frontmatter → Trunk/Satellite graph
-validation → deterministic JSON under `.boris/`. Optional: export an LLM RAG
-corpus. HTML layout assembly exists as modules and unit tests but is **not**
-the default CLI path.
+into a full Apex-native static site generator. The **default product surface**
+is: discover content → bounded frontmatter → Trunk/Satellite graph validation →
+HTML site under `dist/` (Apex + Whiteboard + layout splice). Optional: JSON IR
+via `--out` / `--no-rag`, or an LLM RAG corpus via `--rag` / `--rag-dir`.
 
 The project is named for the folk **Zouave** improviser known as **Boris** —
 resourceful under constraint, chain-minded, wipe-and-continue. Teaching rhythm
@@ -21,22 +20,24 @@ for the compile loop: **Load → Roll → Ignite → Reset** (see
 [system/10-name-and-metaphor.md](10-name-and-metaphor.md)). Narrative only; not
 affiliated with any commercial tobacco or rolling-paper brand.
 
-## What Boris is for (v0.1)
+## What Boris is for
 
-- Compile a markdown content tree into validated **JSON IR** (manifest, graph, report)
+- Build a markdown documentation site into HTML under `dist/` (default CLI)
+- Compile the same tree into validated **JSON IR** via `--out` (manifest, graph, report)
 - Model content as a **Trunk and Satellite graph** (relational foreign keys)
 - Support a **closed frontmatter grammar** (not general YAML)
 - Optionally export an **LLM-friendly RAG corpus** under `rag/`
 - Keep hard constraints: Zig core, in-process Apex when rendering, no Node SSG stack
 
-## Long-term / experimental (present in tree, not default CLI)
+## Implemented product surface
 
-- Render markdown via a **native C-ABI engine (Apex)** linked in-process
-- Tokenize registered components (e.g. `<Aside>`) that stay in document order
-- Document-local **Whiteboard** arena for per-page scratch
-- **Zero-copy layout splicing** to `dist/` (prefix | body | suffix writes)
+- **Aside** tokenizer on the shared compile path (`ECOMPONENT` on failure)
+- Optional RAG corpus with `:::kind` **export** blocks for parsed Asides
+- **HTML default:** Apex + Aside stream + Whiteboard + layout splice to `dist/`
+  (and named multi-target roots), with `--incremental`, `--jobs`, and `--watch`
+- Apex engine is in-process C ABI via **ApexMarkdown Unified** (Feature 1)
 
-Normative IR contracts: `docs/contracts/`. Narrative seeds here must not
+Normative contracts: `docs/contracts/`. Narrative seeds here must not
 overclaim untested guarantees (see STATUS and RELEASE-GATE).
 
 ## Non-goals
@@ -45,8 +46,10 @@ overclaim untested guarantees (see STATUS and RELEASE-GATE).
 - Boris does **not** require Node, React, or a JS bundler to produce artifacts
 - Boris does **not** invent branded names for ordinary docs features (use Aside, admonition, component)
 - Boris does **not** emit standalone fragment pages for normal asides
-- The first production shape is a **single-threaded monolith** (stable before concurrency)
-- v0.1 does **not** claim full YAML, cross-OS bit-identical IR without multi-OS CI, or atomic IR replacement on all platforms
+- IR/RAG and pre-render coordination stay sequential; only HTML page render
+  may use bounded `--jobs` workers under documented isolation rules
+- Boris does **not** claim full YAML, unrestricted MDX, cross-OS bit-identical IR
+  without multi-OS CI, or atomic publish on every volume
 
 ## Repository layout (mental model)
 
@@ -54,30 +57,31 @@ overclaim untested guarantees (see STATUS and RELEASE-GATE).
 |------|------|
 | `content/` | Author source markdown (+ optional registered components) |
 | `layouts/main.html` | Site chrome with a single `{{content}}` splice marker (HTML path) |
-| `src/` | Zig compiler (pipeline IR path + optional HTML/RAG modules) |
-| `vendor/apex/` | C-ABI markdown engine linked into the Boris binary |
-| `.boris/` | Generated IR (default CLI) |
-| `dist/` | Generated HTML (experimental; not default CLI) |
+| `src/` | Zig compiler (HTML path + IR + RAG modules) |
+| `vendor/apex/` | Host C-ABI adapter linked into the Boris binary |
+| `dist/` | Generated HTML (**default** CLI output) |
+| `.boris/` | Generated IR (via `--out` / `--no-rag`) |
 | `docs/rag/system/` | Curated system knowledge seeds for the RAG exporter |
-| `docs/contracts/` | Normative IR / diagnostics / fixtures |
+| `docs/contracts/` | Normative IR / HTML / diagnostics / fixtures |
 | `rag/` | Generated LLM-ready corpus (upload this tree) |
 
 ## How to run
 
 ```bash
 zig build          # build the boris binary
-zig build run      # content compiler → .boris/
-zig build rag      # export RAG corpus (boris --rag)
+zig build run      # HTML site → dist/ (default)
+zig build run -- --out=.boris   # JSON IR only
 zig build test     # unit + fixture + harness + fuzz
 ```
 
 Useful flags:
 
-- `--input=DIR` / `--out=DIR` — IR path (defaults `content` / `.boris`)
+- *(none)* / `--html` / `--html-dir=DIR` / `--target NAME=DIR` — HTML site mode
+- `--out=DIR` / `--no-rag` — IR path (defaults `content` / `.boris`)
 - `--rag` / `--rag-dir=PATH` — RAG-only export (implies no IR; not HTML+RAG)
-- `--no-rag` — explicit IR-only (default)
-- `--quiet` — less progress logging
+- `--jobs N` / `--watch` / `--incremental` — HTML scale-out / rebuild controls
+- `--quiet` — suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
 
 ## One-sentence summary for retrieval
 
-Boris v0.1 is a Zig content compiler (named for the folk Zouave improviser Boris) that **loads** Markdown under `content/`, **rolls** a Trunk/Satellite graph, **ignites** deterministic JSON under `.boris/` (optional RAG pack), and **resets** page scratch on the experimental HTML path; Apex assembly remains in-tree, not the default CLI.
+Boris is a Zig documentation compiler (named for the folk Zouave improviser Boris) that **loads** Markdown under `content/`, **rolls** a Trunk/Satellite graph, **ignites** an HTML site under `dist/` by default (or JSON IR / RAG on request), and **resets** page scratch on the HTML path with real ApexMarkdown Unified rendering.

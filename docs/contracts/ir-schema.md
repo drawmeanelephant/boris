@@ -457,7 +457,7 @@ component lists under this schema version.
 
 | Feature | Status |
 |---------|--------|
-| HTML `dist/` as default output | **Not** default product surface (opt-in HTML is separate) |
+| HTML `dist/` as IR output | **Out of IR** — HTML is the default CLI mode but not part of this schema; see [html-output.md](html-output.md) |
 | Apex markdown render | Out of IR acceptance |
 | Product RAG export | Optional product path; separate [rag-export.md](rag-export.md) |
 | Full YAML frontmatter | Rejected — [frontmatter.md](frontmatter.md) |

@@ -19,6 +19,20 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Feature 2 — HTML as default CLI surface — **Done**
+
+- Bare `boris` (no mode flags) builds an HTML site under `dist/` instead of
+  JSON IR under `.boris/`.
+- Explicit IR: `--out <DIR>` or `--no-rag` (JSON under `--out`, default
+  `.boris`). Explicit HTML flags (`--html` / `--html-dir` / `--target`)
+  retained; bare `--jobs` / `--watch` / `--incremental` are valid under the
+  HTML default.
+- Help text, `scripts/release-gate.sh` (HTML step 4b), README, STATUS,
+  contracts (`html-output`, acceptance, overview), and RAG system seeds
+  updated. IR `schemaVersion` unchanged (`0.1.0`).
+- **Migration:** scripts that assumed bare `boris` ⇒ IR must pass
+  `--out .boris` (or `--no-rag`).
+
 ### Feature 1 — ApexMarkdown Unified (campaign Chats 1–7) — **Done**
 
 - Vendor real **[ApexMarkdown/apex](https://github.com/ApexMarkdown/apex)** as a

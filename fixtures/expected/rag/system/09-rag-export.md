@@ -38,7 +38,12 @@ rag/
 
 ## Determinism
 
-Identical inputs produce **byte-identical** corpora. System seeds are sorted by relative path; content pages and graph edges by `entity_id`; catalog rows and INDEX tables by `rag_path`. No timestamps, random ids, absolute paths, hostnames, or hash-map iteration order.
+**Workshop analogy:** same manuscripts + same instructions → same packet.  
+**Invariant:** identical inputs produce **byte-identical** corpora on a given
+host. System seeds sorted by relative path; content pages and graph edges by
+`entity_id`; catalog rows and INDEX tables by `rag_path`. No timestamps, random
+ids, absolute paths, hostnames, or hash-map iteration order. Cross-OS
+bit-identity is not claimed without multi-OS CI proof.
 
 ## Path design principles (LLM-friendly)
 
@@ -53,12 +58,17 @@ Identical inputs produce **byte-identical** corpora. System seeds are sorted by 
 
 ## Graph validation before export
 
-RAG export validates the content graph before writing page/graph segments:
+RAG reuses the shared `pipeline.compile` path (`graph.validate`) before writing
+page/graph segments. Same codes as IR:
 
-- Missing parent → hard fail (`EPARENTMISSING`)
-- Satellite-of-satellite → hard fail (`EPARENTNOTTRUNK`)
-- Cycles → hard fail (`EPARENTCYCLE`) via DFS visiting set
-- Trunk hubs + satellite lists sorted by `entity_id` for deterministic `relations.md`
+- Missing parent → `EPARENTMISSING`
+- Satellite-of-satellite → `EPARENTNOTTRUNK`
+- Cycles → `EPARENTCYCLE`
+- Duplicate ids → `EDUPLICATEID`
+- Component failures → `ECOMPONENT`
+
+**Workshop analogy:** librarian retrieval packet — one validated catalog, stable
+paths, no partial shelf after a failed audit.
 
 ## Segment categories
 
@@ -71,8 +81,12 @@ RAG export validates the content graph before writing page/graph segments:
 
 ## catalog_meta.json
 
+**Workshop analogy:** edition stamp on the packet.  
+**Invariant:** fixed compact JSON with `format`, `schema_version`, `boris_version`
+(product version from `pipeline.boris_version`, currently `0.0.1`).
+
 ```json
-{"format":"boris-rag","schema_version":1,"boris_version":"0.1.1"}
+{"format":"boris-rag","schema_version":1,"boris_version":"0.0.1"}
 ```
 
 Present in the tree and INDEX documentation; **not** a `catalog.jsonl` entry.

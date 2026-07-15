@@ -10,4 +10,4 @@ expected/          # published HTML after layout splice + Apex body render
 
 Run via `zig build test` (`html fixture golden` in `src/compile.zig`).
 
-Not the default `boris` CLI surface — see `docs/contracts/html-output.md`.
+Used by the default HTML CLI path — see `docs/contracts/html-output.md`.

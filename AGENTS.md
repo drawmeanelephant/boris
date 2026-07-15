@@ -39,8 +39,8 @@ practical chain-thinking, wipe-and-continue) — an independent software homage,
 rhythm for the pipeline: **Load → Roll → Ignite → Reset**. Narrative seed:
 [`docs/rag/system/10-name-and-metaphor.md`](docs/rag/system/10-name-and-metaphor.md).
 
-- **v0.1 product surface (default CLI):** discover Markdown → bounded frontmatter → Trunk/Satellite graph validation → deterministic JSON under `.boris/` (`manifest.json`, `graph.json`, `build-report.json`). Optional `--rag` export.
-- **Long-term product surface:** full documentation SSG — Apex HTML render, layouts, asides, zero-copy assemble to `dist/`, graph-aware navigation. Modules for this path exist but are **not** v0.1 acceptance.
+- **Default product surface (CLI):** discover Markdown → bounded frontmatter → Trunk/Satellite graph validation → HTML site under `dist/` (Apex + Whiteboard + layout splice). JSON IR via `--out` / `--no-rag` under `.boris/` (`manifest.json`, `graph.json`, `build-report.json`). Optional `--rag` export.
+- **Long-term product surface:** full documentation SSG — graph-aware navigation, TOC, asides, zero-copy assemble, multi-target. Core HTML path is the default CLI (Feature 2).
 - Implementation language for the product: **Zig** (currently targeting Zig **0.16+**).
 - Markdown rendering (when used): **Apex**, linked **in-process** as a **C ABI** library (`@cImport`, `build.zig` C sources). **Not** a subprocess, **not** a JS markdown pipeline.
 - Content model: in-memory **Page** graph with **Trunk / Satellite** relations and optional in-page **asides/admonitions** (component tokens, not graph nodes).

@@ -1,9 +1,10 @@
-//! Opt-in HTML rendering path (milestone 9 + P2/P3 extensions).
+//! HTML site rendering path (default CLI surface + P2/P3 extensions).
 //!
-//! **Not** the bare-`boris` default v0.1 CLI surface (IR under `.boris/`, optional
-//! RAG). Wired via `--html` / `--html-dir` / `--target`. Coordinator phases are
-//! sequential; independent page render may use bounded `--jobs` workers with
-//! thread-local Whiteboards (see `docs/contracts/parallel-rendering.md`).
+//! Bare `boris` builds under `dist/`. Explicit IR uses `--out` / `--no-rag`; RAG
+//! uses `--rag` / `--rag-dir`. Also wired via `--html` / `--html-dir` /
+//! `--target`. Coordinator phases are sequential; independent page render may
+//! use bounded `--jobs` workers with thread-local Whiteboards (see
+//! `docs/contracts/parallel-rendering.md`).
 //!
 //! ## Memory model
 //!
@@ -332,9 +333,9 @@ fn writeCacheManifest(writer: anytype, manifest: CacheManifest) !void {
     try writer.writeAll("  ]\n}\n");
 }
 
-/// Experimental site compile: layout → promote PageDb → whiteboard loop → dist/.
+/// Site compile: layout → promote PageDb → whiteboard loop → dist/.
 ///
-/// Single-threaded. Does not mutate default IR semantics.
+/// Single-threaded when `jobs == 1`. Does not mutate IR emit semantics.
 pub fn compileHtmlSite(
     io: Io,
     gpa: std.mem.Allocator,
