@@ -227,15 +227,18 @@ fn mapHtmlError(err: anyerror, quiet: bool) ExitCode {
             }
             return .usage;
         },
+        // Graph/include/wiki (and multi-target wrap of those) already print
+        // structured diagnostics on the HTML path; re-printing @errorName only doubles noise.
+        error.GraphValidationFailed,
+        error.IncludeFailed,
+        error.ReferenceFailed,
+        error.MultiTargetCompilationFailed,
+        => return .content_error,
         error.ParseFailed,
         error.ComponentFailed,
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
         error.LayoutUnknownMarker,
-        error.GraphValidationFailed,
-        error.MultiTargetCompilationFailed,
-        error.IncludeFailed,
-        error.ReferenceFailed,
         => {
             if (!quiet) {
                 std.debug.print("error: content or layout failure: {s}\n", .{@errorName(err)});

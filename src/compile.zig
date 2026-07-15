@@ -269,6 +269,7 @@ pub fn loadAndPromote(
 /// `{{toc}}` is built from rendered body HTML (page-local; no graph required).
 pub fn renderAndPublishPage(
     io: Io,
+    gpa: std.mem.Allocator,
     content_dir: Io.Dir,
     dist_dir: Io.Dir,
     page: *const DurablePage,
@@ -277,11 +278,12 @@ pub fn renderAndPublishPage(
     options: CompileOptions,
     page_index: usize,
 ) !void {
-    return renderAndPublishPageWithSite(io, content_dir, dist_dir, page, layout, doc_arena, options, page_index, null);
+    return renderAndPublishPageWithSite(io, gpa, content_dir, dist_dir, page, layout, doc_arena, options, page_index, null);
 }
 
 pub fn renderAndPublishPageWithSite(
     io: Io,
+    gpa: std.mem.Allocator,
     content_dir: Io.Dir,
     dist_dir: Io.Dir,
     page: *const DurablePage,
@@ -302,33 +304,28 @@ pub fn renderAndPublishPageWithSite(
     }
 
     // Pre-Apex: expand {{include}} then rewrite [[wiki]] (Boris-mediated; Apex FS off).
+    // File I/O buffers use real gpa (not page_allocator); expanded markdown is arena-owned.
+    var include_fail: include_mod.FailInfo = .{};
     const expanded = include_mod.expandIncludes(
         io,
         content_dir,
-        // Temporary file reads use a short-lived GPA region via the arena's child...
-        // expandIncludes uses `gpa` for file reads and `arena` for output.
-        // Page render only has doc_arena — use a dedicated GPA for file buffers.
-        std.heap.page_allocator,
+        gpa,
         arena,
         parsed.doc.body,
         page.source_path,
+        &include_fail,
     ) catch |err| {
         if (!options.quiet) {
-            std.debug.print("error: {s}: include resolve failed: {s}\n", .{
-                page.source_path,
-                @errorName(err),
-            });
+            include_mod.printDiagnostic(gpa, err, page.source_path, include_fail);
         }
         return error.IncludeFailed;
     };
 
     const nodes: []const graph_mod.Node = if (site) |s| s.nodes else &.{};
-    const with_wiki = wikilink.rewriteWikiLinks(arena, expanded, nodes, page.output_path) catch |err| {
+    var wiki_fail: wikilink.FailInfo = .{};
+    const with_wiki = wikilink.rewriteWikiLinks(arena, expanded, nodes, page.output_path, &wiki_fail) catch |err| {
         if (!options.quiet) {
-            std.debug.print("error: {s}: wiki-link resolve failed: {s}\n", .{
-                page.source_path,
-                @errorName(err),
-            });
+            wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail);
         }
         return error.ReferenceFailed;
     };
@@ -514,6 +511,7 @@ const SharedCompileState = struct {
         gpa: std.mem.Allocator,
         db: *PageDb,
         content_root: []const u8,
+        quiet: bool,
     ) !SharedCompileState {
         const cwd = Io.Dir.cwd();
         _ = cwd;
@@ -545,11 +543,16 @@ const SharedCompileState = struct {
                 for (page_includes.items) |inc| gpa.free(inc);
                 page_includes.deinit(gpa);
             }
-            include_mod.collectTransitiveIncludes(io, content_dir, gpa, body, &page_includes) catch |err| {
+            var include_fail: include_mod.FailInfo = .{};
+            include_mod.collectTransitiveIncludes(io, content_dir, gpa, body, &page_includes, &include_fail) catch |err| {
                 if (err == error.IncludeMissing or err == error.IncludeCycle or
                     err == error.IncludeSyntax or err == error.InvalidPath or
                     err == error.DepthExceeded)
                 {
+                    // Plan-time structured diag (retain-owned strings inside printDiagnostic).
+                    if (!quiet) {
+                        include_mod.printDiagnostic(gpa, err, p.source_path, include_fail);
+                    }
                     return error.IncludeFailed;
                 }
                 return err;
@@ -568,7 +571,7 @@ const SharedCompileState = struct {
                 const inc_body = include_mod.bodyOfSource(inc_file);
                 var nested_hits: std.ArrayList(include_mod.ScanHit) = .empty;
                 defer nested_hits.deinit(gpa);
-                include_mod.scanIncludeDirectives(inc_body, gpa, &nested_hits) catch continue;
+                include_mod.scanIncludeDirectives(inc_body, gpa, &nested_hits, null) catch continue;
                 for (nested_hits.items) |hit| {
                     const owned_from = try inc_alloc.dupe(u8, inc_path);
                     const owned_to = try inc_alloc.dupe(u8, hit.path);
@@ -661,7 +664,7 @@ pub fn compileHtmlSiteMulti(
     defer site.deinit();
 
     // Shared content/include fingerprint inputs once for all targets.
-    var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root);
+    var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root, base_options.quiet);
     defer shared.deinit();
 
     // Layout templates cached by path (per-target layouts share the same arena).
@@ -700,7 +703,10 @@ pub fn compileHtmlSiteMulti(
 
         const cached = layout_cache.get(plan.layout_path).?;
         _ = compilePagesWithSharedAndSite(io, gpa, &db, cached.layout, target_options, &shared, cached.bytes, &site) catch |err| {
-            if (!base_options.quiet) {
+            // Include/wiki/graph already printed structured diags; skip duplicate @errorName.
+            if (!base_options.quiet and err != error.IncludeFailed and err != error.ReferenceFailed and
+                err != error.GraphValidationFailed)
+            {
                 std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
             }
             any_failed = true;
@@ -764,6 +770,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
             const page = &ctx.db.items()[page_index];
             renderAndPublishPageWithSite(
                 ctx.io,
+                ctx.gpa,
                 ctx.content_dir,
                 ctx.dist_dir,
                 page,
@@ -947,7 +954,7 @@ fn compilePagesInner(
     var local_shared: ?SharedCompileState = null;
     defer if (local_shared) |*s| s.deinit();
     const shared: *const SharedCompileState = if (shared_opt) |s| s else blk: {
-        local_shared = try SharedCompileState.init(io, gpa, db, options.content_root);
+        local_shared = try SharedCompileState.init(io, gpa, db, options.content_root, options.quiet);
         break :blk &(local_shared.?);
     };
 
@@ -1006,10 +1013,21 @@ fn compilePagesInner(
         for (inc_owned, 0..) |b, j| inc_views[j] = b;
 
         const nav_material: []const u8 = if (layout.has_nav) site.site_nav_material else "";
-        // Wiki reference material (target title/path) so renames dirty dependents.
+        // Wiki reference material from page body + transitive include fragment bodies
+        // so title/path renames dirty parents that only wiki-link via includes.
         const body_for_wiki = include_mod.bodyOfSource(shared.source_bytes[page_idx]);
-        const ref_material = wikilink.referenceMaterial(gpa, body_for_wiki, site.nodes) catch |err| {
-            if (err == error.ReferenceMissing or err == error.ReferenceSyntax) {
+        var wiki_bodies = try gpa.alloc([]const u8, 1 + inc_owned.len);
+        defer gpa.free(wiki_bodies);
+        wiki_bodies[0] = body_for_wiki;
+        for (inc_owned, 0..) |inc_file, j| {
+            wiki_bodies[1 + j] = include_mod.bodyOfSource(inc_file);
+        }
+        var wiki_fail: wikilink.FailInfo = .{};
+        const ref_material = wikilink.referenceMaterialMulti(gpa, wiki_bodies, site.nodes, &wiki_fail) catch |err| {
+            if (err == error.ReferenceMissing or err == error.ReferenceSyntax or err == error.PathError) {
+                if (!options.quiet) {
+                    wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail);
+                }
                 return error.ReferenceFailed;
             }
             return err;
@@ -1138,7 +1156,7 @@ fn compilePagesInner(
             stats.pages_attempted += 1;
 
             if (is_dirty[page_index]) {
-                try renderAndPublishPageWithSite(io, content_dir, stage_dir, page, layout, &doc_arena, options, page_index, site);
+                try renderAndPublishPageWithSite(io, gpa, content_dir, stage_dir, page, layout, &doc_arena, options, page_index, site);
                 stats.pages_written += 1;
                 if (!options.quiet) {
                     std.debug.print("  wrote {s}/{s}\n", .{ options.dist_dir, page.output_path });
@@ -1432,7 +1450,7 @@ test "render failure: whiteboard resets and no final output published" {
     _ = try doc_arena.allocator().alloc(u8, 256);
 
     const page = &db.items()[0];
-    const result = renderAndPublishPage(io, content_dir, dist_dir, page, layout, &doc_arena, .{
+    const result = renderAndPublishPage(io, gpa, content_dir, dist_dir, page, layout, &doc_arena, .{
         .test_fail_render_at = 0,
     }, 0);
     try std.testing.expectError(error.TestInjectedRenderFailure, result);
@@ -1806,6 +1824,223 @@ test "html fixture golden: expected/ matches compile output" {
         defer gpa.free(exp);
         try std.testing.expectEqualStrings(exp, got);
     }
+}
+
+test "Feature 7 HTML: include expands and wiki becomes relative href" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    const work = "zig-cache/boris-f7-include-wiki-ok";
+    try cwd.createDirPath(io, work);
+    defer cwd.deleteTree(io, work) catch {};
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\# Home
+        \\
+        \\{{include includes/blurb.md}}
+        \\
+        \\See [[guides/note]] for more.
+        \\
+    );
+    try writeTreeFile(io, work, "content/guides/note.md",
+        \\---
+        \\title: Note
+        \\parent: index
+        \\---
+        \\# Note
+        \\
+        \\Satellite page.
+        \\
+    );
+    try writeTreeFile(io, work, "content/includes/blurb.md", "INCLUDED_BLURB and [[guides/note|Note link]].\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const page = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(page);
+
+    try std.testing.expect(std.mem.indexOf(u8, page, "INCLUDED_BLURB") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "{{include") == null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "[[") == null);
+    // Wiki rewrite → Markdown link → Apex <a href="…">
+    try std.testing.expect(std.mem.indexOf(u8, page, "href=\"guides/note.html\"") != null);
+}
+
+test "Feature 7 HTML: fail-loud missing include" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    const work = "zig-cache/boris-f7-missing-include";
+    try cwd.createDirPath(io, work);
+    defer cwd.deleteTree(io, work) catch {};
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\{{include includes/does-not-exist.md}}
+        \\
+    );
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try std.testing.expectError(error.IncludeFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    }));
+}
+
+test "Feature 7 HTML: fail-loud include cycle" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    const work = "zig-cache/boris-f7-include-cycle";
+    try cwd.createDirPath(io, work);
+    defer cwd.deleteTree(io, work) catch {};
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\{{include includes/c1.md}}
+        \\
+    );
+    try writeTreeFile(io, work, "content/includes/c1.md", "{{include includes/c2.md}}\n");
+    try writeTreeFile(io, work, "content/includes/c2.md", "{{include includes/c1.md}}\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try std.testing.expectError(error.IncludeFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    }));
+}
+
+test "Feature 7 HTML: fail-loud missing wiki target" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    const work = "zig-cache/boris-f7-missing-wiki";
+    try cwd.createDirPath(io, work);
+    defer cwd.deleteTree(io, work) catch {};
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\See [[no/such/page]] please.
+        \\
+    );
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try std.testing.expectError(error.ReferenceFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    }));
+}
+
+test "Feature 7 HTML: fenced include and wiki stay literal" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    const work = "zig-cache/boris-f7-fences";
+    try cwd.createDirPath(io, work);
+    defer cwd.deleteTree(io, work) catch {};
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\# Home
+        \\
+        \\```
+        \\{{include includes/secret.md}}
+        \\[[fenced/wiki]]
+        \\```
+        \\
+        \\~~~
+        \\{{include includes/secret.md}}
+        \\[[fenced/wiki]]
+        \\~~~
+        \\
+        \\Live text.
+        \\
+    );
+    // If fences were broken, missing include / missing wiki would fail loud.
+    try writeTreeFile(io, work, "content/includes/secret.md", "SHOULD_NOT_APPEAR\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 1), stats.pages_written);
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const page = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(page);
+
+    try std.testing.expect(std.mem.indexOf(u8, page, "SHOULD_NOT_APPEAR") == null);
+    // Literal directive text survives inside code blocks (HTML-escaped or raw).
+    try std.testing.expect(
+        std.mem.indexOf(u8, page, "{{include") != null or
+            std.mem.indexOf(u8, page, "{{include includes/secret.md}}") != null or
+            std.mem.indexOf(u8, page, "include includes/secret") != null,
+    );
 }
 
 test "flush-before-reset: compile defers free_all only after writePage" {
