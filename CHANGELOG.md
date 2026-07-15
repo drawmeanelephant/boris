@@ -27,6 +27,8 @@ How to use going forward:
   long page (next-heading quirk).
 - Add durable Codex/ChatGPT review rules for scope control, authority ordering,
   evidence labels, sandbox-aware gate triage, and concurrency/determinism checks.
+- Add multi-agent branch discipline: topic branches + PR default, no drive-by
+  `main`, intended GitHub ruleset settings for when plan allows enforcement.
 
 ---
 

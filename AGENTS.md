@@ -77,6 +77,55 @@ and the verification command. Keep speculative hardening separate from defects.
   `<appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript_full.jsonl`
   Run or write a quick Python script to parse and replay the chronological `write_to_file` and `replace_file_content` calls to automatically heal the workspace.
 
+## Branch discipline (multi-agent)
+
+`main` is the integration line. Agents and humans do not share a dirty working
+tree on `main` as a default workspace. Treat concurrent agent sessions as
+separate writers that must not land on top of each other without a merge base.
+
+### Hard rules for agents
+
+1. **Never commit or push directly to `main`** unless the user explicitly orders
+   a direct land (hotfix, docs-only fast path they named). Default path is a
+   topic branch → PR → merge.
+2. **Start every substantive task on a fresh branch** from up-to-date `main`:
+   `git fetch origin && git checkout main && git pull --ff-only && git checkout -b <name>`.
+3. **Branch names:** short, owned prefix when useful — `codex/…`, `grok/…`,
+   `feat/…`, `fix/…`, `docs/…`, `chore/…`. One concern per branch.
+4. **Do not rewrite shared history** on `main` or on someone else's published
+   branch (`push --force`, `reset --hard` of published commits) unless the user
+   explicitly requests it.
+5. **Before starting work,** check `git status`, current branch, and whether
+   another agent already owns the files you need. If `main` moved, rebase or
+   merge your topic branch before opening/updating a PR.
+6. **One agent owns a branch** until it is merged or abandoned. Do not two-write
+   the same branch or the same hot files without an explicit handoff.
+7. **Land via PR** when remote collaboration or CI matters. Preferred merge is
+   squash or merge commit per repo default; keep history readable. After merge,
+   delete the topic branch and return local checkout to `main`.
+8. **Generated / ignored outputs** (`dist/`, `rag/`, `source-rag/`, zig cache)
+   are not branch currency — do not commit them to “win” a merge.
+
+### Intended GitHub protection on `main`
+
+When the hosting plan allows repository rulesets or classic branch protection
+(private repos need **GitHub Pro**; public repos can use free rulesets), enable:
+
+| Rule | Setting |
+|------|---------|
+| Target | `refs/heads/main` only |
+| Direct pushes | Blocked (require pull request) |
+| Force push | Blocked (`non_fast_forward`) |
+| Branch deletion | Blocked for `main` |
+| Stale reviews | Dismiss on new push |
+| Required approvals | `0` while solo (raise when co-maintainers exist) |
+| Required status checks | CI job(s) from `.github/workflows/ci.yml` once stable green |
+| Admin bypass | Allowed for repo admin during bootstrap; narrow later |
+
+Until GitHub enforces the above, **these AGENTS rules are binding** for every
+coding agent in this repo. Do not treat a missing GitHub lock as permission to
+drive-by `main`.
+
 | Doc | Role |
 |-----|------|
 | `README.md` | Human front door — outcomes + CLI |
