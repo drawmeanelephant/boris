@@ -4,6 +4,10 @@ const dependency = @import("dependency.zig");
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
 /// Fixed renderer/cache format version constant.
+///
+/// Bumped only when fingerprint inputs or manifest discriminator semantics
+/// change. Adding optional manifest fields (e.g. `output_digest`) does not
+/// require a bump when missing values force a safe re-render.
 pub const CACHE_FORMAT_VERSION = "boris-cache-v1-multitarget";
 
 /// Hash a u64 length prefix in fixed little-endian (host-independent).
@@ -11,6 +15,26 @@ fn updateLen(hasher: *Sha256, len: u64) void {
     var buf: [8]u8 = undefined;
     std.mem.writeInt(u64, &buf, len, .little);
     hasher.update(&buf);
+}
+
+/// SHA-256 of published HTML (or any) bytes for content-addressed output freshness.
+pub fn hashBytes(bytes: []const u8) [32]u8 {
+    var hasher = Sha256.init(.{});
+    hasher.update(bytes);
+    var digest: [32]u8 = undefined;
+    hasher.final(&digest);
+    return digest;
+}
+
+/// Lowercase hex encoding of a 32-byte digest (stable, deterministic).
+pub fn hexDigest(digest: [32]u8) [64]u8 {
+    const hex_chars = "0123456789abcdef";
+    var out: [64]u8 = undefined;
+    for (digest, 0..) |b, i| {
+        out[i * 2] = hex_chars[b >> 4];
+        out[i * 2 + 1] = hex_chars[b & 0x0f];
+    }
+    return out;
 }
 
 /// Compute a deterministic fingerprint for an HTML page from:
@@ -175,6 +199,21 @@ test "fingerprint length prefixes are little-endian fixed" {
     const key = computePageFingerprint("t", "l", "id", "s", &.{}, "L", "n");
     const key2 = computePageFingerprint("t", "l", "id", "s", &.{}, "L", "n");
     try std.testing.expectEqualSlices(u8, &key, &key2);
+}
+
+test "output digest helpers are deterministic and content-sensitive" {
+    const a = hashBytes("hello");
+    const b = hashBytes("hello");
+    const c = hashBytes("hallo");
+    try std.testing.expectEqualSlices(u8, &a, &b);
+    try std.testing.expect(!std.mem.eql(u8, &a, &c));
+
+    const ha = hexDigest(a);
+    const hb = hexDigest(b);
+    try std.testing.expectEqualSlices(u8, &ha, &hb);
+    try std.testing.expectEqual(@as(usize, 64), ha.len);
+    const hc = hexDigest(c);
+    try std.testing.expect(!std.mem.eql(u8, &ha, &hc));
 }
 
 test "Source change changes only that page's key" {

@@ -54,11 +54,15 @@ How to use going forward:
 
 ### Fixed
 
+- **P4 cache freshness:** incremental HTML reuse now records and verifies a
+  SHA-256 `output_digest` of published page bytes (size remains a cheap
+  prefilter). Same-length corruption, truncation, and replacement of dist HTML
+  force re-render; truly unchanged outputs still cache; manifests stay
+  deterministic. Contract: `docs/contracts/html-output.md`.
 - Test isolation: compile/assemble filesystem tests no longer use fixed
   `zig-cache/boris-*` workdirs. Parallel `zig build test` executables that
   re-import those modules raced on the same paths and failed with
   `FileNotFound` (layout open / scrub). Paths now use `std.testing.tmpDir`.
-
 - Adversarial backlog (issues #8–#28 remaining after #7/#23): include expansion
   already landed in #29; this cut hardens cache fingerprints (little-endian
   length prefixes, JSON-escaped manifest, output size freshness, page→page
