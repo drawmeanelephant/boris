@@ -35,7 +35,7 @@ Includes and wiki-links expand on this path before Apex runs.
 | [[getting-started|Getting started]] | Build Boris, first site, three modes |
 | [[guides/cli-and-modes|CLI and modes]] | HTML default vs `--out` vs `--rag` |
 | [[guides/overview|Content model]] | Pipeline + Trunk/Satellite |
-| [[guides/apex-markdown|Apex showcase]] | Unified Markdown features |
+| [[guides/apex-markdown|Apex showcase]] | Tables, footnotes, math, callouts, IAL, … |
 | [[reference/frontmatter|Frontmatter reference]] | Closed author keys |
 
 This tree under `content/` is **dogfood**: it is the sample docs site compiled by

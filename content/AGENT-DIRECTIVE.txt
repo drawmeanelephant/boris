@@ -182,6 +182,8 @@ Quality bar:
 - [ ] Feature 7 dogfood: live `{{include}}` + several `[[wiki]]` links; fences
       keep raw syntax; `includes/` fragments are not pages
 - [ ] Clone URL / first-build commands match `README.md`
+- [ ] `guides/apex-markdown.md` is a real Unified gallery (tables, footnotes,
+      math, callouts, IAL, lists, code, definition lists, …) — not a stub
 - [ ] At least one table, one footnote, multiple fences, ≥3 asides site-wide
 - [ ] Internal links resolve under `dist/` (including wiki → real `<a href>`)
 - [ ] Expanded include text appears in rendered HTML (not only source)

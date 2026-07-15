@@ -51,7 +51,7 @@ Live links (entity ids, optional labels): see
 |-------|--------|
 | [[guides/trunk-satellite|Trunk and Satellite]] | Roles, `parent`, validation rules |
 | [[guides/asides|Asides]] | Constrained callouts in document order |
-| [[guides/apex-markdown|Apex Markdown]] | Unified feature showcase |
+| [[guides/apex-markdown|Apex Markdown]] | Unified gallery (tables, math, footnotes, callouts, …) |
 | [[guides/cli-and-modes|CLI and modes]] | HTML / IR / RAG (parent: Getting Started) |
 | [[guides/rag-export|RAG export]] | `boris --rag` corpus shape |
 
