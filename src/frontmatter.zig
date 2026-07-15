@@ -71,6 +71,10 @@ pub fn validateId(id: []const u8) bool {
 fn parsePlainOrQuoted(raw: []const u8) ![]const u8 {
     const v = trimAscii(raw);
     if (v.len == 0) return error.EmptyValue;
+    // Match product parser.zig parseScalarValue — reject YAML-looking forms.
+    if (v[0] == '|' or v[0] == '>') return error.BlockScalar;
+    if (v[0] == '[' or v[0] == '{') return error.FlowCollection;
+    if (v[0] == '&' or v[0] == '*') return error.AnchorAlias;
     if (v[0] == '"') {
         if (v.len < 2 or v[v.len - 1] != '"') return error.BadQuote;
         const inner = v[1 .. v.len - 1];
@@ -228,6 +232,10 @@ pub fn parse(
                         },
                         error.BadQuote => blk: {
                             try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "malformed double-quoted string", "Close the quote and avoid embedded raw quotes");
+                            break :blk null;
+                        },
+                        error.BlockScalar, error.FlowCollection, error.AnchorAlias => blk: {
+                            try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "YAML block/flow/anchor forms are not supported for id", "Use a plain or double-quoted canonical document id");
                             break :blk null;
                         },
                     };

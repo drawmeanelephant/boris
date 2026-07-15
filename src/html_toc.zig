@@ -53,7 +53,7 @@ pub fn collectHeadings(
             continue;
         }
 
-        const gt = std.mem.indexOfPos(u8, html, open, ">") orelse break;
+        const gt = findOpenTagEnd(html, open) orelse break;
         const open_tag = html[open .. gt + 1];
         const id = extractIdAttr(open_tag) orelse {
             i = gt + 1;
@@ -72,6 +72,7 @@ pub fn collectHeadings(
         };
         const inner = html[gt + 1 .. close];
         const text = try stripTags(allocator, inner);
+        errdefer allocator.free(text);
 
         try out.append(allocator, .{
             .level = level,
@@ -80,6 +81,25 @@ pub fn collectHeadings(
         });
         i = close + close_pat.len;
     }
+}
+
+/// Find `>` that ends an HTML open tag, ignoring `>` inside quoted attributes.
+fn findOpenTagEnd(html: []const u8, open: usize) ?usize {
+    var i = open;
+    var quote: ?u8 = null;
+    while (i < html.len) : (i += 1) {
+        const c = html[i];
+        if (quote) |q| {
+            if (c == q) quote = null;
+            continue;
+        }
+        if (c == '"' or c == '\'') {
+            quote = c;
+            continue;
+        }
+        if (c == '>') return i;
+    }
+    return null;
 }
 
 fn extractIdAttr(open_tag: []const u8) ?[]const u8 {
@@ -181,6 +201,25 @@ test "collectHeadings h1-h3 with ids; skip h4" {
     try std.testing.expectEqualStrings("Sub &amp; More", list.items[1].text);
     try std.testing.expectEqual(@as(u8, 3), list.items[2].level);
     try std.testing.expectEqualStrings("deep", list.items[2].id);
+}
+
+test "collectHeadings ignores > inside attribute values" {
+    const gpa = std.testing.allocator;
+    const html =
+        \\<h2 id="x" title="a>b">Real</h2>
+        \\<h2 title="a>b" id="y">Also Real</h2>
+    ;
+    var list: std.ArrayList(Heading) = .empty;
+    defer {
+        for (list.items) |h| gpa.free(h.text);
+        list.deinit(gpa);
+    }
+    try collectHeadings(gpa, html, &list);
+    try std.testing.expectEqual(@as(usize, 2), list.items.len);
+    try std.testing.expectEqualStrings("x", list.items[0].id);
+    try std.testing.expectEqualStrings("Real", list.items[0].text);
+    try std.testing.expectEqualStrings("y", list.items[1].id);
+    try std.testing.expectEqualStrings("Also Real", list.items[1].text);
 }
 
 test "renderToc empty when no headings" {
