@@ -215,6 +215,31 @@ pub fn mapRenderResult(rc: c_int, out_ptr: ?[*]u8, out_len: usize) ApexError!Htm
     return Html{ .bytes = base[0..out_len] };
 }
 
+/// Serialize entry into the Apex C engine.
+///
+/// Product ApexMarkdown (and the thin host adapter) is not proven re-entrant
+/// across simultaneous `apex_render` calls: extension registries and other
+/// process-global C state race under `--jobs N` / U18. Whiteboards remain
+/// per-thread; only the C call is serialized. See
+/// `docs/contracts/parallel-rendering.md` (D4).
+///
+/// Zig 0.16: `std.Thread.Mutex` is gone; `std.Io.Mutex` needs an `Io`. Use the
+/// lock-free single-owner `std.atomic.Mutex` with yield while contended so
+/// `render` stays Io-free for all call sites.
+var render_mutex: std.atomic.Mutex = .unlocked;
+
+fn lockRenderMutex() void {
+    while (!render_mutex.tryLock()) {
+        std.Thread.yield() catch {
+            std.atomic.spinLoopHint();
+        };
+    }
+}
+
+fn unlockRenderMutex() void {
+    render_mutex.unlock();
+}
+
 /// Render markdown payload via the native Apex C ABI into the Whiteboard arena.
 ///
 /// **Zero-copy contract (input):**
@@ -231,6 +256,9 @@ pub fn mapRenderResult(rc: c_int, out_ptr: ?[*]u8, out_len: usize) ApexError!Htm
 /// **Debug watermark:** after `apex_render` returns, Debug builds assert that
 /// arena capacity did not shrink. A shrink would mean something outside the
 /// arena callbacks freed arena-owned blocks — an ABI violation.
+///
+/// **Concurrency:** takes `render_mutex` for the duration of `apex_render` so
+/// parallel HTML workers never re-enter the C engine concurrently.
 pub fn render(md: []const u8, arena: *std.heap.ArenaAllocator) ApexError!Html {
     // Debug: capacity before the C call (must not shrink across the boundary).
     const pre_capacity = if (builtin.mode == .Debug) arena.queryCapacity() else 0;
@@ -252,6 +280,8 @@ pub fn render(md: []const u8, arena: *std.heap.ArenaAllocator) ApexError!Html {
 
     // Absolute zero-copy input: pointer + length only. Apex bounds all reads
     // with md_len (see vendor/apex/apex.c) — never strlen.
+    // Hold the engine lock only for the C call (not for post-map / asserts).
+    lockRenderMutex();
     const rc = c.apex_render(
         @ptrCast(prepared.ptr),
         prepared.len,
@@ -259,6 +289,7 @@ pub fn render(md: []const u8, arena: *std.heap.ArenaAllocator) ApexError!Html {
         &out_len,
         &apex_alloc,
     );
+    unlockRenderMutex();
 
     if (builtin.mode == .Debug) {
         const post_capacity = arena.queryCapacity();
@@ -948,7 +979,12 @@ test "U17 include syntax does not pull disk when includes disabled" {
 
 test "U18 concurrent Unified renders match sequential baselines (D4 smoke)" {
     try skipIfHostileEngine();
+    // Sequential baseline capture may use the testing GPA. Concurrent worker
+    // arenas must NOT: std.testing.allocator is not thread-safe and races under
+    // U18 (CI Linux/macOS ABRT / segfault on join). page_allocator is safe as
+    // a shared parent for per-thread ArenaAllocators.
     const gpa = std.testing.allocator;
+    const concurrent_gpa = std.heap.page_allocator;
 
     // Distinctive tokens per sample catch cross-talk if threads share engine state.
     const samples = [_][]const u8{
@@ -1053,20 +1089,23 @@ test "U18 concurrent Unified renders match sequential baselines (D4 smoke)" {
     var worker = Worker{
         .samples = &samples,
         .baselines = &baselines,
-        .gpa = gpa,
+        .gpa = concurrent_gpa,
     };
 
     const thread_count = 8;
     var threads: [thread_count]std.Thread = undefined;
     var spawned: usize = 0;
     errdefer {
+        // Only join handles still owned by errdefer (spawn partial failure).
         for (threads[0..spawned]) |t| t.join();
     }
     for (&threads) |*t| {
         t.* = try std.Thread.spawn(.{}, Worker.run, .{&worker});
         spawned += 1;
     }
-    for (threads[0..spawned]) |t| t.join();
+    const to_join = spawned;
+    spawned = 0; // prevent double-join if later expects fail
+    for (threads[0..to_join]) |t| t.join();
 
     try std.testing.expect(!worker.failed.load(.acquire));
 }

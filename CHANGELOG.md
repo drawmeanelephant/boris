@@ -29,6 +29,15 @@ How to use going forward:
   evidence labels, sandbox-aware gate triage, and concurrency/determinism checks.
 - Add multi-agent branch discipline: topic branches + PR default, no drive-by
   `main`, intended GitHub ruleset settings for when plan allows enforcement.
+- CI: track cmark-gfm source CMake modules (were ignored by Apex pin
+  `*.cmake`), add early presence check + aggregate `ci` job for required
+  status checks; concurrency cancel on superseding runs.
+- Fix U18 D4 smoke: concurrent worker arenas use `page_allocator` (not
+  `std.testing.allocator`) so multi-thread Apex stress does not race the
+  testing GPA on CI.
+- Serialize `apex_render` behind a host mutex (D4): product Apex is not
+  re-entrant; parallel `--jobs` keeps per-thread Whiteboards but one C entry
+  at a time. Contract note in `docs/contracts/parallel-rendering.md`.
 
 ---
 
