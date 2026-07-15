@@ -45,14 +45,19 @@ On any rendering or write failure:
 - **Worker Join:** The coordinator MUST block and wait (`join`) for all currently running workers to complete before returning.
 - **Cleanup:** Only the failing operation's temporary files (created via `createFileAtomic`) are discarded. Prior successfully published files MUST remain intact. No intermediate corrupt or partially written files may be promoted.
 
-## Apex concurrency residual (D4)
+## Apex concurrency (D4) — mitigated for product options
 
 Workers call in-process Apex via thread-local Whiteboards and a stack-scoped
 allocator. Boris does **not** claim a full formal proof that every ApexMarkdown
-global (extension registry, optional plugin paths) is thread-safe under all
-options. Product default keeps plugins/includes/highlighters off.
+global (extension registry, optional plugin paths) is thread-safe under **all**
+upstream options. Product default keeps plugins/includes/highlighters off
+(`vendor/apex/apex.c`).
 
-Evidence gates (not proofs):
+**CLI default remains `--jobs 1` (sequential).** `--jobs N` is supported and
+smoke-validated for the product Apex configuration; it is not the silent
+default, so single-thread builds stay the conservative path.
+
+### Permanent evidence gates (not formal proofs)
 
 - `src/apex.zig` **U18** — concurrent Unified renders vs sequential baselines +
   cross-talk markers
@@ -60,3 +65,4 @@ Evidence gates (not proofs):
   jobs (D4)` — seq vs `--jobs 8` byte-identical site HTML + dual parallel runs
 
 If either gate fails, treat concurrent Apex as broken for the pin under test.
+Do not advertise “fully proven thread-safe Apex” in marketing copy.

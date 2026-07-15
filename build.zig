@@ -12,12 +12,14 @@ pub fn build(b: *std.Build) void {
 
     // Feature 1: build static ApexMarkdown (cmake host tool only).
     // Host ABI: vendor/apex; engine: vendor/apex-markdown (see VENDOR.md).
+    // Script always runs (side effects) but exits immediately when the D3 stamp
+    // and static archives are current — avoids full cmake on every zig build.
+    // D2: script forces no system libyaml (see scripts/build-apex-markdown.sh).
     const ensure_apex = b.addSystemCommand(&.{
         "bash",
         "scripts/build-apex-markdown.sh",
     });
     ensure_apex.setCwd(b.path("."));
-    // cmake --build is incremental; always invoke the script so configure/build stay fresh.
     ensure_apex.has_side_effects = true;
     const build_apex_step = b.step(
         "build-apex",

@@ -413,7 +413,7 @@ pub fn printUsage() void {
         \\  --target-layout N=P Per-target layout override (NAME=PATH; target must exist)
         \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
         \\  --watch             Local-development watch mode for HTML builds (implies --incremental)
-        \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1)
+        \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
         \\  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
         \\  -h, --help          Show this help and exit 0
         \\

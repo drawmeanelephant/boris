@@ -80,11 +80,10 @@ pass "test suite succeeded"
 # --- 3. RAG dual export determinism --------------------------------------
 note "3. RAG generation twice + byte-for-byte comparison"
 rm -rf "${RAG_A}" "${RAG_B}"
-# Prefer fixture content that uses compiler-compatible parent keys when
-# demo content still has legacy parentEntry — RAG parser accepts both.
+# Prefer live demo content when it parses under product parent-only grammar.
+# Fall back to the valid contract fixture if demo content fails.
 RAG_INPUT="${VALID_CONTENT}"
 if [[ -d content ]]; then
-  # Use repo content if it parses; fall back to valid fixture on failure.
   if "${BORIS}" --rag --rag-dir="${RAG_A}" --input=content --quiet 2>/dev/null; then
     RAG_INPUT="content"
     rm -rf "${RAG_A}"

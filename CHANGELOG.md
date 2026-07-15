@@ -19,6 +19,25 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Hygiene — residual risks D2/D3/D4 + publish/dialect/migration
+
+- **D2:** Apex CMake configure disables system libyaml / PkgConfig discovery so
+  host packages cannot change product link or behavior. Product frontmatter
+  stays Boris-owned; Apex is not fed YAML metadata options.
+- **D3:** `scripts/build-apex-markdown.sh` stamps
+  `vendor/apex-markdown/build/.boris-apex-stamp` and skips cmake when archives
+  and policy are current (fast path under every `zig build`). Force:
+  `BORIS_FORCE_APEX_BUILD=1`.
+- **D4:** Document concurrent Apex as smoke-validated for product options;
+  CLI default remains `--jobs 1`. Permanent gates: U18 + parallel Unified site
+  compile (`docs/contracts/parallel-rendering.md`).
+- **Publish:** HTML stage tree and IR artifact publish fall back to
+  copy+delete on `error.CrossDevice` (not atomic). Cross-volume atomic replace
+  still not claimed.
+- **Dialect / migration:** Close stale RAG seed wording that accepted
+  `parentEntry` on product parse; architecture seed lists HTML as default CLI
+  surface. STATUS risk table updated to mitigated/documented.
+
 ### Docs — sample dogfood site under `content/`
 
 - Rebuild the sample site for HTML-default + Apex Unified + Trunk/Satellite:

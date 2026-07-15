@@ -26,7 +26,9 @@
 //! volumes: replace is atomic w.r.t. readers seeing old-or-new, not torn bytes).
 //!
 //! **Not claimed without qualification:**
-//! - Cross-device / cross-volume atomic rename (may fail or copy depending on OS).
+//! - Cross-device / cross-volume **atomic** rename. Stage/publish paths prefer
+//!   same-parent rename; HTML stage commit and IR publish fall back to
+//!   copy+delete on `error.CrossDevice` (completeness, not atomicity).
 //! - Windows: Zig std documents a brief window where concurrent openers of the
 //!   destination may see `error.AccessDenied` during replace.
 //! - Universal atomic replacement on every filesystem without multi-OS CI.

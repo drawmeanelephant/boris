@@ -880,6 +880,10 @@ fn stageRelForDist(gpa: std.mem.Allocator, dist_dir: []const u8) ![]u8 {
 
 /// Publish all files under `stage_dir` into `final_dir` via same-parent rename.
 /// Creates intermediate directories under `final_dir` as needed.
+///
+/// Prefer rename (atomic-ish on same filesystem). On `error.CrossDevice` (and
+/// only that), fall back to `copyFile` + delete source. Cross-volume **atomic**
+/// replace is still not claimed — the fallback is best-effort completeness.
 fn publishStageTree(
     io: Io,
     gpa: std.mem.Allocator,
@@ -901,7 +905,16 @@ fn publishStageTree(
                 final_dir.createDirPath(io, parent) catch {};
             }
         }
-        try entry.dir.rename(entry.basename, final_dir, entry.path, io);
+        entry.dir.rename(entry.basename, final_dir, entry.path, io) catch |err| switch (err) {
+            error.CrossDevice => {
+                try entry.dir.copyFile(entry.basename, final_dir, entry.path, io, .{
+                    .make_path = true,
+                    .replace = true,
+                });
+                entry.dir.deleteFile(io, entry.basename) catch {};
+            },
+            else => return err,
+        };
     }
 }
 

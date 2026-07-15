@@ -208,7 +208,8 @@ On the OS/filesystem where `zig build test` runs:
 ### Deliberately not claimed
 
 - Universal cross-platform atomic replacement without multi-OS CI.
-- Cross-device / cross-volume atomic rename.
+- Cross-device / cross-volume **atomic** rename (stage commit falls back to
+  copy+delete on `error.CrossDevice`; completeness only, not atomicity).
 - Windows: Zig std documents a brief window where concurrent openers of the
   destination may see `error.AccessDenied` during replace.
 - IR JSON publication atomicity (separate staging path under `.boris/`).

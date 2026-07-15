@@ -3,8 +3,15 @@ rag_id: system/architecture-pipeline
 rag_path: system/01-architecture-pipeline.md
 category: system
 tags: [architecture, pipeline, phases, compile]
+related:
+  - system/00-overview.md
+  - system/02-data-model-page.md
+  - system/04-components-and-admonitions.md
+  - system/05-memory-whiteboard.md
+  - system/06-apex-native-engine.md
+  - system/07-zero-copy-assembly.md
+  - system/10-name-and-metaphor.md
 ---
-
 
 # Architecture and compile pipeline
 
@@ -17,12 +24,12 @@ thread-local Whiteboards so ordering and isolation stay predictable.
 Narrative names for the same work (not CLI flags). Full lore:
 [system/10-name-and-metaphor.md](10-name-and-metaphor.md).
 
-| Beat | Meaning | v0.1 IR (default) | HTML path (opt-in) |
-|------|---------|-------------------|--------------------|
-| **Load** | Gather sources in deterministic order | `discover` | `scanner` + identity |
-| **Roll** | Shape frontmatter, body, graph | frontmatter + `graph.validate` freeze | `parser` + graph |
-| **Ignite** | Emit / render / package | JSON under `.boris/` (+ optional RAG) | Apex + `assemble` → `dist/` (or multi-target roots) |
-| **Reset** | Drop page scratch; next unit clean | finish emit without leftover soup | whiteboard `arena.reset` (per worker when parallel) |
+| Beat | Meaning | HTML path (default CLI) | IR path (`--out` / `--no-rag`) |
+|------|---------|-------------------------|--------------------------------|
+| **Load** | Gather sources in deterministic order | `scanner` + identity | `discover` |
+| **Roll** | Shape frontmatter, body, graph | `parser` + graph | frontmatter + `graph.validate` freeze |
+| **Ignite** | Emit / render / package | Apex + `assemble` → `dist/` (or multi-target roots) | JSON under `.boris/` |
+| **Reset** | Drop page scratch; next unit clean | whiteboard `arena.reset` (per worker when parallel) | finish emit without leftover soup |
 
 ```text
 LOAD ──► ROLL ──► IGNITE ──► RESET ──► (next page / next build unit)
@@ -32,9 +39,9 @@ LOAD ──► ROLL ──► IGNITE ──► RESET ──► (next page / next
 
 | Surface | Default? | Modules | Output |
 |---------|----------|---------|--------|
-| **Content compiler (v0.1)** | **yes** | `pipeline`, `discover`, `frontmatter`, `graph`, `diag`, `json_out` | `.boris/{manifest,graph,build-report}.json` |
+| **HTML site** | **yes** (bare `boris`); also `--html` / `--html-dir` / `--target` | `scanner`, `parser`, `apex`, `aside`, `compile`, `assemble`, `cache`, `watch`, `target` | `dist/` or named target roots |
+| **Content compiler IR** | opt-in (`--out` / `--no-rag`) | `pipeline`, `discover`, `frontmatter`, `graph`, `diag`, `json_out` | `.boris/{manifest,graph,build-report}.json` |
 | **RAG export** | opt-in (`--rag`) | `scanner`, `parser`, `rag` (+ shared `graph.validate`) | `rag/` corpus |
-| **HTML site** | default CLI; also `--html` / `--html-dir` / `--target` | `scanner`, `parser`, `apex`, `aside`, `compile`, `assemble`, `cache`, `watch`, `target` | `dist/` or named target roots |
 
 ## v0.1 IR pipeline (default)
 

@@ -53,6 +53,13 @@ produced as a compile-time sub-step:
    (host include guard: `BORIS_APEX_HOST_H`, not upstream `APEX_H`).
 7. Hostile path (`test-apex-hostile`) does **not** link ApexMarkdown.
 
+### Boris build policy (D2 / D3)
+
+| ID | Policy |
+|----|--------|
+| **D2** | Configure **without** system libyaml (`CMAKE_DISABLE_FIND_PACKAGE_yaml`, PkgConfig off). Product frontmatter is Boris-owned; Apex is not fed YAML metadata options. Host libyaml must not change link or behavior. Nested `vendor/libyaml/` remains in the snapshot for upstream parity but is **not** linked by the Boris product path. |
+| **D3** | Script writes `build/.boris-apex-stamp`. When stamp policy + archives are current and `CMakeLists.txt` / the script are not newer, the script exits 0 without invoking cmake (fast path under every `zig build`). Force: `BORIS_FORCE_APEX_BUILD=1`. |
+
 ## Modes (product default)
 
 Boris product default is **`APEX_MODE_UNIFIED`** (see upstream

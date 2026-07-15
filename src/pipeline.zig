@@ -423,8 +423,10 @@ pub fn renderBuildReport(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
 /// so a failed rebuild cannot leave a valid-looking IR set.
 ///
 /// Limitations: directory rename of the whole tree is not used; per-file
-/// rename from staging is best-effort. Not proven cross-platform atomic for
-/// concurrent readers. Temp staging path names never appear inside JSON.
+/// rename from staging is preferred. On `error.CrossDevice`, copy+delete is
+/// used (same as HTML stage publish). Cross-volume **atomic** replace is not
+/// claimed. Not proven cross-platform atomic for concurrent readers. Temp
+/// staging path names never appear inside JSON.
 fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result) !void {
     const cwd = Io.Dir.cwd();
     try cwd.createDirPath(io, result.out_dir);
@@ -464,6 +466,7 @@ fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result) !void {
     }
 
     // Publish: rename each staged file into the final directory (replaces if present).
+    // Cross-device: copy then delete source (not atomic; same honesty as HTML/RAG).
     var stage_dir = try cwd.openDir(io, stage_rel, .{});
     defer stage_dir.close(io);
     var out_dir = try cwd.openDir(io, result.out_dir, .{});
@@ -471,7 +474,13 @@ fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result) !void {
 
     const names = [_][]const u8{ "manifest.json", "graph.json", "build-report.json" };
     for (names) |name| {
-        try stage_dir.rename(name, out_dir, name, io);
+        stage_dir.rename(name, out_dir, name, io) catch |err| switch (err) {
+            error.CrossDevice => {
+                try stage_dir.copyFile(name, out_dir, name, io, .{ .replace = true });
+                stage_dir.deleteFile(io, name) catch {};
+            },
+            else => return err,
+        };
     }
 
     cwd.deleteTree(io, stage_rel) catch {};

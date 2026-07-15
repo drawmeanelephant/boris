@@ -28,13 +28,16 @@ are hard errors (`EPARENT*`).
 
 ## Foreign key
 
-**Preferred (compiler dialect):**
+**Author key (only):**
 
 ```markdown
 parent: guides/intro
 ```
 
-**Legacy aliases (HTML/RAG parser only):** `parentEntry` / `parent_entry`.
+Legacy names `parentEntry` / `parent_entry` are **rejected** as unknown keys
+(`EFRONTMATTER`) on every product parse path (IR, HTML, RAG input). RAG export
+may still emit a catalog field named `parent_entry` for the same parent id —
+that is packaging, not author grammar.
 
 The value must match the trunk’s entity id (path without extension), not the
 HTML URL and not a free-form title.

@@ -135,16 +135,16 @@ on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 
 ---
 
-## Risks worth remembering
+## Risks (mitigated / permanent honesty)
 
-| ID | Risk | When it matters |
-|----|------|-----------------|
-| **D2** | cmake may see system libyaml | Before feeding YAML metadata into Apex options |
-| **D3** | Apex cmake step re-runs every `zig build` | When build-time pain is measured |
-| **D4** | Apex thread-safety not formally proven | Before making `--jobs` the recommended default (smoke evidence exists) |
-| Publish | Cross-volume atomic rename not claimed | Multi-disk CI / deploy oddities |
-| Dialect | Author key is **`parent` only** | Never reintroduce `parentEntry` on product parse |
-| Migration | Bare `boris` is HTML, not IR | Old scripts need `--out` |
+| ID | Status | Resolution |
+|----|--------|------------|
+| **D2** | **Mitigated** | `scripts/build-apex-markdown.sh` configures Apex with system libyaml discovery disabled. Product never feeds YAML metadata into Apex options; frontmatter is Boris-owned. See `vendor/apex-markdown/VENDOR.md`. |
+| **D3** | **Mitigated** | Same script stamps `build/.boris-apex-stamp` and skips cmake when archives + policy are current. Force rebuild: `BORIS_FORCE_APEX_BUILD=1`. |
+| **D4** | **Mitigated (not formal proof)** | U18 + parallel Unified site compile gates permanent. CLI default stays `--jobs 1`; `--jobs N` smoke-validated for product Apex options (plugins/includes off). See `docs/contracts/parallel-rendering.md`. |
+| Publish | **Honest limit + fallback** | Cross-volume **atomic** replace still not claimed. HTML stage / IR publish fall back to copy+delete on `error.CrossDevice`; RAG already had directory copy fallback. Same-parent staging remains the common path. |
+| Dialect | **Enforced** | Author key is **`parent` only**. `parentEntry` / `parent_entry` → `EFRONTMATTER` on all product parse paths. Do not reintroduce aliases. |
+| Migration | **Documented** | Bare `boris` is HTML under `dist/`. Old IR scripts need `--out` / `--no-rag`. README + help text carry the note. |
 
 ---
 

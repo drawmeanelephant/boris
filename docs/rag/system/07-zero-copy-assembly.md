@@ -74,10 +74,12 @@ No `prefix ++ html ++ suffix` allocation exists in application memory.
 **Explicitly not claimed:**
 
 - Atomic output replacement on **all** platforms / filesystems without multi-OS CI
-- Cross-device / cross-volume atomic rename
+- Cross-device / cross-volume **atomic** rename (stage commit may copy+delete on
+  `CrossDevice`; not atomic across volumes)
 - Windows: Zig std documents a brief window where concurrent openers of the
   destination may see `error.AccessDenied` during replace
-- Atomic replacement for **IR** JSON under `.boris/` (those use ordinary `writeFile`)
+- Cross-volume **atomic** IR JSON publish (IR stages then rename/copy; not a
+  whole-tree atomic swap on every filesystem)
 
 This module is **HTML path only** (default CLI under `dist/`, plus multi-target).
 
