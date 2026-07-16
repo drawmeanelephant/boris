@@ -150,6 +150,11 @@ the byte sizes differ. Empty groups are still emitted with valid bundle metadata
 Determinism: no timestamps, host paths, or random ids in corpus files. Paths
 are repo-relative. Catalog order is byte-wise `rag_path`.
 
+Regeneration resets the generated `files/` subtree before writing the next
+corpus, so documents excluded by a newer exporter cannot remain in the pack.
+It does not remove the selected output directory or unrelated files beside the
+generated artifacts.
+
 ---
 
 ## Product RAG vs source RAG

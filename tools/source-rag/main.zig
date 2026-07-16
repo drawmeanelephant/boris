@@ -468,6 +468,12 @@ fn writeBytes(io: Io, root: Io.Dir, rel_path: []const u8, data: []const u8) !voi
     try root.writeFile(io, .{ .sub_path = rel_path, .data = data });
 }
 
+/// Reset the corpus documents owned by this exporter without deleting the
+/// caller-selected output root or unrelated files placed beside it.
+fn resetManagedFiles(io: Io, out: Io.Dir) !void {
+    try out.deleteTree(io, "files");
+}
+
 fn log(opts: Options, comptime fmt: []const u8, args: anytype) void {
     if (opts.quiet) return;
     std.debug.print(fmt, args);
@@ -952,6 +958,9 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     try cwd.createDirPath(io, opts.out_dir);
     var out = try cwd.openDir(io, opts.out_dir, .{});
     defer out.close(io);
+    // `files/` is fully generated. Reset it so paths excluded by a newer
+    // exporter (for example vendored dependencies) cannot survive a rerun.
+    try resetManagedFiles(io, out);
     try out.createDirPath(io, "files");
 
     var catalog: std.ArrayList(CatalogEntry) = .empty;
@@ -1309,4 +1318,22 @@ test "exportCorpus mini fixture" {
     const content_bundle = try readFileAlloc(io, out, "boris-content.md", gpa);
     defer gpa.free(content_bundle);
     try std.testing.expect(std.mem.indexOf(u8, content_bundle, "No packed documents") != null);
+
+    // A pre-vendor-exclusion pack may retain this document even though the
+    // current catalog and bundles omit it. Regeneration must remove it.
+    try out.createDirPath(io, "files/vendor");
+    try out.writeFile(io, .{ .sub_path = "files/vendor/third_party.c.md", .data = "stale vendor document\n" });
+    try out.writeFile(io, .{ .sub_path = "user-note.txt", .data = "preserve unrelated output\n" });
+
+    _ = try exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out_rel,
+        .quiet = true,
+        .max_bytes = 512 * 1024,
+    });
+
+    try std.testing.expectError(error.FileNotFound, out.statFile(io, "files/vendor/third_party.c.md", .{}));
+    const user_note = try readFileAlloc(io, out, "user-note.txt", gpa);
+    defer gpa.free(user_note);
+    try std.testing.expectEqualStrings("preserve unrelated output\n", user_note);
 }
