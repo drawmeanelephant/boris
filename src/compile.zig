@@ -862,6 +862,7 @@ fn isContentCompileFailure(err: anyerror) bool {
         error.InvalidThemePath,
         error.ThemeSymlink,
         error.FooterSymlink,
+        error.FooterInvalidUtf8,
         => true,
         // Layout-rule selection failures are usage (exit 2), not content.
         error.AmbiguousGlob,

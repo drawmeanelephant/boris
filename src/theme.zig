@@ -19,6 +19,8 @@ pub const ThemeError = error{
     AssetCollision,
     InvalidThemePath,
     FooterSymlink,
+    /// `footer.html` failed the same UTF-8 gate as layout files (F9.2 parity / #62).
+    FooterInvalidUtf8,
 } || assemble.LayoutError || std.mem.Allocator.Error;
 
 /// Derive theme root from a layout path when it ends with `…/layouts/<file>.html`.
@@ -145,7 +147,14 @@ pub fn loadThemeBundle(
     if (cwd.statFile(io, footer_rel, .{ .follow_symlinks = false })) |st| {
         if (st.kind == .sym_link) return error.FooterSymlink;
         if (st.kind == .file) {
-            bundle.footer_bytes = try readFileAlloc(io, cwd, footer_rel, gpa);
+            const bytes = try readFileAlloc(io, cwd, footer_rel, gpa);
+            errdefer gpa.free(bytes);
+            // Parity with layout UTF-8 gate: footer is injected into every page's
+            // {{footer}} slot; invalid sequences must fail at load, not pollute dist/.
+            if (bytes.len > 0 and !std.unicode.utf8ValidateSlice(bytes)) {
+                return error.FooterInvalidUtf8;
+            }
+            bundle.footer_bytes = bytes;
         }
     } else |_| {}
 
@@ -522,6 +531,37 @@ test "empty theme root yields empty bundle" {
     defer bundle.deinit();
     try std.testing.expectEqual(@as(usize, 0), bundle.assets.len);
     try std.testing.expectEqual(@as(usize, 0), bundle.footer().len);
+}
+
+test "loadThemeBundle rejects invalid UTF-8 in footer.html" {
+    // #62: footer must share the layout UTF-8 gate so every page does not
+    // publish malformed HTML through {{footer}}.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-footer-utf8", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    const theme_root = try std.fmt.allocPrint(gpa, "{s}/theme", .{work});
+    defer gpa.free(theme_root);
+    try cwd.createDirPath(io, theme_root);
+
+    // Lone continuation byte — invalid UTF-8.
+    const bad_footer = try std.fmt.allocPrint(gpa, "{s}/footer.html", .{theme_root});
+    defer gpa.free(bad_footer);
+    try cwd.writeFile(io, .{ .sub_path = bad_footer, .data = "ok\xc3" });
+
+    try std.testing.expectError(error.FooterInvalidUtf8, loadThemeBundle(io, gpa, cwd, theme_root));
+
+    // Valid UTF-8 still loads.
+    try cwd.writeFile(io, .{ .sub_path = bad_footer, .data = "<p>café</p>" });
+    var bundle = try loadThemeBundle(io, gpa, cwd, theme_root);
+    defer bundle.deinit();
+    try std.testing.expectEqualStrings("<p>café</p>", bundle.footer());
 }
 
 test "scrubOrphanThemeAssets removes deleted and renamed assets" {

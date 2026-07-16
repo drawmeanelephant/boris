@@ -21,12 +21,10 @@ How to use going forward:
 
 ### Fixed
 
-- Incremental HTML builds cache harvested wiki heading ids under
-  `.boris-cache/heading-harvest.json` (content-addressed by source + includes +
-  input adapter). No-op rebuilds of sites with `[[entity#heading]]` links no
-  longer re-run Apex for every fragment target; harvest keys that change still
-  re-render. Does not bump the page-fingerprint cache format. `src/compile.zig`.
-  Fixes #58.
+- Theme `footer.html` is UTF-8-validated at load (`FooterInvalidUtf8`), matching
+  the layout gate so `{{footer}}` cannot inject invalid sequences into every
+  published page. Contract: `docs/contracts/templating-and-themes.md` decision
+  10. `src/theme.zig`.
 - Non-incremental stale-HTML cleanup no longer deletes theme-owned `.html`
   assets published under `dist/` (e.g. `assets/embed.html`). The full-build
   sweep only keeps live page outputs and `.boris-cache`; after F9 theme assets
