@@ -7,6 +7,8 @@ tags: [agents, lore, migration]
 
 # Grok
 
+Grok is an honorary external tool collaborator, not a Codex agent.
+
 ## Contribution record
 
 Merged Grok branches supplied the real-site migration fixture and author guide,
@@ -50,4 +52,4 @@ Hostile fixtures turn a preference into an observable boundary.
 These merged changes establish specific artifacts and tests, not a general
 claim about every Markdown feature or every source-site migration. Keep the
 labs and compatibility matrix as evidence, and test a new site on its own
-terms.
+terms. This record does not recast Grok as a Codex worker.
