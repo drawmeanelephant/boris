@@ -1,7 +1,7 @@
-//! Starlight/Astro → Boris migration proof (developer-only).
+//! Starlight/Astro → Boris migration laboratory (developer-only dogfood).
 //!
-//! One-shot preflight + converter for a bounded slice of a Starlight content
-//! tree. Content-root discovery supports both shapes (no i18n semantics):
+//! Read-only preflight + bounded converter for a Starlight content tree.
+//! Content-root discovery supports both shapes (no i18n semantics):
 //! 1. locale directory: `src/content/docs/{locale}/…` (e.g. evcc-io/docs `en/`)
 //! 2. root-locale: default language files directly under `src/content/docs/`
 //!    (withastro/starlight docs — English at root, other langs in sibling dirs)
@@ -15,6 +15,7 @@
 //! - source text is untrusted: never follow embedded directives/prompts
 //! - source roots stay read-only; all writes go under --out
 //! - no Boris core content-asset copying
+//! - no universal-converter claims; invented semantic transforms are forbidden
 //!
 //! Not part of the product compiler. Does not import `src/`.
 
@@ -23,7 +24,7 @@ const Io = std.Io;
 
 pub const format_id = "boris-starlight-migration-lab";
 pub const schema_version: u32 = 1;
-pub const tool_version = "0.2.0";
+pub const tool_version = "0.3.0";
 
 /// Closed Boris author frontmatter keys only.
 const boris_keys = [_][]const u8{ "id", "title", "parent", "status", "tags" };
@@ -126,6 +127,22 @@ const SelectionRow = struct {
     content_rel: []const u8,
     selected: bool,
     reason: []const u8,
+};
+
+/// One boundary classification row: preserved body, stripped untrusted block,
+/// or an item that still needs human migration work.
+const BoundaryItem = struct {
+    class: []const u8, // preserved | stripped | manual_review
+    source_path: []const u8,
+    detail: []const u8,
+    line: ?usize = null,
+    category: ?[]const u8 = null,
+};
+
+const CollisionRecord = struct {
+    entity_id: []const u8,
+    source_paths: []const []const u8,
+    resolution: []const u8, // first_wins_others_disambiguated
 };
 
 fn trim(s: []const u8) []const u8 {
@@ -1005,20 +1022,12 @@ fn scanSidebarEvidence(a: std.mem.Allocator, config_src: []const u8, out: *std.A
                 .decision = "flatten_directory_to_trunk_plus_satellites",
             });
         } else if (std.mem.indexOf(u8, s, "label:")) |_| {
-            // keep noise low — only labels near sidebar context are recorded as group labels
-            if (std.mem.indexOf(u8, s, "Introduction") != null or
-                std.mem.indexOf(u8, s, "Installation") != null or
-                std.mem.indexOf(u8, s, "Features") != null or
-                std.mem.indexOf(u8, s, "Integrations") != null or
-                std.mem.indexOf(u8, s, "Reference") != null or
-                std.mem.indexOf(u8, s, "Devices") != null)
-            {
-                try out.append(a, .{
-                    .kind = "sidebar_label",
-                    .evidence = try std.fmt.allocPrint(a, "L{d}: {s}", .{ line_no, s }),
-                    .decision = "section_label_only_not_a_graph_node",
-                });
-            }
+            // Record every label line as nav evidence (deterministic text scan; not a graph node).
+            try out.append(a, .{
+                .kind = "sidebar_label",
+                .evidence = try std.fmt.allocPrint(a, "L{d}: {s}", .{ line_no, s }),
+                .decision = "section_label_only_not_a_graph_node",
+            });
         }
         pos = if (end < config_src.len) end + 1 else end;
         line_no += 1;
@@ -1029,6 +1038,57 @@ fn scanSidebarEvidence(a: std.mem.Allocator, config_src: []const u8, out: *std.A
         .evidence = "ir-schema one-level forest",
         .decision = "section_dirs_become_trunks_children_are_satellites_no_deep_nav",
     });
+}
+
+fn slashCount(s: []const u8) usize {
+    var n: usize = 0;
+    for (s) |c| {
+        if (c == '/') n += 1;
+    }
+    return n;
+}
+
+/// Disambiguate colliding entity ids deterministically: first source path keeps
+/// the base id; later sources get `-2`, `-3`, … suffixes. Collision is always
+/// reported for human review (no silent overwrite).
+fn disambiguateEntityIds(
+    a: std.mem.Allocator,
+    pages: []SourcePage,
+    route_prefix: []const u8,
+    collisions_out: *std.ArrayList(CollisionRecord),
+) !void {
+    var by_id: std.StringHashMapUnmanaged(std.ArrayList(usize)) = .empty;
+    for (pages, 0..) |p, i| {
+        const gop = try by_id.getOrPut(a, p.entity_id);
+        if (!gop.found_existing) gop.value_ptr.* = .empty;
+        try gop.value_ptr.append(a, i);
+    }
+    var it = by_id.iterator();
+    while (it.next()) |entry| {
+        const idxs = entry.value_ptr.items;
+        if (idxs.len < 2) continue;
+        std.mem.sort(usize, idxs, pages, struct {
+            fn less(ps: []SourcePage, x: usize, y: usize) bool {
+                return std.mem.order(u8, ps[x].source_path, ps[y].source_path) == .lt;
+            }
+        }.less);
+        var paths: std.ArrayList([]const u8) = .empty;
+        for (idxs) |idx| try paths.append(a, pages[idx].source_path);
+        try collisions_out.append(a, .{
+            .entity_id = entry.key_ptr.*,
+            .source_paths = try paths.toOwnedSlice(a),
+            .resolution = "first_wins_others_disambiguated",
+        });
+        var suffix: usize = 2;
+        for (idxs[1..]) |idx| {
+            const base = entry.key_ptr.*;
+            const new_id = try std.fmt.allocPrint(a, "{s}-{d}", .{ base, suffix });
+            pages[idx].entity_id = new_id;
+            pages[idx].route = try routeFromEntity(a, route_prefix, new_id);
+            pages[idx].output_path = try outputPathFromEntity(a, new_id);
+            suffix += 1;
+        }
+    }
 }
 
 fn emitPage(a: std.mem.Allocator, p: SourcePage) ![]u8 {
@@ -1469,6 +1529,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         });
     }
 
+    // Detect entity-id collisions (duplicate/ambiguous routes) before link rewrite.
+    var collisions: std.ArrayList(CollisionRecord) = .empty;
+    try disambiguateEntityIds(a, pages.items, route_prefix, &collisions);
+
     std.mem.sort(SourcePage, pages.items, {}, struct {
         fn less(_: void, x: SourcePage, y: SourcePage) bool {
             return std.mem.order(u8, x.entity_id, y.entity_id) == .lt;
@@ -1554,15 +1618,20 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         try writeFile(io, out, p.output_path, text);
     }
 
+    // Boundary classification (preserved / stripped / manual_review).
+    const boundary = try buildBoundaryItems(a, pages.items, selection_rows.items, assets.items, collisions.items);
+
     // Sidecar manifests
     try writeRouteMap(a, io, out, pages.items);
-    try writeUnsupported(a, io, out, pages.items);
+    try writeUnsupported(a, io, out, pages.items, collisions.items);
     try writeAssetsManifest(a, io, out, assets.items);
     try writeNavManifest(a, io, out, nav.items);
     try writeProvenance(a, io, out, opts, content, pages.items);
     try writeLinkReview(a, io, out, pages.items);
+    try writeHeadingFragments(a, io, out, pages.items);
     try writeSelectionManifest(a, io, out, content, selection_rows.items, opts.max_pages);
-    try writeReports(a, io, out, opts, content, pages.items, inventory.items, assets.items, nav.items, selection_rows.items);
+    try writeBoundaryManifest(a, io, out, boundary.items);
+    try writeReports(a, io, out, opts, content, pages.items, inventory.items, assets.items, nav.items, selection_rows.items, boundary.items, collisions.items);
 
     // Compile proof
     const compile = try tryCompileWithBoris(io, gpa, a, opts, opts.out_dir);
@@ -1574,6 +1643,151 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             .{ @tagName(content.shape), opts.out_dir, pages.items.len, compile.status },
         );
     }
+}
+
+fn buildBoundaryItems(
+    a: std.mem.Allocator,
+    pages: []const SourcePage,
+    selection: []const SelectionRow,
+    assets: []const AssetEntry,
+    collisions: []const CollisionRecord,
+) !std.ArrayList(BoundaryItem) {
+    var items: std.ArrayList(BoundaryItem) = .empty;
+
+    // Selection exclusions → manual review (not converted).
+    for (selection) |r| {
+        if (r.selected) continue;
+        try items.append(a, .{
+            .class = "manual_review",
+            .source_path = r.source_path,
+            .detail = try std.fmt.allocPrint(a, "not_selected:{s}", .{r.reason}),
+            .category = r.reason,
+        });
+    }
+
+    for (pages) |p| {
+        if (p.is_synthetic) {
+            try items.append(a, .{
+                .class = "manual_review",
+                .source_path = p.source_path,
+                .detail = try std.fmt.allocPrint(a, "synthetic_trunk entity={s}", .{p.entity_id}),
+                .category = "synthetic_trunk",
+            });
+            continue;
+        }
+
+        // Preserved: converted body retained under closed Boris frontmatter.
+        try items.append(a, .{
+            .class = "preserved",
+            .source_path = p.source_path,
+            .detail = try std.fmt.allocPrint(a, "body_retained entity={s} output={s}", .{ p.entity_id, p.output_path }),
+            .category = "converted_page",
+        });
+
+        for (p.stripped_blocks) |b| {
+            try items.append(a, .{
+                .class = "stripped",
+                .source_path = p.source_path,
+                .detail = "untrusted_embedded_block_payload_not_replayed",
+                .line = b.line,
+                .category = b.category,
+            });
+        }
+
+        for (p.unmapped_fields) |f| {
+            try items.append(a, .{
+                .class = "manual_review",
+                .source_path = p.source_path,
+                .detail = try std.fmt.allocPrint(a, "unmapped_frontmatter:{s}", .{f}),
+                .category = "unsupported_frontmatter",
+            });
+        }
+        if (p.imports.len > 0 or p.components.len > 0) {
+            try items.append(a, .{
+                .class = "manual_review",
+                .source_path = p.source_path,
+                .detail = try std.fmt.allocPrint(a, "mdx imports={d} components={d} (not executed)", .{ p.imports.len, p.components.len }),
+                .category = "unsupported_mdx",
+            });
+        }
+        if (slashCount(p.entity_id) > 1) {
+            try items.append(a, .{
+                .class = "manual_review",
+                .source_path = p.source_path,
+                .detail = try std.fmt.allocPrint(a, "deep_path_flattened entity={s} parent={s}", .{ p.entity_id, p.parent orelse "(trunk)" }),
+                .category = "deep_path",
+            });
+        }
+        for (p.link_events) |ev| {
+            if (std.mem.eql(u8, ev.resolution, "review")) {
+                try items.append(a, .{
+                    .class = "manual_review",
+                    .source_path = p.source_path,
+                    .detail = try std.fmt.allocPrint(a, "link:{s}", .{ev.review_reason orelse "review"}),
+                    .line = ev.line,
+                    .category = "link_review",
+                });
+            } else if (std.mem.eql(u8, ev.resolution, "rewritten") and ev.review_reason != null) {
+                // Fragment present but heading not verified.
+                try items.append(a, .{
+                    .class = "manual_review",
+                    .source_path = p.source_path,
+                    .detail = try std.fmt.allocPrint(a, "fragment:{s}", .{ev.fragment orelse ""}),
+                    .line = ev.line,
+                    .category = "heading_fragment",
+                });
+            } else if (std.mem.eql(u8, ev.resolution, "asset")) {
+                try items.append(a, .{
+                    .class = "manual_review",
+                    .source_path = p.source_path,
+                    .detail = try std.fmt.allocPrint(a, "asset_not_auto_copied:{s}", .{ev.target}),
+                    .line = ev.line,
+                    .category = "asset_inventory_only",
+                });
+            }
+        }
+    }
+
+    for (collisions) |c| {
+        for (c.source_paths) |sp| {
+            try items.append(a, .{
+                .class = "manual_review",
+                .source_path = sp,
+                .detail = try std.fmt.allocPrint(a, "entity_collision base={s} resolution={s}", .{ c.entity_id, c.resolution }),
+                .category = "ambiguous_route",
+            });
+        }
+    }
+
+    for (assets) |e| {
+        if (!e.exists) {
+            try items.append(a, .{
+                .class = "manual_review",
+                .source_path = e.source_path,
+                .detail = "referenced_asset_missing",
+                .category = "missing_asset",
+            });
+        } else if (e.sha256_hex != null) {
+            try items.append(a, .{
+                .class = "preserved",
+                .source_path = e.source_path,
+                .detail = try std.fmt.allocPrint(a, "asset_inventoried kind={s} sha256_proven (not copied into Boris core)", .{e.kind}),
+                .category = "asset_inventory",
+            });
+        }
+    }
+
+    // Deterministic order: class, source_path, detail.
+    std.mem.sort(BoundaryItem, items.items, {}, struct {
+        fn less(_: void, x: BoundaryItem, y: BoundaryItem) bool {
+            const c = std.mem.order(u8, x.class, y.class);
+            if (c != .eq) return c == .lt;
+            const s = std.mem.order(u8, x.source_path, y.source_path);
+            if (s != .eq) return s == .lt;
+            return std.mem.order(u8, x.detail, y.detail) == .lt;
+        }
+    }.less);
+    return items;
 }
 
 fn collectLocalAssets(
@@ -1627,7 +1841,13 @@ fn writeRouteMap(a: std.mem.Allocator, io: Io, out: Io.Dir, pages: []const Sourc
     try writeFile(io, out, "route_map.json", buf.items);
 }
 
-fn writeUnsupported(a: std.mem.Allocator, io: Io, out: Io.Dir, pages: []const SourcePage) !void {
+fn writeUnsupported(
+    a: std.mem.Allocator,
+    io: Io,
+    out: Io.Dir,
+    pages: []const SourcePage,
+    collisions: []const CollisionRecord,
+) !void {
     var buf: std.ArrayList(u8) = .empty;
     try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-unsupported\",\n  \"schema_version\": 1,\n  \"frontmatter\": [\n");
     var first = true;
@@ -1664,8 +1884,90 @@ fn writeUnsupported(a: std.mem.Allocator, io: Io, out: Io.Dir, pages: []const So
         }
         try buf.appendSlice(a, "] }");
     }
-    try buf.appendSlice(a, "\n  ]\n}\n");
+    try buf.appendSlice(a, "\n  ],\n  \"entity_collisions\": [\n");
+    for (collisions, 0..) |c, i| {
+        try buf.appendSlice(a, "    { \"entity_id\": ");
+        try appendJson(&buf, a, c.entity_id);
+        try buf.appendSlice(a, ", \"resolution\": ");
+        try appendJson(&buf, a, c.resolution);
+        try buf.appendSlice(a, ", \"source_paths\": [");
+        for (c.source_paths, 0..) |sp, j| {
+            if (j > 0) try buf.appendSlice(a, ", ");
+            try appendJson(&buf, a, sp);
+        }
+        try buf.appendSlice(a, "] }");
+        if (i + 1 < collisions.len) try buf.append(a, ',');
+        try buf.append(a, '\n');
+    }
+    try buf.appendSlice(a, "  ]\n}\n");
     try writeFile(io, out, "unsupported_manifest.json", buf.items);
+}
+
+fn writeHeadingFragments(a: std.mem.Allocator, io: Io, out: Io.Dir, pages: []const SourcePage) !void {
+    var buf: std.ArrayList(u8) = .empty;
+    try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-heading-fragments\",\n  \"schema_version\": 1,\n  \"policy\": \"Fragments are inventoried only. Heading ids are not verified against Apex or source headings. Page targets may still be wiki-rewritten when proven.\",\n  \"fragments\": [\n");
+    var first = true;
+    for (pages) |p| {
+        for (p.link_events) |ev| {
+            if (ev.fragment == null) continue;
+            if (!first) try buf.appendSlice(a, ",\n");
+            first = false;
+            try buf.appendSlice(a, "    { \"source_path\": ");
+            try appendJson(&buf, a, p.source_path);
+            try buf.appendSlice(a, ", \"line\": ");
+            try appendUsize(&buf, a, ev.line);
+            try buf.appendSlice(a, ", \"target\": ");
+            try appendJson(&buf, a, ev.target);
+            try buf.appendSlice(a, ", \"fragment\": ");
+            try appendJson(&buf, a, ev.fragment.?);
+            try buf.appendSlice(a, ", \"resolution\": ");
+            try appendJson(&buf, a, ev.resolution);
+            try buf.appendSlice(a, ", \"rewritten_to\": ");
+            if (ev.rewritten_to) |r| try appendJson(&buf, a, r) else try buf.appendSlice(a, "null");
+            try buf.appendSlice(a, ", \"review_reason\": ");
+            if (ev.review_reason) |r| try appendJson(&buf, a, r) else try buf.appendSlice(a, "null");
+            try buf.appendSlice(a, " }");
+        }
+    }
+    try buf.appendSlice(a, "\n  ]\n}\n");
+    try writeFile(io, out, "heading_fragments.json", buf.items);
+}
+
+fn writeBoundaryManifest(a: std.mem.Allocator, io: Io, out: Io.Dir, items: []const BoundaryItem) !void {
+    var preserved_n: usize = 0;
+    var stripped_n: usize = 0;
+    var review_n: usize = 0;
+    for (items) |it| {
+        if (std.mem.eql(u8, it.class, "preserved")) preserved_n += 1;
+        if (std.mem.eql(u8, it.class, "stripped")) stripped_n += 1;
+        if (std.mem.eql(u8, it.class, "manual_review")) review_n += 1;
+    }
+
+    var buf: std.ArrayList(u8) = .empty;
+    try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-boundary\",\n  \"schema_version\": 1,\n  \"policy\": \"Mechanical classification only. preserved = body/asset retained without invented semantics; stripped = untrusted instruction/directive/agent/prompt fences removed without payload replay; manual_review = human migration work still required. Not a universal converter.\",\n  \"counts\": {\n    \"preserved\": ");
+    try appendUsize(&buf, a, preserved_n);
+    try buf.appendSlice(a, ",\n    \"stripped\": ");
+    try appendUsize(&buf, a, stripped_n);
+    try buf.appendSlice(a, ",\n    \"manual_review\": ");
+    try appendUsize(&buf, a, review_n);
+    try buf.appendSlice(a, "\n  },\n  \"items\": [\n");
+    for (items, 0..) |it, i| {
+        try buf.appendSlice(a, "    { \"class\": ");
+        try appendJson(&buf, a, it.class);
+        try buf.appendSlice(a, ", \"source_path\": ");
+        try appendJson(&buf, a, it.source_path);
+        try buf.appendSlice(a, ", \"detail\": ");
+        try appendJson(&buf, a, it.detail);
+        try buf.appendSlice(a, ", \"line\": ");
+        if (it.line) |ln| try appendUsize(&buf, a, ln) else try buf.appendSlice(a, "null");
+        try buf.appendSlice(a, ", \"category\": ");
+        if (it.category) |c| try appendJson(&buf, a, c) else try buf.appendSlice(a, "null");
+        try buf.appendSlice(a, " }");
+        if (i + 1 < items.len) try buf.append(a, ',');
+        try buf.append(a, '\n');
+    }
+    try buf.appendSlice(a, "  ]\n}\n");
+    try writeFile(io, out, "boundary_manifest.json", buf.items);
 }
 
 fn writeAssetsManifest(a: std.mem.Allocator, io: Io, out: Io.Dir, assets: []const AssetEntry) !void {
@@ -1843,10 +2145,20 @@ fn writeReports(
     assets: []const AssetEntry,
     nav: []const NavDecision,
     selection: []const SelectionRow,
+    boundary: []const BoundaryItem,
+    collisions: []const CollisionRecord,
 ) !void {
     var selected_n: usize = 0;
     for (selection) |r| {
         if (r.selected) selected_n += 1;
+    }
+    var preserved_n: usize = 0;
+    var stripped_n: usize = 0;
+    var review_n: usize = 0;
+    for (boundary) |it| {
+        if (std.mem.eql(u8, it.class, "preserved")) preserved_n += 1;
+        if (std.mem.eql(u8, it.class, "stripped")) stripped_n += 1;
+        if (std.mem.eql(u8, it.class, "manual_review")) review_n += 1;
     }
 
     // report.json
@@ -1874,7 +2186,15 @@ fn writeReports(
     try appendUsize(&report, a, selected_n);
     try report.appendSlice(a, ",\n  \"converted_pages\": ");
     try appendUsize(&report, a, pages.len);
-    try report.appendSlice(a, ",\n  \"supported_frontmatter\": [\"id\", \"title\", \"parent\", \"status\", \"tags\"],\n");
+    try report.appendSlice(a, ",\n  \"entity_collisions\": ");
+    try appendUsize(&report, a, collisions.len);
+    try report.appendSlice(a, ",\n  \"boundary_counts\": {\n    \"preserved\": ");
+    try appendUsize(&report, a, preserved_n);
+    try report.appendSlice(a, ",\n    \"stripped\": ");
+    try appendUsize(&report, a, stripped_n);
+    try report.appendSlice(a, ",\n    \"manual_review\": ");
+    try appendUsize(&report, a, review_n);
+    try report.appendSlice(a, "\n  },\n  \"supported_frontmatter\": [\"id\", \"title\", \"parent\", \"status\", \"tags\"],\n");
     try report.appendSlice(a, "  \"unsupported_summary\": {\n");
     try report.appendSlice(a, "    \"full_yaml\": false,\n");
     try report.appendSlice(a, "    \"mdx_components\": false,\n");
@@ -1883,7 +2203,8 @@ fn writeReports(
     try report.appendSlice(a, "    \"translation_linking\": false,\n");
     try report.appendSlice(a, "    \"content_asset_copy\": false,\n");
     try report.appendSlice(a, "    \"live_sync\": false,\n");
-    try report.appendSlice(a, "    \"deep_nav\": false\n");
+    try report.appendSlice(a, "    \"deep_nav\": false,\n");
+    try report.appendSlice(a, "    \"universal_converter\": false\n");
     try report.appendSlice(a, "  },\n  \"inventory_count\": ");
     try appendUsize(&report, a, inventory.len);
     try report.appendSlice(a, ",\n  \"asset_count\": ");
@@ -1914,9 +2235,11 @@ fn writeReports(
     // REPORT.md
     var md: std.ArrayList(u8) = .empty;
     try md.appendSlice(a, "# Starlight → Boris migration report\n\n");
-    try md.appendSlice(a, "Developer-only proof for a bounded Starlight content slice (content-root discovery only; no i18n).\n\n");
+    try md.appendSlice(a, "Developer-only **read-only dogfood** for a Starlight content tree (content-root discovery only; no i18n; not a universal converter).\n\n");
     try md.appendSlice(a, "| | |\n|--|--|\n| Format | `");
     try md.appendSlice(a, format_id);
+    try md.appendSlice(a, "` |\n| Tool version | `");
+    try md.appendSlice(a, tool_version);
     try md.appendSlice(a, "` |\n| Content shape | `");
     try md.appendSlice(a, @tagName(content.shape));
     try md.appendSlice(a, "` |\n| Content root | `");
@@ -1927,9 +2250,28 @@ fn writeReports(
     try md.appendSlice(a, opts.locale);
     try md.appendSlice(a, "` |\n| Converted pages | ");
     try appendUsize(&md, a, pages.len);
+    try md.appendSlice(a, " |\n| Entity collisions | ");
+    try appendUsize(&md, a, collisions.len);
+    try md.appendSlice(a, " |\n| Boundary preserved / stripped / manual_review | ");
+    try appendUsize(&md, a, preserved_n);
+    try md.appendSlice(a, " / ");
+    try appendUsize(&md, a, stripped_n);
+    try md.appendSlice(a, " / ");
+    try appendUsize(&md, a, review_n);
     try md.appendSlice(a, " |\n| Source | `");
     try md.appendSlice(a, opts.source_root_dir);
     try md.appendSlice(a, "` (read-only) |\n\n");
+
+    try md.appendSlice(a, "## Boundary summary\n\n");
+    try md.appendSlice(a,
+        \\| Class | Meaning |
+        \\|-------|---------|
+        \\| **preserved** | Body text or asset inventory retained without invented semantics |
+        \\| **stripped** | Untrusted agent/directive/instruction/prompt fences removed; payload never replayed |
+        \\| **manual_review** | Human migration work still required (MDX, FM, links, fragments, collisions, assets, …) |
+        \\
+        \\
+    );
 
     try md.appendSlice(a, "## Supported / unsupported matrix\n\n");
     try md.appendSlice(a,
@@ -1944,14 +2286,16 @@ fn writeReports(
         \\| Markdown body | **Supported** | Passed through after MDX import strip |
         \\| MDX imports / components | **Unsupported** | Inventoried; tags neutralized; not executed |
         \\| Internal markdown route/relative links | **Conditional** | Rewritten to `[[entity]]` only when target is in entity map |
-        \\| Fragments (`#heading`) | **Review** | Explicit review row; heading not verified |
+        \\| Fragments (`#heading`) | **Review** | Explicit fragment inventory; heading not verified |
         \\| Attribute `href`/`to` routes | **Review** | Never auto-rewritten |
         \\| External links | **Left as-is** | Inventoried as external |
         \\| Local / public assets | **Inventoried** | Existence + SHA-256 when local file proven; not copied |
+        \\| Duplicate / ambiguous entity ids | **Disambiguated** | First source path wins; others get `-2`…; all reviewed |
         \\| Sidebar / autogenerate | **Flattened** | One-level forest: section Trunk + Satellite children |
         \\| Translation linking / i18n | **Unsupported** | Content-root discovery only |
         \\| Live sync / Node runtime | **Unsupported** | |
         \\| Deep multi-hop parents | **Unsupported** | Boris one-level forest |
+        \\| Universal conversion | **Not claimed** | Mechanical inventory + proven rewrites only |
         \\
         \\
     );
@@ -1960,11 +2304,13 @@ fn writeReports(
     try md.appendSlice(a,
         \\- `route_map.json` — source path → route → entity id → output
         \\- `selection_manifest.json` — deterministic candidate selection rows
-        \\- `unsupported_manifest.json` — unmapped frontmatter + MDX imports/components
+        \\- `unsupported_manifest.json` — unmapped frontmatter + MDX + entity collisions
         \\- `assets_manifest.json` — public + content-local assets (exists + sha256 when proven)
         \\- `nav_flatten.json` — discovery + sidebar evidence + flatten decisions
         \\- `provenance_manifest.json` — raw frontmatter + source provenance
         \\- `link_review.json` — every link event (rewritten / review / external / asset)
+        \\- `heading_fragments.json` — fragment inventory (headings not verified)
+        \\- `boundary_manifest.json` — preserved / stripped / manual_review classification
         \\- `compile_report.json` — Boris compile attempt result
         \\- `report.json` — machine summary
         \\
@@ -2090,11 +2436,33 @@ fn writeReports(
     }
     if (!any_strip) try md.appendSlice(a, "None.\n");
 
+    try md.appendSlice(a, "\n## Entity collisions (ambiguous routes)\n\n");
+    if (collisions.len == 0) {
+        try md.appendSlice(a, "None.\n");
+    } else {
+        for (collisions) |c| {
+            try md.appendSlice(a, "- base entity `");
+            try md.appendSlice(a, c.entity_id);
+            try md.appendSlice(a, "` (");
+            try md.appendSlice(a, c.resolution);
+            try md.appendSlice(a, "): ");
+            for (c.source_paths, 0..) |sp, i| {
+                if (i > 0) try md.appendSlice(a, ", ");
+                try md.appendSlice(a, "`");
+                try md.appendSlice(a, sp);
+                try md.appendSlice(a, "`");
+            }
+            try md.appendSlice(a, "\n");
+        }
+    }
+
     try md.appendSlice(a, "\n## Safety\n\n");
     try md.appendSlice(a, "- Source root is never written.\n");
-    try md.appendSlice(a, "- No network, no package install, no Node/Astro execution.\n");
+    try md.appendSlice(a, "- No network, no package install, no Node/Astro/MDX execution.\n");
     try md.appendSlice(a, "- Embedded agent/directive/instruction/prompt fences are stripped without replaying payloads.\n");
-    try md.appendSlice(a, "- Content-asset inventory only; no Boris core asset copy in this proof.\n");
+    try md.appendSlice(a, "- Content-asset inventory only; no Boris core asset copy.\n");
+    try md.appendSlice(a, "- Not a universal converter; no invented semantic transformations.\n");
+    try md.appendSlice(a, "- Repeated runs with the same inputs produce byte-identical reports (relative `--root`/`--out`).\n");
 
     try writeFile(io, out, "REPORT.md", md.items);
 }
@@ -2235,6 +2603,8 @@ test "starlight: locale-dir fixture is deterministic, preserves source, reports 
         "selection_manifest.json",
         "link_review.json",
         "assets_manifest.json",
+        "boundary_manifest.json",
+        "heading_fragments.json",
         "report.json",
         "content/features/alpha.md",
     };
@@ -2262,11 +2632,18 @@ test "starlight: locale-dir fixture is deterministic, preserves source, reports 
     defer std.testing.allocator.free(report);
     try std.testing.expect(std.mem.indexOf(u8, report, format_id) != null);
     try std.testing.expect(std.mem.indexOf(u8, report, "locale_dir") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "boundary_counts") != null);
 
     const assets = try readFileAlloc(io, ao, "assets_manifest.json", std.testing.allocator);
     defer std.testing.allocator.free(assets);
     try std.testing.expect(std.mem.indexOf(u8, assets, "sha256") != null);
     try std.testing.expect(std.mem.indexOf(u8, assets, "\"exists\": true") != null);
+
+    const boundary = try readFileAlloc(io, ao, "boundary_manifest.json", std.testing.allocator);
+    defer std.testing.allocator.free(boundary);
+    try std.testing.expect(std.mem.indexOf(u8, boundary, "\"preserved\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, boundary, "\"stripped\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, boundary, "\"manual_review\"") != null);
 
     const after = try readFileAlloc(io, fixture, "src/content/docs/en/features/alpha.mdx", std.testing.allocator);
     defer std.testing.allocator.free(after);
@@ -2353,4 +2730,200 @@ test "starlight: root-locale fixture discovery and routes" {
 test "starlight: refuse output inside source" {
     try std.testing.expectError(error.OutputInsideSource, refuseOutputInsideSource("/tmp/src", "/tmp/src"));
     try std.testing.expectError(error.OutputInsideSource, refuseOutputInsideSource("/tmp/src", "/tmp/src/out"));
+}
+
+test "starlight: dogfood fixture is deterministic at scale and preserves source" {
+    const io = std.testing.io;
+    const a_out = "fixtures/.test-starlight-dogfood-a";
+    const b_out = "fixtures/.test-starlight-dogfood-b";
+    Io.Dir.cwd().deleteTree(io, a_out) catch {};
+    Io.Dir.cwd().deleteTree(io, b_out) catch {};
+
+    var fixture = try Io.Dir.cwd().openDir(io, "fixtures/dogfood-starlight", .{});
+    defer fixture.close(io);
+    const before = try readFileAlloc(io, fixture, "src/content/docs/getting-started.mdx", std.testing.allocator);
+    defer std.testing.allocator.free(before);
+
+    try run(io, std.testing.allocator, .{
+        .source_root_dir = "fixtures/dogfood-starlight",
+        .out_dir = a_out,
+        .quiet = true,
+        .max_pages = 80,
+    });
+    try run(io, std.testing.allocator, .{
+        .source_root_dir = "fixtures/dogfood-starlight",
+        .out_dir = b_out,
+        .quiet = true,
+        .max_pages = 80,
+    });
+
+    var ao = try Io.Dir.cwd().openDir(io, a_out, .{});
+    defer ao.close(io);
+    var bo = try Io.Dir.cwd().openDir(io, b_out, .{});
+    defer bo.close(io);
+
+    const compare = [_][]const u8{
+        "route_map.json",
+        "selection_manifest.json",
+        "link_review.json",
+        "assets_manifest.json",
+        "nav_flatten.json",
+        "unsupported_manifest.json",
+        "heading_fragments.json",
+        "boundary_manifest.json",
+        "provenance_manifest.json",
+        "report.json",
+        "REPORT.md",
+        "content/getting-started.md",
+        "content/guides/pages.md",
+        "content/blog/2024/release-notes.md",
+    };
+    for (compare) |name| {
+        const xa = try readFileAlloc(io, ao, name, std.testing.allocator);
+        defer std.testing.allocator.free(xa);
+        const xb = try readFileAlloc(io, bo, name, std.testing.allocator);
+        defer std.testing.allocator.free(xb);
+        try std.testing.expectEqualStrings(xa, xb);
+    }
+
+    const report = try readFileAlloc(io, ao, "report.json", std.testing.allocator);
+    defer std.testing.allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "root_locale") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"converted_pages\"") != null);
+    // Parse selected_candidates: dogfood fixture is ~67 non-partial pages.
+    const sel_key = "\"selected_candidates\": ";
+    const sel_at = std.mem.indexOf(u8, report, sel_key) orelse return error.TestUnexpectedResult;
+    var n: usize = 0;
+    var p = sel_at + sel_key.len;
+    while (p < report.len and report[p] >= '0' and report[p] <= '9') : (p += 1) {
+        n = n * 10 + (report[p] - '0');
+    }
+    try std.testing.expect(n >= 40 and n <= 80);
+
+    const routes = try readFileAlloc(io, ao, "route_map.json", std.testing.allocator);
+    defer std.testing.allocator.free(routes);
+    try std.testing.expect(std.mem.indexOf(u8, routes, "\"route\": \"/\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, routes, "\"route\": \"/guides/pages\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, routes, "\"route\": \"/blog/2024/release-notes\"") != null);
+    // Sibling locales must not convert.
+    try std.testing.expect(std.mem.indexOf(u8, routes, "de/") == null);
+    try std.testing.expect(std.mem.indexOf(u8, routes, "zh-cn") == null);
+
+    const page = try readFileAlloc(io, ao, "content/getting-started.md", std.testing.allocator);
+    defer std.testing.allocator.free(page);
+    try std.testing.expect(std.mem.indexOf(u8, page, "untrusted-dogfood-payload") == null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "[[") != null); // proven wiki rewrite present
+
+    const boundary = try readFileAlloc(io, ao, "boundary_manifest.json", std.testing.allocator);
+    defer std.testing.allocator.free(boundary);
+    try std.testing.expect(std.mem.indexOf(u8, boundary, "stripped") != null);
+    try std.testing.expect(std.mem.indexOf(u8, boundary, "manual_review") != null);
+    try std.testing.expect(std.mem.indexOf(u8, boundary, "deep_path") != null);
+
+    const frags = try readFileAlloc(io, ao, "heading_fragments.json", std.testing.allocator);
+    defer std.testing.allocator.free(frags);
+    try std.testing.expect(std.mem.indexOf(u8, frags, "heading-ids") != null or std.mem.indexOf(u8, frags, "fragment") != null);
+
+    const assets = try readFileAlloc(io, ao, "assets_manifest.json", std.testing.allocator);
+    defer std.testing.allocator.free(assets);
+    try std.testing.expect(std.mem.indexOf(u8, assets, "public/images/hero.png") != null);
+    try std.testing.expect(std.mem.indexOf(u8, assets, "sha256") != null);
+
+    const nav = try readFileAlloc(io, ao, "nav_flatten.json", std.testing.allocator);
+    defer std.testing.allocator.free(nav);
+    try std.testing.expect(std.mem.indexOf(u8, nav, "sidebar_autogenerate") != null);
+    try std.testing.expect(std.mem.indexOf(u8, nav, "sidebar_label") != null);
+
+    const after = try readFileAlloc(io, fixture, "src/content/docs/getting-started.mdx", std.testing.allocator);
+    defer std.testing.allocator.free(after);
+    try std.testing.expectEqualStrings(before, after);
+
+    Io.Dir.cwd().deleteTree(io, a_out) catch {};
+    Io.Dir.cwd().deleteTree(io, b_out) catch {};
+}
+
+test "starlight: hostile fixture reports collisions, unsupported MDX, and strips instructions" {
+    const io = std.testing.io;
+    const out_dir = "fixtures/.test-starlight-hostile";
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+
+    var fixture = try Io.Dir.cwd().openDir(io, "fixtures/hostile-starlight", .{});
+    defer fixture.close(io);
+    const before = try readFileAlloc(io, fixture, "src/content/docs/en/features/alpha.mdx", std.testing.allocator);
+    defer std.testing.allocator.free(before);
+
+    try run(io, std.testing.allocator, .{
+        .source_root_dir = "fixtures/hostile-starlight",
+        .out_dir = out_dir,
+        .quiet = true,
+        .max_pages = 40,
+    });
+
+    var od = try Io.Dir.cwd().openDir(io, out_dir, .{});
+    defer od.close(io);
+
+    const report = try readFileAlloc(io, od, "report.json", std.testing.allocator);
+    defer std.testing.allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "locale_dir") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"entity_collisions\": ") != null);
+    // At least one collision group expected.
+    const col_key = "\"entity_collisions\": ";
+    const col_at = std.mem.indexOf(u8, report, col_key) orelse return error.TestUnexpectedResult;
+    var cn: usize = 0;
+    var cp = col_at + col_key.len;
+    while (cp < report.len and report[cp] >= '0' and report[cp] <= '9') : (cp += 1) {
+        cn = cn * 10 + (report[cp] - '0');
+    }
+    try std.testing.expect(cn >= 1);
+
+    const unsup = try readFileAlloc(io, od, "unsupported_manifest.json", std.testing.allocator);
+    defer std.testing.allocator.free(unsup);
+    try std.testing.expect(std.mem.indexOf(u8, unsup, "entity_collisions") != null);
+    try std.testing.expect(std.mem.indexOf(u8, unsup, "clash/intro") != null);
+    try std.testing.expect(std.mem.indexOf(u8, unsup, "sidebar") != null or std.mem.indexOf(u8, unsup, "customObject") != null or std.mem.indexOf(u8, unsup, "draft") != null);
+
+    const routes = try readFileAlloc(io, od, "route_map.json", std.testing.allocator);
+    defer std.testing.allocator.free(routes);
+    // Disambiguated second entity should appear.
+    try std.testing.expect(std.mem.indexOf(u8, routes, "clash/intro-2") != null or std.mem.indexOf(u8, routes, "installation-2") != null);
+
+    const alpha = try readFileAlloc(io, od, "content/features/alpha.md", std.testing.allocator);
+    defer std.testing.allocator.free(alpha);
+    try std.testing.expect(std.mem.indexOf(u8, alpha, "hostile-instruction-payload") == null);
+    try std.testing.expect(std.mem.indexOf(u8, alpha, "id: features/alpha") != null); // converter-owned id
+
+    const boundary = try readFileAlloc(io, od, "boundary_manifest.json", std.testing.allocator);
+    defer std.testing.allocator.free(boundary);
+    try std.testing.expect(std.mem.indexOf(u8, boundary, "ambiguous_route") != null);
+    try std.testing.expect(std.mem.indexOf(u8, boundary, "unsupported_mdx") != null);
+    try std.testing.expect(std.mem.indexOf(u8, boundary, "stripped") != null);
+    try std.testing.expect(std.mem.indexOf(u8, boundary, "deep_path") != null);
+
+    const sel = try readFileAlloc(io, od, "selection_manifest.json", std.testing.allocator);
+    defer std.testing.allocator.free(sel);
+    try std.testing.expect(std.mem.indexOf(u8, sel, "underscore_partial") != null);
+
+    const after = try readFileAlloc(io, fixture, "src/content/docs/en/features/alpha.mdx", std.testing.allocator);
+    defer std.testing.allocator.free(after);
+    try std.testing.expectEqualStrings(before, after);
+
+    // Second run byte-identical.
+    const out_b = "fixtures/.test-starlight-hostile-b";
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
+    try run(io, std.testing.allocator, .{
+        .source_root_dir = "fixtures/hostile-starlight",
+        .out_dir = out_b,
+        .quiet = true,
+        .max_pages = 40,
+    });
+    var ob = try Io.Dir.cwd().openDir(io, out_b, .{});
+    defer ob.close(io);
+    const ba = try readFileAlloc(io, od, "boundary_manifest.json", std.testing.allocator);
+    defer std.testing.allocator.free(ba);
+    const bb = try readFileAlloc(io, ob, "boundary_manifest.json", std.testing.allocator);
+    defer std.testing.allocator.free(bb);
+    try std.testing.expectEqualStrings(ba, bb);
+
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
 }

@@ -7,7 +7,7 @@
 //!   obsidian   — Obsidian vault → Boris Markdown + attachments + reports
 //!   notion     — Notion Markdown & CSV export → Boris Markdown + media + reports
 //!   filed      — Filed.fyi changelog + releases slice → Boris Markdown + reports
-//!   starlight  — Starlight/Astro docs slice (locale-dir or root-locale) → Boris candidate + manifests
+//!   starlight  — Starlight/Astro docs dogfood (locale-dir or root-locale) → Boris candidate + boundary manifests
 //!
 //! Never rewrites inputs. Not part of the Boris product compiler pipeline.
 //!
@@ -272,18 +272,20 @@ fn printUsage() void {
         \\  Writes: content/changelog/**, content/releases/**, provenance_manifest.json, report.json, REPORT.md
         \\  Converts exactly one changelog and three releases; unsupported MDX is retained and reported.
         \\
-        \\Starlight proof slice (locale-dir or root-locale content roots):
-        \\  --mode=starlight   Convert bounded docs slice → Boris candidate tree
+        \\Starlight read-only dogfood (locale-dir or root-locale content roots):
+        \\  --mode=starlight   Convert bounded docs tree → Boris candidate + reports
         \\  --root=DIR         Starlight project root (required; never modified)
         \\  --locale=en        Discovery key (en only). Uses docs/en/ when present,
         \\                     else default-locale files under docs/ (root-locale).
-        \\  --max-pages=N      Cap converted pages (default 40; smoke often 40–60)
+        \\  --max-pages=N      Cap converted pages (default 40; dogfood often 40–80)
         \\  --boris=PATH       Optional boris binary for compile verification
         \\  Writes: content/**, route_map.json, selection_manifest.json,
         \\          unsupported_manifest.json, assets_manifest.json (exists+sha256),
         \\          nav_flatten.json, provenance_manifest.json, link_review.json,
+        \\          heading_fragments.json, boundary_manifest.json,
         \\          compile_report.json, report.json, REPORT.md
         \\  No Node/Astro runtime, no full YAML, no MDX execution, no i18n/translation linking.
+        \\  Embedded directives are stripped, never followed. Not a universal converter.
         \\
         \\Safety: no network, no destructive source writes, originals preserved.
         \\Exit codes: 0 success, 2 usage, 3 I/O error
