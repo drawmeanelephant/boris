@@ -6,9 +6,9 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 /// Fixed renderer/cache format version constant.
 ///
 /// Bumped only when fingerprint inputs or manifest discriminator semantics
-/// change. Adding optional manifest fields (e.g. `output_digest`) does not
-/// require a bump when missing values force a safe re-render.
-pub const CACHE_FORMAT_VERSION = "boris-cache-v1-multitarget";
+/// change. Layout-rule selection records the effective selected layout per
+/// page (`boris-cache-v2-layout-rules`); older manifests force a cold rebuild.
+pub const CACHE_FORMAT_VERSION = "boris-cache-v2-layout-rules";
 
 /// Hash a u64 length prefix in fixed little-endian (host-independent).
 fn updateLen(hasher: *Sha256, len: u64) void {

@@ -18,6 +18,7 @@ Layout selection:
 ```text
 --html-layout <PATH>           # global default (default: layouts/main.html)
 --target-layout <NAME>=<PATH>  # per-target override (NAME must match a --target or "default")
+--layout-rule <TARGET> <SELECTOR> <LAYOUT_PATH>  # repeatable page layout rules (HTML only)
 ```
 
 ### Constraints & Conflict Rules:
@@ -76,7 +77,7 @@ Cache isolation is strictly structural. Each target has its cache namespace and 
 
 ### Configuration Identity Hashing:
 Every page fingerprint hashes a stable **Target Configuration Identity**. The fingerprint includes:
-- Cache-format/version discriminator (e.g., `boris-cache-v1-multitarget`)
+- Cache-format/version discriminator (e.g., `boris-cache-v2-layout-rules`)
 - Target configuration digest, including:
   - Target name / stable namespace string
   - Global/target-specific layout path and layout template bytes/fingerprint
@@ -91,7 +92,7 @@ This ensures that:
 - Target A's cache manifest cannot be read or overwritten by Target B.
 - Accidental cache hits cannot leak across targets if their configuration, layouts, or settings differ.
 - Old or pre-P3 cache directories (lacking a matching configuration/format discriminator) are safely invalidated, triggering a clean cold rebuild.
-- On-disk `manifest.json` `format_version` must equal the fingerprint discriminator (currently `boris-cache-v1-multitarget`). Manifests with any other version string are ignored (cold rebuild for that target).
+- On-disk `manifest.json` `format_version` must equal the fingerprint discriminator (currently `boris-cache-v2-layout-rules`). Manifests with any other version string are ignored (cold rebuild for that target).
 
 ---
 
@@ -115,8 +116,8 @@ graph TD
 |---|---|
 | Content roots | One shared `--input` content root |
 | Graph/parser | Discover, parse, validate, and freeze once per invocation |
-| Layout | Global `--html-layout` default; optional per-target `--target-layout NAME=PATH`. Templates cached by path. |
-| Fingerprint inputs | Source + include graph prepared once; layout path/bytes applied per target |
+| Layout | Global `--html-layout` default; optional per-target `--target-layout`; optional `--layout-rule` table (exact/glob/role). Declared layouts cached by path; selection is per target/page. |
+| Fingerprint inputs | Source + include graph prepared once; effective selected layout path/bytes applied per page |
 | Generated output as input | Forbidden; target output trees are never dependency roots |
 | Cross-target dependencies | Forbidden |
 | Target order | Sorted alphabetically by canonical target name before execution / commit; CLI parse stores the same order |

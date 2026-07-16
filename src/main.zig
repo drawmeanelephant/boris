@@ -434,6 +434,11 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
                     return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
                 };
             }
+            for (t.layout_rules) |rule| {
+                add_layout_root(&watcher, &layout_roots, gpa, rule.layout_path, opts.input_dir) catch |err| {
+                    return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
+                };
+            }
         }
 
         var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher()) catch |err| {
@@ -502,6 +507,10 @@ fn mapHtmlError(
         error.TargetOutputCollision,
         error.TargetOutputSymlink,
         error.WorkspaceEscape,
+        error.MixedThemeRoots,
+        error.AmbiguousGlob,
+        error.DuplicateSelector,
+        error.LayoutSelectionFailed,
         => {
             if (!quiet) {
                 std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});

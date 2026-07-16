@@ -18,6 +18,13 @@ Feature 9 (heading-target wiki links) lives under:
 | `wiki-heading-fragments/` | Success-shape author examples (`[[id#heading]]`) |
 | `wiki-heading-missing/` | Missing fragment must fail HTML with `EREFERENCEMISSING` |
 
+Layout selection (`--layout-rule`) lives under:
+
+| Fixture | Role |
+|---------|------|
+| `layout-rules/` | Multi-layout theme + exact/glob/role selection markers |
+| `layout-rules/adversarial/` | Frontmatter `layout:` rejection; mixed theme roots |
+
 HTML integration coverage is in `src/compile.zig` / `src/wikilink.zig`; the
 release gate smokes the missing-fragment fixture for exit **1**. Fragment
 existence is validated on the **HTML** path only (requires Apex-rendered ids);

@@ -85,6 +85,7 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | In-page heading `{{toc}}` | **Done** (Feature 6 follow-on) |
 | Boris-mediated includes + wiki-links | **Done** (Feature 7; HTML path; Apex FS includes off) |
 | Wiki `[[id#heading]]` section targets | **Done** (F9; Apex heading ids; see `heading-ids.md`) |
+| Page layout selection (`--layout-rule`) | **Done** (exact/glob/role; one theme/target) |
 | Full YAML / MDX / embedded HTTP server | **Not now** |
 
 ### Commands

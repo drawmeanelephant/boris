@@ -408,16 +408,25 @@ pub fn selectTargetsForRebuild(
         return try gpa.dupe(target_mod.TargetSpec, all_targets);
     }
 
-    // Normalize effective layouts once so `./layouts/main.html` and
-    // `layouts/./main.html` match event keys the same way.
-    var layout_norms = try gpa.alloc([]const u8, all_targets.len);
+    // Normalize fallback + rule layout paths so `./layouts/main.html` and
+    // `layouts/./main.html` match event keys the same way. A layout edit fans
+    // out only to targets that declare that path (fallback or rule).
+    var layout_lists = try gpa.alloc([]const []const u8, all_targets.len);
     defer {
-        for (layout_norms) |p| gpa.free(p);
-        gpa.free(layout_norms);
+        for (layout_lists) |list| {
+            for (list) |p| gpa.free(p);
+            gpa.free(list);
+        }
+        gpa.free(layout_lists);
     }
     for (all_targets, 0..) |t, i| {
-        const lp = target_mod.effectiveLayout(t, default_layout);
-        layout_norms[i] = try normalizePath(gpa, lp);
+        const declared = try target_mod.declaredLayoutPaths(gpa, t, default_layout);
+        defer gpa.free(declared);
+        var norms = try gpa.alloc([]const u8, declared.len);
+        for (declared, 0..) |lp, j| {
+            norms[j] = try normalizePath(gpa, lp);
+        }
+        layout_lists[i] = norms;
     }
 
     var rebuild_all = false;
@@ -430,10 +439,13 @@ pub fn selectTargetsForRebuild(
         defer gpa.free(norm_key);
 
         var matched_any_layout = false;
-        for (layout_norms, 0..) |norm_lp, i| {
-            if (std.mem.eql(u8, norm_key, norm_lp)) {
-                need[i] = true;
-                matched_any_layout = true;
+        for (layout_lists, 0..) |norms, i| {
+            for (norms) |norm_lp| {
+                if (std.mem.eql(u8, norm_key, norm_lp)) {
+                    need[i] = true;
+                    matched_any_layout = true;
+                    break;
+                }
             }
         }
         if (!matched_any_layout) {
