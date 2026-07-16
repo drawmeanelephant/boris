@@ -256,3 +256,64 @@ test "renderChildren is id-sorted, escaped, relative, and empty for satellite" {
     const satellite = try renderChildren(gpa, g.nodes, nav, 0, "alpha.html");
     try std.testing.expectEqualStrings("", satellite);
 }
+
+test "navigation chrome has deterministic landmarks, lists, current state, and escaped sinks" {
+    const gpa = std.testing.allocator;
+    var nodes = [_]graph_mod.Node{
+        .{ .id = "index", .source_path = "index.md", .title = "Home & <Start> \"quoted\"", .parent = null },
+        .{ .id = "guides/intro", .source_path = "guides/intro.md", .title = "Intro", .parent = "index" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+    try graph_mod.validate(gpa, gpa, &nodes, &diags);
+    try std.testing.expectEqual(@as(usize, 0), diag.countErrors(diags.items));
+    const g = try graph_mod.freeze(gpa, &nodes, null);
+    defer gpa.free(g.edges);
+    const nav = try graph_mod.buildNav(gpa, g.nodes);
+    defer graph_mod.freeNav(gpa, nav);
+
+    var current: u32 = 0;
+    for (g.nodes, 0..) |node, i| {
+        if (std.mem.eql(u8, node.id, "index")) current = @intCast(i);
+    }
+    const site = try renderNav(gpa, g.nodes, nav, current, "index.html");
+    defer gpa.free(site);
+    try std.testing.expectEqualStrings(
+        "<nav class=\"site-nav\" aria-label=\"Site\">\n" ++
+            "<ul>\n" ++
+            "<li class=\"site-nav__trunk is-current\"><a href=\"index.html\" aria-current=\"page\">Home &amp; &lt;Start&gt; &quot;quoted&quot;</a>\n" ++
+            "<ul>\n" ++
+            "<li class=\"site-nav__satellite\"><a href=\"guides/intro.html\">Intro</a></li>\n" ++
+            "</ul>\n" ++
+            "</li>\n" ++
+            "</ul>\n" ++
+            "</nav>",
+        site,
+    );
+
+    const children = try renderChildren(gpa, g.nodes, nav, current, "index.html");
+    defer gpa.free(children);
+    try std.testing.expectEqualStrings(
+        "<nav class=\"page-children\" aria-label=\"Children\">\n" ++
+            "<ul>\n" ++
+            "<li><a href=\"guides/intro.html\">Intro</a></li>\n" ++
+            "</ul>\n" ++
+            "</nav>",
+        children,
+    );
+
+    const crumb = try renderBreadcrumb(gpa, g.nodes, nav, current, "index.html");
+    defer gpa.free(crumb);
+    try std.testing.expectEqualStrings(
+        "<nav class=\"breadcrumb\" aria-label=\"Breadcrumb\">\n" ++
+            "<ol>\n" ++
+            "<li aria-current=\"page\">Home &amp; &lt;Start&gt; &quot;quoted&quot;</li>\n" ++
+            "</ol>\n" ++
+            "</nav>",
+        crumb,
+    );
+
+    const title = try renderTitle(gpa, g.nodes[current]);
+    defer gpa.free(title);
+    try std.testing.expectEqualStrings("Home &amp; &lt;Start&gt; &quot;quoted&quot;", title);
+}
