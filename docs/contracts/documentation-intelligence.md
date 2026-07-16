@@ -1,6 +1,7 @@
 # Documentation Intelligence (planned)
 
-**Status:** design contract; not implemented by the default CLI.
+**Status:** first slice implemented; normative for `check` / `impact`. Semantic
+relations and Context Bundles remain separate future contracts.
 
 Documentation Intelligence is a read-only analysis layer over Boris's already
 validated, frozen content graph. It must not alter HTML output, IR 0.2 shape,

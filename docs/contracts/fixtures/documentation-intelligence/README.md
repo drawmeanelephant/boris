@@ -13,7 +13,14 @@ The acceptance tree must include:
 - invalid graph and missing-target cases proving analysis does not run on an
   unfrozen graph.
 
-The first implementation slice is covered by focused analysis and CLI parser
-tests plus the release-gate build. Checked-in JSON and human-output goldens are
-the next hardening task before this contract is promoted from planned to a
-fully release-gated feature.
+The checked-in content tree is the deterministic acceptance input. From the
+repository root, the expected commands are:
+
+```text
+boris check --input docs/contracts/fixtures/documentation-intelligence/content --format json
+boris impact guides/reference --input docs/contracts/fixtures/documentation-intelligence/content --format json
+```
+
+The corresponding JSON and human-output goldens are committed beside this
+README. The integration test also verifies that analysis does not create build
+artifacts.
