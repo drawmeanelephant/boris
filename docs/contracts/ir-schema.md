@@ -41,6 +41,8 @@ IR; nodes carry `bodyOffset` only (byte offset of body start in the source
 file). Consumers that need raw body re-read source from `sourcePath`.
 
 No HTML, no RAG tree, no per-page fragment files under this IR contract.
+HTML-only layout slots, including `{{children}}`, do not change this IR shape
+or its `schemaVersion`.
 
 | File | On success (`ok: true`) | On content failure (`ok: false`) |
 |------|-------------------------|-----------------------------------|
