@@ -1,17 +1,21 @@
 # mini-starlight fixture
 
-Synthetic, redistributable Starlight-shaped tree for
+Synthetic, redistributable **locale-directory** Starlight-shaped tree for
 `boris-migration-lab --mode=starlight`.
 
-Mirrors the **English** layout used by the evcc-io/docs proof slice:
+Mirrors sites that keep the default language under `src/content/docs/en/`:
 
-- `src/content/docs/en/` content root
+- `src/content/docs/en/` content root (locale_dir shape)
 - section dirs `features/`, `installation/`
 - MDX imports + component tags
-- route-style and relative links
+- route-style (`/en/…`) and relative links
 - nested `sidebar:` frontmatter (unsupported)
 - public assets under `public/`
 - a delimited untrusted directive fence (stripped, not followed)
 - `astro.config.mjs` sidebar evidence (text-scanned only)
+- underscore partial under `tariffs/` (excluded from candidates)
 
-Not an evcc export and contains no production content. MIT-shaped sample only.
+Pair with [`../mini-starlight-root/`](../mini-starlight-root/) for the
+**root-locale** shape (default language directly under `docs/`).
+
+Not an upstream export and contains no production content. MIT-shaped sample only.

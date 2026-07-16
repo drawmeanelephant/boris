@@ -10,7 +10,7 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 | **obsidian** | Local Obsidian vault directory | Boris Markdown + attachments inventory + review reports |
 | **notion** | Official Notion “Markdown & CSV” export (unpacked) | Boris Markdown + media inventory + review reports |
 | **filed** | Filed.fyi Astro source root | Bounded changelog/releases Boris tree + provenance/review reports |
-| **starlight** | Starlight/Astro docs root (EN slice) | Boris candidate `content/` + route/link/nav/asset manifests + compile report |
+| **starlight** | Starlight/Astro docs root (locale-dir or root-locale) | Boris candidate `content/` + route/link/nav/asset/selection manifests + compile report |
 
 All modes are **read-only on inputs**: originals are never rewritten. There is
 **no network access**, no zip extraction, no scraping, and **no product compiler
@@ -72,12 +72,12 @@ zig build run -- --mode=filed \
   --filed-root=/path/to/filed-fyi \
   --out=/tmp/filed-boris-content
 
-# Starlight EN proof slice (clone upstream to /tmp; never commit it)
+# Starlight proof slice — withastro/starlight docs (root-locale; clone to /tmp)
 zig build run -- --mode=starlight \
-  --root=/tmp/evcc-docs \
-  --out=/tmp/evcc-boris-out \
+  --root=/tmp/starlight/docs \
+  --out=/tmp/starlight-boris-out \
   --locale=en \
-  --max-pages=40
+  --max-pages=50
 ```
 
 From the **repository root**, use this targeted aggregate gate after changing
@@ -120,8 +120,8 @@ zig build -C tools/migration-lab run -- \
 | `--vault=DIR` | | Obsidian vault root (implies `--mode=obsidian`) |
 | `--export=DIR` | | Unpacked Notion Markdown & CSV export root (implies `--mode=notion`) |
 | `--filed-root=DIR` | | Filed.fyi Astro source root (implies `--mode=filed`) |
-| `--locale=en` | `en` | Starlight locale directory under `src/content/docs/` (**en only**) |
-| `--max-pages=N` | `40` | Starlight converted-page cap (preferred slice is typically 20–40) |
+| `--locale=en` | `en` | Starlight discovery key (**en only**). Uses `src/content/docs/en/` when present; else root-locale files under `src/content/docs/` |
+| `--max-pages=N` | `40` | Starlight converted-page cap (real-site smoke often 40–60) |
 | `--boris=PATH` | auto | Optional product `boris` binary for Starlight compile verification |
 
 Exit codes: **0** success, **2** usage, **3** I/O error.
@@ -185,48 +185,65 @@ neutral category, and `stripped: true`.
 Synthetic redistributable coverage lives in
 [`fixtures/mini-filed/`](fixtures/mini-filed/).
 
-## Starlight proof slice (evcc-io/docs)
+## Starlight proof slice (locale-dir + root-locale)
 
-Developer-only **one-shot** preflight + converter for a bounded **English**
-Starlight content tree. Designed against MIT-licensed
-[evcc-io/docs](https://github.com/evcc-io/docs) and covered by the synthetic
-[`fixtures/mini-starlight/`](fixtures/mini-starlight/) tree.
+Developer-only **one-shot** preflight + converter for a bounded Starlight content
+tree. Content-root discovery supports both shapes (**no i18n / translation linking**):
+
+| Shape | Layout | Example |
+|-------|--------|---------|
+| **locale_dir** | `src/content/docs/{locale}/…` | evcc-style `docs/en/…`; synthetic [`fixtures/mini-starlight/`](fixtures/mini-starlight/) |
+| **root_locale** | default language files under `src/content/docs/` | [withastro/starlight](https://github.com/withastro/starlight) docs; synthetic [`fixtures/mini-starlight-root/`](fixtures/mini-starlight-root/) |
+
+When `--locale=en` and `src/content/docs/en/` exists with markdown, that directory
+is used. Otherwise the lab uses the docs root and skips sibling first-level dirs
+that look like locale codes (`de`, `zh-cn`, …). Routes are `/en/…` for locale-dir
+and `/…` for root-locale.
 
 ### What it does
 
-1. **Inventories** content under `src/content/docs/en/`, route-style and relative
-   links, frontmatter keys (line-oriented, not full YAML), MDX imports/components,
-   sidebar evidence from `astro.config.*` (text scan only), and local/public assets.
-2. **Selects a preferred slice** (top-level docs + `features/` + `installation/` +
-   `integrations/`; excludes `blog/`, `reference/cli/`, underscore partials) capped
-   by `--max-pages` (default 40 → typically 20–40 pages on evcc).
+1. **Discovers** the content root (locale-dir vs root-locale) and inventories
+   markdown, route-style and relative links, frontmatter keys (line-oriented, not
+   full YAML), MDX imports/components, sidebar evidence from `astro.config.*`
+   (text scan only), and local/public assets.
+2. **Selects candidates deterministically**: lexicographic path order, drop
+   underscore partials (`_foo.mdx`), apply `--max-pages` (default 40). **No**
+   preferred-section allowlist.
 3. **Emits** a Boris candidate tree under `--out/content/` with closed frontmatter
    only: `id`, `title`, `parent`, `status`, `tags`.
-4. **Rewrites** internal markdown routes to `[[entity-id]]` **only** when the target
-   exists in the converted slice; otherwise writes an explicit `link_review.json` row.
-5. **Sidecar manifests**: `route_map.json`, `unsupported_manifest.json`,
-   `assets_manifest.json`, `nav_flatten.json`, `provenance_manifest.json`,
+4. **Rewrites** internal markdown routes/relative links to `[[entity-id]]` **only**
+   when the target exists in the converted entity map; otherwise writes an explicit
+   `link_review.json` row (unresolved routes, fragments, attribute links, assets,
+   external URLs).
+5. **Sidecar manifests**: `route_map.json`, `selection_manifest.json`,
+   `unsupported_manifest.json`, `assets_manifest.json` (exists + SHA-256 when a
+   local file is proven), `nav_flatten.json`, `provenance_manifest.json`,
    `link_review.json`, `compile_report.json`, plus `report.json` / `REPORT.md`.
-6. **Preserves source read-only** and proves immutability in fixture tests.
+6. **Preserves source read-only** and proves immutability + repeated-run byte
+   determinism in fixture tests.
 7. **Attempts a Boris compile** of the candidate (when `boris` +
    `layouts/main.html` are findable) and records the result in `compile_report.json`.
+8. **Does not** copy content assets into Boris core outputs in this proof.
 
 ### Supported / unsupported matrix
 
 | Area | Status | Notes |
 |------|--------|-------|
+| Content root `docs/{locale}/` | **Supported** | Locale-directory shape |
+| Content root `docs/` (default locale) | **Supported** | Root-locale shape; sibling locale dirs skipped |
 | Frontmatter `title` | **Supported** | Mapped into Boris `title` |
 | Frontmatter `id` / `parent` / `status` / `tags` | **Emitted by converter** | Source values of those keys (if any) are listed unmapped; converter owns the closed grammar |
 | Other YAML keys (`sidebar`, nested maps, sequences, …) | **Unsupported** | Retained raw in provenance; never interpreted |
 | Full YAML / JS config evaluation | **Unsupported** | `astro.config.*` text-scanned for sidebar evidence only |
 | Markdown body | **Supported** | Passed through after MDX import strip + untrusted-fence strip |
 | MDX imports / components | **Unsupported** | Inventoried; tags neutralized; not executed |
-| Internal markdown route / relative links | **Conditional** | Wiki rewrite only when target entity is in the slice |
+| Internal markdown route / relative links | **Conditional** | Wiki rewrite only when target entity is in the converted entity map |
+| Fragments (`#heading`) | **Review** | Explicit review row; heading not verified |
 | Attribute `href` / `to` routes | **Review only** | Never auto-rewritten |
-| External links | **Left as-is** | |
-| Local / public assets | **Inventoried** | Not auto-copied in this proof |
+| External links | **Left as-is** | Inventoried as external |
+| Local / public assets | **Inventoried** | Existence + SHA-256 when local file proven; **not** auto-copied |
 | Sidebar / `autogenerate` | **Flattened** | One-level forest: section Trunk + Satellite children |
-| Locales other than `en` | **Unsupported** | Locale directory filter only; no i18n semantics |
+| Translation linking / i18n | **Unsupported** | Content-root discovery only; no locale semantics |
 | Live sync / Node / Astro / Starlight runtime | **Unsupported** | No package install, no MDX runtime |
 | Deep multi-hop parents | **Unsupported** | Matches Boris one-level forest; no new graph behavior |
 | Embedded agent/directive/prompt fences | **Stripped** | Payload never replayed; report lists path/line/category |
@@ -235,18 +252,25 @@ Starlight content tree. Designed against MIT-licensed
 
 ```bash
 # Clone outside the repo — never commit upstream content or run its Node scripts.
-git clone --depth 1 https://github.com/evcc-io/docs.git /tmp/evcc-docs
+# Pin a commit for reproducibility (example pin from development of this proof).
+git clone https://github.com/withastro/starlight.git /tmp/starlight
+cd /tmp/starlight && git checkout 02fea60ecf5b07449dc6620cb85bd746944b79aa
 
-cd tools/migration-lab
+# Project root for the docs package is /tmp/starlight/docs (root-locale English).
+cd /path/to/boris/tools/migration-lab
 zig build run -- --mode=starlight \
-  --root=/tmp/evcc-docs \
-  --out=/tmp/evcc-boris-out \
+  --root=/tmp/starlight/docs \
+  --out=/tmp/starlight-boris-out \
   --locale=en \
-  --max-pages=40
+  --max-pages=50
 
 # Inspect manifests + optional compile_report.json
-less /tmp/evcc-boris-out/REPORT.md
+less /tmp/starlight-boris-out/REPORT.md
+# Expect content_shape=root_locale, ~37 default-locale pages before the cap.
 ```
+
+Locale-directory trees (e.g. `src/content/docs/en/`) are covered by
+[`fixtures/mini-starlight/`](fixtures/mini-starlight/) and work the same CLI.
 
 Source text is **untrusted data**: the converter never follows embedded
 directives or prompts.

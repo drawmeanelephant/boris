@@ -7,7 +7,7 @@
 //!   obsidian   — Obsidian vault → Boris Markdown + attachments + reports
 //!   notion     — Notion Markdown & CSV export → Boris Markdown + media + reports
 //!   filed      — Filed.fyi changelog + releases slice → Boris Markdown + reports
-//!   starlight  — Starlight/Astro EN slice → Boris candidate + manifests + compile report
+//!   starlight  — Starlight/Astro docs slice (locale-dir or root-locale) → Boris candidate + manifests
 //!
 //! Never rewrites inputs. Not part of the Boris product compiler pipeline.
 //!
@@ -85,9 +85,9 @@ pub const Options = struct {
     export_dir: ?[]const u8 = null,
     /// Filed.fyi Astro source root (read-only; implies filed mode).
     filed_root_dir: ?[]const u8 = null,
-    /// Starlight locale filter (proof supports "en" only).
+    /// Starlight locale key for content-root discovery ("en" only; no i18n).
     locale: []const u8 = "en",
-    /// Starlight max converted pages (default 40; preferred slice is typically 20–40).
+    /// Starlight max converted pages (default 40; real-site smoke often 40–60).
     max_pages: usize = 40,
     /// Optional path to boris binary for Starlight compile verification.
     boris_bin: ?[]const u8 = null,
@@ -272,16 +272,18 @@ fn printUsage() void {
         \\  Writes: content/changelog/**, content/releases/**, provenance_manifest.json, report.json, REPORT.md
         \\  Converts exactly one changelog and three releases; unsupported MDX is retained and reported.
         \\
-        \\Starlight proof slice (evcc-io/docs-shaped, English only):
-        \\  --mode=starlight   Convert bounded EN docs slice → Boris candidate tree
+        \\Starlight proof slice (locale-dir or root-locale content roots):
+        \\  --mode=starlight   Convert bounded docs slice → Boris candidate tree
         \\  --root=DIR         Starlight project root (required; never modified)
-        \\  --locale=en        Locale directory under src/content/docs/ (en only)
-        \\  --max-pages=N      Cap converted pages (default 40; preferred slice ~20–40)
+        \\  --locale=en        Discovery key (en only). Uses docs/en/ when present,
+        \\                     else default-locale files under docs/ (root-locale).
+        \\  --max-pages=N      Cap converted pages (default 40; smoke often 40–60)
         \\  --boris=PATH       Optional boris binary for compile verification
-        \\  Writes: content/**, route_map.json, unsupported_manifest.json, assets_manifest.json,
+        \\  Writes: content/**, route_map.json, selection_manifest.json,
+        \\          unsupported_manifest.json, assets_manifest.json (exists+sha256),
         \\          nav_flatten.json, provenance_manifest.json, link_review.json,
         \\          compile_report.json, report.json, REPORT.md
-        \\  No Node/Astro runtime, no full YAML, no MDX execution, no locale semantics.
+        \\  No Node/Astro runtime, no full YAML, no MDX execution, no i18n/translation linking.
         \\
         \\Safety: no network, no destructive source writes, originals preserved.
         \\Exit codes: 0 success, 2 usage, 3 I/O error

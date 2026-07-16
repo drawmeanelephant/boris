@@ -98,7 +98,7 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | Apex Unified compatibility matrix | **Shipped in v0.4.0** (fixtures + matrix; compatibility evidence, not a new renderer) |
 | Astro, WordPress, and Instagram migration labs | **Shipped in v0.4.0** (bounded conversion/reconnaissance labs + adversarial preservation fixtures; not runtime dependencies) |
 | Obsidian vault + Notion Markdown/CSV migration labs | **Available on main after v0.4.0** (phase-1 developer aids under `tools/migration-lab/`; not runtime dependencies) |
-| Starlight EN proof slice (evcc-shaped) | **Available on main after v0.4.0** (`--mode=starlight` under `tools/migration-lab/`; bounded EN convert + manifests; not a runtime dependency) |
+| Starlight proof slice (locale-dir + root-locale) | **Available on main after v0.4.0** (`--mode=starlight` under `tools/migration-lab/`; content-root discovery for `docs/en/` or root-locale `docs/`; bounded convert + manifests; not a runtime dependency) |
 | Bounded Textile input | **Shipped in v0.4.0** (`--textile`; explicit whole-tree compatibility adapter) |
 | Optional static theme showcase | **Shipped in v0.4.0** (`examples/static-theme-showcase/`; hand-authored CSS, not product chrome) |
 | Agent-lore content dogfood | **Shipped in v0.4.0** (tracked sample content only; private 250MB source data remains excluded/ignored) |
