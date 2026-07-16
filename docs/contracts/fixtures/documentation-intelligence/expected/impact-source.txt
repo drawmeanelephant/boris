@@ -1,0 +1,12 @@
+Documentation Intelligence (impact)
+pages: 4 (roots 2, satellites 2)
+source endpoints: 1
+unreferenced pages: 1
+hotspots: 0
+impact (includes/shared.md):
+  page: guides
+  page: guides/reference
+  page: guides/start
+  page: index
+findings:
+  unreferenced_page: index
