@@ -30,6 +30,8 @@ pub const ExitCode = enum(u8) {
 pub const Options = struct {
     help: bool = false,
     quiet: bool = false,
+    /// Skip the four combined Markdown convenience bundles.
+    no_bundles: bool = false,
     /// Corpus output directory (relative to process cwd unless absolute).
     out_dir: []const u8 = "source-rag",
     /// Project root to scan (relative to process cwd unless absolute).
@@ -156,6 +158,8 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             return opts;
         } else if (std.mem.eql(u8, a, "--quiet") or std.mem.eql(u8, a, "-q")) {
             opts.quiet = true;
+        } else if (std.mem.eql(u8, a, "--no-bundles")) {
+            opts.no_bundles = true;
         } else if (std.mem.startsWith(u8, a, "--out=")) {
             const v = a["--out=".len..];
             if (v.len == 0) return error.MissingValue;
@@ -198,6 +202,7 @@ fn printUsage() void {
         \\Options:
         \\  -h, --help           Show this help and exit 0
         \\  -q, --quiet          Suppress progress lines
+        \\  --no-bundles         Skip combined bundles; emit only per-file corpus and sidecars
         \\  --out=DIR            Output corpus root (default: source-rag)
         \\  --root=DIR           Project root to scan (default: .)
         \\  --max-bytes=N        Skip files larger than N bytes (default: 524288)
@@ -208,7 +213,7 @@ fn printUsage() void {
         \\
         \\Output tree:
         \\  INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json
-        \\  boris-source-1.md  boris-source-2.md  boris-docs.md  boris-content.md
+        \\  boris-source-1.md  boris-source-2.md  boris-docs.md  boris-content.md  (default)
         \\  files/**  (one markdown document per source path)
         \\
         \\Exit codes: 0 success, 2 usage, 3 I/O error
@@ -472,6 +477,12 @@ fn writeBytes(io: Io, root: Io.Dir, rel_path: []const u8, data: []const u8) !voi
 /// caller-selected output root or unrelated files placed beside it.
 fn resetManagedFiles(io: Io, out: Io.Dir) !void {
     try out.deleteTree(io, "files");
+    for (bundle_file_names) |file_name| {
+        out.deleteFile(io, file_name) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+    }
 }
 
 fn log(opts: Options, comptime fmt: []const u8, args: anytype) void {
@@ -536,6 +547,13 @@ const BundleKind = enum {
     source,
     docs,
     content,
+};
+
+const bundle_file_names = [_][]const u8{
+    "boris-source-1.md",
+    "boris-source-2.md",
+    "boris-docs.md",
+    "boris-content.md",
 };
 
 fn bundleKindForPath(source_path: []const u8) BundleKind {
@@ -755,6 +773,7 @@ fn exportIndex(
     out_dir: Io.Dir,
     entries: []const CatalogEntry,
     stats: ExportStats,
+    include_bundles: bool,
 ) !void {
     var doc: std.ArrayList(u8) = .empty;
     defer doc.deinit(gpa);
@@ -779,6 +798,7 @@ fn exportIndex(
         \\|---------|------:|
         \\
     );
+
     {
         var line_buf: [96]u8 = undefined;
         const line = try std.fmt.bufPrint(&line_buf, "| source files | {d} |\n| catalog entries | {d} |\n| skipped | {d} |\n\n", .{
@@ -798,6 +818,9 @@ fn exportIndex(
         \\4. Prefer `files/docs/contracts/**` for IR / machine contracts.
         \\5. Cite `source_path` from document frontmatter when answering.
         \\
+    );
+
+    if (include_bundles) try doc.appendSlice(gpa,
         \\## Combined upload bundles
         \\
         \\These root-level Markdown files are additive convenience bundles; the
@@ -815,6 +838,16 @@ fn exportIndex(
         \\still make the byte sizes uneven. Empty bundles are still emitted with
         \\metadata explaining that they contain no files.
         \\
+    ) else try doc.appendSlice(gpa,
+        \\## Combined upload bundles
+        \\
+        \\This corpus was generated with `--no-bundles`. It intentionally contains
+        \\only the per-file `files/**` documents and catalog sidecars, avoiding the
+        \\duplicate bytes of the optional combined Markdown bundles.
+        \\
+    );
+
+    try doc.appendSlice(gpa,
         \\## Full catalog
         \\
         \\| rag_path | lang | source_path | bytes |
@@ -853,8 +886,8 @@ fn exportIndex(
     try writeBytes(io, out_dir, "INDEX.md", doc.items);
 }
 
-fn exportUploadGuide(io: Io, out_dir: Io.Dir) !void {
-    const body =
+fn exportUploadGuide(io: Io, out_dir: Io.Dir, include_bundles: bool) !void {
+    const common_prefix =
         \\---
         \\rag_id: meta/upload-guide
         \\rag_path: UPLOAD-GUIDE.md
@@ -880,6 +913,8 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir) !void {
         \\3. `files/docs/contracts/**` (if present)
         \\4. `files/AGENTS.md` / `files/README.md` (if present)
         \\
+    ;
+    const bundles =
         \\## Combined bundles
         \\
         \\For a small number of uploads, use the four root-level combined Markdown
@@ -897,6 +932,16 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir) !void {
         \\The boundary never splits a file or reorders documents, and empty groups
         \\are emitted as valid bundles.
         \\
+    ;
+    const no_bundles =
+        \\## Combined bundles
+        \\
+        \\This corpus was generated with `--no-bundles`, so it intentionally omits
+        \\the combined Markdown bundles and their duplicate source bytes. Upload the
+        \\per-file `files/**` documents with `INDEX.md` and the catalog sidecars.
+        \\
+    ;
+    const common_suffix =
         \\## Suggested system prompt
         \\
         \\```
@@ -924,6 +969,10 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir) !void {
         \\- No timestamps or random ids in corpus files.
         \\
     ;
+    const body = if (include_bundles)
+        common_prefix ++ bundles ++ common_suffix
+    else
+        common_prefix ++ no_bundles ++ common_suffix;
     try writeBytes(io, out_dir, "UPLOAD-GUIDE.md", body);
 }
 
@@ -1039,10 +1088,12 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
         log(opts, "  source     {s}\n", .{source_path});
     }
 
-    try exportBundles(io, gpa, out, packed_source.items, packed_docs.items, packed_content.items);
+    if (!opts.no_bundles) {
+        try exportBundles(io, gpa, out, packed_source.items, packed_docs.items, packed_content.items);
+    }
 
     // Meta documents (not source rows until we add them to catalog).
-    try exportUploadGuide(io, out);
+    try exportUploadGuide(io, out, !opts.no_bundles);
     try catalog.append(gpa, .{
         .rag_id = "meta/upload-guide",
         .rag_path = "UPLOAD-GUIDE.md",
@@ -1066,7 +1117,7 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     stats.catalog_entries = catalog.items.len;
 
     // INDEX after catalog is sorted (lists source rows).
-    try exportIndex(io, gpa, out, catalog.items, stats);
+    try exportIndex(io, gpa, out, catalog.items, stats, !opts.no_bundles);
     try exportCatalogJsonl(io, gpa, out, catalog.items);
     try exportCatalogMeta(io, out);
 
@@ -1150,15 +1201,17 @@ test "parseOptions: help and defaults" {
     try std.testing.expect(!o.help);
     try std.testing.expectEqualStrings("source-rag", o.out_dir);
     try std.testing.expectEqualStrings(".", o.root_dir);
+    try std.testing.expect(!o.no_bundles);
 
     const h = try parseOptions(&.{ "boris-source-rag", "--help" });
     try std.testing.expect(h.help);
 
-    const o2 = try parseOptions(&.{ "boris-source-rag", "--out=./pack", "--root=../repo", "--max-bytes=1000", "--quiet" });
+    const o2 = try parseOptions(&.{ "boris-source-rag", "--out=./pack", "--root=../repo", "--max-bytes=1000", "--quiet", "--no-bundles" });
     try std.testing.expectEqualStrings("./pack", o2.out_dir);
     try std.testing.expectEqualStrings("../repo", o2.root_dir);
     try std.testing.expectEqual(@as(usize, 1000), o2.max_bytes);
     try std.testing.expect(o2.quiet);
+    try std.testing.expect(o2.no_bundles);
 }
 
 test "parseOptions: unknown flag" {
@@ -1336,4 +1389,24 @@ test "exportCorpus mini fixture" {
     const user_note = try readFileAlloc(io, out, "user-note.txt", gpa);
     defer gpa.free(user_note);
     try std.testing.expectEqualStrings("preserve unrelated output\n", user_note);
+
+    _ = try exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out_rel,
+        .quiet = true,
+        .no_bundles = true,
+    });
+
+    for (bundle_file_names) |file_name| {
+        try std.testing.expectError(error.FileNotFound, out.statFile(io, file_name, .{}));
+    }
+    const no_bundles_hello = try readFileAlloc(io, out, "files/src/hello.zig.md", gpa);
+    defer gpa.free(no_bundles_hello);
+    const no_bundles_catalog = try readFileAlloc(io, out, "catalog.jsonl", gpa);
+    defer gpa.free(no_bundles_catalog);
+    const no_bundles_meta = try readFileAlloc(io, out, "catalog_meta.json", gpa);
+    defer gpa.free(no_bundles_meta);
+    const no_bundles_index = try readFileAlloc(io, out, "INDEX.md", gpa);
+    defer gpa.free(no_bundles_index);
+    try std.testing.expect(std.mem.indexOf(u8, no_bundles_index, "--no-bundles") != null);
 }

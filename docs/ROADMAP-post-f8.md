@@ -1,36 +1,37 @@
 # Roadmap — post Feature 8 (historical draft + current direction)
 
-**As of:** 2026-07-16 · last tagged product **0.3.1** / IR **0.2.0** · plan
-only · not a substitute for [`STATUS.md`](STATUS.md)
-**Current state:** F8.1–F8.3 are **shipped** (IR 0.2 + reverse-index dirty-set
-in **v0.3.1**). Heading-target wiki links (PR #40), F9.1 closed layout/theme
-assets (PR #41), and F9.2 layout UTF-8 validation + orphan theme-asset scrub
-(PR #42) are **shipped**. Product **v0.3.1** is released/tagged. Documentation
-Intelligence (`check` / `impact`), bounded semantic relations, and AI Context
-Bundles are merged on `main` via PRs #43 and #44 and remain under
-`[Unreleased]` until the next product cut. PRs #50–#55 and #65–#72 are also
-merged and available on `main`, without a new product tag. This file preserves
-the post-F8 planning history and records what remains after the shipped
-main-branch work; it does not assign that work a version.
+**As of:** 2026-07-16 · current product release **v0.4.0** / base IR
+**0.2.0** · historical planning record · not a substitute for
+[`STATUS.md`](STATUS.md)
+**Current direction:** `v0.4.0` is tagged/released. Its knowledge-system,
+layout/theme, Textile, initial migration-lab, static-showcase, and agent-lore
+work is shipped; post-release migration-lab follow-ons remain available on
+`main`. Historical version claims below preserve the post-F8 decision record.
+Active work is limited to real-site dogfood, archive-friendly layouts,
+user-facing documentation packaging, source-RAG ergonomics/publication safety,
+and measurement only after a reproducible need.
 
 Normative behavior: [`docs/contracts/`](contracts/). Hard constraints:
 [`AGENTS.md`](../AGENTS.md). Living phase: [`STATUS.md`](STATUS.md).
 
-### Live direction after F9.2
+### Current direction after v0.4.0
 
-1. Cut the next release with the merged knowledge-system contracts and
-   acceptance gates documented in `[Unreleased]`.
-2. Dogfood Boris against a real site and turn migration findings into focused
-   authoring, layout, and conversion work.
-3. Keep the shipped page-layout selection rules stable while deciding external
-   stylesheet boundaries and any broader theme/DaisyUI experiment.
+1. Dogfood Boris against real sites and archives; turn observed gaps into
+   focused authoring, layout, conversion, or publish work.
+2. Exercise archive-friendly layouts before expanding the theming surface.
+3. Package already-shipped `check`, `impact`, Context Bundles, and layout rules
+   in user-facing documentation.
+4. Improve source-RAG output ergonomics or publication safety only with a
+   concrete failure mode or upload workflow in hand.
+5. Measure cache, watch, and parallel behavior only after a real-site workload
+   establishes what needs improvement.
 
-Do not interpret historical “F8.3 pending” or “heading wiki later” statements
-below as current status; they are retained to preserve planning context.
+The material below is historical planning archaeology. Do not interpret its
+old release state, “pending,” or version statements as current status.
 
 ---
 
-## 1. Executive summary
+## Historical record begins — 1. Executive summary
 
 **Today (product 0.3.1):** Boris is an HTML-first Zig documentation compiler —
 Apex Unified, Trunk/Satellite graph, Feature 7 includes + wiki on the HTML path

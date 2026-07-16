@@ -32,6 +32,9 @@ Then upload the whole `source-rag/` directory (or zip it first).
 # Custom output directory
 zig build source-rag -- --out=./uploads/source-rag
 
+# Avoid the optional combined bundles and their intentional duplicate bytes
+zig build source-rag -- --no-bundles
+
 # After install
 zig-out/bin/boris-source-rag --help
 zig-out/bin/boris-source-rag --out=./source-rag --quiet
@@ -46,6 +49,7 @@ zig-out/bin/boris-source-rag --out=./source-rag --quiet
 | `--out=DIR` | `source-rag` | Corpus root |
 | `--root=DIR` | `.` | Project root to scan |
 | `--max-bytes=N` | `524288` | Skip files larger than N bytes |
+| `--no-bundles` | off | Omit the four combined convenience bundles |
 
 Exit codes: **0** success, **2** usage, **3** I/O error.
 
@@ -57,10 +61,10 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
 source-rag/
   INDEX.md              # retrieval map — start here in a chat
   UPLOAD-GUIDE.md       # how to upload / query
-  boris-source-1.md     # first sorted-path half of non-docs/content files
-  boris-source-2.md     # second sorted-path half of non-docs/content files
-  boris-docs.md         # all packed docs/** files
-  boris-content.md      # all packed content/** files
+  boris-source-1.md     # first sorted-path half of non-docs/content files (default)
+  boris-source-2.md     # second sorted-path half of non-docs/content files (default)
+  boris-docs.md         # all packed docs/** files (default)
+  boris-content.md      # all packed content/** files (default)
   catalog.jsonl         # one JSON object per document
   catalog_meta.json     # format + schema_version + tool_version
   files/**              # one markdown document per source path
@@ -107,8 +111,12 @@ Rows are sorted by `rag_path`. Machine files (`catalog.jsonl`,
 
 ### Combined upload bundles
 
-The four `boris-*.md` files are additive convenience bundles for LLM uploads;
-the per-file `files/**` corpus and catalog remain unchanged. `boris-docs.md`
+By default, the four `boris-*.md` files are additive convenience bundles for
+LLM uploads. They intentionally duplicate the per-file `files/**` corpus; the
+per-file documents and catalog remain unchanged. Pass `--no-bundles` when
+duplicate bytes are undesirable: it still emits `files/**`, `INDEX.md`,
+`UPLOAD-GUIDE.md`, `catalog.jsonl`, and `catalog_meta.json`, while omitting all
+four combined files. `boris-docs.md`
 contains all packed `docs/**` files, and `boris-content.md` contains all packed
 `content/**` files. The source corpus is split into `boris-source-1.md` and
 `boris-source-2.md` at a whole-document boundary near half of the packed body
