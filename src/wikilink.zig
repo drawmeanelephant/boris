@@ -85,12 +85,21 @@ pub const HeadingIndex = struct {
         }
     }
 
-    pub fn has(self: *const HeadingIndex, entity_id: []const u8, fragment: []const u8) bool {
-        const ids = self.map.get(entity_id) orelse return false;
+    /// Outcome of a fragment membership probe. Distinguishes "this page is not
+    /// in the index at all" from "the page is indexed but has no such heading",
+    /// so diagnostics can name the right thing (see `checkFragment`).
+    pub const Lookup = enum { ok, unknown_entity, unknown_fragment };
+
+    pub fn lookup(self: *const HeadingIndex, entity_id: []const u8, fragment: []const u8) Lookup {
+        const ids = self.map.get(entity_id) orelse return .unknown_entity;
         for (ids) |id| {
-            if (std.mem.eql(u8, id, fragment)) return true;
+            if (std.mem.eql(u8, id, fragment)) return .ok;
         }
-        return false;
+        return .unknown_fragment;
+    }
+
+    pub fn has(self: *const HeadingIndex, entity_id: []const u8, fragment: []const u8) bool {
+        return self.lookup(entity_id, fragment) == .ok;
     }
 };
 
@@ -342,9 +351,21 @@ fn checkFragment(
         failFragmentDetail(fail_out, line, column, entity_id, frag, locus);
         return error.ReferenceMissing;
     };
-    if (!idx.has(entity_id, frag)) {
-        failFragmentDetail(fail_out, line, column, entity_id, frag, locus);
-        return error.ReferenceMissing;
+    switch (idx.lookup(entity_id, frag)) {
+        .ok => {},
+        .unknown_fragment => {
+            failFragmentDetail(fail_out, line, column, entity_id, frag, locus);
+            return error.ReferenceMissing;
+        },
+        .unknown_entity => {
+            // The page itself is absent from the index, which (every indexed
+            // fragment target being a real PageDb page) means the entity does
+            // not exist. Report the missing ENTITY, not a missing heading on a
+            // page that was never there. Detail without '#' selects the
+            // page-graph message in `messageFor`, matching the render path.
+            if (fail_out) |f| f.set(line, column, entity_id, locus);
+            return error.ReferenceMissing;
+        },
     }
 }
 
@@ -859,6 +880,75 @@ test "scanWikiLinks fragment inside fence is skipped" {
     try scanWikiLinks(body, std.testing.allocator, &list, null, "");
     try std.testing.expectEqual(@as(usize, 1), list.items.len);
     try std.testing.expectEqualStrings("live", list.items[0].fragment.?);
+}
+
+test "HeadingIndex lookup distinguishes unknown entity from unknown fragment" {
+    const gpa = std.testing.allocator;
+    var idx: HeadingIndex = .{};
+    defer idx.deinit(gpa);
+    try idx.putOwned(gpa, "p", &.{"sec"});
+    try std.testing.expectEqual(HeadingIndex.Lookup.ok, idx.lookup("p", "sec"));
+    try std.testing.expectEqual(HeadingIndex.Lookup.unknown_fragment, idx.lookup("p", "nope"));
+    try std.testing.expectEqual(HeadingIndex.Lookup.unknown_entity, idx.lookup("gone", "sec"));
+}
+
+test "plan path reports missing entity, not missing heading, for [[typo#frag]]" {
+    const gpa = std.testing.allocator;
+    var idx: HeadingIndex = .{};
+    defer idx.deinit(gpa);
+    // A real, indexed page. The linked entity below does not exist at all.
+    try idx.putOwned(gpa, "guides/overview", &.{"section-one"});
+
+    const nodes = [_]graph_mod.Node{.{
+        .id = "guides/overview",
+        .source_path = "guides/overview.md",
+        .title = "Content Model",
+        .role = .trunk,
+        .index = 0,
+    }};
+
+    var fail: FailInfo = .{};
+    const bodies = [_][]const u8{"See [[guides/typo#section-one]]"};
+    try std.testing.expectError(error.ReferenceMissing, referenceMaterialMulti(
+        gpa,
+        &bodies,
+        null,
+        &nodes,
+        &fail,
+        .{ .heading_index = &idx, .validate_fragments = true },
+    ));
+    // Detail must name the ENTITY with no '#', so messageFor emits "not found in
+    // the page graph" instead of blaming a heading on a page that never existed.
+    try std.testing.expect(std.mem.indexOfScalar(u8, fail.detail(), '#') == null);
+    try std.testing.expectEqualStrings("guides/typo", fail.detail());
+}
+
+test "plan path still reports missing heading on an existing page" {
+    const gpa = std.testing.allocator;
+    var idx: HeadingIndex = .{};
+    defer idx.deinit(gpa);
+    try idx.putOwned(gpa, "guides/overview", &.{"section-one"});
+
+    const nodes = [_]graph_mod.Node{.{
+        .id = "guides/overview",
+        .source_path = "guides/overview.md",
+        .title = "Content Model",
+        .role = .trunk,
+        .index = 0,
+    }};
+
+    var fail: FailInfo = .{};
+    const bodies = [_][]const u8{"See [[guides/overview#nope]]"};
+    try std.testing.expectError(error.ReferenceMissing, referenceMaterialMulti(
+        gpa,
+        &bodies,
+        null,
+        &nodes,
+        &fail,
+        .{ .heading_index = &idx, .validate_fragments = true },
+    ));
+    // Real page, bad heading → still the fragment form (entity#frag).
+    try std.testing.expect(std.mem.indexOfScalar(u8, fail.detail(), '#') != null);
 }
 
 test "HeadingIndex duplicate ids are set membership" {

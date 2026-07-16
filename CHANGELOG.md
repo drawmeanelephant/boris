@@ -21,10 +21,25 @@ How to use going forward:
 
 ### Fixed
 
+- Wiki-link diagnostics distinguish a missing entity from a missing heading on
+  the plan/fingerprint path. `[[typo#frag]]` for an entity that is not in the
+  graph reported "heading target … not found on the page" (blaming a heading on
+  a page that never existed) because fragment membership was probed before
+  entity existence and a map miss looked identical to a heading miss.
+  `HeadingIndex.lookup` now separates the two. Exit code is unchanged
+  (`EREFERENCEMISSING`). Contract: `docs/contracts/heading-ids.md`
+  ("messages distinguish missing entity vs missing heading"). `src/wikilink.zig`.
 - `collectFragmentTargetSet` no longer inserts a non-owned key into the fragment
   target map: the id is duped before insert, so an allocation failure can never
   leave a view into source bytes as a map key for the cleanup errdefer to free
   (invalid free on the OOM path). `src/compile.zig`.
+- Orphan theme-asset scrub no longer deletes content pages published under
+  `dist/assets/`. A page whose entity id is namespaced under `assets/` is a live
+  page output, not an orphan theme asset; the scrub now receives the build's
+  page-output set and skips those paths, and the empty-inventory
+  `deleteTree("assets")` is guarded so it only runs when no page output is
+  published under `assets/` (`src/theme.zig`, `src/compile.zig`). Regression
+  test added.
 - `--watch` now watches a managed theme root, not just the layout's parent
   directory. Editing `<theme>/assets/…` or `<theme>/footer.html` previously
   produced no watch event, so pages whose fingerprints include footer or
@@ -79,16 +94,6 @@ How to use going forward:
   the validated graph, with deterministic human/JSON reports and optional
   report-file output and release-gate fixture goldens. Contract:
   `docs/contracts/documentation-intelligence.md`.
-
-### Fixed
-
-- Orphan theme-asset scrub no longer deletes content pages published under
-  `dist/assets/`. A page whose entity id is namespaced under `assets/` is a live
-  page output, not an orphan theme asset; the scrub now receives the build's
-  page-output set and skips those paths, and the empty-inventory
-  `deleteTree("assets")` is guarded so it only runs when no page output is
-  published under `assets/` (`src/theme.zig`, `src/compile.zig`). Regression
-  test added.
 
 ### Docs
 
