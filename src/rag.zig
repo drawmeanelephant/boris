@@ -33,6 +33,7 @@ const json_out = @import("json_out.zig");
 const parser = @import("parser.zig");
 const aside = @import("aside.zig");
 const pipeline = @import("pipeline.zig");
+const textile = @import("textile.zig");
 
 /// Machine format id written into `catalog_meta.json`.
 pub const catalog_format = "boris-rag";
@@ -51,6 +52,7 @@ pub const RagOptions = struct {
     /// Curated system-seed root; missing → skip system segment (no error).
     system_docs_dir: []const u8 = "docs/rag/system",
     quiet: bool = false,
+    input_format: identity.InputFormat = .markdown,
 };
 
 pub const RagStats = struct {
@@ -520,7 +522,12 @@ fn exportContentPages(
         }
         // Component scan already hard-failed compile when invalid; re-tokenize
         // for export representation (:::kind blocks, non-round-trippable).
-        const tok = aside.tokenizeBody(parsed.doc.body, scratch) catch return error.UnexpectedParseFailure;
+        const body = if (opts.input_format == .textile) blk: {
+            const adapted = try textile.toMarkdown(parsed.doc.body, scratch);
+            if (!adapted.isOk()) return error.UnexpectedParseFailure;
+            break :blk adapted.markdown;
+        } else parsed.doc.body;
+        const tok = aside.tokenizeBody(body, scratch) catch return error.UnexpectedParseFailure;
         if (tok.hasErrors()) return error.UnexpectedParseFailure;
         const body_full = try exportBodyForRag(tok.segments, scratch);
         const title = pageTitle(p);
@@ -1153,6 +1160,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
     result.compile = try pipeline.compile(io, gpa, .{
         .content_root = opts.content_root,
         .quiet = opts.quiet,
+        .input_format = opts.input_format,
     });
     errdefer {
         result.compile.deinit();

@@ -54,6 +54,7 @@ const json_out = @import("json_out.zig");
 const pipeline = @import("pipeline.zig");
 const theme_mod = @import("theme.zig");
 const layout_select = @import("layout_select.zig");
+const textile = @import("textile.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -197,6 +198,8 @@ pub const CompileOptions = struct {
     test_fail_cache_publish: bool = false,
     /// Bounded parallel rendering worker count.
     jobs: usize = 1,
+    /// Whole-tree authoring format. Markdown is the byte-compatible default.
+    input_format: identity.InputFormat = .markdown,
 };
 
 fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Allocator) ![]u8 {
@@ -204,6 +207,39 @@ fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Alloc
     defer file.close(io);
     var reader = file.reader(io, &.{});
     return try reader.interface.allocRemaining(allocator, .unlimited);
+}
+
+fn sourceLineAt(source: []const u8, offset: usize) u32 {
+    var line: u32 = 1;
+    for (source[0..@min(offset, source.len)]) |c| if (c == '\n') {
+        line += 1;
+    };
+    return line;
+}
+
+fn bodyForInput(
+    allocator: std.mem.Allocator,
+    input_format: identity.InputFormat,
+    source: []const u8,
+    body: []const u8,
+    body_offset: usize,
+    source_path: []const u8,
+    quiet: bool,
+) ![]const u8 {
+    if (input_format == .markdown) return body;
+    const adapted = try textile.toMarkdown(body, allocator);
+    if (adapted.diagnostic) |td| {
+        if (!quiet) {
+            std.debug.print("error: ETEXTILE: {s}:{d}:{d}: {s} [Use only the bounded Textile compatibility subset]\n", .{
+                source_path,
+                sourceLineAt(source, body_offset) + td.line - 1,
+                td.column,
+                td.message,
+            });
+        }
+        return error.TextileFailed;
+    }
+    return adapted.markdown;
 }
 
 /// Load layout once into long-lived `layout_arena` ownership.
@@ -276,11 +312,28 @@ pub fn loadAndPromote(
     db: *PageDb,
     content_root: []const u8,
 ) !void {
+    return loadAndPromoteFormat(io, gpa, db, content_root, .markdown, true);
+}
+
+pub fn loadAndPromoteFormat(
+    io: Io,
+    gpa: std.mem.Allocator,
+    db: *PageDb,
+    content_root: []const u8,
+    input_format: identity.InputFormat,
+    quiet: bool,
+) !void {
     var scan_list = page_mod.PageList.init(gpa, db.retain);
     defer scan_list.deinit();
 
-    scanner.scan(io, .{ .content_root = content_root }, &scan_list) catch |err| switch (err) {
+    scanner.scan(io, .{ .content_root = content_root, .input_format = input_format }, &scan_list) catch |err| switch (err) {
         error.ContentDirMissing => return error.ContentDirMissing,
+        error.InputFormatMismatch => {
+            if (!quiet) {
+                std.debug.print("error: ETEXTILE: content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode [Use Markdown-only input by default, or pass --textile for a .textile-only tree]\n", .{});
+            }
+            return error.InputFormatMismatch;
+        },
         else => |e| return e,
     };
 
@@ -294,6 +347,9 @@ pub fn loadAndPromote(
 
         const parsed = parser.parse(source);
         if (parsed.diagnostic != null) return error.ParseFailed;
+        var body_arena = std.heap.ArenaAllocator.init(gpa);
+        defer body_arena.deinit();
+        _ = try bodyForInput(body_arena.allocator(), input_format, source, parsed.doc.body, parsed.doc.body_offset, disc.source_path, quiet);
 
         const final_id: []const u8 = if (parsed.doc.meta.id) |override| override else disc.entity_id;
         try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset);
@@ -402,6 +458,7 @@ pub fn renderAndPublishPageWithTheme(
     const source = try readFileAlloc(io, content_dir, page.source_path, arena);
     const parsed = parser.parse(source);
     if (parsed.diagnostic != null) return error.ParseFailed;
+    const body = try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, page.source_path, options.quiet);
 
     if (options.test_fail_render_at) |idx| {
         if (idx == page_index) return error.TestInjectedRenderFailure;
@@ -415,7 +472,7 @@ pub fn renderAndPublishPageWithTheme(
         content_dir,
         gpa,
         arena,
-        parsed.doc.body,
+        body,
         page.source_path,
         &include_fail,
     ) catch |err| {
@@ -628,7 +685,7 @@ pub fn compileHtmlSite(
     var db = PageDb.init(gpa, retain_arena.allocator());
     defer db.deinit();
 
-    try loadAndPromote(io, gpa, &db, options.content_root);
+    try loadAndPromoteFormat(io, gpa, &db, options.content_root, options.input_format, options.quiet);
 
     // 3. Graph validate + freeze (shared rules with IR/RAG; Feature 6 nav).
     var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title);
@@ -674,6 +731,7 @@ const SharedCompileState = struct {
         db: *PageDb,
         content_root: []const u8,
         quiet: bool,
+        input_format: identity.InputFormat,
     ) !SharedCompileState {
         const cwd = Io.Dir.cwd();
         _ = cwd;
@@ -716,7 +774,7 @@ const SharedCompileState = struct {
                 .body_offset = p.body_offset,
             };
         }
-        try pipeline.populateDependencyIndex(io, gpa, inc_alloc, content_root, dep_nodes, quiet, &dep_index);
+        try pipeline.populateDependencyIndexFormat(io, gpa, inc_alloc, content_root, dep_nodes, quiet, input_format, &dep_index);
 
         const include_bytes = try gpa.alloc([][]u8, db.len());
         const include_paths = try gpa.alloc([][]u8, db.len());
@@ -789,6 +847,8 @@ fn isContentCompileFailure(err: anyerror) bool {
         error.ReferenceFailed,
         error.ParseFailed,
         error.ComponentFailed,
+        error.TextileFailed,
+        error.InputFormatMismatch,
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
         error.LayoutUnknownMarker,
@@ -840,7 +900,7 @@ pub fn compileHtmlSiteMulti(
     var db = PageDb.init(gpa, retain_arena.allocator());
     defer db.deinit();
 
-    try loadAndPromote(io, gpa, &db, base_options.content_root);
+    try loadAndPromoteFormat(io, gpa, &db, base_options.content_root, base_options.input_format, base_options.quiet);
 
     // Shared graph freeze once for all targets (Feature 6). Always compute nav
     // material; fingerprint mixes it in only when a layout has `{{nav}}`.
@@ -848,7 +908,7 @@ pub fn compileHtmlSiteMulti(
     defer site.deinit();
 
     // Shared content/include fingerprint inputs once for all targets.
-    var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root, base_options.quiet);
+    var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root, base_options.quiet, base_options.input_format);
     defer shared.deinit();
 
     // Preflight layout selection for every target/page before any target publishes
@@ -1180,6 +1240,7 @@ fn buildSiteHeadingIndex(
     site: *const FrozenSite,
     shared: *const SharedCompileState,
     quiet: bool,
+    input_format: identity.InputFormat,
 ) !wikilink.HeadingIndex {
     var index: wikilink.HeadingIndex = .{};
     errdefer index.deinit(gpa);
@@ -1204,6 +1265,7 @@ fn buildSiteHeadingIndex(
         const source = try readFileAlloc(io, content_dir, page.source_path, arena);
         const parsed = parser.parse(source);
         if (parsed.diagnostic != null) return error.ParseFailed;
+        const body = try bodyForInput(arena, input_format, source, parsed.doc.body, parsed.doc.body_offset, page.source_path, quiet);
 
         var include_fail: include_mod.FailInfo = .{};
         const expanded = include_mod.expandIncludes(
@@ -1211,7 +1273,7 @@ fn buildSiteHeadingIndex(
             content_dir,
             gpa,
             arena,
-            parsed.doc.body,
+            body,
             page.source_path,
             &include_fail,
         ) catch |err| {
@@ -1488,13 +1550,13 @@ fn compilePagesInner(
     var local_shared: ?SharedCompileState = null;
     defer if (local_shared) |*s| s.deinit();
     const shared: *const SharedCompileState = if (shared_opt) |s| s else blk: {
-        local_shared = try SharedCompileState.init(io, gpa, db, options.content_root, options.quiet);
+        local_shared = try SharedCompileState.init(io, gpa, db, options.content_root, options.quiet, options.input_format);
         break :blk &(local_shared.?);
     };
 
     // Heading id index for wiki `[[entity#heading]]` (Apex-rendered ids only;
     // only pages that are fragment targets are rendered for the index).
-    var heading_index = try buildSiteHeadingIndex(io, gpa, content_dir, db, site, shared, options.quiet);
+    var heading_index = try buildSiteHeadingIndex(io, gpa, content_dir, db, site, shared, options.quiet, options.input_format);
     defer heading_index.deinit(gpa);
 
     // Load and parse prior manifest if in incremental mode (from final dist).
@@ -1596,7 +1658,7 @@ fn compilePagesInner(
         }
 
         // Fingerprint uses the effective selected layout identity and bytes.
-        const fp_bytes = cache.computePageFingerprintTheme(
+        const fp_bytes = cache.computePageFingerprintThemeInput(
             options.target_name,
             page_sel_paths[page_idx],
             page.entity_id,
@@ -1605,6 +1667,7 @@ fn compilePagesInner(
             page_layout_bytes[page_idx],
             nav_material,
             page_theme_material[page_idx],
+            if (options.input_format == .textile) textile.adapter_identity else "",
         );
         fingerprints[page_idx] = try fingerprintHex(fp_bytes, gpa);
 
@@ -1937,6 +2000,83 @@ fn writeTreeFile(io: Io, root_rel: []const u8, rel: []const u8, data: []const u8
 
 test "experimental flag is true (HTML path not default product)" {
     try std.testing.expect(experimental);
+}
+
+test "Textile adapter feeds the existing Apex HTML path deterministically" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer gpa.free(root);
+    try writeTreeFile(io, root, "layout.html", "<!doctype html><main>{{content}}</main>\n");
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layout.html", .{root});
+    defer gpa.free(layout);
+    const sequential = try std.fmt.allocPrint(gpa, "{s}/sequential", .{root});
+    defer gpa.free(sequential);
+    const parallel = try std.fmt.allocPrint(gpa, "{s}/parallel", .{root});
+    defer gpa.free(parallel);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/textile-compatibility/content",
+        .dist_dir = sequential,
+        .layout_path = layout,
+        .quiet = true,
+        .jobs = 1,
+        .incremental = true,
+        .input_format = .textile,
+    });
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/textile-compatibility/content",
+        .dist_dir = parallel,
+        .layout_path = layout,
+        .quiet = true,
+        .jobs = 2,
+        .input_format = .textile,
+    });
+
+    var sequential_dir = try Io.Dir.cwd().openDir(io, sequential, .{});
+    defer sequential_dir.close(io);
+    var parallel_dir = try Io.Dir.cwd().openDir(io, parallel, .{});
+    defer parallel_dir.close(io);
+    const html = try readAllFile(io, sequential_dir, "index.html", gpa);
+    defer gpa.free(html);
+    const html_parallel = try readAllFile(io, parallel_dir, "index.html", gpa);
+    defer gpa.free(html_parallel);
+    try std.testing.expectEqualStrings(html, html_parallel);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<h1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<strong>strong</strong>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<ins>inserted</ins>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<blockquote>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<ul>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<ol") != null);
+
+    const no_op = try compileHtmlSite(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/textile-compatibility/content",
+        .dist_dir = sequential,
+        .layout_path = layout,
+        .quiet = true,
+        .jobs = 1,
+        .incremental = true,
+        .input_format = .textile,
+    });
+    try std.testing.expectEqual(@as(usize, 0), no_op.pages_written);
+
+    try std.testing.expectError(error.TextileFailed, compileHtmlSite(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/textile-compatibility/invalid/content",
+        .dist_dir = sequential,
+        .layout_path = layout,
+        .quiet = true,
+        .input_format = .textile,
+    }));
+    try std.testing.expectError(error.InputFormatMismatch, compileHtmlSite(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/textile-compatibility/mixed/content",
+        .dist_dir = sequential,
+        .layout_path = layout,
+        .quiet = true,
+        .input_format = .textile,
+    }));
 }
 
 test "layout missing marker aborts before content compile" {

@@ -42,6 +42,11 @@ verified. Do not check an item because a design doc exists.
 - [x] **RAG determinism test** — dual RAG export to distinct dirs is
       byte-identical (`src/rag.zig` full-tree compare); shared
       `pipeline.compile` / `graph.validate` with IR for invalid fixtures
+- [x] **Explicit Textile compatibility** — `--textile` accepts only a
+      `.textile` tree, adapts the contracted body subset through existing
+      IR/RAG/Apex paths, compares sequential/parallel HTML, and rejects mixed
+      or malformed input with `ETEXTILE`; contract
+      [`textile-compatibility.md`](contracts/textile-compatibility.md)
 - [x] **Apex ABI tests** — in-process Apex C ABI integration covered:
       - real `@cImport` unit tests in `src/apex.zig` (part of `zig build test`)
       - hostile C double via `zig build test-apex-hostile`

@@ -29,6 +29,7 @@ is **not** proof that every surface is the default CLI product.
 | Includes + wiki-links (HTML) | **Implemented** — pre-Apex; see `includes-and-wiki-links.md` |
 | IR 0.2 dependency edges + reverse index | **Implemented (F8.1–F8.3 shipped)** — `--out` emits typed edges and `reverseIndex`; incremental HTML uses the same reverse-walk dirty-set (v0.3.1) |
 | Documentation Intelligence | **Implemented first slice** — `check` / `impact`; see [documentation-intelligence.md](documentation-intelligence.md) |
+| Textile compatibility | **Implemented, explicit opt-in** — bounded `.textile` body adapter via `--textile`; see [textile-compatibility.md](textile-compatibility.md) |
 
 ## Canonical ownership (one document per topic)
 
@@ -56,6 +57,7 @@ per topic:
 | Semantic relations (IR 0.3) | [semantic-relations.md](semantic-relations.md) |
 | AI Context Bundle | [context-bundle.md](context-bundle.md) |
 | Documentation Intelligence | [documentation-intelligence.md](documentation-intelligence.md) |
+| Textile compatibility adapter | [textile-compatibility.md](textile-compatibility.md) |
 
 ### Normative documents (IR v0.2 target) — full list
 
@@ -79,6 +81,7 @@ per topic:
 | [semantic-relations.md](semantic-relations.md) | Bounded author relations and deliberate IR 0.3 schema plan |
 | [context-bundle.md](context-bundle.md) | Deterministic provenance-rich AI context export (`--context`) |
 | [documentation-intelligence.md](documentation-intelligence.md) | Read-only graph health and impact analysis (`check` / `impact`) |
+| [textile-compatibility.md](textile-compatibility.md) | Explicit bounded `.textile`-to-Markdown input mode |
 
 ## Redirect / compatibility paths (non-normative)
 

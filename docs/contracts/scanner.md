@@ -22,6 +22,7 @@
 | Input | Meaning |
 |-------|---------|
 | `content_root` | Directory to walk (CLI `--input`, default `content`) |
+| `input_format` | Whole-tree page family: Markdown by default; Textile only with `--textile` |
 | long-lived retain allocator | Owns all strings on discovered records |
 | list allocator | Owns the flat list spine and temporary walk state |
 
@@ -36,7 +37,7 @@ No configuration files. No environment variables. No frontmatter parse at this s
 3. For each directory entry:
    - **Symlink** → reject (`SymlinkRejected`); do **not** enter.
    - **Directory** → enter once per filesystem inode; re-visit → `SymlinkCycle`.
-   - **Regular file** → accept only if basename ends with case-sensitive `.md` or `.mdx`.
+   - **Regular file** → accept only the selected case-sensitive page family: `.md` / `.mdx` by default, or `.textile` in explicit Textile mode.
    - Other kinds / extensions → ignore (including `.txt`, `.MD`, `.MDX`).
 4. For each accepted file, build a `Page` record (see Record shape).
 5. **Sort** the flat list before any caller processes it.
@@ -49,6 +50,10 @@ No configuration files. No environment variables. No frontmatter parse at this s
 |--------|-----------|
 | `.md`  | **yes** (case-sensitive) |
 | `.mdx` | **yes** (case-sensitive) |
+| `.textile` | **only with `--textile`** (case-sensitive) |
+| recognized page extension from the other family | **error** (`InputFormatMismatch` → `ETEXTILE`) |
+| uppercase/mixed-case variants | **no** (ignored) |
+| `.txt` and all other | **no** (ignored) |
 
 ### Reserved fragment tree
 
@@ -58,9 +63,6 @@ Files under `content/includes/**` are available to Boris-mediated
 output). Nested directories named `includes` under other paths (e.g.
 `guides/includes/`) are **not** reserved and remain normal page trees.
 See [includes-and-wiki-links.md](includes-and-wiki-links.md).
-| `.MD`, `.Md`, `.MDX`, `.Mdx`, … | **no** (ignored) |
-| `.txt` and all other | **no** (ignored) |
-
 ---
 
 ## Record shape (`Page`)
@@ -72,7 +74,7 @@ Flat collection only. Each record minimally includes:
 | `source_path` | Content-root-relative path, `/` only | retain allocator |
 | `entity_id` | From `identity.canonicalEntityId` | retain allocator |
 | `output_path` | From `identity.safeOutputRelativePath` | retain allocator |
-| `kind` | `.md` or `.mdx` | value type |
+| `kind` | `.md`, `.mdx`, or explicit `.textile` | value type |
 
 **Openable source strategy:** open the content root as `Io.Dir`, then open
 `source_path` relative to that handle. Logical metadata never stores host
@@ -98,7 +100,7 @@ Never depend on filesystem enumeration order.
 **Exactly one function:** `identity.canonicalEntityId(allocator, source_path)`.
 
 ```text
-canonical source path  →  strip one trailing ".md" | ".mdx"  →  entity id
+canonical source path  →  strip one selected trailing page extension  →  entity id
 ```
 
 Examples:
@@ -110,6 +112,7 @@ Examples:
 | `nested/deep/page.md` | `nested/deep/page` | `nested/deep/page.html` |
 | `Guides/Intro.md` | `Guides/Intro` | `Guides/Intro.html` |
 | `my.notes.md` | `my.notes` | `my.notes.html` |
+| `guides/intro.textile` (Textile mode) | `guides/intro` | `guides/intro.html` |
 
 Rejected: absolute paths, empty / `.` / `..` segments, unsupported extensions,
 empty stem (`.md`), oversize ids (> 255 UTF-8 bytes).
@@ -148,6 +151,7 @@ host denies symlink creation (`AccessDenied` / `PermissionDenied`).
 | Directory or page symlink under root | `SymlinkRejected` |
 | Directory inode re-entry | `SymlinkCycle` |
 | Illegal path / identity after normalize | `InvalidPath` |
+| Recognized page from the non-selected input family | `InputFormatMismatch` (`ETEXTILE` at the pipeline) |
 | I/O / allocator failures | propagated |
 
 ---

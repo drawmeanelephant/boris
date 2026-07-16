@@ -506,6 +506,8 @@ fn isRecoverableBuildError(err: anyerror) bool {
     return switch (err) {
         error.ParseFailed,
         error.ComponentFailed,
+        error.TextileFailed,
+        error.InputFormatMismatch,
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
         => true,
@@ -687,6 +689,7 @@ pub const WatchCoordinator = struct {
                 .incremental = self.options.incremental,
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
+                .input_format = self.options.input_format,
             }) catch |err| {
                 if (isRecoverableBuildError(err) or err == error.MultiTargetCompilationFailed) {
                     if (!self.options.quiet) {
@@ -707,6 +710,7 @@ pub const WatchCoordinator = struct {
                 .incremental = self.options.incremental,
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
+                .input_format = self.options.input_format,
             }) catch |err| {
                 if (isRecoverableBuildError(err)) {
                     if (!self.options.quiet) {
@@ -743,6 +747,7 @@ pub const WatchCoordinator = struct {
                 .incremental = self.options.incremental,
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
+                .input_format = self.options.input_format,
             }) catch |err| {
                 initial_success = false;
                 if (isRecoverableBuildError(err) or err == error.MultiTargetCompilationFailed) {
@@ -764,6 +769,7 @@ pub const WatchCoordinator = struct {
                 .incremental = self.options.incremental,
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
+                .input_format = self.options.input_format,
             })) |st| {
                 stats = st;
             } else |err| {
