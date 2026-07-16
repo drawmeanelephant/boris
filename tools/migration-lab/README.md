@@ -125,7 +125,7 @@ zig build --build-file tools/migration-lab/build.zig run -- \
   --mode=obsidian \
   --vault=tools/migration-lab/fixtures/mini-obsidian \
   --out=/tmp/obs-mig-report
-zig build -C tools/migration-lab run -- \
+zig build --build-file tools/migration-lab/build.zig run -- \
   --mode=notion \
   --export=tools/migration-lab/fixtures/mini-notion \
   --out=/tmp/notion-mig-report

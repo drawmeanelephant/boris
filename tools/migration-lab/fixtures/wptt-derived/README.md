@@ -23,7 +23,7 @@ file).
 curl -fsSL -o /tmp/themeunittestdata.wordpress.xml \
   https://raw.githubusercontent.com/WPTT/theme-unit-test/master/themeunittestdata.wordpress.xml
 
-zig build -C tools/migration-lab run -- \
+zig build --build-file tools/migration-lab/build.zig run -- \
   --mode=wordpress \
   --wxr=/tmp/themeunittestdata.wordpress.xml \
   --out=/tmp/wp-wptt-out
