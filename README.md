@@ -139,11 +139,12 @@ New section landings: [migration guide](docs/MIGRATION.md) (Trunk + Satellite).
 1. `zig build` → `./zig-out/bin/boris --quiet` → open `dist/index.html` (nav, breadcrumb, TOC).
 2. `./zig-out/bin/boris --context --quiet` → skim `context/bundle.md`.
 3. `./zig-out/bin/boris check` — expect exit **1** on sample unreferenced `index` (policy finding).
-4. Optional convert path: [`docs/MIGRATION.md`](docs/MIGRATION.md) fixture commands.
+4. First real site / convert path: [`docs/MIGRATION.md`](docs/MIGRATION.md)
+   (inspect → bounded slice → build HTML/IR/RAG → incremental → deploy dir).
 
 **Migration:** older scripts that assumed bare `boris` wrote IR should pass
 `--out .boris` (or `--no-rag`). Converting an existing site:
-[`docs/MIGRATION.md`](docs/MIGRATION.md).
+[`docs/MIGRATION.md`](docs/MIGRATION.md) (first real site path).
 
 ---
 
@@ -158,7 +159,7 @@ New section landings: [migration guide](docs/MIGRATION.md) (Trunk + Satellite).
 | Graph health / impact | **Product** (v0.4.0) | `boris check`, `boris impact <id>` — read-only; unreferenced findings can exit 1 |
 | Layout rules / themes | **Product** | Static layouts + `--layout-rule`; see [templating contract](docs/contracts/templating-and-themes.md) |
 | Includes + wiki-links | **Product** (HTML path) | `{{include}}`, `[[id]]`, `[[id#heading]]` — fail loud when invalid |
-| Migration **guide** + fixture | **Product docs** | [`docs/MIGRATION.md`](docs/MIGRATION.md), [`fixtures/migration-site/`](fixtures/migration-site/) |
+| Migration **guide** + fixture | **Product docs** | [`docs/MIGRATION.md`](docs/MIGRATION.md) first real site path; [`fixtures/migration-site/`](fixtures/migration-site/); theme dogfood [`examples/reference-theme/`](examples/reference-theme/) |
 | Migration **labs** (Astro, WordPress, Instagram, Obsidian, Notion, Starlight, …) | **Developer aids** | Standalone under [`tools/migration-lab/`](tools/migration-lab/) — **not** runtime dependencies of `boris`; **not** universal importers |
 
 Context Bundle contract: [`docs/contracts/context-bundle.md`](docs/contracts/context-bundle.md).

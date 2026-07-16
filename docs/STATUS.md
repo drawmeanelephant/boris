@@ -157,7 +157,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 |----------|------|-----|
 | **Next** | Real-site dogfood | Exercise a substantial site/archive and record concrete migration, authoring, and publish gaps. |
 | **Next** | Archive-friendly layouts | Validate layout rules and child/index presentation against real archive navigation before broadening theme features. |
-| **Later** | Further docs packaging | README + migration guide now lead with outcomes, quickstart, and honest AI/migration boundaries; remaining gaps are sample-content version drift and deeper cookbook discoverability. |
+| **Later** | Further docs packaging | README + [`docs/MIGRATION.md`](MIGRATION.md) first real site path cover inspect → convert → build → deploy; remaining gaps are sample-content version drift and deeper external-SSG cookbook depth. |
 | **Later** | Source-RAG ergonomics and publication safety | Keep the standalone source pack distinct from product RAG; prioritize evidence-backed output-size and partial-publish improvements. |
 | **Deferred** | Measurement-driven build work | Benchmark or change cache/watch/parallel behavior only after a reproducible real-site need. |
 
