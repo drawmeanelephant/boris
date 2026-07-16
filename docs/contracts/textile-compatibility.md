@@ -121,7 +121,8 @@ The following recognized forms fail with `ETEXTILE` and a source location:
 
 - block or phrase attributes, class/id syntax, language modifiers, alignment,
   indentation, and arbitrary CSS;
-- tables, table modifiers, footnotes, endnotes, and definition lists;
+- tables and table modifiers (including `table.` declarations and attributed
+  declaration variants), footnotes, endnotes, and definition lists;
 - extended blocks (`..`), block code / preformatted blocks, comments, and
   `notextile` blocks;
 - nested or mixed lists and list attributes;

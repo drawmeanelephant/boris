@@ -1,0 +1,6 @@
+---
+title: Tables are unsupported
+---
+table.
+| Header | Value |
+| One | Two |
