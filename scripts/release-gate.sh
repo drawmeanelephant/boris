@@ -216,6 +216,12 @@ if grep -q '"kind": "depends_on"' "${SEMANTIC_OUT}/graph.json" \
 else
   fail "semantic relation graph missing expected relation kinds"
 fi
+if diff -u "docs/contracts/fixtures/semantic-relations/expected/relations.json" \
+  <(sed -n '/^  "relations":/,$p' "${SEMANTIC_OUT}/graph.json"); then
+  pass "semantic relation ordering and shape match golden"
+else
+  fail "semantic relation ordering or shape mismatch"
+fi
 SEMANTIC_INVALID_OUT="${GATE_DIR}/ir-semantic-relations-invalid"
 rm -rf "${SEMANTIC_INVALID_OUT}"
 set +e

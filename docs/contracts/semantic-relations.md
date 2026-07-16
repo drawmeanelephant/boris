@@ -114,8 +114,7 @@ The first implementation includes fixtures/tests for:
 - absent `relations` (which remains on IR 0.2);
 - malformed list, unknown kind, duplicate tuple, self-target, and missing page
   parser/validation coverage;
+- a combined semantic/build-dependency golden proving the arrays remain
+  separate;
 - old IR 0.2 goldens remaining unchanged while relation-bearing output uses the
   deliberate IR 0.3 schema/version cut.
-
-The remaining acceptance expansion is to add all four kinds and a combined
-semantic/build-dependency golden before the feature is merged to `main`.
