@@ -9,6 +9,7 @@
 //!   filed      — Filed.fyi changelog + releases slice → Boris Markdown + reports
 //!   starlight  — Starlight/Astro docs dogfood (locale-dir or root-locale) → Boris candidate + boundary manifests
 //!   asset-filename — Sanitize content-local asset filenames to Boris ASCII path grammar
+//!   theme-archaeology — Read-only Astro/Starlight theme inventory → adaptation ledger + boundary report
 //!
 //! Never rewrites inputs. Not part of the Boris product compiler pipeline.
 //!
@@ -37,6 +38,7 @@ const notion = @import("notion.zig");
 const filed = @import("filed.zig");
 const starlight = @import("starlight.zig");
 const asset_filename = @import("asset_filename.zig");
+const theme_archaeology = @import("theme_archaeology.zig");
 
 pub const ExitCode = enum(u8) {
     success = 0,
@@ -57,6 +59,7 @@ pub const Mode = enum {
     filed,
     starlight,
     asset_filename,
+    theme_archaeology,
 
     pub fn parse(s: []const u8) ?Mode {
         if (std.mem.eql(u8, s, "astro")) return .astro;
@@ -69,6 +72,9 @@ pub const Mode = enum {
         if (std.mem.eql(u8, s, "asset-filename") or std.mem.eql(u8, s, "assets") or
             std.mem.eql(u8, s, "asset-compat") or std.mem.eql(u8, s, "filename-compat"))
             return .asset_filename;
+        if (std.mem.eql(u8, s, "theme-archaeology") or std.mem.eql(u8, s, "theme") or
+            std.mem.eql(u8, s, "theme-arch") or std.mem.eql(u8, s, "theme-inventory"))
+            return .theme_archaeology;
         return null;
     }
 };
@@ -242,12 +248,21 @@ fn printUsage() void {
         \\Common options:
         \\  -h, --help         Show this help and exit
         \\  -q, --quiet        Suppress progress lines
-        \\  --mode=MODE        astro (default) | wordpress | instagram | obsidian | notion | filed | starlight | asset-filename
+        \\  --mode=MODE        astro (default) | wordpress | instagram | obsidian | notion | filed | starlight | asset-filename | theme-archaeology
         \\  --out=DIR          Output directory (default: migration-report)
         \\
         \\Astro mode:
         \\  --root=DIR         Astro project/export root to scan (default: .)
         \\  Writes: report.json, REPORT.md
+        \\
+        \\Theme archaeology (read-only Astro/Starlight theme inventory):
+        \\  --mode=theme-archaeology  Inventory layouts, CSS, fonts/images, nav/sidebar,
+        \\                     components/MDX tags, scripts, analytics, licenses
+        \\  --root=DIR         Theme/project root (required; never modified)
+        \\  Writes: adaptation_ledger.json, report.json, REPORT.md, BOUNDARY.md
+        \\  Aliases: theme | theme-arch | theme-inventory
+        \\  No JS/MDX execution, no remote fetch, no directive following.
+        \\  Ambiguous mappings are review items, never guesses.
         \\
         \\Asset-filename mode (content-local asset path sanitization):
         \\  --mode=asset-filename  Sanitize sibling page.assets/ filenames to Boris ASCII grammar
@@ -486,6 +501,20 @@ pub fn main(init: std.process.Init) u8 {
                 return ExitCode.io_error.int();
             };
         },
+        .theme_archaeology => {
+            if (std.mem.eql(u8, opts.root_dir, opts.out_dir)) {
+                std.log.err("--out must differ from --root", .{});
+                return ExitCode.usage.int();
+            }
+            theme_archaeology.run(io, gpa, .{
+                .root_dir = opts.root_dir,
+                .out_dir = opts.out_dir,
+                .quiet = opts.quiet,
+            }) catch |err| {
+                std.log.err("migration-lab (theme-archaeology) failed: {s}", .{@errorName(err)});
+                return ExitCode.io_error.int();
+            };
+        },
     }
     return ExitCode.success.int();
 }
@@ -503,6 +532,7 @@ test {
     _ = filed;
     _ = starlight;
     _ = asset_filename;
+    _ = theme_archaeology;
 }
 
 test "parseOptions: defaults and astro flags" {
@@ -627,6 +657,23 @@ test "parseOptions: asset-filename flags" {
 
     const o2 = try parseOptions(&.{ "boris-migration-lab", "--mode=assets", "--root=./c", "--out=./o" });
     try std.testing.expect(o2.mode == .asset_filename);
+}
+
+test "parseOptions: theme-archaeology flags" {
+    const o = try parseOptions(&.{
+        "boris-migration-lab",
+        "--mode=theme-archaeology",
+        "--root=fixtures/mini-theme-astro",
+        "--out=./.theme-out",
+    });
+    try std.testing.expect(o.mode == .theme_archaeology);
+    try std.testing.expectEqualStrings("fixtures/mini-theme-astro", o.root_dir);
+    try std.testing.expectEqualStrings("./.theme-out", o.out_dir);
+
+    const o2 = try parseOptions(&.{ "boris-migration-lab", "--mode=theme", "--root=./t", "--out=./o" });
+    try std.testing.expect(o2.mode == .theme_archaeology);
+    const o3 = try parseOptions(&.{ "boris-migration-lab", "--mode=theme-inventory", "--root=./t", "--out=./o" });
+    try std.testing.expect(o3.mode == .theme_archaeology);
 }
 
 test "parseOptions: starlight flags" {

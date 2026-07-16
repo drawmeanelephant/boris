@@ -1,0 +1,9 @@
+{
+  "name": "mini-theme-astro-fixture",
+  "private": true,
+  "license": "MIT",
+  "dependencies": {
+    "astro": "0.0.0-fixture",
+    "@astrojs/starlight": "0.0.0-fixture"
+  }
+}

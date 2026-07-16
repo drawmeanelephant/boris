@@ -1,0 +1,15 @@
+@import "./tokens-local.css";
+
+:root {
+  --accent: #3366ff;
+}
+
+body {
+  font-family: "SiteFont", system-ui, sans-serif;
+  color: #111;
+}
+
+@font-face {
+  font-family: "SiteFont";
+  src: url("/fonts/site.woff2") format("woff2");
+}
