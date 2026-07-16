@@ -251,6 +251,10 @@ fn exportBodyForRag(segments: []const aside.Segment, arena: std.mem.Allocator) !
                 const block = try aside.formatRagDirective(a, arena);
                 try out.appendSlice(arena, block);
             },
+            .details => |d| {
+                const block = try aside.formatDetailsRagDirective(d, arena);
+                try out.appendSlice(arena, block);
+            },
         }
     }
     return try out.toOwnedSlice(arena);

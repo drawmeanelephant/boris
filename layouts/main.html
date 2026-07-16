@@ -80,6 +80,16 @@
     .admonition--note { border-left-color: #48a; }
     .admonition--warning { border-left-color: #c80; }
     .admonition--danger { border-left-color: #c33; }
+    .details {
+      margin: 1.25rem 0;
+      padding: 0.75rem 1rem;
+      border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+      border-radius: 0.5rem;
+      background: color-mix(in srgb, Canvas 95%, CanvasText 5%);
+    }
+    .details > summary { cursor: pointer; font-weight: 700; }
+    .details__body > :first-child { margin-top: 0.75rem; }
+    .details__body > :last-child { margin-bottom: 0; }
     .page-toc {
       font-size: 0.85rem;
       margin: 0 0 1rem;

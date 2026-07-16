@@ -157,6 +157,10 @@ pub fn renderSource(
                 const h = try aside.renderHtml(component, doc_arena);
                 try html_buf.appendSlice(arena, h);
             },
+            .details => |component| {
+                const h = try aside.renderDetailsHtml(component, doc_arena);
+                try html_buf.appendSlice(arena, h);
+            },
         }
     }
     return html_buf.items;

@@ -447,6 +447,122 @@ test "hardening: valid Aside passes IR and RAG :::kind export" {
     try std.testing.expect(std.mem.indexOf(u8, page, "<Aside") == null);
 }
 
+test "hardening: Details include preserves IR and projects to HTML and RAG" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var work = try WorkDir.create(gpa, io, "details-ok");
+    defer work.cleanup();
+
+    try work.writeFile(
+        "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\Before
+        \\
+        \\{{include includes/disclosure.md}}
+        \\
+        \\After
+        \\
+        \\<Details summary="RAG details" id="rag-1">
+        \\Projected directly.
+        \\</Details>
+        \\
+    );
+    try work.writeFile("content/includes/disclosure.md",
+        \\<Details summary="Read <this> & that" id="more-1" open="true">
+        \\Inside **details**.
+        \\</Details>
+    );
+    try work.writeFile("layouts/main.html", "<html><body>{{content}}</body></html>\n");
+
+    const content = try work.join("content");
+    defer gpa.free(content);
+    const ir_out = try work.join("ir");
+    defer gpa.free(ir_out);
+    const rag_out = try work.join("rag");
+    defer gpa.free(rag_out);
+    const dist = try work.join("dist");
+    defer gpa.free(dist);
+    const layout = try work.join("layouts/main.html");
+    defer gpa.free(layout);
+
+    var ir = try pipeline.run(io, gpa, .{ .content_root = content, .out_dir = ir_out, .quiet = true });
+    defer ir.deinit();
+    try std.testing.expect(ir.ok);
+    for ([_][]const u8{ "manifest.json", "graph.json", "build-report.json" }) |name| {
+        const rel = try std.fmt.allocPrint(gpa, "ir/{s}", .{name});
+        defer gpa.free(rel);
+        const artifact = try work.readFile(rel, gpa);
+        defer gpa.free(artifact);
+        try std.testing.expect(std.mem.indexOf(u8, artifact, "Details") == null);
+    }
+    var rr = try rag.run(io, gpa, .{ .content_root = content, .out_dir = rag_out, .quiet = true });
+    defer rr.deinit();
+    try std.testing.expect(rr.compile.ok);
+    _ = try compile.compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .quiet = true });
+
+    const html = try work.readFile("dist/index.html", gpa);
+    defer gpa.free(html);
+    const before = std.mem.indexOf(u8, html, "Before").?;
+    const details = std.mem.indexOf(u8, html, "<details class=\"details\" id=\"more-1\" open>").?;
+    const after = std.mem.indexOf(u8, html, "After").?;
+    try std.testing.expect(before < details and details < after);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<summary>Read &lt;this&gt; &amp; that</summary>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<strong>details</strong>") != null);
+
+    const rag_page = try work.readFile("rag/content/pages/index.md", gpa);
+    defer gpa.free(rag_page);
+    try std.testing.expect(std.mem.indexOf(u8, rag_page, ":::details{summary=\"RAG details\" id=\"rag-1\"}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rag_page, "<Details") == null);
+}
+
+test "hardening: Details HTML is stable across jobs and incremental builds" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var work = try WorkDir.create(gpa, io, "details-determinism");
+    defer work.cleanup();
+    try work.writeFile("layouts/main.html", "<html><body>{{content}}</body></html>\n");
+    try work.writeFile(
+        "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\<Details summary="Home details" id="home-details">
+        \\One.
+        \\</Details>
+    );
+    try work.writeFile("content/other.md",
+        \\---
+        \\title: Other
+        \\---
+        \\
+        \\<Details summary="Other details" open="true">
+        \\Two.
+        \\</Details>
+    );
+    const content = try work.join("content");
+    defer gpa.free(content);
+    const layout = try work.join("layouts/main.html");
+    defer gpa.free(layout);
+    const seq = try work.join("seq");
+    defer gpa.free(seq);
+    const jobs = try work.join("jobs");
+    defer gpa.free(jobs);
+    const inc = try work.join("inc");
+    defer gpa.free(inc);
+
+    _ = try compile.compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = seq, .layout_path = layout, .jobs = 1, .quiet = true });
+    _ = try compile.compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = jobs, .layout_path = layout, .jobs = 2, .quiet = true });
+    _ = try compile.compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = inc, .layout_path = layout, .incremental = true, .quiet = true });
+    const noop = try compile.compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = inc, .layout_path = layout, .incremental = true, .quiet = true });
+    try std.testing.expectEqual(@as(usize, 0), noop.pages_written);
+    try compareNamedFiles(io, gpa, seq, jobs, &.{ "index.html", "other.html" });
+    try compareNamedFiles(io, gpa, seq, inc, &.{ "index.html", "other.html" });
+}
+
 // ---------------------------------------------------------------------------
 // Experimental HTML Aside stream
 // ---------------------------------------------------------------------------
@@ -457,8 +573,7 @@ test "hardening: experimental HTML renders Aside not raw tags" {
     var work = try WorkDir.create(gpa, io, "html-aside");
     defer work.cleanup();
 
-    try work.writeFile(
-        "content/index.md",
+    try work.writeFile("content/index.md",
         \\---
         \\title: Home
         \\---

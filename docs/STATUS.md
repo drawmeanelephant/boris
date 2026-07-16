@@ -147,7 +147,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 |----------|------|-----|
 | **Next** | Real-site dogfood | Exercise a substantial site/archive and record concrete migration, authoring, and publish gaps. |
 | **Next** | Archive-friendly layouts | Validate layout rules and child/index presentation against real archive navigation before broadening theme features. |
-| **Next** | Documentation packaging | Make existing `check`, `impact`, Context Bundles, and layout rules discoverable in the user-facing documentation. |
+| **Later** | Further docs packaging | README + migration guide now lead with outcomes, quickstart, and honest AI/migration boundaries; remaining gaps are sample-content version drift and deeper cookbook discoverability. |
 | **Later** | Source-RAG ergonomics and publication safety | Keep the standalone source pack distinct from product RAG; prioritize evidence-backed output-size and partial-publish improvements. |
 | **Deferred** | Measurement-driven build work | Benchmark or change cache/watch/parallel behavior only after a reproducible real-site need. |
 
@@ -218,7 +218,8 @@ on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 
 | Doc | Role |
 |-----|------|
-| [`README.md`](../README.md) | Human front door — outcomes + CLI |
+| [`README.md`](../README.md) | Human front door — outcomes, quickstart, AI/migration honesty |
+| [`docs/MIGRATION.md`](MIGRATION.md) | Author migration path + fixture commands |
 | [`AGENTS.md`](../AGENTS.md) | Hard constraints for contributors/agents |
 | **This file** | Where we are + next |
 | [`CHANGELOG.md`](../CHANGELOG.md) | What landed |
@@ -226,6 +227,7 @@ on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 | [`docs/RELEASE-GATE.md`](RELEASE-GATE.md) | Ship checklist / `release-gate.sh` |
 | [`docs/ROADMAP-post-f8.md`](ROADMAP-post-f8.md) | Post-F8 planning history + post-F9.2 future (not living phase banner) |
 | [`docs/rag/system/`](rag/system/) | RAG narrative seeds (not contracts) |
+| [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) | Standalone migration laboratories (not product runtime) |
 | [`content/AGENT-DIRECTIVE.txt`](../content/AGENT-DIRECTIVE.txt) | Sample-content rebuild brief |
 
 ---
