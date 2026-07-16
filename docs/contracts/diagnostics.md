@@ -100,6 +100,7 @@ must emit exactly these strings (no underscore variants such as `E_DUP_ID`).
 | `EFRONTMATTER` | error | Unclosed fence, bad line, unknown key, duplicate key, unsupported syntax, empty/oversize value, invalid status/tags | `parser.parse` → pipeline |
 | `EINVALIDUTF8` | error | Source not valid UTF-8, or leading UTF-8 BOM | `parser.parse` → pipeline |
 | `EINVALIDPATH` | error | Path or entity id cannot be canonicalized; illegal segments; absolute path; empty / `.` / `..` components; invalid frontmatter `id:`; **or** two pages’ entity ids differ only in letter case (output collision on case-insensitive FS) | scanner / `parser.parse` / `graph.diagnoseDuplicateIds` → pipeline |
+| `ETEXTILE` | error | Explicit Textile input-family mismatch, unsupported Textile feature, malformed supported syntax, or unsafe Textile link | scanner / `textile.toMarkdown` → pipeline / HTML |
 | `ECOMPONENT` | error | Aside / component tokenizer failure (unknown PascalCase tag, nested Aside, invalid kind/id, bad attributes, unterminated Aside) | `aside.tokenizeBody` → pipeline |
 | `EINCLUDESYNTAX` | error | Malformed `{{include …}}` directive | `include` → HTML / IR dependency resolution |
 | `EINCLUDEMISSING` | error | Include target path not found / unreadable | `include` → HTML / IR dependency resolution |

@@ -16,6 +16,8 @@ const page_mod = @import("page.zig");
 const include_mod = @import("include.zig");
 const wikilink = @import("wikilink.zig");
 const dependency = @import("dependency.zig");
+const identity = @import("identity.zig");
+const textile = @import("textile.zig");
 
 pub const schema_version = "0.2.0";
 pub const compiler_id = "boris/0.3.1";
@@ -28,12 +30,14 @@ pub const Options = struct {
     content_root: []const u8 = "content",
     out_dir: []const u8 = ".boris",
     quiet: bool = false,
+    input_format: identity.InputFormat = .markdown,
 };
 
 /// Shared load options for IR and RAG (no output paths).
 pub const CompileOptions = struct {
     content_root: []const u8 = "content",
     quiet: bool = false,
+    input_format: identity.InputFormat = .markdown,
 };
 
 pub const PageEntry = graph_mod.Node;
@@ -350,6 +354,7 @@ fn resolveDependencies(
     gpa: std.mem.Allocator,
     retain: std.mem.Allocator,
     content_dir: Io.Dir,
+    input_format: identity.InputFormat,
     result: *Result,
 ) !void {
     var resolver: DependencyResolver = .{
@@ -379,7 +384,14 @@ fn resolveDependencies(
         };
         defer gpa.free(source);
         if (page.body_offset > source.len) return error.InvalidBodyOffset;
-        try resolver.scanPage(page, source[page.body_offset..]);
+        if (input_format == .textile) {
+            const adapted = try textile.toMarkdown(source[page.body_offset..], gpa);
+            if (!adapted.isOk()) return error.InvalidTextile;
+            defer gpa.free(adapted.markdown);
+            try resolver.scanPage(page, adapted.markdown);
+        } else {
+            try resolver.scanPage(page, source[page.body_offset..]);
+        }
     }
 }
 
@@ -393,6 +405,21 @@ pub fn populateDependencyIndex(
     content_root: []const u8,
     nodes: []const graph_mod.Node,
     quiet: bool,
+    index: *dependency.DependencyIndex,
+) !void {
+    return populateDependencyIndexFormat(io, gpa, retain, content_root, nodes, quiet, .markdown, index);
+}
+
+/// Mode-aware dependency population used by explicit Textile builds. The
+/// Markdown wrapper above preserves its pre-existing call contract.
+pub fn populateDependencyIndexFormat(
+    io: Io,
+    gpa: std.mem.Allocator,
+    retain: std.mem.Allocator,
+    content_root: []const u8,
+    nodes: []const graph_mod.Node,
+    quiet: bool,
+    input_format: identity.InputFormat,
     index: *dependency.DependencyIndex,
 ) !void {
     var content_dir = try Io.Dir.cwd().openDir(io, content_root, .{});
@@ -421,7 +448,14 @@ pub fn populateDependencyIndex(
         };
         defer gpa.free(source);
         if (page.body_offset > source.len) return error.InvalidBodyOffset;
-        try resolver.scanPage(page, source[page.body_offset..]);
+        if (input_format == .textile) {
+            const adapted = try textile.toMarkdown(source[page.body_offset..], gpa);
+            if (!adapted.isOk()) return error.InvalidTextile;
+            defer gpa.free(adapted.markdown);
+            try resolver.scanPage(page, adapted.markdown);
+        } else {
+            try resolver.scanPage(page, source[page.body_offset..]);
+        }
         if (page.parent) |parent| {
             try resolver.appendEdge(
                 .{ .type = .page, .value = page.id },
@@ -1066,7 +1100,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     var scan_list = page_mod.PageList.init(gpa, retain);
     defer scan_list.deinit();
 
-    scanner.scan(io, .{ .content_root = options.content_root }, &scan_list) catch |err| switch (err) {
+    scanner.scan(io, .{ .content_root = options.content_root, .input_format = options.input_format }, &scan_list) catch |err| switch (err) {
         error.ContentDirMissing => {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
@@ -1095,6 +1129,17 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
                 .code = .EINVALIDPATH,
                 .message = try retain.dupe(u8, "content path or entity id cannot be canonicalized"),
                 .remediation = try retain.dupe(u8, "Rename paths so they have no empty, ., or .. segments"),
+            });
+            result.failure = .content;
+            diag.sortDiagnostics(result.diagnostics.items);
+            return result;
+        },
+        error.InputFormatMismatch => {
+            try result.diagnostics.append(gpa, .{
+                .severity = .error_,
+                .code = .ETEXTILE,
+                .message = try retain.dupe(u8, "content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode"),
+                .remediation = try retain.dupe(u8, "Use Markdown-only input by default, or pass --textile for a .textile-only tree"),
             });
             result.failure = .content;
             diag.sortDiagnostics(result.diagnostics.items);
@@ -1167,12 +1212,34 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             continue;
         }
 
-        // Aside / component scan on the body (document order; hard errors).
+        // Textile mode adapts only the already-frontmatter-split body. The
+        // adapted Markdown then enters the same component/parser pipeline.
         // Scratch arena owns tokenizer arrays; only diagnostics are retained.
         {
             var tok_arena = std.heap.ArenaAllocator.init(gpa);
             defer tok_arena.deinit();
-            const tok = aside.tokenizeBody(parsed.doc.body, tok_arena.allocator()) catch |err| switch (err) {
+            var body = parsed.doc.body;
+            if (options.input_format == .textile) {
+                const adapted = try textile.toMarkdown(body, tok_arena.allocator());
+                if (adapted.diagnostic) |td| {
+                    const body_line_base = countLinesUpTo(source, parsed.doc.body_offset);
+                    try result.diagnostics.append(gpa, .{
+                        .severity = .error_,
+                        .code = .ETEXTILE,
+                        .message = try retain.dupe(u8, td.message),
+                        .remediation = try retain.dupe(u8, "Use only the bounded Textile compatibility subset"),
+                        .source_path = disc.source_path,
+                        .line = body_line_base + td.line - 1,
+                        .column = td.column,
+                    });
+                    // Preserve metadata promotion so graph diagnostics remain
+                    // available alongside the adapter error.
+                    body = "";
+                } else {
+                    body = adapted.markdown;
+                }
+            }
+            const tok = aside.tokenizeBody(body, tok_arena.allocator()) catch |err| switch (err) {
                 error.InvalidUtf8 => {
                     // Frontmatter path already UTF-8-gated; treat as content error.
                     try result.diagnostics.append(gpa, .{
@@ -1246,7 +1313,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         err_count = diag.countErrors(result.diagnostics.items);
     }
     if (err_count == 0) {
-        try resolveDependencies(io, gpa, retain, content_dir, &result);
+        try resolveDependencies(io, gpa, retain, content_dir, options.input_format, &result);
         diag.sortDiagnostics(result.diagnostics.items);
         err_count = diag.countErrors(result.diagnostics.items);
     }
@@ -1276,6 +1343,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
     var result = try compile(io, gpa, .{
         .content_root = options.content_root,
         .quiet = options.quiet,
+        .input_format = options.input_format,
     });
     errdefer result.deinit();
 
@@ -1430,6 +1498,47 @@ test "e2e valid fixture builds three JSON artifacts" {
     try std.testing.expect(std.mem.indexOf(u8, man_bytes, "/tmp/") == null);
     try std.testing.expect(std.mem.indexOf(u8, graph_bytes, "/Users/") == null);
     try std.testing.expect(std.mem.indexOf(u8, graph_bytes, ".boris-stage") == null);
+}
+
+test "Textile mode preserves graph identity and fails closed" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var valid = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/textile-compatibility/content",
+        .quiet = true,
+        .input_format = .textile,
+    });
+    defer valid.deinit();
+    try std.testing.expect(valid.ok);
+    try std.testing.expect(valid.graph_frozen);
+    try std.testing.expectEqual(@as(usize, 2), valid.pages.items.len);
+    try std.testing.expectEqualStrings("guides/intro", valid.pages.items[0].id);
+    try std.testing.expectEqualStrings("index", valid.pages.items[0].parent.?);
+    try std.testing.expectEqualStrings("guides/intro.textile", valid.pages.items[0].source_path);
+    try std.testing.expectEqualStrings("index", valid.pages.items[1].id);
+
+    var malformed = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/textile-compatibility/invalid/content",
+        .quiet = true,
+        .input_format = .textile,
+    });
+    defer malformed.deinit();
+    try std.testing.expect(!malformed.ok);
+    var saw_textile = false;
+    for (malformed.diagnostics.items) |d| if (d.code == .ETEXTILE) {
+        saw_textile = true;
+    };
+    try std.testing.expect(saw_textile);
+
+    var mixed = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/textile-compatibility/mixed/content",
+        .quiet = true,
+        .input_format = .textile,
+    });
+    defer mixed.deinit();
+    try std.testing.expect(!mixed.ok);
+    try std.testing.expectEqual(diag.Code.ETEXTILE, mixed.diagnostics.items[0].code);
 }
 
 test "F8 graph-native fixture matches full graph golden" {
