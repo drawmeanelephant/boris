@@ -156,6 +156,9 @@ When `{{nav}}` is present, emit a deterministic forest (no hash-map order):
 - Titles (and link text) are HTML-escaped (`& < > "`).
 - `is-current` marks the `li` for the page being rendered; the current link may
   use `aria-current="page"`.
+- The named `nav` landmark and nested `ul` / `li` structure are part of the
+  emitted HTML contract; a Satellite list is nested inside its owning Trunk
+  list item.
 
 When `{{breadcrumb}}` is present:
 
@@ -189,6 +192,8 @@ When `{{children}}` is present, Boris emits only the current frozen node's
   `href` are HTML-escaped.
 - A page with no direct children, including every Satellite under the current
   one-level graph contract, emits the empty fragment (no wrapper).
+- The non-empty fragment is a named `nav` landmark containing one unordered
+  list; each child is a list item containing its link.
 - This slot does not create virtual pages, recursive graph navigation,
   filtering, pagination, queries, or runtime behavior. `{{nav}}` semantics are
   unchanged.
@@ -283,6 +288,8 @@ When `{{toc}}` is present, after body render (Apex + Aside stream):
   present in the body (e.g. `&amp;`) are **not** double-escaped.
 - Nested `<ul>` structure is **not** required in v0; level classes allow CSS
   indent. Flat list preserves document order.
+- The non-empty outline is a named `nav` landmark containing one unordered
+  list; each heading link is contained by a list item.
 
 ---
 
