@@ -345,6 +345,10 @@ pub fn copyAssetsToOutput(
 /// the live inventory (delete or rename). Call only when the target owns a
 /// managed theme root; legacy `layouts/…` builds must not scrub `assets/`.
 ///
+/// `page_outputs` is the live set of page `output_path`s for this build: a
+/// content page whose entity id is namespaced under `assets/` publishes into
+/// this same subtree and must never be treated as an orphan theme asset.
+///
 /// Empty parent directories under `assets/` are removed best-effort. Errors
 /// while deleting are swallowed so a prior successful HTML publish is not
 /// rolled back by a cleanup hiccup.
@@ -353,8 +357,9 @@ pub fn scrubOrphanThemeAssets(
     out_dir: Io.Dir,
     gpa: std.mem.Allocator,
     live_assets: []const AssetEntry,
+    page_outputs: *const std.StringHashMapUnmanaged(void),
 ) void {
-    scrubOrphanThemeAssetsInner(io, out_dir, gpa, live_assets) catch {};
+    scrubOrphanThemeAssetsInner(io, out_dir, gpa, live_assets, page_outputs) catch {};
 }
 
 fn scrubOrphanThemeAssetsInner(
@@ -362,6 +367,7 @@ fn scrubOrphanThemeAssetsInner(
     out_dir: Io.Dir,
     gpa: std.mem.Allocator,
     live_assets: []const AssetEntry,
+    page_outputs: *const std.StringHashMapUnmanaged(void),
 ) !void {
     var assets_dir = out_dir.openDir(io, "assets", .{ .iterate = true }) catch |err| switch (err) {
         error.FileNotFound => return,
@@ -402,6 +408,12 @@ fn scrubOrphanThemeAssetsInner(
             gpa.free(rel);
             continue;
         }
+        // A content page can legitimately publish under `assets/` (entity id
+        // namespaced there); it is a live page output, not an orphan asset.
+        if (page_outputs.contains(rel)) {
+            gpa.free(rel);
+            continue;
+        }
         try orphans.append(gpa, rel);
     }
 
@@ -416,10 +428,22 @@ fn scrubOrphanThemeAssetsInner(
         }
     }
 
-    // When the theme inventory is empty, drop a leftover empty assets/ tree.
-    if (live_assets.len == 0) {
+    // When the theme inventory is empty, drop the leftover assets/ tree — but
+    // only when no live page output is published under it. A wholesale wipe
+    // would otherwise destroy page outputs namespaced under assets/.
+    if (live_assets.len == 0 and !anyPageOutputUnderAssets(page_outputs)) {
         out_dir.deleteTree(io, "assets") catch {};
     }
+}
+
+/// True when any live page output is published under `assets/`, which makes a
+/// wholesale `assets/` tree removal unsafe.
+fn anyPageOutputUnderAssets(page_outputs: *const std.StringHashMapUnmanaged(void)) bool {
+    var it = page_outputs.keyIterator();
+    while (it.next()) |k| {
+        if (std.mem.startsWith(u8, k.*, "assets/")) return true;
+    }
+    return false;
 }
 
 // =============================================================================
@@ -552,15 +576,63 @@ test "scrubOrphanThemeAssets removes deleted and renamed assets" {
     defer gpa.free(keep_bytes);
     const live = [_]AssetEntry{.{ .rel_path = keep_path, .bytes = keep_bytes }};
 
-    scrubOrphanThemeAssets(io, out_dir, gpa, &live);
+    // No content pages published under assets/ in this build.
+    var no_pages: std.StringHashMapUnmanaged(void) = .{};
+    defer no_pages.deinit(gpa);
+
+    scrubOrphanThemeAssets(io, out_dir, gpa, &live, &no_pages);
 
     try out_dir.access(io, "assets/css/keep.css", .{});
     try std.testing.expectError(error.FileNotFound, out_dir.access(io, "assets/css/old.css", .{}));
     try std.testing.expectError(error.FileNotFound, out_dir.access(io, "assets/fonts/gone.woff", .{}));
 
-    // Empty inventory removes the whole assets/ tree.
-    scrubOrphanThemeAssets(io, out_dir, gpa, &.{});
+    // Empty inventory removes the (now-empty) assets/ tree.
+    scrubOrphanThemeAssets(io, out_dir, gpa, &.{}, &no_pages);
     try std.testing.expectError(error.FileNotFound, out_dir.access(io, "assets", .{}));
+}
+
+test "scrubOrphanThemeAssets preserves page outputs published under assets/" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-theme-scrub-pageout", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    const out_rel = try std.fmt.allocPrint(gpa, "{s}/out", .{work});
+    defer gpa.free(out_rel);
+    try cwd.createDirPath(io, out_rel);
+    var out_dir = try cwd.openDir(io, out_rel, .{ .iterate = true });
+    defer out_dir.close(io);
+
+    // A theme asset and a content page that legitimately publishes under assets/.
+    try out_dir.createDirPath(io, "assets/css");
+    try out_dir.writeFile(io, .{ .sub_path = "assets/css/theme.css", .data = "css" });
+    try out_dir.writeFile(io, .{ .sub_path = "assets/css/docs.html", .data = "<page>" });
+
+    const theme_css = try gpa.dupe(u8, "assets/css/theme.css");
+    defer gpa.free(theme_css);
+    const css_bytes = try gpa.dupe(u8, "css");
+    defer gpa.free(css_bytes);
+    const live = [_]AssetEntry{.{ .rel_path = theme_css, .bytes = css_bytes }};
+
+    // The build's live page-output set carries the assets/-namespaced page.
+    var page_outputs: std.StringHashMapUnmanaged(void) = .{};
+    defer page_outputs.deinit(gpa);
+    try page_outputs.put(gpa, "assets/css/docs.html", {});
+
+    scrubOrphanThemeAssets(io, out_dir, gpa, &live, &page_outputs);
+
+    // Theme asset kept; page output NOT scrubbed as a false orphan.
+    try out_dir.access(io, "assets/css/theme.css", .{});
+    try out_dir.access(io, "assets/css/docs.html", .{});
+
+    // Worst variant: an empty theme inventory must not wipe the page output.
+    scrubOrphanThemeAssets(io, out_dir, gpa, &.{}, &page_outputs);
+    try out_dir.access(io, "assets/css/docs.html", .{});
 }
 
 test "loadThemeBundle rejects asset file symlink when host allows" {
