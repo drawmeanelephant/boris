@@ -21,6 +21,12 @@ How to use going forward:
 
 ### Fixed
 
+- Non-incremental stale-HTML cleanup no longer deletes theme-owned `.html`
+  assets published under `dist/` (e.g. `assets/embed.html`). The full-build
+  sweep only keeps live page outputs and `.boris-cache`; after F9 theme assets
+  land in `dist/`, inventoried theme `.html` files are skipped so
+  `copyAssetsToOutput` results survive the prune. Orphan theme assets still
+  drop via `scrubOrphanThemeAssets`. `src/compile.zig`. Regression test added.
 - Wiki-link diagnostics distinguish a missing entity from a missing heading on
   the plan/fingerprint path. `[[typo#frag]]` for an entity that is not in the
   graph reported "heading target … not found on the page" (blaming a heading on
