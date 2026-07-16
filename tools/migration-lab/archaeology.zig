@@ -1041,6 +1041,7 @@ pub fn analyze(
     errdefer stitches.deinit(gpa);
     for (content_pages.items) |p| {
         var route_path: ?[]const u8 = null;
+        var ambiguous_route = false;
         // exact route
         if (std.mem.startsWith(u8, p.source_path, "src/content/")) {
             const rest = p.source_path["src/content/".len..];
@@ -1054,17 +1055,26 @@ pub fn analyze(
                 // dynamic collection route
                 for (page_routes.items) |rp| {
                     if (routeMatchesCollection(rp, col)) {
-                        route_path = rp;
-                        break;
+                        if (route_path == null) {
+                            route_path = rp;
+                        } else {
+                            // A report must not silently select the first lexical
+                            // dynamic route when more than one can own this content.
+                            route_path = null;
+                            ambiguous_route = true;
+                            break;
+                        }
                     }
                 }
             }
         }
 
         const layout_path = try resolveLayoutPath(retain, p.source_path, p.fm.layout, layout_files.items);
-        const complete = route_path != null and layout_path != null;
+        const complete = !ambiguous_route and route_path != null and layout_path != null;
         const notes = if (complete)
             try retain.dupe(u8, "content+route+layout resolved")
+        else if (ambiguous_route)
+            try retain.dupe(u8, "ambiguous matching dynamic page routes; no route selected")
         else if (route_path == null and layout_path == null)
             try retain.dupe(u8, "missing route and layout")
         else if (route_path == null)
