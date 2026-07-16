@@ -252,6 +252,9 @@ Before Aside tokenize and Apex, the HTML path:
 2. Rewrites `[[entity-id]]` / `[[entity-id#heading-id]]` wiki-links to relative
    Markdown links (fragments match Apex-rendered heading ids; see
    [heading-ids.md](heading-ids.md)).
+3. Rewrites safe relative Markdown image destinations into the page’s sibling
+   content-local asset tree (see [content-local-assets.md](content-local-assets.md)).
+   Theme-owned `assets/` and raw HTML `<img>` are out of scope for this step.
 
 Included headings participate in `{{toc}}` (TOC is built from rendered body
 HTML after expansion). Normative syntax and errors:

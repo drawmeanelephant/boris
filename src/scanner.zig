@@ -126,6 +126,13 @@ pub fn scanDirFormat(io: Io, content_dir: Io.Dir, input_format: InputFormat, out
             if (std.mem.eql(u8, entry.path, "includes")) {
                 continue;
             }
+            // Page sibling asset trees (`{stem}.assets/`) are inventoried by
+            // content-local asset publish, not page discovery. Skip the whole
+            // subtree so media-only files and asset-path policy stay out of
+            // the scanner (see docs/contracts/content-local-assets.md).
+            if (std.mem.endsWith(u8, entry.basename, ".assets")) {
+                continue;
+            }
 
             const st = entry.dir.statFile(io, entry.basename, .{ .follow_symlinks = false }) catch |err| switch (err) {
                 error.FileNotFound, error.AccessDenied, error.PermissionDenied => continue,

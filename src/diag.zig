@@ -54,6 +54,8 @@ pub const Code = enum {
     ERELATIONSELF,
     /// Semantic relation tuple is repeated.
     ERELATIONDUPLICATE,
+    /// Content-local page asset path/missing/symlink/collision failures.
+    EASSET,
     EUSAGE,
     EIO,
 

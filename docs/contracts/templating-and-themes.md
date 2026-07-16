@@ -227,6 +227,9 @@ For each target, Boris creates this output shape in the target's isolated root:
 Asset ownership rules:
 
 - The selected theme is the sole owner of files copied from its `assets/`.
+  Page-owned Markdown media use a separate sibling-tree contract
+  (`{stem}.assets/`; see [content-local-assets.md](content-local-assets.md))
+  and must not collide with theme `assets/` paths.
 - Copying is deterministic: path order is bytewise sorted, file bytes are
   copied exactly, and no timestamps or host paths enter output metadata.
 - Asset files are staged and published with the target, not written to a

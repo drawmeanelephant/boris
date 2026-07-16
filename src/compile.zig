@@ -55,6 +55,7 @@ const pipeline = @import("pipeline.zig");
 const theme_mod = @import("theme.zig");
 const layout_select = @import("layout_select.zig");
 const textile = @import("textile.zig");
+const content_asset = @import("content_asset.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -403,6 +404,7 @@ pub fn renderAndPublishPageWithSiteAndHeadings(
         site,
         heading_index,
         null,
+        null,
     );
 }
 
@@ -419,6 +421,7 @@ pub fn renderAndPublishPageWithTheme(
     site: ?*const FrozenSite,
     heading_index: ?*const wikilink.HeadingIndex,
     theme: ?*const theme_mod.ThemeBundle,
+    page_assets: ?*const content_asset.PageAssetBundle,
 ) !void {
     const arena = doc_arena.allocator();
 
@@ -431,6 +434,7 @@ pub fn renderAndPublishPageWithTheme(
         .quiet = options.quiet,
         .nodes = if (site) |s| s.nodes else &.{},
         .heading_index = heading_index,
+        .page_assets = page_assets,
     });
 
     var slots: assemble.SlotValues = .{ .content = html };
@@ -780,6 +784,10 @@ fn isContentCompileFailure(err: anyerror) bool {
         error.AssetCollision,
         error.AssetSymlink,
         error.AssetPathEscape,
+        error.AssetFailed,
+        error.AssetPath,
+        error.AssetMissing,
+        error.AssetNotFile,
         error.ThemeRootMissing,
         error.InvalidThemePath,
         error.ThemeSymlink,
@@ -967,6 +975,7 @@ const ParallelContext = struct {
     site: ?*const FrozenSite,
     heading_index: ?*const wikilink.HeadingIndex,
     theme: ?*const theme_mod.ThemeBundle,
+    content_assets: ?*const content_asset.SiteAssetInventory = null,
 
     // Thread coordination
     mutex: std.Io.Mutex = std.Io.Mutex.init,
@@ -1000,6 +1009,10 @@ fn parallelWorker(ctx: *ParallelContext) void {
 
         if (ctx.is_dirty[page_index]) {
             const page = &ctx.db.items()[page_index];
+            const page_assets: ?*const content_asset.PageAssetBundle = if (ctx.content_assets) |inv|
+                &inv.pages[page_index]
+            else
+                null;
             renderAndPublishPageWithTheme(
                 ctx.io,
                 ctx.gpa,
@@ -1013,6 +1026,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
                 ctx.site,
                 ctx.heading_index,
                 ctx.theme,
+                page_assets,
             ) catch |err| {
                 ctx.mutex.lockUncancelable(ctx.io);
                 if (ctx.shared_error == null) {
@@ -1597,6 +1611,37 @@ fn compilePagesInner(
     // Always publish theme assets into staging (target-owned; not shared).
     try theme_mod.copyAssetsToOutput(io, stage_dir, theme_bundle.assets);
 
+    // Content-local sibling assets: discover, collide-check, copy (independent of HTML dirty).
+    var source_paths = try gpa.alloc([]const u8, db.len());
+    defer gpa.free(source_paths);
+    var entity_ids = try gpa.alloc([]const u8, db.len());
+    defer gpa.free(entity_ids);
+    for (db.items(), 0..) |p, i| {
+        source_paths[i] = p.source_path;
+        entity_ids[i] = p.entity_id;
+    }
+    var content_assets = content_asset.loadSiteAssets(io, gpa, content_dir, source_paths, entity_ids) catch |err| {
+        if (!options.quiet) {
+            std.debug.print("error: content-local asset discovery failed: {s}\n", .{@errorName(err)});
+        }
+        return err;
+    };
+    defer content_assets.deinit();
+    {
+        const content_outs = try content_assets.collectOutputPaths(gpa);
+        defer gpa.free(content_outs);
+        var page_outs: std.ArrayList([]const u8) = .empty;
+        defer page_outs.deinit(gpa);
+        try page_outs.ensureTotalCapacity(gpa, db.len());
+        for (db.items()) |p| try page_outs.append(gpa, p.output_path);
+        var theme_outs: std.ArrayList([]const u8) = .empty;
+        defer theme_outs.deinit(gpa);
+        try theme_outs.ensureTotalCapacity(gpa, theme_bundle.assets.len);
+        for (theme_bundle.assets) |a| try theme_outs.append(gpa, a.rel_path);
+        try content_asset.checkCollisions(content_outs, page_outs.items, theme_outs.items);
+    }
+    try content_asset.copyAssetsToOutput(io, stage_dir, &content_assets);
+
     // Per-layout theme fingerprint material (footer + that layout's asset-url refs).
     {
         var it = layouts_by_path.iterator();
@@ -1755,6 +1800,26 @@ fn compilePagesInner(
         };
         defer gpa.free(ref_material);
 
+        // Validate content-local Markdown images every build (even when HTML is
+        // cached). Asset *bytes* are not fingerprint inputs: a byte-only change
+        // republishes the file without re-rendering HTML.
+        {
+            var asset_fail: content_asset.FailInfo = .{};
+            const rewritten = content_asset.rewriteImageLinks(
+                gpa,
+                body_for_wiki,
+                &content_assets.pages[page_idx],
+                page.output_path,
+                &asset_fail,
+            ) catch |err| {
+                if (!options.quiet) {
+                    content_asset.printDiagnostic(gpa, err, page.source_path, asset_fail);
+                }
+                return error.AssetFailed;
+            };
+            if (rewritten.ptr != body_for_wiki.ptr) gpa.free(rewritten);
+        }
+
         var inc_with_ref = try gpa.alloc([]const u8, inc_views.len + if (ref_material.len > 0) @as(usize, 1) else 0);
         defer gpa.free(inc_with_ref);
         @memcpy(inc_with_ref[0..inc_views.len], inc_views);
@@ -1842,6 +1907,7 @@ fn compilePagesInner(
             .site = site,
             .heading_index = &heading_index,
             .theme = &theme_bundle,
+            .content_assets = &content_assets,
         };
 
         const num_workers = @min(options.jobs, db.len());
@@ -1916,6 +1982,7 @@ fn compilePagesInner(
                     site,
                     &heading_index,
                     &theme_bundle,
+                    &content_assets.pages[page_index],
                 );
                 stats.pages_written += 1;
                 if (!options.quiet) {
@@ -2032,11 +2099,21 @@ fn compilePagesInner(
             // Skip live theme-owned assets (e.g. assets/embed.html): copyAssetsToOutput
             // publishes them into dist/, and they are not page outputs. Orphan theme
             // assets are handled by scrubOrphanThemeAssets below (#61).
+            // Skip content-local `*.assets/**` files (including .html embeds).
             var theme_html_assets: std.StringHashMapUnmanaged(void) = .{};
             defer theme_html_assets.deinit(gpa);
             for (theme_bundle.assets) |a| {
                 if (std.mem.endsWith(u8, a.rel_path, ".html")) {
                     try theme_html_assets.put(gpa, a.rel_path, {});
+                }
+            }
+            var content_html_assets: std.StringHashMapUnmanaged(void) = .{};
+            defer content_html_assets.deinit(gpa);
+            for (content_assets.pages) |page_bundle| {
+                for (page_bundle.entries) |e| {
+                    if (std.mem.endsWith(u8, e.output_rel, ".html")) {
+                        try content_html_assets.put(gpa, e.output_rel, {});
+                    }
                 }
             }
             var walker = try dist_dir.walk(gpa);
@@ -2046,6 +2123,8 @@ fn compilePagesInner(
                 if (!std.mem.endsWith(u8, entry.path, ".html")) continue;
                 if (std.mem.startsWith(u8, entry.path, ".boris-cache")) continue;
                 if (theme_html_assets.contains(entry.path)) continue;
+                if (content_html_assets.contains(entry.path)) continue;
+                if (content_asset.isContentLocalOutputPath(entry.path)) continue;
                 if (!live_paths.contains(entry.path)) {
                     dist_dir.deleteFile(io, entry.path) catch {};
                 }
@@ -2059,6 +2138,10 @@ fn compilePagesInner(
     if (theme_root.len > 0) {
         theme_mod.scrubOrphanThemeAssets(io, dist_dir, gpa, theme_bundle.assets, &live_paths);
     }
+
+    // Content-local sibling assets: drop removed/renamed files under `*.assets/`.
+    // Theme-owned `assets/` is never touched.
+    content_asset.scrubOrphanContentAssets(io, dist_dir, gpa, &content_assets);
 
     // Drop staging tree (errdefer also cleans on earlier failure).
     cwd.deleteTree(io, stage_rel) catch {};
@@ -5901,4 +5984,425 @@ test "F9.1 footer change dirties pages; unreferenced asset does not" {
     defer gpa.free(html);
     try std.testing.expect(std.mem.indexOf(u8, html, "FOOTER-V2") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "FOOTER-V1") == null);
+}
+
+// =============================================================================
+// Content-local page assets (post-v0.5.0)
+// =============================================================================
+
+test "content-local assets: happy path rewrite and copy" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cla-happy2", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md",
+        \\---
+        \\title: Intro
+        \\---
+        \\
+        \\# Intro
+        \\
+        \\![diagram](intro.assets/diagram.svg)
+        \\
+    );
+    try writeTreeFile(io, work, "content/guides/intro.assets/diagram.svg", "<svg id=\"v1\"/>");
+    try writeTreeFile(io, work, "layouts/main.html", "<html>{{content}}</html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+    });
+
+    const html_path = try std.fmt.allocPrint(gpa, "{s}/guides/intro.html", .{dist});
+    defer gpa.free(html_path);
+    const html = try readFileAlloc(io, cwd, html_path, gpa);
+    defer gpa.free(html);
+    try std.testing.expect(std.mem.indexOf(u8, html, "intro.assets/diagram.svg") != null);
+
+    const asset_path = try std.fmt.allocPrint(gpa, "{s}/guides/intro.assets/diagram.svg", .{dist});
+    defer gpa.free(asset_path);
+    const asset = try readFileAlloc(io, cwd, asset_path, gpa);
+    defer gpa.free(asset);
+    try std.testing.expectEqualStrings("<svg id=\"v1\"/>", asset);
+}
+
+test "content-local assets: byte change does not re-render HTML" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cla-bytes", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\![d](index.assets/d.svg)
+        \\
+    );
+    try writeTreeFile(io, work, "content/index.assets/d.svg", "v1");
+    try writeTreeFile(io, work, "layouts/main.html", "<html>{{content}}</html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+    });
+    const html_path = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist});
+    defer gpa.free(html_path);
+    const html_before = try readFileAlloc(io, cwd, html_path, gpa);
+    defer gpa.free(html_before);
+
+    try writeTreeFile(io, work, "content/index.assets/d.svg", "v2-bytes-changed");
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+    });
+    try std.testing.expectEqual(@as(usize, 0), stats.pages_written);
+
+    const html_after = try readFileAlloc(io, cwd, html_path, gpa);
+    defer gpa.free(html_after);
+    try std.testing.expectEqualStrings(html_before, html_after);
+
+    const asset_path = try std.fmt.allocPrint(gpa, "{s}/index.assets/d.svg", .{dist});
+    defer gpa.free(asset_path);
+    const asset = try readFileAlloc(io, cwd, asset_path, gpa);
+    defer gpa.free(asset);
+    try std.testing.expectEqualStrings("v2-bytes-changed", asset);
+}
+
+test "content-local assets: rejects traversal outside tree" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cla-hostile", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md",
+        \\---
+        \\title: Intro
+        \\---
+        \\
+        \\![x](../secret.png)
+        \\
+    );
+    try writeTreeFile(io, work, "content/secret.png", "nope");
+    try writeTreeFile(io, work, "content/guides/intro.assets/ok.svg", "ok");
+    try writeTreeFile(io, work, "layouts/main.html", "<html>{{content}}</html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try std.testing.expectError(error.AssetFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+    }));
+}
+
+test "content-local assets: rejects absolute and backslash destinations" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cla-abs", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "layouts/main.html", "<html>{{content}}</html>");
+    try writeTreeFile(io, work, "content/index.assets/x.svg", "x");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: H
+        \\---
+        \\![x](/etc/passwd)
+        \\
+    );
+    try std.testing.expectError(error.AssetFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+    }));
+
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: H
+        \\---
+        \\![x](index.assets\x.svg)
+        \\
+    );
+    try std.testing.expectError(error.AssetFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+    }));
+}
+
+test "content-local assets: rejects symlink leaf when host allows" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cla-symlink", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: H
+        \\---
+        \\![x](index.assets/link.svg)
+        \\
+    );
+    try writeTreeFile(io, work, "content/index.assets/real.svg", "real");
+    try writeTreeFile(io, work, "layouts/main.html", "<html>{{content}}</html>");
+
+    const assets_dir = try std.fmt.allocPrint(gpa, "{s}/content/index.assets", .{work});
+    defer gpa.free(assets_dir);
+    var adir = try cwd.openDir(io, assets_dir, .{});
+    defer adir.close(io);
+    adir.symLink(io, "real.svg", "link.svg", .{}) catch |err| switch (err) {
+        error.AccessDenied, error.PermissionDenied => return,
+        else => return err,
+    };
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try std.testing.expectError(error.AssetSymlink, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+    }));
+}
+
+test "content-local assets: stale cleanup and theme isolation" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cla-stale", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: H
+        \\---
+        \\![a](index.assets/keep.svg)
+        \\
+    );
+    try writeTreeFile(io, work, "content/index.assets/keep.svg", "keep");
+    try writeTreeFile(io, work, "content/index.assets/drop.svg", "drop");
+    try writeTreeFile(io, work, "theme/layouts/main.html",
+        \\<html><link href="{{asset-url assets/css/docs.css}}">{{content}}</html>
+    );
+    try writeTreeFile(io, work, "theme/assets/css/docs.css", "theme-css");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/theme/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+    });
+
+    const drop_src = try std.fmt.allocPrint(gpa, "{s}/content/index.assets/drop.svg", .{work});
+    defer gpa.free(drop_src);
+    try cwd.deleteFile(io, drop_src);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+    });
+
+    const drop_out = try std.fmt.allocPrint(gpa, "{s}/index.assets/drop.svg", .{dist});
+    defer gpa.free(drop_out);
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, drop_out, .{}));
+
+    const theme_path = try std.fmt.allocPrint(gpa, "{s}/assets/css/docs.css", .{dist});
+    defer gpa.free(theme_path);
+    const theme_bytes = try readFileAlloc(io, cwd, theme_path, gpa);
+    defer gpa.free(theme_bytes);
+    try std.testing.expectEqualStrings("theme-css", theme_bytes);
+
+    const keep_path = try std.fmt.allocPrint(gpa, "{s}/index.assets/keep.svg", .{dist});
+    defer gpa.free(keep_path);
+    const keep = try readFileAlloc(io, cwd, keep_path, gpa);
+    defer gpa.free(keep);
+    try std.testing.expectEqualStrings("keep", keep);
+}
+
+test "content-local assets: multi-target isolation and deterministic bytes" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cla-mt", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: H
+        \\---
+        \\![d](index.assets/d.svg)
+        \\
+    );
+    try writeTreeFile(io, work, "content/index.assets/d.svg", "payload");
+    try writeTreeFile(io, work, "layouts/main.html", "<html>{{content}}</html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist_a = try std.fmt.allocPrint(gpa, "{s}/out-a", .{work});
+    defer gpa.free(dist_a);
+    const dist_b = try std.fmt.allocPrint(gpa, "{s}/out-b", .{work});
+    defer gpa.free(dist_b);
+
+    const targets = [_]target_mod.TargetSpec{
+        .{ .name = "a", .output_dir = dist_a, .layout_path = layout },
+        .{ .name = "b", .output_dir = dist_b, .layout_path = layout },
+    };
+    try compileHtmlSiteMulti(io, gpa, &targets, .{
+        .content_root = content,
+        .layout_path = layout,
+        .quiet = true,
+    });
+
+    const path_a = try std.fmt.allocPrint(gpa, "{s}/index.assets/d.svg", .{dist_a});
+    defer gpa.free(path_a);
+    const path_b = try std.fmt.allocPrint(gpa, "{s}/index.assets/d.svg", .{dist_b});
+    defer gpa.free(path_b);
+    const a = try readFileAlloc(io, cwd, path_a, gpa);
+    defer gpa.free(a);
+    const b = try readFileAlloc(io, cwd, path_b, gpa);
+    defer gpa.free(b);
+    try std.testing.expectEqualStrings("payload", a);
+    try std.testing.expectEqualStrings(a, b);
+
+    try cwd.writeFile(io, .{ .sub_path = path_a, .data = "mutated-a" });
+    const b2 = try readFileAlloc(io, cwd, path_b, gpa);
+    defer gpa.free(b2);
+    try std.testing.expectEqualStrings("payload", b2);
+}
+
+test "content-local assets: two builds are byte-identical" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cla-det", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: H
+        \\---
+        \\![d](index.assets/z.svg)
+        \\![d2](index.assets/a.svg)
+        \\
+    );
+    try writeTreeFile(io, work, "content/index.assets/z.svg", "z");
+    try writeTreeFile(io, work, "content/index.assets/a.svg", "a");
+    try writeTreeFile(io, work, "layouts/main.html", "<html>{{content}}</html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist1 = try std.fmt.allocPrint(gpa, "{s}/d1", .{work});
+    defer gpa.free(dist1);
+    const dist2 = try std.fmt.allocPrint(gpa, "{s}/d2", .{work});
+    defer gpa.free(dist2);
+
+    _ = try compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = dist1, .layout_path = layout, .quiet = true });
+    _ = try compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = dist2, .layout_path = layout, .quiet = true });
+
+    const html1_path = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist1});
+    defer gpa.free(html1_path);
+    const html2_path = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist2});
+    defer gpa.free(html2_path);
+    const html1 = try readFileAlloc(io, cwd, html1_path, gpa);
+    defer gpa.free(html1);
+    const html2 = try readFileAlloc(io, cwd, html2_path, gpa);
+    defer gpa.free(html2);
+    try std.testing.expectEqualStrings(html1, html2);
+
+    const a1p = try std.fmt.allocPrint(gpa, "{s}/index.assets/a.svg", .{dist1});
+    defer gpa.free(a1p);
+    const a2p = try std.fmt.allocPrint(gpa, "{s}/index.assets/a.svg", .{dist2});
+    defer gpa.free(a2p);
+    const a1 = try readFileAlloc(io, cwd, a1p, gpa);
+    defer gpa.free(a1);
+    const a2 = try readFileAlloc(io, cwd, a2p, gpa);
+    defer gpa.free(a2);
+    try std.testing.expectEqualStrings(a1, a2);
 }

@@ -63,6 +63,14 @@ Files under `content/includes/**` are available to Boris-mediated
 output). Nested directories named `includes` under other paths (e.g.
 `guides/includes/`) are **not** reserved and remain normal page trees.
 See [includes-and-wiki-links.md](includes-and-wiki-links.md).
+
+### Page sibling asset trees
+
+Directories whose basename ends with **`.assets`** (for example
+`guides/intro.assets/`) are **not** entered during page discovery. They are
+inventoried by content-local asset publishing only; see
+[content-local-assets.md](content-local-assets.md). Symlink policy inside those
+trees is owned by the asset publisher, not the page scanner.
 ---
 
 ## Record shape (`Page`)
