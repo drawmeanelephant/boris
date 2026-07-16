@@ -258,16 +258,38 @@ if [[ -f "${CONTEXT_A}/bundle.md" && -f "${CONTEXT_A}/graph.json" \
 else
   fail "context bundle provenance artifacts missing"
 fi
+context_hashes_ok=1
+while read -r context_artifact context_expected_hash; do
+  [[ -n "${context_artifact}" ]] || continue
+  context_artifact_path="${CONTEXT_A}/${context_artifact}"
+  if [[ ! -f "${context_artifact_path}" ]]; then
+    context_hashes_ok=0
+    fail "context manifest references missing artifact ${context_artifact}"
+    continue
+  fi
+  context_actual_hash="$(shasum -a 256 "${context_artifact_path}" | awk '{print $1}')"
+  if [[ "${context_actual_hash}" != "${context_expected_hash}" ]]; then
+    context_hashes_ok=0
+    fail "context artifact digest mismatch: ${context_artifact}"
+  fi
+done < <(sed -n 's/.*{"path":"\([^"]*\)","sha256":"\([^"]*\)"}.*/\1 \2/p' "${CONTEXT_A}/manifest.json")
+if [[ "${context_hashes_ok}" -eq 1 ]]; then
+  pass "context manifest digests match every published artifact"
+fi
+CONTEXT_BEFORE_INVALID="${GATE_DIR}/context-before-invalid"
+rm -rf "${CONTEXT_BEFORE_INVALID}"
+cp -R "${CONTEXT_A}" "${CONTEXT_BEFORE_INVALID}"
 context_before="$(shasum -a 256 "${CONTEXT_A}/manifest.json")"
 set +e
 "${BORIS}" --context --context-dir="${CONTEXT_A}" --input="docs/contracts/fixtures/semantic-relations-invalid/content" --quiet
 context_invalid_rc=$?
 set -e
 context_after="$(shasum -a 256 "${CONTEXT_A}/manifest.json")"
-if [[ "${context_invalid_rc}" -eq 1 && "${context_before}" == "${context_after}" ]]; then
-  pass "invalid context input leaves prior bundle untouched"
+if [[ "${context_invalid_rc}" -eq 1 && "${context_before}" == "${context_after}" ]] \
+  && diff -rq "${CONTEXT_A}" "${CONTEXT_BEFORE_INVALID}" >/dev/null; then
+  pass "invalid context input leaves the prior bundle tree untouched"
 else
-  fail "invalid context input replaced or damaged prior bundle"
+  fail "invalid context input replaced or damaged the prior bundle tree"
 fi
 # Feature 2: bare-style default HTML (relative html-dir under gate dir)
 note "4b. Default HTML surface (Feature 2)"
@@ -359,6 +381,70 @@ if "${BORIS}" impact guides/reference --input="${DI_CONTENT}" --format=human --r
   pass "impact human golden"
 else
   fail "impact human golden or exit code mismatch"
+fi
+DI_SOURCE_JSON="${DI_PROBE}/di-impact-source.json"
+DI_SOURCE_HUMAN="${DI_PROBE}/di-impact-source.txt"
+if "${BORIS}" impact includes/shared.md --input="${DI_CONTENT}" --format=json --report="${DI_SOURCE_JSON}" --quiet \
+  && diff -u "${DI_EXPECTED}/impact-source.json" "${DI_SOURCE_JSON}" >/dev/null; then
+  pass "source impact JSON golden + exit 0"
+else
+  fail "source impact JSON golden or exit code mismatch"
+fi
+if "${BORIS}" impact includes/shared.md --input="${DI_CONTENT}" --format=human --report="${DI_SOURCE_HUMAN}" --quiet \
+  && diff -u "${DI_EXPECTED}/impact-source.txt" "${DI_SOURCE_HUMAN}" >/dev/null; then
+  pass "source impact human golden"
+else
+  fail "source impact human golden or exit code mismatch"
+fi
+DI_MISSING_REPORT="${DI_PROBE}/missing-target.json"
+set +e
+"${BORIS}" impact does/not-exist --input="${DI_CONTENT}" --format=json --report="${DI_MISSING_REPORT}" --quiet
+DI_MISSING_EC=$?
+set -e
+if [[ "${DI_MISSING_EC}" -eq 2 && ! -e "${DI_MISSING_REPORT}" ]]; then
+  pass "missing impact target returns usage 2 without a report"
+else
+  fail "missing impact target exit/report behavior mismatch (got ${DI_MISSING_EC})"
+fi
+DI_INVALID_ID_REPORT="${DI_PROBE}/invalid-id.json"
+set +e
+"${BORIS}" impact ../escape --input="${DI_CONTENT}" --format=json --report="${DI_INVALID_ID_REPORT}" --quiet
+DI_INVALID_ID_EC=$?
+set -e
+if [[ "${DI_INVALID_ID_EC}" -eq 2 && ! -e "${DI_INVALID_ID_REPORT}" ]]; then
+  pass "invalid impact ID returns usage 2 without a report"
+else
+  fail "invalid impact ID exit/report behavior mismatch (got ${DI_INVALID_ID_EC})"
+fi
+DI_INVALID_REPORT="${DI_PROBE}/invalid-input.json"
+cp "${DI_EXPECTED}/check.json" "${DI_INVALID_REPORT}"
+DI_INVALID_BEFORE="$(shasum -a 256 "${DI_INVALID_REPORT}")"
+set +e
+"${BORIS}" check --input="docs/contracts/fixtures/missing-parent/content" --format=json --report="${DI_INVALID_REPORT}" --quiet
+DI_INVALID_EC=$?
+set -e
+DI_INVALID_AFTER="$(shasum -a 256 "${DI_INVALID_REPORT}")"
+if [[ "${DI_INVALID_EC}" -eq 1 && "${DI_INVALID_BEFORE}" == "${DI_INVALID_AFTER}" ]]; then
+  pass "invalid graph returns exit 1 and preserves prior report"
+else
+  fail "invalid graph report publication behavior mismatch (got ${DI_INVALID_EC})"
+fi
+DI_EMPTY_REPORT="${DI_PROBE}/empty.json"
+if "${BORIS}" check --input="docs/contracts/fixtures/documentation-intelligence/edge-cases/empty/content" --format=json --report="${DI_EMPTY_REPORT}" --quiet \
+  && grep -q '"pages": 0' "${DI_EMPTY_REPORT}"; then
+  pass "empty analysis tree returns exit 0 with zero pages"
+else
+  fail "empty analysis tree behavior mismatch"
+fi
+DI_SINGLE_REPORT="${DI_PROBE}/single.json"
+set +e
+"${BORIS}" check --input="docs/contracts/fixtures/documentation-intelligence/edge-cases/single/content" --format=json --report="${DI_SINGLE_REPORT}" --quiet
+DI_SINGLE_EC=$?
+set -e
+if [[ "${DI_SINGLE_EC}" -eq 1 && -f "${DI_SINGLE_REPORT}" ]] && grep -q '"pages": 1' "${DI_SINGLE_REPORT}"; then
+  pass "single-page analysis tree reports its page and CI finding"
+else
+  fail "single-page analysis tree behavior mismatch (got ${DI_SINGLE_EC})"
 fi
 if [[ ! -d "${GATE_DIR}/di-probe/dist" && ! -d "${GATE_DIR}/di-probe/rag" && ! -d "${GATE_DIR}/di-probe/.boris-cache" ]]; then
   pass "analysis produced no HTML, RAG, or cache artifacts"

@@ -9,11 +9,11 @@ publishes typed `parent` / `include` / `reference` edges and deterministic
 `reverseIndex`; incremental HTML consumes the same resolver and reverse-walk
 semantics. Fingerprints remain the content-addressed change detector.
 
-**Knowledge-system track:** bounded semantic relations and deterministic AI
-Context Bundles are implemented on topic branches and gated independently.
-Relations use conditional IR 0.3 artifacts; Context Bundles use their own
-`boris-context` schema 1 and preserve source-relative provenance. They are not
-described as merged product capabilities until their PRs land.
+**Knowledge-system track:** Documentation Intelligence, bounded semantic
+relations, and deterministic AI Context Bundles are merged on `main` via PRs
+#43 and #44. Relations use conditional IR 0.3 artifacts; Context Bundles use
+their own `boris-context` schema 1 and preserve source-relative provenance.
+These capabilities remain under `[Unreleased]` until the next product cut.
 
 Living snapshot for agents and humans. Prefer this and [`CHANGELOG.md`](../CHANGELOG.md)
 over archaeology. Normative behavior: [`docs/contracts/`](contracts/).
@@ -127,10 +127,11 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
-| **Next** | Documentation Intelligence hardening | Read-only `check` and `impact` reports are implemented on the feature branch; contract in [`contracts/documentation-intelligence.md`](contracts/documentation-intelligence.md). Add fixture goldens before merge. |
-| **Later** | P4 build-system productization | Measurement-driven cache/watch improvements after F8 |
-| **Hygiene** | Sample content honesty as features land | Root `content/` is current for F7; re-check after next feature |
-| **Hygiene** | No parallel content sandboxes by default | Failed draft removed; root `content/` is SoT |
+| **Next** | Release cut + real-site dogfood | Move the merged knowledge-system work out of `[Unreleased]`, then exercise Boris against a real site and record migration gaps. |
+| **Later** | Template/theme productization | Per-page layout selection, external stylesheet policy, and an optional static DaisyUI sample remain post-F9.2 work. |
+| **Deferred** | P4 build-system productization | Measurement-driven cache/watch improvements after a real need or reproducible benchmark. |
+| **Hygiene** | Sample content honesty as features land | Keep root `content/` aligned with shipped capabilities and migration guidance. |
+| **Hygiene** | No parallel content sandboxes by default | Failed draft removed; root `content/` is SoT. |
 
 ### Shipped (do not re-open as greenfield)
 
