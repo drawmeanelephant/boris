@@ -197,6 +197,78 @@ if diff -u "${GRAPH_NATIVE_EXPECTED}" "${GRAPH_NATIVE_OUT}/graph.json"; then
 else
   fail "graph-native graph.json golden mismatch"
 fi
+
+note "4a. Semantic relations IR 0.3 fixture"
+SEMANTIC_CONTENT="docs/contracts/fixtures/semantic-relations/content"
+SEMANTIC_OUT="${GATE_DIR}/ir-semantic-relations"
+rm -rf "${SEMANTIC_OUT}"
+"${BORIS}" --input="${SEMANTIC_CONTENT}" --out="${SEMANTIC_OUT}" --quiet
+if grep -q '"schemaVersion": "0.3.0"' "${SEMANTIC_OUT}/manifest.json" \
+  && grep -q '"schemaVersion": "0.3.0"' "${SEMANTIC_OUT}/graph.json" \
+  && grep -q '"schemaVersion": "0.3.0"' "${SEMANTIC_OUT}/build-report.json"; then
+  pass "semantic relation artifacts advertise IR 0.3"
+else
+  fail "semantic relation artifacts must advertise IR 0.3"
+fi
+if grep -q '"kind": "depends_on"' "${SEMANTIC_OUT}/graph.json" \
+  && grep -q '"kind": "supersedes"' "${SEMANTIC_OUT}/graph.json"; then
+  pass "semantic relation graph emits bounded relation kinds"
+else
+  fail "semantic relation graph missing expected relation kinds"
+fi
+if diff -u "docs/contracts/fixtures/semantic-relations/expected/relations.json" \
+  <(sed -n '/^  "relations":/,$p' "${SEMANTIC_OUT}/graph.json"); then
+  pass "semantic relation ordering and shape match golden"
+else
+  fail "semantic relation ordering or shape mismatch"
+fi
+SEMANTIC_INVALID_OUT="${GATE_DIR}/ir-semantic-relations-invalid"
+rm -rf "${SEMANTIC_INVALID_OUT}"
+set +e
+"${BORIS}" --input="docs/contracts/fixtures/semantic-relations-invalid/content" --out="${SEMANTIC_INVALID_OUT}" --quiet
+semantic_invalid_rc=$?
+set -e
+if [[ "${semantic_invalid_rc}" -eq 1 ]] \
+  && grep -q '"code": "ERELATIONSELF"' "${SEMANTIC_INVALID_OUT}/build-report.json" \
+  && grep -q '"code": "ERELATIONMISSING"' "${SEMANTIC_INVALID_OUT}/build-report.json"; then
+  pass "semantic relation self and missing targets fail closed"
+else
+  fail "semantic relation invalid-target diagnostics mismatch"
+fi
+
+note "4a. AI Context Bundle determinism and provenance"
+CONTEXT_A="${GATE_DIR}/context-a"
+CONTEXT_B="${GATE_DIR}/context-b"
+rm -rf "${CONTEXT_A}" "${CONTEXT_B}"
+"${BORIS}" --context --context-dir="${CONTEXT_A}" --input="${SEMANTIC_CONTENT}" --quiet
+"${BORIS}" --context --context-dir="${CONTEXT_B}" --input="${SEMANTIC_CONTENT}" --quiet
+if diff -rq "${CONTEXT_A}" "${CONTEXT_B}" >/dev/null; then
+  pass "context bundles are byte-identical across repeated exports"
+else
+  fail "context bundle exports differ"
+fi
+if [[ -f "${CONTEXT_A}/bundle.md" && -f "${CONTEXT_A}/graph.json" \
+  && -f "${CONTEXT_A}/manifest.json" \
+  && -f "${CONTEXT_A}/pages/guides/cache-v2.md" ]] \
+  && grep -q '"format": "boris-context"' "${CONTEXT_A}/manifest.json" \
+  && grep -q 'source_sha256' "${CONTEXT_A}/pages/guides/cache-v2.md" \
+  && grep -q '^````markdown$' "${CONTEXT_A}/pages/guides/cache-v2.md" \
+  && grep -q '"relation_count": 4' "${CONTEXT_A}/manifest.json"; then
+  pass "context bundle has manifest, graph, page provenance, and relation count"
+else
+  fail "context bundle provenance artifacts missing"
+fi
+context_before="$(shasum -a 256 "${CONTEXT_A}/manifest.json")"
+set +e
+"${BORIS}" --context --context-dir="${CONTEXT_A}" --input="docs/contracts/fixtures/semantic-relations-invalid/content" --quiet
+context_invalid_rc=$?
+set -e
+context_after="$(shasum -a 256 "${CONTEXT_A}/manifest.json")"
+if [[ "${context_invalid_rc}" -eq 1 && "${context_before}" == "${context_after}" ]]; then
+  pass "invalid context input leaves prior bundle untouched"
+else
+  fail "invalid context input replaced or damaged prior bundle"
+fi
 # Feature 2: bare-style default HTML (relative html-dir under gate dir)
 note "4b. Default HTML surface (Feature 2)"
 HTML_OUT="${GATE_DIR}/html-default"
@@ -246,6 +318,52 @@ if grep -q 'EREFERENCEMISSING' <<<"${F9_ERR}" && grep -q 'does-not-exist' <<<"${
 else
   fail "F9 missing-heading: diagnostic mismatch"
   printf '%s\n' "${F9_ERR}" | head -20
+fi
+
+# --- 4d. Documentation Intelligence reports + no-artifact behavior --------
+note "4d. Documentation Intelligence reports"
+DI_CONTENT="docs/contracts/fixtures/documentation-intelligence/content"
+DI_EXPECTED="docs/contracts/fixtures/documentation-intelligence/expected"
+DI_PROBE="${GATE_DIR}/di-probe"
+mkdir -p "${DI_PROBE}"
+DI_CHECK_JSON="${DI_PROBE}/di-check.json"
+DI_IMPACT_JSON="${DI_PROBE}/di-impact.json"
+DI_CHECK_HUMAN="${DI_PROBE}/di-check.txt"
+DI_IMPACT_HUMAN="${DI_PROBE}/di-impact.txt"
+set +e
+"${BORIS}" check --input="${DI_CONTENT}" --format=json --report="${DI_CHECK_JSON}" --quiet
+DI_CHECK_EC=$?
+set -e
+if [[ "${DI_CHECK_EC}" -eq 1 ]] && diff -u "${DI_EXPECTED}/check.json" "${DI_CHECK_JSON}" >/dev/null; then
+  pass "check JSON golden + CI finding exit 1"
+else
+  fail "check JSON golden or exit code mismatch (got ${DI_CHECK_EC})"
+fi
+if "${BORIS}" impact guides/reference --input="${DI_CONTENT}" --format=json --report="${DI_IMPACT_JSON}" --quiet \
+  && diff -u "${DI_EXPECTED}/impact.json" "${DI_IMPACT_JSON}" >/dev/null; then
+  pass "impact JSON golden + exit 0"
+else
+  fail "impact JSON golden or exit code mismatch"
+fi
+set +e
+"${BORIS}" check --input="${DI_CONTENT}" --format=human --report="${DI_CHECK_HUMAN}" --quiet
+DI_HUMAN_EC=$?
+set -e
+if [[ "${DI_HUMAN_EC}" -eq 1 ]] && diff -u "${DI_EXPECTED}/check.txt" "${DI_CHECK_HUMAN}" >/dev/null; then
+  pass "check human golden"
+else
+  fail "check human golden or exit code mismatch (got ${DI_HUMAN_EC})"
+fi
+if "${BORIS}" impact guides/reference --input="${DI_CONTENT}" --format=human --report="${DI_IMPACT_HUMAN}" --quiet \
+  && diff -u "${DI_EXPECTED}/impact.txt" "${DI_IMPACT_HUMAN}" >/dev/null; then
+  pass "impact human golden"
+else
+  fail "impact human golden or exit code mismatch"
+fi
+if [[ ! -d "${GATE_DIR}/di-probe/dist" && ! -d "${GATE_DIR}/di-probe/rag" && ! -d "${GATE_DIR}/di-probe/.boris-cache" ]]; then
+  pass "analysis produced no HTML, RAG, or cache artifacts"
+else
+  fail "analysis produced an unexpected build artifact"
 fi
 
 # --- 5. Invalid fixtures: exit codes + diagnostic codes ------------------

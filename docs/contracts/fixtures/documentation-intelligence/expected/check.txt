@@ -1,0 +1,7 @@
+Documentation Intelligence (check)
+pages: 4 (roots 2, satellites 2)
+source endpoints: 1
+unreferenced pages: 1
+hotspots: 0
+findings:
+  unreferenced_page: index

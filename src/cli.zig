@@ -16,8 +16,21 @@ pub const Mode = enum {
     ir,
     /// RAG-only export under `--rag-dir` (default `rag`).
     rag,
+    /// Deterministic provenance-rich AI context bundle.
+    context,
     /// HTML site render under `--html-dir` (default `dist`). Default bare CLI.
     html,
+};
+
+pub const Command = enum {
+    build,
+    check,
+    impact,
+};
+
+pub const AnalysisFormat = enum {
+    human,
+    json,
 };
 
 /// Canonical parsed options. Strings are views into argv (or static defaults).
@@ -25,6 +38,10 @@ pub const Options = struct {
     /// When true, print help and exit successfully (no pipeline).
     help: bool = false,
     quiet: bool = false,
+    command: Command = .build,
+    impact_id: ?[]const u8 = null,
+    analysis_format: AnalysisFormat = .human,
+    analysis_report: ?[]const u8 = null,
     mode: Mode = .html,
     /// Content root (default `content`).
     input_dir: []const u8 = "content",
@@ -32,6 +49,8 @@ pub const Options = struct {
     out_dir: ?[]const u8 = null,
     /// RAG corpus directory. Set for RAG mode only (default `rag`).
     rag_dir: ?[]const u8 = null,
+    /// Context bundle directory. Set for context mode only (default `context`).
+    context_dir: ?[]const u8 = null,
     /// HTML output directory. Set for HTML mode only (default `dist`).
     html_dir: ?[]const u8 = null,
     /// Global HTML layout template (default `layouts/main.html`).
@@ -70,6 +89,7 @@ pub const ParseError = error{
 const default_input_dir = "content";
 const default_out_dir = ".boris";
 const default_rag_dir = "rag";
+const default_context_dir = "context";
 const default_html_dir = "dist";
 const default_html_layout = "layouts/main.html";
 
@@ -82,6 +102,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var input_dir: []const u8 = default_input_dir;
     var out_dir: []const u8 = default_out_dir;
     var rag_dir: []const u8 = default_rag_dir;
+    var context_dir: []const u8 = default_context_dir;
     var html_dir: []const u8 = default_html_dir;
 
     var saw_quiet = false;
@@ -90,6 +111,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_rag = false;
     var saw_no_rag = false;
     var saw_rag_dir = false;
+    var saw_context = false;
+    var saw_context_dir = false;
     var saw_html = false;
     var saw_html_dir = false;
     var saw_html_layout = false;
@@ -97,6 +120,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_incremental = false;
     var saw_jobs = false;
     var saw_watch = false;
+    var saw_format = false;
+    var saw_report = false;
     var jobs: usize = 1;
     var html_layout: []const u8 = default_html_layout;
     var theme_root: ?[]const u8 = null;
@@ -107,7 +132,22 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var target_layouts: std.ArrayListUnmanaged(struct { name: []const u8, path: []const u8 }) = .{ .items = &.{}, .capacity = 0 };
     errdefer target_layouts.deinit(gpa);
 
+    var command: Command = .build;
+    var impact_id: ?[]const u8 = null;
+    var analysis_format: AnalysisFormat = .human;
+    var analysis_report: ?[]const u8 = null;
+
     var i: usize = if (args.len > 0) 1 else 0;
+    if (i < args.len and std.mem.eql(u8, args[i], "check")) {
+        command = .check;
+        i += 1;
+    } else if (i < args.len and std.mem.eql(u8, args[i], "impact")) {
+        command = .impact;
+        i += 1;
+        if (i >= args.len or std.mem.startsWith(u8, args[i], "-")) return error.MissingValue;
+        impact_id = args[i];
+        i += 1;
+    }
     while (i < args.len) : (i += 1) {
         const a = args[i];
 
@@ -120,6 +160,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
                 .input_dir = input_dir,
                 .out_dir = out_dir,
                 .rag_dir = null,
+                .context_dir = null,
                 .html_dir = null,
                 .targets = .{ .items = &.{}, .capacity = 0 },
             };
@@ -135,6 +176,12 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (std.mem.eql(u8, a, "--rag")) {
             if (saw_rag) return error.DuplicateFlag;
             saw_rag = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--context")) {
+            if (saw_context) return error.DuplicateFlag;
+            saw_context = true;
             continue;
         }
 
@@ -159,6 +206,21 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (std.mem.eql(u8, a, "--watch")) {
             if (saw_watch) return error.DuplicateFlag;
             saw_watch = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--format") or std.mem.startsWith(u8, a, "--format=")) {
+            if (saw_format) return error.DuplicateFlag;
+            saw_format = true;
+            const value = try takeValue(args, &i, a, "--format");
+            analysis_format = if (std.mem.eql(u8, value, "human")) .human else if (std.mem.eql(u8, value, "json")) .json else return error.InvalidValue;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--report") or std.mem.startsWith(u8, a, "--report=")) {
+            if (saw_report) return error.DuplicateFlag;
+            saw_report = true;
+            analysis_report = try takeValue(args, &i, a, "--report");
             continue;
         }
 
@@ -249,6 +311,13 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        if (std.mem.eql(u8, a, "--context-dir") or std.mem.startsWith(u8, a, "--context-dir=")) {
+            if (saw_context_dir) return error.DuplicateFlag;
+            saw_context_dir = true;
+            context_dir = try takeValue(args, &i, a, "--context-dir");
+            continue;
+        }
+
         if (std.mem.eql(u8, a, "--html-dir") or std.mem.startsWith(u8, a, "--html-dir=")) {
             if (saw_html_dir) return error.DuplicateFlag;
             saw_html_dir = true;
@@ -295,20 +364,30 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     // Explicit HTML selectors (not the bare default).
     const explicit_html = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts or saw_theme;
     const wants_rag = saw_rag or saw_rag_dir;
+    const wants_context = saw_context or saw_context_dir;
     // Explicit IR: --out and/or --no-rag (bare CLI is HTML, not IR).
     const wants_ir = saw_out or saw_no_rag;
+
+    if (command != .build) {
+        if (wants_rag or wants_ir or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts) {
+            return error.ConflictingFlags;
+        }
+    } else if (saw_format or saw_report) {
+        return error.ConflictingFlags;
+    }
 
     // --- conflict matrix ---------------------------------------------------
     if (saw_rag and saw_no_rag) return error.ConflictingFlags;
     if (saw_no_rag and saw_rag_dir) return error.ConflictingFlags;
     // Explicit --out must never be combined with RAG-only selection.
     if (saw_out and wants_rag) return error.ConflictingFlags;
+    if (wants_context and (wants_rag or wants_ir)) return error.ConflictingFlags;
     // Explicit HTML selectors own the output destination; refuse IR/RAG flags.
-    if (explicit_html and (wants_rag or saw_out)) {
+    if (explicit_html and (wants_rag or wants_context or saw_out)) {
         return error.ConflictingFlags;
     }
     // HTML-only options conflict with IR or RAG selection (default HTML is fine).
-    if ((saw_jobs or saw_watch or saw_incremental) and (wants_ir or wants_rag)) {
+    if ((saw_jobs or saw_watch or saw_incremental) and (wants_ir or wants_rag or wants_context)) {
         return error.ConflictingFlags;
     }
     // Target conflict rules
@@ -328,6 +407,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .html
     else if (wants_rag)
         .rag
+    else if (wants_context)
+        .context
     else if (wants_ir)
         .ir
     else
@@ -376,6 +457,10 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .rag_dir = null,
             .html_dir = null,
             .targets = targets,
+            .command = command,
+            .impact_id = impact_id,
+            .analysis_format = analysis_format,
+            .analysis_report = analysis_report,
         },
         .rag => .{
             .help = false,
@@ -384,8 +469,24 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .input_dir = input_dir,
             .out_dir = null,
             .rag_dir = rag_dir,
+            .context_dir = null,
             .html_dir = null,
             .targets = targets,
+        },
+        .context => .{
+            .help = false,
+            .quiet = quiet,
+            .mode = .context,
+            .input_dir = input_dir,
+            .out_dir = null,
+            .rag_dir = null,
+            .context_dir = context_dir,
+            .html_dir = null,
+            .targets = targets,
+            .command = command,
+            .impact_id = impact_id,
+            .analysis_format = analysis_format,
+            .analysis_report = analysis_report,
         },
         .html => .{
             .help = false,
@@ -394,6 +495,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .input_dir = input_dir,
             .out_dir = null,
             .rag_dir = null,
+            .context_dir = null,
             .html_dir = if (has_explicit_targets) null else html_dir,
             .html_layout = html_layout,
             .owned_html_layout = owned_html_layout,
@@ -401,6 +503,10 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .jobs = jobs,
             .watch = saw_watch,
             .targets = targets,
+            .command = command,
+            .impact_id = impact_id,
+            .analysis_format = analysis_format,
+            .analysis_report = analysis_report,
         },
     };
 }
@@ -434,6 +540,8 @@ pub fn printUsage() void {
         \\Usage: boris [options]
         \\
         \\Modes:
+        \\  check               Read-only graph health report (CI findings exit 1)
+        \\  impact <ID>         Read-only transitive impact report for a page
         \\  (default)           HTML site → pages under dist/ (content/ + layouts/main.html)
         \\  --html              Explicit HTML site mode → --html-dir (default dist)
         \\  --html-dir <DIR>    HTML site mode with output directory DIR
@@ -442,6 +550,8 @@ pub fn printUsage() void {
         \\  --no-rag            Explicit IR mode (JSON under --out, default .boris)
         \\  --rag               RAG-only mode → corpus under --rag-dir (default rag)
         \\  --rag-dir <DIR>     RAG-only mode with output directory DIR
+        \\  --context           Context-only mode → bundle under --context-dir (default context)
+        \\  --context-dir DIR   Context-only mode with output directory DIR
         \\
         \\Options:
         \\  --input <DIR>       Content root (default: content)
@@ -456,6 +566,8 @@ pub fn printUsage() void {
         \\  --watch             Local-development watch mode for HTML builds (implies --incremental)
         \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
         \\  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
+        \\  --format human|json  Analysis output format for check/impact (default human)
+        \\  --report PATH        Write an analysis report instead of stdout
         \\  -h, --help          Show this help and exit 0
         \\
         \\HTML artifacts (success; Apex + layout splice):
@@ -470,9 +582,13 @@ pub fn printUsage() void {
         \\  INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json
         \\  system/**  content/pages/**  graph/entity-catalog.md  graph/relations.md
         \\
+        \\Context artifacts (success; same graph validation as IR/RAG):
+        \\  bundle.md  manifest.json  graph.json  pages/<entity-id>.md
+        \\
         \\Conflicts (exit 2):
         \\  --rag with --no-rag
         \\  --no-rag with --rag-dir
+        \\  --context / --context-dir with --rag, --out, or HTML selectors
         \\  explicit --out with --rag or --rag-dir
         \\  --html / --html-dir / --target / --target-layout with --rag, --rag-dir, or explicit --out
         \\  --target with --html-dir
@@ -645,6 +761,25 @@ test "parse: default is HTML mode" {
     try expectEqual(@as(usize, 1), o.targets.items.len);
     try expectEqualStrings("default", o.targets.items[0].name);
     try expectEqualStrings(default_html_dir, o.targets.items[0].output_dir);
+}
+
+test "parse: documentation intelligence commands" {
+    var check = try parseOptions(std.testing.allocator, &.{ "boris", "check", "--input", "docs", "--format", "json", "--report", "report.json" });
+    defer check.deinit(std.testing.allocator);
+    try expectEqual(Command.check, check.command);
+    try expectEqual(AnalysisFormat.json, check.analysis_format);
+    try expectEqualStrings("docs", check.input_dir);
+    try expectEqualStrings("report.json", check.analysis_report.?);
+
+    var impact = try parseOptions(std.testing.allocator, &.{ "boris", "impact", "guides/cache", "--quiet" });
+    defer impact.deinit(std.testing.allocator);
+    try expectEqual(Command.impact, impact.command);
+    try expectEqualStrings("guides/cache", impact.impact_id.?);
+    try expect(impact.quiet);
+
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "impact" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--out", ".boris" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--format", "json" }));
 }
 
 test "parse: --out selects IR mode" {

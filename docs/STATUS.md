@@ -9,6 +9,12 @@ publishes typed `parent` / `include` / `reference` edges and deterministic
 `reverseIndex`; incremental HTML consumes the same resolver and reverse-walk
 semantics. Fingerprints remain the content-addressed change detector.
 
+**Knowledge-system track:** bounded semantic relations and deterministic AI
+Context Bundles are implemented on topic branches and gated independently.
+Relations use conditional IR 0.3 artifacts; Context Bundles use their own
+`boris-context` schema 1 and preserve source-relative provenance. They are not
+described as merged product capabilities until their PRs land.
+
 Living snapshot for agents and humans. Prefer this and [`CHANGELOG.md`](../CHANGELOG.md)
 over archaeology. Normative behavior: [`docs/contracts/`](contracts/).
 
@@ -36,6 +42,7 @@ TOC, and P2/P3 incremental / watch / jobs / multi-target. Tag: `v0.2.0`.
 | “Did my graph still make sense?” | Fail-loud Trunk/Satellite validation | Exit **1** + diagnostics |
 | Machine-readable graph/IR | JSON under `.boris/` | `boris --out .boris` |
 | LLM knowledge pack of this project | Deterministic `rag/` corpus | `boris --rag` |
+| Grounded context for an LLM | Deterministic bundle with hashes + graph | `boris --context` |
 | Edit → rebuild only what changed | Incremental dirty-set HTML | `--incremental` / `--watch` |
 | Faster multi-page HTML | Bounded parallel page workers | `--jobs N` |
 | Draft vs prod from one tree | Isolated multi-target outputs | `--target name=dir` |
@@ -120,6 +127,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
+| **Next** | Documentation Intelligence hardening | Read-only `check` and `impact` reports are implemented on the feature branch; contract in [`contracts/documentation-intelligence.md`](contracts/documentation-intelligence.md). Add fixture goldens before merge. |
 | **Later** | P4 build-system productization | Measurement-driven cache/watch improvements after F8 |
 | **Hygiene** | Sample content honesty as features land | Root `content/` is current for F7; re-check after next feature |
 | **Hygiene** | No parallel content sandboxes by default | Failed draft removed; root `content/` is SoT |

@@ -201,6 +201,44 @@ const TagsError = error{
     TagTooLong,
 };
 
+const RelationsError = error{
+    BadRelations,
+    TooManyRelations,
+    DuplicateRelation,
+    UnknownKind,
+    InvalidTarget,
+};
+
+fn parseRelationsList(raw: []const u8, out: *[page_mod.max_relation_count]page_mod.SemanticRelation) RelationsError!usize {
+    const value = trimAscii(raw);
+    if (value.len < 2 or value[0] != '[' or value[value.len - 1] != ']') return error.BadRelations;
+    const inner = trimAscii(value[1 .. value.len - 1]);
+    if (inner.len == 0) return 0;
+
+    var count: usize = 0;
+    var cursor: usize = 0;
+    while (cursor < inner.len) {
+        while (cursor < inner.len and isSpace(inner[cursor])) : (cursor += 1) {}
+        const start = cursor;
+        while (cursor < inner.len and inner[cursor] != ',') : (cursor += 1) {}
+        const entry = trimAscii(inner[start..cursor]);
+        const equals = std.mem.indexOfScalar(u8, entry, '=') orelse return error.BadRelations;
+        if (equals == 0 or equals + 1 >= entry.len or std.mem.indexOfScalar(u8, entry[equals + 1 ..], '=') != null) return error.BadRelations;
+        const kind_text = trimAscii(entry[0..equals]);
+        const target = trimAscii(entry[equals + 1 ..]);
+        const kind = page_mod.RelationKind.parse(kind_text) orelse return error.UnknownKind;
+        if (!identity.validateEntityId(target)) return error.InvalidTarget;
+        if (count >= page_mod.max_relation_count) return error.TooManyRelations;
+        for (out[0..count]) |existing| {
+            if (existing.kind == kind and std.mem.eql(u8, existing.target, target)) return error.DuplicateRelation;
+        }
+        out[count] = .{ .kind = kind, .target = target };
+        count += 1;
+        if (cursor < inner.len) cursor += 1;
+    }
+    return count;
+}
+
 /// Parse `tags: [a, b, "c"]` only. Tag slices are into `raw` / source.
 fn parseTagsList(raw: []const u8, out: *[max_tag_count][]const u8) TagsError!usize {
     const v = trimAscii(raw);
@@ -323,6 +361,7 @@ pub fn parse(source: []const u8) ParseResult {
     var saw_parent = false;
     var saw_status = false;
     var saw_tags = false;
+    var saw_relations = false;
     var field_count: usize = 0;
 
     var line_no: u32 = 2; // first field line is after opening ---
@@ -385,6 +424,22 @@ pub fn parse(source: []const u8) ParseResult {
                 };
             };
             doc.meta.tag_count = n;
+            line_no += 1;
+            if (!pl[2]) break;
+            fline_start = pl[1];
+            continue;
+        }
+
+        if (std.mem.eql(u8, key, "relations")) {
+            if (saw_relations) return fail(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"relations\"");
+            saw_relations = true;
+            doc.meta.relation_count = parseRelationsList(raw_val, &doc.meta.relations) catch |err| return switch (err) {
+                error.TooManyRelations => fail(.EFRONTMATTER, line_no, col, "relations exceeds maximum relation count"),
+                error.DuplicateRelation => fail(.EFRONTMATTER, line_no, col, "relations contains a duplicate tuple"),
+                error.UnknownKind => fail(.EFRONTMATTER, line_no, col, "relations contains an unknown relation kind"),
+                error.InvalidTarget => fail(.EINVALIDPATH, line_no, col, "relation target is not a valid entity id"),
+                error.BadRelations => fail(.EFRONTMATTER, line_no, col, "relations must be a list like [supersedes=guides/old]"),
+            };
             line_no += 1;
             if (!pl[2]) break;
             fline_start = pl[1];
@@ -511,6 +566,37 @@ test "parse: valid frontmatter document" {
     // Views point into source.
     try std.testing.expect(@intFromPtr(r.doc.meta.title.?.ptr) >= @intFromPtr(src.ptr));
     try std.testing.expect(@intFromPtr(r.doc.body.ptr) >= @intFromPtr(src.ptr));
+}
+
+test "parse: bounded semantic relations" {
+    const src =
+        \\---
+        \\title: Cache v2
+        \\relations: [supersedes=guides/cache-v1, depends_on=reference/cache-manifest]
+        \\---
+        \\body
+        \\
+    ;
+    const r = parse(src);
+    try std.testing.expect(r.isOk());
+    try std.testing.expectEqual(@as(usize, 2), r.doc.meta.relation_count);
+    try std.testing.expect(r.doc.meta.relationsSlice()[0].kind == .supersedes);
+    try std.testing.expectEqualStrings("guides/cache-v1", r.doc.meta.relationsSlice()[0].target);
+    try std.testing.expect(r.doc.meta.relationsSlice()[1].kind == .depends_on);
+}
+
+test "parse: semantic relation malformed, unknown, duplicate, and invalid target" {
+    const cases = [_][]const u8{
+        "---\nrelations: [supersedes]\n---\n",
+        "---\nrelations: [unknown=guides/old]\n---\n",
+        "---\nrelations: [supersedes=guides/old, supersedes=guides/old]\n---\n",
+        "---\nrelations: [supersedes=../old]\n---\n",
+    };
+    for (cases, 0..) |source, i| {
+        const r = parse(source);
+        try std.testing.expect(!r.isOk());
+        try std.testing.expectEqual(if (i == 3) Category.EINVALIDPATH else Category.EFRONTMATTER, r.category().?);
+    }
 }
 
 // Canonical author-facing parent key on the product IR/RAG parse path.

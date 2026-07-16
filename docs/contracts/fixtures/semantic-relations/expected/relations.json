@@ -1,0 +1,47 @@
+  "relations": [
+    {
+      "from": {
+        "type": "page",
+        "value": "guides/cache-v1"
+      },
+      "to": {
+        "type": "page",
+        "value": "reference/cache-manifest"
+      },
+      "kind": "relates_to"
+    },
+    {
+      "from": {
+        "type": "page",
+        "value": "guides/cache-v2"
+      },
+      "to": {
+        "type": "page",
+        "value": "guides/cache-v1"
+      },
+      "kind": "supersedes"
+    },
+    {
+      "from": {
+        "type": "page",
+        "value": "guides/cache-v2"
+      },
+      "to": {
+        "type": "page",
+        "value": "reference/cache-manifest"
+      },
+      "kind": "depends_on"
+    },
+    {
+      "from": {
+        "type": "page",
+        "value": "reference/cache-manifest"
+      },
+      "to": {
+        "type": "page",
+        "value": "guides/cache-v1"
+      },
+      "kind": "implements"
+    }
+  ]
+}

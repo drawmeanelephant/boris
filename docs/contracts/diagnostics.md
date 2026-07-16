@@ -106,6 +106,9 @@ must emit exactly these strings (no underscore variants such as `E_DUP_ID`).
 | `EINCLUDECYCLE` | error | Transclusion cycle among includes (or depth exceeded) | `include` → HTML / IR dependency resolution |
 | `EREFERENCESYNTAX` | error | Malformed `[[…]]` wiki-link (including empty or illegal `#` fragment) | `wikilink` → HTML / IR dependency resolution |
 | `EREFERENCEMISSING` | error | Wiki-link target entity id not in the page graph, **or** `#fragment` not among that page’s rendered heading ids | `wikilink` → HTML / IR dependency resolution |
+| `ERELATIONMISSING` | error | Semantic relation target entity id is not in the page graph | semantic relation validation → IR |
+| `ERELATIONSELF` | error | Semantic relation targets its source page | semantic relation validation → IR |
+| `ERELATIONDUPLICATE` | error | Same semantic `(kind,target)` tuple appears more than once | semantic relation validation / parser → IR |
 | `EUSAGE` | error | CLI usage / flag error (unknown flag, conflicts, malformed options) | CLI (exit 2; not in build-report) |
 | `EIO` | error | I/O or system failure (missing content root, unreadable file, unexpected runtime) | pipeline / CLI (exit 3 when pure I/O) |
 

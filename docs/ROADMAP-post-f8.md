@@ -1,15 +1,30 @@
-# Roadmap — post Feature 8 (draft)
+# Roadmap — post Feature 8 (historical draft + current direction)
 
 **As of:** 2026-07-15 · product **0.3.1** / IR **0.2.0** · plan only · not a
 substitute for [`STATUS.md`](STATUS.md)
 **Current state:** F8.1–F8.3 are **shipped** (IR 0.2 + reverse-index dirty-set
 in **v0.3.1**). Heading-target wiki links (PR #40), F9.1 closed layout/theme
 assets (PR #41), and F9.2 layout UTF-8 validation + orphan theme-asset scrub
-(PR #42) are **shipped**. Product **v0.3.1** is released/tagged. This file
-preserves the post-F8 planning history and records what remains *after* F9.2.
+(PR #42) are **shipped**. Product **v0.3.1** is released/tagged. Documentation
+Intelligence (`check` / `impact`), bounded semantic relations, and AI Context
+Bundles land in this knowledge-system track — see the live direction block and
+`STATUS.md`. This file preserves the post-F8 planning history and records what
+remains *after* F9.2.
 
 Normative behavior: [`docs/contracts/`](contracts/). Hard constraints:
 [`AGENTS.md`](../AGENTS.md). Living phase: [`STATUS.md`](STATUS.md).
+
+### Live direction after F9.2
+
+1. Harden and merge Documentation Intelligence with fixture goldens and
+   no-artifact checks.
+2. Add bounded semantic relations as a deliberate IR schema change (likely
+   IR 0.3), keeping them separate from build-dependency edges.
+3. Add deterministic, provenance-rich AI Context Bundles over the validated
+   graph and RAG pipeline.
+
+Do not interpret historical “F8.3 pending” or “heading wiki later” statements
+below as current status; they are retained to preserve planning context.
 
 ---
 
@@ -165,6 +180,18 @@ same way.
 | **Risks** | Overclaiming unshipped layout-selection / IR layout edges / DaisyUI productization. |
 | **Verification** | Grep for stale product/IR / “F8.3 pending” claims; smoke `boris` on `content/`. |
 | **PR / agent split** | Fully parallel; docs-only agent. |
+
+### Knowledge-system extension — semantic relations + Context Bundles
+
+This is the next product direction after graph-native dependencies: make the
+validated graph useful as an explicit knowledge surface without turning Boris
+into a JavaScript application stack.
+
+| Cut | User outcome | Contract / gate |
+|-----|--------------|-----------------|
+| Semantic relations | Authors can declare bounded directional relations; relation-bearing IR is explicitly 0.3 while relation-free IR 0.2 remains stable. | [`semantic-relations.md`](contracts/semantic-relations.md); all four kinds, invalid-target diagnostics, and deterministic relation golden. |
+| AI Context Bundle | `--context` emits one uploadable Markdown bundle plus machine manifest, graph, per-page provenance, and source hashes. | [`context-bundle.md`](contracts/context-bundle.md); repeated export identity and failed-input preservation. |
+| Follow-on | Add relation-aware retrieval/impact selection and bundle profiles only after the base bundle contract is proven. | Do not silently mutate RAG schema 1; add a deliberate contract first. |
 
 ---
 
