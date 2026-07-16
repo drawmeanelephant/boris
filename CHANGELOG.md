@@ -25,6 +25,13 @@ How to use going forward:
   target map: the id is duped before insert, so an allocation failure can never
   leave a view into source bytes as a map key for the cleanup errdefer to free
   (invalid free on the OOM path). `src/compile.zig`.
+- Orphan theme-asset scrub no longer deletes content pages published under
+  `dist/assets/`. A page whose entity id is namespaced under `assets/` is a live
+  page output, not an orphan theme asset; the scrub now receives the build's
+  page-output set and skips those paths, and the empty-inventory
+  `deleteTree("assets")` is guarded so it only runs when no page output is
+  published under `assets/` (`src/theme.zig`, `src/compile.zig`). Regression
+  test added.
 - `--watch` now watches a managed theme root, not just the layout's parent
   directory. Editing `<theme>/assets/…` or `<theme>/footer.html` previously
   produced no watch event, so pages whose fingerprints include footer or
@@ -32,6 +39,13 @@ How to use going forward:
   triggered a rebuild. Legacy `layouts/…` builds are unchanged. Contract:
   `docs/contracts/templating-and-themes.md` ("a referenced asset change dirties
   pages that reference it"). `src/main.zig`.
+
+### Changed
+
+- Dropped the write-only `ThemeBundle.fingerprint_material` field and its builder:
+  it duplicated the footer plus every asset's bytes on each load but was never
+  read (page fingerprints use `referencedAssetMaterial`), so a theme with large
+  binary assets held a second full copy for the whole build. `src/theme.zig`.
 
 ### Layout selection
 
@@ -79,16 +93,6 @@ How to use going forward:
   the validated graph, with deterministic human/JSON reports and optional
   report-file output and release-gate fixture goldens. Contract:
   `docs/contracts/documentation-intelligence.md`.
-
-### Fixed
-
-- Orphan theme-asset scrub no longer deletes content pages published under
-  `dist/assets/`. A page whose entity id is namespaced under `assets/` is a live
-  page output, not an orphan theme asset; the scrub now receives the build's
-  page-output set and skips those paths, and the empty-inventory
-  `deleteTree("assets")` is guarded so it only runs when no page output is
-  published under `assets/` (`src/theme.zig`, `src/compile.zig`). Regression
-  test added.
 
 ### Docs
 
