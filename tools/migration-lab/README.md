@@ -6,10 +6,11 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 |------|--------|--------|
 | **astro** | Astro project/export tree | Deterministic archaeology `report.json` + `REPORT.md` |
 | **wordpress** | WordPress WXR/XML + optional local media | Boris-ready Markdown under `content/` + review reports |
+| **instagram** | Unpacked Instagram data-download (Takeout) | Boris Markdown + generated theme assets + reports |
 
-Both modes are **read-only on inputs**: originals are never rewritten. There is
-**no network access** and **no product compiler coupling**. All code and fixtures
-live under `tools/migration-lab/`.
+All modes are **read-only on inputs**: originals are never rewritten. There is
+**no network access**, no zip extraction, no scraping, and **no product compiler
+coupling**. All code and fixtures live under `tools/migration-lab/`.
 
 | | |
 |--|--|
@@ -19,6 +20,7 @@ live under `tools/migration-lab/`.
 | Tests | `zig build test` from this directory |
 | Astro format id | `boris-astro-migration-lab` |
 | WordPress format id | `boris-wordpress-migration-lab` |
+| Instagram format id | `boris-instagram-migration-lab` |
 | Schema | `1` (per mode) |
 
 Companion author guide: [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
@@ -41,6 +43,11 @@ zig build run -- --mode=wordpress \
   --wxr=./fixtures/mini-wxr/export.xml \
   --media=./fixtures/mini-wxr/media \
   --out=./.wp-report
+
+# Instagram Takeout → Boris Markdown + theme assets + reports
+zig build run -- --mode=instagram \
+  --dump=./fixtures/mini-instagram \
+  --out=./.ig-report
 ```
 
 From the **repository root**:
@@ -52,6 +59,10 @@ zig build -C tools/migration-lab run -- \
   --wxr=tools/migration-lab/fixtures/mini-wxr/export.xml \
   --media=tools/migration-lab/fixtures/mini-wxr/media \
   --out=/tmp/wp-mig-report
+zig build -C tools/migration-lab run -- \
+  --mode=instagram \
+  --dump=tools/migration-lab/fixtures/mini-instagram \
+  --out=/tmp/ig-mig-report
 ```
 
 ### Flags
@@ -60,11 +71,12 @@ zig build -C tools/migration-lab run -- \
 |------|---------|---------|
 | `-h`, `--help` | | Print usage; exit 0 |
 | `-q`, `--quiet` | off | Suppress progress lines |
-| `--mode=MODE` | `astro` | `astro` or `wordpress` (`wp` / `wxr` aliases) |
+| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), or `instagram` (`ig` / `takeout`) |
 | `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**) |
 | `--root=DIR` | `.` | Astro scan root |
 | `--wxr=FILE` | | WordPress WXR/XML path (implies `--mode=wordpress`) |
 | `--media=DIR` | | Optional local media/uploads tree (WordPress) |
+| `--dump=DIR` | | Unpacked Instagram data-download root (implies `--mode=instagram`) |
 
 Exit codes: **0** success, **2** usage, **3** I/O error.
 
@@ -78,6 +90,59 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
 4. **No product coupling** — does not import `src/` compiler modules; not in root `zig build test`.
 5. **Deterministic** — sorted ids/paths; fixed field order; no host timestamps in report bodies.
 6. **Never silently discard** — unsupported items are preserved under `content/_preserved/` and listed in the report.
+7. **Instagram** — no zip extraction; dump must already be unpacked. DMs, logins,
+   followers, and ads trees are not read.
+
+---
+
+## Instagram mode
+
+### Inputs
+
+- **Unpacked Instagram data-download** root (Meta “Download your information”).
+- Expects `your_instagram_activity/content/` (or a top-level `content/`) with
+  `posts_*.json` / `posts_*.html`, optional `reels*`, `stories*`, `other_content*`.
+- Local `media/` tree referenced by export URIs.
+
+### Outputs under `--out`
+
+```text
+content/
+  instagram.md                 # Trunk
+  instagram/<kind>-<id>.md     # one page per post/reel/story/other record
+theme/
+  layouts/main.html
+  footer.html
+  assets/css/site.css
+  assets/media/...             # copied source media (bytes unchanged)
+report.json
+REPORT.md
+media_manifest.json            # clean provenance for a later enrichment pass (no OCR)
+```
+
+Each page uses **closed Boris frontmatter only**: `id`, `title`, `parent`,
+`status`, `tags`. Caption bytes, timestamp, source JSON/HTML path, media URIs,
+theme asset paths, and conversion notes live in the body + provenance comment.
+
+| Class | Typical cause |
+|-------|----------------|
+| `exact` | Simple photo record with durable id |
+| `transformed` | Carousel, video, reel/story, HTML-source parse |
+| `unsupported` | other/unknown archive kinds, malformed JSON placeholder |
+| `human_review` | Missing media, empty caption, id collisions |
+
+Synthetic fixture: [`fixtures/mini-instagram/`](fixtures/mini-instagram/).
+
+Compile the generated site with product Boris:
+
+```bash
+# from repo root after a successful migration-lab run
+./zig-out/bin/boris \
+  --input /tmp/ig-mig-report/content \
+  --theme /tmp/ig-mig-report/theme \
+  --html-dir /tmp/ig-site \
+  --quiet
+```
 
 ---
 

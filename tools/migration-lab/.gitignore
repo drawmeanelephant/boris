@@ -1,9 +1,13 @@
 # Local report outputs (never commit generated archaeology)
 .migration-report/
 .wp-report/
+.ig-report/
+.ig-report-b/
 .out-wp/
+.out-ig/
 migration-report/
 fixtures/.test-out*/
 fixtures/.test-wp*/
+fixtures/.ig-test-out*/
 .zig-cache/
 zig-out/
