@@ -98,6 +98,7 @@ fn renderBody(segments: []const aside.Segment, allocator: std.mem.Allocator) ![]
             }
         },
         .aside => |value| try out.appendSlice(allocator, try aside.formatRagDirective(value, allocator)),
+        .details => |value| try out.appendSlice(allocator, try aside.formatDetailsRagDirective(value, allocator)),
     };
     return try out.toOwnedSlice(allocator);
 }
