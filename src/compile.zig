@@ -1219,10 +1219,14 @@ fn collectFragmentTargetSet(
         }
 
         for (raw_ids.items) |id| {
-            const gop = try targets.getOrPut(gpa, id);
-            if (!gop.found_existing) {
-                gop.key_ptr.* = try gpa.dupe(u8, id);
-            }
+            // Dupe before insert: `id` is a view into source/include bytes, not
+            // gpa-owned. Inserting it first and duping after would leave a
+            // non-owned key in the map if the dupe fails, and the errdefer above
+            // frees every key — an invalid free on the OOM path.
+            if (targets.contains(id)) continue;
+            const owned = try gpa.dupe(u8, id);
+            errdefer gpa.free(owned);
+            try targets.put(gpa, owned, {});
         }
     }
     return targets;

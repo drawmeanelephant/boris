@@ -21,6 +21,10 @@ How to use going forward:
 
 ### Fixed
 
+- `collectFragmentTargetSet` no longer inserts a non-owned key into the fragment
+  target map: the id is duped before insert, so an allocation failure can never
+  leave a view into source bytes as a map key for the cleanup errdefer to free
+  (invalid free on the OOM path). `src/compile.zig`.
 - `--watch` now watches a managed theme root, not just the layout's parent
   directory. Editing `<theme>/assets/…` or `<theme>/footer.html` previously
   produced no watch event, so pages whose fingerprints include footer or
