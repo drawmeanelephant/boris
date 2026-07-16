@@ -23,9 +23,9 @@ is **not** proof that every surface is the default CLI product.
 | Parallel HTML workers / watch | **Implemented** (`--jobs`, `--watch`; see contracts below) |
 | Multi-target isolated outputs | **Implemented** — CLI, isolation, stage commit, selective watch (P3.3) |
 | HTML `dist/` default CLI | **Implemented** (Feature 2) |
-| Templating + theme assets (F9.1) | **Implemented** — closed plan, target-owned assets; see `templating-and-themes.md` |
+| Templating + theme assets (F9.1 / F9.2) | **Implemented** — closed plan, target-owned assets, UTF-8 layout gate, orphan asset scrub; see `templating-and-themes.md` |
 | Includes + wiki-links (HTML) | **Implemented** — pre-Apex; see `includes-and-wiki-links.md` |
-| IR 0.2 dependency edges + reverse index | **Implemented (F8.1–F8.2 shipped)** — `--out` emits typed edges and `reverseIndex`; F8.3 dirty-set consumption remains pending |
+| IR 0.2 dependency edges + reverse index | **Implemented (F8.1–F8.3 shipped)** — `--out` emits typed edges and `reverseIndex`; incremental HTML uses the same reverse-walk dirty-set (v0.3.1) |
 
 ## Canonical ownership (one document per topic)
 
@@ -49,7 +49,7 @@ per topic:
 | Multi-target isolated outputs | [multi-target-isolated-output.md](multi-target-isolated-output.md) |
 | Includes + wiki-links | [includes-and-wiki-links.md](includes-and-wiki-links.md) |
 | Heading IDs + wiki fragments | [heading-ids.md](heading-ids.md) |
-| Templating + themes (F9.1) | [templating-and-themes.md](templating-and-themes.md) |
+| Templating + themes (F9.1 / F9.2) | [templating-and-themes.md](templating-and-themes.md) |
 
 ### Normative documents (IR v0.2 target) — full list
 
@@ -69,7 +69,7 @@ per topic:
 | [multi-target-isolated-output.md](multi-target-isolated-output.md) | Multi-target CLI/config, output isolation, cache namespaces (P3.3) |
 | [includes-and-wiki-links.md](includes-and-wiki-links.md) | `{{include}}` + `[[wiki]]` pre-Apex; cycles; fragment tree; IR 0.2 edge projection |
 | [heading-ids.md](heading-ids.md) | Apex heading `id` harvest; `[[entity#heading]]` match + URL rules |
-| [templating-and-themes.md](templating-and-themes.md) | Closed layout plan, theme assets, `metadata`/`footer`/`asset-url` (F9.1) |
+| [templating-and-themes.md](templating-and-themes.md) | Closed layout plan, theme assets, UTF-8/orphan hardening (F9.1 / F9.2) |
 
 ## Redirect / compatibility paths (non-normative)
 

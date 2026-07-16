@@ -19,6 +19,13 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Docs
+
+- Roadmap truth reconciliation after PR #42: F8.3 / v0.3.1 tagged, heading
+  wiki (#40), F9.1 (#41), and F9.2 (#42) recorded as shipped; post-F9.2 future
+  work moved to a dedicated section; contracts index no longer claims F8.3 is
+  pending (`docs/ROADMAP-post-f8.md`, `docs/contracts/README.md`, STATUS map).
+
 ### Feature 9.2 — theme/template hardening
 
 - Layout UTF-8 validation at plan split (`Layout.split` / `loadLayout` →
