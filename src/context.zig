@@ -9,6 +9,7 @@ const cache = @import("cache.zig");
 const graph_mod = @import("graph.zig");
 const json_out = @import("json_out.zig");
 const pipeline = @import("pipeline.zig");
+const identity = @import("identity.zig");
 
 pub const format = "boris-context";
 pub const schema_version: u32 = 1;
@@ -17,6 +18,7 @@ pub const ContextOptions = struct {
     content_root: []const u8 = "content",
     out_dir: []const u8 = "context",
     quiet: bool = false,
+    input_format: identity.InputFormat = .markdown,
 };
 
 pub const ContextResult = struct {
@@ -267,6 +269,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: ContextOptions) !ContextResult 
     var result = ContextResult{ .compile = try pipeline.compile(io, gpa, .{
         .content_root = opts.content_root,
         .quiet = opts.quiet,
+        .input_format = opts.input_format,
     }) };
     errdefer result.deinit();
     if (!result.compile.ok) return result;

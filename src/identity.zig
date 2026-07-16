@@ -16,7 +16,8 @@
 //!
 //! - Entity ids preserve letter case of the source stem.
 //! - Separators in logical metadata are always `/`.
-//! - Page extensions are **case-sensitive**: only `.md` and `.mdx`.
+//! - Page extensions are **case-sensitive**: `.md` / `.mdx` in the default
+//!   input format, or `.textile` in the explicit Textile input format.
 //! - Output paths are built only from validated entity ids (cannot escape).
 
 const std = @import("std");
@@ -29,21 +30,35 @@ pub const PathError = error{
     AbsolutePath,
     IllegalSegment,
     EmptyId,
-    /// Path does not end with an accepted page extension (`.md` / `.mdx`).
+    /// Path does not end with a recognized page extension.
     UnsupportedExtension,
     /// Derived entity id exceeds `max_entity_id_bytes`.
     IdTooLong,
 } || std.mem.Allocator.Error;
 
 /// Content kind derived from the trailing page extension.
+pub const InputFormat = enum {
+    markdown,
+    textile,
+
+    pub fn accepts(self: InputFormat, kind: ContentKind) bool {
+        return switch (self) {
+            .markdown => kind == .md or kind == .mdx,
+            .textile => kind == .textile,
+        };
+    }
+};
+
 pub const ContentKind = enum {
     md,
     mdx,
+    textile,
 
     pub fn extension(self: ContentKind) []const u8 {
         return switch (self) {
             .md => ".md",
             .mdx => ".mdx",
+            .textile => ".textile",
         };
     }
 };
@@ -54,11 +69,14 @@ fn isSep(c: u8) bool {
 
 /// Case-sensitive page-extension check on a basename or full relative path.
 pub fn isPageFile(name: []const u8) bool {
-    return std.mem.endsWith(u8, name, ".mdx") or std.mem.endsWith(u8, name, ".md");
+    return std.mem.endsWith(u8, name, ".textile") or
+        std.mem.endsWith(u8, name, ".mdx") or
+        std.mem.endsWith(u8, name, ".md");
 }
 
 /// Length of the accepted trailing page extension, or null if not a page file.
 pub fn pageExtensionLen(path: []const u8) ?usize {
+    if (std.mem.endsWith(u8, path, ".textile")) return 8;
     if (std.mem.endsWith(u8, path, ".mdx")) return 4;
     if (std.mem.endsWith(u8, path, ".md")) return 3;
     return null;
@@ -66,6 +84,7 @@ pub fn pageExtensionLen(path: []const u8) ?usize {
 
 /// Content kind for a path ending with an accepted page extension.
 pub fn contentKind(path: []const u8) PathError!ContentKind {
+    if (std.mem.endsWith(u8, path, ".textile")) return .textile;
     if (std.mem.endsWith(u8, path, ".mdx")) return .mdx;
     if (std.mem.endsWith(u8, path, ".md")) return .md;
     return error.UnsupportedExtension;
@@ -149,7 +168,7 @@ pub fn validateEntityId(id: []const u8) bool {
     return true;
 }
 
-/// Strip a single trailing page extension (`.md` or `.mdx`) from a canonical
+/// Strip a single recognized trailing page extension from a canonical
 /// source path. Returns a slice into `source_path` (no allocation).
 pub fn stemFromSourcePath(source_path: []const u8) PathError![]const u8 {
     const ext_len = pageExtensionLen(source_path) orelse return error.UnsupportedExtension;
@@ -184,7 +203,7 @@ pub fn normalizeEntityId(allocator: std.mem.Allocator, stem: []const u8) PathErr
 /// Input must be a content-root-relative source path (platform separators OK).
 /// Steps:
 /// 1. `canonicalize` (reject absolute, `.` / `..` / empty segments)
-/// 2. require case-sensitive page extension (`.md` / `.mdx`)
+/// 2. require a recognized case-sensitive page extension
 /// 3. strip one trailing extension
 /// 4. validate entity-id shape (no leading `/`, no `\`, no empty/`.`/`..`)
 /// 5. preserve letter case
@@ -373,11 +392,14 @@ test "canonicalize normalizes backslash and leading dot-slash" {
 test "isPageFile extension policy is case-sensitive lowercase only" {
     try std.testing.expect(isPageFile("x.md"));
     try std.testing.expect(isPageFile("x.mdx"));
+    try std.testing.expect(isPageFile("x.textile"));
     try std.testing.expect(isPageFile("nested/x.md"));
     try std.testing.expect(!isPageFile("x.MD"));
     try std.testing.expect(!isPageFile("x.Md"));
     try std.testing.expect(!isPageFile("x.MDX"));
     try std.testing.expect(!isPageFile("x.Mdx"));
+    try std.testing.expect(!isPageFile("x.TEXTILE"));
+    try std.testing.expect(!isPageFile("x.Textile"));
     try std.testing.expect(!isPageFile("x.txt"));
     try std.testing.expect(!isPageFile("readme.TXT"));
     try std.testing.expect(!isPageFile("md"));
@@ -413,6 +435,10 @@ test "canonicalEntityId is the single derivation path" {
     const g = try canonicalEntityId(gpa, "nested/Path/Page.mdx");
     defer gpa.free(g);
     try std.testing.expectEqualStrings("nested/Path/Page", g);
+
+    const h = try canonicalEntityId(gpa, "notes/tribute.textile");
+    defer gpa.free(h);
+    try std.testing.expectEqualStrings("notes/tribute", h);
 }
 
 test "canonicalEntityId rejects traversal non-page and empty stem" {
@@ -424,6 +450,16 @@ test "canonicalEntityId rejects traversal non-page and empty stem" {
     try std.testing.expectError(error.UnsupportedExtension, canonicalEntityId(gpa, "notes.MD"));
     try std.testing.expectError(error.EmptyId, canonicalEntityId(gpa, ".md"));
     try std.testing.expectError(error.EmptyId, canonicalEntityId(gpa, ".mdx"));
+    try std.testing.expectError(error.EmptyId, canonicalEntityId(gpa, ".textile"));
+}
+
+test "InputFormat admits one explicit source family" {
+    try std.testing.expect(InputFormat.markdown.accepts(.md));
+    try std.testing.expect(InputFormat.markdown.accepts(.mdx));
+    try std.testing.expect(!InputFormat.markdown.accepts(.textile));
+    try std.testing.expect(InputFormat.textile.accepts(.textile));
+    try std.testing.expect(!InputFormat.textile.accepts(.md));
+    try std.testing.expect(!InputFormat.textile.accepts(.mdx));
 }
 
 test "canonicalEntityId rejects oversize stem" {

@@ -84,6 +84,32 @@ pub fn computePageFingerprintTheme(
     site_nav_material: []const u8,
     theme_material: []const u8,
 ) [32]u8 {
+    return computePageFingerprintThemeInput(
+        target_name,
+        layout_path,
+        entity_id,
+        source_bytes,
+        include_deps,
+        layout_bytes,
+        site_nav_material,
+        theme_material,
+        "",
+    );
+}
+
+/// Fingerprint with an optional input-adapter identity. Empty input material
+/// preserves every Markdown-mode digest produced before Textile support.
+pub fn computePageFingerprintThemeInput(
+    target_name: []const u8,
+    layout_path: []const u8,
+    entity_id: []const u8,
+    source_bytes: []const u8,
+    include_deps: []const []const u8,
+    layout_bytes: []const u8,
+    site_nav_material: []const u8,
+    theme_material: []const u8,
+    input_material: []const u8,
+) [32]u8 {
     var hasher = Sha256.init(.{});
 
     // 1. Format version
@@ -125,6 +151,12 @@ pub fn computePageFingerprintTheme(
     if (theme_material.len > 0) {
         updateLen(&hasher, theme_material.len);
         hasher.update(theme_material);
+    }
+
+    if (input_material.len > 0) {
+        hasher.update("boris-input-adapter\x00");
+        updateLen(&hasher, input_material.len);
+        hasher.update(input_material);
     }
 
     var digest: [32]u8 = undefined;
@@ -224,6 +256,14 @@ test "Same inputs produce the same key across runs" {
     const key1 = computePageFingerprint("default", "layouts/main.html", "guides/intro", "source data", &.{ "inc1", "inc2" }, "layout content", "");
     const key2 = computePageFingerprint("default", "layouts/main.html", "guides/intro", "source data", &.{ "inc1", "inc2" }, "layout content", "");
     try std.testing.expectEqualSlices(u8, &key1, &key2);
+}
+
+test "input adapter identity invalidates only explicit adapted fingerprints" {
+    const legacy = computePageFingerprintTheme("default", "layout", "index", "source", &.{}, "layout bytes", "", "");
+    const empty = computePageFingerprintThemeInput("default", "layout", "index", "source", &.{}, "layout bytes", "", "", "");
+    const textile_v1 = computePageFingerprintThemeInput("default", "layout", "index", "source", &.{}, "layout bytes", "", "", "boris-textile-adapter-v1");
+    try std.testing.expectEqualSlices(u8, &legacy, &empty);
+    try std.testing.expect(!std.mem.eql(u8, &legacy, &textile_v1));
 }
 
 test "fingerprint length prefixes are little-endian fixed" {

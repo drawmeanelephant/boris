@@ -51,6 +51,14 @@ How to use going forward:
   (`layout_select.validateLayoutPath` → `InvalidLayoutPath`). Contract:
   `templating-and-themes.md` §4.1.
 
+### Textile compatibility
+
+- Added explicit `--textile` input mode: a bounded, fail-closed in-memory
+  Textile-to-Markdown body adapter for headings, paragraphs, quotes, flat
+  lists, safe phrase modifiers, code, and links. Markdown remains the default;
+  mixed page families fail with `ETEXTILE`. Contract:
+  `docs/contracts/textile-compatibility.md`.
+
 ### Knowledge-system exports
 
 - Bounded semantic relations (`relations: [kind=target]`) validate against the

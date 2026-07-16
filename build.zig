@@ -102,6 +102,18 @@ pub fn build(b: *std.Build) void {
     const run_parser_tests = b.addRunArtifact(parser_tests);
     run_parser_tests.setCwd(b.path("."));
 
+    // --- Explicit bounded Textile-to-Markdown adapter ---------------------
+    const textile_mod = b.createModule(.{
+        .root_source_file = b.path("src/textile.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const textile_tests = b.addTest(.{
+        .root_module = textile_mod,
+    });
+    const run_textile_tests = b.addRunArtifact(textile_tests);
+    run_textile_tests.setCwd(b.path("."));
+
     // --- Pipeline + graph tests (milestone 6) ------------------------------
     // Pipeline imports aside (component validation) → needs Apex link.
     const pipeline_mod = b.createModule(.{
@@ -468,6 +480,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_fixtures_tests.step);
     test_step.dependOn(&run_scanner_tests.step);
     test_step.dependOn(&run_parser_tests.step);
+    test_step.dependOn(&run_textile_tests.step);
     test_step.dependOn(&run_pipeline_tests.step);
     test_step.dependOn(&run_graph_tests.step);
     test_step.dependOn(&run_aside_tests.step);
