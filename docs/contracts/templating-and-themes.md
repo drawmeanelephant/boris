@@ -1,10 +1,11 @@
 # Templating and themes (F9)
 
-**Status:** F9.1 implemented (closed layout plan, metadata/footer/asset-url,
-target-owned assets). Later slices (layout rules, external stylesheets,
+**Status:** F9.1 + F9.2 hardening implemented (closed layout plan,
+metadata/footer/asset-url, target-owned assets, layout UTF-8 at split,
+orphan asset scrub). Later slices (layout rules, external stylesheets,
 DaisyUI experiment) remain open per §12.
 
-**Authority:** normative for the F9.1 HTML theme path. Subordinate contracts:
+**Authority:** normative for the F9.1/F9.2 HTML theme path. Subordinate contracts:
 [HTML output](html-output.md), [multi-target](multi-target-isolated-output.md),
 [identity/path](identity-and-paths.md). Does not change frontmatter grammar,
 IR `schemaVersion`, or the Apex trust model.
@@ -84,8 +85,10 @@ page. Every known marker may occur at most once.
 
 `{{content}}` must occur exactly once. Missing or duplicate markers, unknown
 markers, invalid UTF-8, or an unclosed marker are hard layout errors before
-content compilation. An absent optional slot emits no wrapper of its own, so a
-theme controls its surrounding HTML.
+content compilation. Layout UTF-8 is validated at **plan split / load**
+(`Layout.split` / `loadLayout`), not later during page writes. An absent
+optional slot emits no wrapper of its own, so a theme controls its surrounding
+HTML.
 
 `metadata` is intentionally boring and deterministic. A future implementation
 may emit a stable fragment such as:
@@ -184,6 +187,12 @@ Asset ownership rules:
   copied exactly, and no timestamps or host paths enter output metadata.
 - Asset files are staged and published with the target, not written to a
   shared global cache or another target's directory.
+- When a target uses a **managed theme root** (layout path under
+  `…/layouts/<file>.html` with a parent segment), Boris scrubs orphan files
+  under that target's published `assets/` after each successful publish: any
+  file not in the current sorted theme inventory is deleted (covers remove and
+  rename). Empty inventory removes the leftover `assets/` tree. Legacy
+  `layouts/…` (no theme root) does **not** claim or scrub `assets/`.
 - A page output / asset path collision is a preflight usage error. The design
   does not silently prefer a page or an asset.
 - CSS `url(...)` references are kept relative to the CSS file. F9 does not
@@ -393,10 +402,10 @@ under the theme's `assets/` tree and Boris treats it as opaque bytes. The
 default `zig build`, release gate, and bare `boris` invocation do not require
 Node, a bundler, or network access.
 
-## 12. Open decisions (post-F9.1)
+## 12. Open decisions (post-F9.2)
 
-| # | Decision | F9.1 closure |
-|---|----------|--------------|
+| # | Decision | Closure |
+|---|----------|---------|
 | 1 | Page layout rules (CLI vs config) | **Deferred** — one layout per target |
 | 2 | `footer.html` convention | **Accepted** theme-root `footer.html` |
 | 3 | Metadata DOM shape | **Frozen** for F9.1: `<dl class="page-metadata">` with Status / Parent / Tags when set; title/id omitted (title has `{{title}}`) |
@@ -404,23 +413,35 @@ Node, a bundler, or network access.
 | 5 | Asset dirtying vs separate asset manifest | **Conservative** referenced-asset bytes in page fingerprint; unreferenced inventory changes do not dirty HTML |
 | 6 | External-stylesheet opt-in warning shape | **Deferred** |
 | 7 | IR `layout`/`asset` endpoints | **Deferred** — HTML planner/cache only |
+| 8 | Layout UTF-8 boundary | **F9.2** — `Layout.split` / `loadLayout` (`LayoutInvalidUtf8`) |
+| 9 | Orphan theme-asset scrub | **F9.2** — post-publish under managed theme roots only |
 
 ### Known limitations (not silent failures)
 
-- Layout files are not `utf8Validate`d at split time (contract mentions invalid
-  UTF-8 as an error; Apex/body paths have their own checks). **Dead end for
-  F9.1** — do not claim UTF-8 layout rejection until implemented.
-- `AssetPathEscape` is reserved; escape is enforced by path grammar +
-  collision/symlink checks instead. Orphan asset removal when a theme drops a
-  file is not scrubbed from a prior `dist/`.
-- Symlink rejection is implemented; portable adversarial fixtures for
-  symlinks are host-dependent and not required for the release gate.
+- `AssetPathEscape` remains a reserved error name; escape is enforced by path
+  grammar + collision/symlink checks instead of a separate escape detector.
+- Symlink rejection is implemented; portable tests create a symlink when the
+  host allows and **skip** when create is denied (sandbox). Not a release-gate
+  binary fixture.
+- Footer bytes are not separately UTF-8-gated (trusted theme fragment streamed
+  as opaque HTML). Layout files are.
 
-## 13. F9.1 implementation slice (landed)
+## 13. Implementation slices
+
+### F9.1 (landed)
 
 - Closed layout plan in `assemble.zig` (`metadata`, `footer`, `asset-url`).
 - Target-owned theme inventory/copy in `theme.zig` with collision checks.
 - Fingerprint extension for footer + referenced assets.
 - theme-site + theme-adversarial fixtures; sequential/`--jobs`/multi-target.
+
+### F9.2 hardening (landed)
+
+- Layout UTF-8 validation at plan split (`InvalidUtf8` → `LayoutInvalidUtf8`).
+- Orphan theme-asset scrub after publish when a managed theme root is in use
+  (remove + rename; empty inventory drops `assets/`).
+- Expanded fixture/unit coverage: `--theme` path identity, asset-url depths,
+  footer/metadata, multi-target isolation, full vs incremental byte-identical
+  HTML/assets, traversal/collision/missing/symlink failure paths.
 
 The existing `layouts/main.html` remains the regression fixture throughout.

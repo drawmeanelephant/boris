@@ -1,4 +1,4 @@
-# Theme adversarial fixtures (F9.1)
+# Theme adversarial fixtures (F9.1 / F9.2)
 
 Fail-loud and escape cases for the closed layout plan and target-owned assets.
 Happy path: [theme-site](../theme-site/).
@@ -11,8 +11,16 @@ Happy path: [theme-site](../theme-site/).
 | `metadata-escape/` | closed FM tags/title containing markup | metadata/title sinks HTML-escaped |
 | `collision/` | page output path equals a theme asset path | hard fail (`AssetCollision`) |
 
-These are exercised by unit tests in `src/compile.zig` / `src/assemble.zig`
-(tmpDir isolation + fixture trees where paths are stable).
+Additional F9.2 cases live as tmpDir unit tests (not checked-in binary trees):
+
+| Case | Where | Expected |
+|------|-------|----------|
+| Invalid layout UTF-8 | `src/assemble.zig` + `src/compile.zig` | `InvalidUtf8` / `LayoutInvalidUtf8` before publish |
+| Asset file symlink | `src/theme.zig` + `src/compile.zig` (host-dependent) | `AssetSymlink` when create is allowed; skip when denied |
+| Orphan asset scrub | `src/theme.zig` + `src/compile.zig` | removed/renamed theme files drop from prior `dist/assets/` |
+
+These are exercised by unit tests in `src/compile.zig` / `src/assemble.zig` /
+`src/theme.zig` (tmpDir isolation + fixture trees where paths are stable).
 
 **Note on theme root:** `themeRootFromLayoutPath` returns null only for a path
 that starts with `layouts/` (no parent segment). A fixture path such as

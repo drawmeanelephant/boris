@@ -273,6 +273,7 @@ fn mapHtmlError(
         error.LayoutDuplicateMarker,
         error.LayoutUnknownMarker,
         error.LayoutInvalidAssetUrl,
+        error.LayoutInvalidUtf8,
         error.AssetNotFound,
         error.AssetCollision,
         error.AssetSymlink,

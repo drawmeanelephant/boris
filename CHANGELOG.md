@@ -19,6 +19,19 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Feature 9.2 — theme/template hardening
+
+- Layout UTF-8 validation at plan split (`Layout.split` / `loadLayout` →
+  `LayoutInvalidUtf8`) before content compile.
+- Orphan theme-asset scrub after publish for managed theme roots: removed or
+  renamed files under theme `assets/` are deleted from the target `dist/assets/`;
+  empty inventory drops the leftover `assets/` tree. Legacy `layouts/…` is
+  unchanged and does not scrub.
+- Expanded coverage: theme-site full vs incremental byte-identical HTML/assets,
+  `--theme` path identity, footer/metadata/asset-url, multi-target isolation,
+  traversal/collision/missing-asset failure paths, host-dependent symlink
+  rejection. Contract: `docs/contracts/templating-and-themes.md`.
+
 ### Feature 9.1 — closed layout plan + target-owned theme assets
 
 - Reusable closed layout plan in `assemble.zig`: existing five markers plus

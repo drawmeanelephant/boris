@@ -145,6 +145,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | 7 | Includes + wiki-links | `{{include}}` + `[[entity-id]]` pre-Apex; cycles/missing fail loud; `includes/` not pages |
 | 9 | Heading-target wiki links | `[[entity-id#heading-id]]` matches Apex-rendered ids; fail loud on missing |
 | 9.1 | Closed layout plan + theme assets | `metadata` / `footer` / `asset-url`; target-owned asset copy; see `templating-and-themes.md` |
+| 9.2 | Theme/template hardening | Layout UTF-8 at split; orphan theme-asset scrub; fixture/failure coverage; see `templating-and-themes.md` |
 
 P2 (fingerprints, incremental, layout edges) and P3 scale-out are **complete**
 on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.

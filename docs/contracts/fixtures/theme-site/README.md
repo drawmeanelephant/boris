@@ -19,6 +19,7 @@ one-level Trunk/Satellite graph. The experimental theme is intentionally plain
 CSS; it is a shape fixture for asset ownership and page-relative URLs, not a
 DaisyUI implementation. F9.1 accepts `metadata`, `footer`, and `asset-url`
 when the layout path is under a theme root (`…/layouts/main.html`).
+`--theme experimental-theme` is sugar for that layout path.
 
 Design acceptance expectations:
 
@@ -29,3 +30,8 @@ Design acceptance expectations:
 - A second target can use a different theme without reading or overwriting
   the first target's assets or cache.
 - The copied CSS bytes are exactly the theme input bytes.
+- Full rebuild and incremental no-op produce **byte-identical** HTML pages and
+  managed assets (cache manifest under `.boris-cache/` may be present only on
+  incremental runs).
+- Removing or renaming a theme asset removes the prior file from the target's
+  published `assets/` (F9.2 orphan scrub).
