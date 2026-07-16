@@ -1525,11 +1525,37 @@ test "Textile mode preserves graph identity and fails closed" {
     });
     defer malformed.deinit();
     try std.testing.expect(!malformed.ok);
+    try std.testing.expect(!malformed.graph_frozen);
     var saw_textile = false;
+    var saw_table_declaration = false;
     for (malformed.diagnostics.items) |d| if (d.code == .ETEXTILE) {
         saw_textile = true;
+        if (std.mem.eql(u8, d.source_path, "table.textile")) {
+            saw_table_declaration = true;
+            try std.testing.expectEqual(@as(u32, 4), d.line.?);
+            try std.testing.expectEqual(@as(u32, 1), d.column.?);
+        }
     };
     try std.testing.expect(saw_textile);
+    try std.testing.expect(saw_table_declaration);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try outRel(gpa, &tmp, "textile-table-reject");
+    defer gpa.free(out);
+    var rejected = try run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/textile-compatibility/invalid/content",
+        .out_dir = out,
+        .quiet = true,
+        .input_format = .textile,
+    });
+    defer rejected.deinit();
+    try std.testing.expect(!rejected.ok);
+    try std.testing.expect(!rejected.graph_frozen);
+    try std.testing.expect(!rejected.published_graph_ir);
+    try std.testing.expect(!fileExists(io, out, "manifest.json"));
+    try std.testing.expect(!fileExists(io, out, "graph.json"));
+    try std.testing.expect(fileExists(io, out, "build-report.json"));
 
     var mixed = try compile(io, gpa, .{
         .content_root = "docs/contracts/fixtures/textile-compatibility/mixed/content",

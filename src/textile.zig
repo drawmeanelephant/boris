@@ -393,6 +393,18 @@ fn looksLikeFootnoteBlock(line: []const u8) bool {
     return i < line.len and line[i] == '.';
 }
 
+/// Textile tables begin with `table.` or a `table` block declaration bearing
+/// a modifier such as `table(class).` or `table{width:100%}.`. Recognize the
+/// declaration itself so it cannot fall through to ordinary paragraph text
+/// before its pipe rows are considered.
+fn looksLikeTableDeclaration(line: []const u8) bool {
+    if (!std.mem.startsWith(u8, line, "table") or line.len == "table".len) return false;
+    return switch (line["table".len]) {
+        '.', '(', '{', '[', '<', '>', '=' => true,
+        else => false,
+    };
+}
+
 fn unsupportedBlockMessage(line: []const u8) ?[]const u8 {
     if (looksLikeHeadingSignature(line)) return "malformed heading or unsupported Textile heading attributes/CSS";
     if (std.mem.startsWith(u8, line, "bq..") or std.mem.startsWith(u8, line, "bq.:") or
@@ -410,6 +422,7 @@ fn unsupportedBlockMessage(line: []const u8) ?[]const u8 {
         std.mem.startsWith(u8, line, "notextile.") or std.mem.startsWith(u8, line, "###."))
         return "this Textile block type is outside the compatibility subset";
     if (looksLikeFootnoteBlock(line)) return "Textile footnotes and endnotes are unsupported";
+    if (looksLikeTableDeclaration(line)) return "Textile tables and table modifiers are unsupported";
     if (line[0] == '|') return "Textile tables are unsupported";
     if (std.mem.startsWith(u8, line, "** ") or std.mem.startsWith(u8, line, "## ") or
         std.mem.startsWith(u8, line, "*# ") or std.mem.startsWith(u8, line, "#* "))
@@ -676,6 +689,9 @@ test "Textile adapter rejects attributes malformed modifiers macros and unsafe l
         .{ .body = "h2{color:red}. Styled\n", .needle = "attributes/CSS" },
         .{ .body = "A *strong phrase without a closer.\n", .needle = "unclosed" },
         .{ .body = "| A | table |\n", .needle = "tables" },
+        .{ .body = "table.\n| A | table |\n", .needle = "tables and table modifiers" },
+        .{ .body = "table(class).\n| A | table |\n", .needle = "tables and table modifiers" },
+        .{ .body = "table{width:100%}.\n| A | table |\n", .needle = "tables and table modifiers" },
         .{ .body = "fn1. Note\n", .needle = "footnotes" },
         .{ .body = "{{include includes/a.md}}\n", .needle = "macros" },
         .{ .body = "A @{{include includes/a.md}}@ phrase.\n", .needle = "macros" },
@@ -690,6 +706,13 @@ test "Textile adapter rejects attributes malformed modifiers macros and unsafe l
         try std.testing.expect(!result.isOk());
         try std.testing.expect(std.mem.indexOf(u8, result.diagnostic.?.message, case.needle) != null);
     }
+}
+
+test "Textile table declarations fail at the declaration line" {
+    const result = try toMarkdown("table.\n| Header |\n", std.testing.allocator);
+    try std.testing.expect(!result.isOk());
+    try std.testing.expectEqual(@as(u32, 1), result.diagnostic.?.line);
+    try std.testing.expectEqual(@as(u32, 1), result.diagnostic.?.column);
 }
 
 test "Textile adapter escapes literal Markdown and HTML without changing ordinary prose" {
