@@ -14,6 +14,7 @@ const identity = @import("identity.zig");
 const include_mod = @import("include.zig");
 const wikilink = @import("wikilink.zig");
 const textile = @import("textile.zig");
+const diag = @import("diag.zig");
 
 pub const Options = struct {
     input_format: identity.InputFormat = .markdown,
@@ -28,6 +29,44 @@ fn sourceLineAt(source: []const u8, offset: usize) u32 {
         line += 1;
     };
     return line;
+}
+
+fn componentDiagnostic(
+    gpa: std.mem.Allocator,
+    source: []const u8,
+    body_offset: usize,
+    source_path: []const u8,
+    component_diag: aside.Diagnostic,
+) !diag.Diagnostic {
+    const message = if (component_diag.name.len > 0)
+        try std.fmt.allocPrint(gpa, "{s}: {s}", .{ component_diag.name, component_diag.message })
+    else
+        try gpa.dupe(u8, component_diag.message);
+    return .{
+        .severity = .error_,
+        .code = .ECOMPONENT,
+        .message = message,
+        .remediation = "Use only <Aside kind=\"…\" id=\"…\"> with allowlisted kind/id, outside fenced code",
+        .source_path = source_path,
+        .line = sourceLineAt(source, body_offset) + component_diag.line - 1,
+        .column = component_diag.column,
+    };
+}
+
+fn printComponentDiagnostics(
+    gpa: std.mem.Allocator,
+    source: []const u8,
+    body_offset: usize,
+    source_path: []const u8,
+    diagnostics: []const aside.Diagnostic,
+) !void {
+    for (diagnostics) |component_diag| {
+        const structured = try componentDiagnostic(gpa, source, body_offset, source_path, component_diag);
+        defer gpa.free(structured.message);
+        const text = try diag.formatText(structured, gpa);
+        defer gpa.free(text);
+        std.debug.print("{s}\n", .{text});
+    }
 }
 
 /// Convert a parsed page body when the whole tree explicitly uses Textile.
@@ -101,7 +140,10 @@ pub fn renderSource(
     };
 
     const tok = try aside.tokenizeBody(with_wiki, arena);
-    if (tok.hasErrors()) return error.ComponentFailed;
+    if (tok.hasErrors()) {
+        if (!options.quiet) try printComponentDiagnostics(gpa, source, parsed.doc.body_offset, source_path, tok.diagnostics);
+        return error.ComponentFailed;
+    }
 
     var html_buf: std.ArrayList(u8) = .empty;
     for (tok.segments) |seg| {
@@ -129,6 +171,38 @@ fn writeTestFile(io: Io, root: []const u8, rel: []const u8, data: []const u8) !v
     var file = try cwd.createFile(io, path, .{});
     defer file.close(io);
     try file.writeStreamingAll(io, data);
+}
+
+test "component diagnostics use ECOMPONENT and full-source locator" {
+    const source =
+        "---\n" ++
+        "title: Bad Component\n" ++
+        "---\n" ++
+        "\n" ++
+        "# Bad Component\n" ++
+        "\n" ++
+        "<Figure src=\"x.png\">\n";
+    const parsed = parser.parse(source);
+    try std.testing.expect(parsed.diagnostic == null);
+
+    const structured = try componentDiagnostic(std.testing.allocator, source, parsed.doc.body_offset, "bad-component.md", .{
+        .kind = .unregistered_component,
+        .line = 4,
+        .column = 1,
+        .message = "unregistered component tag",
+        .name = "Figure",
+    });
+    defer std.testing.allocator.free(structured.message);
+
+    try std.testing.expectEqual(diag.Code.ECOMPONENT, structured.code);
+    try std.testing.expectEqual(@as(?u32, 7), structured.line);
+    try std.testing.expectEqual(@as(?u32, 1), structured.column);
+    const text = try diag.formatText(structured, std.testing.allocator);
+    defer std.testing.allocator.free(text);
+    try std.testing.expectEqualStrings(
+        "error: ECOMPONENT: bad-component.md:7:1: Figure: unregistered component tag [Use only <Aside kind=\"…\" id=\"…\"> with allowlisted kind/id, outside fenced code]",
+        text,
+    );
 }
 
 test "shared body pipeline preserves include wiki Aside render order" {

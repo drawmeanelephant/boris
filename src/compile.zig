@@ -916,7 +916,7 @@ pub fn compileHtmlSiteMulti(
         const cached = layout_cache.get(plan.layout_path).?;
         _ = compilePagesWithSharedAndSite(io, gpa, &db, cached.layout, target_options, &shared, cached.bytes, &site) catch |err| {
             if (!base_options.quiet and err != error.IncludeFailed and err != error.ReferenceFailed and
-                err != error.GraphValidationFailed and err != error.AmbiguousGlob and
+                err != error.ComponentFailed and err != error.GraphValidationFailed and err != error.AmbiguousGlob and
                 err != error.MixedThemeRoots and err != error.LayoutSelectionFailed)
             {
                 std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
