@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}} · Contoso Docs</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/site.css}}">
+  <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+</head>
+<body>
+  <header class="site-header">
+    <a class="site-brand" href="#">Contoso Docs</a>
+    {{breadcrumb}}
+  </header>
+  <div class="site-shell">
+    <aside class="site-sidebar">{{nav}}</aside>
+    <main class="site-main">
+      {{metadata}}
+      {{toc}}
+      {{content}}
+    </main>
+  </div>
+  <footer class="site-footer">{{footer}}</footer>
+</body>
+</html>
