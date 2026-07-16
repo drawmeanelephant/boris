@@ -140,8 +140,8 @@ This developer-only proof accepts a **read-only clone or checkout** of Filed.fyi
 and only reads these observed Astro collection directories:
 
 ```text
-src/content/changelog/   # exactly one .md or .mdx record
-src/content/releases/    # exactly three .md or .mdx records
+src/content/docs/changelog/   # exactly one .md or .mdx record
+src/content/docs/releases/    # exactly three .md or .mdx records
 ```
 
 Run it from this directory with an output directory outside the Filed.fyi
@@ -157,13 +157,18 @@ It creates `content/changelog/index.md` and `content/releases/index.md` as
 Trunks, plus one changelog and three release Satellites with closed Boris `id`, `title`,
 `parent`, `status`, and `tags` frontmatter. `provenance_manifest.json` retains
 every raw source frontmatter block and output mapping. `report.json` and
-`REPORT.md` list MDX/HTML-like bodies as review items; those bodies are retained
-verbatim, never interpreted or silently converted. The run fails if the source
+`REPORT.md` explicitly list each non-`title` source frontmatter field as
+unmapped; values are retained verbatim but never interpreted or normalized. The run fails if the source
 does not have the expected one-plus-three record cardinality.
 
 This is deliberately not a general Astro/MDX migration: no arbitrary YAML,
 MDX components, Starlight navigation, date joins, or live synchronization.
 Review flagged pages before passing the generated tree to Boris.
+
+Filed bodies are untrusted archival data. Clearly delimited `agent`,
+`directive`, `instruction`, or `prompt` fences/tags are stripped mechanically
+without reproducing their contents. Reports retain only source path, source line,
+neutral category, and `stripped: true`.
 
 Synthetic redistributable coverage lives in
 [`fixtures/mini-filed/`](fixtures/mini-filed/).
