@@ -45,6 +45,7 @@ pub fn hexDigest(digest: [32]u8) [64]u8 {
 /// - resolved include dependency bytes, in stable dependency order
 /// - resolved layout bytes
 /// - optional site-nav material (when layout has graph chrome; empty otherwise)
+/// - optional theme material (footer + referenced asset path/bytes; F9.1)
 ///
 /// Ensures no timestamps, absolute paths, hostnames, pointer addresses,
 /// random values, or unstable map iterations are factored in.
@@ -57,6 +58,31 @@ pub fn computePageFingerprint(
     include_deps: []const []const u8,
     layout_bytes: []const u8,
     site_nav_material: []const u8,
+) [32]u8 {
+    return computePageFingerprintTheme(
+        target_name,
+        layout_path,
+        entity_id,
+        source_bytes,
+        include_deps,
+        layout_bytes,
+        site_nav_material,
+        "",
+    );
+}
+
+/// Same as `computePageFingerprint` plus optional theme material (footer and
+/// referenced asset bytes). Empty `theme_material` preserves prior digests for
+/// layouts without managed theme inputs.
+pub fn computePageFingerprintTheme(
+    target_name: []const u8,
+    layout_path: []const u8,
+    entity_id: []const u8,
+    source_bytes: []const u8,
+    include_deps: []const []const u8,
+    layout_bytes: []const u8,
+    site_nav_material: []const u8,
+    theme_material: []const u8,
 ) [32]u8 {
     var hasher = Sha256.init(.{});
 
@@ -93,6 +119,12 @@ pub fn computePageFingerprint(
     if (site_nav_material.len > 0) {
         updateLen(&hasher, site_nav_material.len);
         hasher.update(site_nav_material);
+    }
+
+    // 7. Theme material (F9.1) — footer + referenced assets; empty keeps legacy digests.
+    if (theme_material.len > 0) {
+        updateLen(&hasher, theme_material.len);
+        hasher.update(theme_material);
     }
 
     var digest: [32]u8 = undefined;
@@ -233,6 +265,14 @@ test "Target configuration changes isolate page keys" {
 
     try std.testing.expect(!std.mem.eql(u8, &key_prod, &key_stage));
     try std.testing.expect(!std.mem.eql(u8, &key_prod, &key_ref));
+}
+
+test "theme material changes page fingerprint when present" {
+    const base = computePageFingerprintTheme("default", "layouts/main.html", "index", "src", &.{}, "layout", "", "");
+    const with_theme = computePageFingerprintTheme("default", "layouts/main.html", "index", "src", &.{}, "layout", "", "footer\x00assets");
+    const same_empty = computePageFingerprint("default", "layouts/main.html", "index", "src", &.{}, "layout", "");
+    try std.testing.expectEqualSlices(u8, &base, &same_empty);
+    try std.testing.expect(!std.mem.eql(u8, &base, &with_theme));
 }
 
 test "Affected pages query scenarios" {

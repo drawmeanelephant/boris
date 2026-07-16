@@ -19,6 +19,21 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Feature 9.1 — closed layout plan + target-owned theme assets
+
+- Reusable closed layout plan in `assemble.zig`: existing five markers plus
+  `{{metadata}}`, `{{footer}}`, and validated `{{asset-url assets/…}}`.
+- Target-owned theme asset inventory/copy (`theme.zig`): sorted copy under the
+  target output, page/asset collision preflight, symlink and path-escape
+  rejection, ASCII-only asset path grammar (fail closed on non-ASCII).
+- Theme root derived from `…/layouts/<file>.html`; legacy `layouts/main.html`
+  remains unchanged (no managed assets). `--theme ROOT` is sugar for
+  `ROOT/layouts/main.html`.
+- Page fingerprints include footer + referenced asset bytes when those slots
+  are used; asset changes dirty dependent pages. Multi-target isolation
+  preserved. Contract: `docs/contracts/templating-and-themes.md`; fixture:
+  `docs/contracts/fixtures/theme-site/`.
+
 ### Feature 9 — heading-target wiki links
 
 - Wiki links accept section fragments: `[[entity-id#heading-id]]` and

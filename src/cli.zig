@@ -36,6 +36,8 @@ pub const Options = struct {
     html_dir: ?[]const u8 = null,
     /// Global HTML layout template (default `layouts/main.html`).
     html_layout: []const u8 = "layouts/main.html",
+    /// When set, `html_layout` was allocated for `--theme` sugar and must be freed.
+    owned_html_layout: bool = false,
     /// Explicit incremental HTML build mode (HTML mode only).
     incremental: bool = false,
     /// Bounded parallel rendering worker count (HTML mode only).
@@ -46,6 +48,10 @@ pub const Options = struct {
     targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 },
 
     pub fn deinit(self: *Options, gpa: std.mem.Allocator) void {
+        if (self.owned_html_layout) {
+            gpa.free(self.html_layout);
+            self.owned_html_layout = false;
+        }
         self.targets.deinit(gpa);
     }
 };
@@ -87,11 +93,13 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_html = false;
     var saw_html_dir = false;
     var saw_html_layout = false;
+    var saw_theme = false;
     var saw_incremental = false;
     var saw_jobs = false;
     var saw_watch = false;
     var jobs: usize = 1;
     var html_layout: []const u8 = default_html_layout;
+    var theme_root: ?[]const u8 = null;
 
     var targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 };
     errdefer targets.deinit(gpa);
@@ -255,16 +263,37 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        // F9.1: --theme ROOT is sugar for --html-layout ROOT/layouts/main.html
+        // (theme asset root is derived from the layout path at compile time).
+        if (std.mem.eql(u8, a, "--theme") or std.mem.startsWith(u8, a, "--theme=")) {
+            if (saw_theme) return error.DuplicateFlag;
+            saw_theme = true;
+            theme_root = try takeValue(args, &i, a, "--theme");
+            continue;
+        }
+
         if (std.mem.startsWith(u8, a, "-")) {
             return error.UnknownFlag;
         }
         return error.UnexpectedPositional;
     }
 
+    // Resolve --theme sugar before mode selection (implies HTML layout path).
+    var owned_html_layout = false;
+    if (theme_root) |tr| {
+        if (tr.len == 0) return error.EmptyValue;
+        if (saw_html_layout) return error.ConflictingFlags;
+        // Joined path is owned by Options (freed in deinit).
+        html_layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{tr});
+        owned_html_layout = true;
+        saw_html_layout = true;
+    }
+    errdefer if (owned_html_layout) gpa.free(html_layout);
+
     const has_explicit_targets = targets.items.len > 0;
     const has_target_layouts = target_layouts.items.len > 0;
     // Explicit HTML selectors (not the bare default).
-    const explicit_html = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts;
+    const explicit_html = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts or saw_theme;
     const wants_rag = saw_rag or saw_rag_dir;
     // Explicit IR: --out and/or --no-rag (bare CLI is HTML, not IR).
     const wants_ir = saw_out or saw_no_rag;
@@ -367,6 +396,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .rag_dir = null,
             .html_dir = if (has_explicit_targets) null else html_dir,
             .html_layout = html_layout,
+            .owned_html_layout = owned_html_layout,
             .incremental = saw_incremental or saw_watch,
             .jobs = jobs,
             .watch = saw_watch,
@@ -419,6 +449,7 @@ pub fn printUsage() void {
         \\  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
         \\  --html-dir <DIR>    HTML output directory (implies HTML; default: dist)
         \\  --html-layout PATH  Global layout template (default: layouts/main.html)
+        \\  --theme ROOT        Theme root sugar → ROOT/layouts/main.html (+ managed assets/)
         \\  --target NAME=DIR   Named HTML output root (repeatable; exclusive with --html-dir)
         \\  --target-layout N=P Per-target layout (NAME=PATH; may precede or follow --target)
         \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
@@ -1109,6 +1140,20 @@ test "findBadArg reports --target" {
     try expectEqualStrings("--target=bad", findBadArg(&.{ "boris", "--target=bad" }).?);
     try expectEqualStrings("--html-layout", findBadArg(&.{ "boris", "--html-layout" }).?);
     try expectEqualStrings("--target-layout", findBadArg(&.{ "boris", "--target-layout" }).?);
+}
+
+test "parse: --theme sugar selects theme layouts/main.html" {
+    var o = try parseOptions(std.testing.allocator, &.{
+        "boris", "--theme", "experimental-theme",
+    });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(Mode.html, o.mode);
+    try expectEqualStrings("experimental-theme/layouts/main.html", o.html_layout);
+    try expect(o.owned_html_layout);
+
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{
+        "boris", "--theme", "t", "--html-layout", "layouts/main.html",
+    }));
 }
 
 
