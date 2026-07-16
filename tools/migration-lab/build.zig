@@ -1,6 +1,6 @@
 const std = @import("std");
 
-/// Standalone Astro → Boris migration archaeology tool.
+/// Standalone Astro / WordPress → Boris migration laboratory.
 /// Not part of the product compiler or root `zig build test` gate.
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
