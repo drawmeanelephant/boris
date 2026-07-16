@@ -96,7 +96,7 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | Page layout selection (`--layout-rule`) | **Done** (exact/glob/role; one theme/target) |
 | Layout-selection hostile/path gate | **Done** (`zig build test-layout-hostile`; lexical path rejection) |
 | Apex Unified compatibility matrix | **Included in v0.4.0 RC** (fixtures + matrix; compatibility evidence, not a new renderer) |
-| Astro, WordPress, Instagram, and Obsidian migration labs | **Included in v0.4.0 RC** (bounded conversion/reconnaissance labs + adversarial preservation fixtures; Obsidian vault phase-1 under `tools/migration-lab/`; not runtime dependencies) |
+| Astro, WordPress, Instagram, Obsidian, and Notion migration labs | **Included in v0.4.0 RC** (bounded conversion/reconnaissance labs + adversarial preservation fixtures; Obsidian vault + Notion Markdown/CSV phase-1 under `tools/migration-lab/`; not runtime dependencies) |
 | Bounded Textile input | **Included in v0.4.0 RC** (`--textile`; explicit whole-tree compatibility adapter) |
 | Optional static theme showcase | **Included in v0.4.0 RC** (`examples/static-theme-showcase/`; hand-authored CSS, not product chrome) |
 | Agent-lore content dogfood | **Included in v0.4.0 RC** (tracked sample content only; private 250MB source data remains excluded/ignored) |
