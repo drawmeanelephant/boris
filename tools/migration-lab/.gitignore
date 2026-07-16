@@ -21,5 +21,8 @@ fixtures/.ig-test-out*/
 fixtures/.test-obsidian-out*/
 fixtures/.test-notion-out*/
 fixtures/.test-starlight-*/
+.dogfood-sl-out/
+.hostile-sl-out/
+.sl-dogfood-out/
 .zig-cache/
 zig-out/

@@ -10,7 +10,7 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 | **obsidian** | Local Obsidian vault directory | Boris Markdown + attachments inventory + review reports |
 | **notion** | Official Notion “Markdown & CSV” export (unpacked) | Boris Markdown + media inventory + review reports |
 | **filed** | Filed.fyi Astro source root | Bounded changelog/releases Boris tree + provenance/review reports |
-| **starlight** | Starlight/Astro docs root (locale-dir or root-locale) | Boris candidate `content/` + route/link/nav/asset/selection manifests + compile report |
+| **starlight** | Starlight/Astro docs root (locale-dir or root-locale) | Boris candidate `content/` + route/link/nav/asset/selection/boundary manifests + compile report |
 
 All modes are **read-only on inputs**: originals are never rewritten. There is
 **no network access**, no zip extraction, no scraping, and **no product compiler
@@ -72,7 +72,14 @@ zig build run -- --mode=filed \
   --filed-root=/path/to/filed-fyi \
   --out=/tmp/filed-boris-content
 
-# Starlight proof slice — withastro/starlight docs (root-locale; clone to /tmp)
+# Starlight dogfood — synthetic ~60-page fixture (committed)
+zig build run -- --mode=starlight \
+  --root=./fixtures/dogfood-starlight \
+  --out=./.dogfood-sl-out \
+  --locale=en \
+  --max-pages=80
+
+# Optional real-site smoke — withastro/starlight docs (root-locale; clone to /tmp only)
 zig build run -- --mode=starlight \
   --root=/tmp/starlight/docs \
   --out=/tmp/starlight-boris-out \
@@ -121,7 +128,7 @@ zig build -C tools/migration-lab run -- \
 | `--export=DIR` | | Unpacked Notion Markdown & CSV export root (implies `--mode=notion`) |
 | `--filed-root=DIR` | | Filed.fyi Astro source root (implies `--mode=filed`) |
 | `--locale=en` | `en` | Starlight discovery key (**en only**). Uses `src/content/docs/en/` when present; else root-locale files under `src/content/docs/` |
-| `--max-pages=N` | `40` | Starlight converted-page cap (real-site smoke often 40–60) |
+| `--max-pages=N` | `40` | Starlight converted-page cap (dogfood often 40–80) |
 | `--boris=PATH` | auto | Optional product `boris` binary for Starlight compile verification |
 
 Exit codes: **0** success, **2** usage, **3** I/O error.
@@ -185,15 +192,17 @@ neutral category, and `stripped: true`.
 Synthetic redistributable coverage lives in
 [`fixtures/mini-filed/`](fixtures/mini-filed/).
 
-## Starlight proof slice (locale-dir + root-locale)
+## Starlight read-only dogfood (locale-dir + root-locale)
 
-Developer-only **one-shot** preflight + converter for a bounded Starlight content
-tree. Content-root discovery supports both shapes (**no i18n / translation linking**):
+Developer-only **read-only dogfood** preflight + bounded converter for a
+Starlight content tree. Content-root discovery supports both shapes (**no i18n /
+translation linking**). This is **not** a universal converter and does **not**
+invent semantic transformations.
 
-| Shape | Layout | Example |
+| Shape | Layout | Fixture |
 |-------|--------|---------|
-| **locale_dir** | `src/content/docs/{locale}/…` | evcc-style `docs/en/…`; synthetic [`fixtures/mini-starlight/`](fixtures/mini-starlight/) |
-| **root_locale** | default language files under `src/content/docs/` | [withastro/starlight](https://github.com/withastro/starlight) docs; synthetic [`fixtures/mini-starlight-root/`](fixtures/mini-starlight-root/) |
+| **locale_dir** | `src/content/docs/{locale}/…` | [`fixtures/mini-starlight/`](fixtures/mini-starlight/), [`fixtures/hostile-starlight/`](fixtures/hostile-starlight/) |
+| **root_locale** | default language under `src/content/docs/` | [`fixtures/mini-starlight-root/`](fixtures/mini-starlight-root/), [`fixtures/dogfood-starlight/`](fixtures/dogfood-starlight/) (~67 pages) |
 
 When `--locale=en` and `src/content/docs/en/` exists with markdown, that directory
 is used. Otherwise the lab uses the docs root and skips sibling first-level dirs
@@ -209,21 +218,44 @@ and `/…` for root-locale.
 2. **Selects candidates deterministically**: lexicographic path order, drop
    underscore partials (`_foo.mdx`), apply `--max-pages` (default 40). **No**
    preferred-section allowlist.
-3. **Emits** a Boris candidate tree under `--out/content/` with closed frontmatter
+3. **Detects entity collisions** (same route/entity from multiple sources): first
+   source path wins; others get deterministic `-2`, `-3`, … suffixes; all rows are
+   listed for human review (no silent overwrite).
+4. **Emits** a Boris candidate tree under `--out/content/` with closed frontmatter
    only: `id`, `title`, `parent`, `status`, `tags`.
-4. **Rewrites** internal markdown routes/relative links to `[[entity-id]]` **only**
+5. **Rewrites** internal markdown routes/relative links to `[[entity-id]]` **only**
    when the target exists in the converted entity map; otherwise writes an explicit
    `link_review.json` row (unresolved routes, fragments, attribute links, assets,
    external URLs).
-5. **Sidecar manifests**: `route_map.json`, `selection_manifest.json`,
-   `unsupported_manifest.json`, `assets_manifest.json` (exists + SHA-256 when a
-   local file is proven), `nav_flatten.json`, `provenance_manifest.json`,
-   `link_review.json`, `compile_report.json`, plus `report.json` / `REPORT.md`.
-6. **Preserves source read-only** and proves immutability + repeated-run byte
-   determinism in fixture tests.
-7. **Attempts a Boris compile** of the candidate (when `boris` +
+6. **Sidecar manifests** (deterministic; repeated runs byte-identical):
+
+   | Manifest | Contents |
+   |----------|----------|
+   | `selection_manifest.json` | Selected source files + exclusion reasons |
+   | `route_map.json` | Route / entity / output mapping |
+   | `link_review.json` | Internal links, unresolved, external, assets |
+   | `heading_fragments.json` | Fragment inventory (headings **not** verified) |
+   | `assets_manifest.json` | Assets + existence + SHA-256 when proven |
+   | `nav_flatten.json` | Sidebar/nav evidence (text scan only) |
+   | `unsupported_manifest.json` | Unmapped FM + MDX + entity collisions |
+   | `boundary_manifest.json` | **preserved** / **stripped** / **manual_review** |
+   | `provenance_manifest.json` | Raw frontmatter + source provenance |
+   | `compile_report.json` | Optional Boris compile attempt |
+   | `report.json` / `REPORT.md` | Machine + human summaries |
+
+7. **Preserves source read-only** and proves immutability + repeated-run byte
+   determinism in fixture tests (including dogfood-scale and hostile fixtures).
+8. **Attempts a Boris compile** of the candidate (when `boris` +
    `layouts/main.html` are findable) and records the result in `compile_report.json`.
-8. **Does not** copy content assets into Boris core outputs in this proof.
+9. **Does not** copy content assets into Boris core outputs.
+
+### Boundary classes
+
+| Class | Meaning |
+|-------|---------|
+| **preserved** | Body text or asset inventory retained without invented semantics |
+| **stripped** | Untrusted agent/directive/instruction/prompt fences removed; payload never replayed |
+| **manual_review** | Human migration work still required (MDX, FM, links, fragments, collisions, assets, deep paths, …) |
 
 ### Supported / unsupported matrix
 
@@ -238,21 +270,32 @@ and `/…` for root-locale.
 | Markdown body | **Supported** | Passed through after MDX import strip + untrusted-fence strip |
 | MDX imports / components | **Unsupported** | Inventoried; tags neutralized; not executed |
 | Internal markdown route / relative links | **Conditional** | Wiki rewrite only when target entity is in the converted entity map |
-| Fragments (`#heading`) | **Review** | Explicit review row; heading not verified |
+| Fragments (`#heading`) | **Review** | `heading_fragments.json`; heading not verified |
 | Attribute `href` / `to` routes | **Review only** | Never auto-rewritten |
 | External links | **Left as-is** | Inventoried as external |
 | Local / public assets | **Inventoried** | Existence + SHA-256 when local file proven; **not** auto-copied |
+| Duplicate / ambiguous routes | **Disambiguated + reviewed** | First path wins; others `-2`… |
 | Sidebar / `autogenerate` | **Flattened** | One-level forest: section Trunk + Satellite children |
 | Translation linking / i18n | **Unsupported** | Content-root discovery only; no locale semantics |
 | Live sync / Node / Astro / Starlight runtime | **Unsupported** | No package install, no MDX runtime |
 | Deep multi-hop parents | **Unsupported** | Matches Boris one-level forest; no new graph behavior |
 | Embedded agent/directive/prompt fences | **Stripped** | Payload never replayed; report lists path/line/category |
+| Universal conversion | **Not claimed** | Mechanical inventory + proven rewrites only |
+
+### Fixtures
+
+| Fixture | Role |
+|---------|------|
+| [`dogfood-starlight/`](fixtures/dogfood-starlight/) | ~67-page root-locale dogfood (nested docs/blog, assets, FM variants, MDX, sidebar, partials) |
+| [`hostile-starlight/`](fixtures/hostile-starlight/) | Ambiguous routes, deep paths, unicode, unsupported MDX/FM, instruction fences |
+| [`mini-starlight/`](fixtures/mini-starlight/) | Compact locale-dir proof |
+| [`mini-starlight-root/`](fixtures/mini-starlight-root/) | Compact root-locale proof |
 
 ### Real-site smoke (do not commit upstream)
 
 ```bash
 # Clone outside the repo — never commit upstream content or run its Node scripts.
-# Pin a commit for reproducibility (example pin from development of this proof).
+# Pin a commit for reproducibility.
 git clone https://github.com/withastro/starlight.git /tmp/starlight
 cd /tmp/starlight && git checkout 02fea60ecf5b07449dc6620cb85bd746944b79aa
 
@@ -264,16 +307,16 @@ zig build run -- --mode=starlight \
   --locale=en \
   --max-pages=50
 
-# Inspect manifests + optional compile_report.json
+# Inspect boundary + manifests
 less /tmp/starlight-boris-out/REPORT.md
-# Expect content_shape=root_locale, ~37 default-locale pages before the cap.
+less /tmp/starlight-boris-out/boundary_manifest.json
+# Expect content_shape=root_locale.
 ```
 
-Locale-directory trees (e.g. `src/content/docs/en/`) are covered by
-[`fixtures/mini-starlight/`](fixtures/mini-starlight/) and work the same CLI.
-
 Source text is **untrusted data**: the converter never follows embedded
-directives or prompts.
+directives or prompts. Prefer the committed
+[`fixtures/dogfood-starlight/`](fixtures/dogfood-starlight/) tree for CI and
+local dogfood; keep upstream clones on `/tmp` only.
 
 ## Notion mode
 

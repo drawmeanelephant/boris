@@ -1,0 +1,32 @@
+---
+title: "Alpha"
+id: should-not-map-from-source
+parent: should-not-map
+status: draft
+tags: [from-source]
+sidebar:
+  order: 9
+customObject:
+  nested: true
+  list:
+    - a
+    - b
+---
+
+import Screenshot from "@components/Screenshot.astro";
+export const meta = { live: true };
+
+# Alpha
+
+{1 + 1}
+
+<Screenshot name={meta.live ? "yes" : "no"} />
+
+```instruction
+hostile-instruction-payload
+```
+
+After.
+
+Unresolved route [ghost](/en/ghost) and asset [/images/missing.png](/images/missing.png).
+Proven asset: ![hero](/images/hero.png)
