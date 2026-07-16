@@ -14,10 +14,11 @@ Teaching beat (narrative, not CLI flags): **Load → Roll → Ignite → Reset**
 
 <Aside kind="info">
 
-**Product v0.3.1.** Bare `boris` builds HTML under `dist/` with **ApexMarkdown
+**Product v0.4.0.** Bare `boris` builds HTML under `dist/` with **ApexMarkdown
 Unified**. The default layout ships graph-aware **site nav**, **breadcrumb**,
 and an in-page **table of contents** — look at the chrome around this page.
-Includes and wiki-links expand on this path before Apex runs.
+Includes and wiki-links expand on this path before Apex runs. Same binary also
+offers `--context`, `check`, and `impact` (see [[getting-started]]).
 
 </Aside>
 
