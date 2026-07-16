@@ -943,6 +943,27 @@ test "U14 custom allocator OOM path safe" {
     try std.testing.expectError(error.OutOfMemory, render(md, &arena));
 }
 
+test "U15 Unified trusted raw HTML passes through while fenced HTML is escaped" {
+    try skipIfHostileEngine();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const html = try fidelityRender(
+        \\<script type="text/plain" data-boundary="raw">RAW_BOUNDARY</script>
+        \\
+        \\```html
+        \\<script type="text/plain" data-boundary="fenced">FENCED_BOUNDARY</script>
+        \\```
+        \\
+    , &arena);
+
+    // The product host deliberately enables unsafe HTML for trusted authors.
+    // This is a renderer-boundary assertion, not a browser-sanitization claim.
+    try fidelityContains(html, "<script type=\"text/plain\" data-boundary=\"raw\">RAW_BOUNDARY</script>");
+    try fidelityContains(html, "&lt;script");
+    try fidelityContains(html, "FENCED_BOUNDARY");
+    try std.testing.expect(std.mem.indexOf(u8, html, "<script type=\"text/plain\" data-boundary=\"fenced\">") == null);
+}
+
 test "U16 dual-run HTML byte-identical (fidelity alias)" {
     try skipIfHostileEngine();
     var arena_a = std.heap.ArenaAllocator.init(std.testing.allocator);
