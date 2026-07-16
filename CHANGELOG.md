@@ -21,6 +21,14 @@ How to use going forward:
 
 ### Fixed
 
+- Wiki-link diagnostics distinguish a missing entity from a missing heading on
+  the plan/fingerprint path. `[[typo#frag]]` for an entity that is not in the
+  graph reported "heading target … not found on the page" (blaming a heading on
+  a page that never existed) because fragment membership was probed before
+  entity existence and a map miss looked identical to a heading miss.
+  `HeadingIndex.lookup` now separates the two. Exit code is unchanged
+  (`EREFERENCEMISSING`). Contract: `docs/contracts/heading-ids.md`
+  ("messages distinguish missing entity vs missing heading"). `src/wikilink.zig`.
 - `collectFragmentTargetSet` no longer inserts a non-owned key into the fragment
   target map: the id is duped before insert, so an allocation failure can never
   leave a view into source bytes as a map key for the cleanup errdefer to free
