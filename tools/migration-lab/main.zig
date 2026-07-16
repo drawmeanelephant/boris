@@ -6,6 +6,7 @@
 //!   instagram  — Instagram Takeout dump → Boris Markdown + theme assets + reports
 //!   obsidian   — Obsidian vault → Boris Markdown + attachments + reports
 //!   notion     — Notion Markdown & CSV export → Boris Markdown + media + reports
+//!   filed      — Filed.fyi changelog + releases slice → Boris Markdown + reports
 //!
 //! Never rewrites inputs. Not part of the Boris product compiler pipeline.
 //!
@@ -30,6 +31,7 @@ const wordpress = @import("wordpress.zig");
 const instagram = @import("instagram.zig");
 const obsidian = @import("obsidian.zig");
 const notion = @import("notion.zig");
+const filed = @import("filed.zig");
 
 pub const ExitCode = enum(u8) {
     success = 0,
@@ -47,6 +49,7 @@ pub const Mode = enum {
     instagram,
     obsidian,
     notion,
+    filed,
 
     pub fn parse(s: []const u8) ?Mode {
         if (std.mem.eql(u8, s, "astro")) return .astro;
@@ -54,6 +57,7 @@ pub const Mode = enum {
         if (std.mem.eql(u8, s, "instagram") or std.mem.eql(u8, s, "ig") or std.mem.eql(u8, s, "takeout")) return .instagram;
         if (std.mem.eql(u8, s, "obsidian") or std.mem.eql(u8, s, "obs") or std.mem.eql(u8, s, "vault")) return .obsidian;
         if (std.mem.eql(u8, s, "notion") or std.mem.eql(u8, s, "md-csv") or std.mem.eql(u8, s, "notion-export")) return .notion;
+        if (std.mem.eql(u8, s, "filed") or std.mem.eql(u8, s, "filed-fyi")) return .filed;
         return null;
     }
 };
@@ -74,6 +78,8 @@ pub const Options = struct {
     vault_dir: ?[]const u8 = null,
     /// Unpacked Notion Markdown & CSV export root.
     export_dir: ?[]const u8 = null,
+    /// Filed.fyi Astro source root (read-only; implies filed mode).
+    filed_root_dir: ?[]const u8 = null,
     /// Report/output directory (created if missing). Never writes into inputs.
     out_dir: []const u8 = "migration-report",
 };
@@ -167,6 +173,16 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
             options.out_dir = args[index];
+        } else if (std.mem.startsWith(u8, arg, "--filed-root=")) {
+            const value = arg["--filed-root=".len..];
+            if (value.len == 0) return error.MissingValue;
+            options.filed_root_dir = value;
+            options.mode = .filed;
+        } else if (std.mem.eql(u8, arg, "--filed-root")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            options.filed_root_dir = args[index];
+            options.mode = .filed;
         } else {
             return error.UnknownFlag;
         }
@@ -185,7 +201,7 @@ fn printUsage() void {
         \\Common options:
         \\  -h, --help         Show this help and exit
         \\  -q, --quiet        Suppress progress lines
-        \\  --mode=MODE        astro (default) | wordpress | instagram | obsidian | notion
+        \\  --mode=MODE        astro (default) | wordpress | instagram | obsidian | notion | filed
         \\  --out=DIR          Output directory (default: migration-report)
         \\
         \\Astro mode:
@@ -215,6 +231,11 @@ fn printUsage() void {
         \\  Writes: content/**/*.md, media/**, report.json, REPORT.md, media_manifest.json
         \\  (--export implies --mode=notion)
         \\  No Notion API, OAuth, network, zip extraction, or private workspace ingestion.
+        \\
+        \\Filed.fyi slice:
+        \\  --filed-root=DIR   Filed.fyi Astro source root (required; never modified)
+        \\  Writes: content/changelog/**, content/releases/**, provenance_manifest.json, report.json, REPORT.md
+        \\  Converts exactly one changelog and three releases; unsupported MDX is retained and reported.
         \\
         \\Safety: no network, no destructive source writes, originals preserved.
         \\Exit codes: 0 success, 2 usage, 3 I/O error
@@ -355,6 +376,21 @@ pub fn main(init: std.process.Init) u8 {
                 return ExitCode.io_error.int();
             };
         },
+        .filed => {
+            const root = opts.filed_root_dir orelse {
+                std.log.err("filed mode requires --filed-root=DIR", .{});
+                printUsage();
+                return ExitCode.usage.int();
+            };
+            if (std.mem.eql(u8, root, opts.out_dir)) {
+                std.log.err("--out must differ from --filed-root", .{});
+                return ExitCode.usage.int();
+            }
+            filed.run(io, gpa, .{ .source_root_dir = root, .out_dir = opts.out_dir, .quiet = opts.quiet }) catch |err| {
+                std.log.err("migration-lab (filed) failed: {s}", .{@errorName(err)});
+                return ExitCode.io_error.int();
+            };
+        },
     }
     return ExitCode.success.int();
 }
@@ -369,6 +405,7 @@ pub fn main(init: std.process.Init) u8 {
 test {
     _ = obsidian;
     _ = notion;
+    _ = filed;
 }
 
 test "parseOptions: defaults and astro flags" {
@@ -472,6 +509,12 @@ test "parseOptions: notion flags" {
 
     const o3 = try parseOptions(&.{ "boris-migration-lab", "--mode=md-csv", "--export=./e" });
     try std.testing.expect(o3.mode == .notion);
+}
+
+test "parseOptions: filed flags" {
+    const o = try parseOptions(&.{ "boris-migration-lab", "--filed-root=fixtures/mini-filed", "--out=./.filed" });
+    try std.testing.expect(o.mode == .filed);
+    try std.testing.expectEqualStrings("fixtures/mini-filed", o.filed_root_dir.?);
 }
 
 test "parseOptions: unknown flag" {
