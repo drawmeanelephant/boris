@@ -1,0 +1,7 @@
+@import url("https://fonts.googleapis.com/css2?family=Hostile");
+@import url("../../etc/passwd");
+
+.hero {
+  background: url("https://cdn.example/bg.png");
+  mask: url("../../secret/mask.svg");
+}

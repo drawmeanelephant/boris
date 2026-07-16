@@ -12,6 +12,7 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 | **filed** | Filed.fyi Astro source root | Bounded changelog/releases Boris tree + provenance/review reports |
 | **starlight** | Starlight/Astro docs root (locale-dir or root-locale) | Boris candidate `content/` + route/link/nav/asset/selection/boundary manifests + compile report |
 | **asset-filename** | Content tree with sibling `{stem}.assets/` files | Sanitized Boris-safe asset names + rewritten Markdown refs + manifests |
+| **theme-archaeology** | Astro/Starlight-shaped theme or project root | Deterministic adaptation ledger + boundary report (read-only) |
 
 All modes are **read-only on inputs**: originals are never rewritten. There is
 **no network access**, no zip extraction, no scraping, and **no product compiler
@@ -31,7 +32,8 @@ coupling**. All code and fixtures live under `tools/migration-lab/`.
 | Filed format id | `boris-filed-fyi-migration-lab` |
 | Starlight format id | `boris-starlight-migration-lab` |
 | Asset-filename format id | `boris-asset-filename-lab` |
-| Schema | Astro/Instagram/Obsidian/Notion/Filed/Starlight/Asset-filename `1`; WordPress **`3`** |
+| Theme-archaeology format id | `boris-theme-archaeology-lab` |
+| Schema | Astro/Instagram/Obsidian/Notion/Filed/Starlight/Asset-filename/Theme-archaeology `1`; WordPress **`3`** |
 
 Companion author guide: [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
 
@@ -92,6 +94,16 @@ zig build run -- --mode=starlight \
 zig build run -- --mode=asset-filename \
   --root=./fixtures/hostile-asset-filenames \
   --out=./.asset-filename-out
+
+# Theme archaeology (read-only inventory → adaptation ledger + boundary)
+zig build run -- --mode=theme-archaeology \
+  --root=./fixtures/mini-theme-astro \
+  --out=./.theme-arch-out
+
+# Hostile theme signals (runtime scripts, remote CSS, duplicates, traversal)
+zig build run -- --mode=theme-archaeology \
+  --root=./fixtures/hostile-theme-astro \
+  --out=./.theme-arch-hostile-out
 ```
 
 From the **repository root**, use this targeted aggregate gate after changing
@@ -125,9 +137,9 @@ zig build -C tools/migration-lab run -- \
 |------|---------|---------|
 | `-h`, `--help` | | Print usage; exit 0 |
 | `-q`, `--quiet` | off | Suppress progress lines |
-| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), `starlight` (`sl` / `evcc`), or `asset-filename` (`assets` / `asset-compat` / `filename-compat`) |
+| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), `starlight` (`sl` / `evcc`), `asset-filename` (`assets` / `asset-compat` / `filename-compat`), or `theme-archaeology` (`theme` / `theme-arch` / `theme-inventory`) |
 | `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**) |
-| `--root=DIR` | `.` | Astro archaeology root, Starlight project root, **or** asset-filename content tree |
+| `--root=DIR` | `.` | Astro archaeology root, Starlight project root, asset-filename content tree, **or** theme-archaeology scan root |
 | `--wxr=FILE` | | WordPress WXR/XML path (implies `--mode=wordpress`) |
 | `--media=DIR` | | Optional local media/uploads tree (WordPress) |
 | `--dump=DIR` | | Unpacked Instagram data-download root (implies `--mode=instagram`) |
@@ -160,6 +172,78 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
 10. **Asset-filename** — never relaxes Boris core path grammar; only rewrites
     under `--out`. Symlinks and destination collisions are rejected (no silent
     overwrite). No remote asset fetch and no source-site JavaScript execution.
+11. **Theme-archaeology** — inventory only (writes under `--out`). Never
+    executes JS/MDX, never fetches remotes, never follows embedded directives,
+    never mutates the source theme. Ambiguous mappings are **review**, never
+    guesses.
+
+---
+
+## Theme archaeology (Astro / Starlight-shaped)
+
+Read-only inventory of theme-shaped trees so a future converter (and humans)
+can see what can be preserved versus what needs design work. This mode does
+**not** generate a Boris theme; it emits a deterministic **adaptation ledger**
+and a **boundary report**.
+
+```bash
+zig build run -- --mode=theme-archaeology \
+  --root=./fixtures/mini-theme-astro \
+  --out=/tmp/theme-arch-out
+```
+
+### What is inventoried
+
+| Category | Typical sources |
+|----------|-----------------|
+| Layouts / templates | `src/layouts/**`, page `.astro` shells |
+| CSS + imports | `*.css`, `@import`, `url(...)`, `<link rel=stylesheet>` |
+| Fonts / images | `public/`, `src/assets/`, font/image extensions |
+| Navigation / sidebar | text-scan of `astro.config.*` (`sidebar`, `slug`, `autogenerate`) |
+| Components + MDX tags | `src/components/**`, PascalCase tags in MDX/Astro |
+| Scripts / analytics / runtime | `<script>`, `client:*`, `import.meta.env`, analytics hosts |
+| Licenses / provenance | `LICENSE` / `NOTICE` / `package.json` `license` field |
+
+### Adaptation ledger fields
+
+Each row in `adaptation_ledger.json` has:
+
+| Field | Meaning |
+|-------|---------|
+| `source_path` | Scan-root-relative path (`/` separators) |
+| `category` | `layout`, `css`, `font`, `image`, `navigation`, `component`, `mdx_tag`, `script`, `analytics`, … |
+| `sha256` | File content hash when applicable; `null` for extracted evidence rows |
+| `proposed_boris_equivalent` | Closed suggestion only (theme path, native Aside/Details, or `(none …)`) |
+| `decision` | `preserve` · `adapt` · `review` · `drop` |
+| `reason` / `evidence` | Deterministic classification code + line/path evidence |
+| `unsupported_runtime` | `true` when the signal depends on JS/MDX/remote/env runtime |
+
+### Outputs
+
+| Output | Role |
+|--------|------|
+| `adaptation_ledger.json` | Full sorted ledger |
+| `report.json` / `REPORT.md` | Counts + policy + human summary |
+| `BOUNDARY.md` | What a future converter could safely generate vs human design work |
+
+### Decision policy (closed)
+
+| Decision | When |
+|----------|------|
+| **preserve** | Static CSS/fonts/images/license bytes transferable without reinterpretation |
+| **adapt** | Closed mapping exists (layout → `theme/layouts/*.html` slots; Aside/Details tags) |
+| **review** | Ambiguous or multi-valid (sidebar, unknown components, analytics placement) |
+| **drop** | Out of scope or refused (remote fetch, traversal, islands, inline runtime scripts) |
+
+Hostile fixture: [`fixtures/hostile-theme-astro/`](fixtures/hostile-theme-astro/)
+(runtime scripts, remote CSS, duplicate assets, unsupported components, path
+traversal, embedded directives). Friendly fixture:
+[`fixtures/mini-theme-astro/`](fixtures/mini-theme-astro/).
+
+**Why this stays in the lab:** theme conversion is a design problem (nav graph,
+component vocabulary, trusted layout HTML). The product compiler copies
+declared theme assets and slots only; it must not invent layout semantics from
+Astro/MDX source.
 
 ---
 
