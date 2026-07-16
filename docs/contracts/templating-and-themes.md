@@ -458,6 +458,7 @@ Node, a bundler, or network access.
 | 7 | IR `layout`/`asset` endpoints | **Deferred** — HTML planner/cache only |
 | 8 | Layout UTF-8 boundary | **F9.2** — `Layout.split` / `loadLayout` (`LayoutInvalidUtf8`) |
 | 9 | Orphan theme-asset scrub | **F9.2** — post-publish under managed theme roots only |
+| 10 | Footer UTF-8 boundary | **Accepted** — `footer.html` validated at theme load (`FooterInvalidUtf8`); same encoding contract as layout, even though footer is not marker-scanned |
 
 ### Known limitations (not silent failures)
 
@@ -466,8 +467,6 @@ Node, a bundler, or network access.
 - Symlink rejection is implemented; portable tests create a symlink when the
   host allows and **skip** when create is denied (sandbox). Not a release-gate
   binary fixture.
-- Footer bytes are not separately UTF-8-gated (trusted theme fragment streamed
-  as opaque HTML). Layout files are.
 
 ## 13. Implementation slices
 
@@ -481,6 +480,8 @@ Node, a bundler, or network access.
 ### F9.2 hardening (landed)
 
 - Layout UTF-8 validation at plan split (`InvalidUtf8` → `LayoutInvalidUtf8`).
+- Footer UTF-8 validation at theme load (`FooterInvalidUtf8`) so `{{footer}}`
+  cannot inject invalid sequences into published HTML.
 - Orphan theme-asset scrub after publish when a managed theme root is in use
   (remove + rename; empty inventory drops `assets/`).
 - Expanded fixture/unit coverage: `--theme` path identity, asset-url depths,
