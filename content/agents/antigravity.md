@@ -7,6 +7,8 @@ tags: [agents, lore]
 
 # Antigravity
 
+Antigravity is an honorary external tool collaborator, not a Codex agent.
+
 ## Contribution record
 
 The reachable merged history in this checkout does not identify an Antigravity
@@ -48,4 +50,5 @@ The absence of a patch is not evidence of an enduring agent.
 
 No Antigravity-attributed merged work is visible in this checkout. The lesson
 is to describe the source boundary—rather than turn a memorable name into a
-biography the repository cannot support.
+biography the repository cannot support. This record does not recast
+Antigravity as a Codex worker.
