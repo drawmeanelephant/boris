@@ -31,6 +31,10 @@ zig build -C tools/migration-lab run -- \
 
 ## Coverage matrix (confirmed gaps → fixtures)
 
+Primary unit matrix (excerpts, sticky, empty slug, pingbacks, field
+preservation): see [`../unit-wxr/`](../unit-wxr/). This fixture keeps the
+**hostile / high-cardinality** WPTT-class gaps:
+
 | Gap | How it appears here | Importer expectation |
 |-----|---------------------|----------------------|
 | Determinism + source immutability | Double-run tests | Byte-identical `report.json`; export/media untouched |

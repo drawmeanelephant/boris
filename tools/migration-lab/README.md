@@ -25,7 +25,7 @@ coupling**. All code and fixtures live under `tools/migration-lab/`.
 | Instagram format id | `boris-instagram-migration-lab` |
 | Obsidian format id | `boris-obsidian-migration-lab` |
 | Notion format id | `boris-notion-migration-lab` |
-| Schema | `1` (per mode) |
+| Schema | Astro/Instagram/Obsidian/Notion `1`; WordPress **`3`** |
 
 Companion author guide: [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
 
@@ -339,6 +339,8 @@ Every generated Markdown file includes:
 - **Boris closed frontmatter** (`title`, optional `parent`, `status`, `tags`)
 - A **`boris-migration-provenance`** HTML comment (source export path, post_id,
   type, guid, author, dates, conversion class)
+- **WordPress excerpt** (when present) as a labeled blockquote before the body —
+  not a closed frontmatter field
 - Converted body (HTML → Markdown where possible; raw HTML/shortcodes retained as
   unsupported artifacts — never silently expanded offline)
 
@@ -347,9 +349,9 @@ Every generated Markdown file includes:
 | Class | Meaning |
 |-------|---------|
 | `exact` | No material transform (empty/plain body or synthetic stubs) |
-| `transformed` | Known HTML/block mappings applied |
+| `transformed` | Known HTML/block mappings applied (including excerpt preservation) |
 | `unsupported` | Shortcodes, embeds, comments, menus, post formats, widgets, or non post/page types preserved raw — **not** silent meaning-preserving Markdown |
-| `human_review` | Author judgment needed (statuses, missing media, deep hierarchy, empty/long titles, slug conflicts, unresolved links) |
+| `human_review` | Author judgment needed (statuses, sticky, missing media, deep hierarchy, empty/long titles, empty slugs, slug conflicts, unresolved links) |
 
 Overall page class is the **worst** feature rank. Features are also listed
 individually under `features` in `report.json`.
@@ -365,6 +367,18 @@ individually under `features` in `report.json`.
 | `pending` | `draft` | `status_pending` |
 | non-empty `wp:post_password` | `draft` (even if publish) | `status_password_protected` |
 
+### Field preservation (schema 3)
+
+| WXR field | Output | If missing / special |
+|-----------|--------|----------------------|
+| `title` | Frontmatter `title` | Empty → slug fallback + `empty_title` |
+| `wp:post_name` | Entity slug + report `source_slug` | Empty → synthesize from title + `empty_slug` |
+| `wp:post_date` / `_gmt` | Provenance + report | Always recorded when present |
+| `excerpt:encoded` | Body blockquote + report `excerpt` | Empty → omitted; never invented |
+| body (`content:encoded`) | Markdown/HTML body | Empty → `empty_body` |
+| categories / tags | Report lists; merged into closed `tags` | Post formats **excluded** from tags |
+| `wp:is_sticky` | Report `is_sticky` | Sticky → `sticky_post` human review |
+
 ### Explicit unsupported / review artifacts
 
 These must **not** be folded into ordinary page Markdown as if converted:
@@ -377,6 +391,9 @@ These must **not** be folded into ordinary page Markdown as if converted:
 | Widgets | Feature `wp_widget`; raw shortcode/HTML kept |
 | Shortcodes (`[gallery]`, `[audio]`, `[video]`, …) | Left raw; classification `unsupported` |
 | Empty title / empty body / long title | `empty_title`, `empty_body`, `long_title` |
+| Empty / missing slug | `empty_slug` (synthesized path still emitted) |
+| Sticky flag | `sticky_post` (no Boris sticky frontmatter) |
+| Excerpt | Preserved in body + report (`excerpt_preserved`); not closed FM |
 
 ### Report sections (WordPress)
 
@@ -411,9 +428,10 @@ trees are flattened with `human_review` notes.
 
 | Fixture | Role |
 |---------|------|
+| [`fixtures/unit-wxr/`](fixtures/unit-wxr/) | **Unit matrix** — one item per high-value preserve/report behavior (posts/pages, dates, excerpt, sticky, empty slug/title, statuses, shortcodes, comments/trackbacks/pingbacks, hierarchy, duplicates, media, attachments, menus) |
 | [`fixtures/mini-wxr/`](fixtures/mini-wxr/) | Small happy-path + shortcode/media/draft matrix |
 | [`fixtures/adversarial-wxr/`](fixtures/adversarial-wxr/) | Unicode, slug collisions, deep pages, duplicate media basenames |
-| [`fixtures/wptt-derived/`](fixtures/wptt-derived/) | Compact redistributable cases derived from WPTT Theme Unit Test gaps (statuses, comments, formats, menus, empty/long titles, taxonomy cardinality). **Does not** vendor the full upstream WXR |
+| [`fixtures/wptt-derived/`](fixtures/wptt-derived/) | Hostile WPTT-class gaps (taxonomy cardinality, long titles, widgets, empty body). **Does not** vendor the full upstream WXR |
 
 Hostile offline dogfood (operator machine, not CI):
 
@@ -423,6 +441,12 @@ curl -fsSL -o /tmp/themeunittestdata.wordpress.xml \
   https://raw.githubusercontent.com/WPTT/theme-unit-test/master/themeunittestdata.wordpress.xml
 zig build run -- --mode=wordpress \
   --wxr=/tmp/themeunittestdata.wordpress.xml --out=/tmp/wp-wptt-out
+```
+
+```bash
+# Unit matrix (CI-friendly)
+zig build run -- --wxr=./fixtures/unit-wxr/export.xml \
+  --media=./fixtures/unit-wxr/media --out=./.wp-unit-report
 ```
 
 ---
@@ -512,7 +536,7 @@ zig build run -- --mode=astro --root=./fixtures/absolute-links-astro --out=./.mi
 
 ## Schema note
 
-WordPress `report.json` top-level fields (stable order, **schema 2**):
+WordPress `report.json` top-level fields (stable order, **schema 3**):
 
 ```text
 format, schema_version, tool_version, source_export, media_dir,
@@ -521,6 +545,9 @@ taxonomy_stats, pages, parent_relationships, links, media_references,
 missing_media, features, slug_conflicts, unsupported_items, comments,
 human_review, provenance
 ```
+
+Per-page fields (schema 3) include `source_slug`, `post_date_gmt`, `excerpt`,
+and `is_sticky` in addition to title/slug/status/taxonomy/conversion fields.
 
 Obsidian `report.json` top-level fields (stable order):
 

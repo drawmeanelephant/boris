@@ -383,6 +383,8 @@ authoring and conversion aid.
 | Doc | Role |
 |-----|------|
 | [`fixtures/migration-site/README.md`](../fixtures/migration-site/README.md) | Fixture how-to |
+| [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) | Standalone labs (Astro / WordPress WXR / Instagram / Obsidian / Notion) |
+| [`tools/migration-lab/fixtures/unit-wxr/`](../tools/migration-lab/fixtures/unit-wxr/) | WordPress unit-matrix fixture (preserve/report policy) |
 | [`README.md`](../README.md) | Product front door + CLI |
 | [`docs/STATUS.md`](STATUS.md) | Current phase |
 | [`docs/contracts/frontmatter.md`](contracts/frontmatter.md) | Normative FM grammar |

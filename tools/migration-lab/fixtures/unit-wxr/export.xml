@@ -1,0 +1,382 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Compact redistributable unit-matrix WXR for boris-migration-lab WordPress mode.
+  Derived from cases confirmed against the official WPTT Theme Unit Test export
+  (downloaded offline for research; never vendored here).
+
+  Each item is a single high-value behavior the importer must preserve or report.
+  License of this synthetic file: CC0 / public domain test data.
+-->
+<rss version="2.0"
+	xmlns:excerpt="http://wordpress.org/export/1.2/excerpt/"
+	xmlns:content="http://purl.org/rss/1.0/modules/content/"
+	xmlns:wfw="http://wellformedweb.org/CommentAPI/"
+	xmlns:dc="http://purl.org/dc/elements/1.1/"
+	xmlns:wp="http://wordpress.org/export/1.2/">
+<channel>
+	<title>Unit Matrix WP</title>
+	<link>https://unit.example.test</link>
+	<description>Synthetic unit-matrix WXR</description>
+	<language>en-US</language>
+	<wp:wxr_version>1.2</wp:wxr_version>
+	<wp:base_site_url>https://unit.example.test</wp:base_site_url>
+	<wp:base_blog_url>https://unit.example.test</wp:base_blog_url>
+
+	<wp:author>
+		<wp:author_id>1</wp:author_id>
+		<wp:author_login><![CDATA[admin]]></wp:author_login>
+		<wp:author_email><![CDATA[admin@unit.example.test]]></wp:author_email>
+		<wp:author_display_name><![CDATA[Admin]]></wp:author_display_name>
+		<wp:author_first_name><![CDATA[Ad]]></wp:author_first_name>
+		<wp:author_last_name><![CDATA[Min]]></wp:author_last_name>
+	</wp:author>
+
+	<wp:category>
+		<wp:term_id>1</wp:term_id>
+		<wp:category_nicename><![CDATA[news]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[News]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>2</wp:term_id>
+		<wp:category_nicename><![CDATA[releases]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[news]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Releases]]></wp:cat_name>
+	</wp:category>
+	<wp:tag>
+		<wp:term_id>3</wp:term_id>
+		<wp:tag_slug><![CDATA[migration]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Migration]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>4</wp:term_id>
+		<wp:tag_slug><![CDATA[boris]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Boris]]></wp:tag_name>
+	</wp:tag>
+
+	<!-- 1. Published post: title, slug, dates, excerpt, body, cats, tags, present media -->
+	<item>
+		<title><![CDATA[Hello World]]></title>
+		<link>https://unit.example.test/hello-world/</link>
+		<pubDate>Mon, 15 Jan 2024 10:00:00 +0000</pubDate>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/?p=1</guid>
+		<description></description>
+		<content:encoded><![CDATA[<p>Welcome body with <strong>emphasis</strong>.</p>
+<img src="https://unit.example.test/wp-content/uploads/2024/01/hero.png" alt="Hero"/>
+]]></content:encoded>
+		<excerpt:encoded><![CDATA[Unit excerpt for Hello World.]]></excerpt:encoded>
+		<wp:post_id>1</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-15 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-15 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[hello-world]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:menu_order>0</wp:menu_order>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+		<category domain="category" nicename="news"><![CDATA[News]]></category>
+		<category domain="post_tag" nicename="migration"><![CDATA[Migration]]></category>
+		<category domain="post_tag" nicename="boris"><![CDATA[Boris]]></category>
+	</item>
+
+	<!-- 2. Sticky post (WPTT Template: Sticky class) -->
+	<item>
+		<title><![CDATA[Sticky Note]]></title>
+		<link>https://unit.example.test/sticky-note/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/?p=2</guid>
+		<content:encoded><![CDATA[<p>Pinned in WordPress; no Boris sticky field.</p>]]></content:encoded>
+		<excerpt:encoded><![CDATA[]]></excerpt:encoded>
+		<wp:post_id>2</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-16 09:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-16 09:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[sticky-note]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>1</wp:is_sticky>
+	</item>
+
+	<!-- 3. Empty slug → synthesize from title -->
+	<item>
+		<title><![CDATA[Draft Without Slug]]></title>
+		<link>https://unit.example.test/?p=3</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/?p=3</guid>
+		<content:encoded><![CDATA[<p>Empty post_name must be reported.</p>]]></content:encoded>
+		<excerpt:encoded><![CDATA[]]></excerpt:encoded>
+		<wp:post_id>3</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-17 09:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-17 09:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[]]></wp:post_name>
+		<wp:status><![CDATA[draft]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- 4. Empty title -->
+	<item>
+		<title><![CDATA[]]></title>
+		<link>https://unit.example.test/?p=4</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/?p=4</guid>
+		<content:encoded><![CDATA[<p>Has body but no title.</p>]]></content:encoded>
+		<excerpt:encoded><![CDATA[]]></excerpt:encoded>
+		<wp:post_id>4</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-18 09:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-18 09:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[untitled-body]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- 5. Future (scheduled) -->
+	<item>
+		<title><![CDATA[Scheduled Drop]]></title>
+		<link>https://unit.example.test/scheduled-drop/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/?p=5</guid>
+		<content:encoded><![CDATA[<p>Future body.</p>]]></content:encoded>
+		<excerpt:encoded><![CDATA[]]></excerpt:encoded>
+		<wp:post_id>5</wp:post_id>
+		<wp:post_date><![CDATA[2030-06-01 12:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2030-06-01 12:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[scheduled-drop]]></wp:post_name>
+		<wp:status><![CDATA[future]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- 6. Private -->
+	<item>
+		<title><![CDATA[Private Memo]]></title>
+		<link>https://unit.example.test/private-memo/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/?p=6</guid>
+		<content:encoded><![CDATA[<p>Private body.</p>]]></content:encoded>
+		<excerpt:encoded><![CDATA[]]></excerpt:encoded>
+		<wp:post_id>6</wp:post_id>
+		<wp:post_date><![CDATA[2024-02-01 08:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-02-01 08:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[private-memo]]></wp:post_name>
+		<wp:status><![CDATA[private]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- 7. Password-protected publish (WPTT-style) -->
+	<item>
+		<title><![CDATA[Protected Post]]></title>
+		<link>https://unit.example.test/protected-post/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/?p=7</guid>
+		<content:encoded><![CDATA[<p>Password body.</p>]]></content:encoded>
+		<excerpt:encoded><![CDATA[]]></excerpt:encoded>
+		<wp:post_id>7</wp:post_id>
+		<wp:post_date><![CDATA[2024-02-02 08:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-02-02 08:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[protected-post]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[enter]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- 8. Unsupported constructs: gallery, caption, embed shortcodes + comments/trackbacks/pingbacks -->
+	<item>
+		<title><![CDATA[Markup Kitchen Sink]]></title>
+		<link>https://unit.example.test/markup-kitchen-sink/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/?p=8</guid>
+		<content:encoded><![CDATA[<p>Shortcodes and comments must not silently vanish.</p>
+[gallery ids="90"]
+[caption id="attachment_90" align="alignnone" width="300"]Caption text[/caption]
+[embed]https://unit.example.test/video/[/embed]
+[widget id="text-1"]
+]]></content:encoded>
+		<excerpt:encoded><![CDATA[]]></excerpt:encoded>
+		<wp:post_id>8</wp:post_id>
+		<wp:post_date><![CDATA[2024-02-03 08:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-02-03 08:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[markup-kitchen-sink]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+		<category domain="post_format" nicename="post-format-gallery"><![CDATA[Gallery]]></category>
+		<wp:comment>
+			<wp:comment_id>801</wp:comment_id>
+			<wp:comment_author><![CDATA[Alice]]></wp:comment_author>
+			<wp:comment_author_email><![CDATA[a@unit.example.test]]></wp:comment_author_email>
+			<wp:comment_author_url></wp:comment_author_url>
+			<wp:comment_date><![CDATA[2024-02-03 12:00:00]]></wp:comment_date>
+			<wp:comment_content><![CDATA[Comment body must not become page Markdown.]]></wp:comment_content>
+			<wp:comment_approved><![CDATA[1]]></wp:comment_approved>
+			<wp:comment_type><![CDATA[comment]]></wp:comment_type>
+		</wp:comment>
+		<wp:comment>
+			<wp:comment_id>802</wp:comment_id>
+			<wp:comment_author><![CDATA[Remote Track]]></wp:comment_author>
+			<wp:comment_author_email/>
+			<wp:comment_author_url>https://elsewhere.example/track/</wp:comment_author_url>
+			<wp:comment_date><![CDATA[2024-02-03 13:00:00]]></wp:comment_date>
+			<wp:comment_content><![CDATA[[...] Trackback body. [...]]]></wp:comment_content>
+			<wp:comment_approved><![CDATA[1]]></wp:comment_approved>
+			<wp:comment_type>trackback</wp:comment_type>
+		</wp:comment>
+		<wp:comment>
+			<wp:comment_id>803</wp:comment_id>
+			<wp:comment_author><![CDATA[Remote Ping]]></wp:comment_author>
+			<wp:comment_author_email/>
+			<wp:comment_author_url>https://elsewhere.example/ping/</wp:comment_author_url>
+			<wp:comment_date><![CDATA[2024-02-03 14:00:00]]></wp:comment_date>
+			<wp:comment_content><![CDATA[Pingback body.]]></wp:comment_content>
+			<wp:comment_approved><![CDATA[1]]></wp:comment_approved>
+			<wp:comment_type><![CDATA[pingback]]></wp:comment_type>
+		</wp:comment>
+	</item>
+
+	<!-- 9–11. Parent/child pages + deep hierarchy -->
+	<item>
+		<title><![CDATA[About]]></title>
+		<link>https://unit.example.test/about/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/?page_id=20</guid>
+		<content:encoded><![CDATA[<p>About page body.</p>]]></content:encoded>
+		<excerpt:encoded><![CDATA[About excerpt.]]></excerpt:encoded>
+		<wp:post_id>20</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-01 08:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-01 08:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[about]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[page]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+	<item>
+		<title><![CDATA[Team]]></title>
+		<link>https://unit.example.test/about/team/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/?page_id=21</guid>
+		<content:encoded><![CDATA[<p>Team under About.</p>]]></content:encoded>
+		<excerpt:encoded><![CDATA[]]></excerpt:encoded>
+		<wp:post_id>21</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-01 09:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-01 09:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[team]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>20</wp:post_parent>
+		<wp:post_type><![CDATA[page]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+	<item>
+		<title><![CDATA[Engineering]]></title>
+		<link>https://unit.example.test/about/team/engineering/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/?page_id=22</guid>
+		<content:encoded><![CDATA[<p>Deep child under Team.</p>]]></content:encoded>
+		<excerpt:encoded><![CDATA[]]></excerpt:encoded>
+		<wp:post_id>22</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-01 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-01 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[engineering]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>21</wp:post_parent>
+		<wp:post_type><![CDATA[page]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- 12–13. Duplicate slugs (same post type) -->
+	<item>
+		<title><![CDATA[Duplicate One]]></title>
+		<link>https://unit.example.test/duplicate/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/?p=30</guid>
+		<content:encoded><![CDATA[<p>first duplicate</p>]]></content:encoded>
+		<excerpt:encoded><![CDATA[]]></excerpt:encoded>
+		<wp:post_id>30</wp:post_id>
+		<wp:post_date><![CDATA[2024-03-01 08:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-03-01 08:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[duplicate]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+	<item>
+		<title><![CDATA[Duplicate Two]]></title>
+		<link>https://unit.example.test/duplicate-two/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/?p=31</guid>
+		<content:encoded><![CDATA[<p>second duplicate</p>
+<img src="https://unit.example.test/wp-content/uploads/2024/01/missing-asset.png" alt="Missing"/>
+]]></content:encoded>
+		<excerpt:encoded><![CDATA[]]></excerpt:encoded>
+		<wp:post_id>31</wp:post_id>
+		<wp:post_date><![CDATA[2024-03-02 08:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-03-02 08:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[duplicate]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- 14. Attachment (media inventory, not a page) -->
+	<item>
+		<title><![CDATA[hero]]></title>
+		<link>https://unit.example.test/hello-world/hero/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/wp-content/uploads/2024/01/hero.png</guid>
+		<content:encoded><![CDATA[]]></content:encoded>
+		<excerpt:encoded><![CDATA[]]></excerpt:encoded>
+		<wp:post_id>90</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-15 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-15 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[hero]]></wp:post_name>
+		<wp:status><![CDATA[inherit]]></wp:status>
+		<wp:post_parent>1</wp:post_parent>
+		<wp:post_type><![CDATA[attachment]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:attachment_url><![CDATA[https://unit.example.test/wp-content/uploads/2024/01/hero.png]]></wp:attachment_url>
+	</item>
+
+	<!-- 15. nav_menu_item (unsupported menu artifact) -->
+	<item>
+		<title><![CDATA[Menu: About]]></title>
+		<link>https://unit.example.test/about/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://unit.example.test/?p=1100</guid>
+		<content:encoded><![CDATA[]]></content:encoded>
+		<excerpt:encoded><![CDATA[]]></excerpt:encoded>
+		<wp:post_id>1100</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-01 00:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-01 00:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[menu-about]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[nav_menu_item]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<category domain="nav_menu" nicename="primary"><![CDATA[Primary]]></category>
+	</item>
+</channel>
+</rss>
