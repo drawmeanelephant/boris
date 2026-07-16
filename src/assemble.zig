@@ -68,6 +68,8 @@ pub const LayoutError = error{
     TooManyLayoutSegments,
     InvalidAssetUrl,
     TooManyAssetUrls,
+    /// Layout bytes are not valid UTF-8 (validated at split / load boundary).
+    InvalidUtf8,
 };
 
 pub const Slot = enum {
@@ -170,7 +172,14 @@ pub const Layout = struct {
     suffix: []const u8 = "",
 
     /// Split known markers into a closed plan. Missing/duplicate/unknown → hard error.
+    ///
+    /// UTF-8 is validated **here** (layout load / plan boundary), before marker
+    /// scanning. Content Markdown has its own UTF-8 gate in the parser.
     pub fn split(raw: []const u8) LayoutError!Layout {
+        if (raw.len > 0 and !std.unicode.utf8ValidateSlice(raw)) {
+            return error.InvalidUtf8;
+        }
+
         var layout: Layout = .{ .raw = raw };
         var seen_content = false;
         var seen_nav = false;
@@ -664,6 +673,15 @@ test "layout split is zero-copy into raw" {
 
 test "layout missing content marker is hard error" {
     try std.testing.expectError(error.MissingContentMarker, Layout.split("<html></html>"));
+}
+
+test "layout split rejects invalid UTF-8 at plan boundary" {
+    // Truncated multi-byte sequence after ASCII prefix (invalid UTF-8).
+    const bad = [_]u8{ '<', 'h', 0xC3, 0x28, '>', '{', '{', 'c', 'o', 'n', 't', 'e', 'n', 't', '}', '}' };
+    try std.testing.expectError(error.InvalidUtf8, Layout.split(&bad));
+    // Valid UTF-8 still plans.
+    const layout = try Layout.split("<html>{{content}}</html>");
+    try std.testing.expectEqual(@as(usize, 3), layout.segment_count);
 }
 
 test "layout duplicate content marker is hard error" {

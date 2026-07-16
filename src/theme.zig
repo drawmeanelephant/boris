@@ -1,4 +1,5 @@
-//! F9.1 theme root helpers: asset inventory, collision checks, target-owned copy.
+//! F9 theme root helpers: asset inventory, collision checks, target-owned copy,
+//! and orphan asset scrub (F9.2).
 //!
 //! A theme owns trusted layout files, optional `footer.html`, and opaque bytes
 //! under `assets/`. Boris copies those assets into each target output; it never
@@ -340,6 +341,87 @@ pub fn copyAssetsToOutput(
     }
 }
 
+/// Remove published theme assets under `out_dir/assets/` that are no longer in
+/// the live inventory (delete or rename). Call only when the target owns a
+/// managed theme root; legacy `layouts/…` builds must not scrub `assets/`.
+///
+/// Empty parent directories under `assets/` are removed best-effort. Errors
+/// while deleting are swallowed so a prior successful HTML publish is not
+/// rolled back by a cleanup hiccup.
+pub fn scrubOrphanThemeAssets(
+    io: Io,
+    out_dir: Io.Dir,
+    gpa: std.mem.Allocator,
+    live_assets: []const AssetEntry,
+) void {
+    scrubOrphanThemeAssetsInner(io, out_dir, gpa, live_assets) catch {};
+}
+
+fn scrubOrphanThemeAssetsInner(
+    io: Io,
+    out_dir: Io.Dir,
+    gpa: std.mem.Allocator,
+    live_assets: []const AssetEntry,
+) !void {
+    var assets_dir = out_dir.openDir(io, "assets", .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => |e| return e,
+    };
+    defer assets_dir.close(io);
+
+    var live: std.StringHashMapUnmanaged(void) = .{};
+    defer live.deinit(gpa);
+    try live.ensureTotalCapacity(gpa, @intCast(live_assets.len));
+    for (live_assets) |a| {
+        try live.put(gpa, a.rel_path, {});
+    }
+
+    // Collect orphan paths first (walker invalidates if we delete mid-walk).
+    var orphans: std.ArrayList([]u8) = .empty;
+    defer {
+        for (orphans.items) |p| gpa.free(p);
+        orphans.deinit(gpa);
+    }
+
+    var walker = try assets_dir.walkSelectively(gpa);
+    defer walker.deinit();
+    while (try walker.next(io)) |entry| {
+        if (entry.kind == .directory) {
+            try walker.enter(io, entry);
+            continue;
+        }
+        if (entry.kind != .file) continue;
+
+        // entry.path is relative to assets/; theme-relative is assets/<path>.
+        const rel = try std.fmt.allocPrint(gpa, "assets/{s}", .{entry.path});
+        // Normalize separators if the host walk emits backslashes.
+        for (rel) |*c| {
+            if (c.* == '\\') c.* = '/';
+        }
+        if (live.contains(rel)) {
+            gpa.free(rel);
+            continue;
+        }
+        try orphans.append(gpa, rel);
+    }
+
+    for (orphans.items) |rel| {
+        out_dir.deleteFile(io, rel) catch {};
+        // Best-effort prune empty parents under assets/ (not the root itself).
+        var parent_opt = std.fs.path.dirname(rel);
+        while (parent_opt) |parent| {
+            if (parent.len == 0 or std.mem.eql(u8, parent, "assets")) break;
+            out_dir.deleteDir(io, parent) catch break;
+            parent_opt = std.fs.path.dirname(parent);
+        }
+    }
+
+    // When the theme inventory is empty, drop a leftover empty assets/ tree.
+    if (live_assets.len == 0) {
+        out_dir.deleteTree(io, "assets") catch {};
+    }
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -437,4 +519,79 @@ test "empty theme root yields empty bundle" {
     defer bundle.deinit();
     try std.testing.expectEqual(@as(usize, 0), bundle.assets.len);
     try std.testing.expectEqual(@as(usize, 0), bundle.footer().len);
+}
+
+test "scrubOrphanThemeAssets removes deleted and renamed assets" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-theme-orphan", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    const out_rel = try std.fmt.allocPrint(gpa, "{s}/out", .{work});
+    defer gpa.free(out_rel);
+    try cwd.createDirPath(io, out_rel);
+    var out_dir = try cwd.openDir(io, out_rel, .{ .iterate = true });
+    defer out_dir.close(io);
+
+    // Seed published tree with two assets (prior build).
+    try out_dir.createDirPath(io, "assets/css");
+    try out_dir.writeFile(io, .{ .sub_path = "assets/css/old.css", .data = "old" });
+    try out_dir.writeFile(io, .{ .sub_path = "assets/css/keep.css", .data = "keep" });
+    try out_dir.createDirPath(io, "assets/fonts");
+    try out_dir.writeFile(io, .{ .sub_path = "assets/fonts/gone.woff", .data = "font" });
+
+    // Live inventory: keep.css remains; old.css renamed away; fonts gone.
+    const keep_path = try gpa.dupe(u8, "assets/css/keep.css");
+    defer gpa.free(keep_path);
+    const keep_bytes = try gpa.dupe(u8, "keep");
+    defer gpa.free(keep_bytes);
+    const live = [_]AssetEntry{.{ .rel_path = keep_path, .bytes = keep_bytes }};
+
+    scrubOrphanThemeAssets(io, out_dir, gpa, &live);
+
+    try out_dir.access(io, "assets/css/keep.css", .{});
+    try std.testing.expectError(error.FileNotFound, out_dir.access(io, "assets/css/old.css", .{}));
+    try std.testing.expectError(error.FileNotFound, out_dir.access(io, "assets/fonts/gone.woff", .{}));
+
+    // Empty inventory removes the whole assets/ tree.
+    scrubOrphanThemeAssets(io, out_dir, gpa, &.{});
+    try std.testing.expectError(error.FileNotFound, out_dir.access(io, "assets", .{}));
+}
+
+test "loadThemeBundle rejects asset file symlink when host allows" {
+    if (@import("builtin").os.tag == .windows) return;
+
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-theme-symlink", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    const css_dir = try std.fmt.allocPrint(gpa, "{s}/theme/assets/css", .{work});
+    defer gpa.free(css_dir);
+    try cwd.createDirPath(io, css_dir);
+
+    const real = try std.fmt.allocPrint(gpa, "{s}/real.css", .{css_dir});
+    defer gpa.free(real);
+    try cwd.writeFile(io, .{ .sub_path = real, .data = "body{}" });
+
+    var theme_assets = try cwd.openDir(io, css_dir, .{});
+    defer theme_assets.close(io);
+    theme_assets.symLink(io, "real.css", "docs.css", .{}) catch |err| switch (err) {
+        error.AccessDenied, error.PermissionDenied => return,
+        else => return err,
+    };
+
+    const theme_root = try std.fmt.allocPrint(gpa, "{s}/theme", .{work});
+    defer gpa.free(theme_root);
+    try std.testing.expectError(error.AssetSymlink, loadThemeBundle(io, gpa, cwd, theme_root));
 }
