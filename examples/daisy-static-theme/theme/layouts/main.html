@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en" data-theme="kindling">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Kindling Docs</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/docs.css}}">
+</head>
+<body>
+  <a class="skip-link" href="#content">Skip to content</a>
+  <header class="topbar">
+    <a class="brand" href="index.html" aria-label="Kindling Docs home">
+      <span class="brand__mark" aria-hidden="true">K</span>
+      <span>Kindling Docs</span>
+    </a>
+    {{breadcrumb}}
+  </header>
+  <div class="shell">
+    <aside class="rail rail--nav">
+      <p class="eyebrow">Browse</p>
+      {{nav}}
+    </aside>
+    <main id="content" class="article-card">
+      {{metadata}}
+      <article class="prose">{{content}}</article>
+      <section class="children-card" aria-labelledby="children-heading">
+        <h2 id="children-heading">In this section</h2>
+        {{children}}
+      </section>
+    </main>
+    <aside class="rail rail--toc" aria-label="On this page">
+      <p class="eyebrow">On this page</p>
+      {{toc}}
+    </aside>
+  </div>
+  <footer class="footer">{{footer}}</footer>
+</body>
+</html>
