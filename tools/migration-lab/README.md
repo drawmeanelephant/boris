@@ -339,6 +339,11 @@ neutral category, and `stripped: true`.
 Synthetic redistributable coverage lives in
 [`fixtures/mini-filed/`](fixtures/mini-filed/).
 
+A bounded real-site adoption pass (Filed.fyi changelog/releases slice against
+current `main`, including product HTML/IR/RAG evidence and remediation cards)
+is recorded in
+[`docs/dogfood/filed-fyi-adoption-pass.md`](../../docs/dogfood/filed-fyi-adoption-pass.md).
+
 ## Starlight read-only dogfood (locale-dir + root-locale)
 
 Developer-only **read-only dogfood** preflight + bounded converter for a

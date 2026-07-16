@@ -133,6 +133,12 @@ zig build --build-file tools/migration-lab/build.zig run -- \
 Other lab modes (WordPress WXR, Instagram Takeout, Obsidian, Notion, Filed)
 and flags: [`tools/migration-lab/README.md`](../tools/migration-lab/README.md).
 
+**Real-site dogfood (Filed.fyi first slice):** a bounded pass against a live
+Filed.fyi checkout — inventory, lab modes, product HTML/IR/RAG, remediation
+cards, and a narrow RC recommendation — is recorded in
+[`docs/dogfood/filed-fyi-adoption-pass.md`](dogfood/filed-fyi-adoption-pass.md).
+It is evidence for humans, not a universal converter claim.
+
 **What to open after a lab run:** `REPORT.md` / `report.json` (and mode-specific
 manifests under the `--out` dir). Treat them as **evidence for the human
 ledger**, not as a green light to skip non-negotiables.
