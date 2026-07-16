@@ -232,6 +232,26 @@ pub fn build(b: *std.Build) void {
     const run_compile_tests = b.addRunArtifact(compile_tests);
     run_compile_tests.setCwd(b.path("."));
 
+    // Opt-in 200-page incremental HTML smoke. Kept out of `zig build test`
+    // because it exercises a bounded large-site fixture rather than unit scope.
+    const scale_smoke_mod = b.createModule(.{
+        .root_source_file = b.path("src/incremental_scale_smoke_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkApex(scale_smoke_mod, b, false);
+    scale_smoke_mod.addOptions("build_options", apex_opts);
+    const scale_smoke_tests = b.addTest(.{
+        .root_module = scale_smoke_mod,
+    });
+    const run_scale_smoke_tests = b.addRunArtifact(scale_smoke_tests);
+    run_scale_smoke_tests.setCwd(b.path("."));
+    const test_scale_smoke_step = b.step(
+        "test-scale-smoke",
+        "Run opt-in 200-page incremental HTML scale smoke",
+    );
+    test_scale_smoke_step.dependOn(&run_scale_smoke_tests.step);
+
     // Hostile Apex double: Zig wrapper imports a named "apex" module that
     // links apex_hostile.c (never the product binary).
     const apex_hostile_lib_mod = b.createModule(.{
@@ -517,6 +537,7 @@ pub fn build(b: *std.Build) void {
         &rag_tests.step,
         &apex_tests.step,
         &compile_tests.step,
+        &scale_smoke_tests.step,
         &hardening_tests.step,
         &layout_hostile_tests.step,
         &fuzz_tests.step,
