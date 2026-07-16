@@ -105,27 +105,41 @@ see site nav, breadcrumb, and an in-page TOC on pages with headings.
 ./zig-out/bin/boris --out .boris --quiet     # JSON IR
 ./zig-out/bin/boris --rag --quiet            # LLM corpus → rag/
 ./zig-out/bin/boris --context --quiet        # AI Context Bundle → context/
-./zig-out/bin/boris check                    # graph-health report (read-only)
+./zig-out/bin/boris check                    # read-only; exit 1 if unreferenced pages
+./zig-out/bin/boris impact getting-started   # sample Trunk id in this repo
 zig build test
 ```
 
-**Minimal author page** (drop under `content/`):
+Sample `content/` currently reports `index` as unreferenced, so `check` exits
+**1** even though HTML/IR/RAG/Context builds succeed — that is the CI health
+gate, not a broken compiler.
+
+**Minimal author page** (drop under `content/`; `parent` must name an existing
+Trunk entity id — after clone, `getting-started` works):
 
 ```markdown
 ---
-title: Getting started
-parent: guides
+title: My first satellite
+parent: getting-started
 status: published
 tags: [guides]
 ---
 
-# Getting started
+# My first satellite
 
 Ship docs with one binary.
 ```
 
 Author key for parents is **`parent` only** (not `parentEntry` /
 `parent_entry`). Full grammar: [frontmatter contract](docs/contracts/frontmatter.md).
+New section landings: [migration guide](docs/MIGRATION.md) (Trunk + Satellite).
+
+### 15-minute demo path
+
+1. `zig build` → `./zig-out/bin/boris --quiet` → open `dist/index.html` (nav, breadcrumb, TOC).
+2. `./zig-out/bin/boris --context --quiet` → skim `context/bundle.md`.
+3. `./zig-out/bin/boris check` — expect exit **1** on sample unreferenced `index` (policy finding).
+4. Optional convert path: [`docs/MIGRATION.md`](docs/MIGRATION.md) fixture commands.
 
 **Migration:** older scripts that assumed bare `boris` wrote IR should pass
 `--out .boris` (or `--no-rag`). Converting an existing site:
@@ -239,24 +253,33 @@ as a review gate.
 ```
 
 The JSON report is an ordinary local file — not a hosted service. To see what a
-change can affect: `./zig-out/bin/boris impact guides/getting-started`
-(add `--format json` when another local tool needs the result).
+change can affect (sample Trunk id in this repo):
+
+```bash
+./zig-out/bin/boris impact getting-started
+```
+
+Add `--format json` when another local tool needs the result.
 
 ## Shape one site into more than one page type
 
 Keep one content tree; choose a layout per page at build time. Rules are
-HTML-only and do not add layout syntax to frontmatter.
+HTML-only and do not add layout syntax to frontmatter. Selectors:
+`id:<entity-id>`, `glob:<segment-pattern>`, `role:trunk|satellite`.
+
+Copy-pasteable example from [`examples/archive-theme/`](examples/archive-theme/):
 
 ```bash
 ./zig-out/bin/boris \
-  --target public=dist \
-  --target-layout public=themes/archive/layouts/main.html \
-  --layout-rule public id:index themes/archive/layouts/home.html \
-  --layout-rule public 'glob:archive/*' themes/archive/layouts/archive.html \
-  --layout-rule public role:trunk themes/archive/layouts/section.html
+  --input examples/archive-theme/content \
+  --theme examples/archive-theme/theme \
+  --layout-rule default id:archive \
+    examples/archive-theme/theme/layouts/archive.html \
+  --html-dir test-output/archive-theme \
+  --quiet
 ```
 
-Selectors: `id:<entity-id>`, `glob:<segment-pattern>`, `role:trunk|satellite`.
+Contract detail: [templating and themes](docs/contracts/templating-and-themes.md).
 
 ## Use Boris as a pipeline stage
 

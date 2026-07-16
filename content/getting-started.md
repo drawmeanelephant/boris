@@ -6,7 +6,7 @@ tags: [setup, cli]
 
 # Getting Started
 
-Build Boris, compile this sample site, and try the three product modes.
+Build Boris, compile this sample site, and try the product modes.
 
 ## Prerequisites
 
@@ -25,17 +25,21 @@ zig build
 Open `dist/index.html` (or serve `dist/` with any static file server). You should
 see site nav on the left, breadcrumb, and a page TOC when the body has headings.
 
-## Three modes
+## Product modes
 
 | Mode | Command | Output |
 |------|---------|--------|
 | **HTML (default)** | `./zig-out/bin/boris` | `dist/` |
 | **JSON IR** | `./zig-out/bin/boris --out .boris` | `.boris/` |
 | **RAG corpus** | `./zig-out/bin/boris --rag` | `rag/` |
+| **Context Bundle** | `./zig-out/bin/boris --context` | `context/` |
+
+Read-only analysis (not publish modes): `boris check`, `boris impact <id>`.
 
 ```bash
 ./zig-out/bin/boris --out .boris --quiet
 ./zig-out/bin/boris --rag --quiet
+./zig-out/bin/boris --context --quiet
 ```
 
 <Aside kind="tip">
