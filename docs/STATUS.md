@@ -1,8 +1,14 @@
 # Project status — Boris
 
-**As of:** 2026-07-15 · product **0.3.1** / compiler **boris/0.3.1** · Zig **0.16.0**<br>
-**Phase:** **v0.3.1** — Feature 8 graph-native dependencies complete.<br>
+**As of:** 2026-07-16 · last tagged product **0.3.1** / compiler
+**boris/0.3.1** · Zig **0.16.0**<br>
+**Phase:** post-v0.3.1 main — release-cut preparation and real-site dogfood.<br>
 IR `schemaVersion` is **`0.2.0`**.
+
+**Version boundary:** `v0.3.1` remains the last tagged product release. The
+capabilities marked **available on main** below are merged behavior, but are
+still `[Unreleased]`; this document does not assign them a product version or
+create a release claim.
 
 **Feature 8 status:** F8.0 contracts and F8.1–F8.3 are complete. IR 0.2
 publishes typed `parent` / `include` / `reference` edges and deterministic
@@ -86,6 +92,10 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | Boris-mediated includes + wiki-links | **Done** (Feature 7; HTML path; Apex FS includes off) |
 | Wiki `[[id#heading]]` section targets | **Done** (F9; Apex heading ids; see `heading-ids.md`) |
 | Page layout selection (`--layout-rule`) | **Done** (exact/glob/role; one theme/target) |
+| Layout-selection hostile/path gate | **Done** (`zig build test-layout-hostile`; lexical path rejection) |
+| Apex Unified compatibility matrix | **Available on main** (fixtures + matrix; compatibility evidence, not a new renderer) |
+| Astro and WordPress migration labs | **Available on main** (bounded conversion/reconnaissance labs; not runtime dependencies) |
+| Bounded Textile input | **Available on main** (`--textile`; explicit whole-tree compatibility adapter) |
 | Full YAML / MDX / embedded HTTP server | **Not now** |
 
 ### Commands
@@ -106,6 +116,7 @@ zig build test
 # CMake is compile-time only (static ApexMarkdown libs)
 zig build test-apex-hostile
 zig build test-apex-sanitize   # optional
+zig build test-layout-hostile
 ```
 
 Host tools: **Zig 0.16** + **CMake** at build time. Pin:
@@ -128,8 +139,8 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
-| **Next** | Release cut + real-site dogfood | Move the merged knowledge-system work out of `[Unreleased]`, then exercise Boris against a real site and record migration gaps. |
-| **Later** | Template/theme productization | Per-page layout selection, external stylesheet policy, and an optional static DaisyUI sample remain post-F9.2 work. |
+| **Next** | Release cut + real-site dogfood | Decide the next release contents/version; merged knowledge-system, layout-selection, Textile, and migration-lab work remains `[Unreleased]` until then. Exercise Boris against a real site and record migration gaps. |
+| **Later** | Theme policy and samples | External stylesheet policy and an optional static DaisyUI sample remain future work; page layout selection itself is shipped on main. |
 | **Deferred** | P4 build-system productization | Measurement-driven cache/watch improvements after a real need or reproducible benchmark. |
 | **Hygiene** | Sample content honesty as features land | Keep root `content/` aligned with shipped capabilities and migration guidance. |
 | **Hygiene** | No parallel content sandboxes by default | Failed draft removed; root `content/` is SoT. |
@@ -156,6 +167,12 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | 9 | Heading-target wiki links | `[[entity-id#heading-id]]` matches Apex-rendered ids; fail loud on missing |
 | 9.1 | Closed layout plan + theme assets | `metadata` / `footer` / `asset-url`; target-owned asset copy; see `templating-and-themes.md` |
 | 9.2 | Theme/template hardening | Layout UTF-8 at split; orphan theme-asset scrub; fixture/failure coverage; see `templating-and-themes.md` |
+| 9.3 | Page layout selection | `--layout-rule TARGET SELECTOR LAYOUT_PATH`; exact/glob/role precedence, one managed theme per target (PR #50) |
+| 9.3a | Layout-selection hostile coverage | Determinism, fallback, isolation, and invalid/mixed path coverage; focused `test-layout-hostile` gate (PR #51) |
+| — | Apex Unified compatibility evidence | Matrix + fixtures document the supported Boris-facing surface (PR #52) |
+| — | Migration laboratories | Astro archaeology and WordPress conversion labs are developer aids, not Boris product pipelines (PRs #53–#54) |
+| — | Bounded Textile compatibility | Explicit fail-closed `.textile` tree mode through the normal Boris pipeline (PR #55) |
+| — | Post-layout correctness fixes | Theme asset/page-output preservation, owned fragment keys, precise wiki diagnostics, managed-theme watch coverage, non-incremental stale sweep preservation, footer UTF-8 gate, and incremental heading-index reuse (PRs #65–#72) |
 
 P2 (fingerprints, incremental, layout edges) and P3 scale-out are **complete**
 on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
@@ -185,6 +202,7 @@ on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 | Publish | **Honest limit + fallback** | Cross-volume **atomic** replace still not claimed. HTML stage / IR publish fall back to copy+delete on `error.CrossDevice`; RAG already had directory copy fallback. Same-parent staging remains the common path. |
 | Dialect | **Enforced** | Author key is **`parent` only**. `parentEntry` / `parent_entry` → `EFRONTMATTER` on all product parse paths. Do not reintroduce aliases. |
 | Migration | **Documented** | Bare `boris` is HTML under `dist/`. Old IR scripts need `--out` / `--no-rag`. README + help text carry the note. |
+| Main-only work | **Not a release claim** | PRs #50–#55 and #65–#72 are merged and usable from `main`; retain their `[Unreleased]` status until a release owner cuts and tags a version. |
 
 ---
 
