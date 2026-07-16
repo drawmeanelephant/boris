@@ -12,6 +12,12 @@ Satellites, linked with ordinary Markdown and wiki-links. It is a record of
 work visible in this repository—not a claim that an agent persists beyond a
 particular task or that every name has a verified patch.
 
+## Public credits
+
+[[agents/credits|Agent Credits & Roster]] is the durable public-facing thank-you
+record. It distinguishes named Codex workers from honorary external tools and
+labels thin evidence as an investigation/support lane.
+
 ## The roster
 
 | Page | Grounding |
