@@ -1,4 +1,5 @@
 ---
+id: agents
 title: Agent Field Notes
 status: published
 tags: [agents, dogfood]
