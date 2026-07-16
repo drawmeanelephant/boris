@@ -19,7 +19,7 @@ coupling**. All code and fixtures live under `tools/migration-lab/`.
 | Source | `tools/migration-lab/` |
 | Binary | `zig-out/bin/boris-migration-lab` (local package install) |
 | Build | `zig build` from this directory |
-| Tests | `zig build test` from this directory |
+| Tests | `zig build test` from this directory; targeted aggregate gate |
 | Astro format id | `boris-astro-migration-lab` |
 | WordPress format id | `boris-wordpress-migration-lab` |
 | Instagram format id | `boris-instagram-migration-lab` |
@@ -64,20 +64,22 @@ zig build run -- --mode=notion \
   --out=./.notion-report
 ```
 
-From the **repository root**:
+From the **repository root**, use this targeted aggregate gate after changing
+`tools/migration-lab/`. Root `zig build test` deliberately covers only the
+product compiler and does not include this standalone laboratory:
 
 ```bash
-zig build -C tools/migration-lab
-zig build -C tools/migration-lab test
-zig build -C tools/migration-lab run -- \
+zig build --build-file tools/migration-lab/build.zig
+zig build --build-file tools/migration-lab/build.zig test
+zig build --build-file tools/migration-lab/build.zig run -- \
   --wxr=tools/migration-lab/fixtures/mini-wxr/export.xml \
   --media=tools/migration-lab/fixtures/mini-wxr/media \
   --out=/tmp/wp-mig-report
-zig build -C tools/migration-lab run -- \
+zig build --build-file tools/migration-lab/build.zig run -- \
   --mode=instagram \
   --dump=tools/migration-lab/fixtures/mini-instagram \
   --out=/tmp/ig-mig-report
-zig build -C tools/migration-lab run -- \
+zig build --build-file tools/migration-lab/build.zig run -- \
   --mode=obsidian \
   --vault=tools/migration-lab/fixtures/mini-obsidian \
   --out=/tmp/obs-mig-report

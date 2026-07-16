@@ -20,8 +20,10 @@ zig build package              # optional; review tar under packages/ (not ship-
 
 CI (`.github/workflows/ci.yml`) pins **Zig 0.16.0** and runs `zig build`,
 `zig build test`, and `zig build test-apex-hostile` on `ubuntu-latest` and
-`macos-latest`. Sanitizer remains optional and must not be claimed if it only
-skipped.
+`macos-latest`. The root aggregate deliberately excludes the standalone
+migration laboratory; changes under `tools/migration-lab/` additionally run its
+Linux-only targeted gate: `zig build --build-file tools/migration-lab/build.zig test`.
+Sanitizer remains optional and must not be claimed if it only skipped.
 
 ## Checklist
 
