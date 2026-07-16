@@ -1232,10 +1232,108 @@ fn collectFragmentTargetSet(
     return targets;
 }
 
+/// Side-cache format for heading harvest (separate from page manifest so we
+/// do not force a fingerprint-format bump). See #58.
+const HEADING_HARVEST_FORMAT = "boris-heading-harvest-v1";
+
+const ParsedHeadingHarvestEntry = struct {
+    entity_id: []const u8 = "",
+    harvest_key: []const u8 = "",
+    ids: []const []const u8 = &.{},
+};
+
+const ParsedHeadingHarvest = struct {
+    format: []const u8 = "",
+    entries: []ParsedHeadingHarvestEntry = &.{},
+};
+
+const HeadingHarvestWriteEntry = struct {
+    entity_id: []u8,
+    harvest_key: []u8,
+    ids: [][]u8,
+};
+
+const HeadingHarvestSnapshot = struct {
+    /// Owned entry records for the just-built index (needed pages only).
+    entries: []HeadingHarvestWriteEntry,
+    gpa: std.mem.Allocator,
+
+    fn deinit(self: *HeadingHarvestSnapshot) void {
+        for (self.entries) |*e| {
+            self.gpa.free(e.entity_id);
+            self.gpa.free(e.harvest_key);
+            for (e.ids) |id| self.gpa.free(id);
+            self.gpa.free(e.ids);
+        }
+        self.gpa.free(self.entries);
+        self.* = undefined;
+    }
+};
+
+/// Content-addressed key for a page's harvested heading ids: source + transitive
+/// include bodies + input adapter identity. Unchanged key ⇒ reusable ids without Apex.
+fn headingHarvestKey(
+    entity_id: []const u8,
+    source_bytes: []const u8,
+    include_bytes: []const []const u8,
+    input_material: []const u8,
+) [32]u8 {
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    var len_buf: [8]u8 = undefined;
+    const updateLen = struct {
+        fn go(h: *std.crypto.hash.sha2.Sha256, len: u64, buf: *[8]u8) void {
+            std.mem.writeInt(u64, buf, len, .little);
+            h.update(buf);
+        }
+    }.go;
+    updateLen(&hasher, entity_id.len, &len_buf);
+    hasher.update(entity_id);
+    updateLen(&hasher, source_bytes.len, &len_buf);
+    hasher.update(source_bytes);
+    updateLen(&hasher, include_bytes.len, &len_buf);
+    for (include_bytes) |b| {
+        updateLen(&hasher, b.len, &len_buf);
+        hasher.update(b);
+    }
+    updateLen(&hasher, input_material.len, &len_buf);
+    hasher.update(input_material);
+    var out: [32]u8 = undefined;
+    hasher.final(&out);
+    return out;
+}
+
+fn writeHeadingHarvestCache(writer: anytype, entries: []const HeadingHarvestWriteEntry) !void {
+    const gpa = std.heap.page_allocator;
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try buf.appendSlice(gpa, "{\n  \"format\": ");
+    try json_out.writeString(&buf, gpa, HEADING_HARVEST_FORMAT);
+    try buf.appendSlice(gpa, ",\n  \"entries\": [\n");
+    for (entries, 0..) |e, i| {
+        try buf.appendSlice(gpa, "    {\n      \"entity_id\": ");
+        try json_out.writeString(&buf, gpa, e.entity_id);
+        try buf.appendSlice(gpa, ",\n      \"harvest_key\": ");
+        try json_out.writeString(&buf, gpa, e.harvest_key);
+        try buf.appendSlice(gpa, ",\n      \"ids\": [");
+        for (e.ids, 0..) |id, j| {
+            try json_out.writeString(&buf, gpa, id);
+            if (j + 1 < e.ids.len) try buf.appendSlice(gpa, ", ");
+        }
+        try buf.appendSlice(gpa, "]\n    }");
+        if (i + 1 < entries.len) try buf.appendSlice(gpa, ",\n") else try buf.append(gpa, '\n');
+    }
+    try buf.appendSlice(gpa, "  ]\n}\n");
+    try writer.writeAll(buf.items);
+}
+
 /// Harvest Apex-rendered heading ids for pages that are wiki-fragment targets.
 /// Reuses the same pre-Apex + Apex body pipeline as publish (no second slugger).
 /// Wiki fragments are emitted but not validated here (index bootstrapping).
 /// When no fragment links exist, returns an empty index (no Apex work).
+///
+/// When `prior_harvest` is non-null (incremental) and a page's harvest key
+/// matches a prior entry, Apex is skipped for that page (#58). Callers may
+/// write the returned harvest snapshot under `.boris-cache/heading-harvest.json`.
 fn buildSiteHeadingIndex(
     io: Io,
     gpa: std.mem.Allocator,
@@ -1245,7 +1343,8 @@ fn buildSiteHeadingIndex(
     shared: *const SharedCompileState,
     quiet: bool,
     input_format: identity.InputFormat,
-) !wikilink.HeadingIndex {
+    prior_harvest: ?*const ParsedHeadingHarvest,
+) !struct { wikilink.HeadingIndex, HeadingHarvestSnapshot } {
     var index: wikilink.HeadingIndex = .{};
     errdefer index.deinit(gpa);
 
@@ -1255,13 +1354,78 @@ fn buildSiteHeadingIndex(
         while (it.next()) |k| gpa.free(k.*);
         needed.deinit(gpa);
     }
-    if (needed.count() == 0) return index;
+
+    var snapshot: HeadingHarvestSnapshot = .{ .entries = &.{}, .gpa = gpa };
+    errdefer snapshot.deinit();
+
+    if (needed.count() == 0) return .{ index, snapshot };
+
+    // entity_id → prior entry
+    var prior_map: std.StringHashMapUnmanaged(*const ParsedHeadingHarvestEntry) = .{};
+    defer prior_map.deinit(gpa);
+    if (prior_harvest) |ph| {
+        if (std.mem.eql(u8, ph.format, HEADING_HARVEST_FORMAT)) {
+            for (ph.entries) |*e| {
+                if (e.entity_id.len == 0 or e.harvest_key.len == 0) continue;
+                try prior_map.put(gpa, e.entity_id, e);
+            }
+        }
+    }
+
+    var write_list: std.ArrayList(HeadingHarvestWriteEntry) = .empty;
+    errdefer {
+        for (write_list.items) |*e| {
+            gpa.free(e.entity_id);
+            gpa.free(e.harvest_key);
+            for (e.ids) |id| gpa.free(id);
+            gpa.free(e.ids);
+        }
+        write_list.deinit(gpa);
+    }
 
     var doc_arena = std.heap.ArenaAllocator.init(gpa);
     defer doc_arena.deinit();
 
-    for (db.items()) |page| {
+    const input_material: []const u8 = if (input_format == .textile) textile.adapter_identity else "";
+
+    for (db.items(), 0..) |page, page_idx| {
         if (!needed.contains(page.entity_id)) continue;
+
+        const inc_owned = shared.include_bytes[page_idx];
+        const inc_views = try gpa.alloc([]const u8, inc_owned.len);
+        defer gpa.free(inc_views);
+        for (inc_owned, 0..) |b, j| inc_views[j] = b;
+
+        const key_bytes = headingHarvestKey(
+            page.entity_id,
+            shared.source_bytes[page_idx],
+            inc_views,
+            input_material,
+        );
+        const key_hex = cache.hexDigest(key_bytes);
+
+        // Cache hit: reuse prior ids (no Apex).
+        if (prior_map.get(page.entity_id)) |prior| {
+            if (std.mem.eql(u8, prior.harvest_key, &key_hex)) {
+                try index.putOwned(gpa, page.entity_id, prior.ids);
+                const ent_id = try gpa.dupe(u8, page.entity_id);
+                errdefer gpa.free(ent_id);
+                const hk = try gpa.dupe(u8, &key_hex);
+                errdefer gpa.free(hk);
+                const ids_owned = try gpa.alloc([]u8, prior.ids.len);
+                errdefer {
+                    for (ids_owned) |id| gpa.free(id);
+                    gpa.free(ids_owned);
+                }
+                for (prior.ids, 0..) |id, i| ids_owned[i] = try gpa.dupe(u8, id);
+                try write_list.append(gpa, .{
+                    .entity_id = ent_id,
+                    .harvest_key = hk,
+                    .ids = ids_owned,
+                });
+                continue;
+            }
+        }
 
         _ = doc_arena.reset(.free_all);
         const arena = doc_arena.allocator();
@@ -1329,9 +1493,33 @@ fn buildSiteHeadingIndex(
         // collectHeadingIds allocates id copies on gpa (not the page arena).
         try html_toc.collectHeadingIds(gpa, html_buf.items, &ids);
         try index.putOwned(gpa, page.entity_id, ids.items);
+
+        const ent_id = try gpa.dupe(u8, page.entity_id);
+        errdefer gpa.free(ent_id);
+        const hk = try gpa.dupe(u8, &key_hex);
+        errdefer gpa.free(hk);
+        const ids_owned = try gpa.alloc([]u8, ids.items.len);
+        errdefer {
+            for (ids_owned) |id| gpa.free(id);
+            gpa.free(ids_owned);
+        }
+        for (ids.items, 0..) |id, i| ids_owned[i] = try gpa.dupe(u8, id);
+        try write_list.append(gpa, .{
+            .entity_id = ent_id,
+            .harvest_key = hk,
+            .ids = ids_owned,
+        });
     }
 
-    return index;
+    // Deterministic entry order for the cache file.
+    std.mem.sort(HeadingHarvestWriteEntry, write_list.items, {}, struct {
+        fn less(_: void, a: HeadingHarvestWriteEntry, b: HeadingHarvestWriteEntry) bool {
+            return std.mem.order(u8, a.entity_id, b.entity_id) == .lt;
+        }
+    }.less);
+
+    snapshot.entries = try write_list.toOwnedSlice(gpa);
+    return .{ index, snapshot };
 }
 
 fn expandDirtySet(
@@ -1558,11 +1746,6 @@ fn compilePagesInner(
         break :blk &(local_shared.?);
     };
 
-    // Heading id index for wiki `[[entity#heading]]` (Apex-rendered ids only;
-    // only pages that are fragment targets are rendered for the index).
-    var heading_index = try buildSiteHeadingIndex(io, gpa, content_dir, db, site, shared, options.quiet, options.input_format);
-    defer heading_index.deinit(gpa);
-
     // Load and parse prior manifest if in incremental mode (from final dist).
     var manifest_bytes: ?[]u8 = null;
     defer {
@@ -1571,6 +1754,15 @@ fn compilePagesInner(
     var parsed_manifest: ?std.json.Parsed(ParsedCacheManifest) = null;
     defer {
         if (parsed_manifest) |pm| pm.deinit();
+    }
+    // Prior heading-harvest cache (#58): reuse Apex ids when harvest keys match.
+    var heading_harvest_bytes: ?[]u8 = null;
+    defer {
+        if (heading_harvest_bytes) |hb| gpa.free(hb);
+    }
+    var parsed_heading_harvest: ?std.json.Parsed(ParsedHeadingHarvest) = null;
+    defer {
+        if (parsed_heading_harvest) |ph| ph.deinit();
     }
 
     if (options.incremental) {
@@ -1585,7 +1777,37 @@ fn compilePagesInner(
                 }
             } else |_| {}
         } else |_| {}
+        if (readFileAlloc(io, dist_dir, ".boris-cache/heading-harvest.json", gpa)) |bytes| {
+            heading_harvest_bytes = bytes;
+            if (std.json.parseFromSlice(ParsedHeadingHarvest, gpa, bytes, .{ .ignore_unknown_fields = true })) |ph| {
+                if (std.mem.eql(u8, ph.value.format, HEADING_HARVEST_FORMAT)) {
+                    parsed_heading_harvest = ph;
+                } else {
+                    ph.deinit();
+                }
+            } else |_| {}
+        } else |_| {}
     }
+
+    // Heading id index for wiki `[[entity#heading]]` (Apex-rendered ids only;
+    // only pages that are fragment targets are rendered for the index).
+    // Incremental: reuse harvest-cache hits so no-op builds skip Apex (#58).
+    const prior_harvest: ?*const ParsedHeadingHarvest = if (parsed_heading_harvest) |*ph| &ph.value else null;
+    const heading_built = try buildSiteHeadingIndex(
+        io,
+        gpa,
+        content_dir,
+        db,
+        site,
+        shared,
+        options.quiet,
+        options.input_format,
+        prior_harvest,
+    );
+    var heading_index = heading_built[0];
+    defer heading_index.deinit(gpa);
+    var heading_snapshot = heading_built[1];
+    defer heading_snapshot.deinit();
 
     // Precreate output directories under staging
     {
@@ -1888,6 +2110,20 @@ fn compilePagesInner(
         try m_writer.flush();
 
         try atomic_manifest.replace(io);
+
+        // Persist heading harvest for the next incremental run (#58).
+        {
+            var atomic_hh = try stage_dir.createFileAtomic(io, ".boris-cache/heading-harvest.json", .{
+                .replace = true,
+                .make_path = true,
+            });
+            defer atomic_hh.deinit(io);
+            var hh_buf: [4096]u8 = undefined;
+            var hh_writer = atomic_hh.file.writer(io, &hh_buf);
+            try writeHeadingHarvestCache(&hh_writer.interface, heading_snapshot.entries);
+            try hh_writer.flush();
+            try atomic_hh.replace(io);
+        }
     }
 
     // Commit: rename staged files into final dist (final untouched until this point).
@@ -4161,6 +4397,128 @@ test "Feature 9 HTML: heading fragment wiki links resolve to rendered ids" {
     const index_inc = try readAllFile(io, dist_dir, "index.html", gpa);
     defer gpa.free(index_inc);
     try std.testing.expectEqualStrings(index_html, index_inc);
+}
+
+test "Feature 9 incremental: heading harvest cache skips Apex on no-op (#58)" {
+    // Sites with [[entity#heading]] must not re-Apex every fragment target on a
+    // no-op incremental build. Cold build writes heading-harvest.json; warm
+    // no-op reuses harvest keys and still emits correct fragment hrefs.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f9-heading-harvest", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html>{{content}}</html>");
+    try writeTreeFile(io, work, "content/guides/target.md",
+        \\---
+        \\title: Target
+        \\parent: guides
+        \\---
+        \\
+        \\# Section One
+        \\
+        \\Body.
+        \\
+    );
+    try writeTreeFile(io, work, "content/guides.md",
+        \\---
+        \\title: Guides
+        \\---
+        \\
+        \\# Guides
+        \\
+    );
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\See [[guides/target#section-one]].
+        \\
+    );
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    // Cold incremental: harvest + publish.
+    const stats_cold = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .incremental = true,
+        .quiet = true,
+    });
+    try std.testing.expect(stats_cold.pages_written >= 1);
+
+    const harvest_path = try std.fmt.allocPrint(gpa, "{s}/.boris-cache/heading-harvest.json", .{dist});
+    defer gpa.free(harvest_path);
+    const harvest1 = try readFileAlloc(io, cwd, harvest_path, gpa);
+    defer gpa.free(harvest1);
+    try std.testing.expect(std.mem.indexOf(u8, harvest1, HEADING_HARVEST_FORMAT) != null);
+    try std.testing.expect(std.mem.indexOf(u8, harvest1, "guides/target") != null);
+    try std.testing.expect(std.mem.indexOf(u8, harvest1, "section-one") != null);
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const index_html = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(index_html);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "guides/target.html#section-one") != null);
+
+    // No-op warm: zero pages written; harvest file stable; HTML unchanged.
+    const stats_warm = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .incremental = true,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 0), stats_warm.pages_written);
+
+    const harvest2 = try readFileAlloc(io, cwd, harvest_path, gpa);
+    defer gpa.free(harvest2);
+    try std.testing.expectEqualStrings(harvest1, harvest2);
+
+    const index_warm = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(index_warm);
+    try std.testing.expectEqualStrings(index_html, index_warm);
+
+    // Change only non-heading body text on the target → harvest key changes,
+    // fragment id `section-one` still valid, rebuild succeeds and harvest updates.
+    try writeTreeFile(io, work, "content/guides/target.md",
+        \\---
+        \\title: Target
+        \\parent: guides
+        \\---
+        \\
+        \\# Section One
+        \\
+        \\Body changed.
+        \\
+    );
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .incremental = true,
+        .quiet = true,
+    });
+    const harvest3 = try readFileAlloc(io, cwd, harvest_path, gpa);
+    defer gpa.free(harvest3);
+    try std.testing.expect(std.mem.indexOf(u8, harvest3, "section-one") != null);
+    // Harvest key must have changed (source bytes changed).
+    try std.testing.expect(!std.mem.eql(u8, harvest1, harvest3));
+
+    const index_after = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(index_after);
+    try std.testing.expect(std.mem.indexOf(u8, index_after, "guides/target.html#section-one") != null);
 }
 
 test "Feature 9 HTML: missing heading fragment fails loud" {
