@@ -29,6 +29,12 @@ How to use going forward:
   with per-page `selected_layout`. Module: `src/layout_select.zig`. Contract:
   `docs/contracts/templating-and-themes.md` §4; fixture:
   `docs/contracts/fixtures/layout-rules/`. No IR schema or product version bump.
+- Hostile integration harness for layout selection (precedence, ambiguity,
+  rule-order determinism, fallback chain, path/mixed-theme failures, multi-target
+  isolation, incremental/full equivalence, repeated-run determinism). Zig-only:
+  `src/layout_select_hostile_test.zig`, fixtures under
+  `docs/contracts/fixtures/layout-rules/hostile/`, step `zig build test-layout-hostile`.
+  Audit report: `docs/contracts/fixtures/layout-rules/hostile/REPORT.md`.
 
 ### Knowledge-system exports
 

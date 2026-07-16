@@ -24,6 +24,7 @@ Layout selection (`--layout-rule`) lives under:
 |---------|------|
 | `layout-rules/` | Multi-layout theme + exact/glob/role selection markers |
 | `layout-rules/adversarial/` | Frontmatter `layout:` rejection; mixed theme roots |
+| `layout-rules/hostile/` | Hostile integration harness fixtures + audit report |
 
 HTML integration coverage is in `src/compile.zig` / `src/wikilink.zig`; the
 release gate smokes the missing-fragment fixture for exit **1**. Fragment
