@@ -36,7 +36,6 @@ const std = @import("std");
 const Io = std.Io;
 const page_mod = @import("page.zig");
 const parser = @import("parser.zig");
-const aside = @import("aside.zig");
 const apex = @import("apex.zig");
 const assemble = @import("assemble.zig");
 const scanner = @import("scanner.zig");
@@ -48,6 +47,7 @@ const graph_mod = @import("graph.zig");
 const diag = @import("diag.zig");
 const html_nav = @import("html_nav.zig");
 const html_toc = @import("html_toc.zig");
+const html_body = @import("html_body.zig");
 const include_mod = @import("include.zig");
 const wikilink = @import("wikilink.zig");
 const json_out = @import("json_out.zig");
@@ -209,39 +209,6 @@ fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Alloc
     return try reader.interface.allocRemaining(allocator, .unlimited);
 }
 
-fn sourceLineAt(source: []const u8, offset: usize) u32 {
-    var line: u32 = 1;
-    for (source[0..@min(offset, source.len)]) |c| if (c == '\n') {
-        line += 1;
-    };
-    return line;
-}
-
-fn bodyForInput(
-    allocator: std.mem.Allocator,
-    input_format: identity.InputFormat,
-    source: []const u8,
-    body: []const u8,
-    body_offset: usize,
-    source_path: []const u8,
-    quiet: bool,
-) ![]const u8 {
-    if (input_format == .markdown) return body;
-    const adapted = try textile.toMarkdown(body, allocator);
-    if (adapted.diagnostic) |td| {
-        if (!quiet) {
-            std.debug.print("error: ETEXTILE: {s}:{d}:{d}: {s} [Use only the bounded Textile compatibility subset]\n", .{
-                source_path,
-                sourceLineAt(source, body_offset) + td.line - 1,
-                td.column,
-                td.message,
-            });
-        }
-        return error.TextileFailed;
-    }
-    return adapted.markdown;
-}
-
 /// Load layout once into long-lived `layout_arena` ownership.
 /// Missing/duplicate `{{content}}` hard-fails **before** content compilation.
 ///
@@ -349,7 +316,7 @@ pub fn loadAndPromoteFormat(
         if (parsed.diagnostic != null) return error.ParseFailed;
         var body_arena = std.heap.ArenaAllocator.init(gpa);
         defer body_arena.deinit();
-        _ = try bodyForInput(body_arena.allocator(), input_format, source, parsed.doc.body, parsed.doc.body_offset, disc.source_path, quiet);
+        _ = try html_body.bodyForInput(body_arena.allocator(), input_format, source, parsed.doc.body, parsed.doc.body_offset, disc.source_path, quiet);
 
         const final_id: []const u8 = if (parsed.doc.meta.id) |override| override else disc.entity_id;
         try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset);
@@ -456,64 +423,15 @@ pub fn renderAndPublishPageWithTheme(
     const arena = doc_arena.allocator();
 
     const source = try readFileAlloc(io, content_dir, page.source_path, arena);
-    const parsed = parser.parse(source);
-    if (parsed.diagnostic != null) return error.ParseFailed;
-    const body = try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, page.source_path, options.quiet);
-
     if (options.test_fail_render_at) |idx| {
         if (idx == page_index) return error.TestInjectedRenderFailure;
     }
-
-    // Pre-Apex: expand {{include}} then rewrite [[wiki]] (Boris-mediated; Apex FS off).
-    // File I/O buffers use real gpa (not page_allocator); expanded markdown is arena-owned.
-    var include_fail: include_mod.FailInfo = .{};
-    const expanded = include_mod.expandIncludes(
-        io,
-        content_dir,
-        gpa,
-        arena,
-        body,
-        page.source_path,
-        &include_fail,
-    ) catch |err| {
-        if (!options.quiet) {
-            include_mod.printDiagnostic(gpa, err, page.source_path, include_fail);
-        }
-        return error.IncludeFailed;
-    };
-
-    const nodes: []const graph_mod.Node = if (site) |s| s.nodes else &.{};
-    var wiki_fail: wikilink.FailInfo = .{};
-    const with_wiki = wikilink.rewriteWikiLinksOpts(arena, expanded, nodes, page.output_path, &wiki_fail, .{
+    const html = try html_body.renderSource(io, gpa, content_dir, doc_arena, source, page.source_path, page.output_path, .{
+        .input_format = options.input_format,
+        .quiet = options.quiet,
+        .nodes = if (site) |s| s.nodes else &.{},
         .heading_index = heading_index,
-        .validate_fragments = heading_index != null,
-    }) catch |err| {
-        if (!options.quiet) {
-            wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail);
-        }
-        return error.ReferenceFailed;
-    };
-
-    // Body stream: markdown segments via Apex, Aside via aside.renderHtml.
-    // Document order preserved; all HTML lives on the Whiteboard only.
-    const tok = try aside.tokenizeBody(with_wiki, arena);
-    if (tok.hasErrors()) return error.ComponentFailed;
-
-    var html_buf: std.ArrayList(u8) = .empty;
-    for (tok.segments) |seg| {
-        switch (seg) {
-            .markdown => |md| {
-                if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
-                const h = try apex.render(md, doc_arena);
-                try html_buf.appendSlice(arena, h.bytes);
-            },
-            .aside => |c| {
-                const h = try aside.renderHtml(c, doc_arena);
-                try html_buf.appendSlice(arena, h);
-            },
-        }
-    }
-    const html = html_buf.items;
+    });
 
     var slots: assemble.SlotValues = .{ .content = html };
 
@@ -1430,61 +1348,13 @@ fn buildSiteHeadingIndex(
 
         _ = doc_arena.reset(.free_all);
         const arena = doc_arena.allocator();
-
         const source = try readFileAlloc(io, content_dir, page.source_path, arena);
-        const parsed = parser.parse(source);
-        if (parsed.diagnostic != null) return error.ParseFailed;
-        const body = try bodyForInput(arena, input_format, source, parsed.doc.body, parsed.doc.body_offset, page.source_path, quiet);
-
-        var include_fail: include_mod.FailInfo = .{};
-        const expanded = include_mod.expandIncludes(
-            io,
-            content_dir,
-            gpa,
-            arena,
-            body,
-            page.source_path,
-            &include_fail,
-        ) catch |err| {
-            if (!quiet) {
-                include_mod.printDiagnostic(gpa, err, page.source_path, include_fail);
-            }
-            return error.IncludeFailed;
-        };
-
-        var wiki_fail: wikilink.FailInfo = .{};
-        // Do not validate fragments while building the index they depend on.
-        const with_wiki = wikilink.rewriteWikiLinksOpts(
-            arena,
-            expanded,
-            site.nodes,
-            page.output_path,
-            &wiki_fail,
-            .{ .heading_index = null, .validate_fragments = false },
-        ) catch |err| {
-            if (!quiet) {
-                wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail);
-            }
-            return error.ReferenceFailed;
-        };
-
-        const tok = try aside.tokenizeBody(with_wiki, arena);
-        if (tok.hasErrors()) return error.ComponentFailed;
-
-        var html_buf: std.ArrayList(u8) = .empty;
-        for (tok.segments) |seg| {
-            switch (seg) {
-                .markdown => |md| {
-                    if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
-                    const h = try apex.render(md, &doc_arena);
-                    try html_buf.appendSlice(arena, h.bytes);
-                },
-                .aside => |c| {
-                    const h = try aside.renderHtml(c, &doc_arena);
-                    try html_buf.appendSlice(arena, h);
-                },
-            }
-        }
+        const html = try html_body.renderSource(io, gpa, content_dir, &doc_arena, source, page.source_path, page.output_path, .{
+            .input_format = input_format,
+            .quiet = quiet,
+            .nodes = site.nodes,
+            // Do not validate fragments while building the index they depend on.
+        });
 
         var ids: std.ArrayList([]const u8) = .empty;
         defer {
@@ -1492,7 +1362,7 @@ fn buildSiteHeadingIndex(
             ids.deinit(gpa);
         }
         // collectHeadingIds allocates id copies on gpa (not the page arena).
-        try html_toc.collectHeadingIds(gpa, html_buf.items, &ids);
+        try html_toc.collectHeadingIds(gpa, html, &ids);
         try index.putOwned(gpa, page.entity_id, ids.items);
 
         const ent_id = try gpa.dupe(u8, page.entity_id);
