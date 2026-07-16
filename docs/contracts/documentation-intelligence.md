@@ -1,7 +1,8 @@
-# Documentation Intelligence (planned)
+# Documentation Intelligence
 
-**Status:** first slice implemented; normative for `check` / `impact`. Semantic
-relations and Context Bundles remain separate future contracts.
+**Status:** first slice implemented and merged; normative for `check` /
+`impact`. Semantic relations and Context Bundles are separate contracts with
+their own shipped implementations.
 
 Documentation Intelligence is a read-only analysis layer over Boris's already
 validated, frozen content graph. It must not alter HTML output, IR 0.2 shape,
