@@ -1,16 +1,17 @@
 # Roadmap — post Feature 8 (historical draft + current direction)
 
-**As of:** 2026-07-15 · product **0.3.1** / IR **0.2.0** · plan only · not a
-substitute for [`STATUS.md`](STATUS.md)
+**As of:** 2026-07-16 · last tagged product **0.3.1** / IR **0.2.0** · plan
+only · not a substitute for [`STATUS.md`](STATUS.md)
 **Current state:** F8.1–F8.3 are **shipped** (IR 0.2 + reverse-index dirty-set
 in **v0.3.1**). Heading-target wiki links (PR #40), F9.1 closed layout/theme
 assets (PR #41), and F9.2 layout UTF-8 validation + orphan theme-asset scrub
 (PR #42) are **shipped**. Product **v0.3.1** is released/tagged. Documentation
 Intelligence (`check` / `impact`), bounded semantic relations, and AI Context
 Bundles are merged on `main` via PRs #43 and #44 and remain under
-`[Unreleased]` until the next product cut. This file preserves the post-F8
-planning history and records what remains *after* F9.2 and the
-knowledge-system track.
+`[Unreleased]` until the next product cut. PRs #50–#55 and #65–#72 are also
+merged and available on `main`, without a new product tag. This file preserves
+the post-F8 planning history and records what remains after the shipped
+main-branch work; it does not assign that work a version.
 
 Normative behavior: [`docs/contracts/`](contracts/). Hard constraints:
 [`AGENTS.md`](../AGENTS.md). Living phase: [`STATUS.md`](STATUS.md).
@@ -21,8 +22,8 @@ Normative behavior: [`docs/contracts/`](contracts/). Hard constraints:
    acceptance gates documented in `[Unreleased]`.
 2. Dogfood Boris against a real site and turn migration findings into focused
    authoring, layout, and conversion work.
-3. Decide per-page layout selection and external stylesheet boundaries before
-   attempting a broader theme/DaisyUI experiment.
+3. Keep the shipped page-layout selection rules stable while deciding external
+   stylesheet boundaries and any broader theme/DaisyUI experiment.
 
 Do not interpret historical “F8.3 pending” or “heading wiki later” statements
 below as current status; they are retained to preserve planning context.
@@ -55,11 +56,18 @@ tag notes in CHANGELOG as cuts land):**
 | F9.1 layout + theme assets | **#41** | Closed layout plan (`metadata` / `footer` / `asset-url`); target-owned theme asset copy |
 | F9.2 theme hardening | **#42** | Layout UTF-8 validation at split; orphan theme-asset scrub after publish |
 
-**Next (after F9.2):** residual build-system polish, page layout selection rules,
-external stylesheet policy, optional DaisyUI/static-theme experiment, practical
-real-site migration/content conversion. IR-visible layout/asset edges remain
-**explicitly deferred** (optional F10 / schema 0.3). Not polyglot SSG work, not
-unrestricted MDX, not marketing perf claims without measurement.
+**Available on main, pending a release cut:** PR #50 adds deterministic
+per-page `--layout-rule` selection (exact/glob/role) and PR #51 adds its hostile
+integration/path gate. PR #52 records the Apex Unified compatibility matrix.
+PRs #53–#54 add Astro and WordPress migration laboratories; PR #55 adds the
+bounded, fail-closed `--textile` adapter. PRs #65–#72 close important theme,
+watch, stale-output, UTF-8, fragment-ownership, diagnostic, and
+incremental-heading correctness gaps.
+
+**Next:** choose the release contents/version, dogfood the migration labs on a
+real site, and decide external stylesheet policy. IR-visible layout/asset edges
+remain **explicitly deferred** (optional F10 / schema 0.3). Not polyglot SSG
+work, not unrestricted MDX, not marketing perf claims without measurement.
 
 ---
 
@@ -108,8 +116,9 @@ same way.
 | Dirty-set | **0.3.1** | F8.3 | **Shipped / tagged:** incremental dirty-set uses frozen reverse index |
 | Truth | docs | Hygiene-G | STATUS / README / RELEASE-GATE match the binary (ongoing as cuts land) |
 | Build productization | **0.3.1+ / residual** | P4 slices | **Partially shipped** (multi-target CLI order independence, output_digest cache freshness, watch path hygiene); residual measurement-driven work remains |
-| Authoring / themes | **0.3.1 tree** | F9 | **Shipped:** heading wiki (#40); F9.1 layout/theme (#41); F9.2 hardening (#42) |
-| Post-F9.2 future | later | §13 | Layout selection rules; external stylesheet policy; optional DaisyUI/static theme; real-site migration; IR layout/asset **deferred** |
+| Authoring / themes | main, `[Unreleased]` | F9 | **Available:** heading wiki (#40); F9.1/F9.2 (#41/#42); page layout selection + hostile gate (#50/#51); subsequent theme/watch fixes (#65–#72) |
+| Migration / compatibility | main, `[Unreleased]` | labs + Textile | **Available:** Apex matrix (#52); Astro/WordPress labs (#53/#54); bounded `--textile` mode (#55) |
+| Future | later | §13 | External stylesheet policy; optional DaisyUI/static theme; real-site dogfood; IR layout/asset **deferred** |
 | Edge expansion | **0.5.0?** | F10 *optional* | IR-visible layout/asset only if needed (schema **0.3.0**) |
 
 ### Sequencing (mental model)
@@ -130,7 +139,10 @@ same way.
            ergonomics          F9.1 + F9.2 #41–42    schema 0.3 (deferred)
                                        │
                                        ▼
-                              post-F9.2 future (§13)
+                       main-only work (#50–#55, #65–#72)
+                              │
+                              ▼
+                         release cut + §13 future
 ```
 
 ---
@@ -273,7 +285,9 @@ deferred until real-site dogfooding establishes the need.
 | TOC/nav polish; fenced divs pending | **Low-priority residual**; keep pending honesty for fenced divs. |
 | Closed layout + theme assets (F9.1/F9.2) | **Shipped** (#41 / #42). |
 | Multi-target + incremental ergonomics | **Shipped P4 slice**; residual measurement work only. |
-| Page layout selection / external CSS / DaisyUI | **Post-F9.2 future (§13)** — not product default claims. |
+| Page layout selection | **Available on main** (#50), with hostile/path gate (#51); keep it out of release-version claims until cut. |
+| External CSS / DaisyUI | **Future (§13)** — not product default claims. |
+| Migration labs / Textile | **Available on main** (#52–#55); labs remain tooling and Textile remains an explicit bounded adapter. |
 
 ### Hardening / scale
 
@@ -449,6 +463,7 @@ Hostile Apex / sanitizer policy unchanged: skip is not a pass.
 | [`contracts/includes-and-wiki-links.md`](contracts/includes-and-wiki-links.md) | F7 + IR projection |
 | [`contracts/heading-ids.md`](contracts/heading-ids.md) | Heading wiki fragments (PR #40) |
 | [`contracts/templating-and-themes.md`](contracts/templating-and-themes.md) | F9.1 / F9.2 layout + theme assets |
+| [`contracts/textile-compatibility.md`](contracts/textile-compatibility.md) | Bounded explicit `--textile` input mode (PR #55) |
 | [`contracts/parallel-rendering.md`](contracts/parallel-rendering.md) | Coordinator sequential; workers page-only |
 | [`contracts/watch-mode.md`](contracts/watch-mode.md) | Watch / incremental relationship |
 | [`RELEASE-GATE.md`](RELEASE-GATE.md) | Mechanical ship checks |
@@ -463,6 +478,7 @@ Hostile Apex / sanitizer policy unchanged: skip is not a pass.
 |------|------|
 | 2026-07-15 | Initial draft from post-F8 planning session. Defaults D1–D8; F8 treated as in-flight fixed contract work. |
 | 2026-07-15 | Truth reconciliation after PR #42: F8.3 / v0.3.1 tagged; heading wiki #40; F9.1 #41; F9.2 #42 shipped; post-F9.2 future moved to §13; historical F8 weeks retained. |
+| 2026-07-16 | Truth reconciliation after PRs #50–#55 and #65–#72: layout selection and its hostile/path gate, Apex matrix, migration labs, and bounded Textile are available on main; theme/watch/incremental correctness fixes recorded. No new product version or tag claimed. |
 
 When decisions D1–D8 change, update §7 and the phase table in the same edit.
 Update [`STATUS.md`](STATUS.md) when a phase becomes active product reality — this
@@ -475,15 +491,16 @@ file is a roadmap draft, not the living phase banner.
 Active planning surface **after** shipped F8.3, PR #40, F9.1, and F9.2.
 Nothing here is claimed as product default until contracted and tested.
 
-### 13.1 Page layout selection rules
+### 13.1 Page layout selection rules — shipped on main, pending release cut
 
-- **Today:** one layout per target (CLI / default path); theme root derived from
-  layout path (`…/layouts/<file>.html`); `--theme ROOT` sugar for
-  `ROOT/layouts/main.html`.
-- **Open:** per-page or per-role layout selection (CLI vs config vs frontmatter).
-  Deferred open decision in [`templating-and-themes.md`](contracts/templating-and-themes.md) §12.
-- **Constraint:** must stay fail-loud, deterministic, multi-target isolated; no
-  silent fall-back to a different layout.
+- **Available on main:** repeatable `--layout-rule TARGET SELECTOR LAYOUT_PATH`
+  selects layouts by exact id, glob, or role, with deterministic precedence and
+  one managed theme root per target (PR #50).
+- **Gate:** PR #51 adds `zig build test-layout-hostile`, covering precedence,
+  ambiguity, fallback, target isolation, full/incremental equivalence,
+  determinism, and rejected absolute/backslash/dot-segment layout paths.
+- **Still open:** configuration/frontmatter selection is not implied; closed
+  frontmatter remains unchanged. External stylesheet policy is separate.
 
 ### 13.2 External stylesheet policy
 
@@ -520,12 +537,18 @@ Nothing here is claimed as product default until contracted and tested.
 - Prefer measured incremental rebuilds on a real tree over synthetic slogans.
 - Keep migration notes honest about default CLI (`boris` → `dist/`) and opt-in
   IR/RAG flags.
+- **Available on main:** the Astro archaeology lab (PR #53) and WordPress
+  migration laboratory (PR #54) support bounded investigation/conversion work;
+  they do not add an Astro/WordPress runtime or a second compiler pipeline.
+- **Compatibility boundary:** PR #55's `--textile` mode is a fail-closed,
+  whole-tree adapter through Boris's normal pipeline, not general Textile
+  support or mixed-dialect authoring.
 
 ### 13.6 Suggested next PR themes (unordered)
 
 | Theme | Notes |
 |-------|-------|
-| Layout selection design | Contract-first; one-layout-per-target remains default until accepted |
+| Layout selection follow-through | Shipped CLI rules are stable; consider only documented configuration/frontmatter questions if a real need appears |
 | External CSS policy note | Docs/contract honesty; no bundler |
 | Static theme / DaisyUI sample | Optional opaque CSS only; gate must stay Node-free |
 | Real-site content conversion | Sample or companion tree; no product language change |
