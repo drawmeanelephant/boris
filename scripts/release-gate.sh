@@ -320,6 +320,52 @@ else
   printf '%s\n' "${F9_ERR}" | head -20
 fi
 
+# --- 4d. Documentation Intelligence reports + no-artifact behavior --------
+note "4d. Documentation Intelligence reports"
+DI_CONTENT="docs/contracts/fixtures/documentation-intelligence/content"
+DI_EXPECTED="docs/contracts/fixtures/documentation-intelligence/expected"
+DI_PROBE="${GATE_DIR}/di-probe"
+mkdir -p "${DI_PROBE}"
+DI_CHECK_JSON="${DI_PROBE}/di-check.json"
+DI_IMPACT_JSON="${DI_PROBE}/di-impact.json"
+DI_CHECK_HUMAN="${DI_PROBE}/di-check.txt"
+DI_IMPACT_HUMAN="${DI_PROBE}/di-impact.txt"
+set +e
+"${BORIS}" check --input="${DI_CONTENT}" --format=json --report="${DI_CHECK_JSON}" --quiet
+DI_CHECK_EC=$?
+set -e
+if [[ "${DI_CHECK_EC}" -eq 1 ]] && diff -u "${DI_EXPECTED}/check.json" "${DI_CHECK_JSON}" >/dev/null; then
+  pass "check JSON golden + CI finding exit 1"
+else
+  fail "check JSON golden or exit code mismatch (got ${DI_CHECK_EC})"
+fi
+if "${BORIS}" impact guides/reference --input="${DI_CONTENT}" --format=json --report="${DI_IMPACT_JSON}" --quiet \
+  && diff -u "${DI_EXPECTED}/impact.json" "${DI_IMPACT_JSON}" >/dev/null; then
+  pass "impact JSON golden + exit 0"
+else
+  fail "impact JSON golden or exit code mismatch"
+fi
+set +e
+"${BORIS}" check --input="${DI_CONTENT}" --format=human --report="${DI_CHECK_HUMAN}" --quiet
+DI_HUMAN_EC=$?
+set -e
+if [[ "${DI_HUMAN_EC}" -eq 1 ]] && diff -u "${DI_EXPECTED}/check.txt" "${DI_CHECK_HUMAN}" >/dev/null; then
+  pass "check human golden"
+else
+  fail "check human golden or exit code mismatch (got ${DI_HUMAN_EC})"
+fi
+if "${BORIS}" impact guides/reference --input="${DI_CONTENT}" --format=human --report="${DI_IMPACT_HUMAN}" --quiet \
+  && diff -u "${DI_EXPECTED}/impact.txt" "${DI_IMPACT_HUMAN}" >/dev/null; then
+  pass "impact human golden"
+else
+  fail "impact human golden or exit code mismatch"
+fi
+if [[ ! -d "${GATE_DIR}/di-probe/dist" && ! -d "${GATE_DIR}/di-probe/rag" && ! -d "${GATE_DIR}/di-probe/.boris-cache" ]]; then
+  pass "analysis produced no HTML, RAG, or cache artifacts"
+else
+  fail "analysis produced an unexpected build artifact"
+fi
+
 # --- 5. Invalid fixtures: exit codes + diagnostic codes ------------------
 note "5. Invalid fixtures produce expected exit codes and diagnostic codes"
 run_bad() {

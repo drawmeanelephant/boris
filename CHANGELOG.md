@@ -28,6 +28,12 @@ How to use going forward:
   including source-relative provenance, SHA-256 hashes, validated graph output,
   and one uploadable Markdown bundle. Contract:
   `docs/contracts/context-bundle.md`.
+### Documentation Intelligence
+
+- Added read-only `boris check` and `boris impact ID` analysis commands over
+  the validated graph, with deterministic human/JSON reports and optional
+  report-file output and release-gate fixture goldens. Contract:
+  `docs/contracts/documentation-intelligence.md`.
 
 ### Feature 9.2 — theme/template hardening
 

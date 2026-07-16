@@ -127,6 +127,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
+| **Next** | Documentation Intelligence hardening | Read-only `check` and `impact` reports are implemented on the feature branch; contract in [`contracts/documentation-intelligence.md`](contracts/documentation-intelligence.md). Add fixture goldens before merge. |
 | **Later** | P4 build-system productization | Measurement-driven cache/watch improvements after F8 |
 | **Hygiene** | Sample content honesty as features land | Root `content/` is current for F7; re-check after next feature |
 | **Hygiene** | No parallel content sandboxes by default | Failed draft removed; root `content/` is SoT |

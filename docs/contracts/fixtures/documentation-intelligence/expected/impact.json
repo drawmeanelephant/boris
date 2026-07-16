@@ -1,0 +1,18 @@
+{
+  "format": "boris-documentation-intelligence",
+  "schemaVersion": "0.1.0",
+  "compiler": "boris/0.3.1",
+  "input": "docs/contracts/fixtures/documentation-intelligence/content",
+  "summary": {
+    "pages": 4,
+    "roots": 2,
+    "satellites": 2,
+    "sourceEndpoints": 1,
+    "unreferencedPages": 1,
+    "hotspots": 0
+  },
+  "pages": [{"id":"guides","parent":null},{"id":"guides/reference","parent":"guides"},{"id":"guides/start","parent":"guides"},{"id":"index","parent":null}],
+  "sources": ["includes/shared.md"],
+  "findings": [{"code":"unreferenced_page","type":"page","value":"index","count":0}],
+  "impact": [{"type":"page","value":"guides"},{"type":"page","value":"guides/start"},{"type":"page","value":"index"},{"type":"source","value":"includes/shared.md"}]
+}

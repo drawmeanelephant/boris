@@ -409,6 +409,19 @@ pub fn build(b: *std.Build) void {
     const run_dependency_tests = b.addRunArtifact(dependency_tests);
     run_dependency_tests.setCwd(b.path("."));
 
+    // --- Documentation Intelligence analysis core ------------------------
+    // Pure graph analysis; CLI wiring remains a separate product slice.
+    const intelligence_mod = b.createModule(.{
+        .root_source_file = b.path("src/intelligence.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const intelligence_tests = b.addTest(.{
+        .root_module = intelligence_mod,
+    });
+    const run_intelligence_tests = b.addRunArtifact(intelligence_tests);
+    run_intelligence_tests.setCwd(b.path("."));
+
     const cache_mod = b.createModule(.{
         .root_source_file = b.path("src/cache.zig"),
         .target = target,
@@ -438,6 +451,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_source_rag_tests.step);
     test_step.dependOn(&run_package_tests.step);
     test_step.dependOn(&run_dependency_tests.step);
+    test_step.dependOn(&run_intelligence_tests.step);
     test_step.dependOn(&run_cache_tests.step);
     test_step.dependOn(&run_include_tests.step);
     test_step.dependOn(&run_wikilink_tests.step);

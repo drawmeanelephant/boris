@@ -15,6 +15,8 @@ const rag = @import("rag.zig");
 const context = @import("context.zig");
 const compile = @import("compile.zig");
 const target = @import("target.zig");
+const intelligence = @import("intelligence.zig");
+const json_out = @import("json_out.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const Options = cli.Options;
@@ -51,6 +53,7 @@ const ProdRunner = struct {
 /// - usage errors are handled before this (exit 2)
 /// - I/O / system errors → 3
 pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    if (opts.command != .build) return runIntelligence(io, gpa, opts);
     switch (opts.mode) {
         .rag => return runRag(io, gpa, opts),
         .context => return runContext(io, gpa, opts),
@@ -124,6 +127,211 @@ pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .io => .io_error,
         .content, .none => .content_error,
     };
+}
+
+/// Read-only graph analysis. This intentionally calls pipeline.compile rather
+/// than pipeline.run, so no IR/RAG/HTML artifacts or cache manifests publish.
+pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    var result = pipeline.compile(io, gpa, .{
+        .content_root = opts.input_dir,
+        .quiet = true,
+    }) catch |err| {
+        if (!opts.quiet) std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer result.deinit();
+
+    if (!result.ok) {
+        if (!opts.quiet) pipeline.printDiagnostics(gpa, result.diagnostics.items) catch return .io_error;
+        return switch (result.failure) {
+            .io => .io_error,
+            .content, .none => .content_error,
+        };
+    }
+
+    var pages: std.ArrayListUnmanaged(intelligence.Page) = .empty;
+    defer pages.deinit(gpa);
+    pages.ensureTotalCapacity(gpa, result.pages.items.len) catch return .io_error;
+    for (result.pages.items) |page| {
+        pages.appendAssumeCapacity(.{ .id = page.id, .parent = page.parent });
+    }
+
+    var edges: std.ArrayListUnmanaged(intelligence.Edge) = .empty;
+    defer edges.deinit(gpa);
+    edges.ensureTotalCapacity(gpa, result.edges.items.len) catch return .io_error;
+    for (result.edges.items) |edge| {
+        edges.appendAssumeCapacity(.{
+            .from = .{ .type = @enumFromInt(@intFromEnum(edge.from.type)), .value = edge.from.value },
+            .to = .{ .type = @enumFromInt(@intFromEnum(edge.to.type)), .value = edge.to.value },
+            .kind = edge.kind,
+        });
+    }
+
+    var requested: ?intelligence.Endpoint = null;
+    if (opts.command == .impact) {
+        const id = opts.impact_id orelse return .usage;
+        var found = false;
+        for (pages.items) |page| {
+            if (std.mem.eql(u8, page.id, id)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            if (!opts.quiet) std.debug.print("error: impact target not found: {s}\n", .{id});
+            return .usage;
+        }
+        requested = .{ .type = .page, .value = id };
+    }
+
+    var report = intelligence.analyze(gpa, pages.items, edges.items, .{ .impact = requested }) catch |err| {
+        if (!opts.quiet) std.debug.print("error: analysis failed: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer report.deinit();
+
+    const rendered = if (opts.analysis_format == .json)
+        renderAnalysisJson(gpa, opts, result.pages.items, result.edges.items, &report) catch return .io_error
+    else
+        renderAnalysisHuman(gpa, opts, result.pages.items, &report) catch return .io_error;
+    defer gpa.free(rendered);
+
+    if (opts.analysis_report) |path| {
+        Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = rendered }) catch |err| {
+            if (!opts.quiet) std.debug.print("error: failed to write report {s}: {s}\n", .{ path, @errorName(err) });
+            return .io_error;
+        };
+    } else {
+        std.debug.print("{s}", .{rendered});
+    }
+
+    // `check` is CI-useful by default: unreferenced pages are findings.
+    if (opts.command == .check and report.summary.unreferenced_pages > 0) return .content_error;
+    return .success;
+}
+
+fn renderAnalysisHuman(
+    gpa: std.mem.Allocator,
+    opts: Options,
+    pages: []const pipeline.PageEntry,
+    report: *const intelligence.Report,
+) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    try appendFmt(&out, gpa, "Documentation Intelligence ({s})\n", .{@tagName(opts.command)});
+    try appendFmt(&out, gpa, "pages: {d} (roots {d}, satellites {d})\n", .{ report.summary.pages, report.summary.roots, report.summary.satellites });
+    try appendFmt(&out, gpa, "source endpoints: {d}\nunreferenced pages: {d}\nhotspots: {d}\n", .{ report.summary.source_endpoints, report.summary.unreferenced_pages, report.summary.hotspots });
+    if (opts.command == .impact) {
+        try appendFmt(&out, gpa, "impact ({s}):\n", .{opts.impact_id.?});
+        for (report.impact.items) |endpoint| try appendFmt(&out, gpa, "  {s}: {s}\n", .{ @tagName(endpoint.type), endpoint.value });
+    }
+    if (report.findings.items.len > 0) {
+        try out.appendSlice(gpa, "findings:\n");
+        for (report.findings.items) |finding| {
+            try appendFmt(&out, gpa, "  {s}: {s}", .{ @tagName(finding.code), finding.endpoint.value });
+            if (finding.count > 0) try appendFmt(&out, gpa, " ({d})", .{finding.count});
+            try out.append(gpa, '\n');
+        }
+    }
+    _ = pages;
+    return out.toOwnedSlice(gpa);
+}
+
+fn appendFmt(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, comptime fmt: []const u8, args: anytype) !void {
+    const rendered = try std.fmt.allocPrint(gpa, fmt, args);
+    defer gpa.free(rendered);
+    try buf.appendSlice(gpa, rendered);
+}
+
+const BufferWriter = struct {
+    buf: *std.ArrayList(u8),
+    gpa: std.mem.Allocator,
+
+    pub fn writeAll(self: *@This(), bytes: []const u8) !void {
+        try self.buf.appendSlice(self.gpa, bytes);
+    }
+};
+
+fn renderAnalysisJson(
+    gpa: std.mem.Allocator,
+    opts: Options,
+    pages: []const pipeline.PageEntry,
+    edges: []const pipeline.DependencyEdge,
+    report: *const intelligence.Report,
+) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    var w = BufferWriter{ .buf = &out, .gpa = gpa };
+    try w.writeAll("{\n  \"format\": \"boris-documentation-intelligence\",\n  \"schemaVersion\": \"0.1.0\",\n  \"compiler\": \"boris/0.3.1\",\n  \"input\": ");
+    try json_out.writeString(&out, gpa, opts.input_dir);
+    try w.writeAll(",\n  \"summary\": {\n    \"pages\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.pages);
+    try w.writeAll(",\n    \"roots\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.roots);
+    try w.writeAll(",\n    \"satellites\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.satellites);
+    try w.writeAll(",\n    \"sourceEndpoints\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.source_endpoints);
+    try w.writeAll(",\n    \"unreferencedPages\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.unreferenced_pages);
+    try w.writeAll(",\n    \"hotspots\": ");
+    try json_out.writeUsize(&out, gpa, report.summary.hotspots);
+    try w.writeAll("\n  },\n  \"pages\": [");
+    for (pages, 0..) |page, i| {
+        if (i > 0) try w.writeAll(",");
+        try w.writeAll("{\"id\":");
+        try json_out.writeString(&out, gpa, page.id);
+        try w.writeAll(",\"parent\":");
+        if (page.parent) |parent| try json_out.writeString(&out, gpa, parent) else try json_out.writeNull(&out, gpa);
+        try w.writeAll("}");
+    }
+    try w.writeAll("],\n  \"sources\": [");
+    var source_names: std.ArrayListUnmanaged([]const u8) = .empty;
+    defer source_names.deinit(gpa);
+    for (edges) |edge| {
+        if (edge.to.type != .source) continue;
+        var exists = false;
+        for (source_names.items) |name| {
+            if (std.mem.eql(u8, name, edge.to.value)) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) try source_names.append(gpa, edge.to.value);
+    }
+    std.mem.sort([]const u8, source_names.items, {}, struct {
+        fn less(_: void, a: []const u8, b: []const u8) bool { return std.mem.order(u8, a, b) == .lt; }
+    }.less);
+    for (source_names.items, 0..) |source, i| {
+        if (i > 0) try w.writeAll(",");
+        try json_out.writeString(&out, gpa, source);
+    }
+    try w.writeAll("],\n  \"findings\": [");
+    for (report.findings.items, 0..) |finding, i| {
+        if (i > 0) try w.writeAll(",");
+        try w.writeAll("{\"code\":");
+        try json_out.writeString(&out, gpa, @tagName(finding.code));
+        try w.writeAll(",\"type\":");
+        try json_out.writeString(&out, gpa, @tagName(finding.endpoint.type));
+        try w.writeAll(",\"value\":");
+        try json_out.writeString(&out, gpa, finding.endpoint.value);
+        try w.writeAll(",\"count\":");
+        try json_out.writeUsize(&out, gpa, finding.count);
+        try w.writeAll("}");
+    }
+    try w.writeAll("],\n  \"impact\": ");
+    if (opts.command == .impact) {
+        try w.writeAll("[");
+        for (report.impact.items, 0..) |endpoint, i| {
+            if (i > 0) try w.writeAll(",");
+            try w.writeAll("{\"type\":");
+            try json_out.writeString(&out, gpa, @tagName(endpoint.type));
+            try w.writeAll(",\"value\":");
+            try json_out.writeString(&out, gpa, endpoint.value);
+            try w.writeAll("}");
+        }
+        try w.writeAll("]");
+    } else try json_out.writeNull(&out, gpa);
+    try w.writeAll("\n}\n");
+    return out.toOwnedSlice(gpa);
 }
 
 /// Optional deterministic RAG export (same compile + graph.validate as IR).

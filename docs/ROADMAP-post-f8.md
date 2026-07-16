@@ -1,14 +1,27 @@
-# Roadmap — post Feature 8 (draft)
+# Roadmap — post Feature 8 (historical draft + current direction)
 
-**As of:** 2026-07-15 · product **0.3.0** / IR **0.2.0** · plan only · not a
+**As of:** 2026-07-15 · product **0.3.1** / IR **0.2.0** · plan only · not a
 substitute for [`STATUS.md`](STATUS.md)
-**Current state:** F8.1–F8.2 are shipped. F8.3 remains pending; it must not be
-described as reverse-index-backed incremental or watch behavior until it lands.
-Plan everything *after* the shipped F8.1–F8.2 work, plus the remaining F8.3 and
-future roadmap items.
+**Current state:** F8.1–F8.3 and F9.1–F9.2 are shipped. The first
+Documentation Intelligence slice (`boris check` / `boris impact`) is implemented
+on the current feature branch. The detailed sequencing below contains the
+original F8 planning history; use the correction block immediately below and
+`STATUS.md` for live state.
 
 Normative behavior: [`docs/contracts/`](contracts/). Hard constraints:
 [`AGENTS.md`](../AGENTS.md). Living phase: [`STATUS.md`](STATUS.md).
+
+### Live direction after F9.2
+
+1. Harden and merge Documentation Intelligence with fixture goldens and
+   no-artifact checks.
+2. Add bounded semantic relations as a deliberate IR schema change (likely
+   IR 0.3), keeping them separate from build-dependency edges.
+3. Add deterministic, provenance-rich AI Context Bundles over the validated
+   graph and RAG pipeline.
+
+Do not interpret historical “F8.3 pending” or “heading wiki later” statements
+below as current status; they are retained to preserve planning context.
 
 ---
 
