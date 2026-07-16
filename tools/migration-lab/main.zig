@@ -4,6 +4,7 @@
 //!   astro      — read-only Astro tree scan → report.json + REPORT.md
 //!   wordpress  — WordPress WXR → Boris Markdown + reports
 //!   instagram  — Instagram Takeout dump → Boris Markdown + theme assets + reports
+//!   obsidian   — Obsidian vault → Boris Markdown + attachments + reports
 //!
 //! Never rewrites inputs. Not part of the Boris product compiler pipeline.
 //!
@@ -13,6 +14,7 @@
 //!   zig build run -- --mode=wordpress --wxr=./fixtures/mini-wxr/export.xml \
 //!       --media=./fixtures/mini-wxr/media --out=./.out-wp
 //!   zig build run -- --mode=instagram --dump=./fixtures/mini-instagram --out=./.out-ig
+//!   zig build run -- --mode=obsidian --vault=./fixtures/mini-obsidian --out=./.out-obs
 //!   zig build test
 //!
 //! From repo root:
@@ -24,6 +26,7 @@ const Io = std.Io;
 const archaeology = @import("archaeology.zig");
 const wordpress = @import("wordpress.zig");
 const instagram = @import("instagram.zig");
+const obsidian = @import("obsidian.zig");
 
 pub const ExitCode = enum(u8) {
     success = 0,
@@ -39,11 +42,13 @@ pub const Mode = enum {
     astro,
     wordpress,
     instagram,
+    obsidian,
 
     pub fn parse(s: []const u8) ?Mode {
         if (std.mem.eql(u8, s, "astro")) return .astro;
         if (std.mem.eql(u8, s, "wordpress") or std.mem.eql(u8, s, "wp") or std.mem.eql(u8, s, "wxr")) return .wordpress;
         if (std.mem.eql(u8, s, "instagram") or std.mem.eql(u8, s, "ig") or std.mem.eql(u8, s, "takeout")) return .instagram;
+        if (std.mem.eql(u8, s, "obsidian") or std.mem.eql(u8, s, "obs") or std.mem.eql(u8, s, "vault")) return .obsidian;
         return null;
     }
 };
@@ -60,6 +65,8 @@ pub const Options = struct {
     media_dir: ?[]const u8 = null,
     /// Unpacked Instagram data-download root.
     dump_dir: ?[]const u8 = null,
+    /// Obsidian vault root.
+    vault_dir: ?[]const u8 = null,
     /// Report/output directory (created if missing). Never writes into inputs.
     out_dir: []const u8 = "migration-report",
 };
@@ -125,6 +132,16 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
             options.dump_dir = args[index];
             options.mode = .instagram;
+        } else if (std.mem.startsWith(u8, arg, "--vault=")) {
+            const value = arg["--vault=".len..];
+            if (value.len == 0) return error.MissingValue;
+            options.vault_dir = value;
+            options.mode = .obsidian;
+        } else if (std.mem.eql(u8, arg, "--vault")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            options.vault_dir = args[index];
+            options.mode = .obsidian;
         } else if (std.mem.startsWith(u8, arg, "--out=")) {
             const value = arg["--out=".len..];
             if (value.len == 0) return error.MissingValue;
@@ -142,7 +159,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
 
 fn printUsage() void {
     std.debug.print(
-        \\boris-migration-lab — Astro / WordPress / Instagram → Boris migration laboratory
+        \\boris-migration-lab — Astro / WordPress / Instagram / Obsidian → Boris migration laboratory
         \\
         \\Usage:
         \\  boris-migration-lab [options]
@@ -151,7 +168,7 @@ fn printUsage() void {
         \\Common options:
         \\  -h, --help         Show this help and exit
         \\  -q, --quiet        Suppress progress lines
-        \\  --mode=MODE        astro (default) | wordpress | instagram
+        \\  --mode=MODE        astro (default) | wordpress | instagram | obsidian
         \\  --out=DIR          Output directory (default: migration-report)
         \\
         \\Astro mode:
@@ -169,6 +186,12 @@ fn printUsage() void {
         \\  Writes: content/**/*.md, theme/**, report.json, REPORT.md, media_manifest.json
         \\  (--dump implies --mode=instagram)
         \\  No network, zip extraction, API, or scraping.
+        \\
+        \\Obsidian mode:
+        \\  --vault=DIR        Obsidian vault root (required; never modified)
+        \\  Writes: content/**/*.md, assets/**, report.json, REPORT.md, attachments_manifest.json
+        \\  (--vault implies --mode=obsidian)
+        \\  No Dataview/Canvas/plugin evaluation; unresolved links retained raw.
         \\
         \\Safety: no network, no destructive source writes, originals preserved.
         \\Exit codes: 0 success, 2 usage, 3 I/O error
@@ -271,6 +294,25 @@ pub fn main(init: std.process.Init) u8 {
                 return ExitCode.io_error.int();
             };
         },
+        .obsidian => {
+            const vault = opts.vault_dir orelse {
+                std.log.err("obsidian mode requires --vault=DIR", .{});
+                printUsage();
+                return ExitCode.usage.int();
+            };
+            if (std.mem.eql(u8, vault, opts.out_dir)) {
+                std.log.err("--out must differ from --vault", .{});
+                return ExitCode.usage.int();
+            }
+            obsidian.run(io, gpa, .{
+                .vault_dir = vault,
+                .out_dir = opts.out_dir,
+                .quiet = opts.quiet,
+            }) catch |err| {
+                std.log.err("migration-lab (obsidian) failed: {s}", .{@errorName(err)});
+                return ExitCode.io_error.int();
+            };
+        },
     }
     return ExitCode.success.int();
 }
@@ -278,6 +320,13 @@ pub fn main(init: std.process.Init) u8 {
 // ---------------------------------------------------------------------------
 // Tests — shared CLI + WordPress unit/fixture + Astro regression
 // ---------------------------------------------------------------------------
+
+// Pull Obsidian unit/fixture tests into this test binary. (Other modes already
+// declare their fixture tests in this file; do not refAllDecls Instagram here —
+// its in-module tests currently leak under the testing allocator.)
+test {
+    _ = obsidian;
+}
 
 test "parseOptions: defaults and astro flags" {
     const o = try parseOptions(&.{"boris-migration-lab"});
@@ -334,6 +383,29 @@ test "parseOptions: instagram flags" {
     });
     try std.testing.expect(o2.mode == .instagram);
     try std.testing.expectEqualStrings("fixtures/mini-instagram", o2.dump_dir.?);
+}
+
+test "parseOptions: obsidian flags" {
+    const o = try parseOptions(&.{
+        "boris-migration-lab",
+        "--vault=fixtures/mini-obsidian",
+        "--out=./.obs",
+    });
+    try std.testing.expect(o.mode == .obsidian);
+    try std.testing.expectEqualStrings("fixtures/mini-obsidian", o.vault_dir.?);
+    try std.testing.expectEqualStrings("./.obs", o.out_dir);
+
+    const o2 = try parseOptions(&.{
+        "boris-migration-lab",
+        "--mode=obsidian",
+        "--vault",
+        "fixtures/mini-obsidian",
+    });
+    try std.testing.expect(o2.mode == .obsidian);
+    try std.testing.expectEqualStrings("fixtures/mini-obsidian", o2.vault_dir.?);
+
+    const o3 = try parseOptions(&.{ "boris-migration-lab", "--mode=vault", "--vault=./v" });
+    try std.testing.expect(o3.mode == .obsidian);
 }
 
 test "parseOptions: unknown flag" {

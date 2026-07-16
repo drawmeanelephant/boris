@@ -15,6 +15,9 @@ pub const format_id = "boris-instagram-migration-lab";
 pub const schema_version: u32 = 1;
 pub const tool_version = "0.1.0";
 
+/// Enough for `{entity_id}.html` (product entity ids max 255 bytes + suffix).
+const maxEntityIdHrefBytes: usize = 255 + ".html".len;
+
 pub const RunOptions = struct {
     /// Unpacked Instagram data-download root (never modified).
     dump_dir: []const u8,
@@ -903,6 +906,25 @@ fn writeRecordMarkdown(allocator: std.mem.Allocator, rec: IgRecord) ![]u8 {
     return try body.toOwnedSlice(allocator);
 }
 
+/// Site-relative HTML path for a page entity — same mapping as product
+/// `identity.htmlOutputPath` / wiki-link rewrite (`{entity_id}.html`).
+/// Source stays `content/{entity_id}.md`; do not link the `.md` source path.
+fn publishedHtmlHref(entity_id: []const u8, buf: []u8) ![]const u8 {
+    return try std.fmt.bufPrint(buf, "{s}.html", .{entity_id});
+}
+
+/// Escape `]` and `\` so caption text cannot break `[label](href)` links.
+fn escapeMdLinkLabel(allocator: std.mem.Allocator, label: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.ensureTotalCapacity(allocator, label.len);
+    for (label) |c| {
+        if (c == '\\' or c == ']') try out.append(allocator, '\\');
+        try out.append(allocator, c);
+    }
+    return try out.toOwnedSlice(allocator);
+}
+
 fn writeTrunkMarkdown(allocator: std.mem.Allocator, records: []const IgRecord) ![]u8 {
     const fm = try buildFrontmatter(allocator, "instagram", "Instagram archive", null, "published", &.{ "instagram", "archive" });
     defer allocator.free(fm);
@@ -936,12 +958,15 @@ fn writeTrunkMarkdown(allocator: std.mem.Allocator, records: []const IgRecord) !
             return std.mem.order(u8, recs[a].entity_id, recs[b].entity_id) == .lt;
         }
     }.less);
+    var href_buf: [maxEntityIdHrefBytes]u8 = undefined;
     for (order.items) |i| {
         const r = records[i];
-        const leaf = if (std.mem.lastIndexOfScalar(u8, r.entity_id, '/')) |s| r.entity_id[s + 1 ..] else r.entity_id;
-        try body.print(allocator, "- [{s}](instagram/{s}.md) — `{s}` — {s}\n", .{
-            firstLineTitle(r.title, 60),
-            leaf,
+        const href = try publishedHtmlHref(r.entity_id, &href_buf);
+        const label = try escapeMdLinkLabel(allocator, firstLineTitle(r.title, 60));
+        defer allocator.free(label);
+        try body.print(allocator, "- [{s}]({s}) — `{s}` — {s}\n", .{
+            label,
+            href,
             r.kind.name(),
             r.conversion.jsonName(),
         });
@@ -1463,4 +1488,103 @@ test "fixture: instagram mode end-to-end + determinism + source immutability" {
     const photo = try readFileAlloc(io, a_root, photo_path, gpa);
     defer gpa.free(photo);
     try std.testing.expect(photo.len > 0);
+}
+
+test "publishedHtmlHref matches entity_id.html" {
+    var buf: [maxEntityIdHrefBytes]u8 = undefined;
+    const href = try publishedHtmlHref("instagram/post-abc", &buf);
+    try std.testing.expectEqualStrings("instagram/post-abc.html", href);
+}
+
+test "escapeMdLinkLabel escapes brackets and backslashes" {
+    const e = try escapeMdLinkLabel(std.testing.allocator, "a]b\\c");
+    defer std.testing.allocator.free(e);
+    try std.testing.expectEqualStrings("a\\]b\\\\c", e);
+}
+
+// Archive index must link published HTML paths ({entity_id}.html), not source
+// Markdown. Every child page must appear as a link target that exists on disk.
+test "fixture: archive index links published .html paths that exist as content pages" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    const dump = "fixtures/mini-instagram";
+    const out = "fixtures/.ig-test-index-links";
+    Io.Dir.cwd().deleteTree(io, out) catch {};
+    defer Io.Dir.cwd().deleteTree(io, out) catch {};
+
+    try run(io, gpa, .{ .dump_dir = dump, .out_dir = out, .quiet = true });
+
+    var root = try Io.Dir.cwd().openDir(io, out, .{});
+    defer root.close(io);
+
+    const trunk = try readFileAlloc(io, root, "content/instagram.md", gpa);
+    defer gpa.free(trunk);
+
+    // Must not emit source-tree .md hrefs for child records (those 404 under a
+    // static server that only serves Boris HTML publish output).
+    try std.testing.expect(std.mem.indexOf(u8, trunk, "](instagram/") != null);
+    try std.testing.expect(std.mem.indexOf(u8, trunk, ".html)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, trunk, ".md)") == null);
+
+    // Collect every child source page under content/instagram/
+    var children: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (children.items) |c| gpa.free(c);
+        children.deinit(gpa);
+    }
+    var child_dir = try root.openDir(io, "content/instagram", .{ .iterate = true });
+    defer child_dir.close(io);
+    var it = child_dir.iterate();
+    while (try it.next(io)) |entry| {
+        if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.name, ".md")) continue;
+        const entity = try std.fmt.allocPrint(gpa, "instagram/{s}", .{entry.name[0 .. entry.name.len - ".md".len]});
+        try children.append(gpa, entity);
+    }
+    try std.testing.expect(children.items.len >= 1);
+
+    // Walk markdown link targets of the form ](instagram/….html)
+    var found: usize = 0;
+    var i: usize = 0;
+    while (i < trunk.len) {
+        const marker = "](";
+        const at = std.mem.indexOfPos(u8, trunk, i, marker) orelse break;
+        const start = at + marker.len;
+        const end = std.mem.indexOfScalarPos(u8, trunk, start, ')') orelse break;
+        const href = trunk[start..end];
+        i = end + 1;
+
+        if (!std.mem.startsWith(u8, href, "instagram/")) continue;
+        // Child-record links under instagram/ must be .html only.
+        try std.testing.expect(std.mem.endsWith(u8, href, ".html"));
+        found += 1;
+
+        // Source that publishes to {entity_id}.html is content/{entity_id}.md
+        const entity = href[0 .. href.len - ".html".len];
+        const src_rel = try std.fmt.allocPrint(gpa, "content/{s}.md", .{entity});
+        defer gpa.free(src_rel);
+        const page = try readFileAlloc(io, root, src_rel, gpa);
+        defer gpa.free(page);
+        try std.testing.expect(page.len > 0);
+        // Frontmatter id must match the published path stem.
+        const id_line = try std.fmt.allocPrint(gpa, "id: {s}", .{entity});
+        defer gpa.free(id_line);
+        try std.testing.expect(std.mem.indexOf(u8, page, id_line) != null);
+
+        // Helper must round-trip the same href.
+        var href_buf: [maxEntityIdHrefBytes]u8 = undefined;
+        const expected = try publishedHtmlHref(entity, &href_buf);
+        try std.testing.expectEqualStrings(expected, href);
+    }
+    try std.testing.expectEqual(children.items.len, found);
+
+    // Every child page is linked from the index (no orphans in the reverse direction).
+    for (children.items) |entity| {
+        var href_buf: [maxEntityIdHrefBytes]u8 = undefined;
+        const href = try publishedHtmlHref(entity, &href_buf);
+        const needle = try std.fmt.allocPrint(gpa, "]({s})", .{href});
+        defer gpa.free(needle);
+        try std.testing.expect(std.mem.indexOf(u8, trunk, needle) != null);
+    }
 }
