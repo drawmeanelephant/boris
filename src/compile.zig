@@ -6406,3 +6406,74 @@ test "content-local assets: two builds are byte-identical" {
     defer gpa.free(a2);
     try std.testing.expectEqualStrings(a1, a2);
 }
+
+// =============================================================================
+// Optional example: reference theme (examples/reference-theme/)
+// =============================================================================
+
+test "example reference-theme: layouts, components, page-local assets" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dist = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-example-reference-theme", .{tmp.sub_path});
+    defer gpa.free(dist);
+
+    const rules = [_]layout_select.LayoutRule{
+        .{ .kind = .id, .value = "index", .layout_path = "examples/reference-theme/theme/layouts/home.html" },
+        .{ .kind = .role, .value = "trunk", .layout_path = "examples/reference-theme/theme/layouts/section.html" },
+    };
+
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = "examples/reference-theme/content",
+        .dist_dir = dist,
+        .layout_path = "examples/reference-theme/theme/layouts/main.html",
+        .layout_rules = &rules,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 6), stats.pages_written);
+
+    const index_path = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist});
+    defer gpa.free(index_path);
+    const index_html = try readFileAlloc(io, cwd, index_path, gpa);
+    defer gpa.free(index_html);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "data-layout=\"home\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "href=\"assets/css/reference.css\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "index.assets/rhythm-diagram.svg") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "site-nav") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "admonition--tip") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "https://") == null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "http://") == null);
+
+    const guides_path = try std.fmt.allocPrint(gpa, "{s}/guides.html", .{dist});
+    defer gpa.free(guides_path);
+    const guides_html = try readFileAlloc(io, cwd, guides_path, gpa);
+    defer gpa.free(guides_html);
+    try std.testing.expect(std.mem.indexOf(u8, guides_html, "data-layout=\"section\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, guides_html, "page-children") != null);
+
+    const components_path = try std.fmt.allocPrint(gpa, "{s}/guides/components.html", .{dist});
+    defer gpa.free(components_path);
+    const components_html = try readFileAlloc(io, cwd, components_path, gpa);
+    defer gpa.free(components_html);
+    try std.testing.expect(std.mem.indexOf(u8, components_html, "data-layout=\"main\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, components_html, "page-toc") != null);
+    try std.testing.expect(std.mem.indexOf(u8, components_html, "class=\"details\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, components_html, "components.assets/component-flow.svg") != null);
+    try std.testing.expect(std.mem.indexOf(u8, components_html, "href=\"../assets/css/reference.css\"") != null);
+
+    const theme_css_out = try std.fmt.allocPrint(gpa, "{s}/assets/css/reference.css", .{dist});
+    defer gpa.free(theme_css_out);
+    const copied_css = try readFileAlloc(io, cwd, theme_css_out, gpa);
+    defer gpa.free(copied_css);
+    const theme_css = try readFileAlloc(io, cwd, "examples/reference-theme/theme/assets/css/reference.css", gpa);
+    defer gpa.free(theme_css);
+    try std.testing.expectEqualStrings(theme_css, copied_css);
+
+    const local_asset = try std.fmt.allocPrint(gpa, "{s}/index.assets/rhythm-diagram.svg", .{dist});
+    defer gpa.free(local_asset);
+    const local_bytes = try readFileAlloc(io, cwd, local_asset, gpa);
+    defer gpa.free(local_bytes);
+    try std.testing.expect(local_bytes.len > 0);
+}

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" data-layout="main" data-theme="boris-reference">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Boris Reference</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/reference.css}}">
+  <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+</head>
+<body data-layout="main">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="site-header" role="banner">
+    <div class="site-header__inner">
+      <p class="brand">
+        <img class="brand__mark" src="{{asset-url assets/img/mark.svg}}" width="28" height="28" alt="">
+        <span class="brand__name">Boris Reference</span>
+        <span class="brand__badge">docs</span>
+      </p>
+      {{breadcrumb}}
+    </div>
+  </header>
+  <div class="shell">
+    <aside class="rail rail--nav" aria-label="Site">
+      <p class="rail__label" id="nav-label">Browse</p>
+      {{nav}}
+    </aside>
+    <main id="main-content" class="panel" tabindex="-1">
+      {{metadata}}
+      <article class="prose">
+        {{content}}
+      </article>
+    </main>
+    <aside class="rail rail--toc" aria-label="On this page">
+      <p class="rail__label" id="toc-label">On this page</p>
+      {{toc}}
+    </aside>
+  </div>
+  <footer class="site-footer" role="contentinfo">{{footer}}</footer>
+</body>
+</html>
