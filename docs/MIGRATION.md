@@ -330,6 +330,46 @@ Use after cutover when paths or titles change.
 
 ## Mapping cheat sheets
 
+### MkDocs Material preflight
+
+Treat a completed MkDocs Material site as conversion evidence, not as a Boris
+input tree. **`mkdocs.yml`, the Material theme/plugin runtime, Python hooks,
+and full YAML metadata are not Boris inputs.** Boris does not import that
+configuration or execute its plugins/hooks, and this guide does not promise a
+general MkDocs importer.
+
+Before moving files, make a small manual conversion ledger:
+
+- [ ] **Closed frontmatter:** map only `id`, `title`, `parent`, `status`, and
+  `tags`; remove or preserve elsewhere every other YAML key. In particular,
+  Material/blog `authors`, `date`, `categories`, and blog-specific metadata
+  need an authoring or publishing decision outside Boris's source grammar.
+  See the [frontmatter contract](contracts/frontmatter.md).
+- [ ] **Navigation:** use `mkdocs.yml` only as an inventory, then flatten each
+  nested `nav:` branch into a Trunk landing page plus direct Satellite pages.
+  A Satellite cannot parent another Satellite; see the
+  [parent/graph rules](contracts/ir-schema.md#trunk--satellite-graph-rules).
+- [ ] **Links:** replace relative Markdown page links such as
+  `[Install](../setup.md)` with `[[setup|Install]]` (and validate any heading
+  fragment against the rendered heading id). The exact include/wiki syntax and
+  failure behavior are in the [includes and wiki-links contract](contracts/includes-and-wiki-links.md).
+- [ ] **Reusable Markdown:** replace plugin- or hook-expanded snippets with
+  explicit `{{include includes/name.md}}` directives; keep fragments under the
+  content-root `includes/` directory rather than treating them as pages.
+- [ ] **Local assets:** inventory every image, download, font, and stylesheet
+  referenced by content. Boris manages static theme bytes only under
+  `theme/assets/`; move shared output assets there, update links deliberately,
+  and check a deep generated page for working URLs. See
+  [templating and themes](contracts/templating-and-themes.md).
+- [ ] **Runtime features:** replace Material plugins, macros, Python hooks,
+  generated navigation, and blog/archive behavior with static Markdown,
+  explicit includes, a bounded Boris theme, or a separate pre-conversion step.
+  Do not pass their configuration through as frontmatter.
+
+Run a full Boris HTML build after this pass and fix validation errors before
+porting visual polish. That proves the converted content graph; it does not
+claim Material feature parity.
+
 ### Hugo
 
 | Hugo | Boris |
