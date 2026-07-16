@@ -1826,16 +1826,19 @@ fn compilePagesInner(
     // Commit: rename staged files into final dist (final untouched until this point).
     try publishStageTree(io, gpa, stage_dir, dist_dir);
 
+    // Live page-output set for this build. Shared by stale cleanup AND the theme
+    // scrub below, so a page published under `assets/` is never mistaken for an
+    // orphan theme asset.
+    var live_paths: std.StringHashMapUnmanaged(void) = .{};
+    defer live_paths.deinit(gpa);
+    for (db.items()) |p| {
+        try live_paths.put(gpa, p.output_path, {});
+    }
+
     // Stale cleanup: drop published HTML for pages no longer in PageDb.
     // Prefer prior incremental manifest when present; otherwise scan dist/*.html
     // against current output_path set so --watch without --incremental still prunes.
     {
-        var live_paths: std.StringHashMapUnmanaged(void) = .{};
-        defer live_paths.deinit(gpa);
-        for (db.items()) |p| {
-            try live_paths.put(gpa, p.output_path, {});
-        }
-
         if (parsed_manifest) |pm| {
             for (pm.value.entries) |entry| {
                 if (!live_paths.contains(entry.output_path)) {
@@ -1858,9 +1861,10 @@ fn compilePagesInner(
     }
 
     // F9.2: when a managed theme owns `assets/`, drop files removed or renamed
-    // in the theme inventory so prior dist does not retain orphans.
+    // in the theme inventory so prior dist does not retain orphans — but never a
+    // live page output published under assets/.
     if (theme_root.len > 0) {
-        theme_mod.scrubOrphanThemeAssets(io, dist_dir, gpa, theme_bundle.assets);
+        theme_mod.scrubOrphanThemeAssets(io, dist_dir, gpa, theme_bundle.assets, &live_paths);
     }
 
     // Drop staging tree (errdefer also cleans on earlier failure).

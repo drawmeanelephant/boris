@@ -58,6 +58,16 @@ How to use going forward:
   report-file output and release-gate fixture goldens. Contract:
   `docs/contracts/documentation-intelligence.md`.
 
+### Fixed
+
+- Orphan theme-asset scrub no longer deletes content pages published under
+  `dist/assets/`. A page whose entity id is namespaced under `assets/` is a live
+  page output, not an orphan theme asset; the scrub now receives the build's
+  page-output set and skips those paths, and the empty-inventory
+  `deleteTree("assets")` is guarded so it only runs when no page output is
+  published under `assets/` (`src/theme.zig`, `src/compile.zig`). Regression
+  test added.
+
 ### Docs
 
 - ApexMarkdown Unified compatibility matrix (read-only): fixtures under
