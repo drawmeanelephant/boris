@@ -238,7 +238,7 @@ Before doing any of the following, **stop and get a clear user request**:
 ## When you change behavior
 
 - **Contracts first for IR:** if emit shape, frontmatter, graph rules, or diagnostics change, update `docs/contracts/` (and fixtures) in the same change set, or deliberately note temporary drift in `docs/STATUS.md`.
-- **Changelog:** add a short bullet under `[Unreleased]` in `CHANGELOG.md` for user-visible or contract-visible work.
+- **Changelog:** feature/fix PRs add one uniquely named fragment under `docs/changelog.d/` instead of editing `CHANGELOG.md`'s `[Unreleased]` section. Follow `docs/changelog.d/README.md`; the release owner assembles and removes or archives fragments at the release cut. User-visible or contract-visible work still requires one short changelog bullet, and IR work must link its updated contract.
 - **Status:** update `docs/STATUS.md` when phase, primary CLI surface, or known-gap list changes — not for every tiny fix.
 - **Tests:** extend fixture or unit tests under the module you touch; `zig build test` is the gate.
 - **Breaking IR:** bump `schemaVersion` and `pipeline.compiler_id` / related constants; do not silently reshape `"0.1.0"`.
