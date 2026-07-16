@@ -20,11 +20,26 @@ pub const Mode = enum {
     html,
 };
 
+pub const Command = enum {
+    build,
+    check,
+    impact,
+};
+
+pub const AnalysisFormat = enum {
+    human,
+    json,
+};
+
 /// Canonical parsed options. Strings are views into argv (or static defaults).
 pub const Options = struct {
     /// When true, print help and exit successfully (no pipeline).
     help: bool = false,
     quiet: bool = false,
+    command: Command = .build,
+    impact_id: ?[]const u8 = null,
+    analysis_format: AnalysisFormat = .human,
+    analysis_report: ?[]const u8 = null,
     mode: Mode = .html,
     /// Content root (default `content`).
     input_dir: []const u8 = "content",
@@ -97,6 +112,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_incremental = false;
     var saw_jobs = false;
     var saw_watch = false;
+    var saw_format = false;
+    var saw_report = false;
     var jobs: usize = 1;
     var html_layout: []const u8 = default_html_layout;
     var theme_root: ?[]const u8 = null;
@@ -107,7 +124,22 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var target_layouts: std.ArrayListUnmanaged(struct { name: []const u8, path: []const u8 }) = .{ .items = &.{}, .capacity = 0 };
     errdefer target_layouts.deinit(gpa);
 
+    var command: Command = .build;
+    var impact_id: ?[]const u8 = null;
+    var analysis_format: AnalysisFormat = .human;
+    var analysis_report: ?[]const u8 = null;
+
     var i: usize = if (args.len > 0) 1 else 0;
+    if (i < args.len and std.mem.eql(u8, args[i], "check")) {
+        command = .check;
+        i += 1;
+    } else if (i < args.len and std.mem.eql(u8, args[i], "impact")) {
+        command = .impact;
+        i += 1;
+        if (i >= args.len or std.mem.startsWith(u8, args[i], "-")) return error.MissingValue;
+        impact_id = args[i];
+        i += 1;
+    }
     while (i < args.len) : (i += 1) {
         const a = args[i];
 
@@ -159,6 +191,21 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (std.mem.eql(u8, a, "--watch")) {
             if (saw_watch) return error.DuplicateFlag;
             saw_watch = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--format") or std.mem.startsWith(u8, a, "--format=")) {
+            if (saw_format) return error.DuplicateFlag;
+            saw_format = true;
+            const value = try takeValue(args, &i, a, "--format");
+            analysis_format = if (std.mem.eql(u8, value, "human")) .human else if (std.mem.eql(u8, value, "json")) .json else return error.InvalidValue;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--report") or std.mem.startsWith(u8, a, "--report=")) {
+            if (saw_report) return error.DuplicateFlag;
+            saw_report = true;
+            analysis_report = try takeValue(args, &i, a, "--report");
             continue;
         }
 
@@ -298,6 +345,14 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     // Explicit IR: --out and/or --no-rag (bare CLI is HTML, not IR).
     const wants_ir = saw_out or saw_no_rag;
 
+    if (command != .build) {
+        if (wants_rag or wants_ir or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts) {
+            return error.ConflictingFlags;
+        }
+    } else if (saw_format or saw_report) {
+        return error.ConflictingFlags;
+    }
+
     // --- conflict matrix ---------------------------------------------------
     if (saw_rag and saw_no_rag) return error.ConflictingFlags;
     if (saw_no_rag and saw_rag_dir) return error.ConflictingFlags;
@@ -376,6 +431,10 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .rag_dir = null,
             .html_dir = null,
             .targets = targets,
+            .command = command,
+            .impact_id = impact_id,
+            .analysis_format = analysis_format,
+            .analysis_report = analysis_report,
         },
         .rag => .{
             .help = false,
@@ -386,6 +445,10 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .rag_dir = rag_dir,
             .html_dir = null,
             .targets = targets,
+            .command = command,
+            .impact_id = impact_id,
+            .analysis_format = analysis_format,
+            .analysis_report = analysis_report,
         },
         .html => .{
             .help = false,
@@ -401,6 +464,10 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .jobs = jobs,
             .watch = saw_watch,
             .targets = targets,
+            .command = command,
+            .impact_id = impact_id,
+            .analysis_format = analysis_format,
+            .analysis_report = analysis_report,
         },
     };
 }
@@ -434,6 +501,8 @@ pub fn printUsage() void {
         \\Usage: boris [options]
         \\
         \\Modes:
+        \\  check               Read-only graph health report (CI findings exit 1)
+        \\  impact <ID>         Read-only transitive impact report for a page
         \\  (default)           HTML site → pages under dist/ (content/ + layouts/main.html)
         \\  --html              Explicit HTML site mode → --html-dir (default dist)
         \\  --html-dir <DIR>    HTML site mode with output directory DIR
@@ -456,6 +525,8 @@ pub fn printUsage() void {
         \\  --watch             Local-development watch mode for HTML builds (implies --incremental)
         \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
         \\  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
+        \\  --format human|json  Analysis output format for check/impact (default human)
+        \\  --report PATH        Write an analysis report instead of stdout
         \\  -h, --help          Show this help and exit 0
         \\
         \\HTML artifacts (success; Apex + layout splice):
@@ -645,6 +716,25 @@ test "parse: default is HTML mode" {
     try expectEqual(@as(usize, 1), o.targets.items.len);
     try expectEqualStrings("default", o.targets.items[0].name);
     try expectEqualStrings(default_html_dir, o.targets.items[0].output_dir);
+}
+
+test "parse: documentation intelligence commands" {
+    var check = try parseOptions(std.testing.allocator, &.{ "boris", "check", "--input", "docs", "--format", "json", "--report", "report.json" });
+    defer check.deinit(std.testing.allocator);
+    try expectEqual(Command.check, check.command);
+    try expectEqual(AnalysisFormat.json, check.analysis_format);
+    try expectEqualStrings("docs", check.input_dir);
+    try expectEqualStrings("report.json", check.analysis_report.?);
+
+    var impact = try parseOptions(std.testing.allocator, &.{ "boris", "impact", "guides/cache", "--quiet" });
+    defer impact.deinit(std.testing.allocator);
+    try expectEqual(Command.impact, impact.command);
+    try expectEqualStrings("guides/cache", impact.impact_id.?);
+    try expect(impact.quiet);
+
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "impact" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--out", ".boris" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--format", "json" }));
 }
 
 test "parse: --out selects IR mode" {

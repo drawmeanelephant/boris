@@ -97,8 +97,11 @@ The exact option spelling remains provisional until implementation. Behavior:
 - malformed command or ID: usage exit `2`;
 - filesystem/system failure: existing I/O exit `3`.
 
-The implementation must choose and document one default for “findings fail the
-command” before shipping; CI behavior must not be implicit.
+The shipped first slice chooses CI-failing behavior for `check`: any
+`unreferenced_page` finding returns exit `1`. `impact` returns exit `0` when the
+requested page exists and the graph is valid. This policy is deliberately
+limited to the first finding class; future thresholds require an amended
+contract.
 
 ## Acceptance fixtures
 
@@ -120,4 +123,3 @@ that `check` and `impact` do not modify HTML, IR, RAG, or cache outputs.
 - content-quality judgments based on an LLM;
 - IR 0.2 schema changes;
 - a generic plugin or scripting system.
-
