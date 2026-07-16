@@ -2,6 +2,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
+const layout_select = @import("layout_select.zig");
+const theme_mod = @import("theme.zig");
 
 /// User-configured target specification from the CLI.
 pub const TargetSpec = struct {
@@ -9,6 +11,9 @@ pub const TargetSpec = struct {
     output_dir: []const u8,
     /// Optional per-target layout override. When null, use global `--html-layout`.
     layout_path: ?[]const u8 = null,
+    /// Canonical `--layout-rule` table for this target (GPA-owned slice of rules;
+    /// rule string fields are typically argv views). Empty when no rules.
+    layout_rules: []const layout_select.LayoutRule = &.{},
 };
 
 /// Fully resolved and validated execution target plan.
@@ -16,8 +21,10 @@ pub const TargetPlan = struct {
     name: []const u8,
     output_dir: []const u8,
     resolved_output_dir: []const u8,
-    /// Effective layout path (global default or per-target override). Not owned.
+    /// Fallback layout path (global default or per-target override). Not owned.
     layout_path: []const u8,
+    /// Rule table view (not owned; points into TargetSpec).
+    layout_rules: []const layout_select.LayoutRule = &.{},
 };
 
 /// Effective layout for a target given the global default.
@@ -38,17 +45,28 @@ pub fn sortTargetSpecsByName(specs: []TargetSpec) void {
 }
 
 /// Print one line per target in slice order (caller supplies canonical order).
-/// Format: `  target <name>: out=<output_dir> layout=<effective_layout>`
+/// Format: `  target <name>: out=<output_dir> layout=<effective_layout> rules=N`
 /// Uses `std.debug.print` (same channel as other CLI diagnostics).
 pub fn printTargetConfigLines(specs: []const TargetSpec, default_layout: []const u8) void {
     for (specs) |spec| {
         const layout = effectiveLayout(spec, default_layout);
-        std.debug.print("  target {s}: out={s} layout={s}\n", .{
+        std.debug.print("  target {s}: out={s} layout={s} rules={d}\n", .{
             spec.name,
             spec.output_dir,
             layout,
+            spec.layout_rules.len,
         });
     }
+}
+
+/// All layout paths a target may load (fallback + rule paths), unique, first-seen order.
+/// Caller frees the slice (path strings are views).
+pub fn declaredLayoutPaths(
+    gpa: Allocator,
+    spec: TargetSpec,
+    default_layout: []const u8,
+) ![]const []const u8 {
+    return layout_select.collectDeclaredLayouts(gpa, effectiveLayout(spec, default_layout), spec.layout_rules);
 }
 
 /// True when `path` equals `prefix` or is `prefix/` + more.
@@ -165,6 +183,30 @@ pub const ValidateTargetsOptions = struct {
     layout_path: []const u8 = "layouts/main.html",
 };
 
+/// Reject mixing managed theme roots or managed+legacy layouts within one target.
+pub fn rejectMixedThemeRoots(fallback: []const u8, rules: []const layout_select.LayoutRule) !void {
+    const fallback_root = theme_mod.themeRootFromLayoutPath(fallback);
+    for (rules) |r| {
+        const root = theme_mod.themeRootFromLayoutPath(r.layout_path);
+        const same = switch (fallback_root == null) {
+            true => root == null,
+            false => root != null and std.mem.eql(u8, fallback_root.?, root.?),
+        };
+        if (!same) return error.MixedThemeRoots;
+    }
+    if (rules.len > 1) {
+        const first = theme_mod.themeRootFromLayoutPath(rules[0].layout_path);
+        for (rules[1..]) |r| {
+            const root = theme_mod.themeRootFromLayoutPath(r.layout_path);
+            const same = switch (first == null) {
+                true => root == null,
+                false => root != null and std.mem.eql(u8, first.?, root.?),
+            };
+            if (!same) return error.MixedThemeRoots;
+        }
+    }
+}
+
 /// Validate all target specifications, canonicalize paths, perform safety and overlap checks,
 /// and return a sorted array of TargetPlans.
 ///
@@ -231,15 +273,19 @@ pub fn validateTargets(
         const layout = effectiveLayout(target, options.layout_path);
         if (layout.len == 0) return error.EmptyTargetDirectory;
 
+        // One managed theme root (or all-legacy) for fallback + every rule layout.
+        try rejectMixedThemeRoots(layout, target.layout_rules);
+
         try plans.append(gpa, .{
             .name = target.name,
             .output_dir = target.output_dir,
             .resolved_output_dir = normalized,
             .layout_path = layout,
+            .layout_rules = target.layout_rules,
         });
     }
 
-    // 3. Protected roots: content tree and every effective layout path/dir
+    // 3. Protected roots: content tree and every declared layout path/dir
     const content_abs = try resolveNormalized(gpa, cwd_path, options.content_root);
     defer gpa.free(content_abs);
 
@@ -250,16 +296,20 @@ pub fn validateTargets(
     }
 
     for (plans.items) |plan| {
-        const layout_file_abs = try resolveNormalized(gpa, cwd_path, plan.layout_path);
-        try protected_layouts.append(gpa, layout_file_abs);
+        const declared = try layout_select.collectDeclaredLayouts(gpa, plan.layout_path, plan.layout_rules);
+        defer gpa.free(declared);
+        for (declared) |lp| {
+            const layout_file_abs = try resolveNormalized(gpa, cwd_path, lp);
+            try protected_layouts.append(gpa, layout_file_abs);
 
-        if (std.fs.path.dirname(plan.layout_path)) |layout_parent| {
-            if (layout_parent.len > 0 and !std.mem.eql(u8, layout_parent, ".")) {
-                const ld = try resolveNormalized(gpa, cwd_path, layout_parent);
-                try protected_layouts.append(gpa, ld);
+            if (std.fs.path.dirname(lp)) |layout_parent| {
+                if (layout_parent.len > 0 and !std.mem.eql(u8, layout_parent, ".")) {
+                    const ld = try resolveNormalized(gpa, cwd_path, layout_parent);
+                    try protected_layouts.append(gpa, ld);
+                }
             }
+            try rejectSymlinkAlongPath(io, cwd_dir, gpa, lp);
         }
-        try rejectSymlinkAlongPath(io, cwd_dir, gpa, plan.layout_path);
     }
 
     // 4. Overlap, parent/child nesting, protected roots, symlink detection

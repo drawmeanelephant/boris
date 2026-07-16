@@ -196,6 +196,17 @@ pub fn build(b: *std.Build) void {
     const run_theme_tests = b.addRunArtifact(theme_tests);
     run_theme_tests.setCwd(b.path("."));
 
+    const layout_select_mod = b.createModule(.{
+        .root_source_file = b.path("src/layout_select.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const layout_select_tests = b.addTest(.{
+        .root_module = layout_select_mod,
+    });
+    const run_layout_select_tests = b.addRunArtifact(layout_select_tests);
+    run_layout_select_tests.setCwd(b.path("."));
+
     const compile_mod = b.createModule(.{
         .root_source_file = b.path("src/compile.zig"),
         .target = target,
@@ -445,6 +456,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_apex_tests.step);
     test_step.dependOn(&run_assemble_tests.step);
     test_step.dependOn(&run_theme_tests.step);
+    test_step.dependOn(&run_layout_select_tests.step);
     test_step.dependOn(&run_compile_tests.step);
     test_step.dependOn(&run_hardening_tests.step);
     test_step.dependOn(&run_fuzz_tests.step);

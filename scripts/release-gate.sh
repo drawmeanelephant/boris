@@ -342,6 +342,139 @@ else
   printf '%s\n' "${F9_ERR}" | head -20
 fi
 
+# --- 4c2. Layout selection (--layout-rule) --------------------------------
+note "4c2. Layout selection (--layout-rule)"
+LR_ROOT="docs/contracts/fixtures/layout-rules"
+LR_CONTENT="${LR_ROOT}/content"
+LR_THEME="${LR_ROOT}/theme"
+LR_OUT_A="${GATE_DIR}/layout-rules-a"
+LR_OUT_B="${GATE_DIR}/layout-rules-b"
+LR_OUT_INC="${GATE_DIR}/layout-rules-inc"
+rm -rf "${LR_OUT_A}" "${LR_OUT_B}" "${LR_OUT_INC}"
+
+# Order A
+if "${BORIS}" --input="${LR_CONTENT}" --theme="${LR_THEME}" \
+  --layout-rule default id:index "${LR_THEME}/layouts/home.html" \
+  --layout-rule default 'glob:reference/*' "${LR_THEME}/layouts/reference.html" \
+  --layout-rule default role:trunk "${LR_THEME}/layouts/section.html" \
+  --html-dir="${LR_OUT_A}" --quiet; then
+  if grep -q 'data-layout="home"' "${LR_OUT_A}/index.html" \
+    && grep -q 'data-layout="section"' "${LR_OUT_A}/guides.html" \
+    && grep -q 'data-layout="main"' "${LR_OUT_A}/guides/getting-started.html" \
+    && grep -q 'data-layout="section"' "${LR_OUT_A}/reference.html" \
+    && grep -q 'data-layout="reference"' "${LR_OUT_A}/reference/configuration.html"; then
+    pass "layout-rules: exact/glob/role/fallback markers"
+  else
+    fail "layout-rules: missing expected data-layout markers"
+    head -5 "${LR_OUT_A}/index.html" || true
+  fi
+else
+  fail "layout-rules: compile failed"
+fi
+
+# Order B (permuted rules) — byte-identical page HTML
+if "${BORIS}" --input="${LR_CONTENT}" --theme="${LR_THEME}" \
+  --layout-rule default role:trunk "${LR_THEME}/layouts/section.html" \
+  --layout-rule default 'glob:reference/*' "${LR_THEME}/layouts/reference.html" \
+  --layout-rule default id:index "${LR_THEME}/layouts/home.html" \
+  --html-dir="${LR_OUT_B}" --quiet; then
+  if diff -rq "${LR_OUT_A}" "${LR_OUT_B}" >/dev/null; then
+    pass "layout-rules: rule order permutation byte-identical"
+  else
+    fail "layout-rules: rule order permutation produced different trees"
+    diff -rq "${LR_OUT_A}" "${LR_OUT_B}" || true
+  fi
+else
+  fail "layout-rules: permuted compile failed"
+fi
+
+# Incremental cold then no-op
+if "${BORIS}" --input="${LR_CONTENT}" --theme="${LR_THEME}" \
+  --layout-rule default id:index "${LR_THEME}/layouts/home.html" \
+  --layout-rule default 'glob:reference/*' "${LR_THEME}/layouts/reference.html" \
+  --layout-rule default role:trunk "${LR_THEME}/layouts/section.html" \
+  --html-dir="${LR_OUT_INC}" --incremental --quiet \
+  && "${BORIS}" --input="${LR_CONTENT}" --theme="${LR_THEME}" \
+  --layout-rule default id:index "${LR_THEME}/layouts/home.html" \
+  --layout-rule default 'glob:reference/*' "${LR_THEME}/layouts/reference.html" \
+  --layout-rule default role:trunk "${LR_THEME}/layouts/section.html" \
+  --html-dir="${LR_OUT_INC}" --incremental --quiet; then
+  if [[ -f "${LR_OUT_INC}/.boris-cache/manifest.json" ]] \
+    && grep -q 'boris-cache-v2-layout-rules' "${LR_OUT_INC}/.boris-cache/manifest.json" \
+    && grep -q 'selected_layout' "${LR_OUT_INC}/.boris-cache/manifest.json"; then
+    pass "layout-rules: incremental cache v2 + selected_layout"
+  else
+    fail "layout-rules: cache manifest missing v2/selected_layout"
+  fi
+else
+  fail "layout-rules: incremental compile failed"
+fi
+
+# Ambiguous equal-specificity globs → exit 2
+set +e
+LR_AMB_OUT="${GATE_DIR}/layout-rules-amb"
+rm -rf "${LR_AMB_OUT}"
+LR_AMB_ERR="$("${BORIS}" --input="${LR_CONTENT}" --theme="${LR_THEME}" \
+  --layout-rule default 'glob:reference/*' "${LR_THEME}/layouts/reference.html" \
+  --layout-rule default 'glob:*/configuration' "${LR_THEME}/layouts/main.html" \
+  --html-dir="${LR_AMB_OUT}" 2>&1)"
+LR_AMB_EC=$?
+set -e
+if [[ "${LR_AMB_EC}" -eq 2 ]]; then
+  pass "layout-rules: ambiguous globs exit 2"
+else
+  fail "layout-rules: ambiguous globs expected exit 2, got ${LR_AMB_EC}"
+  printf '%s\n' "${LR_AMB_ERR}" | head -10
+fi
+if [[ -d "${LR_AMB_OUT}" ]] && find "${LR_AMB_OUT}" -name '*.html' 2>/dev/null | grep -q .; then
+  fail "layout-rules: ambiguous globs published HTML"
+else
+  pass "layout-rules: ambiguous globs did not publish HTML"
+fi
+
+# layout: frontmatter → exit 1 EFRONTMATTER (IR path prints the diagnostic code)
+set +e
+LR_FM_OUT="${GATE_DIR}/layout-rules-fm-ir"
+rm -rf "${LR_FM_OUT}"
+LR_FM_ERR="$("${BORIS}" --input="${LR_ROOT}/adversarial/frontmatter-layout/content" \
+  --out="${LR_FM_OUT}" 2>&1)"
+LR_FM_EC=$?
+set -e
+if [[ "${LR_FM_EC}" -eq 1 ]] && grep -q 'EFRONTMATTER' <<<"${LR_FM_ERR}"; then
+  pass "layout-rules: layout frontmatter is EFRONTMATTER"
+else
+  fail "layout-rules: layout frontmatter expected exit 1 EFRONTMATTER, got ${LR_FM_EC}"
+  printf '%s\n' "${LR_FM_ERR}" | head -10
+fi
+
+# --layout-rule with IR → exit 2
+set +e
+"${BORIS}" --layout-rule default id:index layouts/main.html --out "${GATE_DIR}/layout-rules-ir" --quiet >/dev/null 2>&1
+LR_IR_EC=$?
+set -e
+if [[ "${LR_IR_EC}" -eq 2 ]]; then
+  pass "layout-rules: conflicts with IR (--out)"
+else
+  fail "layout-rules: expected exit 2 with --out, got ${LR_IR_EC}"
+fi
+
+# Mixed managed theme roots → exit 2
+set +e
+LR_MIX_OUT="${GATE_DIR}/layout-rules-mix"
+rm -rf "${LR_MIX_OUT}"
+LR_MIX_ERR="$("${BORIS}" --input="${LR_ROOT}/adversarial/mixed-theme/content" \
+  --theme="${LR_THEME}" \
+  --layout-rule default id:index layouts/main.html \
+  --html-dir="${LR_MIX_OUT}" 2>&1)"
+LR_MIX_EC=$?
+set -e
+if [[ "${LR_MIX_EC}" -eq 2 ]]; then
+  pass "layout-rules: mixed theme roots exit 2"
+else
+  fail "layout-rules: mixed theme roots expected exit 2, got ${LR_MIX_EC}"
+  printf '%s\n' "${LR_MIX_ERR}" | head -10
+fi
+
 # --- 4d. Documentation Intelligence reports + no-artifact behavior --------
 note "4d. Documentation Intelligence reports"
 DI_CONTENT="docs/contracts/fixtures/documentation-intelligence/content"

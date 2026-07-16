@@ -1,0 +1,43 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, sans-serif;
+  color: #1f2937;
+  background: #f8fafc;
+}
+
+body {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+  line-height: 1.6;
+}
+
+.site-header,
+.site-shell {
+  display: grid;
+  gap: 1rem;
+}
+
+.site-brand {
+  color: #1d4ed8;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.site-sidebar {
+  border-right: 1px solid #cbd5e1;
+  padding-right: 1rem;
+}
+
+.page-metadata,
+.page-toc {
+  background: #e2e8f0;
+  padding: 0.75rem 1rem;
+}
+
+footer {
+  border-top: 1px solid #cbd5e1;
+  margin-top: 2rem;
+  padding-top: 1rem;
+  color: #475569;
+}

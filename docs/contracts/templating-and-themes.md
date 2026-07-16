@@ -1,9 +1,9 @@
 # Templating and themes (F9)
 
-**Status:** F9.1 + F9.2 hardening implemented (closed layout plan,
+**Status:** F9.1 + F9.2 + layout selection implemented (closed layout plan,
 metadata/footer/asset-url, target-owned assets, layout UTF-8 at split,
-orphan asset scrub). Later slices (layout rules, external stylesheets,
-DaisyUI experiment) remain open per §12.
+orphan asset scrub, `--layout-rule` selection). Later slices (external
+stylesheets, DaisyUI experiment, IR layout/asset edges) remain open per §12.
 
 **Authority:** normative for the F9.1/F9.2 HTML theme path. Subordinate contracts:
 [HTML output](html-output.md), [multi-target](multi-target-isolated-output.md),
@@ -135,39 +135,74 @@ are not rewritten by Boris.
 
 ## 4. Layout selection
 
-Frontmatter remains the closed five-key grammar. In particular, F9 must not
-add a `layout` frontmatter key as an ad hoc escape hatch. Layout choice is
-build configuration, not page-authored executable metadata.
+Frontmatter remains the closed five-key grammar. In particular, Boris must not
+add a `layout` or `template` frontmatter key. Layout choice is build
+configuration (`--layout-rule`), not page-authored executable metadata.
+Unknown keys such as `layout:` continue to produce `EFRONTMATTER`.
 
-Selection precedence for a target is:
-
-1. A future exact entity-id rule, if configured.
-2. A future entity-id glob rule, if configured and uniquely most specific.
-3. The target's explicit layout (`--target-layout NAME=PATH`).
-4. The global `--html-layout` value, defaulting to `layouts/main.html`.
-
-The rule surface is intentionally a follow-on CLI/config decision. The design
-recommendation is repeatable, order-independent rules such as:
+### 4.1 CLI grammar
 
 ```text
---layout-rule index=themes/docs/layouts/home.html
---layout-rule reference/*=themes/docs/layouts/reference.html
+--layout-rule <TARGET> <SELECTOR> <LAYOUT_PATH>
 ```
 
-`*` matches one entity-id segment. A future `**` may match a suffix, but must
-not be assumed until specified. Exact matches beat globs; among globs, the
-rule with more literal path segments wins. A tie is a usage error, not
-first-declaration-wins. If no rule matches, target layout selection applies.
+The flag is repeatable, HTML-only, and consumes exactly three following
+arguments. Selectors are closed:
 
-The current implementation has no `--layout-rule`; therefore the first F9
-implementation slice should support one layout per target and preserve the
-existing `--html-layout` / `--target-layout` behavior. Page-specific rules can
-follow without changing page frontmatter or output identity.
+| Selector | Match |
+|---|---|
+| `id:<entity-id>` | Byte-exact final entity id (including `id:` frontmatter override) |
+| `glob:<segment-pattern>` | `/`-separated segments; `*` is one complete non-empty segment |
+| `role:trunk` / `role:satellite` | Resolved graph role after parent validation |
 
-All selected layout paths are resolved and validated before discovery/rendering
-and follow the existing workspace, content-overlap, and symlink protections.
-Named layouts are loaded once per target plan and shared immutably by its page
-workers.
+Partial wildcards (`ref*`), recursive `**`, regex, and declaration-order
+precedence are rejected. At most **256** rules per target. Unknown targets,
+duplicate selectors (even with equal paths), invalid selectors, and rule
+limits are usage errors (exit **2**) before discovery. `--layout-rule` with
+IR, RAG, Context Bundle, `check`, or `impact` is a conflicting-flags usage
+error. Rule flags may appear before or after `--target` / `--target-layout`;
+Boris attaches after target synthesis (including synthetic `default`).
+
+### 4.2 Precedence
+
+For each `(target, page)` pair:
+
+1. Exact id rule (sole match).
+2. Matching glob with the greatest count of literal segments; equal-specificity
+   ties are usage errors even when layout paths are identical.
+3. Role rule for the page’s resolved role.
+4. Target fallback (`--target-layout NAME=PATH`).
+5. Global fallback (`--html-layout`, including `--theme ROOT` sugar).
+6. Product default `layouts/main.html`.
+
+Rule declaration order never affects selection. Canonical rule order for
+diagnostics and plan digests is `(selector rank, selector bytes, layout path)`.
+A winning layout that is missing or invalid fails without silent fallback to
+the next rule.
+
+### 4.3 One theme root per target
+
+Every fallback and rule layout for one target must either:
+
+- share one managed theme root (`…/layouts/<file>.html` with a parent segment), or
+- be entirely unmanaged legacy layouts (no derived theme root).
+
+Mixing managed roots or managed+legacy within one target is a usage error.
+Different targets may use different themes. One footer and one asset inventory
+apply to the whole target; rules do not create per-page asset namespaces.
+
+### 4.4 Cache and watch
+
+HTML cache format is `boris-cache-v2-layout-rules`. Each page entry records
+`selected_layout`. Fingerprints hash the effective selected layout path and
+bytes (plus theme material for that layout), not the full rule table. Watch
+observes every declared layout path; a changed layout rebuilds only targets
+that declare it. With no `--layout-rule`, behavior matches one-layout-per-target
+prior to this slice.
+
+All declared layout paths are validated (loaded/split) even when no page
+selects them. Selection runs after the frozen graph and before page workers.
+Workers receive an immutable selected layout and never mutate rule tables.
 
 ## 5. Theme assets and self-contained output
 
@@ -406,7 +441,7 @@ Node, a bundler, or network access.
 
 | # | Decision | Closure |
 |---|----------|---------|
-| 1 | Page layout rules (CLI vs config) | **Deferred** — one layout per target |
+| 1 | Page layout rules (CLI vs config) | **Accepted** — `--layout-rule TARGET SELECTOR PATH` (CLI first; no project manifest) |
 | 2 | `footer.html` convention | **Accepted** theme-root `footer.html` |
 | 3 | Metadata DOM shape | **Frozen** for F9.1: `<dl class="page-metadata">` with Status / Parent / Tags when set; title/id omitted (title has `{{title}}`) |
 | 4 | Non-ASCII asset URLs | **ASCII-only, fail closed**; percent-encoding deferred |
@@ -443,5 +478,13 @@ Node, a bundler, or network access.
 - Expanded fixture/unit coverage: `--theme` path identity, asset-url depths,
   footer/metadata, multi-target isolation, full vs incremental byte-identical
   HTML/assets, traversal/collision/missing/symlink failure paths.
+
+### Layout selection (landed)
+
+- `--layout-rule TARGET SELECTOR LAYOUT_PATH` with `id:` / `glob:` / `role:`.
+- Deterministic precedence, one theme root per target, cache format
+  `boris-cache-v2-layout-rules` with per-page `selected_layout`.
+- Fixtures: `docs/contracts/fixtures/layout-rules/`; pure selector module
+  `src/layout_select.zig`. No IR schema change; no DaisyUI/Node/CSS pipeline.
 
 The existing `layouts/main.html` remains the regression fixture throughout.

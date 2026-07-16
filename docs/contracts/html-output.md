@@ -182,17 +182,17 @@ Layouts without `{{nav}}` keep the prior page-local fingerprint inputs
 On `--incremental`, a page is **reused** only when all of the following hold:
 
 1. Prior `dist/.boris-cache/manifest.json` parses and its `format_version`
-   equals the fingerprint discriminator (`boris-cache-v1-multitarget`).
-2. A manifest entry matches the page’s `entity_id`, `output_path`, and current
-   **input** fingerprint (source / includes / layout / target / nav material).
+   equals the fingerprint discriminator (`boris-cache-v2-layout-rules`).
+2. A manifest entry matches the page’s `entity_id`, `output_path`, effective
+   `selected_layout`, and current **input** fingerprint (source / includes /
+   selected layout path+bytes / target / nav material / theme material).
 3. The on-disk HTML file exists and is non-empty.
 4. The file’s **SHA-256** (lowercase hex) equals the entry’s `output_digest`.
 
 `output_size` is recorded as a **cheap prefilter** only. Same-length
 corruption of published HTML must still fail the digest check and force a
-re-render. Missing or empty `output_digest` (older manifests under the same
-format version) forces re-render — deliberate forward-compatible fail-closed
-behavior without bumping `format_version` or reshaping input fingerprints.
+re-render. Older manifests with a different `format_version` (including
+`boris-cache-v1-multitarget`) force a cold rebuild.
 
 Manifest entry shape (deterministic field order; entries follow PageDb order):
 
@@ -201,6 +201,7 @@ Manifest entry shape (deterministic field order; entries follow PageDb order):
   "entity_id": "guides/intro",
   "fingerprint": "<64 hex chars>",
   "output_path": "guides/intro.html",
+  "selected_layout": "layouts/main.html",
   "output_size": 1234,
   "output_digest": "<64 hex chars>"
 }

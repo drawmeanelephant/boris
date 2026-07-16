@@ -19,6 +19,17 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Layout selection
+
+- HTML page layout selection via repeatable
+  `--layout-rule TARGET SELECTOR LAYOUT_PATH` (`id:`, `glob:`, `role:`).
+  Closed frontmatter unchanged (`layout:` / `template:` still `EFRONTMATTER`).
+  Deterministic precedence (exact > most-specific glob > role > fallback), one
+  managed theme root per target, HTML cache format `boris-cache-v2-layout-rules`
+  with per-page `selected_layout`. Module: `src/layout_select.zig`. Contract:
+  `docs/contracts/templating-and-themes.md` §4; fixture:
+  `docs/contracts/fixtures/layout-rules/`. No IR schema or product version bump.
+
 ### Knowledge-system exports
 
 - Bounded semantic relations (`relations: [kind=target]`) validate against the

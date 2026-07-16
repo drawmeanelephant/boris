@@ -53,6 +53,7 @@ const wikilink = @import("wikilink.zig");
 const json_out = @import("json_out.zig");
 const pipeline = @import("pipeline.zig");
 const theme_mod = @import("theme.zig");
+const layout_select = @import("layout_select.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -178,7 +179,10 @@ pub const CompileOptions = struct {
     target_name: []const u8 = "default",
     content_root: []const u8 = "content",
     dist_dir: []const u8 = "dist",
+    /// Fallback layout path (global / --target-layout / product default).
     layout_path: []const u8 = "layouts/main.html",
+    /// Target-owned layout rules (`--layout-rule`). Empty → one layout for all pages.
+    layout_rules: []const layout_select.LayoutRule = &.{},
     quiet: bool = true,
     /// When set, force a render failure after promoting page `N` (0-based)
     /// without publishing — used to prove error-path Whiteboard reset + no
@@ -501,6 +505,8 @@ pub const CacheEntry = struct {
     entity_id: []const u8,
     fingerprint: []const u8,
     output_path: []const u8,
+    /// Effective selected layout path for this target/page (workspace-relative).
+    selected_layout: []const u8 = "",
     /// On-disk output size at last successful publish (cheap prefilter).
     output_size: u64 = 0,
     /// Lowercase hex SHA-256 of published HTML bytes; empty forces re-render.
@@ -516,6 +522,8 @@ pub const ParsedCacheEntry = struct {
     entity_id: []const u8,
     fingerprint: []const u8,
     output_path: []const u8,
+    /// Effective selected layout; missing on older manifests forces re-render via format bump.
+    selected_layout: []const u8 = "",
     /// Optional for older manifests; missing/zero is a cheap prefilter only.
     output_size: u64 = 0,
     /// Optional for older manifests; missing/empty forces re-render.
@@ -576,6 +584,8 @@ fn writeCacheManifest(writer: anytype, manifest: CacheManifest) !void {
         try json_out.writeString(&buf, gpa, entry.fingerprint);
         try buf.appendSlice(gpa, ",\n      \"output_path\": ");
         try json_out.writeString(&buf, gpa, entry.output_path);
+        try buf.appendSlice(gpa, ",\n      \"selected_layout\": ");
+        try json_out.writeString(&buf, gpa, entry.selected_layout);
         try buf.appendSlice(gpa, ",\n      \"output_size\": ");
         try json_out.writeUsize(&buf, gpa, @intCast(entry.output_size));
         try buf.appendSlice(gpa, ",\n      \"output_digest\": ");
@@ -762,6 +772,8 @@ const SharedCompileState = struct {
 const CachedLayout = struct {
     layout: assemble.Layout,
     bytes: []u8,
+    /// Theme fingerprint material for this layout (footer + its asset-url refs).
+    theme_material: []u8 = &.{},
 };
 
 fn isContentCompileFailure(err: anyerror) bool {
@@ -785,6 +797,12 @@ fn isContentCompileFailure(err: anyerror) bool {
         error.ThemeSymlink,
         error.FooterSymlink,
         => true,
+        // Layout-rule selection failures are usage (exit 2), not content.
+        error.AmbiguousGlob,
+        error.MixedThemeRoots,
+        error.DuplicateSelector,
+        error.LayoutSelectionFailed,
+        => false,
         else => false,
     };
 }
@@ -826,6 +844,33 @@ pub fn compileHtmlSiteMulti(
     var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root, base_options.quiet);
     defer shared.deinit();
 
+    // Preflight layout selection for every target/page before any target publishes
+    // (RFC §5: ambiguous globs and mixed roots must not leave partial publications).
+    for (plans) |plan| {
+        target_mod.rejectMixedThemeRoots(plan.layout_path, plan.layout_rules) catch |err| {
+            if (!base_options.quiet) {
+                std.debug.print("error: target '{s}' mixed theme roots in layout rules: {s}\n", .{ plan.name, @errorName(err) });
+            }
+            return error.MixedThemeRoots;
+        };
+        for (db.items()) |page| {
+            _ = layout_select.selectLayout(page.entity_id, page.role, plan.layout_rules, plan.layout_path) catch |err| {
+                if (!base_options.quiet) {
+                    std.debug.print("error: target '{s}' layout selection failed for '{s}': {s}\n", .{
+                        plan.name,
+                        page.entity_id,
+                        @errorName(err),
+                    });
+                }
+                return switch (err) {
+                    error.AmbiguousGlob => error.AmbiguousGlob,
+                    error.DuplicateSelector => error.DuplicateSelector,
+                    else => error.LayoutSelectionFailed,
+                };
+            };
+        }
+    }
+
     // Layout templates cached by path (per-target layouts share the same arena).
     var layout_arena = std.heap.ArenaAllocator.init(gpa);
     defer layout_arena.deinit();
@@ -834,45 +879,66 @@ pub fn compileHtmlSiteMulti(
 
     var any_failed = false;
     var any_io_failed = false;
+    var any_usage_failed = false;
     for (plans) |plan| {
         var target_options = base_options;
         target_options.target_name = plan.name;
         target_options.dist_dir = plan.output_dir;
         target_options.layout_path = plan.layout_path;
+        target_options.layout_rules = plan.layout_rules;
 
-        const gop = try layout_cache.getOrPut(gpa, plan.layout_path);
-        if (!gop.found_existing) {
-            const layout = loadLayoutOnce(io, Io.Dir.cwd(), plan.layout_path, layout_arena.allocator()) catch |err| {
+        // Load every declared layout (fallback + rules), even if no page selects it.
+        const declared = layout_select.collectDeclaredLayouts(gpa, plan.layout_path, plan.layout_rules) catch {
+            any_failed = true;
+            any_io_failed = true;
+            continue;
+        };
+        defer gpa.free(declared);
+
+        var load_failed = false;
+        for (declared) |lp| {
+            const gop = try layout_cache.getOrPut(gpa, lp);
+            if (gop.found_existing) continue;
+            const layout = loadLayoutOnce(io, Io.Dir.cwd(), lp, layout_arena.allocator()) catch |err| {
                 if (!base_options.quiet) {
-                    std.debug.print("error: target '{s}' failed to load layout: {s}\n", .{ plan.name, @errorName(err) });
+                    std.debug.print("error: target '{s}' failed to load layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
                 }
                 any_failed = true;
                 any_io_failed = any_io_failed or !isContentCompileFailure(err);
-                _ = layout_cache.remove(plan.layout_path);
-                continue;
+                _ = layout_cache.remove(lp);
+                load_failed = true;
+                break;
             };
-            const bytes = readFileAlloc(io, Io.Dir.cwd(), plan.layout_path, gpa) catch |err| {
+            const bytes = readFileAlloc(io, Io.Dir.cwd(), lp, gpa) catch |err| {
                 if (!base_options.quiet) {
-                    std.debug.print("error: target '{s}' failed to read layout: {s}\n", .{ plan.name, @errorName(err) });
+                    std.debug.print("error: target '{s}' failed to read layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
                 }
                 any_failed = true;
                 any_io_failed = true;
-                _ = layout_cache.remove(plan.layout_path);
-                continue;
+                _ = layout_cache.remove(lp);
+                load_failed = true;
+                break;
             };
             gop.value_ptr.* = .{ .layout = layout, .bytes = bytes };
         }
+        if (load_failed) continue;
 
         const cached = layout_cache.get(plan.layout_path).?;
         _ = compilePagesWithSharedAndSite(io, gpa, &db, cached.layout, target_options, &shared, cached.bytes, &site) catch |err| {
-            // Include/wiki/graph already printed structured diags; skip duplicate @errorName.
             if (!base_options.quiet and err != error.IncludeFailed and err != error.ReferenceFailed and
-                err != error.GraphValidationFailed)
+                err != error.GraphValidationFailed and err != error.AmbiguousGlob and
+                err != error.MixedThemeRoots and err != error.LayoutSelectionFailed)
             {
                 std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
             }
             any_failed = true;
-            any_io_failed = any_io_failed or !isContentCompileFailure(err);
+            if (err == error.AmbiguousGlob or err == error.MixedThemeRoots or
+                err == error.DuplicateSelector or err == error.LayoutSelectionFailed)
+            {
+                any_usage_failed = true;
+            } else {
+                any_io_failed = any_io_failed or !isContentCompileFailure(err);
+            }
             continue;
         };
     }
@@ -881,9 +947,11 @@ pub fn compileHtmlSiteMulti(
     var it = layout_cache.iterator();
     while (it.next()) |entry| {
         gpa.free(entry.value_ptr.bytes);
+        if (entry.value_ptr.theme_material.len > 0) gpa.free(entry.value_ptr.theme_material);
     }
 
     if (any_failed) {
+        if (any_usage_failed) return error.LayoutSelectionFailed;
         if (any_io_failed) return error.MultiTargetIoFailed;
         return error.MultiTargetCompilationFailed;
     }
@@ -902,7 +970,8 @@ const ParallelContext = struct {
     content_dir: Io.Dir,
     dist_dir: Io.Dir,
     db: *PageDb,
-    layout: assemble.Layout,
+    /// Per-page selected layout (parallel to PageDb).
+    page_layouts: []const assemble.Layout,
     options: CompileOptions,
     is_dirty: []const bool,
     site: ?*const FrozenSite,
@@ -947,7 +1016,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
                 ctx.content_dir,
                 ctx.dist_dir,
                 page,
-                ctx.layout,
+                ctx.page_layouts[page_index],
                 &doc_arena,
                 ctx.options,
                 page_index,
@@ -1297,12 +1366,85 @@ fn compilePagesInner(
     var stage_dir = try cwd.openDir(io, stage_rel, .{ .iterate = true });
     defer stage_dir.close(io);
 
-    // F9.1 theme: derive root from layout path (legacy `layouts/…` → no theme).
+    // Layout selection: load every declared layout (fallback + rules), select per page.
+    try target_mod.rejectMixedThemeRoots(options.layout_path, options.layout_rules);
+    const declared = try layout_select.collectDeclaredLayouts(gpa, options.layout_path, options.layout_rules);
+    defer gpa.free(declared);
+
+    var layout_arena_local = std.heap.ArenaAllocator.init(gpa);
+    defer layout_arena_local.deinit();
+    var layouts_by_path: std.StringHashMapUnmanaged(CachedLayout) = .{};
+    defer {
+        var it = layouts_by_path.iterator();
+        while (it.next()) |e| {
+            // Fallback bytes may be borrowed from caller (layout_bytes); only free owned.
+            if (e.value_ptr.bytes.ptr != layout_bytes.ptr) {
+                gpa.free(e.value_ptr.bytes);
+            }
+            if (e.value_ptr.theme_material.len > 0) gpa.free(e.value_ptr.theme_material);
+        }
+        layouts_by_path.deinit(gpa);
+    }
+
+    // Seed with the caller-provided fallback layout (bytes may be shared).
+    try layouts_by_path.put(gpa, options.layout_path, .{
+        .layout = layout,
+        .bytes = @constCast(layout_bytes),
+    });
+    for (declared) |lp| {
+        if (layouts_by_path.contains(lp)) continue;
+        const loaded = try loadLayoutOnce(io, cwd, lp, layout_arena_local.allocator());
+        const bytes = try readFileAlloc(io, cwd, lp, gpa);
+        try layouts_by_path.put(gpa, lp, .{ .layout = loaded, .bytes = bytes });
+    }
+
+    // Per-page selection (after graph freeze; roles are on PageDb).
+    const page_sel_paths = try gpa.alloc([]const u8, db.len());
+    defer gpa.free(page_sel_paths);
+    const page_layouts = try gpa.alloc(assemble.Layout, db.len());
+    defer gpa.free(page_layouts);
+    const page_layout_bytes = try gpa.alloc([]const u8, db.len());
+    defer gpa.free(page_layout_bytes);
+
+    for (db.items(), 0..) |page, i| {
+        const sel = layout_select.selectLayout(page.entity_id, page.role, options.layout_rules, options.layout_path) catch |err| {
+            if (!options.quiet) {
+                std.debug.print("error: layout selection failed for target '{s}' page '{s}': {s}\n", .{
+                    options.target_name,
+                    page.entity_id,
+                    @errorName(err),
+                });
+            }
+            return switch (err) {
+                error.AmbiguousGlob => error.AmbiguousGlob,
+                error.DuplicateSelector => error.DuplicateSelector,
+                else => error.LayoutSelectionFailed,
+            };
+        };
+        page_sel_paths[i] = sel.layout_path;
+        const cached = layouts_by_path.get(sel.layout_path) orelse return error.LayoutSelectionFailed;
+        page_layouts[i] = cached.layout;
+        page_layout_bytes[i] = cached.bytes;
+    }
+
+    // F9.1 theme: one root per target from the fallback layout (rules share it).
     const theme_root = theme_mod.themeRootFromLayoutPath(options.layout_path) orelse "";
-    if (layout.has_asset_url and theme_root.len == 0) return error.ThemeRootMissing;
+    // Any selected/declared layout with asset-url requires a managed theme root.
+    {
+        var it = layouts_by_path.iterator();
+        while (it.next()) |e| {
+            if (e.value_ptr.layout.has_asset_url and theme_root.len == 0) return error.ThemeRootMissing;
+        }
+    }
     var theme_bundle = try theme_mod.loadThemeBundle(io, gpa, cwd, theme_root);
     defer theme_bundle.deinit();
-    try theme_mod.requireReferencedAssets(&theme_bundle, layout.assetPaths());
+    // Validate asset refs for every declared layout (stale rules cannot hide broken templates).
+    {
+        var it = layouts_by_path.iterator();
+        while (it.next()) |e| {
+            try theme_mod.requireReferencedAssets(&theme_bundle, e.value_ptr.layout.assetPaths());
+        }
+    }
     {
         var outs: std.ArrayList([]const u8) = .empty;
         defer outs.deinit(gpa);
@@ -1313,13 +1455,23 @@ fn compilePagesInner(
     // Always publish theme assets into staging (target-owned; not shared).
     try theme_mod.copyAssetsToOutput(io, stage_dir, theme_bundle.assets);
 
-    const theme_material = try theme_mod.referencedAssetMaterial(
-        gpa,
-        &theme_bundle,
-        layout.assetPaths(),
-        layout.has_footer,
-    );
-    defer gpa.free(theme_material);
+    // Per-layout theme fingerprint material (footer + that layout's asset-url refs).
+    {
+        var it = layouts_by_path.iterator();
+        while (it.next()) |e| {
+            e.value_ptr.theme_material = try theme_mod.referencedAssetMaterial(
+                gpa,
+                &theme_bundle,
+                e.value_ptr.layout.assetPaths(),
+                e.value_ptr.layout.has_footer,
+            );
+        }
+    }
+    const page_theme_material = try gpa.alloc([]const u8, db.len());
+    defer gpa.free(page_theme_material);
+    for (page_sel_paths, 0..) |lp, i| {
+        page_theme_material[i] = layouts_by_path.get(lp).?.theme_material;
+    }
 
     // Own shared state when the caller did not supply one (single-target).
     var local_shared: ?SharedCompileState = null;
@@ -1388,8 +1540,9 @@ fn compilePagesInner(
         defer gpa.free(inc_views);
         for (inc_owned, 0..) |b, j| inc_views[j] = b;
 
+        const page_layout = page_layouts[page_idx];
         // Graph chrome (nav, breadcrumb, title) all depend on frozen site material.
-        const needs_site_material = layout.has_nav or layout.has_breadcrumb or layout.has_title;
+        const needs_site_material = page_layout.has_nav or page_layout.has_breadcrumb or page_layout.has_title;
         const nav_material: []const u8 = if (needs_site_material) site.site_nav_material else "";
         // Wiki reference material from page body + transitive include fragment bodies
         // so title/path renames dirty parents that only wiki-link via includes.
@@ -1431,15 +1584,16 @@ fn compilePagesInner(
             inc_with_ref[inc_views.len] = ref_material;
         }
 
+        // Fingerprint uses the effective selected layout identity and bytes.
         const fp_bytes = cache.computePageFingerprintTheme(
             options.target_name,
-            options.layout_path,
+            page_sel_paths[page_idx],
             page.entity_id,
             shared.source_bytes[page_idx],
             inc_with_ref,
-            layout_bytes,
+            page_layout_bytes[page_idx],
             nav_material,
-            theme_material,
+            page_theme_material[page_idx],
         );
         fingerprints[page_idx] = try fingerprintHex(fp_bytes, gpa);
 
@@ -1461,7 +1615,8 @@ fn compilePagesInner(
                 for (pm.value.entries) |entry| {
                     if (std.mem.eql(u8, entry.entity_id, page.entity_id) and
                         std.mem.eql(u8, entry.output_path, page.output_path) and
-                        std.mem.eql(u8, entry.fingerprint, fingerprints[page_idx]))
+                        std.mem.eql(u8, entry.fingerprint, fingerprints[page_idx]) and
+                        (entry.selected_layout.len == 0 or std.mem.eql(u8, entry.selected_layout, page_sel_paths[page_idx])))
                     {
                         // Content-addressed output freshness: require a non-empty
                         // digest that matches on-disk HTML. Size is a cheap
@@ -1502,7 +1657,7 @@ fn compilePagesInner(
             .content_dir = content_dir,
             .dist_dir = stage_dir,
             .db = db,
-            .layout = layout,
+            .page_layouts = page_layouts,
             .options = options,
             .is_dirty = is_dirty,
             .site = site,
@@ -1575,7 +1730,7 @@ fn compilePagesInner(
                     content_dir,
                     stage_dir,
                     page,
-                    layout,
+                    page_layouts[page_index],
                     &doc_arena,
                     options,
                     page_index,
@@ -1634,6 +1789,7 @@ fn compilePagesInner(
                 .entity_id = page.entity_id,
                 .fingerprint = fingerprints[page_idx],
                 .output_path = page.output_path,
+                .selected_layout = page_sel_paths[page_idx],
                 .output_size = out_size,
                 .output_digest = out_digest,
             };

@@ -1,6 +1,6 @@
 # RFC: deterministic page layout selection
 
-**Status:** Proposed; decision-ready for a contracts-first implementation
+**Status:** Accepted and implemented (CLI `--layout-rule` slice; no project manifest)
 
 **Scope:** HTML page layout selection after F9.2
 

@@ -6,6 +6,7 @@
 const std = @import("std");
 const diagnostic = @import("diagnostic.zig");
 const target_mod = @import("target.zig");
+const layout_select = @import("layout_select.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const RunResult = diagnostic.RunResult;
@@ -71,6 +72,9 @@ pub const Options = struct {
             gpa.free(self.html_layout);
             self.owned_html_layout = false;
         }
+        for (self.targets.items) |t| {
+            if (t.layout_rules.len > 0) gpa.free(t.layout_rules);
+        }
         self.targets.deinit(gpa);
     }
 };
@@ -127,10 +131,22 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var theme_root: ?[]const u8 = null;
 
     var targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 };
-    errdefer targets.deinit(gpa);
+    errdefer {
+        for (targets.items) |t| {
+            if (t.layout_rules.len > 0) gpa.free(t.layout_rules);
+        }
+        targets.deinit(gpa);
+    }
     // Pending --target-layout NAME=PATH applied after targets are known.
     var target_layouts: std.ArrayListUnmanaged(struct { name: []const u8, path: []const u8 }) = .{ .items = &.{}, .capacity = 0 };
-    errdefer target_layouts.deinit(gpa);
+    defer target_layouts.deinit(gpa);
+    // Pending --layout-rule TARGET SELECTOR LAYOUT_PATH (three following args).
+    var pending_rules: std.ArrayListUnmanaged(struct {
+        target: []const u8,
+        selector: []const u8,
+        path: []const u8,
+    }) = .{ .items = &.{}, .capacity = 0 };
+    defer pending_rules.deinit(gpa);
 
     var command: Command = .build;
     var impact_id: ?[]const u8 = null;
@@ -272,6 +288,24 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        // --layout-rule TARGET SELECTOR LAYOUT_PATH (exactly three following args).
+        if (std.mem.eql(u8, a, "--layout-rule") or std.mem.startsWith(u8, a, "--layout-rule=")) {
+            if (std.mem.startsWith(u8, a, "--layout-rule=")) return error.InvalidValue;
+            if (i + 3 >= args.len) return error.MissingValue;
+            const tname = args[i + 1];
+            const selector = args[i + 2];
+            const path = args[i + 3];
+            if (tname.len == 0 or selector.len == 0 or path.len == 0) return error.EmptyValue;
+            if (!target_mod.isValidTargetName(tname)) return error.InvalidValue;
+            // Reject values that look like flags (prevent silent arg shift).
+            if (tname[0] == '-' or selector[0] == '-' or path[0] == '-') return error.InvalidValue;
+            // Validate selector grammar early (fail before discovery).
+            _ = layout_select.parseSelector(selector) catch return error.InvalidValue;
+            try pending_rules.append(gpa, .{ .target = tname, .selector = selector, .path = path });
+            i += 3;
+            continue;
+        }
+
         if (std.mem.eql(u8, a, "--jobs") or std.mem.startsWith(u8, a, "--jobs=") or
             std.mem.eql(u8, a, "-j") or std.mem.startsWith(u8, a, "-j=")) {
             if (saw_jobs) return error.DuplicateFlag;
@@ -361,15 +395,16 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
 
     const has_explicit_targets = targets.items.len > 0;
     const has_target_layouts = target_layouts.items.len > 0;
+    const has_layout_rules = pending_rules.items.len > 0;
     // Explicit HTML selectors (not the bare default).
-    const explicit_html = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts or saw_theme;
+    const explicit_html = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts or saw_theme or has_layout_rules;
     const wants_rag = saw_rag or saw_rag_dir;
     const wants_context = saw_context or saw_context_dir;
     // Explicit IR: --out and/or --no-rag (bare CLI is HTML, not IR).
     const wants_ir = saw_out or saw_no_rag;
 
     if (command != .build) {
-        if (wants_rag or wants_ir or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts) {
+        if (wants_rag or wants_ir or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
             return error.ConflictingFlags;
         }
     } else if (saw_format or saw_report) {
@@ -392,14 +427,12 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     }
     // Target conflict rules
     if (has_explicit_targets and saw_html_dir) return error.ConflictingFlags;
-    // --target-layout attaches to a named --target, or to the synthetic "default"
-    // target on bare HTML / --html / --html-dir. Unknown layout names are rejected
-    // after the default target is synthesized (InvalidValue). Combined with --out
-    // or RAG selectors, has_target_layouts forces explicit_html and hits the
-    // HTML-vs-IR/RAG conflict above when --out / --rag / --rag-dir is present.
+    // --target-layout / --layout-rule attach to a named --target, or to the
+    // synthetic "default" target on bare HTML / --html / --html-dir. Unknown
+    // target names are rejected after default synthesis (InvalidValue).
 
     // Mode selection:
-    // 1. Explicit HTML flags / --target / --target-layout → HTML
+    // 1. Explicit HTML flags / --target / --target-layout / --layout-rule → HTML
     // 2. --rag / --rag-dir → RAG-only
     // 3. --out / --no-rag → IR
     // 4. Default (no mode flags) → HTML site under dist/
@@ -415,7 +448,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .html;
 
     // Single-target HTML (bare CLI, --html, or --html-dir) maps to target "default".
-    // --target-layout NAME=PATH may attach to this synthetic target.
+    // --target-layout / --layout-rule may attach to this synthetic target.
     if (mode == .html and !has_explicit_targets) {
         try targets.append(gpa, .{
             .name = "default",
@@ -438,7 +471,48 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         }
         if (!found) return error.InvalidValue;
     }
-    target_layouts.deinit(gpa);
+
+    // Attach --layout-rule TARGET SELECTOR PATH. Order relative to --target is
+    // independent; unknown targets and duplicate selectors fail as usage.
+    if (has_layout_rules) {
+        // Count rules per target for the 256 limit.
+        for (targets.items) |*t| {
+            var count: usize = 0;
+            for (pending_rules.items) |pr| {
+                if (std.mem.eql(u8, pr.target, t.name)) count += 1;
+            }
+            if (count > layout_select.max_rules_per_target) return error.InvalidValue;
+            if (count == 0) continue;
+
+            var rules = try gpa.alloc(layout_select.LayoutRule, count);
+            errdefer gpa.free(rules);
+            var filled: usize = 0;
+            for (pending_rules.items) |pr| {
+                if (!std.mem.eql(u8, pr.target, t.name)) continue;
+                const parsed = layout_select.parseSelector(pr.selector) catch return error.InvalidValue;
+                rules[filled] = .{
+                    .kind = parsed.kind,
+                    .value = parsed.value,
+                    .layout_path = pr.path,
+                };
+                filled += 1;
+            }
+            layout_select.rejectDuplicateSelectors(rules) catch return error.DuplicateFlag;
+            layout_select.sortRulesCanonical(rules);
+            t.layout_rules = rules;
+        }
+        // Unknown rule targets (no matching --target / default).
+        for (pending_rules.items) |pr| {
+            var found = false;
+            for (targets.items) |t| {
+                if (std.mem.eql(u8, t.name, pr.target)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) return error.InvalidValue;
+        }
+    }
 
     // Canonical target order: equivalent --target argv permutations produce the
     // same Options.targets sequence (sorted by name). Execution/diagnostics use
@@ -562,6 +636,8 @@ pub fn printUsage() void {
         \\  --theme ROOT        Theme root sugar → ROOT/layouts/main.html (+ managed assets/)
         \\  --target NAME=DIR   Named HTML output root (repeatable; exclusive with --html-dir)
         \\  --target-layout N=P Per-target layout (NAME=PATH; may precede or follow --target)
+        \\  --layout-rule T S P HTML layout rule: TARGET SELECTOR LAYOUT_PATH (repeatable; max 256/target)
+        \\                      Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
         \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
         \\  --watch             Local-development watch mode for HTML builds (implies --incremental)
         \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
@@ -590,18 +666,19 @@ pub fn printUsage() void {
         \\  --no-rag with --rag-dir
         \\  --context / --context-dir with --rag, --out, or HTML selectors
         \\  explicit --out with --rag or --rag-dir
-        \\  --html / --html-dir / --target / --target-layout with --rag, --rag-dir, or explicit --out
+        \\  --html / --html-dir / --target / --target-layout / --layout-rule with --rag, --rag-dir, --context, or explicit --out
         \\  --target with --html-dir
-        \\  --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG
+        \\  --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG / context
         \\  Invalid target names, duplicate names, output collisions, workspace escape,
-        \\  content/layout overlap, unknown --target-layout name
+        \\  content/layout overlap, unknown --target-layout / --layout-rule target,
+        \\  duplicate or invalid layout selectors, mixed theme roots, >256 rules/target
         \\
         \\Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
         \\
         \\Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
         \\      --html / --html-dir / bare CLI map to a single target named "default".
-        \\      Equivalent --target / --target-layout permutations yield the same config
-        \\      (targets sorted by name). --target works with --watch and --incremental.
+        \\      Equivalent --target / --target-layout / --layout-rule permutations yield the
+        \\      same config (targets sorted by name; rules canonicalized). No layout frontmatter.
         \\
     , .{});
 }
@@ -683,6 +760,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.eql(u8, a, "--html-layout") or
             std.mem.eql(u8, a, "--target") or
             std.mem.eql(u8, a, "--target-layout") or
+            std.mem.eql(u8, a, "--layout-rule") or
             std.mem.eql(u8, a, "--jobs") or
             std.mem.eql(u8, a, "-j"))
         {
@@ -696,6 +774,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.startsWith(u8, a, "--html-layout=") or
             std.mem.startsWith(u8, a, "--target=") or
             std.mem.startsWith(u8, a, "--target-layout=") or
+            std.mem.startsWith(u8, a, "--layout-rule=") or
             std.mem.startsWith(u8, a, "--jobs=") or
             std.mem.startsWith(u8, a, "-j="))
         {
@@ -1434,4 +1513,66 @@ test "runArgs: invalid target parse errors exit 2" {
         "boris", "--target", "b=dist/b", "--target", "a=dist/a", "--watch", "--incremental",
     }, &spy));
     try expectEqual(@as(usize, 1), spy.pipeline_calls);
+}
+
+test "parse: --layout-rule attaches to default and named targets" {
+    var o = try parseOptions(std.testing.allocator, &.{
+        "boris",
+        "--theme", "experimental-theme",
+        "--layout-rule", "default", "id:index", "experimental-theme/layouts/home.html",
+        "--layout-rule", "default", "role:trunk", "experimental-theme/layouts/section.html",
+    });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(Mode.html, o.mode);
+    try expectEqual(@as(usize, 1), o.targets.items.len);
+    try expectEqualStrings("default", o.targets.items[0].name);
+    try expectEqual(@as(usize, 2), o.targets.items[0].layout_rules.len);
+    // Canonical sort: id before role
+    try expectEqual(layout_select.SelectorKind.id, o.targets.items[0].layout_rules[0].kind);
+    try expectEqualStrings("index", o.targets.items[0].layout_rules[0].value);
+    try expectEqual(layout_select.SelectorKind.role, o.targets.items[0].layout_rules[1].kind);
+}
+
+test "parse: --layout-rule order independent; unknown target and bad selector fail" {
+    var a = try parseOptions(std.testing.allocator, &.{
+        "boris",
+        "--layout-rule", "prod", "id:index", "layouts/home.html",
+        "--target", "prod=dist/prod",
+        "--layout-rule", "prod", "role:trunk", "layouts/section.html",
+    });
+    defer a.deinit(std.testing.allocator);
+    var b = try parseOptions(std.testing.allocator, &.{
+        "boris",
+        "--target", "prod=dist/prod",
+        "--layout-rule", "prod", "role:trunk", "layouts/section.html",
+        "--layout-rule", "prod", "id:index", "layouts/home.html",
+    });
+    defer b.deinit(std.testing.allocator);
+    try expectEqual(@as(usize, 2), a.targets.items[0].layout_rules.len);
+    try expectEqual(a.targets.items[0].layout_rules[0].kind, b.targets.items[0].layout_rules[0].kind);
+    try expectEqualStrings(a.targets.items[0].layout_rules[0].value, b.targets.items[0].layout_rules[0].value);
+
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{
+        "boris", "--target", "prod=dist/p", "--layout-rule", "nope", "id:index", "layouts/x.html",
+    }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{
+        "boris", "--layout-rule", "default", "layout:home", "layouts/x.html",
+    }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{
+        "boris", "--layout-rule", "default", "glob:ref*", "layouts/x.html",
+    }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{
+        "boris",
+        "--layout-rule", "default", "id:index", "layouts/a.html",
+        "--layout-rule", "default", "id:index", "layouts/b.html",
+    }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{
+        "boris", "--layout-rule", "default", "id:index", "layouts/a.html", "--out", ".boris",
+    }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{
+        "boris", "--layout-rule", "default", "id:index", "layouts/a.html", "--rag",
+    }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{
+        "boris", "--layout-rule", "default", "id:index",
+    }));
 }
