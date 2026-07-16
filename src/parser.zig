@@ -234,7 +234,11 @@ fn parseRelationsList(raw: []const u8, out: *[page_mod.max_relation_count]page_m
         }
         out[count] = .{ .kind = kind, .target = target };
         count += 1;
-        if (cursor < inner.len) cursor += 1;
+        if (cursor == inner.len) break;
+        cursor += 1;
+        while (cursor < inner.len and isSpace(inner[cursor])) : (cursor += 1) {}
+        // A comma separates two entries; it cannot terminate the list.
+        if (cursor == inner.len) return error.BadRelations;
     }
     return count;
 }
@@ -278,6 +282,9 @@ fn parseTagsList(raw: []const u8, out: *[max_tag_count][]const u8) TagsError!usi
         if (i >= inner.len) break;
         if (inner[i] != ',') return error.BadTags;
         i += 1;
+        while (i < inner.len and isSpace(inner[i])) : (i += 1) {}
+        // A comma separates two tag items; it cannot terminate the list.
+        if (i >= inner.len) return error.BadTags;
     }
     return count;
 }
@@ -591,6 +598,8 @@ test "parse: semantic relation malformed, unknown, duplicate, and invalid target
         "---\nrelations: [unknown=guides/old]\n---\n",
         "---\nrelations: [supersedes=guides/old, supersedes=guides/old]\n---\n",
         "---\nrelations: [supersedes=../old]\n---\n",
+        "---\nrelations: [supersedes=guides/old,]\n---\n",
+        "---\nrelations: [supersedes=guides/old, \t]\n---\n",
     };
     for (cases, 0..) |source, i| {
         const r = parse(source);
@@ -736,6 +745,18 @@ test "parse: invalid tags syntax is EFRONTMATTER" {
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EFRONTMATTER);
     try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "tags") != null);
+}
+
+test "parse: tags reject trailing commas" {
+    const cases = [_][]const u8{
+        "---\ntags: [alpha,]\n---\n",
+        "---\ntags: [alpha, \t]\n---\n",
+    };
+    for (cases) |source| {
+        const r = parse(source);
+        try std.testing.expect(!r.isOk());
+        try std.testing.expectEqual(Category.EFRONTMATTER, r.category().?);
+    }
 }
 
 test "parse: overlong title is EFRONTMATTER" {

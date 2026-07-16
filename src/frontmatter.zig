@@ -122,6 +122,9 @@ fn parseTagsList(retain: std.mem.Allocator, raw: []const u8) ![]const []const u8
         if (i >= inner.len) break;
         if (inner[i] != ',') return error.BadTags;
         i += 1;
+        while (i < inner.len and isSpace(inner[i])) : (i += 1) {}
+        // A comma separates two tag items; it cannot terminate the list.
+        if (i >= inner.len) return error.BadTags;
     }
 
     return try list.toOwnedSlice(retain);
@@ -451,6 +454,18 @@ test "parse duplicate key" {
     try std.testing.expectEqual(@as(usize, 1), diags.items.len);
     try std.testing.expect(diags.items[0].code == .EFRONTMATTER);
     try std.testing.expectEqualStrings("A", meta.title.?);
+}
+
+test "parse rejects tags with a trailing comma" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+
+    _ = try parse("---\ntags: [alpha, \t]\n---\n", "trailing-comma.md", arena.allocator(), gpa, &diags);
+    try std.testing.expectEqual(@as(usize, 1), diags.items.len);
+    try std.testing.expectEqual(diag.Code.EFRONTMATTER, diags.items[0].code);
 }
 
 test "validateId" {
