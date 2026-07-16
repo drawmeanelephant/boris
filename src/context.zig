@@ -303,6 +303,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: ContextOptions) !ContextResult 
     defer gpa.free(stage);
     cwd.deleteTree(io, stage) catch {};
     try ensureDirPath(io, stage);
+    // A failed write or publish must not leave a partially rendered bundle for
+    // a later invocation to mistake for its own staging area. On success the
+    // stage is renamed away, so this cleanup is a no-op.
+    errdefer cwd.deleteTree(io, stage) catch {};
     {
         var stage_dir = try cwd.openDir(io, stage, .{});
         defer stage_dir.close(io);
