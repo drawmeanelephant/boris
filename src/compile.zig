@@ -1914,12 +1914,23 @@ fn compilePagesInner(
             }
         } else if (!options.incremental) {
             // Full rebuild: remove html outputs under dist that are not in this build.
+            // Skip live theme-owned assets (e.g. assets/embed.html): copyAssetsToOutput
+            // publishes them into dist/, and they are not page outputs. Orphan theme
+            // assets are handled by scrubOrphanThemeAssets below (#61).
+            var theme_html_assets: std.StringHashMapUnmanaged(void) = .{};
+            defer theme_html_assets.deinit(gpa);
+            for (theme_bundle.assets) |a| {
+                if (std.mem.endsWith(u8, a.rel_path, ".html")) {
+                    try theme_html_assets.put(gpa, a.rel_path, {});
+                }
+            }
             var walker = try dist_dir.walk(gpa);
             defer walker.deinit();
             while (try walker.next(io)) |entry| {
                 if (entry.kind != .file) continue;
                 if (!std.mem.endsWith(u8, entry.path, ".html")) continue;
                 if (std.mem.startsWith(u8, entry.path, ".boris-cache")) continue;
+                if (theme_html_assets.contains(entry.path)) continue;
                 if (!live_paths.contains(entry.path)) {
                     dist_dir.deleteFile(io, entry.path) catch {};
                 }
@@ -5081,6 +5092,90 @@ test "F9.1 determinism: theme-site full vs incremental and jobs byte-identical" 
         defer gpa.free(b);
         try std.testing.expectEqualSlices(u8, a, b);
     }
+}
+
+test "F9.2 non-incremental stale-HTML sweep preserves theme-owned .html assets" {
+    // #61: full (non-incremental) stale cleanup walks dist/**/*.html and deletes
+    // anything not in the live page set. Theme assets like assets/embed.html are
+    // published into dist/ by copyAssetsToOutput and must survive that prune.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/f92-stale-html-theme-asset", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+    );
+    try writeTreeFile(io, work, "theme/layouts/main.html",
+        \\<html><a href="{{asset-url assets/embed.html}}">{{content}}</a></html>
+    );
+    try writeTreeFile(io, work, "theme/assets/embed.html", "<div id=\"embed\">ok</div>\n");
+    try writeTreeFile(io, work, "theme/assets/css/a.css", "body{}\n");
+
+    const layout = try std.fmt.allocPrint(gpa, "{s}/theme/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    // Explicit non-incremental full build (the buggy path).
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = false,
+    });
+
+    const embed_path = try std.fmt.allocPrint(gpa, "{s}/assets/embed.html", .{dist});
+    defer gpa.free(embed_path);
+    const embed = try readFileAlloc(io, cwd, embed_path, gpa);
+    defer gpa.free(embed);
+    try std.testing.expectEqualStrings("<div id=\"embed\">ok</div>\n", embed);
+
+    // Page output still published; theme asset is not mistaken for a page.
+    const index_path = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist});
+    defer gpa.free(index_path);
+    try cwd.access(io, index_path, .{});
+
+    // Second full build must keep the theme .html asset (re-publish + sweep).
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = false,
+    });
+    const embed2 = try readFileAlloc(io, cwd, embed_path, gpa);
+    defer gpa.free(embed2);
+    try std.testing.expectEqualStrings("<div id=\"embed\">ok</div>\n", embed2);
+
+    // True stale page html still gets pruned.
+    const stale_path = try std.fmt.allocPrint(gpa, "{s}/gone.html", .{dist});
+    defer gpa.free(stale_path);
+    try writeTreeFile(io, dist, "gone.html", "<html>stale</html>\n");
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = false,
+    });
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, stale_path, .{}));
+    // Theme asset still present after pruning a real stale page.
+    const embed3 = try readFileAlloc(io, cwd, embed_path, gpa);
+    defer gpa.free(embed3);
+    try std.testing.expectEqualStrings("<div id=\"embed\">ok</div>\n", embed3);
 }
 
 test "F9.2 orphan theme assets scrubbed on remove and rename" {
