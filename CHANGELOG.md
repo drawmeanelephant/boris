@@ -3,10 +3,10 @@
 All notable changes to Boris are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
-Versioning: product **v0.3.1** with IR `schemaVersion` **`0.2.0`** and compiler id
-**`boris/0.3.1`**. Breaking IR changes must bump `schemaVersion` and update
-`docs/contracts/`. Product version bumps may update `compiler_id` / `boris_version`
-without changing IR schema.
+Versioning: product **v0.4.0** with base IR `schemaVersion` **`0.2.0`** and
+compiler id **`boris/0.4.0`**. Breaking IR changes must bump `schemaVersion` and
+update `docs/contracts/`. Product version bumps may update `compiler_id` /
+`boris_version` without changing IR schema.
 
 How to use going forward:
 
@@ -24,149 +24,70 @@ How to use going forward:
 
 ## [Unreleased]
 
-### Fixed
+_No changes yet._
 
-- Theme `footer.html` is UTF-8-validated at load (`FooterInvalidUtf8`), matching
-  the layout gate so `{{footer}}` cannot inject invalid sequences into every
-  published page. Contract: `docs/contracts/templating-and-themes.md` decision
-  10. `src/theme.zig`.
-- Non-incremental stale-HTML cleanup no longer deletes theme-owned `.html`
-  assets published under `dist/` (e.g. `assets/embed.html`). The full-build
-  sweep only keeps live page outputs and `.boris-cache`; after F9 theme assets
-  land in `dist/`, inventoried theme `.html` files are skipped so
-  `copyAssetsToOutput` results survive the prune. Orphan theme assets still
-  drop via `scrubOrphanThemeAssets`. `src/compile.zig`. Regression test added.
-- Wiki-link diagnostics distinguish a missing entity from a missing heading on
-  the plan/fingerprint path. `[[typo#frag]]` for an entity that is not in the
-  graph reported "heading target … not found on the page" (blaming a heading on
-  a page that never existed) because fragment membership was probed before
-  entity existence and a map miss looked identical to a heading miss.
-  `HeadingIndex.lookup` now separates the two. Exit code is unchanged
-  (`EREFERENCEMISSING`). Contract: `docs/contracts/heading-ids.md`
-  ("messages distinguish missing entity vs missing heading"). `src/wikilink.zig`.
-- `collectFragmentTargetSet` no longer inserts a non-owned key into the fragment
-  target map: the id is duped before insert, so an allocation failure can never
-  leave a view into source bytes as a map key for the cleanup errdefer to free
-  (invalid free on the OOM path). `src/compile.zig`.
-- Orphan theme-asset scrub no longer deletes content pages published under
-  `dist/assets/`. A page whose entity id is namespaced under `assets/` is a live
-  page output, not an orphan theme asset; the scrub now receives the build's
-  page-output set and skips those paths, and the empty-inventory
-  `deleteTree("assets")` is guarded so it only runs when no page output is
-  published under `assets/` (`src/theme.zig`, `src/compile.zig`). Regression
-  test added.
-- `--watch` now watches a managed theme root, not just the layout's parent
-  directory. Editing `<theme>/assets/…` or `<theme>/footer.html` previously
-  produced no watch event, so pages whose fingerprints include footer or
-  referenced asset bytes (F9.1) served stale output until an unrelated edit
-  triggered a rebuild. Legacy `layouts/…` builds are unchanged. Contract:
-  `docs/contracts/templating-and-themes.md` ("a referenced asset change dirties
-  pages that reference it"). `src/main.zig`.
+## [0.4.0] — 2026-07-16
+
+Release-candidate cut after v0.3.1. Package/product and RAG version are
+`0.4.0`; the compiler id is `boris/0.4.0`. Relation-free output remains base
+IR `0.2.0`; semantic relations retain conditional IR `0.3.0` artifacts with
+compiler id `boris/0.4.0+semantic-relations`. This product cut does not bump an
+IR schema.
+
+### Added
+
+- Bounded semantic `relations: [kind=target]` validate against the page graph
+  and emit conditional IR 0.3 artifacts; relation-free IR 0.2 output is
+  unchanged. Contract: [semantic relations](docs/contracts/semantic-relations.md).
+- Deterministic AI Context Bundles via `--context` / `--context-dir`, with
+  source-relative provenance, SHA-256 hashes, validated graph output, and one
+  uploadable Markdown bundle. Contract:
+  [context bundle](docs/contracts/context-bundle.md).
+- Read-only `boris check` and `boris impact ID` Documentation Intelligence
+  commands with deterministic human/JSON reports and optional report files.
+  Contract: [Documentation Intelligence](docs/contracts/documentation-intelligence.md).
+- Heading-target wiki links resolve `[[entity-id#heading-id]]` against exact
+  Apex-rendered ids and fail loud on missing entities or headings. Contract:
+  [heading ids](docs/contracts/heading-ids.md).
+- Closed theme plans add metadata, footer, and validated asset slots; target-owned
+  assets, per-page `--layout-rule` selection, deterministic precedence, and
+  hostile path/isolation coverage keep layouts bounded. Contract:
+  [templating and themes](docs/contracts/templating-and-themes.md).
+- Explicit `--textile` mode adds a bounded, fail-closed whole-tree adapter
+  through the existing Boris pipeline. Contract:
+  [Textile compatibility](docs/contracts/textile-compatibility.md).
+- Developer-only migration laboratories cover Astro archaeology, WordPress
+  conversion, and Instagram Takeout conversion, with adversarial Astro/WXR
+  preservation fixtures; they add no Boris runtime dependency.
+- Tracked sample content now dogfoods an agent-lore documentation section. The
+  private 250MB source dataset remains excluded and ignored.
 
 ### Changed
 
-- Dropped the write-only `ThemeBundle.fingerprint_material` field and its builder:
-  it duplicated the footer plus every asset's bytes on each load but was never
-  read (page fingerprints use `referencedAssetMaterial`), so a theme with large
-  binary assets held a second full copy for the whole build. `src/theme.zig`.
+- Theme handling now validates layout/footer UTF-8, inventories and scrubs
+  managed assets safely, watches the complete managed theme root, and preserves
+  both theme-owned HTML assets and content pages under `assets/`.
+- Incremental heading indexes are reused when valid, and the unused duplicate
+  `ThemeBundle.fingerprint_material` allocation was removed.
+- Layout and theme paths fail closed on absolute, escaped, backslash, empty,
+  `.`, and `..` forms.
 
-### Layout selection
+### Fixed
 
-- HTML page layout selection via repeatable
-  `--layout-rule TARGET SELECTOR LAYOUT_PATH` (`id:`, `glob:`, `role:`).
-  Closed frontmatter unchanged (`layout:` / `template:` still `EFRONTMATTER`).
-  Deterministic precedence (exact > most-specific glob > role > fallback), one
-  managed theme root per target, HTML cache format `boris-cache-v2-layout-rules`
-  with per-page `selected_layout`. Module: `src/layout_select.zig`. Contract:
-  `docs/contracts/templating-and-themes.md` §4; fixture:
-  `docs/contracts/fixtures/layout-rules/`. No IR schema or product version bump.
-- Hostile integration harness for layout selection (precedence, ambiguity,
-  rule-order determinism, fallback chain, path/mixed-theme failures, multi-target
-  isolation, incremental/full equivalence, repeated-run determinism). Zig-only:
-  `src/layout_select_hostile_test.zig`, fixtures under
-  `docs/contracts/fixtures/layout-rules/hostile/`, step `zig build test-layout-hostile`.
-  Audit report: `docs/contracts/fixtures/layout-rules/hostile/REPORT.md`.
-- Layout path lexical gate: `--html-layout`, `--target-layout`, `--layout-rule`
-  paths, and `--theme` roots reject absolute forms, backslashes, empty / `.` /
-  `..` segments at parse (usage exit 2). Library path validates the same grammar
-  (`layout_select.validateLayoutPath` → `InvalidLayoutPath`). Contract:
-  `templating-and-themes.md` §4.1.
-
-### Textile compatibility
-
-- Added explicit `--textile` input mode: a bounded, fail-closed in-memory
-  Textile-to-Markdown body adapter for headings, paragraphs, quotes, flat
-  lists, safe phrase modifiers, code, and links. Markdown remains the default;
-  mixed page families fail with `ETEXTILE`. Contract:
-  `docs/contracts/textile-compatibility.md`.
-
-### Knowledge-system exports
-
-- Bounded semantic relations (`relations: [kind=target]`) validate against the
-  page graph and emit conditional IR 0.3 artifacts; relation-free IR 0.2
-  goldens remain unchanged. Contract: `docs/contracts/semantic-relations.md`.
-- Added deterministic AI Context Bundles via `--context` / `--context-dir`,
-  including source-relative provenance, SHA-256 hashes, validated graph output,
-  and one uploadable Markdown bundle. Contract:
-  `docs/contracts/context-bundle.md`.
-
-### Documentation Intelligence
-
-- Added read-only `boris check` and `boris impact ID` analysis commands over
-  the validated graph, with deterministic human/JSON reports and optional
-  report-file output and release-gate fixture goldens. Contract:
-  `docs/contracts/documentation-intelligence.md`.
+- Wiki diagnostics now distinguish missing entities from missing headings, and
+  fragment-target map keys are owned before insertion so allocation failure
+  cannot leave an invalid cleanup key.
+- Source-code RAG export excludes vendored dependencies.
 
 ### Docs
 
-- ApexMarkdown Unified compatibility matrix (read-only): fixtures under
-  `docs/contracts/fixtures/apex-unified-compat/`, classifications in
-  `MATRIX.md`, audit method/results in `REPORT.md`. No product-code changes.
-- Roadmap truth reconciliation after PR #42: F8.3 / v0.3.1 tagged, heading
-  wiki (#40), F9.1 (#41), and F9.2 (#42) recorded as shipped; post-F9.2 future
-  work moved to a dedicated section; contracts index no longer claims F8.3 is
-  pending (`docs/ROADMAP-post-f8.md`, `docs/contracts/README.md`, STATUS map).
-
-### Feature 9.2 — theme/template hardening
-
-- Layout UTF-8 validation at plan split (`Layout.split` / `loadLayout` →
-  `LayoutInvalidUtf8`) before content compile.
-- Orphan theme-asset scrub after publish for managed theme roots: removed or
-  renamed files under theme `assets/` are deleted from the target `dist/assets/`;
-  empty inventory drops the leftover `assets/` tree. Legacy `layouts/…` is
-  unchanged and does not scrub.
-- Expanded coverage: theme-site full vs incremental byte-identical HTML/assets,
-  `--theme` path identity, footer/metadata/asset-url, multi-target isolation,
-  traversal/collision/missing-asset failure paths, host-dependent symlink
-  rejection. Contract: `docs/contracts/templating-and-themes.md`.
-
-### Feature 9.1 — closed layout plan + target-owned theme assets
-
-- Reusable closed layout plan in `assemble.zig`: existing five markers plus
-  `{{metadata}}`, `{{footer}}`, and validated `{{asset-url assets/…}}`.
-- Target-owned theme asset inventory/copy (`theme.zig`): sorted copy under the
-  target output, page/asset collision preflight, symlink and path-escape
-  rejection, ASCII-only asset path grammar (fail closed on non-ASCII).
-- Theme root derived from `…/layouts/<file>.html`; legacy `layouts/main.html`
-  remains unchanged (no managed assets). `--theme ROOT` is sugar for
-  `ROOT/layouts/main.html`.
-- Page fingerprints include footer + referenced asset bytes when those slots
-  are used; asset changes dirty dependent pages. Multi-target isolation
-  preserved. Contract: `docs/contracts/templating-and-themes.md`; fixture:
-  `docs/contracts/fixtures/theme-site/`.
-
-### Feature 9 — heading-target wiki links
-
-- Wiki links accept section fragments: `[[entity-id#heading-id]]` and
-  `[[entity-id#heading-id|label]]`. Fragments match **exact Apex-rendered**
-  heading `id` attributes on the target page (no second slugger; same harvest
-  approach as `{{toc}}`). Missing or empty fragments fail loud with
-  `EREFERENCEMISSING` / `EREFERENCESYNTAX` — no silent page-only fall-back.
-  Validation is fail-closed without a heading index; only fragment-target pages
-  are rendered for the index. Page-only `[[entity-id]]` is unchanged. IR/RAG
-  edge shape unchanged (IR does not check heading membership). Contract:
-  `docs/contracts/heading-ids.md`. Sample content dogfoods one section link on
-  `content/guides/overview.md`.
+- Added the ApexMarkdown Unified compatibility matrix and an opt-in synthetic
+  scale smoke as bounded evidence, not new renderer or benchmark claims.
+- Added the per-PR changelog-fragment workflow; release cuts consume numbered
+  fragments while retaining the directory README and template.
+- Optional static theme showcase under
+  [`examples/static-theme-showcase/`](/examples/static-theme-showcase/)
+  (multi-layout theme demo; hand-authored CSS; not product chrome).
 
 ## [0.3.1] — 2026-07-15
 
@@ -1041,6 +962,7 @@ gaps still listed in `docs/STATUS.md`.
 | Tag / section | Meaning |
 |---------------|---------|
 | `[Unreleased]` | Landed on main, not yet cut as a release note block |
+| `[0.4.0]` | Current release-candidate cut; product `boris/0.4.0`, base IR `0.2.0`, conditional semantic IR `0.3.0` |
 | `[0.2.0]` | HTML-default product cut: Features 1+2+6, P2/P3; product `boris/0.2.0` |
 | `[0.1.1]` | Doc↔code reconciliation + release gate; product `boris/0.1.1` |
 | `[0.1.0]` | First content-compiler checkpoint |

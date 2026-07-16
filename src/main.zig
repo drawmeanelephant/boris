@@ -279,7 +279,7 @@ fn renderAnalysisJson(
 ) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     var w = BufferWriter{ .buf = &out, .gpa = gpa };
-    try w.writeAll("{\n  \"format\": \"boris-documentation-intelligence\",\n  \"schemaVersion\": \"0.1.0\",\n  \"compiler\": \"boris/0.3.1\",\n  \"input\": ");
+    try w.writeAll("{\n  \"format\": \"boris-documentation-intelligence\",\n  \"schemaVersion\": \"0.1.0\",\n  \"compiler\": \"boris/0.4.0\",\n  \"input\": ");
     try json_out.writeString(&out, gpa, opts.input_dir);
     try w.writeAll(",\n  \"summary\": {\n    \"pages\": ");
     try json_out.writeUsize(&out, gpa, report.summary.pages);

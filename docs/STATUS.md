@@ -1,14 +1,14 @@
 # Project status — Boris
 
-**As of:** 2026-07-16 · last tagged product **0.3.1** / compiler
-**boris/0.3.1** · Zig **0.16.0**<br>
-**Phase:** post-v0.3.1 main — release-cut preparation and real-site dogfood.<br>
+**As of:** 2026-07-16 · current product cut **0.4.0 release candidate** /
+compiler **boris/0.4.0** · last tagged product **v0.3.1** · Zig **0.16.0**<br>
+**Phase:** v0.4.0 release-candidate validation and real-site dogfood.<br>
 IR `schemaVersion` is **`0.2.0`**.
 
-**Version boundary:** `v0.3.1` remains the last tagged product release. The
-capabilities marked **available on main** below are merged behavior, but are
-still `[Unreleased]`; this document does not assign them a product version or
-create a release claim.
+**Version boundary:** this branch prepares the current **v0.4.0** cut without
+claiming that a `v0.4.0` tag exists. `v0.3.1` remains the last tagged product
+release. Relation-free output remains base IR `0.2.0`; semantic relations retain
+their documented conditional IR `0.3.0` artifacts.
 
 **Feature 8 status:** F8.0 contracts and F8.1–F8.3 are complete. IR 0.2
 publishes typed `parent` / `include` / `reference` edges and deterministic
@@ -19,18 +19,20 @@ semantics. Fingerprints remain the content-addressed change detector.
 relations, and deterministic AI Context Bundles are merged on `main` via PRs
 #43 and #44. Relations use conditional IR 0.3 artifacts; Context Bundles use
 their own `boris-context` schema 1 and preserve source-relative provenance.
-These capabilities remain under `[Unreleased]` until the next product cut.
+These capabilities are included in the v0.4.0 release-candidate cut.
 
 Living snapshot for agents and humans. Prefer this and [`CHANGELOG.md`](../CHANGELOG.md)
 over archaeology. Normative behavior: [`docs/contracts/`](contracts/).
 
-### What 0.3.1 is
+### What 0.4.0 is
 
-Product **0.3.1** projects direct parent/include/reference dependencies into
-IR 0.2 with typed page/source endpoints, canonical edge ordering, and a target-
-keyed reverse index, then reuses that dependency story to expand incremental
-HTML dirty sets. Include/wiki failures gate graph publication and HTML planning.
-Bare `boris` remains HTML → `dist/`; IR/RAG remain opt-in.
+Product **0.4.0** extends the v0.3.1 graph-native compiler with knowledge-system
+exports, Documentation Intelligence, heading-aware links, hardened theme assets
+and per-page layout selection, bounded Textile input, migration laboratories,
+and tracked agent-lore content dogfood. Bare `boris` remains HTML → `dist/`;
+IR/RAG remain opt-in. Relation-free output stays IR 0.2, while semantic relations
+use their conditional IR 0.3 artifacts. This is the current release-candidate
+cut, not a tag claim.
 
 **0.2.0** packaged ApexMarkdown Unified, HTML default CLI, graph-aware nav +
 TOC, and P2/P3 incremental / watch / jobs / multi-target. Tag: `v0.2.0`.
@@ -93,9 +95,11 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | Wiki `[[id#heading]]` section targets | **Done** (F9; Apex heading ids; see `heading-ids.md`) |
 | Page layout selection (`--layout-rule`) | **Done** (exact/glob/role; one theme/target) |
 | Layout-selection hostile/path gate | **Done** (`zig build test-layout-hostile`; lexical path rejection) |
-| Apex Unified compatibility matrix | **Available on main** (fixtures + matrix; compatibility evidence, not a new renderer) |
-| Astro and WordPress migration labs | **Available on main** (bounded conversion/reconnaissance labs; not runtime dependencies) |
-| Bounded Textile input | **Available on main** (`--textile`; explicit whole-tree compatibility adapter) |
+| Apex Unified compatibility matrix | **Included in v0.4.0 RC** (fixtures + matrix; compatibility evidence, not a new renderer) |
+| Astro, WordPress, and Instagram migration labs | **Included in v0.4.0 RC** (bounded conversion/reconnaissance labs + adversarial preservation fixtures; not runtime dependencies) |
+| Bounded Textile input | **Included in v0.4.0 RC** (`--textile`; explicit whole-tree compatibility adapter) |
+| Optional static theme showcase | **Included in v0.4.0 RC** (`examples/static-theme-showcase/`; hand-authored CSS, not product chrome) |
+| Agent-lore content dogfood | **Included in v0.4.0 RC** (tracked sample content only; private 250MB source data remains excluded/ignored) |
 | Full YAML / MDX / embedded HTTP server | **Not now** |
 
 ### Commands
@@ -139,16 +143,17 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
-| **Next** | Release cut + real-site dogfood | Decide the next release contents/version; merged knowledge-system, layout-selection, Textile, and migration-lab work remains `[Unreleased]` until then. Exercise Boris against a real site and record migration gaps. |
-| **Later** | Theme policy and samples | External stylesheet policy and an optional static DaisyUI sample remain future work; page layout selection itself is shipped on main. |
+| **Next** | Validate v0.4.0 RC + real-site dogfood | Run the release gates, exercise Boris against a real site, and record migration gaps before any tag is created. |
+| **Later** | Theme policy follow-on | External stylesheet policy remains future work; the optional static theme showcase is included in this cut. |
 | **Deferred** | P4 build-system productization | Measurement-driven cache/watch improvements after a real need or reproducible benchmark. |
 | **Hygiene** | Sample content honesty as features land | Keep root `content/` aligned with shipped capabilities and migration guidance. |
 | **Hygiene** | No parallel content sandboxes by default | Failed draft removed; root `content/` is SoT. |
 
-### Shipped (do not re-open as greenfield)
+### Current cut and shipped history (do not re-open as greenfield)
 
 | # | Feature | Note |
 |---|---------|------|
+| — | **Product v0.4.0 RC** | Current untagged cut: knowledge-system exports, Documentation Intelligence, layout/theme work, Textile, migration labs, static theme showcase, and agent-lore dogfood; base IR remains 0.2 |
 | — | **Product v0.3.1** | F8.3 reverse-index incremental dirty-set; IR remains 0.2 |
 | — | **Product v0.3.0** | Feature 8.1–8.2 / IR 0.2 graph-native dependencies |
 | — | **Product v0.2.1** | Feature 7 + dogfood + F7 polish; tag `v0.2.1` |
@@ -170,7 +175,8 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | 9.3 | Page layout selection | `--layout-rule TARGET SELECTOR LAYOUT_PATH`; exact/glob/role precedence, one managed theme per target (PR #50) |
 | 9.3a | Layout-selection hostile coverage | Determinism, fallback, isolation, and invalid/mixed path coverage; focused `test-layout-hostile` gate (PR #51) |
 | — | Apex Unified compatibility evidence | Matrix + fixtures document the supported Boris-facing surface (PR #52) |
-| — | Migration laboratories | Astro archaeology and WordPress conversion labs are developer aids, not Boris product pipelines (PRs #53–#54) |
+| — | Migration laboratories | Astro archaeology, WordPress conversion, Instagram Takeout, and adversarial preservation fixtures are developer aids, not Boris product pipelines (PRs #53–#54, #77–#78) |
+| — | Agent-lore content dogfood | Tracked sample content exercises a documentation section without committing the private 250MB source dataset (PR #79) |
 | — | Bounded Textile compatibility | Explicit fail-closed `.textile` tree mode through the normal Boris pipeline (PR #55) |
 | — | Post-layout correctness fixes | Theme asset/page-output preservation, owned fragment keys, precise wiki diagnostics, managed-theme watch coverage, non-incremental stale sweep preservation, footer UTF-8 gate, and incremental heading-index reuse (PRs #65–#72) |
 
@@ -202,7 +208,7 @@ on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 | Publish | **Honest limit + fallback** | Cross-volume **atomic** replace still not claimed. HTML stage / IR publish fall back to copy+delete on `error.CrossDevice`; RAG already had directory copy fallback. Same-parent staging remains the common path. |
 | Dialect | **Enforced** | Author key is **`parent` only**. `parentEntry` / `parent_entry` → `EFRONTMATTER` on all product parse paths. Do not reintroduce aliases. |
 | Migration | **Documented** | Bare `boris` is HTML under `dist/`. Old IR scripts need `--out` / `--no-rag`. README + help text carry the note. |
-| Main-only work | **Not a release claim** | PRs #50–#55 and #65–#72 are merged and usable from `main`; retain their `[Unreleased]` status until a release owner cuts and tags a version. |
+| Release state | **Current cut, not tagged** | Merged knowledge-system, layout/theme, Textile, migration-lab, and showcase work is represented in this release-candidate branch; `v0.3.1` remains the latest tag until release validation completes. |
 
 ---
 
