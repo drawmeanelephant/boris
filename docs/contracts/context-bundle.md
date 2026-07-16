@@ -41,6 +41,9 @@ fails. It does not parse frontmatter or graph edges independently.
   content-root label, page count, relation count, and generated artifact paths.
 - Markdown source is fenced with a dynamically sized backtick fence so source
   content cannot terminate its own provenance section.
+- The exporter stages beside the final directory. A completed publish removes
+  its staging directory; a write or publish error also removes it while leaving
+  the prior complete directory untouched.
 
 The `content_root` field is the caller-provided relative label. Absolute input
 roots are rejected for bundle metadata rather than leaking host paths.
