@@ -1527,6 +1527,7 @@ test "parser error fixtures map to EFRONTMATTER / EINVALIDPATH" {
     const cases = [_]struct { root: []const u8, code: diag.Code }{
         .{ .root = "docs/contracts/fixtures/invalid-status/content", .code = .EFRONTMATTER },
         .{ .root = "docs/contracts/fixtures/invalid-tags/content", .code = .EFRONTMATTER },
+        .{ .root = "docs/contracts/fixtures/invalid-tags-trailing-comma/content", .code = .EFRONTMATTER },
         .{ .root = "docs/contracts/fixtures/invalid-id/content", .code = .EINVALIDPATH },
         .{ .root = "docs/contracts/fixtures/unsupported-syntax/content", .code = .EFRONTMATTER },
         .{ .root = "docs/contracts/fixtures/duplicate-key/content", .code = .EFRONTMATTER },
