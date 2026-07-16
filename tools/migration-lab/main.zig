@@ -8,6 +8,7 @@
 //!   notion     — Notion Markdown & CSV export → Boris Markdown + media + reports
 //!   filed      — Filed.fyi changelog + releases slice → Boris Markdown + reports
 //!   starlight  — Starlight/Astro docs dogfood (locale-dir or root-locale) → Boris candidate + boundary manifests
+//!   asset-filename — Sanitize content-local asset filenames to Boris ASCII path grammar
 //!
 //! Never rewrites inputs. Not part of the Boris product compiler pipeline.
 //!
@@ -35,6 +36,7 @@ const obsidian = @import("obsidian.zig");
 const notion = @import("notion.zig");
 const filed = @import("filed.zig");
 const starlight = @import("starlight.zig");
+const asset_filename = @import("asset_filename.zig");
 
 pub const ExitCode = enum(u8) {
     success = 0,
@@ -54,6 +56,7 @@ pub const Mode = enum {
     notion,
     filed,
     starlight,
+    asset_filename,
 
     pub fn parse(s: []const u8) ?Mode {
         if (std.mem.eql(u8, s, "astro")) return .astro;
@@ -63,6 +66,9 @@ pub const Mode = enum {
         if (std.mem.eql(u8, s, "notion") or std.mem.eql(u8, s, "md-csv") or std.mem.eql(u8, s, "notion-export")) return .notion;
         if (std.mem.eql(u8, s, "filed") or std.mem.eql(u8, s, "filed-fyi")) return .filed;
         if (std.mem.eql(u8, s, "starlight") or std.mem.eql(u8, s, "sl") or std.mem.eql(u8, s, "evcc")) return .starlight;
+        if (std.mem.eql(u8, s, "asset-filename") or std.mem.eql(u8, s, "assets") or
+            std.mem.eql(u8, s, "asset-compat") or std.mem.eql(u8, s, "filename-compat"))
+            return .asset_filename;
         return null;
     }
 };
@@ -236,12 +242,20 @@ fn printUsage() void {
         \\Common options:
         \\  -h, --help         Show this help and exit
         \\  -q, --quiet        Suppress progress lines
-        \\  --mode=MODE        astro (default) | wordpress | instagram | obsidian | notion | filed | starlight
+        \\  --mode=MODE        astro (default) | wordpress | instagram | obsidian | notion | filed | starlight | asset-filename
         \\  --out=DIR          Output directory (default: migration-report)
         \\
         \\Astro mode:
         \\  --root=DIR         Astro project/export root to scan (default: .)
         \\  Writes: report.json, REPORT.md
+        \\
+        \\Asset-filename mode (content-local asset path sanitization):
+        \\  --mode=asset-filename  Sanitize sibling page.assets/ filenames to Boris ASCII grammar
+        \\  --root=DIR         Content tree (or parent containing content/); never modified
+        \\  Writes: content/**, asset_filename_manifest.json, rewrite_manifest.json,
+        \\          report.json, REPORT.md
+        \\  Aliases: assets | asset-compat | filename-compat
+        \\  No remote fetch, no JS execution, no silent overwrite on collision.
         \\
         \\WordPress mode:
         \\  --wxr=FILE         WordPress WXR/XML export (required; never modified)
@@ -458,6 +472,20 @@ pub fn main(init: std.process.Init) u8 {
                 return ExitCode.io_error.int();
             };
         },
+        .asset_filename => {
+            if (std.mem.eql(u8, opts.root_dir, opts.out_dir)) {
+                std.log.err("--out must differ from --root", .{});
+                return ExitCode.usage.int();
+            }
+            asset_filename.run(io, gpa, .{
+                .root_dir = opts.root_dir,
+                .out_dir = opts.out_dir,
+                .quiet = opts.quiet,
+            }) catch |err| {
+                std.log.err("migration-lab (asset-filename) failed: {s}", .{@errorName(err)});
+                return ExitCode.io_error.int();
+            };
+        },
     }
     return ExitCode.success.int();
 }
@@ -474,6 +502,7 @@ test {
     _ = notion;
     _ = filed;
     _ = starlight;
+    _ = asset_filename;
 }
 
 test "parseOptions: defaults and astro flags" {
@@ -583,6 +612,21 @@ test "parseOptions: filed flags" {
     const o = try parseOptions(&.{ "boris-migration-lab", "--filed-root=fixtures/mini-filed", "--out=./.filed" });
     try std.testing.expect(o.mode == .filed);
     try std.testing.expectEqualStrings("fixtures/mini-filed", o.filed_root_dir.?);
+}
+
+test "parseOptions: asset-filename flags" {
+    const o = try parseOptions(&.{
+        "boris-migration-lab",
+        "--mode=asset-filename",
+        "--root=fixtures/hostile-asset-filenames",
+        "--out=./.asset-out",
+    });
+    try std.testing.expect(o.mode == .asset_filename);
+    try std.testing.expectEqualStrings("fixtures/hostile-asset-filenames", o.root_dir);
+    try std.testing.expectEqualStrings("./.asset-out", o.out_dir);
+
+    const o2 = try parseOptions(&.{ "boris-migration-lab", "--mode=assets", "--root=./c", "--out=./o" });
+    try std.testing.expect(o2.mode == .asset_filename);
 }
 
 test "parseOptions: starlight flags" {
