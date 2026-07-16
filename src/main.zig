@@ -177,11 +177,26 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
                 break;
             }
         }
+        if (found) {
+            requested = .{ .type = .page, .value = id };
+        } else {
+            // Source endpoints are not page records, but they are part of
+            // the frozen dependency graph and are valid impact roots.
+            for (result.edges.items) |edge| {
+                const matches_source =
+                    (edge.from.type == .source and std.mem.eql(u8, edge.from.value, id)) or
+                    (edge.to.type == .source and std.mem.eql(u8, edge.to.value, id));
+                if (matches_source) {
+                    found = true;
+                    break;
+                }
+            }
+        }
         if (!found) {
             if (!opts.quiet) std.debug.print("error: impact target not found: {s}\n", .{id});
             return .usage;
         }
-        requested = .{ .type = .page, .value = id };
+        if (requested == null) requested = .{ .type = .source, .value = id };
     }
 
     var report = intelligence.analyze(gpa, pages.items, edges.items, .{ .impact = requested }) catch |err| {

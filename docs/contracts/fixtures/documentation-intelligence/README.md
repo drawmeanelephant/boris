@@ -1,4 +1,4 @@
-# Documentation Intelligence fixtures (planned acceptance)
+# Documentation Intelligence fixtures
 
 This fixture family exercises the read-only `boris check` and `boris impact`
 commands without publishing HTML, IR, RAG, or cache artifacts.
@@ -21,6 +21,12 @@ boris check --input docs/contracts/fixtures/documentation-intelligence/content -
 boris impact guides/reference --input docs/contracts/fixtures/documentation-intelligence/content --format json
 ```
 
-The corresponding JSON and human-output goldens are committed beside this
-README. The integration test also verifies that analysis does not create build
-artifacts.
+The corresponding JSON and human-output goldens, including source-endpoint
+impact, are committed beside this README. The `edge-cases/` trees cover empty
+and single-page inputs. The integration test also verifies that analysis does
+not create build artifacts or publish a report after invalid input.
+
+The release gate additionally covers source-endpoint impact, missing and
+malformed targets, invalid-input publication safety, and empty/single-page
+trees. These cases exercise the contract's error boundaries rather than only
+the happy-path page report.
