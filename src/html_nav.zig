@@ -106,6 +106,37 @@ pub fn renderNav(
     return try buf.toOwnedSlice(allocator);
 }
 
+/// Direct frozen children for `{{children}}`. Satellites have no children in
+/// Boris's one-level Trunk/Satellite graph, so their fragment is empty.
+pub fn renderChildren(
+    allocator: std.mem.Allocator,
+    nodes: []const graph_mod.Node,
+    nav: []const graph_mod.NavEntry,
+    current_index: u32,
+    current_output_path: []const u8,
+) ![]u8 {
+    const children = nav[current_index].children;
+    if (children.len == 0) return "";
+
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(allocator);
+    try buf.appendSlice(allocator, "<nav class=\"page-children\" aria-label=\"Children\">\n<ul>\n");
+    for (children) |ci| {
+        const child = nodes[ci];
+        const output_path = try outputPathFor(allocator, child);
+        defer allocator.free(output_path);
+        const href = try identity.relativeHref(allocator, current_output_path, output_path);
+        defer allocator.free(href);
+        try buf.appendSlice(allocator, "<li><a href=\"");
+        try appendEscaped(&buf, allocator, href);
+        try buf.appendSlice(allocator, "\">");
+        try appendEscaped(&buf, allocator, displayTitle(child));
+        try buf.appendSlice(allocator, "</a></li>\n");
+    }
+    try buf.appendSlice(allocator, "</ul>\n</nav>");
+    return try buf.toOwnedSlice(allocator);
+}
+
 /// Breadcrumb root → self for `{{breadcrumb}}`.
 pub fn renderBreadcrumb(
     allocator: std.mem.Allocator,
@@ -196,4 +227,32 @@ test "renderNav forest and breadcrumb" {
     try std.testing.expect(std.mem.indexOf(u8, crumb, "breadcrumb") != null);
     try std.testing.expect(std.mem.indexOf(u8, crumb, "aria-current=\"page\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, crumb, "Tips") != null);
+}
+
+test "renderChildren is id-sorted, escaped, relative, and empty for satellite" {
+    const gpa = std.testing.allocator;
+    var nodes = [_]graph_mod.Node{
+        .{ .id = "zeta", .source_path = "zeta.md", .parent = "index" },
+        .{ .id = "index", .source_path = "index.md" },
+        .{ .id = "alpha", .source_path = "alpha.md", .title = "A & <Alpha> \"quoted\"", .parent = "index" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+    try graph_mod.validate(gpa, gpa, &nodes, &diags);
+    try std.testing.expectEqual(@as(usize, 0), diag.countErrors(diags.items));
+    const g = try graph_mod.freeze(gpa, &nodes, null);
+    defer gpa.free(g.edges);
+    const nav = try graph_mod.buildNav(gpa, g.nodes);
+    defer graph_mod.freeNav(gpa, nav);
+
+    const parent = try renderChildren(gpa, g.nodes, nav, 1, "index.html");
+    defer gpa.free(parent);
+    try std.testing.expect(std.mem.indexOf(u8, parent, "page-children") != null);
+    try std.testing.expect(std.mem.indexOf(u8, parent, "href=\"alpha.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, parent, "A &amp; &lt;Alpha&gt; &quot;quoted&quot;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, parent, "href=\"zeta.html\">zeta") != null);
+    try std.testing.expect(std.mem.indexOf(u8, parent, "alpha.html").? < std.mem.indexOf(u8, parent, "zeta.html").?);
+
+    const satellite = try renderChildren(gpa, g.nodes, nav, 0, "alpha.html");
+    try std.testing.expectEqualStrings("", satellite);
 }

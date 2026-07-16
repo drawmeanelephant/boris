@@ -17,7 +17,7 @@ or application-language dependency.
 ## 1. Problem and design boundary
 
 `layouts/main.html` is already useful for a small site: it has `content`,
-`title`, `nav`, `breadcrumb`, and `toc` markers. Real documentation sites
+`title`, `nav`, `breadcrumb`, `toc`, and `children` markers. Real documentation sites
 usually need a theme-owned stylesheet, a stable footer, page metadata, several
 page shapes, and more than one output target. The practical extension is a
 small, closed template vocabulary plus explicit static asset ownership.
@@ -80,6 +80,7 @@ page. Every known marker may occur at most once.
 | `{{nav}}` | no | Deterministic graph forest from the frozen Trunk/Satellite graph; generated HTML as in `html-output.md`. |
 | `{{breadcrumb}}` | no | Root-to-current graph chain; generated HTML as in `html-output.md`. |
 | `{{toc}}` | no | Page-local h1–h3 outline from Apex-emitted heading ids; generated HTML as in `html-output.md`. |
+| `{{children}}` | no | Deterministic direct-child list from the frozen graph; title-or-id labels and links are escaped, and childless pages emit empty. No recursive graph semantics or query language is introduced. |
 | `{{metadata}}` | no | Boris-generated page metadata fragment. Only current closed frontmatter fields are represented; text and attribute values are escaped. |
 | `{{footer}}` | no | Contents of the theme's optional `footer.html`, or the empty string. This is theme-owned trusted static HTML, not page-authored executable content. |
 

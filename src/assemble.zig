@@ -3,7 +3,7 @@
 //! Layout is loaded once at **startup** (before content compile) and split into
 //! a reusable closed plan of ordered static / slot / asset-url segments.
 //! Required marker: `{{content}}`. Optional slots: `{{nav}}`, `{{breadcrumb}}`,
-//! `{{title}}`, `{{toc}}`, `{{metadata}}`, `{{footer}}`. Optional helper:
+//! `{{title}}`, `{{toc}}`, `{{children}}`, `{{metadata}}`, `{{footer}}`. Optional helper:
 //! `{{asset-url <theme-relative path>}}` (validated path grammar only).
 //! Final HTML is streamed with sequential writes — no full-page mega-string.
 //!
@@ -46,6 +46,7 @@ pub const nav_marker = "{{nav}}";
 pub const breadcrumb_marker = "{{breadcrumb}}";
 pub const title_marker = "{{title}}";
 pub const toc_marker = "{{toc}}";
+pub const children_marker = "{{children}}";
 pub const metadata_marker = "{{metadata}}";
 pub const footer_marker = "{{footer}}";
 /// Prefix of the argument-bearing helper (path follows a single space).
@@ -78,6 +79,7 @@ pub const Slot = enum {
     breadcrumb,
     title,
     toc,
+    children,
     metadata,
     footer,
 };
@@ -97,6 +99,7 @@ pub const SlotValues = struct {
     breadcrumb: []const u8 = "",
     title: []const u8 = "",
     toc: []const u8 = "",
+    children: []const u8 = "",
     metadata: []const u8 = "",
     footer: []const u8 = "",
     /// Page-relative hrefs for each `asset_url` segment, in layout order.
@@ -109,6 +112,7 @@ pub const SlotValues = struct {
             .breadcrumb => self.breadcrumb,
             .title => self.title,
             .toc => self.toc,
+            .children => self.children,
             .metadata => self.metadata,
             .footer => self.footer,
         };
@@ -161,6 +165,7 @@ pub const Layout = struct {
     has_breadcrumb: bool = false,
     has_title: bool = false,
     has_toc: bool = false,
+    has_children: bool = false,
     has_metadata: bool = false,
     has_footer: bool = false,
     has_asset_url: bool = false,
@@ -186,6 +191,7 @@ pub const Layout = struct {
         var seen_breadcrumb = false;
         var seen_title = false;
         var seen_toc = false;
+        var seen_children = false;
         var seen_metadata = false;
         var seen_footer = false;
 
@@ -231,6 +237,11 @@ pub const Layout = struct {
                 seen_toc = true;
                 layout.has_toc = true;
                 try layout.appendSlot(.toc);
+            } else if (std.mem.eql(u8, token, children_marker)) {
+                if (seen_children) return error.DuplicateLayoutMarker;
+                seen_children = true;
+                layout.has_children = true;
+                try layout.appendSlot(.children);
             } else if (std.mem.eql(u8, token, metadata_marker)) {
                 if (seen_metadata) return error.DuplicateLayoutMarker;
                 seen_metadata = true;
@@ -258,7 +269,7 @@ pub const Layout = struct {
         if (!seen_content) return error.MissingContentMarker;
 
         // Content-only convenience prefix/suffix for legacy three-write tests.
-        if (!layout.has_nav and !layout.has_breadcrumb and !layout.has_title and !layout.has_toc and
+        if (!layout.has_nav and !layout.has_breadcrumb and !layout.has_title and !layout.has_toc and !layout.has_children and
             !layout.has_metadata and !layout.has_footer and !layout.has_asset_url)
         {
             if (layout.segment_count == 3 and
@@ -704,6 +715,9 @@ test "layout multi-slot nav breadcrumb title toc" {
     const toc_only = try Layout.split("{{toc}}{{content}}");
     try std.testing.expect(toc_only.has_toc);
     try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{toc}}{{toc}}{{content}}"));
+    const children_only = try Layout.split("{{children}}{{content}}");
+    try std.testing.expect(children_only.has_children);
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{children}}{{children}}{{content}}"));
     try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{nav}}{{nav}}{{content}}"));
     try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{nope}}{{content}}"));
 }

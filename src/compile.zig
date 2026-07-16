@@ -333,7 +333,7 @@ pub fn loadAndPromoteFormat(
 /// function re-reads source for the body only — parse views stay on the
 /// Whiteboard until return.
 ///
-/// When `site` is non-null and the layout has nav/breadcrumb/title slots, those
+/// When `site` is non-null and the layout has graph chrome slots, those
 /// fragments are rendered from the frozen graph on the Whiteboard.
 /// `{{toc}}` is built from rendered body HTML (page-local; no graph required).
 pub fn renderAndPublishPage(
@@ -465,7 +465,10 @@ pub fn renderAndPublishPageWithTheme(
         if (layout.has_title) {
             slots.title = try html_nav.renderTitle(arena, node);
         }
-    } else if (layout.has_nav or layout.has_breadcrumb or layout.has_title) {
+        if (layout.has_children) {
+            slots.children = try html_nav.renderChildren(arena, s.nodes, s.nav, gi, page.output_path);
+        }
+    } else if (layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children) {
         // Layout requests graph chrome but no frozen site — treat as internal error.
         return error.GraphValidationFailed;
     }
@@ -606,7 +609,8 @@ pub fn compileHtmlSite(
     try loadAndPromoteFormat(io, gpa, &db, options.content_root, options.input_format, options.quiet);
 
     // 3. Graph validate + freeze (shared rules with IR/RAG; Feature 6 nav).
-    var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title);
+    // Rules may select graph chrome even when the fallback layout has none.
+    var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or options.layout_rules.len != 0);
     defer site.deinit();
 
     return try compilePagesWithSite(io, gpa, &db, layout, options, &site);
@@ -1046,7 +1050,8 @@ pub fn compilePages(
 ) !CompileStats {
     // Content-only layouts can compile without graph chrome; still freeze so
     // invalid parents fail loud on the HTML path.
-    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title);
+    // Rules may select graph chrome even when the fallback layout has none.
+    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or options.layout_rules.len != 0);
     defer site.deinit();
     return compilePagesWithSite(io, gpa, db, layout, options, &site);
 }
@@ -1075,7 +1080,8 @@ pub fn compilePagesWithShared(
     shared: *const SharedCompileState,
     layout_bytes: []const u8,
 ) !CompileStats {
-    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title);
+    // Rules may select graph chrome even when the fallback layout has none.
+    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or options.layout_rules.len != 0);
     defer site.deinit();
     return compilePagesInner(io, gpa, db, layout, options, shared, layout_bytes, &site);
 }
@@ -1711,8 +1717,10 @@ fn compilePagesInner(
         for (inc_owned, 0..) |b, j| inc_views[j] = b;
 
         const page_layout = page_layouts[page_idx];
-        // Graph chrome (nav, breadcrumb, title) all depend on frozen site material.
-        const needs_site_material = page_layout.has_nav or page_layout.has_breadcrumb or page_layout.has_title;
+        // Graph chrome (nav, breadcrumb, title, children) depends on the frozen site.
+        // `children` uses the same complete graph digest conservatively: it keeps
+        // add/remove/rename/title changes correct across incremental runs.
+        const needs_site_material = page_layout.has_nav or page_layout.has_breadcrumb or page_layout.has_title or page_layout.has_children;
         const nav_material: []const u8 = if (needs_site_material) site.site_nav_material else "";
         // Wiki reference material from page body + transitive include fragment bodies
         // so title/path renames dirty parents that only wiki-link via includes.
@@ -2646,6 +2654,82 @@ test "HTML path emits site nav and breadcrumb for forest" {
     try std.testing.expect(std.mem.indexOf(u8, child, "../index.html") != null);
     try std.testing.expect(std.mem.indexOf(u8, child, "breadcrumb") != null);
     try std.testing.expect(std.mem.indexOf(u8, child, "<title>Child</title>") != null);
+}
+
+test "HTML path emits deterministic escaped direct children with selected layouts" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-children-slot", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<main data-layout=\"fallback\">{{content}}</main>");
+    try writeTreeFile(io, work, "layouts/trunk.html", "<main data-layout=\"trunk\">{{children}}{{content}}</main>");
+    try writeTreeFile(io, work, "content/index.md", "---\ntitle: Parent\n---\n\n# Parent\n");
+    // Discovery order is deliberately opposite canonical entity-id order.
+    try writeTreeFile(io, work, "content/zeta.md", "---\nparent: index\n---\n\n# Zeta\n");
+    try writeTreeFile(io, work, "content/alpha.md", "---\ntitle: A & <Alpha>\nparent: index\n---\n\n# Alpha\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const trunk_layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/trunk.html", .{work});
+    defer gpa.free(trunk_layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const rules = [_]layout_select.LayoutRule{.{ .kind = .role, .value = "trunk", .layout_path = trunk_layout_path }};
+
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .layout_rules = &rules,
+        .incremental = true,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 3), stats.pages_written);
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const parent = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(parent);
+    const alpha = try readAllFile(io, dist_dir, "alpha.html", gpa);
+    defer gpa.free(alpha);
+    const zeta = try readAllFile(io, dist_dir, "zeta.html", gpa);
+    defer gpa.free(zeta);
+
+    try std.testing.expect(std.mem.indexOf(u8, parent, "data-layout=\"trunk\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, parent, "page-children") != null);
+    try std.testing.expect(std.mem.indexOf(u8, parent, "href=\"alpha.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, parent, "A &amp; &lt;Alpha&gt;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, parent, "href=\"zeta.html\">zeta") != null);
+    const alpha_at = std.mem.indexOf(u8, parent, "alpha.html").?;
+    const zeta_at = std.mem.indexOf(u8, parent, "zeta.html").?;
+    try std.testing.expect(alpha_at < zeta_at);
+    // Satellites select the fallback layout and never receive a children fragment.
+    try std.testing.expect(std.mem.indexOf(u8, alpha, "data-layout=\"fallback\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, alpha, "page-children") == null);
+    try std.testing.expect(std.mem.indexOf(u8, zeta, "page-children") == null);
+
+    // A child label change must re-render its parent slot. The existing frozen
+    // reverse-dependency expansion is deliberately conservative for graph edits.
+    try writeTreeFile(io, work, "content/alpha.md", "---\ntitle: Alpha Updated\nparent: index\n---\n\n# Alpha\n");
+    const incremental = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .layout_rules = &rules,
+        .incremental = true,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 3), incremental.pages_written);
+    const updated_parent = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(updated_parent);
+    try std.testing.expect(std.mem.indexOf(u8, updated_parent, "Alpha Updated") != null);
 }
 
 test "HTML path emits page toc from body headings" {

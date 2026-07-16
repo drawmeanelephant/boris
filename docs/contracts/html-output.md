@@ -112,6 +112,7 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
    | `{{breadcrumb}}` | Parent chain root → current page (inclusive) |
    | `{{title}}` | Page title, or entity id when title is absent (HTML-escaped text) |
    | `{{toc}}` | In-page outline from **this page’s** body headings (h1–h3 with `id`) |
+   | `{{children}}` | Direct frozen children of the current page (or empty) |
 
 4. Missing `{{content}}` → hard error **before** content compilation.
 5. Duplicate of any known marker → hard error **before** content compilation.
@@ -119,7 +120,7 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
 7. Split into an ordered list of **static** slices and **slot** placeholders
    (`assemble.Layout`), all views into the long-lived layout buffer.
 8. Final assembly streams sequential writes only: static segments and per-page
-   slot fragments (content, and nav/breadcrumb/title/toc when those slots exist).
+   slot fragments (content, and nav/breadcrumb/title/toc/children when those slots exist).
    **No** full-page mega-string concatenation in the product assembly path.
 
 ### Graph gate (HTML path)
@@ -130,7 +131,8 @@ Before any page render, the HTML path:
 2. Runs the same `graph.validate` rules as IR/RAG (`EPARENT*`, duplicates, cycles).
 3. On any error diagnostic: **do not** publish HTML pages; exit **1** (content).
 4. On success: freeze the graph, `buildNav`, and use the frozen snapshot for
-   `{{nav}}` / `{{breadcrumb}}` (and fingerprint material when `{{nav}}` is present).
+   `{{nav}}` / `{{breadcrumb}}` / `{{children}}` (and fingerprint material when
+   graph chrome is present).
 
 ### Site nav HTML (normative shape)
 
@@ -168,13 +170,38 @@ When `{{breadcrumb}}` is present:
 
 Last crumb is the current page (unlinked text). Earlier crumbs are links.
 
-### Incremental fingerprints and `{{nav}}`
+### Direct-children HTML (normative shape)
 
-When the layout contains `{{nav}}`, each page fingerprint includes a **site nav
-material** digest derived from the frozen ordered list of
-`(id, title, parent, role)` for every page. A title or parent change on any
-page dirties every page that uses that layout (full forest is global chrome).
-Layouts without `{{nav}}` keep the prior page-local fingerprint inputs
+When `{{children}}` is present, Boris emits only the current frozen node's
+**direct** children, in canonical entity-id ascending order:
+
+```html
+<nav class="page-children" aria-label="Children">
+  <ul>
+    <li><a href="REL">TITLE</a></li>
+  </ul>
+</nav>
+```
+
+- `REL` uses the same page-relative output-path behavior as `{{nav}}`; it is
+  never a leading-`/` site-absolute path.
+- `TITLE` is the child title when set, otherwise its entity id. Link text and
+  `href` are HTML-escaped.
+- A page with no direct children, including every Satellite under the current
+  one-level graph contract, emits the empty fragment (no wrapper).
+- This slot does not create virtual pages, recursive graph navigation,
+  filtering, pagination, queries, or runtime behavior. `{{nav}}` semantics are
+  unchanged.
+
+### Incremental fingerprints and graph chrome
+
+When the layout contains `{{nav}}`, `{{breadcrumb}}`, `{{title}}`, or
+`{{children}}`, each such page fingerprint includes a **site nav material**
+digest derived from the frozen ordered list of `(id, title, parent, role)` for
+every page. This conservative shared material keeps title, output-path, parent,
+and direct-child changes correct across incremental builds; a title or parent
+change on any page dirties every page using graph chrome. Layouts without graph
+chrome keep the prior page-local fingerprint inputs
 (source, includes, layout bytes, entity id, target identity).
 
 ### Incremental cache freshness (output digest)
