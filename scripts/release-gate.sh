@@ -235,6 +235,40 @@ if [[ "${semantic_invalid_rc}" -eq 1 ]] \
 else
   fail "semantic relation invalid-target diagnostics mismatch"
 fi
+
+note "4a. AI Context Bundle determinism and provenance"
+CONTEXT_A="${GATE_DIR}/context-a"
+CONTEXT_B="${GATE_DIR}/context-b"
+rm -rf "${CONTEXT_A}" "${CONTEXT_B}"
+"${BORIS}" --context --context-dir="${CONTEXT_A}" --input="${SEMANTIC_CONTENT}" --quiet
+"${BORIS}" --context --context-dir="${CONTEXT_B}" --input="${SEMANTIC_CONTENT}" --quiet
+if diff -rq "${CONTEXT_A}" "${CONTEXT_B}" >/dev/null; then
+  pass "context bundles are byte-identical across repeated exports"
+else
+  fail "context bundle exports differ"
+fi
+if [[ -f "${CONTEXT_A}/bundle.md" && -f "${CONTEXT_A}/graph.json" \
+  && -f "${CONTEXT_A}/manifest.json" \
+  && -f "${CONTEXT_A}/pages/guides/cache-v2.md" ]] \
+  && grep -q '"format": "boris-context"' "${CONTEXT_A}/manifest.json" \
+  && grep -q 'source_sha256' "${CONTEXT_A}/pages/guides/cache-v2.md" \
+  && grep -q '^````markdown$' "${CONTEXT_A}/pages/guides/cache-v2.md" \
+  && grep -q '"relation_count": 4' "${CONTEXT_A}/manifest.json"; then
+  pass "context bundle has manifest, graph, page provenance, and relation count"
+else
+  fail "context bundle provenance artifacts missing"
+fi
+context_before="$(shasum -a 256 "${CONTEXT_A}/manifest.json")"
+set +e
+"${BORIS}" --context --context-dir="${CONTEXT_A}" --input="docs/contracts/fixtures/semantic-relations-invalid/content" --quiet
+context_invalid_rc=$?
+set -e
+context_after="$(shasum -a 256 "${CONTEXT_A}/manifest.json")"
+if [[ "${context_invalid_rc}" -eq 1 && "${context_before}" == "${context_after}" ]]; then
+  pass "invalid context input leaves prior bundle untouched"
+else
+  fail "invalid context input replaced or damaged prior bundle"
+fi
 # Feature 2: bare-style default HTML (relative html-dir under gate dir)
 note "4b. Default HTML surface (Feature 2)"
 HTML_OUT="${GATE_DIR}/html-default"

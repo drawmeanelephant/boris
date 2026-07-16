@@ -24,7 +24,8 @@ is **not** proof that every surface is the default CLI product.
 | Multi-target isolated outputs | **Implemented** — CLI, isolation, stage commit, selective watch (P3.3) |
 | HTML `dist/` default CLI | **Implemented** (Feature 2) |
 | Templating + theme assets (F9.1) | **Implemented** — closed plan, target-owned assets; see `templating-and-themes.md` |
-| Semantic relations (planned IR 0.3) | **Planned** — bounded author relations with deliberate schema change; see `semantic-relations.md` |
+| Semantic relations (IR 0.3) | **Implemented on topic branch** — bounded author relations with deliberate schema change; see `semantic-relations.md` |
+| AI Context Bundle (`--context`) | **Implemented on topic branch** — deterministic provenance-rich export; see `context-bundle.md` |
 | Includes + wiki-links (HTML) | **Implemented** — pre-Apex; see `includes-and-wiki-links.md` |
 | IR 0.2 dependency edges + reverse index | **Implemented (F8.1–F8.2 shipped)** — `--out` emits typed edges and `reverseIndex`; F8.3 dirty-set consumption remains pending |
 
@@ -51,7 +52,8 @@ per topic:
 | Includes + wiki-links | [includes-and-wiki-links.md](includes-and-wiki-links.md) |
 | Heading IDs + wiki fragments | [heading-ids.md](heading-ids.md) |
 | Templating + themes (F9.1) | [templating-and-themes.md](templating-and-themes.md) |
-| Semantic relations (planned IR 0.3) | [semantic-relations.md](semantic-relations.md) |
+| Semantic relations (IR 0.3) | [semantic-relations.md](semantic-relations.md) |
+| AI Context Bundle | [context-bundle.md](context-bundle.md) |
 
 ### Normative documents (IR v0.2 target) — full list
 

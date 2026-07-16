@@ -8,3 +8,7 @@ relations: [supersedes=guides/cache-v1, depends_on=reference/cache-manifest]
 The current cache format supersedes the first one.
 
 {{include includes/cache-note.md}}
+
+```text
+cache-format = 2
+```

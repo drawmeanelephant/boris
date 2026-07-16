@@ -19,6 +19,16 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Knowledge-system exports (topic branches)
+
+- Bounded semantic relations (`relations: [kind=target]`) validate against the
+  page graph and emit conditional IR 0.3 artifacts; relation-free IR 0.2
+  goldens remain unchanged. Contract: `docs/contracts/semantic-relations.md`.
+- Added deterministic AI Context Bundles via `--context` / `--context-dir`,
+  including source-relative provenance, SHA-256 hashes, validated graph output,
+  and one uploadable Markdown bundle. Contract:
+  `docs/contracts/context-bundle.md`.
+
 ### Feature 9.2 — theme/template hardening
 
 - Layout UTF-8 validation at plan split (`Layout.split` / `loadLayout` →

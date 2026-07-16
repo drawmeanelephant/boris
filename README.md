@@ -36,6 +36,7 @@ HTML-default cut. See
 | **Structure you can trust** | Trunk/Satellite graph validation fails loud on broken parents, cycles, duplicates. |
 | **Rebuilds that stay lean** | Unchanged pages can be skipped (`--incremental` / `--watch`). Parallel page work with `--jobs N`. Layout + body stream to disk instead of building one giant intermediate HTML string. |
 | **Same content, different products** | HTML site, JSON IR (`--out`), or deterministic RAG pack (`--rag`) from one tree. |
+| **Give an LLM grounded project context** | Deterministic provenance-rich Context Bundle (`--context`) from the validated graph. |
 | **Draft vs production outputs** | Multi-target builds with isolated dirs and caches (`--target`). |
 
 That last performance paragraph is **design intent**, not a stopwatch claim.
@@ -81,6 +82,7 @@ zig build test
 | `boris --out DIR` | **JSON IR** under `DIR` (no HTML) |
 | `boris --no-rag` | Explicit IR (default out `.boris`) |
 | `boris --rag` / `--rag-dir DIR` | **RAG corpus** only |
+| `boris --context` / `--context-dir DIR` | **AI Context Bundle** only |
 | `boris --target name=dir` | Multi-target HTML (repeatable; order-independent) |
 | `boris --help` | Usage; exit 0; no filesystem walk |
 
@@ -138,6 +140,7 @@ See [frontmatter.md](docs/contracts/frontmatter.md).
 | Default HTML site + real ApexMarkdown Unified | **Done** |
 | Trunk/Satellite graph, closed frontmatter, Asides | **Done** |
 | IR 0.2 graph-native dependencies + RAG export | **Done** |
+| Bounded semantic relations + Context Bundles | **Topic branch** |
 | Incremental, watch, parallel jobs, multi-target | **Done** |
 | CI Linux + macOS | **Done** |
 | Graph-aware HTML nav (`{{nav}}` / breadcrumb) | **Done** (Feature 6 MVP) |

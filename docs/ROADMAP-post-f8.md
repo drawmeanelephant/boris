@@ -147,6 +147,18 @@ Markdown the same way.
 | **Verification** | Grep for stale product/IR claims; smoke `boris` on `content/`. |
 | **PR / agent split** | Fully parallel after green F8; docs-only agent. |
 
+### Knowledge-system extension — semantic relations + Context Bundles
+
+This is the next product direction after graph-native dependencies: make the
+validated graph useful as an explicit knowledge surface without turning Boris
+into a JavaScript application stack.
+
+| Cut | User outcome | Contract / gate |
+|-----|--------------|-----------------|
+| Semantic relations | Authors can declare bounded directional relations; relation-bearing IR is explicitly 0.3 while relation-free IR 0.2 remains stable. | [`semantic-relations.md`](contracts/semantic-relations.md); all four kinds, invalid-target diagnostics, and deterministic relation golden. |
+| AI Context Bundle | `--context` emits one uploadable Markdown bundle plus machine manifest, graph, per-page provenance, and source hashes. | [`context-bundle.md`](contracts/context-bundle.md); repeated export identity and failed-input preservation. |
+| Follow-on | Add relation-aware retrieval/impact selection and bundle profiles only after the base bundle contract is proven. | Do not silently mutate RAG schema 1; add a deliberate contract first. |
+
 ---
 
 ### P4 — build-system productization → **v0.4.0**
