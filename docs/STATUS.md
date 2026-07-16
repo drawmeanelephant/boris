@@ -1,14 +1,13 @@
 # Project status — Boris
 
-**As of:** 2026-07-16 · next product cut **v0.5.0 release candidate** /
+**As of:** 2026-07-16 · current product release **v0.5.0** /
 compiler **boris/0.5.0** · Zig **0.16.0**<br>
-**Phase:** v0.5.0 release certification; tag pending.<br>
+**Phase:** post-v0.5.0 release follow-through and real-site dogfood.<br>
 IR `schemaVersion` is **`0.2.0`**.
 
-**Version boundary:** `v0.4.0` remains the latest tagged release. The prepared
-`v0.5.0` cut does not change base IR `0.2.0`; semantic relations retain their
-documented conditional IR `0.3.0` artifacts. The `v0.5.0` tag is pending final
-release-owner review.
+**Version boundary:** `v0.5.0` is tagged and released. The release does not
+change base IR `0.2.0`; semantic relations retain their documented conditional
+IR `0.3.0` artifacts.
 
 **Feature 8 status:** F8.0 contracts and F8.1–F8.3 are complete. IR 0.2
 publishes typed `parent` / `include` / `reference` edges and deterministic
@@ -37,7 +36,7 @@ use their conditional IR 0.3 artifacts.
 
 ### What v0.5.0 adds
 
-The prepared v0.5.0 cut adds the closed native `<Details>` component and
+The v0.5.0 release adds the closed native `<Details>` component and
 source-located invalid-component diagnostics. It also packages post-v0.4
 source-RAG publication hardening, bounded Obsidian/Notion/Starlight/Filed
 migration-lab evidence, and the judge-verified docs path. Migration labs remain
@@ -95,7 +94,7 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | ApexMarkdown Unified (tables, footnotes, …) | **Done** (Feature 1; pin v1.1.11) |
 | Trunk/Satellite graph + closed frontmatter | **Done** |
 | `<Aside>` kinds + document order | **Done** |
-| Closed `<Details>` disclosure component | **Prepared for v0.5.0** (native HTML + deterministic RAG projection) |
+| Closed `<Details>` disclosure component | **Shipped in v0.5.0** (native HTML + deterministic RAG projection) |
 | JSON IR (`--out` / `--no-rag`) | **Done** |
 | RAG export (`--rag` / `--rag-dir`) | **Done** |
 | Incremental / watch / `--jobs` / multi-target | **Done** (P2–P3 on HTML path) |
@@ -108,8 +107,8 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | Layout-selection hostile/path gate | **Done** (`zig build test-layout-hostile`; lexical path rejection) |
 | Apex Unified compatibility matrix | **Shipped in v0.4.0** (fixtures + matrix; compatibility evidence, not a new renderer) |
 | Astro, WordPress, and Instagram migration labs | **Shipped in v0.4.0** (bounded conversion/reconnaissance labs + adversarial preservation fixtures; not runtime dependencies) |
-| Obsidian vault + Notion Markdown/CSV migration labs | **Prepared for v0.5.0** (phase-1 developer aids under `tools/migration-lab/`; not runtime dependencies) |
-| Starlight proof slice (locale-dir + root-locale) | **Prepared for v0.5.0** (`--mode=starlight` under `tools/migration-lab/`; content-root discovery for `docs/en/` or root-locale `docs/`; bounded convert + manifests; not a runtime dependency) |
+| Obsidian vault + Notion Markdown/CSV migration labs | **Shipped in v0.5.0** (phase-1 developer aids under `tools/migration-lab/`; not runtime dependencies) |
+| Starlight proof slice (locale-dir + root-locale) | **Shipped in v0.5.0** (`--mode=starlight` under `tools/migration-lab/`; content-root discovery for `docs/en/` or root-locale `docs/`; bounded convert + manifests; not a runtime dependency) |
 | Bounded Textile input | **Shipped in v0.4.0** (`--textile`; explicit whole-tree compatibility adapter) |
 | Optional static theme showcase | **Shipped in v0.4.0** (`examples/static-theme-showcase/`; hand-authored CSS, not product chrome) |
 | Agent-lore content dogfood | **Shipped in v0.4.0** (tracked sample content only; private 250MB source data remains excluded/ignored) |
