@@ -11,6 +11,7 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 | **notion** | Official Notion “Markdown & CSV” export (unpacked) | Boris Markdown + media inventory + review reports |
 | **filed** | Filed.fyi Astro source root | Bounded changelog/releases Boris tree + provenance/review reports |
 | **starlight** | Starlight/Astro docs root (locale-dir or root-locale) | Boris candidate `content/` + route/link/nav/asset/selection/boundary manifests + compile report |
+| **asset-filename** | Content tree with sibling `{stem}.assets/` files | Sanitized Boris-safe asset names + rewritten Markdown refs + manifests |
 
 All modes are **read-only on inputs**: originals are never rewritten. There is
 **no network access**, no zip extraction, no scraping, and **no product compiler
@@ -29,7 +30,8 @@ coupling**. All code and fixtures live under `tools/migration-lab/`.
 | Notion format id | `boris-notion-migration-lab` |
 | Filed format id | `boris-filed-fyi-migration-lab` |
 | Starlight format id | `boris-starlight-migration-lab` |
-| Schema | Astro/Instagram/Obsidian/Notion/Filed/Starlight `1`; WordPress **`3`** |
+| Asset-filename format id | `boris-asset-filename-lab` |
+| Schema | Astro/Instagram/Obsidian/Notion/Filed/Starlight/Asset-filename `1`; WordPress **`3`** |
 
 Companion author guide: [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
 
@@ -85,6 +87,11 @@ zig build run -- --mode=starlight \
   --out=/tmp/starlight-boris-out \
   --locale=en \
   --max-pages=50
+
+# Content-local asset filename compatibility (spaces / Unicode / %20 → Boris-safe)
+zig build run -- --mode=asset-filename \
+  --root=./fixtures/hostile-asset-filenames \
+  --out=./.asset-filename-out
 ```
 
 From the **repository root**, use this targeted aggregate gate after changing
@@ -118,9 +125,9 @@ zig build -C tools/migration-lab run -- \
 |------|---------|---------|
 | `-h`, `--help` | | Print usage; exit 0 |
 | `-q`, `--quiet` | off | Suppress progress lines |
-| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), or `starlight` (`sl` / `evcc`) |
+| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), `starlight` (`sl` / `evcc`), or `asset-filename` (`assets` / `asset-compat` / `filename-compat`) |
 | `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**) |
-| `--root=DIR` | `.` | Astro archaeology root **or** Starlight project root |
+| `--root=DIR` | `.` | Astro archaeology root, Starlight project root, **or** asset-filename content tree |
 | `--wxr=FILE` | | WordPress WXR/XML path (implies `--mode=wordpress`) |
 | `--media=DIR` | | Optional local media/uploads tree (WordPress) |
 | `--dump=DIR` | | Unpacked Instagram data-download root (implies `--mode=instagram`) |
@@ -150,6 +157,62 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
 9. **Notion** — official **Markdown & CSV** export only (already unpacked). No
    Notion API, OAuth, remote fetch, or private workspace data in the repo.
    Hidden/tooling dirs (`.git/`, `node_modules/`, `dist/`, …) are skipped.
+10. **Asset-filename** — never relaxes Boris core path grammar; only rewrites
+    under `--out`. Symlinks and destination collisions are rejected (no silent
+    overwrite). No remote asset fetch and no source-site JavaScript execution.
+
+---
+
+## Asset filename compatibility (content-local)
+
+Boris core content-local assets accept only ASCII path segments
+`[A-Za-z0-9._-]+` under sibling `{page-stem}.assets/` trees (normative:
+[`docs/contracts/content-local-assets.md`](../../docs/contracts/content-local-assets.md)).
+Astro/Starlight archives frequently use **spaces**, **Unicode**, or **literal
+`%20`-style** names that the product compiler rejects by design.
+
+`--mode=asset-filename` is the lab adapter for that gap:
+
+1. Discover Markdown pages and sibling `{stem}.assets/**` trees under `--root`
+   (or `--root/content` when present).
+2. Detect within-tree paths Boris would reject; leave already-safe names
+   unchanged.
+3. Deterministically sanitize unsafe segments (URL-decode `%XX` first; spaces /
+   non-ASCII / other punctuation → `-`; preserve nested directories).
+4. Copy accepted assets into `--out/content/` under sanitized destinations.
+5. Rewrite Markdown image and link destinations (fence-aware) to the sanitized
+   paths, including `%20` reference forms of original names.
+6. Record every asset with **original path**, **destination path**, **action**,
+   **reason**, and **SHA-256** in `asset_filename_manifest.json`.
+7. Record Markdown rewrites in `rewrite_manifest.json`.
+8. Reject **destination collisions** and **case collisions** (ASCII
+   case-fold); first source path wins; never silent overwrite.
+9. Reject **symlinks** and **traversal** within-tree forms; leave hostile
+   `../` Markdown destinations unre-written for human review.
+10. Keep the source tree byte-identical; repeated runs are byte-identical.
+
+```bash
+zig build run -- --mode=asset-filename \
+  --root=./fixtures/hostile-asset-filenames \
+  --out=/tmp/asset-filename-out
+```
+
+| Output | Role |
+|--------|------|
+| `content/**` | Sanitized pages + `.assets/` trees |
+| `asset_filename_manifest.json` | Source → dest inventory (reason + SHA-256) |
+| `rewrite_manifest.json` | Markdown destination rewrites |
+| `report.json` / `REPORT.md` | Counts + policy + human summary |
+
+Hostile fixture: [`fixtures/hostile-asset-filenames/`](fixtures/hostile-asset-filenames/)
+(spaces, Unicode, `%20` names, nested dirs, case collision, sanitized-name
+collision, traversal refs, symlink).
+
+**Why this stays in the lab (not Boris core):** product path validation is a
+deliberate fail-closed safety boundary for publish correctness, incremental
+cleanup, and portable URLs. Migration archives are dirty by nature; sanitizing
+them is a one-way import concern with provenance, not a reason to widen the
+runtime contract.
 
 ---
 
