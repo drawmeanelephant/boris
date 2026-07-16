@@ -1,0 +1,579 @@
+/* Boris static theme showcase — hand-authored CSS.
+   Inspired by clean component-library aesthetics (soft surfaces, badges,
+   cards, semantic color tokens). This is NOT DaisyUI and is not a vendored
+   third-party stylesheet. No Tailwind, no CDN, no runtime CSS compiler. */
+
+:root,
+[data-theme="boris-showcase"] {
+  color-scheme: light;
+  --b-base-100: #ffffff;
+  --b-base-200: #f3f1f8;
+  --b-base-300: #e4e0ef;
+  --b-base-content: #1d1635;
+  --b-primary: #6419e6;
+  --b-primary-content: #f4efff;
+  --b-secondary: #d926a9;
+  --b-secondary-content: #fff0f9;
+  --b-accent: #1fb2a6;
+  --b-accent-content: #052e2b;
+  --b-muted: #635b78;
+  --b-line: color-mix(in oklab, var(--b-base-content) 12%, transparent);
+  --b-shadow: 0 1px 2px color-mix(in oklab, var(--b-base-content) 8%, transparent),
+    0 8px 24px color-mix(in oklab, var(--b-primary) 8%, transparent);
+  --b-radius: 0.85rem;
+  --b-radius-sm: 0.5rem;
+  --b-font: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --b-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --b-ok: #0d9488;
+  --b-warn: #c2410c;
+  --b-danger: #dc2626;
+  --b-info: #2563eb;
+  font-family: var(--b-font);
+  color: var(--b-base-content);
+  background:
+    radial-gradient(1200px 500px at 10% -10%, color-mix(in oklab, var(--b-primary) 14%, transparent), transparent 60%),
+    radial-gradient(900px 400px at 90% 0%, color-mix(in oklab, var(--b-secondary) 10%, transparent), transparent 55%),
+    var(--b-base-200);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root,
+  [data-theme="boris-showcase"] {
+    color-scheme: dark;
+    --b-base-100: #1a1528;
+    --b-base-200: #120e1c;
+    --b-base-300: #2a223d;
+    --b-base-content: #eee9f8;
+    --b-primary: #a78bfa;
+    --b-primary-content: #1a0b3d;
+    --b-secondary: #f472b6;
+    --b-secondary-content: #3b0730;
+    --b-accent: #2dd4bf;
+    --b-accent-content: #042f2e;
+    --b-muted: #b7aecc;
+    --b-line: color-mix(in oklab, var(--b-base-content) 16%, transparent);
+    --b-shadow: 0 1px 2px rgb(0 0 0 / 35%),
+      0 12px 28px color-mix(in oklab, var(--b-primary) 18%, transparent);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  line-height: 1.65;
+}
+
+a {
+  color: var(--b-primary);
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+/* —— Chrome —— */
+
+.navbar,
+.hero {
+  max-width: 76rem;
+  margin: 0 auto;
+  padding: 1rem 1.1rem 0.75rem;
+}
+
+.navbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.25rem;
+}
+
+.navbar--compact {
+  padding-bottom: 0.35rem;
+}
+
+.navbar--blog .navbar__title {
+  letter-spacing: 0.01em;
+}
+
+.navbar__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.navbar__mark,
+.hero__mark {
+  display: block;
+  border-radius: 0.55rem;
+  box-shadow: var(--b-shadow);
+}
+
+.navbar__title {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.hero {
+  padding-top: 1.75rem;
+  padding-bottom: 0.5rem;
+}
+
+.hero__inner {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 1.35rem 1.4rem;
+  border-radius: calc(var(--b-radius) + 0.15rem);
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--b-primary) 12%, var(--b-base-100)),
+    var(--b-base-100) 55%,
+    color-mix(in oklab, var(--b-secondary) 10%, var(--b-base-100))
+  );
+  border: 1px solid var(--b-line);
+  box-shadow: var(--b-shadow);
+}
+
+.hero__kicker {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--b-muted);
+}
+
+.hero__title {
+  margin: 0 0 0.45rem;
+  font-size: clamp(1.6rem, 2.5vw, 2.15rem);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+
+.hero__lead {
+  margin: 0;
+  max-width: 42rem;
+  color: var(--b-muted);
+}
+
+.hero__lead code {
+  font-family: var(--b-mono);
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 0.3rem;
+  background: color-mix(in oklab, var(--b-primary) 12%, var(--b-base-100));
+}
+
+/* —— Layout shells —— */
+
+.shell,
+.home-grid,
+.blog-shell,
+.section-main {
+  max-width: 76rem;
+  margin: 0 auto;
+  padding: 0.75rem 1.1rem 1.5rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.shell {
+  grid-template-columns: 1fr;
+  align-items: start;
+}
+
+@media (min-width: 54rem) {
+  .shell {
+    grid-template-columns: 16rem minmax(0, 1fr);
+  }
+
+  .blog-shell {
+    grid-template-columns: minmax(0, 1fr) 15rem;
+  }
+
+  .section-main {
+    grid-template-columns: minmax(0, 1.4fr) minmax(14rem, 0.8fr);
+  }
+
+  .home-grid {
+    grid-template-columns: 16rem minmax(0, 1fr);
+  }
+}
+
+.home-card--wide {
+  min-width: 0;
+}
+
+/* —— Cards / badges —— */
+
+.card {
+  background: var(--b-base-100);
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius);
+  box-shadow: var(--b-shadow);
+  padding: 1rem 1.1rem;
+}
+
+.main.card,
+.blog-post.card {
+  padding: 1.15rem 1.25rem 1.4rem;
+}
+
+.card__title {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+
+.badge--primary {
+  background: color-mix(in oklab, var(--b-primary) 18%, var(--b-base-100));
+  color: var(--b-primary);
+}
+
+.badge--secondary {
+  background: color-mix(in oklab, var(--b-secondary) 18%, var(--b-base-100));
+  color: var(--b-secondary);
+}
+
+.badge--accent {
+  background: color-mix(in oklab, var(--b-accent) 22%, var(--b-base-100));
+  color: color-mix(in oklab, var(--b-accent) 70%, var(--b-base-content));
+}
+
+/* —— Nav / breadcrumb / TOC / metadata (Boris-emitted classes) —— */
+
+.sidebar__label {
+  margin: 0 0 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--b-muted);
+}
+
+.site-nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.site-nav > ul > li {
+  margin: 0.25rem 0;
+}
+
+.site-nav ul ul {
+  margin: 0.2rem 0 0.45rem 0.55rem;
+  padding-left: 0.55rem;
+  border-left: 2px solid var(--b-line);
+}
+
+.site-nav a {
+  color: inherit;
+  text-decoration: none;
+  display: inline-block;
+  padding: 0.18rem 0.3rem;
+  border-radius: 0.35rem;
+}
+
+.site-nav a:hover {
+  background: color-mix(in oklab, var(--b-primary) 10%, transparent);
+  text-decoration: none;
+}
+
+.site-nav .is-current > a {
+  font-weight: 700;
+  color: var(--b-primary);
+  background: color-mix(in oklab, var(--b-primary) 12%, transparent);
+}
+
+.breadcrumb ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  font-size: 0.86rem;
+  color: var(--b-muted);
+}
+
+.breadcrumb li:not(:last-child)::after {
+  content: "/";
+  margin-left: 0.3rem;
+  opacity: 0.55;
+}
+
+.breadcrumb a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.breadcrumb a:hover {
+  color: var(--b-primary);
+  text-decoration: underline;
+}
+
+.page-metadata,
+.page-toc {
+  background: color-mix(in oklab, var(--b-base-200) 80%, var(--b-base-100));
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius-sm);
+  padding: 0.7rem 0.9rem;
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+}
+
+.page-metadata {
+  display: grid;
+  gap: 0.35rem 1rem;
+}
+
+.page-metadata div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+}
+
+.page-metadata dt {
+  font-weight: 700;
+  color: var(--b-muted);
+  min-width: 4.5rem;
+}
+
+.page-metadata dd {
+  margin: 0;
+}
+
+.page-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.page-toc li {
+  margin: 0.18rem 0;
+}
+
+.page-toc__l2 {
+  padding-left: 0.8rem;
+}
+
+.page-toc__l3 {
+  padding-left: 1.6rem;
+}
+
+.page-toc a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.page-toc a:hover {
+  color: var(--b-primary);
+  text-decoration: underline;
+}
+
+/* —— Prose —— */
+
+.prose {
+  min-width: 0;
+}
+
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose h1,
+.prose h2,
+.prose h3 {
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
+
+.prose h1 {
+  font-size: 1.85rem;
+  margin: 0 0 0.85rem;
+}
+
+.prose h2 {
+  font-size: 1.3rem;
+  margin: 1.6rem 0 0.65rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--b-line);
+}
+
+.prose h3 {
+  font-size: 1.08rem;
+  margin: 1.25rem 0 0.45rem;
+}
+
+.prose--blog h1 {
+  font-size: 2rem;
+}
+
+.prose p,
+.prose ul,
+.prose ol {
+  margin: 0.7rem 0;
+}
+
+.prose li + li {
+  margin-top: 0.25rem;
+}
+
+.prose code {
+  font-family: var(--b-mono);
+  font-size: 0.9em;
+  padding: 0.08em 0.32em;
+  border-radius: 0.3rem;
+  background: color-mix(in oklab, var(--b-primary) 10%, var(--b-base-200));
+}
+
+.prose pre {
+  overflow: auto;
+  margin: 1rem 0;
+  padding: 0.9rem 1rem;
+  border-radius: var(--b-radius-sm);
+  background: color-mix(in oklab, var(--b-base-content) 92%, var(--b-primary));
+  color: #f5f3ff;
+  border: 1px solid color-mix(in oklab, var(--b-base-content) 70%, transparent);
+}
+
+.prose pre code {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 0.88rem;
+}
+
+.prose table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 1rem 0;
+  font-size: 0.94rem;
+  overflow: hidden;
+  border: 1px solid var(--b-line);
+  border-radius: var(--b-radius-sm);
+}
+
+.prose th,
+.prose td {
+  padding: 0.55rem 0.7rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--b-line);
+}
+
+.prose th {
+  background: color-mix(in oklab, var(--b-primary) 10%, var(--b-base-200));
+  font-weight: 700;
+}
+
+.prose tr:last-child td {
+  border-bottom: 0;
+}
+
+.prose blockquote {
+  margin: 1rem 0;
+  padding: 0.55rem 0.9rem;
+  border-left: 4px solid var(--b-primary);
+  background: color-mix(in oklab, var(--b-primary) 8%, var(--b-base-100));
+  color: var(--b-muted);
+  border-radius: 0 var(--b-radius-sm) var(--b-radius-sm) 0;
+}
+
+/* Asides / admonitions emitted by Boris */
+
+.admonition {
+  margin: 1.15rem 0;
+  padding: 0.8rem 1rem;
+  border-radius: var(--b-radius-sm);
+  border: 1px solid var(--b-line);
+  border-left-width: 4px;
+  background: color-mix(in oklab, var(--b-base-200) 70%, var(--b-base-100));
+}
+
+.admonition__title {
+  margin: 0 0 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.admonition--tip {
+  border-left-color: var(--b-ok);
+}
+
+.admonition--info,
+.admonition--note {
+  border-left-color: var(--b-info);
+}
+
+.admonition--warning {
+  border-left-color: var(--b-warn);
+}
+
+.admonition--danger {
+  border-left-color: var(--b-danger);
+}
+
+/* —— Footer —— */
+
+.footer {
+  max-width: 76rem;
+  margin: 0 auto 1.5rem;
+  padding: 0 1.1rem;
+}
+
+.footer__inner {
+  border-top: 1px solid var(--b-line);
+  padding-top: 0.9rem;
+  color: var(--b-muted);
+  font-size: 0.88rem;
+}
+
+.footer__copy {
+  margin: 0 0 0.25rem;
+  font-weight: 600;
+  color: color-mix(in oklab, var(--b-base-content) 80%, var(--b-muted));
+}
+
+.footer__meta {
+  margin: 0;
+}
+
+/* Layout marker hooks for verification / theming experiments */
+
+body[data-layout="home"] .home-grid {
+  padding-top: 1rem;
+}
+
+body[data-layout="blog"] .blog-post {
+  padding-top: 1.25rem;
+}
+
+body[data-layout="section"] .section-intro {
+  min-width: 0;
+}

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en" data-layout="blog" data-theme="boris-showcase">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}} · Blog · Boris Showcase</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/showcase.css}}">
+  <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+</head>
+<body data-layout="blog">
+  <header class="navbar navbar--blog">
+    <div class="navbar__brand">
+      <img class="navbar__mark" src="{{asset-url assets/img/mark.svg}}" width="28" height="28" alt="">
+      <span class="navbar__title">Boris Showcase</span>
+      <span class="badge badge--secondary">blog</span>
+    </div>
+    {{breadcrumb}}
+  </header>
+  <div class="blog-shell">
+    <article class="card blog-post">
+      {{metadata}}
+      {{toc}}
+      <div class="prose prose--blog">
+        {{content}}
+      </div>
+    </article>
+    <aside class="card blog-rail">
+      <p class="sidebar__label">All pages</p>
+      {{nav}}
+    </aside>
+  </div>
+  <footer class="footer">{{footer}}</footer>
+</body>
+</html>
