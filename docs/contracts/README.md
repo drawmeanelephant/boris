@@ -50,6 +50,7 @@ per topic:
 | Includes + wiki-links | [includes-and-wiki-links.md](includes-and-wiki-links.md) |
 | Heading IDs + wiki fragments | [heading-ids.md](heading-ids.md) |
 | Templating + themes (F9.1) | [templating-and-themes.md](templating-and-themes.md) |
+| Documentation Intelligence (planned) | [documentation-intelligence.md](documentation-intelligence.md) |
 
 ### Normative documents (IR v0.2 target) — full list
 
@@ -70,6 +71,7 @@ per topic:
 | [includes-and-wiki-links.md](includes-and-wiki-links.md) | `{{include}}` + `[[wiki]]` pre-Apex; cycles; fragment tree; IR 0.2 edge projection |
 | [heading-ids.md](heading-ids.md) | Apex heading `id` harvest; `[[entity#heading]]` match + URL rules |
 | [templating-and-themes.md](templating-and-themes.md) | Closed layout plan, theme assets, `metadata`/`footer`/`asset-url` (F9.1) |
+| [documentation-intelligence.md](documentation-intelligence.md) | Planned read-only graph health and impact analysis; not implemented |
 
 ## Redirect / compatibility paths (non-normative)
 
