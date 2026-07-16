@@ -7,6 +7,7 @@
 //!   obsidian   — Obsidian vault → Boris Markdown + attachments + reports
 //!   notion     — Notion Markdown & CSV export → Boris Markdown + media + reports
 //!   filed      — Filed.fyi changelog + releases slice → Boris Markdown + reports
+//!   starlight  — Starlight/Astro EN slice → Boris candidate + manifests + compile report
 //!
 //! Never rewrites inputs. Not part of the Boris product compiler pipeline.
 //!
@@ -18,6 +19,7 @@
 //!   zig build run -- --mode=instagram --dump=./fixtures/mini-instagram --out=./.out-ig
 //!   zig build run -- --mode=obsidian --vault=./fixtures/mini-obsidian --out=./.out-obs
 //!   zig build run -- --mode=notion --export=./fixtures/mini-notion --out=./.out-notion
+//!   zig build run -- --mode=starlight --root=./fixtures/mini-starlight --out=./.out-sl
 //!   zig build test
 //!
 //! From repo root:
@@ -32,6 +34,7 @@ const instagram = @import("instagram.zig");
 const obsidian = @import("obsidian.zig");
 const notion = @import("notion.zig");
 const filed = @import("filed.zig");
+const starlight = @import("starlight.zig");
 
 pub const ExitCode = enum(u8) {
     success = 0,
@@ -50,6 +53,7 @@ pub const Mode = enum {
     obsidian,
     notion,
     filed,
+    starlight,
 
     pub fn parse(s: []const u8) ?Mode {
         if (std.mem.eql(u8, s, "astro")) return .astro;
@@ -58,6 +62,7 @@ pub const Mode = enum {
         if (std.mem.eql(u8, s, "obsidian") or std.mem.eql(u8, s, "obs") or std.mem.eql(u8, s, "vault")) return .obsidian;
         if (std.mem.eql(u8, s, "notion") or std.mem.eql(u8, s, "md-csv") or std.mem.eql(u8, s, "notion-export")) return .notion;
         if (std.mem.eql(u8, s, "filed") or std.mem.eql(u8, s, "filed-fyi")) return .filed;
+        if (std.mem.eql(u8, s, "starlight") or std.mem.eql(u8, s, "sl") or std.mem.eql(u8, s, "evcc")) return .starlight;
         return null;
     }
 };
@@ -80,6 +85,12 @@ pub const Options = struct {
     export_dir: ?[]const u8 = null,
     /// Filed.fyi Astro source root (read-only; implies filed mode).
     filed_root_dir: ?[]const u8 = null,
+    /// Starlight locale filter (proof supports "en" only).
+    locale: []const u8 = "en",
+    /// Starlight max converted pages (default 40; preferred slice is typically 20–40).
+    max_pages: usize = 40,
+    /// Optional path to boris binary for Starlight compile verification.
+    boris_bin: ?[]const u8 = null,
     /// Report/output directory (created if missing). Never writes into inputs.
     out_dir: []const u8 = "migration-report",
 };
@@ -183,6 +194,30 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
             options.filed_root_dir = args[index];
             options.mode = .filed;
+        } else if (std.mem.startsWith(u8, arg, "--locale=")) {
+            const value = arg["--locale=".len..];
+            if (value.len == 0) return error.MissingValue;
+            options.locale = value;
+        } else if (std.mem.eql(u8, arg, "--locale")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            options.locale = args[index];
+        } else if (std.mem.startsWith(u8, arg, "--max-pages=")) {
+            const value = arg["--max-pages=".len..];
+            if (value.len == 0) return error.MissingValue;
+            options.max_pages = std.fmt.parseInt(usize, value, 10) catch return error.InvalidValue;
+        } else if (std.mem.eql(u8, arg, "--max-pages")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            options.max_pages = std.fmt.parseInt(usize, args[index], 10) catch return error.InvalidValue;
+        } else if (std.mem.startsWith(u8, arg, "--boris=")) {
+            const value = arg["--boris=".len..];
+            if (value.len == 0) return error.MissingValue;
+            options.boris_bin = value;
+        } else if (std.mem.eql(u8, arg, "--boris")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            options.boris_bin = args[index];
         } else {
             return error.UnknownFlag;
         }
@@ -192,7 +227,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
 
 fn printUsage() void {
     std.debug.print(
-        \\boris-migration-lab — Astro / WordPress / Instagram / Obsidian / Notion → Boris migration laboratory
+        \\boris-migration-lab — Astro / WordPress / Instagram / Obsidian / Notion / Starlight → Boris migration laboratory
         \\
         \\Usage:
         \\  boris-migration-lab [options]
@@ -201,7 +236,7 @@ fn printUsage() void {
         \\Common options:
         \\  -h, --help         Show this help and exit
         \\  -q, --quiet        Suppress progress lines
-        \\  --mode=MODE        astro (default) | wordpress | instagram | obsidian | notion | filed
+        \\  --mode=MODE        astro (default) | wordpress | instagram | obsidian | notion | filed | starlight
         \\  --out=DIR          Output directory (default: migration-report)
         \\
         \\Astro mode:
@@ -236,6 +271,17 @@ fn printUsage() void {
         \\  --filed-root=DIR   Filed.fyi Astro source root (required; never modified)
         \\  Writes: content/changelog/**, content/releases/**, provenance_manifest.json, report.json, REPORT.md
         \\  Converts exactly one changelog and three releases; unsupported MDX is retained and reported.
+        \\
+        \\Starlight proof slice (evcc-io/docs-shaped, English only):
+        \\  --mode=starlight   Convert bounded EN docs slice → Boris candidate tree
+        \\  --root=DIR         Starlight project root (required; never modified)
+        \\  --locale=en        Locale directory under src/content/docs/ (en only)
+        \\  --max-pages=N      Cap converted pages (default 40; preferred slice ~20–40)
+        \\  --boris=PATH       Optional boris binary for compile verification
+        \\  Writes: content/**, route_map.json, unsupported_manifest.json, assets_manifest.json,
+        \\          nav_flatten.json, provenance_manifest.json, link_review.json,
+        \\          compile_report.json, report.json, REPORT.md
+        \\  No Node/Astro runtime, no full YAML, no MDX execution, no locale semantics.
         \\
         \\Safety: no network, no destructive source writes, originals preserved.
         \\Exit codes: 0 success, 2 usage, 3 I/O error
@@ -391,6 +437,23 @@ pub fn main(init: std.process.Init) u8 {
                 return ExitCode.io_error.int();
             };
         },
+        .starlight => {
+            if (std.mem.eql(u8, opts.root_dir, opts.out_dir)) {
+                std.log.err("--out must differ from --root", .{});
+                return ExitCode.usage.int();
+            }
+            starlight.run(io, gpa, .{
+                .source_root_dir = opts.root_dir,
+                .out_dir = opts.out_dir,
+                .locale = opts.locale,
+                .max_pages = opts.max_pages,
+                .quiet = opts.quiet,
+                .boris_bin = opts.boris_bin,
+            }) catch |err| {
+                std.log.err("migration-lab (starlight) failed: {s}", .{@errorName(err)});
+                return ExitCode.io_error.int();
+            };
+        },
     }
     return ExitCode.success.int();
 }
@@ -406,6 +469,7 @@ test {
     _ = obsidian;
     _ = notion;
     _ = filed;
+    _ = starlight;
 }
 
 test "parseOptions: defaults and astro flags" {
@@ -515,6 +579,26 @@ test "parseOptions: filed flags" {
     const o = try parseOptions(&.{ "boris-migration-lab", "--filed-root=fixtures/mini-filed", "--out=./.filed" });
     try std.testing.expect(o.mode == .filed);
     try std.testing.expectEqualStrings("fixtures/mini-filed", o.filed_root_dir.?);
+}
+
+test "parseOptions: starlight flags" {
+    const o = try parseOptions(&.{
+        "boris-migration-lab",
+        "--mode=starlight",
+        "--root=fixtures/mini-starlight",
+        "--out=./.sl-out",
+        "--locale=en",
+        "--max-pages=32",
+        "--boris=../../zig-out/bin/boris",
+    });
+    try std.testing.expect(o.mode == .starlight);
+    try std.testing.expectEqualStrings("fixtures/mini-starlight", o.root_dir);
+    try std.testing.expectEqualStrings("en", o.locale);
+    try std.testing.expect(o.max_pages == 32);
+    try std.testing.expectEqualStrings("../../zig-out/bin/boris", o.boris_bin.?);
+
+    const o2 = try parseOptions(&.{ "boris-migration-lab", "--mode=sl", "--root", "./r" });
+    try std.testing.expect(o2.mode == .starlight);
 }
 
 test "parseOptions: unknown flag" {

@@ -10,6 +10,7 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 | **obsidian** | Local Obsidian vault directory | Boris Markdown + attachments inventory + review reports |
 | **notion** | Official Notion “Markdown & CSV” export (unpacked) | Boris Markdown + media inventory + review reports |
 | **filed** | Filed.fyi Astro source root | Bounded changelog/releases Boris tree + provenance/review reports |
+| **starlight** | Starlight/Astro docs root (EN slice) | Boris candidate `content/` + route/link/nav/asset manifests + compile report |
 
 All modes are **read-only on inputs**: originals are never rewritten. There is
 **no network access**, no zip extraction, no scraping, and **no product compiler
@@ -27,7 +28,8 @@ coupling**. All code and fixtures live under `tools/migration-lab/`.
 | Obsidian format id | `boris-obsidian-migration-lab` |
 | Notion format id | `boris-notion-migration-lab` |
 | Filed format id | `boris-filed-fyi-migration-lab` |
-| Schema | Astro/Instagram/Obsidian/Notion `1`; WordPress **`3`** |
+| Starlight format id | `boris-starlight-migration-lab` |
+| Schema | Astro/Instagram/Obsidian/Notion/Filed/Starlight `1`; WordPress **`3`** |
 
 Companion author guide: [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
 
@@ -69,6 +71,13 @@ zig build run -- --mode=notion \
 zig build run -- --mode=filed \
   --filed-root=/path/to/filed-fyi \
   --out=/tmp/filed-boris-content
+
+# Starlight EN proof slice (clone upstream to /tmp; never commit it)
+zig build run -- --mode=starlight \
+  --root=/tmp/evcc-docs \
+  --out=/tmp/evcc-boris-out \
+  --locale=en \
+  --max-pages=40
 ```
 
 From the **repository root**, use this targeted aggregate gate after changing
@@ -102,15 +111,18 @@ zig build -C tools/migration-lab run -- \
 |------|---------|---------|
 | `-h`, `--help` | | Print usage; exit 0 |
 | `-q`, `--quiet` | off | Suppress progress lines |
-| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), or `filed` (`filed-fyi`) |
+| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), or `starlight` (`sl` / `evcc`) |
 | `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**) |
-| `--root=DIR` | `.` | Astro scan root |
+| `--root=DIR` | `.` | Astro archaeology root **or** Starlight project root |
 | `--wxr=FILE` | | WordPress WXR/XML path (implies `--mode=wordpress`) |
 | `--media=DIR` | | Optional local media/uploads tree (WordPress) |
 | `--dump=DIR` | | Unpacked Instagram data-download root (implies `--mode=instagram`) |
 | `--vault=DIR` | | Obsidian vault root (implies `--mode=obsidian`) |
 | `--export=DIR` | | Unpacked Notion Markdown & CSV export root (implies `--mode=notion`) |
 | `--filed-root=DIR` | | Filed.fyi Astro source root (implies `--mode=filed`) |
+| `--locale=en` | `en` | Starlight locale directory under `src/content/docs/` (**en only**) |
+| `--max-pages=N` | `40` | Starlight converted-page cap (preferred slice is typically 20–40) |
+| `--boris=PATH` | auto | Optional product `boris` binary for Starlight compile verification |
 
 Exit codes: **0** success, **2** usage, **3** I/O error.
 
@@ -172,6 +184,72 @@ neutral category, and `stripped: true`.
 
 Synthetic redistributable coverage lives in
 [`fixtures/mini-filed/`](fixtures/mini-filed/).
+
+## Starlight proof slice (evcc-io/docs)
+
+Developer-only **one-shot** preflight + converter for a bounded **English**
+Starlight content tree. Designed against MIT-licensed
+[evcc-io/docs](https://github.com/evcc-io/docs) and covered by the synthetic
+[`fixtures/mini-starlight/`](fixtures/mini-starlight/) tree.
+
+### What it does
+
+1. **Inventories** content under `src/content/docs/en/`, route-style and relative
+   links, frontmatter keys (line-oriented, not full YAML), MDX imports/components,
+   sidebar evidence from `astro.config.*` (text scan only), and local/public assets.
+2. **Selects a preferred slice** (top-level docs + `features/` + `installation/` +
+   `integrations/`; excludes `blog/`, `reference/cli/`, underscore partials) capped
+   by `--max-pages` (default 40 → typically 20–40 pages on evcc).
+3. **Emits** a Boris candidate tree under `--out/content/` with closed frontmatter
+   only: `id`, `title`, `parent`, `status`, `tags`.
+4. **Rewrites** internal markdown routes to `[[entity-id]]` **only** when the target
+   exists in the converted slice; otherwise writes an explicit `link_review.json` row.
+5. **Sidecar manifests**: `route_map.json`, `unsupported_manifest.json`,
+   `assets_manifest.json`, `nav_flatten.json`, `provenance_manifest.json`,
+   `link_review.json`, `compile_report.json`, plus `report.json` / `REPORT.md`.
+6. **Preserves source read-only** and proves immutability in fixture tests.
+7. **Attempts a Boris compile** of the candidate (when `boris` +
+   `layouts/main.html` are findable) and records the result in `compile_report.json`.
+
+### Supported / unsupported matrix
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Frontmatter `title` | **Supported** | Mapped into Boris `title` |
+| Frontmatter `id` / `parent` / `status` / `tags` | **Emitted by converter** | Source values of those keys (if any) are listed unmapped; converter owns the closed grammar |
+| Other YAML keys (`sidebar`, nested maps, sequences, …) | **Unsupported** | Retained raw in provenance; never interpreted |
+| Full YAML / JS config evaluation | **Unsupported** | `astro.config.*` text-scanned for sidebar evidence only |
+| Markdown body | **Supported** | Passed through after MDX import strip + untrusted-fence strip |
+| MDX imports / components | **Unsupported** | Inventoried; tags neutralized; not executed |
+| Internal markdown route / relative links | **Conditional** | Wiki rewrite only when target entity is in the slice |
+| Attribute `href` / `to` routes | **Review only** | Never auto-rewritten |
+| External links | **Left as-is** | |
+| Local / public assets | **Inventoried** | Not auto-copied in this proof |
+| Sidebar / `autogenerate` | **Flattened** | One-level forest: section Trunk + Satellite children |
+| Locales other than `en` | **Unsupported** | Locale directory filter only; no i18n semantics |
+| Live sync / Node / Astro / Starlight runtime | **Unsupported** | No package install, no MDX runtime |
+| Deep multi-hop parents | **Unsupported** | Matches Boris one-level forest; no new graph behavior |
+| Embedded agent/directive/prompt fences | **Stripped** | Payload never replayed; report lists path/line/category |
+
+### Real-site smoke (do not commit upstream)
+
+```bash
+# Clone outside the repo — never commit upstream content or run its Node scripts.
+git clone --depth 1 https://github.com/evcc-io/docs.git /tmp/evcc-docs
+
+cd tools/migration-lab
+zig build run -- --mode=starlight \
+  --root=/tmp/evcc-docs \
+  --out=/tmp/evcc-boris-out \
+  --locale=en \
+  --max-pages=40
+
+# Inspect manifests + optional compile_report.json
+less /tmp/evcc-boris-out/REPORT.md
+```
+
+Source text is **untrusted data**: the converter never follows embedded
+directives or prompts.
 
 ## Notion mode
 
