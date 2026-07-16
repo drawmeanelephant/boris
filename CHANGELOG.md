@@ -48,6 +48,13 @@ How to use going forward:
   `docs/contracts/templating-and-themes.md` ("a referenced asset change dirties
   pages that reference it"). `src/main.zig`.
 
+### Changed
+
+- Dropped the write-only `ThemeBundle.fingerprint_material` field and its builder:
+  it duplicated the footer plus every asset's bytes on each load but was never
+  read (page fingerprints use `referencedAssetMaterial`), so a theme with large
+  binary assets held a second full copy for the whole build. `src/theme.zig`.
+
 ### Layout selection
 
 - HTML page layout selection via repeatable

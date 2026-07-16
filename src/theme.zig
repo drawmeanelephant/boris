@@ -82,8 +82,6 @@ pub const ThemeBundle = struct {
     footer_bytes: []u8 = &.{},
     /// Sorted asset inventory (owned paths + bytes).
     assets: []AssetEntry = &.{},
-    /// Deterministic fingerprint material: footer + sorted (path, bytes).
-    fingerprint_material: []u8 = &.{},
 
     pub fn deinit(self: *ThemeBundle) void {
         if (self.footer_bytes.len > 0) self.gpa.free(self.footer_bytes);
@@ -92,7 +90,6 @@ pub const ThemeBundle = struct {
             self.gpa.free(a.bytes);
         }
         if (self.assets.len > 0) self.gpa.free(self.assets);
-        if (self.fingerprint_material.len > 0) self.gpa.free(self.fingerprint_material);
         self.* = undefined;
     }
 
@@ -136,7 +133,6 @@ pub fn loadThemeBundle(
     errdefer bundle.deinit();
 
     if (theme_root.len == 0) {
-        bundle.fingerprint_material = try buildFingerprintMaterial(gpa, &.{}, &.{});
         return bundle;
     }
 
@@ -215,7 +211,6 @@ pub fn loadThemeBundle(
         else => |e| return e,
     }
 
-    bundle.fingerprint_material = try buildFingerprintMaterial(gpa, bundle.footer_bytes, bundle.assets);
     return bundle;
 }
 
@@ -236,22 +231,6 @@ fn rejectSymlinkAlongRel(io: Io, cwd: Io.Dir, rel_path: []const u8) !void {
         if (slash >= rel_path.len) break;
         start = slash + 1;
     }
-}
-
-fn buildFingerprintMaterial(
-    gpa: std.mem.Allocator,
-    footer_bytes: []const u8,
-    assets: []const AssetEntry,
-) ![]u8 {
-    var buf: std.ArrayList(u8) = .empty;
-    errdefer buf.deinit(gpa);
-    // footer\0 then each path\0 bytes with length-delimited stability via explicit lens
-    try appendLenPrefixed(&buf, gpa, footer_bytes);
-    for (assets) |a| {
-        try appendLenPrefixed(&buf, gpa, a.rel_path);
-        try appendLenPrefixed(&buf, gpa, a.bytes);
-    }
-    return try buf.toOwnedSlice(gpa);
 }
 
 fn appendLenPrefixed(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, bytes: []const u8) !void {
