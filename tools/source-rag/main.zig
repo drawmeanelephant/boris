@@ -52,7 +52,6 @@ pub const default_scan_dirs = [_][]const u8{
     "layouts",
     "scripts",
     "tools",
-    "vendor",
     "test",
     "SUPPORT",
 };
@@ -88,7 +87,7 @@ const skip_dir_names = [_][]const u8{
     "CMakeFiles",
 };
 
-/// Top-level product / cache trees only (repo-relative path equals or is under).
+/// Top-level product, cache, and third-party trees only (repo-relative path equals or is under).
 const skip_top_level_dirs = [_][]const u8{
     "rag",
     "rag1",
@@ -97,6 +96,9 @@ const skip_top_level_dirs = [_][]const u8{
     "dist",
     "zig-out",
     "test-output",
+    // Vendored dependencies do not belong in the source corpus. Keep this
+    // root-only so the exporter itself remains at tools/source-rag/.
+    "vendor",
 };
 
 /// File basenames skipped.
@@ -201,7 +203,7 @@ fn printUsage() void {
         \\  --max-bytes=N        Skip files larger than N bytes (default: 524288)
         \\
         \\Default scan (when present under --root):
-        \\  dirs:  src docs content layouts scripts tools vendor test SUPPORT
+        \\  dirs:  src docs content layouts scripts tools test SUPPORT
         \\  files: AGENTS.md README.md CHANGELOG.md LICENSE build.zig build.zig.zon
         \\
         \\Output tree:
@@ -347,7 +349,7 @@ fn isUnderOutDir(rel: []const u8, out_rel: []const u8) bool {
     return isUnderPrefix(rel, out_rel);
 }
 
-/// Skip generated product trees at repo root only (not `docs/rag/`, `tools/source-rag/`).
+/// Skip generated, cache, and vendor trees at repo root only (not `docs/rag/`, `tools/source-rag/`).
 fn isSkippedTopLevelTree(rel: []const u8) bool {
     for (skip_top_level_dirs) |top| {
         if (isUnderPrefix(rel, top)) return true;
@@ -415,6 +417,7 @@ fn collectSourcePaths(
     for (default_scan_dirs) |dname| {
         if (isSkippedDirName(dname)) continue;
         if (isUnderOutDir(dname, out_rel)) continue;
+        if (isSkippedTopLevelTree(dname)) continue;
         if (!pathExists(io, root, dname)) continue;
         var sub = root.openDir(io, dname, .{ .iterate = true }) catch continue;
         defer sub.close(io);
@@ -1168,6 +1171,7 @@ test "langFromPath and extensions" {
     try std.testing.expect(isUnderOutDir("source-rag/INDEX.md", "source-rag"));
     try std.testing.expect(!isUnderOutDir("tools/source-rag/main.zig", "source-rag"));
     try std.testing.expect(isSkippedTopLevelTree("rag/INDEX.md"));
+    try std.testing.expect(isSkippedTopLevelTree("vendor/apex/apex.c"));
     try std.testing.expect(!isSkippedTopLevelTree("docs/rag/system/00-overview.md"));
     try std.testing.expect(!isSkippedTopLevelTree("tools/source-rag/main.zig"));
 }
@@ -1241,11 +1245,21 @@ test "exportCorpus mini fixture" {
         try Io.Dir.cwd().createDirPath(io, src_rel);
     }
     {
+        const vendor_rel = try std.fmt.allocPrint(gpa, "{s}/vendor", .{root_rel});
+        defer gpa.free(vendor_rel);
+        try Io.Dir.cwd().createDirPath(io, vendor_rel);
+        const tool_rel = try std.fmt.allocPrint(gpa, "{s}/tools/source-rag", .{root_rel});
+        defer gpa.free(tool_rel);
+        try Io.Dir.cwd().createDirPath(io, tool_rel);
+    }
+    {
         var root = try Io.Dir.cwd().openDir(io, root_rel, .{});
         defer root.close(io);
         try root.writeFile(io, .{ .sub_path = "README.md", .data = "# Demo\n" });
         try root.writeFile(io, .{ .sub_path = "src/hello.zig", .data = "pub fn main() void {}\n" });
         try root.writeFile(io, .{ .sub_path = "src/skip.bin", .data = &[_]u8{ 0x00, 0x01, 0x02 } });
+        try root.writeFile(io, .{ .sub_path = "vendor/third_party.c", .data = "int third_party;\n" });
+        try root.writeFile(io, .{ .sub_path = "tools/source-rag/main.zig", .data = "pub fn export() void {}\n" });
     }
 
     const stats = try exportCorpus(io, gpa, .{
@@ -1254,8 +1268,8 @@ test "exportCorpus mini fixture" {
         .quiet = true,
         .max_bytes = 512 * 1024,
     });
-    try std.testing.expectEqual(@as(usize, 2), stats.source_files);
-    try std.testing.expect(stats.catalog_entries >= 2);
+    try std.testing.expectEqual(@as(usize, 3), stats.source_files);
+    try std.testing.expect(stats.catalog_entries >= 3);
 
     var out = try Io.Dir.cwd().openDir(io, out_rel, .{});
     defer out.close(io);
@@ -1275,13 +1289,20 @@ test "exportCorpus mini fixture" {
     const catalog = try readFileAlloc(io, out, "catalog.jsonl", gpa);
     defer gpa.free(catalog);
     try std.testing.expect(std.mem.indexOf(u8, catalog, "src/hello.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, catalog, "tools/source-rag/main.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, catalog, "vendor/third_party.c") == null);
 
     const source_one = try readFileAlloc(io, out, "boris-source-1.md", gpa);
     defer gpa.free(source_one);
     try std.testing.expect(std.mem.indexOf(u8, source_one, "source_path: README.md") != null);
     const source_two = try readFileAlloc(io, out, "boris-source-2.md", gpa);
     defer gpa.free(source_two);
-    try std.testing.expect(std.mem.indexOf(u8, source_two, "source_path: src/hello.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source_one, "source_path: src/hello.zig") != null or
+        std.mem.indexOf(u8, source_two, "source_path: src/hello.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source_one, "vendor/third_party.c") == null);
+    try std.testing.expect(std.mem.indexOf(u8, source_two, "vendor/third_party.c") == null);
+    try std.testing.expect(std.mem.indexOf(u8, source_one, "tools/source-rag/main.zig") != null or
+        std.mem.indexOf(u8, source_two, "tools/source-rag/main.zig") != null);
     const docs_bundle = try readFileAlloc(io, out, "boris-docs.md", gpa);
     defer gpa.free(docs_bundle);
     try std.testing.expect(std.mem.indexOf(u8, docs_bundle, "No packed documents") != null);
