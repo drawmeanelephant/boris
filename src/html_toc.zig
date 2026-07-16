@@ -329,6 +329,20 @@ test "renderToc shape and anchors" {
     try std.testing.expect(std.mem.indexOf(u8, toc, "Section X") != null);
 }
 
+test "renderToc emits a labeled list landmark and preserves rendered text entities" {
+    const gpa = std.testing.allocator;
+    const toc = try renderToc(gpa, "<h2 id=\"a&amp;b&lt;c&gt;\">A &amp; <em>B</em></h2>");
+    defer gpa.free(toc);
+    try std.testing.expectEqualStrings(
+        "<nav class=\"page-toc\" aria-label=\"On this page\">\n" ++
+            "<ul>\n" ++
+            "<li class=\"page-toc__l2\"><a href=\"#a&amp;amp;b&amp;lt;c&amp;gt;\">A &amp; B</a></li>\n" ++
+            "</ul>\n" ++
+            "</nav>",
+        toc,
+    );
+}
+
 test "renderToc skips headings without id" {
     const gpa = std.testing.allocator;
     const toc = try renderToc(gpa, "<h2>No id</h2><h2 id=\"has\">Has</h2>");
