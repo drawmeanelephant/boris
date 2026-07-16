@@ -5,9 +5,15 @@
 .ig-report-b/
 .out-wp/
 .out-ig/
+.obs-report/
+.notion-report/
+.out-obs/
+.out-notion/
 migration-report/
 fixtures/.test-out*/
 fixtures/.test-wp*/
 fixtures/.ig-test-out*/
+fixtures/.test-obsidian-out*/
+fixtures/.test-notion-out*/
 .zig-cache/
 zig-out/

@@ -8,6 +8,7 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 | **wordpress** | WordPress WXR/XML + optional local media | Boris-ready Markdown under `content/` + review reports |
 | **instagram** | Unpacked Instagram data-download (Takeout) | Boris Markdown + generated theme assets + reports |
 | **obsidian** | Local Obsidian vault directory | Boris Markdown + attachments inventory + review reports |
+| **notion** | Official Notion “Markdown & CSV” export (unpacked) | Boris Markdown + media inventory + review reports |
 
 All modes are **read-only on inputs**: originals are never rewritten. There is
 **no network access**, no zip extraction, no scraping, and **no product compiler
@@ -23,6 +24,7 @@ coupling**. All code and fixtures live under `tools/migration-lab/`.
 | WordPress format id | `boris-wordpress-migration-lab` |
 | Instagram format id | `boris-instagram-migration-lab` |
 | Obsidian format id | `boris-obsidian-migration-lab` |
+| Notion format id | `boris-notion-migration-lab` |
 | Schema | `1` (per mode) |
 
 Companion author guide: [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
@@ -55,6 +57,11 @@ zig build run -- --mode=instagram \
 zig build run -- --mode=obsidian \
   --vault=./fixtures/mini-obsidian \
   --out=./.obs-report
+
+# Notion Markdown & CSV export → Boris Markdown + media + reports
+zig build run -- --mode=notion \
+  --export=./fixtures/mini-notion \
+  --out=./.notion-report
 ```
 
 From the **repository root**:
@@ -74,6 +81,10 @@ zig build -C tools/migration-lab run -- \
   --mode=obsidian \
   --vault=tools/migration-lab/fixtures/mini-obsidian \
   --out=/tmp/obs-mig-report
+zig build -C tools/migration-lab run -- \
+  --mode=notion \
+  --export=tools/migration-lab/fixtures/mini-notion \
+  --out=/tmp/notion-mig-report
 ```
 
 ### Flags
@@ -82,13 +93,14 @@ zig build -C tools/migration-lab run -- \
 |------|---------|---------|
 | `-h`, `--help` | | Print usage; exit 0 |
 | `-q`, `--quiet` | off | Suppress progress lines |
-| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `instagram` (`ig` / `takeout`), or `obsidian` (`obs` / `vault`) |
+| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), or `notion` (`md-csv` / `notion-export`) |
 | `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**) |
 | `--root=DIR` | `.` | Astro scan root |
 | `--wxr=FILE` | | WordPress WXR/XML path (implies `--mode=wordpress`) |
 | `--media=DIR` | | Optional local media/uploads tree (WordPress) |
 | `--dump=DIR` | | Unpacked Instagram data-download root (implies `--mode=instagram`) |
 | `--vault=DIR` | | Obsidian vault root (implies `--mode=obsidian`) |
+| `--export=DIR` | | Unpacked Notion Markdown & CSV export root (implies `--mode=notion`) |
 
 Exit codes: **0** success, **2** usage, **3** I/O error.
 
@@ -106,6 +118,63 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
    followers, and ads trees are not read.
 8. **Obsidian** — never ingest or commit a private vault; use a local path only.
    `.obsidian/`, `.git/`, `node_modules/`, and generated/output dirs are skipped.
+9. **Notion** — official **Markdown & CSV** export only (already unpacked). No
+   Notion API, OAuth, remote fetch, or private workspace data in the repo.
+   Hidden/tooling dirs (`.git/`, `node_modules/`, `dist/`, …) are skipped.
+
+---
+
+## Notion mode
+
+### Inputs
+
+- An **unpacked** official Notion export directory (**Markdown & CSV**).
+- Expects page files named like `Title <32-hex-id>.md` with nested sibling folders
+  of the same stem for subpages, local attachments beside pages, and `.csv` for
+  full-page databases.
+- Does **not** call the Notion API, perform OAuth, download remote assets, or
+  extract zip files (export must already be unpacked).
+
+### Outputs under `--out`
+
+```text
+content/
+  <entity-id>.md           # one file per discovered page (ids stripped from paths)
+media/
+  ...                      # copied local attachments (bytes unchanged)
+report.json
+REPORT.md
+media_manifest.json        # deterministic source→output inventory
+```
+
+Each page uses **closed Boris frontmatter** where possible (`title`, optional
+`parent` / `status` / `tags`), preserves compatible authored frontmatter, drops
+unknown keys into the review queue, and appends a
+`boris-migration-provenance` comment (export path, entity id, Notion page id).
+
+| Class | Typical cause |
+|-------|----------------|
+| `exact` | Plain page body with no rewrites needed |
+| `transformed` | Parent inferred from folders; local links/media rewritten |
+| `unsupported` | Relation/rollup, synced blocks, embeds, unsupported block markers |
+| `human_review` | Ambiguous/unresolved links, CSV databases, deep hierarchy, unknown FM |
+
+| Flagged (never silent drop) | Handling |
+|----------------------------|----------|
+| Database CSV views | `unsupported_items` + human review |
+| Relation / rollup markers | hazard + human review; body retained raw |
+| Synced blocks / embeds / unsupported blocks | hazard + human review; retained raw |
+| Ambiguous page/media targets | link left raw + human review |
+| Unresolved local links | link left raw + human review |
+| Nesting deeper than one hop | `deep_hierarchy` review (Boris graph is one parent hop) |
+
+Synthetic fixture: [`fixtures/mini-notion/`](fixtures/mini-notion/).
+
+```bash
+zig build run -- --mode=notion \
+  --export=./fixtures/mini-notion \
+  --out=./.notion-report
+```
 
 ---
 
@@ -352,6 +421,13 @@ Obsidian `report.json` top-level fields (stable order):
 ```text
 format, schema_version, tool_version, source_vault, summary,
 pages, links, hazards, attachments, unsupported_items, human_review
+```
+
+Notion `report.json` top-level fields (stable order):
+
+```text
+format, schema_version, tool_version, source_export, summary,
+pages, links, hazards, media, unsupported_items, human_review
 ```
 
 Bump `schema_version` if field meaning or required shape changes.

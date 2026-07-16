@@ -5,6 +5,7 @@
 //!   wordpress  — WordPress WXR → Boris Markdown + reports
 //!   instagram  — Instagram Takeout dump → Boris Markdown + theme assets + reports
 //!   obsidian   — Obsidian vault → Boris Markdown + attachments + reports
+//!   notion     — Notion Markdown & CSV export → Boris Markdown + media + reports
 //!
 //! Never rewrites inputs. Not part of the Boris product compiler pipeline.
 //!
@@ -15,6 +16,7 @@
 //!       --media=./fixtures/mini-wxr/media --out=./.out-wp
 //!   zig build run -- --mode=instagram --dump=./fixtures/mini-instagram --out=./.out-ig
 //!   zig build run -- --mode=obsidian --vault=./fixtures/mini-obsidian --out=./.out-obs
+//!   zig build run -- --mode=notion --export=./fixtures/mini-notion --out=./.out-notion
 //!   zig build test
 //!
 //! From repo root:
@@ -27,6 +29,7 @@ const archaeology = @import("archaeology.zig");
 const wordpress = @import("wordpress.zig");
 const instagram = @import("instagram.zig");
 const obsidian = @import("obsidian.zig");
+const notion = @import("notion.zig");
 
 pub const ExitCode = enum(u8) {
     success = 0,
@@ -43,12 +46,14 @@ pub const Mode = enum {
     wordpress,
     instagram,
     obsidian,
+    notion,
 
     pub fn parse(s: []const u8) ?Mode {
         if (std.mem.eql(u8, s, "astro")) return .astro;
         if (std.mem.eql(u8, s, "wordpress") or std.mem.eql(u8, s, "wp") or std.mem.eql(u8, s, "wxr")) return .wordpress;
         if (std.mem.eql(u8, s, "instagram") or std.mem.eql(u8, s, "ig") or std.mem.eql(u8, s, "takeout")) return .instagram;
         if (std.mem.eql(u8, s, "obsidian") or std.mem.eql(u8, s, "obs") or std.mem.eql(u8, s, "vault")) return .obsidian;
+        if (std.mem.eql(u8, s, "notion") or std.mem.eql(u8, s, "md-csv") or std.mem.eql(u8, s, "notion-export")) return .notion;
         return null;
     }
 };
@@ -67,6 +72,8 @@ pub const Options = struct {
     dump_dir: ?[]const u8 = null,
     /// Obsidian vault root.
     vault_dir: ?[]const u8 = null,
+    /// Unpacked Notion Markdown & CSV export root.
+    export_dir: ?[]const u8 = null,
     /// Report/output directory (created if missing). Never writes into inputs.
     out_dir: []const u8 = "migration-report",
 };
@@ -142,6 +149,16 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
             options.vault_dir = args[index];
             options.mode = .obsidian;
+        } else if (std.mem.startsWith(u8, arg, "--export=")) {
+            const value = arg["--export=".len..];
+            if (value.len == 0) return error.MissingValue;
+            options.export_dir = value;
+            options.mode = .notion;
+        } else if (std.mem.eql(u8, arg, "--export")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            options.export_dir = args[index];
+            options.mode = .notion;
         } else if (std.mem.startsWith(u8, arg, "--out=")) {
             const value = arg["--out=".len..];
             if (value.len == 0) return error.MissingValue;
@@ -159,7 +176,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
 
 fn printUsage() void {
     std.debug.print(
-        \\boris-migration-lab — Astro / WordPress / Instagram / Obsidian → Boris migration laboratory
+        \\boris-migration-lab — Astro / WordPress / Instagram / Obsidian / Notion → Boris migration laboratory
         \\
         \\Usage:
         \\  boris-migration-lab [options]
@@ -168,7 +185,7 @@ fn printUsage() void {
         \\Common options:
         \\  -h, --help         Show this help and exit
         \\  -q, --quiet        Suppress progress lines
-        \\  --mode=MODE        astro (default) | wordpress | instagram | obsidian
+        \\  --mode=MODE        astro (default) | wordpress | instagram | obsidian | notion
         \\  --out=DIR          Output directory (default: migration-report)
         \\
         \\Astro mode:
@@ -192,6 +209,12 @@ fn printUsage() void {
         \\  Writes: content/**/*.md, assets/**, report.json, REPORT.md, attachments_manifest.json
         \\  (--vault implies --mode=obsidian)
         \\  No Dataview/Canvas/plugin evaluation; unresolved links retained raw.
+        \\
+        \\Notion mode:
+        \\  --export=DIR       Unpacked Notion Markdown & CSV export root (required; never modified)
+        \\  Writes: content/**/*.md, media/**, report.json, REPORT.md, media_manifest.json
+        \\  (--export implies --mode=notion)
+        \\  No Notion API, OAuth, network, zip extraction, or private workspace ingestion.
         \\
         \\Safety: no network, no destructive source writes, originals preserved.
         \\Exit codes: 0 success, 2 usage, 3 I/O error
@@ -313,6 +336,25 @@ pub fn main(init: std.process.Init) u8 {
                 return ExitCode.io_error.int();
             };
         },
+        .notion => {
+            const export_dir = opts.export_dir orelse {
+                std.log.err("notion mode requires --export=DIR", .{});
+                printUsage();
+                return ExitCode.usage.int();
+            };
+            if (std.mem.eql(u8, export_dir, opts.out_dir)) {
+                std.log.err("--out must differ from --export", .{});
+                return ExitCode.usage.int();
+            }
+            notion.run(io, gpa, .{
+                .export_dir = export_dir,
+                .out_dir = opts.out_dir,
+                .quiet = opts.quiet,
+            }) catch |err| {
+                std.log.err("migration-lab (notion) failed: {s}", .{@errorName(err)});
+                return ExitCode.io_error.int();
+            };
+        },
     }
     return ExitCode.success.int();
 }
@@ -321,11 +363,12 @@ pub fn main(init: std.process.Init) u8 {
 // Tests — shared CLI + WordPress unit/fixture + Astro regression
 // ---------------------------------------------------------------------------
 
-// Pull Obsidian unit/fixture tests into this test binary. (Other modes already
-// declare their fixture tests in this file; do not refAllDecls Instagram here —
-// its in-module tests currently leak under the testing allocator.)
+// Pull Obsidian / Notion unit/fixture tests into this test binary. (Other modes
+// already declare their fixture tests in this file; do not refAllDecls Instagram
+// here — its in-module tests currently leak under the testing allocator.)
 test {
     _ = obsidian;
+    _ = notion;
 }
 
 test "parseOptions: defaults and astro flags" {
@@ -406,6 +449,29 @@ test "parseOptions: obsidian flags" {
 
     const o3 = try parseOptions(&.{ "boris-migration-lab", "--mode=vault", "--vault=./v" });
     try std.testing.expect(o3.mode == .obsidian);
+}
+
+test "parseOptions: notion flags" {
+    const o = try parseOptions(&.{
+        "boris-migration-lab",
+        "--export=fixtures/mini-notion",
+        "--out=./.notion",
+    });
+    try std.testing.expect(o.mode == .notion);
+    try std.testing.expectEqualStrings("fixtures/mini-notion", o.export_dir.?);
+    try std.testing.expectEqualStrings("./.notion", o.out_dir);
+
+    const o2 = try parseOptions(&.{
+        "boris-migration-lab",
+        "--mode=notion",
+        "--export",
+        "fixtures/mini-notion",
+    });
+    try std.testing.expect(o2.mode == .notion);
+    try std.testing.expectEqualStrings("fixtures/mini-notion", o2.export_dir.?);
+
+    const o3 = try parseOptions(&.{ "boris-migration-lab", "--mode=md-csv", "--export=./e" });
+    try std.testing.expect(o3.mode == .notion);
 }
 
 test "parseOptions: unknown flag" {
