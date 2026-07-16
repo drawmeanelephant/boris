@@ -25,8 +25,8 @@
 //!   zig build test
 //!
 //! From repo root:
-//!   zig build -C tools/migration-lab
-//!   zig build -C tools/migration-lab test
+//!   zig build --build-file tools/migration-lab/build.zig
+//!   zig build --build-file tools/migration-lab/build.zig test
 
 const std = @import("std");
 const Io = std.Io;
