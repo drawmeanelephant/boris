@@ -475,6 +475,31 @@ else
   printf '%s\n' "${LR_MIX_ERR}" | head -10
 fi
 
+# Layout path with .. / absolute → exit 2 (lexical gate; no publish)
+set +e
+LR_TRAV_OUT="${GATE_DIR}/layout-rules-trav"
+rm -rf "${LR_TRAV_OUT}"
+"${BORIS}" --input="${LR_CONTENT}" --theme="${LR_THEME}" \
+  --layout-rule default id:index "${LR_THEME}/layouts/../../layouts/main.html" \
+  --html-dir="${LR_TRAV_OUT}" --quiet >/dev/null 2>&1
+LR_TRAV_EC=$?
+set -e
+if [[ "${LR_TRAV_EC}" -eq 2 ]]; then
+  pass "layout-rules: traversal layout path exit 2"
+else
+  fail "layout-rules: traversal layout path expected exit 2, got ${LR_TRAV_EC}"
+fi
+set +e
+"${BORIS}" --input="${LR_CONTENT}" --html-layout '../layouts/main.html' \
+  --html-dir="${LR_TRAV_OUT}" --quiet >/dev/null 2>&1
+LR_TRAV2_EC=$?
+set -e
+if [[ "${LR_TRAV2_EC}" -eq 2 ]]; then
+  pass "layout-rules: absolute/.. html-layout exit 2"
+else
+  fail "layout-rules: .. html-layout expected exit 2, got ${LR_TRAV2_EC}"
+fi
+
 # --- 4d. Documentation Intelligence reports + no-artifact behavior --------
 note "4d. Documentation Intelligence reports"
 DI_CONTENT="docs/contracts/fixtures/documentation-intelligence/content"

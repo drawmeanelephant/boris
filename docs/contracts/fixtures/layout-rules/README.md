@@ -51,4 +51,12 @@ Rule order permutations must produce byte-identical HTML. Full vs
 | Equal-specificity globs for one page | exit 2, no publish |
 | `layout:` frontmatter | exit 1, `EFRONTMATTER` |
 | Cross-theme rule layouts | exit 2 `MixedThemeRoots` |
+| Layout path with `..` / absolute / `\` | exit 2 (parse / `InvalidLayoutPath`) |
 | `--layout-rule` with `--out` / `--rag` | exit 2 |
+
+## Hostile coverage
+
+Adversarial integration (precedence, ambiguity, order independence, fallback
+chain, path/mixed-theme failures, multi-target isolation, incremental/full
+equivalence, determinism) lives under [`hostile/`](hostile/) and
+`src/layout_select_hostile_test.zig` (`zig build test-layout-hostile`).

@@ -1,0 +1,2 @@
+/* hostile alpha theme */
+body[data-theme="alpha"] { --hostile: alpha; }

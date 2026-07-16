@@ -611,6 +611,12 @@ pub fn compileHtmlSite(
 ) !CompileStats {
     const cwd = Io.Dir.cwd();
 
+    // 0. Lexical layout-path grammar before any open (no .. / absolute escapes).
+    try layout_select.validateLayoutPath(options.layout_path);
+    for (options.layout_rules) |rule| {
+        try layout_select.validateLayoutPath(rule.layout_path);
+    }
+
     // 1. Layout first — hard fail before any content walk on bad marker.
     var layout_arena = std.heap.ArenaAllocator.init(gpa);
     defer layout_arena.deinit();
@@ -801,6 +807,7 @@ fn isContentCompileFailure(err: anyerror) bool {
         error.AmbiguousGlob,
         error.MixedThemeRoots,
         error.DuplicateSelector,
+        error.InvalidLayoutPath,
         error.LayoutSelectionFailed,
         => false,
         else => false,
@@ -1367,6 +1374,10 @@ fn compilePagesInner(
     defer stage_dir.close(io);
 
     // Layout selection: load every declared layout (fallback + rules), select per page.
+    try layout_select.validateLayoutPath(options.layout_path);
+    for (options.layout_rules) |rule| {
+        try layout_select.validateLayoutPath(rule.layout_path);
+    }
     try target_mod.rejectMixedThemeRoots(options.layout_path, options.layout_rules);
     const declared = try layout_select.collectDeclaredLayouts(gpa, options.layout_path, options.layout_rules);
     defer gpa.free(declared);

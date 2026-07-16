@@ -337,6 +337,25 @@ pub fn build(b: *std.Build) void {
     const run_hardening_tests = b.addRunArtifact(hardening_tests);
     run_hardening_tests.setCwd(b.path("."));
 
+    // Layout-selection hostile integration (PR #50 audit harness; no product patches).
+    const layout_hostile_mod = b.createModule(.{
+        .root_source_file = b.path("src/layout_select_hostile_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkApex(layout_hostile_mod, b, false);
+    layout_hostile_mod.addOptions("build_options", apex_opts);
+    const layout_hostile_tests = b.addTest(.{
+        .root_module = layout_hostile_mod,
+    });
+    const run_layout_hostile_tests = b.addRunArtifact(layout_hostile_tests);
+    run_layout_hostile_tests.setCwd(b.path("."));
+    const test_layout_hostile_step = b.step(
+        "test-layout-hostile",
+        "Hostile integration coverage for --layout-rule selection",
+    );
+    test_layout_hostile_step.dependOn(&run_layout_hostile_tests.step);
+
     // Fuzz suite (frontmatter / component / apex / graph) — deterministic seeds.
     const fuzz_mod = b.createModule(.{
         .root_source_file = b.path("src/fuzz.zig"),
@@ -459,6 +478,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_layout_select_tests.step);
     test_step.dependOn(&run_compile_tests.step);
     test_step.dependOn(&run_hardening_tests.step);
+    test_step.dependOn(&run_layout_hostile_tests.step);
     test_step.dependOn(&run_fuzz_tests.step);
     test_step.dependOn(&run_source_rag_tests.step);
     test_step.dependOn(&run_package_tests.step);
@@ -485,6 +505,7 @@ pub fn build(b: *std.Build) void {
         &apex_tests.step,
         &compile_tests.step,
         &hardening_tests.step,
+        &layout_hostile_tests.step,
         &fuzz_tests.step,
         &package_exe.step,
         &package_tests.step,
