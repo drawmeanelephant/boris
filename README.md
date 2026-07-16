@@ -1,15 +1,11 @@
 # Boris
 
-**Write Markdown docs. Run one binary. Get a site.**
+**Write Markdown docs. Run one local binary. Get a validated static site.**
 
-Boris is a **Zig** documentation compiler: it discovers your pages, validates a
-Trunk/Satellite content graph, and by default publishes HTML under `dist/`. Need
-machine IR or an LLM knowledge pack? Same tool — different flags.
-
-Named for the folk **Zouave** figure known as **Boris** — improvise under
-constraint, chain the next leaf, clear the slate. Compile rhythm (narrative,
-not CLI flags): **Load → Roll → Ignite → Reset**. Independent software; **not**
-affiliated with any commercial tobacco or rolling-paper brand.
+Boris is a **Zig documentation compiler** — not a Node SSG. It discovers your
+pages, validates a Trunk/Satellite content graph, and by default publishes HTML
+under `dist/`. The same binary can also emit JSON IR, a deterministic RAG pack,
+or an AI Context Bundle.
 
 | | |
 |--|--|
@@ -18,57 +14,154 @@ affiliated with any commercial tobacco or rolling-paper brand.
 | IR schema | **0.2.0** (typed dependency endpoints + reverse index) |
 | License | [MIT](LICENSE) |
 
-**v0.4.0** adds Documentation Intelligence, Context Bundles, bounded semantic
-relations, layout selection, and migration labs while keeping base IR schema
-0.2.0. It builds on the **v0.3.1** incremental graph work, the **v0.2.1**
-include/wiki path, and the **v0.2.0** HTML-default cut. See
-[`CHANGELOG.md`](CHANGELOG.md) and [`docs/STATUS.md`](docs/STATUS.md).
+Living phase note: [`docs/STATUS.md`](docs/STATUS.md) · history:
+[`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 
-## Why it exists (outcomes)
+## What it does
 
-| Outcome | What that means day-to-day |
-|---------|----------------------------|
-| **Ship a docs site without a JS toolchain** | `boris` → `dist/**/*.html`. No Node, no bundler, no React runtime for the compile. |
-| **Markdown that looks like modern docs** | Real **ApexMarkdown Unified** (tables, footnotes, lists, callouts, …) — not a toy stub. |
-| **Callouts that stay on the page** | Constrained `<Aside>` components in document order (not separate mini-sites). |
-| **Structure you can trust** | Trunk/Satellite graph validation fails loud on broken parents, cycles, duplicates. |
-| **Rebuilds that stay lean** | Unchanged pages can be skipped (`--incremental` / `--watch`). Parallel page work with `--jobs N`. Layout + body stream to disk instead of building one giant intermediate HTML string. |
-| **Same content, different products** | HTML site, JSON IR (`--out`), or deterministic RAG pack (`--rag`) from one tree. |
-| **Give an LLM grounded project context** | Deterministic provenance-rich Context Bundle (`--context`) from the validated graph. |
-| **Draft vs production outputs** | Multi-target builds with isolated dirs and caches (`--target`). |
+```text
+Markdown + closed frontmatter
+        │
+        ▼
+  discover → validate graph → render
+        │
+        ├──► HTML site      (default → dist/)
+        ├──► JSON IR        (--out)
+        ├──► RAG corpus     (--rag)
+        └──► Context Bundle (--context)
+```
 
-That last performance paragraph is **design intent**, not a stopwatch claim.
-Large trees still need measurement; the architecture avoids the usual
-“concatenate the whole site in memory” tax.
+Teaching rhythm (narrative only, not CLI flags): **Load → Roll → Ignite → Reset**.
 
-Living phase note: [`docs/STATUS.md`](docs/STATUS.md).
+Named for the folk **Zouave** figure known as **Boris** — improvise under
+constraint, chain the next leaf, clear the slate. Independent software; **not**
+affiliated with any commercial tobacco or rolling-paper brand.
 
 ---
 
-## Quick start
+## Why it exists
+
+Most documentation stacks grew into JavaScript app toolchains. Boris takes the
+opposite path: a **local Zig binary** that treats docs as a **validated content
+graph**, not a mini web app.
+
+| You want… | Boris gives you… |
+|-----------|------------------|
+| A docs site without a JS toolchain | `boris` → `dist/**/*.html` — no Node, bundler, or React runtime for the compile |
+| Markdown that looks like modern docs | Real **ApexMarkdown Unified** in-process (tables, footnotes, lists, …) — not a toy stub |
+| Callouts that stay on the page | Constrained `<Aside>` components in document order |
+| Structure you can trust | Trunk/Satellite parents, wiki targets, and includes **fail the build** when invalid |
+| Rebuilds that stay lean | Skip unchanged pages (`--incremental` / `--watch`); parallel HTML with `--jobs N` |
+| Same content, different products | HTML, JSON IR, RAG pack, or Context Bundle from one tree |
+
+Performance shape is **design intent** (stream layout + body, wipe page scratch,
+optional incremental/parallel) — not a published stopwatch claim. Measure your
+tree before advertising numbers.
+
+---
+
+## Why choose Boris over a Node docs stack?
+
+Honest differentiators — not a feature-parity matrix against every plugin.
+
+| Dimension | Typical Node SSG | Boris (today) |
+|-----------|------------------|---------------|
+| Runtime to **build** the site | Node + package tree | Local `boris` binary after Zig/CMake **build** of Boris itself |
+| Content model | Often flexible YAML/MDX | **Closed** frontmatter (`id`, `title`, `parent`, `status`, `tags` only) |
+| Internal structure | Conventions / plugins | Validated **Trunk/Satellite** graph; invalid parents fail loud |
+| In-page links | Often soft warnings | `[[entity-id]]` / `[[entity-id#heading]]` **fail** if missing; ordinary Markdown `[]()` hrefs are **not** fully link-checked |
+| Output products | Usually HTML (+ ad-hoc scripts) | HTML **or** IR **or** RAG **or** Context Bundle (modes do not mix) |
+| Themes | Component frameworks common | Trusted **static** HTML layouts + copied assets — no CDN fetch in the compile path |
+| Extensibility | MDX / JS in content | Allowlisted `<Aside>` + includes — **no** unrestricted MDX |
+
+**Host tools to *compile Boris*:** Zig **0.16** + **CMake** (CMake builds vendored
+ApexMarkdown static libs at compile time only). Authors and CI that already have
+`zig-out/bin/boris` do not need Node to publish docs.
+
+**Not claimed:** universal broken-link prevention, universal Astro/MkDocs/Hugo
+import, cross-OS bit-identical trees, or “zero dependencies” for building the
+compiler.
+
+---
+
+## Five-minute quickstart
+
+Needs **Zig 0.16** and **CMake** once, to build the binary.
 
 ```bash
-# Needs Zig 0.16 + CMake (compile-time only: builds vendored ApexMarkdown)
+git clone https://github.com/drawmeanelephant/boris.git
+cd boris
 zig build
-./zig-out/bin/boris --quiet          # site → dist/
-./zig-out/bin/boris --help
-zig build test
-./scripts/release-gate.sh
+./zig-out/bin/boris --quiet          # sample content/ → dist/
 ```
 
+Open `dist/index.html` (or serve `dist/` with any static file server). You should
+see site nav, breadcrumb, and an in-page TOC on pages with headings.
+
 ```bash
-./zig-out/bin/boris                              # HTML under dist/
-./zig-out/bin/boris --out .boris --quiet         # JSON IR only
-./zig-out/bin/boris --rag --quiet                # LLM corpus under rag/
-./zig-out/bin/boris --jobs 4 --quiet
-./zig-out/bin/boris --watch
-./zig-out/bin/boris --target prod=dist/prod --target stage=dist/stage
+./zig-out/bin/boris --help
+./zig-out/bin/boris --out .boris --quiet     # JSON IR
+./zig-out/bin/boris --rag --quiet            # LLM corpus → rag/
+./zig-out/bin/boris --context --quiet        # AI Context Bundle → context/
+./zig-out/bin/boris check                    # graph-health report (read-only)
+zig build test
 ```
+
+**Minimal author page** (drop under `content/`):
+
+```markdown
+---
+title: Getting started
+parent: guides
+status: published
+tags: [guides]
+---
+
+# Getting started
+
+Ship docs with one binary.
+```
+
+Author key for parents is **`parent` only** (not `parentEntry` /
+`parent_entry`). Full grammar: [frontmatter contract](docs/contracts/frontmatter.md).
 
 **Migration:** older scripts that assumed bare `boris` wrote IR should pass
-`--out .boris` (or `--no-rag`).
+`--out .boris` (or `--no-rag`). Converting an existing site:
+[`docs/MIGRATION.md`](docs/MIGRATION.md).
+
+---
+
+## What is real today (AI, migration, analysis)
+
+| Capability | Status | How |
+|------------|--------|-----|
+| HTML site (default) | **Product** | `boris` → `dist/` |
+| JSON IR | **Product** | `boris --out .boris` |
+| RAG corpus | **Product** | `boris --rag` |
+| AI Context Bundle | **Product** (v0.4.0) | `boris --context` — deterministic `bundle.md` + provenance + graph; not a hosted service |
+| Graph health / impact | **Product** (v0.4.0) | `boris check`, `boris impact <id>` — read-only; unreferenced findings can exit 1 |
+| Layout rules / themes | **Product** | Static layouts + `--layout-rule`; see [templating contract](docs/contracts/templating-and-themes.md) |
+| Includes + wiki-links | **Product** (HTML path) | `{{include}}`, `[[id]]`, `[[id#heading]]` — fail loud when invalid |
+| Migration **guide** + fixture | **Product docs** | [`docs/MIGRATION.md`](docs/MIGRATION.md), [`fixtures/migration-site/`](fixtures/migration-site/) |
+| Migration **labs** (Astro, WordPress, Instagram, Obsidian, Notion, Starlight, …) | **Developer aids** | Standalone under [`tools/migration-lab/`](tools/migration-lab/) — **not** runtime dependencies of `boris`; **not** universal importers |
+
+Context Bundle contract: [`docs/contracts/context-bundle.md`](docs/contracts/context-bundle.md).
+Documentation Intelligence: [`docs/contracts/documentation-intelligence.md`](docs/contracts/documentation-intelligence.md).
+
+---
+
+## Author essentials
+
+1. **Closed frontmatter** — only `id`, `title`, `parent`, `status`, `tags`.
+2. **One-level graph** — Satellites parent to **Trunks** only (no satellite-of-satellite).
+3. **Fail-loud structure** — bad parents, missing wiki targets/headings, missing includes, and cycles exit **1** with diagnostics. Ordinary Markdown `[](url)` links are **not** a complete site-wide link checker.
+4. **Asides** — `<Aside kind="tip">…</Aside>` (and related kinds) stay in document order.
+5. **Trusted HTML authors** — raw HTML in Markdown is passed through. Do not feed untrusted contributor content without a sanitizer ([apex-abi](docs/contracts/apex-abi.md)).
+6. **UTF-8 without BOM** — BOM rejects the file.
+
+Exit codes: **0** success · **1** content · **2** usage · **3** I/O.
 
 ---
 
@@ -96,6 +189,7 @@ zig build test
 | `--out <DIR>` | `.boris` when IR | Selects IR mode |
 | `--html-dir <DIR>` | `dist` when HTML | Selects HTML mode |
 | `--html-layout <PATH>` | `layouts/main.html` | Global layout (`{{content}}` once) |
+| `--theme ROOT` | — | Theme sugar → `ROOT/layouts/main.html` + managed `assets/` |
 | `--target NAME=DIR` | — | Named HTML root (not with `--html-dir`); any order |
 | `--target-layout N=P` | — | Per-target layout; may precede or follow `--target` |
 | `--layout-rule T S P` | — | Per-page HTML layout: selector is `id:`, `glob:`, or `role:` |
@@ -111,13 +205,12 @@ Also accepted: `--input=DIR`, `--out=DIR`, `--rag-dir=DIR`, `--html-dir=DIR`,
 1. **Default = HTML** (`dist/` as target `"default"`).
 2. `--out` or `--no-rag` → **IR**.
 3. `--rag` / `--rag-dir` → **RAG-only**.
-4. `--html` / `--html-dir` / `--target` / `--target-layout` → **HTML** (explicit).
-5. Mixing IR/RAG flags with HTML selectors → exit **2**.
-6. `--jobs` / `--watch` / `--incremental` with IR, RAG, or Context Bundle → exit **2**.
-7. Invalid target names, collisions, workspace escape, content/layout overlap → exit **2**.
-8. Equivalent `--target` / `--target-layout` permutations yield the same config (targets sorted by name).
-
-Exit codes: **0** success · **1** content · **2** usage · **3** I/O.
+4. `--context` / `--context-dir` → **Context Bundle only**.
+5. `--html` / `--html-dir` / `--target` / `--target-layout` → **HTML** (explicit).
+6. Mixing IR/RAG/Context flags with HTML selectors → exit **2**.
+7. `--jobs` / `--watch` / `--incremental` with IR, RAG, or Context Bundle → exit **2**.
+8. Invalid target names, collisions, workspace escape, content/layout overlap → exit **2**.
+9. Equivalent `--target` / `--target-layout` permutations yield the same config (targets sorted by name).
 
 ### Outputs
 
@@ -125,16 +218,15 @@ Exit codes: **0** success · **1** content · **2** usage · **3** I/O.
 dist/**/*.html                 # default HTML (or each --target root)
 .boris/{manifest,graph,build-report}.json   # IR via --out
 rag/{INDEX,system,content,graph,catalog…}   # via --rag
-context/bundle.md                            # via --context
-context/{manifest,graph}.json                # via --context
+context/{bundle.md,manifest.json,graph.json,pages/…}  # via --context
 ```
 
 ## Keep a content graph healthy
 
-Use `check` before a merge or publish to inspect the same validated graph Boris
-uses to compile. It is read-only: it does not publish HTML, IR, RAG, or a
-Context Bundle. `check` returns exit **1** when it finds unreferenced pages, so
-CI can treat the report as a review gate.
+`check` inspects the same validated graph Boris uses to compile. It is
+read-only: it does not publish HTML, IR, RAG, or a Context Bundle. `check`
+returns exit **1** when it finds unreferenced pages, so CI can treat the report
+as a review gate.
 
 ```yaml
 # Example GitHub Actions step after `zig build`
@@ -146,15 +238,13 @@ CI can treat the report as a review gate.
       --report .boris/check.json
 ```
 
-The JSON report is an ordinary local file: upload it as a CI artifact or review
-it in a later job. It is not a hosted service. To see the pages and sources a
-specific change can affect, run `./zig-out/bin/boris impact guides/getting-started`
+The JSON report is an ordinary local file — not a hosted service. To see what a
+change can affect: `./zig-out/bin/boris impact guides/getting-started`
 (add `--format json` when another local tool needs the result).
 
 ## Shape one site into more than one page type
 
-For an archive landing page, a reference section, or a special home page, keep
-one content tree and choose a layout per page at build time. Rules are
+Keep one content tree; choose a layout per page at build time. Rules are
 HTML-only and do not add layout syntax to frontmatter.
 
 ```bash
@@ -166,31 +256,19 @@ HTML-only and do not add layout syntax to frontmatter.
   --layout-rule public role:trunk themes/archive/layouts/section.html
 ```
 
-Selectors are deterministic: `id:<entity-id>` selects one page,
-`glob:<segment-pattern>` selects matching IDs, and `role:trunk|satellite`
-selects by graph role. Use a single global layout when page shapes are truly
-the same; use rules when a migration has a small, known set of shapes.
+Selectors: `id:<entity-id>`, `glob:<segment-pattern>`, `role:trunk|satellite`.
 
 ## Use Boris as a pipeline stage
 
-If you need an external renderer or downstream integration, ask Boris to
-validate and emit JSON IR instead of making that renderer part of Boris:
+Validate and emit JSON IR for an external renderer or integration — keep that
+renderer outside Boris:
 
 ```bash
 ./zig-out/bin/boris --input content --out .boris
 ```
 
-The external step can consume `.boris/manifest.json`, `graph.json`, and
-`build-report.json` after Boris succeeds. Keep that renderer's dependencies
-and deployment choices outside Boris; the compiler remains a local, portable
-validation and graph-production stage.
-
-**Trusted authors only on the HTML path:** raw HTML in Markdown is passed
-through. Do not feed untrusted contributor content without a sanitizer.
-Details: [apex-abi.md](docs/contracts/apex-abi.md).
-
-Author frontmatter key for parents is **`parent` only** (not `parentEntry`).
-See [frontmatter.md](docs/contracts/frontmatter.md).
+Consumers read `.boris/manifest.json`, `graph.json`, and `build-report.json`
+after exit 0.
 
 ---
 
@@ -230,13 +308,14 @@ See [frontmatter.md](docs/contracts/frontmatter.md).
 | Doc | Role |
 |-----|------|
 | [`docs/STATUS.md`](docs/STATUS.md) | Living phase + next work |
+| [`docs/MIGRATION.md`](docs/MIGRATION.md) | Convert an existing Markdown site |
 | [`docs/contracts/`](docs/contracts/) | **Normative** contracts (ownership in that README) |
 | [`docs/RELEASE-GATE.md`](docs/RELEASE-GATE.md) | Release checklist |
+| [`tools/migration-lab/README.md`](tools/migration-lab/README.md) | Standalone migration laboratories |
 | [`docs/rag/system/`](docs/rag/system/) | RAG architecture seeds |
 | [`content/AGENT-DIRECTIVE.txt`](content/AGENT-DIRECTIVE.txt) | Brief for rebuilding sample `content/` |
 | [`AGENTS.md`](AGENTS.md) | Contributor / agent hard constraints |
 | [`CHANGELOG.md`](CHANGELOG.md) | What changed |
-
 
 ### Normative contracts (canonical)
 
@@ -248,9 +327,13 @@ See [frontmatter.md](docs/contracts/frontmatter.md).
 | [diagnostics.md](docs/contracts/diagnostics.md) | Codes & exits |
 | [ir-schema.md](docs/contracts/ir-schema.md) | Graph + JSON IR |
 | [rag-export.md](docs/contracts/rag-export.md) | RAG corpus |
+| [context-bundle.md](docs/contracts/context-bundle.md) | AI Context Bundle |
+| [documentation-intelligence.md](docs/contracts/documentation-intelligence.md) | `check` / `impact` |
 | [components.md](docs/contracts/components.md) | `<Aside>` |
 | [apex-abi.md](docs/contracts/apex-abi.md) | Apex host ABI |
 | [html-output.md](docs/contracts/html-output.md) | HTML path (default CLI) |
+| [includes-and-wiki-links.md](docs/contracts/includes-and-wiki-links.md) | Includes + wiki |
+| [templating-and-themes.md](docs/contracts/templating-and-themes.md) | Themes + layout rules |
 | [parallel-rendering.md](docs/contracts/parallel-rendering.md) | `--jobs` |
 | [watch-mode.md](docs/contracts/watch-mode.md) | `--watch` |
 | [multi-target-isolated-output.md](docs/contracts/multi-target-isolated-output.md) | `--target` |
@@ -261,8 +344,9 @@ See [frontmatter.md](docs/contracts/frontmatter.md).
 
 - **Shipped:** content graph, IR, RAG, Asides, real Apex Unified, HTML default,
   incremental/watch/jobs/multi-target, graph nav + in-page `{{toc}}`,
-  includes + wiki-links (Feature 7), typed IR dependency edges + reverse index
-  (Feature 8.1–8.3), Documentation Intelligence, Context Bundles, layout
-  selection, Textile compatibility, and migration labs. Product **v0.4.0**.
+  includes + wiki-links, typed IR dependency edges + reverse index,
+  Documentation Intelligence, Context Bundles, layout selection, Textile
+  compatibility, and migration labs as **standalone developer aids**. Product
+  **v0.4.0**.
 - **Next:** real-site dogfood and release follow-through — see
   [`docs/STATUS.md`](docs/STATUS.md).
