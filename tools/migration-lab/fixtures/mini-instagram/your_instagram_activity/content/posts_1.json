@@ -1,0 +1,102 @@
+[
+  {
+    "title": "Simple photo post with #drawmeanelephant",
+    "creation_timestamp": 1704067200,
+    "media": [
+      {
+        "uri": "media/posts/202401/photo_1111111111111111111.jpg",
+        "creation_timestamp": 1704067200,
+        "title": "Simple photo post with #drawmeanelephant",
+        "media_metadata": {
+          "photo_metadata": {
+            "exif_data": [{ "source_type": "library" }]
+          }
+        }
+      }
+    ]
+  },
+  {
+    "title": "Carousel: two frames 🎨 café",
+    "creation_timestamp": 1704153600,
+    "media": [
+      {
+        "uri": "media/posts/202401/carousel_2222222222222222222_a.jpg",
+        "creation_timestamp": 1704153600,
+        "title": "Carousel: two frames 🎨 café"
+      },
+      {
+        "uri": "media/posts/202401/carousel_2222222222222222222_b.jpg",
+        "creation_timestamp": 1704153610,
+        "title": "Carousel: two frames 🎨 café"
+      }
+    ]
+  },
+  {
+    "title": "Video post (no OCR)",
+    "creation_timestamp": 1704240000,
+    "media": [
+      {
+        "uri": "media/posts/202401/video_7777777777777777777.mp4",
+        "creation_timestamp": 1704240000,
+        "title": "Video post (no OCR)"
+      }
+    ]
+  },
+  {
+    "title": "Missing media on purpose",
+    "creation_timestamp": 1704326400,
+    "media": [
+      {
+        "uri": "media/posts/202401/missing_does_not_exist_9999999999.jpg",
+        "creation_timestamp": 1704326400,
+        "title": "Missing media on purpose"
+      }
+    ]
+  },
+  {
+    "title": "Duplicate basename path A",
+    "creation_timestamp": 1704412800,
+    "media": [
+      {
+        "uri": "media/posts/202401/dupname_3333333333333333333.jpg",
+        "creation_timestamp": 1704412800,
+        "title": "Duplicate basename path A"
+      }
+    ]
+  },
+  {
+    "title": "Duplicate basename path B",
+    "creation_timestamp": 1704499200,
+    "media": [
+      {
+        "uri": "media/posts/202402/dupname_4444444444444444444.jpg",
+        "creation_timestamp": 1704499200,
+        "title": "Duplicate basename path B"
+      }
+    ]
+  },
+  {
+    "title": "Unicode caption: 日本語 emoji 🐘 and café",
+    "creation_timestamp": 1704585600,
+    "media": [
+      {
+        "uri": "media/posts/202401/photo_1111111111111111111.jpg",
+        "creation_timestamp": 1704585600,
+        "title": "Unicode caption: 日本語 emoji 🐘 and café"
+      }
+    ]
+  },
+  {
+    "title": "",
+    "creation_timestamp": 1704672000,
+    "media": []
+  },
+  {
+    "media": [
+      {
+        "uri": "media/posts/202401/photo_1111111111111111111.jpg",
+        "creation_timestamp": 1704758400
+      }
+    ]
+  }
+]
