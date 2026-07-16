@@ -269,7 +269,11 @@ pub fn firstLineTitle(caption: []const u8, max_len: usize) []const u8 {
     line = trimSpace(line);
     if (line.len == 0) return "Untitled Instagram post";
     if (line.len <= max_len) return line;
-    return line[0..max_len];
+    // Truncate on a UTF-8 codepoint boundary (byte slice only; no alloc).
+    var end = max_len;
+    while (end > 0 and (line[end] & 0xC0) == 0x80) end -= 1;
+    if (end == 0) end = max_len; // pathological; avoid empty
+    return line[0..end];
 }
 
 fn jsonGetString(obj: std.json.Value, key: []const u8) []const u8 {
@@ -1375,6 +1379,14 @@ test "fallbackHashId deterministic" {
 test "firstLineTitle truncates" {
     const t = firstLineTitle("hello world\nmore", 5);
     try std.testing.expectEqualStrings("hello", t);
+}
+
+test "firstLineTitle does not split utf8" {
+    // curly apostrophe U+2019 is e2 80 99 — truncating mid-sequence is invalid UTF-8
+    const s = "ab\xe2\x80\x99cd"; // ab'cd
+    const t = firstLineTitle(s, 3);
+    try std.testing.expect(std.unicode.utf8ValidateSlice(t));
+    try std.testing.expectEqualStrings("ab", t);
 }
 
 test "escapeFmValue quotes specials" {
