@@ -18,7 +18,7 @@ tested** behavior from **platform-qualified** publication notes.
 
 | In scope | Out of scope |
 |----------|--------------|
-| Layout load + `{{content}}` split | Process-RSS guarantees |
+| Layout load + closed plan (`{{content}}` + optional slots / `asset-url`) | Process-RSS guarantees |
 | Whiteboard per-page arena lifecycle | Generic component HTML / MDX |
 | Ordered body stream: Apex(markdown) + Aside HTML | Mega-string assembly |
 | Three-write layout splice | Cross-volume atomic rename claims |
@@ -30,12 +30,15 @@ tested** behavior from **platform-qualified** publication notes.
 Modules:
 
 - `src/compile.zig` — site loop, PageDb promote, Whiteboard, Apex render
-- `src/assemble.zig` — layout split, zero-copy splice, Atomic publish
+- `src/assemble.zig` — closed layout plan, zero-copy splice, Atomic publish
+- `src/theme.zig` — theme root, asset inventory/copy, collision checks (F9.1)
 - `layouts/main.html` — default template (exactly one `{{content}}`)
 - `src/apex.zig` — in-process markdown → HTML (m8)
 - `src/cache.zig` / `src/dependency.zig` — fingerprints and indexes (P2)
 - `src/watch.zig` — opt-in watch loop (P3.2)
 - `src/target.zig` — multi-target isolation (P3.3)
+
+Theme/layout vocabulary detail: [templating-and-themes.md](templating-and-themes.md).
 
 CLI entry: bare `boris` (default), or `--html` / `--html-dir` / `--target`
 (and related flags). Library API: `compile.compileHtmlSite` (and multi-target

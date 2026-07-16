@@ -1,9 +1,11 @@
-//! Zero-copy layout splicing for the HTML path (milestone 9 + Feature 6 nav).
+//! Zero-copy layout splicing for the HTML path (milestone 9 + Feature 6 nav + F9.1).
 //!
 //! Layout is loaded once at **startup** (before content compile) and split into
-//! ordered static / slot segments. Required marker: `{{content}}`. Optional:
-//! `{{nav}}`, `{{breadcrumb}}`, `{{title}}`, `{{toc}}`. Final HTML is streamed
-//! with sequential writes — no full-page mega-string concatenation.
+//! a reusable closed plan of ordered static / slot / asset-url segments.
+//! Required marker: `{{content}}`. Optional slots: `{{nav}}`, `{{breadcrumb}}`,
+//! `{{title}}`, `{{toc}}`, `{{metadata}}`, `{{footer}}`. Optional helper:
+//! `{{asset-url <theme-relative path>}}` (validated path grammar only).
+//! Final HTML is streamed with sequential writes — no full-page mega-string.
 //!
 //! ## I/O invariants
 //!
@@ -11,7 +13,7 @@
 //!   are hard errors at layout load time.
 //! - Segment slices are views into `Layout.raw`. The owning `Layout` (and its
 //!   raw buffer) must outlive every `writePage` call.
-//! - Page bytes are written as N sequential segments (static + slot values).
+//! - Page bytes are written as N sequential segments (static + slot + asset URLs).
 //! - Publish uses Zig 0.16 `Dir.createFileAtomic` + `File.Atomic.replace`:
 //!   a unique temporary name (hex u64, scoped to the destination directory) is
 //!   created, fully written and flushed, then renamed into the final path.
@@ -44,9 +46,15 @@ pub const nav_marker = "{{nav}}";
 pub const breadcrumb_marker = "{{breadcrumb}}";
 pub const title_marker = "{{title}}";
 pub const toc_marker = "{{toc}}";
+pub const metadata_marker = "{{metadata}}";
+pub const footer_marker = "{{footer}}";
+/// Prefix of the argument-bearing helper (path follows a single space).
+pub const asset_url_prefix = "{{asset-url ";
 
-/// Max static+slot pieces in one layout (5 slots + static regions is typical).
-pub const max_segments: usize = 16;
+/// Max static + slot + asset-url pieces in one closed layout plan.
+pub const max_segments: usize = 32;
+/// Max distinct `{{asset-url …}}` occurrences in one layout.
+pub const max_asset_urls: usize = 16;
 
 /// Stack buffer size for the page writer — large enough that most pages need
 /// one underlying write path per splice segment. **Not** Whiteboard memory.
@@ -58,6 +66,8 @@ pub const LayoutError = error{
     DuplicateLayoutMarker,
     UnknownLayoutMarker,
     TooManyLayoutSegments,
+    InvalidAssetUrl,
+    TooManyAssetUrls,
 };
 
 pub const Slot = enum {
@@ -66,20 +76,29 @@ pub const Slot = enum {
     breadcrumb,
     title,
     toc,
+    metadata,
+    footer,
 };
 
 pub const Segment = union(enum) {
     static: []const u8,
     slot: Slot,
+    /// Theme-relative asset path under `assets/` (view into layout raw).
+    asset_url: []const u8,
 };
 
 /// Per-page values for layout slots. Static layout bytes come from `Layout`.
+/// `asset_hrefs` is parallel to `Layout.assetPaths()` (page-relative URLs).
 pub const SlotValues = struct {
     content: []const u8,
     nav: []const u8 = "",
     breadcrumb: []const u8 = "",
     title: []const u8 = "",
     toc: []const u8 = "",
+    metadata: []const u8 = "",
+    footer: []const u8 = "",
+    /// Page-relative hrefs for each `asset_url` segment, in layout order.
+    asset_hrefs: []const []const u8 = &.{},
 
     pub fn forSlot(self: SlotValues, slot: Slot) []const u8 {
         return switch (slot) {
@@ -88,11 +107,43 @@ pub const SlotValues = struct {
             .breadcrumb => self.breadcrumb,
             .title => self.title,
             .toc => self.toc,
+            .metadata => self.metadata,
+            .footer => self.footer,
         };
     }
 };
 
-/// Immutable multi-slot split of a layout template (e.g. `layouts/main.html`).
+/// Validate a theme-relative asset path for `{{asset-url …}}` (F9.1 ASCII-only).
+///
+/// Rules: non-empty, `/` separators only, no absolute/drive prefix, no empty/`.`/`..`
+/// segments, must start with `assets/`, and every byte is a conservative ASCII
+/// path character (`A-Za-z0-9._-/`). Rejects backslashes and non-ASCII.
+pub fn validateAssetUrlPath(path: []const u8) LayoutError!void {
+    if (path.len == 0) return error.InvalidAssetUrl;
+    if (path[0] == '/' or path[0] == '\\') return error.InvalidAssetUrl;
+    if (path.len >= 2 and path[1] == ':') return error.InvalidAssetUrl;
+    if (!std.mem.startsWith(u8, path, "assets/")) return error.InvalidAssetUrl;
+    if (path.len == "assets/".len) return error.InvalidAssetUrl;
+
+    var start: usize = 0;
+    while (start <= path.len) {
+        const slash = std.mem.indexOfScalarPos(u8, path, start, '/') orelse path.len;
+        const seg = path[start..slash];
+        if (seg.len == 0) return error.InvalidAssetUrl;
+        if (std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, "..")) return error.InvalidAssetUrl;
+        for (seg) |c| {
+            const ok = (c >= 'a' and c <= 'z') or
+                (c >= 'A' and c <= 'Z') or
+                (c >= '0' and c <= '9') or
+                c == '.' or c == '_' or c == '-';
+            if (!ok) return error.InvalidAssetUrl;
+        }
+        if (slash >= path.len) break;
+        start = slash + 1;
+    }
+}
+
+/// Immutable multi-slot closed plan of a layout template (e.g. `layouts/main.html`).
 ///
 /// Segment slices are views into `raw`. Keep the `Layout` (and the allocator
 /// that owns `raw`) alive for the full duration of all `writePage` calls.
@@ -101,10 +152,16 @@ pub const Layout = struct {
     raw: []const u8,
     segments: [max_segments]Segment = undefined,
     segment_count: usize = 0,
+    /// Theme-relative paths from each `asset_url` segment (views into `raw`).
+    asset_paths: [max_asset_urls][]const u8 = undefined,
+    asset_path_count: usize = 0,
     has_nav: bool = false,
     has_breadcrumb: bool = false,
     has_title: bool = false,
     has_toc: bool = false,
+    has_metadata: bool = false,
+    has_footer: bool = false,
+    has_asset_url: bool = false,
 
     /// Content-only convenience: bytes before the single `{{content}}`.
     /// Empty when the layout has other slots (use `segments` instead).
@@ -112,7 +169,7 @@ pub const Layout = struct {
     /// Content-only convenience: bytes after the single `{{content}}`.
     suffix: []const u8 = "",
 
-    /// Split known markers. Missing/duplicate/unknown → hard error.
+    /// Split known markers into a closed plan. Missing/duplicate/unknown → hard error.
     pub fn split(raw: []const u8) LayoutError!Layout {
         var layout: Layout = .{ .raw = raw };
         var seen_content = false;
@@ -120,6 +177,8 @@ pub const Layout = struct {
         var seen_breadcrumb = false;
         var seen_title = false;
         var seen_toc = false;
+        var seen_metadata = false;
+        var seen_footer = false;
 
         var pos: usize = 0;
         while (pos < raw.len) {
@@ -163,6 +222,24 @@ pub const Layout = struct {
                 seen_toc = true;
                 layout.has_toc = true;
                 try layout.appendSlot(.toc);
+            } else if (std.mem.eql(u8, token, metadata_marker)) {
+                if (seen_metadata) return error.DuplicateLayoutMarker;
+                seen_metadata = true;
+                layout.has_metadata = true;
+                try layout.appendSlot(.metadata);
+            } else if (std.mem.eql(u8, token, footer_marker)) {
+                if (seen_footer) return error.DuplicateLayoutMarker;
+                seen_footer = true;
+                layout.has_footer = true;
+                try layout.appendSlot(.footer);
+            } else if (std.mem.startsWith(u8, token, asset_url_prefix) and std.mem.endsWith(u8, token, "}}")) {
+                // `{{asset-url PATH}}` — single space after the helper name.
+                const inner = token[asset_url_prefix.len .. token.len - 2];
+                const path = std.mem.trim(u8, inner, " \t");
+                if (path.len != inner.len or path.len == 0) return error.InvalidAssetUrl;
+                if (std.mem.indexOfAny(u8, path, " \t") != null) return error.InvalidAssetUrl;
+                try validateAssetUrlPath(path);
+                try layout.appendAssetUrl(path);
             } else {
                 return error.UnknownLayoutMarker;
             }
@@ -172,7 +249,9 @@ pub const Layout = struct {
         if (!seen_content) return error.MissingContentMarker;
 
         // Content-only convenience prefix/suffix for legacy three-write tests.
-        if (!layout.has_nav and !layout.has_breadcrumb and !layout.has_title and !layout.has_toc) {
+        if (!layout.has_nav and !layout.has_breadcrumb and !layout.has_title and !layout.has_toc and
+            !layout.has_metadata and !layout.has_footer and !layout.has_asset_url)
+        {
             if (layout.segment_count == 3 and
                 layout.segments[0] == .static and
                 layout.segments[1] == .slot and layout.segments[1].slot == .content and
@@ -216,8 +295,22 @@ pub const Layout = struct {
         self.segment_count += 1;
     }
 
+    fn appendAssetUrl(self: *Layout, path: []const u8) LayoutError!void {
+        if (self.asset_path_count >= max_asset_urls) return error.TooManyAssetUrls;
+        if (self.segment_count >= max_segments) return error.TooManyLayoutSegments;
+        self.asset_paths[self.asset_path_count] = path;
+        self.asset_path_count += 1;
+        self.segments[self.segment_count] = .{ .asset_url = path };
+        self.segment_count += 1;
+        self.has_asset_url = true;
+    }
+
     pub fn segmentsSlice(self: *const Layout) []const Segment {
         return self.segments[0..self.segment_count];
+    }
+
+    pub fn assetPaths(self: *const Layout) []const []const u8 {
+        return self.asset_paths[0..self.asset_path_count];
     }
 };
 
@@ -335,10 +428,16 @@ pub fn writePageWithSlotsOpts(
     const w = &file_writer.interface;
 
     // Sequential writes of existing slices — no full-page mega-string.
+    var asset_i: usize = 0;
     for (layout.segmentsSlice()) |seg| {
         switch (seg) {
             .static => |s| try w.writeAll(s),
             .slot => |slot| try w.writeAll(slots.forSlot(slot)),
+            .asset_url => {
+                if (asset_i >= slots.asset_hrefs.len) return error.InvalidAssetUrl;
+                try w.writeAll(slots.asset_hrefs[asset_i]);
+                asset_i += 1;
+            },
         }
     }
     try w.flush();
@@ -428,10 +527,16 @@ pub fn spliceToHold(layout: Layout, html_body: []const u8, sink: *HoldUntilFlush
 }
 
 pub fn spliceToHoldSlots(layout: Layout, slots: SlotValues, sink: *HoldUntilFlush) !void {
+    var asset_i: usize = 0;
     for (layout.segmentsSlice()) |seg| {
         switch (seg) {
             .static => |s| try sink.writeAll(s),
             .slot => |slot| try sink.writeAll(slots.forSlot(slot)),
+            .asset_url => {
+                if (asset_i >= slots.asset_hrefs.len) return error.InvalidAssetUrl;
+                try sink.writeAll(slots.asset_hrefs[asset_i]);
+                asset_i += 1;
+            },
         }
     }
     try sink.flush();
@@ -583,6 +688,49 @@ test "layout multi-slot nav breadcrumb title toc" {
     try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{toc}}{{toc}}{{content}}"));
     try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{nav}}{{nav}}{{content}}"));
     try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{nope}}{{content}}"));
+}
+
+test "layout metadata footer and asset-url plan" {
+    const raw =
+        \\<link href="{{asset-url assets/css/docs.css}}">{{metadata}}{{footer}}{{content}}
+    ;
+    const layout = try Layout.split(raw);
+    try std.testing.expect(layout.has_metadata);
+    try std.testing.expect(layout.has_footer);
+    try std.testing.expect(layout.has_asset_url);
+    try std.testing.expectEqual(@as(usize, 1), layout.asset_path_count);
+    try std.testing.expectEqualStrings("assets/css/docs.css", layout.assetPaths()[0]);
+
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{metadata}}{{metadata}}{{content}}"));
+    try std.testing.expectError(error.DuplicateLayoutMarker, Layout.split("{{footer}}{{footer}}{{content}}"));
+    try std.testing.expectError(error.InvalidAssetUrl, Layout.split("{{asset-url ../escape.css}}{{content}}"));
+    try std.testing.expectError(error.InvalidAssetUrl, Layout.split("{{asset-url /abs.css}}{{content}}"));
+    try std.testing.expectError(error.InvalidAssetUrl, Layout.split("{{asset-url css/docs.css}}{{content}}"));
+    try std.testing.expectError(error.InvalidAssetUrl, Layout.split("{{asset-url assets/café.css}}{{content}}"));
+    try std.testing.expectError(error.InvalidAssetUrl, Layout.split("{{asset-url  assets/a.css}}{{content}}"));
+    try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{asset-url}}{{content}}"));
+}
+
+test "writePage resolves asset-url slots in order" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-assemble-asset-url", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    var out = try cwd.openDir(io, work, .{});
+    defer out.close(io);
+
+    const layout = try Layout.split("<link href=\"{{asset-url assets/css/a.css}}\">{{content}}");
+    try writePageWithSlots(io, out, "guides/page.html", layout, .{
+        .content = "BODY",
+        .asset_hrefs = &.{"../assets/css/a.css"},
+    });
+    const got = try readAllFile(io, out, "guides/page.html", gpa);
+    defer gpa.free(got);
+    try std.testing.expectEqualStrings("<link href=\"../assets/css/a.css\">BODY", got);
 }
 
 test "static layout fixtures missing and duplicate" {

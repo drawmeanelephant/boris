@@ -52,6 +52,7 @@ const include_mod = @import("include.zig");
 const wikilink = @import("wikilink.zig");
 const json_out = @import("json_out.zig");
 const pipeline = @import("pipeline.zig");
+const theme_mod = @import("theme.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -218,8 +219,46 @@ pub fn loadLayoutOnce(
         error.DuplicateLayoutMarker => return error.LayoutDuplicateMarker,
         error.UnknownLayoutMarker => return error.LayoutUnknownMarker,
         error.TooManyLayoutSegments => return error.LayoutUnknownMarker,
+        error.InvalidAssetUrl => return error.LayoutInvalidAssetUrl,
+        error.TooManyAssetUrls => return error.LayoutInvalidAssetUrl,
         else => |e| return e,
     };
+}
+
+/// F9.1 closed metadata fragment: status, parent, tags when set (escaped).
+/// Title is owned by `{{title}}`; entity id is not repeated as chrome.
+/// Empty string when no set fields.
+fn renderMetadata(allocator: std.mem.Allocator, page: *const DurablePage) ![]const u8 {
+    const has_status = page.status != null;
+    const has_parent = if (page.parent) |p| p.len > 0 else false;
+    const has_tags = page.tags.len > 0;
+    if (!has_status and !has_parent and !has_tags) return "";
+
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(allocator);
+    try buf.appendSlice(allocator, "<dl class=\"page-metadata\">\n");
+    if (page.status) |st| {
+        try buf.appendSlice(allocator, "  <div><dt>Status</dt><dd>");
+        try html_nav.appendEscaped(&buf, allocator, st.name());
+        try buf.appendSlice(allocator, "</dd></div>\n");
+    }
+    if (page.parent) |parent| {
+        if (parent.len > 0) {
+            try buf.appendSlice(allocator, "  <div><dt>Parent</dt><dd>");
+            try html_nav.appendEscaped(&buf, allocator, parent);
+            try buf.appendSlice(allocator, "</dd></div>\n");
+        }
+    }
+    if (page.tags.len > 0) {
+        try buf.appendSlice(allocator, "  <div><dt>Tags</dt><dd>");
+        for (page.tags, 0..) |tag, i| {
+            if (i > 0) try buf.appendSlice(allocator, ", ");
+            try html_nav.appendEscaped(&buf, allocator, tag);
+        }
+        try buf.appendSlice(allocator, "</dd></div>\n");
+    }
+    try buf.appendSlice(allocator, "</dl>\n");
+    return try buf.toOwnedSlice(allocator);
 }
 
 /// Discover pages and promote durable frontmatter into `db` (PageDb retain).
@@ -323,6 +362,36 @@ pub fn renderAndPublishPageWithSiteAndHeadings(
     site: ?*const FrozenSite,
     heading_index: ?*const wikilink.HeadingIndex,
 ) !void {
+    return renderAndPublishPageWithTheme(
+        io,
+        gpa,
+        content_dir,
+        dist_dir,
+        page,
+        layout,
+        doc_arena,
+        options,
+        page_index,
+        site,
+        heading_index,
+        null,
+    );
+}
+
+pub fn renderAndPublishPageWithTheme(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    dist_dir: Io.Dir,
+    page: *const DurablePage,
+    layout: assemble.Layout,
+    doc_arena: *std.heap.ArenaAllocator,
+    options: CompileOptions,
+    page_index: usize,
+    site: ?*const FrozenSite,
+    heading_index: ?*const wikilink.HeadingIndex,
+    theme: ?*const theme_mod.ThemeBundle,
+) !void {
     const arena = doc_arena.allocator();
 
     const source = try readFileAlloc(io, content_dir, page.source_path, arena);
@@ -388,6 +457,20 @@ pub fn renderAndPublishPageWithSiteAndHeadings(
 
     if (layout.has_toc) {
         slots.toc = try html_toc.renderToc(arena, html);
+    }
+    if (layout.has_metadata) {
+        slots.metadata = try renderMetadata(arena, page);
+    }
+    if (layout.has_footer) {
+        slots.footer = if (theme) |t| t.footer() else "";
+    }
+    if (layout.has_asset_url) {
+        const paths = layout.assetPaths();
+        var hrefs = try arena.alloc([]const u8, paths.len);
+        for (paths, 0..) |ap, i| {
+            hrefs[i] = try identity.relativeHref(arena, page.output_path, ap);
+        }
+        slots.asset_hrefs = hrefs;
     }
 
     if (site) |s| {
@@ -690,6 +773,15 @@ fn isContentCompileFailure(err: anyerror) bool {
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
         error.LayoutUnknownMarker,
+        error.LayoutInvalidAssetUrl,
+        error.AssetNotFound,
+        error.AssetCollision,
+        error.AssetSymlink,
+        error.AssetPathEscape,
+        error.ThemeRootMissing,
+        error.InvalidThemePath,
+        error.ThemeSymlink,
+        error.FooterSymlink,
         => true,
         else => false,
     };
@@ -813,6 +905,7 @@ const ParallelContext = struct {
     is_dirty: []const bool,
     site: ?*const FrozenSite,
     heading_index: ?*const wikilink.HeadingIndex,
+    theme: ?*const theme_mod.ThemeBundle,
 
     // Thread coordination
     mutex: std.Io.Mutex = std.Io.Mutex.init,
@@ -846,7 +939,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
 
         if (ctx.is_dirty[page_index]) {
             const page = &ctx.db.items()[page_index];
-            renderAndPublishPageWithSiteAndHeadings(
+            renderAndPublishPageWithTheme(
                 ctx.io,
                 ctx.gpa,
                 ctx.content_dir,
@@ -858,6 +951,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
                 page_index,
                 ctx.site,
                 ctx.heading_index,
+                ctx.theme,
             ) catch |err| {
                 ctx.mutex.lockUncancelable(ctx.io);
                 if (ctx.shared_error == null) {
@@ -1201,6 +1295,30 @@ fn compilePagesInner(
     var stage_dir = try cwd.openDir(io, stage_rel, .{ .iterate = true });
     defer stage_dir.close(io);
 
+    // F9.1 theme: derive root from layout path (legacy `layouts/…` → no theme).
+    const theme_root = theme_mod.themeRootFromLayoutPath(options.layout_path) orelse "";
+    if (layout.has_asset_url and theme_root.len == 0) return error.ThemeRootMissing;
+    var theme_bundle = try theme_mod.loadThemeBundle(io, gpa, cwd, theme_root);
+    defer theme_bundle.deinit();
+    try theme_mod.requireReferencedAssets(&theme_bundle, layout.assetPaths());
+    {
+        var outs: std.ArrayList([]const u8) = .empty;
+        defer outs.deinit(gpa);
+        try outs.ensureTotalCapacity(gpa, db.len());
+        for (db.items()) |p| try outs.append(gpa, p.output_path);
+        try theme_mod.checkAssetPageCollisions(theme_bundle.assets, outs.items);
+    }
+    // Always publish theme assets into staging (target-owned; not shared).
+    try theme_mod.copyAssetsToOutput(io, stage_dir, theme_bundle.assets);
+
+    const theme_material = try theme_mod.referencedAssetMaterial(
+        gpa,
+        &theme_bundle,
+        layout.assetPaths(),
+        layout.has_footer,
+    );
+    defer gpa.free(theme_material);
+
     // Own shared state when the caller did not supply one (single-target).
     var local_shared: ?SharedCompileState = null;
     defer if (local_shared) |*s| s.deinit();
@@ -1311,7 +1429,7 @@ fn compilePagesInner(
             inc_with_ref[inc_views.len] = ref_material;
         }
 
-        const fp_bytes = cache.computePageFingerprint(
+        const fp_bytes = cache.computePageFingerprintTheme(
             options.target_name,
             options.layout_path,
             page.entity_id,
@@ -1319,6 +1437,7 @@ fn compilePagesInner(
             inc_with_ref,
             layout_bytes,
             nav_material,
+            theme_material,
         );
         fingerprints[page_idx] = try fingerprintHex(fp_bytes, gpa);
 
@@ -1386,6 +1505,7 @@ fn compilePagesInner(
             .is_dirty = is_dirty,
             .site = site,
             .heading_index = &heading_index,
+            .theme = &theme_bundle,
         };
 
         const num_workers = @min(options.jobs, db.len());
@@ -1447,7 +1567,7 @@ fn compilePagesInner(
             stats.pages_attempted += 1;
 
             if (is_dirty[page_index]) {
-                try renderAndPublishPageWithSiteAndHeadings(
+                try renderAndPublishPageWithTheme(
                     io,
                     gpa,
                     content_dir,
@@ -1459,6 +1579,7 @@ fn compilePagesInner(
                     page_index,
                     site,
                     &heading_index,
+                    &theme_bundle,
                 );
                 stats.pages_written += 1;
                 if (!options.quiet) {
@@ -4125,4 +4246,598 @@ test "Feature 9 HTML: no fragment links skips heading-index Apex work path" {
         .quiet = true,
     });
     try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
+}
+
+test "F9.1 theme-site fixture: slots, page-relative asset URLs, footer" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dist = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f91-theme-site", .{tmp.sub_path});
+    defer gpa.free(dist);
+
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/theme-site/content",
+        .dist_dir = dist,
+        .layout_path = "docs/contracts/fixtures/theme-site/experimental-theme/layouts/main.html",
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 5), stats.pages_written);
+
+    // jobs > 1 path must produce the same acceptance surface
+    const dist_jobs = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f91-theme-site-jobs", .{tmp.sub_path});
+    defer gpa.free(dist_jobs);
+    const stats_jobs = try compileHtmlSite(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/theme-site/content",
+        .dist_dir = dist_jobs,
+        .layout_path = "docs/contracts/fixtures/theme-site/experimental-theme/layouts/main.html",
+        .quiet = true,
+        .jobs = 4,
+    });
+    try std.testing.expectEqual(@as(usize, 5), stats_jobs.pages_written);
+
+    // index → assets/css/docs.css (same depth)
+    const index_path = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist});
+    defer gpa.free(index_path);
+    const index_html = try readFileAlloc(io, cwd, index_path, gpa);
+    defer gpa.free(index_html);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "href=\"assets/css/docs.css\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "page-metadata") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "site-footer__copy") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "Acme Platform") != null);
+
+    // nested page → ../assets/css/docs.css
+    const guide_path = try std.fmt.allocPrint(gpa, "{s}/guides/getting-started.html", .{dist});
+    defer gpa.free(guide_path);
+    const guide_html = try readFileAlloc(io, cwd, guide_path, gpa);
+    defer gpa.free(guide_html);
+    try std.testing.expect(std.mem.indexOf(u8, guide_html, "href=\"../assets/css/docs.css\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, guide_html, "Getting Started") != null);
+    try std.testing.expect(std.mem.indexOf(u8, guide_html, "page-toc") != null);
+
+    // Asset bytes identical to theme input
+    const out_css = try std.fmt.allocPrint(gpa, "{s}/assets/css/docs.css", .{dist});
+    defer gpa.free(out_css);
+    const copied = try readFileAlloc(io, cwd, out_css, gpa);
+    defer gpa.free(copied);
+    const theme_css = try readFileAlloc(io, cwd, "docs/contracts/fixtures/theme-site/experimental-theme/assets/css/docs.css", gpa);
+    defer gpa.free(theme_css);
+    try std.testing.expectEqualStrings(theme_css, copied);
+}
+
+test "F9.1 multi-target themes isolate assets" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f91-multi-theme", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    // Shared content
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\status: published
+        \\tags: [docs]
+        \\---
+        \\
+        \\# Home
+        \\
+    );
+
+    // Theme A
+    try writeTreeFile(io, work, "theme-a/layouts/main.html",
+        \\<html><link href="{{asset-url assets/css/a.css}}">{{footer}}{{content}}</html>
+    );
+    try writeTreeFile(io, work, "theme-a/footer.html", "FOOTER-A");
+    try writeTreeFile(io, work, "theme-a/assets/css/a.css", "/* theme-a */");
+
+    // Theme B
+    try writeTreeFile(io, work, "theme-b/layouts/main.html",
+        \\<html><link href="{{asset-url assets/css/b.css}}">{{footer}}{{content}}</html>
+    );
+    try writeTreeFile(io, work, "theme-b/footer.html", "FOOTER-B");
+    try writeTreeFile(io, work, "theme-b/assets/css/b.css", "/* theme-b */");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout_a = try std.fmt.allocPrint(gpa, "{s}/theme-a/layouts/main.html", .{work});
+    defer gpa.free(layout_a);
+    const layout_b = try std.fmt.allocPrint(gpa, "{s}/theme-b/layouts/main.html", .{work});
+    defer gpa.free(layout_b);
+    const out_a = try std.fmt.allocPrint(gpa, "{s}/dist/a", .{work});
+    defer gpa.free(out_a);
+    const out_b = try std.fmt.allocPrint(gpa, "{s}/dist/b", .{work});
+    defer gpa.free(out_b);
+
+    try compileHtmlSiteMulti(io, gpa, &.{
+        .{ .name = "a", .output_dir = out_a, .layout_path = layout_a },
+        .{ .name = "b", .output_dir = out_b, .layout_path = layout_b },
+    }, .{
+        .content_root = content,
+        .layout_path = layout_a,
+        .quiet = true,
+    });
+
+    const path_css_a = try std.fmt.allocPrint(gpa, "{s}/assets/css/a.css", .{out_a});
+    defer gpa.free(path_css_a);
+    const css_a = try readFileAlloc(io, cwd, path_css_a, gpa);
+    defer gpa.free(css_a);
+    try std.testing.expectEqualStrings("/* theme-a */", css_a);
+
+    const path_css_b = try std.fmt.allocPrint(gpa, "{s}/assets/css/b.css", .{out_b});
+    defer gpa.free(path_css_b);
+    const css_b = try readFileAlloc(io, cwd, path_css_b, gpa);
+    defer gpa.free(css_b);
+    try std.testing.expectEqualStrings("/* theme-b */", css_b);
+
+    // Target A must not receive B's CSS
+    const leak = try std.fmt.allocPrint(gpa, "{s}/assets/css/b.css", .{out_a});
+    defer gpa.free(leak);
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, leak, .{}));
+
+    const path_html_a = try std.fmt.allocPrint(gpa, "{s}/index.html", .{out_a});
+    defer gpa.free(path_html_a);
+    const html_a = try readFileAlloc(io, cwd, path_html_a, gpa);
+    defer gpa.free(html_a);
+    try std.testing.expect(std.mem.indexOf(u8, html_a, "FOOTER-A") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html_a, "FOOTER-B") == null);
+}
+
+test "F9.1 asset collision with page output fails loudly" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f91-collision", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/assets/css/docs.md",
+        \\---
+        \\title: Collides
+        \\---
+        \\
+        \\# Collides
+        \\
+    );
+    try writeTreeFile(io, work, "theme/layouts/main.html",
+        \\<html><link href="{{asset-url assets/css/docs.css}}">{{content}}</html>
+    );
+    try writeTreeFile(io, work, "theme/assets/css/docs.css", "body{}");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/theme/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    // Page output is assets/css/docs.html — not css collision with .css.
+    // Force collision: invent an asset path equal to page html output.
+    // Entity id assets/css/docs → assets/css/docs.html. Place asset at that path.
+    const theme_assets = try std.fmt.allocPrint(gpa, "{s}/theme/assets", .{work});
+    defer gpa.free(theme_assets);
+    try cwd.deleteTree(io, theme_assets);
+    try writeTreeFile(io, work, "theme/assets/css/docs.html", "not-a-real-css");
+    try writeTreeFile(io, work, "theme/layouts/main.html",
+        \\<html><link href="{{asset-url assets/css/docs.html}}">{{content}}</html>
+    );
+
+    try std.testing.expectError(error.AssetCollision, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    }));
+}
+
+test "F9.1 referenced asset change invalidates page fingerprint material" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f91-asset-fp", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+    );
+    try writeTreeFile(io, work, "theme/layouts/main.html",
+        \\<html><link href="{{asset-url assets/css/a.css}}">{{content}}</html>
+    );
+    try writeTreeFile(io, work, "theme/assets/css/a.css", "v1");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/theme/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .incremental = true,
+    });
+    // Second build should cache (0 pages written if fingerprints match)
+    const stats_cached = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .incremental = true,
+    });
+    try std.testing.expectEqual(@as(usize, 0), stats_cached.pages_written);
+
+    // Change asset bytes
+    try writeTreeFile(io, work, "theme/assets/css/a.css", "v2");
+    const stats_dirty = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .incremental = true,
+    });
+    try std.testing.expectEqual(@as(usize, 1), stats_dirty.pages_written);
+
+    const css_path = try std.fmt.allocPrint(gpa, "{s}/assets/css/a.css", .{dist});
+    defer gpa.free(css_path);
+    const css = try readFileAlloc(io, cwd, css_path, gpa);
+    defer gpa.free(css);
+    try std.testing.expectEqualStrings("v2", css);
+}
+
+test "F9.1 legacy layouts/main.html still renders without theme assets" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dist = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f91-legacy", .{tmp.sub_path});
+    defer gpa.free(dist);
+
+    // Use real sample content + default layout when present
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = "content",
+        .dist_dir = dist,
+        .layout_path = "layouts/main.html",
+        .quiet = true,
+    });
+    try std.testing.expect(stats.pages_written > 0);
+
+    const index_path = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist});
+    defer gpa.free(index_path);
+    const html = try readFileAlloc(io, cwd, index_path, gpa);
+    defer gpa.free(html);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<main>") != null);
+    // No managed assets/ tree required for legacy layout
+    const assets = try std.fmt.allocPrint(gpa, "{s}/assets", .{dist});
+    defer gpa.free(assets);
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, assets, .{}));
+}
+
+// ---------------------------------------------------------------------------
+// F9.1 adversarial fixtures + determinism (theme path)
+// ---------------------------------------------------------------------------
+
+fn expectDirTreesEqual(io: Io, gpa: std.mem.Allocator, left_rel: []const u8, right_rel: []const u8) !void {
+    const cwd = Io.Dir.cwd();
+    var left = try cwd.openDir(io, left_rel, .{ .iterate = true });
+    defer left.close(io);
+    var right = try cwd.openDir(io, right_rel, .{ .iterate = true });
+    defer right.close(io);
+
+    var seen: std.StringHashMapUnmanaged(void) = .{};
+    defer {
+        var it = seen.keyIterator();
+        while (it.next()) |k| gpa.free(k.*);
+        seen.deinit(gpa);
+    }
+
+    var walker = try left.walkSelectively(gpa);
+    defer walker.deinit();
+    while (try walker.next(io)) |entry| {
+        if (entry.kind == .directory) {
+            try walker.enter(io, entry);
+            continue;
+        }
+        if (entry.kind != .file) continue;
+        // Skip cache manifest for optional compare callers; include all by default.
+        const path_owned = try gpa.dupe(u8, entry.path);
+        try seen.put(gpa, path_owned, {});
+        const a = try readFileAlloc(io, left, entry.path, gpa);
+        defer gpa.free(a);
+        const b = try readFileAlloc(io, right, entry.path, gpa);
+        defer gpa.free(b);
+        try std.testing.expectEqualSlices(u8, a, b);
+    }
+
+    // Ensure right has no extra files
+    var walker_r = try right.walkSelectively(gpa);
+    defer walker_r.deinit();
+    while (try walker_r.next(io)) |entry| {
+        if (entry.kind == .directory) {
+            try walker_r.enter(io, entry);
+            continue;
+        }
+        if (entry.kind != .file) continue;
+        try std.testing.expect(seen.contains(entry.path));
+    }
+}
+
+test "F9.1 adversarial: missing asset fails before publish" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dist = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/adv-missing", .{tmp.sub_path});
+    defer gpa.free(dist);
+
+    try std.testing.expectError(error.AssetNotFound, compileHtmlSite(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/theme-adversarial/missing-asset/content",
+        .dist_dir = dist,
+        .layout_path = "docs/contracts/fixtures/theme-adversarial/missing-asset/theme/layouts/main.html",
+        .quiet = true,
+    }));
+}
+
+test "F9.1 adversarial: asset-url without theme root fails" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dist = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/adv-no-theme", .{tmp.sub_path});
+    defer gpa.free(dist);
+
+    // Bare `layouts/…` is the only path form with null theme root (contract).
+    // Write a temporary layout under repo `layouts/` and remove it after.
+    const layout_path = "layouts/.boris-f91-theme-root-missing.html";
+    try cwd.writeFile(io, .{
+        .sub_path = layout_path,
+        .data = "<html><link href=\"{{asset-url assets/css/docs.css}}\">{{content}}</html>",
+    });
+    defer cwd.deleteFile(io, layout_path) catch {};
+
+    try std.testing.expectEqual(@as(?[]const u8, null), theme_mod.themeRootFromLayoutPath(layout_path));
+    try std.testing.expectError(error.ThemeRootMissing, compileHtmlSite(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/theme-adversarial/theme-root-missing/content",
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    }));
+
+    // Nested `…/layouts/…` derives a theme root; empty assets → AssetNotFound (not ThemeRootMissing).
+    try std.testing.expectError(error.AssetNotFound, compileHtmlSite(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/theme-adversarial/theme-root-missing/content",
+        .dist_dir = dist,
+        .layout_path = "docs/contracts/fixtures/theme-adversarial/theme-root-missing/layouts/main.html",
+        .quiet = true,
+    }));
+}
+
+test "F9.1 adversarial: unsafe asset-url layouts fail at load" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dist = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/adv-unsafe", .{tmp.sub_path});
+    defer gpa.free(dist);
+
+    const cases = [_][]const u8{
+        "docs/contracts/fixtures/theme-adversarial/unsafe-layout/theme-escape-dotdot/layouts/main.html",
+        "docs/contracts/fixtures/theme-adversarial/unsafe-layout/theme-absolute/layouts/main.html",
+        "docs/contracts/fixtures/theme-adversarial/unsafe-layout/theme-backslash/layouts/main.html",
+        "docs/contracts/fixtures/theme-adversarial/unsafe-layout/theme-no-assets-prefix/layouts/main.html",
+    };
+    for (cases) |lp| {
+        try std.testing.expectError(error.LayoutInvalidAssetUrl, compileHtmlSite(io, gpa, .{
+            .content_root = "docs/contracts/fixtures/theme-adversarial/unsafe-layout/content",
+            .dist_dir = dist,
+            .layout_path = lp,
+            .quiet = true,
+        }));
+        // No published tree
+        const index_path = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist});
+        defer gpa.free(index_path);
+        try std.testing.expectError(error.FileNotFound, cwd.access(io, index_path, .{}));
+    }
+}
+
+test "F9.1 adversarial: metadata and title HTML-escape hostile frontmatter" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dist = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/adv-meta-esc", .{tmp.sub_path});
+    defer gpa.free(dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/theme-adversarial/metadata-escape/content",
+        .dist_dir = dist,
+        .layout_path = "docs/contracts/fixtures/theme-adversarial/metadata-escape/theme/layouts/main.html",
+        .quiet = true,
+    });
+
+    const index_path = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist});
+    defer gpa.free(index_path);
+    const html = try readFileAlloc(io, cwd, index_path, gpa);
+    defer gpa.free(html);
+
+    // Escaped in title and metadata sinks
+    try std.testing.expect(std.mem.indexOf(u8, html, "&lt;b&gt;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "&amp;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "x&lt;script&gt;") != null);
+    // Must not emit raw markup from title/tags into chrome sinks
+    try std.testing.expect(std.mem.indexOf(u8, html, "<title>A <b>Bold</b>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "x<script>") == null);
+}
+
+test "F9.1 adversarial: fixture collision tree fails" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const dist = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/adv-coll", .{tmp.sub_path});
+    defer gpa.free(dist);
+
+    try std.testing.expectError(error.AssetCollision, compileHtmlSite(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/theme-adversarial/collision/content",
+        .dist_dir = dist,
+        .layout_path = "docs/contracts/fixtures/theme-adversarial/collision/theme/layouts/main.html",
+        .quiet = true,
+    }));
+}
+
+test "F9.1 determinism: theme-site full vs incremental and jobs byte-identical" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const base = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/f91-det", .{tmp.sub_path});
+    defer gpa.free(base);
+
+    const content = "docs/contracts/fixtures/theme-site/content";
+    const layout = "docs/contracts/fixtures/theme-site/experimental-theme/layouts/main.html";
+
+    const full_a = try std.fmt.allocPrint(gpa, "{s}/full-a", .{base});
+    defer gpa.free(full_a);
+    const full_b = try std.fmt.allocPrint(gpa, "{s}/full-b", .{base});
+    defer gpa.free(full_b);
+    const jobs = try std.fmt.allocPrint(gpa, "{s}/jobs", .{base});
+    defer gpa.free(jobs);
+    const inc = try std.fmt.allocPrint(gpa, "{s}/inc", .{base});
+    defer gpa.free(inc);
+
+    _ = try compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = full_a, .layout_path = layout, .quiet = true, .jobs = 1 });
+    _ = try compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = full_b, .layout_path = layout, .quiet = true, .jobs = 1 });
+    try expectDirTreesEqual(io, gpa, full_a, full_b);
+
+    _ = try compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = jobs, .layout_path = layout, .quiet = true, .jobs = 4 });
+    try expectDirTreesEqual(io, gpa, full_a, jobs);
+
+    // Seed with incremental=true so the cache manifest is written; then no-op.
+    // (Non-incremental builds do not write `.boris-cache/manifest.json`.)
+    _ = try compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = inc, .layout_path = layout, .quiet = true, .incremental = true });
+    const stats_noop = try compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = inc, .layout_path = layout, .quiet = true, .incremental = true });
+    try std.testing.expectEqual(@as(usize, 0), stats_noop.pages_written);
+    // Compare HTML + assets (manifest may differ only if present under .boris-cache — exclude via selective check)
+    const pages = [_][]const u8{
+        "index.html",
+        "guides.html",
+        "guides/getting-started.html",
+        "reference.html",
+        "reference/configuration.html",
+        "assets/css/docs.css",
+    };
+    const cwd = Io.Dir.cwd();
+    for (pages) |rel| {
+        const pa = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ full_a, rel });
+        defer gpa.free(pa);
+        const pb = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ inc, rel });
+        defer gpa.free(pb);
+        const a = try readFileAlloc(io, cwd, pa, gpa);
+        defer gpa.free(a);
+        const b = try readFileAlloc(io, cwd, pb, gpa);
+        defer gpa.free(b);
+        try std.testing.expectEqualSlices(u8, a, b);
+    }
+}
+
+test "F9.1 footer change dirties pages; unreferenced asset does not" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/f91-footer-unref", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+    );
+    try writeTreeFile(io, work, "theme/layouts/main.html",
+        \\<html>{{footer}}<link href="{{asset-url assets/css/used.css}}">{{content}}</html>
+    );
+    try writeTreeFile(io, work, "theme/footer.html", "FOOTER-V1");
+    try writeTreeFile(io, work, "theme/assets/css/used.css", "used-v1");
+    try writeTreeFile(io, work, "theme/assets/css/unused.css", "unused-v1");
+
+    const layout = try std.fmt.allocPrint(gpa, "{s}/theme/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+    });
+    const noop = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+    });
+    try std.testing.expectEqual(@as(usize, 0), noop.pages_written);
+
+    // Unreferenced asset change: pages stay cached; asset file still republished.
+    try writeTreeFile(io, work, "theme/assets/css/unused.css", "unused-v2");
+    const after_unref = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+    });
+    try std.testing.expectEqual(@as(usize, 0), after_unref.pages_written);
+    const unused_path = try std.fmt.allocPrint(gpa, "{s}/assets/css/unused.css", .{dist});
+    defer gpa.free(unused_path);
+    const unused_bytes = try readFileAlloc(io, cwd, unused_path, gpa);
+    defer gpa.free(unused_bytes);
+    try std.testing.expectEqualStrings("unused-v2", unused_bytes);
+
+    // Footer change dirties every page using the layout.
+    try writeTreeFile(io, work, "theme/footer.html", "FOOTER-V2");
+    const after_footer = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+    });
+    try std.testing.expectEqual(@as(usize, 1), after_footer.pages_written);
+    const index_path = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist});
+    defer gpa.free(index_path);
+    const html = try readFileAlloc(io, cwd, index_path, gpa);
+    defer gpa.free(html);
+    try std.testing.expect(std.mem.indexOf(u8, html, "FOOTER-V2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "FOOTER-V1") == null);
 }

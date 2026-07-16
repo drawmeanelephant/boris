@@ -272,6 +272,15 @@ fn mapHtmlError(
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
         error.LayoutUnknownMarker,
+        error.LayoutInvalidAssetUrl,
+        error.AssetNotFound,
+        error.AssetCollision,
+        error.AssetSymlink,
+        error.AssetPathEscape,
+        error.ThemeRootMissing,
+        error.InvalidThemePath,
+        error.ThemeSymlink,
+        error.FooterSymlink,
         => {
             if (!quiet) {
                 std.debug.print("error: content or layout failure: {s}\n", .{@errorName(err)});
