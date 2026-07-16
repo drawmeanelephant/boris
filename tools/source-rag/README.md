@@ -122,7 +122,7 @@ the byte sizes differ. Empty groups are still emitted with valid bundle metadata
 
 ### Directories (when present under `--root`)
 
-`src`, `docs`, `content`, `layouts`, `scripts`, `tools`, `vendor`, `test`, `SUPPORT`
+`src`, `docs`, `content`, `layouts`, `scripts`, `tools`, `test`, `SUPPORT`
 
 ### Root files (when present)
 
@@ -142,6 +142,7 @@ the byte sizes differ. Empty groups are still emitted with valid bundle metadata
 | Build / temp | `zig-out`, `dist`, `test-output`, `.boris`, `.release-gate` |
 | Product RAG dumps (top-level only) | `rag/`, `rag1/`, `rag2/` |
 | This tool’s default out (top-level) | `source-rag/` |
+| Vendored dependencies (top-level only) | `vendor/` |
 | Nested product-ish names kept | `docs/rag/**`, `tools/source-rag/**` |
 | Junk / binary | `.DS_Store`, files with NUL in the first 8KiB |
 | Oversized | larger than `--max-bytes` |
