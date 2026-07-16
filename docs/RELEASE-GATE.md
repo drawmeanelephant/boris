@@ -17,7 +17,15 @@ zig build run -- --input test/fixtures/html/content --html-dir .tmp/boris-dist
 zig build run -- --input content --quiet   # default HTML → dist/
 zig build package              # optional; review tar under packages/ (not ship-blocking)
 ./scripts/release-gate.sh      # preferred one-shot mechanical gate
+./scripts/test-release-gate-git-detection.sh  # step 7 worktree detection smoke
 ```
+
+Step **7** (no tracked/disallowed generated product output) detects a real Git
+checkout with `git rev-parse --is-inside-work-tree`, not `[[ -d .git ]]`. Linked
+worktrees store `.git` as a file (gitdir pointer); the directory check would
+skip cleanliness there. The approved/generated path policy is unchanged.
+`./scripts/test-release-gate-git-detection.sh` creates a temporary linked
+worktree and asserts the Git-native predicate still enables the check.
 
 CI (`.github/workflows/ci.yml`) pins **Zig 0.16.0** and runs `zig build`,
 `zig build test`, and `zig build test-apex-hostile` on `ubuntu-latest` and

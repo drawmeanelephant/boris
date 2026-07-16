@@ -718,8 +718,14 @@ run_bad unsupported-syntax EFRONTMATTER
 # Intent: product *output* (dist/rag/.boris/…) must not be committed, and any
 # leftover untracked generated trees must be only the approved gitignored set.
 # Ordinary source may be untracked during WIP checkouts — that is not a gate fail.
+#
+# Git detection must use a Git-native worktree check. Linked worktrees have
+# `.git` as a *file* (gitdir pointer), not a directory — so `[[ -d .git ]]`
+# falsely skips this step. Prefer `git rev-parse --is-inside-work-tree`.
 note "7. No untracked generated output except approved directories"
-if ! command -v git >/dev/null || [[ ! -d .git ]]; then
+if ! command -v git >/dev/null; then
+  pass "skip git cleanliness (git not on PATH)"
+elif ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   pass "skip git cleanliness (not a git checkout)"
 else
   is_generated_path() {
