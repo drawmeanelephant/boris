@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Boris v0.1 release gate — mechanical checks for reviewers and CI.
+# Boris release gate — mechanical checks for reviewers and CI.
 # See docs/RELEASE-GATE.md.
 set -euo pipefail
 
@@ -27,9 +27,11 @@ note "0. Preconditions"
 command -v zig >/dev/null || { echo "zig not on PATH"; exit 1; }
 ZIG_VER="$(zig version | tr -d '\r')"
 ZON_MIN="$(sed -n 's/.*minimum_zig_version *= *"\([^"]*\)".*/\1/p' build.zig.zon | head -1)"
+PRODUCT_VERSION="$(sed -n 's/.*\.version *= *"\([^"]*\)".*/\1/p' build.zig.zon | head -1)"
 CI_ZIG="$(sed -n 's/.*version: *\([0-9][0-9.]*\).*/\1/p' .github/workflows/ci.yml | head -1)"
 pass "zig version: ${ZIG_VER}"
 pass "build.zig.zon minimum_zig_version: ${ZON_MIN}"
+pass "build.zig.zon product version: ${PRODUCT_VERSION}"
 pass "CI pin: ${CI_ZIG}"
 
 # --- 8. Zig version alignment (document + package + CI) -----------------
@@ -108,13 +110,11 @@ if [[ ! -f "${META}" ]]; then
   fail "missing catalog_meta.json"
 else
   # Fixed compact shape (schema v1)
-  EXPECT_META='{"format":"boris-rag","schema_version":1,"boris_version":"0.4.0"}'
+  EXPECT_META="{\"format\":\"boris-rag\",\"schema_version\":1,\"boris_version\":\"${PRODUCT_VERSION}\"}"
   GOT_META="$(tr -d '\n' < "${META}" | sed 's/[[:space:]]//g')"
   # Allow trailing newline already stripped; tolerate pretty vs compact by
   # requiring keys and values rather than exact whitespace.
-  if grep -q '"format"[[:space:]]*:[[:space:]]*"boris-rag"' "${META}" \
-    && grep -q '"schema_version"[[:space:]]*:[[:space:]]*1' "${META}" \
-    && grep -q '"boris_version"[[:space:]]*:[[:space:]]*"0\.4\.0"' "${META}"; then
+  if [[ "${GOT_META}" == "${EXPECT_META}" ]]; then
     pass "catalog_meta.json fields (format/schema_version/boris_version)"
   else
     fail "catalog_meta.json shape mismatch: $(cat "${META}")"

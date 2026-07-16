@@ -1,7 +1,7 @@
 {
   "format": "boris-documentation-intelligence",
   "schemaVersion": "0.1.0",
-  "compiler": "boris/0.4.0",
+  "compiler": "boris/0.5.0",
   "input": "docs/contracts/fixtures/documentation-intelligence/content",
   "summary": {
     "pages": 4,
