@@ -725,6 +725,12 @@ test "wordpress: mapWpStatus" {
     try std.testing.expectEqualStrings("published", wordpress.mapWpStatus("publish"));
     try std.testing.expectEqualStrings("draft", wordpress.mapWpStatus("draft"));
     try std.testing.expectEqualStrings("draft", wordpress.mapWpStatus("private"));
+    try std.testing.expectEqualStrings("draft", wordpress.mapWpStatus("future"));
+    try std.testing.expect(wordpress.statusFeatureCode("publish", "") == null);
+    try std.testing.expectEqualStrings("status_future", wordpress.statusFeatureCode("future", "").?);
+    try std.testing.expectEqualStrings("status_private", wordpress.statusFeatureCode("private", "").?);
+    try std.testing.expectEqualStrings("status_password_protected", wordpress.statusFeatureCode("publish", "s3cret").?);
+    try std.testing.expectEqualStrings("status_draft", wordpress.statusFeatureCode("draft", "").?);
 }
 
 test "wordpress: htmlToMarkdown basic" {
@@ -811,7 +817,7 @@ test "wordpress: fixture conversion is deterministic and preserves export" {
 
     // Format and sections
     try std.testing.expect(std.mem.indexOf(u8, ja, "\"format\": \"boris-wordpress-migration-lab\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ja, "\"schema_version\": 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ja, "\"schema_version\": 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, ja, "\"pages\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, ja, "\"parent_relationships\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, ja, "\"links\"") != null);
@@ -820,6 +826,8 @@ test "wordpress: fixture conversion is deterministic and preserves export" {
     try std.testing.expect(std.mem.indexOf(u8, ja, "\"features\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, ja, "\"slug_conflicts\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, ja, "\"unsupported_items\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ja, "\"comments\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ja, "\"taxonomy_stats\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, ja, "\"human_review\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, ja, "\"provenance\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, ja, "\"proposed_frontmatter\"") != null);
@@ -937,4 +945,117 @@ test "wordpress: adversarial corpus preserves every item and reports collisions"
     try std.testing.expectEqualStrings(media_before, media_after);
     Io.Dir.cwd().deleteTree(io, out_a) catch {};
     Io.Dir.cwd().deleteTree(io, out_b) catch {};
+}
+
+test "wordpress: wptt-derived hostile gaps (status, comments, formats, empty, unicode)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const out_a = "fixtures/.test-wptt-derived-a";
+    const out_b = "fixtures/.test-wptt-derived-b";
+    Io.Dir.cwd().deleteTree(io, out_a) catch {};
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
+
+    var fixture = try Io.Dir.cwd().openDir(io, "fixtures/wptt-derived", .{});
+    defer fixture.close(io);
+    const source_before = try wordpress.readFileAlloc(io, fixture, "export.xml", gpa);
+    defer gpa.free(source_before);
+
+    try wordpress.run(io, gpa, .{
+        .wxr_path = "fixtures/wptt-derived/export.xml",
+        .media_dir = "fixtures/wptt-derived/media",
+        .out_dir = out_a,
+        .quiet = true,
+    });
+    try wordpress.run(io, gpa, .{
+        .wxr_path = "fixtures/wptt-derived/export.xml",
+        .media_dir = "fixtures/wptt-derived/media",
+        .out_dir = out_b,
+        .quiet = true,
+    });
+
+    var a = try Io.Dir.cwd().openDir(io, out_a, .{});
+    defer a.close(io);
+    var b = try Io.Dir.cwd().openDir(io, out_b, .{});
+    defer b.close(io);
+    const report_a = try wordpress.readFileAlloc(io, a, "report.json", gpa);
+    defer gpa.free(report_a);
+    const report_b = try wordpress.readFileAlloc(io, b, "report.json", gpa);
+    defer gpa.free(report_b);
+    try std.testing.expectEqualStrings(report_a, report_b);
+
+    // Schema 2 sections
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "\"schema_version\": 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "\"taxonomy_stats\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "\"comments\"") != null);
+
+    // Statuses
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "status_draft") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "status_future") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "status_private") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "status_password_protected") != null);
+
+    // Empty title/body, long title, unicode
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "empty_title") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "empty_body") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "long_title") != null);
+
+    // Post format is unsupported artifact, not a tag
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "post_format") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "post-format-gallery") == null or
+        std.mem.indexOf(u8, report_a, "\"code\": \"post_format\"") != null);
+
+    // Comments / trackbacks not in page body
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "wp_comments") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "wp_trackback") != null or std.mem.indexOf(u8, report_a, "trackback") != null);
+    const hello = try wordpress.readFileAlloc(io, a, "content/posts/hello.md", gpa);
+    defer gpa.free(hello);
+    try std.testing.expect(std.mem.indexOf(u8, hello, "wp:comment") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hello, "This is a comment body") == null);
+    const preserved_comments = try wordpress.readFileAlloc(io, a, "content/_preserved/comments-1.md", gpa);
+    defer gpa.free(preserved_comments);
+    try std.testing.expect(std.mem.indexOf(u8, preserved_comments, "This is a comment body") != null);
+    try std.testing.expect(std.mem.indexOf(u8, preserved_comments, "trackback") != null);
+
+    // Menus + shortcodes + widgets + gallery preserved as unsupported
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "wp_menu") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "shortcode_gallery") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "wp_widget") != null or std.mem.indexOf(u8, report_a, "shortcode") != null);
+
+    // Parent/child within one-level boundary
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "deep_page_hierarchy") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "\"confidence\": \"medium\"") != null);
+
+    // Media audio/video + missing + present
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "shortcode_embed_media") != null or std.mem.indexOf(u8, report_a, "html_audio_or_video") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "missing_media") != null);
+
+    // Title entities decoded (not left as &amp;)
+    const special = try wordpress.readFileAlloc(io, a, "content/posts/title-special.md", gpa);
+    defer gpa.free(special);
+    try std.testing.expect(std.mem.indexOf(u8, special, "&amp;") == null);
+    try std.testing.expect(std.mem.indexOf(u8, special, "A & B") != null or std.mem.indexOf(u8, special, "A &amp; B") == null);
+
+    // High-cardinality taxonomy reporting
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "high_cardinality") != null);
+
+    // Unicode title preserved
+    const unicode = try wordpress.readFileAlloc(io, a, "content/posts/unicode-cafe.md", gpa);
+    defer gpa.free(unicode);
+    try std.testing.expect(std.mem.indexOf(u8, unicode, "Café") != null or std.mem.indexOf(u8, unicode, "Caf") != null);
+
+    // Source immutability
+    const source_after = try wordpress.readFileAlloc(io, fixture, "export.xml", gpa);
+    defer gpa.free(source_after);
+    try std.testing.expectEqualStrings(source_before, source_after);
+
+    Io.Dir.cwd().deleteTree(io, out_a) catch {};
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
+}
+
+test "wordpress: excerptUtf8 does not split multi-byte chars" {
+    const gpa = std.testing.allocator;
+    // "café" is 5 bytes; cut mid-sequence must not leave dangling continuation
+    const s = try wordpress.excerptUtf8(gpa, "café-extra", 4);
+    defer gpa.free(s);
+    try std.testing.expect(std.unicode.utf8ValidateSlice(s));
 }

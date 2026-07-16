@@ -330,7 +330,7 @@ content/
   posts/<slug>.md       # migrated posts
   pages/<slug>.md       # migrated pages
   _preserved/<type>-<id>.md   # attachments, custom post types, etc.
-report.json             # machine-readable (schema_version 1)
+report.json             # machine-readable (schema_version 2)
 REPORT.md               # human-readable twin
 ```
 
@@ -339,7 +339,8 @@ Every generated Markdown file includes:
 - **Boris closed frontmatter** (`title`, optional `parent`, `status`, `tags`)
 - A **`boris-migration-provenance`** HTML comment (source export path, post_id,
   type, guid, author, dates, conversion class)
-- Converted body (HTML → Markdown where possible; raw HTML/shortcodes retained)
+- Converted body (HTML → Markdown where possible; raw HTML/shortcodes retained as
+  unsupported artifacts — never silently expanded offline)
 
 ### Conversion classes
 
@@ -347,25 +348,51 @@ Every generated Markdown file includes:
 |-------|---------|
 | `exact` | No material transform (empty/plain body or synthetic stubs) |
 | `transformed` | Known HTML/block mappings applied |
-| `unsupported` | Shortcodes, embeds, custom blocks, or non post/page types preserved raw |
-| `human_review` | Author judgment needed (drafts, missing media, deep hierarchy, slug conflicts, unresolved links) |
+| `unsupported` | Shortcodes, embeds, comments, menus, post formats, widgets, or non post/page types preserved raw — **not** silent meaning-preserving Markdown |
+| `human_review` | Author judgment needed (statuses, missing media, deep hierarchy, empty/long titles, slug conflicts, unresolved links) |
 
 Overall page class is the **worst** feature rank. Features are also listed
 individually under `features` in `report.json`.
+
+### WordPress statuses
+
+| `wp:status` / flag | Boris `status` | Feature code |
+|--------------------|----------------|--------------|
+| `publish` | `published` | _(none)_ |
+| `draft` / `auto-draft` | `draft` | `status_draft` |
+| `future` (scheduled) | `draft` | `status_future` |
+| `private` | `draft` | `status_private` |
+| `pending` | `draft` | `status_pending` |
+| non-empty `wp:post_password` | `draft` (even if publish) | `status_password_protected` |
+
+### Explicit unsupported / review artifacts
+
+These must **not** be folded into ordinary page Markdown as if converted:
+
+| Artifact | Treatment |
+|----------|-----------|
+| Comments / trackbacks / pingbacks | `comments[]` + `content/_preserved/comments-<post_id>.md`; page body untouched |
+| `nav_menu_item` | `_preserved/` + feature `wp_menu` |
+| Post formats (`domain="post_format"`) | Feature `post_format`; **not** added to Boris `tags` |
+| Widgets | Feature `wp_widget`; raw shortcode/HTML kept |
+| Shortcodes (`[gallery]`, `[audio]`, `[video]`, …) | Left raw; classification `unsupported` |
+| Empty title / empty body / long title | `empty_title`, `empty_body`, `long_title` |
 
 ### Report sections (WordPress)
 
 | Section | Contents |
 |---------|----------|
 | `authors` | WXR authors |
-| `taxonomies` | Categories and tags from export |
+| `taxonomies` | Categories, tags, and non-duplicate `wp:term` rows (e.g. `nav_menu`) |
+| `taxonomy_stats` | Counts + `high_cardinality` vs threshold (schema 2) |
 | `pages` | Posts/pages (+ trunk stubs): dates, authors, slugs, categories, tags, proposed frontmatter, conversion |
 | `parent_relationships` | `wp:post_parent` → proposed Boris `parent` (one-hop graph notes) |
 | `links` | Internal (and site-local) hrefs with resolution status |
-| `media_references` / `missing_media` | Image/attachment refs vs optional `--media` tree |
-| `features` | Raw HTML, shortcodes, embeds, galleries, Gutenberg blocks |
+| `media_references` / `missing_media` | Image/audio/video/attachment refs vs optional `--media` tree |
+| `features` | Raw HTML, shortcodes, embeds, galleries, comments, formats, statuses |
 | `slug_conflicts` | Duplicate `post_name` values |
-| `unsupported_items` | Custom types/attachments preserved under `_preserved/` |
+| `unsupported_items` | Custom types/attachments/comments preserved under `_preserved/` |
+| `comments` | Comment/trackback/pingback index (schema 2); not page bodies |
 | `human_review` | Aggregated review queue |
 | `provenance` | One record per generated file |
 
@@ -380,10 +407,23 @@ individually under `features` in `report.json`.
 Boris only allows **one** parent hop (Trunk ← Satellite). Deep WordPress page
 trees are flattened with `human_review` notes.
 
-### Fixture
+### Fixtures
 
-[`fixtures/mini-wxr/`](fixtures/mini-wxr/) — synthetic WXR + partial media tree.
-See its README for the coverage matrix.
+| Fixture | Role |
+|---------|------|
+| [`fixtures/mini-wxr/`](fixtures/mini-wxr/) | Small happy-path + shortcode/media/draft matrix |
+| [`fixtures/adversarial-wxr/`](fixtures/adversarial-wxr/) | Unicode, slug collisions, deep pages, duplicate media basenames |
+| [`fixtures/wptt-derived/`](fixtures/wptt-derived/) | Compact redistributable cases derived from WPTT Theme Unit Test gaps (statuses, comments, formats, menus, empty/long titles, taxonomy cardinality). **Does not** vendor the full upstream WXR |
+
+Hostile offline dogfood (operator machine, not CI):
+
+```bash
+# Download WPTT outside the repo — do not commit
+curl -fsSL -o /tmp/themeunittestdata.wordpress.xml \
+  https://raw.githubusercontent.com/WPTT/theme-unit-test/master/themeunittestdata.wordpress.xml
+zig build run -- --mode=wordpress \
+  --wxr=/tmp/themeunittestdata.wordpress.xml --out=/tmp/wp-wptt-out
+```
 
 ---
 
@@ -409,13 +449,14 @@ Fixture: [`fixtures/mini-astro/`](fixtures/mini-astro/).
 
 ## Schema note
 
-WordPress `report.json` top-level fields (stable order):
+WordPress `report.json` top-level fields (stable order, **schema 2**):
 
 ```text
 format, schema_version, tool_version, source_export, media_dir,
 site_title, base_site_url, base_blog_url, summary, authors, taxonomies,
-pages, parent_relationships, links, media_references, missing_media,
-features, slug_conflicts, unsupported_items, human_review, provenance
+taxonomy_stats, pages, parent_relationships, links, media_references,
+missing_media, features, slug_conflicts, unsupported_items, comments,
+human_review, provenance
 ```
 
 Obsidian `report.json` top-level fields (stable order):

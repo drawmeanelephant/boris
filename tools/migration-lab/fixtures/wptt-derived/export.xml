@@ -1,0 +1,658 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Derived redistributable fixture for boris-migration-lab WordPress mode.
+  Inspired by gaps found while running the official WPTT Theme Unit Test WXR
+  offline (not vendored here — GPL, large, remote media).
+  Covers: statuses, empty title/body, long/Unicode titles, comments/trackbacks,
+  post formats, menus, widgets, shortcodes, parent/child depth, media, taxonomy
+  cardinality. License of this synthetic file: CC0 / public domain test data.
+-->
+<rss version="2.0"
+	xmlns:excerpt="http://wordpress.org/export/1.2/excerpt/"
+	xmlns:content="http://purl.org/rss/1.0/modules/content/"
+	xmlns:wfw="http://wellformedweb.org/CommentAPI/"
+	xmlns:dc="http://purl.org/dc/elements/1.1/"
+	xmlns:wp="http://wordpress.org/export/1.2/">
+<channel>
+	<title>WPTT-derived Lab</title>
+	<link>https://example.test</link>
+	<description>Synthetic derived hostile WXR</description>
+	<language>en-US</language>
+	<wp:wxr_version>1.2</wp:wxr_version>
+	<wp:base_site_url>https://example.test</wp:base_site_url>
+	<wp:base_blog_url>https://example.test</wp:base_blog_url>
+
+	<wp:author>
+		<wp:author_id>1</wp:author_id>
+		<wp:author_login><![CDATA[admin]]></wp:author_login>
+		<wp:author_email><![CDATA[admin@example.test]]></wp:author_email>
+		<wp:author_display_name><![CDATA[Admin]]></wp:author_display_name>
+		<wp:author_first_name><![CDATA[Ad]]></wp:author_first_name>
+		<wp:author_last_name><![CDATA[Min]]></wp:author_last_name>
+	</wp:author>
+
+	<wp:category>
+		<wp:term_id>1</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-1]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 1]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>2</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-2]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 2]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>3</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-3]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 3]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>4</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-4]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 4]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>5</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-5]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 5]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>6</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-6]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 6]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>7</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-7]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 7]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>8</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-8]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 8]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>9</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-9]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 9]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>10</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-10]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 10]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>11</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-11]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 11]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>12</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-12]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 12]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>13</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-13]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 13]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>14</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-14]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 14]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>15</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-15]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 15]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>16</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-16]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 16]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>17</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-17]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 17]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>18</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-18]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 18]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>19</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-19]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 19]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>20</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-20]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 20]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>21</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-21]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 21]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>22</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-22]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 22]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>23</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-23]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 23]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>24</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-24]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 24]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>25</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-25]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 25]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>26</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-26]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 26]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>27</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-27]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 27]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>28</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-28]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 28]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>29</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-29]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 29]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>30</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-30]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[cat-29]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 30]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>31</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-31]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[cat-30]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 31]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>32</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-32]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[cat-31]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 32]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>33</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-33]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[cat-32]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 33]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>34</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-34]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[cat-33]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 34]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>35</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-35]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[cat-34]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 35]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>36</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-36]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[cat-35]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 36]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>37</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-37]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[cat-36]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 37]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>38</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-38]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[cat-37]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 38]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>39</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-39]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[cat-38]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 39]]></wp:cat_name>
+	</wp:category>
+	<wp:category>
+		<wp:term_id>40</wp:term_id>
+		<wp:category_nicename><![CDATA[cat-40]]></wp:category_nicename>
+		<wp:category_parent><![CDATA[cat-39]]></wp:category_parent>
+		<wp:cat_name><![CDATA[Category 40]]></wp:cat_name>
+	</wp:category>
+	<wp:tag>
+		<wp:term_id>101</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-1]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 1]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>102</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-2]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 2]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>103</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-3]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 3]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>104</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-4]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 4]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>105</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-5]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 5]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>106</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-6]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 6]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>107</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-7]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 7]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>108</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-8]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 8]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>109</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-9]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 9]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>110</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-10]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 10]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>111</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-11]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 11]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>112</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-12]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 12]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>113</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-13]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 13]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>114</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-14]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 14]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>115</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-15]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 15]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>116</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-16]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 16]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>117</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-17]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 17]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>118</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-18]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 18]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>119</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-19]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 19]]></wp:tag_name>
+	</wp:tag>
+	<wp:tag>
+		<wp:term_id>120</wp:term_id>
+		<wp:tag_slug><![CDATA[tag-20]]></wp:tag_slug>
+		<wp:tag_name><![CDATA[Tag 20]]></wp:tag_name>
+	</wp:tag>
+	<wp:term>
+		<wp:term_id>500</wp:term_id>
+		<wp:term_taxonomy><![CDATA[nav_menu]]></wp:term_taxonomy>
+		<wp:term_slug><![CDATA[primary]]></wp:term_slug>
+		<wp:term_parent><![CDATA[]]></wp:term_parent>
+		<wp:term_name><![CDATA[Primary]]></wp:term_name>
+	</wp:term>
+
+	<!-- Published post with comments + trackback + shortcodes + media -->
+	<item>
+		<title><![CDATA[Hello]]></title>
+		<link>https://example.test/hello/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.test/?p=1</guid>
+		<content:encoded><![CDATA[<p>Hello body with image.</p>
+<img src="https://example.test/wp-content/uploads/2024/01/hero.png" alt="Hero"/>
+[gallery ids="10"]
+[audio mp3="https://example.test/wp-content/uploads/2024/01/missing-track.mp3"]
+[video mp4="https://example.test/wp-content/uploads/2024/01/missing-clip.mp4"]
+[widget id="text-1"]
+<audio controls src="https://example.test/wp-content/uploads/2024/01/missing-track.mp3"></audio>
+]]></content:encoded>
+		<excerpt:encoded><![CDATA[]]></excerpt:encoded>
+		<wp:post_id>1</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-15 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-15 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[hello]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:menu_order>0</wp:menu_order>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+		<category domain="category" nicename="cat-1"><![CDATA[Category 1]]></category>
+		<category domain="post_tag" nicename="tag-1"><![CDATA[Tag 1]]></category>
+		<wp:comment>
+			<wp:comment_id>101</wp:comment_id>
+			<wp:comment_author><![CDATA[Alice]]></wp:comment_author>
+			<wp:comment_author_email><![CDATA[a@example.test]]></wp:comment_author_email>
+			<wp:comment_author_url></wp:comment_author_url>
+			<wp:comment_date><![CDATA[2024-01-16 12:00:00]]></wp:comment_date>
+			<wp:comment_content><![CDATA[This is a comment body that must not become page Markdown.]]></wp:comment_content>
+			<wp:comment_approved><![CDATA[1]]></wp:comment_approved>
+			<wp:comment_type><![CDATA[comment]]></wp:comment_type>
+		</wp:comment>
+		<wp:comment>
+			<wp:comment_id>102</wp:comment_id>
+			<wp:comment_author><![CDATA[Remote Ping]]></wp:comment_author>
+			<wp:comment_author_email/>
+			<wp:comment_author_url>https://elsewhere.example/ping/</wp:comment_author_url>
+			<wp:comment_date><![CDATA[2024-01-16 13:00:00]]></wp:comment_date>
+			<wp:comment_content><![CDATA[[...] Trackback test. [...]]]></wp:comment_content>
+			<wp:comment_approved><![CDATA[1]]></wp:comment_approved>
+			<wp:comment_type>trackback</wp:comment_type>
+		</wp:comment>
+	</item>
+
+	<!-- Draft -->
+	<item>
+		<title><![CDATA[Draft Ideas]]></title>
+		<link>https://example.test/?p=2</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.test/?p=2</guid>
+		<content:encoded><![CDATA[<p>Not ready.</p>]]></content:encoded>
+		<wp:post_id>2</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-17 09:00:00]]></wp:post_date>
+		<wp:post_name><![CDATA[draft-ideas]]></wp:post_name>
+		<wp:status><![CDATA[draft]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+	</item>
+
+	<!-- Scheduled (future) -->
+	<item>
+		<title><![CDATA[Scheduled]]></title>
+		<link>https://example.test/?p=3</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.test/?p=3</guid>
+		<content:encoded><![CDATA[<p>Future post.</p>]]></content:encoded>
+		<wp:post_id>3</wp:post_id>
+		<wp:post_date><![CDATA[2030-01-01 12:00:00]]></wp:post_date>
+		<wp:post_name><![CDATA[scheduled]]></wp:post_name>
+		<wp:status><![CDATA[future]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+	</item>
+
+	<!-- Private -->
+	<item>
+		<title><![CDATA[Private Note]]></title>
+		<link>https://example.test/?p=4</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.test/?p=4</guid>
+		<content:encoded><![CDATA[<p>Secret-ish.</p>]]></content:encoded>
+		<wp:post_id>4</wp:post_id>
+		<wp:post_date><![CDATA[2024-02-01 08:00:00]]></wp:post_date>
+		<wp:post_name><![CDATA[private-note]]></wp:post_name>
+		<wp:status><![CDATA[private]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+	</item>
+
+	<!-- Password protected (publish + password) -->
+	<item>
+		<title><![CDATA[Protected Post]]></title>
+		<link>https://example.test/protected/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.test/?p=5</guid>
+		<content:encoded><![CDATA[<p>Password body.</p>]]></content:encoded>
+		<wp:post_id>5</wp:post_id>
+		<wp:post_date><![CDATA[2024-02-02 08:00:00]]></wp:post_date>
+		<wp:post_name><![CDATA[protected-post]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[s3cret]]></wp:post_password>
+	</item>
+
+	<!-- Empty title + empty body -->
+	<item>
+		<title><![CDATA[]]></title>
+		<link>https://example.test/?p=6</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.test/?p=6</guid>
+		<content:encoded><![CDATA[]]></content:encoded>
+		<wp:post_id>6</wp:post_id>
+		<wp:post_date><![CDATA[2024-02-03 08:00:00]]></wp:post_date>
+		<wp:post_name><![CDATA[untitled-empty]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+	</item>
+
+	<!-- Long title (Maori place name style from WPTT) + many categories -->
+	<item>
+		<title><![CDATA[Taumatawhakatangihangakoauauotamateaturipukakapikimaungahoronukupokaiwhenuakitanatahu]]></title>
+		<link>https://example.test/long-title/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.test/?p=7</guid>
+		<content:encoded><![CDATA[<p>Long title body.</p>]]></content:encoded>
+		<wp:post_id>7</wp:post_id>
+		<wp:post_date><![CDATA[2024-02-04 08:00:00]]></wp:post_date>
+		<wp:post_name><![CDATA[title-should-not-overflow]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<category domain="category" nicename="cat-1"><![CDATA[Category 1]]></category>
+		<category domain="category" nicename="cat-2"><![CDATA[Category 2]]></category>
+		<category domain="category" nicename="cat-3"><![CDATA[Category 3]]></category>
+		<category domain="category" nicename="cat-4"><![CDATA[Category 4]]></category>
+		<category domain="category" nicename="cat-5"><![CDATA[Category 5]]></category>
+		<category domain="category" nicename="cat-6"><![CDATA[Category 6]]></category>
+		<category domain="category" nicename="cat-7"><![CDATA[Category 7]]></category>
+		<category domain="category" nicename="cat-8"><![CDATA[Category 8]]></category>
+		<category domain="category" nicename="cat-9"><![CDATA[Category 9]]></category>
+		<category domain="category" nicename="cat-10"><![CDATA[Category 10]]></category>
+		<category domain="category" nicename="cat-11"><![CDATA[Category 11]]></category>
+		<category domain="category" nicename="cat-12"><![CDATA[Category 12]]></category>
+		<category domain="category" nicename="cat-13"><![CDATA[Category 13]]></category>
+		<category domain="category" nicename="cat-14"><![CDATA[Category 14]]></category>
+		<category domain="category" nicename="cat-15"><![CDATA[Category 15]]></category>
+		<category domain="category" nicename="cat-16"><![CDATA[Category 16]]></category>
+		<category domain="category" nicename="cat-17"><![CDATA[Category 17]]></category>
+	</item>
+
+	<!-- Special characters in title (entity-encoded like WPTT) -->
+	<item>
+		<title>Title With Special Characters A &amp; B &lt;C&gt; &#39;q&#39;</title>
+		<link>https://example.test/title-special/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.test/?p=8</guid>
+		<content:encoded><![CDATA[<p>Special title post.</p>]]></content:encoded>
+		<wp:post_id>8</wp:post_id>
+		<wp:post_date><![CDATA[2024-02-05 08:00:00]]></wp:post_date>
+		<wp:post_name><![CDATA[title-special]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+	</item>
+
+	<!-- Unicode café + post format gallery -->
+	<item>
+		<title><![CDATA[Café 🧪 Unicode]]></title>
+		<link>https://example.test/unicode-cafe/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.test/?p=9</guid>
+		<content:encoded><![CDATA[<p>Unicode body with café.</p>
+[gallery ids="10"]
+]]></content:encoded>
+		<wp:post_id>9</wp:post_id>
+		<wp:post_date><![CDATA[2024-02-06 08:00:00]]></wp:post_date>
+		<wp:post_name><![CDATA[unicode-cafe]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<category domain="post_format" nicename="post-format-gallery"><![CDATA[Gallery]]></category>
+		<category domain="category" nicename="cat-2"><![CDATA[Category 2]]></category>
+	</item>
+
+	<!-- Pages: About → Team → Engineering (deep hierarchy) -->
+	<item>
+		<title><![CDATA[About]]></title>
+		<link>https://example.test/about/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.test/?page_id=20</guid>
+		<content:encoded><![CDATA[<p>About page.</p>]]></content:encoded>
+		<wp:post_id>20</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-01 08:00:00]]></wp:post_date>
+		<wp:post_name><![CDATA[about]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[page]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+	</item>
+	<item>
+		<title><![CDATA[Team]]></title>
+		<link>https://example.test/about/team/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.test/?page_id=21</guid>
+		<content:encoded><![CDATA[<p>Team under About.</p>]]></content:encoded>
+		<wp:post_id>21</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-01 09:00:00]]></wp:post_date>
+		<wp:post_name><![CDATA[team]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>20</wp:post_parent>
+		<wp:post_type><![CDATA[page]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+	</item>
+	<item>
+		<title><![CDATA[Engineering]]></title>
+		<link>https://example.test/about/team/engineering/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.test/?page_id=22</guid>
+		<content:encoded><![CDATA[<p>Deep child under Team.</p>]]></content:encoded>
+		<wp:post_id>22</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-01 10:00:00]]></wp:post_date>
+		<wp:post_name><![CDATA[engineering]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>21</wp:post_parent>
+		<wp:post_type><![CDATA[page]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+	</item>
+
+	<!-- Attachment present -->
+	<item>
+		<title><![CDATA[hero]]></title>
+		<link>https://example.test/hello/hero/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.test/wp-content/uploads/2024/01/hero.png</guid>
+		<content:encoded><![CDATA[]]></content:encoded>
+		<wp:post_id>10</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-15 10:00:00]]></wp:post_date>
+		<wp:post_name><![CDATA[hero]]></wp:post_name>
+		<wp:status><![CDATA[inherit]]></wp:status>
+		<wp:post_parent>1</wp:post_parent>
+		<wp:post_type><![CDATA[attachment]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:attachment_url><![CDATA[https://example.test/wp-content/uploads/2024/01/hero.png]]></wp:attachment_url>
+	</item>
+
+	<!-- nav_menu_item -->
+	<item>
+		<title><![CDATA[Menu: About]]></title>
+		<link>https://example.test/about/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.test/?p=1100</guid>
+		<content:encoded><![CDATA[]]></content:encoded>
+		<wp:post_id>1100</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-01 00:00:00]]></wp:post_date>
+		<wp:post_name><![CDATA[menu-about]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[nav_menu_item]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<category domain="nav_menu" nicename="primary"><![CDATA[Primary]]></category>
+	</item>
+</channel>
+</rss>

@@ -10,8 +10,16 @@ const std = @import("std");
 const Io = std.Io;
 
 pub const format_id = "boris-wordpress-migration-lab";
-pub const schema_version: u32 = 1;
-pub const tool_version = "0.1.0";
+/// Schema 2 adds `comments` + `taxonomy_stats` report sections and refined feature codes.
+pub const schema_version: u32 = 2;
+pub const tool_version = "0.2.0";
+
+/// Site-level taxonomy count above which we emit high-cardinality reporting.
+pub const high_cardinality_taxonomy_threshold: usize = 50;
+/// Per-page category+tag count above which we flag high_cardinality_terms.
+pub const high_cardinality_terms_threshold: usize = 15;
+/// Title length (UTF-8 bytes) above which we flag long_title for human review.
+pub const long_title_threshold: usize = 80;
 
 pub const RunOptions = struct {
     /// Path to WXR/XML export file (never modified).
@@ -59,9 +67,21 @@ pub const ConversionClass = enum {
 // ---------------------------------------------------------------------------
 
 pub const CategoryRef = struct {
-    domain: []const u8, // "category" | "post_tag" | other
+    domain: []const u8, // "category" | "post_tag" | "post_format" | other
     nicename: []const u8,
     label: []const u8,
+};
+
+pub const WxrComment = struct {
+    comment_id: []const u8 = "",
+    author: []const u8 = "",
+    author_email: []const u8 = "",
+    author_url: []const u8 = "",
+    date: []const u8 = "",
+    content: []const u8 = "",
+    approved: []const u8 = "",
+    /// Empty or "comment" for ordinary comments; "pingback" / "trackback" for remote pings.
+    comment_type: []const u8 = "",
 };
 
 pub const WxrItem = struct {
@@ -82,8 +102,11 @@ pub const WxrItem = struct {
     menu_order: []const u8 = "0",
     post_type: []const u8 = "",
     is_sticky: []const u8 = "0",
+    /// Non-empty when the post is password-protected (often still status=publish).
+    post_password: []const u8 = "",
     attachment_url: []const u8 = "",
     categories: []CategoryRef = &.{},
+    comments: []WxrComment = &.{},
 };
 
 pub const WxrAuthor = struct {
@@ -206,6 +229,28 @@ pub const HumanReview = struct {
     codes: []const []const u8,
 };
 
+/// Comment/trackback/pingback artifacts — never written into page bodies as Markdown.
+pub const CommentRecord = struct {
+    parent_post_id: []const u8,
+    comment_id: []const u8,
+    author: []const u8,
+    comment_type: []const u8, // comment | pingback | trackback | other
+    date: []const u8,
+    approved: []const u8,
+    content_excerpt: []const u8,
+    preserved_path: []const u8,
+    classification: ConversionClass,
+};
+
+pub const TaxonomyStats = struct {
+    total: usize,
+    categories: usize,
+    tags: usize,
+    other: usize,
+    high_cardinality: bool,
+    threshold: usize,
+};
+
 pub const Report = struct {
     source_export: []const u8,
     media_dir: ?[]const u8,
@@ -214,6 +259,7 @@ pub const Report = struct {
     base_blog_url: []const u8,
     authors: []WxrAuthor,
     taxonomies: []WxrTaxonomy,
+    taxonomy_stats: TaxonomyStats,
     pages: []PageRecord,
     parent_relationships: []ParentRel,
     links: []LinkFinding,
@@ -222,6 +268,7 @@ pub const Report = struct {
     features: []FeatureFinding,
     slug_conflicts: []SlugConflict,
     unsupported_items: []UnsupportedItem,
+    comments: []CommentRecord,
     human_review: []HumanReview,
     provenance: []Provenance,
 };
@@ -480,7 +527,89 @@ fn parseTaxonomies(allocator: std.mem.Allocator, channel: []const u8) ![]WxrTaxo
         });
         from = close + "</wp:tag>".len;
     }
+    // Generic terms (nav_menu, post_format registry, custom taxonomies). Skip
+    // category/post_tag duplicates already captured above when possible.
+    from = 0;
+    while (from < channel.len) {
+        const open = std.mem.indexOfPos(u8, channel, from, "<wp:term>") orelse break;
+        const close = std.mem.indexOfPos(u8, channel, open, "</wp:term>") orelse break;
+        const block = channel[open .. close + "</wp:term>".len];
+        const taxonomy = extractElementImpl(block, "term_taxonomy");
+        // category/tag already listed via wp:category / wp:tag channel elements
+        if (!std.mem.eql(u8, taxonomy, "category") and !std.mem.eql(u8, taxonomy, "post_tag") and taxonomy.len > 0) {
+            try list.append(allocator, .{
+                .domain = try allocator.dupe(u8, taxonomy),
+                .nicename = try allocator.dupe(u8, extractElementImpl(block, "term_slug")),
+                .name = try allocator.dupe(u8, extractElementImpl(block, "term_name")),
+                .parent = try allocator.dupe(u8, extractElementImpl(block, "term_parent")),
+            });
+        }
+        from = close + "</wp:term>".len;
+    }
+    // Deterministic taxonomy order: domain then nicename
+    std.mem.sort(WxrTaxonomy, list.items, {}, struct {
+        fn less(_: void, a: WxrTaxonomy, b: WxrTaxonomy) bool {
+            const o = std.mem.order(u8, a.domain, b.domain);
+            if (o != .eq) return o == .lt;
+            return std.mem.order(u8, a.nicename, b.nicename) == .lt;
+        }
+    }.less);
     return try list.toOwnedSlice(allocator);
+}
+
+fn parseComments(allocator: std.mem.Allocator, item_xml: []const u8) ![]WxrComment {
+    var list: std.ArrayList(WxrComment) = .empty;
+    errdefer list.deinit(allocator);
+    var from: usize = 0;
+    while (from < item_xml.len) {
+        const open = std.mem.indexOfPos(u8, item_xml, from, "<wp:comment>") orelse break;
+        const close = std.mem.indexOfPos(u8, item_xml, open, "</wp:comment>") orelse break;
+        const block = item_xml[open .. close + "</wp:comment>".len];
+        var ctype = extractElementImpl(block, "comment_type");
+        if (ctype.len == 0) ctype = "comment";
+        try list.append(allocator, .{
+            .comment_id = try allocator.dupe(u8, extractElementImpl(block, "comment_id")),
+            .author = try allocator.dupe(u8, extractElementImpl(block, "comment_author")),
+            .author_email = try allocator.dupe(u8, extractElementImpl(block, "comment_author_email")),
+            .author_url = try allocator.dupe(u8, extractElementImpl(block, "comment_author_url")),
+            .date = try allocator.dupe(u8, extractElementImpl(block, "comment_date")),
+            .content = try allocator.dupe(u8, extractElementImpl(block, "comment_content")),
+            .approved = try allocator.dupe(u8, extractElementImpl(block, "comment_approved")),
+            .comment_type = try allocator.dupe(u8, ctype),
+        });
+        from = close + "</wp:comment>".len;
+    }
+    std.mem.sort(WxrComment, list.items, {}, struct {
+        fn less(_: void, a: WxrComment, b: WxrComment) bool {
+            const ai = std.fmt.parseInt(u64, a.comment_id, 10) catch std.math.maxInt(u64);
+            const bi = std.fmt.parseInt(u64, b.comment_id, 10) catch std.math.maxInt(u64);
+            if (ai != bi) return ai < bi;
+            return std.mem.order(u8, a.comment_id, b.comment_id) == .lt;
+        }
+    }.less);
+    return try list.toOwnedSlice(allocator);
+}
+
+fn commentTypeLabel(ctype: []const u8) []const u8 {
+    if (std.mem.eql(u8, ctype, "pingback")) return "pingback";
+    if (std.mem.eql(u8, ctype, "trackback")) return "trackback";
+    if (ctype.len == 0 or std.mem.eql(u8, ctype, "comment")) return "comment";
+    return "other";
+}
+
+fn featureCodeForCommentType(ctype: []const u8) []const u8 {
+    if (std.mem.eql(u8, ctype, "pingback")) return "wp_pingback";
+    if (std.mem.eql(u8, ctype, "trackback")) return "wp_trackback";
+    return "wp_comment";
+}
+
+/// Truncate to at most max_bytes without splitting a UTF-8 codepoint.
+pub fn excerptUtf8(allocator: std.mem.Allocator, input: []const u8, max_bytes: usize) ![]u8 {
+    if (input.len <= max_bytes) return try allocator.dupe(u8, input);
+    var end = max_bytes;
+    while (end > 0 and (input[end] & 0xC0) == 0x80) end -= 1;
+    if (end == 0) end = max_bytes;
+    return try std.fmt.allocPrint(allocator, "{s}…", .{input[0..end]});
 }
 
 pub fn parseWxr(allocator: std.mem.Allocator, xml: []const u8) !WxrDocument {
@@ -505,8 +634,11 @@ pub fn parseWxr(allocator: std.mem.Allocator, xml: []const u8) !WxrDocument {
         const block = hit.slice;
         from = hit.next;
         const cats = try parseCategoryTags(allocator, block);
+        const comments = try parseComments(allocator, block);
+        const raw_title = extractElementImpl(block, "title");
+        const decoded_title = try decodeEntities(allocator, raw_title);
         try items.append(allocator, .{
-            .title = try allocator.dupe(u8, extractElementImpl(block, "title")),
+            .title = decoded_title,
             .link = try allocator.dupe(u8, extractElementImpl(block, "link")),
             .pub_date = try allocator.dupe(u8, extractElementImpl(block, "pubDate")),
             .creator = try allocator.dupe(u8, extractElementImpl(block, "creator")),
@@ -523,8 +655,10 @@ pub fn parseWxr(allocator: std.mem.Allocator, xml: []const u8) !WxrDocument {
             .menu_order = try allocator.dupe(u8, extractElementImpl(block, "menu_order")),
             .post_type = try allocator.dupe(u8, extractElementImpl(block, "post_type")),
             .is_sticky = try allocator.dupe(u8, extractElementImpl(block, "is_sticky")),
+            .post_password = try allocator.dupe(u8, extractElementImpl(block, "post_password")),
             .attachment_url = try allocator.dupe(u8, extractElementImpl(block, "attachment_url")),
             .categories = cats,
+            .comments = comments,
         });
         // Fix content:encoded vs excerpt:encoded — extractElementImpl finds first "encoded".
         // Re-parse both explicitly.
@@ -612,13 +746,24 @@ pub fn sanitizeEntitySegment(allocator: std.mem.Allocator, slug: []const u8) ![]
     return try out.toOwnedSlice(allocator);
 }
 
+/// Map WordPress `wp:status` to Boris closed `status` values.
+/// `publish` → `published`; draft/pending/future/private/auto-draft → `draft`.
+/// Password-protected posts are handled separately (often still `publish` in WP).
 pub fn mapWpStatus(wp_status: []const u8) []const u8 {
     if (std.mem.eql(u8, wp_status, "publish")) return "published";
-    if (std.mem.eql(u8, wp_status, "draft") or std.mem.eql(u8, wp_status, "auto-draft") or
-        std.mem.eql(u8, wp_status, "pending") or std.mem.eql(u8, wp_status, "future") or
-        std.mem.eql(u8, wp_status, "private"))
-        return "draft";
+    // draft, auto-draft, pending, future (scheduled), private, trash, inherit, …
     return "draft";
+}
+
+/// Feature code for non-publish / special WP status values (empty when publish + no password).
+pub fn statusFeatureCode(wp_status: []const u8, post_password: []const u8) ?[]const u8 {
+    if (post_password.len > 0) return "status_password_protected";
+    if (std.mem.eql(u8, wp_status, "publish")) return null;
+    if (std.mem.eql(u8, wp_status, "future")) return "status_future";
+    if (std.mem.eql(u8, wp_status, "private")) return "status_private";
+    if (std.mem.eql(u8, wp_status, "draft") or std.mem.eql(u8, wp_status, "auto-draft")) return "status_draft";
+    if (std.mem.eql(u8, wp_status, "pending")) return "status_pending";
+    return "non_publish_status";
 }
 
 // ---------------------------------------------------------------------------
@@ -677,31 +822,41 @@ pub fn detectFeatures(allocator: std.mem.Allocator, content: []const u8) ![]Feat
             .message = "Embed/custom HTML blocks preserved as raw HTML",
         });
     }
-    // Shortcodes
+    // Shortcodes — never expanded to meaning-preserving Markdown offline.
     if (std.mem.indexOf(u8, content, "[gallery") != null) {
         try hits.append(allocator, .{
             .code = "shortcode_gallery",
             .class = .unsupported,
             .excerpt = "[gallery …]",
-            .message = "Gallery shortcode cannot be expanded offline; preserved raw",
+            .message = "Gallery shortcode cannot be expanded offline; preserved raw as unsupported artifact",
         });
     }
-    if (std.mem.indexOf(u8, content, "[caption") != null) {
+    if (std.mem.indexOf(u8, content, "[caption") != null or std.mem.indexOf(u8, content, "[wp_caption") != null) {
         try hits.append(allocator, .{
             .code = "shortcode_caption",
-            .class = .transformed,
+            .class = .unsupported,
             .excerpt = "[caption …]",
-            .message = "Caption shortcode unwrapped to image + italic caption when possible",
+            .message = "Caption shortcode preserved raw (not silently converted to Markdown)",
         });
     }
     if (std.mem.indexOf(u8, content, "[embed") != null or std.mem.indexOf(u8, content, "[video") != null or
-        std.mem.indexOf(u8, content, "[audio") != null)
+        std.mem.indexOf(u8, content, "[audio") != null or std.mem.indexOf(u8, content, "[playlist") != null)
     {
         try hits.append(allocator, .{
             .code = "shortcode_embed_media",
             .class = .unsupported,
-            .excerpt = "[embed|video|audio]",
+            .excerpt = "[embed|video|audio|playlist]",
             .message = "Media/embed shortcodes preserved raw (no network expansion)",
+        });
+    }
+    if (std.mem.indexOf(u8, content, "[widget") != null or std.mem.indexOf(u8, content, "<!-- wp:legacy-widget") != null or
+        std.mem.indexOf(u8, content, "class=\"widget") != null or std.mem.indexOf(u8, content, "class='widget") != null)
+    {
+        try hits.append(allocator, .{
+            .code = "wp_widget",
+            .class = .unsupported,
+            .excerpt = "widget",
+            .message = "Widget markup/shortcode is not a Boris page feature; preserved for human review",
         });
     }
     // Generic shortcode heuristic: [word ...]
@@ -710,7 +865,7 @@ pub fn detectFeatures(allocator: std.mem.Allocator, content: []const u8) ![]Feat
             .code = "shortcode_generic",
             .class = .unsupported,
             .excerpt = "[shortcode]",
-            .message = "One or more shortcodes remain in body",
+            .message = "One or more shortcodes remain as raw unsupported artifacts in body",
         });
     }
     if (std.mem.indexOf(u8, content, "<script") != null or std.mem.indexOf(u8, content, "<iframe") != null) {
@@ -719,6 +874,16 @@ pub fn detectFeatures(allocator: std.mem.Allocator, content: []const u8) ![]Feat
             .class = .human_review,
             .excerpt = "<script>|<iframe>",
             .message = "Script/iframe present; review for security and fit",
+        });
+    }
+    if (std.mem.indexOf(u8, content, "<audio") != null or std.mem.indexOf(u8, content, "<video") != null or
+        std.mem.indexOf(u8, content, "<source") != null)
+    {
+        try hits.append(allocator, .{
+            .code = "html_audio_or_video",
+            .class = .human_review,
+            .excerpt = "<audio>|<video>",
+            .message = "HTML audio/video elements need local media verification; preserved as HTML",
         });
     }
     if (std.mem.indexOf(u8, content, "<table") != null) {
@@ -1032,36 +1197,6 @@ fn collapseBlankLines(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     return try out.toOwnedSlice(allocator);
 }
 
-/// Preserve shortcodes that we cannot expand: leave them in the body.
-fn unwrapCaptionShortcodes(allocator: std.mem.Allocator, content: []const u8) ![]u8 {
-    // [caption ...]<img ...>text[/caption] → img md later + *text*
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    var i: usize = 0;
-    while (i < content.len) {
-        if (std.mem.startsWith(u8, content[i..], "[caption")) {
-            const close_open = std.mem.indexOfScalarPos(u8, content, i, ']') orelse {
-                try out.append(allocator, content[i]);
-                i += 1;
-                continue;
-            };
-            const end = std.mem.indexOfPos(u8, content, close_open, "[/caption]") orelse {
-                try out.appendSlice(allocator, content[i .. close_open + 1]);
-                i = close_open + 1;
-                continue;
-            };
-            const inner = content[close_open + 1 .. end];
-            try out.appendSlice(allocator, inner);
-            try out.appendSlice(allocator, "\n");
-            i = end + "[/caption]".len;
-            continue;
-        }
-        try out.append(allocator, content[i]);
-        i += 1;
-    }
-    return try out.toOwnedSlice(allocator);
-}
-
 // ---------------------------------------------------------------------------
 // Link + media extraction from converted / original body
 // ---------------------------------------------------------------------------
@@ -1073,9 +1208,16 @@ fn isExternalUrl(url: []const u8) bool {
 
 fn isMediaPath(url: []const u8) bool {
     if (std.mem.indexOf(u8, url, "wp-content/uploads/") != null) return true;
+    // Common CDN upload hosts from WP.com exports (offline; never fetched).
+    if (std.mem.indexOf(u8, url, ".files.wordpress.com/") != null) return true;
     const ext = fileExtension(url);
     if (ext.len == 0) return false;
-    const media_exts = [_][]const u8{ ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".pdf", ".mp4", ".mp3", ".zip" };
+    const media_exts = [_][]const u8{
+        ".png",  ".jpg",  ".jpeg", ".gif",  ".webp", ".svg",  ".pdf",
+        ".mp4",  ".m4v",  ".webm", ".ogv",  ".mov",
+        ".mp3",  ".ogg",  ".wav",  ".m4a",  ".aac",  ".flac",
+        ".zip",
+    };
     for (media_exts) |e| {
         if (std.ascii.eqlIgnoreCase(ext, e)) return true;
     }
@@ -1111,6 +1253,52 @@ pub fn mediaRelativeKey(url: []const u8) ?[]const u8 {
     return null;
 }
 
+fn mediaAlreadyListed(media: []const MediaRef, target: []const u8) bool {
+    for (media) |m| {
+        if (std.mem.eql(u8, m.referenced, target)) return true;
+    }
+    return false;
+}
+
+fn appendMediaRef(
+    allocator: std.mem.Allocator,
+    media: *std.ArrayList(MediaRef),
+    post_id: []const u8,
+    output: []const u8,
+    target: []const u8,
+) !void {
+    if (target.len == 0) return;
+    if (mediaAlreadyListed(media.items, target)) return;
+    try media.append(allocator, .{
+        .source_post_id = try allocator.dupe(u8, post_id),
+        .source_output = try allocator.dupe(u8, output),
+        .referenced = try allocator.dupe(u8, target),
+        .local_path = null,
+        .status = "pending",
+    });
+}
+
+/// Pull media URLs from remaining raw HTML attrs and shortcode attributes.
+fn extractRawMediaUrls(allocator: std.mem.Allocator, text: []const u8, post_id: []const u8, output: []const u8, media: *std.ArrayList(MediaRef)) !void {
+    // src="..." / href="..." when the target looks like media
+    const attrs = [_][]const u8{ "src=\"", "href=\"", "src='", "href='", "mp3=\"", "mp4=\"", "m4v=\"", "ogg=\"", "wav=\"", "poster=\"" };
+    for (attrs) |pat| {
+        var from: usize = 0;
+        while (std.mem.indexOfPos(u8, text, from, pat)) |idx| {
+            const start = idx + pat.len;
+            const quote: u8 = if (pat[pat.len - 1] == '\'') '\'' else '"';
+            const end = std.mem.indexOfScalarPos(u8, text, start, quote) orelse break;
+            const target = text[start..end];
+            if (isMediaPath(target) or std.mem.indexOf(u8, target, "wp-content/uploads/") != null or
+                std.mem.indexOf(u8, target, ".files.wordpress.com/") != null)
+            {
+                try appendMediaRef(allocator, media, post_id, output, target);
+            }
+            from = end + 1;
+        }
+    }
+}
+
 fn extractMarkdownLinks(allocator: std.mem.Allocator, body: []const u8, post_id: []const u8, output: []const u8) !struct { []LinkFinding, []MediaRef } {
     var links: std.ArrayList(LinkFinding) = .empty;
     errdefer links.deinit(allocator);
@@ -1128,14 +1316,10 @@ fn extractMarkdownLinks(allocator: std.mem.Allocator, body: []const u8, post_id:
         const target = body[rb + 2 .. re];
         if (target.len == 0) continue;
         if (is_img or isMediaPath(target)) {
-            try media.append(allocator, .{
-                .source_post_id = try allocator.dupe(u8, post_id),
-                .source_output = try allocator.dupe(u8, output),
-                .referenced = try allocator.dupe(u8, target),
-                .local_path = null,
-                .status = "pending",
-            });
-        } else if (isExternalUrl(target) and std.mem.indexOf(u8, target, "wp-content/uploads/") == null) {
+            try appendMediaRef(allocator, &media, post_id, output, target);
+        } else if (isExternalUrl(target) and std.mem.indexOf(u8, target, "wp-content/uploads/") == null and
+            std.mem.indexOf(u8, target, ".files.wordpress.com/") == null)
+        {
             // external non-media: skip from internal list but still note as external_skipped when site-local handled later
             try links.append(allocator, .{
                 .source_post_id = try allocator.dupe(u8, post_id),
@@ -1157,6 +1341,8 @@ fn extractMarkdownLinks(allocator: std.mem.Allocator, body: []const u8, post_id:
         }
         i = re;
     }
+    // Also scan remaining raw HTML / shortcode attrs for image/audio/video URLs.
+    try extractRawMediaUrls(allocator, body, post_id, output, &media);
     return .{ try links.toOwnedSlice(allocator), try media.toOwnedSlice(allocator) };
 }
 
@@ -1165,15 +1351,21 @@ fn extractMarkdownLinks(allocator: std.mem.Allocator, body: []const u8, post_id:
 // ---------------------------------------------------------------------------
 
 pub fn escapeFmValue(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
-    // Quote if contains special chars
+    // Quote if contains special chars (including HTML leftovers after entity decode).
     var needs_quote = false;
     for (value) |c| {
-        if (c == ':' or c == '#' or c == '"' or c == '[' or c == ']' or c == '\n' or c == ',') {
+        if (c == ':' or c == '#' or c == '"' or c == '\'' or c == '[' or c == ']' or c == '\n' or c == ',' or
+            c == '&' or c == '<' or c == '>' or c == '{' or c == '}' or c == '\\' or c == '`' or c == '!' or
+            c == '@' or c == '$' or c == '%' or c == '^' or c == '*' or c == '(' or c == ')' or c == '=' or
+            c == '+' or c == ';' or c == '?' or c == '/')
+        {
             needs_quote = true;
             break;
         }
     }
     if (!needs_quote and value.len > 0 and (value[0] == ' ' or value[value.len - 1] == ' ')) needs_quote = true;
+    // Non-ASCII (Unicode titles) are fine unquoted for Boris closed FM, but
+    // multi-byte with spaces already handled; keep simple ASCII check above.
     if (!needs_quote) return try allocator.dupe(u8, value);
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
@@ -1386,15 +1578,9 @@ pub fn convertItemBody(
         });
     }
 
-    // Unwrap captions then HTML→MD
-    const unwrapped = try unwrapCaptionShortcodes(allocator, raw);
-    defer allocator.free(unwrapped);
-    if (!std.mem.eql(u8, unwrapped, raw)) {
-        class = ConversionClass.worse(class, .transformed);
-        try appendUniqueCode(allocator, &codes, "shortcode_caption");
-    }
-
-    const md_pair = try htmlToMarkdown(allocator, unwrapped);
+    // Shortcodes stay in the body as raw unsupported artifacts — do not unwrap
+    // captions into pseudo-Markdown that looks meaning-preserving.
+    const md_pair = try htmlToMarkdown(allocator, raw);
     var body = md_pair[0];
     class = ConversionClass.worse(class, md_pair[1]);
 
@@ -1404,11 +1590,12 @@ pub fn convertItemBody(
         try appendUniqueCode(allocator, &codes, "shortcode_remaining");
     }
 
-    // Empty content is still exact empty
+    // Empty content: emit a blank body and let the caller flag empty_body.
     if (raw.len == 0 and body.len <= 1) {
-        class = .exact;
         allocator.free(body);
         body = try allocator.dupe(u8, "\n");
+        // exact empty body — empty_body feature is applied in run()
+        if (class.rank() <= ConversionClass.exact.rank()) class = .exact;
     }
 
     const link_media = try extractMarkdownLinks(allocator, body, item.post_id, output_path);
@@ -1478,6 +1665,9 @@ fn emitJson(gpa: std.mem.Allocator, report: Report) ![]u8 {
     try buf.print(gpa, "    \"features\": {d},\n", .{report.features.len});
     try buf.print(gpa, "    \"slug_conflicts\": {d},\n", .{report.slug_conflicts.len});
     try buf.print(gpa, "    \"unsupported_items\": {d},\n", .{report.unsupported_items.len});
+    try buf.print(gpa, "    \"comments\": {d},\n", .{report.comments.len});
+    try buf.print(gpa, "    \"taxonomies\": {d},\n", .{report.taxonomies.len});
+    try buf.print(gpa, "    \"high_cardinality_taxonomy\": {s},\n", .{if (report.taxonomy_stats.high_cardinality) "true" else "false"});
     try buf.print(gpa, "    \"human_review\": {d},\n", .{report.human_review.len});
     try buf.print(gpa, "    \"provenance\": {d}\n", .{report.provenance.len});
     try buf.appendSlice(gpa, "  }");
@@ -1513,6 +1703,16 @@ fn emitJson(gpa: std.mem.Allocator, report: Report) ![]u8 {
         try buf.append(gpa, '\n');
     }
     try buf.appendSlice(gpa, "  ]");
+
+    // taxonomy_stats
+    try buf.appendSlice(gpa, ",\n  \"taxonomy_stats\": {\n");
+    try buf.print(gpa, "    \"total\": {d},\n", .{report.taxonomy_stats.total});
+    try buf.print(gpa, "    \"categories\": {d},\n", .{report.taxonomy_stats.categories});
+    try buf.print(gpa, "    \"tags\": {d},\n", .{report.taxonomy_stats.tags});
+    try buf.print(gpa, "    \"other\": {d},\n", .{report.taxonomy_stats.other});
+    try buf.print(gpa, "    \"high_cardinality\": {s},\n", .{if (report.taxonomy_stats.high_cardinality) "true" else "false"});
+    try buf.print(gpa, "    \"threshold\": {d}\n", .{report.taxonomy_stats.threshold});
+    try buf.appendSlice(gpa, "  }");
 
     // pages
     try buf.appendSlice(gpa, ",\n  \"pages\": [\n");
@@ -1710,6 +1910,33 @@ fn emitJson(gpa: std.mem.Allocator, report: Report) ![]u8 {
     }
     try buf.appendSlice(gpa, "  ]");
 
+    // comments (artifacts — never page Markdown)
+    try buf.appendSlice(gpa, ",\n  \"comments\": [\n");
+    for (report.comments, 0..) |c, idx| {
+        try buf.appendSlice(gpa, "    {\"parent_post_id\": ");
+        try jsonEscapeAppend(&buf, gpa, c.parent_post_id);
+        try buf.appendSlice(gpa, ", \"comment_id\": ");
+        try jsonEscapeAppend(&buf, gpa, c.comment_id);
+        try buf.appendSlice(gpa, ", \"author\": ");
+        try jsonEscapeAppend(&buf, gpa, c.author);
+        try buf.appendSlice(gpa, ", \"comment_type\": ");
+        try jsonEscapeAppend(&buf, gpa, c.comment_type);
+        try buf.appendSlice(gpa, ", \"date\": ");
+        try jsonEscapeAppend(&buf, gpa, c.date);
+        try buf.appendSlice(gpa, ", \"approved\": ");
+        try jsonEscapeAppend(&buf, gpa, c.approved);
+        try buf.appendSlice(gpa, ", \"content_excerpt\": ");
+        try jsonEscapeAppend(&buf, gpa, c.content_excerpt);
+        try buf.appendSlice(gpa, ", \"preserved_path\": ");
+        try jsonEscapeAppend(&buf, gpa, c.preserved_path);
+        try buf.appendSlice(gpa, ", \"classification\": ");
+        try jsonEscapeAppend(&buf, gpa, c.classification.jsonName());
+        try buf.append(gpa, '}');
+        if (idx + 1 < report.comments.len) try buf.append(gpa, ',');
+        try buf.append(gpa, '\n');
+    }
+    try buf.appendSlice(gpa, "  ]");
+
     // human_review
     try buf.appendSlice(gpa, ",\n  \"human_review\": [\n");
     for (report.human_review, 0..) |h, idx| {
@@ -1788,6 +2015,9 @@ fn emitMarkdown(gpa: std.mem.Allocator, report: Report) ![]u8 {
     try buf.print(gpa, "| Feature findings | {d} |\n", .{report.features.len});
     try buf.print(gpa, "| Duplicate slugs | {d} |\n", .{report.slug_conflicts.len});
     try buf.print(gpa, "| Unsupported items (preserved) | {d} |\n", .{report.unsupported_items.len});
+    try buf.print(gpa, "| Comments / trackbacks / pingbacks | {d} |\n", .{report.comments.len});
+    try buf.print(gpa, "| Taxonomies | {d} |\n", .{report.taxonomies.len});
+    try buf.print(gpa, "| High-cardinality taxonomy | {s} |\n", .{if (report.taxonomy_stats.high_cardinality) "yes" else "no"});
     try buf.print(gpa, "| Human review | {d} |\n", .{report.human_review.len});
     try buf.print(gpa, "| Provenance records | {d} |\n\n", .{report.provenance.len});
 
@@ -1803,6 +2033,14 @@ fn emitMarkdown(gpa: std.mem.Allocator, report: Report) ![]u8 {
     }
 
     try buf.appendSlice(gpa, "## Taxonomies\n\n");
+    try buf.print(gpa, "Stats: total={d} categories={d} tags={d} other={d} high_cardinality={s} (threshold {d}).\n\n", .{
+        report.taxonomy_stats.total,
+        report.taxonomy_stats.categories,
+        report.taxonomy_stats.tags,
+        report.taxonomy_stats.other,
+        if (report.taxonomy_stats.high_cardinality) "true" else "false",
+        report.taxonomy_stats.threshold,
+    });
     try buf.appendSlice(gpa, "| domain | nicename | name | parent |\n|---|---|---|---|\n");
     for (report.taxonomies) |t| {
         try buf.print(gpa, "| {s} | `{s}` | {s} | `{s}` |\n", .{ t.domain, t.nicename, t.name, t.parent });
@@ -1942,6 +2180,25 @@ fn emitMarkdown(gpa: std.mem.Allocator, report: Report) ![]u8 {
                 u.title,
                 u.preserved_path,
                 u.reason,
+            });
+        }
+        try buf.appendSlice(gpa, "\n");
+    }
+
+    try buf.appendSlice(gpa, "## Comments, trackbacks, and pingbacks\n\n");
+    try buf.appendSlice(gpa, "These are **not** converted into page Markdown. Full text is under `content/_preserved/comments-*.md`.\n\n");
+    if (report.comments.len == 0) {
+        try buf.appendSlice(gpa, "_None._\n\n");
+    } else {
+        try buf.appendSlice(gpa, "| parent post | comment_id | type | author | date | preserved |\n|---|---|---|---|---|---|\n");
+        for (report.comments) |c| {
+            try buf.print(gpa, "| `{s}` | `{s}` | {s} | {s} | `{s}` | `{s}` |\n", .{
+                c.parent_post_id,
+                c.comment_id,
+                c.comment_type,
+                c.author,
+                c.date,
+                c.preserved_path,
             });
         }
         try buf.appendSlice(gpa, "\n");
@@ -2106,10 +2363,38 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     defer all_features.deinit(gpa);
     var unsupported: std.ArrayList(UnsupportedItem) = .empty;
     defer unsupported.deinit(gpa);
+    var all_comments: std.ArrayList(CommentRecord) = .empty;
+    defer all_comments.deinit(gpa);
     var human: std.ArrayList(HumanReview) = .empty;
     defer human.deinit(gpa);
     var provenance: std.ArrayList(Provenance) = .empty;
     defer provenance.deinit(gpa);
+
+    // Site-level taxonomy cardinality (before per-page conversion).
+    var tax_cats: usize = 0;
+    var tax_tags: usize = 0;
+    var tax_other: usize = 0;
+    for (doc.taxonomies) |t| {
+        if (std.mem.eql(u8, t.domain, "category")) tax_cats += 1 else if (std.mem.eql(u8, t.domain, "tag") or std.mem.eql(u8, t.domain, "post_tag")) tax_tags += 1 else tax_other += 1;
+    }
+    const taxonomy_stats: TaxonomyStats = .{
+        .total = doc.taxonomies.len,
+        .categories = tax_cats,
+        .tags = tax_tags,
+        .other = tax_other,
+        .high_cardinality = doc.taxonomies.len >= high_cardinality_taxonomy_threshold,
+        .threshold = high_cardinality_taxonomy_threshold,
+    };
+    if (taxonomy_stats.high_cardinality) {
+        try all_features.append(gpa, .{
+            .source_post_id = "site",
+            .source_output = "(site)",
+            .code = "high_cardinality_taxonomy",
+            .classification = .human_review,
+            .excerpt = try std.fmt.allocPrint(retain, "{d} taxonomies", .{doc.taxonomies.len}),
+            .message = try std.fmt.allocPrint(retain, "Export declares {d} taxonomies (threshold {d}); review category/tag mapping before bulk import", .{ doc.taxonomies.len, high_cardinality_taxonomy_threshold }),
+        });
+    }
 
     // Basename-only references are ambiguous when uploads contains more than
     // one file of that name. Preserve the inventory detail in the report;
@@ -2153,7 +2438,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         const item = m.item;
         var conv = try convertItemBody(retain, item, m.output_path, opts.wxr_path);
 
-        // Collect categories / tags
+        // Collect categories / tags (post formats are not Boris tags)
         var cats: std.ArrayList([]const u8) = .empty;
         var tags: std.ArrayList([]const u8) = .empty;
         var code_list: std.ArrayList([]const u8) = .empty;
@@ -2163,12 +2448,36 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
                 try cats.append(retain, c.nicename);
             } else if (std.mem.eql(u8, c.domain, "post_tag") or std.mem.eql(u8, c.domain, "tag")) {
                 try tags.append(retain, c.nicename);
+            } else if (std.mem.eql(u8, c.domain, "post_format")) {
+                // Post formats are WP presentation metadata, not tags.
+                conv.classification = ConversionClass.worse(conv.classification, .unsupported);
+                try appendUniqueCode(retain, &code_list, "post_format");
+                try all_features.append(gpa, .{
+                    .source_post_id = try retain.dupe(u8, item.post_id),
+                    .source_output = try retain.dupe(u8, m.output_path),
+                    .code = "post_format",
+                    .classification = .unsupported,
+                    .excerpt = try retain.dupe(u8, c.nicename),
+                    .message = try std.fmt.allocPrint(retain, "WordPress post format '{s}' is not a Boris page feature; flagged for human review (not converted to tags)", .{c.nicename}),
+                });
             } else {
                 // other taxonomies → tags + human review
                 try tags.append(retain, c.nicename);
                 conv.classification = ConversionClass.worse(conv.classification, .human_review);
                 try appendUniqueCode(retain, &code_list, "unknown_taxonomy");
             }
+        }
+        if (cats.items.len + tags.items.len >= high_cardinality_terms_threshold) {
+            conv.classification = ConversionClass.worse(conv.classification, .human_review);
+            try appendUniqueCode(retain, &code_list, "high_cardinality_terms");
+            try all_features.append(gpa, .{
+                .source_post_id = try retain.dupe(u8, item.post_id),
+                .source_output = try retain.dupe(u8, m.output_path),
+                .code = "high_cardinality_terms",
+                .classification = .human_review,
+                .excerpt = try std.fmt.allocPrint(retain, "{d} terms", .{cats.items.len + tags.items.len}),
+                .message = try std.fmt.allocPrint(retain, "Page has {d} categories+tags (threshold {d}); review tag merge into closed Boris tags", .{ cats.items.len + tags.items.len, high_cardinality_terms_threshold }),
+            });
         }
 
         // Parent proposal
@@ -2244,10 +2553,145 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             }
         }
 
-        const status_boris = mapWpStatus(item.status);
-        if (!std.mem.eql(u8, item.status, "publish")) {
+        // Status mapping: password-protected publish posts become draft for safety.
+        var status_boris = mapWpStatus(item.status);
+        if (item.post_password.len > 0) {
+            status_boris = "draft";
+        }
+        if (statusFeatureCode(item.status, item.post_password)) |scode| {
             conv.classification = ConversionClass.worse(conv.classification, .human_review);
-            try appendUniqueCode(retain, &code_list, "non_publish_status");
+            try appendUniqueCode(retain, &code_list, scode);
+            // Keep legacy umbrella code for non-publish without a more specific code.
+            if (std.mem.eql(u8, scode, "non_publish_status") or
+                std.mem.eql(u8, scode, "status_draft") or
+                std.mem.eql(u8, scode, "status_future") or
+                std.mem.eql(u8, scode, "status_private") or
+                std.mem.eql(u8, scode, "status_pending") or
+                std.mem.eql(u8, scode, "status_password_protected"))
+            {
+                try all_features.append(gpa, .{
+                    .source_post_id = try retain.dupe(u8, item.post_id),
+                    .source_output = try retain.dupe(u8, m.output_path),
+                    .code = try retain.dupe(u8, scode),
+                    .classification = .human_review,
+                    .excerpt = try std.fmt.allocPrint(retain, "wp:status={s}", .{item.status}),
+                    .message = try std.fmt.allocPrint(retain, "WordPress status '{s}'{s} mapped to Boris status '{s}'; author review required before publish", .{
+                        item.status,
+                        if (item.post_password.len > 0) " (password-protected)" else "",
+                        status_boris,
+                    }),
+                });
+            }
+        }
+
+        // Empty / long titles and empty bodies
+        if (item.title.len == 0) {
+            conv.classification = ConversionClass.worse(conv.classification, .human_review);
+            try appendUniqueCode(retain, &code_list, "empty_title");
+            try all_features.append(gpa, .{
+                .source_post_id = try retain.dupe(u8, item.post_id),
+                .source_output = try retain.dupe(u8, m.output_path),
+                .code = "empty_title",
+                .classification = .human_review,
+                .excerpt = "(empty title)",
+                .message = "Missing title; used slug as Boris title fallback",
+            });
+        } else if (item.title.len >= long_title_threshold) {
+            conv.classification = ConversionClass.worse(conv.classification, .human_review);
+            try appendUniqueCode(retain, &code_list, "long_title");
+            try all_features.append(gpa, .{
+                .source_post_id = try retain.dupe(u8, item.post_id),
+                .source_output = try retain.dupe(u8, m.output_path),
+                .code = "long_title",
+                .classification = .human_review,
+                .excerpt = try excerptUtf8(retain, item.title, 60),
+                .message = try std.fmt.allocPrint(retain, "Title is {d} bytes (threshold {d}); review layout fit", .{ item.title.len, long_title_threshold }),
+            });
+        }
+        if (item.content_encoded.len == 0) {
+            conv.classification = ConversionClass.worse(conv.classification, .human_review);
+            try appendUniqueCode(retain, &code_list, "empty_body");
+            try all_features.append(gpa, .{
+                .source_post_id = try retain.dupe(u8, item.post_id),
+                .source_output = try retain.dupe(u8, m.output_path),
+                .code = "empty_body",
+                .classification = .human_review,
+                .excerpt = "(empty content:encoded)",
+                .message = "Missing body; page emitted with empty Markdown body for review",
+            });
+        }
+
+        // Comments / trackbacks / pingbacks: never render into page Markdown.
+        if (item.comments.len > 0) {
+            conv.classification = ConversionClass.worse(conv.classification, .unsupported);
+            var n_comment: usize = 0;
+            var n_ping: usize = 0;
+            var n_track: usize = 0;
+            const preserved_comments_path = try std.fmt.allocPrint(retain, "content/_preserved/comments-{s}.md", .{item.post_id});
+            var cbody: std.ArrayList(u8) = .empty;
+            try cbody.appendSlice(retain, "---\n");
+            try cbody.print(retain, "title: \"Comments for post {s}\"\n", .{item.post_id});
+            try cbody.appendSlice(retain, "status: draft\n");
+            try cbody.appendSlice(retain, "tags: [preserved, wordpress, comments]\n");
+            try cbody.appendSlice(retain, "---\n\n");
+            try cbody.appendSlice(retain, "<!-- boris-migration-provenance\n");
+            try cbody.appendSlice(retain, "source_format: wordpress-wxr\n");
+            try cbody.print(retain, "post_id: {s}\n", .{item.post_id});
+            try cbody.appendSlice(retain, "post_type: comments\n");
+            try cbody.appendSlice(retain, "conversion: unsupported\n");
+            try cbody.appendSlice(retain, "-->\n\n");
+            try cbody.appendSlice(retain, "> **Preserved WordPress comments / trackbacks / pingbacks** — not page Markdown.\n\n");
+            for (item.comments) |cm| {
+                const label = commentTypeLabel(cm.comment_type);
+                if (std.mem.eql(u8, label, "pingback")) n_ping += 1 else if (std.mem.eql(u8, label, "trackback")) n_track += 1 else n_comment += 1;
+                try appendUniqueCode(retain, &code_list, featureCodeForCommentType(cm.comment_type));
+                const excerpt = try excerptUtf8(retain, cm.content, 160);
+                try all_comments.append(gpa, .{
+                    .parent_post_id = item.post_id,
+                    .comment_id = cm.comment_id,
+                    .author = cm.author,
+                    .comment_type = try retain.dupe(u8, label),
+                    .date = cm.date,
+                    .approved = cm.approved,
+                    .content_excerpt = excerpt,
+                    .preserved_path = preserved_comments_path,
+                    .classification = .unsupported,
+                });
+                try cbody.print(retain, "### {s} `{s}` by {s}\n\n", .{ label, cm.comment_id, if (cm.author.len > 0) cm.author else "(anonymous)" });
+                try cbody.print(retain, "- date: `{s}`\n- approved: `{s}`\n\n", .{ cm.date, cm.approved });
+                try cbody.appendSlice(retain, "```\n");
+                try cbody.appendSlice(retain, cm.content);
+                if (cm.content.len == 0 or cm.content[cm.content.len - 1] != '\n') try cbody.append(retain, '\n');
+                try cbody.appendSlice(retain, "```\n\n");
+            }
+            try writeBytes(io, out_root, preserved_comments_path, cbody.items);
+            try provenance.append(gpa, .{
+                .output_path = preserved_comments_path,
+                .source_export = opts.wxr_path,
+                .post_id = item.post_id,
+                .post_type = "comments",
+                .guid = "",
+                .post_name = "",
+                .author = "",
+                .post_date = "",
+                .link = "",
+                .conversion = .unsupported,
+            });
+            try unsupported.append(gpa, .{
+                .post_id = item.post_id,
+                .post_type = "comments",
+                .title = try std.fmt.allocPrint(retain, "comments for {s}", .{item.post_id}),
+                .reason = "comments/trackbacks/pingbacks are not Boris content; preserved for human review only",
+                .preserved_path = preserved_comments_path,
+            });
+            try all_features.append(gpa, .{
+                .source_post_id = try retain.dupe(u8, item.post_id),
+                .source_output = try retain.dupe(u8, m.output_path),
+                .code = "wp_comments",
+                .classification = .unsupported,
+                .excerpt = try std.fmt.allocPrint(retain, "{d} comment artifact(s)", .{item.comments.len}),
+                .message = try std.fmt.allocPrint(retain, "Export carries {d} comment(s), {d} pingback(s), {d} trackback(s); preserved under `{s}` (not page Markdown)", .{ n_comment, n_ping, n_track, preserved_comments_path }),
+            });
         }
 
         // Boris tags: merge WP tags + categories (categories become tags for closed grammar)
@@ -2262,7 +2706,8 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             if (!dup) try boris_tags.append(retain, c);
         }
 
-        const fm = try buildFrontmatter(retain, if (item.title.len > 0) item.title else m.slug, proposed_parent, status_boris, boris_tags.items);
+        const display_title = if (item.title.len > 0) item.title else m.slug;
+        const fm = try buildFrontmatter(retain, display_title, proposed_parent, status_boris, boris_tags.items);
 
         // Resolve links against site URLs and item links
         for (conv.links) |lnk| {
@@ -2532,8 +2977,22 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         const path = try std.fmt.allocPrint(retain, "content/_preserved/{s}-{s}.md", .{ safe_type, safe_id });
         const reason = if (std.mem.eql(u8, item.post_type, "attachment"))
             "attachment item; not a Boris page — preserved for media inventory"
+        else if (std.mem.eql(u8, item.post_type, "nav_menu_item"))
+            "WordPress menu item (nav_menu_item); not a Boris page — preserved as unsupported menu artifact"
+        else if (std.mem.eql(u8, item.post_type, "wp_block") or std.mem.eql(u8, item.post_type, "wp_template") or std.mem.eql(u8, item.post_type, "wp_navigation"))
+            "WordPress theme/block artifact; not a Boris page — preserved for human review"
         else
             "non post/page post_type; preserved raw for review";
+        if (std.mem.eql(u8, item.post_type, "nav_menu_item")) {
+            try all_features.append(gpa, .{
+                .source_post_id = try retain.dupe(u8, item.post_id),
+                .source_output = path,
+                .code = "wp_menu",
+                .classification = .unsupported,
+                .excerpt = try retain.dupe(u8, if (item.title.len > 0) item.title else "nav_menu_item"),
+                .message = "nav_menu_item is a WordPress menu artifact, not meaning-preserving Markdown",
+            });
+        }
 
         var body: std.ArrayList(u8) = .empty;
         try body.appendSlice(retain, "---\n");
@@ -2698,6 +3157,13 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             return std.mem.order(u8, a.preserved_path, b.preserved_path) == .lt;
         }
     }.less);
+    std.mem.sort(CommentRecord, all_comments.items, {}, struct {
+        fn less(_: void, a: CommentRecord, b: CommentRecord) bool {
+            const o = std.mem.order(u8, a.parent_post_id, b.parent_post_id);
+            if (o != .eq) return o == .lt;
+            return std.mem.order(u8, a.comment_id, b.comment_id) == .lt;
+        }
+    }.less);
     std.mem.sort(HumanReview, human.items, {}, struct {
         fn less(_: void, a: HumanReview, b: HumanReview) bool {
             return std.mem.order(u8, a.source_output, b.source_output) == .lt;
@@ -2717,6 +3183,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         .base_blog_url = doc.base_blog_url,
         .authors = doc.authors,
         .taxonomies = doc.taxonomies,
+        .taxonomy_stats = taxonomy_stats,
         .pages = pages.items,
         .parent_relationships = parents.items,
         .links = all_links.items,
@@ -2725,6 +3192,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         .features = all_features.items,
         .slug_conflicts = slug_conflicts.items,
         .unsupported_items = unsupported.items,
+        .comments = all_comments.items,
         .human_review = human.items,
         .provenance = provenance.items,
     };
