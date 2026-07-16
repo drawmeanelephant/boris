@@ -1,0 +1,4 @@
+---
+title: Attributes are unsupported
+---
+h2{color:red}. Styled heading

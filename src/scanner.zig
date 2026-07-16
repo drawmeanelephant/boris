@@ -1,12 +1,15 @@
 //! Deterministic recursive content discovery (milestone 4).
 //!
-//! Walks a content root once, collects page files (`.md` / `.mdx` only),
+//! Walks a content root once, collects the explicitly selected page family,
 //! derives identity via `identity.canonicalEntityId`, and sorts results
 //! before any caller processes them.
 //!
 //! ## Policies (see docs/contracts/scanner.md)
 //!
-//! - **Extensions:** case-sensitive lowercase `.md` and `.mdx` only.
+//! - **Extensions:** default Markdown accepts lowercase `.md` / `.mdx`;
+//!   explicit Textile accepts lowercase `.textile` only.
+//! - **Isolation:** a recognized page from the other input family fails the
+//!   scan; Boris never guesses a dialect per page.
 //! - **Paths:** logical metadata uses `/` only; no host absolute paths.
 //! - **Identity:** single derivation function `identity.canonicalEntityId`.
 //! - **Sort key:** `entity_id` ascending, then `source_path`.
@@ -26,6 +29,7 @@ const page_mod = @import("page.zig");
 pub const Page = page_mod.Page;
 pub const PageList = page_mod.PageList;
 pub const ContentKind = page_mod.ContentKind;
+pub const InputFormat = identity.InputFormat;
 
 pub const ScanError = error{
     ContentDirMissing,
@@ -35,6 +39,8 @@ pub const ScanError = error{
     SymlinkCycle,
     /// Path or identity cannot be represented safely.
     InvalidPath,
+    /// A recognized page extension belongs to the non-selected input family.
+    InputFormatMismatch,
 } || std.mem.Allocator.Error || Io.Dir.OpenError || Io.Dir.SelectiveWalker.Error || Io.Dir.StatError || Io.Dir.StatFileError || identity.PathError;
 
 /// Options for a content-root scan.
@@ -42,6 +48,7 @@ pub const Options = struct {
     /// Content root relative to process CWD (or absolute — only used to open;
     /// never stored in page logical metadata).
     content_root: []const u8 = "content",
+    input_format: InputFormat = .markdown,
 };
 
 /// Composite filesystem identity for cycle detection (inode when available).
@@ -80,11 +87,16 @@ pub fn scan(io: Io, options: Options, out: *PageList) ScanError!void {
     };
     defer content_dir.close(io);
 
-    try scanDir(io, content_dir, out);
+    try scanDirFormat(io, content_dir, options.input_format, out);
 }
 
 /// Scan an already-open content directory handle.
 pub fn scanDir(io: Io, content_dir: Io.Dir, out: *PageList) ScanError!void {
+    return scanDirFormat(io, content_dir, .markdown, out);
+}
+
+/// Scan an already-open content directory using one explicit input family.
+pub fn scanDirFormat(io: Io, content_dir: Io.Dir, input_format: InputFormat, out: *PageList) ScanError!void {
     const list_gpa = out.list_gpa;
     const retain = out.retain;
 
@@ -134,8 +146,11 @@ pub fn scanDir(io: Io, content_dir: Io.Dir, out: *PageList) ScanError!void {
         }
 
         if (entry.kind != .file) continue;
-        // Non-page files (.txt, .MD, assets, …) are ignored.
+        // Non-page files (.txt, .MD, assets, …) are ignored. Recognized page
+        // extensions from the other input family fail closed.
         if (!identity.isPageFile(entry.basename)) continue;
+        const entry_kind = identity.contentKind(entry.basename) catch continue;
+        if (!input_format.accepts(entry_kind)) return error.InputFormatMismatch;
         // Defense in depth if includes/ were ever entered.
         if (std.mem.eql(u8, entry.path, "includes") or std.mem.startsWith(u8, entry.path, "includes/")) {
             continue;
@@ -373,6 +388,71 @@ test "scan: ignores .txt and case-variant .MD extensions" {
     // Same entity_id from .md and .mdx — both retained for later EDUPLICATEID.
     try testing.expectEqualStrings("keep.md", list.items()[0].source_path);
     try testing.expectEqualStrings("keep.mdx", list.items()[1].source_path);
+}
+
+test "scan: explicit Textile mode discovers only lowercase .textile pages" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const content_rel = try tmpContentRoot(gpa, io, &tmp);
+    defer gpa.free(content_rel);
+
+    {
+        var content = try Io.Dir.cwd().openDir(io, content_rel, .{});
+        defer content.close(io);
+        try content.writeFile(io, .{ .sub_path = "index.textile", .data = "h1. Home\n" });
+        try content.writeFile(io, .{ .sub_path = "README.TEXTILE", .data = "h1. ignored\n" });
+        try content.writeFile(io, .{ .sub_path = "notes.txt", .data = "ignored\n" });
+    }
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var list = PageList.init(gpa, arena.allocator());
+    defer list.deinit();
+
+    try scan(io, .{ .content_root = content_rel, .input_format = .textile }, &list);
+    try testing.expectEqual(@as(usize, 1), list.len());
+    try testing.expectEqualStrings("index.textile", list.items()[0].source_path);
+    try testing.expectEqualStrings("index", list.items()[0].entity_id);
+    try testing.expect(list.items()[0].kind == .textile);
+}
+
+test "scan: input families fail closed instead of mixing or guessing" {
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const content_rel = try tmpContentRoot(gpa, io, &tmp);
+    defer gpa.free(content_rel);
+
+    {
+        var content = try Io.Dir.cwd().openDir(io, content_rel, .{});
+        defer content.close(io);
+        try content.writeFile(io, .{ .sub_path = "index.textile", .data = "h1. Home\n" });
+        try content.writeFile(io, .{ .sub_path = "legacy.md", .data = "# Legacy\n" });
+    }
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var markdown_list = PageList.init(gpa, arena.allocator());
+    defer markdown_list.deinit();
+    try testing.expectError(
+        error.InputFormatMismatch,
+        scan(io, .{ .content_root = content_rel }, &markdown_list),
+    );
+
+    _ = arena.reset(.free_all);
+    var textile_list = PageList.init(gpa, arena.allocator());
+    defer textile_list.deinit();
+    try testing.expectError(
+        error.InputFormatMismatch,
+        scan(io, .{ .content_root = content_rel, .input_format = .textile }, &textile_list),
+    );
 }
 
 test "scan: missing content root" {

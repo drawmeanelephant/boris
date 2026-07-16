@@ -1,0 +1,21 @@
+---
+id: index
+title: Textile Tribute
+status: published
+tags: [textile, dean-allen]
+---
+h1. Textile Tribute
+
+A *strong* and _careful_ paragraph with +inserted+ and -deleted- text, @code@, and "Textile":https://textile-lang.com/.
+
+Literal comparison: 5 < 7 & 8 > 3.
+
+bq. A small language can leave a long shadow.
+
+* Load
+* Roll
+
+p. Then continue in order.
+
+# Ignite
+# Reset

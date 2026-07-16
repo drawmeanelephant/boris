@@ -7,6 +7,7 @@ const std = @import("std");
 const diagnostic = @import("diagnostic.zig");
 const target_mod = @import("target.zig");
 const layout_select = @import("layout_select.zig");
+const identity = @import("identity.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const RunResult = diagnostic.RunResult;
@@ -44,6 +45,8 @@ pub const Options = struct {
     analysis_format: AnalysisFormat = .human,
     analysis_report: ?[]const u8 = null,
     mode: Mode = .html,
+    /// Explicit whole-tree authoring format (Markdown remains the default).
+    input_format: identity.InputFormat = .markdown,
     /// Content root (default `content`).
     input_dir: []const u8 = "content",
     /// IR output directory. Set for IR mode only (default `.boris`).
@@ -124,6 +127,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_incremental = false;
     var saw_jobs = false;
     var saw_watch = false;
+    var saw_textile = false;
     var saw_format = false;
     var saw_report = false;
     var jobs: usize = 1;
@@ -186,6 +190,12 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             if (saw_quiet) return error.DuplicateFlag;
             saw_quiet = true;
             quiet = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--textile")) {
+            if (saw_textile) return error.DuplicateFlag;
+            saw_textile = true;
             continue;
         }
 
@@ -546,6 +556,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .impact_id = impact_id,
             .analysis_format = analysis_format,
             .analysis_report = analysis_report,
+            .input_format = if (saw_textile) .textile else .markdown,
         },
         .rag => .{
             .help = false,
@@ -557,6 +568,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .context_dir = null,
             .html_dir = null,
             .targets = targets,
+            .input_format = if (saw_textile) .textile else .markdown,
         },
         .context => .{
             .help = false,
@@ -572,6 +584,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .impact_id = impact_id,
             .analysis_format = analysis_format,
             .analysis_report = analysis_report,
+            .input_format = if (saw_textile) .textile else .markdown,
         },
         .html => .{
             .help = false,
@@ -592,6 +605,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .impact_id = impact_id,
             .analysis_format = analysis_format,
             .analysis_report = analysis_report,
+            .input_format = if (saw_textile) .textile else .markdown,
         },
     };
 }
@@ -640,6 +654,7 @@ pub fn printUsage() void {
         \\
         \\Options:
         \\  --input <DIR>       Content root (default: content)
+        \\  --textile          Explicit .textile-only input adapter mode (no mixed trees)
         \\  --out <DIR>         IR output directory (selects IR mode; default: .boris)
         \\  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
         \\  --html-dir <DIR>    HTML output directory (implies HTML; default: dist)
@@ -760,6 +775,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.eql(u8, a, "--rag") or
             std.mem.eql(u8, a, "--no-rag") or
             std.mem.eql(u8, a, "--html") or
+            std.mem.eql(u8, a, "--textile") or
             std.mem.eql(u8, a, "--incremental") or
             std.mem.eql(u8, a, "--watch"))
         {
@@ -852,6 +868,21 @@ test "parse: default is HTML mode" {
     try expectEqual(@as(usize, 1), o.targets.items.len);
     try expectEqualStrings("default", o.targets.items[0].name);
     try expectEqualStrings(default_html_dir, o.targets.items[0].output_dir);
+    try expectEqual(identity.InputFormat.markdown, o.input_format);
+}
+
+test "parse: Textile input mode is explicit and whole-tree" {
+    var html = try parseOptions(std.testing.allocator, &.{ "boris", "--textile", "--input", "pages" });
+    defer html.deinit(std.testing.allocator);
+    try expectEqual(identity.InputFormat.textile, html.input_format);
+    try expectEqual(Mode.html, html.mode);
+
+    var ir = try parseOptions(std.testing.allocator, &.{ "boris", "--textile", "--out", ".boris" });
+    defer ir.deinit(std.testing.allocator);
+    try expectEqual(identity.InputFormat.textile, ir.input_format);
+    try expectEqual(Mode.ir, ir.mode);
+
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "--textile", "--textile" }));
 }
 
 test "parse: documentation intelligence commands" {

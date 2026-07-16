@@ -34,6 +34,8 @@ pub const Code = enum {
     EFRONTMATTER,
     EINVALIDUTF8,
     EINVALIDPATH,
+    /// Explicit Textile-mode adapter failures and input-family mismatches.
+    ETEXTILE,
     /// Aside / registered-component tokenizer failures (milestone 10).
     ECOMPONENT,
     /// Malformed `{{include …}}` directive.
@@ -169,6 +171,7 @@ test "Code names match contract strings" {
     try std.testing.expectEqualStrings("EFRONTMATTER", Code.EFRONTMATTER.name());
     try std.testing.expectEqualStrings("EINVALIDUTF8", Code.EINVALIDUTF8.name());
     try std.testing.expectEqualStrings("EINVALIDPATH", Code.EINVALIDPATH.name());
+    try std.testing.expectEqualStrings("ETEXTILE", Code.ETEXTILE.name());
     try std.testing.expectEqualStrings("ECOMPONENT", Code.ECOMPONENT.name());
     try std.testing.expectEqualStrings("EINCLUDESYNTAX", Code.EINCLUDESYNTAX.name());
     try std.testing.expectEqualStrings("EINCLUDEMISSING", Code.EINCLUDEMISSING.name());

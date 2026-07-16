@@ -43,11 +43,14 @@ behavior is in [scanner.md](scanner.md). Summary:
 |--------|-------------------|
 | `.md`  | **yes** (case-sensitive) |
 | `.mdx` | **yes** (case-sensitive) |
+| `.textile` | **only in explicit `--textile` mode** (case-sensitive) |
 | `.MD`, `.Md`, `.MDX`, `.Mdx`, … | **no** |
 | other  | **no** |
 
-**Case behavior is case-sensitive for extensions.** Only lowercase `.md` and
-`.mdx` are page sources. Implementations must **not** case-fold extensions.
+**Case behavior is case-sensitive for extensions.** Lowercase `.md` and `.mdx`
+are the default page sources; lowercase `.textile` is selected only by
+`--textile`. Implementations must **not** case-fold extensions or mix page
+families in one compile.
 
 Exactly one trailing extension is stripped for ID derivation
 (`my.notes.md` → id `my.notes`; intermediate dots stay). Prefer matching
@@ -66,7 +69,8 @@ After discovery, each file has a **source path** string `sourcePath` such that:
 5. Does **not** end with `/`.
 6. Preserves the path’s Unicode and letter case exactly as stored on disk
    (after separator normalization). Comparison is **case-sensitive**.
-7. Ends with a case-sensitive page extension (`.md` or `.mdx`).
+7. Ends with a case-sensitive extension in the selected page family (`.md` /
+   `.mdx`, or `.textile` in explicit Textile mode).
 
 **Invalid** examples (must not appear as `sourcePath`; emit
 [`EINVALIDPATH`](diagnostics.md)):
@@ -90,7 +94,7 @@ segments are illegal (never silently folded).
 [`src/identity.zig`](../../src/identity.zig).
 
 ```text
-id = sourcePath with trailing ".md" or ".mdx" removed
+id = sourcePath with its selected trailing page extension removed
      (after canonicalize: '\' → '/', reject absolute / . / .. / empty segments)
 ```
 
@@ -103,6 +107,7 @@ Letter case is **preserved**. Platform separators must not leak into graph keys.
 | `Guides/Intro.md` | `Guides/Intro` |
 | `nested/deep/page.md` | `nested/deep/page` |
 | `a\b\c.md` (pre-normalize) | `a/b/c` |
+| `guides/intro.textile` (Textile mode) | `guides/intro` |
 
 ### Rules
 
