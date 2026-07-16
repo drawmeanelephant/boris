@@ -10,9 +10,10 @@ const std = @import("std");
 const Io = std.Io;
 
 pub const format_id = "boris-wordpress-migration-lab";
-/// Schema 2 adds `comments` + `taxonomy_stats` report sections and refined feature codes.
-pub const schema_version: u32 = 2;
-pub const tool_version = "0.2.0";
+/// Schema 3 adds per-page `excerpt` / `is_sticky` fields and explicit empty-slug /
+/// sticky / excerpt-preservation feature codes (no silent drop of WXR metadata).
+pub const schema_version: u32 = 3;
+pub const tool_version = "0.3.0";
 
 /// Site-level taxonomy count above which we emit high-cardinality reporting.
 pub const high_cardinality_taxonomy_threshold: usize = 50;
@@ -156,8 +157,15 @@ pub const PageRecord = struct {
     post_type: []const u8,
     title: []const u8,
     slug: []const u8,
+    /// Original `wp:post_name` before synthesis; empty when the export omitted a slug.
+    source_slug: []const u8,
     author: []const u8,
     post_date: []const u8,
+    post_date_gmt: []const u8,
+    /// Raw `excerpt:encoded` (may be empty). Preserved in body + report; not Boris frontmatter.
+    excerpt: []const u8,
+    /// WordPress sticky flag (`wp:is_sticky` == "1").
+    is_sticky: bool,
     status_wp: []const u8,
     status_boris: []const u8,
     categories: []const []const u8,
@@ -932,6 +940,32 @@ fn stripGutenbergChrome(allocator: std.mem.Allocator, content: []const u8) ![]u8
         i += 1;
     }
     return try out.toOwnedSlice(allocator);
+}
+
+/// Format a WordPress excerpt as a body prefix. Excerpts are not closed Boris
+/// frontmatter fields; they are preserved as visible review content (never dropped).
+pub fn formatPreservedExcerpt(allocator: std.mem.Allocator, excerpt: []const u8) ![]u8 {
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(allocator);
+    try buf.appendSlice(allocator, "> **WordPress excerpt** (preserved; not a Boris frontmatter field)\n");
+    try buf.appendSlice(allocator, ">\n");
+    // Quote each line so multi-line excerpts stay blockquotes.
+    var start: usize = 0;
+    while (start <= excerpt.len) {
+        const rest = excerpt[start..];
+        const nl = std.mem.indexOfScalar(u8, rest, '\n');
+        const line = if (nl) |n| rest[0..n] else rest;
+        try buf.appendSlice(allocator, "> ");
+        try buf.appendSlice(allocator, line);
+        try buf.append(allocator, '\n');
+        if (nl) |n| {
+            start += n + 1;
+        } else {
+            break;
+        }
+    }
+    try buf.append(allocator, '\n');
+    return try buf.toOwnedSlice(allocator);
 }
 
 /// Convert a subset of HTML to Markdown. Unrecognized tags are kept as HTML (never dropped).
@@ -1728,10 +1762,18 @@ fn emitJson(gpa: std.mem.Allocator, report: Report) ![]u8 {
         try jsonEscapeAppend(&buf, gpa, p.title);
         try buf.appendSlice(gpa, ",\n      \"slug\": ");
         try jsonEscapeAppend(&buf, gpa, p.slug);
+        try buf.appendSlice(gpa, ",\n      \"source_slug\": ");
+        try jsonEscapeAppend(&buf, gpa, p.source_slug);
         try buf.appendSlice(gpa, ",\n      \"author\": ");
         try jsonEscapeAppend(&buf, gpa, p.author);
         try buf.appendSlice(gpa, ",\n      \"post_date\": ");
         try jsonEscapeAppend(&buf, gpa, p.post_date);
+        try buf.appendSlice(gpa, ",\n      \"post_date_gmt\": ");
+        try jsonEscapeAppend(&buf, gpa, p.post_date_gmt);
+        try buf.appendSlice(gpa, ",\n      \"excerpt\": ");
+        try jsonEscapeAppend(&buf, gpa, p.excerpt);
+        try buf.appendSlice(gpa, ",\n      \"is_sticky\": ");
+        try buf.appendSlice(gpa, if (p.is_sticky) "true" else "false");
         try buf.appendSlice(gpa, ",\n      \"status_wp\": ");
         try jsonEscapeAppend(&buf, gpa, p.status_wp);
         try buf.appendSlice(gpa, ",\n      \"status_boris\": ");
@@ -2048,15 +2090,17 @@ fn emitMarkdown(gpa: std.mem.Allocator, report: Report) ![]u8 {
     try buf.appendSlice(gpa, "\n");
 
     try buf.appendSlice(gpa, "## Posts and pages\n\n");
-    try buf.appendSlice(gpa, "| output | type | title | slug | author | date | wp status | conversion |\n|---|---|---|---|---|---|---|---|\n");
+    try buf.appendSlice(gpa, "| output | type | title | slug | date | sticky | excerpt | wp status | conversion |\n|---|---|---|---|---|---|---|---|---|\n");
     for (report.pages) |p| {
-        try buf.print(gpa, "| `{s}` | {s} | {s} | `{s}` | `{s}` | `{s}` | {s} | **{s}** |\n", .{
+        const excerpt_note: []const u8 = if (p.excerpt.len > 0) "yes" else "—";
+        try buf.print(gpa, "| `{s}` | {s} | {s} | `{s}` | `{s}` | {s} | {s} | {s} | **{s}** |\n", .{
             p.output_path,
             p.post_type,
             p.title,
             p.slug,
-            p.author,
             p.post_date,
+            if (p.is_sticky) "yes" else "no",
+            excerpt_note,
             p.status_wp,
             p.conversion.jsonName(),
         });
@@ -2069,6 +2113,19 @@ fn emitMarkdown(gpa: std.mem.Allocator, report: Report) ![]u8 {
         try buf.appendSlice(gpa, "```yaml\n");
         try buf.appendSlice(gpa, p.proposed_frontmatter);
         try buf.appendSlice(gpa, "```\n\n");
+        if (p.excerpt.len > 0) {
+            try buf.appendSlice(gpa, "- **Excerpt** (preserved in body, not frontmatter):\n\n");
+            try buf.appendSlice(gpa, "  > ");
+            // single-line preview for the report
+            var i: usize = 0;
+            while (i < p.excerpt.len and i < 120) : (i += 1) {
+                const c = p.excerpt[i];
+                if (c == '\n' or c == '\r') break;
+                try buf.append(gpa, c);
+            }
+            if (p.excerpt.len > i) try buf.appendSlice(gpa, "…");
+            try buf.appendSlice(gpa, "\n\n");
+        }
         if (p.categories.len > 0 or p.tags.len > 0) {
             try buf.appendSlice(gpa, "- Categories: ");
             for (p.categories, 0..) |c, i| {
@@ -2621,6 +2678,50 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             });
         }
 
+        // Empty / missing wp:post_name — slug was synthesized; never silent.
+        if (item.post_name.len == 0) {
+            conv.classification = ConversionClass.worse(conv.classification, .human_review);
+            try appendUniqueCode(retain, &code_list, "empty_slug");
+            try all_features.append(gpa, .{
+                .source_post_id = try retain.dupe(u8, item.post_id),
+                .source_output = try retain.dupe(u8, m.output_path),
+                .code = "empty_slug",
+                .classification = .human_review,
+                .excerpt = try retain.dupe(u8, m.slug),
+                .message = try std.fmt.allocPrint(retain, "Missing wp:post_name; synthesized entity slug '{s}' from title (or 'untitled')", .{m.slug}),
+            });
+        }
+
+        // Sticky posts have no Boris equivalent — report explicitly.
+        const sticky = std.mem.eql(u8, item.is_sticky, "1");
+        if (sticky) {
+            conv.classification = ConversionClass.worse(conv.classification, .human_review);
+            try appendUniqueCode(retain, &code_list, "sticky_post");
+            try all_features.append(gpa, .{
+                .source_post_id = try retain.dupe(u8, item.post_id),
+                .source_output = try retain.dupe(u8, m.output_path),
+                .code = "sticky_post",
+                .classification = .human_review,
+                .excerpt = "wp:is_sticky=1",
+                .message = "WordPress sticky flag has no Boris frontmatter equivalent; preserved in report for author review",
+            });
+        }
+
+        // Excerpt: preserve in body + report (not closed frontmatter).
+        if (item.excerpt_encoded.len > 0) {
+            try appendUniqueCode(retain, &code_list, "excerpt_preserved");
+            try all_features.append(gpa, .{
+                .source_post_id = try retain.dupe(u8, item.post_id),
+                .source_output = try retain.dupe(u8, m.output_path),
+                .code = "excerpt_preserved",
+                .classification = .transformed,
+                .excerpt = try excerptUtf8(retain, item.excerpt_encoded, 80),
+                .message = "WordPress excerpt preserved in Markdown body (not a closed Boris frontmatter field)",
+            });
+            // Excerpt alone does not force human_review; keep current class at least transformed.
+            if (conv.classification == .exact) conv.classification = .transformed;
+        }
+
         // Comments / trackbacks / pingbacks: never render into page Markdown.
         if (item.comments.len > 0) {
             conv.classification = ConversionClass.worse(conv.classification, .unsupported);
@@ -2821,6 +2922,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         try file_buf.append(retain, '\n');
         try file_buf.appendSlice(retain, prov_comment);
         try file_buf.append(retain, '\n');
+        if (item.excerpt_encoded.len > 0) {
+            const excerpt_block = try formatPreservedExcerpt(retain, item.excerpt_encoded);
+            try file_buf.appendSlice(retain, excerpt_block);
+        }
         try file_buf.appendSlice(retain, conv.markdown_body);
         if (conv.markdown_body.len == 0 or conv.markdown_body[conv.markdown_body.len - 1] != '\n') {
             try file_buf.append(retain, '\n');
@@ -2834,8 +2939,12 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             .post_type = item.post_type,
             .title = item.title,
             .slug = m.slug,
+            .source_slug = item.post_name,
             .author = item.creator,
             .post_date = item.post_date,
+            .post_date_gmt = item.post_date_gmt,
+            .excerpt = item.excerpt_encoded,
+            .is_sticky = sticky,
             .status_wp = item.status,
             .status_boris = status_boris,
             .categories = try cats.toOwnedSlice(retain),
@@ -2902,8 +3011,12 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             .post_type = "trunk",
             .title = "Posts",
             .slug = "posts",
+            .source_slug = "posts",
             .author = "",
             .post_date = "",
+            .post_date_gmt = "",
+            .excerpt = "",
+            .is_sticky = false,
             .status_wp = "publish",
             .status_boris = "published",
             .categories = &.{},
@@ -2954,8 +3067,12 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             .post_type = "trunk",
             .title = "Pages",
             .slug = "pages",
+            .source_slug = "pages",
             .author = "",
             .post_date = "",
+            .post_date_gmt = "",
+            .excerpt = "",
+            .is_sticky = false,
             .status_wp = "publish",
             .status_boris = "published",
             .categories = &.{},
