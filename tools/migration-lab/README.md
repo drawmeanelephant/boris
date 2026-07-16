@@ -9,6 +9,7 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 | **instagram** | Unpacked Instagram data-download (Takeout) | Boris Markdown + generated theme assets + reports |
 | **obsidian** | Local Obsidian vault directory | Boris Markdown + attachments inventory + review reports |
 | **notion** | Official Notion “Markdown & CSV” export (unpacked) | Boris Markdown + media inventory + review reports |
+| **filed** | Filed.fyi Astro source root | Bounded changelog/releases Boris tree + provenance/review reports |
 
 All modes are **read-only on inputs**: originals are never rewritten. There is
 **no network access**, no zip extraction, no scraping, and **no product compiler
@@ -25,6 +26,7 @@ coupling**. All code and fixtures live under `tools/migration-lab/`.
 | Instagram format id | `boris-instagram-migration-lab` |
 | Obsidian format id | `boris-obsidian-migration-lab` |
 | Notion format id | `boris-notion-migration-lab` |
+| Filed format id | `boris-filed-fyi-migration-lab` |
 | Schema | Astro/Instagram/Obsidian/Notion `1`; WordPress **`3`** |
 
 Companion author guide: [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
@@ -62,6 +64,11 @@ zig build run -- --mode=obsidian \
 zig build run -- --mode=notion \
   --export=./fixtures/mini-notion \
   --out=./.notion-report
+
+# Filed.fyi first reversible slice
+zig build run -- --mode=filed \
+  --filed-root=/path/to/filed-fyi \
+  --out=/tmp/filed-boris-content
 ```
 
 From the **repository root**, use this targeted aggregate gate after changing
@@ -95,7 +102,7 @@ zig build -C tools/migration-lab run -- \
 |------|---------|---------|
 | `-h`, `--help` | | Print usage; exit 0 |
 | `-q`, `--quiet` | off | Suppress progress lines |
-| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), or `notion` (`md-csv` / `notion-export`) |
+| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), or `filed` (`filed-fyi`) |
 | `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**) |
 | `--root=DIR` | `.` | Astro scan root |
 | `--wxr=FILE` | | WordPress WXR/XML path (implies `--mode=wordpress`) |
@@ -103,6 +110,7 @@ zig build -C tools/migration-lab run -- \
 | `--dump=DIR` | | Unpacked Instagram data-download root (implies `--mode=instagram`) |
 | `--vault=DIR` | | Obsidian vault root (implies `--mode=obsidian`) |
 | `--export=DIR` | | Unpacked Notion Markdown & CSV export root (implies `--mode=notion`) |
+| `--filed-root=DIR` | | Filed.fyi Astro source root (implies `--mode=filed`) |
 
 Exit codes: **0** success, **2** usage, **3** I/O error.
 
@@ -125,6 +133,45 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
    Hidden/tooling dirs (`.git/`, `node_modules/`, `dist/`, …) are skipped.
 
 ---
+
+## Filed.fyi first slice
+
+This developer-only proof accepts a **read-only clone or checkout** of Filed.fyi
+and only reads these observed Astro collection directories:
+
+```text
+src/content/docs/changelog/   # exactly one .md or .mdx record
+src/content/docs/releases/    # exactly three .md or .mdx records
+```
+
+Run it from this directory with an output directory outside the Filed.fyi
+checkout:
+
+```bash
+zig build run -- --mode=filed \
+  --filed-root=/absolute/path/to/filed-fyi \
+  --out=/tmp/filed-boris-content
+```
+
+It creates `content/changelog/index.md` and `content/releases/index.md` as
+Trunks, plus one changelog and three release Satellites with closed Boris `id`, `title`,
+`parent`, `status`, and `tags` frontmatter. `provenance_manifest.json` retains
+every raw source frontmatter block and output mapping. `report.json` and
+`REPORT.md` explicitly list each non-`title` source frontmatter field as
+unmapped; values are retained verbatim but never interpreted or normalized. The run fails if the source
+does not have the expected one-plus-three record cardinality.
+
+This is deliberately not a general Astro/MDX migration: no arbitrary YAML,
+MDX components, Starlight navigation, date joins, or live synchronization.
+Review flagged pages before passing the generated tree to Boris.
+
+Filed bodies are untrusted archival data. Clearly delimited `agent`,
+`directive`, `instruction`, or `prompt` fences/tags are stripped mechanically
+without reproducing their contents. Reports retain only source path, source line,
+neutral category, and `stripped: true`.
+
+Synthetic redistributable coverage lives in
+[`fixtures/mini-filed/`](fixtures/mini-filed/).
 
 ## Notion mode
 
