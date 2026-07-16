@@ -155,16 +155,25 @@ attachments_manifest.json
 
 1. Exact vault path / stem (`Notes/Beta`, `Notes/Beta.md`)
 2. Exact mapped entity id (`Notes/Beta`)
-3. Unique basename (`Beta` → single note named `Beta.md`)
-4. Multiple basenames → **ambiguous** (raw retained)
-5. No match → **unresolved** (raw retained)
-6. Inside fenced code → left unchanged
+3. Sanitized target equals entity id (`Q1 Plan` → `Q1-Plan` when unique)
+4. Unique **path-suffix** on vault stem (`Concept Board/X` → `Vault/Concept Board/X`)
+5. Unique path-suffix on sanitized entity id
+6. Unique basename (`Beta` → single note named `Beta.md`)
+7. Unique last-segment basename when the target contains `/`
+8. Multiple matches → **ambiguous** (raw retained)
+9. No match → **unresolved** (raw retained)
+10. Templater / `${…}` / `<%…%>` wiki targets → **plugin_template** (raw + plugin hazard; not unresolved)
+11. Inside fenced code → left unchanged
+
+Entity ids that collide after sanitization (e.g. `Hello World.md` vs
+`Hello-World.md`) are **disambiguated** deterministically (`…-2`, `…-3`, …) so
+output paths never clobber; collisions are listed under `unsupported_items`.
 
 ### Fixture
 
 [`fixtures/mini-obsidian/`](fixtures/mini-obsidian/) — public synthetic vault
-(collisions, spaces, embeds, Dataview, Canvas, ignored `.obsidian` /
-`node_modules`). Coverage notes:
+(collisions, path-suffix links, Templater placeholders, spaces, embeds,
+Dataview, Canvas, ignored `.obsidian` / `node_modules`). Coverage notes:
 [`fixtures/mini-obsidian-README.md`](fixtures/mini-obsidian-README.md).
 
 ### Compile generated content with product Boris

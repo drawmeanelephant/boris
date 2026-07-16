@@ -13,7 +13,7 @@ const Io = std.Io;
 
 pub const format_id = "boris-obsidian-migration-lab";
 pub const schema_version: u32 = 1;
-pub const tool_version = "0.1.0";
+pub const tool_version = "0.1.1";
 
 pub const max_entity_id_bytes: usize = 255;
 
@@ -61,6 +61,8 @@ pub const LinkStatus = enum {
     heading_or_block,
     skipped_fence,
     unsupported_embed,
+    /// Templater / `${…}` / `<%…%>` inside a wiki target — not a real note link.
+    plugin_template,
 
     pub fn jsonName(self: LinkStatus) []const u8 {
         return switch (self) {
@@ -70,9 +72,28 @@ pub const LinkStatus = enum {
             .heading_or_block => "heading_or_block",
             .skipped_fence => "skipped_fence",
             .unsupported_embed => "unsupported_embed",
+            .plugin_template => "plugin_template",
         };
     }
 };
+
+/// True when a wiki target is plugin/template syntax rather than a note path.
+pub fn isPluginTemplateWikiTarget(target: []const u8) bool {
+    if (std.mem.indexOf(u8, target, "${") != null) return true;
+    if (std.mem.indexOf(u8, target, "<%") != null) return true;
+    return false;
+}
+
+/// True when `hay` equals `needle` or ends with `"/" ++ needle` (Obsidian path-suffix style).
+pub fn pathSuffixMatch(hay: []const u8, needle: []const u8) bool {
+    if (needle.len == 0) return false;
+    if (std.mem.eql(u8, hay, needle)) return true;
+    if (hay.len > needle.len and
+        hay[hay.len - needle.len - 1] == '/' and
+        std.mem.endsWith(u8, hay, needle))
+        return true;
+    return false;
+}
 
 // ---------------------------------------------------------------------------
 // Directory skip policy
@@ -168,20 +189,20 @@ pub fn pathToEntityId(allocator: std.mem.Allocator, vault_rel: []const u8) ![]u8
     return try sanitizeEntityId(allocator, stem);
 }
 
-/// Sanitize a vault stem into a wiki-safe entity id: [A-Za-z0-9/_.-], no spaces.
-pub fn sanitizeEntityId(allocator: std.mem.Allocator, stem: []const u8) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
+/// Sanitize into a fixed buffer (no alloc). Returns null if empty or too long.
+pub fn sanitizeEntityIdBuf(buf: []u8, stem: []const u8) ?[]const u8 {
+    if (buf.len == 0) return null;
+    var len: usize = 0;
     var prev_dash = false;
     var i: usize = 0;
     while (i < stem.len) {
         const c = stem[i];
         if (c == '/') {
-            if (out.items.len > 0 and out.items[out.items.len - 1] == '-') {
-                _ = out.pop();
-            }
-            if (out.items.len > 0 and out.items[out.items.len - 1] != '/') {
-                try out.append(allocator, '/');
+            if (len > 0 and buf[len - 1] == '-') len -= 1;
+            if (len > 0 and buf[len - 1] != '/') {
+                if (len >= buf.len) return null;
+                buf[len] = '/';
+                len += 1;
             }
             prev_dash = false;
             i += 1;
@@ -192,32 +213,45 @@ pub fn sanitizeEntityId(allocator: std.mem.Allocator, stem: []const u8) ![]u8 {
             (c >= '0' and c <= '9') or
             c == '_' or c == '.' or c == '-';
         if (ok) {
-            try out.append(allocator, c);
+            if (len >= buf.len) return null;
+            buf[len] = c;
+            len += 1;
             prev_dash = c == '-';
         } else if (c == ' ' or c == '\t') {
-            if (!prev_dash and out.items.len > 0 and out.items[out.items.len - 1] != '/') {
-                try out.append(allocator, '-');
+            if (!prev_dash and len > 0 and buf[len - 1] != '/') {
+                if (len >= buf.len) return null;
+                buf[len] = '-';
+                len += 1;
                 prev_dash = true;
             }
         } else {
             // drop non-ASCII / punctuation as dash boundary
-            if (!prev_dash and out.items.len > 0 and out.items[out.items.len - 1] != '/') {
-                try out.append(allocator, '-');
+            if (!prev_dash and len > 0 and buf[len - 1] != '/') {
+                if (len >= buf.len) return null;
+                buf[len] = '-';
+                len += 1;
                 prev_dash = true;
             }
         }
         i += 1;
     }
-    // trim trailing dashes per segment
-    while (out.items.len > 0 and out.items[out.items.len - 1] == '-') {
-        _ = out.pop();
+    while (len > 0 and buf[len - 1] == '-') len -= 1;
+    if (len == 0) {
+        const untitled = "untitled";
+        if (untitled.len > buf.len) return null;
+        @memcpy(buf[0..untitled.len], untitled);
+        return buf[0..untitled.len];
     }
-    // collapse empty segments from double slashes
-    if (out.items.len == 0) try out.appendSlice(allocator, "untitled");
-    if (out.items.len > max_entity_id_bytes) return error.IdTooLong;
-    // reject leading/trailing slash
-    if (out.items[0] == '/' or out.items[out.items.len - 1] == '/') return error.IllegalSegment;
-    return try out.toOwnedSlice(allocator);
+    if (len > max_entity_id_bytes) return null;
+    if (buf[0] == '/' or buf[len - 1] == '/') return null;
+    return buf[0..len];
+}
+
+/// Sanitize a vault stem into a wiki-safe entity id: [A-Za-z0-9/_.-], no spaces.
+pub fn sanitizeEntityId(allocator: std.mem.Allocator, stem: []const u8) ![]u8 {
+    var buf: [max_entity_id_bytes]u8 = undefined;
+    const s = sanitizeEntityIdBuf(&buf, stem) orelse return error.IdTooLong;
+    return try allocator.dupe(u8, s);
 }
 
 pub fn basenameStem(path: []const u8) []const u8 {
@@ -748,42 +782,98 @@ const Index = struct {
         const t_stem = if (std.mem.endsWith(u8, t, ".md")) t[0 .. t.len - 3] else t;
 
         // 1. exact vault stem match (path form)
-        var exact: ?*const PageEntry = null;
         for (self.pages) |*p| {
-            if (std.mem.eql(u8, p.vault_stem, t_stem)) {
-                if (exact != null) {
-                    // two same stem paths impossible if unique paths
-                }
-                exact = p;
-            }
+            if (std.mem.eql(u8, p.vault_stem, t_stem)) return .{ .page = p };
         }
-        if (exact) |p| return .{ .page = p };
 
-        // 2. entity-id match (already sanitized path)
+        // 2. exact entity-id match
         for (self.pages) |*p| {
             if (std.mem.eql(u8, p.entity_id, t_stem)) return .{ .page = p };
         }
 
-        // 3. basename match (Obsidian default)
-        var matches: [32]*const PageEntry = undefined;
+        // 3. sanitized target equals entity id (spaces/punct → wiki-safe form)
+        var san_buf: [max_entity_id_bytes]u8 = undefined;
+        const san = sanitizeEntityIdBuf(&san_buf, t_stem);
+        if (san) |s| {
+            if (!std.mem.eql(u8, s, t_stem)) {
+                for (self.pages) |*p| {
+                    if (std.mem.eql(u8, p.entity_id, s)) return .{ .page = p };
+                }
+            }
+        }
+
+        // 4. unique path-suffix on vault stem (Obsidian-style partial paths)
+        {
+            var matches: [32]*const PageEntry = undefined;
+            const n = self.collectPathSuffixMatchesVault(t_stem, &matches);
+            if (n == 1) return .{ .page = matches[0] };
+            if (n > 1) return .none; // ambiguous; outer collect reports
+        }
+
+        // 5. unique path-suffix on entity id using sanitized target
+        if (san) |s| {
+            var matches: [32]*const PageEntry = undefined;
+            const n = self.collectPathSuffixMatchesEntity(s, &matches);
+            if (n == 1) return .{ .page = matches[0] };
+            if (n > 1) return .none;
+        }
+
+        // 6. unique basename (full target as note name)
+        {
+            var matches: [32]*const PageEntry = undefined;
+            const n = self.collectBasenameMatches(t_stem, &matches);
+            if (n == 1) return .{ .page = matches[0] };
+            if (n > 1) return .none;
+        }
+
+        // 7. unique last-segment basename when target has a path component
+        if (std.mem.indexOfScalar(u8, t_stem, '/') != null) {
+            const last = basenameStem(t_stem);
+            if (last.len > 0 and !std.mem.eql(u8, last, t_stem)) {
+                var matches: [32]*const PageEntry = undefined;
+                var n: usize = 0;
+                for (self.pages) |*p| {
+                    if (std.mem.eql(u8, p.basename, last)) {
+                        if (n < matches.len) {
+                            matches[n] = p;
+                            n += 1;
+                        }
+                    }
+                }
+                if (n == 1) return .{ .page = matches[0] };
+            }
+        }
+
+        return .none;
+    }
+
+    fn collectPathSuffixMatchesVault(self: *const Index, t_stem: []const u8, buf: []*const PageEntry) usize {
         var n: usize = 0;
         for (self.pages) |*p| {
-            if (std.mem.eql(u8, p.basename, t_stem)) {
-                if (n < matches.len) {
-                    matches[n] = p;
+            if (pathSuffixMatch(p.vault_stem, t_stem)) {
+                if (n < buf.len) {
+                    buf[n] = p;
                     n += 1;
                 }
             }
         }
-        if (n == 1) return .{ .page = matches[0] };
-        if (n > 1) {
-            // caller will format; return none and use separate? Use ambiguous via stack slice not durable.
-            // We return none here and let outer use collectAmbiguous — actually need durable.
-            return .none; // filled by resolvePageAmbiguous helper
-        }
-        return .none;
+        return n;
     }
 
+    fn collectPathSuffixMatchesEntity(self: *const Index, entity_needle: []const u8, buf: []*const PageEntry) usize {
+        var n: usize = 0;
+        for (self.pages) |*p| {
+            if (pathSuffixMatch(p.entity_id, entity_needle)) {
+                if (n < buf.len) {
+                    buf[n] = p;
+                    n += 1;
+                }
+            }
+        }
+        return n;
+    }
+
+    /// Basename matches: full target as basename, plus last path segment when present.
     fn collectBasenameMatches(self: *const Index, target: []const u8, buf: []*const PageEntry) usize {
         const t = trimSpace(target);
         const t_stem = if (std.mem.endsWith(u8, t, ".md")) t[0 .. t.len - 3] else t;
@@ -795,6 +885,34 @@ const Index = struct {
                     n += 1;
                 }
             }
+        }
+        if (n > 0) return n;
+        // path form: try last segment only when no full-string basename hits
+        if (std.mem.indexOfScalar(u8, t_stem, '/') != null) {
+            const last = basenameStem(t_stem);
+            if (last.len > 0) {
+                for (self.pages) |*p| {
+                    if (std.mem.eql(u8, p.basename, last)) {
+                        if (n < buf.len) {
+                            buf[n] = p;
+                            n += 1;
+                        }
+                    }
+                }
+            }
+        }
+        return n;
+    }
+
+    /// All pages matching path-suffix strategies (for ambiguous reporting).
+    fn collectPathSuffixMatches(self: *const Index, target: []const u8, buf: []*const PageEntry) usize {
+        const t = trimSpace(target);
+        const t_stem = if (std.mem.endsWith(u8, t, ".md")) t[0 .. t.len - 3] else t;
+        var n = self.collectPathSuffixMatchesVault(t_stem, buf);
+        if (n > 0) return n;
+        var san_buf: [max_entity_id_bytes]u8 = undefined;
+        if (sanitizeEntityIdBuf(&san_buf, t_stem)) |s| {
+            n = self.collectPathSuffixMatchesEntity(s, buf);
         }
         return n;
     }
@@ -939,6 +1057,26 @@ fn rewriteBody(
             continue;
         }
 
+        // Templater / JS template placeholders are not note targets
+        if (isPluginTemplateWikiTarget(hit.target) or isPluginTemplateWikiTarget(raw_full)) {
+            try out.appendSlice(allocator, raw_full);
+            class = ConversionClass.worse(class, .human_review);
+            try findings.append(allocator, .{
+                .source_path = source_path,
+                .raw = try allocator.dupe(u8, raw_full),
+                .target = try allocator.dupe(u8, hit.target),
+                .status = .plugin_template,
+                .is_embed = hit.is_embed,
+                .note = "plugin/template placeholder in wiki target; left raw",
+            });
+            try hazards.append(allocator, .{
+                .kind = .plugin_syntax,
+                .source_path = source_path,
+                .detail = try allocator.dupe(u8, raw_full),
+            });
+            continue;
+        }
+
         if (hit.has_heading_or_block) {
             try out.appendSlice(allocator, raw_full);
             class = ConversionClass.worse(class, .human_review);
@@ -1050,16 +1188,15 @@ fn rewriteBody(
 
             // try note embed
             var pbuf: [32]*const PageEntry = undefined;
-            var pn = index.collectBasenameMatches(hit.target, &pbuf);
             var page_target: ?*const PageEntry = null;
-            if (pn == 0) {
-                switch (index.resolvePage(hit.target)) {
-                    .page => |p| page_target = p,
-                    else => {
-                        // check path exact already in resolvePage; also try basename via collect after path strip
-                        pn = index.collectBasenameMatches(hit.target, &pbuf);
-                    },
-                }
+            switch (index.resolvePage(hit.target)) {
+                .page => |p| page_target = p,
+                else => {},
+            }
+            var pn: usize = 0;
+            if (page_target == null) {
+                pn = index.collectBasenameMatches(hit.target, &pbuf);
+                if (pn == 0) pn = index.collectPathSuffixMatches(hit.target, &pbuf);
             }
             if (page_target == null and pn == 1) page_target = pbuf[0];
             if (page_target == null and pn > 1) {
@@ -1138,13 +1275,14 @@ fn rewriteBody(
         // ordinary wiki link (non-embed)
         var pbuf: [32]*const PageEntry = undefined;
         var page_target: ?*const PageEntry = null;
-        // exact / path first
+        // exact / path / suffix / basename
         switch (index.resolvePage(hit.target)) {
             .page => |p| page_target = p,
             else => {},
         }
         if (page_target == null) {
-            const pn = index.collectBasenameMatches(hit.target, &pbuf);
+            var pn = index.collectBasenameMatches(hit.target, &pbuf);
+            if (pn == 0) pn = index.collectPathSuffixMatches(hit.target, &pbuf);
             if (pn == 1) {
                 page_target = pbuf[0];
             } else if (pn > 1) {
@@ -1640,6 +1778,78 @@ fn attachmentOutputPath(allocator: std.mem.Allocator, vault_path: []const u8) ![
     return try std.fmt.allocPrint(allocator, "assets/{s}", .{sanitized});
 }
 
+/// When multiple vault notes map to the same entity id, keep the first (by
+/// vault_path order within the group) and assign `-2`, `-3`, … to the rest so
+/// output paths never clobber each other. Records each collision in `unsupported`.
+fn disambiguateEntityIdCollisions(
+    retain: std.mem.Allocator,
+    pages: []PageEntry,
+    unsupported: *std.ArrayList(UnsupportedItem),
+) !void {
+    if (pages.len < 2) return;
+
+    const order = try retain.alloc(usize, pages.len);
+    for (order, 0..) |*o, i| o.* = i;
+    std.mem.sort(usize, order, pages, struct {
+        fn less(ps: []PageEntry, a: usize, b: usize) bool {
+            const c = std.mem.order(u8, ps[a].entity_id, ps[b].entity_id);
+            if (c != .eq) return c == .lt;
+            return std.mem.order(u8, ps[a].vault_path, ps[b].vault_path) == .lt;
+        }
+    }.less);
+
+    var i: usize = 0;
+    while (i < order.len) {
+        const base_id = pages[order[i]].entity_id;
+        var j = i + 1;
+        while (j < order.len and std.mem.eql(u8, pages[order[j]].entity_id, base_id)) : (j += 1) {}
+        if (j - i > 1) {
+            var suffix: usize = 2;
+            var k: usize = i + 1;
+            while (k < j) : (k += 1) {
+                const idx = order[k];
+                const original = pages[idx].entity_id;
+                const new_id = try allocUniqueEntityId(retain, pages, original, &suffix);
+                try unsupported.append(retain, .{
+                    .source_path = pages[idx].vault_path,
+                    .kind = "entity_id_collision",
+                    .detail = try std.fmt.allocPrint(retain, "collides with {s} → {s}; remapped to {s}", .{
+                        pages[order[i]].vault_path,
+                        original,
+                        new_id,
+                    }),
+                });
+                pages[idx].entity_id = new_id;
+                pages[idx].output_path = try std.fmt.allocPrint(retain, "content/{s}.md", .{new_id});
+            }
+        }
+        i = j;
+    }
+}
+
+fn entityIdTaken(pages: []const PageEntry, id: []const u8) bool {
+    for (pages) |p| {
+        if (std.mem.eql(u8, p.entity_id, id)) return true;
+    }
+    return false;
+}
+
+fn allocUniqueEntityId(
+    retain: std.mem.Allocator,
+    pages: []const PageEntry,
+    base: []const u8,
+    suffix: *usize,
+) ![]u8 {
+    while (suffix.* < 10_000) : (suffix.* += 1) {
+        const candidate = try std.fmt.allocPrint(retain, "{s}-{d}", .{ base, suffix.* });
+        if (!entityIdTaken(pages, candidate)) {
+            suffix.* += 1;
+            return candidate;
+        }
+    }
+    return error.IdTooLong;
+}
+
 // ---------------------------------------------------------------------------
 // Main pipeline
 // ---------------------------------------------------------------------------
@@ -1711,25 +1921,9 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         }
     }
 
-    // Detect entity id collisions
-    {
-        var i: usize = 0;
-        while (i < pages_list.items.len) : (i += 1) {
-            var j = i + 1;
-            while (j < pages_list.items.len) : (j += 1) {
-                if (std.mem.eql(u8, pages_list.items[i].entity_id, pages_list.items[j].entity_id)) {
-                    try unsupported.append(retain, .{
-                        .source_path = pages_list.items[j].vault_path,
-                        .kind = "entity_id_collision",
-                        .detail = try std.fmt.allocPrint(retain, "collides with {s} → {s}", .{
-                            pages_list.items[i].vault_path,
-                            pages_list.items[i].entity_id,
-                        }),
-                    });
-                }
-            }
-        }
-    }
+    // Collision-safe entity ids: same sanitized path → unique -2, -3, … suffixes.
+    // Deterministic: groups ordered by entity_id then vault_path; first keeps base id.
+    try disambiguateEntityIdCollisions(retain, pages_list.items, &unsupported);
 
     std.mem.sort(PageEntry, pages_list.items, {}, struct {
         fn less(_: void, a: PageEntry, b: PageEntry) bool {
@@ -1814,7 +2008,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
 
         for (page_links.items) |lf| {
             try all_links.append(retain, lf);
-            if (lf.status == .unresolved or lf.status == .ambiguous or lf.status == .heading_or_block or lf.status == .unsupported_embed) {
+            if (lf.status == .unresolved or lf.status == .ambiguous or lf.status == .heading_or_block or lf.status == .unsupported_embed or lf.status == .plugin_template) {
                 try human_review.append(retain, .{
                     .source_path = page.vault_path,
                     .reason = lf.status.jsonName(),
@@ -2068,6 +2262,21 @@ test "sanitizeEntityId: wiki-safe charset" {
     try std.testing.expect(entityIdIsWikiSafe(id));
 }
 
+test "pathSuffixMatch: exact and nested suffix" {
+    try std.testing.expect(pathSuffixMatch("Vault/Concept Board/Concept Board", "Concept Board/Concept Board"));
+    try std.testing.expect(pathSuffixMatch("Vault/Concept-Board/Concept-Board", "Concept-Board/Concept-Board"));
+    try std.testing.expect(pathSuffixMatch("Notes/Beta", "Notes/Beta"));
+    try std.testing.expect(!pathSuffixMatch("Notes/Beta", "eta")); // must be path-boundary
+    try std.testing.expect(!pathSuffixMatch("Notes/Beta", "Other/Beta"));
+}
+
+test "isPluginTemplateWikiTarget: templater and dollar braces" {
+    try std.testing.expect(isPluginTemplateWikiTarget("${navLink}"));
+    try std.testing.expect(isPluginTemplateWikiTarget("<% tp.file.title %>"));
+    try std.testing.expect(!isPluginTemplateWikiTarget("Notes/Beta"));
+    try std.testing.expect(!isPluginTemplateWikiTarget("Q1 Plan"));
+}
+
 test "scanWikiHits: link alias embed and fence" {
     const gpa = std.testing.allocator;
     const body =
@@ -2224,10 +2433,52 @@ test "fixture: obsidian end-to-end determinism + immutability + link resolution"
     // Fenced not rewritten — still [[Beta]] inside fence
     try std.testing.expect(std.mem.indexOf(u8, alpha, "```markdown\n[[Beta]]") != null or std.mem.indexOf(u8, alpha, "[[Beta]]") != null);
 
+    // Content-byte determinism (not only reports)
+    const alpha_b = try readFileAlloc(io, b, "content/Notes/Alpha.md", gpa);
+    defer gpa.free(alpha_b);
+    try std.testing.expectEqualStrings(alpha, alpha_b);
+
     // Spaces path mapped
     const q1 = try readFileAlloc(io, a, "content/Projects/Q1-Plan.md", gpa);
     defer gpa.free(q1);
     try std.testing.expect(std.mem.indexOf(u8, q1, "title:") != null);
+
+    // Path-suffix resolution (Vault/ omitted in link target)
+    const hydro = try readFileAlloc(io, a, "content/Vault/Concept-Board/Concepts/Vertical-Hydroponics.md", gpa);
+    defer gpa.free(hydro);
+    try std.testing.expect(std.mem.indexOf(u8, hydro, "[[Vault/Concept-Board/Concept-Board") != null);
+    // Content-byte determinism on rewritten path-suffix page
+    const hydro_b = try readFileAlloc(io, b, "content/Vault/Concept-Board/Concepts/Vertical-Hydroponics.md", gpa);
+    defer gpa.free(hydro_b);
+    try std.testing.expectEqualStrings(hydro, hydro_b);
+
+    // Ambiguous path suffix retained raw
+    const probe = try readFileAlloc(io, a, "content/Notes/Suffix-Probe.md", gpa);
+    defer gpa.free(probe);
+    try std.testing.expect(std.mem.indexOf(u8, probe, "[[Shared Path/Deep]]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ja, "Shared Path/Deep") != null);
+
+    // Templater placeholders classified as plugin_template (not unresolved)
+    try std.testing.expect(std.mem.indexOf(u8, ja, "plugin_template") != null);
+    const nav = try readFileAlloc(io, a, "content/Templates/Nav.md", gpa);
+    defer gpa.free(nav);
+    try std.testing.expect(std.mem.indexOf(u8, nav, "[[${navLink}|${navName}]]") != null);
+
+    // Entity-id collision remapped to unique output paths (no clobber)
+    const clash1 = try readFileAlloc(io, a, "content/Clash/Hello-World.md", gpa);
+    defer gpa.free(clash1);
+    const clash2 = try readFileAlloc(io, a, "content/Clash/Hello-World-2.md", gpa);
+    defer gpa.free(clash2);
+    try std.testing.expect(std.mem.indexOf(u8, clash1, "Hello World") != null or std.mem.indexOf(u8, clash1, "spaced") != null or std.mem.indexOf(u8, clash1, "dashed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, clash2, "Hello World") != null or std.mem.indexOf(u8, clash2, "spaced") != null or std.mem.indexOf(u8, clash2, "dashed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ja, "entity_id_collision") != null);
+    // both collision outputs deterministic across runs
+    const clash1b = try readFileAlloc(io, b, "content/Clash/Hello-World.md", gpa);
+    defer gpa.free(clash1b);
+    const clash2b = try readFileAlloc(io, b, "content/Clash/Hello-World-2.md", gpa);
+    defer gpa.free(clash2b);
+    try std.testing.expectEqualStrings(clash1, clash1b);
+    try std.testing.expectEqualStrings(clash2, clash2b);
 
     // Embed image rewritten
     const embeds = try readFileAlloc(io, a, "content/Embeds.md", gpa);
