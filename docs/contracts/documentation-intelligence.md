@@ -1,7 +1,8 @@
-# Documentation Intelligence (planned)
+# Documentation Intelligence
 
-**Status:** first slice implemented; normative for `check` / `impact`. Semantic
-relations and Context Bundles remain separate future contracts.
+**Status:** first slice implemented and merged; normative for `check` /
+`impact`. Semantic relations and Context Bundles are separate contracts with
+their own shipped implementations.
 
 Documentation Intelligence is a read-only analysis layer over Boris's already
 validated, frozen content graph. It must not alter HTML output, IR 0.2 shape,
@@ -89,7 +90,7 @@ boris check [--input DIR] [--format human|json] [--report PATH]
 boris impact ID [--input DIR] [--format human|json] [--report PATH]
 ```
 
-The exact option spelling remains provisional until implementation. Behavior:
+The option spelling is implemented as shown above. Behavior:
 
 - success with no findings: exit `0`;
 - valid graph with policy findings: exit `1` when CI mode requests a failing
@@ -100,9 +101,9 @@ The exact option spelling remains provisional until implementation. Behavior:
 
 The shipped first slice chooses CI-failing behavior for `check`: any
 `unreferenced_page` finding returns exit `1`. `impact` returns exit `0` when the
-requested page exists and the graph is valid. This policy is deliberately
-limited to the first finding class; future thresholds require an amended
-contract.
+requested page or source endpoint exists and the graph is valid. This policy is
+deliberately limited to the first finding class; future thresholds require an
+amended contract.
 
 ## Acceptance fixtures
 
