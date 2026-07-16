@@ -8,17 +8,47 @@ Companion fixture (realistic Contoso tree, ~32 pages + theme):
 
 [`fixtures/migration-site/`](../fixtures/migration-site/)
 
+Product front door and five-minute build: [`README.md`](../README.md).
+
+---
+
+## What is real today
+
+| Path | What it is | What it is not |
+|------|------------|----------------|
+| **This guide + fixture** | Manual conversion into Boris's closed content model, then `boris` compile | An automatic importer for every SSG |
+| **`boris` product binary** | HTML / IR / RAG / Context Bundle from a Boris tree; fail-loud graph + wiki | A Node SSG, universal link checker, or plugin host |
+| **`tools/migration-lab/`** | Standalone **developer laboratories** (Astro archaeology, WordPress WXR, Instagram Takeout, Obsidian, Notion, Starlight, …) | A runtime dependency of `boris`, or a promise of full site parity |
+
+Labs never rewrite your originals, do not fetch the network, and are built from
+[`tools/migration-lab/`](../tools/migration-lab/) — not from the product
+`boris` CLI. Treat lab output as a **starting draft** to review under this
+guide's non-negotiables, then compile with product `boris`.
+
+```text
+Old site inventory
+      │
+      ├─(optional lab)→ draft Markdown + reports
+      │
+      ▼
+Closed frontmatter + Trunk/Satellite + wiki/includes
+      │
+      ▼
+  boris ──► HTML | IR | RAG | Context Bundle
+```
+
 ---
 
 ## What you are migrating into
 
 Boris is a **Zig documentation compiler**:
 
-| Input | Output (choose mode) |
-|-------|----------------------|
+| Input | Output (choose **one** mode) |
+|-------|------------------------------|
 | Markdown under a content root | **HTML** site (default) |
 | Closed frontmatter | **JSON IR** (`--out`) |
 | Optional theme layouts + assets | **RAG** pack (`--rag`) |
+| Same validated graph | **Context Bundle** (`--context`) |
 
 There is no Node SSG, no React runtime, and no subprocess Markdown renderer.
 Markdown is rendered in-process with ApexMarkdown Unified.
@@ -41,6 +71,9 @@ Teaching rhythm (narrative only): **Load → Roll → Ignite → Reset**.
 6. **Wiki links** — `[[entity-id]]` and `[[entity-id#heading-id]]`; heading
    fragments must match Apex-rendered ids exactly. Wiki entity ids use an
    **ASCII** character class — prefer ASCII path stems for linkable pages.
+   Missing wiki targets **fail the build**. Ordinary Markdown
+   `[text](./page.md)` hrefs are **not** fully validated as a site-wide link
+   checker.
 7. **Examples stay fenced** — put sample wiki/include/Aside syntax in fenced
    code blocks. Inline backticks do not protect wiki/include directives; bare
    `<Aside …>` outside fences is a real component.
@@ -214,6 +247,28 @@ test-output/migration-ir/build-report.json
 ```
 
 **Expected:** exit `0`; corpus files under the rag-dir. Do not commit.
+
+### AI Context Bundle (optional)
+
+```bash
+./zig-out/bin/boris \
+  --input fixtures/migration-site/content \
+  --context-dir test-output/migration-context \
+  --quiet
+```
+
+**Expected:** exit `0` and at least:
+
+```text
+test-output/migration-context/bundle.md
+test-output/migration-context/manifest.json
+test-output/migration-context/graph.json
+test-output/migration-context/pages/
+```
+
+Upload `bundle.md` (or the directory) as **grounded context** for an LLM — not
+as a substitute for source control or the HTML site. Contract:
+[context-bundle.md](contracts/context-bundle.md).
 
 ### Incremental + jobs
 
