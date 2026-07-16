@@ -221,8 +221,25 @@ pub fn isSkippedFileName(name: []const u8) bool {
     return false;
 }
 
+/// Well-known Astro content-collection directory names (scan-root relative).
+/// Discovery is restricted to these roots so arbitrary repository Markdown
+/// (README.md, docs/, notes/, …) is never treated as Astro content.
+/// Preference when both exist: `src/content` (canonical) then root `content`.
+pub const content_root_dir_names = [_][]const u8{ "src/content", "content" };
+
+/// If `path` sits under a supported content root, return that root prefix
+/// including the trailing slash (`src/content/` or `content/`). Longer /
+/// more-specific roots are checked first so `src/content/…` is not mistaken
+/// for a bare `content/…` path.
+pub fn contentRootPrefix(path: []const u8) ?[]const u8 {
+    // Order matters: check the longer prefix first.
+    if (std.mem.startsWith(u8, path, "src/content/")) return "src/content/";
+    if (std.mem.startsWith(u8, path, "content/")) return "content/";
+    return null;
+}
+
 pub fn isContentPage(path: []const u8) bool {
-    if (!std.mem.startsWith(u8, path, "src/content/")) return false;
+    if (contentRootPrefix(path) == null) return false;
     return std.mem.endsWith(u8, path, ".md") or std.mem.endsWith(u8, path, ".mdx");
 }
 
@@ -255,6 +272,9 @@ pub fn isConfig(path: []const u8) bool {
     if (std.mem.eql(u8, path, "src/content/config.ts") or std.mem.eql(u8, path, "src/content/config.mjs") or
         std.mem.eql(u8, path, "src/content/config.js"))
         return true;
+    if (std.mem.eql(u8, path, "content/config.ts") or std.mem.eql(u8, path, "content/config.mjs") or
+        std.mem.eql(u8, path, "content/config.js"))
+        return true;
     if (std.mem.eql(u8, base, "package.json") or std.mem.eql(u8, base, "tsconfig.json")) return true;
     return false;
 }
@@ -270,12 +290,11 @@ pub fn classifyPath(path: []const u8) FileKind {
     return .other;
 }
 
-/// Path under `src/content/<collection>/…` with extension stripped, collection kept.
+/// Path under `<content-root>/<collection>/…` or `src/pages/…` with extension stripped.
 pub fn proposeEntityId(path: []const u8) []const u8 {
-    // Return a static? No — need allocation for general case. Tests use known prefixes.
     // Provide non-allocating for common prefixes by returning a slice of path.
-    if (std.mem.startsWith(u8, path, "src/content/")) {
-        var rest = path["src/content/".len..];
+    if (contentRootPrefix(path)) |prefix| {
+        var rest = path[prefix.len..];
         if (std.mem.endsWith(u8, rest, ".mdx")) return rest[0 .. rest.len - 4];
         if (std.mem.endsWith(u8, rest, ".md")) return rest[0 .. rest.len - 3];
         return rest;
@@ -295,10 +314,10 @@ pub fn proposeEntityId(path: []const u8) []const u8 {
     return path;
 }
 
-/// Collection-relative slug (drops `src/content/<collection>/`).
+/// Collection-relative slug (drops `<content-root>/<collection>/`).
 pub fn slugFromContentPath(path: []const u8) []const u8 {
-    if (!std.mem.startsWith(u8, path, "src/content/")) return proposeEntityId(path);
-    const rest = path["src/content/".len..];
+    const prefix = contentRootPrefix(path) orelse return proposeEntityId(path);
+    const rest = path[prefix.len..];
     if (std.mem.indexOfScalar(u8, rest, '/')) |slash| {
         var after = rest[slash + 1 ..];
         if (std.mem.endsWith(u8, after, ".mdx")) after = after[0 .. after.len - 4];
@@ -309,12 +328,40 @@ pub fn slugFromContentPath(path: []const u8) []const u8 {
 }
 
 pub fn collectionFromContentPath(path: []const u8) ?[]const u8 {
-    if (!std.mem.startsWith(u8, path, "src/content/")) return null;
-    const rest = path["src/content/".len..];
+    const prefix = contentRootPrefix(path) orelse return null;
+    const rest = path[prefix.len..];
     if (std.mem.indexOfScalar(u8, rest, '/')) |slash| {
         return rest[0..slash];
     }
     return null;
+}
+
+/// True when a directory entry exists at `name` under `root` (file or dir).
+fn entryExists(io: Io, root: Io.Dir, name: []const u8) bool {
+    _ = root.statFile(io, name, .{}) catch {
+        // statFile may fail for directories on some backends; try openDir.
+        var d = root.openDir(io, name, .{}) catch return false;
+        d.close(io);
+        return true;
+    };
+    return true;
+}
+
+/// Detect which supported content-collection roots exist under the scan root.
+/// Returns retained path prefixes with trailing slash, preference order:
+/// `src/content/` then `content/`. Does not invent roots from free-form Markdown.
+pub fn detectContentRoots(io: Io, retain: std.mem.Allocator, root: Io.Dir) ![]const []const u8 {
+    var list: std.ArrayList([]const u8) = .empty;
+    errdefer list.deinit(retain);
+    for (content_root_dir_names) |name| {
+        if (!entryExists(io, root, name)) continue;
+        // Only treat as a content root when it is a directory.
+        var d = root.openDir(io, name, .{}) catch continue;
+        d.close(io);
+        const prefix = try std.fmt.allocPrint(retain, "{s}/", .{name});
+        try list.append(retain, prefix);
+    }
+    return try list.toOwnedSlice(retain);
 }
 
 fn isBorisKey(key: []const u8) bool {
@@ -765,18 +812,43 @@ fn dirnamePosix(path: []const u8) []const u8 {
     return "";
 }
 
-/// Resolve a relative URL against a source file path (POSIX).
-fn resolveRelative(allocator: std.mem.Allocator, from_file: []const u8, target: []const u8) ![]u8 {
-    // Strip query/fragment for resolution.
+/// Strip `#fragment` and `?query` from a link target for filesystem resolution.
+fn stripQueryFragment(target: []const u8) []const u8 {
     var t = target;
     if (std.mem.indexOfScalar(u8, t, '#')) |hash| t = t[0..hash];
     if (std.mem.indexOfScalar(u8, t, '?')) |q| t = t[0..q];
+    return t;
+}
+
+/// Map a site-root absolute URL (`/images/hero.png`) to a `public/…` path.
+pub fn absoluteToPublicPath(allocator: std.mem.Allocator, target: []const u8) ![]u8 {
+    const t = stripQueryFragment(target);
+    if (t.len == 0 or t[0] != '/') return try allocator.dupe(u8, t);
+    if (t.len == 1) return try allocator.dupe(u8, "public");
+    return try std.fmt.allocPrint(allocator, "public{s}", .{t});
+}
+
+/// Map a site-root absolute URL to a route key for page resolution.
+/// `/` → `index`; `/about` → `about`; trailing slashes are trimmed.
+pub fn absoluteToRouteKey(allocator: std.mem.Allocator, target: []const u8) ![]u8 {
+    var t = stripQueryFragment(target);
+    if (t.len == 0 or t[0] != '/') return try allocator.dupe(u8, t);
+    while (t.len > 1 and t[t.len - 1] == '/') t = t[0 .. t.len - 1];
+    if (t.len == 1) return try allocator.dupe(u8, "index");
+    return try allocator.dupe(u8, t[1..]);
+}
+
+/// Resolve a relative URL against a source file path (POSIX).
+/// Site-root absolute targets (`/…`) return the path without the leading slash
+/// (empty string for `/`). Asset callers that need `public/` must use
+/// `absoluteToPublicPath` instead — absolute hrefs are routes, not assets.
+fn resolveRelative(allocator: std.mem.Allocator, from_file: []const u8, target: []const u8) ![]u8 {
+    var t = stripQueryFragment(target);
     if (t.len == 0) return try allocator.dupe(u8, "");
 
     if (t[0] == '/') {
-        // Site-root absolute: map to public/
-        if (t.len == 1) return try allocator.dupe(u8, "public");
-        return try std.fmt.allocPrint(allocator, "public{s}", .{t});
+        if (t.len == 1) return try allocator.dupe(u8, "");
+        return try allocator.dupe(u8, t[1..]);
     }
 
     const base_dir = dirnamePosix(from_file);
@@ -827,6 +899,10 @@ fn pathSetContains(paths: []const []const u8, needle: []const u8) bool {
     return false;
 }
 
+fn isAssetLinkKind(kind: []const u8) bool {
+    return std.mem.eql(u8, kind, "markdown_image") or std.mem.eql(u8, kind, "html_src");
+}
+
 fn hasPageCandidate(paths: []const []const u8, entity_or_path: []const u8) bool {
     // Exact path
     if (pathSetContains(paths, entity_or_path)) return true;
@@ -840,9 +916,9 @@ fn hasPageCandidate(paths: []const []const u8, entity_or_path: []const u8) bool 
         const full = buf[0 .. entity_or_path.len + suf.len];
         if (pathSetContains(paths, full)) return true;
     }
-    // content entity under src/content
+    // Content entity under supported content roots, pages, or public assets.
     if (entity_or_path.len + 20 < buf.len) {
-        const prefixes = [_][]const u8{ "src/content/", "src/pages/", "public/" };
+        const prefixes = [_][]const u8{ "src/content/", "content/", "src/pages/", "public/" };
         for (prefixes) |pre| {
             for (candidates) |suf| {
                 const n = pre.len + entity_or_path.len + suf.len;
@@ -861,6 +937,79 @@ fn hasPageCandidate(paths: []const []const u8, entity_or_path: []const u8) bool 
         }
     }
     return false;
+}
+
+/// Classify one internal link: asset refs → missing_assets; page routes → broken_links.
+fn classifyResolvedLink(
+    gpa: std.mem.Allocator,
+    retain: std.mem.Allocator,
+    all_paths: []const []const u8,
+    source_path: []const u8,
+    link: LinkRef,
+    broken: *std.ArrayList(BrokenLink),
+    missing_assets: *std.ArrayList(MissingAsset),
+) !void {
+    const target = link.target;
+    if (target.len == 0) return;
+    const is_asset_kind = isAssetLinkKind(link.kind);
+    const is_absolute = target[0] == '/';
+
+    if (is_asset_kind) {
+        // Image/src: absolute → public/; relative → path relative to source file.
+        const resolved = if (is_absolute)
+            try absoluteToPublicPath(retain, target)
+        else
+            try resolveRelative(retain, source_path, target);
+        if (resolved.len == 0) return;
+        if (!pathSetContains(all_paths, resolved) and !hasPageCandidate(all_paths, resolved)) {
+            try missing_assets.append(gpa, .{
+                .source_path = source_path,
+                .referenced = target,
+                .line = link.line,
+            });
+        }
+        return;
+    }
+
+    // markdown_link / html_href
+    if (is_absolute) {
+        // Existing public file at this URL remains an asset hit (not a route miss).
+        const public_path = try absoluteToPublicPath(retain, target);
+        if (pathSetContains(all_paths, public_path) or hasPageCandidate(all_paths, public_path)) {
+            return;
+        }
+        // Otherwise evaluate as a site route / content page.
+        const route_key = try absoluteToRouteKey(retain, target);
+        if (route_key.len > 0 and hasPageCandidate(all_paths, route_key)) {
+            return;
+        }
+        try broken.append(gpa, .{
+            .source_path = source_path,
+            .target = target,
+            .line = link.line,
+            .reason = "target_not_found",
+        });
+        return;
+    }
+
+    // Relative page/doc ref
+    const resolved = try resolveRelative(retain, source_path, target);
+    if (resolved.len == 0) return;
+    if (pathSetContains(all_paths, resolved) or hasPageCandidate(all_paths, resolved)) return;
+
+    const looks_page = std.mem.endsWith(u8, target, ".md") or
+        std.mem.endsWith(u8, target, ".mdx") or
+        std.mem.endsWith(u8, target, ".astro") or
+        std.mem.eql(u8, link.kind, "markdown_link") or
+        std.mem.eql(u8, link.kind, "html_href");
+    if (looks_page) {
+        try broken.append(gpa, .{
+            .source_path = source_path,
+            .target = target,
+            .line = link.line,
+            .reason = "target_not_found",
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1018,7 +1167,7 @@ pub fn analyze(
         try proposed.append(gpa, .{
             .source_path = p.source_path,
             .proposed_entity_id = p.entity_id,
-            .basis = "path_under_src_content_strip_ext",
+            .basis = "path_under_content_root_strip_ext",
         });
     }
     for (page_routes.items) |rp| {
@@ -1042,9 +1191,9 @@ pub fn analyze(
     for (content_pages.items) |p| {
         var route_path: ?[]const u8 = null;
         var ambiguous_route = false;
-        // exact route
-        if (std.mem.startsWith(u8, p.source_path, "src/content/")) {
-            const rest = p.source_path["src/content/".len..];
+        // exact route under src/pages for any supported content root
+        if (contentRootPrefix(p.source_path)) |cprefix| {
+            const rest = p.source_path[cprefix.len..];
             var stem = rest;
             if (std.mem.endsWith(u8, stem, ".mdx")) stem = stem[0 .. stem.len - 4];
             if (std.mem.endsWith(u8, stem, ".md")) stem = stem[0 .. stem.len - 3];
@@ -1209,53 +1358,23 @@ pub fn analyze(
 
     const all_path_slice = path_index.items;
 
+    // Content-root ambiguity: both supported roots present → human review only
+    // (still discover pages under each root; never scan arbitrary Markdown).
+    const detected_roots = try detectContentRoots(io, retain, root);
+    if (detected_roots.len > 1) {
+        try hazards.append(gpa, .{
+            .source_path = try retain.dupe(u8, detected_roots[1]),
+            .code = "ambiguous_content_roots",
+            .severity = "high",
+            .message = try retain.dupe(u8, "both src/content/ and content/ exist; pages under each are inventoried — confirm which collections are authoritative"),
+        });
+    }
+
     for (content_pages.items) |p| {
         const page_links = try extractLinks(retain, p.source_path, p.source);
         for (page_links) |l| {
             try links.append(gpa, l);
-            const resolved = try resolveRelative(retain, p.source_path, l.target);
-            const is_asset_kind = std.mem.eql(u8, l.kind, "markdown_image") or std.mem.eql(u8, l.kind, "html_src");
-            if (resolved.len == 0) continue;
-
-            // Asset refs
-            if (is_asset_kind or std.mem.startsWith(u8, l.target, "/")) {
-                const exists = pathSetContains(all_path_slice, resolved) or
-                    hasPageCandidate(all_path_slice, resolved);
-                if (!exists) {
-                    // try without public prefix mapping variants
-                    var found_asset = false;
-                    if (std.mem.startsWith(u8, l.target, "/")) {
-                        // already mapped to public/
-                        found_asset = pathSetContains(all_path_slice, resolved);
-                    }
-                    if (!found_asset and !pathSetContains(all_path_slice, resolved)) {
-                        try missing_assets.append(gpa, .{
-                            .source_path = p.source_path,
-                            .referenced = l.target,
-                            .line = l.line,
-                        });
-                        continue;
-                    }
-                }
-            }
-
-            if (!hasPageCandidate(all_path_slice, resolved) and !pathSetContains(all_path_slice, resolved)) {
-                // Maybe resolved file with different extension already tried.
-                // Treat as broken internal link when looks like page/doc ref.
-                const looks_page = std.mem.endsWith(u8, l.target, ".md") or
-                    std.mem.endsWith(u8, l.target, ".mdx") or
-                    std.mem.endsWith(u8, l.target, ".astro") or
-                    std.mem.eql(u8, l.kind, "markdown_link") or
-                    std.mem.eql(u8, l.kind, "html_href");
-                if (looks_page and !is_asset_kind) {
-                    try broken.append(gpa, .{
-                        .source_path = p.source_path,
-                        .target = l.target,
-                        .line = l.line,
-                        .reason = "target_not_found",
-                    });
-                }
-            }
+            try classifyResolvedLink(gpa, retain, all_path_slice, p.source_path, l, &broken, &missing_assets);
         }
 
         const page_hazards = try collectHazards(retain, p.source_path, p.source, p.fm);
@@ -1268,25 +1387,7 @@ pub fn analyze(
         const page_links = try extractLinks(retain, rp, source);
         for (page_links) |l| {
             try links.append(gpa, l);
-            const resolved = try resolveRelative(retain, rp, l.target);
-            if (resolved.len == 0) continue;
-            if (!pathSetContains(all_path_slice, resolved) and !hasPageCandidate(all_path_slice, resolved)) {
-                const is_asset_kind = std.mem.eql(u8, l.kind, "markdown_image") or std.mem.eql(u8, l.kind, "html_src");
-                if (is_asset_kind or std.mem.startsWith(u8, l.target, "/")) {
-                    try missing_assets.append(gpa, .{
-                        .source_path = rp,
-                        .referenced = l.target,
-                        .line = l.line,
-                    });
-                } else {
-                    try broken.append(gpa, .{
-                        .source_path = rp,
-                        .target = l.target,
-                        .line = l.line,
-                        .reason = "target_not_found",
-                    });
-                }
-            }
+            try classifyResolvedLink(gpa, retain, all_path_slice, rp, l, &broken, &missing_assets);
         }
     }
 

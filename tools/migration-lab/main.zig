@@ -515,11 +515,48 @@ test "astro: path helpers: normalize and classify" {
     );
     try std.testing.expect(archaeology.isContentPage("src/content/docs/a.md"));
     try std.testing.expect(archaeology.isContentPage("src/content/docs/a.mdx"));
+    try std.testing.expect(archaeology.isContentPage("content/docs/a.md"));
     try std.testing.expect(!archaeology.isContentPage("src/pages/a.astro"));
+    try std.testing.expect(!archaeology.isContentPage("NOTES.md"));
+    try std.testing.expect(!archaeology.isContentPage("docs/readme.md"));
     try std.testing.expect(archaeology.isPageRoute("src/pages/docs/[...slug].astro"));
     try std.testing.expect(archaeology.isLayout("src/layouts/BaseLayout.astro"));
     try std.testing.expect(archaeology.isPublicAsset("public/favicon.svg"));
     try std.testing.expect(archaeology.isSrcAsset("src/assets/logo.svg"));
+    try std.testing.expectEqualStrings("src/content/", archaeology.contentRootPrefix("src/content/docs/a.md").?);
+    try std.testing.expectEqualStrings("content/", archaeology.contentRootPrefix("content/docs/a.md").?);
+    try std.testing.expect(archaeology.contentRootPrefix("NOTES.md") == null);
+}
+
+test "astro: absolute route key and public path helpers" {
+    const gpa = std.testing.allocator;
+    const root_key = try archaeology.absoluteToRouteKey(gpa, "/");
+    defer gpa.free(root_key);
+    try std.testing.expectEqualStrings("index", root_key);
+    const about_key = try archaeology.absoluteToRouteKey(gpa, "/about");
+    defer gpa.free(about_key);
+    try std.testing.expectEqualStrings("about", about_key);
+    const about_slash = try archaeology.absoluteToRouteKey(gpa, "/about/");
+    defer gpa.free(about_slash);
+    try std.testing.expectEqualStrings("about", about_slash);
+    const pub_path = try archaeology.absoluteToPublicPath(gpa, "/images/hero.png");
+    defer gpa.free(pub_path);
+    try std.testing.expectEqualStrings("public/images/hero.png", pub_path);
+}
+
+test "astro: entity id from root-level content path" {
+    try std.testing.expectEqualStrings(
+        "docs/intro",
+        archaeology.proposeEntityId("content/docs/intro.md"),
+    );
+    try std.testing.expectEqualStrings(
+        "intro",
+        archaeology.slugFromContentPath("content/docs/intro.md"),
+    );
+    try std.testing.expectEqualStrings(
+        "docs",
+        archaeology.collectionFromContentPath("content/docs/intro.md").?,
+    );
 }
 
 test "astro: frontmatter hazard detection" {
@@ -686,6 +723,153 @@ test "astro: adversarial corpus preserves unicode and reports route ambiguity" {
     const after = try archaeology.readFileAlloc(io, root, "src/content/docs/café.md", gpa);
     defer gpa.free(after);
     try std.testing.expectEqualStrings(before, after);
+    Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+}
+
+test "astro: root-level content/ discovery + determinism + source immutability" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const fixture = "fixtures/root-content-astro";
+    const out_a = "fixtures/.test-root-content-a";
+    const out_b = "fixtures/.test-root-content-b";
+    Io.Dir.cwd().deleteTree(io, out_a) catch {};
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
+
+    var root = try Io.Dir.cwd().openDir(io, fixture, .{});
+    defer root.close(io);
+    const before = try archaeology.readFileAlloc(io, root, "content/docs/intro.md", gpa);
+    defer gpa.free(before);
+
+    try archaeology.run(io, gpa, .{ .root_dir = fixture, .out_dir = out_a, .quiet = true });
+    try archaeology.run(io, gpa, .{ .root_dir = fixture, .out_dir = out_b, .quiet = true });
+
+    var oa = try Io.Dir.cwd().openDir(io, out_a, .{});
+    defer oa.close(io);
+    var ob = try Io.Dir.cwd().openDir(io, out_b, .{});
+    defer ob.close(io);
+    const json_a = try archaeology.readFileAlloc(io, oa, "report.json", gpa);
+    defer gpa.free(json_a);
+    const json_b = try archaeology.readFileAlloc(io, ob, "report.json", gpa);
+    defer gpa.free(json_b);
+    try std.testing.expectEqualStrings(json_a, json_b);
+
+    // Content under root-level content/ is discovered
+    try std.testing.expect(std.mem.indexOf(u8, json_a, "\"source_path\": \"content/docs/intro.md\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_a, "\"kind\": \"content_page\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_a, "\"proposed_entity_id\": \"docs/intro\"") != null);
+    // Free-form Markdown outside supported roots is not content
+    try std.testing.expect(std.mem.indexOf(u8, json_a, "NOTES.md") == null);
+
+    const after = try archaeology.readFileAlloc(io, root, "content/docs/intro.md", gpa);
+    defer gpa.free(after);
+    try std.testing.expectEqualStrings(before, after);
+
+    Io.Dir.cwd().deleteTree(io, out_a) catch {};
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
+}
+
+test "astro: absolute root link, valid route, missing route, real public asset" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const fixture = "fixtures/absolute-links-astro";
+    const out_rel = "fixtures/.test-absolute-links";
+    Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+
+    var root = try Io.Dir.cwd().openDir(io, fixture, .{});
+    defer root.close(io);
+    const before = try archaeology.readFileAlloc(io, root, "src/content/docs/links.md", gpa);
+    defer gpa.free(before);
+
+    try archaeology.run(io, gpa, .{ .root_dir = fixture, .out_dir = out_rel, .quiet = true });
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{});
+    defer out.close(io);
+    const json = try archaeology.readFileAlloc(io, out, "report.json", gpa);
+    defer gpa.free(json);
+
+    // Missing absolute route → broken_links, never missing_assets
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"target\": \"/no-such-page\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"reason\": \"target_not_found\"") != null);
+    // /no-such-page must not appear under missing_assets
+    {
+        const ma_key = "\"missing_assets\"";
+        const bl_key = "\"broken_links\"";
+        const ma_idx = std.mem.indexOf(u8, json, ma_key) orelse return error.TestUnexpectedResult;
+        const bl_idx = std.mem.indexOf(u8, json, bl_key) orelse return error.TestUnexpectedResult;
+        // broken_links section contains /no-such-page
+        const after_bl = json[bl_idx..];
+        const next_section = std.mem.indexOf(u8, after_bl, "\"slug_conflicts\"") orelse after_bl.len;
+        try std.testing.expect(std.mem.indexOf(u8, after_bl[0..next_section], "/no-such-page") != null);
+        // missing_assets section does not
+        const after_ma = json[ma_idx..];
+        const ma_end = std.mem.indexOf(u8, after_ma, "\"hazards\"") orelse after_ma.len;
+        try std.testing.expect(std.mem.indexOf(u8, after_ma[0..ma_end], "/no-such-page") == null);
+        // real missing image asset is present
+        try std.testing.expect(std.mem.indexOf(u8, after_ma[0..ma_end], "/images/missing.png") != null);
+        // present public asset is not listed as missing
+        try std.testing.expect(std.mem.indexOf(u8, after_ma[0..ma_end], "/images/hero.png") == null);
+    }
+    // Valid absolute routes / and /about are not broken
+    {
+        const bl_idx = std.mem.indexOf(u8, json, "\"broken_links\"") orelse return error.TestUnexpectedResult;
+        const after_bl = json[bl_idx..];
+        const next_section = std.mem.indexOf(u8, after_bl, "\"slug_conflicts\"") orelse after_bl.len;
+        const section = after_bl[0..next_section];
+        // exact "target": "/" would be the root link — must not appear as broken
+        try std.testing.expect(std.mem.indexOf(u8, section, "\"target\": \"/\"") == null);
+        try std.testing.expect(std.mem.indexOf(u8, section, "\"target\": \"/about\"") == null);
+    }
+
+    const after = try archaeology.readFileAlloc(io, root, "src/content/docs/links.md", gpa);
+    defer gpa.free(after);
+    try std.testing.expectEqualStrings(before, after);
+    Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+}
+
+test "astro: dual content roots inventoriable + ambiguous human review; stray md ignored" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const fixture = "fixtures/dual-content-roots-astro";
+    const out_rel = "fixtures/.test-dual-content-roots";
+    Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+
+    try archaeology.run(io, gpa, .{ .root_dir = fixture, .out_dir = out_rel, .quiet = true });
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{});
+    defer out.close(io);
+    const json = try archaeology.readFileAlloc(io, out, "report.json", gpa);
+    defer gpa.free(json);
+
+    try std.testing.expect(std.mem.indexOf(u8, json, "src/content/docs/from-src.md") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "content/docs/from-root.md") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "ambiguous_content_roots") != null);
+    // Free-form NOTES.md may appear in inventory as "other", never as content_page
+    // or as a proposed entity id / stitch content path.
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"proposed_entity_id\": \"NOTES\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"content_path\": \"NOTES.md\"") == null);
+    // No content_page inventory row for NOTES.md
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"source_path\": \"NOTES.md\", \"kind\": \"content_page\"") == null);
+
+    Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+}
+
+test "astro: mini-astro absolute /docs is route not missing asset" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const out_rel = "fixtures/.test-mini-astro-abs";
+    Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+    try archaeology.run(io, gpa, .{ .root_dir = "fixtures/mini-astro", .out_dir = out_rel, .quiet = true });
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{});
+    defer out.close(io);
+    const json = try archaeology.readFileAlloc(io, out, "report.json", gpa);
+    defer gpa.free(json);
+
+    const ma_idx = std.mem.indexOf(u8, json, "\"missing_assets\"") orelse return error.TestUnexpectedResult;
+    const after_ma = json[ma_idx..];
+    const ma_end = std.mem.indexOf(u8, after_ma, "\"hazards\"") orelse after_ma.len;
+    // /docs was previously misclassified as a missing public asset
+    try std.testing.expect(std.mem.indexOf(u8, after_ma[0..ma_end], "\"referenced\": \"/docs\"") == null);
+    // real missing image still reported
+    try std.testing.expect(std.mem.indexOf(u8, after_ma[0..ma_end], "/images/not-there.png") != null);
+
     Io.Dir.cwd().deleteTree(io, out_rel) catch {};
 }
 
