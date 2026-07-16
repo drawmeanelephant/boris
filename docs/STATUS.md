@@ -196,6 +196,7 @@ on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 | [`CHANGELOG.md`](../CHANGELOG.md) | What landed |
 | [`docs/contracts/`](contracts/) | **Normative** machine contracts + fixtures |
 | [`docs/RELEASE-GATE.md`](RELEASE-GATE.md) | Ship checklist / `release-gate.sh` |
+| [`docs/ROADMAP-post-f8.md`](ROADMAP-post-f8.md) | Post-F8 planning history + post-F9.2 future (not living phase banner) |
 | [`docs/rag/system/`](rag/system/) | RAG narrative seeds (not contracts) |
 | [`content/AGENT-DIRECTIVE.txt`](../content/AGENT-DIRECTIVE.txt) | Sample-content rebuild brief |
 

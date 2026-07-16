@@ -23,11 +23,11 @@ is **not** proof that every surface is the default CLI product.
 | Parallel HTML workers / watch | **Implemented** (`--jobs`, `--watch`; see contracts below) |
 | Multi-target isolated outputs | **Implemented** — CLI, isolation, stage commit, selective watch (P3.3) |
 | HTML `dist/` default CLI | **Implemented** (Feature 2) |
-| Templating + theme assets (F9.1) | **Implemented** — closed plan, target-owned assets; see `templating-and-themes.md` |
-| Semantic relations (IR 0.3) | **Implemented on topic branch** — bounded author relations with deliberate schema change; see `semantic-relations.md` |
-| AI Context Bundle (`--context`) | **Implemented on topic branch** — deterministic provenance-rich export; see `context-bundle.md` |
+| Templating + theme assets (F9.1 / F9.2) | **Implemented** — closed plan, target-owned assets, UTF-8 layout gate, orphan asset scrub; see `templating-and-themes.md` |
+| Semantic relations (IR 0.3) | **Implemented** — bounded author relations with deliberate schema change; see `semantic-relations.md` |
+| AI Context Bundle (`--context`) | **Implemented** — deterministic provenance-rich export; see `context-bundle.md` |
 | Includes + wiki-links (HTML) | **Implemented** — pre-Apex; see `includes-and-wiki-links.md` |
-| IR 0.2 dependency edges + reverse index | **Implemented (F8.1–F8.3 shipped)** — `--out` emits typed edges and `reverseIndex`; HTML incremental uses the shared reverse-walk semantics |
+| IR 0.2 dependency edges + reverse index | **Implemented (F8.1–F8.3 shipped)** — `--out` emits typed edges and `reverseIndex`; incremental HTML uses the same reverse-walk dirty-set (v0.3.1) |
 | Documentation Intelligence | **Implemented first slice** — `check` / `impact`; see [documentation-intelligence.md](documentation-intelligence.md) |
 
 ## Canonical ownership (one document per topic)
@@ -52,7 +52,7 @@ per topic:
 | Multi-target isolated outputs | [multi-target-isolated-output.md](multi-target-isolated-output.md) |
 | Includes + wiki-links | [includes-and-wiki-links.md](includes-and-wiki-links.md) |
 | Heading IDs + wiki fragments | [heading-ids.md](heading-ids.md) |
-| Templating + themes (F9.1) | [templating-and-themes.md](templating-and-themes.md) |
+| Templating + themes (F9.1 / F9.2) | [templating-and-themes.md](templating-and-themes.md) |
 | Semantic relations (IR 0.3) | [semantic-relations.md](semantic-relations.md) |
 | AI Context Bundle | [context-bundle.md](context-bundle.md) |
 | Documentation Intelligence | [documentation-intelligence.md](documentation-intelligence.md) |
@@ -75,8 +75,9 @@ per topic:
 | [multi-target-isolated-output.md](multi-target-isolated-output.md) | Multi-target CLI/config, output isolation, cache namespaces (P3.3) |
 | [includes-and-wiki-links.md](includes-and-wiki-links.md) | `{{include}}` + `[[wiki]]` pre-Apex; cycles; fragment tree; IR 0.2 edge projection |
 | [heading-ids.md](heading-ids.md) | Apex heading `id` harvest; `[[entity#heading]]` match + URL rules |
-| [templating-and-themes.md](templating-and-themes.md) | Closed layout plan, theme assets, `metadata`/`footer`/`asset-url` (F9.1) |
+| [templating-and-themes.md](templating-and-themes.md) | Closed layout plan, theme assets, UTF-8/orphan hardening (F9.1 / F9.2) |
 | [semantic-relations.md](semantic-relations.md) | Bounded author relations and deliberate IR 0.3 schema plan |
+| [context-bundle.md](context-bundle.md) | Deterministic provenance-rich AI context export (`--context`) |
 | [documentation-intelligence.md](documentation-intelligence.md) | Read-only graph health and impact analysis (`check` / `impact`) |
 
 ## Redirect / compatibility paths (non-normative)

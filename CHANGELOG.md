@@ -19,7 +19,7 @@ How to use going forward:
 
 ## [Unreleased]
 
-### Knowledge-system exports (topic branches)
+### Knowledge-system exports
 
 - Bounded semantic relations (`relations: [kind=target]`) validate against the
   page graph and emit conditional IR 0.3 artifacts; relation-free IR 0.2
@@ -28,12 +28,20 @@ How to use going forward:
   including source-relative provenance, SHA-256 hashes, validated graph output,
   and one uploadable Markdown bundle. Contract:
   `docs/contracts/context-bundle.md`.
+
 ### Documentation Intelligence
 
 - Added read-only `boris check` and `boris impact ID` analysis commands over
   the validated graph, with deterministic human/JSON reports and optional
   report-file output and release-gate fixture goldens. Contract:
   `docs/contracts/documentation-intelligence.md`.
+
+### Docs
+
+- Roadmap truth reconciliation after PR #42: F8.3 / v0.3.1 tagged, heading
+  wiki (#40), F9.1 (#41), and F9.2 (#42) recorded as shipped; post-F9.2 future
+  work moved to a dedicated section; contracts index no longer claims F8.3 is
+  pending (`docs/ROADMAP-post-f8.md`, `docs/contracts/README.md`, STATUS map).
 
 ### Feature 9.2 — theme/template hardening
 
