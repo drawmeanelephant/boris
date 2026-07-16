@@ -10,7 +10,7 @@ or an AI Context Bundle.
 | | |
 |--|--|
 | Language | Zig **0.16.0** (`build.zig.zon` / CI pin) |
-| Product | **0.4.0** / compiler **boris/0.4.0** |
+| Product | **0.5.0** / compiler **boris/0.5.0** |
 | IR schema | **0.2.0** (typed dependency endpoints + reverse index) |
 | License | [MIT](LICENSE) |
 
@@ -74,7 +74,7 @@ Honest differentiators — not a feature-parity matrix against every plugin.
 | In-page links | Often soft warnings | `[[entity-id]]` / `[[entity-id#heading]]` **fail** if missing; ordinary Markdown `[]()` hrefs are **not** fully link-checked |
 | Output products | Usually HTML (+ ad-hoc scripts) | HTML **or** IR **or** RAG **or** Context Bundle (modes do not mix) |
 | Themes | Component frameworks common | Trusted **static** HTML layouts + copied assets — no CDN fetch in the compile path |
-| Extensibility | MDX / JS in content | Allowlisted `<Aside>` + includes — **no** unrestricted MDX |
+| Extensibility | MDX / JS in content | Allowlisted `<Aside>` / `<Details>` + includes — **no** unrestricted MDX |
 
 **Host tools to *compile Boris*:** Zig **0.16** + **CMake** (CMake builds vendored
 ApexMarkdown static libs at compile time only). Authors and CI that already have
@@ -352,7 +352,7 @@ after exit 0.
 | [rag-export.md](docs/contracts/rag-export.md) | RAG corpus |
 | [context-bundle.md](docs/contracts/context-bundle.md) | AI Context Bundle |
 | [documentation-intelligence.md](docs/contracts/documentation-intelligence.md) | `check` / `impact` |
-| [components.md](docs/contracts/components.md) | `<Aside>` |
+| [components.md](docs/contracts/components.md) | `<Aside>` and `<Details>` |
 | [apex-abi.md](docs/contracts/apex-abi.md) | Apex host ABI |
 | [html-output.md](docs/contracts/html-output.md) | HTML path (default CLI) |
 | [includes-and-wiki-links.md](docs/contracts/includes-and-wiki-links.md) | Includes + wiki |
@@ -369,7 +369,7 @@ after exit 0.
   incremental/watch/jobs/multi-target, graph nav + in-page `{{toc}}`,
   includes + wiki-links, typed IR dependency edges + reverse index,
   Documentation Intelligence, Context Bundles, layout selection, Textile
-  compatibility, and migration labs as **standalone developer aids**. Product
-  **v0.4.0**.
+  compatibility, and migration labs as **standalone developer aids**. Prepared
+  product **v0.5.0 release candidate**.
 - **Next:** real-site dogfood and release follow-through — see
   [`docs/STATUS.md`](docs/STATUS.md).

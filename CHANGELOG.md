@@ -3,10 +3,10 @@
 All notable changes to Boris are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
-Versioning: product **v0.4.0** with base IR `schemaVersion` **`0.2.0`** and
-compiler id **`boris/0.4.0`**. Breaking IR changes must bump `schemaVersion` and
-update `docs/contracts/`. Product version bumps may update `compiler_id` /
-`boris_version` without changing IR schema.
+Versioning: the current product cut is **v0.5.0** with base IR
+`schemaVersion` **`0.2.0`** and compiler id **`boris/0.5.0`**. Breaking IR
+changes must bump `schemaVersion` and update `docs/contracts/`. Product version
+bumps may update `compiler_id` / `boris_version` without changing IR schema.
 
 How to use going forward:
 
@@ -26,9 +26,133 @@ How to use going forward:
 
 _No changes yet._
 
+## [0.5.0] — 2026-07-16 (release candidate)
+
+The v0.5.0 candidate keeps base IR `0.2.0` and conditional semantic-relation
+IR `0.3.0`; it updates product/compiler/RAG versioning to `0.5.0` without an
+IR schema change. The tag remains pending release-owner review.
+
+### Added
+
+- Added a durable public [agent credits and roster](/content/agents/credits.md)
+  that distinguishes Codex worker records from honorary external tools and
+  preserves evidence boundaries.
+- Added a developer-only, reversible Filed.fyi changelog/releases first slice in
+  the [migration laboratory](/tools/migration-lab/README.md), with raw
+  provenance, explicit unmapped-field reports, and mechanical stripping reports
+  for delimited untrusted instruction blocks.
+- Locked down the trusted-author Apex boundary: raw HTML passes through while
+  HTML-looking fenced code remains escaped. Links:
+  [Apex ABI contract](/docs/contracts/apex-abi.md).
+- Added a developer-only Starlight/Astro English proof slice in the
+  [migration laboratory](/tools/migration-lab/README.md) (`--mode=starlight`),
+  with synthetic [`mini-starlight`](/tools/migration-lab/fixtures/mini-starlight/)
+  fixtures, route/link/nav/asset manifests, proven wiki rewrites only, source
+  immutability checks, and an optional Boris compile report.
+- Added the optional, local-only
+  [friendly static docs theme example](examples/daisy-static-theme/README.md)
+  with Boris layout slots, responsive CSS, and no framework or runtime
+  dependency.
+- Added the fixed native `<Details>` disclosure component with closed
+  attributes, deterministic HTML/RAG projection, and `ECOMPONENT` validation.
+  [Component contract](/docs/contracts/components.md).
+- The standalone source-code exporter accepts `--no-bundles` to omit its four
+  duplicate-byte convenience files while retaining the per-file corpus and
+  catalog artifacts. See [source-RAG usage](/tools/source-rag/README.md).
+- Expanded the tracked agent-lore dogfood section with evidence-bounded Codex
+  task records. Links: [agent field notes](/content/agents/index.md).
+- Added a compact, hand-authored archive-theme example showing the deterministic
+  `{{children}}` layout slot for future visual imports. See the
+  [archive-theme example](/examples/archive-theme/).
+- Added opt-in deterministic 200-page incremental HTML smoke coverage with
+  sequential and bounded-parallel output comparison. Notes:
+  [scale smoke fixture](/test/scale-smoke/README.md).
+- Added optional `{{children}}` layouts that render each page’s deterministic,
+  escaped direct-child links without changing IR output. Contract:
+  [HTML output](/docs/contracts/html-output.md).
+- Added bounded Obsidian vault migration (`--mode=obsidian` / `--vault`) with
+  deterministic discovery, unambiguous wiki/asset rewrites, manifests, and
+  review reports for unsupported or ambiguous constructs; it remains a
+  developer tool. See [migration-lab README](tools/migration-lab/README.md).
+- Added bounded Notion Markdown/CSV export migration (`--mode=notion` /
+  `--export`) with deterministic discovery, safe local rewrites, media
+  inventory, and review reports; it remains a developer tool. See
+  [migration-lab README](tools/migration-lab/README.md).
+
+### Changed
+
+- Isolated deterministic IR artifact serialization behind pipeline-compatible
+  wrappers. Contract: [IR schema](/docs/contracts/ir-schema.md).
+- Isolated deterministic product-RAG document and catalog serialization behind
+  a RAG-compatible emitter while preserving schema 1 bytes. Contract:
+  [RAG export](/docs/contracts/rag-export.md).
+- Strengthened the developer-only Starlight migration proof: deterministic
+  discovery supports both locale-dir and root-locale trees; link/asset review
+  manifests are explicit; no Boris core asset copy or runtime dependency is
+  introduced. See [migration-lab README](tools/migration-lab/README.md).
+- HTML publication and heading harvesting now share one source-to-body renderer,
+  preserving the documented [HTML body pipeline](/docs/contracts/html-output.md).
+
+### Fixed
+
+- Textile table declarations, including attributed variants, now fail closed
+  with `ETEXTILE` before paragraph fallback. Contract:
+  [Textile compatibility](/docs/contracts/textile-compatibility.md).
+- Closed frontmatter now rejects trailing commas in `tags` and semantic
+  `relations` lists. Contract: [frontmatter grammar](/docs/contracts/frontmatter.md).
+- HTML builds now report invalid registered-component syntax as source-located
+  `ECOMPONENT` diagnostics instead of a bare internal failure; see the
+  [diagnostics contract](/docs/contracts/diagnostics.md).
+- Regenerating the source-code RAG pack removes stale generated documents,
+  including previously exported vendored files. See
+  [source-RAG usage](/tools/source-rag/README.md).
+- Instagram migration-lab archive indexes link child records with published
+  HTML paths instead of source Markdown paths. See
+  [`instagram.zig`](/tools/migration-lab/instagram.zig).
+- Obsidian migration resolves unambiguous path-suffix wiki targets, classifies
+  Templater targets, and disambiguates colliding entity ids. See
+  [migration-lab README](tools/migration-lab/README.md).
+- WordPress migration preserves WPTT-class artifacts and status/taxonomy edge
+  cases with redistributable fixtures. See
+  [migration-lab README](tools/migration-lab/README.md).
+- Astro migration archaeology discovers root-level `content/` and classifies
+  site-root absolute hrefs as routes rather than blind public assets. See
+  [migration-lab README](/tools/migration-lab/README.md).
+- WordPress migration no longer silently drops WXR excerpts, sticky flags, or
+  empty slugs; it records their preservation in its review report. See
+  [migration-lab README](tools/migration-lab/README.md).
+- Context Bundle staging directories are removed after failed writes or
+  publishes while preserving prior output. Contract:
+  [Context Bundle](/docs/contracts/context-bundle.md).
+
+### Docs
+
+- Migration-lab changes now have a Linux CI gate; contributors can run the
+  matching targeted aggregate command documented in the
+  [release gate](/docs/RELEASE-GATE.md).
+- Added an honest MkDocs Material preflight and manual conversion checklist to
+  the [migration guide](/docs/MIGRATION.md), without adding an importer or
+  runtime dependency.
+- Documented stable landmark and list semantics for generated navigation,
+  direct-child, and in-page TOC fragments in the
+  [HTML output contract](/docs/contracts/html-output.md).
+- Made Documentation Intelligence, Context Bundles, layout rules, and Boris’s
+  local JSON-IR pipeline recipe discoverable from the [README](/README.md) and
+  [migration guide](/docs/MIGRATION.md).
+- Reconciled the living [project status](/docs/STATUS.md), post-F8 planning
+  header, and [RAG export contract](/docs/contracts/rag-export.md) with the
+  tagged Boris v0.4.0 release.
+- Restructured the [README](/README.md) and [migration guide](/docs/MIGRATION.md)
+  for first-time and hackathon readers: outcomes first, five-minute quickstart,
+  evidence-backed differentiators, and honest AI/migration boundaries.
+- Verified the README quickstart against a clean checkout; corrected copy/paste
+  failures and added a compact 15-minute demo path. See [README](/README.md).
+- Reconciled the canonical IR and multi-target contracts with the prepared
+  `boris/0.5.0` compiler id while preserving IR schema `0.2.0`.
+
 ## [0.4.0] — 2026-07-16
 
-Release-candidate cut after v0.3.1. Package/product and RAG version are
+Released after v0.3.1. Package/product and RAG version are
 `0.4.0`; the compiler id is `boris/0.4.0`. Relation-free output remains base
 IR `0.2.0`; semantic relations retain conditional IR `0.3.0` artifacts with
 compiler id `boris/0.4.0+semantic-relations`. This product cut does not bump an
@@ -962,7 +1086,7 @@ gaps still listed in `docs/STATUS.md`.
 | Tag / section | Meaning |
 |---------------|---------|
 | `[Unreleased]` | Landed on main, not yet cut as a release note block |
-| `[0.4.0]` | Current release-candidate cut; product `boris/0.4.0`, base IR `0.2.0`, conditional semantic IR `0.3.0` |
+| `[0.4.0]` | Tagged product release; product `boris/0.4.0`, base IR `0.2.0`, conditional semantic IR `0.3.0` |
 | `[0.2.0]` | HTML-default product cut: Features 1+2+6, P2/P3; product `boris/0.2.0` |
 | `[0.1.1]` | Doc↔code reconciliation + release gate; product `boris/0.1.1` |
 | `[0.1.0]` | First content-compiler checkpoint |
