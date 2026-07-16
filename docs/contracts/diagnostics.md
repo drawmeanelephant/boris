@@ -113,6 +113,11 @@ must emit exactly these strings (no underscore variants such as `E_DUP_ID`).
 | `EUSAGE` | error | CLI usage / flag error (unknown flag, conflicts, malformed options) | CLI (exit 2; not in build-report) |
 | `EIO` | error | I/O or system failure (missing content root, unreadable file, unexpected runtime) | pipeline / CLI (exit 3 when pure I/O) |
 
+On the HTML path, component tokenizer failures are emitted as structured
+`ECOMPONENT` diagnostics with the content-relative source path and the
+full-source line/column of the offending tag; the CLI does not replace them
+with a bare internal `ComponentFailed` error.
+
 ### Mapping notes
 
 | Issue class | Primary code |

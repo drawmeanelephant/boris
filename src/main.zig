@@ -543,11 +543,12 @@ fn mapHtmlError(
             }
             return .usage;
         },
-        // Graph/include/wiki (and multi-target wrap of those) already print
+        // Graph/include/wiki/component failures (and multi-target wrap) already print
         // structured diagnostics on the HTML path; re-printing @errorName only doubles noise.
         error.GraphValidationFailed,
         error.IncludeFailed,
         error.ReferenceFailed,
+        error.ComponentFailed,
         // Multi-target wrap can mix content and I/O; prefer content for graph/include
         // failures already printed, but treat pure layout load I/O as exit 3 via FileNotFound etc.
         error.MultiTargetCompilationFailed,
@@ -563,7 +564,6 @@ fn mapHtmlError(
             return .io_error;
         },
         error.ParseFailed,
-        error.ComponentFailed,
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
         error.LayoutUnknownMarker,
