@@ -1,0 +1,14 @@
+{
+  "nodes": [
+    {
+      "id": "n1",
+      "type": "text",
+      "text": "Canvas is unsupported in phase-1",
+      "x": 0,
+      "y": 0,
+      "width": 200,
+      "height": 80
+    }
+  ],
+  "edges": []
+}
