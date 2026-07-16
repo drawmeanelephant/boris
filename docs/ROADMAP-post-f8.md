@@ -7,21 +7,22 @@ in **v0.3.1**). Heading-target wiki links (PR #40), F9.1 closed layout/theme
 assets (PR #41), and F9.2 layout UTF-8 validation + orphan theme-asset scrub
 (PR #42) are **shipped**. Product **v0.3.1** is released/tagged. Documentation
 Intelligence (`check` / `impact`), bounded semantic relations, and AI Context
-Bundles land in this knowledge-system track — see the live direction block and
-`STATUS.md`. This file preserves the post-F8 planning history and records what
-remains *after* F9.2.
+Bundles are merged on `main` via PRs #43 and #44 and remain under
+`[Unreleased]` until the next product cut. This file preserves the post-F8
+planning history and records what remains *after* F9.2 and the
+knowledge-system track.
 
 Normative behavior: [`docs/contracts/`](contracts/). Hard constraints:
 [`AGENTS.md`](../AGENTS.md). Living phase: [`STATUS.md`](STATUS.md).
 
 ### Live direction after F9.2
 
-1. Harden and merge Documentation Intelligence with fixture goldens and
-   no-artifact checks.
-2. Add bounded semantic relations as a deliberate IR schema change (likely
-   IR 0.3), keeping them separate from build-dependency edges.
-3. Add deterministic, provenance-rich AI Context Bundles over the validated
-   graph and RAG pipeline.
+1. Cut the next release with the merged knowledge-system contracts and
+   acceptance gates documented in `[Unreleased]`.
+2. Dogfood Boris against a real site and turn migration findings into focused
+   authoring, layout, and conversion work.
+3. Decide per-page layout selection and external stylesheet boundaries before
+   attempting a broader theme/DaisyUI experiment.
 
 Do not interpret historical “F8.3 pending” or “heading wiki later” statements
 below as current status; they are retained to preserve planning context.
@@ -181,11 +182,12 @@ same way.
 | **Verification** | Grep for stale product/IR / “F8.3 pending” claims; smoke `boris` on `content/`. |
 | **PR / agent split** | Fully parallel; docs-only agent. |
 
-### Knowledge-system extension — semantic relations + Context Bundles
+### Knowledge-system extension — semantic relations + Context Bundles → shipped
 
-This is the next product direction after graph-native dependencies: make the
-validated graph useful as an explicit knowledge surface without turning Boris
-into a JavaScript application stack.
+This track is now merged on `main` via PRs #43 and #44. It makes the validated
+graph useful as an explicit knowledge surface without turning Boris into a
+JavaScript application stack. Follow-on retrieval and bundle-profile work is
+deferred until real-site dogfooding establishes the need.
 
 | Cut | User outcome | Contract / gate |
 |-----|--------------|-----------------|

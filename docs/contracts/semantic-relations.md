@@ -1,7 +1,7 @@
 # Semantic relations (IR 0.3)
 
-**Status:** first implementation on the semantic-relations branch; relation-free
-inputs remain byte-compatible with the IR 0.2 goldens.
+**Status:** implemented and merged; relation-free inputs remain byte-compatible
+with the IR 0.2 goldens.
 
 Semantic relations describe author-intended knowledge relationships. They are
 not build dependencies. In particular, a `depends_on` semantic relation must
@@ -78,8 +78,9 @@ The `graph.json` root key order becomes:
 schemaVersion, frozen, nodes, edges, reverseIndex, nav, relations
 ```
 
-`relations` is always present on a successful frozen graph, including as an
-empty array. Each entry has fixed key order:
+For artifacts emitted with schema `0.3.0`, `relations` is always present on a
+successful frozen graph, including as an empty array. Relation-free artifacts
+retain IR 0.2 shape and omit this key. Each entry has fixed key order:
 
 ```json
 {

@@ -140,7 +140,7 @@ See [frontmatter.md](docs/contracts/frontmatter.md).
 | Default HTML site + real ApexMarkdown Unified | **Done** |
 | Trunk/Satellite graph, closed frontmatter, Asides | **Done** |
 | IR 0.2 graph-native dependencies + RAG export | **Done** |
-| Bounded semantic relations + Context Bundles | **Topic branch** |
+| Documentation Intelligence, bounded semantic relations + Context Bundles | **Merged; unreleased** |
 | Incremental, watch, parallel jobs, multi-target | **Done** |
 | CI Linux + macOS | **Done** |
 | Graph-aware HTML nav (`{{nav}}` / breadcrumb) | **Done** (Feature 6 MVP) |
