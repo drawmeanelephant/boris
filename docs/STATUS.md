@@ -32,7 +32,7 @@ TOC, and P2/P3 incremental / watch / jobs / multi-target. Tag: `v0.2.0`.
 | A docs site from Markdown | HTML under `dist/` | `boris` (default) |
 | Tables, footnotes, callouts, real Markdown | ApexMarkdown Unified, not a toy stub | Feature 1 — in-process render |
 | Callouts that stay in the page | Constrained `<Aside>` in document order | Shared compile path |
-| Shared fragments + internal page links | `{{include}}` + `[[entity-id]]` (HTML) | Feature 7 — pre-Apex |
+| Shared fragments + internal page links | `{{include}}` + `[[entity-id]]` / `[[entity-id#heading]]` (HTML) | Feature 7 + F9 heading fragments |
 | “Did my graph still make sense?” | Fail-loud Trunk/Satellite validation | Exit **1** + diagnostics |
 | Machine-readable graph/IR | JSON under `.boris/` | `boris --out .boris` |
 | LLM knowledge pack of this project | Deterministic `rag/` corpus | `boris --rag` |
@@ -77,6 +77,7 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | Graph-aware HTML nav (`{{nav}}` / breadcrumb / title) | **Done** (Feature 6 MVP) |
 | In-page heading `{{toc}}` | **Done** (Feature 6 follow-on) |
 | Boris-mediated includes + wiki-links | **Done** (Feature 7; HTML path; Apex FS includes off) |
+| Wiki `[[id#heading]]` section targets | **Done** (F9; Apex heading ids; see `heading-ids.md`) |
 | Full YAML / MDX / embedded HTTP server | **Not now** |
 
 ### Commands
@@ -119,7 +120,6 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
-| **Later** | Wiki `[[id#heading]]` section targets | Needs heading-id contract |
 | **Later** | P4 build-system productization | Measurement-driven cache/watch improvements after F8 |
 | **Hygiene** | Sample content honesty as features land | Root `content/` is current for F7; re-check after next feature |
 | **Hygiene** | No parallel content sandboxes by default | Failed draft removed; root `content/` is SoT |
@@ -143,6 +143,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | 6 | Graph-aware HTML nav (MVP) | `{{nav}}` forest + breadcrumb + title; HTML graph gate |
 | 6b | In-page `{{toc}}` | h1–h3 outline from rendered body ids (`src/html_toc.zig`) |
 | 7 | Includes + wiki-links | `{{include}}` + `[[entity-id]]` pre-Apex; cycles/missing fail loud; `includes/` not pages |
+| 9 | Heading-target wiki links | `[[entity-id#heading-id]]` matches Apex-rendered ids; fail loud on missing |
 
 P2 (fingerprints, incremental, layout edges) and P3 scale-out are **complete**
 on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.

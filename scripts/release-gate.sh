@@ -212,6 +212,42 @@ pass "IR: explicit --out path remains contract surface"
 # RAG artifacts already produced in step 3
 pass "RAG: catalog_meta + catalog.jsonl present from step 3"
 
+# --- 4c. Feature 9 heading-fragment wiki (HTML) --------------------------
+note "4c. Feature 9 heading-fragment wiki links (HTML)"
+F9_OK_CONTENT="docs/contracts/fixtures/wiki-heading-fragments/content"
+F9_BAD_CONTENT="docs/contracts/fixtures/wiki-heading-missing/content"
+# Layout must not sit beside the HTML out dir (target path-boundary rules).
+F9_LAYOUT="test/fixtures/html/layouts/main.html"
+F9_OK_OUT="${GATE_DIR}/html-f9-ok"
+F9_BAD_OUT="${GATE_DIR}/html-f9-bad"
+rm -rf "${F9_OK_OUT}" "${F9_BAD_OUT}"
+if "${BORIS}" --input="${F9_OK_CONTENT}" --html-layout="${F9_LAYOUT}" --html-dir="${F9_OK_OUT}" --quiet; then
+  if grep -q 'href="guides/target.html#section-one"' "${F9_OK_OUT}/index.html" \
+    && grep -q 'href="../index.html#home"' "${F9_OK_OUT}/guides/from.html"; then
+    pass "F9 success fixture: fragment hrefs present (trunk + satellite)"
+  else
+    fail "F9 success fixture: missing expected fragment hrefs"
+    head -20 "${F9_OK_OUT}/index.html" || true
+  fi
+else
+  fail "F9 success fixture: compile failed"
+fi
+set +e
+F9_ERR="$("${BORIS}" --input="${F9_BAD_CONTENT}" --html-layout="${F9_LAYOUT}" --html-dir="${F9_BAD_OUT}" 2>&1)"
+F9_EC=$?
+set -e
+if [[ "${F9_EC}" -ne 1 ]]; then
+  fail "F9 missing-heading: expected exit 1, got ${F9_EC}"
+else
+  pass "F9 missing-heading: exit 1"
+fi
+if grep -q 'EREFERENCEMISSING' <<<"${F9_ERR}" && grep -q 'does-not-exist' <<<"${F9_ERR}"; then
+  pass "F9 missing-heading: EREFERENCEMISSING for fragment"
+else
+  fail "F9 missing-heading: diagnostic mismatch"
+  printf '%s\n' "${F9_ERR}" | head -20
+fi
+
 # --- 5. Invalid fixtures: exit codes + diagnostic codes ------------------
 note "5. Invalid fixtures produce expected exit codes and diagnostic codes"
 run_bad() {

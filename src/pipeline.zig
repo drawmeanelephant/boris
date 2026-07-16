@@ -1369,6 +1369,77 @@ test "include and wiki failures prevent dependency graph freeze and publication"
     try std.testing.expect(fileExists(io, out, "build-report.json"));
 }
 
+test "Feature 9 IR: wiki fragment still emits page reference edge only" {
+    // IR does not validate heading membership (no Apex); fragment syntax must not
+    // break edge projection and must not invent a new edge kind.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const content = try outRel(gpa, &tmp, "content");
+    defer gpa.free(content);
+    const out = try outRel(gpa, &tmp, "out");
+    defer gpa.free(out);
+
+    const cwd = Io.Dir.cwd();
+    try cwd.createDirPath(io, content);
+    {
+        const guides_rel = try std.fmt.allocPrint(gpa, "{s}/guides", .{content});
+        defer gpa.free(guides_rel);
+        try cwd.createDirPath(io, guides_rel);
+    }
+    var dir = try cwd.openDir(io, content, .{});
+    defer dir.close(io);
+    try dir.writeFile(io, .{
+        .sub_path = "index.md",
+        .data =
+            \\---
+            \\title: Home
+            \\---
+            \\
+            \\# Home
+            \\
+            \\See [[guides/t#sec]] and [[guides/t]].
+            \\
+        ,
+    });
+    try dir.writeFile(io, .{
+        .sub_path = "guides/t.md",
+        .data =
+            \\---
+            \\title: T
+            \\parent: index
+            \\---
+            \\
+            \\# T
+            \\
+            \\## Sec
+            \\
+        ,
+    });
+
+    var result = try run(io, gpa, .{
+        .content_root = content,
+        .out_dir = out,
+        .quiet = true,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+    try std.testing.expect(result.published_graph_ir);
+
+    // Exactly one reference edge page:index → page:guides/t (fragment ignored for identity).
+    var ref_count: usize = 0;
+    for (result.edges.items) |e| {
+        if (!std.mem.eql(u8, e.kind, "reference")) continue;
+        ref_count += 1;
+        try std.testing.expect(e.from.type == .page);
+        try std.testing.expectEqualStrings("index", e.from.value);
+        try std.testing.expect(e.to.type == .page);
+        try std.testing.expectEqualStrings("guides/t", e.to.value);
+    }
+    try std.testing.expectEqual(@as(usize, 1), ref_count);
+}
+
 test "duplicate id fails and does not publish graph-dependent IR" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;

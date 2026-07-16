@@ -41,9 +41,10 @@ Read [[guides/trunk-satellite]] or [[reference/frontmatter|closed frontmatter]].
 
 {{include includes/authoring-note.md}}
 
-Live links (entity ids, optional labels): see
-[[guides/trunk-satellite|Trunk vs Satellite]], [[guides/asides|Asides]], and
-[[reference/frontmatter]].
+Live links (entity ids, optional labels, optional section targets): see
+[[guides/trunk-satellite|Trunk vs Satellite]],
+[[guides/trunk-satellite#satellites|Satellites section]],
+[[guides/asides|Asides]], and [[reference/frontmatter]].
 
 ## Guides in this section
 

@@ -50,28 +50,33 @@ pages if they contain `.md` / `.mdx`.
 ```markdown
 [[entity-id]]
 [[entity-id|display label]]
+[[entity-id#heading-id]]
+[[entity-id#heading-id|display label]]
 ```
 
 | Rule | Detail |
 |------|--------|
 | Target | Exact **entity id** (same space as `parent`) |
 | Display | Optional `\|label`; default = page `title` if set, else entity id |
-| Output | Rewritten to `[label](relative-href)` using HTML output paths |
-| Missing | Hard error `EREFERENCEMISSING` |
+| Output | Rewritten to `[label](relative-href)` using HTML output paths; with fragment → `relative-href#fragment` |
+| Missing entity | Hard error `EREFERENCEMISSING` |
+| Missing heading | Hard error `EREFERENCEMISSING` (no silent fall-back to page-only URL) |
 | Fences | No rewrite inside fenced code |
-| Sections | `[[id#heading]]` **not** supported in this MVP |
+| Sections | `[[id#heading-id]]` — fragment is the **exact rendered heading `id`** on the target page; see [heading-ids.md](heading-ids.md) |
 
 ---
 
 ## Resolve order (HTML)
 
 1. Fence-aware **include expansion** (depth limit 32 + cycle stack).
-2. Fence-aware **wiki rewrite** against frozen graph nodes.
-3. **Aside** tokenize.
-4. **Apex** render markdown segments.
+2. Build per-page **heading id index** from Apex-rendered body HTML (see
+   [heading-ids.md](heading-ids.md)); used only to validate wiki fragments.
+3. Fence-aware **wiki rewrite** against frozen graph nodes (+ optional fragment).
+4. **Aside** tokenize.
+5. **Apex** render markdown segments.
 
-Coordinator phases (discover, parent graph freeze, include plan, fingerprint)
-stay sequential. Workers only render with precomputed deps.
+Coordinator phases (discover, parent graph freeze, include plan, heading index,
+fingerprint) stay sequential. Workers only render with precomputed deps.
 
 ---
 
@@ -85,8 +90,8 @@ sequentially before graph freeze and does not render Markdown.
 |----------------|--------|---------|
 | Discovered page body | `{{include path}}` | `page:<entity-id>` → `source:<canonical-path>` (`include`) |
 | Included source body | `{{include path}}` | `source:<locus-path>` → `source:<canonical-path>` (`include`) |
-| Discovered page body | `[[entity-id]]` | `page:<source-id>` → `page:<target-id>` (`reference`) |
-| Included source body | `[[entity-id]]` | `source:<locus-path>` → `page:<target-id>` (`reference`) |
+| Discovered page body | `[[entity-id]]` or `[[entity-id#heading]]` | `page:<source-id>` → `page:<target-id>` (`reference`) |
+| Included source body | `[[entity-id]]` or `[[entity-id#heading]]` | `source:<locus-path>` → `page:<target-id>` (`reference`) |
 
 The `page:` / `source:` notation above is explanatory shorthand. JSON uses
 typed endpoint objects (`{"type":"page","value":"…"}`), as specified by
@@ -95,7 +100,7 @@ the IR contract.
 - Edges represent direct active syntax only; nested/transitive dependency
   closure is recovered by reverse traversal.
 - Repeated directives to the same target in one locus do not duplicate an edge.
-- Wiki labels do not affect edge identity.
+- Wiki labels and heading fragments do not affect edge identity (still page→page).
 - Include targets remain source endpoints and are not discovered as page nodes
   merely because they occur in the IR graph.
 - Any include/wiki diagnostic prevents `graph.json` publication, matching other
@@ -125,8 +130,8 @@ Page fingerprint inputs (see `cache.computePageFingerprint`) include:
 | `EINCLUDESYNTAX` | Malformed `{{include …}}` |
 | `EINCLUDEMISSING` | Target path not found / unreadable |
 | `EINCLUDECYCLE` | Transclusion cycle (or depth exceeded) |
-| `EREFERENCESYNTAX` | Malformed `[[…]]` |
-| `EREFERENCEMISSING` | Wiki target entity id not in graph |
+| `EREFERENCESYNTAX` | Malformed `[[…]]` (including empty `#` fragment) |
+| `EREFERENCEMISSING` | Wiki target entity id not in graph, **or** fragment not among target’s rendered heading ids |
 | `EINVALIDPATH` | Illegal include path segments |
 
 HTML path emits **structured** text diagnostics via `diag.formatText`:
@@ -156,5 +161,6 @@ error: EINCLUDEMISSING: path/to/page.md:line:col: message [remediation]
 
 - Apex-native includes or wiki plugins.
 - Soft warnings for broken links.
-- Heading-fragment wiki targets (`#section`).
+- Re-implementing Apex heading slug rules in Zig (see [heading-ids.md](heading-ids.md)).
 - Emitting internal `layout` or `asset` dependency kinds in IR 0.2.
+- Fragment-aware IR edge kinds or schema changes.
