@@ -12,6 +12,8 @@
 migration-report/
 fixtures/.test-out*/
 fixtures/.test-wp*/
+fixtures/.test-wptt*/
+fixtures/.test-adversarial*/
 fixtures/.ig-test-out*/
 fixtures/.test-obsidian-out*/
 fixtures/.test-notion-out*/

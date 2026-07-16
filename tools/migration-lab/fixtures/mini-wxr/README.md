@@ -26,6 +26,10 @@ Synthetic WordPress WXR export for `boris-migration-lab --mode=wordpress`.
 | Custom post type | `product` → preserved under `_preserved/` |
 | Attachments | post_ids 10–11 |
 
+For statuses (future/private/password), comments, post formats, menus, empty
+titles, and high-cardinality taxonomies, see
+[`../wptt-derived/`](../wptt-derived/).
+
 Run from `tools/migration-lab/`:
 
 ```bash
