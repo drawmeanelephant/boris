@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" data-layout="archive">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Field Notes Archive</title>
+  <link rel="stylesheet" href="{{asset-url assets/archive.css}}">
+</head>
+<body>
+  <main class="archive-shell">
+    <header class="masthead">
+      <p class="eyebrow">Personal index · 2018—2024</p>
+      <h1>{{title}}</h1>
+      <p class="lede">Small records, held in order.</p>
+    </header>
+    <section class="archive-index" aria-labelledby="archive-entries">
+      <div class="section-label">
+        <p id="archive-entries">Selected entries</p>
+        <span aria-hidden="true">↓</span>
+      </div>
+      {{children}}
+    </section>
+    <article class="archive-note">{{content}}</article>
+  </main>
+</body>
+</html>
