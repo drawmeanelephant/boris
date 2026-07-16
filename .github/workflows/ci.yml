@@ -10,7 +10,28 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
+  changes:
+    name: changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      migration_lab: ${{ steps.filter.outputs.migration_lab }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            migration_lab:
+              - 'tools/migration-lab/**'
+
   build-and-test:
     name: build-and-test (${{ matrix.os }})
     strategy:
@@ -79,15 +100,36 @@ jobs:
           echo "C sanitizers required on Linux CI via BORIS_REQUIRE_SANITIZE=1."
           echo "macOS: opt-in local zig build test-apex-sanitize (may skip)."
 
+  migration-lab-test:
+    name: migration-lab-test (Linux)
+    needs: changes
+    if: needs.changes.outputs.migration_lab == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Migration-lab aggregate tests
+        run: zig build --build-file tools/migration-lab/build.zig test
+
   # Single required status check for branch protection / rulesets.
   ci:
     name: ci
-    needs: build-and-test
+    needs: [build-and-test, migration-lab-test]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Require matrix success
         run: |
-          result="${{ needs.build-and-test.result }}"
-          echo "build-and-test result: ${result}"
-          test "${result}" = "success"
+          build_and_test="${{ needs.build-and-test.result }}"
+          migration_lab_test="${{ needs.migration-lab-test.result }}"
+          echo "build-and-test result: ${build_and_test}"
+          echo "migration-lab-test result: ${migration_lab_test}"
+          test "${build_and_test}" = "success"
+          test "${migration_lab_test}" = "success" || test "${migration_lab_test}" = "skipped"
