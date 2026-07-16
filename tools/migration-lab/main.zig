@@ -3,6 +3,7 @@
 //! Modes:
 //!   astro      — read-only Astro tree scan → report.json + REPORT.md
 //!   wordpress  — WordPress WXR → Boris Markdown + reports
+//!   instagram  — Instagram Takeout dump → Boris Markdown + theme assets + reports
 //!
 //! Never rewrites inputs. Not part of the Boris product compiler pipeline.
 //!
@@ -11,6 +12,7 @@
 //!   zig build run -- --mode=astro --root=./fixtures/mini-astro --out=./.out-report
 //!   zig build run -- --mode=wordpress --wxr=./fixtures/mini-wxr/export.xml \
 //!       --media=./fixtures/mini-wxr/media --out=./.out-wp
+//!   zig build run -- --mode=instagram --dump=./fixtures/mini-instagram --out=./.out-ig
 //!   zig build test
 //!
 //! From repo root:
@@ -21,6 +23,7 @@ const std = @import("std");
 const Io = std.Io;
 const archaeology = @import("archaeology.zig");
 const wordpress = @import("wordpress.zig");
+const instagram = @import("instagram.zig");
 
 pub const ExitCode = enum(u8) {
     success = 0,
@@ -35,10 +38,12 @@ pub const ExitCode = enum(u8) {
 pub const Mode = enum {
     astro,
     wordpress,
+    instagram,
 
     pub fn parse(s: []const u8) ?Mode {
         if (std.mem.eql(u8, s, "astro")) return .astro;
         if (std.mem.eql(u8, s, "wordpress") or std.mem.eql(u8, s, "wp") or std.mem.eql(u8, s, "wxr")) return .wordpress;
+        if (std.mem.eql(u8, s, "instagram") or std.mem.eql(u8, s, "ig") or std.mem.eql(u8, s, "takeout")) return .instagram;
         return null;
     }
 };
@@ -53,6 +58,8 @@ pub const Options = struct {
     wxr_path: ?[]const u8 = null,
     /// Optional local media directory (WordPress uploads mirror).
     media_dir: ?[]const u8 = null,
+    /// Unpacked Instagram data-download root.
+    dump_dir: ?[]const u8 = null,
     /// Report/output directory (created if missing). Never writes into inputs.
     out_dir: []const u8 = "migration-report",
 };
@@ -108,6 +115,16 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
             options.media_dir = args[index];
+        } else if (std.mem.startsWith(u8, arg, "--dump=")) {
+            const value = arg["--dump=".len..];
+            if (value.len == 0) return error.MissingValue;
+            options.dump_dir = value;
+            options.mode = .instagram;
+        } else if (std.mem.eql(u8, arg, "--dump")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            options.dump_dir = args[index];
+            options.mode = .instagram;
         } else if (std.mem.startsWith(u8, arg, "--out=")) {
             const value = arg["--out=".len..];
             if (value.len == 0) return error.MissingValue;
@@ -125,7 +142,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
 
 fn printUsage() void {
     std.debug.print(
-        \\boris-migration-lab — Astro / WordPress → Boris migration laboratory
+        \\boris-migration-lab — Astro / WordPress / Instagram → Boris migration laboratory
         \\
         \\Usage:
         \\  boris-migration-lab [options]
@@ -134,7 +151,7 @@ fn printUsage() void {
         \\Common options:
         \\  -h, --help         Show this help and exit
         \\  -q, --quiet        Suppress progress lines
-        \\  --mode=MODE        astro (default) | wordpress
+        \\  --mode=MODE        astro (default) | wordpress | instagram
         \\  --out=DIR          Output directory (default: migration-report)
         \\
         \\Astro mode:
@@ -146,6 +163,12 @@ fn printUsage() void {
         \\  --media=DIR        Optional local media/uploads directory (never modified)
         \\  Writes: content/**/*.md, report.json, REPORT.md
         \\  (--wxr implies --mode=wordpress)
+        \\
+        \\Instagram mode:
+        \\  --dump=DIR         Unpacked Instagram data-download root (required; never modified)
+        \\  Writes: content/**/*.md, theme/**, report.json, REPORT.md, media_manifest.json
+        \\  (--dump implies --mode=instagram)
+        \\  No network, zip extraction, API, or scraping.
         \\
         \\Safety: no network, no destructive source writes, originals preserved.
         \\Exit codes: 0 success, 2 usage, 3 I/O error
@@ -229,6 +252,25 @@ pub fn main(init: std.process.Init) u8 {
                 return ExitCode.io_error.int();
             };
         },
+        .instagram => {
+            const dump = opts.dump_dir orelse {
+                std.log.err("instagram mode requires --dump=DIR", .{});
+                printUsage();
+                return ExitCode.usage.int();
+            };
+            if (std.mem.eql(u8, dump, opts.out_dir)) {
+                std.log.err("--out must differ from --dump", .{});
+                return ExitCode.usage.int();
+            }
+            instagram.run(io, gpa, .{
+                .dump_dir = dump,
+                .out_dir = opts.out_dir,
+                .quiet = opts.quiet,
+            }) catch |err| {
+                std.log.err("migration-lab (instagram) failed: {s}", .{@errorName(err)});
+                return ExitCode.io_error.int();
+            };
+        },
     }
     return ExitCode.success.int();
 }
@@ -272,6 +314,26 @@ test "parseOptions: wordpress flags" {
 
     const o2 = try parseOptions(&.{ "boris-migration-lab", "--mode=wordpress", "--wxr", "a.xml" });
     try std.testing.expect(o2.mode == .wordpress);
+}
+
+test "parseOptions: instagram flags" {
+    const o = try parseOptions(&.{
+        "boris-migration-lab",
+        "--dump=fixtures/mini-instagram",
+        "--out=./.ig",
+    });
+    try std.testing.expect(o.mode == .instagram);
+    try std.testing.expectEqualStrings("fixtures/mini-instagram", o.dump_dir.?);
+    try std.testing.expectEqualStrings("./.ig", o.out_dir);
+
+    const o2 = try parseOptions(&.{
+        "boris-migration-lab",
+        "--mode=instagram",
+        "--dump",
+        "fixtures/mini-instagram",
+    });
+    try std.testing.expect(o2.mode == .instagram);
+    try std.testing.expectEqualStrings("fixtures/mini-instagram", o2.dump_dir.?);
 }
 
 test "parseOptions: unknown flag" {

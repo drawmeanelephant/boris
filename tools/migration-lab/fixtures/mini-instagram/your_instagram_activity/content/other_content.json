@@ -1,0 +1,13 @@
+[
+  {
+    "title": "Unknown archive record",
+    "creation_timestamp": 1705017600,
+    "media": [
+      {
+        "uri": "media/other/not_in_fixture.jpg",
+        "creation_timestamp": 1705017600,
+        "title": "Unknown archive record"
+      }
+    ]
+  }
+]
