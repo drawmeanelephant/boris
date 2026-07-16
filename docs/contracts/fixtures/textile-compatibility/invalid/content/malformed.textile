@@ -1,0 +1,4 @@
+---
+title: Malformed supported syntax
+---
+A *strong phrase without a closer.

@@ -610,6 +610,67 @@ else
   fail "analysis produced an unexpected build artifact"
 fi
 
+# --- 4e. Explicit bounded Textile adapter ---------------------------------
+note "4e. Textile adapter mode, outputs, determinism, and failures"
+TEXTILE_ROOT="docs/contracts/fixtures/textile-compatibility"
+TEXTILE_IR="${GATE_DIR}/textile-ir"
+TEXTILE_HTML_A="${GATE_DIR}/textile-html-a"
+TEXTILE_HTML_B="${GATE_DIR}/textile-html-b"
+TEXTILE_RAG="${GATE_DIR}/textile-rag"
+TEXTILE_LAYOUT="test/fixtures/html/layouts/main.html"
+
+"${BORIS}" --textile --input="${TEXTILE_ROOT}/content" --out="${TEXTILE_IR}" --quiet
+if grep -q '"sourcePath": "guides/intro.textile"' "${TEXTILE_IR}/graph.json" \
+  && grep -q '"kind": "parent"' "${TEXTILE_IR}/graph.json"; then
+  pass "Textile IR preserves source identity and Trunk/Satellite parent edge"
+else
+  fail "Textile IR lost source identity or parent edge"
+fi
+
+"${BORIS}" --textile --input="${TEXTILE_ROOT}/content" --html-dir="${TEXTILE_HTML_A}" --html-layout="${TEXTILE_LAYOUT}" --jobs=1 --quiet
+"${BORIS}" --textile --input="${TEXTILE_ROOT}/content" --html-dir="${TEXTILE_HTML_B}" --html-layout="${TEXTILE_LAYOUT}" --jobs=4 --quiet
+if diff -rq "${TEXTILE_HTML_A}" "${TEXTILE_HTML_B}" >/dev/null; then
+  pass "Textile sequential and parallel HTML trees are byte-identical"
+else
+  fail "Textile sequential and parallel HTML trees differ"
+fi
+if grep -q '<strong>strong</strong>' "${TEXTILE_HTML_A}/index.html" \
+  && grep -q '<ins>inserted</ins>' "${TEXTILE_HTML_A}/index.html" \
+  && grep -q '<ol>' "${TEXTILE_HTML_A}/index.html"; then
+  pass "Textile subset reaches the existing Apex HTML renderer"
+else
+  fail "Textile HTML is missing contracted rendered forms"
+fi
+
+"${BORIS}" --textile --rag --input="${TEXTILE_ROOT}/content" --rag-dir="${TEXTILE_RAG}" --quiet
+if grep -q '^# Textile Tribute' "${TEXTILE_RAG}/content/pages/index.md" \
+  && ! grep -q '^h1\. Textile Tribute' "${TEXTILE_RAG}/content/pages/index.md"; then
+  pass "Textile RAG page contains adapted Markdown rather than raw Textile"
+else
+  fail "Textile RAG page body was not adapted"
+fi
+
+set +e
+TEXTILE_BAD_ERR="$("${BORIS}" --textile --input="${TEXTILE_ROOT}/invalid/content" --out="${GATE_DIR}/textile-invalid" 2>&1)"
+TEXTILE_BAD_EC=$?
+TEXTILE_MIX_ERR="$("${BORIS}" --textile --input="${TEXTILE_ROOT}/mixed/content" --out="${GATE_DIR}/textile-mixed" 2>&1)"
+TEXTILE_MIX_EC=$?
+TEXTILE_DEFAULT_ERR="$("${BORIS}" --input="${TEXTILE_ROOT}/mixed/content" --out="${GATE_DIR}/textile-default-mixed" 2>&1)"
+TEXTILE_DEFAULT_EC=$?
+set -e
+if [[ "${TEXTILE_BAD_EC}" -eq 1 ]] && grep -q 'ETEXTILE' <<<"${TEXTILE_BAD_ERR}"; then
+  pass "unsupported/malformed Textile fails loud with ETEXTILE"
+else
+  fail "invalid Textile exit/category mismatch (exit ${TEXTILE_BAD_EC})"
+fi
+if [[ "${TEXTILE_MIX_EC}" -eq 1 && "${TEXTILE_DEFAULT_EC}" -eq 1 ]] \
+  && grep -q 'ETEXTILE' <<<"${TEXTILE_MIX_ERR}" \
+  && grep -q 'ETEXTILE' <<<"${TEXTILE_DEFAULT_ERR}"; then
+  pass "mixed Markdown/Textile trees fail in both input modes"
+else
+  fail "mixed input family did not fail closed in both modes"
+fi
+
 # --- 5. Invalid fixtures: exit codes + diagnostic codes ------------------
 note "5. Invalid fixtures produce expected exit codes and diagnostic codes"
 run_bad() {

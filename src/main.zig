@@ -67,6 +67,7 @@ pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .content_root = opts.input_dir,
         .out_dir = out_dir,
         .quiet = opts.quiet,
+        .input_format = opts.input_format,
     }) catch |err| {
         if (!opts.quiet) {
             std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
@@ -102,6 +103,7 @@ pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .content_root = opts.input_dir,
         .out_dir = context_dir,
         .quiet = opts.quiet,
+        .input_format = opts.input_format,
     }) catch |err| {
         if (!opts.quiet) {
             std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
@@ -135,6 +137,7 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     var result = pipeline.compile(io, gpa, .{
         .content_root = opts.input_dir,
         .quiet = true,
+        .input_format = opts.input_format,
     }) catch |err| {
         if (!opts.quiet) std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
         return .io_error;
@@ -358,6 +361,7 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .out_dir = rag_dir,
         .system_docs_dir = "docs/rag/system",
         .quiet = opts.quiet,
+        .input_format = opts.input_format,
     }) catch |err| {
         if (!opts.quiet) {
             std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
@@ -460,6 +464,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             .incremental = opts.incremental,
             .quiet = opts.quiet,
             .jobs = opts.jobs,
+            .input_format = opts.input_format,
         }) catch |err| {
             return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
         };
@@ -477,6 +482,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             .incremental = opts.incremental,
             .quiet = opts.quiet,
             .jobs = opts.jobs,
+            .input_format = opts.input_format,
         }) catch |err| {
             return mapHtmlError(err, opts.quiet, &.{}, layout_path);
         };
@@ -530,6 +536,10 @@ fn mapHtmlError(
         // Multi-target wrap can mix content and I/O; prefer content for graph/include
         // failures already printed, but treat pure layout load I/O as exit 3 via FileNotFound etc.
         error.MultiTargetCompilationFailed,
+        => return .content_error,
+        // The HTML loader already emitted the structured ETEXTILE diagnostic.
+        error.TextileFailed,
+        error.InputFormatMismatch,
         => return .content_error,
         error.MultiTargetIoFailed => {
             if (!quiet) {
