@@ -10,10 +10,15 @@ without changing IR schema.
 
 How to use going forward:
 
-- Add bullets under **`[Unreleased]`** as you land work.
-- When cutting a tag, move Unreleased into a dated section and reset Unreleased.
+- Feature/fix PRs add one fragment under
+  [`docs/changelog.d/`](docs/changelog.d/README.md); do not edit the shared
+  **`[Unreleased]`** section.
+- At release cut, the release owner assembles the fragments into a dated section,
+  in the documented deterministic order, then removes or archives them and resets
+  Unreleased.
 - Prefer one short bullet per user-visible or contract-visible change.
-- Link related contracts or fixtures when the IR or acceptance surface moves.
+- Each fragment includes at least one repository-root-relative Markdown link;
+  link the relevant contract when the IR or acceptance surface moves.
 
 ---
 
