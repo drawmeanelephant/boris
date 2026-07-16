@@ -429,11 +429,74 @@ zig build run -- --mode=wordpress \
 
 ## Astro mode
 
-Scans typical Astro trees (`src/content`, `src/pages`, layouts, assets) and
-emits archaeology-only reports (no Markdown rewrite). See the Astro sections in
-git history / prior README content for stitch model and hazard codes.
+Read-only archaeology over an Astro project/export tree. Emits `report.json` +
+`REPORT.md` only — **no** Markdown rewrite, **no** network, **no** Astro config
+evaluation.
 
-Fixture: [`fixtures/mini-astro/`](fixtures/mini-astro/).
+### Content-root selection
+
+Markdown/MDX content pages are discovered **only** under well-known Astro
+content-collection directories. Arbitrary repository Markdown (`README.md`,
+`docs/`, notes trees, …) is never treated as content.
+
+| Priority | Root (scan-root relative) | Role |
+|----------|---------------------------|------|
+| 1 | `src/content/` | Canonical Astro content collections |
+| 2 | `content/` | Root-level collections used by some Astro layouts |
+
+Rules:
+
+1. Each candidate is used **only if it exists as a directory** under `--root`.
+2. `.md` / `.mdx` files under every existing candidate are inventoried as
+   `content_page` (entity id = path under that root with extension stripped).
+3. When **both** roots exist, pages under each are inventoried and a high
+   severity `ambiguous_content_roots` hazard is emitted for human review.
+4. Config markers such as `src/content/config.ts` and `content/config.ts` are
+   classified as `config`, not content pages.
+
+Other inventory classes (unchanged): `src/pages/**/*.astro` → `page_route`,
+`src/layouts/` → `layout`, `src/components/` → `component`, `public/` →
+`public_asset`, `src/assets/` → `src_asset`.
+
+### Absolute link classification
+
+Site-root absolute targets (`/…`) are **not** blindly mapped to `public/`.
+
+| Kind | Absolute target | Resolution |
+|------|-----------------|------------|
+| `markdown_image` / `html_src` | `/images/hero.png` | `public/images/hero.png` — missing → `missing_assets` |
+| `markdown_link` / `html_href` | existing file under `public/` | treated as present asset |
+| `markdown_link` / `html_href` | `/`, `/about`, `/docs/…` | evaluated as route/page (content roots + `src/pages/`) |
+| `markdown_link` / `html_href` | missing route e.g. `/no-such-page` | **`broken_links`**, not `missing_assets` |
+
+Relative image/src handling is unchanged (resolved against the source file path).
+
+### Documented limitations (human review / future work)
+
+These are **out of scope** for the archaeology lab and must not be mistaken for
+silent success:
+
+- **tsconfig / import-alias resolution** (`@/`, `~/`, package subpath imports)
+- **Dynamic-route stitch disambiguation** beyond “zero or one matching dynamic
+  route” (multiple `[slug]` / `[...slug]` owners → incomplete stitch note)
+- **General Astro config evaluation** (`astro.config.*` content collections
+  overrides, custom `srcDir`, i18n path prefixes, middleware rewrites)
+- **Runtime / SSR-only routes** and endpoint handlers (`.ts` API routes)
+
+### Fixtures
+
+| Fixture | Role |
+|---------|------|
+| [`fixtures/mini-astro/`](fixtures/mini-astro/) | Happy-path collections under `src/content/`, stitches, hazards |
+| [`fixtures/root-content-astro/`](fixtures/root-content-astro/) | Root-level `content/` discovery (no `src/content/`) |
+| [`fixtures/absolute-links-astro/`](fixtures/absolute-links-astro/) | `/`, `/about`, missing route vs public image assets |
+| [`fixtures/dual-content-roots-astro/`](fixtures/dual-content-roots-astro/) | Both content roots + free-form `NOTES.md` ignored |
+| [`fixtures/adversarial-astro/`](fixtures/adversarial-astro/) | Unicode paths, route ambiguity, JSX hazards |
+
+```bash
+zig build run -- --mode=astro --root=./fixtures/root-content-astro --out=./.migration-report-root
+zig build run -- --mode=astro --root=./fixtures/absolute-links-astro --out=./.migration-report-abs
+```
 
 ---
 

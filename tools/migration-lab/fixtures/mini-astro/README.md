@@ -16,5 +16,6 @@ Intentionally includes:
 | Broken links | `does-not-exist.md`, `ghost.md` |
 | Missing assets | `/images/missing-banner.png`, `/images/not-there.png` |
 | Present assets | `public/images/hero.png`, `src/assets/logo.svg` |
+| Absolute route (not asset) | `src/pages/index.astro` → `/docs` resolves as route/page |
 
 This fixture is **not** a runnable Astro app in CI (no `node_modules`). It is source-shaped input for the read-only scanner.
