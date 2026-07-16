@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" data-layout="home" data-theme="boris-reference">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Boris Reference</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/reference.css}}">
+  <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+</head>
+<body data-layout="home">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="hero" role="banner">
+    <div class="hero__inner">
+      <img class="hero__mark" src="{{asset-url assets/img/mark.svg}}" width="56" height="56" alt="">
+      <div class="hero__copy">
+        <p class="hero__kicker">Example-only theme</p>
+        <p class="hero__title">Boris reference theme</p>
+        <p class="hero__lead">
+          A polished, offline documentation surface built only with Boris layout
+          slots, closed components, local theme assets, and page-local
+          <code>.assets/</code> images. Not product chrome.
+        </p>
+      </div>
+    </div>
+  </header>
+  <div class="home-shell">
+    <nav class="panel home-nav" aria-labelledby="home-nav-label">
+      <p class="rail__label" id="home-nav-label">Site map</p>
+      {{nav}}
+    </nav>
+    <main id="main-content" class="panel home-main" tabindex="-1">
+      {{metadata}}
+      <article class="prose">
+        {{content}}
+      </article>
+    </main>
+  </div>
+  <footer class="site-footer" role="contentinfo">{{footer}}</footer>
+</body>
+</html>

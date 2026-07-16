@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en" data-layout="section" data-theme="boris-reference">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Section · Boris Reference</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/reference.css}}">
+  <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+</head>
+<body data-layout="section">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="site-header site-header--compact" role="banner">
+    <div class="site-header__inner">
+      <p class="brand">
+        <img class="brand__mark" src="{{asset-url assets/img/mark.svg}}" width="24" height="24" alt="">
+        <span class="brand__name">Boris Reference</span>
+        <span class="brand__badge brand__badge--section">section</span>
+      </p>
+      {{breadcrumb}}
+    </div>
+  </header>
+  <div class="section-shell">
+    <main id="main-content" class="panel section-intro" tabindex="-1">
+      {{metadata}}
+      <article class="prose">
+        {{content}}
+      </article>
+    </main>
+    <aside class="panel section-children" aria-labelledby="section-children-heading">
+      <h2 id="section-children-heading" class="children-panel__title">Pages in this section</h2>
+      {{children}}
+      <p class="rail__label section-children__nav-label">Full site</p>
+      {{nav}}
+    </aside>
+  </div>
+  <footer class="site-footer" role="contentinfo">{{footer}}</footer>
+</body>
+</html>
