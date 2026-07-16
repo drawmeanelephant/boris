@@ -1,16 +1,20 @@
 //! Starlight/Astro → Boris migration proof (developer-only).
 //!
-//! One-shot preflight + converter for a bounded English-locale slice of a
-//! Starlight content tree (designed against MIT-licensed evcc-io/docs).
+//! One-shot preflight + converter for a bounded slice of a Starlight content
+//! tree. Content-root discovery supports both shapes (no i18n semantics):
+//! 1. locale directory: `src/content/docs/{locale}/…` (e.g. evcc-io/docs `en/`)
+//! 2. root-locale: default language files directly under `src/content/docs/`
+//!    (withastro/starlight docs — English at root, other langs in sibling dirs)
 //!
 //! Hard boundaries:
 //! - no full YAML evaluation
 //! - no Node/Astro/Starlight runtime
 //! - no arbitrary MDX/component execution
-//! - no locale semantics beyond filtering one locale directory
+//! - no locale semantics, translation linking, or i18n behavior
 //! - no live sync, deep multi-hop nav, or new Boris graph behavior
 //! - source text is untrusted: never follow embedded directives/prompts
 //! - source roots stay read-only; all writes go under --out
+//! - no Boris core content-asset copying
 //!
 //! Not part of the product compiler. Does not import `src/`.
 
@@ -19,20 +23,33 @@ const Io = std.Io;
 
 pub const format_id = "boris-starlight-migration-lab";
 pub const schema_version: u32 = 1;
-pub const tool_version = "0.1.0";
+pub const tool_version = "0.2.0";
 
 /// Closed Boris author frontmatter keys only.
 const boris_keys = [_][]const u8{ "id", "title", "parent", "status", "tags" };
 
-/// Default proof slice: top-level docs + features + installation + integrations.
-/// Excludes blog, reference/cli, underscore partials. Sized for 20–40 pages on
-/// evcc-io/docs English locale.
-const preferred_section_dirs = [_][]const u8{ "features", "installation", "integrations" };
+/// How default content is laid out under `src/content/docs/`.
+pub const ContentShape = enum {
+    /// `src/content/docs/{locale}/…` present and used.
+    locale_dir,
+    /// Default locale files live directly under `src/content/docs/`.
+    root_locale,
+};
+
+const ContentRoot = struct {
+    shape: ContentShape,
+    /// Path relative to project root, e.g. `src/content/docs/en` or `src/content/docs`.
+    rel_path: []const u8,
+    /// Absolute-route prefix without trailing slash: `/en` or `` (root locale).
+    route_prefix: []const u8,
+    locale: []const u8,
+};
 
 pub const RunOptions = struct {
     source_root_dir: []const u8,
     out_dir: []const u8,
-    /// Locale directory under src/content/docs/ (proof only supports "en").
+    /// Locale key for discovery only ("en"). When `src/content/docs/en/` exists,
+    /// that directory is used; otherwise root-locale layout is used for `en`.
     locale: []const u8 = "en",
     /// Hard cap on converted pages (synthetic trunks do not count toward this).
     max_pages: usize = 40,
@@ -44,11 +61,11 @@ pub const RunOptions = struct {
 const SourcePage = struct {
     /// Path relative to source root, e.g. src/content/docs/en/features/app.mdx
     source_path: []const u8,
-    /// Path under locale root, e.g. features/app.mdx
+    /// Path under content root, e.g. features/app.mdx
     locale_rel: []const u8,
     /// Entity id without extension / index collapse, e.g. features/app
     entity_id: []const u8,
-    /// Starlight-style route without trailing slash, e.g. /en/features/app
+    /// Starlight-style route without trailing slash, e.g. /en/features/app or /features/app
     route: []const u8,
     /// Output path under out/, e.g. content/features/app.md
     output_path: []const u8,
@@ -79,12 +96,17 @@ const LinkEvent = struct {
     resolution: []const u8, // rewritten | review | external | asset | leave
     rewritten_to: ?[]const u8 = null,
     review_reason: ?[]const u8 = null,
+    fragment: ?[]const u8 = null,
 };
 
 const AssetEntry = struct {
     source_path: []const u8,
     kind: []const u8, // public | content_local | referenced_missing
     referenced_from: ?[]const u8 = null,
+    exists: bool = false,
+    bytes: u64 = 0,
+    /// Lowercase hex SHA-256 when a local source file was opened and hashed.
+    sha256_hex: ?[]const u8 = null,
 };
 
 const NavDecision = struct {
@@ -97,6 +119,13 @@ const InventoryRow = struct {
     source_path: []const u8,
     kind: []const u8,
     bytes: u64,
+};
+
+const SelectionRow = struct {
+    source_path: []const u8,
+    content_rel: []const u8,
+    selected: bool,
+    reason: []const u8,
 };
 
 fn trim(s: []const u8) []const u8 {
@@ -149,31 +178,81 @@ fn entityIdFromLocaleRel(allocator: std.mem.Allocator, locale_rel: []const u8) !
     return try allocator.dupe(u8, stem_path);
 }
 
-fn routeFromEntity(allocator: std.mem.Allocator, locale: []const u8, entity_id: []const u8) ![]u8 {
+/// Deterministic route from entity id. `route_prefix` is `/en` or `` (root locale).
+fn routeFromEntity(allocator: std.mem.Allocator, route_prefix: []const u8, entity_id: []const u8) ![]u8 {
     if (std.mem.eql(u8, entity_id, "index")) {
-        return try std.fmt.allocPrint(allocator, "/{s}", .{locale});
+        if (route_prefix.len == 0) return try allocator.dupe(u8, "/");
+        return try allocator.dupe(u8, route_prefix);
     }
-    return try std.fmt.allocPrint(allocator, "/{s}/{s}", .{ locale, entity_id });
+    if (route_prefix.len == 0) {
+        return try std.fmt.allocPrint(allocator, "/{s}", .{entity_id});
+    }
+    return try std.fmt.allocPrint(allocator, "{s}/{s}", .{ route_prefix, entity_id });
 }
 
 fn outputPathFromEntity(allocator: std.mem.Allocator, entity_id: []const u8) ![]u8 {
     return try std.fmt.allocPrint(allocator, "content/{s}.md", .{entity_id});
 }
 
-fn inPreferredSlice(locale_rel: []const u8) bool {
-    // Underscore partials are Starlight-internal includes, not pages.
-    const base = std.fs.path.basename(locale_rel);
-    if (base.len > 0 and base[0] == '_') return false;
-    if (startsWithPath(locale_rel, "blog")) return false;
-    if (startsWithPath(locale_rel, "reference/cli")) return false;
-
-    // Top-level files (no slash).
-    if (std.mem.indexOfScalar(u8, locale_rel, '/') == null) return true;
-
-    for (preferred_section_dirs) |sec| {
-        if (startsWithPath(locale_rel, sec)) return true;
+/// Narrow BCP-47-ish first-level dir names used by Starlight translations.
+/// Used only to skip sibling locale trees under a root-locale docs root.
+/// Not full i18n: no linking, no fallback, no translation graph.
+fn looksLikeLocaleDirName(name: []const u8) bool {
+    if (name.len == 2) {
+        return std.ascii.isLower(name[0]) and std.ascii.isLower(name[1]);
+    }
+    // xx-yy (e.g. zh-cn, pt-br)
+    if (name.len == 5 and name[2] == '-') {
+        return std.ascii.isLower(name[0]) and std.ascii.isLower(name[1]) and
+            std.ascii.isLower(name[3]) and std.ascii.isLower(name[4]);
     }
     return false;
+}
+
+fn dirExists(io: Io, root: Io.Dir, rel: []const u8) bool {
+    var d = root.openDir(io, rel, .{}) catch return false;
+    d.close(io);
+    return true;
+}
+
+/// Candidate page filter: exclude underscore partials only (no preferred sections).
+fn isCandidatePage(content_rel: []const u8) bool {
+    const base = std.fs.path.basename(content_rel);
+    if (base.len > 0 and base[0] == '_') return false;
+    return true;
+}
+
+/// Discover content root: prefer `docs/{locale}/` when present; else root-locale.
+fn discoverContentRoot(io: Io, a: std.mem.Allocator, source: Io.Dir, locale: []const u8) !ContentRoot {
+    const docs_base = "src/content/docs";
+    if (!dirExists(io, source, docs_base)) return error.ContentRootNotFound;
+
+    const locale_path = try std.fmt.allocPrint(a, "{s}/{s}", .{ docs_base, locale });
+    if (dirExists(io, source, locale_path)) {
+        var probe: std.ArrayList([]const u8) = .empty;
+        collectMarkdownFiles(io, a, source, locale_path, &probe, false) catch {};
+        if (probe.items.len > 0) {
+            return .{
+                .shape = .locale_dir,
+                .rel_path = locale_path,
+                .route_prefix = try std.fmt.allocPrint(a, "/{s}", .{locale}),
+                .locale = locale,
+            };
+        }
+    }
+
+    // Root-locale: default content directly under docs base (skip sibling locale dirs).
+    var probe_root: std.ArrayList([]const u8) = .empty;
+    collectMarkdownFiles(io, a, source, docs_base, &probe_root, true) catch {};
+    if (probe_root.items.len > 0) {
+        return .{
+            .shape = .root_locale,
+            .rel_path = try a.dupe(u8, docs_base),
+            .route_prefix = "",
+            .locale = locale,
+        };
+    }
+    return error.ContentRootNotFound;
 }
 
 fn titleFromStem(allocator: std.mem.Allocator, entity_id: []const u8) ![]u8 {
@@ -435,27 +514,28 @@ fn sanitizeMdxBody(a: std.mem.Allocator, body: []const u8) !struct {
     };
 }
 
-fn normalizeRouteTarget(allocator: std.mem.Allocator, locale: []const u8, target: []const u8) ![]u8 {
+/// Split path and optional `#fragment` (query dropped). Empty path with fragment → path "".
+fn splitTargetFragment(allocator: std.mem.Allocator, target: []const u8) !struct { path: []u8, fragment: ?[]u8 } {
     var t = target;
-    // Drop query/fragment for route identity.
     if (std.mem.indexOfScalar(u8, t, '?')) |q| t = t[0..q];
-    if (std.mem.indexOfScalar(u8, t, '#')) |h| t = t[0..h];
-    // Strip trailing slash (evcc uses trailingSlash: never).
+    var frag: ?[]u8 = null;
+    if (std.mem.indexOfScalar(u8, t, '#')) |h| {
+        if (h + 1 < t.len) {
+            frag = try allocator.dupe(u8, t[h + 1 ..]);
+        } else {
+            frag = try allocator.dupe(u8, "");
+        }
+        t = t[0..h];
+    }
+    // Strip trailing slash (Starlight often uses trailingSlash: always; others never).
     while (t.len > 1 and t[t.len - 1] == '/') t = t[0 .. t.len - 1];
+    return .{ .path = try allocator.dupe(u8, t), .fragment = frag };
+}
 
-    if (std.mem.startsWith(u8, t, "http://") or std.mem.startsWith(u8, t, "https://") or
-        std.mem.startsWith(u8, t, "mailto:") or std.mem.startsWith(u8, t, "tel:"))
-    {
-        return try allocator.dupe(u8, t);
-    }
-    // Absolute site path.
-    if (std.mem.startsWith(u8, t, "/")) {
-        // /en/foo → /en/foo ; /foo may be locale-less device pages (out of slice).
-        return try allocator.dupe(u8, t);
-    }
-    // Relative — caller resolves against page entity dir.
-    _ = locale;
-    return try allocator.dupe(u8, t);
+fn normalizeRouteTarget(allocator: std.mem.Allocator, target: []const u8) ![]u8 {
+    const split = try splitTargetFragment(allocator, target);
+    // Caller uses fragment separately; return path only.
+    return split.path;
 }
 
 fn resolveRelativeToEntity(allocator: std.mem.Allocator, entity_id: []const u8, rel: []const u8) ![]u8 {
@@ -490,12 +570,19 @@ fn resolveRelativeToEntity(allocator: std.mem.Allocator, entity_id: []const u8, 
     return try path_buf.toOwnedSlice(allocator);
 }
 
-fn routeToEntityCandidate(allocator: std.mem.Allocator, locale: []const u8, route: []const u8) !?[]u8 {
-    // /en → index ; /en/features/app → features/app
+fn routeToEntityCandidate(allocator: std.mem.Allocator, route_prefix: []const u8, route: []const u8) !?[]u8 {
+    // locale_dir: /en → index ; /en/features/app → features/app
+    // root_locale: / → index ; /features/app → features/app
     if (!std.mem.startsWith(u8, route, "/")) return null;
-    const loc_prefix = try std.fmt.allocPrint(allocator, "/{s}", .{locale});
-    if (std.mem.eql(u8, route, loc_prefix)) return try allocator.dupe(u8, "index");
-    const with_slash = try std.fmt.allocPrint(allocator, "/{s}/", .{locale});
+
+    if (route_prefix.len == 0) {
+        if (std.mem.eql(u8, route, "/") or route.len == 0) return try allocator.dupe(u8, "index");
+        // Absolute path under site root.
+        return try allocator.dupe(u8, route[1..]);
+    }
+
+    if (std.mem.eql(u8, route, route_prefix)) return try allocator.dupe(u8, "index");
+    const with_slash = try std.fmt.allocPrint(allocator, "{s}/", .{route_prefix});
     if (std.mem.startsWith(u8, route, with_slash)) {
         return try allocator.dupe(u8, route[with_slash.len..]);
     }
@@ -506,7 +593,7 @@ const EntityMap = std.StringHashMapUnmanaged([]const u8); // entity_id → entit
 
 fn rewriteLinks(
     a: std.mem.Allocator,
-    locale: []const u8,
+    route_prefix: []const u8,
     entity_id: []const u8,
     body: []const u8,
     entities: *const EntityMap,
@@ -528,7 +615,7 @@ fn rewriteLinks(
                     if (std.mem.indexOfScalarPos(u8, body, url_start, ')')) |url_end| {
                         const url = body[url_start..url_end];
                         if (std.mem.indexOfScalar(u8, url, '\n') == null) {
-                            const ev = try classifyAndMaybeRewrite(a, locale, entity_id, url, entities, "markdown", line_no);
+                            const ev = try classifyAndMaybeRewrite(a, route_prefix, entity_id, url, entities, "markdown", line_no);
                             try events.append(a, ev);
                             if (std.mem.eql(u8, ev.resolution, "rewritten")) {
                                 try out.appendSlice(a, "[[");
@@ -541,7 +628,6 @@ fn rewriteLinks(
                             } else {
                                 try out.appendSlice(a, body[pos .. url_end + 1]);
                             }
-                            // Count newlines skipped? url has none; text has none.
                             pos = url_end + 1;
                             continue;
                         }
@@ -554,15 +640,14 @@ fn rewriteLinks(
         pos += 1;
     }
 
-    // Second pass: scan remaining href="/..." and to="/..." for inventory (no rewrite of raw HTML).
-    // Walk original body lines for href/to attributes.
+    // Second pass: scan href="/..." and to="/..." for inventory (never rewrite attributes).
     {
         var p: usize = 0;
         var ln: u32 = 1;
         while (p < body.len) {
             const end = std.mem.indexOfScalarPos(u8, body, p, '\n') orelse body.len;
             const line = body[p..end];
-            try scanAttrLinks(a, locale, entity_id, line, entities, ln, &events);
+            try scanAttrLinks(a, route_prefix, entity_id, line, entities, ln, &events);
             p = if (end < body.len) end + 1 else end;
             ln += 1;
         }
@@ -573,7 +658,7 @@ fn rewriteLinks(
 
 fn scanAttrLinks(
     a: std.mem.Allocator,
-    locale: []const u8,
+    route_prefix: []const u8,
     entity_id: []const u8,
     line: []const u8,
     entities: *const EntityMap,
@@ -593,8 +678,8 @@ fn scanAttrLinks(
             const vs = at + attr.prefix.len;
             const ve = std.mem.indexOfScalarPos(u8, line, vs, q) orelse break;
             const url = line[vs..ve];
-            const ev = try classifyAndMaybeRewrite(a, locale, entity_id, url, entities, attr.kind, line_no);
-            // Attr links are never auto-rewritten (not markdown); force review/external inventory.
+            const ev = try classifyAndMaybeRewrite(a, route_prefix, entity_id, url, entities, attr.kind, line_no);
+            // Attr links are never auto-rewritten; force explicit review when a rewrite was possible.
             if (std.mem.eql(u8, ev.resolution, "rewritten")) {
                 try events.append(a, .{
                     .kind = attr.kind,
@@ -603,6 +688,7 @@ fn scanAttrLinks(
                     .resolution = "review",
                     .rewritten_to = ev.rewritten_to,
                     .review_reason = "attribute_link_not_auto_rewritten",
+                    .fragment = ev.fragment,
                 });
             } else {
                 try events.append(a, ev);
@@ -614,7 +700,7 @@ fn scanAttrLinks(
 
 fn classifyAndMaybeRewrite(
     a: std.mem.Allocator,
-    locale: []const u8,
+    route_prefix: []const u8,
     entity_id: []const u8,
     raw_url: []const u8,
     entities: *const EntityMap,
@@ -630,37 +716,67 @@ fn classifyAndMaybeRewrite(
     {
         return .{ .kind = kind, .target = try a.dupe(u8, url), .line = line_no, .resolution = "external" };
     }
-    // Asset-like extension
-    if (std.mem.indexOfScalar(u8, url, '.')) |_| {
+
+    const split = try splitTargetFragment(a, url);
+    const norm = split.path;
+    const fragment = split.fragment;
+
+    // Pure fragment (#heading) — no page target.
+    if (norm.len == 0 or (norm.len == 1 and norm[0] == '#')) {
+        return .{
+            .kind = kind,
+            .target = try a.dupe(u8, url),
+            .line = line_no,
+            .resolution = "review",
+            .review_reason = "fragment_only",
+            .fragment = fragment,
+        };
+    }
+
+    // Asset-like extension (path before fragment already in norm).
+    if (std.mem.indexOfScalar(u8, norm, '.')) |_| {
         const lower_exts = [_][]const u8{ ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".mp4", ".webm", ".pdf", ".ico", ".css", ".js", ".woff", ".woff2" };
         for (lower_exts) |ext| {
-            // Compare case-insensitive against suffix before query
-            var bare = url;
-            if (std.mem.indexOfScalar(u8, bare, '?')) |q| bare = bare[0..q];
-            if (std.mem.indexOfScalar(u8, bare, '#')) |h| bare = bare[0..h];
-            if (bare.len >= ext.len and std.ascii.eqlIgnoreCase(bare[bare.len - ext.len ..], ext)) {
-                return .{ .kind = kind, .target = try a.dupe(u8, url), .line = line_no, .resolution = "asset" };
+            if (norm.len >= ext.len and std.ascii.eqlIgnoreCase(norm[norm.len - ext.len ..], ext)) {
+                return .{
+                    .kind = kind,
+                    .target = try a.dupe(u8, url),
+                    .line = line_no,
+                    .resolution = "asset",
+                    .review_reason = "local_or_same_origin_asset",
+                    .fragment = fragment,
+                };
             }
         }
     }
 
     var candidate_entity: ?[]const u8 = null;
-    var norm = try normalizeRouteTarget(a, locale, url);
 
     if (std.mem.startsWith(u8, norm, "/")) {
-        candidate_entity = try routeToEntityCandidate(a, locale, norm);
+        candidate_entity = try routeToEntityCandidate(a, route_prefix, norm);
         if (candidate_entity == null) {
             return .{
                 .kind = kind,
                 .target = norm,
                 .line = line_no,
                 .resolution = "review",
-                .review_reason = "absolute_route_outside_locale_or_unmapped",
+                .review_reason = "absolute_route_outside_content_root_or_unmapped",
+                .fragment = fragment,
             };
         }
     } else {
-        // Relative path
+        // Relative path (ignore fragment — already split).
         const rel = if (std.mem.startsWith(u8, norm, "./")) norm[2..] else norm;
+        if (rel.len == 0) {
+            return .{
+                .kind = kind,
+                .target = norm,
+                .line = line_no,
+                .resolution = "review",
+                .review_reason = "fragment_only",
+                .fragment = fragment,
+            };
+        }
         candidate_entity = try resolveRelativeToEntity(a, entity_id, rel);
     }
 
@@ -671,10 +787,35 @@ fn classifyAndMaybeRewrite(
             .line = line_no,
             .resolution = "review",
             .review_reason = "no_candidate_entity",
+            .fragment = fragment,
         };
     };
 
     if (entities.get(ent)) |found| {
+        // Fragment present: still only rewrite the page target when proven; fragment needs review.
+        if (fragment != null and fragment.?.len > 0) {
+            if (std.mem.eql(u8, kind, "markdown")) {
+                // Rewrite page entity only; record fragment for human heading check.
+                return .{
+                    .kind = kind,
+                    .target = norm,
+                    .line = line_no,
+                    .resolution = "rewritten",
+                    .rewritten_to = found,
+                    .review_reason = "fragment_present_heading_not_verified",
+                    .fragment = fragment,
+                };
+            }
+            return .{
+                .kind = kind,
+                .target = norm,
+                .line = line_no,
+                .resolution = "review",
+                .rewritten_to = found,
+                .review_reason = "attribute_link_not_auto_rewritten",
+                .fragment = fragment,
+            };
+        }
         // Only rewrite markdown links automatically.
         if (std.mem.eql(u8, kind, "markdown")) {
             return .{
@@ -683,6 +824,7 @@ fn classifyAndMaybeRewrite(
                 .line = line_no,
                 .resolution = "rewritten",
                 .rewritten_to = found,
+                .fragment = fragment,
             };
         }
         return .{
@@ -691,7 +833,8 @@ fn classifyAndMaybeRewrite(
             .line = line_no,
             .resolution = "review",
             .rewritten_to = found,
-            .review_reason = "non_markdown_link_needs_review",
+            .review_reason = "attribute_link_not_auto_rewritten",
+            .fragment = fragment,
         };
     }
     return .{
@@ -699,8 +842,9 @@ fn classifyAndMaybeRewrite(
         .target = norm,
         .line = line_no,
         .resolution = "review",
-        .review_reason = "target_not_in_converted_slice",
+        .review_reason = "target_not_in_converted_entity_map",
         .rewritten_to = ent,
+        .fragment = fragment,
     };
 }
 
@@ -740,12 +884,15 @@ fn appendBool(buf: *std.ArrayList(u8), a: std.mem.Allocator, v: bool) !void {
     try buf.appendSlice(a, if (v) "true" else "false");
 }
 
+/// Collect markdown under `rel_dir`. When `skip_locale_siblings` is true (root-locale
+/// walk at the docs root), skip first-level directories that look like locale codes.
 fn collectMarkdownFiles(
     io: Io,
     a: std.mem.Allocator,
     root: Io.Dir,
     rel_dir: []const u8,
     out: *std.ArrayList([]const u8),
+    skip_locale_siblings: bool,
 ) !void {
     var dir = try root.openDir(io, rel_dir, .{ .iterate = true });
     defer dir.close(io);
@@ -753,8 +900,10 @@ fn collectMarkdownFiles(
     while (try it.next(io)) |entry| {
         if (entry.kind == .directory) {
             if (isSkipDir(entry.name)) continue;
+            if (skip_locale_siblings and looksLikeLocaleDirName(entry.name)) continue;
             const child = try std.fmt.allocPrint(a, "{s}/{s}", .{ rel_dir, entry.name });
-            try collectMarkdownFiles(io, a, root, child, out);
+            // Only skip locale siblings at the docs root level; deeper walks are normal.
+            try collectMarkdownFiles(io, a, root, child, out, false);
         } else if (entry.kind == .file and isMarkdownName(entry.name)) {
             const path = try std.fmt.allocPrint(a, "{s}/{s}", .{ rel_dir, entry.name });
             try out.append(a, path);
@@ -773,7 +922,58 @@ fn listPublicAssets(io: Io, a: std.mem.Allocator, root: Io.Dir, rel_dir: []const
             try listPublicAssets(io, a, root, child, out);
         } else if (entry.kind == .file) {
             const path = try std.fmt.allocPrint(a, "{s}/{s}", .{ rel_dir, entry.name });
-            try out.append(a, .{ .source_path = path, .kind = "public" });
+            try out.append(a, .{ .source_path = path, .kind = "public", .exists = true });
+        }
+    }
+}
+
+fn sha256Hex(a: std.mem.Allocator, data: []const u8) ![]u8 {
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(data, &digest, .{});
+    const hex = try a.alloc(u8, 64);
+    const charset = "0123456789abcdef";
+    for (digest, 0..) |byte, i| {
+        hex[i * 2] = charset[byte >> 4];
+        hex[i * 2 + 1] = charset[byte & 0xf];
+    }
+    return hex;
+}
+
+fn enrichAssetsWithHashes(io: Io, a: std.mem.Allocator, root: Io.Dir, assets: *std.ArrayList(AssetEntry)) !void {
+    for (assets.items) |*e| {
+        const data = readFileAlloc(io, root, e.source_path, a) catch {
+            e.exists = false;
+            e.sha256_hex = null;
+            e.bytes = 0;
+            continue;
+        };
+        e.exists = true;
+        e.bytes = data.len;
+        e.sha256_hex = try sha256Hex(a, data);
+    }
+}
+
+fn inventoryReferencedAssets(a: std.mem.Allocator, pages: []const SourcePage, assets: *std.ArrayList(AssetEntry)) !void {
+    // Record asset-resolution link targets that are not already inventoried by path.
+    var seen: std.StringHashMapUnmanaged(void) = .empty;
+    for (assets.items) |e| try seen.put(a, e.source_path, {});
+    for (pages) |p| {
+        for (p.link_events) |ev| {
+            if (!std.mem.eql(u8, ev.resolution, "asset")) continue;
+            const key = ev.target;
+            if (seen.get(key) != null) continue;
+            try seen.put(a, key, {});
+            // Paths starting with / may map to public/; relative may map under content.
+            // We only prove existence when an earlier walk already hashed a local file.
+            // Referenced-only rows are explicit review inventory without a proven hash.
+            try assets.append(a, .{
+                .source_path = try a.dupe(u8, key),
+                .kind = "referenced",
+                .referenced_from = p.source_path,
+                .exists = false,
+                .bytes = 0,
+                .sha256_hex = null,
+            });
         }
     }
 }
@@ -1082,29 +1282,57 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     var source = try Io.Dir.cwd().openDir(io, opts.source_root_dir, .{ .iterate = true });
     defer source.close(io);
 
-    const locale_root = try std.fmt.allocPrint(a, "src/content/docs/{s}", .{opts.locale});
+    const content = try discoverContentRoot(io, a, source, opts.locale);
+    const content_root = content.rel_path;
+    const route_prefix = content.route_prefix;
+    const skip_locale_siblings = content.shape == .root_locale;
 
-    // ---- Inventory: markdown under locale ----
+    // ---- Inventory: markdown under content root ----
     var md_files: std.ArrayList([]const u8) = .empty;
-    try collectMarkdownFiles(io, a, source, locale_root, &md_files);
+    try collectMarkdownFiles(io, a, source, content_root, &md_files, skip_locale_siblings);
     std.mem.sort([]const u8, md_files.items, {}, struct {
         fn less(_: void, x: []const u8, y: []const u8) bool {
             return std.mem.order(u8, x, y) == .lt;
         }
     }.less);
 
-    // Filter to preferred slice and max_pages.
+    // Deterministic candidate selection: sort order, drop underscore partials, cap max_pages.
+    // No preferred-section allowlist (evcc-specific paths are not privileged).
+    var selection_rows: std.ArrayList(SelectionRow) = .empty;
     var selected: std.ArrayList([]const u8) = .empty;
+    const prefix = try std.fmt.allocPrint(a, "{s}/", .{content_root});
     for (md_files.items) |path| {
-        const prefix = try std.fmt.allocPrint(a, "{s}/", .{locale_root});
-        if (!std.mem.startsWith(u8, path, prefix)) continue;
-        const locale_rel = path[prefix.len..];
-        if (!inPreferredSlice(locale_rel)) continue;
+        const content_rel = if (std.mem.startsWith(u8, path, prefix))
+            path[prefix.len..]
+        else if (std.mem.eql(u8, path, content_root))
+            ""
+        else
+            path;
+        if (!isCandidatePage(content_rel)) {
+            try selection_rows.append(a, .{
+                .source_path = path,
+                .content_rel = content_rel,
+                .selected = false,
+                .reason = "underscore_partial",
+            });
+            continue;
+        }
+        if (selected.items.len >= opts.max_pages) {
+            try selection_rows.append(a, .{
+                .source_path = path,
+                .content_rel = content_rel,
+                .selected = false,
+                .reason = "max_pages_cap",
+            });
+            continue;
+        }
         try selected.append(a, path);
-    }
-    if (selected.items.len > opts.max_pages) {
-        // Deterministic trim: keep sort order, take first max_pages.
-        selected.items.len = opts.max_pages;
+        try selection_rows.append(a, .{
+            .source_path = path,
+            .content_rel = content_rel,
+            .selected = true,
+            .reason = "lexicographic_cap",
+        });
     }
 
     // ---- Parse pages ----
@@ -1114,15 +1342,14 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
 
     for (selected.items) |path| {
         const raw = try readFileAlloc(io, source, path, a);
-        const prefix = try std.fmt.allocPrint(a, "{s}/", .{locale_root});
-        const locale_rel = path[prefix.len..];
+        const locale_rel = if (std.mem.startsWith(u8, path, prefix)) path[prefix.len..] else path;
         const entity_id = try entityIdFromLocaleRel(a, locale_rel);
         const fallback_title = try titleFromStem(a, entity_id);
         const parsed = try parseFrontmatterLite(a, raw, fallback_title);
         const stripped = try stripUntrustedBlocks(a, parsed.body);
         const mdx = try sanitizeMdxBody(a, stripped.body);
 
-        // Parent / trunk assignment (one-level forest).
+        // Parent / trunk assignment (one-level forest, path-derived only).
         var parent: ?[]const u8 = null;
         var is_trunk = false;
         if (std.mem.eql(u8, entity_id, "index")) {
@@ -1132,22 +1359,15 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             parent = try a.dupe(u8, section);
             try section_needs_trunk.put(a, section, {});
         } else {
-            // Top-level page → satellite of index; section name alone is a trunk if it is a section dir.
-            var is_section = false;
-            for (preferred_section_dirs) |sec| {
-                if (std.mem.eql(u8, entity_id, sec)) {
-                    is_section = true;
-                    break;
-                }
-            }
-            if (is_section) {
-                is_trunk = true;
-            } else {
-                parent = "index";
-            }
+            // Top-level page (including collapsed section index → section id) →
+            // satellite of site index, unless this entity is a section trunk for children.
+            // Section trunks from `section/index` collapse to entity_id without slash and
+            // become trunks when children reference them; mark trunk if section dir kids exist
+            // is handled by synthetic path below. Bare top-level files parent to index.
+            parent = "index";
         }
 
-        const route = try routeFromEntity(a, opts.locale, entity_id);
+        const route = try routeFromEntity(a, route_prefix, entity_id);
         const output_path = try outputPathFromEntity(a, entity_id);
 
         try pages.append(a, .{
@@ -1175,6 +1395,15 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     var existing: std.StringHashMapUnmanaged(void) = .empty;
     for (pages.items) |p| try existing.put(a, p.entity_id, {});
 
+    // If a page entity_id equals a needed section (e.g. installation/index → installation),
+    // promote it to trunk and clear parent.
+    for (pages.items) |*p| {
+        if (section_needs_trunk.get(p.entity_id) != null) {
+            p.is_trunk = true;
+            p.parent = null;
+        }
+    }
+
     var synth_keys: std.ArrayList([]const u8) = .empty;
     var sec_it = section_needs_trunk.keyIterator();
     while (sec_it.next()) |k| try synth_keys.append(a, k.*);
@@ -1187,7 +1416,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     for (synth_keys.items) |section| {
         if (existing.get(section) != null) continue;
         const title = try titleFromStem(a, section);
-        const route = try routeFromEntity(a, opts.locale, section);
+        const route = try routeFromEntity(a, route_prefix, section);
         const output_path = try outputPathFromEntity(a, section);
         try pages.append(a, .{
             .source_path = try std.fmt.allocPrint(a, "(synthetic)/{s}", .{section}),
@@ -1223,7 +1452,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             .source_path = "(synthetic)/index",
             .locale_rel = "index.md",
             .entity_id = "index",
-            .route = try routeFromEntity(a, opts.locale, "index"),
+            .route = try routeFromEntity(a, route_prefix, "index"),
             .output_path = try outputPathFromEntity(a, "index"),
             .title = "Home",
             .parent = null,
@@ -1253,20 +1482,18 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     // Link rewrite pass.
     for (pages.items) |*p| {
         if (p.is_synthetic) continue;
-        const rewritten = try rewriteLinks(a, opts.locale, p.entity_id, p.body, &entities);
+        const rewritten = try rewriteLinks(a, route_prefix, p.entity_id, p.body, &entities);
         p.body = rewritten.body;
         p.link_events = rewritten.events;
     }
 
-    // ---- Assets inventory ----
+    // ---- Assets inventory (existence + SHA-256 when local file proven) ----
     var assets: std.ArrayList(AssetEntry) = .empty;
     try listPublicAssets(io, a, source, "public", &assets);
-    // Co-located content assets (images next to pages).
-    for (md_files.items) |path| {
-        _ = path;
-    }
-    // Walk locale tree for non-md assets.
-    try collectLocalAssets(io, a, source, locale_root, &assets);
+    try collectLocalAssets(io, a, source, content_root, &assets, skip_locale_siblings);
+    try enrichAssetsWithHashes(io, a, source, &assets);
+    // Referenced asset-like links that are missing from inventory.
+    try inventoryReferencedAssets(a, pages.items, &assets);
     std.mem.sort(AssetEntry, assets.items, {}, struct {
         fn less(_: void, x: AssetEntry, y: AssetEntry) bool {
             return std.mem.order(u8, x.source_path, y.source_path) == .lt;
@@ -1275,6 +1502,20 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
 
     // ---- Sidebar / nav evidence ----
     var nav: std.ArrayList(NavDecision) = .empty;
+    try nav.append(a, .{
+        .kind = "content_root_discovery",
+        .evidence = try std.fmt.allocPrint(a, "shape={s}; path={s}; route_prefix={s}", .{
+            @tagName(content.shape),
+            content_root,
+            if (route_prefix.len == 0) "(root)" else route_prefix,
+        }),
+        .decision = "content_root_only_no_i18n_semantics",
+    });
+    try nav.append(a, .{
+        .kind = "candidate_selection",
+        .evidence = "lexicographic order; drop underscore partials; apply max_pages cap",
+        .decision = "no_preferred_section_allowlist",
+    });
     const config_names = [_][]const u8{ "astro.config.mjs", "astro.config.ts", "astro.config.js" };
     var config_found = false;
     for (config_names) |cn| {
@@ -1318,9 +1559,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     try writeUnsupported(a, io, out, pages.items);
     try writeAssetsManifest(a, io, out, assets.items);
     try writeNavManifest(a, io, out, nav.items);
-    try writeProvenance(a, io, out, opts, pages.items);
+    try writeProvenance(a, io, out, opts, content, pages.items);
     try writeLinkReview(a, io, out, pages.items);
-    try writeReports(a, io, out, opts, pages.items, inventory.items, assets.items, nav.items);
+    try writeSelectionManifest(a, io, out, content, selection_rows.items, opts.max_pages);
+    try writeReports(a, io, out, opts, content, pages.items, inventory.items, assets.items, nav.items, selection_rows.items);
 
     // Compile proof
     const compile = try tryCompileWithBoris(io, gpa, a, opts, opts.out_dir);
@@ -1328,8 +1570,8 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
 
     if (!opts.quiet) {
         std.debug.print(
-            "starlight-migration-lab: wrote {s}/content/ ({d} pages), manifests, reports; compile={s}\n",
-            .{ opts.out_dir, pages.items.len, compile.status },
+            "starlight-migration-lab: shape={s} wrote {s}/content/ ({d} pages), manifests, reports; compile={s}\n",
+            .{ @tagName(content.shape), opts.out_dir, pages.items.len, compile.status },
         );
     }
 }
@@ -1340,6 +1582,7 @@ fn collectLocalAssets(
     root: Io.Dir,
     rel_dir: []const u8,
     out: *std.ArrayList(AssetEntry),
+    skip_locale_siblings: bool,
 ) !void {
     var dir = root.openDir(io, rel_dir, .{ .iterate = true }) catch return;
     defer dir.close(io);
@@ -1347,12 +1590,13 @@ fn collectLocalAssets(
     while (try it.next(io)) |entry| {
         if (entry.kind == .directory) {
             if (isSkipDir(entry.name)) continue;
+            if (skip_locale_siblings and looksLikeLocaleDirName(entry.name)) continue;
             const child = try std.fmt.allocPrint(a, "{s}/{s}", .{ rel_dir, entry.name });
-            try collectLocalAssets(io, a, root, child, out);
+            try collectLocalAssets(io, a, root, child, out, false);
         } else if (entry.kind == .file) {
             if (isMarkdownName(entry.name)) continue;
             const path = try std.fmt.allocPrint(a, "{s}/{s}", .{ rel_dir, entry.name });
-            try out.append(a, .{ .source_path = path, .kind = "content_local" });
+            try out.append(a, .{ .source_path = path, .kind = "content_local", .exists = true });
         }
     }
 }
@@ -1426,12 +1670,20 @@ fn writeUnsupported(a: std.mem.Allocator, io: Io, out: Io.Dir, pages: []const So
 
 fn writeAssetsManifest(a: std.mem.Allocator, io: Io, out: Io.Dir, assets: []const AssetEntry) !void {
     var buf: std.ArrayList(u8) = .empty;
-    try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-assets\",\n  \"schema_version\": 1,\n  \"assets\": [\n");
+    try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-assets\",\n  \"schema_version\": 1,\n  \"policy\": \"Inventory only; no Boris core content-asset copying. SHA-256 present only when a local source file was opened and hashed.\",\n  \"assets\": [\n");
     for (assets, 0..) |e, i| {
         try buf.appendSlice(a, "    { \"source_path\": ");
         try appendJson(&buf, a, e.source_path);
         try buf.appendSlice(a, ", \"kind\": ");
         try appendJson(&buf, a, e.kind);
+        try buf.appendSlice(a, ", \"exists\": ");
+        try appendBool(&buf, a, e.exists);
+        try buf.appendSlice(a, ", \"bytes\": ");
+        try appendUsize(&buf, a, e.bytes);
+        try buf.appendSlice(a, ", \"sha256\": ");
+        if (e.sha256_hex) |h| try appendJson(&buf, a, h) else try buf.appendSlice(a, "null");
+        try buf.appendSlice(a, ", \"referenced_from\": ");
+        if (e.referenced_from) |r| try appendJson(&buf, a, r) else try buf.appendSlice(a, "null");
         try buf.appendSlice(a, " }");
         if (i + 1 < assets.len) try buf.append(a, ',');
         try buf.append(a, '\n');
@@ -1458,7 +1710,7 @@ fn writeNavManifest(a: std.mem.Allocator, io: Io, out: Io.Dir, nav: []const NavD
     try writeFile(io, out, "nav_flatten.json", buf.items);
 }
 
-fn writeProvenance(a: std.mem.Allocator, io: Io, out: Io.Dir, opts: RunOptions, pages: []const SourcePage) !void {
+fn writeProvenance(a: std.mem.Allocator, io: Io, out: Io.Dir, opts: RunOptions, content: ContentRoot, pages: []const SourcePage) !void {
     var buf: std.ArrayList(u8) = .empty;
     try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-provenance\",\n  \"schema_version\": 1,\n  \"tool_version\": ");
     try appendJson(&buf, a, tool_version);
@@ -1466,7 +1718,13 @@ fn writeProvenance(a: std.mem.Allocator, io: Io, out: Io.Dir, opts: RunOptions, 
     try appendJson(&buf, a, opts.source_root_dir);
     try buf.appendSlice(a, ",\n  \"locale\": ");
     try appendJson(&buf, a, opts.locale);
-    try buf.appendSlice(a, ",\n  \"source_site\": \"evcc-io/docs (or compatible Starlight tree)\",\n  \"license_note\": \"Upstream evcc-io/docs is MIT; do not commit cloned upstream into Boris.\",\n  \"records\": [\n");
+    try buf.appendSlice(a, ",\n  \"content_shape\": ");
+    try appendJson(&buf, a, @tagName(content.shape));
+    try buf.appendSlice(a, ",\n  \"content_root\": ");
+    try appendJson(&buf, a, content.rel_path);
+    try buf.appendSlice(a, ",\n  \"route_prefix\": ");
+    try appendJson(&buf, a, content.route_prefix);
+    try buf.appendSlice(a, ",\n  \"source_site\": \"Starlight-compatible tree (withastro/starlight docs or locale-dir sites)\",\n  \"license_note\": \"Clone upstream to /tmp only; never commit upstream content into Boris.\",\n  \"records\": [\n");
     for (pages, 0..) |p, i| {
         try buf.appendSlice(a, "    { \"source_path\": ");
         try appendJson(&buf, a, p.source_path);
@@ -1488,7 +1746,7 @@ fn writeProvenance(a: std.mem.Allocator, io: Io, out: Io.Dir, opts: RunOptions, 
 
 fn writeLinkReview(a: std.mem.Allocator, io: Io, out: Io.Dir, pages: []const SourcePage) !void {
     var buf: std.ArrayList(u8) = .empty;
-    try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-link-review\",\n  \"schema_version\": 1,\n  \"policy\": \"Rewrite markdown route links to wiki only when the target entity exists in the converted slice. Otherwise emit an explicit review row.\",\n  \"links\": [\n");
+    try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-link-review\",\n  \"schema_version\": 1,\n  \"policy\": \"Rewrite markdown route/relative links to wiki only when the target entity exists in the converted entity map. Attribute links, unresolved routes, fragments, assets, and external URLs get explicit review/inventory rows.\",\n  \"links\": [\n");
     var first = true;
     for (pages) |p| {
         for (p.link_events) |ev| {
@@ -1508,11 +1766,46 @@ fn writeLinkReview(a: std.mem.Allocator, io: Io, out: Io.Dir, pages: []const Sou
             if (ev.rewritten_to) |r| try appendJson(&buf, a, r) else try buf.appendSlice(a, "null");
             try buf.appendSlice(a, ", \"review_reason\": ");
             if (ev.review_reason) |r| try appendJson(&buf, a, r) else try buf.appendSlice(a, "null");
+            try buf.appendSlice(a, ", \"fragment\": ");
+            if (ev.fragment) |f| try appendJson(&buf, a, f) else try buf.appendSlice(a, "null");
             try buf.appendSlice(a, " }");
         }
     }
     try buf.appendSlice(a, "\n  ]\n}\n");
     try writeFile(io, out, "link_review.json", buf.items);
+}
+
+fn writeSelectionManifest(
+    a: std.mem.Allocator,
+    io: Io,
+    out: Io.Dir,
+    content: ContentRoot,
+    rows: []const SelectionRow,
+    max_pages: usize,
+) !void {
+    var buf: std.ArrayList(u8) = .empty;
+    try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-selection\",\n  \"schema_version\": 1,\n  \"policy\": \"Deterministic lexicographic order; exclude underscore partials; apply max_pages. No preferred-section allowlist.\",\n  \"content_shape\": ");
+    try appendJson(&buf, a, @tagName(content.shape));
+    try buf.appendSlice(a, ",\n  \"content_root\": ");
+    try appendJson(&buf, a, content.rel_path);
+    try buf.appendSlice(a, ",\n  \"max_pages\": ");
+    try appendUsize(&buf, a, max_pages);
+    try buf.appendSlice(a, ",\n  \"candidates\": [\n");
+    for (rows, 0..) |r, i| {
+        try buf.appendSlice(a, "    { \"source_path\": ");
+        try appendJson(&buf, a, r.source_path);
+        try buf.appendSlice(a, ", \"content_rel\": ");
+        try appendJson(&buf, a, r.content_rel);
+        try buf.appendSlice(a, ", \"selected\": ");
+        try appendBool(&buf, a, r.selected);
+        try buf.appendSlice(a, ", \"reason\": ");
+        try appendJson(&buf, a, r.reason);
+        try buf.appendSlice(a, " }");
+        if (i + 1 < rows.len) try buf.append(a, ',');
+        try buf.append(a, '\n');
+    }
+    try buf.appendSlice(a, "  ]\n}\n");
+    try writeFile(io, out, "selection_manifest.json", buf.items);
 }
 
 fn writeCompileReport(
@@ -1544,11 +1837,18 @@ fn writeReports(
     io: Io,
     out: Io.Dir,
     opts: RunOptions,
+    content: ContentRoot,
     pages: []const SourcePage,
     inventory: []const InventoryRow,
     assets: []const AssetEntry,
     nav: []const NavDecision,
+    selection: []const SelectionRow,
 ) !void {
+    var selected_n: usize = 0;
+    for (selection) |r| {
+        if (r.selected) selected_n += 1;
+    }
+
     // report.json
     var report: std.ArrayList(u8) = .empty;
     try report.appendSlice(a, "{\n  \"format\": \"");
@@ -1561,8 +1861,17 @@ fn writeReports(
     try appendJson(&report, a, opts.source_root_dir);
     try report.appendSlice(a, ",\n  \"locale\": ");
     try appendJson(&report, a, opts.locale);
-    try report.appendSlice(a, ",\n  \"max_pages\": ");
+    try report.appendSlice(a, ",\n  \"content_shape\": ");
+    try appendJson(&report, a, @tagName(content.shape));
+    try report.appendSlice(a, ",\n  \"content_root\": ");
+    try appendJson(&report, a, content.rel_path);
+    try report.appendSlice(a, ",\n  \"route_prefix\": ");
+    try appendJson(&report, a, content.route_prefix);
+    try report.appendSlice(a, ",\n  \"selection_policy\": \"lexicographic; drop underscore partials; max_pages cap; no preferred sections\",\n");
+    try report.appendSlice(a, "  \"max_pages\": ");
     try appendUsize(&report, a, opts.max_pages);
+    try report.appendSlice(a, ",\n  \"selected_candidates\": ");
+    try appendUsize(&report, a, selected_n);
     try report.appendSlice(a, ",\n  \"converted_pages\": ");
     try appendUsize(&report, a, pages.len);
     try report.appendSlice(a, ",\n  \"supported_frontmatter\": [\"id\", \"title\", \"parent\", \"status\", \"tags\"],\n");
@@ -1571,6 +1880,8 @@ fn writeReports(
     try report.appendSlice(a, "    \"mdx_components\": false,\n");
     try report.appendSlice(a, "    \"starlight_runtime\": false,\n");
     try report.appendSlice(a, "    \"locale_semantics\": false,\n");
+    try report.appendSlice(a, "    \"translation_linking\": false,\n");
+    try report.appendSlice(a, "    \"content_asset_copy\": false,\n");
     try report.appendSlice(a, "    \"live_sync\": false,\n");
     try report.appendSlice(a, "    \"deep_nav\": false\n");
     try report.appendSlice(a, "  },\n  \"inventory_count\": ");
@@ -1585,6 +1896,8 @@ fn writeReports(
         try appendJson(&report, a, p.entity_id);
         try report.appendSlice(a, ", \"source_path\": ");
         try appendJson(&report, a, p.source_path);
+        try report.appendSlice(a, ", \"route\": ");
+        try appendJson(&report, a, p.route);
         try report.appendSlice(a, ", \"title\": ");
         try appendJson(&report, a, p.title);
         try report.appendSlice(a, ", \"trunk\": ");
@@ -1601,10 +1914,16 @@ fn writeReports(
     // REPORT.md
     var md: std.ArrayList(u8) = .empty;
     try md.appendSlice(a, "# Starlight → Boris migration report\n\n");
-    try md.appendSlice(a, "Developer-only proof for a bounded **English** Starlight slice.\n\n");
+    try md.appendSlice(a, "Developer-only proof for a bounded Starlight content slice (content-root discovery only; no i18n).\n\n");
     try md.appendSlice(a, "| | |\n|--|--|\n| Format | `");
     try md.appendSlice(a, format_id);
-    try md.appendSlice(a, "` |\n| Locale | `");
+    try md.appendSlice(a, "` |\n| Content shape | `");
+    try md.appendSlice(a, @tagName(content.shape));
+    try md.appendSlice(a, "` |\n| Content root | `");
+    try md.appendSlice(a, content.rel_path);
+    try md.appendSlice(a, "` |\n| Route prefix | `");
+    try md.appendSlice(a, if (content.route_prefix.len == 0) "(root)" else content.route_prefix);
+    try md.appendSlice(a, "` |\n| Locale key | `");
     try md.appendSlice(a, opts.locale);
     try md.appendSlice(a, "` |\n| Converted pages | ");
     try appendUsize(&md, a, pages.len);
@@ -1616,18 +1935,21 @@ fn writeReports(
     try md.appendSlice(a,
         \\| Area | Status | Notes |
         \\|------|--------|-------|
+        \\| Content root `docs/{locale}/` | **Supported** | Locale-directory shape |
+        \\| Content root `docs/` (default locale) | **Supported** | Root-locale shape; sibling locale dirs skipped |
         \\| Frontmatter `title` | **Supported** | Mapped into Boris `title` |
         \\| Frontmatter `id` / `parent` / `status` / `tags` | **Emitted** | Converter-owned; source values listed as unmapped when present |
         \\| Other YAML keys (`sidebar`, `draft`, nested maps, …) | **Unsupported** | Retained in provenance; never interpreted |
         \\| Full YAML / JS config evaluation | **Unsupported** | `astro.config.*` text-scanned only |
         \\| Markdown body | **Supported** | Passed through after MDX import strip |
         \\| MDX imports / components | **Unsupported** | Inventoried; tags neutralized; not executed |
-        \\| Internal markdown route links | **Conditional** | Rewritten to `[[entity]]` only when target is in slice |
+        \\| Internal markdown route/relative links | **Conditional** | Rewritten to `[[entity]]` only when target is in entity map |
+        \\| Fragments (`#heading`) | **Review** | Explicit review row; heading not verified |
         \\| Attribute `href`/`to` routes | **Review** | Never auto-rewritten |
-        \\| External links | **Left as-is** | |
-        \\| Local / public assets | **Inventoried** | Not auto-copied in this proof |
+        \\| External links | **Left as-is** | Inventoried as external |
+        \\| Local / public assets | **Inventoried** | Existence + SHA-256 when local file proven; not copied |
         \\| Sidebar / autogenerate | **Flattened** | One-level forest: section Trunk + Satellite children |
-        \\| Locales other than `en` | **Unsupported** | Locale filter only; no i18n semantics |
+        \\| Translation linking / i18n | **Unsupported** | Content-root discovery only |
         \\| Live sync / Node runtime | **Unsupported** | |
         \\| Deep multi-hop parents | **Unsupported** | Boris one-level forest |
         \\
@@ -1637,9 +1959,10 @@ fn writeReports(
     try md.appendSlice(a, "## Sidecar manifests\n\n");
     try md.appendSlice(a,
         \\- `route_map.json` — source path → route → entity id → output
+        \\- `selection_manifest.json` — deterministic candidate selection rows
         \\- `unsupported_manifest.json` — unmapped frontmatter + MDX imports/components
-        \\- `assets_manifest.json` — public + content-local assets
-        \\- `nav_flatten.json` — sidebar evidence + flatten decisions
+        \\- `assets_manifest.json` — public + content-local assets (exists + sha256 when proven)
+        \\- `nav_flatten.json` — discovery + sidebar evidence + flatten decisions
         \\- `provenance_manifest.json` — raw frontmatter + source provenance
         \\- `link_review.json` — every link event (rewritten / review / external / asset)
         \\- `compile_report.json` — Boris compile attempt result
@@ -1652,7 +1975,9 @@ fn writeReports(
     for (pages) |p| {
         try md.appendSlice(a, "- `");
         try md.appendSlice(a, p.entity_id);
-        try md.appendSlice(a, "` ← `");
+        try md.appendSlice(a, "` (`");
+        try md.appendSlice(a, p.route);
+        try md.appendSlice(a, "`) ← `");
         try md.appendSlice(a, p.source_path);
         try md.appendSlice(a, "`");
         if (p.is_synthetic) try md.appendSlice(a, " *(synthetic trunk)*");
@@ -1722,10 +2047,32 @@ fn writeReports(
             try md.appendSlice(a, ev.target);
             try md.appendSlice(a, "` — ");
             try md.appendSlice(a, ev.review_reason orelse "review");
+            if (ev.fragment) |f| {
+                try md.appendSlice(a, " (fragment `#");
+                try md.appendSlice(a, f);
+                try md.appendSlice(a, "`)");
+            }
             try md.appendSlice(a, "\n");
         }
     }
     if (!any_review) try md.appendSlice(a, "None.\n");
+
+    try md.appendSlice(a, "\n## Local assets (proven)\n\n");
+    var any_asset = false;
+    for (assets) |e| {
+        if (!e.exists or e.sha256_hex == null) continue;
+        any_asset = true;
+        try md.appendSlice(a, "- `");
+        try md.appendSlice(a, e.source_path);
+        try md.appendSlice(a, "` (");
+        try md.appendSlice(a, e.kind);
+        try md.appendSlice(a, ", ");
+        try appendUsize(&md, a, e.bytes);
+        try md.appendSlice(a, " bytes, sha256=`");
+        try md.appendSlice(a, e.sha256_hex.?);
+        try md.appendSlice(a, "`)\n");
+    }
+    if (!any_asset) try md.appendSlice(a, "None with proven local hash.\n");
 
     try md.appendSlice(a, "\n## Stripped untrusted blocks\n\n");
     var any_strip = false;
@@ -1747,6 +2094,7 @@ fn writeReports(
     try md.appendSlice(a, "- Source root is never written.\n");
     try md.appendSlice(a, "- No network, no package install, no Node/Astro execution.\n");
     try md.appendSlice(a, "- Embedded agent/directive/instruction/prompt fences are stripped without replaying payloads.\n");
+    try md.appendSlice(a, "- Content-asset inventory only; no Boris core asset copy in this proof.\n");
 
     try writeFile(io, out, "REPORT.md", md.items);
 }
@@ -1769,20 +2117,30 @@ test "starlight: entity id and route helpers" {
     defer a.free(id3);
     try std.testing.expectEqualStrings("index", id3);
 
-    const r = try routeFromEntity(a, "en", "features/plans");
+    const r = try routeFromEntity(a, "/en", "features/plans");
     defer a.free(r);
     try std.testing.expectEqualStrings("/en/features/plans", r);
+
+    const r_root = try routeFromEntity(a, "", "guides/pages");
+    defer a.free(r_root);
+    try std.testing.expectEqualStrings("/guides/pages", r_root);
+
+    const r_idx = try routeFromEntity(a, "", "index");
+    defer a.free(r_idx);
+    try std.testing.expectEqualStrings("/", r_idx);
 }
 
-test "starlight: preferred slice filter" {
-    try std.testing.expect(inPreferredSlice("index.mdx"));
-    try std.testing.expect(inPreferredSlice("features/app.mdx"));
-    try std.testing.expect(inPreferredSlice("installation/linux.mdx"));
-    try std.testing.expect(inPreferredSlice("integrations/mcp.mdx"));
-    try std.testing.expect(!inPreferredSlice("blog/2024/x.md"));
-    try std.testing.expect(!inPreferredSlice("reference/cli/evcc.md"));
-    try std.testing.expect(!inPreferredSlice("tariffs/_dynamic_electricity_price.mdx"));
-    try std.testing.expect(!inPreferredSlice("reference/configuration/site.mdx"));
+test "starlight: candidate filter excludes only underscore partials" {
+    try std.testing.expect(isCandidatePage("index.mdx"));
+    try std.testing.expect(isCandidatePage("features/app.mdx"));
+    try std.testing.expect(isCandidatePage("blog/2024/x.md"));
+    try std.testing.expect(isCandidatePage("reference/cli/evcc.md"));
+    try std.testing.expect(!isCandidatePage("tariffs/_dynamic_electricity_price.mdx"));
+    try std.testing.expect(!isCandidatePage("_partial.mdx"));
+    try std.testing.expect(looksLikeLocaleDirName("de"));
+    try std.testing.expect(looksLikeLocaleDirName("zh-cn"));
+    try std.testing.expect(!looksLikeLocaleDirName("guides"));
+    try std.testing.expect(!looksLikeLocaleDirName("components"));
 }
 
 test "starlight: link rewrite only when proven" {
@@ -1796,26 +2154,54 @@ test "starlight: link rewrite only when proven" {
     const body =
         \\See [CO2](./co2) and [missing](./nope) and [external](https://example.com).
         \\Also [abs](/en/features/plans) and [out](/en/tariffs).
+        \\And [frag](/en/features/plans#heading) plus [asset](/images/hero.png).
         \\
     ;
-    const result = try rewriteLinks(a, "en", "features/plans", body, &entities);
+    const result = try rewriteLinks(a, "/en", "features/plans", body, &entities);
 
     try std.testing.expect(std.mem.indexOf(u8, result.body, "[[features/co2|CO2]]") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.body, "[[features/plans|abs]]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.body, "[[features/plans|frag]]") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.body, "[missing](./nope)") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.body, "https://example.com") != null);
 
     var rewritten: usize = 0;
     var review: usize = 0;
+    var asset: usize = 0;
+    var frag_note: usize = 0;
     for (result.events) |ev| {
         if (std.mem.eql(u8, ev.resolution, "rewritten")) rewritten += 1;
         if (std.mem.eql(u8, ev.resolution, "review")) review += 1;
+        if (std.mem.eql(u8, ev.resolution, "asset")) asset += 1;
+        if (ev.review_reason) |rr| {
+            if (std.mem.eql(u8, rr, "fragment_present_heading_not_verified")) frag_note += 1;
+        }
     }
-    try std.testing.expect(rewritten >= 2);
+    try std.testing.expect(rewritten >= 3);
     try std.testing.expect(review >= 1);
+    try std.testing.expect(asset >= 1);
+    try std.testing.expect(frag_note >= 1);
 }
 
-test "starlight: fixture is deterministic, preserves source, reports MDX" {
+test "starlight: root-locale link rewrite" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var entities: EntityMap = .empty;
+    try entities.put(a, "guides/pages", "guides/pages");
+    try entities.put(a, "index", "index");
+
+    const body =
+        \\See [pages](/guides/pages/) and [home](/) and [missing](/nope).
+        \\
+    ;
+    const result = try rewriteLinks(a, "", "getting-started", body, &entities);
+    try std.testing.expect(std.mem.indexOf(u8, result.body, "[[guides/pages|pages]]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.body, "[[index|home]]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.body, "[missing](/nope)") != null);
+}
+
+test "starlight: locale-dir fixture is deterministic, preserves source, reports MDX" {
     const io = std.testing.io;
     const a_out = "fixtures/.test-starlight-a";
     const b_out = "fixtures/.test-starlight-b";
@@ -1843,11 +2229,22 @@ test "starlight: fixture is deterministic, preserves source, reports MDX" {
     var bo = try Io.Dir.cwd().openDir(io, b_out, .{});
     defer bo.close(io);
 
-    const ma = try readFileAlloc(io, ao, "route_map.json", std.testing.allocator);
-    defer std.testing.allocator.free(ma);
-    const mb = try readFileAlloc(io, bo, "route_map.json", std.testing.allocator);
-    defer std.testing.allocator.free(mb);
-    try std.testing.expectEqualStrings(ma, mb);
+    // Byte-identical across repeated runs for key manifests + content.
+    const compare = [_][]const u8{
+        "route_map.json",
+        "selection_manifest.json",
+        "link_review.json",
+        "assets_manifest.json",
+        "report.json",
+        "content/features/alpha.md",
+    };
+    for (compare) |name| {
+        const xa = try readFileAlloc(io, ao, name, std.testing.allocator);
+        defer std.testing.allocator.free(xa);
+        const xb = try readFileAlloc(io, bo, name, std.testing.allocator);
+        defer std.testing.allocator.free(xb);
+        try std.testing.expectEqualStrings(xa, xb);
+    }
 
     const unsup = try readFileAlloc(io, ao, "unsupported_manifest.json", std.testing.allocator);
     defer std.testing.allocator.free(unsup);
@@ -1864,6 +2261,12 @@ test "starlight: fixture is deterministic, preserves source, reports MDX" {
     const report = try readFileAlloc(io, ao, "report.json", std.testing.allocator);
     defer std.testing.allocator.free(report);
     try std.testing.expect(std.mem.indexOf(u8, report, format_id) != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "locale_dir") != null);
+
+    const assets = try readFileAlloc(io, ao, "assets_manifest.json", std.testing.allocator);
+    defer std.testing.allocator.free(assets);
+    try std.testing.expect(std.mem.indexOf(u8, assets, "sha256") != null);
+    try std.testing.expect(std.mem.indexOf(u8, assets, "\"exists\": true") != null);
 
     const after = try readFileAlloc(io, fixture, "src/content/docs/en/features/alpha.mdx", std.testing.allocator);
     defer std.testing.allocator.free(after);
@@ -1876,8 +2279,75 @@ test "starlight: fixture is deterministic, preserves source, reports MDX" {
     defer std.testing.allocator.free(compile);
     try std.testing.expect(std.mem.indexOf(u8, compile, "status") != null);
 
+    const sel = try readFileAlloc(io, ao, "selection_manifest.json", std.testing.allocator);
+    defer std.testing.allocator.free(sel);
+    try std.testing.expect(std.mem.indexOf(u8, sel, "underscore_partial") != null);
+
     Io.Dir.cwd().deleteTree(io, a_out) catch {};
     Io.Dir.cwd().deleteTree(io, b_out) catch {};
+}
+
+test "starlight: root-locale fixture discovery and routes" {
+    const io = std.testing.io;
+    const out_dir = "fixtures/.test-starlight-root";
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+
+    var fixture = try Io.Dir.cwd().openDir(io, "fixtures/mini-starlight-root", .{});
+    defer fixture.close(io);
+    const before = try readFileAlloc(io, fixture, "src/content/docs/index.mdx", std.testing.allocator);
+    defer std.testing.allocator.free(before);
+
+    try run(io, std.testing.allocator, .{
+        .source_root_dir = "fixtures/mini-starlight-root",
+        .out_dir = out_dir,
+        .quiet = true,
+        .max_pages = 50,
+    });
+
+    var od = try Io.Dir.cwd().openDir(io, out_dir, .{});
+    defer od.close(io);
+
+    const report = try readFileAlloc(io, od, "report.json", std.testing.allocator);
+    defer std.testing.allocator.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "root_locale") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "src/content/docs") != null);
+
+    const routes = try readFileAlloc(io, od, "route_map.json", std.testing.allocator);
+    defer std.testing.allocator.free(routes);
+    try std.testing.expect(std.mem.indexOf(u8, routes, "\"route\": \"/\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, routes, "\"route\": \"/guides/pages\"") != null);
+    // Sibling locale tree must not be converted.
+    try std.testing.expect(std.mem.indexOf(u8, routes, "de/") == null);
+    try std.testing.expect(std.mem.indexOf(u8, routes, "\"entity_id\": \"de\"") == null);
+
+    const page = try readFileAlloc(io, od, "content/guides/pages.md", std.testing.allocator);
+    defer std.testing.allocator.free(page);
+    try std.testing.expect(std.mem.indexOf(u8, page, "parent: guides") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "[[index") != null);
+
+    const after = try readFileAlloc(io, fixture, "src/content/docs/index.mdx", std.testing.allocator);
+    defer std.testing.allocator.free(after);
+    try std.testing.expectEqualStrings(before, after);
+
+    // Determinism: second run byte-matches.
+    const out_b = "fixtures/.test-starlight-root-b";
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
+    try run(io, std.testing.allocator, .{
+        .source_root_dir = "fixtures/mini-starlight-root",
+        .out_dir = out_b,
+        .quiet = true,
+        .max_pages = 50,
+    });
+    var ob = try Io.Dir.cwd().openDir(io, out_b, .{});
+    defer ob.close(io);
+    const ra = try readFileAlloc(io, od, "route_map.json", std.testing.allocator);
+    defer std.testing.allocator.free(ra);
+    const rb = try readFileAlloc(io, ob, "route_map.json", std.testing.allocator);
+    defer std.testing.allocator.free(rb);
+    try std.testing.expectEqualStrings(ra, rb);
+
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
 }
 
 test "starlight: refuse output inside source" {
