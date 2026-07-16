@@ -417,6 +417,10 @@ test "harness: component tokenizer failures and valid rendering" {
                     const h = try aside.renderHtml(c, &arena);
                     try html.appendSlice(a, h);
                 },
+                .details => |c| {
+                    const h = try aside.renderDetailsHtml(c, &arena);
+                    try html.appendSlice(a, h);
+                },
             }
         }
         try std.testing.expect(std.mem.indexOf(u8, html.items, "<strong>world</strong>") != null);
@@ -789,6 +793,10 @@ test "harness: whiteboard reset isolates pages (no metadata/body reuse)" {
                 },
                 .aside => |c| {
                     const h = try aside.renderHtml(c, &doc_arena);
+                    try html.appendSlice(arena, h);
+                },
+                .details => |c| {
+                    const h = try aside.renderDetailsHtml(c, &doc_arena);
                     try html.appendSlice(arena, h);
                 },
             }

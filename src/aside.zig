@@ -2,7 +2,8 @@
 //!
 //! ## Authoring
 //!
-//! The only supported component is constrained `<Aside …>…</Aside>`.
+//! The supported components are constrained `<Aside …>…</Aside>` and
+//! `<Details …>…</Details>`.
 //! Unknown PascalCase open tags are hard errors. This is **not** generic HTML
 //! parsing, **not** MDX, and **not** a multi-component registry system.
 //!
@@ -28,8 +29,10 @@ const apex = @import("apex.zig");
 // Bounds / allowlists
 // ---------------------------------------------------------------------------
 
-/// Max bytes for an optional Aside `id` attribute value.
+/// Max bytes for optional component `id` attribute values.
 pub const max_aside_id_bytes: usize = 64;
+/// Max bytes for a plain-text Details `summary` attribute value.
+pub const max_details_summary_bytes: usize = 256;
 
 /// Closed kind vocabulary (exact spellings, lowercase).
 pub const allowed_kinds = [_][]const u8{ "note", "tip", "info", "warning", "danger" };
@@ -60,6 +63,14 @@ pub fn isValidAsideId(id: []const u8) bool {
     return true;
 }
 
+/// Details summaries are source text, not Markdown. Newlines would make the
+/// opening tag multi-line, so they are rejected along with empty values.
+pub fn isValidDetailsSummary(summary: []const u8) bool {
+    if (summary.len == 0 or summary.len > max_details_summary_bytes) return false;
+    for (summary) |c| if (c == '\n' or c == '\r') return false;
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -81,9 +92,21 @@ pub const Aside = struct {
     column: u32 = 1,
 };
 
+/// Structured disclosure extracted from `<Details summary="…">…</Details>`.
+pub const Details = struct {
+    summary: []const u8,
+    id: []const u8 = "",
+    open: bool = false,
+    body: []const u8 = "",
+    raw_span: []const u8 = "",
+    line: u32 = 1,
+    column: u32 = 1,
+};
+
 pub const Segment = union(enum) {
     markdown: []const u8,
     aside: Aside,
+    details: Details,
 };
 
 /// Component-local diagnostic kinds (stable for tests; map to `ECOMPONENT` in pipeline).
@@ -93,6 +116,8 @@ pub const DiagKind = enum {
     nested_component,
     invalid_kind,
     invalid_id,
+    invalid_summary,
+    invalid_open,
     duplicate_attribute,
     unknown_attribute,
     unterminated_quote,
@@ -115,6 +140,7 @@ pub const Diagnostic = struct {
 pub const TokenizeResult = struct {
     segments: []const Segment = &.{},
     asides: []const Aside = &.{},
+    details: []const Details = &.{},
     diagnostics: []const Diagnostic = &.{},
 
     pub fn hasErrors(self: TokenizeResult) bool {
@@ -210,6 +236,8 @@ const AttrError = error{
     MalformedAttribute,
     InvalidKind,
     InvalidId,
+    InvalidSummary,
+    InvalidOpen,
 };
 
 const ParsedAttrs = struct {
@@ -217,6 +245,15 @@ const ParsedAttrs = struct {
     id: []const u8 = "",
     saw_kind: bool = false,
     saw_id: bool = false,
+};
+
+const ParsedDetailsAttrs = struct {
+    summary: []const u8 = "",
+    id: []const u8 = "",
+    open: bool = false,
+    saw_summary: bool = false,
+    saw_id: bool = false,
+    saw_open: bool = false,
 };
 
 fn parseAttributes(open_inner: []const u8) AttrError!ParsedAttrs {
@@ -272,14 +309,95 @@ fn parseAttributes(open_inner: []const u8) AttrError!ParsedAttrs {
     return attrs;
 }
 
+fn parseDetailsAttributes(open_inner: []const u8) AttrError!ParsedDetailsAttrs {
+    var attrs: ParsedDetailsAttrs = .{};
+    var i: usize = 0;
+    while (i < open_inner.len) {
+        while (i < open_inner.len and (isSpace(open_inner[i]) or open_inner[i] == '\n' or open_inner[i] == '\r')) : (i += 1) {}
+        if (i >= open_inner.len) break;
+        const key_start = i;
+        while (i < open_inner.len) {
+            const c = open_inner[i];
+            const ok = (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or
+                (c >= '0' and c <= '9') or c == '_' or c == '-';
+            if (!ok) break;
+            i += 1;
+        }
+        if (i == key_start) return error.MalformedAttribute;
+        const key = open_inner[key_start..i];
+        while (i < open_inner.len and isSpace(open_inner[i])) : (i += 1) {}
+        if (i >= open_inner.len or open_inner[i] != '=') return error.MalformedAttribute;
+        i += 1;
+        while (i < open_inner.len and isSpace(open_inner[i])) : (i += 1) {}
+        if (i >= open_inner.len or open_inner[i] != '"') return error.MalformedAttribute;
+        i += 1;
+        const val_start = i;
+        while (i < open_inner.len and open_inner[i] != '"') : (i += 1) {}
+        if (i >= open_inner.len) return error.UnterminatedQuote;
+        const val = open_inner[val_start..i];
+        i += 1;
+
+        if (std.mem.eql(u8, key, "summary")) {
+            if (attrs.saw_summary) return error.DuplicateAttribute;
+            attrs.saw_summary = true;
+            if (!isValidDetailsSummary(val)) return error.InvalidSummary;
+            attrs.summary = val;
+        } else if (std.mem.eql(u8, key, "id")) {
+            if (attrs.saw_id) return error.DuplicateAttribute;
+            attrs.saw_id = true;
+            if (!isValidAsideId(val)) return error.InvalidId;
+            attrs.id = val;
+        } else if (std.mem.eql(u8, key, "open")) {
+            if (attrs.saw_open) return error.DuplicateAttribute;
+            attrs.saw_open = true;
+            if (!std.mem.eql(u8, val, "true")) return error.InvalidOpen;
+            attrs.open = true;
+        } else return error.UnknownAttribute;
+    }
+    if (!attrs.saw_summary) return error.InvalidSummary;
+    return attrs;
+}
+
+fn appendAttributeDiagnostic(
+    diagnostics: *std.ArrayList(Diagnostic),
+    allocator: std.mem.Allocator,
+    err: AttrError,
+    line: u32,
+    column: u32,
+    name: []const u8,
+) !void {
+    const kind: DiagKind = switch (err) {
+        error.DuplicateAttribute => .duplicate_attribute,
+        error.UnknownAttribute => .unknown_attribute,
+        error.UnterminatedQuote => .unterminated_quote,
+        error.MalformedAttribute => .malformed_attribute,
+        error.InvalidKind => .invalid_kind,
+        error.InvalidId => .invalid_id,
+        error.InvalidSummary => .invalid_summary,
+        error.InvalidOpen => .invalid_open,
+    };
+    const message: []const u8 = switch (err) {
+        error.DuplicateAttribute => "duplicate component attribute",
+        error.UnknownAttribute => "unknown component attribute",
+        error.UnterminatedQuote => "unterminated quote in component attribute",
+        error.MalformedAttribute => "malformed component attribute (quoted values only)",
+        error.InvalidKind => "invalid Aside kind (allowlist: note, tip, info, warning, danger)",
+        error.InvalidId => "invalid component id (must match [A-Za-z0-9][A-Za-z0-9_-]* length 1..64)",
+        error.InvalidSummary => "invalid Details summary (required plain text, length 1..256 bytes)",
+        error.InvalidOpen => "invalid Details open attribute (only open=\"true\" is accepted)",
+    };
+    try diagnostics.append(allocator, .{ .kind = kind, .line = line, .column = column, .message = message, .name = name });
+}
+
 // ---------------------------------------------------------------------------
 // Tokenizer
 // ---------------------------------------------------------------------------
 
 const OpenState = struct {
+    component: enum { aside, details },
     open_start: usize,
     open_end: usize, // index of '>'
-    attrs: ParsedAttrs,
+    attrs: union(enum) { aside: ParsedAttrs, details: ParsedDetailsAttrs },
     line: u32,
     column: u32,
 };
@@ -297,6 +415,8 @@ pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeRes
     errdefer segments.deinit(allocator);
     var asides: std.ArrayList(Aside) = .empty;
     errdefer asides.deinit(allocator);
+    var details: std.ArrayList(Details) = .empty;
+    errdefer details.deinit(allocator);
     var diagnostics: std.ArrayList(Diagnostic) = .empty;
     errdefer diagnostics.deinit(allocator);
 
@@ -357,33 +477,42 @@ pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeRes
             continue;
         }
 
-        // Line-start close tag while an Aside is open.
+        // Line-start close tag while a component is open.
         if (open != null and atLineStart(body, i)) {
             var j = i;
             while (j < body.len and isSpace(body[j])) : (j += 1) {}
-            if (j + 8 <= body.len and std.mem.eql(u8, body[j .. j + 8], "</Aside>")) {
-                const after = j + 8;
+            const close_name: ?[]const u8 = if (j + 8 <= body.len and std.mem.eql(u8, body[j .. j + 8], "</Aside>")) "Aside" else if (j + 10 <= body.len and std.mem.eql(u8, body[j .. j + 10], "</Details>")) "Details" else null;
+            if (close_name) |name| {
+                const after = j + name.len + 3;
                 // Optional trailing whitespace to EOL.
                 var k = after;
                 while (k < body.len and (isSpace(body[k]) or body[k] == '\r')) : (k += 1) {}
                 const at_eol = k >= body.len or body[k] == '\n';
                 if (at_eol) {
                     const st = open.?;
+                    const expected = if (st.component == .aside) "Aside" else "Details";
+                    if (!std.mem.eql(u8, name, expected)) {
+                        try diagnostics.append(allocator, .{ .kind = .nested_component, .line = line, .column = col, .message = "cross-nested component close tag is not supported", .name = name });
+                        i = k;
+                        continue;
+                    }
                     // Flush markdown before open tag.
                     if (st.open_start > md_start) {
                         try segments.append(allocator, .{ .markdown = body[md_start..st.open_start] });
                     }
                     const inner_body = body[st.open_end + 1 .. i];
-                    const a: Aside = .{
-                        .kind = st.attrs.kind,
-                        .id = st.attrs.id,
-                        .body = inner_body,
-                        .raw_span = body[st.open_start..k],
-                        .line = st.line,
-                        .column = st.column,
-                    };
-                    try asides.append(allocator, a);
-                    try segments.append(allocator, .{ .aside = a });
+                    switch (st.attrs) {
+                        .aside => |attrs| {
+                            const a: Aside = .{ .kind = attrs.kind, .id = attrs.id, .body = inner_body, .raw_span = body[st.open_start..k], .line = st.line, .column = st.column };
+                            try asides.append(allocator, a);
+                            try segments.append(allocator, .{ .aside = a });
+                        },
+                        .details => |attrs| {
+                            const d: Details = .{ .summary = attrs.summary, .id = attrs.id, .open = attrs.open, .body = inner_body, .raw_span = body[st.open_start..k], .line = st.line, .column = st.column };
+                            try details.append(allocator, d);
+                            try segments.append(allocator, .{ .details = d });
+                        },
+                    }
                     open = null;
                     // Skip close line including newline.
                     i = if (k < body.len and body[k] == '\n') k + 1 else k;
@@ -438,7 +567,7 @@ pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeRes
                     continue;
                 }
 
-                if (!std.mem.eql(u8, name, "Aside")) {
+                if (!std.mem.eql(u8, name, "Aside") and !std.mem.eql(u8, name, "Details")) {
                     try diagnostics.append(allocator, .{
                         .kind = .unregistered_component,
                         .line = line,
@@ -450,55 +579,35 @@ pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeRes
                     continue;
                 }
 
-                // Nested Aside while one is open.
+                // Components cannot nest or cross-nest.
                 if (open != null) {
                     try diagnostics.append(allocator, .{
                         .kind = .nested_component,
                         .line = line,
                         .column = col,
-                        .message = "nested Aside is not supported",
-                        .name = "Aside",
+                        .message = "nested or cross-nested component is not supported",
+                        .name = name,
                     });
                     i = gt + 1;
                     continue;
                 }
 
                 const attr_slice = body[name_end..gt];
-                const attrs = parseAttributes(attr_slice) catch |err| {
-                    const kind: DiagKind = switch (err) {
-                        error.DuplicateAttribute => .duplicate_attribute,
-                        error.UnknownAttribute => .unknown_attribute,
-                        error.UnterminatedQuote => .unterminated_quote,
-                        error.MalformedAttribute => .malformed_attribute,
-                        error.InvalidKind => .invalid_kind,
-                        error.InvalidId => .invalid_id,
+                if (std.mem.eql(u8, name, "Aside")) {
+                    const attrs = parseAttributes(attr_slice) catch |err| {
+                        try appendAttributeDiagnostic(&diagnostics, allocator, err, line, col, "Aside");
+                        i = gt + 1;
+                        continue;
                     };
-                    const msg: []const u8 = switch (err) {
-                        error.DuplicateAttribute => "duplicate Aside attribute",
-                        error.UnknownAttribute => "unknown Aside attribute",
-                        error.UnterminatedQuote => "unterminated quote in Aside attribute",
-                        error.MalformedAttribute => "malformed Aside attribute (quoted values only)",
-                        error.InvalidKind => "invalid Aside kind (allowlist: note, tip, info, warning, danger)",
-                        error.InvalidId => "invalid Aside id (must match [A-Za-z0-9][A-Za-z0-9_-]* length 1..64)",
+                    open = .{ .component = .aside, .open_start = i, .open_end = gt, .attrs = .{ .aside = attrs }, .line = line, .column = col };
+                } else {
+                    const attrs = parseDetailsAttributes(attr_slice) catch |err| {
+                        try appendAttributeDiagnostic(&diagnostics, allocator, err, line, col, "Details");
+                        i = gt + 1;
+                        continue;
                     };
-                    try diagnostics.append(allocator, .{
-                        .kind = kind,
-                        .line = line,
-                        .column = col,
-                        .message = msg,
-                        .name = "Aside",
-                    });
-                    i = gt + 1;
-                    continue;
-                };
-
-                open = .{
-                    .open_start = i,
-                    .open_end = gt,
-                    .attrs = attrs,
-                    .line = line,
-                    .column = col,
-                };
+                    open = .{ .component = .details, .open_start = i, .open_end = gt, .attrs = .{ .details = attrs }, .line = line, .column = col };
+                }
                 i = gt + 1;
                 continue;
             }
@@ -512,8 +621,8 @@ pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeRes
             .kind = .unterminated_component,
             .line = st.line,
             .column = st.column,
-            .message = "unterminated Aside (missing line-start </Aside>)",
-            .name = "Aside",
+            .message = if (st.component == .aside) "unterminated Aside (missing line-start </Aside>)" else "unterminated Details (missing line-start </Details>)",
+            .name = if (st.component == .aside) "Aside" else "Details",
         });
         // Do not emit a partial aside segment; leave open-span as markdown.
     }
@@ -528,6 +637,7 @@ pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeRes
     return .{
         .segments = try segments.toOwnedSlice(allocator),
         .asides = try asides.toOwnedSlice(allocator),
+        .details = try details.toOwnedSlice(allocator),
         .diagnostics = try diagnostics.toOwnedSlice(allocator),
     };
 }
@@ -625,6 +735,27 @@ pub fn renderHtml(a: Aside, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
     return try out.toOwnedSlice(arena);
 }
 
+/// Render one Details component using the platform-native disclosure elements.
+/// The summary is intentionally emitted as escaped text, never Markdown.
+pub fn renderDetailsHtml(d: Details, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
+    const arena = doc_arena.allocator();
+    const inner = if (d.body.len > 0) (try apex.render(d.body, doc_arena)).bytes else "";
+    var out: std.ArrayList(u8) = .empty;
+    try out.appendSlice(arena, "<details class=\"details\"");
+    if (d.id.len > 0) {
+        try out.appendSlice(arena, " id=\"");
+        try appendEscapedAttr(&out, arena, d.id);
+        try out.appendSlice(arena, "\"");
+    }
+    if (d.open) try out.appendSlice(arena, " open");
+    try out.appendSlice(arena, ">\n<summary>");
+    try appendEscapedAttr(&out, arena, d.summary);
+    try out.appendSlice(arena, "</summary>\n<div class=\"details__body\">\n");
+    try out.appendSlice(arena, inner);
+    try out.appendSlice(arena, "</div>\n</details>\n");
+    return try out.toOwnedSlice(arena);
+}
+
 // ---------------------------------------------------------------------------
 // RAG export representation (non-round-trippable)
 // ---------------------------------------------------------------------------
@@ -654,6 +785,30 @@ pub fn formatRagDirective(a: Aside, allocator: std.mem.Allocator) ![]u8 {
     return try out.toOwnedSlice(allocator);
 }
 
+/// Format Details as an inline, export-only RAG directive. The body remains
+/// source Markdown; the summary is escaped for the directive attribute sink.
+pub fn formatDetailsRagDirective(d: Details, allocator: std.mem.Allocator) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.appendSlice(allocator, ":::details{summary=\"");
+    try appendEscapedAttr(&out, allocator, d.summary);
+    try out.appendSlice(allocator, "\"");
+    if (d.id.len > 0) {
+        try out.appendSlice(allocator, " id=\"");
+        try appendEscapedAttr(&out, allocator, d.id);
+        try out.appendSlice(allocator, "\"");
+    }
+    if (d.open) try out.appendSlice(allocator, " open=\"true\"");
+    try out.appendSlice(allocator, "}\n");
+    var body = d.body;
+    if (body.len > 0 and body[0] == '\n') body = body[1..];
+    if (body.len > 0 and body[body.len - 1] == '\r') body = body[0 .. body.len - 1];
+    try out.appendSlice(allocator, body);
+    if (body.len == 0 or body[body.len - 1] != '\n') try out.append(allocator, '\n');
+    try out.appendSlice(allocator, ":::\n");
+    return try out.toOwnedSlice(allocator);
+}
+
 /// Rebuild a body for RAG: markdown segments H1-normalized by caller pieces,
 /// asides as `:::kind` blocks, document order preserved.
 pub fn exportBodyWithDirectives(
@@ -675,6 +830,11 @@ pub fn exportBodyWithDirectives(
             },
             .aside => |a| {
                 const block = try formatRagDirective(a, allocator);
+                defer allocator.free(block);
+                try out.appendSlice(allocator, block);
+            },
+            .details => |d| {
+                const block = try formatDetailsRagDirective(d, allocator);
                 defer allocator.free(block);
                 try out.appendSlice(allocator, block);
             },
@@ -738,6 +898,76 @@ test "renderHtml escapes id attribute sinks" {
         .raw_span = "",
     }, &arena);
     try std.testing.expect(std.mem.indexOf(u8, html, "id=\"a&quot;b&amp;c\"") != null);
+}
+
+test "renderDetailsHtml uses native semantics and escapes text sinks" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const html = try renderDetailsHtml(.{
+        .summary = "A < B & \"quoted\"",
+        .id = "detail-1",
+        .open = true,
+        .body = "Inside **body**.",
+    }, &arena);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<details class=\"details\" id=\"detail-1\" open>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<summary>A &lt; B &amp; &quot;quoted&quot;</summary>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<div class=\"details__body\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<strong>body</strong>") != null);
+}
+
+test "tokenize: valid Details attributes and RAG projection" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const r = try tokenizeBody(
+        \\<Details summary="Read <this> & that" id="more-1" open="true">
+        \\Inside.
+        \\</Details>
+    , arena.allocator());
+    try std.testing.expect(!r.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), r.details.len);
+    try std.testing.expect(r.details[0].open);
+    const rag = try formatDetailsRagDirective(r.details[0], gpa);
+    defer gpa.free(rag);
+    try std.testing.expect(std.mem.indexOf(u8, rag, ":::details{summary=\"Read &lt;this&gt; &amp; that\" id=\"more-1\" open=\"true\"}") != null);
+}
+
+test "tokenize: Details rejects closed grammar and cross nesting" {
+    const gpa = std.testing.allocator;
+    var too_long: [max_details_summary_bytes + 1]u8 = undefined;
+    @memset(&too_long, 'x');
+    try std.testing.expect(!isValidDetailsSummary(""));
+    try std.testing.expect(!isValidDetailsSummary(&too_long));
+    const cases = [_]struct { body: []const u8, kind: DiagKind }{
+        .{ .body = "<Details>\nx\n</Details>\n", .kind = .invalid_summary },
+        .{ .body = "<Details summary=\"x\" open=\"false\">\nx\n</Details>\n", .kind = .invalid_open },
+        .{ .body = "<Details summary=\"x\" class=\"no\">\nx\n</Details>\n", .kind = .unknown_attribute },
+        .{ .body = "<Details summary=\"x\" summary=\"y\">\nx\n</Details>\n", .kind = .duplicate_attribute },
+        .{ .body = "<Details summary=\"x\"\n", .kind = .missing_close_angle },
+        .{ .body = "<Details summary=\"x\">\n<Aside kind=\"tip\">\ny\n</Details>\n</Aside>\n", .kind = .nested_component },
+        .{ .body = "<Aside kind=\"tip\">\nx\n</Details>\n", .kind = .nested_component },
+    };
+    for (cases) |case| {
+        var arena = std.heap.ArenaAllocator.init(gpa);
+        defer arena.deinit();
+        const r = try tokenizeBody(case.body, arena.allocator());
+        try std.testing.expect(r.hasErrors());
+        var found = false;
+        for (r.diagnostics) |d| {
+            if (d.kind == case.kind) found = true;
+        }
+        try std.testing.expect(found);
+    }
+}
+
+test "tokenize: fenced Details remains literal" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const r = try tokenizeBody("```md\n<Details summary=\"literal\">\nx\n</Details>\n```\n", arena.allocator());
+    try std.testing.expect(!r.hasErrors());
+    try std.testing.expectEqual(@as(usize, 0), r.details.len);
 }
 
 test "tokenize: valid Aside with optional id" {
@@ -885,6 +1115,7 @@ test "tokenize: fenced code keeps Aside literal" {
         switch (seg) {
             .markdown => |md| try joined.appendSlice(gpa, md),
             .aside => try std.testing.expect(false),
+            .details => try std.testing.expect(false),
         }
     }
     try std.testing.expect(std.mem.indexOf(u8, joined.items, "<Aside kind=\"tip\">") != null);
@@ -1001,6 +1232,10 @@ test "U15 Aside document order with real Apex stream" {
                 const h = try renderHtml(a, &arena);
                 try out.appendSlice(gpa, h);
             },
+            .details => |d| {
+                const h = try renderDetailsHtml(d, &arena);
+                try out.appendSlice(gpa, h);
+            },
         }
     }
     const html = out.items;
@@ -1046,6 +1281,10 @@ test "U15b Apex callout inside Aside body renders through" {
             },
             .aside => |a| {
                 const h = try renderHtml(a, &arena);
+                try out.appendSlice(gpa, h);
+            },
+            .details => |d| {
+                const h = try renderDetailsHtml(d, &arena);
                 try out.appendSlice(gpa, h);
             },
         }
