@@ -26,11 +26,11 @@ How to use going forward:
 
 _No changes yet._
 
-## [0.5.0] — 2026-07-16 (release candidate)
+## [0.5.0] — 2026-07-16
 
-The v0.5.0 candidate keeps base IR `0.2.0` and conditional semantic-relation
+The v0.5.0 release keeps base IR `0.2.0` and conditional semantic-relation
 IR `0.3.0`; it updates product/compiler/RAG versioning to `0.5.0` without an
-IR schema change. The tag remains pending release-owner review.
+IR schema change.
 
 ### Added
 

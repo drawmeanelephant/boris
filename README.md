@@ -369,7 +369,7 @@ after exit 0.
   incremental/watch/jobs/multi-target, graph nav + in-page `{{toc}}`,
   includes + wiki-links, typed IR dependency edges + reverse index,
   Documentation Intelligence, Context Bundles, layout selection, Textile
-  compatibility, and migration labs as **standalone developer aids**. Prepared
-  product **v0.5.0 release candidate**.
+  compatibility, and migration labs as **standalone developer aids**. Product
+  **v0.5.0**.
 - **Next:** real-site dogfood and release follow-through — see
   [`docs/STATUS.md`](docs/STATUS.md).

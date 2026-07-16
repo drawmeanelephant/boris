@@ -1,7 +1,8 @@
-# Release gate — Boris (v0.5.0 release candidate)
+# Release gate — Boris v0.5.0
 
 Mechanical checklist before tagging a release or claiming a milestone complete.
-This is the current **v0.5.0** cut; no `v0.5.0` tag is claimed here.
+This documents the verified **v0.5.0** release gate. The `v0.5.0` tag points
+at the merged candidate that passed these checks.
 
 Run locally:
 
@@ -89,7 +90,7 @@ verified. Do not check an item because a design doc exists.
 `--out` / `--no-rag`. **P2 and P3 scale-out on the HTML path are complete.**
 **Features 1–7** (Apex Unified, HTML default, jobs/watch/target, nav/toc,
 includes + wiki) and **F8.1–F8.3** graph-native dependencies are Done — see
-[`docs/STATUS.md`](STATUS.md). Product **v0.5.0 release candidate** / base IR
+[`docs/STATUS.md`](STATUS.md). Product **v0.5.0** / base IR
 **0.2.0**. Semantic relations retain their conditional IR **0.3.0** artifacts;
 relation-free output remains IR 0.2. Incremental HTML uses the shared direct-edge
 resolver and reverse affected-set semantics.
