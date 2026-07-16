@@ -1,0 +1,6 @@
+# Local report outputs (never commit generated archaeology)
+.migration-report/
+migration-report/
+fixtures/.test-out*/
+.zig-cache/
+zig-out/

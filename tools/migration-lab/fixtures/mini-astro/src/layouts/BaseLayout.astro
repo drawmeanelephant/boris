@@ -1,0 +1,15 @@
+---
+const { title = 'Site' } = Astro.props;
+---
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{title}</title>
+    <link rel="icon" href="/favicon.svg" />
+  </head>
+  <body>
+    <main>
+      <slot />
+    </main>
+  </body>
+</html>
