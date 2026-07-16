@@ -46,6 +46,12 @@ pub const Code = enum {
     EREFERENCESYNTAX,
     /// Wiki-link target entity id not in the page graph.
     EREFERENCEMISSING,
+    /// Semantic relation target is not a discovered page.
+    ERELATIONMISSING,
+    /// Semantic relation points from a page to itself.
+    ERELATIONSELF,
+    /// Semantic relation tuple is repeated.
+    ERELATIONDUPLICATE,
     EUSAGE,
     EIO,
 

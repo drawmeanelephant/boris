@@ -197,6 +197,38 @@ if diff -u "${GRAPH_NATIVE_EXPECTED}" "${GRAPH_NATIVE_OUT}/graph.json"; then
 else
   fail "graph-native graph.json golden mismatch"
 fi
+
+note "4a. Semantic relations IR 0.3 fixture"
+SEMANTIC_CONTENT="docs/contracts/fixtures/semantic-relations/content"
+SEMANTIC_OUT="${GATE_DIR}/ir-semantic-relations"
+rm -rf "${SEMANTIC_OUT}"
+"${BORIS}" --input="${SEMANTIC_CONTENT}" --out="${SEMANTIC_OUT}" --quiet
+if grep -q '"schemaVersion": "0.3.0"' "${SEMANTIC_OUT}/manifest.json" \
+  && grep -q '"schemaVersion": "0.3.0"' "${SEMANTIC_OUT}/graph.json" \
+  && grep -q '"schemaVersion": "0.3.0"' "${SEMANTIC_OUT}/build-report.json"; then
+  pass "semantic relation artifacts advertise IR 0.3"
+else
+  fail "semantic relation artifacts must advertise IR 0.3"
+fi
+if grep -q '"kind": "depends_on"' "${SEMANTIC_OUT}/graph.json" \
+  && grep -q '"kind": "supersedes"' "${SEMANTIC_OUT}/graph.json"; then
+  pass "semantic relation graph emits bounded relation kinds"
+else
+  fail "semantic relation graph missing expected relation kinds"
+fi
+SEMANTIC_INVALID_OUT="${GATE_DIR}/ir-semantic-relations-invalid"
+rm -rf "${SEMANTIC_INVALID_OUT}"
+set +e
+"${BORIS}" --input="docs/contracts/fixtures/semantic-relations-invalid/content" --out="${SEMANTIC_INVALID_OUT}" --quiet
+semantic_invalid_rc=$?
+set -e
+if [[ "${semantic_invalid_rc}" -eq 1 ]] \
+  && grep -q '"code": "ERELATIONSELF"' "${SEMANTIC_INVALID_OUT}/build-report.json" \
+  && grep -q '"code": "ERELATIONMISSING"' "${SEMANTIC_INVALID_OUT}/build-report.json"; then
+  pass "semantic relation self and missing targets fail closed"
+else
+  fail "semantic relation invalid-target diagnostics mismatch"
+fi
 # Feature 2: bare-style default HTML (relative html-dir under gate dir)
 note "4b. Default HTML surface (Feature 2)"
 HTML_OUT="${GATE_DIR}/html-default"

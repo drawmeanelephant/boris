@@ -47,6 +47,9 @@ pub const max_frontmatter_bytes: usize = 64 * 1024;
 /// Max non-blank field lines inside one frontmatter block.
 pub const max_frontmatter_fields: usize = 32;
 
+/// Maximum semantic relations on one page in the IR 0.3 grammar.
+pub const max_relation_count: usize = 16;
+
 /// Closed `status` vocabulary (exact spellings only).
 pub const Status = enum {
     draft,
@@ -65,6 +68,30 @@ pub const Status = enum {
     }
 };
 
+pub const RelationKind = enum {
+    relates_to,
+    implements,
+    depends_on,
+    supersedes,
+
+    pub fn parse(s: []const u8) ?RelationKind {
+        if (std.mem.eql(u8, s, "relates_to")) return .relates_to;
+        if (std.mem.eql(u8, s, "implements")) return .implements;
+        if (std.mem.eql(u8, s, "depends_on")) return .depends_on;
+        if (std.mem.eql(u8, s, "supersedes")) return .supersedes;
+        return null;
+    }
+
+    pub fn name(self: RelationKind) []const u8 {
+        return @tagName(self);
+    }
+};
+
+pub const SemanticRelation = struct {
+    kind: RelationKind,
+    target: []const u8,
+};
+
 /// Parsed frontmatter fields as **views into the source buffer**.
 ///
 /// Lifetime is tied to the `source` slice passed to `parser.parse`. Do **not**
@@ -80,9 +107,15 @@ pub const FrontmatterView = struct {
     /// Tag token slices into source; only `tags[0..tag_count]` is defined.
     tags: [max_tag_count][]const u8 = undefined,
     tag_count: usize = 0,
+    relations: [max_relation_count]SemanticRelation = undefined,
+    relation_count: usize = 0,
 
     pub fn tagsSlice(self: *const FrontmatterView) []const []const u8 {
         return self.tags[0..self.tag_count];
+    }
+
+    pub fn relationsSlice(self: *const FrontmatterView) []const SemanticRelation {
+        return self.relations[0..self.relation_count];
     }
 };
 
@@ -182,6 +215,8 @@ pub const DurablePage = struct {
     status: ?Status = null,
     /// Retain-owned tag strings (may be empty slice).
     tags: []const []const u8 = &.{},
+    /// Retain-owned semantic relation targets (IR 0.3 when emitted).
+    relations: []const SemanticRelation = &.{},
     kind: ContentKind = .md,
     /// Byte offset of body start in the source file (not a live buffer).
     body_offset: usize = 0,
@@ -270,6 +305,16 @@ pub const PageDb = struct {
             tags_owned = buf;
         }
 
+        const relations_src = meta.relationsSlice();
+        var relations_owned: []const SemanticRelation = &.{};
+        if (relations_src.len > 0) {
+            const buf = try self.retain.alloc(SemanticRelation, relations_src.len);
+            for (relations_src, 0..) |relation, i| {
+                buf[i] = .{ .kind = relation.kind, .target = try self.retain.dupe(u8, relation.target) };
+            }
+            relations_owned = buf;
+        }
+
         // Recompute output path from final entity id when id was overridden.
         const output_path = if (std.mem.eql(u8, entity_id, discovery.entity_id))
             try self.retain.dupe(u8, discovery.output_path)
@@ -284,6 +329,7 @@ pub const PageDb = struct {
             .output_path = output_path,
             .status = meta.status,
             .tags = tags_owned,
+            .relations = relations_owned,
             .kind = discovery.kind,
             .body_offset = body_offset,
             .role = if (meta.parent != null) .satellite else .trunk,

@@ -8,6 +8,9 @@ Feature 8 is shipped under `graph-native-dependencies/`. Its full generated
 enforced by the release gate; `edge-skeleton.json` remains the compact contract
 pin for the same sorted arrays.
 
+The `semantic-relations/` fixture pins the conditional IR 0.3 semantic-relations
+shape. Relation-free fixtures remain on IR 0.2.
+
 Feature 9 (heading-target wiki links) lives under:
 
 | Fixture | Role |

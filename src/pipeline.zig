@@ -19,6 +19,8 @@ const dependency = @import("dependency.zig");
 
 pub const schema_version = "0.2.0";
 pub const compiler_id = "boris/0.3.1";
+pub const semantic_schema_version = "0.3.0";
+pub const semantic_compiler_id = "boris/0.3.1+semantic-relations";
 /// Product version string (package / catalog_meta.boris_version).
 pub const boris_version = "0.3.1";
 
@@ -61,6 +63,12 @@ pub const ReverseEntry = struct {
     incoming_edges: []const u32,
 };
 
+pub const SemanticEdge = struct {
+    from: Endpoint,
+    to: Endpoint,
+    kind: []const u8,
+};
+
 /// Pipeline failure class for CLI exit mapping.
 pub const FailureKind = enum {
     none,
@@ -96,6 +104,19 @@ pub const Result = struct {
         return diag.countErrors(self.diagnostics.items);
     }
 };
+
+fn hasSemanticRelations(result: *const Result) bool {
+    for (result.pages.items) |page| if (page.semantic_relations.len > 0) return true;
+    return false;
+}
+
+fn artifactSchemaVersion(result: *const Result) []const u8 {
+    return if (hasSemanticRelations(result)) semantic_schema_version else schema_version;
+}
+
+fn artifactCompilerId(result: *const Result) []const u8 {
+    return if (hasSemanticRelations(result)) semantic_compiler_id else compiler_id;
+}
 
 fn log(opts: Options, comptime fmt: []const u8, args: anytype) void {
     if (!opts.quiet) {
@@ -136,6 +157,60 @@ fn findPage(nodes: []const PageEntry, id: []const u8) bool {
         if (std.mem.eql(u8, node.id, id)) return true;
     }
     return false;
+}
+
+fn validateSemanticRelations(
+    list_gpa: std.mem.Allocator,
+    retain: std.mem.Allocator,
+    nodes: []const PageEntry,
+    diagnostics: *std.ArrayList(diag.Diagnostic),
+) !void {
+    for (nodes) |node| {
+        for (node.semantic_relations, 0..) |relation, relation_index| {
+            if (std.mem.eql(u8, node.id, relation.target)) {
+                try diagnostics.append(list_gpa, .{
+                    .severity = .error_,
+                    .code = .ERELATIONSELF,
+                    .message = try std.fmt.allocPrint(retain, "semantic relation {s} targets its source page", .{relation.kind.name()}),
+                    .remediation = try retain.dupe(u8, "Choose a different target page"),
+                    .source_path = node.source_path,
+                    .line = 1,
+                    .column = 1,
+                    .id = node.id,
+                });
+                continue;
+            }
+            if (!findPage(nodes, relation.target)) {
+                try diagnostics.append(list_gpa, .{
+                    .severity = .error_,
+                    .code = .ERELATIONMISSING,
+                    .message = try std.fmt.allocPrint(retain, "semantic relation {s} targets missing page \"{s}\"", .{ relation.kind.name(), relation.target }),
+                    .remediation = try retain.dupe(u8, "Create the target page or remove the relation"),
+                    .source_path = node.source_path,
+                    .line = 1,
+                    .column = 1,
+                    .id = node.id,
+                });
+            }
+            var prior: usize = 0;
+            while (prior < relation_index) : (prior += 1) {
+                const earlier = node.semantic_relations[prior];
+                if (earlier.kind == relation.kind and std.mem.eql(u8, earlier.target, relation.target)) {
+                    try diagnostics.append(list_gpa, .{
+                        .severity = .error_,
+                        .code = .ERELATIONDUPLICATE,
+                        .message = try std.fmt.allocPrint(retain, "duplicate semantic relation {s} -> \"{s}\"", .{ relation.kind.name(), relation.target }),
+                        .remediation = try retain.dupe(u8, "Keep each semantic relation tuple only once"),
+                        .source_path = node.source_path,
+                        .line = 1,
+                        .column = 1,
+                        .id = node.id,
+                    });
+                    break;
+                }
+            }
+        }
+    }
 }
 
 const DependencyResolver = struct {
@@ -483,11 +558,11 @@ pub fn renderManifest(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
     try buf.appendSlice(gpa, "{\n");
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"schemaVersion\": ");
-    try json_out.writeString(&buf, gpa, schema_version);
+    try json_out.writeString(&buf, gpa, artifactSchemaVersion(result));
     try buf.appendSlice(gpa, ",\n");
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"compiler\": ");
-    try json_out.writeString(&buf, gpa, compiler_id);
+    try json_out.writeString(&buf, gpa, artifactCompilerId(result));
     try buf.appendSlice(gpa, ",\n");
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"contentRoot\": ");
@@ -577,7 +652,7 @@ pub fn renderGraph(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
     try buf.appendSlice(gpa, "{\n");
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"schemaVersion\": ");
-    try json_out.writeString(&buf, gpa, schema_version);
+    try json_out.writeString(&buf, gpa, artifactSchemaVersion(result));
     try buf.appendSlice(gpa, ",\n");
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"frozen\": ");
@@ -718,7 +793,54 @@ pub fn renderGraph(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
         try buf.append(gpa, '\n');
     }
     try json_out.indent(&buf, gpa, 1);
-    try buf.appendSlice(gpa, "]\n}\n");
+    if (!hasSemanticRelations(result)) {
+        try buf.appendSlice(gpa, "]\n}\n");
+    } else {
+        try buf.appendSlice(gpa, "],\n");
+        try json_out.indent(&buf, gpa, 1);
+        try buf.appendSlice(gpa, "\"relations\": [\n");
+
+        var semantic_edges: std.ArrayList(SemanticEdge) = .empty;
+        defer semantic_edges.deinit(gpa);
+        for (result.pages.items) |page| {
+            for (page.semantic_relations) |relation| {
+                try semantic_edges.append(gpa, .{
+                    .from = .{ .type = .page, .value = page.id },
+                    .to = .{ .type = .page, .value = relation.target },
+                    .kind = relation.kind.name(),
+                });
+            }
+        }
+        std.sort.block(SemanticEdge, semantic_edges.items, {}, struct {
+            fn lessThan(_: void, a: SemanticEdge, b: SemanticEdge) bool {
+                if (!endpointEql(a.from, b.from)) return endpointLess(a.from, b.from);
+                if (!endpointEql(a.to, b.to)) return endpointLess(a.to, b.to);
+                return std.mem.order(u8, a.kind, b.kind) == .lt;
+            }
+        }.lessThan);
+        for (semantic_edges.items, 0..) |edge, i| {
+            try json_out.indent(&buf, gpa, 2);
+            try buf.appendSlice(gpa, "{\n");
+            try json_out.indent(&buf, gpa, 3);
+            try buf.appendSlice(gpa, "\"from\": ");
+            try writeEndpoint(&buf, gpa, edge.from, 3);
+            try buf.appendSlice(gpa, ",\n");
+            try json_out.indent(&buf, gpa, 3);
+            try buf.appendSlice(gpa, "\"to\": ");
+            try writeEndpoint(&buf, gpa, edge.to, 3);
+            try buf.appendSlice(gpa, ",\n");
+            try json_out.indent(&buf, gpa, 3);
+            try buf.appendSlice(gpa, "\"kind\": ");
+            try json_out.writeString(&buf, gpa, edge.kind);
+            try buf.appendSlice(gpa, "\n");
+            try json_out.indent(&buf, gpa, 2);
+            try buf.append(gpa, '}');
+            if (i + 1 < semantic_edges.items.len) try buf.append(gpa, ',');
+            try buf.append(gpa, '\n');
+        }
+        try json_out.indent(&buf, gpa, 1);
+        try buf.appendSlice(gpa, "]\n}\n");
+    }
 
     return try buf.toOwnedSlice(gpa);
 }
@@ -730,7 +852,7 @@ pub fn renderBuildReport(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
     try buf.appendSlice(gpa, "{\n");
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"schemaVersion\": ");
-    try json_out.writeString(&buf, gpa, schema_version);
+    try json_out.writeString(&buf, gpa, artifactSchemaVersion(result));
     try buf.appendSlice(gpa, ",\n");
     try json_out.indent(&buf, gpa, 1);
     try buf.appendSlice(gpa, "\"ok\": ");
@@ -1108,6 +1230,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             .tags = p.tags,
             .body_offset = p.body_offset,
             .role = if (p.parent != null) .satellite else .trunk,
+            .semantic_relations = p.relations,
         });
     }
 
@@ -1117,6 +1240,11 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     diag.sortDiagnostics(result.diagnostics.items);
 
     var err_count = diag.countErrors(result.diagnostics.items);
+    if (err_count == 0) {
+        try validateSemanticRelations(gpa, retain, result.pages.items, &result.diagnostics);
+        diag.sortDiagnostics(result.diagnostics.items);
+        err_count = diag.countErrors(result.diagnostics.items);
+    }
     if (err_count == 0) {
         try resolveDependencies(io, gpa, retain, content_dir, &result);
         diag.sortDiagnostics(result.diagnostics.items);

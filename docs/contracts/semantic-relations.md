@@ -1,6 +1,7 @@
-# Semantic relations (planned IR 0.3)
+# Semantic relations (IR 0.3)
 
-**Status:** contract design; not emitted by the current IR 0.2 compiler.
+**Status:** first implementation on the semantic-relations branch; relation-free
+inputs remain byte-compatible with the IR 0.2 goldens.
 
 Semantic relations describe author-intended knowledge relationships. They are
 not build dependencies. In particular, a `depends_on` semantic relation must
@@ -18,8 +19,7 @@ relations: [supersedes=guides/cache-v1, depends_on=reference/cache-manifest]
 
 Rules:
 
-- `relations:` is accepted only in the product frontmatter parser after the
-  IR 0.3 contract ships;
+- `relations:` is accepted only in the product frontmatter parser;
 - the value must be `[` then zero or more comma-separated entries then `]`;
 - each entry is `kind=target`, with optional ASCII spaces/tabs around commas
   and the equals sign;
@@ -108,14 +108,14 @@ semantic lookup can build one without confusing it with build invalidation.
 
 ## Acceptance fixtures
 
-The implementation must include fixtures for:
+The first implementation includes fixtures/tests for:
 
-- all four valid kinds, multiple relations, and deterministic canonical order;
-- empty and absent `relations`;
-- malformed list, unknown kind, duplicate tuple, self-target, and missing page;
-- a page with both a semantic relation and a build dependency to prove the
-  arrays remain separate;
-- byte-identical IR output across two builds;
-- old IR 0.2 goldens remaining unchanged until the relation feature is enabled
-  and the schema/version cut is made deliberately.
+- multiple valid kinds and deterministic canonical order;
+- absent `relations` (which remains on IR 0.2);
+- malformed list, unknown kind, duplicate tuple, self-target, and missing page
+  parser/validation coverage;
+- old IR 0.2 goldens remaining unchanged while relation-bearing output uses the
+  deliberate IR 0.3 schema/version cut.
 
+The remaining acceptance expansion is to add all four kinds and a combined
+semantic/build-dependency golden before the feature is merged to `main`.

@@ -6,6 +6,7 @@
 const std = @import("std");
 const diag = @import("diag.zig");
 const identity = @import("identity.zig");
+const page_mod = @import("page.zig");
 
 pub const Role = enum {
     trunk,
@@ -28,6 +29,8 @@ pub const Node = struct {
     tags: []const []const u8 = &.{},
     role: Role = .trunk,
     body_offset: usize = 0,
+    /// Author semantic relations; never used for build dependency walks.
+    semantic_relations: []const page_mod.SemanticRelation = &.{},
 };
 
 pub const Edge = struct {
