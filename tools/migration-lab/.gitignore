@@ -9,6 +9,9 @@
 .notion-report/
 .out-obs/
 .out-notion/
+.out-sl/
+.sl-report/
+sl-proof-out/
 migration-report/
 fixtures/.test-out*/
 fixtures/.test-wp*/
@@ -17,5 +20,6 @@ fixtures/.test-adversarial*/
 fixtures/.ig-test-out*/
 fixtures/.test-obsidian-out*/
 fixtures/.test-notion-out*/
+fixtures/.test-starlight-*/
 .zig-cache/
 zig-out/
