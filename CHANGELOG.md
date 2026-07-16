@@ -19,6 +19,16 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Fixed
+
+- `--watch` now watches a managed theme root, not just the layout's parent
+  directory. Editing `<theme>/assets/…` or `<theme>/footer.html` previously
+  produced no watch event, so pages whose fingerprints include footer or
+  referenced asset bytes (F9.1) served stale output until an unrelated edit
+  triggered a rebuild. Legacy `layouts/…` builds are unchanged. Contract:
+  `docs/contracts/templating-and-themes.md` ("a referenced asset change dirties
+  pages that reference it"). `src/main.zig`.
+
 ### Layout selection
 
 - HTML page layout selection via repeatable
