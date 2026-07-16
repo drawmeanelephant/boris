@@ -230,6 +230,44 @@ test-output/migration-ir/build-report.json
 **Expected:** exit `0`; may create target cache under
 `test-output/migration-dist/.boris-cache/` (untracked / local only).
 
+### One tree, several page shapes
+
+Many migrations have a home page, section landings, and an archive or reference
+area that should not share the same chrome. After adding those layouts to your
+theme, keep the content graph in one tree and select the exceptional HTML
+layouts at build time rather than introducing a second content dialect:
+
+```bash
+./zig-out/bin/boris \
+  --input path/to/content \
+  --target public=test-output/my-docs-dist \
+  --target-layout public=theme/layouts/main.html \
+  --layout-rule public id:index theme/layouts/home.html \
+  --layout-rule public 'glob:reference/*' theme/layouts/reference.html \
+  --layout-rule public role:trunk theme/layouts/section.html \
+  --quiet
+```
+
+Use `id:<entity-id>` for one known page, `glob:<segment-pattern>` for a stable
+path family, and `role:trunk|satellite` for graph role. Rules are HTML-only;
+they intentionally do not change frontmatter, IR, RAG, or Context Bundle
+output.
+
+### Migration follow-up checklist
+
+After the first clean HTML build:
+
+- [ ] Add `--layout-rule` only where the old site has genuinely distinct page
+  shapes (home, archive, reference), not for ordinary visual tweaks.
+- [ ] Run `boris check --format json --report .boris/check.json` and review
+  unreferenced-page findings before declaring the tree complete.
+- [ ] Run `boris impact <entity-id>` before a broad rename to see the validated
+  dependent set.
+- [ ] Export `--context-dir test-output/migration-context` when an LLM or
+  reviewer needs the validated hierarchy and source-relative provenance; use
+  the bundle as context, not as a replacement for source control.
+- [ ] Keep the full build and a deep-page asset check in the migration handoff.
+
 ### Your own tree
 
 ```bash
@@ -335,6 +373,7 @@ Keep generated and local tooling output **untracked**:
 | `.boris/`, IR `--out` dirs | Generated IR |
 | `.boris-cache/`, target caches | Incremental state |
 | `source-rag/` | Generated source pack |
+| `context/`, custom `--context-dir` trees | Generated AI Context Bundle |
 | `zig-out/`, `.zig-cache/` | Build outputs |
 
 Repository `.gitignore` already covers common product output roots such as

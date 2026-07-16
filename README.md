@@ -14,14 +14,14 @@ affiliated with any commercial tobacco or rolling-paper brand.
 | | |
 |--|--|
 | Language | Zig **0.16.0** (`build.zig.zon` / CI pin) |
-| Product | **0.3.1** / compiler **boris/0.3.1** |
+| Product | **0.4.0** / compiler **boris/0.4.0** |
 | IR schema | **0.2.0** (typed dependency endpoints + reverse index) |
 | License | [MIT](LICENSE) |
 
-**v0.3.1** uses those same frozen dependencies to expand incremental HTML dirty
-sets; IR remains schema 0.2.0. It builds
-on the **v0.2.1** Feature 7 HTML include/wiki path and the **v0.2.0**
-HTML-default cut. See
+**v0.4.0** adds Documentation Intelligence, Context Bundles, bounded semantic
+relations, layout selection, and migration labs while keeping base IR schema
+0.2.0. It builds on the **v0.3.1** incremental graph work, the **v0.2.1**
+include/wiki path, and the **v0.2.0** HTML-default cut. See
 [`CHANGELOG.md`](CHANGELOG.md) and [`docs/STATUS.md`](docs/STATUS.md).
 
 ---
@@ -83,6 +83,8 @@ zig build test
 | `boris --no-rag` | Explicit IR (default out `.boris`) |
 | `boris --rag` / `--rag-dir DIR` | **RAG corpus** only |
 | `boris --context` / `--context-dir DIR` | **AI Context Bundle** only |
+| `boris check` | Read-only graph-health report (CI findings exit 1) |
+| `boris impact ID` | Read-only transitive impact report for one page |
 | `boris --target name=dir` | Multi-target HTML (repeatable; order-independent) |
 | `boris --help` | Usage; exit 0; no filesystem walk |
 
@@ -96,6 +98,7 @@ zig build test
 | `--html-layout <PATH>` | `layouts/main.html` | Global layout (`{{content}}` once) |
 | `--target NAME=DIR` | — | Named HTML root (not with `--html-dir`); any order |
 | `--target-layout N=P` | — | Per-target layout; may precede or follow `--target` |
+| `--layout-rule T S P` | — | Per-page HTML layout: selector is `id:`, `glob:`, or `role:` |
 | `--jobs N` / `-j N` | `1` | Parallel HTML workers `1–64` |
 | `--incremental` / `--watch` | off | Dirty-set rebuilds; watch implies incremental; OK with `--target` |
 | `--quiet` | off | Less stderr; exit codes unchanged |
@@ -110,7 +113,7 @@ Also accepted: `--input=DIR`, `--out=DIR`, `--rag-dir=DIR`, `--html-dir=DIR`,
 3. `--rag` / `--rag-dir` → **RAG-only**.
 4. `--html` / `--html-dir` / `--target` / `--target-layout` → **HTML** (explicit).
 5. Mixing IR/RAG flags with HTML selectors → exit **2**.
-6. `--jobs` / `--watch` / `--incremental` with IR or RAG → exit **2**.
+6. `--jobs` / `--watch` / `--incremental` with IR, RAG, or Context Bundle → exit **2**.
 7. Invalid target names, collisions, workspace escape, content/layout overlap → exit **2**.
 8. Equivalent `--target` / `--target-layout` permutations yield the same config (targets sorted by name).
 
@@ -122,7 +125,65 @@ Exit codes: **0** success · **1** content · **2** usage · **3** I/O.
 dist/**/*.html                 # default HTML (or each --target root)
 .boris/{manifest,graph,build-report}.json   # IR via --out
 rag/{INDEX,system,content,graph,catalog…}   # via --rag
+context/bundle.md                            # via --context
+context/{manifest,graph}.json                # via --context
 ```
+
+## Keep a content graph healthy
+
+Use `check` before a merge or publish to inspect the same validated graph Boris
+uses to compile. It is read-only: it does not publish HTML, IR, RAG, or a
+Context Bundle. `check` returns exit **1** when it finds unreferenced pages, so
+CI can treat the report as a review gate.
+
+```yaml
+# Example GitHub Actions step after `zig build`
+- name: Check documentation graph
+  run: |
+    ./zig-out/bin/boris check \
+      --input content \
+      --format json \
+      --report .boris/check.json
+```
+
+The JSON report is an ordinary local file: upload it as a CI artifact or review
+it in a later job. It is not a hosted service. To see the pages and sources a
+specific change can affect, run `./zig-out/bin/boris impact guides/getting-started`
+(add `--format json` when another local tool needs the result).
+
+## Shape one site into more than one page type
+
+For an archive landing page, a reference section, or a special home page, keep
+one content tree and choose a layout per page at build time. Rules are
+HTML-only and do not add layout syntax to frontmatter.
+
+```bash
+./zig-out/bin/boris \
+  --target public=dist \
+  --target-layout public=themes/archive/layouts/main.html \
+  --layout-rule public id:index themes/archive/layouts/home.html \
+  --layout-rule public 'glob:archive/*' themes/archive/layouts/archive.html \
+  --layout-rule public role:trunk themes/archive/layouts/section.html
+```
+
+Selectors are deterministic: `id:<entity-id>` selects one page,
+`glob:<segment-pattern>` selects matching IDs, and `role:trunk|satellite`
+selects by graph role. Use a single global layout when page shapes are truly
+the same; use rules when a migration has a small, known set of shapes.
+
+## Use Boris as a pipeline stage
+
+If you need an external renderer or downstream integration, ask Boris to
+validate and emit JSON IR instead of making that renderer part of Boris:
+
+```bash
+./zig-out/bin/boris --input content --out .boris
+```
+
+The external step can consume `.boris/manifest.json`, `graph.json`, and
+`build-report.json` after Boris succeeds. Keep that renderer's dependencies
+and deployment choices outside Boris; the compiler remains a local, portable
+validation and graph-production stage.
 
 **Trusted authors only on the HTML path:** raw HTML in Markdown is passed
 through. Do not feed untrusted contributor content without a sanitizer.
@@ -140,7 +201,7 @@ See [frontmatter.md](docs/contracts/frontmatter.md).
 | Default HTML site + real ApexMarkdown Unified | **Done** |
 | Trunk/Satellite graph, closed frontmatter, Asides | **Done** |
 | IR 0.2 graph-native dependencies + RAG export | **Done** |
-| Documentation Intelligence, bounded semantic relations + Context Bundles | **Merged; unreleased** |
+| Documentation Intelligence, bounded semantic relations + Context Bundles | **Done** (v0.4.0) |
 | Incremental, watch, parallel jobs, multi-target | **Done** |
 | CI Linux + macOS | **Done** |
 | Graph-aware HTML nav (`{{nav}}` / breadcrumb) | **Done** (Feature 6 MVP) |
@@ -201,6 +262,7 @@ See [frontmatter.md](docs/contracts/frontmatter.md).
 - **Shipped:** content graph, IR, RAG, Asides, real Apex Unified, HTML default,
   incremental/watch/jobs/multi-target, graph nav + in-page `{{toc}}`,
   includes + wiki-links (Feature 7), typed IR dependency edges + reverse index
-  (Feature 8.1–8.3). Product **v0.3.1**.
-- **Next:** wiki `#heading` targets and post-F8 build-system productization — see
+  (Feature 8.1–8.3), Documentation Intelligence, Context Bundles, layout
+  selection, Textile compatibility, and migration labs. Product **v0.4.0**.
+- **Next:** real-site dogfood and release follow-through — see
   [`docs/STATUS.md`](docs/STATUS.md).
