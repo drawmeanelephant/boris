@@ -60,6 +60,9 @@ How to use going forward:
 
 ### Docs
 
+- ApexMarkdown Unified compatibility matrix (read-only): fixtures under
+  `docs/contracts/fixtures/apex-unified-compat/`, classifications in
+  `MATRIX.md`, audit method/results in `REPORT.md`. No product-code changes.
 - Roadmap truth reconciliation after PR #42: F8.3 / v0.3.1 tagged, heading
   wiki (#40), F9.1 (#41), and F9.2 (#42) recorded as shipped; post-F9.2 future
   work moved to a dedicated section; contracts index no longer claims F8.3 is
