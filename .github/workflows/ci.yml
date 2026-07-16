@@ -25,9 +25,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Empty token forces git-based change detection (fetch-depth: 0 above).
+      # The default PR-files REST API has returned GitHub Unicorn/5xx HTML,
+      # failing this job and skipping migration-lab-test even when the lab
+      # paths changed. Local git avoids that dependency.
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          token: ''
+          base: ${{ github.event.pull_request.base.sha || github.event.before || github.event.repository.default_branch }}
           filters: |
             migration_lab:
               - 'tools/migration-lab/**'
