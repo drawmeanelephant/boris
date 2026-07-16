@@ -15,12 +15,16 @@ const include_mod = @import("include.zig");
 const wikilink = @import("wikilink.zig");
 const textile = @import("textile.zig");
 const diag = @import("diag.zig");
+const content_asset = @import("content_asset.zig");
 
 pub const Options = struct {
     input_format: identity.InputFormat = .markdown,
     quiet: bool = true,
     nodes: []const graph_mod.Node = &.{},
     heading_index: ?*const wikilink.HeadingIndex = null,
+    /// When non-null, rewrite Markdown image destinations into this page's
+    /// sibling asset tree (see `docs/contracts/content-local-assets.md`).
+    page_assets: ?*const content_asset.PageAssetBundle = null,
 };
 
 fn sourceLineAt(source: []const u8, offset: usize) u32 {
@@ -99,8 +103,9 @@ pub fn bodyForInput(
 /// Render one already-read page source through Boris's ordered HTML body path.
 ///
 /// Ordering is contractual: parse/adapt, include expansion, wiki rewrite,
-/// Aside tokenization, then Apex/Aside body streaming. Diagnostics retain the
-/// same source-locus behavior as the old compile-local implementation.
+/// content-local image rewrite, Aside tokenization, then Apex/Aside body
+/// streaming. Diagnostics retain the same source-locus behavior as the old
+/// compile-local implementation.
 pub fn renderSource(
     io: Io,
     gpa: std.mem.Allocator,
@@ -139,7 +144,16 @@ pub fn renderSource(
         return error.ReferenceFailed;
     };
 
-    const tok = try aside.tokenizeBody(with_wiki, arena);
+    // Content-local Markdown images → published sibling-tree URLs (pre-Apex).
+    const with_assets = if (options.page_assets) |bundle| blk: {
+        var asset_fail: content_asset.FailInfo = .{};
+        break :blk content_asset.rewriteImageLinks(arena, with_wiki, bundle, output_path, &asset_fail) catch |err| {
+            if (!options.quiet) content_asset.printDiagnostic(gpa, err, source_path, asset_fail);
+            return error.AssetFailed;
+        };
+    } else with_wiki;
+
+    const tok = try aside.tokenizeBody(with_assets, arena);
     if (tok.hasErrors()) {
         if (!options.quiet) try printComponentDiagnostics(gpa, source, parsed.doc.body_offset, source_path, tok.diagnostics);
         return error.ComponentFailed;
