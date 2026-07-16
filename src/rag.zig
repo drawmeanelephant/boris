@@ -29,10 +29,10 @@ const Io = std.Io;
 const diag = @import("diag.zig");
 const graph_mod = @import("graph.zig");
 const identity = @import("identity.zig");
-const json_out = @import("json_out.zig");
 const parser = @import("parser.zig");
 const aside = @import("aside.zig");
 const pipeline = @import("pipeline.zig");
+const rag_emit = @import("rag_emit.zig");
 const textile = @import("textile.zig");
 
 /// Machine format id written into `catalog_meta.json`.
@@ -85,16 +85,7 @@ pub const RagResult = struct {
 };
 
 /// Machine catalog row (`catalog.jsonl`). Field order is fixed and normative.
-const CatalogEntry = struct {
-    rag_id: []const u8,
-    rag_path: []const u8,
-    category: []const u8,
-    title: []const u8,
-    entity_id: []const u8 = "",
-    role: []const u8 = "",
-    parent_entry: []const u8 = "",
-    tags: []const u8 = "",
-};
+const CatalogEntry = rag_emit.CatalogEntry;
 
 fn log(opts: RagOptions, comptime fmt: []const u8, args: anytype) void {
     if (!opts.quiet) std.debug.print(fmt, args);
@@ -167,14 +158,6 @@ fn appendCatalog(
         .parent_entry = try arena.dupe(u8, entry.parent_entry),
         .tags = try arena.dupe(u8, entry.tags),
     });
-}
-
-fn sortCatalogByRagPath(entries: []CatalogEntry) void {
-    std.mem.sort(CatalogEntry, entries, {}, struct {
-        fn less(_: void, a: CatalogEntry, b: CatalogEntry) bool {
-            return std.mem.order(u8, a.rag_path, b.rag_path) == .lt;
-        }
-    }.less);
 }
 
 // ---------------------------------------------------------------------------
@@ -459,21 +442,9 @@ fn exportSystemDocs(
         const tags = extractTagsLine(source);
         const tags_out = if (tags.len > 0) tags else "[boris, system]";
 
-        var doc: std.ArrayList(u8) = .empty;
-        defer doc.deinit(gpa);
-        try doc.appendSlice(gpa, "---\n");
-        try doc.appendSlice(gpa, "rag_id: ");
-        try doc.appendSlice(gpa, rag_id);
-        try doc.appendSlice(gpa, "\nrag_path: ");
-        try doc.appendSlice(gpa, rag_path);
-        try doc.appendSlice(gpa, "\ncategory: system\n");
-        try doc.appendSlice(gpa, "tags: ");
-        try doc.appendSlice(gpa, tags_out);
-        try doc.appendSlice(gpa, "\n---\n\n");
-        try doc.appendSlice(gpa, body);
-        if (body.len == 0 or body[body.len - 1] != '\n') try doc.append(gpa, '\n');
-
-        try writeBytes(io, out_dir, rag_path, doc.items);
+        const doc = try rag_emit.renderSystemDocument(gpa, rag_id, rag_path, tags_out, body);
+        defer gpa.free(doc);
+        try writeBytes(io, out_dir, rag_path, doc);
         try appendCatalog(catalog, gpa, arena, .{
             .rag_id = rag_id,
             .rag_path = rag_path,
@@ -529,84 +500,12 @@ fn exportContentPages(
         } else parsed.doc.body;
         const tok = aside.tokenizeBody(body, scratch) catch return error.UnexpectedParseFailure;
         if (tok.hasErrors()) return error.UnexpectedParseFailure;
-        const body_full = try exportBodyForRag(tok.segments, scratch);
-        const title = pageTitle(p);
-        const role = p.role.name();
-        const parent = p.parent orelse "";
-        const tags_str = try formatTags(arena, p.tags);
-
         const rag_path = try identity.ragPagePath(arena, p.id);
         const rag_id = try std.fmt.allocPrint(arena, "content/{s}", .{p.id});
-
-        // related: direct graph neighbors only, stable order (parent first, then
-        // children by entity id — pages are already id-sorted).
-        var related: std.ArrayList(u8) = .empty;
-        defer related.deinit(scratch);
-        try related.appendSlice(scratch, "related:\n");
-        if (parent.len > 0) {
-            try related.appendSlice(scratch, "  - content/pages/");
-            try related.appendSlice(scratch, parent);
-            try related.appendSlice(scratch, ".md\n");
-        }
-        for (pages) |other| {
-            if (other.role != .satellite) continue;
-            const op = other.parent orelse continue;
-            if (!std.mem.eql(u8, op, p.id)) continue;
-            try related.appendSlice(scratch, "  - content/pages/");
-            try related.appendSlice(scratch, other.id);
-            try related.appendSlice(scratch, ".md\n");
-        }
-
-        var doc: std.ArrayList(u8) = .empty;
-        defer doc.deinit(gpa);
-
-        try doc.appendSlice(gpa, "---\n");
-        try doc.appendSlice(gpa, "rag_id: ");
-        try doc.appendSlice(gpa, rag_id);
-        try doc.appendSlice(gpa, "\nrag_path: ");
-        try doc.appendSlice(gpa, rag_path);
-        try doc.appendSlice(gpa, "\ncategory: content\n");
-        try doc.appendSlice(gpa, "entity_id: ");
-        try doc.appendSlice(gpa, p.id);
-        try doc.appendSlice(gpa, "\nsource_path: ");
-        try doc.appendSlice(gpa, p.source_path);
-        try doc.appendSlice(gpa, "\nrole: ");
-        try doc.appendSlice(gpa, role);
-        try doc.append(gpa, '\n');
-        if (parent.len > 0) {
-            try doc.appendSlice(gpa, "parent_entry: ");
-            try doc.appendSlice(gpa, parent);
-            try doc.append(gpa, '\n');
-        }
-        try doc.appendSlice(gpa, "title: ");
-        try doc.appendSlice(gpa, title);
-        try doc.append(gpa, '\n');
-        try doc.appendSlice(gpa, "tags: ");
-        try doc.appendSlice(gpa, tags_str);
-        try doc.append(gpa, '\n');
-        try doc.appendSlice(gpa, related.items);
-        try doc.appendSlice(gpa, "---\n\n");
-
-        // Sole document H1 — metadata-owned (frontmatter title else entity id).
-        try doc.appendSlice(gpa, "# ");
-        try doc.appendSlice(gpa, title);
-        try doc.appendSlice(gpa, "\n\n");
-        try doc.appendSlice(gpa, body_full);
-        if (body_full.len == 0 or body_full[body_full.len - 1] != '\n') {
-            try doc.append(gpa, '\n');
-        }
-
-        try writeBytes(io, out_dir, rag_path, doc.items);
-        try appendCatalog(catalog, gpa, arena, .{
-            .rag_id = rag_id,
-            .rag_path = rag_path,
-            .category = "content",
-            .title = title,
-            .entity_id = p.id,
-            .role = role,
-            .parent_entry = parent,
-            .tags = tags_str,
-        });
+        const doc = try rag_emit.renderContentDocument(gpa, scratch, p, pages, rag_id, rag_path, tok.segments);
+        defer gpa.free(doc);
+        try writeBytes(io, out_dir, rag_path, doc);
+        try appendCatalog(catalog, gpa, arena, try rag_emit.contentCatalogEntry(arena, p, rag_id, rag_path));
         n += 1;
         log(opts, "  rag page    {s}\n", .{rag_path});
     }
@@ -664,7 +563,9 @@ fn exportGraphDocs(
             try doc.appendSlice(gpa, p.id);
             try doc.appendSlice(gpa, ".md` |\n");
         }
-        try writeBytes(io, out_dir, "graph/entity-catalog.md", doc.items);
+        const emitted = try rag_emit.renderEntityCatalog(gpa, pages);
+        defer gpa.free(emitted);
+        try writeBytes(io, out_dir, "graph/entity-catalog.md", emitted);
         try appendCatalog(catalog, gpa, arena, .{
             .rag_id = "graph/entity-catalog",
             .rag_path = "graph/entity-catalog.md",
@@ -763,7 +664,9 @@ fn exportGraphDocs(
         }
         try doc.appendSlice(gpa, "```\n");
 
-        try writeBytes(io, out_dir, "graph/relations.md", doc.items);
+        const emitted = try rag_emit.renderRelations(gpa, pages);
+        defer gpa.free(emitted);
+        try writeBytes(io, out_dir, "graph/relations.md", emitted);
         try appendCatalog(catalog, gpa, arena, .{
             .rag_id = "graph/relations",
             .rag_path = "graph/relations.md",
@@ -782,13 +685,9 @@ fn exportGraphDocs(
 // Catalog / INDEX / UPLOAD-GUIDE
 // ---------------------------------------------------------------------------
 
-fn exportCatalogMeta(io: Io, out_dir: Io.Dir) !void {
-    var buf: [160]u8 = undefined;
-    const text = try std.fmt.bufPrint(
-        &buf,
-        "{{\"format\":\"{s}\",\"schema_version\":{d},\"boris_version\":\"{s}\"}}\n",
-        .{ catalog_format, catalog_schema_version, boris_version },
-    );
+fn exportCatalogMeta(io: Io, gpa: std.mem.Allocator, out_dir: Io.Dir) !void {
+    const text = try rag_emit.renderCatalogMeta(gpa, catalog_format, catalog_schema_version, boris_version);
+    defer gpa.free(text);
     try writeBytes(io, out_dir, "catalog_meta.json", text);
 }
 
@@ -799,28 +698,9 @@ fn exportCatalogJsonl(
     out_dir: Io.Dir,
     catalog: []const CatalogEntry,
 ) !void {
-    var doc: std.ArrayList(u8) = .empty;
-    defer doc.deinit(gpa);
-    for (catalog) |e| {
-        try doc.appendSlice(gpa, "{\"rag_id\":\"");
-        try json_out.escapeAppend(&doc, gpa, e.rag_id);
-        try doc.appendSlice(gpa, "\",\"rag_path\":\"");
-        try json_out.escapeAppend(&doc, gpa, e.rag_path);
-        try doc.appendSlice(gpa, "\",\"category\":\"");
-        try json_out.escapeAppend(&doc, gpa, e.category);
-        try doc.appendSlice(gpa, "\",\"title\":\"");
-        try json_out.escapeAppend(&doc, gpa, e.title);
-        try doc.appendSlice(gpa, "\",\"entity_id\":\"");
-        try json_out.escapeAppend(&doc, gpa, e.entity_id);
-        try doc.appendSlice(gpa, "\",\"role\":\"");
-        try json_out.escapeAppend(&doc, gpa, e.role);
-        try doc.appendSlice(gpa, "\",\"parent_entry\":\"");
-        try json_out.escapeAppend(&doc, gpa, e.parent_entry);
-        try doc.appendSlice(gpa, "\",\"tags\":\"");
-        try json_out.escapeAppend(&doc, gpa, e.tags);
-        try doc.appendSlice(gpa, "\"}\n");
-    }
-    try writeBytes(io, out_dir, "catalog.jsonl", doc.items);
+    const doc = try rag_emit.renderCatalogJsonl(gpa, catalog);
+    defer gpa.free(doc);
+    try writeBytes(io, out_dir, "catalog.jsonl", doc);
 }
 
 fn exportIndex(
@@ -931,7 +811,14 @@ fn exportIndex(
         \\
     );
 
-    try writeBytes(io, out_dir, "INDEX.md", doc.items);
+    const emitted = try rag_emit.renderIndex(gpa, catalog, .{
+        .system_docs = stats.system_docs,
+        .content_pages = stats.content_pages,
+        .graph_docs = stats.graph_docs,
+        .catalog_entries = stats.catalog_entries,
+    }, boris_version);
+    defer gpa.free(emitted);
+    try writeBytes(io, out_dir, "INDEX.md", emitted);
 }
 
 fn exportUploadGuide(io: Io, out_dir: Io.Dir) !void {
@@ -977,7 +864,8 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir) !void {
         \\- Parsed `<Aside>` callouts appear as `:::kind` export blocks (not authoring syntax).
         \\
     ;
-    try writeBytes(io, out_dir, "UPLOAD-GUIDE.md", text);
+    _ = text;
+    try writeBytes(io, out_dir, "UPLOAD-GUIDE.md", rag_emit.upload_guide);
 }
 
 // ---------------------------------------------------------------------------
@@ -1234,12 +1122,12 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
             .tags = "[index, catalog, retrieval-map]",
         });
 
-        sortCatalogByRagPath(catalog.items);
+        rag_emit.sortCatalogByRagPath(catalog.items);
         stats.catalog_entries = catalog.items.len;
 
         try exportIndex(io, gpa, stage_dir, catalog.items, stats);
         try exportCatalogJsonl(io, gpa, stage_dir, catalog.items);
-        try exportCatalogMeta(io, stage_dir);
+        try exportCatalogMeta(io, gpa, stage_dir);
     }
 
     // Publish only after the full stage tree is written and handles closed.
@@ -1292,7 +1180,7 @@ test "catalog_meta.json shape is fixed and compact" {
     var out_dir = try Io.Dir.cwd().openDir(io, out_rel, .{});
     defer out_dir.close(io);
 
-    try exportCatalogMeta(io, out_dir);
+    try exportCatalogMeta(io, gpa, out_dir);
 
     const bytes = try readFileAlloc(io, out_dir, "catalog_meta.json", gpa);
     defer gpa.free(bytes);
