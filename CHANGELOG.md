@@ -19,6 +19,13 @@ How to use going forward:
 
 ## [Unreleased]
 
+### Feature — Documentation Intelligence (in progress)
+
+- Added read-only `boris check` and `boris impact ID` analysis commands over
+  the validated graph, with deterministic human/JSON reports and optional
+  report-file output. The feature branch still needs fixture goldens before
+  release integration.
+
 ### Feature 9.2 — theme/template hardening
 
 - Layout UTF-8 validation at plan split (`Layout.split` / `loadLayout` →
