@@ -15,6 +15,7 @@ const rag = @import("rag.zig");
 const context = @import("context.zig");
 const compile = @import("compile.zig");
 const target = @import("target.zig");
+const theme_mod = @import("theme.zig");
 const intelligence = @import("intelligence.zig");
 const json_out = @import("json_out.zig");
 
@@ -409,6 +410,20 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         defer layout_roots.deinit(gpa);
         const add_layout_root = struct {
             fn go(w: *watch.PollingWatcher, map: *std.StringHashMapUnmanaged(void), gpa_: std.mem.Allocator, lp: []const u8, input_dir: []const u8) !void {
+                // A managed theme root owns `layouts/`, optional `footer.html` and
+                // `assets/`. Watch the whole root, not just the layout's parent:
+                // footer and referenced asset bytes are page-fingerprint inputs
+                // (F9.1), so edits under `<theme>/assets/` must produce events or
+                // `--watch` serves stale output (#59). scanFiles is recursive, so
+                // this also covers `layouts/`; a missing dir scans to nothing.
+                if (theme_mod.themeRootFromLayoutPath(lp)) |theme_root| {
+                    if (std.mem.eql(u8, theme_root, input_dir)) return; // content root covers it
+                    const t_gop = try map.getOrPut(gpa_, theme_root);
+                    if (!t_gop.found_existing) {
+                        try w.addRoot(theme_root);
+                    }
+                    return;
+                }
                 // Bare filename (no dirname) — watch the file via its parent only when
                 // that parent is not the whole cwd (which would scan .git/dist every poll).
                 // Prefer not adding "." when content is already watched under input_dir.
