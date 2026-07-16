@@ -2060,6 +2060,28 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         try gop.value_ptr.append(gpa, item.post_id);
     }
 
+    // A duplicate post_name may map to the same type-specific output path.
+    // Keep every source item: disambiguate only the generated path/id and leave
+    // the original slug conflict visible in the report for human resolution.
+    const colliding_outputs = try gpa.alloc(bool, metas.items.len);
+    defer gpa.free(colliding_outputs);
+    @memset(colliding_outputs, false);
+    for (metas.items, 0..) |meta, index| {
+        for (metas.items[index + 1 ..], index + 1..) |other, other_index| {
+            if (std.mem.eql(u8, meta.output_path, other.output_path)) {
+                colliding_outputs[index] = true;
+                colliding_outputs[other_index] = true;
+            }
+        }
+    }
+    for (metas.items, 0..) |*meta, index| {
+        if (!colliding_outputs[index]) continue;
+        const original_entity = meta.entity_id;
+        const suffix = if (meta.item.post_id.len > 0) meta.item.post_id else try std.fmt.allocPrint(retain, "item-{d}", .{index});
+        meta.entity_id = try std.fmt.allocPrint(retain, "{s}--{s}", .{ original_entity, suffix });
+        meta.output_path = try proposeOutputPath(retain, meta.entity_id);
+    }
+
     // Sort metas by entity_id for deterministic emission
     std.mem.sort(ItemMeta, metas.items, {}, struct {
         fn less(_: void, a: ItemMeta, b: ItemMeta) bool {
@@ -2088,6 +2110,28 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     defer human.deinit(gpa);
     var provenance: std.ArrayList(Provenance) = .empty;
     defer provenance.deinit(gpa);
+
+    // Basename-only references are ambiguous when uploads contains more than
+    // one file of that name. Preserve the inventory detail in the report;
+    // never pretend an offline migration can choose one safely.
+    for (media_files, 0..) |media, index| {
+        const basename = std.fs.path.basename(media);
+        if (index > 0 and std.mem.eql(u8, basename, std.fs.path.basename(media_files[index - 1]))) continue;
+        var matches: usize = 0;
+        for (media_files) |other| {
+            if (std.mem.eql(u8, basename, std.fs.path.basename(other))) matches += 1;
+        }
+        if (matches > 1) {
+            try all_features.append(gpa, .{
+                .source_post_id = "media-inventory",
+                .source_output = "(media inventory)",
+                .code = "duplicate_media_basename",
+                .classification = .human_review,
+                .excerpt = try retain.dupe(u8, basename),
+                .message = try std.fmt.allocPrint(retain, "{d} local media files share basename '{s}'; basename-only references require review", .{ matches, basename }),
+            });
+        }
+    }
 
     // Map post_id → entity_id for pages/posts
     var id_to_entity: std.StringHashMapUnmanaged([]const u8) = .empty;

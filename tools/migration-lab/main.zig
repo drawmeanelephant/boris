@@ -524,6 +524,33 @@ test "astro: sources are never modified" {
     Io.Dir.cwd().deleteTree(io, out_rel) catch {};
 }
 
+test "astro: adversarial corpus preserves unicode and reports route ambiguity" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const out_rel = "fixtures/.test-adversarial-astro";
+    Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+
+    var root = try Io.Dir.cwd().openDir(io, "fixtures/adversarial-astro", .{});
+    defer root.close(io);
+    const before = try archaeology.readFileAlloc(io, root, "src/content/docs/café.md", gpa);
+    defer gpa.free(before);
+
+    try archaeology.run(io, gpa, .{ .root_dir = "fixtures/adversarial-astro", .out_dir = out_rel, .quiet = true });
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{});
+    defer out.close(io);
+    const report = try archaeology.readFileAlloc(io, out, "report.json", gpa);
+    defer gpa.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "café.md") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "ambiguous matching dynamic page routes") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "missing%20file.md") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "jsx_component") != null);
+
+    const after = try archaeology.readFileAlloc(io, root, "src/content/docs/café.md", gpa);
+    defer gpa.free(after);
+    try std.testing.expectEqualStrings(before, after);
+    Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+}
+
 // ---- WordPress unit tests ----
 
 test "wordpress: decode entities" {
@@ -714,4 +741,62 @@ test "wordpress: conversion classes include expected range" {
     try std.testing.expect(has_transformed);
     try std.testing.expect(has_unsupported or has_review);
     Io.Dir.cwd().deleteTree(io, out_rel) catch {};
+}
+
+test "wordpress: adversarial corpus preserves every item and reports collisions" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const out_a = "fixtures/.test-adversarial-wp-a";
+    const out_b = "fixtures/.test-adversarial-wp-b";
+    Io.Dir.cwd().deleteTree(io, out_a) catch {};
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
+
+    var fixture = try Io.Dir.cwd().openDir(io, "fixtures/adversarial-wxr", .{});
+    defer fixture.close(io);
+    const source_before = try wordpress.readFileAlloc(io, fixture, "export.xml", gpa);
+    defer gpa.free(source_before);
+    const media_before = try wordpress.readFileAlloc(io, fixture, "media/2024/01/hero.png", gpa);
+    defer gpa.free(media_before);
+
+    try wordpress.run(io, gpa, .{ .wxr_path = "fixtures/adversarial-wxr/export.xml", .media_dir = "fixtures/adversarial-wxr/media", .out_dir = out_a, .quiet = true });
+    try wordpress.run(io, gpa, .{ .wxr_path = "fixtures/adversarial-wxr/export.xml", .media_dir = "fixtures/adversarial-wxr/media", .out_dir = out_b, .quiet = true });
+
+    var a = try Io.Dir.cwd().openDir(io, out_a, .{});
+    defer a.close(io);
+    var b = try Io.Dir.cwd().openDir(io, out_b, .{});
+    defer b.close(io);
+    const report_a = try wordpress.readFileAlloc(io, a, "report.json", gpa);
+    defer gpa.free(report_a);
+    const report_b = try wordpress.readFileAlloc(io, b, "report.json", gpa);
+    defer gpa.free(report_b);
+    try std.testing.expectEqualStrings(report_a, report_b);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "duplicate_post_name") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "deep_page_hierarchy") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "shortcode_gallery") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "duplicate_media_basename") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "missing_media") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_a, "content/_preserved/portfolio-300.md") != null);
+
+    const duplicate_one = try wordpress.readFileAlloc(io, a, "content/posts/duplicate--201.md", gpa);
+    defer gpa.free(duplicate_one);
+    const duplicate_two = try wordpress.readFileAlloc(io, a, "content/posts/duplicate--202.md", gpa);
+    defer gpa.free(duplicate_two);
+    try std.testing.expect(std.mem.indexOf(u8, duplicate_one, "first duplicate") != null);
+    try std.testing.expect(std.mem.indexOf(u8, duplicate_two, "second duplicate") != null);
+    const unicode_post = try wordpress.readFileAlloc(io, a, "content/posts/caf.md", gpa);
+    defer gpa.free(unicode_post);
+    try std.testing.expect(std.mem.indexOf(u8, unicode_post, "[gallery ids=\"1,2\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, unicode_post, "<custom-widget>keep</custom-widget>") != null);
+    const preserved = try wordpress.readFileAlloc(io, a, "content/_preserved/portfolio-300.md", gpa);
+    defer gpa.free(preserved);
+    try std.testing.expect(std.mem.indexOf(u8, preserved, "opaque unsupported payload") != null);
+
+    const source_after = try wordpress.readFileAlloc(io, fixture, "export.xml", gpa);
+    defer gpa.free(source_after);
+    try std.testing.expectEqualStrings(source_before, source_after);
+    const media_after = try wordpress.readFileAlloc(io, fixture, "media/2024/01/hero.png", gpa);
+    defer gpa.free(media_after);
+    try std.testing.expectEqualStrings(media_before, media_after);
+    Io.Dir.cwd().deleteTree(io, out_a) catch {};
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
 }
