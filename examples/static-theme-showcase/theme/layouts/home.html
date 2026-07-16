@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" data-layout="home" data-theme="boris-showcase">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}} · Boris Showcase</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/showcase.css}}">
+  <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+</head>
+<body data-layout="home">
+  <header class="hero">
+    <div class="hero__inner">
+      <img class="hero__mark" src="{{asset-url assets/img/mark.svg}}" width="48" height="48" alt="">
+      <div>
+        <p class="hero__kicker">Static theme experiment</p>
+        <p class="hero__title">Boris theme showcase</p>
+        <p class="hero__lead">
+          Polished docs + blog layout using Boris themes, local assets,
+          closed layout slots, and <code>--layout-rule</code> selection.
+          Page title from frontmatter appears in the document
+          <code>&lt;title&gt;</code> and body headings.
+        </p>
+      </div>
+    </div>
+  </header>
+  <div class="home-grid">
+    <section class="card home-card">
+      <h2 class="card__title">Browse the site</h2>
+      {{nav}}
+    </section>
+    <section class="card home-card home-card--wide">
+      {{metadata}}
+      <article class="prose">
+        {{content}}
+      </article>
+    </section>
+  </div>
+  <footer class="footer">{{footer}}</footer>
+</body>
+</html>

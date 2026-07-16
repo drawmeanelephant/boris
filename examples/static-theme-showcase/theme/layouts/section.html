@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" data-layout="section" data-theme="boris-showcase">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}} · Section · Boris Showcase</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/showcase.css}}">
+  <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
+</head>
+<body data-layout="section">
+  <header class="navbar navbar--compact">
+    <div class="navbar__brand">
+      <img class="navbar__mark" src="{{asset-url assets/img/mark.svg}}" width="24" height="24" alt="">
+      <span class="navbar__title">Boris Showcase</span>
+      <span class="badge badge--accent">section</span>
+    </div>
+    {{breadcrumb}}
+  </header>
+  <main class="section-main">
+    <div class="card section-intro">
+      {{metadata}}
+      <article class="prose">
+        {{content}}
+      </article>
+    </div>
+    <aside class="card section-children">
+      <p class="sidebar__label">In this section</p>
+      {{nav}}
+    </aside>
+  </main>
+  <footer class="footer">{{footer}}</footer>
+</body>
+</html>
