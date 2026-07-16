@@ -24,5 +24,8 @@ zig-cache/
 # Local scratch / private drop (images, notes dumps) — not product source
 /SUPPORT/
 
+# Private real-site dogfood (generated content, media, HTML out) — see docs/DOGFOOD.md
+/dogfood/
+
 # Local smoke kit / agent kit
 /boris-agent-kit/
