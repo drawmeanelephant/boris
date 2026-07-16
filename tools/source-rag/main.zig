@@ -38,6 +38,9 @@ pub const Options = struct {
     root_dir: []const u8 = ".",
     /// Skip files larger than this many bytes.
     max_bytes: usize = 512 * 1024,
+    /// Test-only deterministic failure injection after this many staged source
+    /// documents have been written. Not accepted by the CLI.
+    test_fail_after_stage_writes: ?usize = null,
 };
 
 pub const ParseError = error{
@@ -473,16 +476,103 @@ fn writeBytes(io: Io, root: Io.Dir, rel_path: []const u8, data: []const u8) !voi
     try root.writeFile(io, .{ .sub_path = rel_path, .data = data });
 }
 
-/// Reset the corpus documents owned by this exporter without deleting the
-/// caller-selected output root or unrelated files placed beside it.
-fn resetManagedFiles(io: Io, out: Io.Dir) !void {
-    try out.deleteTree(io, "files");
+/// Root files owned by this exporter. `files/` is the only managed directory.
+const managed_root_file_names = [_][]const u8{
+    "INDEX.md",
+    "UPLOAD-GUIDE.md",
+    "catalog.jsonl",
+    "catalog_meta.json",
+};
+
+fn deleteManagedFiles(io: Io, out: Io.Dir) !void {
+    try removeTreeIfPresent(io, out, "files");
+    for (managed_root_file_names) |file_name| {
+        out.deleteFile(io, file_name) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+    }
     for (bundle_file_names) |file_name| {
         out.deleteFile(io, file_name) catch |err| switch (err) {
             error.FileNotFound => {},
             else => return err,
         };
     }
+}
+
+fn removeTreeIfPresent(io: Io, dir: Io.Dir, path: []const u8) !void {
+    var child = dir.openDir(io, path, .{}) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => return err,
+    };
+    child.close(io);
+    try dir.deleteTree(io, path);
+}
+
+fn moveIfPresent(io: Io, from: Io.Dir, path: []const u8, to: Io.Dir) !bool {
+    from.rename(path, to, path, io) catch |err| switch (err) {
+        error.FileNotFound => return false,
+        else => return err,
+    };
+    return true;
+}
+
+fn restorePreviousManagedCorpus(io: Io, prev: Io.Dir, out: Io.Dir) !void {
+    _ = try moveIfPresent(io, prev, "files", out);
+    for (managed_root_file_names) |file_name| {
+        _ = try moveIfPresent(io, prev, file_name, out);
+    }
+    for (bundle_file_names) |file_name| {
+        _ = try moveIfPresent(io, prev, file_name, out);
+    }
+}
+
+fn moveManagedCorpus(io: Io, from: Io.Dir, to: Io.Dir) !void {
+    _ = try moveIfPresent(io, from, "files", to);
+    for (managed_root_file_names) |file_name| {
+        _ = try moveIfPresent(io, from, file_name, to);
+    }
+    for (bundle_file_names) |file_name| {
+        _ = try moveIfPresent(io, from, file_name, to);
+    }
+}
+
+/// Publish a complete staged corpus without ever deleting the caller-selected
+/// output root. Managed paths are moved aside, then restored if the install
+/// fails; unrelated siblings are never moved or removed.
+fn publishManagedCorpus(io: Io, gpa: std.mem.Allocator, stage_path: []const u8, out_path: []const u8) !void {
+    const cwd = Io.Dir.cwd();
+    const prev_path = try std.fmt.allocPrint(gpa, "{s}.boris-source-rag-prev", .{out_path});
+    defer gpa.free(prev_path);
+
+    if (std.fs.path.dirname(out_path)) |parent| {
+        if (parent.len > 0) try cwd.createDirPath(io, parent);
+    }
+    try cwd.createDirPath(io, out_path);
+    try removeTreeIfPresent(io, cwd, prev_path);
+    try cwd.createDirPath(io, prev_path);
+
+    var stage = try cwd.openDir(io, stage_path, .{});
+    defer stage.close(io);
+    var out = try cwd.openDir(io, out_path, .{});
+    defer out.close(io);
+    var prev = try cwd.openDir(io, prev_path, .{});
+    defer prev.close(io);
+
+    moveManagedCorpus(io, out, prev) catch |err| {
+        restorePreviousManagedCorpus(io, prev, out) catch return error.SourceRagPublishRestoreFailed;
+        return err;
+    };
+    moveManagedCorpus(io, stage, out) catch |err| {
+        deleteManagedFiles(io, out) catch return error.SourceRagPublishRestoreFailed;
+        restorePreviousManagedCorpus(io, prev, out) catch return error.SourceRagPublishRestoreFailed;
+        return err;
+    };
+
+    // Cleanup failures leave harmless sibling recovery material; they must not
+    // turn a completed publication into a failed export.
+    removeTreeIfPresent(io, cwd, prev_path) catch {};
+    removeTreeIfPresent(io, cwd, stage_path) catch {};
 }
 
 fn log(opts: Options, comptime fmt: []const u8, args: anytype) void {
@@ -984,7 +1074,8 @@ fn sortCatalog(entries: []CatalogEntry) void {
     }.less);
 }
 
-/// Export a source RAG corpus. `root_dir` is opened for read; `out_dir` is created/replaced contents-wise by overwrite.
+/// Export a source RAG corpus. The complete next corpus is generated under a
+/// sibling staging directory and only then published into `out_dir`.
 pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
@@ -1004,12 +1095,14 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     const paths = try collectSourcePaths(io, gpa, arena, root, out_skip);
     defer gpa.free(paths);
 
-    try cwd.createDirPath(io, opts.out_dir);
-    var out = try cwd.openDir(io, opts.out_dir, .{});
+    const stage_path = try std.fmt.allocPrint(gpa, "{s}.boris-source-rag-stage", .{opts.out_dir});
+    defer gpa.free(stage_path);
+    try removeTreeIfPresent(io, cwd, stage_path);
+    try cwd.createDirPath(io, stage_path);
+    errdefer removeTreeIfPresent(io, cwd, stage_path) catch {};
+
+    var out = try cwd.openDir(io, stage_path, .{});
     defer out.close(io);
-    // `files/` is fully generated. Reset it so paths excluded by a newer
-    // exporter (for example vendored dependencies) cannot survive a rerun.
-    try resetManagedFiles(io, out);
     try out.createDirPath(io, "files");
 
     var catalog: std.ArrayList(CatalogEntry) = .empty;
@@ -1032,6 +1125,7 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     }
 
     var stats: ExportStats = .{};
+    var stage_writes: usize = 0;
 
     log(opts, "\nSource RAG → {s}/  (root={s})\n", .{ opts.out_dir, opts.root_dir });
 
@@ -1061,6 +1155,10 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
         defer gpa.free(doc);
 
         try writeBytes(io, out, rag_path, doc);
+        stage_writes += 1;
+        if (opts.test_fail_after_stage_writes) |limit| {
+            if (stage_writes >= limit) return error.TestInjectedStageWriteFailure;
+        }
 
         try catalog.append(gpa, .{
             .rag_id = rag_id,
@@ -1120,6 +1218,8 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     try exportIndex(io, gpa, out, catalog.items, stats, !opts.no_bundles);
     try exportCatalogJsonl(io, gpa, out, catalog.items);
     try exportCatalogMeta(io, out);
+
+    try publishManagedCorpus(io, gpa, stage_path, opts.out_dir);
 
     log(opts, "\nDone: {d} source files, {d} catalog entries, {d} skipped → {s}/\n", .{
         stats.source_files,
@@ -1378,6 +1478,24 @@ test "exportCorpus mini fixture" {
     try out.writeFile(io, .{ .sub_path = "files/vendor/third_party.c.md", .data = "stale vendor document\n" });
     try out.writeFile(io, .{ .sub_path = "user-note.txt", .data = "preserve unrelated output\n" });
 
+    // A write failure after staging has begun must leave the last successful
+    // corpus (and caller-owned siblings) untouched.
+    try std.testing.expectError(error.TestInjectedStageWriteFailure, exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out_rel,
+        .quiet = true,
+        .test_fail_after_stage_writes = 1,
+    }));
+    const preserved_hello = try readFileAlloc(io, out, "files/src/hello.zig.md", gpa);
+    defer gpa.free(preserved_hello);
+    try std.testing.expectEqualStrings(hello, preserved_hello);
+    const preserved_catalog = try readFileAlloc(io, out, "catalog.jsonl", gpa);
+    defer gpa.free(preserved_catalog);
+    try std.testing.expectEqualStrings(catalog, preserved_catalog);
+    const preserved_user_note = try readFileAlloc(io, out, "user-note.txt", gpa);
+    defer gpa.free(preserved_user_note);
+    try std.testing.expectEqualStrings("preserve unrelated output\n", preserved_user_note);
+
     _ = try exportCorpus(io, gpa, .{
         .root_dir = root_rel,
         .out_dir = out_rel,
@@ -1389,6 +1507,14 @@ test "exportCorpus mini fixture" {
     const user_note = try readFileAlloc(io, out, "user-note.txt", gpa);
     defer gpa.free(user_note);
     try std.testing.expectEqualStrings("preserve unrelated output\n", user_note);
+
+    // A fresh normal publication is byte-for-byte deterministic.
+    const regenerated_hello = try readFileAlloc(io, out, "files/src/hello.zig.md", gpa);
+    defer gpa.free(regenerated_hello);
+    try std.testing.expectEqualStrings(hello, regenerated_hello);
+    const regenerated_catalog = try readFileAlloc(io, out, "catalog.jsonl", gpa);
+    defer gpa.free(regenerated_catalog);
+    try std.testing.expectEqualStrings(catalog, regenerated_catalog);
 
     _ = try exportCorpus(io, gpa, .{
         .root_dir = root_rel,
