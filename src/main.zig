@@ -510,6 +510,7 @@ fn mapHtmlError(
         error.MixedThemeRoots,
         error.AmbiguousGlob,
         error.DuplicateSelector,
+        error.InvalidLayoutPath,
         error.LayoutSelectionFailed,
         => {
             if (!quiet) {

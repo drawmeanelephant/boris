@@ -279,6 +279,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             if (!target_mod.isValidTargetName(name)) {
                 return error.InvalidValue;
             }
+            layout_select.validateLayoutPath(path) catch return error.InvalidValue;
             for (target_layouts.items) |existing| {
                 if (std.mem.eql(u8, existing.name, name)) {
                     return error.DuplicateFlag;
@@ -301,6 +302,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             if (tname[0] == '-' or selector[0] == '-' or path[0] == '-') return error.InvalidValue;
             // Validate selector grammar early (fail before discovery).
             _ = layout_select.parseSelector(selector) catch return error.InvalidValue;
+            layout_select.validateLayoutPath(path) catch return error.InvalidValue;
             try pending_rules.append(gpa, .{ .target = tname, .selector = selector, .path = path });
             i += 3;
             continue;
@@ -363,6 +365,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             if (saw_html_layout) return error.DuplicateFlag;
             saw_html_layout = true;
             html_layout = try takeValue(args, &i, a, "--html-layout");
+            layout_select.validateLayoutPath(html_layout) catch return error.InvalidValue;
             continue;
         }
 
@@ -372,6 +375,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             if (saw_theme) return error.DuplicateFlag;
             saw_theme = true;
             theme_root = try takeValue(args, &i, a, "--theme");
+            // Theme root uses the same no-escape relative path grammar; the
+            // synthesized layout path is validated after composition below.
+            layout_select.validateLayoutPath(theme_root.?) catch return error.InvalidValue;
             continue;
         }
 
@@ -390,6 +396,11 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         html_layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{tr});
         owned_html_layout = true;
         saw_html_layout = true;
+        layout_select.validateLayoutPath(html_layout) catch {
+            gpa.free(html_layout);
+            owned_html_layout = false;
+            return error.InvalidValue;
+        };
     }
     errdefer if (owned_html_layout) gpa.free(html_layout);
 
@@ -671,7 +682,8 @@ pub fn printUsage() void {
         \\  --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG / context
         \\  Invalid target names, duplicate names, output collisions, workspace escape,
         \\  content/layout overlap, unknown --target-layout / --layout-rule target,
-        \\  duplicate or invalid layout selectors, mixed theme roots, >256 rules/target
+        \\  duplicate or invalid layout selectors, invalid layout paths (.. / absolute),
+        \\  mixed theme roots, >256 rules/target
         \\
         \\Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
         \\
@@ -1575,4 +1587,48 @@ test "parse: --layout-rule order independent; unknown target and bad selector fa
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{
         "boris", "--layout-rule", "default", "id:index",
     }));
+}
+
+test "parse: layout paths reject .. absolute and backslash escapes" {
+    const gpa = std.testing.allocator;
+    // --layout-rule
+    try expectError(error.InvalidValue, parseOptions(gpa, &.{
+        "boris", "--layout-rule", "default", "id:index", "../layouts/main.html", "--html-dir", "d",
+    }));
+    try expectError(error.InvalidValue, parseOptions(gpa, &.{
+        "boris", "--layout-rule", "default", "id:index", "/abs/main.html", "--html-dir", "d",
+    }));
+    try expectError(error.InvalidValue, parseOptions(gpa, &.{
+        "boris", "--layout-rule", "default", "id:index", "theme/layouts/../layouts/main.html", "--html-dir", "d",
+    }));
+    try expectError(error.InvalidValue, parseOptions(gpa, &.{
+        "boris", "--layout-rule", "default", "id:index", "layouts\\main.html", "--html-dir", "d",
+    }));
+    // --html-layout
+    try expectError(error.InvalidValue, parseOptions(gpa, &.{
+        "boris", "--html-layout", "../layouts/main.html", "--html-dir", "d",
+    }));
+    try expectError(error.InvalidValue, parseOptions(gpa, &.{
+        "boris", "--html-layout", "/tmp/escape.html", "--html-dir", "d",
+    }));
+    // --target-layout
+    try expectError(error.InvalidValue, parseOptions(gpa, &.{
+        "boris", "--target", "prod=dist/prod", "--target-layout", "prod=../layouts/x.html",
+    }));
+    // --theme root
+    try expectError(error.InvalidValue, parseOptions(gpa, &.{
+        "boris", "--theme", "../evil-theme", "--html-dir", "d",
+    }));
+    try expectError(error.InvalidValue, parseOptions(gpa, &.{
+        "boris", "--theme", "/abs/theme", "--html-dir", "d",
+    }));
+    // Valid relative forms still parse.
+    var ok = try parseOptions(gpa, &.{
+        "boris",
+        "--html-layout", "layouts/main.html",
+        "--layout-rule", "default", "id:index", "themes/docs/layouts/home.html",
+        "--html-dir", "d",
+    });
+    defer ok.deinit(gpa);
+    try expectEqualStrings("layouts/main.html", ok.html_layout);
 }

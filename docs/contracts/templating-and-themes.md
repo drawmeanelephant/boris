@@ -163,6 +163,14 @@ IR, RAG, Context Bundle, `check`, or `impact` is a conflicting-flags usage
 error. Rule flags may appear before or after `--target` / `--target-layout`;
 Boris attaches after target synthesis (including synthetic `default`).
 
+**Layout path grammar** (shared by `--html-layout`, `--target-layout` paths,
+`--layout-rule` layout paths, and `--theme` roots): workspace-relative only,
+`/` separators, no absolute forms, no Windows drive letters, no backslashes,
+no empty / `.` / `..` segments, no trailing separator. Invalid layout paths are
+usage errors (exit **2**) at parse or target validation — before discovery or
+publish. Missing layout files still fail closed without falling through to the
+next rule.
+
 ### 4.2 Precedence
 
 For each `(target, page)` pair:

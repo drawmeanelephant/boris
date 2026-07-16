@@ -35,6 +35,11 @@ How to use going forward:
   `src/layout_select_hostile_test.zig`, fixtures under
   `docs/contracts/fixtures/layout-rules/hostile/`, step `zig build test-layout-hostile`.
   Audit report: `docs/contracts/fixtures/layout-rules/hostile/REPORT.md`.
+- Layout path lexical gate: `--html-layout`, `--target-layout`, `--layout-rule`
+  paths, and `--theme` roots reject absolute forms, backslashes, empty / `.` /
+  `..` segments at parse (usage exit 2). Library path validates the same grammar
+  (`layout_select.validateLayoutPath` → `InvalidLayoutPath`). Contract:
+  `templating-and-themes.md` §4.1.
 
 ### Knowledge-system exports
 

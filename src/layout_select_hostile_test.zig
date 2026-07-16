@@ -513,8 +513,40 @@ test "H5 missing layout file fails without silent next-rule fallback" {
     try expect(!work.fileExists("dist/index.html"));
 }
 
-test "H5 traversal / cross-theme via .. is rejected or mixed-root" {
-    // Cross-theme via relative segments that still resolve under beta.
+test "H5 traversal / cross-theme via .. is InvalidLayoutPath at every surface" {
+    // Pure lexical reject (no filesystem).
+    try expectError(
+        error.InvalidLayoutPath,
+        layout_select.validateLayoutPath(theme_alpha ++ "/layouts/../../themes/beta/layouts/main.html"),
+    );
+    try expectError(error.InvalidLayoutPath, layout_select.validateLayoutPath("../layouts/main.html"));
+    try expectError(error.InvalidLayoutPath, layout_select.validateLayoutPath("/abs/main.html"));
+    try expectError(error.InvalidLayoutPath, layout_select.validateLayoutPath("theme/./layouts/main.html"));
+
+    // CLI: usage error before discovery.
+    try expectError(error.InvalidValue, cli.parseOptions(std.testing.allocator, &.{
+        "boris",
+        "--layout-rule", "default", "id:index",
+        theme_alpha ++ "/layouts/../../themes/beta/layouts/main.html",
+        "--html-dir", "d",
+    }));
+    try expectError(error.InvalidValue, cli.parseOptions(std.testing.allocator, &.{
+        "boris", "--html-layout", "../layouts/main.html", "--html-dir", "d",
+    }));
+    try expectError(error.InvalidValue, cli.parseOptions(std.testing.allocator, &.{
+        "boris", "--target", "prod=dist/p", "--target-layout", "prod=../layouts/x.html",
+    }));
+    try expectError(error.InvalidValue, cli.parseOptions(std.testing.allocator, &.{
+        "boris", "--theme", "../evil", "--html-dir", "d",
+    }));
+
+    // Library compile path rejects without publishing.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var work = try WorkDir.create(gpa, io, "h5-trav");
+    defer work.cleanup();
+    const dist = try work.join("dist");
+    defer gpa.free(dist);
     const cross = [_]layout_select.LayoutRule{
         .{
             .kind = .id,
@@ -522,78 +554,16 @@ test "H5 traversal / cross-theme via .. is rejected or mixed-root" {
             .layout_path = theme_alpha ++ "/layouts/../../themes/beta/layouts/main.html",
         },
     };
-    // themeRootFromLayoutPath looks for "/layouts/" — this path still contains
-    // themes/alpha/layouts/… so root may be themes/alpha, but the file is beta.
-    // Either MixedThemeRoots (if roots differ after normalize) or load failure
-    // is acceptable; silent success with wrong theme is not.
-    const mixed = target_mod.rejectMixedThemeRoots(layout_main, &cross);
-    if (mixed) |_| {
-        // Same derived root string — compile must still fail closed on load or
-        // produce consistent single-theme behavior. Probe compile.
-        const gpa = std.testing.allocator;
-        const io = std.testing.io;
-        var work = try WorkDir.create(gpa, io, "h5-trav");
-        defer work.cleanup();
-        const dist = try work.join("dist");
-        defer gpa.free(dist);
-        const result = compileWithRules(io, gpa, dist, &cross, layout_main, false);
-        // If compile succeeds, the selected layout must not introduce beta theme markers
-        // while claiming alpha fallback root — record as unexpected success only when
-        // beta markers appear under a mixed construction.
-        if (result) |stats| {
-            _ = stats;
-            if (work.fileExists("dist/index.html")) {
-                const html = try work.readFile("dist/index.html", gpa);
-                defer gpa.free(html);
-                // Cross-theme path should not silently render beta theme while
-                // fallback is alpha managed root with asset-url.
-                if (std.mem.indexOf(u8, html, "data-theme=\"beta\"") != null) {
-                    return error.TestUnexpectedResult;
-                }
-            }
-        } else |_| {
-            // Fail-closed is the preferred outcome for traversal paths.
-        }
-    } else |err| {
-        try expect(err == error.MixedThemeRoots);
-    }
+    try expectError(error.InvalidLayoutPath, compileWithRules(io, gpa, dist, &cross, layout_main, false));
+    try expect(!work.fileExists("dist/index.html"));
 
-    // Parent escape path as fallback alone: product default may not validate
-    // ".." in layout path strings at selection time. Document observed class.
-    const parent_escape = [_]layout_select.LayoutRule{};
-    _ = parent_escape;
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var work = try WorkDir.create(gpa, io, "h5-parent");
-    defer work.cleanup();
-    try work.writeFile("content/index.md", "---\ntitle: T\n---\n\n# T\n");
-    try work.writeFile("layouts/main.html", "<html><body data-layout=\"escaped\">{{content}}</body></html>\n");
-    const content = try work.join("content");
-    defer gpa.free(content);
-    const dist = try work.join("dist");
-    defer gpa.free(dist);
-    // Use a path that climbs out of a nested theme-shaped path.
-    try work.writeFile(
-        "theme/layouts/main.html",
-        "<html><body data-layout=\"nested\">{{content}}</body></html>\n",
-    );
-    const escape_layout = try work.join("theme/layouts/../layouts/main.html");
-    defer gpa.free(escape_layout);
-    // `../` inside theme path: if accepted, must load a real file and not escape workspace.
-    // The path theme/layouts/../layouts/main.html lexically is theme/layouts/main.html on some
-    // resolve paths and theme/layouts on others — openFile may fail. Fail-closed is fine.
-    const result = compile.compileHtmlSite(io, gpa, .{
-        .content_root = content,
+    try expectError(error.InvalidLayoutPath, compile.compileHtmlSite(io, gpa, .{
+        .content_root = content_root,
         .dist_dir = dist,
-        .layout_path = escape_layout,
+        .layout_path = "../layouts/main.html",
         .quiet = true,
-    });
-    if (result) |_| {
-        // If accepted, published HTML must still be under work dist only.
-        try expect(work.fileExists("dist/index.html"));
-    } else |_| {
-        // Fail-closed OK.
-    }
+    }));
+    try expect(!work.fileExists("dist/index.html"));
 }
 
 test "H5 invalid selectors and duplicate selectors are usage errors at parse" {

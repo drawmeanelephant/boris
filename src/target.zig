@@ -273,6 +273,12 @@ pub fn validateTargets(
         const layout = effectiveLayout(target, options.layout_path);
         if (layout.len == 0) return error.EmptyTargetDirectory;
 
+        // Lexical layout-path grammar (workspace-relative; no .. / absolute).
+        try layout_select.validateLayoutPath(layout);
+        for (target.layout_rules) |rule| {
+            try layout_select.validateLayoutPath(rule.layout_path);
+        }
+
         // One managed theme root (or all-legacy) for fallback + every rule layout.
         try rejectMixedThemeRoots(layout, target.layout_rules);
 

@@ -63,11 +63,41 @@ pub const SelectError = error{
     DuplicateSelector,
     RuleLimitExceeded,
     MixedThemeRoots,
+    InvalidLayoutPath,
     InvalidSelector,
     UnknownSelectorKind,
     EmptySelector,
     OutOfMemory,
 };
+
+/// Lexical layout-path grammar for build-owner layout configuration.
+///
+/// Accepts workspace-relative paths with `/` separators only. Rejects empty
+/// paths, absolute forms, Windows drive letters, backslashes, empty segments,
+/// and `.` / `..` segments. Does not touch the filesystem.
+///
+/// Applies to `--html-layout`, `--target-layout` paths, `--layout-rule` paths,
+/// and product/library fallback layout strings (e.g. `layouts/main.html`).
+pub fn validateLayoutPath(path: []const u8) error{InvalidLayoutPath}!void {
+    if (path.len == 0) return error.InvalidLayoutPath;
+    if (path[0] == '/' or path[0] == '\\') return error.InvalidLayoutPath;
+    if (path.len >= 2 and path[1] == ':') return error.InvalidLayoutPath;
+    if (path[path.len - 1] == '/' or path[path.len - 1] == '\\') return error.InvalidLayoutPath;
+
+    var i: usize = 0;
+    var seg_count: usize = 0;
+    while (i < path.len) {
+        const start = i;
+        while (i < path.len and path[i] != '/' and path[i] != '\\') : (i += 1) {}
+        if (i < path.len and path[i] == '\\') return error.InvalidLayoutPath;
+        const seg = path[start..i];
+        if (seg.len == 0) return error.InvalidLayoutPath;
+        if (std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, "..")) return error.InvalidLayoutPath;
+        seg_count += 1;
+        if (i < path.len) i += 1; // skip '/'
+    }
+    if (seg_count == 0) return error.InvalidLayoutPath;
+}
 
 /// Parse a raw selector token (`id:…`, `glob:…`, `role:trunk|satellite`).
 pub fn parseSelector(raw: []const u8) ParseSelectorError!struct { kind: SelectorKind, value: []const u8 } {
@@ -330,6 +360,22 @@ const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualStrings = std.testing.expectEqualStrings;
 const expectError = std.testing.expectError;
+
+test "validateLayoutPath rejects escapes and absolute forms" {
+    try validateLayoutPath("layouts/main.html");
+    try validateLayoutPath("themes/docs/layouts/home.html");
+    try validateLayoutPath("main.html");
+    try expectError(error.InvalidLayoutPath, validateLayoutPath(""));
+    try expectError(error.InvalidLayoutPath, validateLayoutPath("/abs/main.html"));
+    try expectError(error.InvalidLayoutPath, validateLayoutPath("\\abs\\main.html"));
+    try expectError(error.InvalidLayoutPath, validateLayoutPath("C:/layouts/main.html"));
+    try expectError(error.InvalidLayoutPath, validateLayoutPath("../layouts/main.html"));
+    try expectError(error.InvalidLayoutPath, validateLayoutPath("theme/layouts/../layouts/main.html"));
+    try expectError(error.InvalidLayoutPath, validateLayoutPath("theme/./layouts/main.html"));
+    try expectError(error.InvalidLayoutPath, validateLayoutPath("a//b.html"));
+    try expectError(error.InvalidLayoutPath, validateLayoutPath("layouts/main.html/"));
+    try expectError(error.InvalidLayoutPath, validateLayoutPath("layouts\\main.html"));
+}
 
 test "parseSelector closed grammar" {
     {

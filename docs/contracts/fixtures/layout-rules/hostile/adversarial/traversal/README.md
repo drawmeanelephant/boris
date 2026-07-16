@@ -1,15 +1,14 @@
 # Layout path traversal / escape probes
 
-Hostile layout path strings used by the Zig harness (not product sources):
+Hostile layout path strings rejected **lexically** at CLI parse / target
+validation / compile preflight (`layout_select.validateLayoutPath`):
 
-| Path shape | Intent |
-|------------|--------|
-| `../layouts/main.html` | parent-segment escape |
-| `themes/alpha/layouts/../../themes/beta/layouts/main.html` | cross-theme via `..` |
-| `/tmp/escape.html` | absolute path |
-| `themes/alpha/layouts/main.html/../main.html` | odd trailing form |
+| Path shape | Intent | Expect |
+|------------|--------|--------|
+| `../layouts/main.html` | parent-segment escape | exit 2 / `InvalidLayoutPath` |
+| `themes/alpha/layouts/../../themes/beta/layouts/main.html` | cross-theme via `..` | exit 2 / `InvalidLayoutPath` |
+| `/tmp/escape.html` | absolute path | exit 2 / `InvalidLayoutPath` |
+| `theme/./layouts/main.html` | `.` segment | exit 2 / `InvalidLayoutPath` |
+| `layouts\main.html` | backslash separator | exit 2 / `InvalidLayoutPath` |
 
-Contract expectation: managed theme roots stay single-root per target;
-path escapes must not silently publish. Exact error class may be
-`MixedThemeRoots`, load/I/O failure, or path validation — harness records the
-observed classification without weakening the product.
+No discovery, selection, or HTML publish after these paths.
