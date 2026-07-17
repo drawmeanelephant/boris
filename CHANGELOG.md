@@ -3,8 +3,8 @@
 All notable changes to Boris are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
-Versioning: the current product cut is **v0.5.0** with base IR
-`schemaVersion` **`0.2.0`** and compiler id **`boris/0.5.0`**. Breaking IR
+Versioning: the current product cut is **v0.5.1** with base IR
+`schemaVersion` **`0.2.0`** and compiler id **`boris/0.5.1`**. Breaking IR
 changes must bump `schemaVersion` and update `docs/contracts/`. Product version
 bumps may update `compiler_id` / `boris_version` without changing IR schema.
 
@@ -25,6 +25,39 @@ How to use going forward:
 ## [Unreleased]
 
 _No changes yet._
+
+## [0.5.1] — 2026-07-16 (release candidate)
+
+The v0.5.1 release candidate keeps base IR `0.2.0` and conditional
+semantic-relation IR `0.3.0`; it updates product/compiler/RAG versioning to
+`0.5.1` without an IR schema change. The tag is pending merge and final gates.
+
+### Added
+
+- Added secure content-local sibling asset publishing for page-owned
+  `{stem}.assets/` trees, including safe Markdown image rewriting, stale asset
+  cleanup, target isolation, and a normative [content-local assets contract](docs/contracts/content-local-assets.md).
+- Added an accessibility-forward, framework-free [reference theme example](examples/daisy-static-theme/README.md)
+  and a documented first real-site adoption path for bounded migrations.
+- Added deterministic migration-lab asset filename sanitization for spaces,
+  Unicode, and percent-encoded names, preserving original names, destinations,
+  and hashes in review manifests.
+- Added migration-lab theme archaeology reporting for layouts, styles, assets,
+  navigation, scripts, analytics, and licenses with preserve/adapt/review/drop
+  decisions.
+
+### Fixed
+
+- Fixed release-gate worktree detection so linked Git worktrees are recognized
+  and cleanliness checks cannot be silently skipped; added a focused smoke test.
+
+### Docs
+
+- Added bounded Starlight and Filed.fyi adoption evidence and documented the
+  migration workflow, boundaries, and remaining site-specific remediation.
+- Updated migration-lab build instructions to use the standalone build file
+  syntax (`zig build --build-file`) and aligned release, status, contract, and
+  compiler metadata for the v0.5.1 candidate.
 
 ## [0.5.0] — 2026-07-16
 
