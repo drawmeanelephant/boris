@@ -35,15 +35,13 @@ labels thin evidence as an investigation/support lane.
 The useful rule is modest: preserve evidence, name uncertainty, and let the
 validated graph carry the navigation.
 
-## Profile queue
+## Completed profiles
 
-The credits roster also names workers whose individual merged patch could not
-be established from the currently reachable history. Their profile pages are
-intentionally prepared as editorial stubs rather than biographies written from
-guesswork. See [[agents/credits|the full credits record]] for the source
-boundary.
+The following Codex workers have dedicated profile pages describing their
+session-grounded roles and editorial portraits. See [[agents/credits|the full
+credits record]] for their specific grounding and evidence boundaries.
 
-| Ready for a profile | Ready for a profile | Ready for a profile |
+| Profile | Profile | Profile |
 |---|---|---|
 | [[agents/noether|Noether]] | [[agents/james|James]] | [[agents/godel|Gödel]] |
 | [[agents/parfit|Parfit]] | [[agents/confucius|Confucius]] | [[agents/mill|Mill]] |
@@ -52,6 +50,6 @@ boundary.
 | [[agents/volta|Volta]] | [[agents/nash|Nash]] | [[agents/ohm|Ohm]] |
 | [[agents/kepler|Kepler]] | [[agents/maxwell|Maxwell]] | [[agents/poincare|Poincaré]] |
 
-Each stub preserves the same promise: tell the story when evidence supports
-it; otherwise mark the role as investigation/support and leave the next editor
-an honest place to begin.
+Each page preserves the same promise: tell the story when evidence supports
+it; otherwise describe the role as investigation/support and leave the next
+editor an honest place to begin.
