@@ -1,6 +1,6 @@
 # Project status — Boris
 
-**As of:** 2026-07-16 · current product release **v0.5.1** /
+**As of:** 2026-07-17 · current product release **v0.5.1** /
 compiler **boris/0.5.1** · Zig **0.16.0**<br>
 **Phase:** post-v0.5.1 real-site dogfood and migration hardening.<br>
 IR `schemaVersion` is **`0.2.0`**.
@@ -203,6 +203,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | — | Migration laboratories | Astro archaeology, WordPress conversion, Instagram Takeout, and adversarial preservation fixtures are developer aids, not Boris product pipelines (PRs #53–#54, #77–#78) |
 | — | Filed.fyi first-slice adoption pass | Bounded real-site dogfood: filed/astro/theme/asset-filename/starlight labs + product compile of changelog/releases; evidence in [`docs/dogfood/filed-fyi-adoption-pass.md`](dogfood/filed-fyi-adoption-pass.md) (not full-site conversion) |
 | — | Filed.fyi representative-slice pass | Second bounded dogfood: full-tree inventory + hand-converted landing/nested/asset/links/hard-MDX pages; evidence in [`docs/dogfood/filed-fyi-v051-representative-slice.md`](dogfood/filed-fyi-v051-representative-slice.md) (not full-site conversion) |
+| — | Starlight F-L1 archive image paths | **CLOSED** (PR #131 fix + #132 audit + post-merge re-verify): proven relative/public Markdown images → page `{stem}.assets/`; missing/escape fail loud. Evidence: [`docs/dogfood/filed-fyi-archive-layout-audit.md`](dogfood/filed-fyi-archive-layout-audit.md). **F-L2** Unicode asset-filename sanitization remains separate / non-blocking |
 | — | Agent-lore content dogfood | Tracked sample content exercises a documentation section without committing the private 250MB source dataset (PR #79) |
 | — | Bounded Textile compatibility | Explicit fail-closed `.textile` tree mode through the normal Boris pipeline (PR #55) |
 | — | Post-layout correctness fixes | Theme asset/page-output preservation, owned fragment keys, precise wiki diagnostics, managed-theme watch coverage, non-incremental stale sweep preservation, footer UTF-8 gate, and incremental heading-index reuse (PRs #65–#72) |
