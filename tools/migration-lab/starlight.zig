@@ -952,10 +952,14 @@ fn sanitizeMdxBody(a: std.mem.Allocator, body: []const u8) !struct {
     var dedup: std.ArrayList([]const u8) = .empty;
     var prev: ?[]const u8 = null;
     for (components.items) |c| {
-        if (prev) |p| if (std.mem.eql(u8, p, c)) continue;
+        if (prev) |p| if (std.mem.eql(u8, p, c)) {
+            a.free(c);
+            continue;
+        };
         try dedup.append(a, c);
         prev = c;
     }
+    components.deinit(a);
     return .{
         .body = try out.toOwnedSlice(a),
         .imports = try imports.toOwnedSlice(a),
@@ -4020,4 +4024,31 @@ test "starlight: dogfood relative images migrate for Boris compile surface" {
     try std.testing.expect(std.mem.indexOf(u8, pages, "pages.assets/assets/diagram.png") != null);
 
     Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+}
+
+test "starlight: sanitizeMdxBody preserves attributed Aside and Details" {
+    const a = std.testing.allocator;
+    const body =
+        \\<Details summary="Custom Details Summary" open="true">
+        \\This is inside details.
+        \\</Details>
+        \\
+        \\<Aside type="note" title="Custom Aside Title" class="extra-style">
+        \\This is inside aside.
+        \\</Aside>
+    ;
+
+    const res = try sanitizeMdxBody(a, body);
+    defer {
+        a.free(res.body);
+        for (res.imports) |imp| a.free(imp);
+        a.free(res.imports);
+        for (res.components) |cmp| a.free(cmp);
+        a.free(res.components);
+    }
+
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "<Details summary=\"Custom Details Summary\" open=\"true\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "</Details>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "<Aside type=\"note\" title=\"Custom Aside Title\" class=\"extra-style\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "</Aside>") != null);
 }
