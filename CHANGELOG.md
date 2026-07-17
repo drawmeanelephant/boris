@@ -58,7 +58,7 @@ semantic-relation IR `0.3.0`; it updates product/compiler/RAG versioning to
   migration workflow, boundaries, and remaining site-specific remediation.
 - Updated migration-lab build instructions to use the standalone build file
   syntax (`zig build --build-file`) and aligned release, status, contract, and
-  compiler metadata for the v0.5.1 candidate.
+  compiler metadata for the v0.5.1 release.
 
 ## [0.5.0] — 2026-07-16
 
