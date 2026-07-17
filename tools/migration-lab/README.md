@@ -379,7 +379,13 @@ and `/…` for root-locale.
    when the target exists in the converted entity map; otherwise writes an explicit
    `link_review.json` row (unresolved routes, fragments, attribute links, assets,
    external URLs).
-6. **Sidecar manifests** (deterministic; repeated runs byte-identical):
+6. **Migrates proven Markdown images** into Boris page-sibling `{stem}.assets/`
+   trees under `--out` when the source file resolves relative to the document
+   directory or under `public/` (site-absolute `/…`). Missing, escape, and
+   non–Boris-safe paths are left unchanged with explicit review reasons — never
+   invented. Query strings on image URLs are dropped (same as link targets);
+   `#fragments` are reattached when present.
+7. **Sidecar manifests** (deterministic; repeated runs byte-identical):
 
    | Manifest | Contents |
    |----------|----------|
@@ -387,7 +393,7 @@ and `/…` for root-locale.
    | `route_map.json` | Route / entity / output mapping |
    | `link_review.json` | Internal links, unresolved, external, assets |
    | `heading_fragments.json` | Fragment inventory (headings **not** verified) |
-   | `assets_manifest.json` | Assets + existence + SHA-256 when proven |
+   | `assets_manifest.json` | Inventory + migrated page assets (exists + SHA-256 when proven) |
    | `nav_flatten.json` | Sidebar/nav evidence (text scan only) |
    | `unsupported_manifest.json` | Unmapped FM + MDX + entity collisions |
    | `boundary_manifest.json` | **preserved** / **stripped** / **manual_review** |
@@ -395,11 +401,12 @@ and `/…` for root-locale.
    | `compile_report.json` | Optional Boris compile attempt |
    | `report.json` / `REPORT.md` | Machine + human summaries |
 
-7. **Preserves source read-only** and proves immutability + repeated-run byte
+8. **Preserves source read-only** and proves immutability + repeated-run byte
    determinism in fixture tests (including dogfood-scale and hostile fixtures).
-8. **Attempts a Boris compile** of the candidate (when `boris` +
+9. **Attempts a Boris compile** of the candidate (when `boris` +
    `layouts/main.html` are findable) and records the result in `compile_report.json`.
-9. **Does not** copy content assets into Boris core outputs.
+10. **Does not** couple product `boris` into the lab binary; image copies stay
+    under `--out/content/**` only.
 
 ### Boundary classes
 
@@ -425,7 +432,7 @@ and `/…` for root-locale.
 | Fragments (`#heading`) | **Review** | `heading_fragments.json`; heading not verified |
 | Attribute `href` / `to` routes | **Review only** | Never auto-rewritten |
 | External links | **Left as-is** | Inventoried as external |
-| Local / public assets | **Inventoried** | Existence + SHA-256 when local file proven; **not** auto-copied |
+| Local / public Markdown images | **Conditional** | Proven relative/public images → page `{stem}.assets/` + rewrite; missing/escape/invalid → review (never invented). Query strings dropped; fragments preserved. Non-image asset links remain inventory-only. |
 | Duplicate / ambiguous routes | **Disambiguated + reviewed** | First path wins; others `-2`… |
 | Sidebar / `autogenerate` | **Flattened** | One-level forest: section Trunk + Satellite children |
 | Translation linking / i18n | **Unsupported** | Content-root discovery only; no locale semantics |
@@ -439,6 +446,7 @@ and `/…` for root-locale.
 | Fixture | Role |
 |---------|------|
 | [`dogfood-starlight/`](fixtures/dogfood-starlight/) | ~67-page root-locale dogfood (nested docs/blog, assets, FM variants, MDX, sidebar, partials) |
+| [`image-path-starlight/`](fixtures/image-path-starlight/) | **F-L1** image resolve matrix: relative sibling, nested, missing, escape, already-correct `{stem}.assets/`, public absolute |
 | [`hostile-starlight/`](fixtures/hostile-starlight/) | Ambiguous routes, deep paths, unicode, unsupported MDX/FM, instruction fences |
 | [`mini-starlight/`](fixtures/mini-starlight/) | Compact locale-dir proof |
 | [`mini-starlight-root/`](fixtures/mini-starlight-root/) | Compact root-locale proof |
