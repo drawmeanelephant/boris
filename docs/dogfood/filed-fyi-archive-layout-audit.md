@@ -22,7 +22,22 @@ migration-lab fix that resolves proven Starlight source-relative images into
 Boris page-sibling `{stem}.assets/` trees under `--out`, rewrites Markdown
 destinations, and leaves missing/escape paths unre-written with explicit review
 reasons. This audit re-runs the F-L1 matrix and Filed-shaped dogfood on fresh
-`origin/main` after that merge.
+`origin/main` after that merge. PR [#132](https://github.com/drawmeanelephant/boris/pull/132)
+landed this evidence note (docs only).
+
+### Independent post-merge verification (2026-07-17)
+
+Re-run on `origin/main` @ `a09a240` after #132 merged. No product code changed.
+**F-L2 was not started** (left separate / non-blocking).
+
+| Question | Answer |
+|----------|--------|
+| **F-L1 closed or still open?** | **CLOSED** — matrix rewrite + happy Boris compile without `EASSET` |
+| **Starlight fixture compiles?** | **Yes** — `dogfood-starlight` → 69 HTML pages, exit **0**; image-path happy subset exit **0**; whole-tree image-path still exit **1** (intentional missing/escape) |
+| **Migration-lab tests green?** | **Yes** — `zig build --build-file tools/migration-lab/build.zig test` exit **0** |
+| **Release gate green?** | **Yes** — `./scripts/release-gate.sh` → `RELEASE GATE PASSED`; also `zig build test`, `test-apex-hostile`, `test-layout-hostile`, `git diff --check` all **0** |
+
+Also re-checked: nested + already-correct paths, missing/escape fail closed with product `EASSET`, dual-migrate determinism, full vs incremental dogfood HTML byte-identical (81 files, exclude `.boris-cache`). Query strings on image URLs remain **dropped** (documented); `#fragments` reattached when present.
 
 ---
 
