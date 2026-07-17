@@ -910,7 +910,9 @@ fn sanitizeMdxBody(a: std.mem.Allocator, body: []const u8) !struct {
                         while (k < line.len and line[k] != '>') : (k += 1) {}
                         if (k < line.len) k += 1;
                         const tag_content = line[li + 2 .. k - 1];
-                        const tag_name = std.mem.trim(u8, tag_content, " \t\r");
+                        var name_end: usize = 0;
+                        while (name_end < tag_content.len and !std.ascii.isWhitespace(tag_content[name_end]) and tag_content[name_end] != '/' and tag_content[name_end] != '>') : (name_end += 1) {}
+                        const tag_name = tag_content[0..name_end];
                         if (std.mem.eql(u8, tag_name, "Aside") or std.mem.eql(u8, tag_name, "Details")) {
                             try out.appendSlice(a, line[li..k]);
                         }
