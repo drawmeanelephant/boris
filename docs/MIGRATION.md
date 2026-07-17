@@ -137,7 +137,10 @@ and flags: [`tools/migration-lab/README.md`](../tools/migration-lab/README.md).
 Filed.fyi checkout — inventory, lab modes, product HTML/IR/RAG, remediation
 cards, and a narrow RC recommendation — is recorded in
 [`docs/dogfood/filed-fyi-adoption-pass.md`](dogfood/filed-fyi-adoption-pass.md).
-It is evidence for humans, not a universal converter claim.
+A second pass with a five-page representative slice (landing, nested docs,
+page-local asset, absolute links, hard MDX dialects) is in
+[`docs/dogfood/filed-fyi-v051-representative-slice.md`](dogfood/filed-fyi-v051-representative-slice.md).
+Both are evidence for humans, not universal converter claims.
 
 **What to open after a lab run:** `REPORT.md` / `report.json` (and mode-specific
 manifests under the `--out` dir). Treat them as **evidence for the human

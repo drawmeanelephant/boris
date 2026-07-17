@@ -201,6 +201,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | — | Apex Unified compatibility evidence | Matrix + fixtures document the supported Boris-facing surface (PR #52) |
 | — | Migration laboratories | Astro archaeology, WordPress conversion, Instagram Takeout, and adversarial preservation fixtures are developer aids, not Boris product pipelines (PRs #53–#54, #77–#78) |
 | — | Filed.fyi first-slice adoption pass | Bounded real-site dogfood: filed/astro/theme/asset-filename/starlight labs + product compile of changelog/releases; evidence in [`docs/dogfood/filed-fyi-adoption-pass.md`](dogfood/filed-fyi-adoption-pass.md) (not full-site conversion) |
+| — | Filed.fyi representative-slice pass | Second bounded dogfood: full-tree inventory + hand-converted landing/nested/asset/links/hard-MDX pages; evidence in [`docs/dogfood/filed-fyi-v051-representative-slice.md`](dogfood/filed-fyi-v051-representative-slice.md) (not full-site conversion) |
 | — | Agent-lore content dogfood | Tracked sample content exercises a documentation section without committing the private 250MB source dataset (PR #79) |
 | — | Bounded Textile compatibility | Explicit fail-closed `.textile` tree mode through the normal Boris pipeline (PR #55) |
 | — | Post-layout correctness fixes | Theme asset/page-output preservation, owned fragment keys, precise wiki diagnostics, managed-theme watch coverage, non-incremental stale sweep preservation, footer UTF-8 gate, and incremental heading-index reuse (PRs #65–#72) |
