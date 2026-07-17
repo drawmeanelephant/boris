@@ -10,7 +10,7 @@ or an AI Context Bundle.
 | | |
 |--|--|
 | Language | Zig **0.16.0** (`build.zig.zon` / CI pin) |
-| Product | **0.5.0** / compiler **boris/0.5.0** |
+| Product | **0.5.1** / compiler **boris/0.5.1** |
 | IR schema | **0.2.0** (typed dependency endpoints + reverse index) |
 | License | [MIT](LICENSE) |
 
@@ -371,6 +371,6 @@ after exit 0.
   includes + wiki-links, typed IR dependency edges + reverse index,
   Documentation Intelligence, Context Bundles, layout selection, Textile
   compatibility, and migration labs as **standalone developer aids**. Product
-  **v0.5.0**.
-- **Next:** real-site dogfood and release follow-through — see
+  **v0.5.1** release candidate.
+- **Next:** merge/tag v0.5.1, then continue real-site dogfood — see
   [`docs/STATUS.md`](docs/STATUS.md).

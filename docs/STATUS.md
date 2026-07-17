@@ -1,13 +1,14 @@
 # Project status — Boris
 
-**As of:** 2026-07-16 · current product release **v0.5.0** /
-compiler **boris/0.5.0** · Zig **0.16.0**<br>
-**Phase:** post-v0.5.0 release follow-through and real-site dogfood.<br>
+**As of:** 2026-07-16 · current product release **v0.5.1** /
+compiler **boris/0.5.1** · Zig **0.16.0**<br>
+**Phase:** v0.5.1 release certification; tag pending.<br>
 IR `schemaVersion` is **`0.2.0`**.
 
-**Version boundary:** `v0.5.0` is tagged and released. The release does not
-change base IR `0.2.0`; semantic relations retain their documented conditional
-IR `0.3.0` artifacts.
+**Version boundary:** `v0.5.0` is the latest tagged release; `v0.5.1` is the
+release candidate being certified here. This cut does not change base IR
+`0.2.0`; semantic relations retain their documented conditional IR `0.3.0`
+artifacts.
 
 **Feature 8 status:** F8.0 contracts and F8.1–F8.3 are complete. IR 0.2
 publishes typed `parent` / `include` / `reference` edges and deterministic
@@ -42,6 +43,14 @@ source-RAG publication hardening, bounded Obsidian/Notion/Starlight/Filed
 migration-lab evidence, and the judge-verified docs path. Migration labs remain
 developer tools: they do not become Boris runtime dependencies or universal
 converters.
+
+### What v0.5.1 adds
+
+The v0.5.1 cut certifies secure content-local page assets, an
+accessibility-forward reference theme, bounded Starlight and Filed.fyi
+adoption evidence, asset-name sanitization and theme-archaeology migration
+aids, and a release gate that works correctly inside linked Git worktrees.
+These are additive capabilities; base IR remains `0.2.0`.
 
 **0.2.0** packaged ApexMarkdown Unified, HTML default CLI, graph-aware nav +
 TOC, and P2/P3 incremental / watch / jobs / multi-target. Tag: `v0.2.0`.
@@ -109,6 +118,9 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | Astro, WordPress, and Instagram migration labs | **Shipped in v0.4.0** (bounded conversion/reconnaissance labs + adversarial preservation fixtures; not runtime dependencies) |
 | Obsidian vault + Notion Markdown/CSV migration labs | **Shipped in v0.5.0** (phase-1 developer aids under `tools/migration-lab/`; not runtime dependencies) |
 | Starlight proof slice (locale-dir + root-locale) | **Shipped in v0.5.0** (`--mode=starlight` under `tools/migration-lab/`; content-root discovery for `docs/en/` or root-locale `docs/`; bounded convert + manifests; not a runtime dependency) |
+| Content-local sibling page assets | **Shipped in v0.5.1** (secure `{stem}.assets/` publishing with stale cleanup and target isolation) |
+| Reference theme and real-site adoption workflow | **Shipped in v0.5.1** (framework-free theme example plus bounded Filed.fyi/Starlight evidence) |
+| Migration asset-name sanitization and theme archaeology | **Shipped in v0.5.1** (developer-only migration-lab reports; core remains strict and deterministic) |
 | Bounded Textile input | **Shipped in v0.4.0** (`--textile`; explicit whole-tree compatibility adapter) |
 | Optional static theme showcase | **Shipped in v0.4.0** (`examples/static-theme-showcase/`; hand-authored CSS, not product chrome) |
 | Agent-lore content dogfood | **Shipped in v0.4.0** (tracked sample content only; private 250MB source data remains excluded/ignored) |
