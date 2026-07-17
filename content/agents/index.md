@@ -34,3 +34,24 @@ labels thin evidence as an investigation/support lane.
 
 The useful rule is modest: preserve evidence, name uncertainty, and let the
 validated graph carry the navigation.
+
+## Profile queue
+
+The credits roster also names workers whose individual merged patch could not
+be established from the currently reachable history. Their profile pages are
+intentionally prepared as editorial stubs rather than biographies written from
+guesswork. See [[agents/credits|the full credits record]] for the source
+boundary.
+
+| Ready for a profile | Ready for a profile | Ready for a profile |
+|---|---|---|
+| [[agents/noether|Noether]] | [[agents/james|James]] | [[agents/godel|Gödel]] |
+| [[agents/parfit|Parfit]] | [[agents/confucius|Confucius]] | [[agents/jason|Jason]] |
+| [[agents/turing|Turing]] | [[agents/gauss|Gauss]] | [[agents/cicero|Cicero]] |
+| [[agents/heisenberg|Heisenberg]] | [[agents/pauli|Pauli]] | [[agents/volta|Volta]] |
+| [[agents/nash|Nash]] | [[agents/ohm|Ohm]] | [[agents/kepler|Kepler]] |
+| [[agents/maxwell|Maxwell]] | [[agents/poincare|Poincaré]] | — |
+
+Each stub preserves the same promise: tell the story when evidence supports
+it; otherwise mark the role as investigation/support and leave the next editor
+an honest place to begin.
