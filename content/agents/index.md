@@ -46,11 +46,11 @@ boundary.
 | Ready for a profile | Ready for a profile | Ready for a profile |
 |---|---|---|
 | [[agents/noether|Noether]] | [[agents/james|James]] | [[agents/godel|Gödel]] |
-| [[agents/parfit|Parfit]] | [[agents/confucius|Confucius]] | [[agents/jason|Jason]] |
-| [[agents/turing|Turing]] | [[agents/gauss|Gauss]] | [[agents/cicero|Cicero]] |
-| [[agents/heisenberg|Heisenberg]] | [[agents/pauli|Pauli]] | [[agents/volta|Volta]] |
-| [[agents/nash|Nash]] | [[agents/ohm|Ohm]] | [[agents/kepler|Kepler]] |
-| [[agents/maxwell|Maxwell]] | [[agents/poincare|Poincaré]] | — |
+| [[agents/parfit|Parfit]] | [[agents/confucius|Confucius]] | [[agents/mill|Mill]] |
+| [[agents/jason|Jason]] | [[agents/turing|Turing]] | [[agents/gauss|Gauss]] |
+| [[agents/cicero|Cicero]] | [[agents/heisenberg|Heisenberg]] | [[agents/pauli|Pauli]] |
+| [[agents/volta|Volta]] | [[agents/nash|Nash]] | [[agents/ohm|Ohm]] |
+| [[agents/kepler|Kepler]] | [[agents/maxwell|Maxwell]] | [[agents/poincare|Poincaré]] |
 
 Each stub preserves the same promise: tell the story when evidence supports
 it; otherwise mark the role as investigation/support and leave the next editor
