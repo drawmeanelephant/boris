@@ -50,7 +50,11 @@ Static output dir → any static host                ← deployment (outside Bor
 
 1. **Closed frontmatter** — only `id`, `title`, `parent`, `status`, `tags`.
 2. **Parent key is `parent` only** — `parentEntry` / `parent_entry` fail as
-   unknown keys.
+   unknown keys on the product parser. The Filed migration lab rewrites those
+   legacy keys to `parent` under `--out` only (with conflict/invalid review);
+   see [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) and
+   [`docs/dogfood/filed-parent-key-normalize.md`](dogfood/filed-parent-key-normalize.md).
+   Do not expect product `boris` to accept the aliases.
 3. **One-level graph** — Satellites parent to **Trunks** only (no
    satellite-of-satellite).
 4. **Entity ids** — path-derived (or `id:` override); case- and byte-exact for

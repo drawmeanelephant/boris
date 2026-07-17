@@ -320,12 +320,49 @@ zig build run -- --mode=filed \
 ```
 
 It creates `content/changelog/index.md` and `content/releases/index.md` as
-Trunks, plus one changelog and three release Satellites with closed Boris `id`, `title`,
-`parent`, `status`, and `tags` frontmatter. `provenance_manifest.json` retains
-every raw source frontmatter block and output mapping. `report.json` and
-`REPORT.md` explicitly list each non-`title` source frontmatter field as
-unmapped; values are retained verbatim but never interpreted or normalized. The run fails if the source
-does not have the expected one-plus-three record cardinality.
+Trunks, plus one changelog and three release Satellites with closed Boris `id`,
+`title`, `parent`, `status`, and `tags` frontmatter. Source trees are never
+rewritten. The run fails if the source does not have the expected one-plus-three
+record cardinality.
+
+### Parent key normalization (Filed adapter only)
+
+Filed archives commonly use legacy structural parent keys that product Boris
+**rejects** as unknown (`EFRONTMATTER`). The lab rewrites them **only under
+`--out`**:
+
+| Source key | Result |
+|------------|--------|
+| `parentEntry: <id>` | → emitted `parent: <id>` (`normalized`) |
+| `parent_entry: <id>` | → emitted `parent: <id>` (`normalized`) |
+| `parent: <id>` only | → emitted `parent: <id>` (`identity`) |
+| legacy + canonical, **same** value | → single `parent: <id>` (`normalized`) |
+| differing values across keys | → **conflict** (no auto-pick; human review) |
+| empty / traversal / unsafe id | → **invalid** (no rewrite; human review) |
+| no parent-related keys | → `missing` (first-slice uses collection Trunk as **converter-owned** structure; the normalizer does **not** invent parents from directory names) |
+
+Rules:
+
+1. Preserve original key, value, and source line in `provenance_manifest.json`
+   under each record’s `parent_normalization.original_keys`.
+2. Preserve safe values **exactly** (no path rewriting, no directory invention).
+3. Never silently choose among conflicting values.
+4. Unknown non-parent frontmatter keys remain review items (`unmapped_frontmatter`);
+   they are not discarded by this stage.
+5. Repeated runs are byte-identical.
+6. Product grammar stays closed: no core aliases for `parentEntry` /
+   `parent_entry`.
+
+`report.json` (schema **2**) includes `parent_normalization` counts and a
+`parent_review` array for conflict/invalid rows. See
+[`docs/dogfood/filed-parent-key-normalize.md`](../../docs/dogfood/filed-parent-key-normalize.md).
+
+### Provenance / outputs
+
+`provenance_manifest.json` retains every raw source frontmatter block, output
+mapping, unmapped keys, and parent-normalization provenance. `report.json` and
+`REPORT.md` list non-`title` source frontmatter fields as unmapped (except
+legacy parent keys, which are normalized above).
 
 This is deliberately not a general Astro/MDX migration: no arbitrary YAML,
 MDX components, Starlight navigation, date joins, or live synchronization.
@@ -336,8 +373,11 @@ Filed bodies are untrusted archival data. Clearly delimited `agent`,
 without reproducing their contents. Reports retain only source path, source line,
 neutral category, and `stripped: true`.
 
-Synthetic redistributable coverage lives in
-[`fixtures/mini-filed/`](fixtures/mini-filed/).
+| Fixture | Role |
+|---------|------|
+| [`fixtures/mini-filed/`](fixtures/mini-filed/) | First-slice happy path (missing parent keys → collection Trunk) |
+| [`fixtures/filed-parent-normalize/`](fixtures/filed-parent-normalize/) | Safe parent rewrite matrix (camel / snake / canonical / both-same) |
+| [`fixtures/filed-parent-conflict/`](fixtures/filed-parent-conflict/) | Conflict + invalid parent values (no silent pick) |
 
 A bounded real-site adoption pass (Filed.fyi changelog/releases slice against
 current `main`, including product HTML/IR/RAG evidence and remediation cards)
