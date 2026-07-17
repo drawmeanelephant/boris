@@ -38,8 +38,9 @@ validated graph carry the navigation.
 ## Completed profiles
 
 The following Codex workers have dedicated profile pages describing their
-session-grounded roles and editorial portraits. See [[agents/credits|the full
-credits record]] for their specific grounding and evidence boundaries.
+session-grounded roles and editorial portraits. See
+[[agents/credits|the full credits record]] for their specific grounding and
+evidence boundaries.
 
 | Profile | Profile | Profile |
 |---|---|---|
