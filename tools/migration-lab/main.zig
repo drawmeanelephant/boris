@@ -274,9 +274,11 @@ fn printUsage() void {
         \\
         \\WordPress mode:
         \\  --wxr=FILE         WordPress WXR/XML export (required; never modified)
-        \\  --media=DIR        Optional local media/uploads directory (never modified)
-        \\  Writes: content/**/*.md, report.json, REPORT.md
+        \\  --media=DIR        Optional local media/uploads directory (never modified; offline only)
+        \\  Writes: content/**/*.md (+ page {{stem}}.assets/ when media matches),
+        \\          report.json, REPORT.md, media_manifest.json
         \\  (--wxr implies --mode=wordpress)
+        \\  No network fetch; unresolved media kept + listed for review.
         \\
         \\Instagram mode:
         \\  --dump=DIR         Unpacked Instagram data-download root (required; never modified)
@@ -1160,6 +1162,58 @@ test "wordpress: mediaRelativeKey" {
     const k = wordpress.mediaRelativeKey("https://example.com/wp-content/uploads/2024/01/hero.png");
     try std.testing.expectEqualStrings("2024/01/hero.png", k.?);
     try std.testing.expect(wordpress.mediaRelativeKey("https://cdn.example.com/a.png") == null);
+    const rel = wordpress.mediaRelativeKey("uploads/2024/01/shared.png");
+    try std.testing.expectEqualStrings("2024/01/shared.png", rel.?);
+    const q = wordpress.mediaRelativeKey("https://example.com/wp-content/uploads/2024/01/hero.png?w=1#x");
+    try std.testing.expectEqualStrings("2024/01/hero.png", q.?);
+}
+
+test "wordpress: matchMediaReference matrix" {
+    const files = [_][]const u8{ "2024/01/hero.png", "2025/02/hero.png", "2024/01/shared.png" };
+    const found = wordpress.matchMediaReference(&files, true, "https://example.com/wp-content/uploads/2024/01/hero.png");
+    try std.testing.expect(found.kind == .found);
+    try std.testing.expectEqualStrings("2024/01/hero.png", found.local_path.?);
+
+    const rel = wordpress.matchMediaReference(&files, true, "uploads/2024/01/shared.png");
+    try std.testing.expect(rel.kind == .found);
+    try std.testing.expectEqualStrings("2024/01/shared.png", rel.local_path.?);
+
+    const missing = wordpress.matchMediaReference(&files, true, "https://example.com/wp-content/uploads/2024/01/gone.png");
+    try std.testing.expect(missing.kind == .missing);
+
+    const amb = wordpress.matchMediaReference(&files, true, "hero.png");
+    try std.testing.expect(amb.kind == .ambiguous);
+
+    const trav = wordpress.matchMediaReference(&files, true, "https://example.com/wp-content/uploads/2024/01/../../secret.png");
+    try std.testing.expect(trav.kind == .rejected);
+
+    const abs = wordpress.matchMediaReference(&files, true, "file:///etc/passwd.png");
+    try std.testing.expect(abs.kind == .rejected);
+
+    const no_dir = wordpress.matchMediaReference(&files, false, "https://example.com/wp-content/uploads/2024/01/hero.png");
+    try std.testing.expect(no_dir.kind == .missing);
+    try std.testing.expectEqualStrings("media_dir_not_provided", no_dir.reason);
+}
+
+test "wordpress: rewriteMediaReferences exact only" {
+    const gpa = std.testing.allocator;
+    const body = "![a](https://example.com/wp-content/uploads/2024/01/hero.png) and ![b](https://example.com/wp-content/uploads/2024/01/gone.png)";
+    const rewrites = [_]wordpress.MediaRewrite{
+        .{ .original = "https://example.com/wp-content/uploads/2024/01/hero.png", .rewritten = "full-upload.assets/2024/01/hero.png" },
+    };
+    const out = try wordpress.rewriteMediaReferences(gpa, body, &rewrites);
+    defer gpa.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "full-upload.assets/2024/01/hero.png") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "https://example.com/wp-content/uploads/2024/01/gone.png") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "https://example.com/wp-content/uploads/2024/01/hero.png") == null);
+}
+
+test "wordpress: isBorisSafeWithinTree and unsafe keys" {
+    try std.testing.expect(wordpress.isBorisSafeWithinTree("2024/01/hero.png"));
+    try std.testing.expect(!wordpress.isBorisSafeWithinTree("../x.png"));
+    try std.testing.expect(wordpress.isUnsafeMediaKey("../../secret.png"));
+    try std.testing.expect(wordpress.isUnsafeMediaKey("/abs.png"));
+    try std.testing.expect(!wordpress.isUnsafeMediaKey("2024/01/hero.png"));
 }
 
 test "wordpress: buildFrontmatter closed grammar" {
@@ -1605,4 +1659,355 @@ test "wordpress: unit-wxr matrix preserves fields and reports unsupported" {
 
     Io.Dir.cwd().deleteTree(io, out_a) catch {};
     Io.Dir.cwd().deleteTree(io, out_b) catch {};
+}
+
+test "wordpress: media materialization copies, rewrites, and manifests" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    const out_a = "fixtures/.tmp-media-wxr-a";
+    const out_b = "fixtures/.tmp-media-wxr-b";
+    Io.Dir.cwd().deleteTree(io, out_a) catch {};
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
+
+    var fixture = try Io.Dir.cwd().openDir(io, "fixtures/media-wxr", .{});
+    defer fixture.close(io);
+    const source_before = try wordpress.readFileAlloc(io, fixture, "export.xml", gpa);
+    defer gpa.free(source_before);
+    const media_before = try wordpress.readFileAlloc(io, fixture, "media/2024/01/hero.png", gpa);
+    defer gpa.free(media_before);
+    const shared_before = try wordpress.readFileAlloc(io, fixture, "media/2024/01/shared.png", gpa);
+    defer gpa.free(shared_before);
+
+    try wordpress.run(io, gpa, .{
+        .wxr_path = "fixtures/media-wxr/export.xml",
+        .media_dir = "fixtures/media-wxr/media",
+        .out_dir = out_a,
+        .quiet = true,
+    });
+    try wordpress.run(io, gpa, .{
+        .wxr_path = "fixtures/media-wxr/export.xml",
+        .media_dir = "fixtures/media-wxr/media",
+        .out_dir = out_b,
+        .quiet = true,
+    });
+
+    var a = try Io.Dir.cwd().openDir(io, out_a, .{});
+    defer a.close(io);
+    var b = try Io.Dir.cwd().openDir(io, out_b, .{});
+    defer b.close(io);
+
+    // Deterministic dual runs
+    const man_a = try wordpress.readFileAlloc(io, a, "media_manifest.json", gpa);
+    defer gpa.free(man_a);
+    const man_b = try wordpress.readFileAlloc(io, b, "media_manifest.json", gpa);
+    defer gpa.free(man_b);
+    try std.testing.expectEqualStrings(man_a, man_b);
+    const rep_a = try wordpress.readFileAlloc(io, a, "report.json", gpa);
+    defer gpa.free(rep_a);
+    const rep_b = try wordpress.readFileAlloc(io, b, "report.json", gpa);
+    defer gpa.free(rep_b);
+    try std.testing.expectEqualStrings(rep_a, rep_b);
+
+    try std.testing.expect(std.mem.indexOf(u8, man_a, "boris-wordpress-media-manifest") != null);
+    try std.testing.expect(std.mem.indexOf(u8, man_a, "\"status\": \"copied\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, man_a, "\"status\": \"missing\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, man_a, "\"status\": \"ambiguous\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, man_a, "\"status\": \"rejected\"") != null);
+
+    // Full uploads URL match
+    const full = try wordpress.readFileAlloc(io, a, "content/posts/full-upload.md", gpa);
+    defer gpa.free(full);
+    try std.testing.expect(std.mem.indexOf(u8, full, "full-upload.assets/2024/01/hero.png") != null);
+    try std.testing.expect(std.mem.indexOf(u8, full, "wp-content/uploads/2024/01/hero.png") == null);
+    const hero_copy = try wordpress.readFileAlloc(io, a, "content/posts/full-upload.assets/2024/01/hero.png", gpa);
+    defer gpa.free(hero_copy);
+    try std.testing.expectEqualStrings(media_before, hero_copy);
+
+    // Relative uploads/ match
+    const rel = try wordpress.readFileAlloc(io, a, "content/posts/relative-uploads.md", gpa);
+    defer gpa.free(rel);
+    try std.testing.expect(std.mem.indexOf(u8, rel, "relative-uploads.assets/2024/01/shared.png") != null);
+    const shared_a = try wordpress.readFileAlloc(io, a, "content/posts/relative-uploads.assets/2024/01/shared.png", gpa);
+    defer gpa.free(shared_a);
+    try std.testing.expectEqualStrings(shared_before, shared_a);
+
+    // Same source asset on two pages → per-page copies
+    const shared_again = try wordpress.readFileAlloc(io, a, "content/posts/shared-again.md", gpa);
+    defer gpa.free(shared_again);
+    try std.testing.expect(std.mem.indexOf(u8, shared_again, "shared-again.assets/2024/01/shared.png") != null);
+    const shared_b = try wordpress.readFileAlloc(io, a, "content/posts/shared-again.assets/2024/01/shared.png", gpa);
+    defer gpa.free(shared_b);
+    try std.testing.expectEqualStrings(shared_before, shared_b);
+
+    // Nested page output path
+    const nested = try wordpress.readFileAlloc(io, a, "content/pages/nested-diagram.md", gpa);
+    defer gpa.free(nested);
+    try std.testing.expect(std.mem.indexOf(u8, nested, "nested-diagram.assets/2024/06/diagram.png") != null);
+    const diagram = try wordpress.readFileAlloc(io, a, "content/pages/nested-diagram.assets/2024/06/diagram.png", gpa);
+    defer gpa.free(diagram);
+    try std.testing.expect(diagram.len > 0);
+
+    // Missing media: original reference preserved
+    const missing = try wordpress.readFileAlloc(io, a, "content/posts/missing-media.md", gpa);
+    defer gpa.free(missing);
+    try std.testing.expect(std.mem.indexOf(u8, missing, "https://example.com/wp-content/uploads/2024/01/gone.png") != null);
+    try std.testing.expect(std.mem.indexOf(u8, missing, "missing-media.assets") == null);
+
+    // Ambiguous basename
+    const amb = try wordpress.readFileAlloc(io, a, "content/posts/ambiguous-basename.md", gpa);
+    defer gpa.free(amb);
+    try std.testing.expect(std.mem.indexOf(u8, amb, "](hero.png)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, man_a, "duplicate_media_basename") != null);
+
+    // Traversal rejected; original preserved
+    const trav = try wordpress.readFileAlloc(io, a, "content/posts/traversal-escape.md", gpa);
+    defer gpa.free(trav);
+    try std.testing.expect(std.mem.indexOf(u8, trav, "wp-content/uploads/2024/01/../../secret.png") != null);
+    try std.testing.expect(std.mem.indexOf(u8, trav, "traversal-escape.assets") == null);
+
+    // Absolute / file: escapes preserved
+    const abs = try wordpress.readFileAlloc(io, a, "content/posts/absolute-escape.md", gpa);
+    defer gpa.free(abs);
+    try std.testing.expect(std.mem.indexOf(u8, abs, "file:///etc/passwd.png") != null);
+    try std.testing.expect(std.mem.indexOf(u8, abs, "/etc/passwd.png") != null);
+
+    // Query and fragment dropped (Boris asset grammar); limitation recorded
+    const qf = try wordpress.readFileAlloc(io, a, "content/posts/query-fragment.md", gpa);
+    defer gpa.free(qf);
+    try std.testing.expect(std.mem.indexOf(u8, qf, "query-fragment.assets/2024/01/hero.png") != null);
+    try std.testing.expect(std.mem.indexOf(u8, qf, "query-fragment.assets/2024/01/hero.png#main") == null);
+    try std.testing.expect(std.mem.indexOf(u8, qf, "?w=640") == null);
+    try std.testing.expect(std.mem.indexOf(u8, man_a, "query_string_dropped") != null);
+    try std.testing.expect(std.mem.indexOf(u8, man_a, "fragment_dropped") != null);
+
+    // Exact 2025 path still copies despite duplicate basename inventory
+    const h25 = try wordpress.readFileAlloc(io, a, "content/posts/hero-2025.md", gpa);
+    defer gpa.free(h25);
+    try std.testing.expect(std.mem.indexOf(u8, h25, "hero-2025.assets/2025/02/hero.png") != null);
+
+    // Source immutability
+    const source_after = try wordpress.readFileAlloc(io, fixture, "export.xml", gpa);
+    defer gpa.free(source_after);
+    try std.testing.expectEqualStrings(source_before, source_after);
+    const media_after = try wordpress.readFileAlloc(io, fixture, "media/2024/01/hero.png", gpa);
+    defer gpa.free(media_after);
+    try std.testing.expectEqualStrings(media_before, media_after);
+
+    Io.Dir.cwd().deleteTree(io, out_a) catch {};
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
+}
+
+test "wordpress: media symlink escape is rejected" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    const tmp_media = "fixtures/.tmp-media-symlink";
+    const out_dir = "fixtures/.tmp-media-symlink-out";
+    Io.Dir.cwd().deleteTree(io, tmp_media) catch {};
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+    try Io.Dir.cwd().createDirPath(io, tmp_media ++ "/2024/01");
+
+    {
+        var year = try Io.Dir.cwd().openDir(io, tmp_media ++ "/2024/01", .{});
+        defer year.close(io);
+        try year.writeFile(io, .{ .sub_path = "real.png", .data = "real-bytes" });
+        year.symLink(io, "/etc/hosts", "alias.png", .{}) catch {
+            year.symLink(io, "../../../export-outside", "alias.png", .{}) catch {};
+        };
+    }
+
+    const wxr =
+        \\<?xml version="1.0" encoding="UTF-8" ?>
+        \\<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:wp="http://wordpress.org/export/1.2/">
+        \\<channel><title>Sym</title><link>https://example.com</link>
+        \\<wp:base_site_url>https://example.com</wp:base_site_url><wp:base_blog_url>https://example.com</wp:base_blog_url>
+        \\<item><title>Symlink Post</title><link>https://example.com/sym/</link><dc:creator>a</dc:creator>
+        \\<guid>sym</guid>
+        \\<content:encoded><![CDATA[<img src="https://example.com/wp-content/uploads/2024/01/alias.png" alt="Alias"/>]]></content:encoded>
+        \\<wp:post_id>1</wp:post_id><wp:post_date>2024-01-01</wp:post_date><wp:post_name>sym</wp:post_name>
+        \\<wp:status>publish</wp:status><wp:post_parent>0</wp:post_parent><wp:post_type>post</wp:post_type>
+        \\</item></channel></rss>
+    ;
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = tmp_media ++ "/export.xml", .data = wxr });
+
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const has_link = blk: {
+        var year = Io.Dir.cwd().openDir(io, tmp_media ++ "/2024/01", .{}) catch break :blk false;
+        defer year.close(io);
+        _ = year.readLink(io, "alias.png", &buf) catch break :blk false;
+        break :blk true;
+    };
+    if (!has_link) {
+        Io.Dir.cwd().deleteTree(io, tmp_media) catch {};
+        return;
+    }
+
+    try wordpress.run(io, gpa, .{
+        .wxr_path = tmp_media ++ "/export.xml",
+        .media_dir = tmp_media,
+        .out_dir = out_dir,
+        .quiet = true,
+    });
+
+    var out = try Io.Dir.cwd().openDir(io, out_dir, .{});
+    defer out.close(io);
+    const man = try wordpress.readFileAlloc(io, out, "media_manifest.json", gpa);
+    defer gpa.free(man);
+    try std.testing.expect(std.mem.indexOf(u8, man, "symlink_escape") != null or std.mem.indexOf(u8, man, "\"status\": \"rejected\"") != null);
+
+    const page = try wordpress.readFileAlloc(io, out, "content/posts/sym.md", gpa);
+    defer gpa.free(page);
+    try std.testing.expect(std.mem.indexOf(u8, page, "wp-content/uploads/2024/01/alias.png") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "sym.assets") == null);
+
+    Io.Dir.cwd().deleteTree(io, tmp_media) catch {};
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+}
+
+test "wordpress: generated content compiles with product Boris" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    // Lab tests use cwd = tools/migration-lab. Boris validates layout paths without `..`
+    // and requires HTML output inside the workspace, so spawn with cwd = repo root.
+    //
+    // Hostile refs (absolute, basename-only, file:) are intentional review fixtures and
+    // would fail product EASSET; compile a filtered tree of successfully materialised pages.
+    const lab_out = "fixtures/.tmp-media-wxr-compile";
+    const clean_out = "fixtures/.tmp-media-wxr-compile-clean";
+    Io.Dir.cwd().deleteTree(io, lab_out) catch {};
+    Io.Dir.cwd().deleteTree(io, clean_out) catch {};
+
+    try wordpress.run(io, gpa, .{
+        .wxr_path = "fixtures/media-wxr/export.xml",
+        .media_dir = "fixtures/media-wxr/media",
+        .out_dir = lab_out,
+        .quiet = true,
+    });
+
+    const boris_from_lab = "../../zig-out/bin/boris";
+    var boris_probe = Io.Dir.cwd().openFile(io, boris_from_lab, .{}) catch {
+        Io.Dir.cwd().deleteTree(io, lab_out) catch {};
+        return; // product binary not built
+    };
+    boris_probe.close(io);
+
+    // Copy only pages whose media was materialised (or have no local media refs).
+    try Io.Dir.cwd().createDirPath(io, clean_out ++ "/content/posts");
+    try Io.Dir.cwd().createDirPath(io, clean_out ++ "/content/pages");
+    const keep = [_][]const u8{
+        "content/posts.md",
+        "content/pages.md",
+        "content/posts/full-upload.md",
+        "content/posts/relative-uploads.md",
+        "content/posts/shared-again.md",
+        "content/posts/query-fragment.md",
+        "content/posts/hero-2025.md",
+        "content/pages/guides.md",
+        "content/pages/nested-diagram.md",
+    };
+    var src_root = try Io.Dir.cwd().openDir(io, lab_out, .{});
+    defer src_root.close(io);
+    var dst_root = try Io.Dir.cwd().openDir(io, clean_out, .{});
+    defer dst_root.close(io);
+    for (keep) |rel| {
+        const bytes = try wordpress.readFileAlloc(io, src_root, rel, gpa);
+        defer gpa.free(bytes);
+        // writeBytes is private; use ensure parent + writeFile via dst_root paths.
+        if (std.fs.path.dirname(rel)) |parent| {
+            try dst_root.createDirPath(io, parent);
+        }
+        try dst_root.writeFile(io, .{ .sub_path = rel, .data = bytes });
+    }
+    // Copy sibling asset trees for materialised pages.
+    const asset_trees = [_][]const u8{
+        "content/posts/full-upload.assets",
+        "content/posts/relative-uploads.assets",
+        "content/posts/shared-again.assets",
+        "content/posts/query-fragment.assets",
+        "content/posts/hero-2025.assets",
+        "content/pages/nested-diagram.assets",
+    };
+    for (asset_trees) |tree| {
+        // Recursive copy via walk of known nested files in this fixture.
+        var src_tree = src_root.openDir(io, tree, .{ .iterate = true }) catch continue;
+        defer src_tree.close(io);
+        try copyTreeRecursive(io, gpa, src_root, dst_root, tree);
+    }
+
+    const content_from_root = "tools/migration-lab/fixtures/.tmp-media-wxr-compile-clean/content";
+    const html_from_root = "test-output/wp-media-compile-html";
+    const boris_from_root = "zig-out/bin/boris";
+    const layout_from_root = "layouts/main.html";
+
+    Io.Dir.cwd().deleteTree(io, "../../test-output/wp-media-compile-html") catch {};
+    try Io.Dir.cwd().createDirPath(io, "../../test-output");
+
+    const argv = [_][]const u8{
+        boris_from_root,
+        "--input",
+        content_from_root,
+        "--html-dir",
+        html_from_root,
+        "--html-layout",
+        layout_from_root,
+        "--quiet",
+    };
+    const result = std.process.run(gpa, io, .{
+        .argv = &argv,
+        .cwd = .{ .path = "../.." },
+        .stdout_limit = .limited(64 * 1024),
+        .stderr_limit = .limited(64 * 1024),
+    }) catch {
+        Io.Dir.cwd().deleteTree(io, lab_out) catch {};
+        Io.Dir.cwd().deleteTree(io, clean_out) catch {};
+        return;
+    };
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+
+    const code: u8 = switch (result.term) {
+        .exited => |c| c,
+        else => 255,
+    };
+    if (code != 0) {
+        std.debug.print("boris compile failed code={d} stderr={s} stdout={s}\n", .{ code, result.stderr, result.stdout });
+    }
+    try std.testing.expectEqual(@as(u8, 0), code);
+
+    var html_root = try Io.Dir.cwd().openDir(io, "../../test-output/wp-media-compile-html", .{});
+    defer html_root.close(io);
+    const pub_hero = try wordpress.readFileAlloc(io, html_root, "posts/full-upload.assets/2024/01/hero.png", gpa);
+    defer gpa.free(pub_hero);
+    try std.testing.expect(pub_hero.len > 0);
+    const pub_nested = try wordpress.readFileAlloc(io, html_root, "pages/nested-diagram.assets/2024/06/diagram.png", gpa);
+    defer gpa.free(pub_nested);
+    try std.testing.expect(pub_nested.len > 0);
+
+    Io.Dir.cwd().deleteTree(io, lab_out) catch {};
+    Io.Dir.cwd().deleteTree(io, clean_out) catch {};
+    Io.Dir.cwd().deleteTree(io, "../../test-output/wp-media-compile-html") catch {};
+}
+
+fn copyTreeRecursive(io: Io, gpa: std.mem.Allocator, src_root: Io.Dir, dst_root: Io.Dir, rel: []const u8) !void {
+    var dir = try src_root.openDir(io, rel, .{ .iterate = true });
+    defer dir.close(io);
+    var it = dir.iterate();
+    while (try it.next(io)) |entry| {
+        const child = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ rel, entry.name });
+        defer gpa.free(child);
+        if (entry.kind == .directory) {
+            try dst_root.createDirPath(io, child);
+            try copyTreeRecursive(io, gpa, src_root, dst_root, child);
+            continue;
+        }
+        if (entry.kind != .file) continue;
+        const data = try wordpress.readFileAlloc(io, src_root, child, gpa);
+        defer gpa.free(data);
+        if (std.fs.path.dirname(child)) |parent| {
+            try dst_root.createDirPath(io, parent);
+        }
+        try dst_root.writeFile(io, .{ .sub_path = child, .data = data });
+    }
 }

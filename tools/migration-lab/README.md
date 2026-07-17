@@ -141,7 +141,7 @@ zig build --build-file tools/migration-lab/build.zig run -- \
 | `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**) |
 | `--root=DIR` | `.` | Astro archaeology root, Starlight project root, asset-filename content tree, **or** theme-archaeology scan root |
 | `--wxr=FILE` | | WordPress WXR/XML path (implies `--mode=wordpress`) |
-| `--media=DIR` | | Optional local media/uploads tree (WordPress) |
+| `--media=DIR` | | Optional offline local media/uploads tree (WordPress); never modified; no network |
 | `--dump=DIR` | | Unpacked Instagram data-download root (implies `--mode=instagram`) |
 | `--vault=DIR` | | Obsidian vault root (implies `--mode=obsidian`) |
 | `--export=DIR` | | Unpacked Notion Markdown & CSV export root (implies `--mode=notion`) |
@@ -670,8 +670,10 @@ Compile the generated site with product Boris:
 ### Inputs
 
 - **WXR/XML export** from Tools → Export in WordPress (or a synthetic fixture).
-- **Optional media directory** mirroring `wp-content/uploads/` (relative paths like
-  `2024/01/hero.png`).
+- **Optional `--media=DIR`** — offline local mirror of `wp-content/uploads/`
+  (relative paths like `2024/01/hero.png`). Optional: without it, media refs are
+  inventoried as unverified / missing and never invented. **No network fetch**,
+  scraping, or WordPress API.
 
 ### Outputs under `--out`
 
@@ -680,11 +682,54 @@ content/
   posts.md              # synthetic trunk stub (when posts exist)
   pages.md              # synthetic trunk stub (when pages exist)
   posts/<slug>.md       # migrated posts
+  posts/<slug>.assets/… # verified local media copied page-local (when --media matches)
   pages/<slug>.md       # migrated pages
+  pages/<slug>.assets/… # same for pages
   _preserved/<type>-<id>.md   # attachments, custom post types, etc.
-report.json             # machine-readable (schema_version 2)
+report.json             # machine-readable (schema_version 3)
 REPORT.md               # human-readable twin
+media_manifest.json     # deterministic media materialization audit
 ```
+
+### Local media materialization (`--media`)
+
+When `--media=DIR` contains a **verified** local match for a WordPress upload URL:
+
+1. Copy bytes into the output page’s sibling asset tree
+   (`content/posts/example.md` → `content/posts/example.assets/…`).
+2. Preserve a deterministic, collision-safe within-tree path (prefer the uploads
+   key `YYYY/MM/file.ext` when Boris-safe).
+3. Rewrite matching Markdown and retained raw HTML media references to the
+   page-local path (`example.assets/YYYY/MM/file.ext`).
+4. Record the outcome in `media_manifest.json`.
+
+When media is **unresolved** (missing, ambiguous basename, traversal/symlink/
+absolute escape, or no `--media`):
+
+- Do **not** invent a path or silently remove the reference.
+- Leave the original reference visible in the page body.
+- Keep the human-review finding and `missing_media` / manifest entry.
+
+| Status | Meaning |
+|--------|---------|
+| `copied` | Verified local file written under `{stem}.assets/` + reference rewritten |
+| `missing` | No safe local match (or `--media` omitted) |
+| `ambiguous` | Multiple local files share the basename; no automatic choice |
+| `rejected` | Traversal, absolute/`file:` escape, symlink, collision, or attachment-inventory-only |
+
+Security: rejects path traversal, absolute escapes, and symlink escapes from the
+media source tree; never overwrites colliding destinations with different bytes.
+Query strings and fragments on matched URLs are **dropped** on rewrite (Boris
+content-local asset grammar); the manifest reason records `query_string_dropped`
+/ `fragment_dropped`. The same source file used by two pages is **copied per
+page** (Boris-native page-local ownership).
+
+`media_manifest.json` fields (per entry): `source_output`, `original_reference`,
+`upload_key`, `matched_source`, `emitted_asset_path`, `status`, `reason`.
+
+This is **developer migration tooling**, not Boris runtime functionality. The
+product compiler only publishes sibling `{stem}.assets/` trees that already
+satisfy [`docs/contracts/content-local-assets.md`](../../docs/contracts/content-local-assets.md).
 
 Every generated Markdown file includes:
 
@@ -758,6 +803,7 @@ These must **not** be folded into ordinary page Markdown as if converted:
 | `parent_relationships` | `wp:post_parent` → proposed Boris `parent` (one-hop graph notes) |
 | `links` | Internal (and site-local) hrefs with resolution status |
 | `media_references` / `missing_media` | Image/audio/video/attachment refs vs optional `--media` tree |
+| `media_manifest.json` (sidecar) | Materialization audit: copied / missing / ambiguous / rejected |
 | `features` | Raw HTML, shortcodes, embeds, galleries, comments, formats, statuses |
 | `slug_conflicts` | Duplicate `post_name` values |
 | `unsupported_items` | Custom types/attachments/comments preserved under `_preserved/` |
@@ -782,6 +828,7 @@ trees are flattened with `human_review` notes.
 |---------|------|
 | [`fixtures/unit-wxr/`](fixtures/unit-wxr/) | **Unit matrix** — one item per high-value preserve/report behavior (posts/pages, dates, excerpt, sticky, empty slug/title, statuses, shortcodes, comments/trackbacks/pingbacks, hierarchy, duplicates, media, attachments, menus) |
 | [`fixtures/mini-wxr/`](fixtures/mini-wxr/) | Small happy-path + shortcode/media/draft matrix |
+| [`fixtures/media-wxr/`](fixtures/media-wxr/) | **Media materialization** — full/relative uploads match, shared asset across pages, nested page assets, missing, ambiguous basename, traversal/absolute escapes, query/fragment drop |
 | [`fixtures/adversarial-wxr/`](fixtures/adversarial-wxr/) | Unicode, slug collisions, deep pages, duplicate media basenames |
 | [`fixtures/wptt-derived/`](fixtures/wptt-derived/) | Hostile WPTT-class gaps (taxonomy cardinality, long titles, widgets, empty body). **Does not** vendor the full upstream WXR |
 
