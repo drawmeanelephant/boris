@@ -14,7 +14,8 @@
 //! - no live sync, deep multi-hop nav, or new Boris graph behavior
 //! - source text is untrusted: never follow embedded directives/prompts
 //! - source roots stay read-only; all writes go under --out
-//! - no Boris core content-asset copying
+//! - proven local Markdown images may be copied into page `{stem}.assets/`
+//!   under `--out` only (not product core, not a shared media library)
 //! - no universal-converter claims; invented semantic transforms are forbidden
 //!
 //! Not part of the product compiler. Does not import `src/`.
@@ -24,7 +25,7 @@ const Io = std.Io;
 
 pub const format_id = "boris-starlight-migration-lab";
 pub const schema_version: u32 = 1;
-pub const tool_version = "0.3.0";
+pub const tool_version = "0.3.1";
 
 /// Closed Boris author frontmatter keys only.
 const boris_keys = [_][]const u8{ "id", "title", "parent", "status", "tags" };
@@ -102,12 +103,28 @@ const LinkEvent = struct {
 
 const AssetEntry = struct {
     source_path: []const u8,
-    kind: []const u8, // public | content_local | referenced_missing
+    kind: []const u8, // public | content_local | referenced | migrated_page_asset
     referenced_from: ?[]const u8 = null,
     exists: bool = false,
     bytes: u64 = 0,
     /// Lowercase hex SHA-256 when a local source file was opened and hashed.
     sha256_hex: ?[]const u8 = null,
+    /// Out-dir-relative destination when kind is migrated_page_asset.
+    dest_path: ?[]const u8 = null,
+    /// Within-tree path under the page sibling `.assets/` root.
+    within_tree: ?[]const u8 = null,
+};
+
+/// One proven Markdown image copied into a page sibling `{stem}.assets/` tree.
+const MigratedAsset = struct {
+    source_path: []const u8,
+    dest_path: []const u8,
+    within_tree: []const u8,
+    page_entity: []const u8,
+    original_ref: []const u8,
+    rewritten_ref: []const u8,
+    bytes: u64,
+    sha256_hex: []const u8,
 };
 
 const NavDecision = struct {
@@ -587,6 +604,435 @@ fn resolveRelativeToEntity(allocator: std.mem.Allocator, entity_id: []const u8, 
     return try path_buf.toOwnedSlice(allocator);
 }
 
+fn pageStemFromEntity(entity_id: []const u8) []const u8 {
+    if (std.mem.lastIndexOfScalar(u8, entity_id, '/')) |i| return entity_id[i + 1 ..];
+    return entity_id;
+}
+
+fn pageDirFromLocaleRel(locale_rel: []const u8) []const u8 {
+    if (std.fs.path.dirname(locale_rel)) |d| {
+        if (d.len == 0 or std.mem.eql(u8, d, ".")) return "";
+        return d;
+    }
+    return "";
+}
+
+/// Asset-like path extensions that may be content/public media.
+fn isAssetLikePath(path: []const u8) bool {
+    const lower_exts = [_][]const u8{ ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".mp4", ".webm", ".pdf", ".ico", ".css", ".js", ".woff", ".woff2" };
+    for (lower_exts) |ext| {
+        if (path.len >= ext.len and std.ascii.eqlIgnoreCase(path[path.len - ext.len ..], ext)) return true;
+    }
+    return false;
+}
+
+/// Boris content-local within-tree grammar: `/`-separated `[A-Za-z0-9._-]+` segments.
+fn isBorisSafeWithinTree(path: []const u8) bool {
+    if (path.len == 0) return false;
+    if (std.mem.indexOfScalar(u8, path, '\\') != null) return false;
+    var start: usize = 0;
+    while (start <= path.len) {
+        const slash = std.mem.indexOfScalarPos(u8, path, start, '/') orelse path.len;
+        const seg = path[start..slash];
+        if (seg.len == 0 or std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, "..")) return false;
+        for (seg) |c| {
+            const ok = (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or
+                (c >= '0' and c <= '9') or c == '.' or c == '_' or c == '-';
+            if (!ok) return false;
+        }
+        if (slash >= path.len) break;
+        start = slash + 1;
+    }
+    return true;
+}
+
+/// Join `base` + `rel` with `/` segments, resolving `.` and `..`.
+/// Returns null when `..` would escape above the base root.
+fn joinNormalized(allocator: std.mem.Allocator, base: []const u8, rel: []const u8) !?[]u8 {
+    var segs: std.ArrayList([]const u8) = .empty;
+    defer segs.deinit(allocator);
+    const push_parts = struct {
+        fn go(a: std.mem.Allocator, list: *std.ArrayList([]const u8), parts: []const u8) !?void {
+            var it = std.mem.splitScalar(u8, parts, '/');
+            while (it.next()) |seg| {
+                if (seg.len == 0 or std.mem.eql(u8, seg, ".")) continue;
+                if (std.mem.eql(u8, seg, "..")) {
+                    if (list.items.len == 0) return null;
+                    _ = list.pop();
+                    continue;
+                }
+                try list.append(a, seg);
+            }
+            return {};
+        }
+    }.go;
+    if ((try push_parts(allocator, &segs, base)) == null) return null;
+    if ((try push_parts(allocator, &segs, rel)) == null) return null;
+    if (segs.items.len == 0) return try allocator.dupe(u8, "");
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    for (segs.items, 0..) |s, i| {
+        if (i > 0) try out.append(allocator, '/');
+        try out.appendSlice(allocator, s);
+    }
+    return try out.toOwnedSlice(allocator);
+}
+
+fn pathExistsFile(io: Io, root: Io.Dir, rel: []const u8) bool {
+    if (rel.len == 0) return false;
+    var file = root.openFile(io, rel, .{}) catch return false;
+    file.close(io);
+    return true;
+}
+
+fn stripImageDestExtras(dest: []const u8) []const u8 {
+    var t = trim(dest);
+    if (t.len >= 2 and t[0] == '<' and t[t.len - 1] == '>') {
+        t = trim(t[1 .. t.len - 1]);
+    }
+    // Markdown image title: url "title" — keep only the url token.
+    if (std.mem.indexOfScalar(u8, t, ' ')) |sp| {
+        const rest = trim(t[sp..]);
+        if (rest.len > 0 and rest[0] == '"') t = trim(t[0..sp]);
+    }
+    return t;
+}
+
+const ImageResolveStatus = enum {
+    found,
+    missing,
+    escape,
+    invalid,
+};
+
+const ImageResolve = struct {
+    status: ImageResolveStatus,
+    /// Project-root-relative source path when found.
+    source_rel: ?[]const u8 = null,
+    /// Within-tree path under `{stem}.assets/`.
+    within_tree: ?[]const u8 = null,
+    /// Preserve an already-correct `{stem}.assets/…` Markdown destination.
+    preserve_ref: bool = false,
+};
+
+/// Resolve a Markdown image destination against the source document and known roots
+/// (`content_root`, `public/`). Never invents paths; escape/missing/invalid are explicit.
+fn resolveImageSource(
+    a: std.mem.Allocator,
+    io: Io,
+    source: Io.Dir,
+    content_root: []const u8,
+    locale_rel: []const u8,
+    entity_id: []const u8,
+    raw_dest: []const u8,
+) !ImageResolve {
+    const dest = stripImageDestExtras(raw_dest);
+    if (dest.len == 0) return .{ .status = .invalid };
+    if (std.mem.startsWith(u8, dest, "http://") or std.mem.startsWith(u8, dest, "https://") or
+        std.mem.startsWith(u8, dest, "mailto:") or std.mem.startsWith(u8, dest, "tel:") or
+        std.mem.startsWith(u8, dest, "data:") or std.mem.startsWith(u8, dest, "//"))
+    {
+        return .{ .status = .invalid }; // caller should not treat remotes as local
+    }
+    if (std.mem.indexOfScalar(u8, dest, '\\') != null) return .{ .status = .invalid };
+
+    // Drop query (documented limitation); keep path for fragment split.
+    const split = try splitTargetFragment(a, dest);
+    const norm = split.path;
+    if (norm.len == 0) return .{ .status = .invalid };
+
+    const stem = pageStemFromEntity(entity_id);
+    const page_dir = pageDirFromLocaleRel(locale_rel);
+    const already_prefix = try std.fmt.allocPrint(a, "{s}.assets/", .{stem});
+
+    // Already-correct Boris form relative to the page: `{stem}.assets/within…`
+    var rel_for_already = norm;
+    if (std.mem.startsWith(u8, rel_for_already, "./")) rel_for_already = rel_for_already[2..];
+    if (std.mem.startsWith(u8, rel_for_already, already_prefix)) {
+        const within = rel_for_already[already_prefix.len..];
+        if (!isBorisSafeWithinTree(within)) return .{ .status = .invalid };
+        const under_page = if (page_dir.len == 0)
+            try a.dupe(u8, rel_for_already)
+        else
+            try std.fmt.allocPrint(a, "{s}/{s}", .{ page_dir, rel_for_already });
+        const full = try std.fmt.allocPrint(a, "{s}/{s}", .{ content_root, under_page });
+        if (pathExistsFile(io, source, full)) {
+            return .{
+                .status = .found,
+                .source_rel = full,
+                .within_tree = within,
+                .preserve_ref = true,
+            };
+        }
+        return .{ .status = .missing, .source_rel = full, .within_tree = within };
+    }
+
+    // Site-absolute → public/
+    if (std.mem.startsWith(u8, norm, "/")) {
+        if (std.mem.indexOf(u8, norm, "/../") != null or std.mem.endsWith(u8, norm, "/..") or
+            std.mem.startsWith(u8, norm, "/.."))
+            return .{ .status = .escape };
+        const under_public = try std.fmt.allocPrint(a, "public{s}", .{norm});
+        if (!isBorisSafeWithinTree(norm[1..])) {
+            // Still report existence when possible, but refuse unsafe within-tree copy.
+            if (pathExistsFile(io, source, under_public)) return .{ .status = .invalid, .source_rel = under_public };
+            return .{ .status = .invalid };
+        }
+        if (pathExistsFile(io, source, under_public)) {
+            return .{
+                .status = .found,
+                .source_rel = under_public,
+                .within_tree = norm[1..],
+            };
+        }
+        return .{ .status = .missing, .source_rel = under_public, .within_tree = norm[1..] };
+    }
+
+    // Relative to source document directory under the content root.
+    var rel = norm;
+    if (std.mem.startsWith(u8, rel, "./")) rel = rel[2..];
+    const joined = try joinNormalized(a, page_dir, rel) orelse return .{ .status = .escape };
+    const full = if (joined.len == 0)
+        try a.dupe(u8, content_root)
+    else
+        try std.fmt.allocPrint(a, "{s}/{s}", .{ content_root, joined });
+
+    // Within-tree: prefer path relative to the page directory; else basename.
+    var within: []const u8 = undefined;
+    if (page_dir.len > 0) {
+        const pfx = try std.fmt.allocPrint(a, "{s}/", .{page_dir});
+        if (std.mem.startsWith(u8, joined, pfx)) {
+            within = joined[pfx.len..];
+        } else if (std.mem.eql(u8, joined, page_dir)) {
+            return .{ .status = .invalid };
+        } else {
+            within = std.fs.path.basename(joined);
+        }
+    } else {
+        within = joined;
+    }
+    if (within.len == 0 or !isBorisSafeWithinTree(within)) {
+        if (pathExistsFile(io, source, full)) return .{ .status = .invalid, .source_rel = full };
+        return .{ .status = .invalid };
+    }
+
+    if (pathExistsFile(io, source, full)) {
+        return .{ .status = .found, .source_rel = full, .within_tree = within };
+    }
+
+    // Fallback: content-root-relative (authors sometimes omit ./ from section root).
+    if (page_dir.len > 0) {
+        const alt_join = try joinNormalized(a, "", rel) orelse return .{ .status = .escape };
+        if (alt_join.len > 0) {
+            const alt_full = try std.fmt.allocPrint(a, "{s}/{s}", .{ content_root, alt_join });
+            if (pathExistsFile(io, source, alt_full) and isBorisSafeWithinTree(std.fs.path.basename(alt_join))) {
+                return .{
+                    .status = .found,
+                    .source_rel = alt_full,
+                    .within_tree = std.fs.path.basename(alt_join),
+                };
+            }
+        }
+    }
+
+    return .{ .status = .missing, .source_rel = full, .within_tree = within };
+}
+
+/// Rewrite Markdown images (`![alt](dest)`) that resolve to proven local files into
+/// Boris page-sibling `{stem}.assets/` destinations, and schedule byte copies under --out.
+/// Missing / escape / invalid destinations are left unchanged with explicit review events.
+/// Query strings are dropped (same as link targets); fragments are reattached when present.
+fn migratePageImages(
+    a: std.mem.Allocator,
+    io: Io,
+    source: Io.Dir,
+    content_root: []const u8,
+    page: *SourcePage,
+    migrated: *std.ArrayList(MigratedAsset),
+) !void {
+    if (page.is_synthetic) return;
+    const body = page.body;
+    var out: std.ArrayList(u8) = .empty;
+    var events: std.ArrayList(LinkEvent) = .empty;
+    // Preserve prior link-rewrite events.
+    try events.appendSlice(a, page.link_events);
+
+    var pos: usize = 0;
+    var line_no: u32 = 1;
+    // Per-page within-tree occupancy for collision disambiguation.
+    var used_within: std.StringHashMapUnmanaged([]const u8) = .empty; // within → source_rel
+
+    while (pos < body.len) {
+        if (body[pos] == '!' and pos + 1 < body.len and body[pos + 1] == '[') {
+            if (std.mem.indexOfPos(u8, body, pos + 2, "](")) |mid| {
+                const text = body[pos + 2 .. mid];
+                if (std.mem.indexOfScalar(u8, text, '\n') == null) {
+                    const url_start = mid + 2;
+                    if (std.mem.indexOfScalarPos(u8, body, url_start, ')')) |url_end| {
+                        const raw_url = body[url_start..url_end];
+                        if (std.mem.indexOfScalar(u8, raw_url, '\n') == null) {
+                            const dest_core = stripImageDestExtras(raw_url);
+                            // Remote / non-local schemes: leave bytes unchanged.
+                            if (std.mem.startsWith(u8, dest_core, "http://") or
+                                std.mem.startsWith(u8, dest_core, "https://") or
+                                std.mem.startsWith(u8, dest_core, "mailto:") or
+                                std.mem.startsWith(u8, dest_core, "tel:") or
+                                std.mem.startsWith(u8, dest_core, "data:") or
+                                std.mem.startsWith(u8, dest_core, "//"))
+                            {
+                                try out.appendSlice(a, body[pos .. url_end + 1]);
+                                pos = url_end + 1;
+                                continue;
+                            }
+
+                            // Only attempt migration for asset-like destinations.
+                            const split = try splitTargetFragment(a, dest_core);
+                            if (!isAssetLikePath(split.path)) {
+                                try out.appendSlice(a, body[pos .. url_end + 1]);
+                                pos = url_end + 1;
+                                continue;
+                            }
+
+                            const resolved = try resolveImageSource(
+                                a,
+                                io,
+                                source,
+                                content_root,
+                                page.locale_rel,
+                                page.entity_id,
+                                dest_core,
+                            );
+
+                            switch (resolved.status) {
+                                .found => {
+                                    const within0 = resolved.within_tree.?;
+                                    const source_rel = resolved.source_rel.?;
+                                    // Disambiguate within-tree collisions on the same page.
+                                    var within = within0;
+                                    if (used_within.get(within)) |prior| {
+                                        if (!std.mem.eql(u8, prior, source_rel)) {
+                                            // Insert -N before extension.
+                                            const ext_at = std.mem.lastIndexOfScalar(u8, within0, '.') orelse within0.len;
+                                            var n: usize = 2;
+                                            while (n < 1000) : (n += 1) {
+                                                const cand = try std.fmt.allocPrint(a, "{s}-{d}{s}", .{
+                                                    within0[0..ext_at],
+                                                    n,
+                                                    within0[ext_at..],
+                                                });
+                                                if (used_within.get(cand) == null) {
+                                                    within = cand;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    try used_within.put(a, within, source_rel);
+
+                                    const stem = pageStemFromEntity(page.entity_id);
+                                    const md_ref = if (resolved.preserve_ref)
+                                        try std.fmt.allocPrint(a, "{s}.assets/{s}", .{ stem, within })
+                                    else
+                                        try std.fmt.allocPrint(a, "{s}.assets/{s}", .{ stem, within });
+                                    // Reattach fragment when present; queries stay dropped.
+                                    const rewritten_ref = if (split.fragment) |frag|
+                                        try std.fmt.allocPrint(a, "{s}#{s}", .{ md_ref, frag })
+                                    else
+                                        md_ref;
+
+                                    // Output path: content/{entity_dir}{stem}.assets/{within}
+                                    // page.output_path is content/{entity}.md
+                                    const out_md = page.output_path; // content/features/alpha.md
+                                    const out_stem_path = out_md[0 .. out_md.len - 3]; // strip .md
+                                    const dest_path = try std.fmt.allocPrint(a, "{s}.assets/{s}", .{ out_stem_path, within });
+
+                                    // Read + hash once for manifest.
+                                    const data = try readFileAlloc(io, source, source_rel, a);
+                                    const hex = try sha256Hex(a, data);
+
+                                    try migrated.append(a, .{
+                                        .source_path = source_rel,
+                                        .dest_path = dest_path,
+                                        .within_tree = within,
+                                        .page_entity = page.entity_id,
+                                        .original_ref = try a.dupe(u8, dest_core),
+                                        .rewritten_ref = rewritten_ref,
+                                        .bytes = data.len,
+                                        .sha256_hex = hex,
+                                    });
+
+                                    try events.append(a, .{
+                                        .kind = "markdown_image",
+                                        .target = try a.dupe(u8, dest_core),
+                                        .line = line_no,
+                                        .resolution = "rewritten",
+                                        .rewritten_to = rewritten_ref,
+                                        .review_reason = "image_migrated_to_page_assets",
+                                        .fragment = split.fragment,
+                                    });
+
+                                    try out.appendSlice(a, "![");
+                                    try out.appendSlice(a, text);
+                                    try out.appendSlice(a, "](");
+                                    try out.appendSlice(a, rewritten_ref);
+                                    try out.append(a, ')');
+                                    pos = url_end + 1;
+                                    continue;
+                                },
+                                .missing => {
+                                    try events.append(a, .{
+                                        .kind = "markdown_image",
+                                        .target = try a.dupe(u8, dest_core),
+                                        .line = line_no,
+                                        .resolution = "review",
+                                        .review_reason = "referenced_asset_missing",
+                                        .fragment = split.fragment,
+                                    });
+                                    try out.appendSlice(a, body[pos .. url_end + 1]);
+                                    pos = url_end + 1;
+                                    continue;
+                                },
+                                .escape => {
+                                    try events.append(a, .{
+                                        .kind = "markdown_image",
+                                        .target = try a.dupe(u8, dest_core),
+                                        .line = line_no,
+                                        .resolution = "review",
+                                        .review_reason = "asset_path_escapes_migration_root",
+                                        .fragment = split.fragment,
+                                    });
+                                    try out.appendSlice(a, body[pos .. url_end + 1]);
+                                    pos = url_end + 1;
+                                    continue;
+                                },
+                                .invalid => {
+                                    try events.append(a, .{
+                                        .kind = "markdown_image",
+                                        .target = try a.dupe(u8, dest_core),
+                                        .line = line_no,
+                                        .resolution = "review",
+                                        .review_reason = "asset_path_invalid_or_not_boris_safe",
+                                        .fragment = split.fragment,
+                                    });
+                                    try out.appendSlice(a, body[pos .. url_end + 1]);
+                                    pos = url_end + 1;
+                                    continue;
+                                },
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (body[pos] == '\n') line_no += 1;
+        try out.append(a, body[pos]);
+        pos += 1;
+    }
+
+    page.body = try out.toOwnedSlice(a);
+    page.link_events = try events.toOwnedSlice(a);
+}
+
 fn routeToEntityCandidate(allocator: std.mem.Allocator, route_prefix: []const u8, route: []const u8) !?[]u8 {
     // locale_dir: /en → index ; /en/features/app → features/app
     // root_locale: / → index ; /features/app → features/app
@@ -621,32 +1067,36 @@ fn rewriteLinks(
     var line_no: u32 = 1;
 
     while (pos < body.len) {
-        // Scan for markdown link [text](url) or bare patterns.
+        // Scan for markdown link [text](url). Images (`![...](...)`) are left for
+        // migratePageImages so page-local asset migration owns that surface.
         if (body[pos] == '[') {
-            // Find ](
-            if (std.mem.indexOfPos(u8, body, pos, "](")) |mid| {
-                const text = body[pos + 1 .. mid];
-                // Reject if nested newline in text for simplicity (multi-line links → leave).
-                if (std.mem.indexOfScalar(u8, text, '\n') == null) {
-                    const url_start = mid + 2;
-                    if (std.mem.indexOfScalarPos(u8, body, url_start, ')')) |url_end| {
-                        const url = body[url_start..url_end];
-                        if (std.mem.indexOfScalar(u8, url, '\n') == null) {
-                            const ev = try classifyAndMaybeRewrite(a, route_prefix, entity_id, url, entities, "markdown", line_no);
-                            try events.append(a, ev);
-                            if (std.mem.eql(u8, ev.resolution, "rewritten")) {
-                                try out.appendSlice(a, "[[");
-                                try out.appendSlice(a, ev.rewritten_to.?);
-                                if (text.len > 0) {
-                                    try out.append(a, '|');
-                                    try out.appendSlice(a, text);
+            const is_image = pos > 0 and body[pos - 1] == '!';
+            if (!is_image) {
+                // Find ](
+                if (std.mem.indexOfPos(u8, body, pos, "](")) |mid| {
+                    const text = body[pos + 1 .. mid];
+                    // Reject if nested newline in text for simplicity (multi-line links → leave).
+                    if (std.mem.indexOfScalar(u8, text, '\n') == null) {
+                        const url_start = mid + 2;
+                        if (std.mem.indexOfScalarPos(u8, body, url_start, ')')) |url_end| {
+                            const url = body[url_start..url_end];
+                            if (std.mem.indexOfScalar(u8, url, '\n') == null) {
+                                const ev = try classifyAndMaybeRewrite(a, route_prefix, entity_id, url, entities, "markdown", line_no);
+                                try events.append(a, ev);
+                                if (std.mem.eql(u8, ev.resolution, "rewritten")) {
+                                    try out.appendSlice(a, "[[");
+                                    try out.appendSlice(a, ev.rewritten_to.?);
+                                    if (text.len > 0) {
+                                        try out.append(a, '|');
+                                        try out.appendSlice(a, text);
+                                    }
+                                    try out.appendSlice(a, "]]");
+                                } else {
+                                    try out.appendSlice(a, body[pos .. url_end + 1]);
                                 }
-                                try out.appendSlice(a, "]]");
-                            } else {
-                                try out.appendSlice(a, body[pos .. url_end + 1]);
+                                pos = url_end + 1;
+                                continue;
                             }
-                            pos = url_end + 1;
-                            continue;
                         }
                     }
                 }
@@ -971,12 +1421,18 @@ fn enrichAssetsWithHashes(io: Io, a: std.mem.Allocator, root: Io.Dir, assets: *s
 }
 
 fn inventoryReferencedAssets(a: std.mem.Allocator, pages: []const SourcePage, assets: *std.ArrayList(AssetEntry)) !void {
-    // Record asset-resolution link targets that are not already inventoried by path.
+    // Record asset-resolution link targets and failed image migrations not already inventoried.
     var seen: std.StringHashMapUnmanaged(void) = .empty;
     for (assets.items) |e| try seen.put(a, e.source_path, {});
     for (pages) |p| {
         for (p.link_events) |ev| {
-            if (!std.mem.eql(u8, ev.resolution, "asset")) continue;
+            const is_asset_link = std.mem.eql(u8, ev.resolution, "asset");
+            const is_missing_image = std.mem.eql(u8, ev.resolution, "review") and
+                ev.review_reason != null and
+                (std.mem.eql(u8, ev.review_reason.?, "referenced_asset_missing") or
+                    std.mem.eql(u8, ev.review_reason.?, "asset_path_escapes_migration_root") or
+                    std.mem.eql(u8, ev.review_reason.?, "asset_path_invalid_or_not_boris_safe"));
+            if (!is_asset_link and !is_missing_image) continue;
             const key = ev.target;
             if (seen.get(key) != null) continue;
             try seen.put(a, key, {});
@@ -1543,7 +1999,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     var entities: EntityMap = .empty;
     for (pages.items) |p| try entities.put(a, p.entity_id, p.entity_id);
 
-    // Link rewrite pass.
+    // Link rewrite pass (wiki targets only; Markdown images handled next).
     for (pages.items) |*p| {
         if (p.is_synthetic) continue;
         const rewritten = try rewriteLinks(a, route_prefix, p.entity_id, p.body, &entities);
@@ -1551,12 +2007,32 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         p.link_events = rewritten.events;
     }
 
+    // ---- Proven local Markdown images → page `{stem}.assets/` (F-L1) ----
+    var migrated: std.ArrayList(MigratedAsset) = .empty;
+    for (pages.items) |*p| {
+        if (p.is_synthetic) continue;
+        try migratePageImages(a, io, source, content_root, p, &migrated);
+    }
+
     // ---- Assets inventory (existence + SHA-256 when local file proven) ----
     var assets: std.ArrayList(AssetEntry) = .empty;
     try listPublicAssets(io, a, source, "public", &assets);
     try collectLocalAssets(io, a, source, content_root, &assets, skip_locale_siblings);
     try enrichAssetsWithHashes(io, a, source, &assets);
-    // Referenced asset-like links that are missing from inventory.
+    // Migrated page assets (copied under --out).
+    for (migrated.items) |m| {
+        try assets.append(a, .{
+            .source_path = m.source_path,
+            .kind = "migrated_page_asset",
+            .referenced_from = m.page_entity,
+            .exists = true,
+            .bytes = m.bytes,
+            .sha256_hex = m.sha256_hex,
+            .dest_path = m.dest_path,
+            .within_tree = m.within_tree,
+        });
+    }
+    // Referenced asset-like links/images that are missing from inventory.
     try inventoryReferencedAssets(a, pages.items, &assets);
     std.mem.sort(AssetEntry, assets.items, {}, struct {
         fn less(_: void, x: AssetEntry, y: AssetEntry) bool {
@@ -1616,6 +2092,12 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         else
             try emitPage(a, p);
         try writeFile(io, out, p.output_path, text);
+    }
+
+    // Copy proven Markdown images into page sibling `.assets/` trees under --out.
+    for (migrated.items) |m| {
+        const data = try readFileAlloc(io, source, m.source_path, a);
+        try writeFile(io, out, m.dest_path, data);
     }
 
     // Boundary classification (preserved / stripped / manual_review).
@@ -1744,6 +2226,18 @@ fn buildBoundaryItems(
                     .line = ev.line,
                     .category = "asset_inventory_only",
                 });
+            } else if (std.mem.eql(u8, ev.resolution, "rewritten")) {
+                if (ev.review_reason) |rr| {
+                    if (std.mem.eql(u8, rr, "image_migrated_to_page_assets")) {
+                        try items.append(a, .{
+                            .class = "preserved",
+                            .source_path = p.source_path,
+                            .detail = try std.fmt.allocPrint(a, "image_migrated:{s}->{s}", .{ ev.target, ev.rewritten_to orelse "" }),
+                            .line = ev.line,
+                            .category = "migrated_page_asset",
+                        });
+                    }
+                }
             }
         }
     }
@@ -1767,11 +2261,21 @@ fn buildBoundaryItems(
                 .detail = "referenced_asset_missing",
                 .category = "missing_asset",
             });
+        } else if (std.mem.eql(u8, e.kind, "migrated_page_asset")) {
+            try items.append(a, .{
+                .class = "preserved",
+                .source_path = e.source_path,
+                .detail = try std.fmt.allocPrint(a, "migrated_page_asset dest={s} within={s}", .{
+                    e.dest_path orelse "",
+                    e.within_tree orelse "",
+                }),
+                .category = "migrated_page_asset",
+            });
         } else if (e.sha256_hex != null) {
             try items.append(a, .{
                 .class = "preserved",
                 .source_path = e.source_path,
-                .detail = try std.fmt.allocPrint(a, "asset_inventoried kind={s} sha256_proven (not copied into Boris core)", .{e.kind}),
+                .detail = try std.fmt.allocPrint(a, "asset_inventoried kind={s} sha256_proven (inventory; page images may also migrate)", .{e.kind}),
                 .category = "asset_inventory",
             });
         }
@@ -1972,7 +2476,7 @@ fn writeBoundaryManifest(a: std.mem.Allocator, io: Io, out: Io.Dir, items: []con
 
 fn writeAssetsManifest(a: std.mem.Allocator, io: Io, out: Io.Dir, assets: []const AssetEntry) !void {
     var buf: std.ArrayList(u8) = .empty;
-    try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-assets\",\n  \"schema_version\": 1,\n  \"policy\": \"Inventory only; no Boris core content-asset copying. SHA-256 present only when a local source file was opened and hashed.\",\n  \"assets\": [\n");
+    try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-assets\",\n  \"schema_version\": 1,\n  \"policy\": \"Public/content inventory plus proven Markdown images migrated into page {stem}.assets/ under --out. SHA-256 present when a local source file was opened and hashed. Missing/escape/invalid image refs are review-only (never invented). Query strings on image URLs are dropped; fragments are preserved when present.\",\n  \"assets\": [\n");
     for (assets, 0..) |e, i| {
         try buf.appendSlice(a, "    { \"source_path\": ");
         try appendJson(&buf, a, e.source_path);
@@ -1986,6 +2490,10 @@ fn writeAssetsManifest(a: std.mem.Allocator, io: Io, out: Io.Dir, assets: []cons
         if (e.sha256_hex) |h| try appendJson(&buf, a, h) else try buf.appendSlice(a, "null");
         try buf.appendSlice(a, ", \"referenced_from\": ");
         if (e.referenced_from) |r| try appendJson(&buf, a, r) else try buf.appendSlice(a, "null");
+        try buf.appendSlice(a, ", \"dest_path\": ");
+        if (e.dest_path) |d| try appendJson(&buf, a, d) else try buf.appendSlice(a, "null");
+        try buf.appendSlice(a, ", \"within_tree\": ");
+        if (e.within_tree) |w| try appendJson(&buf, a, w) else try buf.appendSlice(a, "null");
         try buf.appendSlice(a, " }");
         if (i + 1 < assets.len) try buf.append(a, ',');
         try buf.append(a, '\n');
@@ -2201,7 +2709,7 @@ fn writeReports(
     try report.appendSlice(a, "    \"starlight_runtime\": false,\n");
     try report.appendSlice(a, "    \"locale_semantics\": false,\n");
     try report.appendSlice(a, "    \"translation_linking\": false,\n");
-    try report.appendSlice(a, "    \"content_asset_copy\": false,\n");
+    try report.appendSlice(a, "    \"content_asset_copy\": \"proven_markdown_images_to_page_assets_only\",\n");
     try report.appendSlice(a, "    \"live_sync\": false,\n");
     try report.appendSlice(a, "    \"deep_nav\": false,\n");
     try report.appendSlice(a, "    \"universal_converter\": false\n");
@@ -2266,9 +2774,9 @@ fn writeReports(
     try md.appendSlice(a,
         \\| Class | Meaning |
         \\|-------|---------|
-        \\| **preserved** | Body text or asset inventory retained without invented semantics |
+        \\| **preserved** | Body text retained; proven local Markdown images migrated into page `{stem}.assets/` |
         \\| **stripped** | Untrusted agent/directive/instruction/prompt fences removed; payload never replayed |
-        \\| **manual_review** | Human migration work still required (MDX, FM, links, fragments, collisions, assets, …) |
+        \\| **manual_review** | Human migration work still required (MDX, FM, links, fragments, collisions, missing/escape assets, …) |
         \\
         \\
     );
@@ -2289,7 +2797,7 @@ fn writeReports(
         \\| Fragments (`#heading`) | **Review** | Explicit fragment inventory; heading not verified |
         \\| Attribute `href`/`to` routes | **Review** | Never auto-rewritten |
         \\| External links | **Left as-is** | Inventoried as external |
-        \\| Local / public assets | **Inventoried** | Existence + SHA-256 when local file proven; not copied |
+        \\| Local / public Markdown images | **Conditional** | Proven relative/public images → page `{stem}.assets/` + rewrite; missing/escape → review (never invented) |
         \\| Duplicate / ambiguous entity ids | **Disambiguated** | First source path wins; others get `-2`…; all reviewed |
         \\| Sidebar / autogenerate | **Flattened** | One-level forest: section Trunk + Satellite children |
         \\| Translation linking / i18n | **Unsupported** | Content-root discovery only |
@@ -2305,7 +2813,7 @@ fn writeReports(
         \\- `route_map.json` — source path → route → entity id → output
         \\- `selection_manifest.json` — deterministic candidate selection rows
         \\- `unsupported_manifest.json` — unmapped frontmatter + MDX + entity collisions
-        \\- `assets_manifest.json` — public + content-local assets (exists + sha256 when proven)
+        \\- `assets_manifest.json` — public + content-local inventory + migrated page assets
         \\- `nav_flatten.json` — discovery + sidebar evidence + flatten decisions
         \\- `provenance_manifest.json` — raw frontmatter + source provenance
         \\- `link_review.json` — every link event (rewritten / review / external / asset)
@@ -2460,7 +2968,7 @@ fn writeReports(
     try md.appendSlice(a, "- Source root is never written.\n");
     try md.appendSlice(a, "- No network, no package install, no Node/Astro/MDX execution.\n");
     try md.appendSlice(a, "- Embedded agent/directive/instruction/prompt fences are stripped without replaying payloads.\n");
-    try md.appendSlice(a, "- Content-asset inventory only; no Boris core asset copy.\n");
+    try md.appendSlice(a, "- Proven Markdown images copy into page `{stem}.assets/` under `--out` only; missing/escape paths are review-only.\n");
     try md.appendSlice(a, "- Not a universal converter; no invented semantic transformations.\n");
     try md.appendSlice(a, "- Repeated runs with the same inputs produce byte-identical reports (relative `--root`/`--out`).\n");
 
@@ -2926,4 +3434,161 @@ test "starlight: hostile fixture reports collisions, unsupported MDX, and strips
 
     Io.Dir.cwd().deleteTree(io, out_dir) catch {};
     Io.Dir.cwd().deleteTree(io, out_b) catch {};
+}
+
+test "starlight: joinNormalized resolves and rejects escape" {
+    const a = std.testing.allocator;
+    const ok = (try joinNormalized(a, "features", "./img/shot.png")).?;
+    defer a.free(ok);
+    try std.testing.expectEqualStrings("features/img/shot.png", ok);
+
+    const nested = (try joinNormalized(a, "nested/deep", "./media/pic.png")).?;
+    defer a.free(nested);
+    try std.testing.expectEqualStrings("nested/deep/media/pic.png", nested);
+
+    const esc = try joinNormalized(a, "escape", "../../../../secret.png");
+    try std.testing.expect(esc == null);
+
+    try std.testing.expect(isBorisSafeWithinTree("img/shot.png"));
+    try std.testing.expect(isBorisSafeWithinTree("media/pic.png"));
+    try std.testing.expect(!isBorisSafeWithinTree("../x.png"));
+    try std.testing.expect(!isBorisSafeWithinTree("café.png"));
+    try std.testing.expectEqualStrings("alpha", pageStemFromEntity("features/alpha"));
+    try std.testing.expectEqualStrings("features", pageDirFromLocaleRel("features/alpha.mdx"));
+}
+
+test "starlight: F-L1 image-path fixture migrates, preserves, and fails closed" {
+    const io = std.testing.io;
+    const out_dir = "fixtures/.test-image-path-starlight";
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+
+    var fixture = try Io.Dir.cwd().openDir(io, "fixtures/image-path-starlight", .{});
+    defer fixture.close(io);
+    const before = try readFileAlloc(io, fixture, "src/content/docs/en/features/alpha.mdx", std.testing.allocator);
+    defer std.testing.allocator.free(before);
+
+    try run(io, std.testing.allocator, .{
+        .source_root_dir = "fixtures/image-path-starlight",
+        .out_dir = out_dir,
+        .quiet = true,
+        .max_pages = 40,
+    });
+
+    var od = try Io.Dir.cwd().openDir(io, out_dir, .{});
+    defer od.close(io);
+
+    // 1+2: relative ./img/shot.png with asset at features/img/shot.png
+    const alpha = try readFileAlloc(io, od, "content/features/alpha.md", std.testing.allocator);
+    defer std.testing.allocator.free(alpha);
+    try std.testing.expect(std.mem.indexOf(u8, alpha, "![shot](alpha.assets/img/shot.png)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, alpha, "![hero](alpha.assets/images/hero.png)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, alpha, "./img/shot.png") == null);
+
+    // Copied bytes exist under out.
+    const shot = try readFileAlloc(io, od, "content/features/alpha.assets/img/shot.png", std.testing.allocator);
+    defer std.testing.allocator.free(shot);
+    try std.testing.expect(shot.len > 0);
+    const hero = try readFileAlloc(io, od, "content/features/alpha.assets/images/hero.png", std.testing.allocator);
+    defer std.testing.allocator.free(hero);
+    try std.testing.expect(hero.len > 0);
+
+    // 3: nested document + nested asset
+    const nested = try readFileAlloc(io, od, "content/nested/deep/page.md", std.testing.allocator);
+    defer std.testing.allocator.free(nested);
+    try std.testing.expect(std.mem.indexOf(u8, nested, "![pic](page.assets/media/pic.png)") != null);
+    const pic = try readFileAlloc(io, od, "content/nested/deep/page.assets/media/pic.png", std.testing.allocator);
+    defer std.testing.allocator.free(pic);
+    try std.testing.expect(pic.len > 0);
+
+    // 4: missing asset — leave original, explicit review
+    const missing = try readFileAlloc(io, od, "content/missing/page.md", std.testing.allocator);
+    defer std.testing.allocator.free(missing);
+    try std.testing.expect(std.mem.indexOf(u8, missing, "![nope](./nope.png)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, missing, "nope.assets") == null);
+
+    // 5: escape attempt — leave original, explicit review
+    const escape = try readFileAlloc(io, od, "content/escape/page.md", std.testing.allocator);
+    defer std.testing.allocator.free(escape);
+    try std.testing.expect(std.mem.indexOf(u8, escape, "![bad](../../../../secret.png)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, escape, "page.assets") == null);
+
+    // 6: already-correct `{stem}.assets/…` form preserved + copied
+    const ready = try readFileAlloc(io, od, "content/ready/note.md", std.testing.allocator);
+    defer std.testing.allocator.free(ready);
+    try std.testing.expect(std.mem.indexOf(u8, ready, "![ok](note.assets/ok.png)") != null);
+    const ok_bytes = try readFileAlloc(io, od, "content/ready/note.assets/ok.png", std.testing.allocator);
+    defer std.testing.allocator.free(ok_bytes);
+    try std.testing.expect(ok_bytes.len > 0);
+
+    const links = try readFileAlloc(io, od, "link_review.json", std.testing.allocator);
+    defer std.testing.allocator.free(links);
+    try std.testing.expect(std.mem.indexOf(u8, links, "image_migrated_to_page_assets") != null);
+    try std.testing.expect(std.mem.indexOf(u8, links, "referenced_asset_missing") != null);
+    try std.testing.expect(std.mem.indexOf(u8, links, "asset_path_escapes_migration_root") != null);
+
+    const assets = try readFileAlloc(io, od, "assets_manifest.json", std.testing.allocator);
+    defer std.testing.allocator.free(assets);
+    try std.testing.expect(std.mem.indexOf(u8, assets, "migrated_page_asset") != null);
+    try std.testing.expect(std.mem.indexOf(u8, assets, "content/features/alpha.assets/img/shot.png") != null);
+
+    // Source immutability.
+    const after = try readFileAlloc(io, fixture, "src/content/docs/en/features/alpha.mdx", std.testing.allocator);
+    defer std.testing.allocator.free(after);
+    try std.testing.expectEqualStrings(before, after);
+
+    // Determinism.
+    const out_b = "fixtures/.test-image-path-starlight-b";
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
+    try run(io, std.testing.allocator, .{
+        .source_root_dir = "fixtures/image-path-starlight",
+        .out_dir = out_b,
+        .quiet = true,
+        .max_pages = 40,
+    });
+    var ob = try Io.Dir.cwd().openDir(io, out_b, .{});
+    defer ob.close(io);
+    const aa = try readFileAlloc(io, od, "content/features/alpha.md", std.testing.allocator);
+    defer std.testing.allocator.free(aa);
+    const ab = try readFileAlloc(io, ob, "content/features/alpha.md", std.testing.allocator);
+    defer std.testing.allocator.free(ab);
+    try std.testing.expectEqualStrings(aa, ab);
+    const ma = try readFileAlloc(io, od, "assets_manifest.json", std.testing.allocator);
+    defer std.testing.allocator.free(ma);
+    const mb = try readFileAlloc(io, ob, "assets_manifest.json", std.testing.allocator);
+    defer std.testing.allocator.free(mb);
+    try std.testing.expectEqualStrings(ma, mb);
+
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
+}
+
+test "starlight: dogfood relative images migrate for Boris compile surface" {
+    const io = std.testing.io;
+    const out_dir = "fixtures/.test-starlight-dogfood-images";
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+
+    try run(io, std.testing.allocator, .{
+        .source_root_dir = "fixtures/dogfood-starlight",
+        .out_dir = out_dir,
+        .quiet = true,
+        .max_pages = 80,
+    });
+
+    var od = try Io.Dir.cwd().openDir(io, out_dir, .{});
+    defer od.close(io);
+
+    const alpha = try readFileAlloc(io, od, "content/features/alpha.md", std.testing.allocator);
+    defer std.testing.allocator.free(alpha);
+    try std.testing.expect(std.mem.indexOf(u8, alpha, "![shot](alpha.assets/img/shot.png)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, alpha, "./img/shot.png") == null);
+
+    const shot = try readFileAlloc(io, od, "content/features/alpha.assets/img/shot.png", std.testing.allocator);
+    defer std.testing.allocator.free(shot);
+    try std.testing.expect(shot.len > 0);
+
+    const pages = try readFileAlloc(io, od, "content/guides/pages.md", std.testing.allocator);
+    defer std.testing.allocator.free(pages);
+    try std.testing.expect(std.mem.indexOf(u8, pages, "pages.assets/assets/diagram.png") != null);
+
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
 }
