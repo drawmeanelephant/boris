@@ -1169,30 +1169,46 @@ test "wordpress: mediaRelativeKey" {
 }
 
 test "wordpress: matchMediaReference matrix" {
-    const files = [_][]const u8{ "2024/01/hero.png", "2025/02/hero.png", "2024/01/shared.png" };
-    const found = wordpress.matchMediaReference(&files, true, "https://example.com/wp-content/uploads/2024/01/hero.png");
+    const gpa = std.testing.allocator;
+    const files = [_][]const u8{ "2024/01/hero.png", "2025/02/hero.png", "2024/01/shared.png", "2024/01/my photo.png" };
+    const found = try wordpress.matchMediaReference(gpa, &files, true, "https://example.com/wp-content/uploads/2024/01/hero.png");
     try std.testing.expect(found.kind == .found);
     try std.testing.expectEqualStrings("2024/01/hero.png", found.local_path.?);
 
-    const rel = wordpress.matchMediaReference(&files, true, "uploads/2024/01/shared.png");
+    const rel = try wordpress.matchMediaReference(gpa, &files, true, "uploads/2024/01/shared.png");
     try std.testing.expect(rel.kind == .found);
     try std.testing.expectEqualStrings("2024/01/shared.png", rel.local_path.?);
 
-    const missing = wordpress.matchMediaReference(&files, true, "https://example.com/wp-content/uploads/2024/01/gone.png");
+    const missing = try wordpress.matchMediaReference(gpa, &files, true, "https://example.com/wp-content/uploads/2024/01/gone.png");
     try std.testing.expect(missing.kind == .missing);
 
-    const amb = wordpress.matchMediaReference(&files, true, "hero.png");
+    const amb = try wordpress.matchMediaReference(gpa, &files, true, "hero.png");
     try std.testing.expect(amb.kind == .ambiguous);
 
-    const trav = wordpress.matchMediaReference(&files, true, "https://example.com/wp-content/uploads/2024/01/../../secret.png");
+    const trav = try wordpress.matchMediaReference(gpa, &files, true, "https://example.com/wp-content/uploads/2024/01/../../secret.png");
     try std.testing.expect(trav.kind == .rejected);
 
-    const abs = wordpress.matchMediaReference(&files, true, "file:///etc/passwd.png");
+    const abs = try wordpress.matchMediaReference(gpa, &files, true, "file:///etc/passwd.png");
     try std.testing.expect(abs.kind == .rejected);
 
-    const no_dir = wordpress.matchMediaReference(&files, false, "https://example.com/wp-content/uploads/2024/01/hero.png");
+    const no_dir = try wordpress.matchMediaReference(gpa, &files, false, "https://example.com/wp-content/uploads/2024/01/hero.png");
     try std.testing.expect(no_dir.kind == .missing);
     try std.testing.expectEqualStrings("media_dir_not_provided", no_dir.reason);
+
+    // Percent-encoded reference matches decoded on-disk name
+    const pct = try wordpress.matchMediaReference(gpa, &files, true, "https://example.com/wp-content/uploads/2024/01/my%20photo.png");
+    try std.testing.expect(pct.kind == .found);
+    try std.testing.expectEqualStrings("2024/01/my photo.png", pct.local_path.?);
+    try std.testing.expectEqualStrings("percent_decoded_lookup", pct.reason);
+
+    // WP intermediate size: missing but original exists → explicit reason (no rewrite)
+    const resized = try wordpress.matchMediaReference(gpa, &files, true, "https://example.com/wp-content/uploads/2024/01/hero-300x200.png");
+    try std.testing.expect(resized.kind == .missing);
+    try std.testing.expectEqualStrings("likely_wp_resized_derivative", resized.reason);
+
+    // Percent-encoded traversal after decode is rejected
+    const pct_trav = try wordpress.matchMediaReference(gpa, &files, true, "https://example.com/wp-content/uploads/%2e%2e/secret.png");
+    try std.testing.expect(pct_trav.kind == .rejected);
 }
 
 test "wordpress: rewriteMediaReferences exact only" {
@@ -1786,6 +1802,36 @@ test "wordpress: media materialization copies, rewrites, and manifests" {
     defer gpa.free(h25);
     try std.testing.expect(std.mem.indexOf(u8, h25, "hero-2025.assets/2025/02/hero.png") != null);
 
+    // Percent-encoded URL matches decoded on-disk name; output is Boris-safe
+    const pct_page = try wordpress.readFileAlloc(io, a, "content/posts/percent-encoded.md", gpa);
+    defer gpa.free(pct_page);
+    try std.testing.expect(std.mem.indexOf(u8, pct_page, "my%20photo.png") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pct_page, "percent-encoded.assets/") != null);
+    try std.testing.expect(std.mem.indexOf(u8, man_a, "percent_decoded_lookup") != null);
+    // Emitted path uses sanitized basename when spaces are not Boris-safe
+    try std.testing.expect(std.mem.indexOf(u8, pct_page, "my-photo.png") != null or
+        std.mem.indexOf(u8, pct_page, "my photo.png") != null);
+
+    // srcset + data-src URLs are harvested and rewritten when matched
+    const srcset_page = try wordpress.readFileAlloc(io, a, "content/posts/srcset-lazy.md", gpa);
+    defer gpa.free(srcset_page);
+    try std.testing.expect(std.mem.indexOf(u8, srcset_page, "srcset-lazy.assets/2024/01/shared.png") != null);
+    try std.testing.expect(std.mem.indexOf(u8, srcset_page, "srcset-lazy.assets/2024/06/diagram.png") != null);
+    try std.testing.expect(std.mem.indexOf(u8, srcset_page, "srcset-lazy.assets/2024/01/hero.png") != null);
+
+    // WP intermediate size: original preserved; reason recorded
+    const resized_page = try wordpress.readFileAlloc(io, a, "content/posts/resized-derivative.md", gpa);
+    defer gpa.free(resized_page);
+    try std.testing.expect(std.mem.indexOf(u8, resized_page, "hero-300x200.png") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resized_page, "resized-derivative.assets") == null);
+    try std.testing.expect(std.mem.indexOf(u8, man_a, "likely_wp_resized_derivative") != null);
+
+    // REPORT.md materialization summary
+    const report_md = try wordpress.readFileAlloc(io, a, "REPORT.md", gpa);
+    defer gpa.free(report_md);
+    try std.testing.expect(std.mem.indexOf(u8, report_md, "## Media materialization") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_md, "| copied |") != null);
+
     // Source immutability
     const source_after = try wordpress.readFileAlloc(io, fixture, "export.xml", gpa);
     defer gpa.free(source_after);
@@ -1796,6 +1842,50 @@ test "wordpress: media materialization copies, rewrites, and manifests" {
 
     Io.Dir.cwd().deleteTree(io, out_a) catch {};
     Io.Dir.cwd().deleteTree(io, out_b) catch {};
+}
+
+test "wordpress: re-run into same out dir wipes stale content" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    const out_dir = "fixtures/.tmp-media-wxr-rerun";
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+
+    try wordpress.run(io, gpa, .{
+        .wxr_path = "fixtures/media-wxr/export.xml",
+        .media_dir = "fixtures/media-wxr/media",
+        .out_dir = out_dir,
+        .quiet = true,
+    });
+
+    // Plant a stale asset that must not survive the next run.
+    try Io.Dir.cwd().createDirPath(io, out_dir ++ "/content/posts/stale-ghost.assets");
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = out_dir ++ "/content/posts/stale-ghost.assets/ghost.png", .data = "stale" });
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = out_dir ++ "/content/posts/stale-ghost.md", .data = "# stale\n" });
+
+    try wordpress.run(io, gpa, .{
+        .wxr_path = "fixtures/media-wxr/export.xml",
+        .media_dir = "fixtures/media-wxr/media",
+        .out_dir = out_dir,
+        .quiet = true,
+    });
+
+    var out = try Io.Dir.cwd().openDir(io, out_dir, .{});
+    defer out.close(io);
+    // Stale paths gone
+    const stale_md = out.access(io, "content/posts/stale-ghost.md", .{});
+    try std.testing.expect(stale_md == error.FileNotFound or stale_md == error.PathNotFound);
+    const stale_asset = out.access(io, "content/posts/stale-ghost.assets/ghost.png", .{});
+    try std.testing.expect(stale_asset == error.FileNotFound or stale_asset == error.PathNotFound);
+    // Fresh materialization still present
+    const hero = try wordpress.readFileAlloc(io, out, "content/posts/full-upload.assets/2024/01/hero.png", gpa);
+    defer gpa.free(hero);
+    try std.testing.expect(hero.len > 0);
+    const man = try wordpress.readFileAlloc(io, out, "media_manifest.json", gpa);
+    defer gpa.free(man);
+    try std.testing.expect(std.mem.indexOf(u8, man, "\"status\": \"copied\"") != null);
+
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
 }
 
 test "wordpress: media symlink escape is rejected" {
