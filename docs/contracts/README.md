@@ -106,7 +106,7 @@ Supporting / historical drafts may also remain in this tree. Prefer linking the
 | [acceptance.md](acceptance.md) | v0.1 acceptance checklist |
 | [v0.1-overview.md](v0.1-overview.md) | Orientation; points at canonical contracts |
 | [../STATUS.md](../STATUS.md) | Living status + next work |
-| [`../../archive/`](../../archive/) | Historical reviews/audits (not normative; optional) |
+| [`../../CHANGELOG.md`](../../CHANGELOG.md) | Shipped history; removed campaign reviews are not normative |
 
 ## Fixture corpus
 

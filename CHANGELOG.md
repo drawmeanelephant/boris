@@ -26,18 +26,19 @@ How to use going forward:
 
 _No changes yet._
 
-## [0.5.1] — 2026-07-16 (release candidate)
+## [0.5.1] — 2026-07-16
 
-The v0.5.1 release candidate keeps base IR `0.2.0` and conditional
+The v0.5.1 release keeps base IR `0.2.0` and conditional
 semantic-relation IR `0.3.0`; it updates product/compiler/RAG versioning to
-`0.5.1` without an IR schema change. The tag is pending merge and final gates.
+`0.5.1` without an IR schema change. Tag `v0.5.1` points at the certified PR
+#127 merge commit.
 
 ### Added
 
 - Added secure content-local sibling asset publishing for page-owned
   `{stem}.assets/` trees, including safe Markdown image rewriting, stale asset
   cleanup, target isolation, and a normative [content-local assets contract](docs/contracts/content-local-assets.md).
-- Added an accessibility-forward, framework-free [reference theme example](examples/daisy-static-theme/README.md)
+- Added an accessibility-forward, framework-free [reference theme example](examples/reference-theme/README.md)
   and a documented first real-site adoption path for bounded migrations.
 - Added deterministic migration-lab asset filename sanitization for spaces,
   Unicode, and percent-encoded names, preserving original names, destinations,
@@ -486,9 +487,9 @@ path. **IR `schemaVersion` remains `"0.1.0"`** (emit shape unchanged).
 
 - Lead **README** / **STATUS** with user outcomes (site, graph, lean rebuilds)
   before internal mechanics; keep contracts normative and precise.
-- Move historical reviews + m10 audit to top-level [`archive/`](archive/)
-  (safe to delete or relocate off-tree). Active docs: STATUS, contracts,
-  RELEASE-GATE, rag seeds only under `docs/`.
+- Move historical reviews + m10 audit to a top-level archive (later removed
+  from the repository). Active docs: STATUS, contracts, RELEASE-GATE, and RAG
+  seeds only under `docs/`.
 
 ### Feature 2 — HTML as default CLI surface — **Done**
 
@@ -527,13 +528,12 @@ path. **IR `schemaVersion` remains `"0.1.0"`** (emit shape unchanged).
 - **Chat 5:** STATUS/README/contracts/RAG narrative claim **ApexMarkdown
   Unified**; Feature 1 marked Done; release-gate green. No IR schema or CLI
   default changes (Feature 2 still roadmap).
-- **Chat 6:** Internal review
-  ([`archive/docs/reviews/feature-1-internal-review.md`](archive/docs/reviews/feature-1-internal-review.md)):
+- **Chat 6:** Internal review (historical record later removed from the tree):
   residual stub wording closed; adapter forces
   `allow_external_plugin_detection=false`; reject `md_len` wrap before NUL
   copy.
-- **Chat 7:** External audit response
-  ([`archive/docs/reviews/feature-1-external-audit-response.md`](archive/docs/reviews/feature-1-external-audit-response.md)):
+- **Chat 7:** External audit response (historical record later removed from the
+  tree):
   golden HTML pins for table/footnote/math/callout; trusted-author
   `unsafe=true` notice; STATUS tracks D2/D3/D4 with resolve triggers;
   source-rag skips `build`/`CMakeFiles`; full review SHA + sanitizer PASS vs
@@ -545,9 +545,8 @@ path. **IR `schemaVersion` remains `"0.1.0"`** (emit shape unchanged).
 - **Second external opinion (micro-fixes):** pin `remainingAbiAssumptions`
   count to exact 8; `SECURITY` comment on adapter `unsafe=true`; U15b Apex
   callout inside Aside body.
-- Retire root `APEX-Feature1-plan.md` after ship: campaign bullets archived in
-  [`archive/docs/reviews/feature-1-apex-fidelity-spec.md`](archive/docs/reviews/feature-1-apex-fidelity-spec.md);
-  pointers updated to contracts + reviews.
+- Retire root `APEX-Feature1-plan.md` after ship; its historical campaign record
+  was later removed from the tree, while active pointers remain in contracts.
 
 ### Docs — residual post-P3 audit cleanup
 
@@ -559,10 +558,9 @@ path. **IR `schemaVersion` remains `"0.1.0"`** (emit shape unchanged).
 - Remove ghost **v0.4.0** “P3.3 complete” release trigger from
   `docs/STATUS.md` versioning table (P3.3 already landed; packaging stays under
   0.2/0.3). No runtime or IR schema changes.
-- Feature 1 implementer handoff / archive:
-  [`archive/docs/reviews/feature-1-apex-fidelity-spec.md`](archive/docs/reviews/feature-1-apex-fidelity-spec.md)
-  (real ApexMarkdown Unified under frozen host `apex.h` — not cmark-as-product;
-  root plan retired after ship).
+- Feature 1 implementer handoff recorded real ApexMarkdown Unified under frozen
+  host `apex.h` — not cmark-as-product; the historical handoff record and root
+  plan were removed after ship.
 
 ### Docs — post-P3 reconciliation
 
@@ -572,7 +570,7 @@ path. **IR `schemaVersion` remains `"0.1.0"`** (emit shape unchanged).
   non-support wording, RAG narrative seeds, AUDIT historical banner, AGENTS
   concurrency guidance, and `compile.zig` module header. No runtime or IR schema
   changes. Bare CLI remains IR-first; Apex remains a minimal stub ≠ CommonMark.
-  Audit note: [`archive/docs/reviews/post-p3-reconciliation.md`](archive/docs/reviews/post-p3-reconciliation.md).
+  The historical audit record was later removed from the tree.
 
 ### Multi-Target Isolated Output Directories & Cache Namespaces (P3.3)
 
@@ -582,7 +580,8 @@ path. **IR `schemaVersion` remains `"0.1.0"`** (emit shape unchanged).
 - Isolated output trees and structural cache namespaces: `<target-out>/.boris-cache/manifest.json` per target; sequential sorted target execution with aggregate failure (`MultiTargetCompilationFailed`).
 - Cache fingerprints use discriminator `boris-cache-v1-multitarget` and include target name, layout path, and layout template bytes. On-disk manifest `format_version` matches that discriminator; foreign/old versions are ignored (cold rebuild).
 - Watch mode ignores events under every configured target output root and rebuilds all targets in sorted order after a debounced change batch.
-- Review record and hardening notes: [`archive/docs/reviews/p3.3-multi-target-review.md`](archive/docs/reviews/p3.3-multi-target-review.md).
+- The historical review record and hardening notes were later removed from the
+  tree; current behavior is normative in the multi-target contract.
 - P3.3 follow-ups: watch ignore roots precomputed once; shared multi-target fingerprint/dep prep (source/include scan once); best-effort orphan atomic-temp scrub; intermediate symlink component walk on target paths; `--target` in usage/`findBadArg`.
 - P3.3 completion: `--html-layout` + `--target-layout NAME=PATH`; selective watch fan-out (layout-only → affected targets); sibling `{dist}.boris-stage` tree commit (discard on failure). Mark P3 scale-out complete in STATUS.
 
@@ -702,7 +701,7 @@ path. **IR `schemaVersion` remains `"0.1.0"`** (emit shape unchanged).
 - CI matrix: Linux + macOS; Apex sanitizer remains opt-in local
   (`zig build test-apex-sanitize`).
 - Contract: [`docs/contracts/components.md`](docs/contracts/components.md).
-- Self-audit: [`archive/docs/AUDIT-v0.1.md`](archive/docs/AUDIT-v0.1.md).
+- The historical v0.1 self-audit was later removed from the tree.
 - Docs/seeds synchronized; publishing-workshop analogies paired with invariants.
 
 ### Milestone 9 — experimental HTML path (Whiteboard + layout splice)

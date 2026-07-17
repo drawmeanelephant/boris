@@ -2,13 +2,12 @@
 
 **As of:** 2026-07-16 · current product release **v0.5.1** /
 compiler **boris/0.5.1** · Zig **0.16.0**<br>
-**Phase:** v0.5.1 release certification; tag pending.<br>
+**Phase:** post-v0.5.1 real-site dogfood and migration hardening.<br>
 IR `schemaVersion` is **`0.2.0`**.
 
-**Version boundary:** `v0.5.0` is the latest tagged release; `v0.5.1` is the
-release candidate being certified here. This cut does not change base IR
-`0.2.0`; semantic relations retain their documented conditional IR `0.3.0`
-artifacts.
+**Version boundary:** `v0.5.1` is tagged at the certified PR #127 merge commit.
+This cut does not change base IR `0.2.0`; semantic relations retain their
+documented conditional IR `0.3.0` artifacts.
 
 **Feature 8 status:** F8.0 contracts and F8.1–F8.3 are complete. IR 0.2
 publishes typed `parent` / `include` / `reference` edges and deterministic
@@ -177,6 +176,8 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | # | Feature | Note |
 |---|---------|------|
+| — | **Product v0.5.1** | Tagged/released: content-local assets, reference theme, bounded real-site adoption evidence, migration-lab asset/theme aids, and worktree-safe release cleanliness checks; base IR remains 0.2 |
+| — | **Product v0.5.0** | Tagged/released: native Details, source-RAG publication hardening, Obsidian/Notion/Starlight/Filed evidence, and judge-facing docs |
 | — | **Product v0.4.0** | Tagged/released: knowledge-system exports, Documentation Intelligence, layout/theme work, Textile, migration labs, static theme showcase, and agent-lore dogfood; base IR remains 0.2 |
 | — | **Product v0.3.1** | F8.3 reverse-index incremental dirty-set; IR remains 0.2 |
 | — | **Product v0.3.0** | Feature 8.1–8.2 / IR 0.2 graph-native dependencies |
@@ -234,7 +235,7 @@ on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 | Publish | **Honest limit + fallback** | Cross-volume **atomic** replace still not claimed. HTML stage / IR publish fall back to copy+delete on `error.CrossDevice`; RAG already had directory copy fallback. Same-parent staging remains the common path. |
 | Dialect | **Enforced** | Author key is **`parent` only**. `parentEntry` / `parent_entry` → `EFRONTMATTER` on all product parse paths. Do not reintroduce aliases. |
 | Migration | **Documented** | Bare `boris` is HTML under `dist/`. Old IR scripts need `--out` / `--no-rag`. README + help text carry the note. |
-| Release state | **v0.4.0 released** | Knowledge-system, layout/theme, Textile, migration-lab, and showcase work shipped in the tagged v0.4.0 product release. |
+| Release state | **v0.5.1 released** | Tag `v0.5.1` points at the certified PR #127 merge commit; post-release dogfood is tracked separately and does not rewrite the release boundary. |
 
 ---
 

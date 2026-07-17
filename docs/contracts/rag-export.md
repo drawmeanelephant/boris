@@ -19,9 +19,9 @@ a separate tool and is **not** this contract.
 
 | Surface | Role |
 |---------|------|
-| Default v0.1 output | Deterministic JSON IR under `.boris/` ([ir-schema.md](ir-schema.md)) |
+| Default CLI output | HTML site under `dist/` ([html-output.md](html-output.md)) |
+| Optional JSON IR | Deterministic JSON under `--out DIR` / `--no-rag` ([ir-schema.md](ir-schema.md)) |
 | Optional RAG export | Separate corpus tree (`rag/` by default) for LLM retrieval |
-| HTML `dist/` | Not default; experimental when present |
 
 ### Shared validation (hard requirement)
 
