@@ -1,15 +1,103 @@
 ---
-title: "Tabs"
+title: "Tabs Calibration Test"
 sidebar:
   badge: New
 ---
 
-# Tabs
+# Tabs and Component Calibration Test
 
-Tabs inventory.
+This file contains calibration cases for Astro/Starlight component mappings, malformed props, nested components, unknown components, and content-preservation fallbacks.
 
-import Tabs from "@astrojs/starlight/components/Tabs.astro";
+## 1. Supported Component Mappings
 
-<Tabs />
+### Tabs & Tab Groups (Lossy Static Approximation via Collapsible Details)
+<Tabs>
+  <TabItem label="npm">
+    ```bash
+    npm install boris
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn add boris
+    ```
+  </TabItem>
+</Tabs>
 
-Cross-link: [Asides](/components/asides)
+### Asides/Callouts (Safe Mechanical Mapping to Native Aside)
+<Aside type="tip">
+This is a standard tip aside.
+</Aside>
+
+<Aside type="warning" title="Warning Title">
+This is a warning aside with a custom title.
+</Aside>
+
+### Asides via ::: Markdown Container
+:::note[Important Note]
+This is a note with a title.
+:::
+
+:::danger
+This is a danger callout without a title.
+:::
+
+### Cards & Card Grids (Lossy Static Approximation via Flattened Headings)
+<CardGrid>
+  <Card title="Speed" icon="rocket">
+    Boris is written in Zig and runs extremely fast.
+  </Card>
+  <Card title="Safety" icon="shield">
+    Fully validated graph connections prevent broken links.
+  </Card>
+</CardGrid>
+
+### Steps (Safe Mechanical Mapping via Ordered List)
+<Steps>
+  1. Clone the repository.
+  2. Compile using Zig.
+  3. Run the benchmarks.
+</Steps>
+
+### Badges, Icons, and Link Cards
+<Badge text="Stable" /> <Icon name="rocket" />
+
+<LinkCard title="Asides" href="/components/asides" description="Read more about our admonition support" />
+
+---
+
+## 2. Robustness and Boundary Cases
+
+### Malformed Props (Manual Review / Safe Degradation)
+<Aside type=tip>
+Unquoted attributes on components.
+</Aside>
+
+<Aside type="unsupported-type">
+Unsupported aside type attribute.
+</Aside>
+
+### Nested Components (Manual Review / Strict Neutralization)
+<Tabs>
+  <Tabs>
+    <TabItem label="Nested">
+      Inside nested tab.
+    </TabItem>
+  </Tabs>
+</Tabs>
+
+### Unknown/Unregistered Components (Manual Review / Comment Wrap)
+<UnknownComponent title="Weird Tag" prop="val">
+Some unregistered content that should be flagged.
+</UnknownComponent>
+
+## 3. Attributed Details and Asides Survival Test
+
+<Details summary="Custom Details Summary">
+This is a custom details section that should survive.
+</Details>
+
+<Aside type="note" title="Custom Aside Title" class="extra-style">
+This is a custom aside with extra attributes that should survive.
+</Aside>
+

@@ -83,6 +83,7 @@ const SourcePage = struct {
     components: []const []const u8,
     stripped_blocks: []const StrippedBlock,
     link_events: []const LinkEvent,
+    component_events: []const LinkEvent,
     bytes: u64,
 };
 
@@ -452,6 +453,405 @@ fn extractImportPath(line: []const u8) ?[]const u8 {
     return null;
 }
 
+const TransformedMdx = struct {
+    body: []const u8,
+    events: []const LinkEvent,
+};
+
+fn parseAttribute(allocator: std.mem.Allocator, tag: []const u8, name: []const u8) !?[]const u8 {
+    var i: usize = 0;
+    while (i < tag.len) {
+        if (std.mem.startsWith(u8, tag[i..], name)) {
+            const after_name = i + name.len;
+            if (after_name < tag.len and (tag[after_name] == '=' or std.ascii.isWhitespace(tag[after_name]))) {
+                var eq = after_name;
+                while (eq < tag.len and std.ascii.isWhitespace(tag[eq])) : (eq += 1) {}
+                if (eq < tag.len and tag[eq] == '=') {
+                    var val_start = eq + 1;
+                    while (val_start < tag.len and std.ascii.isWhitespace(tag[val_start])) : (val_start += 1) {}
+                    if (val_start < tag.len) {
+                        const quote = tag[val_start];
+                        if (quote == '"' or quote == '\'') {
+                            const val_end = std.mem.indexOfScalarPos(u8, tag, val_start + 1, quote);
+                            if (val_end) |end| {
+                                return try allocator.dupe(u8, tag[val_start + 1 .. end]);
+                            }
+                        } else if (quote == '{') {
+                            const val_end = std.mem.indexOfScalarPos(u8, tag, val_start + 1, '}');
+                            if (val_end) |end| {
+                                return try allocator.dupe(u8, tag[val_start + 1 .. end]);
+                            }
+                        } else {
+                            var end = val_start;
+                            while (end < tag.len and !std.ascii.isWhitespace(tag[end]) and tag[end] != '>' and tag[end] != '/') : (end += 1) {}
+                            return try allocator.dupe(u8, tag[val_start..end]);
+                        }
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    return null;
+}
+
+fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(a);
+    var events: std.ArrayList(LinkEvent) = .empty;
+    errdefer events.deinit(a);
+
+    var pos: usize = 0;
+    var line_no: u32 = 1;
+
+    var in_aside = false;
+
+    while (pos < body.len) {
+        const end = std.mem.indexOfScalarPos(u8, body, pos, '\n') orelse body.len;
+        const line = body[pos..end];
+        const has_newline = end < body.len;
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+
+        if (std.mem.startsWith(u8, trimmed, ":::")) {
+            const block_content = std.mem.trim(u8, trimmed[3..], " \t\r");
+            if (block_content.len == 0) {
+                if (in_aside) {
+                    try out.appendSlice(a, "</Aside>\n");
+                    in_aside = false;
+                    pos = if (has_newline) end + 1 else end;
+                    line_no += 1;
+                    continue;
+                }
+            } else {
+                var kind: ?[]const u8 = null;
+                var raw_title: ?[]const u8 = null;
+
+                const space_pos = std.mem.indexOfScalar(u8, block_content, ' ');
+                const bracket_pos = std.mem.indexOfScalar(u8, block_content, '[');
+                const first_boundary = space_pos orelse bracket_pos orelse block_content.len;
+                const kind_candidate = block_content[0..first_boundary];
+
+                if (std.mem.eql(u8, kind_candidate, "note")) {
+                    kind = "note";
+                } else if (std.mem.eql(u8, kind_candidate, "tip")) {
+                    kind = "tip";
+                } else if (std.mem.eql(u8, kind_candidate, "caution") or std.mem.eql(u8, kind_candidate, "warning")) {
+                    kind = "warning";
+                } else if (std.mem.eql(u8, kind_candidate, "danger")) {
+                    kind = "danger";
+                }
+
+                if (kind) |k| {
+                    if (bracket_pos) |b_idx| {
+                        if (std.mem.indexOfScalarPos(u8, block_content, b_idx, ']')) |e_idx| {
+                            raw_title = block_content[b_idx + 1 .. e_idx];
+                        }
+                    }
+                    try out.appendSlice(a, "<Aside kind=\"");
+                    try out.appendSlice(a, k);
+                    try out.appendSlice(a, "\">\n");
+
+                    var rewritten_to_buf: std.ArrayList(u8) = .empty;
+                    defer rewritten_to_buf.deinit(a);
+                    try rewritten_to_buf.appendSlice(a, "<Aside kind=\"");
+                    try rewritten_to_buf.appendSlice(a, k);
+                    try rewritten_to_buf.appendSlice(a, "\">");
+
+                    if (raw_title) |t| {
+                        try out.appendSlice(a, "**");
+                        try out.appendSlice(a, t);
+                        try out.appendSlice(a, "**\n\n");
+                        try rewritten_to_buf.appendSlice(a, " (title: ");
+                        try rewritten_to_buf.appendSlice(a, t);
+                        try rewritten_to_buf.appendSlice(a, ")");
+                    }
+
+                    try events.append(a, .{
+                        .kind = "component_mapping",
+                        .target = "MarkdownAdmonition",
+                        .line = line_no,
+                        .resolution = "rewritten",
+                        .review_reason = "safe_mechanical_mapping",
+                        .rewritten_to = try a.dupe(u8, rewritten_to_buf.items),
+                    });
+
+                    in_aside = true;
+                    pos = if (has_newline) end + 1 else end;
+                    line_no += 1;
+                    continue;
+                }
+            }
+        }
+
+        if (std.mem.indexOfScalar(u8, trimmed, '<')) |_| {
+            if (std.mem.indexOf(u8, trimmed, "<Tabs") != null) {
+                try events.append(a, .{
+                    .kind = "component_mapping",
+                    .target = "Tabs",
+                    .line = line_no,
+                    .resolution = "rewritten",
+                    .review_reason = "lossy_explicit_approximation",
+                    .rewritten_to = "flattened to Details blocks",
+                });
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+            if (std.mem.indexOf(u8, trimmed, "</Tabs>") != null) {
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+            if (std.mem.indexOf(u8, trimmed, "<TabItem") != null) {
+                const idx = std.mem.indexOf(u8, trimmed, "<TabItem").?;
+                const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
+                const tag_text = trimmed[idx..tag_end];
+                const label = (try parseAttribute(a, tag_text, "label")) orelse "Tab";
+                try out.appendSlice(a, "<Details summary=\"Tab: ");
+                try out.appendSlice(a, label);
+                try out.appendSlice(a, "\" open=\"true\">\n");
+
+                try events.append(a, .{
+                    .kind = "component_mapping",
+                    .target = "TabItem",
+                    .line = line_no,
+                    .resolution = "rewritten",
+                    .review_reason = "lossy_explicit_approximation",
+                    .rewritten_to = try std.fmt.allocPrint(a, "<Details summary=\"Tab: {s}\">", .{label}),
+                });
+
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+            if (std.mem.indexOf(u8, trimmed, "</TabItem>") != null) {
+                try out.appendSlice(a, "</Details>\n");
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+            if (std.mem.indexOf(u8, trimmed, "<CardGrid") != null) {
+                try events.append(a, .{
+                    .kind = "component_mapping",
+                    .target = "CardGrid",
+                    .line = line_no,
+                    .resolution = "rewritten",
+                    .review_reason = "lossy_explicit_approximation",
+                    .rewritten_to = "flattened grid wrapper",
+                });
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+            if (std.mem.indexOf(u8, trimmed, "</CardGrid>") != null) {
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+            if (std.mem.indexOf(u8, trimmed, "<Card") != null) {
+                const idx = std.mem.indexOf(u8, trimmed, "<Card").?;
+                const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
+                const tag_text = trimmed[idx..tag_end];
+                const title = (try parseAttribute(a, tag_text, "title")) orelse "Card";
+                const icon = try parseAttribute(a, tag_text, "icon");
+                try out.appendSlice(a, "### [Card] ");
+                try out.appendSlice(a, title);
+                if (icon) |ic| {
+                    try out.appendSlice(a, " (");
+                    try out.appendSlice(a, ic);
+                    try out.appendSlice(a, ")");
+                }
+                try out.appendSlice(a, "\n");
+
+                try events.append(a, .{
+                    .kind = "component_mapping",
+                    .target = "Card",
+                    .line = line_no,
+                    .resolution = "rewritten",
+                    .review_reason = "lossy_explicit_approximation",
+                    .rewritten_to = try std.fmt.allocPrint(a, "### [Card] {s}", .{title}),
+                });
+
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+            if (std.mem.indexOf(u8, trimmed, "</Card>") != null) {
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+            if (std.mem.indexOf(u8, trimmed, "<Steps>") != null) {
+                try events.append(a, .{
+                    .kind = "component_mapping",
+                    .target = "Steps",
+                    .line = line_no,
+                    .resolution = "rewritten",
+                    .review_reason = "safe_mechanical_mapping",
+                    .rewritten_to = "stripped steps wrapper",
+                });
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+            if (std.mem.indexOf(u8, trimmed, "</Steps>") != null) {
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+            if (std.mem.indexOf(u8, trimmed, "<Aside") != null) {
+                const idx = std.mem.indexOf(u8, trimmed, "<Aside").?;
+                const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
+                const tag_text = trimmed[idx..tag_end];
+                const type_attr = (try parseAttribute(a, tag_text, "type")) orelse (try parseAttribute(a, tag_text, "kind")) orelse "note";
+                const title = try parseAttribute(a, tag_text, "title");
+
+                var is_valid_kind = false;
+                var normalized_kind: []const u8 = "note";
+                if (std.mem.eql(u8, type_attr, "note")) {
+                    normalized_kind = "note";
+                    is_valid_kind = true;
+                } else if (std.mem.eql(u8, type_attr, "tip")) {
+                    normalized_kind = "tip";
+                    is_valid_kind = true;
+                } else if (std.mem.eql(u8, type_attr, "caution") or std.mem.eql(u8, type_attr, "warning")) {
+                    normalized_kind = "warning";
+                    is_valid_kind = true;
+                } else if (std.mem.eql(u8, type_attr, "danger")) {
+                    normalized_kind = "danger";
+                    is_valid_kind = true;
+                }
+
+                if (!is_valid_kind) {
+                    try events.append(a, .{
+                        .kind = "component_mapping",
+                        .target = "Aside",
+                        .line = line_no,
+                        .resolution = "review",
+                        .review_reason = "manual_review_required",
+                        .rewritten_to = try std.fmt.allocPrint(a, "unsupported type='{s}'", .{type_attr}),
+                    });
+                } else {
+                    try events.append(a, .{
+                        .kind = "component_mapping",
+                        .target = "Aside",
+                        .line = line_no,
+                        .resolution = "rewritten",
+                        .review_reason = if (title != null) "lossy_explicit_approximation" else "safe_mechanical_mapping",
+                        .rewritten_to = try std.fmt.allocPrint(a, "<Aside kind=\"{s}\">", .{normalized_kind}),
+                    });
+                }
+
+                try out.appendSlice(a, "<Aside kind=\"");
+                try out.appendSlice(a, normalized_kind);
+                try out.appendSlice(a, "\">\n");
+                if (title) |ti| {
+                    try out.appendSlice(a, "**");
+                    try out.appendSlice(a, ti);
+                    try out.appendSlice(a, "**\n\n");
+                }
+
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+            if (std.mem.indexOf(u8, trimmed, "</Aside>") != null) {
+                try out.appendSlice(a, "</Aside>\n");
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+            if (std.mem.indexOf(u8, trimmed, "<Badge") != null) {
+                const idx = std.mem.indexOf(u8, trimmed, "<Badge").?;
+                const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
+                const tag_text = trimmed[idx..tag_end];
+                const text = (try parseAttribute(a, tag_text, "text")) orelse "Badge";
+                try out.appendSlice(a, "**[");
+                try out.appendSlice(a, text);
+                try out.appendSlice(a, "]**");
+
+                try events.append(a, .{
+                    .kind = "component_mapping",
+                    .target = "Badge",
+                    .line = line_no,
+                    .resolution = "rewritten",
+                    .review_reason = "lossy_explicit_approximation",
+                    .rewritten_to = try std.fmt.allocPrint(a, "**[{s}]**", .{text}),
+                });
+
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+            if (std.mem.indexOf(u8, trimmed, "<Icon") != null) {
+                const idx = std.mem.indexOf(u8, trimmed, "<Icon").?;
+                const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
+                const tag_text = trimmed[idx..tag_end];
+                const name = (try parseAttribute(a, tag_text, "name")) orelse "icon";
+                try out.appendSlice(a, "(icon: ");
+                try out.appendSlice(a, name);
+                try out.appendSlice(a, ")");
+
+                try events.append(a, .{
+                    .kind = "component_mapping",
+                    .target = "Icon",
+                    .line = line_no,
+                    .resolution = "rewritten",
+                    .review_reason = "lossy_explicit_approximation",
+                    .rewritten_to = try std.fmt.allocPrint(a, "(icon: {s})", .{name}),
+                });
+
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+            if (std.mem.indexOf(u8, trimmed, "<LinkCard") != null) {
+                const idx = std.mem.indexOf(u8, trimmed, "<LinkCard").?;
+                const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
+                const tag_text = trimmed[idx..tag_end];
+                const title = (try parseAttribute(a, tag_text, "title")) orelse "Link";
+                const href = (try parseAttribute(a, tag_text, "href")) orelse "#";
+                const desc = try parseAttribute(a, tag_text, "description");
+
+                try out.appendSlice(a, "### [Link Card] ");
+                try out.appendSlice(a, title);
+                try out.appendSlice(a, "\n\n");
+                try out.appendSlice(a, "[Link](");
+                try out.appendSlice(a, href);
+                try out.appendSlice(a, ")");
+                if (desc) |d| {
+                    try out.appendSlice(a, " - ");
+                    try out.appendSlice(a, d);
+                }
+                try out.appendSlice(a, "\n");
+
+                try events.append(a, .{
+                    .kind = "component_mapping",
+                    .target = "LinkCard",
+                    .line = line_no,
+                    .resolution = "rewritten",
+                    .review_reason = "lossy_explicit_approximation",
+                    .rewritten_to = try std.fmt.allocPrint(a, "### [Link Card] {s}", .{title}),
+                });
+
+                pos = if (has_newline) end + 1 else end;
+                line_no += 1;
+                continue;
+            }
+        }
+
+        try out.appendSlice(a, line);
+        if (has_newline) try out.append(a, '\n');
+        pos = if (has_newline) end + 1 else end;
+        line_no += 1;
+    }
+
+    return TransformedMdx{
+        .body = try out.toOwnedSlice(a),
+        .events = try events.toOwnedSlice(a),
+    };
+}
+
 /// Detect PascalCase JSX/MDX component tag names on a line.
 fn scanComponentTags(a: std.mem.Allocator, line: []const u8, out: *std.ArrayList([]const u8)) !void {
     var i: usize = 0;
@@ -509,6 +909,13 @@ fn sanitizeMdxBody(a: std.mem.Allocator, body: []const u8) !struct {
                         var k = li + 2;
                         while (k < line.len and line[k] != '>') : (k += 1) {}
                         if (k < line.len) k += 1;
+                        const tag_content = line[li + 2 .. k - 1];
+                        var name_end: usize = 0;
+                        while (name_end < tag_content.len and !std.ascii.isWhitespace(tag_content[name_end]) and tag_content[name_end] != '/' and tag_content[name_end] != '>') : (name_end += 1) {}
+                        const tag_name = tag_content[0..name_end];
+                        if (std.mem.eql(u8, tag_name, "Aside") or std.mem.eql(u8, tag_name, "Details")) {
+                            try out.appendSlice(a, line[li..k]);
+                        }
                         li = k;
                         continue;
                     }
@@ -516,7 +923,15 @@ fn sanitizeMdxBody(a: std.mem.Allocator, body: []const u8) !struct {
                         var k = li + 1;
                         while (k < line.len and line[k] != '>') : (k += 1) {}
                         if (k < line.len) k += 1;
-                        try out.appendSlice(a, "<!-- unsupported-mdx-component -->");
+                        const tag_content = line[li + 1 .. k - 1];
+                        var name_end: usize = 0;
+                        while (name_end < tag_content.len and !std.ascii.isWhitespace(tag_content[name_end]) and tag_content[name_end] != '/' and tag_content[name_end] != '>') : (name_end += 1) {}
+                        const tag_name = tag_content[0..name_end];
+                        if (std.mem.eql(u8, tag_name, "Aside") or std.mem.eql(u8, tag_name, "Details")) {
+                            try out.appendSlice(a, line[li..k]);
+                        } else {
+                            try out.appendSlice(a, "<!-- unsupported-mdx-component -->");
+                        }
                         li = k;
                         continue;
                     }
@@ -537,10 +952,14 @@ fn sanitizeMdxBody(a: std.mem.Allocator, body: []const u8) !struct {
     var dedup: std.ArrayList([]const u8) = .empty;
     var prev: ?[]const u8 = null;
     for (components.items) |c| {
-        if (prev) |p| if (std.mem.eql(u8, p, c)) continue;
+        if (prev) |p| if (std.mem.eql(u8, p, c)) {
+            a.free(c);
+            continue;
+        };
         try dedup.append(a, c);
         prev = c;
     }
+    components.deinit(a);
     return .{
         .body = try out.toOwnedSlice(a),
         .imports = try imports.toOwnedSlice(a),
@@ -1863,7 +2282,8 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         const fallback_title = try titleFromStem(a, entity_id);
         const parsed = try parseFrontmatterLite(a, raw, fallback_title);
         const stripped = try stripUntrustedBlocks(a, parsed.body);
-        const mdx = try sanitizeMdxBody(a, stripped.body);
+        const transformed = try transformStarlightMdx(a, stripped.body);
+        const mdx = try sanitizeMdxBody(a, transformed.body);
 
         // Parent / trunk assignment (one-level forest, path-derived only).
         var parent: ?[]const u8 = null;
@@ -1902,6 +2322,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             .components = mdx.components,
             .stripped_blocks = stripped.blocks,
             .link_events = &.{},
+            .component_events = transformed.events,
             .bytes = raw.len,
         });
         try inventory.append(a, .{ .source_path = path, .kind = "content_page", .bytes = raw.len });
@@ -1951,6 +2372,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             .components = &.{},
             .stripped_blocks = &.{},
             .link_events = &.{},
+            .component_events = &.{},
             .bytes = 0,
         });
         try existing.put(a, section, {});
@@ -1981,6 +2403,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             .components = &.{},
             .stripped_blocks = &.{},
             .link_events = &.{},
+            .component_events = &.{},
             .bytes = 0,
         });
     }
@@ -2182,6 +2605,16 @@ fn buildBoundaryItems(
                 .source_path = p.source_path,
                 .detail = try std.fmt.allocPrint(a, "unmapped_frontmatter:{s}", .{f}),
                 .category = "unsupported_frontmatter",
+            });
+        }
+        for (p.component_events) |ev| {
+            const is_review = std.mem.eql(u8, ev.resolution, "review");
+            try items.append(a, .{
+                .class = if (is_review) "manual_review" else "preserved",
+                .source_path = p.source_path,
+                .detail = try std.fmt.allocPrint(a, "component {s} -> mapping_confidence={s}: {s}", .{ ev.target, ev.review_reason orelse "", ev.rewritten_to orelse "" }),
+                .line = ev.line,
+                .category = "component_mapping",
             });
         }
         if (p.imports.len > 0 or p.components.len > 0) {
@@ -3591,4 +4024,31 @@ test "starlight: dogfood relative images migrate for Boris compile surface" {
     try std.testing.expect(std.mem.indexOf(u8, pages, "pages.assets/assets/diagram.png") != null);
 
     Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+}
+
+test "starlight: sanitizeMdxBody preserves attributed Aside and Details" {
+    const a = std.testing.allocator;
+    const body =
+        \\<Details summary="Custom Details Summary" open="true">
+        \\This is inside details.
+        \\</Details>
+        \\
+        \\<Aside type="note" title="Custom Aside Title" class="extra-style">
+        \\This is inside aside.
+        \\</Aside>
+    ;
+
+    const res = try sanitizeMdxBody(a, body);
+    defer {
+        a.free(res.body);
+        for (res.imports) |imp| a.free(imp);
+        a.free(res.imports);
+        for (res.components) |cmp| a.free(cmp);
+        a.free(res.components);
+    }
+
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "<Details summary=\"Custom Details Summary\" open=\"true\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "</Details>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "<Aside type=\"note\" title=\"Custom Aside Title\" class=\"extra-style\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "</Aside>") != null);
 }
