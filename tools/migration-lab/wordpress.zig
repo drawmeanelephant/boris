@@ -13,7 +13,8 @@ pub const format_id = "boris-wordpress-migration-lab";
 /// Schema 3 adds per-page `excerpt` / `is_sticky` fields and explicit empty-slug /
 /// sticky / excerpt-preservation feature codes (no silent drop of WXR metadata).
 pub const schema_version: u32 = 3;
-pub const tool_version = "0.3.0";
+/// 0.4.0: verified local media materializes into page `{stem}.assets/` + media_manifest.json.
+pub const tool_version = "0.4.0";
 
 /// Site-level taxonomy count above which we emit high-cardinality reporting.
 pub const high_cardinality_taxonomy_threshold: usize = 50;
@@ -202,7 +203,25 @@ pub const MediaRef = struct {
     source_output: []const u8,
     referenced: []const u8,
     local_path: ?[]const u8,
-    status: []const u8, // present | missing | attachment_only
+    status: []const u8, // present | missing | attachment_only | ambiguous | rejected
+};
+
+/// Deterministic per-reference materialization audit (media_manifest.json).
+pub const MediaManifestEntry = struct {
+    /// Generated page path under --out (e.g. content/posts/hello-world.md).
+    source_output: []const u8,
+    /// Original media reference as found in the converted body (or attachment URL).
+    original_reference: []const u8,
+    /// Normalized uploads-relative key when extractable (e.g. 2024/01/hero.png).
+    upload_key: ?[]const u8,
+    /// Media-dir-relative path of the verified local match, if any.
+    matched_source: ?[]const u8,
+    /// Out-relative Boris asset path after copy (e.g. content/posts/hello-world.assets/2024/01/hero.png).
+    emitted_asset_path: ?[]const u8,
+    /// copied | missing | ambiguous | rejected
+    status: []const u8,
+    /// Empty when copied; precise reason for non-copied outcomes.
+    reason: []const u8,
 };
 
 pub const FeatureFinding = struct {
@@ -1270,21 +1289,44 @@ pub fn fileExtension(path: []const u8) []const u8 {
     return "";
 }
 
+/// Strip query string and fragment from a URL/path (path only).
+pub fn stripUrlQueryFragment(url: []const u8) []const u8 {
+    var p = url;
+    if (std.mem.indexOfScalar(u8, p, '?')) |q| p = p[0..q];
+    if (std.mem.indexOfScalar(u8, p, '#')) |h| p = p[0..h];
+    return p;
+}
+
 /// Normalize a media URL/path to a uploads-relative path when possible.
+/// Query strings and fragments are stripped from the returned key.
 pub fn mediaRelativeKey(url: []const u8) ?[]const u8 {
     const marker = "wp-content/uploads/";
     if (std.mem.indexOf(u8, url, marker)) |idx| {
-        var rest = url[idx + marker.len ..];
-        if (std.mem.indexOfScalar(u8, rest, '?')) |q| rest = rest[0..q];
-        return rest;
+        return stripUrlQueryFragment(url[idx + marker.len ..]);
     }
     // bare relative uploads path
     if (std.mem.startsWith(u8, url, "uploads/")) {
-        var rest = url["uploads/".len..];
-        if (std.mem.indexOfScalar(u8, rest, '?')) |q| rest = rest[0..q];
-        return rest;
+        return stripUrlQueryFragment(url["uploads/".len..]);
     }
     return null;
+}
+
+/// Extract fragment (without '#') when present; null otherwise.
+pub fn urlFragment(url: []const u8) ?[]const u8 {
+    // Fragment after query is rare; take last '#' after stripping nothing.
+    if (std.mem.indexOfScalar(u8, url, '#')) |h| {
+        const frag = url[h + 1 ..];
+        // Drop fragment-internal query if any (nonstandard).
+        if (std.mem.indexOfScalar(u8, frag, '?')) |q| return frag[0..q];
+        return frag;
+    }
+    return null;
+}
+
+/// True when the reference carried a query string (materialization drops it).
+pub fn urlHasQuery(url: []const u8) bool {
+    const hash = std.mem.indexOfScalar(u8, url, '#') orelse url.len;
+    return std.mem.indexOfScalar(u8, url[0..hash], '?') != null;
 }
 
 fn mediaAlreadyListed(media: []const MediaRef, target: []const u8) bool {
@@ -1511,7 +1553,9 @@ fn collectMediaFiles(
             try collectMediaFiles(io, gpa, retain, sub, child_rel, out);
             continue;
         }
-        if (entry.kind != .file) continue;
+        // Include regular files and symlinks (symlinks are inventoried so materialization
+        // can reject them explicitly rather than treating them as missing).
+        if (entry.kind != .file and entry.kind != .sym_link) continue;
         if (std.mem.eql(u8, entry.name, ".DS_Store")) continue;
         const child_rel = if (prefix.len == 0)
             try retain.dupe(u8, entry.name)
@@ -1522,18 +1566,357 @@ fn collectMediaFiles(
 }
 
 fn findLocalMedia(files: []const []const u8, key: []const u8) ?[]const u8 {
+    // Prefer exact match; then unique basename. Loose endsWith matching is retained
+    // only for inventory reporting of present/missing (not for materialization).
     for (files) |f| {
         if (std.mem.eql(u8, f, key)) return f;
     }
     for (files) |f| {
         if (std.mem.endsWith(u8, f, key) or std.mem.endsWith(u8, key, f)) return f;
     }
-    // basename match
     const base = std.fs.path.basename(key);
+    var hit: ?[]const u8 = null;
     for (files) |f| {
-        if (std.mem.eql(u8, std.fs.path.basename(f), base)) return f;
+        if (std.mem.eql(u8, std.fs.path.basename(f), base)) {
+            if (hit != null and !std.mem.eql(u8, hit.?, f)) return hit; // first; inventory only
+            hit = f;
+        }
+    }
+    return hit;
+}
+
+// ---------------------------------------------------------------------------
+// Media materialization → page-local `{stem}.assets/` (Boris content-local)
+// ---------------------------------------------------------------------------
+
+/// Boris content-local within-tree grammar: `/`-separated `[A-Za-z0-9._-]+` segments.
+pub fn isBorisSafeWithinTree(path: []const u8) bool {
+    if (path.len == 0) return false;
+    if (std.mem.indexOfScalar(u8, path, '\\') != null) return false;
+    var start: usize = 0;
+    while (start <= path.len) {
+        const slash = std.mem.indexOfScalarPos(u8, path, start, '/') orelse path.len;
+        const seg = path[start..slash];
+        if (seg.len == 0 or std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, "..")) return false;
+        for (seg) |c| {
+            const ok = (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or
+                (c >= '0' and c <= '9') or c == '.' or c == '_' or c == '-';
+            if (!ok) return false;
+        }
+        if (slash >= path.len) break;
+        start = slash + 1;
+    }
+    return true;
+}
+
+/// True when a media key is unsafe (traversal, absolute, backslash, empty).
+pub fn isUnsafeMediaKey(key: []const u8) bool {
+    if (key.len == 0) return true;
+    if (key[0] == '/' or key[0] == '\\') return true;
+    if (key.len >= 2 and key[1] == ':') return true; // Windows drive
+    if (std.mem.indexOfScalar(u8, key, '\\') != null) return true;
+    if (std.mem.indexOf(u8, key, "://") != null) return true;
+    var start: usize = 0;
+    while (start <= key.len) {
+        const slash = std.mem.indexOfScalarPos(u8, key, start, '/') orelse key.len;
+        const seg = key[start..slash];
+        if (seg.len == 0 and start != 0 and slash < key.len) return true; // empty segment //
+        if (std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, "..")) return true;
+        if (slash >= key.len) break;
+        start = slash + 1;
+    }
+    return false;
+}
+
+fn isSymlink(io: Io, dir: Io.Dir, rel: []const u8) bool {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    _ = dir.readLink(io, rel, &buf) catch return false;
+    return true;
+}
+
+fn countBasenameMatches(files: []const []const u8, basename: []const u8) usize {
+    var n: usize = 0;
+    for (files) |f| {
+        if (std.mem.eql(u8, std.fs.path.basename(f), basename)) n += 1;
+    }
+    return n;
+}
+
+fn findExactLocalMedia(files: []const []const u8, key: []const u8) ?[]const u8 {
+    for (files) |f| {
+        if (std.mem.eql(u8, f, key)) return f;
     }
     return null;
+}
+
+const MediaMatchKind = enum {
+    found,
+    missing,
+    ambiguous,
+    rejected,
+};
+
+const MediaMatch = struct {
+    kind: MediaMatchKind,
+    /// Media-dir-relative path when found.
+    local_path: ?[]const u8 = null,
+    /// Uploads-relative / within-tree candidate key when known.
+    upload_key: ?[]const u8 = null,
+    reason: []const u8 = "",
+};
+
+/// Resolve a body media reference against the optional local media inventory.
+/// Never invents paths. Ambiguous basenames and unsafe keys are explicit.
+pub fn matchMediaReference(
+    media_files: []const []const u8,
+    media_dir_provided: bool,
+    referenced: []const u8,
+) MediaMatch {
+    if (referenced.len == 0) {
+        return .{ .kind = .rejected, .reason = "empty_reference" };
+    }
+    // Absolute filesystem escapes (not site-root http URLs) — reject even without --media.
+    if (std.mem.startsWith(u8, referenced, "file:")) {
+        return .{ .kind = .rejected, .reason = "absolute_or_scheme_escape" };
+    }
+    if (referenced[0] == '/' and std.mem.indexOf(u8, referenced, "wp-content/uploads/") == null) {
+        // Site-absolute non-upload path — do not treat as media-dir relative.
+        if (!isMediaPath(referenced)) {
+            return .{ .kind = .rejected, .reason = "absolute_non_upload_path" };
+        }
+        // Absolute path that only looks like media by extension (e.g. /etc/passwd.png).
+        return .{ .kind = .rejected, .reason = "traversal_or_absolute_escape" };
+    }
+    const key_opt = mediaRelativeKey(referenced);
+    // Unsafe upload keys are rejected even when --media is omitted (no inventing).
+    if (key_opt) |key| {
+        if (isUnsafeMediaKey(key)) {
+            return .{ .kind = .rejected, .upload_key = key, .reason = "traversal_or_unsafe_upload_key" };
+        }
+    }
+    // Without --media, still extract upload keys for audit, but never invent copies.
+    if (!media_dir_provided) {
+        return .{
+            .kind = .missing,
+            .upload_key = key_opt,
+            .reason = "media_dir_not_provided",
+        };
+    }
+
+    if (key_opt) |key| {
+        // Upload keys require an exact path match under --media (no basename guess).
+        if (findExactLocalMedia(media_files, key)) |local| {
+            return .{ .kind = .found, .local_path = local, .upload_key = key, .reason = "" };
+        }
+        return .{ .kind = .missing, .upload_key = key, .reason = "local_media_not_found" };
+    }
+
+    // No upload key: try exact inventory path, then unique basename.
+    const path_only = stripUrlQueryFragment(referenced);
+    // Reject absolute / traversal forms that are not site upload URLs.
+    if (isUnsafeMediaKey(path_only) or std.mem.startsWith(u8, path_only, "/")) {
+        return .{ .kind = .rejected, .reason = "traversal_or_absolute_escape" };
+    }
+    if (findExactLocalMedia(media_files, path_only)) |local| {
+        return .{ .kind = .found, .local_path = local, .upload_key = path_only, .reason = "" };
+    }
+    const base = std.fs.path.basename(path_only);
+    if (base.len == 0 or std.mem.eql(u8, base, ".") or std.mem.eql(u8, base, "..")) {
+        return .{ .kind = .rejected, .reason = "unsafe_basename" };
+    }
+    const n = countBasenameMatches(media_files, base);
+    if (n > 1) {
+        return .{ .kind = .ambiguous, .reason = "duplicate_media_basename" };
+    }
+    if (n == 1) {
+        for (media_files) |f| {
+            if (std.mem.eql(u8, std.fs.path.basename(f), base)) {
+                return .{ .kind = .found, .local_path = f, .upload_key = f, .reason = "basename_unique" };
+            }
+        }
+    }
+    return .{ .kind = .missing, .reason = "local_media_not_found" };
+}
+
+/// Page stem for content-local assets: basename of output without `.md`.
+pub fn pageStemFromOutput(output_path: []const u8) []const u8 {
+    const base = std.fs.path.basename(output_path);
+    if (std.mem.endsWith(u8, base, ".md")) return base[0 .. base.len - 3];
+    return base;
+}
+
+/// Out-relative asset root for a page: `content/posts/hello-world.assets`.
+pub fn pageAssetRoot(allocator: std.mem.Allocator, output_path: []const u8) ![]u8 {
+    if (std.mem.endsWith(u8, output_path, ".md")) {
+        return try std.fmt.allocPrint(allocator, "{s}.assets", .{output_path[0 .. output_path.len - 3]});
+    }
+    return try std.fmt.allocPrint(allocator, "{s}.assets", .{output_path});
+}
+
+/// Choose a Boris-safe within-tree path under the page asset root.
+fn withinTreeForMedia(allocator: std.mem.Allocator, upload_key: ?[]const u8, local_path: []const u8) !struct { []const u8, []const u8 } {
+    // Prefer upload key when Boris-safe; else local inventory path; else basename.
+    const candidates = [_][]const u8{
+        upload_key orelse "",
+        local_path,
+        std.fs.path.basename(local_path),
+    };
+    for (candidates) |c| {
+        if (c.len == 0) continue;
+        if (isBorisSafeWithinTree(c)) return .{ try allocator.dupe(u8, c), "" };
+    }
+    // Last resort: sanitize basename to ASCII-safe form.
+    const base = std.fs.path.basename(local_path);
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    for (base) |c| {
+        const ok = (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or
+            (c >= '0' and c <= '9') or c == '.' or c == '_' or c == '-';
+        try out.append(allocator, if (ok) c else '-');
+    }
+    if (out.items.len == 0) try out.appendSlice(allocator, "asset.bin");
+    // Collapse leading dots that would make empty-looking names.
+    while (out.items.len > 0 and out.items[0] == '.') {
+        _ = out.orderedRemove(0);
+    }
+    if (out.items.len == 0) try out.appendSlice(allocator, "asset.bin");
+    return .{ try out.toOwnedSlice(allocator), "sanitized_basename_for_boris_safety" };
+}
+
+fn disambiguateWithin(
+    allocator: std.mem.Allocator,
+    within0: []const u8,
+    used: *std.StringHashMapUnmanaged([]const u8),
+    local_path: []const u8,
+) ![]const u8 {
+    if (used.get(within0)) |prior| {
+        if (std.mem.eql(u8, prior, local_path)) return within0;
+    } else {
+        return within0;
+    }
+    const ext_at = std.mem.lastIndexOfScalar(u8, within0, '.') orelse within0.len;
+    var n: usize = 2;
+    while (n < 1000) : (n += 1) {
+        const cand = try std.fmt.allocPrint(allocator, "{s}-{d}{s}", .{
+            within0[0..ext_at],
+            n,
+            within0[ext_at..],
+        });
+        if (used.get(cand) == null) return cand;
+        if (used.get(cand)) |p| {
+            if (std.mem.eql(u8, p, local_path)) return cand;
+        }
+    }
+    return within0;
+}
+
+fn replaceAllAlloc(allocator: std.mem.Allocator, haystack: []const u8, needle: []const u8, replacement: []const u8) ![]u8 {
+    if (needle.len == 0) return try allocator.dupe(u8, haystack);
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    var from: usize = 0;
+    while (from < haystack.len) {
+        if (std.mem.indexOfPos(u8, haystack, from, needle)) |idx| {
+            try out.appendSlice(allocator, haystack[from..idx]);
+            try out.appendSlice(allocator, replacement);
+            from = idx + needle.len;
+        } else {
+            try out.appendSlice(allocator, haystack[from..]);
+            break;
+        }
+    }
+    return try out.toOwnedSlice(allocator);
+}
+
+pub const MediaRewrite = struct {
+    original: []const u8,
+    rewritten: []const u8,
+};
+
+/// Rewrite Markdown image/link destinations and retained raw HTML media attrs.
+/// Only exact original_reference strings are replaced (never invents targets).
+pub fn rewriteMediaReferences(allocator: std.mem.Allocator, body: []const u8, rewrites: []const MediaRewrite) ![]u8 {
+    if (rewrites.len == 0) return try allocator.dupe(u8, body);
+    // Longer originals first to avoid partial overlaps.
+    const order = try allocator.alloc(MediaRewrite, rewrites.len);
+    defer allocator.free(order);
+    @memcpy(order, rewrites);
+    std.mem.sort(MediaRewrite, order, {}, struct {
+        fn less(_: void, a: MediaRewrite, b: MediaRewrite) bool {
+            return a.original.len > b.original.len;
+        }
+    }.less);
+    var current = try allocator.dupe(u8, body);
+    for (order) |rw| {
+        if (rw.original.len == 0) continue;
+        if (std.mem.eql(u8, rw.original, rw.rewritten)) continue;
+        const next = try replaceAllAlloc(allocator, current, rw.original, rw.rewritten);
+        allocator.free(current);
+        current = next;
+    }
+    return current;
+}
+
+fn copyMediaFile(
+    io: Io,
+    media_root: Io.Dir,
+    out_root: Io.Dir,
+    source_rel: []const u8,
+    dest_rel: []const u8,
+) !void {
+    // Refuse symlink sources (escape risk).
+    if (isSymlink(io, media_root, source_rel)) return error.SymlinkRejected;
+    const data = try readFileAlloc(io, media_root, source_rel, std.heap.page_allocator);
+    defer std.heap.page_allocator.free(data);
+    // Refuse silent overwrite of a different file already at dest.
+    if (out_root.access(io, dest_rel, .{})) |_| {
+        const existing = try readFileAlloc(io, out_root, dest_rel, std.heap.page_allocator);
+        defer std.heap.page_allocator.free(existing);
+        if (!std.mem.eql(u8, existing, data)) return error.DestinationCollision;
+        return; // identical bytes — idempotent
+    } else |_| {}
+    try writeBytes(io, out_root, dest_rel, data);
+}
+
+fn emitMediaManifest(gpa: std.mem.Allocator, entries: []const MediaManifestEntry) ![]u8 {
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(gpa);
+    try buf.appendSlice(gpa, "{\n  \"format\": \"boris-wordpress-media-manifest\",\n  \"schema_version\": 1,\n");
+    try buf.appendSlice(gpa, "  \"policy\": \"Verified local --media matches are copied into page-sibling {stem}.assets/ under --out only. Unresolved references are preserved and listed. No network fetch. Inputs never modified. Query strings and fragments are dropped on rewrite (Boris content-local asset grammar); reasons are recorded when dropped.\",\n");
+    try buf.appendSlice(gpa, "  \"entries\": [\n");
+    for (entries, 0..) |e, i| {
+        try buf.appendSlice(gpa, "    {\n      \"source_output\": ");
+        try jsonEscapeAppend(&buf, gpa, e.source_output);
+        try buf.appendSlice(gpa, ",\n      \"original_reference\": ");
+        try jsonEscapeAppend(&buf, gpa, e.original_reference);
+        try buf.appendSlice(gpa, ",\n      \"upload_key\": ");
+        if (e.upload_key) |k| {
+            try jsonEscapeAppend(&buf, gpa, k);
+        } else {
+            try buf.appendSlice(gpa, "null");
+        }
+        try buf.appendSlice(gpa, ",\n      \"matched_source\": ");
+        if (e.matched_source) |m| {
+            try jsonEscapeAppend(&buf, gpa, m);
+        } else {
+            try buf.appendSlice(gpa, "null");
+        }
+        try buf.appendSlice(gpa, ",\n      \"emitted_asset_path\": ");
+        if (e.emitted_asset_path) |p| {
+            try jsonEscapeAppend(&buf, gpa, p);
+        } else {
+            try buf.appendSlice(gpa, "null");
+        }
+        try buf.appendSlice(gpa, ",\n      \"status\": ");
+        try jsonEscapeAppend(&buf, gpa, e.status);
+        try buf.appendSlice(gpa, ",\n      \"reason\": ");
+        try jsonEscapeAppend(&buf, gpa, e.reason);
+        try buf.appendSlice(gpa, "\n    }");
+        if (i + 1 < entries.len) try buf.append(gpa, ',');
+        try buf.append(gpa, '\n');
+    }
+    try buf.appendSlice(gpa, "  ]\n}\n");
+    return try buf.toOwnedSlice(gpa);
 }
 
 // ---------------------------------------------------------------------------
@@ -2044,6 +2427,8 @@ fn emitMarkdown(gpa: std.mem.Allocator, report: Report) ![]u8 {
         try buf.appendSlice(gpa, "Media directory: _(none)_\n\n");
     }
     try buf.appendSlice(gpa, "Original WXR/export and media inputs were **not modified**. ");
+    try buf.appendSlice(gpa, "Verified local media (when `--media` is set) is copied into page-local ");
+    try buf.appendSlice(gpa, "`{stem}.assets/` trees; see `media_manifest.json` for the audit. ");
     try buf.appendSlice(gpa, "No network access. Content is never silently discarded: ");
     try buf.appendSlice(gpa, "unsupported items are preserved under `content/_preserved/`.\n\n");
 
@@ -2319,12 +2704,13 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     // Snapshot hash not required; preserve by never writing to wxr path.
     const doc = try parseWxr(retain, wxr_bytes);
 
-    // Optional media inventory
+    // Optional media inventory (paths relative to media_dir; never modified).
     var media_files: []const []const u8 = &.{};
+    var media_root_opt: ?Io.Dir = null;
+    defer if (media_root_opt) |*mr| mr.close(io);
     if (opts.media_dir) |mdir| {
         var list: std.ArrayList([]const u8) = .empty;
-        var mroot = try Io.Dir.cwd().openDir(io, mdir, .{ .iterate = true });
-        defer mroot.close(io);
+        const mroot = try Io.Dir.cwd().openDir(io, mdir, .{ .iterate = true });
         try collectMediaFiles(io, gpa, retain, mroot, "", &list);
         std.mem.sort([]const u8, list.items, {}, struct {
             fn less(_: void, a: []const u8, b: []const u8) bool {
@@ -2332,6 +2718,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             }
         }.less);
         media_files = try list.toOwnedSlice(gpa);
+        media_root_opt = mroot; // take ownership for later verified copies
     }
     defer if (media_files.len > 0) gpa.free(media_files);
 
@@ -2416,6 +2803,8 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     defer all_links.deinit(gpa);
     var all_media: std.ArrayList(MediaRef) = .empty;
     defer all_media.deinit(gpa);
+    var media_manifest: std.ArrayList(MediaManifestEntry) = .empty;
+    defer media_manifest.deinit(gpa);
     var all_features: std.ArrayList(FeatureFinding) = .empty;
     defer all_features.deinit(gpa);
     var unsupported: std.ArrayList(UnsupportedItem) = .empty;
@@ -2855,40 +3244,151 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             }
         }
 
-        // Media matching
+        // Media matching + materialization into page-local `{stem}.assets/`.
+        var rewrites: std.ArrayList(MediaRewrite) = .empty;
+        var used_within: std.StringHashMapUnmanaged([]const u8) = .empty; // within → local_path
+        const page_stem = pageStemFromOutput(m.output_path);
+        const asset_root = try pageAssetRoot(retain, m.output_path);
         for (conv.media_refs) |mr| {
             var entry = mr;
             entry.source_post_id = try retain.dupe(u8, mr.source_post_id);
             entry.source_output = try retain.dupe(u8, mr.source_output);
             entry.referenced = try retain.dupe(u8, mr.referenced);
-            if (mediaRelativeKey(mr.referenced)) |key| {
-                if (findLocalMedia(media_files, key)) |local| {
-                    entry.local_path = try retain.dupe(u8, local);
-                    entry.status = "present";
-                } else {
+
+            const match = matchMediaReference(media_files, opts.media_dir != null, mr.referenced);
+            var man: MediaManifestEntry = .{
+                .source_output = m.output_path,
+                .original_reference = entry.referenced,
+                .upload_key = if (match.upload_key) |k| try retain.dupe(u8, k) else null,
+                .matched_source = null,
+                .emitted_asset_path = null,
+                .status = "missing",
+                .reason = try retain.dupe(u8, match.reason),
+            };
+
+            switch (match.kind) {
+                .found => {
+                    const local = match.local_path.?;
+                    // Symlink / non-regular sources are rejected (escape risk).
+                    if (media_root_opt) |mroot| {
+                        if (isSymlink(io, mroot, local)) {
+                            entry.local_path = try retain.dupe(u8, local);
+                            entry.status = "rejected";
+                            man.status = "rejected";
+                            man.matched_source = try retain.dupe(u8, local);
+                            man.reason = try retain.dupe(u8, "symlink_escape");
+                            conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                            try appendUniqueCode(retain, &code_list, "media_symlink_rejected");
+                            try all_media.append(gpa, entry);
+                            try media_manifest.append(gpa, man);
+                            continue;
+                        }
+                    }
+
+                    const within_pair = try withinTreeForMedia(retain, match.upload_key, local);
+                    var within = within_pair[0];
+                    const sanitize_note = within_pair[1];
+                    within = try disambiguateWithin(retain, within, &used_within, local);
+                    try used_within.put(retain, within, try retain.dupe(u8, local));
+
+                    const dest_path = try std.fmt.allocPrint(retain, "{s}/{s}", .{ asset_root, within });
+                    // Boris content-local image destinations reject query strings and
+                    // fragments; drop both and record the limitation in the manifest.
+                    const md_ref = try std.fmt.allocPrint(retain, "{s}.assets/{s}", .{ page_stem, within });
+                    const had_query = urlHasQuery(mr.referenced);
+                    const had_frag = urlFragment(mr.referenced) != null;
+
+                    var copy_ok = false;
+                    var copy_reason: []const u8 = "";
+                    if (media_root_opt) |mroot| {
+                        copyMediaFile(io, mroot, out_root, local, dest_path) catch |err| {
+                            copy_reason = switch (err) {
+                                error.SymlinkRejected => "symlink_escape",
+                                error.DestinationCollision => "destination_collision",
+                                else => "copy_failed",
+                            };
+                        };
+                        if (copy_reason.len == 0) copy_ok = true;
+                    } else {
+                        copy_reason = "media_dir_not_provided";
+                    }
+
+                    if (copy_ok) {
+                        entry.local_path = try retain.dupe(u8, local);
+                        entry.status = "present";
+                        man.matched_source = try retain.dupe(u8, local);
+                        man.emitted_asset_path = dest_path;
+                        man.status = "copied";
+                        // Document query/fragment drops (not meaningful under Boris asset grammar).
+                        var reason_parts: std.ArrayList([]const u8) = .empty;
+                        if (had_query) try reason_parts.append(retain, "query_string_dropped");
+                        if (had_frag) try reason_parts.append(retain, "fragment_dropped");
+                        if (sanitize_note.len > 0) try reason_parts.append(retain, sanitize_note);
+                        if (reason_parts.items.len == 0) {
+                            man.reason = "";
+                        } else if (reason_parts.items.len == 1) {
+                            man.reason = try retain.dupe(u8, reason_parts.items[0]);
+                        } else {
+                            var rb: std.ArrayList(u8) = .empty;
+                            for (reason_parts.items, 0..) |p, i| {
+                                if (i > 0) try rb.append(retain, ';');
+                                try rb.appendSlice(retain, p);
+                            }
+                            man.reason = try rb.toOwnedSlice(retain);
+                        }
+                        try rewrites.append(retain, .{
+                            .original = entry.referenced,
+                            .rewritten = md_ref,
+                        });
+                    } else {
+                        entry.local_path = try retain.dupe(u8, local);
+                        entry.status = "rejected";
+                        man.matched_source = try retain.dupe(u8, local);
+                        man.status = "rejected";
+                        man.reason = try retain.dupe(u8, copy_reason);
+                        conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                        try appendUniqueCode(retain, &code_list, "media_copy_rejected");
+                    }
+                },
+                .missing => {
                     entry.local_path = null;
                     entry.status = "missing";
+                    man.status = "missing";
+                    if (man.reason.len == 0) man.reason = try retain.dupe(u8, "local_media_not_found");
                     conv.classification = ConversionClass.worse(conv.classification, .human_review);
-                    try appendUniqueCode(retain, &code_list, "missing_media");
-                }
-            } else if (opts.media_dir != null) {
-                const base = std.fs.path.basename(mr.referenced);
-                if (findLocalMedia(media_files, base)) |local| {
-                    entry.local_path = try retain.dupe(u8, local);
-                    entry.status = "present";
-                } else {
-                    entry.status = "missing";
+                    if (opts.media_dir == null) {
+                        try appendUniqueCode(retain, &code_list, "media_unverified");
+                    } else {
+                        try appendUniqueCode(retain, &code_list, "missing_media");
+                    }
+                },
+                .ambiguous => {
+                    entry.local_path = null;
+                    entry.status = "ambiguous";
+                    man.status = "ambiguous";
+                    if (man.reason.len == 0) man.reason = try retain.dupe(u8, "duplicate_media_basename");
                     conv.classification = ConversionClass.worse(conv.classification, .human_review);
-                    try appendUniqueCode(retain, &code_list, "missing_media");
-                }
-            } else {
-                entry.status = "missing";
-                entry.local_path = null;
-                // no media dir: still report
-                try appendUniqueCode(retain, &code_list, "media_unverified");
-                conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                    try appendUniqueCode(retain, &code_list, "ambiguous_media");
+                },
+                .rejected => {
+                    entry.local_path = null;
+                    entry.status = "rejected";
+                    man.status = "rejected";
+                    if (man.reason.len == 0) man.reason = try retain.dupe(u8, "rejected");
+                    conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                    try appendUniqueCode(retain, &code_list, "media_rejected");
+                },
             }
             try all_media.append(gpa, entry);
+            try media_manifest.append(gpa, man);
+        }
+
+        // Apply verified rewrites to the page body (unresolved refs left intact).
+        if (rewrites.items.len > 0) {
+            const rewritten_body = try rewriteMediaReferences(retain, conv.markdown_body, rewrites.items);
+            conv.markdown_body = rewritten_body;
+            conv.classification = ConversionClass.worse(conv.classification, .transformed);
+            try appendUniqueCode(retain, &code_list, "media_materialized");
         }
 
         for (conv.features) |f| {
@@ -3156,7 +3656,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             .conversion = .unsupported,
         });
 
-        // Attachment media inventory
+        // Attachment media inventory (report only — not materialized into page assets).
         if (std.mem.eql(u8, item.post_type, "attachment") and item.attachment_url.len > 0) {
             var entry: MediaRef = .{
                 .source_post_id = item.post_id,
@@ -3165,22 +3665,41 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
                 .local_path = null,
                 .status = "attachment_only",
             };
-            if (mediaRelativeKey(item.attachment_url)) |key| {
-                if (findLocalMedia(media_files, key)) |local| {
-                    entry.local_path = local;
+            const match = matchMediaReference(media_files, opts.media_dir != null, item.attachment_url);
+            var man: MediaManifestEntry = .{
+                .source_output = path,
+                .original_reference = item.attachment_url,
+                .upload_key = if (match.upload_key) |k| try retain.dupe(u8, k) else mediaRelativeKey(item.attachment_url),
+                .matched_source = null,
+                .emitted_asset_path = null,
+                .status = "rejected",
+                .reason = try retain.dupe(u8, "attachment_inventory_only_not_materialized"),
+            };
+            switch (match.kind) {
+                .found => {
+                    entry.local_path = match.local_path;
                     entry.status = "present";
-                } else {
+                    man.matched_source = match.local_path;
+                    // Keep rejected/not-materialized: attachments are not Boris pages.
+                },
+                .missing => {
                     entry.status = "missing";
-                }
-            } else if (opts.media_dir != null) {
-                entry.status = if (findLocalMedia(media_files, std.fs.path.basename(item.attachment_url)) != null) "present" else "missing";
-                if (std.mem.eql(u8, entry.status, "present")) {
-                    entry.local_path = findLocalMedia(media_files, std.fs.path.basename(item.attachment_url));
-                }
-            } else {
-                entry.status = "missing";
+                    man.status = "missing";
+                    man.reason = try retain.dupe(u8, if (match.reason.len > 0) match.reason else "local_media_not_found");
+                },
+                .ambiguous => {
+                    entry.status = "ambiguous";
+                    man.status = "ambiguous";
+                    man.reason = try retain.dupe(u8, if (match.reason.len > 0) match.reason else "duplicate_media_basename");
+                },
+                .rejected => {
+                    entry.status = "rejected";
+                    man.status = "rejected";
+                    man.reason = try retain.dupe(u8, if (match.reason.len > 0) match.reason else "rejected");
+                },
             }
             try all_media.append(gpa, entry);
+            try media_manifest.append(gpa, man);
         }
     }
 
@@ -3262,6 +3781,15 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             return std.mem.order(u8, a.referenced, b.referenced) == .lt;
         }
     }.less);
+    std.mem.sort(MediaManifestEntry, media_manifest.items, {}, struct {
+        fn less(_: void, a: MediaManifestEntry, b: MediaManifestEntry) bool {
+            const o = std.mem.order(u8, a.source_output, b.source_output);
+            if (o != .eq) return o == .lt;
+            const o2 = std.mem.order(u8, a.original_reference, b.original_reference);
+            if (o2 != .eq) return o2 == .lt;
+            return std.mem.order(u8, a.status, b.status) == .lt;
+        }
+    }.less);
     std.mem.sort(FeatureFinding, all_features.items, {}, struct {
         fn less(_: void, a: FeatureFinding, b: FeatureFinding) bool {
             const o = std.mem.order(u8, a.source_output, b.source_output);
@@ -3318,20 +3846,29 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     defer gpa.free(json);
     const md = try emitMarkdown(gpa, report);
     defer gpa.free(md);
+    const man_json = try emitMediaManifest(gpa, media_manifest.items);
+    defer gpa.free(man_json);
 
     try writeBytes(io, out_root, "report.json", json);
     try writeBytes(io, out_root, "REPORT.md", md);
+    try writeBytes(io, out_root, "media_manifest.json", man_json);
 
     if (!opts.quiet) {
-        std.debug.print("wordpress-migration-lab: wrote {s}/content/, {s}/report.json, {s}/REPORT.md\n", .{
+        std.debug.print("wordpress-migration-lab: wrote {s}/content/, {s}/report.json, {s}/REPORT.md, {s}/media_manifest.json\n", .{
+            opts.out_dir,
             opts.out_dir,
             opts.out_dir,
             opts.out_dir,
         });
-        std.debug.print("  pages={d} features={d} missing_media={d} human_review={d} preserved={d}\n", .{
+        var n_copied: usize = 0;
+        for (media_manifest.items) |e| {
+            if (std.mem.eql(u8, e.status, "copied")) n_copied += 1;
+        }
+        std.debug.print("  pages={d} features={d} missing_media={d} media_copied={d} human_review={d} preserved={d}\n", .{
             report.pages.len,
             report.features.len,
             report.missing_media.len,
+            n_copied,
             report.human_review.len,
             report.unsupported_items.len,
         });

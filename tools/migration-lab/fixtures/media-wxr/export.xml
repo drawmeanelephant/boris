@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Synthetic WXR for WordPress media materialization tests.
+  Covers: full uploads URL match, relative uploads/ match, shared asset across
+  two pages, nested page output path, missing media, duplicate basenames,
+  traversal/absolute escapes, query/fragment on matched URL.
+-->
+<rss version="2.0"
+	xmlns:excerpt="http://wordpress.org/export/1.2/excerpt/"
+	xmlns:content="http://purl.org/rss/1.0/modules/content/"
+	xmlns:dc="http://purl.org/dc/elements/1.1/"
+	xmlns:wp="http://wordpress.org/export/1.2/">
+<channel>
+	<title>Media Materialize Lab</title>
+	<link>https://example.com</link>
+	<description>Media materialization fixture</description>
+	<wp:wxr_version>1.2</wp:wxr_version>
+	<wp:base_site_url>https://example.com</wp:base_site_url>
+	<wp:base_blog_url>https://example.com</wp:base_blog_url>
+
+	<wp:author>
+		<wp:author_id>1</wp:author_id>
+		<wp:author_login><![CDATA[admin]]></wp:author_login>
+		<wp:author_email><![CDATA[admin@example.com]]></wp:author_email>
+		<wp:author_display_name><![CDATA[Admin]]></wp:author_display_name>
+	</wp:author>
+
+	<!-- Full wp-content/uploads/YYYY/MM/file match -->
+	<item>
+		<title><![CDATA[Full Upload Path]]></title>
+		<link>https://example.com/full-upload/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.com/?p=1</guid>
+		<content:encoded><![CDATA[<p>Hero via absolute upload URL.</p>
+<img src="https://example.com/wp-content/uploads/2024/01/hero.png" alt="Hero"/>
+]]></content:encoded>
+		<wp:post_id>1</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-15 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-15 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[full-upload]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- Relative uploads/... match (same bytes as shared.png) -->
+	<item>
+		<title><![CDATA[Relative Uploads]]></title>
+		<link>https://example.com/relative-uploads/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.com/?p=2</guid>
+		<content:encoded><![CDATA[<p>Shared via relative uploads path.</p>
+<img src="uploads/2024/01/shared.png" alt="Shared relative"/>
+]]></content:encoded>
+		<wp:post_id>2</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-16 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-16 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[relative-uploads]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- Same shared asset as post 2 — per-page copy -->
+	<item>
+		<title><![CDATA[Shared Again]]></title>
+		<link>https://example.com/shared-again/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.com/?p=3</guid>
+		<content:encoded><![CDATA[<p>Second page referencing the same shared asset.</p>
+<img src="https://example.com/wp-content/uploads/2024/01/shared.png" alt="Shared absolute"/>
+]]></content:encoded>
+		<wp:post_id>3</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-17 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-17 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[shared-again]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- Nested page output: pages/<slug> with parent chain -->
+	<item>
+		<title><![CDATA[Guides]]></title>
+		<link>https://example.com/guides/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.com/?page_id=10</guid>
+		<content:encoded><![CDATA[<p>Guides trunk page.</p>]]></content:encoded>
+		<wp:post_id>10</wp:post_id>
+		<wp:post_date><![CDATA[2024-02-01 08:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-02-01 08:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[guides]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[page]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+	<item>
+		<title><![CDATA[Nested Diagram]]></title>
+		<link>https://example.com/guides/nested-diagram/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.com/?page_id=11</guid>
+		<content:encoded><![CDATA[<p>Nested page under Guides with a diagram.</p>
+<img src="https://example.com/wp-content/uploads/2024/06/diagram.png" alt="Diagram"/>
+]]></content:encoded>
+		<wp:post_id>11</wp:post_id>
+		<wp:post_date><![CDATA[2024-02-01 09:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-02-01 09:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[nested-diagram]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>10</wp:post_parent>
+		<wp:post_type><![CDATA[page]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- Missing media — original reference must remain -->
+	<item>
+		<title><![CDATA[Missing Media]]></title>
+		<link>https://example.com/missing-media/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.com/?p=4</guid>
+		<content:encoded><![CDATA[<p>This asset is not on disk.</p>
+<img src="https://example.com/wp-content/uploads/2024/01/gone.png" alt="Gone"/>
+]]></content:encoded>
+		<wp:post_id>4</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-18 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-18 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[missing-media]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- Basename-only reference with duplicate hero.png basenames → ambiguous -->
+	<item>
+		<title><![CDATA[Ambiguous Basename]]></title>
+		<link>https://example.com/ambiguous-basename/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.com/?p=5</guid>
+		<content:encoded><![CDATA[<p>Basename-only ref cannot choose among duplicate hero.png files.</p>
+<img src="hero.png" alt="Which hero"/>
+]]></content:encoded>
+		<wp:post_id>5</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-19 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-19 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[ambiguous-basename]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- Traversal in upload key — rejected, original preserved -->
+	<item>
+		<title><![CDATA[Traversal Escape]]></title>
+		<link>https://example.com/traversal-escape/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.com/?p=6</guid>
+		<content:encoded><![CDATA[<p>Traversal attempt must not materialize.</p>
+<img src="https://example.com/wp-content/uploads/2024/01/../../secret.png" alt="Traversal"/>
+]]></content:encoded>
+		<wp:post_id>6</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-20 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-20 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[traversal-escape]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- Absolute filesystem / scheme escape -->
+	<item>
+		<title><![CDATA[Absolute Escape]]></title>
+		<link>https://example.com/absolute-escape/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.com/?p=7</guid>
+		<content:encoded><![CDATA[<p>file: scheme and absolute path escapes.</p>
+<img src="file:///etc/passwd.png" alt="Absolute"/>
+<img src="/etc/passwd.png" alt="Root abs"/>
+]]></content:encoded>
+		<wp:post_id>7</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-21 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-21 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[absolute-escape]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- Query + fragment on a matched upload URL -->
+	<item>
+		<title><![CDATA[Query Fragment]]></title>
+		<link>https://example.com/query-fragment/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.com/?p=8</guid>
+		<content:encoded><![CDATA[<p>Matched media with query (dropped) and fragment (kept).</p>
+<img src="https://example.com/wp-content/uploads/2024/01/hero.png?w=640&amp;h=480#main" alt="Sized hero"/>
+]]></content:encoded>
+		<wp:post_id>8</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-22 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-22 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[query-fragment]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- Same full path on two dates for inventory duplicate_media_basename signal -->
+	<item>
+		<title><![CDATA[Hero 2025 Ref]]></title>
+		<link>https://example.com/hero-2025/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.com/?p=9</guid>
+		<content:encoded><![CDATA[<p>Exact path to the 2025 hero (distinct from 2024).</p>
+<img src="https://example.com/wp-content/uploads/2025/02/hero.png" alt="Hero 2025"/>
+]]></content:encoded>
+		<wp:post_id>9</wp:post_id>
+		<wp:post_date><![CDATA[2025-02-01 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2025-02-01 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[hero-2025]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+</channel>
+</rss>
