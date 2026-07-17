@@ -17,6 +17,10 @@ or an AI Context Bundle.
 Living phase note: [`docs/STATUS.md`](docs/STATUS.md) · history:
 [`CHANGELOG.md`](CHANGELOG.md).
 
+**v0.5.1:** secure page-local `{stem}.assets/`, an accessibility-forward
+reference theme, bounded Filed.fyi/Starlight adoption evidence, and migration
+lab aids for asset names and theme archaeology — without changing IR 0.2.
+
 ---
 
 ## What it does
@@ -134,13 +138,23 @@ Author key for parents is **`parent` only** (not `parentEntry` /
 `parent_entry`). Full grammar: [frontmatter contract](docs/contracts/frontmatter.md).
 New section landings: [migration guide](docs/MIGRATION.md) (Trunk + Satellite).
 
-### 15-minute demo path
+### 10-minute judge path
 
-1. `zig build` → `./zig-out/bin/boris --quiet` → open `dist/index.html` (nav, breadcrumb, TOC).
-2. `./zig-out/bin/boris --context --quiet` → skim `context/bundle.md`.
-3. `./zig-out/bin/boris check` — expect exit **1** on sample unreferenced `index` (policy finding).
-4. First real site / convert path: [`docs/MIGRATION.md`](docs/MIGRATION.md)
-   (inspect → bounded slice → build HTML/IR/RAG → incremental → deploy dir).
+1. **0:00 — build:** `zig build`.
+2. **2:00 — site:** `./zig-out/bin/boris --quiet`, then open
+   `dist/index.html` to see nav, breadcrumb, and TOC.
+3. **3:30 — graph:** `./zig-out/bin/boris --out .boris --quiet`, then inspect
+   `.boris/manifest.json`, `graph.json`, and `build-report.json`.
+4. **4:30 — grounded AI context:** `./zig-out/bin/boris --context --quiet`,
+   then skim `context/bundle.md` (local artifacts only).
+5. **6:00 — migration-shaped fixture:**
+   `./zig-out/bin/boris --input fixtures/migration-site/content --theme fixtures/migration-site/theme --html-dir test-output/migration-dist --quiet`.
+6. **8:00 — impact:** `./zig-out/bin/boris impact getting-started`. Optionally
+   run `check`; its expected exit **1** on the sample tree is an unreferenced-page
+   policy finding, not a failed build.
+
+For a real conversion, continue with [`docs/MIGRATION.md`](docs/MIGRATION.md):
+inspect → bounded slice → review → build HTML/IR/RAG → deploy.
 
 **Migration:** older scripts that assumed bare `boris` wrote IR should pass
 `--out .boris` (or `--no-rag`). Converting an existing site:
@@ -159,6 +173,7 @@ New section landings: [migration guide](docs/MIGRATION.md) (Trunk + Satellite).
 | Graph health / impact | **Product** (v0.4.0) | `boris check`, `boris impact <id>` — read-only; unreferenced findings can exit 1 |
 | Layout rules / themes | **Product** | Static layouts + `--layout-rule`; see [templating contract](docs/contracts/templating-and-themes.md) |
 | Includes + wiki-links | **Product** (HTML path) | `{{include}}`, `[[id]]`, `[[id#heading]]` — fail loud when invalid |
+| Page-local assets | **Product** (v0.5.1) | Sibling `{stem}.assets/` trees publish with safe path validation and target isolation |
 | Migration **guide** + fixture | **Product docs** | [`docs/MIGRATION.md`](docs/MIGRATION.md) first real site path; [`fixtures/migration-site/`](fixtures/migration-site/); theme dogfood [`examples/reference-theme/`](examples/reference-theme/) |
 | Migration **labs** (Astro, WordPress, Instagram, Obsidian, Notion, Starlight, …) | **Developer aids** | Standalone under [`tools/migration-lab/`](tools/migration-lab/) — **not** runtime dependencies of `boris`; **not** universal importers |
 
@@ -356,6 +371,7 @@ after exit 0.
 | [components.md](docs/contracts/components.md) | `<Aside>` and `<Details>` |
 | [apex-abi.md](docs/contracts/apex-abi.md) | Apex host ABI |
 | [html-output.md](docs/contracts/html-output.md) | HTML path (default CLI) |
+| [content-local-assets.md](docs/contracts/content-local-assets.md) | Page-owned sibling asset trees |
 | [includes-and-wiki-links.md](docs/contracts/includes-and-wiki-links.md) | Includes + wiki |
 | [templating-and-themes.md](docs/contracts/templating-and-themes.md) | Themes + layout rules |
 | [parallel-rendering.md](docs/contracts/parallel-rendering.md) | `--jobs` |
@@ -371,6 +387,6 @@ after exit 0.
   includes + wiki-links, typed IR dependency edges + reverse index,
   Documentation Intelligence, Context Bundles, layout selection, Textile
   compatibility, and migration labs as **standalone developer aids**. Product
-  **v0.5.1** release candidate.
-- **Next:** merge/tag v0.5.1, then continue real-site dogfood — see
+  **v0.5.1**.
+- **Next:** continue bounded real-site dogfood and migration hardening — see
   [`docs/STATUS.md`](docs/STATUS.md).
