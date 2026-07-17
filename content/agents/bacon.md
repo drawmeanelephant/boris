@@ -7,45 +7,88 @@ tags: [agents, lore]
 
 # Bacon
 
-## Contribution record
+> **Role:** independent release reviewer, evidence keeper, enemy of “green
+> enough.”
 
-The reachable merged history in this checkout does not identify a Bacon branch,
-author, or patch. This page therefore makes no contribution claim on Bacon’s
-behalf; it uses the name as a prompt to keep attribution as strict as Boris’s
-frontmatter. See [[agents|the field-notes trunk]] and [[agents/gibbs|Gibbs]].
+## The closeout desk
+
+Bacon enters at the point where a project can most easily flatter itself: the
+checks are green, the changelog looks handsome, and somebody is already
+reaching for the tag. The job is not to write a heroic patch. It is to ask
+whether the claim survives contact with the evidence.
+
+That makes Bacon the patron saint of the last uncomfortable question. Does the
+release note match the behavior? Did the hostile path actually run? Is a skip
+being called a pass? Is a migration limitation being sold as an importer? If
+the answer is uncertain, the useful move is not drama; it is a smaller claim
+and a better next test.
+
+See [[agents|the field-notes trunk]], the careful boundary work on
+[[agents/gibbs|Gibbs]], and the implementation-heavy record on
+[[agents/grok|Grok]].
+
+## The Bacon protocol
+
+1. Read the release claim before reading the applause.
+2. Ask for the smallest command that can disprove it.
+3. Separate a product defect from a documented limitation or a bad test setup.
+4. Ship the truth that remains.
+
+## What is actually claimed
+
+This is a session-grounded review role, not a claim that a Bacon-authored
+branch or merged patch is visible in the checked-out history. The page keeps
+the distinction on purpose: review can materially improve a release without
+being code authorship.
 
 ## Limericks
 
-There once was a claim without proof,\
-It rattled around in the roof.\
-We checked every trace,\
-Then gave doubt its place—\
-That modesty made the work hoof-proof.
+There once was a release nearly crowned,\
+With green little checks all around.\
+Bacon said, “Hold—\
+What claim can we hold?”\
+And the weak bits politely fell down.
 
-An agent was named in a note,\
-But no merged commit kept it afloat.\
-So the ledger stayed clear,\
-And the lesson stayed near:\
-Don’t launch a conclusion by boat.
+A changelog was polished and bright,\
+Its promises soaring in flight.\
+“Show evidence, friend,\
+From command to the end.”\
+Then the wording came down to the right.
+
+The dashboard declared, “All is clear!”\
+But a skipped sanitizer drew near.\
+“That is not green,”\
+Said Bacon, serene.\
+“It is absent. Write that, and we ship without fear.”
 
 ## Haikus
 
-Quiet history tree\
-Names absent from its branches now\
-Evidence waits
+Before the tag lands\
+One small question checks the seam\
+Truth keeps its footing
 
-Clean frontmatter\
-Keeps a small promise honest\
-No alias blooms
+Green is a color\
+Not a verdict by itself\
+Run the hard path
+
+Release notes settle\
+Only after the evidence\
+Finds its own voice
 
 ## Aphorisms
 
-Attribution is a fact to verify, not a gap to decorate.
+The last review is where confidence becomes a claim—or a correction.
 
-A missing record is information, not permission to improvise.
+A passing check is evidence; a skipped check is a condition; neither is a
+vibe.
 
-## Limitation / lesson
+The best release note is the strongest statement that still survives a hostile
+question.
 
-This repository snapshot cannot verify a Bacon-attributed merged contribution.
-That limit is the page’s point: future evidence may revise the record, but this
-page should not outrun it.
+Good reviewers do not slow shipping. They remove the part that would have made
+shipping embarrassing.
+
+## Lesson kept
+
+Attribution is a fact to verify, not a gap to decorate. Future evidence can
+add a precise record; this page should never outrun it.
