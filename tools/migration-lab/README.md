@@ -701,7 +701,21 @@ When `--media=DIR` contains a **verified** local match for a WordPress upload UR
    key `YYYY/MM/file.ext` when Boris-safe).
 3. Rewrite matching Markdown and retained raw HTML media references to the
    page-local path (`example.assets/YYYY/MM/file.ext`).
-4. Record the outcome in `media_manifest.json`.
+4. Record the outcome in `media_manifest.json` and summarize in `REPORT.md`.
+
+### Supported reference forms
+
+| Form | Behaviour |
+|------|-----------|
+| Full `…/wp-content/uploads/YYYY/MM/file.ext` | Exact inventory match |
+| Relative `uploads/YYYY/MM/file.ext` | Exact inventory match |
+| Site-absolute `/wp-content/uploads/…` | Exact inventory match |
+| Percent-encoded path segments (`my%20photo.png`) | Lookup decodes then matches disk name; reason `percent_decoded_lookup` |
+| HTML `src` / `href` / `poster` / media attrs | Harvested from body (Markdown or retained HTML) |
+| `data-src` / `data-lazy-src` | Harvested; `<img>` with these attrs is **kept as raw HTML** (not collapsed to Markdown) so rewrite can apply |
+| `srcset` / `data-srcset` | Each URL token harvested and rewritten; same raw-HTML preservation as lazy attrs |
+| Basename-only (`hero.png`) | Unique basename only; else `ambiguous` |
+| Query / fragment on matched URL | Dropped on rewrite (`query_string_dropped` / `fragment_dropped`) |
 
 When media is **unresolved** (missing, ambiguous basename, traversal/symlink/
 absolute escape, or no `--media`):
@@ -709,6 +723,8 @@ absolute escape, or no `--media`):
 - Do **not** invent a path or silently remove the reference.
 - Leave the original reference visible in the page body.
 - Keep the human-review finding and `missing_media` / manifest entry.
+- WordPress intermediate sizes (`name-300x200.ext`) when only `name.ext` exists
+  stay **missing** with reason `likely_wp_resized_derivative` (no silent remap).
 
 | Status | Meaning |
 |--------|---------|
@@ -717,12 +733,13 @@ absolute escape, or no `--media`):
 | `ambiguous` | Multiple local files share the basename; no automatic choice |
 | `rejected` | Traversal, absolute/`file:` escape, symlink, collision, or attachment-inventory-only |
 
-Security: rejects path traversal, absolute escapes, and symlink escapes from the
-media source tree; never overwrites colliding destinations with different bytes.
-Query strings and fragments on matched URLs are **dropped** on rewrite (Boris
-content-local asset grammar); the manifest reason records `query_string_dropped`
-/ `fragment_dropped`. The same source file used by two pages is **copied per
-page** (Boris-native page-local ownership).
+Security: rejects path traversal (including after percent-decode), absolute
+escapes, and symlink escapes from the media source tree; never overwrites
+colliding destinations with different bytes. Re-running into the same `--out`
+**wipes lab-owned** `content/` plus `report.json` / `REPORT.md` /
+`media_manifest.json` so stale assets cannot linger (inputs are never touched).
+The same source file used by two pages is **copied per page** (Boris-native
+page-local ownership).
 
 `media_manifest.json` fields (per entry): `source_output`, `original_reference`,
 `upload_key`, `matched_source`, `emitted_asset_path`, `status`, `reason`.

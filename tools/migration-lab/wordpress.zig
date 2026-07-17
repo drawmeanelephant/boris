@@ -13,8 +13,9 @@ pub const format_id = "boris-wordpress-migration-lab";
 /// Schema 3 adds per-page `excerpt` / `is_sticky` fields and explicit empty-slug /
 /// sticky / excerpt-preservation feature codes (no silent drop of WXR metadata).
 pub const schema_version: u32 = 3;
-/// 0.4.0: verified local media materializes into page `{stem}.assets/` + media_manifest.json.
-pub const tool_version = "0.4.0";
+/// 0.4.1: percent-decoded lookup, srcset/data-src harvest, REPORT materialization summary,
+/// deterministic lab-owned out wipe on re-run.
+pub const tool_version = "0.4.1";
 
 /// Site-level taxonomy count above which we emit high-cardinality reporting.
 pub const high_cardinality_taxonomy_threshold: usize = 50;
@@ -1172,8 +1173,22 @@ pub fn htmlToMarkdown(allocator: std.mem.Allocator, html_in: []const u8) !struct
                 }
             }
             if (std.mem.eql(u8, name, "img")) {
-                const src = extractAttr(html[i .. gt + 1], "src");
-                const alt = extractAttr(html[i .. gt + 1], "alt");
+                const tag = html[i .. gt + 1];
+                // Responsive / lazy-load attrs cannot be represented in simple Markdown
+                // image syntax — keep the raw tag so materialization can harvest and
+                // rewrite srcset / data-src URLs without inventing a collapse.
+                const has_extra = extractAttr(tag, "srcset").len > 0 or
+                    extractAttr(tag, "data-srcset").len > 0 or
+                    extractAttr(tag, "data-src").len > 0 or
+                    extractAttr(tag, "data-lazy-src").len > 0;
+                if (has_extra) {
+                    try out.appendSlice(allocator, tag);
+                    class = ConversionClass.worse(class, .transformed);
+                    i = gt + 1;
+                    continue;
+                }
+                const src = extractAttr(tag, "src");
+                const alt = extractAttr(tag, "alt");
                 try out.appendSlice(allocator, "![");
                 try out.appendSlice(allocator, alt);
                 try out.appendSlice(allocator, "](");
@@ -1354,10 +1369,22 @@ fn appendMediaRef(
     });
 }
 
+fn looksLikeMediaTarget(target: []const u8) bool {
+    return isMediaPath(target) or
+        std.mem.indexOf(u8, target, "wp-content/uploads/") != null or
+        std.mem.indexOf(u8, target, ".files.wordpress.com/") != null;
+}
+
 /// Pull media URLs from remaining raw HTML attrs and shortcode attributes.
+/// Includes lazy-load (`data-src`) and responsive (`srcset`) forms common in WordPress HTML.
 fn extractRawMediaUrls(allocator: std.mem.Allocator, text: []const u8, post_id: []const u8, output: []const u8, media: *std.ArrayList(MediaRef)) !void {
-    // src="..." / href="..." when the target looks like media
-    const attrs = [_][]const u8{ "src=\"", "href=\"", "src='", "href='", "mp3=\"", "mp4=\"", "m4v=\"", "ogg=\"", "wav=\"", "poster=\"" };
+    // Single-URL attributes
+    const attrs = [_][]const u8{
+        "src=\"",         "href=\"",         "src='",         "href='",
+        "data-src=\"",    "data-src='",      "data-lazy-src=\"", "data-lazy-src='",
+        "mp3=\"",         "mp4=\"",          "m4v=\"",        "ogg=\"",
+        "wav=\"",         "poster=\"",       "poster='",
+    };
     for (attrs) |pat| {
         var from: usize = 0;
         while (std.mem.indexOfPos(u8, text, from, pat)) |idx| {
@@ -1365,13 +1392,51 @@ fn extractRawMediaUrls(allocator: std.mem.Allocator, text: []const u8, post_id: 
             const quote: u8 = if (pat[pat.len - 1] == '\'') '\'' else '"';
             const end = std.mem.indexOfScalarPos(u8, text, start, quote) orelse break;
             const target = text[start..end];
-            if (isMediaPath(target) or std.mem.indexOf(u8, target, "wp-content/uploads/") != null or
-                std.mem.indexOf(u8, target, ".files.wordpress.com/") != null)
-            {
+            if (looksLikeMediaTarget(target)) {
                 try appendMediaRef(allocator, media, post_id, output, target);
             }
             from = end + 1;
         }
+    }
+    // srcset / data-srcset: "url 300w, url2 1024w" — harvest each URL token only.
+    const srcset_pats = [_][]const u8{ "srcset=\"", "srcset='", "data-srcset=\"", "data-srcset='" };
+    for (srcset_pats) |pat| {
+        var from: usize = 0;
+        while (std.mem.indexOfPos(u8, text, from, pat)) |idx| {
+            const start = idx + pat.len;
+            const quote: u8 = if (pat[pat.len - 1] == '\'') '\'' else '"';
+            const end = std.mem.indexOfScalarPos(u8, text, start, quote) orelse break;
+            try extractSrcsetUrls(allocator, text[start..end], post_id, output, media);
+            from = end + 1;
+        }
+    }
+}
+
+/// Split a srcset attribute value into candidate media URLs (first token of each comma entry).
+fn extractSrcsetUrls(
+    allocator: std.mem.Allocator,
+    value: []const u8,
+    post_id: []const u8,
+    output: []const u8,
+    media: *std.ArrayList(MediaRef),
+) !void {
+    var start: usize = 0;
+    while (start < value.len) {
+        // Skip leading separators / space
+        while (start < value.len and (value[start] == ',' or value[start] == ' ' or value[start] == '\t' or value[start] == '\n' or value[start] == '\r')) {
+            start += 1;
+        }
+        if (start >= value.len) break;
+        const comma = std.mem.indexOfScalarPos(u8, value, start, ',') orelse value.len;
+        const entry = trimSpace(value[start..comma]);
+        // URL is the first whitespace-separated token
+        var url_end: usize = 0;
+        while (url_end < entry.len and entry[url_end] != ' ' and entry[url_end] != '\t') : (url_end += 1) {}
+        const url = entry[0..url_end];
+        if (url.len > 0 and looksLikeMediaTarget(url)) {
+            try appendMediaRef(allocator, media, post_id, output, url);
+        }
+        start = comma + 1;
     }
 }
 
@@ -1665,13 +1730,125 @@ const MediaMatch = struct {
     reason: []const u8 = "",
 };
 
+/// Percent-decode a path/URL segment for local media lookup only.
+/// Invalid `%` sequences are left literal (no inventing). Used after key extraction;
+/// callers re-check `isUnsafeMediaKey` on the decoded form before matching.
+pub fn percentDecodeAlloc(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.ensureTotalCapacity(allocator, input.len);
+    var i: usize = 0;
+    while (i < input.len) {
+        if (input[i] == '%' and i + 2 < input.len) {
+            const hi = hexNibble(input[i + 1]);
+            const lo = hexNibble(input[i + 2]);
+            if (hi != null and lo != null) {
+                try out.append(allocator, (hi.? << 4) | lo.?);
+                i += 3;
+                continue;
+            }
+        }
+        try out.append(allocator, input[i]);
+        i += 1;
+    }
+    return try out.toOwnedSlice(allocator);
+}
+
+fn hexNibble(c: u8) ?u8 {
+    if (c >= '0' and c <= '9') return c - '0';
+    if (c >= 'a' and c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' and c <= 'F') return c - 'A' + 10;
+    return null;
+}
+
+/// If `key` looks like a WordPress intermediate size (`name-300x200.ext`), return an
+/// owned path with the `-NNNxNNN` suffix stripped. Does **not** rewrite references —
+/// used only to classify missing matches as `likely_wp_resized_derivative`.
+pub fn stripWordPressImageSize(allocator: std.mem.Allocator, key: []const u8) !?[]u8 {
+    const dir_prefix = if (std.mem.lastIndexOfScalar(u8, key, '/')) |s| key[0 .. s + 1] else "";
+    const base = std.fs.path.basename(key);
+    const dot = std.mem.lastIndexOfScalar(u8, base, '.') orelse return null;
+    if (dot == 0) return null;
+    const stem = base[0..dot];
+    const ext = base[dot..];
+    const dash = std.mem.lastIndexOfScalar(u8, stem, '-') orelse return null;
+    if (dash == 0) return null;
+    const suffix = stem[dash + 1 ..];
+    const x = std.mem.indexOfScalar(u8, suffix, 'x') orelse return null;
+    if (x == 0 or x + 1 >= suffix.len) return null;
+    for (suffix[0..x]) |c| {
+        if (c < '0' or c > '9') return null;
+    }
+    for (suffix[x + 1 ..]) |c| {
+        if (c < '0' or c > '9') return null;
+    }
+    return try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ dir_prefix, stem[0..dash], ext });
+}
+
+/// Try exact inventory match; if the key contains `%`, also try percent-decoded form.
+/// On decode-only hit, `upload_key` is the matched inventory path (stable lifetime)
+/// and `reason` is `percent_decoded_lookup`.
+fn matchExactOrDecoded(
+    allocator: std.mem.Allocator,
+    media_files: []const []const u8,
+    key: []const u8,
+) !MediaMatch {
+    if (findExactLocalMedia(media_files, key)) |local| {
+        return .{ .kind = .found, .local_path = local, .upload_key = key, .reason = "" };
+    }
+    if (std.mem.indexOfScalar(u8, key, '%') == null) {
+        return .{ .kind = .missing, .upload_key = key, .reason = "local_media_not_found" };
+    }
+    const decoded = try percentDecodeAlloc(allocator, key);
+    defer allocator.free(decoded);
+    if (std.mem.eql(u8, decoded, key)) {
+        return .{ .kind = .missing, .upload_key = key, .reason = "local_media_not_found" };
+    }
+    if (isUnsafeMediaKey(decoded)) {
+        return .{ .kind = .rejected, .upload_key = key, .reason = "traversal_or_unsafe_upload_key" };
+    }
+    if (findExactLocalMedia(media_files, decoded)) |local| {
+        return .{ .kind = .found, .local_path = local, .upload_key = local, .reason = "percent_decoded_lookup" };
+    }
+    return .{ .kind = .missing, .upload_key = key, .reason = "local_media_not_found" };
+}
+
+fn classifyMissingWithResizeHint(
+    allocator: std.mem.Allocator,
+    media_files: []const []const u8,
+    key: []const u8,
+) !MediaMatch {
+    if (try stripWordPressImageSize(allocator, key)) |base| {
+        defer allocator.free(base);
+        if (findExactLocalMedia(media_files, base) != null) {
+            return .{ .kind = .missing, .upload_key = key, .reason = "likely_wp_resized_derivative" };
+        }
+    }
+    // Also try resize strip on percent-decoded form when key still has % encodings.
+    if (std.mem.indexOfScalar(u8, key, '%') != null) {
+        const decoded = try percentDecodeAlloc(allocator, key);
+        defer allocator.free(decoded);
+        if (!std.mem.eql(u8, decoded, key) and !isUnsafeMediaKey(decoded)) {
+            if (try stripWordPressImageSize(allocator, decoded)) |base| {
+                defer allocator.free(base);
+                if (findExactLocalMedia(media_files, base) != null) {
+                    return .{ .kind = .missing, .upload_key = key, .reason = "likely_wp_resized_derivative" };
+                }
+            }
+        }
+    }
+    return .{ .kind = .missing, .upload_key = key, .reason = "local_media_not_found" };
+}
+
 /// Resolve a body media reference against the optional local media inventory.
 /// Never invents paths. Ambiguous basenames and unsafe keys are explicit.
+/// Percent-decodes upload keys for lookup only (disk names are typically decoded).
 pub fn matchMediaReference(
+    allocator: std.mem.Allocator,
     media_files: []const []const u8,
     media_dir_provided: bool,
     referenced: []const u8,
-) MediaMatch {
+) !MediaMatch {
     if (referenced.len == 0) {
         return .{ .kind = .rejected, .reason = "empty_reference" };
     }
@@ -1704,11 +1881,10 @@ pub fn matchMediaReference(
     }
 
     if (key_opt) |key| {
-        // Upload keys require an exact path match under --media (no basename guess).
-        if (findExactLocalMedia(media_files, key)) |local| {
-            return .{ .kind = .found, .local_path = local, .upload_key = key, .reason = "" };
-        }
-        return .{ .kind = .missing, .upload_key = key, .reason = "local_media_not_found" };
+        // Upload keys: exact path, then percent-decoded path (no basename guess).
+        const hit = try matchExactOrDecoded(allocator, media_files, key);
+        if (hit.kind != .missing) return hit;
+        return try classifyMissingWithResizeHint(allocator, media_files, key);
     }
 
     // No upload key: try exact inventory path, then unique basename.
@@ -1717,10 +1893,22 @@ pub fn matchMediaReference(
     if (isUnsafeMediaKey(path_only) or std.mem.startsWith(u8, path_only, "/")) {
         return .{ .kind = .rejected, .reason = "traversal_or_absolute_escape" };
     }
-    if (findExactLocalMedia(media_files, path_only)) |local| {
-        return .{ .kind = .found, .local_path = local, .upload_key = path_only, .reason = "" };
+    const path_hit = try matchExactOrDecoded(allocator, media_files, path_only);
+    if (path_hit.kind != .missing) return path_hit;
+
+    // Basename match uses decoded form when the reference is percent-encoded.
+    var base_buf: ?[]u8 = null;
+    defer if (base_buf) |b| allocator.free(b);
+    var base = std.fs.path.basename(path_only);
+    if (std.mem.indexOfScalar(u8, base, '%') != null) {
+        const dec = try percentDecodeAlloc(allocator, base);
+        if (!std.mem.eql(u8, dec, base) and !isUnsafeMediaKey(dec)) {
+            base_buf = dec;
+            base = dec;
+        } else {
+            allocator.free(dec);
+        }
     }
-    const base = std.fs.path.basename(path_only);
     if (base.len == 0 or std.mem.eql(u8, base, ".") or std.mem.eql(u8, base, "..")) {
         return .{ .kind = .rejected, .reason = "unsafe_basename" };
     }
@@ -1731,11 +1919,12 @@ pub fn matchMediaReference(
     if (n == 1) {
         for (media_files) |f| {
             if (std.mem.eql(u8, std.fs.path.basename(f), base)) {
-                return .{ .kind = .found, .local_path = f, .upload_key = f, .reason = "basename_unique" };
+                const reason: []const u8 = if (base_buf != null) "percent_decoded_lookup;basename_unique" else "basename_unique";
+                return .{ .kind = .found, .local_path = f, .upload_key = f, .reason = reason };
             }
         }
     }
-    return .{ .kind = .missing, .reason = "local_media_not_found" };
+    return try classifyMissingWithResizeHint(allocator, media_files, path_only);
 }
 
 /// Page stem for content-local assets: basename of output without `.md`.
@@ -2414,7 +2603,7 @@ fn emitJson(gpa: std.mem.Allocator, report: Report) ![]u8 {
     return try buf.toOwnedSlice(gpa);
 }
 
-fn emitMarkdown(gpa: std.mem.Allocator, report: Report) ![]u8 {
+fn emitMarkdown(gpa: std.mem.Allocator, report: Report, media_manifest: []const MediaManifestEntry) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(gpa);
 
@@ -2432,13 +2621,28 @@ fn emitMarkdown(gpa: std.mem.Allocator, report: Report) ![]u8 {
     try buf.appendSlice(gpa, "No network access. Content is never silently discarded: ");
     try buf.appendSlice(gpa, "unsupported items are preserved under `content/_preserved/`.\n\n");
 
+    var n_copied: usize = 0;
+    var n_missing: usize = 0;
+    var n_ambiguous: usize = 0;
+    var n_rejected: usize = 0;
+    for (media_manifest) |e| {
+        if (std.mem.eql(u8, e.status, "copied")) n_copied += 1;
+        if (std.mem.eql(u8, e.status, "missing")) n_missing += 1;
+        if (std.mem.eql(u8, e.status, "ambiguous")) n_ambiguous += 1;
+        if (std.mem.eql(u8, e.status, "rejected")) n_rejected += 1;
+    }
+
     try buf.appendSlice(gpa, "## Summary\n\n");
     try buf.appendSlice(gpa, "| Metric | Count |\n|---|---:|\n");
     try buf.print(gpa, "| Generated pages (posts/pages) | {d} |\n", .{report.pages.len});
     try buf.print(gpa, "| Parent relationships | {d} |\n", .{report.parent_relationships.len});
     try buf.print(gpa, "| Links | {d} |\n", .{report.links.len});
     try buf.print(gpa, "| Media references | {d} |\n", .{report.media_references.len});
-    try buf.print(gpa, "| Missing media | {d} |\n", .{report.missing_media.len});
+    try buf.print(gpa, "| Media copied (materialized) | {d} |\n", .{n_copied});
+    try buf.print(gpa, "| Media missing | {d} |\n", .{n_missing});
+    try buf.print(gpa, "| Media ambiguous | {d} |\n", .{n_ambiguous});
+    try buf.print(gpa, "| Media rejected | {d} |\n", .{n_rejected});
+    try buf.print(gpa, "| Missing media (legacy list) | {d} |\n", .{report.missing_media.len});
     try buf.print(gpa, "| Feature findings | {d} |\n", .{report.features.len});
     try buf.print(gpa, "| Duplicate slugs | {d} |\n", .{report.slug_conflicts.len});
     try buf.print(gpa, "| Unsupported items (preserved) | {d} |\n", .{report.unsupported_items.len});
@@ -2569,6 +2773,36 @@ fn emitMarkdown(gpa: std.mem.Allocator, report: Report) ![]u8 {
         });
     }
     try buf.appendSlice(gpa, "\n");
+
+    try buf.appendSlice(gpa, "## Media materialization\n\n");
+    try buf.appendSlice(gpa, "Machine-readable audit: `media_manifest.json` (byte-stable, sorted).\n\n");
+    try buf.appendSlice(gpa, "| status | count |\n|---|---:|\n");
+    try buf.print(gpa, "| copied | {d} |\n", .{n_copied});
+    try buf.print(gpa, "| missing | {d} |\n", .{n_missing});
+    try buf.print(gpa, "| ambiguous | {d} |\n", .{n_ambiguous});
+    try buf.print(gpa, "| rejected | {d} |\n\n", .{n_rejected});
+    if (media_manifest.len == 0) {
+        try buf.appendSlice(gpa, "_No media references inventoried._\n\n");
+    } else {
+        try buf.appendSlice(gpa, "Unresolved / notable entries (missing, ambiguous, rejected, and non-empty reasons):\n\n");
+        try buf.appendSlice(gpa, "| source | original | status | reason |\n|---|---|---|---|\n");
+        var any_notable = false;
+        for (media_manifest) |e| {
+            const notable = !std.mem.eql(u8, e.status, "copied") or e.reason.len > 0;
+            if (!notable) continue;
+            any_notable = true;
+            try buf.print(gpa, "| `{s}` | `{s}` | **{s}** | {s} |\n", .{
+                e.source_output,
+                e.original_reference,
+                e.status,
+                if (e.reason.len > 0) e.reason else "—",
+            });
+        }
+        if (!any_notable) {
+            try buf.appendSlice(gpa, "_All inventoried media copied cleanly._\n");
+        }
+        try buf.appendSlice(gpa, "\n");
+    }
 
     try buf.appendSlice(gpa, "## Missing media\n\n");
     if (report.missing_media.len == 0) {
@@ -2790,8 +3024,20 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         }
     }.less);
 
-    // Prepare out dir
+    // Prepare out dir. Wipe lab-owned outputs so re-runs into the same --out are
+    // free of stale content/.assets and report sidecars (never touches inputs).
     try Io.Dir.cwd().createDirPath(io, opts.out_dir);
+    {
+        const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{opts.out_dir});
+        defer gpa.free(content_path);
+        Io.Dir.cwd().deleteTree(io, content_path) catch {};
+        const sidecar_names = [_][]const u8{ "report.json", "REPORT.md", "media_manifest.json" };
+        for (sidecar_names) |name| {
+            const p = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ opts.out_dir, name });
+            defer gpa.free(p);
+            Io.Dir.cwd().deleteFile(io, p) catch {};
+        }
+    }
     var out_root = try Io.Dir.cwd().openDir(io, opts.out_dir, .{});
     defer out_root.close(io);
 
@@ -3255,7 +3501,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             entry.source_output = try retain.dupe(u8, mr.source_output);
             entry.referenced = try retain.dupe(u8, mr.referenced);
 
-            const match = matchMediaReference(media_files, opts.media_dir != null, mr.referenced);
+            const match = try matchMediaReference(retain, media_files, opts.media_dir != null, mr.referenced);
             var man: MediaManifestEntry = .{
                 .source_output = m.output_path,
                 .original_reference = entry.referenced,
@@ -3319,8 +3565,9 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
                         man.matched_source = try retain.dupe(u8, local);
                         man.emitted_asset_path = dest_path;
                         man.status = "copied";
-                        // Document query/fragment drops (not meaningful under Boris asset grammar).
+                        // Document query/fragment drops and lookup notes.
                         var reason_parts: std.ArrayList([]const u8) = .empty;
+                        if (match.reason.len > 0) try reason_parts.append(retain, match.reason);
                         if (had_query) try reason_parts.append(retain, "query_string_dropped");
                         if (had_frag) try reason_parts.append(retain, "fragment_dropped");
                         if (sanitize_note.len > 0) try reason_parts.append(retain, sanitize_note);
@@ -3665,7 +3912,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
                 .local_path = null,
                 .status = "attachment_only",
             };
-            const match = matchMediaReference(media_files, opts.media_dir != null, item.attachment_url);
+            const match = try matchMediaReference(retain, media_files, opts.media_dir != null, item.attachment_url);
             var man: MediaManifestEntry = .{
                 .source_output = path,
                 .original_reference = item.attachment_url,
@@ -3844,7 +4091,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
 
     const json = try emitJson(gpa, report);
     defer gpa.free(json);
-    const md = try emitMarkdown(gpa, report);
+    const md = try emitMarkdown(gpa, report, media_manifest.items);
     defer gpa.free(md);
     const man_json = try emitMediaManifest(gpa, media_manifest.items);
     defer gpa.free(man_json);

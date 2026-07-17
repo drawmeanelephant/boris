@@ -241,5 +241,67 @@
 		<wp:post_password><![CDATA[]]></wp:post_password>
 		<wp:is_sticky>0</wp:is_sticky>
 	</item>
+
+	<!-- Percent-encoded filename in URL; on-disk name is decoded "my photo.png" -->
+	<item>
+		<title><![CDATA[Percent Encoded]]></title>
+		<link>https://example.com/percent-encoded/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.com/?p=12</guid>
+		<content:encoded><![CDATA[<p>URL-encoded space in uploads path.</p>
+<img src="https://example.com/wp-content/uploads/2024/01/my%20photo.png" alt="Spaced name"/>
+]]></content:encoded>
+		<wp:post_id>12</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-23 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-23 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[percent-encoded]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- Responsive srcset + lazy data-src (common WordPress HTML) -->
+	<item>
+		<title><![CDATA[Srcset Lazy]]></title>
+		<link>https://example.com/srcset-lazy/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.com/?p=13</guid>
+		<content:encoded><![CDATA[<p>srcset and data-src must materialize each matched URL.</p>
+<img src="https://example.com/wp-content/uploads/2024/01/shared.png" alt="Shared"
+  srcset="https://example.com/wp-content/uploads/2024/01/shared.png 640w, https://example.com/wp-content/uploads/2024/06/diagram.png 1024w"
+  data-src="https://example.com/wp-content/uploads/2024/01/hero.png"/>
+]]></content:encoded>
+		<wp:post_id>13</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-24 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-24 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[srcset-lazy]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
+
+	<!-- WP intermediate size only (derivative missing; original present) -->
+	<item>
+		<title><![CDATA[Resized Derivative]]></title>
+		<link>https://example.com/resized-derivative/</link>
+		<dc:creator><![CDATA[admin]]></dc:creator>
+		<guid isPermaLink="false">https://example.com/?p=14</guid>
+		<content:encoded><![CDATA[<p>WordPress -NNNxNNN intermediate; do not invent a rewrite.</p>
+<img src="https://example.com/wp-content/uploads/2024/01/hero-300x200.png" alt="Resized"/>
+]]></content:encoded>
+		<wp:post_id>14</wp:post_id>
+		<wp:post_date><![CDATA[2024-01-25 10:00:00]]></wp:post_date>
+		<wp:post_date_gmt><![CDATA[2024-01-25 10:00:00]]></wp:post_date_gmt>
+		<wp:post_name><![CDATA[resized-derivative]]></wp:post_name>
+		<wp:status><![CDATA[publish]]></wp:status>
+		<wp:post_parent>0</wp:post_parent>
+		<wp:post_type><![CDATA[post]]></wp:post_type>
+		<wp:post_password><![CDATA[]]></wp:post_password>
+		<wp:is_sticky>0</wp:is_sticky>
+	</item>
 </channel>
 </rss>
