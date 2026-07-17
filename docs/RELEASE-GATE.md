@@ -1,8 +1,8 @@
 # Release gate — Boris v0.5.1
 
 Mechanical checklist before tagging a release or claiming a milestone complete.
-This documents the verified **v0.5.1** release gate. The `v0.5.1` tag points
-at the merged PR #127 candidate that passed these checks.
+This documents the verified **v0.5.1** release gate. Tag `v0.5.1` points at
+the certified PR #127 merge commit that passed these checks; do not re-tag.
 
 Run locally:
 
