@@ -3,8 +3,8 @@
 All notable changes to Boris are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
-Versioning: the current product cut is **v0.5.2** with base IR
-`schemaVersion` **`0.2.0`** and compiler id **`boris/0.5.2`**. Breaking IR
+Versioning: the current product cut is **v0.6.0** with base IR
+`schemaVersion` **`0.2.0`** and compiler id **`boris/0.6.0`**. Breaking IR
 changes must bump `schemaVersion` and update `docs/contracts/`. Product version
 bumps may update `compiler_id` / `boris_version` without changing IR schema.
 
@@ -21,6 +21,33 @@ How to use going forward:
   link the relevant contract when the IR or acceptance surface moves.
 
 ---
+
+## [0.6.0] — 2026-07-18
+
+The v0.6.0 release keeps base IR `0.2.0` and conditional semantic-relation IR
+`0.3.0`; it updates product/compiler/RAG versioning to `0.6.0` without an IR
+schema change. This cut packages deterministic LLM discovery, bounded source
+packs, and calibrated zero-dependency theme examples.
+
+### Added
+
+- Added deterministic `boris --llms` export with graph-ordered page links,
+  bounded first-paragraph summaries, safe URL fallbacks, and a normative
+  [`llms.txt` contract](docs/contracts/llms-txt.md).
+- Added bounded `boris-source-rag --profile=core|docs|tools` exports while
+  preserving the complete `all` profile, with deterministic profile metadata
+  and path manifests for targeted LLM uploads. See the
+  [source-RAG tool guide](tools/source-rag/README.md).
+- Added Milligram-inspired and modern corporate Stitch-calibrated theme
+  prototypes with slot mappings, manual-review notes, and deterministic
+  manifests. See the [Milligram calibration report](docs/dogfood/STITCH_MILLIGRAM_CALIBRATION.md),
+  [corporate calibration report](docs/dogfood/STITCH_CORPORATE_CALIBRATION.md),
+  and [theme examples](examples/).
+
+### Docs
+
+- Updated release metadata, status, contracts, fixtures, sample content, and
+  the mechanical release gate for the v0.6.0 cut while keeping base IR 0.2.0.
 
 ## [Unreleased]
 

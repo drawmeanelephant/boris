@@ -1,11 +1,12 @@
 # Project status — Boris
 
-**As of:** 2026-07-17 · current product release **v0.5.2** /
-compiler **boris/0.5.2** · Zig **0.16.0**<br>
-**Phase:** v0.6 feature-complete track; release metadata remains v0.5.2 until the cut.<br>
+**As of:** 2026-07-18 · current product release **v0.6.0** /
+compiler **boris/0.6.0** · Zig **0.16.0**<br>
+**Phase:** v0.6.0 release candidate; tag after the final release gate.<br>
 IR `schemaVersion` is **`0.2.0`**.
 
-**Version boundary:** `v0.5.2` packages post-`v0.5.1` migration-lab and dogfood
+**Version boundary:** `v0.6.0` packages post-`v0.5.2` exports, source-RAG profiles,
+and calibrated theme prototypes on the same base IR. `v0.5.2` packages post-`v0.5.1` migration-lab and dogfood
 work on the same compiler surface; base IR remains `0.2.0`. Tag `v0.5.1`
 remains at the certified PR #127 merge commit. Semantic relations retain their
 documented conditional IR `0.3.0` artifacts.
@@ -62,12 +63,13 @@ calibration, plus bounded dogfood evidence. Core product `src/` behavior and
 base IR `0.2.0` are unchanged. Migration labs remain developer aids, not
 runtime dependencies or universal importers.
 
-### What is in the v0.6 track
+### What v0.6.0 adds
 
-The first v0.6 slices are merged on `main`: deterministic `llms.txt` export
-(PR #150) and bounded source-RAG pack profiles (PR #149). Both preserve the
-existing compiler and IR contracts. The release remains intentionally untagged
-while real-site and theme dogfood identifies the final migration gaps.
+The v0.6.0 cut adds deterministic `llms.txt` export, bounded source-RAG pack
+profiles with explicit exclusions, and two zero-dependency Stitch-calibrated
+theme prototypes. These additions preserve base IR `0.2.0`; semantic relations
+retain their conditional IR `0.3.0` artifacts. Theme and migration work remains
+developer tooling and examples, not a new runtime or framework dependency.
 
 **0.2.0** packaged ApexMarkdown Unified, HTML default CLI, graph-aware nav +
 TOC, and P2/P3 incremental / watch / jobs / multi-target. Tag: `v0.2.0`.
@@ -190,7 +192,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | **Next** | Archive-friendly layouts | Validate layout rules and child/index presentation against real archive navigation before broadening theme features. |
 | **Shipped on main / v0.6** | `llms.txt` export | Deterministic graph-ordered export with URL, summary, fallback, and contract coverage (PR #150). `llms-full.txt` remains later. |
 | **Shipped on main / v0.6** | Source-RAG pack profiles | Bounded logical packs with explicit scope selection, manifests, and vendor/generated/cache exclusions (PR #149). |
-| **Next v0.6** | Stitch/Milligram theme calibration | Validate a report-first local Stitch export against Boris slots and a real compile; keep automation in the migration lab. |
+| **Shipped on main / v0.6** | Stitch-calibrated theme prototypes | Milligram-inspired and corporate zero-dependency examples with slot, manual-review, and deterministic calibration reports (PR #152). |
 | **Later** | Further docs packaging | README + [`docs/MIGRATION.md`](MIGRATION.md) first real site path cover inspect → convert → build → deploy; remaining gaps are sample-content version drift and deeper external-SSG cookbook depth. |
 | **Later** | Source-RAG ergonomics and publication safety | Keep the standalone source pack distinct from product RAG; prioritize evidence-backed output-size and partial-publish improvements. |
 | **Deferred** | Measurement-driven build work | Benchmark or change cache/watch/parallel behavior only after a reproducible real-site need. |
@@ -199,6 +201,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | # | Feature | Note |
 |---|---------|------|
+| — | **Product v0.6.0** | Deterministic `llms.txt`, bounded source-RAG profiles, and Stitch-calibrated zero-dependency theme prototypes; base IR remains 0.2 |
 | — | **Product v0.5.2** | Migration-lab packaging: WP media materialize, Filed parent-key normalize, Starlight F-L1 image paths + calibration, bounded dogfood; core compiler surface unchanged; base IR remains 0.2 |
 | — | **Product v0.5.1** | Tagged/released: content-local assets, reference theme, bounded real-site adoption evidence, migration-lab asset/theme aids, and worktree-safe release cleanliness checks; base IR remains 0.2 |
 | — | **Product v0.5.0** | Tagged/released: native Details, source-RAG publication hardening, Obsidian/Notion/Starlight/Filed evidence, and judge-facing docs |
@@ -260,7 +263,7 @@ on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 | Publish | **Honest limit + fallback** | Cross-volume **atomic** replace still not claimed. HTML stage / IR publish fall back to copy+delete on `error.CrossDevice`; RAG already had directory copy fallback. Same-parent staging remains the common path. |
 | Dialect | **Enforced** | Author key is **`parent` only**. `parentEntry` / `parent_entry` → `EFRONTMATTER` on all product parse paths. Do not reintroduce aliases. |
 | Migration | **Documented** | Bare `boris` is HTML under `dist/`. Old IR scripts need `--out` / `--no-rag`. README + help text carry the note. |
-| Release state | **v0.5.2 release prep** | Product/compiler metadata `0.5.2`; tag when the release gate is green on the prep merge. Prior tag `v0.5.1` remains at the certified PR #127 merge commit. |
+| Release state | **v0.6.0 release candidate** | Product/compiler metadata `0.6.0`; tag after the release gate is green on the release-cut merge. Prior tag `v0.5.2` remains historical. |
 
 ---
 
