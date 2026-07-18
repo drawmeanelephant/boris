@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en" data-theme="pure-field-notes" data-layout="home">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Pure Field Notes</title>
+  <link rel="stylesheet" href="{{asset-url assets/pure-field-notes.css}}">
+</head>
+<body data-layout="home">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="site-header site-header--home" role="banner">
+    <div class="site-header__inner">
+      <a class="brand" href="index.html" aria-label="Pure Field Notes home">
+        <span class="brand__mark" aria-hidden="true">PF</span>
+        <span class="brand__text">Pure Field Notes</span>
+      </a>
+      {{breadcrumb}}
+    </div>
+  </header>
+  <main id="main-content" class="home-frame" tabindex="-1">
+    <div class="home-intro">
+      <p class="home-kicker">An independent Boris theme study</p>
+      {{metadata}}
+    </div>
+    <div class="home-body">
+      <article class="prose prose--home">
+        {{content}}
+      </article>
+      <aside class="home-map" aria-label="Site map">
+        <p class="rail__eyebrow">The map</p>
+        {{nav}}
+      </aside>
+    </div>
+  </main>
+  <footer class="theme-footer" role="contentinfo">{{footer}}</footer>
+</body>
+</html>

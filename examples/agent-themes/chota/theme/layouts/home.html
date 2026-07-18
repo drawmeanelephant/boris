@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en" data-theme="boris-chota" data-layout="home">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Boris Field Guide</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/chota.css}}">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="hero" role="banner">
+    <div class="container hero__inner">
+      <div>
+        <p class="eyebrow">Independent theme prototype</p>
+        <p class="hero__title"><span class="brand__mark" aria-hidden="true">B</span> Boris Field Guide</p>
+        <p class="hero__lead">A compact, offline reading surface for docs that value useful defaults and quiet chrome.</p>
+      </div>
+      {{breadcrumb}}
+    </div>
+  </header>
+  <div class="container home-grid">
+    <nav class="home-nav" aria-label="Site navigation">
+      <p class="eyebrow">Explore</p>
+      {{nav}}
+    </nav>
+    <main id="main-content" class="reading-panel" tabindex="-1">
+      {{metadata}}
+      <article class="prose">{{content}}</article>
+      <section class="children-panel" aria-labelledby="home-children-heading">
+        <h2 id="home-children-heading">Start with a trail</h2>
+        {{children}}
+      </section>
+    </main>
+  </div>
+  <footer class="site-footer" role="contentinfo">{{footer}}</footer>
+</body>
+</html>

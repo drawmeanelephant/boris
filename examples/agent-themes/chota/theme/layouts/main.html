@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" data-theme="boris-chota" data-layout="main">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Boris Field Guide</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/chota.css}}">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="site-header" role="banner">
+    <div class="container site-header__inner">
+      <p class="brand" aria-label="Boris Field Guide">
+        <span class="brand__mark" aria-hidden="true">B</span>
+        <span class="brand__name">Boris Field Guide</span>
+      </p>
+      {{breadcrumb}}
+    </div>
+  </header>
+  <div class="container page-grid">
+    <aside class="rail rail--nav" aria-label="Site navigation">
+      <p class="eyebrow">Browse</p>
+      {{nav}}
+    </aside>
+    <main id="main-content" class="reading-panel" tabindex="-1">
+      {{metadata}}
+      <article class="prose">{{content}}</article>
+      <section class="children-panel" aria-labelledby="children-heading">
+        <h2 id="children-heading">In this section</h2>
+        {{children}}
+      </section>
+    </main>
+    <aside class="rail rail--toc" aria-label="On this page">
+      <p class="eyebrow">On this page</p>
+      {{toc}}
+    </aside>
+  </div>
+  <footer class="site-footer" role="contentinfo">{{footer}}</footer>
+</body>
+</html>
