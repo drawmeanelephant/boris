@@ -1775,7 +1775,7 @@ test "exportCorpus mini fixture" {
     try std.testing.expectEqual(@as(usize, 1), stats.skipped);
     try std.testing.expect(stats.catalog_entries >= 3);
 
-    var out = try Io.Dir.cwd().openDir(io, out_rel, .{});
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{ .iterate = true });
     defer out.close(io);
 
     const meta = try readFileAlloc(io, out, "catalog_meta.json", gpa);
