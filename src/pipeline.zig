@@ -20,11 +20,11 @@ const identity = @import("identity.zig");
 const textile = @import("textile.zig");
 
 pub const schema_version = "0.2.0";
-pub const compiler_id = "boris/0.6.0";
+pub const compiler_id = "boris/0.6.1";
 pub const semantic_schema_version = "0.3.0";
-pub const semantic_compiler_id = "boris/0.6.0+semantic-relations";
+pub const semantic_compiler_id = "boris/0.6.1+semantic-relations";
 /// Product version string (package / catalog_meta.boris_version).
-pub const boris_version = "0.6.0";
+pub const boris_version = "0.6.1";
 
 pub const Options = struct {
     content_root: []const u8 = "content",
