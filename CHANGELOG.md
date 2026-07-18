@@ -3,8 +3,8 @@
 All notable changes to Boris are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
-Versioning: the current product cut is **v0.6.0** with base IR
-`schemaVersion` **`0.2.0`** and compiler id **`boris/0.6.0`**. Breaking IR
+Versioning: the current product cut is **v0.6.1** with base IR
+`schemaVersion` **`0.2.0`** and compiler id **`boris/0.6.1`**. Breaking IR
 changes must bump `schemaVersion` and update `docs/contracts/`. Product version
 bumps may update `compiler_id` / `boris_version` without changing IR schema.
 
@@ -19,6 +19,41 @@ How to use going forward:
 - Prefer one short bullet per user-visible or contract-visible change.
 - Each fragment includes at least one repository-root-relative Markdown link;
   link the relevant contract when the IR or acceptance surface moves.
+
+---
+
+## [0.6.1] — 2026-07-18
+
+The v0.6.1 release keeps base IR `0.2.0` and conditional semantic-relation IR
+`0.3.0`; it updates product/compiler/RAG versioning to `0.6.1` without an IR
+schema change. This cut packages migration-lab hardening, source-RAG profile
+correctness, and a family of zero-dependency theme examples.
+
+### Added
+
+- Added safe dynamic Astro/Starlight `src={...}` and `href={...}` normalization
+  with code-fence and inline-code preservation, nested-expression handling,
+  and manual-review traceability.
+- Added a read-only WordPress theme archaeology lab with deterministic
+  template/asset/hook inventory, Boris slot prototype, and manual-review
+  manifest.
+- Added Pure, Chota, terminal journal, Cozy Corner, and Node Tracker theme
+  examples with responsive semantic layouts, accessibility notes, and no
+  runtime or network dependencies.
+
+### Fixed
+
+- Corrected source-RAG profile manifests so skipped candidates are not listed
+  as packed source paths; documented measured bundle-size tradeoffs.
+
+### Docs
+
+- Updated release metadata, status, contracts, fixtures, sample content, and
+  the mechanical release gate for v0.6.1 while keeping base IR 0.2.0.
+
+## [Unreleased]
+
+_No changes yet._
 
 ---
 
@@ -48,10 +83,6 @@ packs, and calibrated zero-dependency theme examples.
 
 - Updated release metadata, status, contracts, fixtures, sample content, and
   the mechanical release gate for the v0.6.0 cut while keeping base IR 0.2.0.
-
-## [Unreleased]
-
-_No changes yet._
 
 ## [0.5.2] — 2026-07-17
 

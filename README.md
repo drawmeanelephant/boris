@@ -10,7 +10,7 @@ an AI Context Bundle, or a graph-ordered `llms.txt` map.
 | | |
 |--|--|
 | Language | Zig **0.16.0** (`build.zig.zon` / CI pin) |
-| Product | **0.6.0** / compiler **boris/0.6.0** |
+| Product | **0.6.1** / compiler **boris/0.6.1** |
 | IR schema | **0.2.0** (typed dependency endpoints + reverse index) |
 | License | [MIT](LICENSE) |
 
@@ -22,9 +22,10 @@ local media materialization, Filed parent-key normalize, Starlight F-L1 image
 paths and component-mapping calibration, plus bounded dogfood evidence —
 without changing IR 0.2.
 
-**v0.6.0:** deterministic `llms.txt` export, bounded source-RAG pack profiles,
-and calibrated zero-dependency theme prototypes for Milligram-inspired and
-modern corporate documentation layouts. Base IR remains `0.2.0`.
+**v0.6.1:** migration-lab hardening and a family of zero-dependency theme
+showcases: Astro dynamic-asset normalization, WordPress theme archaeology,
+source-RAG manifest correctness, and Pure, Chota, journal, Cozy Corner, and
+Node Tracker examples. Base IR remains `0.2.0`.
 
 ---
 
@@ -400,6 +401,6 @@ after exit 0.
   includes + wiki-links, typed IR dependency edges + reverse index,
   Documentation Intelligence, Context Bundles, layout selection, Textile
   compatibility, and migration labs as **standalone developer aids**. Product
-  **v0.6.0**.
+  **v0.6.1**.
 - **Next:** continue bounded real-site dogfood and migration hardening — see
   [`docs/STATUS.md`](docs/STATUS.md).

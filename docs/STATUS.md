@@ -1,12 +1,12 @@
 # Project status — Boris
 
-**As of:** 2026-07-18 · current product release **v0.6.0** /
-compiler **boris/0.6.0** · Zig **0.16.0**<br>
-**Phase:** v0.6.0 release candidate; tag after the final release gate.<br>
+**As of:** 2026-07-18 · current product release **v0.6.1** /
+compiler **boris/0.6.1** · Zig **0.16.0**<br>
+**Phase:** v0.6.1 release candidate; tag after the final release gate.<br>
 IR `schemaVersion` is **`0.2.0`**.
 
-**Version boundary:** `v0.6.0` packages post-`v0.5.2` exports, source-RAG profiles,
-and calibrated theme prototypes on the same base IR. `v0.5.2` packages post-`v0.5.1` migration-lab and dogfood
+**Version boundary:** `v0.6.1` packages post-`v0.6.0` migration-lab hardening,
+theme showcases, and source-RAG correctness fixes on the same base IR. `v0.6.0` packages post-`v0.5.2` exports, source-RAG profiles,
 work on the same compiler surface; base IR remains `0.2.0`. Tag `v0.5.1`
 remains at the certified PR #127 merge commit. Semantic relations retain their
 documented conditional IR `0.3.0` artifacts.
@@ -70,6 +70,14 @@ profiles with explicit exclusions, and two zero-dependency Stitch-calibrated
 theme prototypes. These additions preserve base IR `0.2.0`; semantic relations
 retain their conditional IR `0.3.0` artifacts. Theme and migration work remains
 developer tooling and examples, not a new runtime or framework dependency.
+
+### What v0.6.1 adds
+
+The v0.6.1 cut packages the dynamic Astro/Starlight asset-expression
+normalization fix, the read-only WordPress theme archaeology lab, source-RAG
+profile-manifest correctness, and five additional zero-dependency theme
+showcases. These remain migration aids and examples; Boris core and base IR
+`0.2.0` are unchanged.
 
 **0.2.0** packaged ApexMarkdown Unified, HTML default CLI, graph-aware nav +
 TOC, and P2/P3 incremental / watch / jobs / multi-target. Tag: `v0.2.0`.
@@ -201,6 +209,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | # | Feature | Note |
 |---|---------|------|
+| — | **Product v0.6.1** | Astro/WordPress migration-lab hardening, source-RAG manifest correctness, and five additional zero-dependency theme showcases; base IR remains 0.2 |
 | — | **Product v0.6.0** | Deterministic `llms.txt`, bounded source-RAG profiles, and Stitch-calibrated zero-dependency theme prototypes; base IR remains 0.2 |
 | — | **Product v0.5.2** | Migration-lab packaging: WP media materialize, Filed parent-key normalize, Starlight F-L1 image paths + calibration, bounded dogfood; core compiler surface unchanged; base IR remains 0.2 |
 | — | **Product v0.5.1** | Tagged/released: content-local assets, reference theme, bounded real-site adoption evidence, migration-lab asset/theme aids, and worktree-safe release cleanliness checks; base IR remains 0.2 |
@@ -263,7 +272,7 @@ on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 | Publish | **Honest limit + fallback** | Cross-volume **atomic** replace still not claimed. HTML stage / IR publish fall back to copy+delete on `error.CrossDevice`; RAG already had directory copy fallback. Same-parent staging remains the common path. |
 | Dialect | **Enforced** | Author key is **`parent` only**. `parentEntry` / `parent_entry` → `EFRONTMATTER` on all product parse paths. Do not reintroduce aliases. |
 | Migration | **Documented** | Bare `boris` is HTML under `dist/`. Old IR scripts need `--out` / `--no-rag`. README + help text carry the note. |
-| Release state | **v0.6.0 release candidate** | Product/compiler metadata `0.6.0`; tag after the release gate is green on the release-cut merge. Prior tag `v0.5.2` remains historical. |
+| Release state | **v0.6.1 release candidate** | Product/compiler metadata `0.6.1`; tag after the release gate is green on the release-cut merge. Prior tag `v0.6.0` remains historical. |
 
 ---
 
