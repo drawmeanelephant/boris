@@ -5,7 +5,7 @@
 Boris is a **Zig documentation compiler** — not a Node SSG. It discovers your
 pages, validates a Trunk/Satellite content graph, and by default publishes HTML
 under `dist/`. The same binary can also emit JSON IR, a deterministic RAG pack,
-or an AI Context Bundle.
+an AI Context Bundle, or a graph-ordered `llms.txt` map.
 
 | | |
 |--|--|
@@ -35,7 +35,8 @@ Markdown + closed frontmatter
         ├──► HTML site      (default → dist/)
         ├──► JSON IR        (--out)
         ├──► RAG corpus     (--rag)
-        └──► Context Bundle (--context)
+        ├──► Context Bundle (--context)
+        └──► llms.txt map   (--llms)
 ```
 
 Teaching rhythm (narrative only, not CLI flags): **Load → Roll → Ignite → Reset**.
@@ -110,6 +111,7 @@ see site nav, breadcrumb, and an in-page TOC on pages with headings.
 ./zig-out/bin/boris --out .boris --quiet     # JSON IR
 ./zig-out/bin/boris --rag --quiet            # LLM corpus → rag/
 ./zig-out/bin/boris --context --quiet        # AI Context Bundle → context/
+./zig-out/bin/boris --llms --quiet           # graph-ordered LLM map → llms.txt
 ./zig-out/bin/boris check                    # read-only; exit 1 if unreferenced pages
 ./zig-out/bin/boris impact getting-started   # sample Trunk id in this repo
 zig build test
@@ -171,6 +173,7 @@ inspect → bounded slice → review → build HTML/IR/RAG → deploy.
 | JSON IR | **Product** | `boris --out .boris` |
 | RAG corpus | **Product** | `boris --rag` |
 | AI Context Bundle | **Product** (v0.4.0) | `boris --context` — deterministic `bundle.md` + provenance + graph; not a hosted service |
+| `llms.txt` map | **Product** (v0.6) | `boris --llms` — deterministic graph-ordered links and bounded summaries |
 | Graph health / impact | **Product** (v0.4.0) | `boris check`, `boris impact <id>` — read-only; unreferenced findings can exit 1 |
 | Layout rules / themes | **Product** | Static layouts + `--layout-rule`; see [templating contract](docs/contracts/templating-and-themes.md) |
 | Includes + wiki-links | **Product** (HTML path) | `{{include}}`, `[[id]]`, `[[id#heading]]` — fail loud when invalid |
@@ -179,6 +182,7 @@ inspect → bounded slice → review → build HTML/IR/RAG → deploy.
 | Migration **labs** (Astro, WordPress, Instagram, Obsidian, Notion, Starlight, …) | **Developer aids** | Standalone under [`tools/migration-lab/`](tools/migration-lab/) — **not** runtime dependencies of `boris`; **not** universal importers |
 
 Context Bundle contract: [`docs/contracts/context-bundle.md`](docs/contracts/context-bundle.md).
+`llms.txt` contract: [`docs/contracts/llms-txt.md`](docs/contracts/llms-txt.md).
 Documentation Intelligence: [`docs/contracts/documentation-intelligence.md`](docs/contracts/documentation-intelligence.md).
 
 ---
@@ -207,6 +211,7 @@ Exit codes: **0** success · **1** content · **2** usage · **3** I/O.
 | `boris --no-rag` | Explicit IR (default out `.boris`) |
 | `boris --rag` / `--rag-dir DIR` | **RAG corpus** only |
 | `boris --context` / `--context-dir DIR` | **AI Context Bundle** only |
+| `boris --llms` / `--llms-path PATH` | **`llms.txt` export** only |
 | `boris check` | Read-only graph-health report (CI findings exit 1) |
 | `boris impact ID` | Read-only transitive impact report for one page |
 | `boris --target name=dir` | Multi-target HTML (repeatable; order-independent) |
@@ -218,6 +223,7 @@ Exit codes: **0** success · **1** content · **2** usage · **3** I/O.
 |--------|---------|--------|
 | `--input <DIR>` | `content` | Content root |
 | `--out <DIR>` | `.boris` when IR | Selects IR mode |
+| `--llms-path PATH` | `llms.txt` | Selects deterministic `llms.txt` mode |
 | `--html-dir <DIR>` | `dist` when HTML | Selects HTML mode |
 | `--html-layout <PATH>` | `layouts/main.html` | Global layout (`{{content}}` once) |
 | `--theme ROOT` | — | Theme sugar → `ROOT/layouts/main.html` + managed `assets/` |
@@ -237,11 +243,12 @@ Also accepted: `--input=DIR`, `--out=DIR`, `--rag-dir=DIR`, `--html-dir=DIR`,
 2. `--out` or `--no-rag` → **IR**.
 3. `--rag` / `--rag-dir` → **RAG-only**.
 4. `--context` / `--context-dir` → **Context Bundle only**.
-5. `--html` / `--html-dir` / `--target` / `--target-layout` → **HTML** (explicit).
-6. Mixing IR/RAG/Context flags with HTML selectors → exit **2**.
-7. `--jobs` / `--watch` / `--incremental` with IR, RAG, or Context Bundle → exit **2**.
-8. Invalid target names, collisions, workspace escape, content/layout overlap → exit **2**.
-9. Equivalent `--target` / `--target-layout` permutations yield the same config (targets sorted by name).
+5. `--llms` / `--llms-path` → **`llms.txt` only**.
+6. `--html` / `--html-dir` / `--target` / `--target-layout` → **HTML** (explicit).
+7. Mixing IR/RAG/Context/`llms.txt` flags with HTML selectors → exit **2**.
+8. `--jobs` / `--watch` / `--incremental` with IR, RAG, Context Bundle, or `llms.txt` → exit **2**.
+9. Invalid target names, collisions, workspace escape, content/layout overlap → exit **2**.
+10. Equivalent `--target` / `--target-layout` permutations yield the same config (targets sorted by name).
 
 ### Outputs
 
@@ -250,6 +257,7 @@ dist/**/*.html                 # default HTML (or each --target root)
 .boris/{manifest,graph,build-report}.json   # IR via --out
 rag/{INDEX,system,content,graph,catalog…}   # via --rag
 context/{bundle.md,manifest.json,graph.json,pages/…}  # via --context
+llms.txt                                      # via --llms
 ```
 
 ## Keep a content graph healthy

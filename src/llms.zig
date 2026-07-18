@@ -1,0 +1,199 @@
+//! Deterministic community `llms.txt` export.
+//!
+//! This is a small, human-readable projection of the validated Boris graph.
+//! It deliberately does not invent a second parser or URL/frontmatter dialect.
+
+const std = @import("std");
+const Io = std.Io;
+const identity = @import("identity.zig");
+const pipeline = @import("pipeline.zig");
+const graph = @import("graph.zig");
+
+pub const format = "llms.txt";
+
+pub const Options = struct {
+    content_root: []const u8 = "content",
+    out_path: []const u8 = "llms.txt",
+    quiet: bool = false,
+    input_format: identity.InputFormat = .markdown,
+};
+
+pub const Result = struct {
+    compile: pipeline.Result,
+    published: bool = false,
+
+    pub fn deinit(self: *Result) void {
+        self.compile.deinit();
+    }
+
+    pub fn ok(self: *const Result) bool {
+        return self.compile.ok and self.published;
+    }
+};
+
+fn log(opts: Options, comptime fmt: []const u8, args: anytype) void {
+    if (!opts.quiet) std.debug.print(fmt, args);
+}
+
+fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    var file = try dir.openFile(io, path, .{});
+    defer file.close(io);
+    var reader = file.reader(io, &.{});
+    return try reader.interface.allocRemaining(allocator, .unlimited);
+}
+
+fn ensureParent(io: Io, path: []const u8) !void {
+    if (std.fs.path.dirname(path)) |parent| {
+        if (parent.len > 0) try Io.Dir.cwd().createDirPath(io, parent);
+    }
+}
+
+fn appendInline(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, value: []const u8) !void {
+    for (value) |c| {
+        if (c == '\\' or c == '[' or c == ']' or c == '(' or c == ')') try buf.append(gpa, '\\');
+        if (c == '\n' or c == '\r' or c == '\t') {
+            try buf.append(gpa, ' ');
+        } else {
+            try buf.append(gpa, c);
+        }
+    }
+}
+
+fn pageTitle(page: graph.Node) []const u8 {
+    return page.title orelse page.id;
+}
+
+fn summary(gpa: std.mem.Allocator, source: []const u8, fallback: []const u8) ![]u8 {
+    const body = if (std.mem.startsWith(u8, source, "---\n"))
+        if (std.mem.indexOfPos(u8, source, 4, "---\n")) |end| source[end + 4 ..] else source
+        else source;
+    var line_start: usize = 0;
+    var paragraph: std.ArrayList(u8) = .empty;
+    errdefer paragraph.deinit(gpa);
+    var saw_text = false;
+    var i: usize = 0;
+    while (i <= body.len) : (i += 1) {
+        if (i < body.len and body[i] != '\n' and body[i] != '\r') continue;
+        const line = body[line_start..i];
+        line_start = i + 1;
+        const trimmed = std.mem.trim(u8, line, " \t");
+        if (trimmed.len == 0) {
+            if (saw_text) break;
+            continue;
+        }
+        if (trimmed[0] == '#') continue;
+        if (saw_text) try paragraph.append(gpa, ' ');
+        try paragraph.appendSlice(gpa, trimmed);
+        saw_text = true;
+        if (paragraph.items.len >= 240) break;
+    }
+    if (!saw_text) return try gpa.dupe(u8, fallback);
+    if (paragraph.items.len > 240) paragraph.shrinkRetainingCapacity(240);
+    return try paragraph.toOwnedSlice(gpa);
+}
+
+fn appendUrl(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, id: []const u8) !void {
+    try buf.append(gpa, '/');
+    try appendInline(buf, gpa, id);
+    try buf.appendSlice(gpa, "/");
+}
+
+fn findChildren(pages: []const graph.Node, parent: []const u8, visited: []const bool, out: *std.ArrayList(usize), gpa: std.mem.Allocator) !void {
+    for (pages, 0..) |page, index| {
+        if (!visited[index] and page.parent != null and std.mem.eql(u8, page.parent.?, parent)) try out.append(gpa, index);
+    }
+}
+
+fn renderPage(gpa: std.mem.Allocator, buf: *std.ArrayList(u8), pages: []const graph.Node, sources: []const []const u8, visited: []bool, index: usize, depth: usize) !void {
+    if (visited[index]) return;
+    visited[index] = true;
+    const page = pages[index];
+    var indent: usize = 0;
+    while (indent < depth) : (indent += 1) try buf.appendSlice(gpa, "  ");
+    try buf.appendSlice(gpa, "- [");
+    try appendInline(buf, gpa, pageTitle(page));
+    // Keep the URL fallback deterministic and independent of host deployment.
+    try buf.appendSlice(gpa, "](");
+    try appendUrl(buf, gpa, page.id);
+    try buf.appendSlice(gpa, "): ");
+    const text = try summary(gpa, sources[index], pageTitle(page));
+    defer gpa.free(text);
+    try appendInline(buf, gpa, text);
+    try buf.append(gpa, '\n');
+
+    var children: std.ArrayList(usize) = .empty;
+    defer children.deinit(gpa);
+    try findChildren(pages, page.id, visited, &children, gpa);
+    for (children.items) |child| try renderPage(gpa, buf, pages, sources, visited, child, depth + 1);
+}
+
+fn render(gpa: std.mem.Allocator, result: *pipeline.Result, sources: []const []const u8) ![]u8 {
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(gpa);
+    try buf.appendSlice(gpa, "# Boris documentation\n\n");
+    try buf.appendSlice(gpa, "> This file is generated by Boris from a validated Trunk/Satellite content graph.\n\n");
+    try buf.appendSlice(gpa, "## Documentation\n\n");
+    const visited = try gpa.alloc(bool, result.pages.items.len);
+    defer gpa.free(visited);
+    @memset(visited, false);
+    for (result.pages.items, 0..) |page, index| {
+        if (page.parent == null) try renderPage(gpa, &buf, result.pages.items, sources, visited, index, 0);
+    }
+    // Validated graphs should make this unnecessary, but keeping an explicit
+    // fallback makes the exporter total if a future graph role is introduced.
+    for (visited, 0..) |seen, index| if (!seen) try renderPage(gpa, &buf, result.pages.items, sources, visited, index, 0);
+    return try buf.toOwnedSlice(gpa);
+}
+
+fn publish(io: Io, gpa: std.mem.Allocator, path: []const u8, data: []const u8) !void {
+    const stage = try std.fmt.allocPrint(gpa, "{s}.boris-llms-stage", .{path});
+    defer gpa.free(stage);
+    const previous = try std.fmt.allocPrint(gpa, "{s}.boris-llms-prev", .{path});
+    defer gpa.free(previous);
+    const cwd = Io.Dir.cwd();
+    cwd.deleteFile(io, stage) catch {};
+    cwd.deleteFile(io, previous) catch {};
+    try ensureParent(io, stage);
+    try cwd.writeFile(io, .{ .sub_path = stage, .data = data });
+    cwd.rename(path, cwd, previous, io) catch {};
+    cwd.rename(stage, cwd, path, io) catch |err| {
+        cwd.rename(previous, cwd, path, io) catch {};
+        return err;
+    };
+    cwd.deleteFile(io, previous) catch {};
+}
+
+pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !Result {
+    if (std.fs.path.isAbsolute(opts.content_root) or std.fs.path.isAbsolute(opts.out_path)) return error.AbsolutePath;
+    var result = Result{ .compile = try pipeline.compile(io, gpa, .{
+        .content_root = opts.content_root,
+        .quiet = opts.quiet,
+        .input_format = opts.input_format,
+    }) };
+    errdefer result.deinit();
+    if (!result.compile.ok) return result;
+    const arena = result.compile.arena.allocator();
+    var content_dir = try Io.Dir.cwd().openDir(io, opts.content_root, .{});
+    defer content_dir.close(io);
+    const sources = try gpa.alloc([]const u8, result.compile.pages.items.len);
+    defer {
+        gpa.free(sources);
+    }
+    for (result.compile.pages.items, 0..) |page, index| sources[index] = try readFileAlloc(io, content_dir, page.source_path, arena);
+    const output = try render(gpa, &result.compile, sources);
+    defer gpa.free(output);
+    try publish(io, gpa, opts.out_path, output);
+    result.published = true;
+    log(opts, "llms.txt export complete: {s} ({d} page(s))\n", .{ opts.out_path, result.compile.pages.items.len });
+    return result;
+}
+
+test "summary uses first body paragraph and falls back to title" {
+    const gpa = std.testing.allocator;
+    const got = try summary(gpa, "---\nid: x\n---\n\n# Heading\n\nFirst useful sentence.", "Fallback");
+    defer gpa.free(got);
+    try std.testing.expectEqualStrings("First useful sentence.", got);
+    const fallback = try summary(gpa, "---\nid: x\n---\n\n# Heading\n", "Fallback");
+    defer gpa.free(fallback);
+    try std.testing.expectEqualStrings("Fallback", fallback);
+}
