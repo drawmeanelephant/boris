@@ -1190,6 +1190,20 @@ fn neutralizeDynamicAssetAttrs(
     return count;
 }
 
+/// Find an opening tag prefix only when the prefix ends at a tag-name boundary.
+/// This keeps `<AsideThing>` and `<Asides>` from being mistaken for `<Aside>`.
+fn findExactTagStart(line: []const u8, tag_prefix: []const u8) ?usize {
+    var search: usize = 0;
+    while (std.mem.indexOfPos(u8, line, search, tag_prefix)) |idx| {
+        const after = idx + tag_prefix.len;
+        if (after >= line.len or line[after] == '>' or line[after] == '/' or std.ascii.isWhitespace(line[after])) {
+            return idx;
+        }
+        search = after;
+    }
+    return null;
+}
+
 fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
@@ -1394,8 +1408,7 @@ fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx
                 line_no += 1;
                 continue;
             }
-            if (std.mem.indexOf(u8, trimmed, "<Aside") != null) {
-                const idx = std.mem.indexOf(u8, trimmed, "<Aside").?;
+            if (findExactTagStart(trimmed, "<Aside")) |idx| {
                 const tag_end = std.mem.indexOfScalarPos(u8, trimmed, idx, '>') orelse trimmed.len;
                 const tag_text = trimmed[idx..tag_end];
                 const type_attr = (try parseAttribute(a, tag_text, "type")) orelse (try parseAttribute(a, tag_text, "kind")) orelse "note";
@@ -5052,6 +5065,33 @@ test "starlight: sanitizeMdxBody preserves attributed Aside and Details" {
     try std.testing.expect(std.mem.indexOf(u8, res.body, "</Details>") != null);
     try std.testing.expect(std.mem.indexOf(u8, res.body, "<Aside type=\"note\" title=\"Custom Aside Title\" class=\"extra-style\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, res.body, "</Aside>") != null);
+}
+
+test "starlight: prefix-colliding Aside component stays reviewable" {
+    const a = std.testing.allocator;
+    const transformed = try transformStarlightMdx(a, "<Asides />\n");
+    defer {
+        a.free(transformed.body);
+        a.free(transformed.events);
+    }
+
+    try std.testing.expectEqual(@as(usize, 0), transformed.events.len);
+    try std.testing.expect(std.mem.indexOf(u8, transformed.body, "<Asides />") != null);
+    try std.testing.expect(std.mem.indexOf(u8, transformed.body, "<Aside kind=") == null);
+
+    const sanitized = try sanitizeMdxBody(a, transformed.body);
+    defer {
+        a.free(sanitized.body);
+        for (sanitized.imports) |imp| a.free(imp);
+        a.free(sanitized.imports);
+        for (sanitized.components) |cmp| a.free(cmp);
+        a.free(sanitized.components);
+        for (sanitized.asset_events) |event| a.free(event.target);
+        a.free(sanitized.asset_events);
+    }
+
+    try std.testing.expect(std.mem.indexOf(u8, sanitized.body, "unsupported-mdx-component") != null);
+    try std.testing.expect(std.mem.indexOf(u8, sanitized.body, "<Aside kind=") == null);
 }
 
 test "starlight: sanitize dynamic asset expression keeps exact review event" {
