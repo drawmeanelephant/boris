@@ -1,0 +1,167 @@
+{
+  "theme": "Modern Corporate (Comparison Project 9485581018269572800)",
+  "compiler": "Boris static-site compiler",
+  "determinism": "Verified (Run A vs Run B match byte-for-byte)",
+  "files": {
+    "index.html": {
+      "sha256": "0174fa7203898980237c2ab8fa7526cb94b75b64741d9ca04d07929c9848585f",
+      "size_bytes": 9231
+    },
+    "agents.html": {
+      "sha256": "3a0c7f15cc455d7ed8a83df37fc5a21eb19af89e5eb3f63690f349c270c2a508",
+      "size_bytes": 10429
+    },
+    "getting-started.html": {
+      "sha256": "c039924d97fc6897f052a38b942a1c57a32b7dfbf9dd3d6191eff3314b48e0ba",
+      "size_bytes": 10452
+    },
+    "agents/confucius.html": {
+      "sha256": "b09c3a45fd9cf322d5e0d86b1b84c952412b3851a6429d5ffdc232dae03c72e7",
+      "size_bytes": 8600
+    },
+    "agents/codex-html-body.html": {
+      "sha256": "9df622ab3a2cbd5200b2d66e85621dd7d55133d1579051762d1e33afbb24aae3",
+      "size_bytes": 8148
+    },
+    "agents/turing.html": {
+      "sha256": "754b864373e40662a143f9f027db9d72dac101719bd3319b69798914f642f2a5",
+      "size_bytes": 8613
+    },
+    "agents/parfit.html": {
+      "sha256": "007f426b9af2749940830af39ac147f38c8c23bed6a457abf091e470aa71c558",
+      "size_bytes": 8619
+    },
+    "agents/poincare.html": {
+      "sha256": "3109493c85dee4a48c9fa16e98f6aa18e513b2febb6288a58a42c65112fb2974",
+      "size_bytes": 8657
+    },
+    "agents/gibbs.html": {
+      "sha256": "d02b57e98675fc1480d2066c03f09a37977faf42353f77417e3758b22353f173",
+      "size_bytes": 8061
+    },
+    "agents/maxwell.html": {
+      "sha256": "90c9daaa7f637bc973c69d630b4f44363eb6ece99fa8e582924e4d8f8b9ae42b",
+      "size_bytes": 8658
+    },
+    "agents/cicero.html": {
+      "sha256": "edbdda8b8225b0f97d8f7bf50d34cf16d4e2b1659b051ca414c52e919e2156dd",
+      "size_bytes": 8612
+    },
+    "agents/ohm.html": {
+      "sha256": "e87d714378f5df799d512466d741c2071547b4ce467bf7939932d1ebbf6ac822",
+      "size_bytes": 8589
+    },
+    "agents/pauli.html": {
+      "sha256": "69e5af854a292ea26695c83c30e3614d481ec5b4cbecae194b47e0f762f0127f",
+      "size_bytes": 8634
+    },
+    "agents/codex-children-layout.html": {
+      "sha256": "6463a37124e5fb36fee943e3f6a655914224a99b173f7fbb2839dd3924a218f1",
+      "size_bytes": 8071
+    },
+    "agents/mill.html": {
+      "sha256": "58b8f8e161e2da18bab1d04e439b92e238d46e1b19f1f4390e73ce6ae6d8b5d4",
+      "size_bytes": 8762
+    },
+    "agents/bacon.html": {
+      "sha256": "683363f83d5a64f8c9218d8de5a8041ea8c60084e78d53f4f985ce506afe7570",
+      "size_bytes": 9970
+    },
+    "agents/gauss.html": {
+      "sha256": "14c3b7d8bd93c830e790c9a99d46ee36fab7894e691471a22e2f6fe6c26844bd",
+      "size_bytes": 8576
+    },
+    "agents/codex-migration-lab-ci.html": {
+      "sha256": "986eb601bb0e220f93666fcd60ba56213448e8b150088d6da3b4a3753a4186df",
+      "size_bytes": 8109
+    },
+    "agents/codex-source-rag.html": {
+      "sha256": "6e1f149a7eb5b5f8c76e112dc3043bd2cfd3ed9d88072162bd9215f168057ae4",
+      "size_bytes": 8265
+    },
+    "agents/volta.html": {
+      "sha256": "e6a50ca59a02494ead74d01d331c20d146f64ee700977cfb94972f06d05d0a11",
+      "size_bytes": 8614
+    },
+    "agents/kepler.html": {
+      "sha256": "0a08e58bf641ae68e1917b697053cb064f472e364e620b8f0b49721c974ef870",
+      "size_bytes": 8626
+    },
+    "agents/codex-release-docs-truth.html": {
+      "sha256": "096dfdd98eff8930ef7138b28ddbe3626841fad87c1e19b63c85374131d7e4bb",
+      "size_bytes": 8155
+    },
+    "agents/james.html": {
+      "sha256": "9e0331a8765100e255d1684e83c5eadb43cace8511fc8277e8f84904e59b55cd",
+      "size_bytes": 8588
+    },
+    "agents/grok.html": {
+      "sha256": "2450921b21c6cd656da88675d989f121cf77a0ea491756e5fa5a4e3a455072f6",
+      "size_bytes": 8385
+    },
+    "agents/antigravity.html": {
+      "sha256": "4bb4079bcb0cb2ffcb9d8ec88a4f4966eb00ab98a4359888286ad4640cbe42e2",
+      "size_bytes": 8268
+    },
+    "agents/jason.html": {
+      "sha256": "475a7801a65f0802b63aeaa06c69479bd33763f9e2849074ed88bd98cfb9874b",
+      "size_bytes": 8543
+    },
+    "agents/noether.html": {
+      "sha256": "e95f0f44d602de774e15d223e54966636b6e969281babea4c177094143f09755",
+      "size_bytes": 8638
+    },
+    "agents/credits.html": {
+      "sha256": "f1090714850ac9b71d0916b3b50aa11ed0290b86e094343ee2a38e35915ef882",
+      "size_bytes": 12721
+    },
+    "agents/godel.html": {
+      "sha256": "cfc3248b4cc8d82620a8a79541b29b223adac35013a40fd24b7b58ca14eb8849",
+      "size_bytes": 8550
+    },
+    "agents/codex-session-success-story.html": {
+      "sha256": "48f5d2f5eade9830b497087204a44953a96993cdac8d539cbff2901f3247a044",
+      "size_bytes": 9425
+    },
+    "agents/nash.html": {
+      "sha256": "300e1af5c49e4a84c0e60e8e27233e2274bdd0a732abe945a72a8d937fbe4682",
+      "size_bytes": 8620
+    },
+    "agents/heisenberg.html": {
+      "sha256": "38f95a412e815509652344a7f3dc0a65617cc5eb812a2c1635556930a1da0410",
+      "size_bytes": 8633
+    },
+    "guides/cli-and-modes.html": {
+      "sha256": "019be05aaf5604d60b9b4690bfcc8bd3e67c2c977c680f465fb89082c62a2874",
+      "size_bytes": 9786
+    },
+    "guides/apex-markdown.html": {
+      "sha256": "0a743758bc2cdc2a51ff0b8fc68ca7084ccef7acce36991905a96cd27dce787f",
+      "size_bytes": 39087
+    },
+    "guides/rag-export.html": {
+      "sha256": "8245d0b1b3c9eed9e70d468978feafc7d924d278fb3bd3d3814758784855c3d0",
+      "size_bytes": 8708
+    },
+    "guides/overview.html": {
+      "sha256": "48679ee6e730c3ea504edf0a491cde71361fa3ca88084c5b0f5f900dbf45f909",
+      "size_bytes": 10325
+    },
+    "guides/trunk-satellite.html": {
+      "sha256": "7f312d4a50ebcd41d6bff9e34bdabebd5960d5d8e24034ad618bbbe7265a6131",
+      "size_bytes": 9243
+    },
+    "guides/asides.html": {
+      "sha256": "6b25f8d2783c0ac5ff0711bed591a4bfb700e9ea95f71bb575478d0a25c2059b",
+      "size_bytes": 9523
+    },
+    "assets/theme.css": {
+      "sha256": "8d952eac0fe3ef7322e3e92d269b97720674325c53fdcbec2581e549e830584a",
+      "size_bytes": 12623
+    },
+    "reference/frontmatter.html": {
+      "sha256": "091a665bcbb8b9c90a0cc05874f1c3a535ab26074e92b2cb3ddddcdfb24177ac",
+      "size_bytes": 9491
+    }
+  }
+}
