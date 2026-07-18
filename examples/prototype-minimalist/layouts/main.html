@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>{{title}} · TechDocs</title>
+<link rel="stylesheet" href="{{asset-url assets/theme.css}}">
+</head>
+<body>
+<div class="app-container">
+<!-- TopNavBar -->
+<header class="header">
+<div class="flex items-center gap-md">
+<span class="header-logo">Boris</span>
+</div>
+<div class="header-links">
+<a class="header-link active" href="#">Documentation</a>
+<a class="header-link" href="#">Reference</a>
+<a class="header-link" href="#">Guides</a>
+<a class="header-link" href="#">Community</a>
+</div>
+<div class="header-actions">
+<div class="search-container">
+<svg class="search-icon" fill="none" stroke="currentColor" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+<input class="search-input" placeholder="Search..." type="text"/>
+</div>
+<button class="icon-btn">
+<svg class="w-6" fill="none" stroke="currentColor" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+<button class="icon-btn">
+<svg class="w-6" fill="none" stroke="currentColor" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<path d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
+</svg>
+</button>
+</div>
+</header>
+<div class="main-wrapper">
+<!-- SideNavBar -->
+<aside class="sidebar">
+<div style="padding: 0 var(--spacing-lg) var(--spacing-xl) var(--spacing-lg);">
+<h2 style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-on-surface); margin: 0; border: none; padding: 0;">Documentation</h2>
+<p style="font-size: 14px; color: var(--color-on-surface-variant); margin-top: 4px; margin-bottom: 0;">v0.1.0-alpha</p>
+</div>
+<details class="mobile-nav-details" open>
+      <summary class="mobile-nav-summary font-body-md">Menu</summary>
+      <div class="mobile-nav-wrapper">
+        {{nav}}
+      </div>
+    </details>
+</aside>
+<!-- Main Content Area -->
+<main class="content-area">
+      <article>
+        {{breadcrumb}}
+        <div class="boris-content">
+          {{content}}
+        </div>
+        {{footer}}
+      </article>
+    </main>
+<!-- Table of Contents (Right Aside) -->
+<aside class="toc-sidebar" aria-label="Table of Contents">
+      {{toc}}
+    </aside>
+</div>
+<!-- Footer -->
+</div>
+</body></html>
