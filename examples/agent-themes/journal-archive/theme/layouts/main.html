@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en" data-layout="journal-archive">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{{title}} // system.log</title>
+  <link rel="stylesheet" href="{{asset-url assets/journal.css}}">
+</head>
+<body>
+  <div class="journal-frame">
+    <header class="journal-header">
+      <p class="prompt" aria-label="shell prompt">root@localhost:~# cat /docs/spec.md</p>
+      <h1>{{title}}</h1>
+      <p class="status-line">static archive // load → roll → ignite → reset</p>
+      <nav class="journal-nav" aria-label="Archive navigation">{{nav}}</nav>
+    </header>
+
+    <main class="journal-main">
+      <div class="journal-breadcrumb">{{breadcrumb}}</div>
+      <article class="entry-box">
+        <header class="entry-header">
+          <div>
+            <p class="entry-kicker">DOCUMENT ENTRY</p>
+            <h2>{{title}}</h2>
+          </div>
+          <div class="userpic" role="img" aria-label="Text userpic: SYS_ADMIN">SYS_ADMIN</div>
+        </header>
+        <div class="entry-content">{{content}}</div>
+      </article>
+
+      <section class="archive-children" aria-labelledby="archive-entries">
+        <h2 id="archive-entries">Archive entries</h2>
+        {{children}}
+      </section>
+
+      <aside class="journal-toc" aria-label="On this page">{{toc}}</aside>
+    </main>
+
+    <footer class="journal-footer">{{footer}}</footer>
+  </div>
+</body>
+</html>
