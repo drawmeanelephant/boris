@@ -2,7 +2,7 @@
 
 **As of:** 2026-07-17 · current product release **v0.5.2** /
 compiler **boris/0.5.2** · Zig **0.16.0**<br>
-**Phase:** post-v0.5.2 real-site dogfood and migration hardening.<br>
+**Phase:** v0.6 feature-complete track; release metadata remains v0.5.2 until the cut.<br>
 IR `schemaVersion` is **`0.2.0`**.
 
 **Version boundary:** `v0.5.2` packages post-`v0.5.1` migration-lab and dogfood
@@ -61,6 +61,13 @@ Starlight F-L1 image-path resolution, and improved Starlight component-mapping
 calibration, plus bounded dogfood evidence. Core product `src/` behavior and
 base IR `0.2.0` are unchanged. Migration labs remain developer aids, not
 runtime dependencies or universal importers.
+
+### What is in the v0.6 track
+
+The first v0.6 slices are merged on `main`: deterministic `llms.txt` export
+(PR #150) and bounded source-RAG pack profiles (PR #149). Both preserve the
+existing compiler and IR contracts. The release remains intentionally untagged
+while real-site and theme dogfood identifies the final migration gaps.
 
 **0.2.0** packaged ApexMarkdown Unified, HTML default CLI, graph-aware nav +
 TOC, and P2/P3 incremental / watch / jobs / multi-target. Tag: `v0.2.0`.
@@ -181,8 +188,9 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 |----------|------|-----|
 | **Next** | Real-site dogfood | Exercise a substantial site/archive and record concrete migration, authoring, and publish gaps. |
 | **Next** | Archive-friendly layouts | Validate layout rules and child/index presentation against real archive navigation before broadening theme features. |
-| **v0.6 candidate** | `llms.txt` export | Emit a deterministic, graph-ordered community-format `llms.txt` from validated Boris content; define URL, summary, fallback, and golden-fixture contracts. Keep `llms-full.txt` as a later optional extension. |
-| **v0.6 candidate** | Source-RAG pack profiles | Split source export into bounded logical packs (core, tools, docs), add explicit scope selection and manifests, and exclude vendor/generated/cache trees by default. |
+| **Shipped on main / v0.6** | `llms.txt` export | Deterministic graph-ordered export with URL, summary, fallback, and contract coverage (PR #150). `llms-full.txt` remains later. |
+| **Shipped on main / v0.6** | Source-RAG pack profiles | Bounded logical packs with explicit scope selection, manifests, and vendor/generated/cache exclusions (PR #149). |
+| **Next v0.6** | Stitch/Milligram theme calibration | Validate a report-first local Stitch export against Boris slots and a real compile; keep automation in the migration lab. |
 | **Later** | Further docs packaging | README + [`docs/MIGRATION.md`](MIGRATION.md) first real site path cover inspect → convert → build → deploy; remaining gaps are sample-content version drift and deeper external-SSG cookbook depth. |
 | **Later** | Source-RAG ergonomics and publication safety | Keep the standalone source pack distinct from product RAG; prioritize evidence-backed output-size and partial-publish improvements. |
 | **Deferred** | Measurement-driven build work | Benchmark or change cache/watch/parallel behavior only after a reproducible real-site need. |

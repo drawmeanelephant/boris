@@ -22,6 +22,10 @@ local media materialization, Filed parent-key normalize, Starlight F-L1 image
 paths and component-mapping calibration, plus bounded dogfood evidence —
 without changing IR 0.2.
 
+**Next release track: v0.6.** The first slices are merged on `main`: a
+deterministic `llms.txt` export and bounded source-RAG pack profiles. The
+version remains 0.5.2 until the final release gate and tag.
+
 ---
 
 ## What it does
