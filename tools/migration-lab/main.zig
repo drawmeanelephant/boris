@@ -10,6 +10,7 @@
 //!   starlight  — Starlight/Astro docs dogfood (locale-dir or root-locale) → Boris candidate + boundary manifests
 //!   asset-filename — Sanitize content-local asset filenames to Boris ASCII path grammar
 //!   theme-archaeology — Read-only Astro/Starlight theme inventory → adaptation ledger + boundary report
+//!   wordpress-theme — Read-only classic WordPress PHP theme inventory → static prototype + review manifest
 //!
 //! Never rewrites inputs. Not part of the Boris product compiler pipeline.
 //!
@@ -39,6 +40,7 @@ const filed = @import("filed.zig");
 const starlight = @import("starlight.zig");
 const asset_filename = @import("asset_filename.zig");
 const theme_archaeology = @import("theme_archaeology.zig");
+const wordpress_theme = @import("wordpress_theme.zig");
 
 pub const ExitCode = enum(u8) {
     success = 0,
@@ -60,6 +62,7 @@ pub const Mode = enum {
     starlight,
     asset_filename,
     theme_archaeology,
+    wordpress_theme,
 
     pub fn parse(s: []const u8) ?Mode {
         if (std.mem.eql(u8, s, "astro")) return .astro;
@@ -75,6 +78,9 @@ pub const Mode = enum {
         if (std.mem.eql(u8, s, "theme-archaeology") or std.mem.eql(u8, s, "theme") or
             std.mem.eql(u8, s, "theme-arch") or std.mem.eql(u8, s, "theme-inventory"))
             return .theme_archaeology;
+        if (std.mem.eql(u8, s, "wordpress-theme") or std.mem.eql(u8, s, "wp-theme") or
+            std.mem.eql(u8, s, "kubrick-theme"))
+            return .wordpress_theme;
         return null;
     }
 };
@@ -248,7 +254,7 @@ fn printUsage() void {
         \\Common options:
         \\  -h, --help         Show this help and exit
         \\  -q, --quiet        Suppress progress lines
-        \\  --mode=MODE        astro (default) | wordpress | instagram | obsidian | notion | filed | starlight | asset-filename | theme-archaeology
+        \\  --mode=MODE        astro (default) | wordpress | wordpress-theme | instagram | obsidian | notion | filed | starlight | asset-filename | theme-archaeology
         \\  --out=DIR          Output directory (default: migration-report)
         \\
         \\Astro mode:
@@ -263,6 +269,15 @@ fn printUsage() void {
         \\  Aliases: theme | theme-arch | theme-inventory
         \\  No JS/MDX execution, no remote fetch, no directive following.
         \\  Ambiguous mappings are review items, never guesses.
+        \\
+        \\WordPress theme archaeology (read-only PHP source scan):
+        \\  --mode=wordpress-theme  Inventory classic theme files, assets, hooks,
+        \\                     menus, widgets, and template relationships
+        \\  --root=DIR         Theme root (required; never modified)
+        \\  Writes: inventory.json, slot_mapping.json, manual_review.json,
+        \\          prototype/main.html, report.json, REPORT.md
+        \\  Aliases: wp-theme | kubrick-theme
+        \\  Never executes PHP or claims universal WordPress compatibility.
         \\
         \\Asset-filename mode (content-local asset path sanitization):
         \\  --mode=asset-filename  Sanitize sibling page.assets/ filenames to Boris ASCII grammar
@@ -517,6 +532,20 @@ pub fn main(init: std.process.Init) u8 {
                 return ExitCode.io_error.int();
             };
         },
+        .wordpress_theme => {
+            if (std.mem.eql(u8, opts.root_dir, opts.out_dir)) {
+                std.log.err("--out must differ from --root", .{});
+                return ExitCode.usage.int();
+            }
+            wordpress_theme.run(io, gpa, .{
+                .root_dir = opts.root_dir,
+                .out_dir = opts.out_dir,
+                .quiet = opts.quiet,
+            }) catch |err| {
+                std.log.err("migration-lab (wordpress-theme) failed: {s}", .{@errorName(err)});
+                return ExitCode.io_error.int();
+            };
+        },
     }
     return ExitCode.success.int();
 }
@@ -535,6 +564,7 @@ test {
     _ = starlight;
     _ = asset_filename;
     _ = theme_archaeology;
+    _ = wordpress_theme;
 }
 
 test "parseOptions: defaults and astro flags" {
@@ -676,6 +706,19 @@ test "parseOptions: theme-archaeology flags" {
     try std.testing.expect(o2.mode == .theme_archaeology);
     const o3 = try parseOptions(&.{ "boris-migration-lab", "--mode=theme-inventory", "--root=./t", "--out=./o" });
     try std.testing.expect(o3.mode == .theme_archaeology);
+}
+
+test "parseOptions: wordpress-theme flags" {
+    const o = try parseOptions(&.{
+        "boris-migration-lab",
+        "--mode=wordpress-theme",
+        "--root=fixtures/mini-wordpress-kubrick",
+        "--out=./.wp-theme-out",
+    });
+    try std.testing.expect(o.mode == .wordpress_theme);
+    try std.testing.expectEqualStrings("fixtures/mini-wordpress-kubrick", o.root_dir);
+    const o2 = try parseOptions(&.{ "boris-migration-lab", "--mode=kubrick-theme", "--root=./t", "--out=./o" });
+    try std.testing.expect(o2.mode == .wordpress_theme);
 }
 
 test "parseOptions: starlight flags" {

@@ -1,0 +1,9 @@
+{
+  "format": "boris-wordpress-theme-archaeology-lab",
+  "schema_version": 1,
+  "tool_version": "0.1.0",
+  "source_root": "./fixtures/mini-wordpress-kubrick",
+  "counts": { "files": 15, "php_files": 9, "assets": 5, "dynamic_findings": 99, "menus": 2, "widgets": 4, "template_relationships": 8, "manual_review": 86 },
+  "decisions": { "preserve": 9, "adapt": 23, "review": 78, "drop": 4 },
+  "evidence_boundary": ["Source files are inventoried and line-scanned only", "PHP is never executed", "WordPress core/plugin behavior is not inferred", "Remote assets and network behavior are outside this run", "This fixture is representative, not an authentic Kubrick distribution"]
+}

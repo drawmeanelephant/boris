@@ -1,0 +1,14 @@
+{
+  "format": "boris-wordpress-theme-static-prototype",
+  "schema_version": 1,
+  "slots": [
+    { "slot": "nav", "source": ["header.php", "functions.php"], "decision": "adapt", "mapping": "wp_nav_menu() is a candidate for {{nav}} after graph review" },
+    { "slot": "breadcrumb", "source": ["header.php", "single.php", "page.php"], "decision": "review", "mapping": "WordPress conditional/link logic is not inferred; use Boris graph breadcrumb" },
+    { "slot": "title", "source": ["index.php", "single.php", "page.php"], "decision": "adapt", "mapping": "the_title() → {{title}}" },
+    { "slot": "content", "source": ["index.php", "single.php", "page.php"], "decision": "adapt", "mapping": "the_content() → {{content}}" },
+    { "slot": "children", "source": ["sidebar.php"], "decision": "review", "mapping": "wp_list_pages() may become {{children}} only after hierarchy review" },
+    { "slot": "Aside", "source": ["sidebar.php"], "decision": "review", "mapping": "widget output is not a direct slot; selected static content may become inline <Aside>" },
+    { "slot": "toc", "source": ["sidebar.php"], "decision": "review", "mapping": "no evidence of a stable heading outline; use {{toc}} only after content review" },
+    { "slot": "footer", "source": ["footer.php"], "decision": "adapt", "mapping": "static footer shell → {{footer}}; wp_footer() callbacks remain review items" }
+  ]
+}

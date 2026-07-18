@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}}</title>
+  <link rel="stylesheet" href="{{asset-url theme/assets/css/style.css}}">
+</head>
+<body>
+  <header class="site-header">
+    <a class="site-brand" href="/">Classic Theme Prototype</a>
+    <nav aria-label="Primary">{{nav}}</nav>
+    <div class="breadcrumb">{{breadcrumb}}</div>
+  </header>
+  <main>
+    <article>
+      <h1>{{title}}</h1>
+      {{content}}
+      <!-- Direct child pages are emitted by the graph-aware {{children}} slot when selected. -->
+      {{children}}
+    </article>
+    <aside class="toc" aria-label="On this page">{{toc}}</aside>
+  </main>
+  <!-- Aside is an ordered inline content component, not a WordPress sidebar/widget slot. -->
+  <footer>{{footer}}</footer>
+</body>
+</html>

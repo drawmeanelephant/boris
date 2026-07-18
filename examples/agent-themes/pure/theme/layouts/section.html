@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en" data-theme="pure-field-notes" data-layout="section">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Pure Field Notes</title>
+  <link rel="stylesheet" href="{{asset-url assets/pure-field-notes.css}}">
+</head>
+<body data-layout="section">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="site-header" role="banner">
+    <div class="site-header__inner">
+      <a class="brand" href="index.html" aria-label="Pure Field Notes home">
+        <span class="brand__mark" aria-hidden="true">PF</span>
+        <span class="brand__text">Pure Field Notes</span>
+      </a>
+      {{breadcrumb}}
+    </div>
+  </header>
+  <div class="section-frame">
+    <aside class="section-nav" aria-label="Browse">
+      <p class="rail__eyebrow">Browse</p>
+      {{nav}}
+    </aside>
+    <main id="main-content" class="section-reading" tabindex="-1">
+      {{metadata}}
+      <article class="prose">
+        {{content}}
+      </article>
+      <section class="children-panel" aria-labelledby="children-heading">
+        <p class="rail__eyebrow" id="children-heading">In this section</p>
+        {{children}}
+      </section>
+    </main>
+  </div>
+  <footer class="theme-footer" role="contentinfo">{{footer}}</footer>
+</body>
+</html>

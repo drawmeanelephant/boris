@@ -1,0 +1,12 @@
+/*
+Theme Name: Mini Kubrick Benchmark
+Theme URI: https://example.invalid/mini-kubrick
+Author: Boris migration lab
+Version: 1.0.0
+Template: classic
+*/
+body { margin: 0; color: #222; background: #f5f5f5; font: 16px/1.5 sans-serif; }
+.site-header, .site-footer { padding: 1rem 2rem; background: #1d3557; color: #fff; }
+.site-header a, .site-footer a { color: #fff; }
+.site-content { max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
+.widget-area { max-width: 48rem; margin: 2rem auto; padding: 1rem; background: #fff; }
