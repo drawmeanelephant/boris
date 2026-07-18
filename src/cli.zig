@@ -20,6 +20,8 @@ pub const Mode = enum {
     rag,
     /// Deterministic provenance-rich AI context bundle.
     context,
+    /// Deterministic community `llms.txt` export.
+    llms,
     /// HTML site render under `--html-dir` (default `dist`). Default bare CLI.
     html,
 };
@@ -55,6 +57,8 @@ pub const Options = struct {
     rag_dir: ?[]const u8 = null,
     /// Context bundle directory. Set for context mode only (default `context`).
     context_dir: ?[]const u8 = null,
+    /// `llms.txt` output path (default `llms.txt`).
+    llms_path: ?[]const u8 = null,
     /// HTML output directory. Set for HTML mode only (default `dist`).
     html_dir: ?[]const u8 = null,
     /// Global HTML layout template (default `layouts/main.html`).
@@ -97,6 +101,7 @@ const default_input_dir = "content";
 const default_out_dir = ".boris";
 const default_rag_dir = "rag";
 const default_context_dir = "context";
+const default_llms_path = "llms.txt";
 const default_html_dir = "dist";
 const default_html_layout = "layouts/main.html";
 
@@ -110,6 +115,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var out_dir: []const u8 = default_out_dir;
     var rag_dir: []const u8 = default_rag_dir;
     var context_dir: []const u8 = default_context_dir;
+    var llms_path: []const u8 = default_llms_path;
     var html_dir: []const u8 = default_html_dir;
 
     var saw_quiet = false;
@@ -120,6 +126,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_rag_dir = false;
     var saw_context = false;
     var saw_context_dir = false;
+    var saw_llms = false;
+    var saw_llms_path = false;
     var saw_html = false;
     var saw_html_dir = false;
     var saw_html_layout = false;
@@ -181,6 +189,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
                 .out_dir = out_dir,
                 .rag_dir = null,
                 .context_dir = null,
+                .llms_path = null,
                 .html_dir = null,
                 .targets = .{ .items = &.{}, .capacity = 0 },
             };
@@ -208,6 +217,12 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (std.mem.eql(u8, a, "--context")) {
             if (saw_context) return error.DuplicateFlag;
             saw_context = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--llms")) {
+            if (saw_llms) return error.DuplicateFlag;
+            saw_llms = true;
             continue;
         }
 
@@ -364,6 +379,14 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        if (std.mem.eql(u8, a, "--llms-path") or std.mem.startsWith(u8, a, "--llms-path=")) {
+            if (saw_llms_path) return error.DuplicateFlag;
+            saw_llms_path = true;
+            llms_path = try takeValue(args, &i, a, "--llms-path");
+            if (std.fs.path.isAbsolute(llms_path)) return error.InvalidValue;
+            continue;
+        }
+
         if (std.mem.eql(u8, a, "--html-dir") or std.mem.startsWith(u8, a, "--html-dir=")) {
             if (saw_html_dir) return error.DuplicateFlag;
             saw_html_dir = true;
@@ -421,11 +444,12 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     const explicit_html = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts or saw_theme or has_layout_rules;
     const wants_rag = saw_rag or saw_rag_dir;
     const wants_context = saw_context or saw_context_dir;
+    const wants_llms = saw_llms or saw_llms_path;
     // Explicit IR: --out and/or --no-rag (bare CLI is HTML, not IR).
     const wants_ir = saw_out or saw_no_rag;
 
     if (command != .build) {
-        if (wants_rag or wants_ir or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
+        if (wants_rag or wants_ir or wants_context or wants_llms or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
             return error.ConflictingFlags;
         }
     } else if (saw_format or saw_report) {
@@ -438,6 +462,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     // Explicit --out must never be combined with RAG-only selection.
     if (saw_out and wants_rag) return error.ConflictingFlags;
     if (wants_context and (wants_rag or wants_ir)) return error.ConflictingFlags;
+    if (wants_llms and (wants_rag or wants_ir or wants_context or explicit_html)) return error.ConflictingFlags;
     // Explicit HTML selectors own the output destination; refuse IR/RAG flags.
     if (explicit_html and (wants_rag or wants_context or saw_out)) {
         return error.ConflictingFlags;
@@ -463,6 +488,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .rag
     else if (wants_context)
         .context
+    else if (wants_llms)
+        .llms
     else if (wants_ir)
         .ir
     else
@@ -550,6 +577,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .input_dir = input_dir,
             .out_dir = out_dir,
             .rag_dir = null,
+            .llms_path = null,
             .html_dir = null,
             .targets = targets,
             .command = command,
@@ -566,6 +594,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .out_dir = null,
             .rag_dir = rag_dir,
             .context_dir = null,
+            .llms_path = null,
             .html_dir = null,
             .targets = targets,
             .input_format = if (saw_textile) .textile else .markdown,
@@ -578,7 +607,24 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .out_dir = null,
             .rag_dir = null,
             .context_dir = context_dir,
+            .llms_path = null,
             .html_dir = null,
+            .targets = targets,
+            .command = command,
+            .impact_id = impact_id,
+            .analysis_format = analysis_format,
+            .analysis_report = analysis_report,
+            .input_format = if (saw_textile) .textile else .markdown,
+        },
+        .llms => .{
+            .help = false,
+            .quiet = quiet,
+            .mode = .llms,
+            .input_dir = input_dir,
+            .out_dir = null,
+            .rag_dir = null,
+            .context_dir = null,
+            .llms_path = llms_path,
             .targets = targets,
             .command = command,
             .impact_id = impact_id,
@@ -594,6 +640,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .out_dir = null,
             .rag_dir = null,
             .context_dir = null,
+            .llms_path = null,
             .html_dir = if (has_explicit_targets) null else html_dir,
             .html_layout = html_layout,
             .owned_html_layout = owned_html_layout,
@@ -651,6 +698,8 @@ pub fn printUsage() void {
         \\  --rag-dir <DIR>     RAG-only mode with output directory DIR
         \\  --context           Context-only mode → bundle under --context-dir (default context)
         \\  --context-dir DIR   Context-only mode with output directory DIR
+        \\  --llms              Deterministic llms.txt export → llms.txt
+        \\  --llms-path PATH    llms.txt export path (implies --llms)
         \\
         \\Options:
         \\  --input <DIR>       Content root (default: content)
@@ -1662,4 +1711,14 @@ test "parse: layout paths reject .. absolute and backslash escapes" {
     });
     defer ok.deinit(gpa);
     try expectEqualStrings("layouts/main.html", ok.html_layout);
+}
+
+test "parse: llms mode and path" {
+    var opts = try parseOptions(std.testing.allocator, &.{ "boris", "--llms-path", "public/llms.txt", "--input", "docs" });
+    defer opts.deinit(std.testing.allocator);
+    try expectEqual(Mode.llms, opts.mode);
+    try expectEqualStrings("public/llms.txt", opts.llms_path.?);
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--llms", "--rag" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--llms", "--html" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--llms-path", "/tmp/llms.txt" }));
 }

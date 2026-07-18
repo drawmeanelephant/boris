@@ -13,6 +13,7 @@ const diagnostic = @import("diagnostic.zig");
 const pipeline = @import("pipeline.zig");
 const rag = @import("rag.zig");
 const context = @import("context.zig");
+const llms = @import("llms.zig");
 const compile = @import("compile.zig");
 const target = @import("target.zig");
 const theme_mod = @import("theme.zig");
@@ -58,6 +59,7 @@ pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     switch (opts.mode) {
         .rag => return runRag(io, gpa, opts),
         .context => return runContext(io, gpa, opts),
+        .llms => return runLlms(io, gpa, opts),
         .html => return runHtml(io, gpa, opts),
         .ir => {},
     }
@@ -126,6 +128,32 @@ pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         return .success;
     }
 
+    return switch (result.compile.failure) {
+        .io => .io_error,
+        .content, .none => .content_error,
+    };
+}
+
+/// Deterministic community `llms.txt` export using the shared validated graph.
+pub fn runLlms(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    const out_path = opts.llms_path orelse "llms.txt";
+    var result = llms.run(io, gpa, .{
+        .content_root = opts.input_dir,
+        .out_path = out_path,
+        .quiet = opts.quiet,
+        .input_format = opts.input_format,
+    }) catch |err| {
+        if (!opts.quiet) std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer result.deinit();
+    if (result.compile.diagnostics.items.len > 0 and !opts.quiet) {
+        pipeline.printDiagnostics(gpa, result.compile.diagnostics.items) catch return .io_error;
+    }
+    if (result.ok()) {
+        if (!opts.quiet) std.debug.print("ok: wrote llms.txt under {s} ({d} page(s))\n", .{ out_path, result.compile.pages.items.len });
+        return .success;
+    }
     return switch (result.compile.failure) {
         .io => .io_error,
         .content, .none => .content_error,
