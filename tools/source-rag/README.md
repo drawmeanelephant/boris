@@ -71,7 +71,7 @@ source-rag/
   boris-content.md      # all packed content/** files (default)
   catalog.jsonl         # one JSON object per document
   catalog_meta.json     # format + schema_version + tool_version
-  profile_manifest.json  # selected profile, counts, and sorted source paths
+  profile_manifest.json  # selected profile, counts, and sorted packed paths
   files/**              # one markdown document per source path
 ```
 
@@ -141,9 +141,11 @@ profile when an LLM upload should be bounded by purpose:
 | `tools` | `scripts/`, `tools/`, `test/`, and `SUPPORT/` |
 
 Every export records the selected profile in `catalog_meta.json` and emits a
-deterministic `profile_manifest.json` containing counts and sorted source paths.
-Profile selection changes scope only; the same path, fence, catalog ordering,
-staged publication, and vendor/cache exclusion rules still apply.
+deterministic `profile_manifest.json` containing counts and sorted paths for
+documents actually packed. Candidates skipped as oversized, binary, or unreadable
+are counted in `skipped` and omitted from `paths`. Profile selection changes scope
+only; the same path, fence, catalog ordering, staged publication, and vendor/cache
+exclusion rules still apply.
 
 ---
 
