@@ -32,6 +32,8 @@ pub const Options = struct {
     quiet: bool = false,
     /// Skip the four combined Markdown convenience bundles.
     no_bundles: bool = false,
+    /// Named input scope. `all` preserves the historical complete export.
+    profile: Profile = .all,
     /// Corpus output directory (relative to process cwd unless absolute).
     out_dir: []const u8 = "source-rag",
     /// Project root to scan (relative to process cwd unless absolute).
@@ -42,6 +44,25 @@ pub const Options = struct {
     /// documents have been written. Not accepted by the CLI.
     test_fail_after_stage_writes: ?usize = null,
 };
+
+pub const Profile = enum { all, core, docs, tools };
+
+pub fn profileName(profile: Profile) []const u8 {
+    return switch (profile) {
+        .all => "all",
+        .core => "core",
+        .docs => "docs",
+        .tools => "tools",
+    };
+}
+
+fn parseProfile(value: []const u8) ParseError!Profile {
+    if (std.mem.eql(u8, value, "all")) return .all;
+    if (std.mem.eql(u8, value, "core")) return .core;
+    if (std.mem.eql(u8, value, "docs")) return .docs;
+    if (std.mem.eql(u8, value, "tools")) return .tools;
+    return error.InvalidValue;
+}
 
 pub const ParseError = error{
     UnknownFlag,
@@ -106,6 +127,15 @@ const skip_top_level_dirs = [_][]const u8{
     "vendor",
 };
 
+fn scanDirsForProfile(profile: Profile) []const []const u8 {
+    return switch (profile) {
+        .all => &default_scan_dirs,
+        .core => &[_][]const u8{ "src", "layouts" },
+        .docs => &[_][]const u8{ "docs", "content" },
+        .tools => &[_][]const u8{ "scripts", "tools", "test", "SUPPORT" },
+    };
+}
+
 /// File basenames skipped.
 const skip_file_names = [_][]const u8{
     ".DS_Store",
@@ -163,6 +193,14 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             opts.quiet = true;
         } else if (std.mem.eql(u8, a, "--no-bundles")) {
             opts.no_bundles = true;
+        } else if (std.mem.startsWith(u8, a, "--profile=")) {
+            const v = a["--profile=".len..];
+            if (v.len == 0) return error.MissingValue;
+            opts.profile = try parseProfile(v);
+        } else if (std.mem.eql(u8, a, "--profile")) {
+            i += 1;
+            if (i >= args.len or args[i].len == 0) return error.MissingValue;
+            opts.profile = try parseProfile(args[i]);
         } else if (std.mem.startsWith(u8, a, "--out=")) {
             const v = a["--out=".len..];
             if (v.len == 0) return error.MissingValue;
@@ -206,6 +244,7 @@ fn printUsage() void {
         \\  -h, --help           Show this help and exit 0
         \\  -q, --quiet          Suppress progress lines
         \\  --no-bundles         Skip combined bundles; emit only per-file corpus and sidecars
+        \\  --profile=NAME       Input scope: all (default), core, docs, or tools
         \\  --out=DIR            Output corpus root (default: source-rag)
         \\  --root=DIR           Project root to scan (default: .)
         \\  --max-bytes=N        Skip files larger than N bytes (default: 524288)
@@ -410,19 +449,22 @@ fn collectSourcePaths(
     retain: std.mem.Allocator,
     root: Io.Dir,
     out_rel: []const u8,
+    profile: Profile,
 ) ![]const []const u8 {
     var list: std.ArrayList([]const u8) = .empty;
     errdefer list.deinit(gpa);
 
     // Explicit root files.
-    for (default_root_files) |name| {
-        if (!pathExists(io, root, name)) continue;
-        if (isUnderOutDir(name, out_rel)) continue;
-        try list.append(gpa, try retain.dupe(u8, name));
+    if (profile == .all or profile == .core) {
+        for (default_root_files) |name| {
+            if (!pathExists(io, root, name)) continue;
+            if (isUnderOutDir(name, out_rel)) continue;
+            try list.append(gpa, try retain.dupe(u8, name));
+        }
     }
 
     // Default scan dirs.
-    for (default_scan_dirs) |dname| {
+    for (scanDirsForProfile(profile)) |dname| {
         if (isSkippedDirName(dname)) continue;
         if (isUnderOutDir(dname, out_rel)) continue;
         if (isSkippedTopLevelTree(dname)) continue;
@@ -482,6 +524,7 @@ const managed_root_file_names = [_][]const u8{
     "UPLOAD-GUIDE.md",
     "catalog.jsonl",
     "catalog_meta.json",
+    "profile_manifest.json",
 };
 
 fn deleteManagedFiles(io: Io, out: Io.Dir) !void {
@@ -816,14 +859,43 @@ fn exportBundles(
     try exportBundle(io, gpa, out_dir, bundleFileName(.content, 0), .content, null, null, content_files);
 }
 
-fn exportCatalogMeta(io: Io, out_dir: Io.Dir) !void {
+fn exportCatalogMeta(io: Io, out_dir: Io.Dir, profile: Profile) !void {
     var buf: [128]u8 = undefined;
     const line = try std.fmt.bufPrint(
         &buf,
-        "{{\"format\":\"{s}\",\"schema_version\":{d},\"tool_version\":\"{s}\"}}\n",
-        .{ format_id, schema_version, tool_version },
+        "{{\"format\":\"{s}\",\"schema_version\":{d},\"tool_version\":\"{s}\",\"profile\":\"{s}\"}}\n",
+        .{ format_id, schema_version, tool_version, profileName(profile) },
     );
     try writeBytes(io, out_dir, "catalog_meta.json", line);
+}
+
+fn exportProfileManifest(
+    io: Io,
+    gpa: std.mem.Allocator,
+    out_dir: Io.Dir,
+    profile: Profile,
+    stats: ExportStats,
+    paths: []const []const u8,
+) !void {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try buf.appendSlice(gpa, "{\"profile\":\"");
+    try buf.appendSlice(gpa, profileName(profile));
+    try buf.appendSlice(gpa, "\",\"source_files\":");
+    var num_buf: [32]u8 = undefined;
+    try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{stats.source_files}));
+    try buf.appendSlice(gpa, ",\"catalog_entries\":");
+    try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{stats.catalog_entries}));
+    try buf.appendSlice(gpa, ",\"skipped\":");
+    try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d},\"paths\":[", .{stats.skipped}));
+    for (paths, 0..) |path, index| {
+        if (index != 0) try buf.appendSlice(gpa, ",");
+        try buf.append(gpa, '"');
+        try jsonEscapeAppend(&buf, gpa, path);
+        try buf.append(gpa, '"');
+    }
+    try buf.appendSlice(gpa, "]}\n");
+    try writeBytes(io, out_dir, "profile_manifest.json", buf.items);
 }
 
 fn exportCatalogJsonl(
@@ -1092,7 +1164,7 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
         break :blk o;
     };
 
-    const paths = try collectSourcePaths(io, gpa, arena, root, out_skip);
+    const paths = try collectSourcePaths(io, gpa, arena, root, out_skip, opts.profile);
     defer gpa.free(paths);
 
     const stage_path = try std.fmt.allocPrint(gpa, "{s}.boris-source-rag-stage", .{opts.out_dir});
@@ -1217,7 +1289,8 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     // INDEX after catalog is sorted (lists source rows).
     try exportIndex(io, gpa, out, catalog.items, stats, !opts.no_bundles);
     try exportCatalogJsonl(io, gpa, out, catalog.items);
-    try exportCatalogMeta(io, out);
+    try exportCatalogMeta(io, out, opts.profile);
+    try exportProfileManifest(io, gpa, out, opts.profile, stats, paths);
 
     try publishManagedCorpus(io, gpa, stage_path, opts.out_dir);
 
@@ -1302,20 +1375,26 @@ test "parseOptions: help and defaults" {
     try std.testing.expectEqualStrings("source-rag", o.out_dir);
     try std.testing.expectEqualStrings(".", o.root_dir);
     try std.testing.expect(!o.no_bundles);
+    try std.testing.expectEqual(Profile.all, o.profile);
 
     const h = try parseOptions(&.{ "boris-source-rag", "--help" });
     try std.testing.expect(h.help);
 
-    const o2 = try parseOptions(&.{ "boris-source-rag", "--out=./pack", "--root=../repo", "--max-bytes=1000", "--quiet", "--no-bundles" });
+    const o2 = try parseOptions(&.{ "boris-source-rag", "--out=./pack", "--root=../repo", "--max-bytes=1000", "--quiet", "--no-bundles", "--profile=docs" });
     try std.testing.expectEqualStrings("./pack", o2.out_dir);
     try std.testing.expectEqualStrings("../repo", o2.root_dir);
     try std.testing.expectEqual(@as(usize, 1000), o2.max_bytes);
     try std.testing.expect(o2.quiet);
     try std.testing.expect(o2.no_bundles);
+    try std.testing.expectEqual(Profile.docs, o2.profile);
+
+    const o3 = try parseOptions(&.{ "boris-source-rag", "--profile", "tools" });
+    try std.testing.expectEqual(Profile.tools, o3.profile);
 }
 
 test "parseOptions: unknown flag" {
     try std.testing.expectError(error.UnknownFlag, parseOptions(&.{ "x", "--rag" }));
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--profile=bogus" }));
 }
 
 test "langFromPath and extensions" {

@@ -35,6 +35,9 @@ zig build source-rag -- --out=./uploads/source-rag
 # Avoid the optional combined bundles and their intentional duplicate bytes
 zig build source-rag -- --no-bundles
 
+# Export a bounded logical profile (all remains the default)
+zig build source-rag -- --profile=core --no-bundles
+
 # After install
 zig-out/bin/boris-source-rag --help
 zig-out/bin/boris-source-rag --out=./source-rag --quiet
@@ -50,6 +53,7 @@ zig-out/bin/boris-source-rag --out=./source-rag --quiet
 | `--root=DIR` | `.` | Project root to scan |
 | `--max-bytes=N` | `524288` | Skip files larger than N bytes |
 | `--no-bundles` | off | Omit the four combined convenience bundles |
+| `--profile=NAME` | `all` | Select `all`, `core`, `docs`, or `tools` input scope |
 
 Exit codes: **0** success, **2** usage, **3** I/O error.
 
@@ -67,6 +71,7 @@ source-rag/
   boris-content.md      # all packed content/** files (default)
   catalog.jsonl         # one JSON object per document
   catalog_meta.json     # format + schema_version + tool_version
+  profile_manifest.json  # selected profile, counts, and sorted source paths
   files/**              # one markdown document per source path
 ```
 
@@ -106,7 +111,7 @@ rag_id, rag_path, category, title, source_path, lang, bytes
 ```
 
 Rows are sorted by `rag_path`. Machine files (`catalog.jsonl`,
-`catalog_meta.json`) are **not** catalog rows; meta docs `INDEX.md` and
+`catalog_meta.json`, `profile_manifest.json`) are **not** catalog rows; meta docs `INDEX.md` and
 `UPLOAD-GUIDE.md` **are** rows (`category: meta`).
 
 ### Combined upload bundles
@@ -123,6 +128,22 @@ contains all packed `docs/**` files, and `boris-content.md` contains all packed
 bytes in sorted source-path order. This keeps output deterministic and avoids
 splitting or reordering a source file, though a large indivisible file may make
 the byte sizes differ. Empty groups are still emitted with valid bundle metadata.
+
+### Profiles
+
+The default `all` profile preserves the complete historical scan. Use a
+profile when an LLM upload should be bounded by purpose:
+
+| Profile | Included roots |
+|---------|----------------|
+| `core` | root project guidance/build files, `src/`, and `layouts/` |
+| `docs` | `docs/` and `content/` |
+| `tools` | `scripts/`, `tools/`, `test/`, and `SUPPORT/` |
+
+Every export records the selected profile in `catalog_meta.json` and emits a
+deterministic `profile_manifest.json` containing counts and sorted source paths.
+Profile selection changes scope only; the same path, fence, catalog ordering,
+staged publication, and vendor/cache exclusion rules still apply.
 
 ---
 
