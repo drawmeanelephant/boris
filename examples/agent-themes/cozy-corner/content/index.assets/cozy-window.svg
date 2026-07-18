@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 240" role="img" aria-labelledby="title desc">
+  <title id="title">A warm desk beside a window</title>
+  <desc id="desc">A simple illustrated window, desk, plant, and coffee cup.</desc>
+  <rect width="800" height="240" fill="#d9e4e1"/>
+  <rect x="70" y="28" width="330" height="150" fill="#fffaf0" stroke="#5a7b8c" stroke-width="10"/>
+  <path d="M235 28v150M70 103h330" stroke="#5a7b8c" stroke-width="8"/>
+  <circle cx="330" cy="67" r="22" fill="#cf5e1e" opacity=".8"/>
+  <rect x="0" y="178" width="800" height="62" fill="#a94b15" opacity=".75"/>
+  <path d="M540 180c-25-80 12-111 43-48 18-72 59-33 35 48" fill="#718e6b" stroke="#4c654d" stroke-width="6"/>
+  <rect x="625" y="144" width="62" height="45" rx="5" fill="#fffaf0" stroke="#a94b15" stroke-width="6"/>
+  <path d="M687 154c35-4 35 31 0 27" fill="none" stroke="#a94b15" stroke-width="6"/>
+</svg>

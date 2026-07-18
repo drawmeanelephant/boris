@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en" data-layout="cozy-corner">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}} · The Cozy Corner</title>
+  <link rel="stylesheet" href="{{asset-url assets/cozy.css}}">
+</head>
+<body>
+  <div class="site-shell">
+    <header class="site-header">
+      <p class="site-kicker">personal web archive // 2004—forever</p>
+      <h1>{{title}}</h1>
+      <p class="tagline">Ramblings, thoughts, and web design in the mid-2000s</p>
+    </header>
+    <div class="layout">
+      <main class="site-main">
+        <div class="breadcrumb">{{breadcrumb}}</div>
+        <article class="entry">
+          <header class="entry-header">
+            <h2>{{title}}</h2>
+            <p class="entry-meta">hand-coded entry · static archive</p>
+          </header>
+          <div class="entry-content">{{content}}</div>
+          <footer class="entry-footer">comments and TrackBacks are preserved as authored metadata</footer>
+        </article>
+        <section class="recent-posts" aria-labelledby="recent-posts">
+          <h2 id="recent-posts">Recent posts</h2>
+          {{children}}
+        </section>
+      </main>
+      <aside class="sidebar" aria-label="Site sidebar">
+        <section class="sidebar-module">
+          <h2>About Me</h2>
+          <div class="avatar" aria-hidden="true">A</div>
+          <p>I code in plain text editors, drink too much coffee, and keep a
+          small corner of the web tidy.</p>
+        </section>
+        <nav class="sidebar-module" aria-label="Site navigation">
+          <h2>Navigation</h2>
+          {{nav}}
+        </nav>
+        <section class="sidebar-module">
+          <h2>Blogroll</h2>
+          <ul class="blogroll">
+            <li><a href="{{asset-url assets/cozy.css}}">the stylesheet</a></li>
+            <li><a href="{{asset-url assets/cozy.css}}">the archive rules</a></li>
+            <li><a href="{{asset-url assets/cozy.css}}">the quiet corner</a></li>
+          </ul>
+        </section>
+        <section class="sidebar-module toc-module" aria-label="On this page">{{toc}}</section>
+      </aside>
+    </div>
+    <footer class="site-footer">{{footer}}</footer>
+  </div>
+</body>
+</html>
