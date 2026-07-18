@@ -3,8 +3,8 @@
 All notable changes to Boris are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
-Versioning: the current product cut is **v0.5.1** with base IR
-`schemaVersion` **`0.2.0`** and compiler id **`boris/0.5.1`**. Breaking IR
+Versioning: the current product cut is **v0.5.2** with base IR
+`schemaVersion` **`0.2.0`** and compiler id **`boris/0.5.2`**. Breaking IR
 changes must bump `schemaVersion` and update `docs/contracts/`. Product version
 bumps may update `compiler_id` / `boris_version` without changing IR schema.
 
@@ -25,6 +25,79 @@ How to use going forward:
 ## [Unreleased]
 
 _No changes yet._
+
+## [0.5.2] — 2026-07-17
+
+The v0.5.2 release keeps base IR `0.2.0` and conditional semantic-relation
+IR `0.3.0`; it updates product/compiler/RAG versioning to `0.5.2` without an
+IR schema change. Core product compiler behavior is unchanged from v0.5.1;
+this cut packages post-release migration-lab work and dogfood evidence.
+Tag `v0.5.1` remains at the certified PR #127 merge commit.
+
+### Added
+
+- WordPress migration-lab can materialize verified local `--media` matches into
+  page-sibling `{stem}.assets/` trees, rewrite matching references, and emit a
+  deterministic `media_manifest.json` audit (unresolved media stay review items;
+  no network). See
+  [migration-lab WordPress mode](/tools/migration-lab/README.md) and
+  [content-local assets](/docs/contracts/content-local-assets.md).
+- Filed migration lab normalizes legacy `parentEntry` / `parent_entry` to
+  canonical `parent` under `--out` only, with conflict/invalid human review and
+  full provenance — product grammar stays closed
+  ([frontmatter contract](/docs/contracts/frontmatter.md),
+  [dogfood report](/docs/dogfood/filed-parent-key-normalize.md)).
+- Improved Starlight component-mapping parser in standalone migration
+  laboratory. Translates custom MDX tags (Tabs, TabItem, Aside, Card, Steps,
+  Badge, Icon, LinkCard) to their Boris fallback visual equivalents. Links:
+  [Starlight calibration report](/docs/dogfood/starlight-calibration-milestone.md).
+
+### Changed
+
+- WordPress migration-lab media materialization: percent-decoded local lookup,
+  `srcset`/`data-src` harvest, `REPORT.md` materialization summary, and
+  deterministic wipe of lab-owned `--out` trees on re-run. See
+  [migration-lab WordPress mode](/tools/migration-lab/README.md).
+
+### Fixed
+
+- Starlight migration-lab resolves proven relative and public Markdown images
+  into page `{stem}.assets/` (F-L1); missing or escape paths fail loud with
+  `EASSET`. Links: [migration-lab README](/tools/migration-lab/README.md),
+  [archive layout audit](/docs/dogfood/filed-fyi-archive-layout-audit.md),
+  [image-path fixture](/tools/migration-lab/fixtures/image-path-starlight/README.md).
+
+### Docs
+
+- Record a second bounded Filed.fyi dogfood pass: full-tree inventory plus a
+  hand-converted five-page representative slice (landing, nested docs,
+  page-local image asset, absolute links/metadata, Broside/:::note/Limerick
+  hard page) with conversion/unmapped/asset/route reports and a next-importer
+  recommendation. No product code changes; not full-site conversion.
+  Links: [representative slice report](/docs/dogfood/filed-fyi-v051-representative-slice.md),
+  [prior adoption pass](/docs/dogfood/filed-fyi-adoption-pass.md),
+  [migration guide](/docs/MIGRATION.md).
+- Align the v0.5.1 tag, status, release gate, changelog, RAG default-mode
+  contract, and judge path with the released product; remove stale archive
+  pointers and clarify the polished reference-theme link. Links:
+  [RAG export contract](/docs/contracts/rag-export.md),
+  [release gate](/docs/RELEASE-GATE.md), and [README](/README.md).
+- Re-audit Filed.fyi / Starlight archive image layout after PR #131: F-L1
+  relative image → `{stem}.assets/` is **CLOSED** on the image-path and
+  dogfood fixtures; missing/escape still fail loud with `EASSET`; F-L2 Unicode
+  asset-filename sanitization remains separate and non-blocking. No product
+  code changes.
+  Links: [archive layout audit](/docs/dogfood/filed-fyi-archive-layout-audit.md),
+  [migration-lab README](/tools/migration-lab/README.md),
+  [image-path fixture](/tools/migration-lab/fixtures/image-path-starlight/README.md).
+- Record independent post-merge verification that Starlight **F-L1** image-path
+  migration remains **CLOSED** on `main` (dogfood fixture compiles, migration-lab
+  tests and release gate green); F-L2 stays separate and non-blocking. No product
+  code changes.
+  Links: [archive layout audit](/docs/dogfood/filed-fyi-archive-layout-audit.md),
+  [project status](/docs/STATUS.md).
+- Align product/compiler/RAG metadata, release gate, status, and sample content
+  for the v0.5.2 cut (IR remains `0.2.0`).
 
 ## [0.5.1] — 2026-07-16
 

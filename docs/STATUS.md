@@ -1,12 +1,13 @@
 # Project status — Boris
 
-**As of:** 2026-07-17 · current product release **v0.5.1** /
-compiler **boris/0.5.1** · Zig **0.16.0**<br>
-**Phase:** post-v0.5.1 real-site dogfood and migration hardening.<br>
+**As of:** 2026-07-17 · current product release **v0.5.2** /
+compiler **boris/0.5.2** · Zig **0.16.0**<br>
+**Phase:** post-v0.5.2 real-site dogfood and migration hardening.<br>
 IR `schemaVersion` is **`0.2.0`**.
 
-**Version boundary:** `v0.5.1` is tagged at the certified PR #127 merge commit.
-This cut does not change base IR `0.2.0`; semantic relations retain their
+**Version boundary:** `v0.5.2` packages post-`v0.5.1` migration-lab and dogfood
+work on the same compiler surface; base IR remains `0.2.0`. Tag `v0.5.1`
+remains at the certified PR #127 merge commit. Semantic relations retain their
 documented conditional IR `0.3.0` artifacts.
 
 **Feature 8 status:** F8.0 contracts and F8.1–F8.3 are complete. IR 0.2
@@ -50,6 +51,16 @@ accessibility-forward reference theme, bounded Starlight and Filed.fyi
 adoption evidence, asset-name sanitization and theme-archaeology migration
 aids, and a release gate that works correctly inside linked Git worktrees.
 These are additive capabilities; base IR remains `0.2.0`.
+
+### What v0.5.2 adds
+
+The v0.5.2 cut packages standalone migration-lab improvements on the v0.5.1
+compiler surface: WordPress local media materialization into page
+`{stem}.assets/`, Filed legacy parent-key normalization under `--out`,
+Starlight F-L1 image-path resolution, and improved Starlight component-mapping
+calibration, plus bounded dogfood evidence. Core product `src/` behavior and
+base IR `0.2.0` are unchanged. Migration labs remain developer aids, not
+runtime dependencies or universal importers.
 
 **0.2.0** packaged ApexMarkdown Unified, HTML default CLI, graph-aware nav +
 TOC, and P2/P3 incremental / watch / jobs / multi-target. Tag: `v0.2.0`.
@@ -120,6 +131,8 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | Content-local sibling page assets | **Shipped in v0.5.1** (secure `{stem}.assets/` publishing with stale cleanup and target isolation) |
 | Reference theme and real-site adoption workflow | **Shipped in v0.5.1** (framework-free theme example plus bounded Filed.fyi/Starlight evidence) |
 | Migration asset-name sanitization and theme archaeology | **Shipped in v0.5.1** (developer-only migration-lab reports; core remains strict and deterministic) |
+| WordPress media materialize + Filed parent normalize | **Shipped in v0.5.2** (developer-only migration-lab; product grammar stays closed) |
+| Starlight F-L1 image paths + component-mapping calibration | **Shipped in v0.5.2** (developer-only migration-lab; not universal MDX/Starlight parity) |
 | Bounded Textile input | **Shipped in v0.4.0** (`--textile`; explicit whole-tree compatibility adapter) |
 | Optional static theme showcase | **Shipped in v0.4.0** (`examples/static-theme-showcase/`; hand-authored CSS, not product chrome) |
 | Agent-lore content dogfood | **Shipped in v0.4.0** (tracked sample content only; private 250MB source data remains excluded/ignored) |
@@ -176,6 +189,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | # | Feature | Note |
 |---|---------|------|
+| — | **Product v0.5.2** | Migration-lab packaging: WP media materialize, Filed parent-key normalize, Starlight F-L1 image paths + calibration, bounded dogfood; core compiler surface unchanged; base IR remains 0.2 |
 | — | **Product v0.5.1** | Tagged/released: content-local assets, reference theme, bounded real-site adoption evidence, migration-lab asset/theme aids, and worktree-safe release cleanliness checks; base IR remains 0.2 |
 | — | **Product v0.5.0** | Tagged/released: native Details, source-RAG publication hardening, Obsidian/Notion/Starlight/Filed evidence, and judge-facing docs |
 | — | **Product v0.4.0** | Tagged/released: knowledge-system exports, Documentation Intelligence, layout/theme work, Textile, migration labs, static theme showcase, and agent-lore dogfood; base IR remains 0.2 |
@@ -236,7 +250,7 @@ on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 | Publish | **Honest limit + fallback** | Cross-volume **atomic** replace still not claimed. HTML stage / IR publish fall back to copy+delete on `error.CrossDevice`; RAG already had directory copy fallback. Same-parent staging remains the common path. |
 | Dialect | **Enforced** | Author key is **`parent` only**. `parentEntry` / `parent_entry` → `EFRONTMATTER` on all product parse paths. Do not reintroduce aliases. |
 | Migration | **Documented** | Bare `boris` is HTML under `dist/`. Old IR scripts need `--out` / `--no-rag`. README + help text carry the note. |
-| Release state | **v0.5.1 released** | Tag `v0.5.1` points at the certified PR #127 merge commit; post-release dogfood is tracked separately and does not rewrite the release boundary. |
+| Release state | **v0.5.2 release prep** | Product/compiler metadata `0.5.2`; tag when the release gate is green on the prep merge. Prior tag `v0.5.1` remains at the certified PR #127 merge commit. |
 
 ---
 

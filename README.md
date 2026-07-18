@@ -10,16 +10,17 @@ or an AI Context Bundle.
 | | |
 |--|--|
 | Language | Zig **0.16.0** (`build.zig.zon` / CI pin) |
-| Product | **0.5.1** / compiler **boris/0.5.1** |
+| Product | **0.5.2** / compiler **boris/0.5.2** |
 | IR schema | **0.2.0** (typed dependency endpoints + reverse index) |
 | License | [MIT](LICENSE) |
 
 Living phase note: [`docs/STATUS.md`](docs/STATUS.md) · history:
 [`CHANGELOG.md`](CHANGELOG.md).
 
-**v0.5.1:** secure page-local `{stem}.assets/`, an accessibility-forward
-reference theme, bounded Filed.fyi/Starlight adoption evidence, and migration
-lab aids for asset names and theme archaeology — without changing IR 0.2.
+**v0.5.2:** migration-lab packaging on the v0.5.1 compiler surface — WordPress
+local media materialization, Filed parent-key normalize, Starlight F-L1 image
+paths and component-mapping calibration, plus bounded dogfood evidence —
+without changing IR 0.2.
 
 ---
 
@@ -387,6 +388,6 @@ after exit 0.
   includes + wiki-links, typed IR dependency edges + reverse index,
   Documentation Intelligence, Context Bundles, layout selection, Textile
   compatibility, and migration labs as **standalone developer aids**. Product
-  **v0.5.1**.
+  **v0.5.2**.
 - **Next:** continue bounded real-site dogfood and migration hardening — see
   [`docs/STATUS.md`](docs/STATUS.md).
