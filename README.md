@@ -80,7 +80,7 @@ Honest differentiators — not a feature-parity matrix against every plugin.
 | Dimension | Typical Node SSG | Boris (today) |
 |-----------|------------------|---------------|
 | Runtime to **build** the site | Node + package tree | Local `boris` binary after Zig/CMake **build** of Boris itself |
-| Content model | Often flexible YAML/MDX | **Closed** frontmatter (`id`, `title`, `parent`, `status`, `tags` only) |
+| Content model | Often flexible YAML/MDX | **Closed** frontmatter (`id`, `title`, `parent`, `status`, `tags`, bounded `relations`) |
 | Internal structure | Conventions / plugins | Validated **Trunk/Satellite** graph; invalid parents fail loud |
 | In-page links | Often soft warnings | `[[entity-id]]` / `[[entity-id#heading]]` **fail** if missing; ordinary Markdown `[]()` hrefs are **not** fully link-checked |
 | Output products | Usually HTML (+ ad-hoc scripts) | HTML **or** IR **or** RAG **or** Context Bundle (modes do not mix) |
@@ -194,7 +194,7 @@ Documentation Intelligence: [`docs/contracts/documentation-intelligence.md`](doc
 
 ## Author essentials
 
-1. **Closed frontmatter** — only `id`, `title`, `parent`, `status`, `tags`.
+1. **Closed frontmatter** — only `id`, `title`, `parent`, `status`, `tags`, and bounded [`relations`](docs/contracts/semantic-relations.md).
 2. **One-level graph** — Satellites parent to **Trunks** only (no satellite-of-satellite).
 3. **Fail-loud structure** — bad parents, missing wiki targets/headings, missing includes, and cycles exit **1** with diagnostics. Ordinary Markdown `[](url)` links are **not** a complete site-wide link checker.
 4. **Asides** — `<Aside kind="tip">…</Aside>` (and related kinds) stay in document order.

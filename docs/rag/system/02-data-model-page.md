@@ -55,7 +55,10 @@ tags: [guide, intro]
 ---
 ```
 
-Keys: `id`, `title`, `parent`, `status`, `tags`. Unknown keys error.
+Keys: `id`, `title`, `parent`, `status`, `tags`, and bounded `relations`.
+Unknown keys error. Relations use the closed vocabulary and validation in
+[`semantic-relations.md`](../../contracts/semantic-relations.md); they are not
+build dependencies.
 Legacy `parentEntry` is **rejected** (`EFRONTMATTER`). There is **no** general
 YAML support.
 

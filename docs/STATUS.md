@@ -2,7 +2,7 @@
 
 **As of:** 2026-07-18 · current product release **v0.6.1** /
 compiler **boris/0.6.1** · Zig **0.16.0**<br>
-**Phase:** v0.6.1 release candidate; tag after the final release gate.<br>
+**Phase:** v0.7 development after the tagged v0.6.1 release.<br>
 IR `schemaVersion` is **`0.2.0`**.
 
 **Version boundary:** `v0.6.1` packages post-`v0.6.0` migration-lab hardening,
@@ -197,7 +197,9 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
+| **Next** | Migration relationship candidates | Preserve Filed-shaped relationship metadata as deterministic review evidence before any explicit mapping to Boris's existing bounded semantic `relations`. |
 | **Next** | Archive-friendly layouts | Validate layout rules and child/index presentation against real archive navigation before broadening theme features. |
+| **Shipped on main / v0.7** | Source-RAG deterministic partitioning | Complete-file bundle parts, explicit manifests, profiles, and bounded `--split-size` output (PR #163). |
 | **Shipped on main / v0.6** | `llms.txt` export | Deterministic graph-ordered export with URL, summary, fallback, and contract coverage (PR #150). `llms-full.txt` remains later. |
 | **Shipped on main / v0.6** | Source-RAG pack profiles | Bounded logical packs with explicit scope selection, manifests, and vendor/generated/cache exclusions (PR #149). |
 | **Shipped on main / v0.6** | Stitch-calibrated theme prototypes | Milligram-inspired and corporate zero-dependency examples with slot, manual-review, and deterministic calibration reports (PR #152). |
