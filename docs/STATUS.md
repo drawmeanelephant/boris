@@ -75,8 +75,9 @@ developer tooling and examples, not a new runtime or framework dependency.
 
 The v0.6.1 cut packages the dynamic Astro/Starlight asset-expression
 normalization fix, the read-only WordPress theme archaeology lab, source-RAG
-profile-manifest correctness, and five additional zero-dependency theme
-showcases. These remain migration aids and examples; Boris core and base IR
+profile-manifest correctness, five additional zero-dependency theme
+showcases, and the complete real-site dogfood preflight case study for `filed.fyi`. 
+These remain migration aids and examples; Boris core and base IR
 `0.2.0` are unchanged.
 
 **0.2.0** packaged ApexMarkdown Unified, HTML default CLI, graph-aware nav +
@@ -196,7 +197,6 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
-| **Next** | Real-site dogfood | Exercise a substantial site/archive and record concrete migration, authoring, and publish gaps. |
 | **Next** | Archive-friendly layouts | Validate layout rules and child/index presentation against real archive navigation before broadening theme features. |
 | **Shipped on main / v0.6** | `llms.txt` export | Deterministic graph-ordered export with URL, summary, fallback, and contract coverage (PR #150). `llms-full.txt` remains later. |
 | **Shipped on main / v0.6** | Source-RAG pack profiles | Bounded logical packs with explicit scope selection, manifests, and vendor/generated/cache exclusions (PR #149). |
@@ -239,6 +239,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | — | Migration laboratories | Astro archaeology, WordPress conversion, Instagram Takeout, and adversarial preservation fixtures are developer aids, not Boris product pipelines (PRs #53–#54, #77–#78) |
 | — | Filed.fyi first-slice adoption pass | Bounded real-site dogfood: filed/astro/theme/asset-filename/starlight labs + product compile of changelog/releases; evidence in [`docs/dogfood/filed-fyi-adoption-pass.md`](dogfood/filed-fyi-adoption-pass.md) (not full-site conversion) |
 | — | Filed.fyi representative-slice pass | Second bounded dogfood: full-tree inventory + hand-converted landing/nested/asset/links/hard-MDX pages; evidence in [`docs/dogfood/filed-fyi-v051-representative-slice.md`](dogfood/filed-fyi-v051-representative-slice.md) (not full-site conversion) |
+| — | Filed.fyi full-site preflight case study | Third bounded dogfood: whole-site inventory (567 pages, 19 assets) + 200-page candidate cap conversion + perfect GREEN compilation under core Boris compiler; evidence in [`docs/dogfood/filed-fyi-case-study.md`](dogfood/filed-fyi-case-study.md) |
 | — | Starlight F-L1 archive image paths | **CLOSED** (PR #131 fix + #132 audit + post-merge re-verify): proven relative/public Markdown images → page `{stem}.assets/`; missing/escape fail loud. Evidence: [`docs/dogfood/filed-fyi-archive-layout-audit.md`](dogfood/filed-fyi-archive-layout-audit.md). **F-L2** Unicode asset-filename sanitization remains separate / non-blocking |
 | — | Agent-lore content dogfood | Tracked sample content exercises a documentation section without committing the private 250MB source dataset (PR #79) |
 | — | Bounded Textile compatibility | Explicit fail-closed `.textile` tree mode through the normal Boris pipeline (PR #55) |

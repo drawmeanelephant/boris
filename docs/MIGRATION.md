@@ -137,14 +137,12 @@ zig build --build-file tools/migration-lab/build.zig run -- \
 Other lab modes (WordPress WXR, Instagram Takeout, Obsidian, Notion, Filed)
 and flags: [`tools/migration-lab/README.md`](../tools/migration-lab/README.md).
 
-**Real-site dogfood (Filed.fyi first slice):** a bounded pass against a live
-Filed.fyi checkout — inventory, lab modes, product HTML/IR/RAG, remediation
-cards, and a narrow RC recommendation — is recorded in
-[`docs/dogfood/filed-fyi-adoption-pass.md`](dogfood/filed-fyi-adoption-pass.md).
-A second pass with a five-page representative slice (landing, nested docs,
-page-local asset, absolute links, hard MDX dialects) is in
-[`docs/dogfood/filed-fyi-v051-representative-slice.md`](dogfood/filed-fyi-v051-representative-slice.md).
-Both are evidence for humans, not universal converter claims.
+**Real-site dogfood (Filed.fyi adoptability history):**
+*   **First Pass (v0.5.1)**: A bounded pass against a live Filed.fyi checkout — inventory, lab modes, product HTML/IR/RAG, remediation cards, and a narrow RC recommendation — is recorded in [`docs/dogfood/filed-fyi-adoption-pass.md`](dogfood/filed-fyi-adoption-pass.md).
+*   **Second Pass (v0.5.1)**: A pass with a five-page representative slice (landing, nested docs, page-local asset, absolute links, hard MDX dialects) is in [`docs/dogfood/filed-fyi-v051-representative-slice.md`](dogfood/filed-fyi-v051-representative-slice.md).
+*   **Third Pass (v0.6.1 pre-release)**: A whole-site preflight of 567 pages and 19 assets under a 200-page candidate selection cap is recorded in [`docs/dogfood/filed-fyi-case-study.md`](dogfood/filed-fyi-case-study.md). It validates whole-site candidate selection, deterministic image/asset migration, automatic synthetic trunk stubs, and perfect GREEN compilation under core Boris, with detailed 5-item remediation cards for the top 5 limitations.
+
+These passes provide empirical evidence for human teams planning migration tasks, rather than claiming universal automatic conversion.
 
 **What to open after a lab run:** `REPORT.md` / `report.json` (and mode-specific
 manifests under the `--out` dir). Treat them as **evidence for the human
