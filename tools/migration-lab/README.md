@@ -507,6 +507,10 @@ Every later duplicate remains visible with `proposed_kind: "relates_to"`,
 it does not consume another product-limit slot. Here `proposed_kind` records a
 defensible semantic mapping, not eligibility for automatic emission.
 
+The bounded real-site results and the converted-map evidence boundary are
+recorded in the
+[Filed.fyi v0.7 relationship-candidate dogfood report](/docs/dogfood/filed-relation-candidates-v07.md).
+
 ### Boundary classes
 
 | Class | Meaning |

@@ -197,7 +197,8 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Priority | Item | Why |
 |----------|------|-----|
-| **Next** | Migration relationship candidates | Preserve Filed-shaped relationship metadata as deterministic review evidence before any explicit mapping to Boris's existing bounded semantic `relations`. |
+| **Shipped on main / v0.7** | Migration relationship candidates | Filed-shaped relationship metadata is preserved in a deterministic review sidecar before any explicit mapping to Boris's existing bounded semantic `relations`; the [real-site dogfood pass](dogfood/filed-relation-candidates-v07.md) validates 1,370 retained values without automatic emission. |
+| **Next** | Relationship object shapes + site-wide target inventory | Recognize the proven Filed `{slug}` shape, then distinguish selected, inventoried, ambiguous, and absent targets while keeping conversion bounded and review-first. |
 | **Next** | Archive-friendly layouts | Validate layout rules and child/index presentation against real archive navigation before broadening theme features. |
 | **Shipped on main / v0.7** | Source-RAG deterministic partitioning | Complete-file bundle parts, explicit manifests, profiles, and bounded `--split-size` output (PR #163). |
 | **Shipped on main / v0.6** | `llms.txt` export | Deterministic graph-ordered export with URL, summary, fallback, and contract coverage (PR #150). `llms-full.txt` remains later. |
