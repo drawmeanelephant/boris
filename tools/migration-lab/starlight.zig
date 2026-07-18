@@ -163,6 +163,56 @@ const CollisionRecord = struct {
     resolution: []const u8, // first_wins_others_disambiguated
 };
 
+const product_relation_limit: usize = 16;
+
+const relation_source_fields = [_][]const u8{
+    "relatedEntries",
+    "relatedHaiku",
+    "relatedLimerick",
+    "relatedLorelog",
+    "mascotRef",
+    "concepts",
+    "escalationPath",
+};
+
+/// Review-first evidence extracted from known Filed-shaped source frontmatter.
+/// These rows never alter emitted Markdown or Boris product relations.
+const RelationCandidate = struct {
+    source_path: []const u8,
+    output_path: []const u8,
+    source_entity: []const u8,
+    source_field: []const u8,
+    source_line: u32,
+    value_index: usize,
+    raw_value: []const u8,
+    normalized_target: ?[]const u8,
+    proposed_kind: ?[]const u8,
+    target_resolution: []const u8, // resolved | unresolved | ambiguous | not_attempted | not_applicable
+    resolved_entity: ?[]const u8,
+    relation_ordinal: ?usize,
+    within_product_limit: ?bool,
+    review_reason: ?[]const u8,
+};
+
+const RawRelationValue = struct {
+    source_field: []const u8,
+    source_line: u32,
+    value_index: usize,
+    raw_value: []const u8,
+    target_value: ?[]const u8,
+    collection: ?[]const u8 = null,
+    review_reason: ?[]const u8 = null,
+};
+
+const FrontmatterLine = struct {
+    raw: []const u8,
+    text: []const u8,
+    start: usize,
+    end: usize,
+    indent: usize,
+    line: u32,
+};
+
 fn trim(s: []const u8) []const u8 {
     return std.mem.trim(u8, s, " \t\r\n");
 }
@@ -178,8 +228,8 @@ fn isBorisKey(key: []const u8) bool {
 
 fn isSkipDir(name: []const u8) bool {
     const skip = [_][]const u8{
-        ".git", ".hg", ".svn", "node_modules", ".astro", "dist",
-        ".vercel", ".netlify", ".output", "zig-out", ".zig-cache", "zig-cache",
+        ".git",    ".hg",      ".svn",    "node_modules", ".astro",     "dist",
+        ".vercel", ".netlify", ".output", "zig-out",      ".zig-cache", "zig-cache",
     };
     for (skip) |s| if (std.mem.eql(u8, name, s)) return true;
     return false;
@@ -379,6 +429,493 @@ fn parseFrontmatterLite(allocator: std.mem.Allocator, raw: []const u8, fallback_
         .unmapped = try unmapped.toOwnedSlice(allocator),
         .all_keys = try all_keys.toOwnedSlice(allocator),
     };
+}
+
+fn canonicalRelationSourceField(key: []const u8) ?[]const u8 {
+    for (relation_source_fields) |field| {
+        if (std.mem.eql(u8, key, field)) return field;
+    }
+    return null;
+}
+
+fn relationFieldProposesKind(field: []const u8) bool {
+    return std.mem.eql(u8, field, "relatedEntries") or
+        std.mem.eql(u8, field, "relatedHaiku") or
+        std.mem.eql(u8, field, "relatedLimerick") or
+        std.mem.eql(u8, field, "relatedLorelog") or
+        std.mem.eql(u8, field, "mascotRef");
+}
+
+fn splitFrontmatterLines(a: std.mem.Allocator, raw: []const u8) ![]const FrontmatterLine {
+    var lines: std.ArrayList(FrontmatterLine) = .empty;
+    var pos: usize = 0;
+    var line_no: u32 = 1;
+    while (pos < raw.len) : (line_no += 1) {
+        const line_end = std.mem.indexOfScalarPos(u8, raw, pos, '\n') orelse raw.len;
+        var text = raw[pos..line_end];
+        if (text.len > 0 and text[text.len - 1] == '\r') text = text[0 .. text.len - 1];
+        var indent: usize = 0;
+        while (indent < text.len and (text[indent] == ' ' or text[indent] == '\t')) : (indent += 1) {}
+        try lines.append(a, .{
+            .raw = text,
+            .text = text[indent..],
+            .start = pos,
+            .end = if (line_end < raw.len) line_end + 1 else line_end,
+            .indent = indent,
+            .line = line_no,
+        });
+        pos = if (line_end < raw.len) line_end + 1 else raw.len;
+    }
+    return try lines.toOwnedSlice(a);
+}
+
+fn topLevelField(line: FrontmatterLine) ?struct { key: []const u8, value: []const u8 } {
+    if (line.indent != 0 or line.text.len == 0 or line.text[0] == '#') return null;
+    const colon = std.mem.indexOfScalar(u8, line.text, ':') orelse return null;
+    const key = trim(line.text[0..colon]);
+    if (key.len == 0) return null;
+    return .{ .key = key, .value = trim(line.text[colon + 1 ..]) };
+}
+
+fn appendRawRelationValue(
+    a: std.mem.Allocator,
+    out: *std.ArrayList(RawRelationValue),
+    field: []const u8,
+    line: u32,
+    value_index: *usize,
+    raw_value: []const u8,
+    target_value: ?[]const u8,
+    collection: ?[]const u8,
+    review_reason: ?[]const u8,
+) !void {
+    try out.append(a, .{
+        .source_field = field,
+        .source_line = line,
+        .value_index = value_index.*,
+        .raw_value = try a.dupe(u8, raw_value),
+        .target_value = if (target_value) |v| try a.dupe(u8, v) else null,
+        .collection = if (collection) |v| try a.dupe(u8, v) else null,
+        .review_reason = review_reason,
+    });
+    value_index.* += 1;
+}
+
+fn scalarLooksNonScalar(value: []const u8) bool {
+    const v = trim(value);
+    if (v.len == 0) return true;
+    return v[0] == '{' or v[0] == '|' or v[0] == '>' or v[0] == '&' or v[0] == '*';
+}
+
+fn parseInlineRelationValues(
+    a: std.mem.Allocator,
+    out: *std.ArrayList(RawRelationValue),
+    field: []const u8,
+    line: u32,
+    value: []const u8,
+    value_index: *usize,
+) !void {
+    const v = trim(value);
+    if (v.len == 0) {
+        try appendRawRelationValue(a, out, field, line, value_index, v, null, null, "empty_value");
+        return;
+    }
+    if (v[0] != '[') {
+        if (scalarLooksNonScalar(v)) {
+            try appendRawRelationValue(a, out, field, line, value_index, v, null, null, "non_scalar_value");
+        } else {
+            try appendRawRelationValue(a, out, field, line, value_index, v, v, null, null);
+        }
+        return;
+    }
+    if (v.len < 2 or v[v.len - 1] != ']') {
+        try appendRawRelationValue(a, out, field, line, value_index, v, null, null, "malformed_inline_list");
+        return;
+    }
+
+    const inner = v[1 .. v.len - 1];
+    var start: usize = 0;
+    var quote: ?u8 = null;
+    var malformed = false;
+    var i: usize = 0;
+    while (i <= inner.len) : (i += 1) {
+        const at_end = i == inner.len;
+        if (!at_end) {
+            const c = inner[i];
+            if (quote) |q| {
+                if (c == q) quote = null;
+                if (c == '\\') malformed = true; // escapes need a YAML parser; preserve for review
+            } else if (c == '\'' or c == '"') {
+                quote = c;
+            } else if (c == '[' or c == ']' or c == '{' or c == '}') {
+                malformed = true;
+            }
+        }
+        if (at_end or (quote == null and inner[i] == ',')) {
+            const item = trim(inner[start..i]);
+            if (item.len == 0) malformed = true;
+            if (!malformed and item.len > 0) {
+                try appendRawRelationValue(a, out, field, line, value_index, item, item, null, null);
+            }
+            start = i + 1;
+        }
+    }
+    if (quote != null) malformed = true;
+    if (malformed) {
+        // Preserve the entire value once when safe item boundaries cannot be proven.
+        while (out.items.len > 0 and out.items[out.items.len - 1].source_line == line and
+            std.mem.eql(u8, out.items[out.items.len - 1].source_field, field))
+        {
+            _ = out.pop();
+            value_index.* -= 1;
+        }
+        try appendRawRelationValue(a, out, field, line, value_index, v, null, null, "malformed_inline_list");
+    }
+}
+
+fn parseObjectItem(
+    a: std.mem.Allocator,
+    out: *std.ArrayList(RawRelationValue),
+    field: []const u8,
+    lines: []const FrontmatterLine,
+    item_start: usize,
+    item_end: usize,
+    raw_frontmatter: []const u8,
+    value_index: *usize,
+) !void {
+    const first = lines[item_start];
+    const raw_end = if (item_end > item_start) lines[item_end - 1].end else first.end;
+    const raw_item = trim(raw_frontmatter[first.start..raw_end]);
+    var target: ?[]const u8 = null;
+    var collection: ?[]const u8 = null;
+    var malformed = false;
+
+    var idx = item_start;
+    while (idx < item_end) : (idx += 1) {
+        var text = trim(lines[idx].raw);
+        if (idx == item_start and std.mem.startsWith(u8, text, "-")) text = trim(text[1..]);
+        if (text.len == 0 or text[0] == '#') continue;
+        const colon = std.mem.indexOfScalar(u8, text, ':') orelse {
+            malformed = true;
+            continue;
+        };
+        const key = trim(text[0..colon]);
+        const value = trim(text[colon + 1 ..]);
+        if (value.len == 0 or scalarLooksNonScalar(value)) {
+            malformed = true;
+            continue;
+        }
+        if (std.mem.eql(u8, key, "id")) {
+            if (target != null) malformed = true else target = value;
+        } else if (std.mem.eql(u8, key, "collection")) {
+            if (collection != null) malformed = true else collection = value;
+        } else {
+            malformed = true;
+        }
+    }
+
+    if (target == null or malformed) {
+        try appendRawRelationValue(a, out, field, first.line, value_index, raw_item, null, null, "non_scalar_or_ambiguous_object");
+    } else {
+        try appendRawRelationValue(a, out, field, first.line, value_index, raw_item, target, collection, null);
+    }
+}
+
+fn parseBlockRelationValues(
+    a: std.mem.Allocator,
+    out: *std.ArrayList(RawRelationValue),
+    field: []const u8,
+    field_line: u32,
+    lines: []const FrontmatterLine,
+    block_start: usize,
+    block_end: usize,
+    raw_frontmatter: []const u8,
+    value_index: *usize,
+) !void {
+    var found_item = false;
+    var i = block_start;
+    while (i < block_end) {
+        const text = trim(lines[i].raw);
+        if (text.len == 0 or text[0] == '#') {
+            i += 1;
+            continue;
+        }
+        if (!std.mem.startsWith(u8, text, "-")) {
+            const raw_block = trim(raw_frontmatter[lines[block_start].start..lines[block_end - 1].end]);
+            try appendRawRelationValue(a, out, field, field_line, value_index, raw_block, null, null, "non_scalar_block");
+            return;
+        }
+
+        found_item = true;
+        var next = i + 1;
+        while (next < block_end) : (next += 1) {
+            const next_text = trim(lines[next].raw);
+            if (std.mem.startsWith(u8, next_text, "-")) break;
+        }
+        const after_dash = trim(text[1..]);
+        if (after_dash.len == 0) {
+            const raw_item = trim(raw_frontmatter[lines[i].start..lines[next - 1].end]);
+            try appendRawRelationValue(a, out, field, lines[i].line, value_index, raw_item, null, null, "empty_list_item");
+        } else if (std.mem.indexOfScalar(u8, after_dash, ':') != null or next > i + 1) {
+            try parseObjectItem(a, out, field, lines, i, next, raw_frontmatter, value_index);
+        } else if (scalarLooksNonScalar(after_dash)) {
+            try appendRawRelationValue(a, out, field, lines[i].line, value_index, after_dash, null, null, "non_scalar_value");
+        } else {
+            try appendRawRelationValue(a, out, field, lines[i].line, value_index, after_dash, after_dash, null, null);
+        }
+        i = next;
+    }
+    if (!found_item) {
+        try appendRawRelationValue(a, out, field, field_line, value_index, "", null, null, "empty_value");
+    }
+}
+
+fn extractRawRelationValues(a: std.mem.Allocator, raw_frontmatter: []const u8) ![]const RawRelationValue {
+    var out: std.ArrayList(RawRelationValue) = .empty;
+    const lines = try splitFrontmatterLines(a, raw_frontmatter);
+    var i: usize = 0;
+    var value_index: usize = 0;
+    while (i < lines.len) {
+        const field_line = topLevelField(lines[i]) orelse {
+            i += 1;
+            continue;
+        };
+        const field = canonicalRelationSourceField(field_line.key) orelse {
+            i += 1;
+            continue;
+        };
+        var block_end = i + 1;
+        while (block_end < lines.len) : (block_end += 1) {
+            if (topLevelField(lines[block_end]) != null) break;
+        }
+        if (field_line.value.len > 0) {
+            try parseInlineRelationValues(a, &out, field, lines[i].line, field_line.value, &value_index);
+        } else {
+            try parseBlockRelationValues(a, &out, field, lines[i].line, lines, i + 1, block_end, raw_frontmatter, &value_index);
+        }
+        i = block_end;
+    }
+    return try out.toOwnedSlice(a);
+}
+
+fn unquoteRelationScalar(raw: []const u8) ?[]const u8 {
+    const v = trim(raw);
+    if (v.len == 0) return null;
+    if (v[0] == '\'' or v[0] == '"') {
+        if (v.len < 2 or v[v.len - 1] != v[0]) return null;
+        const inner = v[1 .. v.len - 1];
+        if (std.mem.indexOfScalar(u8, inner, v[0]) != null or std.mem.indexOfScalar(u8, inner, '\\') != null) return null;
+        return if (inner.len == 0) null else inner;
+    }
+    if (v[v.len - 1] == '\'' or v[v.len - 1] == '"') return null;
+    return v;
+}
+
+fn isTargetLikeEntityId(id: []const u8) bool {
+    if (id.len == 0 or id.len > 255 or id[0] == '/' or id[id.len - 1] == '/') return false;
+    var it = std.mem.splitScalar(u8, id, '/');
+    while (it.next()) |segment| {
+        if (segment.len == 0 or std.mem.eql(u8, segment, ".") or std.mem.eql(u8, segment, "..")) return false;
+        for (segment) |c| {
+            if (c == '\\' or c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == '#' or c == '?') return false;
+        }
+    }
+    return true;
+}
+
+fn normalizeRelationTarget(a: std.mem.Allocator, route_prefix: []const u8, raw: []const u8) !?[]const u8 {
+    var value = unquoteRelationScalar(raw) orelse return null;
+    if (std.mem.eql(u8, value, "null") or std.mem.eql(u8, value, "~")) return null;
+    while (value.len > 1 and value[value.len - 1] == '/') value = value[0 .. value.len - 1];
+    if (std.mem.startsWith(u8, value, "/")) {
+        const from_route = try routeToEntityCandidate(a, route_prefix, value);
+        if (from_route == null) return null;
+        value = from_route.?;
+    } else if (std.mem.startsWith(u8, value, "./")) {
+        value = value[2..];
+    }
+    if (std.mem.endsWith(u8, value, ".mdx")) value = value[0 .. value.len - 4] else if (std.mem.endsWith(u8, value, ".md")) value = value[0 .. value.len - 3];
+    if (std.mem.endsWith(u8, value, "/index")) value = value[0 .. value.len - 6];
+    if (!isTargetLikeEntityId(value)) return null;
+    return try a.dupe(u8, value);
+}
+
+const TargetResolution = struct {
+    normalized_target: ?[]const u8,
+    resolved_entity: ?[]const u8,
+    state: []const u8,
+    review_reason: ?[]const u8,
+};
+
+fn resolveRelationTarget(
+    a: std.mem.Allocator,
+    route_prefix: []const u8,
+    raw_target: []const u8,
+    raw_collection: ?[]const u8,
+    entities: *const EntityMap,
+) !TargetResolution {
+    const normalized = try normalizeRelationTarget(a, route_prefix, raw_target) orelse return .{
+        .normalized_target = null,
+        .resolved_entity = null,
+        .state = "not_attempted",
+        .review_reason = "malformed_or_non_target_scalar",
+    };
+
+    if (raw_collection) |raw| {
+        const collection = unquoteRelationScalar(raw);
+        if (collection) |c| {
+            if (!std.mem.eql(u8, c, "docs") and std.mem.indexOfScalar(u8, normalized, '/') == null and isTargetLikeEntityId(c)) {
+                const joined = try std.fmt.allocPrint(a, "{s}/{s}", .{ c, normalized });
+                if (entities.get(joined)) |resolved| {
+                    return .{ .normalized_target = joined, .resolved_entity = resolved, .state = "resolved", .review_reason = null };
+                }
+            }
+        }
+    }
+    if (entities.get(normalized)) |resolved| {
+        return .{ .normalized_target = normalized, .resolved_entity = resolved, .state = "resolved", .review_reason = null };
+    }
+
+    // A bare slug may resolve only when it uniquely names one converted entity.
+    var match: ?[]const u8 = null;
+    var ambiguous = false;
+    var it = entities.keyIterator();
+    while (it.next()) |key_ptr| {
+        const key = key_ptr.*;
+        const suffix_match = std.mem.eql(u8, pageStemFromEntity(key), normalized) or
+            (key.len > normalized.len and key[key.len - normalized.len - 1] == '/' and std.mem.endsWith(u8, key, normalized));
+        if (!suffix_match) continue;
+        if (match != null and !std.mem.eql(u8, match.?, key)) {
+            ambiguous = true;
+            break;
+        }
+        match = key;
+    }
+    if (ambiguous) return .{
+        .normalized_target = normalized,
+        .resolved_entity = null,
+        .state = "ambiguous",
+        .review_reason = "ambiguous_target_in_converted_entity_map",
+    };
+    if (match) |resolved| return .{
+        .normalized_target = normalized,
+        .resolved_entity = resolved,
+        .state = "resolved",
+        .review_reason = null,
+    };
+    return .{
+        .normalized_target = normalized,
+        .resolved_entity = null,
+        .state = "unresolved",
+        .review_reason = "target_not_in_converted_entity_map",
+    };
+}
+
+fn collectRelationCandidatesForPage(
+    a: std.mem.Allocator,
+    page: SourcePage,
+    route_prefix: []const u8,
+    entities: *const EntityMap,
+    out: *std.ArrayList(RelationCandidate),
+) !void {
+    const raw_values = try extractRawRelationValues(a, page.raw_frontmatter);
+    var relation_ordinal: usize = 0;
+    for (raw_values) |raw| {
+        if (!relationFieldProposesKind(raw.source_field)) {
+            try out.append(a, .{
+                .source_path = page.source_path,
+                .output_path = page.output_path,
+                .source_entity = page.entity_id,
+                .source_field = raw.source_field,
+                .source_line = raw.source_line,
+                .value_index = raw.value_index,
+                .raw_value = raw.raw_value,
+                .normalized_target = null,
+                .proposed_kind = null,
+                .target_resolution = if (raw.review_reason == null) "not_applicable" else "not_attempted",
+                .resolved_entity = null,
+                .relation_ordinal = null,
+                .within_product_limit = null,
+                .review_reason = raw.review_reason orelse "review_only_field_no_relation_kind",
+            });
+            continue;
+        }
+        if (raw.review_reason) |reason| {
+            try out.append(a, .{
+                .source_path = page.source_path,
+                .output_path = page.output_path,
+                .source_entity = page.entity_id,
+                .source_field = raw.source_field,
+                .source_line = raw.source_line,
+                .value_index = raw.value_index,
+                .raw_value = raw.raw_value,
+                .normalized_target = null,
+                .proposed_kind = null,
+                .target_resolution = "not_attempted",
+                .resolved_entity = null,
+                .relation_ordinal = null,
+                .within_product_limit = null,
+                .review_reason = reason,
+            });
+            continue;
+        }
+
+        const resolution = try resolveRelationTarget(a, route_prefix, raw.target_value.?, raw.collection, entities);
+        var proposed_kind: ?[]const u8 = null;
+        var ordinal: ?usize = null;
+        var within_limit: ?bool = null;
+        var review_reason = resolution.review_reason;
+        if (resolution.resolved_entity) |resolved| {
+            if (std.mem.eql(u8, resolved, page.entity_id)) {
+                review_reason = "self_target_not_product_relation";
+            } else {
+                relation_ordinal += 1;
+                ordinal = relation_ordinal;
+                within_limit = relation_ordinal <= product_relation_limit;
+                proposed_kind = "relates_to";
+                if (!within_limit.?) review_reason = "product_relation_limit_exceeded";
+            }
+        }
+        try out.append(a, .{
+            .source_path = page.source_path,
+            .output_path = page.output_path,
+            .source_entity = page.entity_id,
+            .source_field = raw.source_field,
+            .source_line = raw.source_line,
+            .value_index = raw.value_index,
+            .raw_value = raw.raw_value,
+            .normalized_target = resolution.normalized_target,
+            .proposed_kind = proposed_kind,
+            .target_resolution = resolution.state,
+            .resolved_entity = resolution.resolved_entity,
+            .relation_ordinal = ordinal,
+            .within_product_limit = within_limit,
+            .review_reason = review_reason,
+        });
+    }
+}
+
+fn collectRelationCandidates(
+    a: std.mem.Allocator,
+    pages: []const SourcePage,
+    route_prefix: []const u8,
+    entities: *const EntityMap,
+) ![]const RelationCandidate {
+    var out: std.ArrayList(RelationCandidate) = .empty;
+    for (pages) |page| {
+        if (!page.is_synthetic) try collectRelationCandidatesForPage(a, page, route_prefix, entities, &out);
+    }
+    std.mem.sort(RelationCandidate, out.items, {}, struct {
+        fn less(_: void, x: RelationCandidate, y: RelationCandidate) bool {
+            var order = std.mem.order(u8, x.source_entity, y.source_entity);
+            if (order != .eq) return order == .lt;
+            order = std.mem.order(u8, x.source_field, y.source_field);
+            if (order != .eq) return order == .lt;
+            if (x.source_line != y.source_line) return x.source_line < y.source_line;
+            if (x.value_index != y.value_index) return x.value_index < y.value_index;
+            return std.mem.order(u8, x.raw_value, y.raw_value) == .lt;
+        }
+    }.less);
+    return try out.toOwnedSlice(a);
 }
 
 fn categoryForBlockStart(line: []const u8) ?[]const u8 {
@@ -2584,6 +3121,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     var entities: EntityMap = .empty;
     for (pages.items) |p| try entities.put(a, p.entity_id, p.entity_id);
 
+    // Review-first relationship evidence from known Filed-shaped frontmatter.
+    // This never mutates generated Markdown or product relation semantics.
+    const relation_candidates = try collectRelationCandidates(a, pages.items, route_prefix, &entities);
+
     // Link rewrite pass (wiki targets only; Markdown images handled next).
     for (pages.items) |*p| {
         if (p.is_synthetic) continue;
@@ -2698,6 +3239,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     try writeNavManifest(a, io, out, nav.items);
     try writeProvenance(a, io, out, opts, content, pages.items);
     try writeLinkReview(a, io, out, pages.items);
+    try writeRelationCandidates(a, io, out, relation_candidates);
     try writeHeadingFragments(a, io, out, pages.items);
     try writeSelectionManifest(a, io, out, content, selection_rows.items, opts.max_pages);
     try writeBoundaryManifest(a, io, out, boundary.items);
@@ -3193,6 +3735,81 @@ fn writeLinkReview(a: std.mem.Allocator, io: Io, out: Io.Dir, pages: []const Sou
     try writeFile(io, out, "link_review.json", buf.items);
 }
 
+fn writeRelationCandidates(
+    a: std.mem.Allocator,
+    io: Io,
+    out: Io.Dir,
+    candidates: []const RelationCandidate,
+) !void {
+    var resolved_n: usize = 0;
+    var unresolved_n: usize = 0;
+    var ambiguous_n: usize = 0;
+    var review_only_n: usize = 0;
+    var over_limit_n: usize = 0;
+    for (candidates) |candidate| {
+        if (std.mem.eql(u8, candidate.target_resolution, "resolved")) resolved_n += 1;
+        if (std.mem.eql(u8, candidate.target_resolution, "unresolved")) unresolved_n += 1;
+        if (std.mem.eql(u8, candidate.target_resolution, "ambiguous")) ambiguous_n += 1;
+        if (candidate.proposed_kind == null) review_only_n += 1;
+        if (candidate.within_product_limit != null and !candidate.within_product_limit.?) over_limit_n += 1;
+    }
+
+    var buf: std.ArrayList(u8) = .empty;
+    try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-relation-candidates\",\n" ++
+        "  \"schema_version\": 1,\n" ++
+        "  \"policy\": \"Review-first evidence only. Known Filed-shaped fields are inventoried without changing generated Markdown. relates_to is proposed only for safely normalized targets resolved in the converted entity map; no product relation is emitted. concepts and escalationPath never receive an invented kind.\",\n" ++
+        "  \"product_relation_limit\": ");
+    try appendUsize(&buf, a, product_relation_limit);
+    try buf.appendSlice(a, ",\n  \"counts\": { \"total\": ");
+    try appendUsize(&buf, a, candidates.len);
+    try buf.appendSlice(a, ", \"resolved\": ");
+    try appendUsize(&buf, a, resolved_n);
+    try buf.appendSlice(a, ", \"unresolved\": ");
+    try appendUsize(&buf, a, unresolved_n);
+    try buf.appendSlice(a, ", \"ambiguous\": ");
+    try appendUsize(&buf, a, ambiguous_n);
+    try buf.appendSlice(a, ", \"review_only\": ");
+    try appendUsize(&buf, a, review_only_n);
+    try buf.appendSlice(a, ", \"over_limit\": ");
+    try appendUsize(&buf, a, over_limit_n);
+    try buf.appendSlice(a, " },\n  \"candidates\": [\n");
+    for (candidates, 0..) |candidate, i| {
+        try buf.appendSlice(a, "    { \"source_path\": ");
+        try appendJson(&buf, a, candidate.source_path);
+        try buf.appendSlice(a, ", \"output_path\": ");
+        try appendJson(&buf, a, candidate.output_path);
+        try buf.appendSlice(a, ", \"source_entity\": ");
+        try appendJson(&buf, a, candidate.source_entity);
+        try buf.appendSlice(a, ", \"source_field\": ");
+        try appendJson(&buf, a, candidate.source_field);
+        try buf.appendSlice(a, ", \"source_line\": ");
+        try appendUsize(&buf, a, @intCast(candidate.source_line));
+        try buf.appendSlice(a, ", \"value_index\": ");
+        try appendUsize(&buf, a, candidate.value_index);
+        try buf.appendSlice(a, ", \"raw_value\": ");
+        try appendJson(&buf, a, candidate.raw_value);
+        try buf.appendSlice(a, ", \"normalized_target\": ");
+        if (candidate.normalized_target) |value| try appendJson(&buf, a, value) else try buf.appendSlice(a, "null");
+        try buf.appendSlice(a, ", \"proposed_kind\": ");
+        if (candidate.proposed_kind) |value| try appendJson(&buf, a, value) else try buf.appendSlice(a, "null");
+        try buf.appendSlice(a, ", \"target_resolution\": ");
+        try appendJson(&buf, a, candidate.target_resolution);
+        try buf.appendSlice(a, ", \"resolved_entity\": ");
+        if (candidate.resolved_entity) |value| try appendJson(&buf, a, value) else try buf.appendSlice(a, "null");
+        try buf.appendSlice(a, ", \"relation_ordinal\": ");
+        if (candidate.relation_ordinal) |value| try appendUsize(&buf, a, value) else try buf.appendSlice(a, "null");
+        try buf.appendSlice(a, ", \"within_product_limit\": ");
+        if (candidate.within_product_limit) |value| try appendBool(&buf, a, value) else try buf.appendSlice(a, "null");
+        try buf.appendSlice(a, ", \"review_reason\": ");
+        if (candidate.review_reason) |value| try appendJson(&buf, a, value) else try buf.appendSlice(a, "null");
+        try buf.appendSlice(a, " }");
+        if (i + 1 < candidates.len) try buf.append(a, ',');
+        try buf.append(a, '\n');
+    }
+    try buf.appendSlice(a, "  ]\n}\n");
+    try writeFile(io, out, "relation_candidates.json", buf.items);
+}
+
 fn writeSelectionManifest(
     a: std.mem.Allocator,
     io: Io,
@@ -3425,6 +4042,7 @@ fn writeReports(
         \\- `nav_flatten.json` — discovery + sidebar evidence + flatten decisions
         \\- `provenance_manifest.json` — raw frontmatter + source provenance
         \\- `link_review.json` — every link event (rewritten / review / external / asset)
+        \\- `relation_candidates.json` — review-first known relationship fields + target resolution evidence
         \\- `heading_fragments.json` — fragment inventory (headings not verified)
         \\- `boundary_manifest.json` — preserved / stripped / manual_review classification
         \\- `compile_report.json` — Boris compile attempt result
@@ -3627,6 +4245,58 @@ test "starlight: candidate filter excludes only underscore partials" {
     try std.testing.expect(!looksLikeLocaleDirName("components"));
 }
 
+test "starlight: relation candidates retain over-limit and ambiguous evidence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var entities: EntityMap = .empty;
+    const targets = [_][]const u8{
+        "targets/t01", "targets/t02", "targets/t03", "targets/t04", "targets/t05", "targets/t06",
+        "targets/t07", "targets/t08", "targets/t09", "targets/t10", "targets/t11", "targets/t12",
+        "targets/t13", "targets/t14", "targets/t15", "targets/t16", "targets/t17",
+    };
+    for (targets) |target| try entities.put(a, target, target);
+    try entities.put(a, "a/shared", "a/shared");
+    try entities.put(a, "b/shared", "b/shared");
+
+    const page: SourcePage = .{
+        .source_path = "src/content/docs/en/source.mdx",
+        .locale_rel = "source.mdx",
+        .entity_id = "source",
+        .route = "/en/source",
+        .output_path = "content/source.md",
+        .title = "Source",
+        .parent = null,
+        .is_trunk = true,
+        .raw_frontmatter =
+        \\relatedEntries: [targets/t01, targets/t02, targets/t03, targets/t04, targets/t05, targets/t06, targets/t07, targets/t08, targets/t09, targets/t10, targets/t11, targets/t12, targets/t13, targets/t14, targets/t15, targets/t16, targets/t17]
+        \\mascotRef: shared
+        ,
+        .unmapped_fields = &.{},
+        .body = "",
+        .imports = &.{},
+        .components = &.{},
+        .stripped_blocks = &.{},
+        .link_events = &.{},
+        .component_events = &.{},
+        .bytes = 0,
+    };
+    var candidates: std.ArrayList(RelationCandidate) = .empty;
+    try collectRelationCandidatesForPage(a, page, "/en", &entities, &candidates);
+    try std.testing.expectEqual(@as(usize, 18), candidates.items.len);
+    for (candidates.items[0..16], 0..) |candidate, i| {
+        try std.testing.expectEqual(@as(?usize, i + 1), candidate.relation_ordinal);
+        try std.testing.expectEqual(@as(?bool, true), candidate.within_product_limit);
+        try std.testing.expectEqualStrings("relates_to", candidate.proposed_kind.?);
+    }
+    try std.testing.expectEqual(@as(?usize, 17), candidates.items[16].relation_ordinal);
+    try std.testing.expectEqual(@as(?bool, false), candidates.items[16].within_product_limit);
+    try std.testing.expectEqualStrings("product_relation_limit_exceeded", candidates.items[16].review_reason.?);
+    try std.testing.expectEqualStrings("ambiguous", candidates.items[17].target_resolution);
+    try std.testing.expect(candidates.items[17].proposed_kind == null);
+    try std.testing.expectEqualStrings("ambiguous_target_in_converted_entity_map", candidates.items[17].review_reason.?);
+}
+
 test "starlight: link rewrite only when proven" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -3718,6 +4388,7 @@ test "starlight: locale-dir fixture is deterministic, preserves source, reports 
         "route_map.json",
         "selection_manifest.json",
         "link_review.json",
+        "relation_candidates.json",
         "assets_manifest.json",
         "boundary_manifest.json",
         "heading_fragments.json",
@@ -3743,6 +4414,18 @@ test "starlight: locale-dir fixture is deterministic, preserves source, reports 
     try std.testing.expect(std.mem.indexOf(u8, page, "id: features/alpha") != null);
     try std.testing.expect(std.mem.indexOf(u8, page, "[[features/beta") != null);
     try std.testing.expect(std.mem.indexOf(u8, page, "fixture-payload") == null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "relations:") == null);
+
+    const relations = try readFileAlloc(io, ao, "relation_candidates.json", std.testing.allocator);
+    defer std.testing.allocator.free(relations);
+    try std.testing.expect(std.mem.indexOf(u8, relations, "boris-starlight-relation-candidates") != null);
+    try std.testing.expect(std.mem.indexOf(u8, relations, "\"source_field\": \"relatedEntries\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, relations, "\"resolved_entity\": \"features/beta\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, relations, "\"proposed_kind\": \"relates_to\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, relations, "target_not_in_converted_entity_map") != null);
+    try std.testing.expect(std.mem.indexOf(u8, relations, "non_scalar_value") != null);
+    try std.testing.expect(std.mem.indexOf(u8, relations, "malformed_inline_list") != null);
+    try std.testing.expect(std.mem.indexOf(u8, relations, "review_only_field_no_relation_kind") != null);
 
     const report = try readFileAlloc(io, ao, "report.json", std.testing.allocator);
     defer std.testing.allocator.free(report);
