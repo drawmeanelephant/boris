@@ -1,15 +1,15 @@
 # Intermediate representation (IR) schema (v0.2)
 
 **Status:** normative Feature 8 contract — F8.1–F8.3 implemented
-**Target product / compiler id:** `0.5.2` / `boris/0.5.2`
+**Target product / compiler id:** `0.6.0` / `boris/0.6.0`
 **schemaVersion:** `0.2.0`
 
 IR is explicit (`--out DIR` / `--no-rag`) and deterministic. Bare `boris`
 continues to emit HTML under `dist/`; this schema does not change CLI mode
 selection.
 
-The v0.5.2 compiler emits this unchanged dependency shape with
-`schemaVersion: "0.2.0"` and compiler id `boris/0.5.2`.
+The v0.6.0 compiler emits this unchanged dependency shape with
+`schemaVersion: "0.2.0"` and compiler id `boris/0.6.0`.
 
 ---
 
@@ -67,7 +67,7 @@ Every top-level IR document **must** include:
 | Breaking change | Typed dependency endpoints and `reverseIndex`; old writers must not silently emit these under `"0.1.0"` |
 
 Also required on success paths: a compiler id string of the form
-`boris/<product-version>` (target `boris/0.5.2`). Product version bumps may
+`boris/<product-version>` (target `boris/0.6.0`). Product version bumps may
 update this string without changing the IR schema, but this breaking IR change
 requires both the schema and compiler/product bumps.
 
@@ -227,7 +227,7 @@ schemaVersion, compiler, contentRoot, pageCount, pages
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `schemaVersion` | string | yes | `"0.2.0"` |
-| `compiler` | string | yes | e.g. `"boris/0.5.2"` |
+| `compiler` | string | yes | e.g. `"boris/0.6.0"` |
 | `contentRoot` | string | yes | Content root path string as passed to the pipeline (no trailing slash) |
 | `pageCount` | integer | yes | `pages.length` |
 | `pages` | array | yes | Summary entries sorted by `id` |
@@ -253,7 +253,7 @@ Example (shape only):
 ```json
 {
   "schemaVersion": "0.2.0",
-  "compiler": "boris/0.5.2",
+  "compiler": "boris/0.6.0",
   "contentRoot": "content",
   "pageCount": 2,
   "pages": [
