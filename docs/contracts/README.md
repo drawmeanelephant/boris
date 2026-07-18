@@ -65,7 +65,7 @@ per topic:
 
 | Document | Topic |
 |----------|-------|
-| [frontmatter.md](frontmatter.md) | Closed frontmatter grammar; keys `id`, `title`, `parent`, `status`, `tags` only |
+| [frontmatter.md](frontmatter.md) | Closed frontmatter grammar; keys `id`, `title`, `parent`, `status`, `tags`, and bounded `relations` only |
 | [identity-and-paths.md](identity-and-paths.md) | Source paths, entity ids, `/` separators, `.md`/`.mdx` case rules |
 | [scanner.md](scanner.md) | Deterministic discovery walk, sort key, symlink policy (m4) |
 | [diagnostics.md](diagnostics.md) | Stable categories (`EDUPLICATEID`, …), severity, exit codes |

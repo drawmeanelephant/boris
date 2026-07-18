@@ -48,7 +48,9 @@ Static output dir → any static host                ← deployment (outside Bor
 
 ## Non-negotiables (before bulk conversion)
 
-1. **Closed frontmatter** — only `id`, `title`, `parent`, `status`, `tags`.
+1. **Closed frontmatter** — only `id`, `title`, `parent`, `status`, `tags`, and
+   bounded [`relations`](contracts/semantic-relations.md). Migration tools must
+   not invent relation kinds or targets from ambiguous source metadata.
 2. **Parent key is `parent` only** — `parentEntry` / `parent_entry` fail as
    unknown keys on the product parser. The Filed migration lab rewrites those
    legacy keys to `parent` under `--out` only (with conflict/invalid review);
@@ -221,7 +223,8 @@ preserve / drop / rewrite decision is intentional.
 
 **Manual human review (required even when the lab is green):**
 
-- [ ] Only `id`, `title`, `parent`, `status`, `tags` remain in page frontmatter
+- [ ] Only `id`, `title`, `parent`, `status`, `tags`, and deliberately reviewed
+  `relations` remain in page frontmatter
 - [ ] Every Satellite `parent` names a Trunk entity id (byte-exact)
 - [ ] No satellite-of-satellite edges
 - [ ] Includes live under content-root `includes/` when possible

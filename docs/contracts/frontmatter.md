@@ -76,11 +76,14 @@ Informal grammar:
 ```text
 field      := key ":" [ " " | "\t" ]* value-part
 key        := <non-empty token without leading indent>
-value-part := plain | dquoted | tags-list   ; tags-list only for key "tags"
+value-part := plain | dquoted | tags-list | relations-list
+                                             ; bounded lists only on their named keys
 plain      := <non-empty run; leading/trailing space/tab trimmed>
 dquoted    := '"' <chars without raw "> '"'
 tags-list  := "[" [ tag-item ( "," tag-item )* ] "]"
 tag-item   := plain-token | dquoted
+relations-list := "[" [ relation ( "," relation )* ] "]"
+relation   := relation-kind "=" entity-id
 ```
 
 ### Rules
@@ -117,7 +120,7 @@ Do **not** half-parse these; emit [`EFRONTMATTER`](diagnostics.md):
 - Anchors / aliases (`&name`, `*name`)
 - Flow mappings `{ … }`
 - Flow sequences `[ … ]` on any key **except** the deliberately supported
-  `tags: [ … ]` form
+  `tags: [ … ]` and `relations: [kind=target, …]` forms
 - Multiline scalar forms
 - Multiple documents mid-file
 
@@ -125,7 +128,7 @@ Do **not** half-parse these; emit [`EFRONTMATTER`](diagnostics.md):
 
 ## Canonical author-facing keys (closed set)
 
-Exactly these five keys are accepted. **No aliases.**
+Exactly these six keys are accepted. **No aliases.**
 
 | Key | Required | Value | Notes |
 |-----|----------|-------|-------|
@@ -134,6 +137,7 @@ Exactly these five keys are accepted. **No aliases.**
 | `parent` | no | plain/dquoted entity id | Foreign key to a **Trunk** entity id; ≤255 bytes |
 | `status` | no | `draft` \| `published` \| `archived` | Exact spellings only |
 | `tags` | no | `[a, b, "c"]` only | Bracket list; plain or double-quoted items |
+| `relations` | no | `[kind=target, …]` only | Bounded semantic relations; closed kinds and validation in [semantic-relations.md](semantic-relations.md) |
 
 ### Forbidden key names and forms
 
