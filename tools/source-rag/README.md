@@ -35,6 +35,9 @@ zig build source-rag -- --out=./uploads/source-rag
 # Avoid the optional combined bundles and their intentional duplicate bytes
 zig build source-rag -- --no-bundles
 
+# Partition combined bundles at a 256 KiB body-byte target (whole files only)
+zig build source-rag -- --split-size=262144
+
 # Export a bounded logical profile (all remains the default)
 zig build source-rag -- --profile=core --no-bundles
 
@@ -52,7 +55,8 @@ zig-out/bin/boris-source-rag --out=./source-rag --quiet
 | `--out=DIR` | `source-rag` | Corpus root |
 | `--root=DIR` | `.` | Project root to scan |
 | `--max-bytes=N` | `524288` | Skip files larger than N bytes |
-| `--no-bundles` | off | Omit the four combined convenience bundles |
+| `--split-size=N` | `524288` | Target body bytes per combined bundle part |
+| `--no-bundles` | off | Omit combined convenience bundles and parts |
 | `--profile=NAME` | `all` | Select `all`, `core`, `docs`, or `tools` input scope |
 
 Exit codes: **0** success, **2** usage, **3** I/O error.
@@ -65,13 +69,13 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
 source-rag/
   INDEX.md              # retrieval map — start here in a chat
   UPLOAD-GUIDE.md       # how to upload / query
-  boris-source-1.md     # first sorted-path half of non-docs/content files (default)
-  boris-source-2.md     # second sorted-path half of non-docs/content files (default)
-  boris-docs.md         # all packed docs/** files (default)
-  boris-content.md      # all packed content/** files (default)
+  boris-source-N.md     # ordered whole-file parts for non-docs/content files
+  boris-docs[-N].md     # one or more ordered whole-file docs parts
+  boris-content[-N].md  # one or more ordered whole-file content parts
   catalog.jsonl         # one JSON object per document
-  catalog_meta.json     # format + schema_version + tool_version
+  catalog_meta.json     # format + schema_version + tool_version + profile + split target
   profile_manifest.json  # selected profile, counts, and sorted packed paths
+  part_manifest.json     # profile, ordered parts, source paths, and byte counts
   files/**              # one markdown document per source path
 ```
 
@@ -101,7 +105,7 @@ bytes: 4610
 ### catalog_meta.json
 
 ```json
-{"format":"boris-source-rag","schema_version":1,"tool_version":"0.1.0"}
+{"format":"boris-source-rag","schema_version":1,"tool_version":"0.1.0","profile":"all","split_size":524288}
 ```
 
 ### catalog.jsonl (field order)
@@ -111,23 +115,26 @@ rag_id, rag_path, category, title, source_path, lang, bytes
 ```
 
 Rows are sorted by `rag_path`. Machine files (`catalog.jsonl`,
-`catalog_meta.json`, `profile_manifest.json`) are **not** catalog rows; meta docs `INDEX.md` and
+`catalog_meta.json`, `profile_manifest.json`, `part_manifest.json`) are **not** catalog rows; meta docs `INDEX.md` and
 `UPLOAD-GUIDE.md` **are** rows (`category: meta`).
 
 ### Combined upload bundles
 
-By default, the four `boris-*.md` files are additive convenience bundles for
-LLM uploads. They intentionally duplicate the per-file `files/**` corpus; the
-per-file documents and catalog remain unchanged. Pass `--no-bundles` when
-duplicate bytes are undesirable: it still emits `files/**`, `INDEX.md`,
-`UPLOAD-GUIDE.md`, `catalog.jsonl`, and `catalog_meta.json`, while omitting all
-four combined files. `boris-docs.md`
-contains all packed `docs/**` files, and `boris-content.md` contains all packed
-`content/**` files. The source corpus is split into `boris-source-1.md` and
-`boris-source-2.md` at a whole-document boundary near half of the packed body
-bytes in sorted source-path order. This keeps output deterministic and avoids
-splitting or reordering a source file, though a large indivisible file may make
-the byte sizes differ. Empty groups are still emitted with valid bundle metadata.
+By default, the `boris-*.md` files are additive convenience bundles for LLM
+uploads. They intentionally duplicate the per-file `files/**` corpus; the
+per-file documents and catalog remain unchanged. `--split-size=N` sets a target
+for combined bundle body bytes. Files are packed contiguously in sorted
+source-path order and are never split. If one accepted source file is larger
+than `N`, it is emitted whole in its own part and that part may exceed `N`.
+Empty groups still emit a valid empty part.
+
+`part_manifest.json` is the authoritative part map. It records the selected
+profile and split target, then each part’s global order, filename, bundle kind,
+per-kind order, body byte count, and ordered source paths with their byte
+counts. Use it to upload parts in order or to verify that no source was
+duplicated or omitted. `--no-bundles` omits all combined part files and emits
+the same manifest with `"bundles":false` and an empty `parts` array; the
+per-file corpus and sidecars remain available.
 
 ### Profiles
 

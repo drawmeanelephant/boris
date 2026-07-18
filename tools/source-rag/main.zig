@@ -40,6 +40,9 @@ pub const Options = struct {
     root_dir: []const u8 = ".",
     /// Skip files larger than this many bytes.
     max_bytes: usize = 512 * 1024,
+    /// Target maximum body bytes per combined bundle part. A single source
+    /// document larger than this limit is kept whole in its own part.
+    split_size: usize = 512 * 1024,
     /// Test-only deterministic failure injection after this many staged source
     /// documents have been written. Not accepted by the CLI.
     test_fail_after_stage_writes: ?usize = null,
@@ -223,6 +226,16 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             const v = a["--max-bytes=".len..];
             if (v.len == 0) return error.MissingValue;
             opts.max_bytes = std.fmt.parseInt(usize, v, 10) catch return error.InvalidValue;
+        } else if (std.mem.startsWith(u8, a, "--split-size=")) {
+            const v = a["--split-size=".len..];
+            if (v.len == 0) return error.MissingValue;
+            opts.split_size = std.fmt.parseInt(usize, v, 10) catch return error.InvalidValue;
+            if (opts.split_size == 0) return error.InvalidValue;
+        } else if (std.mem.eql(u8, a, "--split-size")) {
+            i += 1;
+            if (i >= args.len or args[i].len == 0) return error.MissingValue;
+            opts.split_size = std.fmt.parseInt(usize, args[i], 10) catch return error.InvalidValue;
+            if (opts.split_size == 0) return error.InvalidValue;
         } else {
             return error.UnknownFlag;
         }
@@ -243,11 +256,12 @@ fn printUsage() void {
         \\Options:
         \\  -h, --help           Show this help and exit 0
         \\  -q, --quiet          Suppress progress lines
-        \\  --no-bundles         Skip combined bundles; emit only per-file corpus and sidecars
+        \\  --no-bundles         Skip combined bundles; emit per-file corpus and sidecars
         \\  --profile=NAME       Input scope: all (default), core, docs, or tools
         \\  --out=DIR            Output corpus root (default: source-rag)
         \\  --root=DIR           Project root to scan (default: .)
         \\  --max-bytes=N        Skip files larger than N bytes (default: 524288)
+        \\  --split-size=N       Target body bytes per combined bundle part (default: 524288)
         \\
         \\Default scan (when present under --root):
         \\  dirs:  src docs content layouts scripts tools test SUPPORT
@@ -255,7 +269,8 @@ fn printUsage() void {
         \\
         \\Output tree:
         \\  INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json
-        \\  boris-source-1.md  boris-source-2.md  boris-docs.md  boris-content.md  (default)
+        \\  profile_manifest.json  part_manifest.json
+        \\  boris-source-N.md  boris-docs[-N].md  boris-content[-N].md  (bundles)
         \\  files/**  (one markdown document per source path)
         \\
         \\Exit codes: 0 success, 2 usage, 3 I/O error
@@ -525,9 +540,66 @@ const managed_root_file_names = [_][]const u8{
     "catalog.jsonl",
     "catalog_meta.json",
     "profile_manifest.json",
+    "part_manifest.json",
 };
 
-fn deleteManagedFiles(io: Io, out: Io.Dir) !void {
+fn isManagedBundleFileName(name: []const u8) bool {
+    const exact = [_][]const u8{ "boris-docs.md", "boris-content.md" };
+    for (exact) |candidate| {
+        if (std.mem.eql(u8, name, candidate)) return true;
+    }
+    const prefixes = [_][]const u8{ "boris-source-", "boris-docs-", "boris-content-" };
+    for (prefixes) |prefix| {
+        if (!std.mem.startsWith(u8, name, prefix) or !std.mem.endsWith(u8, name, ".md")) continue;
+        const digits = name[prefix.len .. name.len - ".md".len];
+        if (digits.len == 0) continue;
+        var all_digits = true;
+        for (digits) |digit| {
+            if (digit < '0' or digit > '9') {
+                all_digits = false;
+                break;
+            }
+        }
+        if (all_digits) return true;
+    }
+    return false;
+}
+
+fn collectManagedBundleNames(
+    io: Io,
+    gpa: std.mem.Allocator,
+    dir: Io.Dir,
+) ![]const []const u8 {
+    var names: std.ArrayList([]const u8) = .empty;
+    errdefer {
+        for (names.items) |name| gpa.free(name);
+        names.deinit(gpa);
+    }
+    var it = dir.iterate();
+    while (try it.next(io)) |entry| {
+        if (entry.kind != .file or !isManagedBundleFileName(entry.name)) continue;
+        try names.append(gpa, try gpa.dupe(u8, entry.name));
+    }
+    std.mem.sort([]const u8, names.items, {}, struct {
+        fn less(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.order(u8, a, b) == .lt;
+        }
+    }.less);
+    return try names.toOwnedSlice(gpa);
+}
+
+fn freeManagedBundleNames(gpa: std.mem.Allocator, names: []const []const u8) void {
+    for (names) |name| gpa.free(name);
+    gpa.free(names);
+}
+
+fn deleteManagedBundleFiles(io: Io, gpa: std.mem.Allocator, out: Io.Dir) !void {
+    const names = try collectManagedBundleNames(io, gpa, out);
+    defer freeManagedBundleNames(gpa, names);
+    for (names) |name| try out.deleteFile(io, name);
+}
+
+fn deleteManagedFiles(io: Io, gpa: std.mem.Allocator, out: Io.Dir) !void {
     try removeTreeIfPresent(io, out, "files");
     for (managed_root_file_names) |file_name| {
         out.deleteFile(io, file_name) catch |err| switch (err) {
@@ -535,12 +607,7 @@ fn deleteManagedFiles(io: Io, out: Io.Dir) !void {
             else => return err,
         };
     }
-    for (bundle_file_names) |file_name| {
-        out.deleteFile(io, file_name) catch |err| switch (err) {
-            error.FileNotFound => {},
-            else => return err,
-        };
-    }
+    try deleteManagedBundleFiles(io, gpa, out);
 }
 
 fn removeTreeIfPresent(io: Io, dir: Io.Dir, path: []const u8) !void {
@@ -560,24 +627,26 @@ fn moveIfPresent(io: Io, from: Io.Dir, path: []const u8, to: Io.Dir) !bool {
     return true;
 }
 
-fn restorePreviousManagedCorpus(io: Io, prev: Io.Dir, out: Io.Dir) !void {
+fn moveManagedBundleFiles(io: Io, gpa: std.mem.Allocator, from: Io.Dir, to: Io.Dir) !void {
+    const names = try collectManagedBundleNames(io, gpa, from);
+    defer freeManagedBundleNames(gpa, names);
+    for (names) |name| try from.rename(name, to, name, io);
+}
+
+fn restorePreviousManagedCorpus(io: Io, gpa: std.mem.Allocator, prev: Io.Dir, out: Io.Dir) !void {
     _ = try moveIfPresent(io, prev, "files", out);
     for (managed_root_file_names) |file_name| {
         _ = try moveIfPresent(io, prev, file_name, out);
     }
-    for (bundle_file_names) |file_name| {
-        _ = try moveIfPresent(io, prev, file_name, out);
-    }
+    try moveManagedBundleFiles(io, gpa, prev, out);
 }
 
-fn moveManagedCorpus(io: Io, from: Io.Dir, to: Io.Dir) !void {
+fn moveManagedCorpus(io: Io, gpa: std.mem.Allocator, from: Io.Dir, to: Io.Dir) !void {
     _ = try moveIfPresent(io, from, "files", to);
     for (managed_root_file_names) |file_name| {
         _ = try moveIfPresent(io, from, file_name, to);
     }
-    for (bundle_file_names) |file_name| {
-        _ = try moveIfPresent(io, from, file_name, to);
-    }
+    try moveManagedBundleFiles(io, gpa, from, to);
 }
 
 /// Publish a complete staged corpus without ever deleting the caller-selected
@@ -595,20 +664,20 @@ fn publishManagedCorpus(io: Io, gpa: std.mem.Allocator, stage_path: []const u8, 
     try removeTreeIfPresent(io, cwd, prev_path);
     try cwd.createDirPath(io, prev_path);
 
-    var stage = try cwd.openDir(io, stage_path, .{});
+    var stage = try cwd.openDir(io, stage_path, .{ .iterate = true });
     defer stage.close(io);
-    var out = try cwd.openDir(io, out_path, .{});
+    var out = try cwd.openDir(io, out_path, .{ .iterate = true });
     defer out.close(io);
-    var prev = try cwd.openDir(io, prev_path, .{});
+    var prev = try cwd.openDir(io, prev_path, .{ .iterate = true });
     defer prev.close(io);
 
-    moveManagedCorpus(io, out, prev) catch |err| {
-        restorePreviousManagedCorpus(io, prev, out) catch return error.SourceRagPublishRestoreFailed;
+    moveManagedCorpus(io, gpa, out, prev) catch |err| {
+        restorePreviousManagedCorpus(io, gpa, prev, out) catch return error.SourceRagPublishRestoreFailed;
         return err;
     };
-    moveManagedCorpus(io, stage, out) catch |err| {
-        deleteManagedFiles(io, out) catch return error.SourceRagPublishRestoreFailed;
-        restorePreviousManagedCorpus(io, prev, out) catch return error.SourceRagPublishRestoreFailed;
+    moveManagedCorpus(io, gpa, stage, out) catch |err| {
+        deleteManagedFiles(io, gpa, out) catch return error.SourceRagPublishRestoreFailed;
+        restorePreviousManagedCorpus(io, gpa, prev, out) catch return error.SourceRagPublishRestoreFailed;
         return err;
     };
 
@@ -682,13 +751,6 @@ const BundleKind = enum {
     content,
 };
 
-const bundle_file_names = [_][]const u8{
-    "boris-source-1.md",
-    "boris-source-2.md",
-    "boris-docs.md",
-    "boris-content.md",
-};
-
 fn bundleKindForPath(source_path: []const u8) BundleKind {
     if (std.mem.startsWith(u8, source_path, "docs/")) return .docs;
     if (std.mem.startsWith(u8, source_path, "content/")) return .content;
@@ -703,43 +765,92 @@ fn bundleKindName(kind: BundleKind) []const u8 {
     };
 }
 
-/// Source bundle parts are contiguous sorted-path halves. Choose the boundary
-/// nearest half of the packed body bytes without splitting a document. Ties
-/// prefer the earlier boundary for deterministic output.
-fn sourceBundleSplitIndex(files: []const PackedSource) usize {
-    if (files.len <= 1) return files.len;
-    const total = bundleByteCount(files);
-    const target = (total + 1) / 2;
-    var prefix: usize = 0;
-    var best_index: usize = 1;
-    var best_distance: usize = std.math.maxInt(usize);
-    for (files[0 .. files.len - 1], 0..) |file, index| {
-        prefix += file.body.len;
-        const distance = if (prefix >= target) prefix - target else target - prefix;
-        if (distance < best_distance) {
-            best_distance = distance;
-            best_index = index + 1;
-        }
-    }
-    return best_index;
-}
-
-fn bundleFileName(kind: BundleKind, part: usize) []const u8 {
-    return switch (kind) {
-        .source => switch (part) {
-            1 => "boris-source-1.md",
-            2 => "boris-source-2.md",
-            else => unreachable,
-        },
-        .docs => "boris-docs.md",
-        .content => "boris-content.md",
-    };
-}
-
 fn bundleByteCount(files: []const PackedSource) usize {
     var total: usize = 0;
     for (files) |file| total += file.body.len;
     return total;
+}
+
+const BundlePart = struct {
+    kind: BundleKind,
+    part: usize,
+    total_parts: usize,
+    file_name: []const u8,
+    files: []const PackedSource,
+    bytes: usize,
+};
+
+const PartitionRange = struct {
+    start: usize,
+    end: usize,
+    bytes: usize,
+};
+
+fn bundlePrefix(kind: BundleKind) []const u8 {
+    return switch (kind) {
+        .source => "boris-source-",
+        .docs => "boris-docs-",
+        .content => "boris-content-",
+    };
+}
+
+fn bundleFileName(
+    gpa: std.mem.Allocator,
+    kind: BundleKind,
+    part: usize,
+    total_parts: usize,
+) ![]const u8 {
+    if (total_parts == 1 and kind != .source) {
+        return try std.fmt.allocPrint(gpa, "boris-{s}.md", .{bundleKindName(kind)});
+    }
+    return try std.fmt.allocPrint(gpa, "{s}{d}.md", .{ bundlePrefix(kind), part });
+}
+
+/// Partition a sorted group into contiguous whole-document parts. The limit
+/// is a target: a single document larger than it is retained alone and may
+/// make that part larger than the requested size.
+fn partitionBundleFiles(
+    gpa: std.mem.Allocator,
+    kind: BundleKind,
+    files: []const PackedSource,
+    split_size: usize,
+) ![]const BundlePart {
+    var ranges: std.ArrayList(PartitionRange) = .empty;
+    defer ranges.deinit(gpa);
+
+    if (files.len == 0) {
+        try ranges.append(gpa, .{ .start = 0, .end = 0, .bytes = 0 });
+    } else {
+        var start: usize = 0;
+        var bytes: usize = 0;
+        for (files, 0..) |file, index| {
+            if (index > start and (bytes > split_size or file.body.len > split_size - bytes)) {
+                try ranges.append(gpa, .{ .start = start, .end = index, .bytes = bytes });
+                start = index;
+                bytes = 0;
+            }
+            bytes += file.body.len;
+        }
+        try ranges.append(gpa, .{ .start = start, .end = files.len, .bytes = bytes });
+    }
+
+    var parts: std.ArrayList(BundlePart) = .empty;
+    errdefer {
+        for (parts.items) |part| gpa.free(part.file_name);
+        parts.deinit(gpa);
+    }
+    try parts.ensureTotalCapacity(gpa, ranges.items.len);
+    for (ranges.items, 0..) |range, index| {
+        parts.appendAssumeCapacity(.{
+            .kind = kind,
+            .part = index + 1,
+            .total_parts = ranges.items.len,
+            .file_name = try bundleFileName(gpa, kind, index + 1, ranges.items.len),
+            .files = files[range.start..range.end],
+            .bytes = range.bytes,
+        });
+    }
+    return try parts.toOwnedSlice(gpa);
 }
 
 fn renderBundle(
@@ -848,23 +959,42 @@ fn exportBundles(
     io: Io,
     gpa: std.mem.Allocator,
     out_dir: Io.Dir,
+    split_size: usize,
     source_files: []const PackedSource,
     docs_files: []const PackedSource,
     content_files: []const PackedSource,
+    all_parts: *std.ArrayList(BundlePart),
 ) !void {
-    const split = sourceBundleSplitIndex(source_files);
-    try exportBundle(io, gpa, out_dir, bundleFileName(.source, 1), .source, 1, 2, source_files[0..split]);
-    try exportBundle(io, gpa, out_dir, bundleFileName(.source, 2), .source, 2, 2, source_files[split..]);
-    try exportBundle(io, gpa, out_dir, bundleFileName(.docs, 0), .docs, null, null, docs_files);
-    try exportBundle(io, gpa, out_dir, bundleFileName(.content, 0), .content, null, null, content_files);
+    const groups = [_]struct { kind: BundleKind, files: []const PackedSource }{
+        .{ .kind = .source, .files = source_files },
+        .{ .kind = .docs, .files = docs_files },
+        .{ .kind = .content, .files = content_files },
+    };
+    for (groups) |group| {
+        const parts = try partitionBundleFiles(gpa, group.kind, group.files, split_size);
+        defer gpa.free(parts);
+        for (parts) |part| {
+            try exportBundle(
+                io,
+                gpa,
+                out_dir,
+                part.file_name,
+                part.kind,
+                part.part,
+                part.total_parts,
+                part.files,
+            );
+            try all_parts.append(gpa, part);
+        }
+    }
 }
 
-fn exportCatalogMeta(io: Io, out_dir: Io.Dir, profile: Profile) !void {
-    var buf: [128]u8 = undefined;
+fn exportCatalogMeta(io: Io, out_dir: Io.Dir, profile: Profile, split_size: usize) !void {
+    var buf: [192]u8 = undefined;
     const line = try std.fmt.bufPrint(
         &buf,
-        "{{\"format\":\"{s}\",\"schema_version\":{d},\"tool_version\":\"{s}\",\"profile\":\"{s}\"}}\n",
-        .{ format_id, schema_version, tool_version, profileName(profile) },
+        "{{\"format\":\"{s}\",\"schema_version\":{d},\"tool_version\":\"{s}\",\"profile\":\"{s}\",\"split_size\":{d}}}\n",
+        .{ format_id, schema_version, tool_version, profileName(profile), split_size },
     );
     try writeBytes(io, out_dir, "catalog_meta.json", line);
 }
@@ -896,6 +1026,60 @@ fn exportProfileManifest(
     }
     try buf.appendSlice(gpa, "]}\n");
     try writeBytes(io, out_dir, "profile_manifest.json", buf.items);
+}
+
+fn exportPartManifest(
+    io: Io,
+    gpa: std.mem.Allocator,
+    out_dir: Io.Dir,
+    profile: Profile,
+    split_size: usize,
+    include_bundles: bool,
+    parts: []const BundlePart,
+) !void {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+
+    try buf.appendSlice(gpa, "{\"profile\":\"");
+    try jsonEscapeAppend(&buf, gpa, profileName(profile));
+    try buf.appendSlice(gpa, "\",\"split_size\":");
+    var num_buf: [32]u8 = undefined;
+    try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{split_size}));
+    try buf.appendSlice(gpa, ",\"bundles\":");
+    try buf.appendSlice(gpa, if (include_bundles) "true" else "false");
+    try buf.appendSlice(gpa, ",\"parts\":[");
+
+    for (parts, 0..) |part, part_index| {
+        if (part_index != 0) try buf.appendSlice(gpa, ",");
+        try buf.appendSlice(gpa, "{\"order\":");
+        try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{part_index + 1}));
+        try buf.appendSlice(gpa, ",\"profile\":\"");
+        try jsonEscapeAppend(&buf, gpa, profileName(profile));
+        try buf.appendSlice(gpa, "\",\"file\":\"");
+        try jsonEscapeAppend(&buf, gpa, part.file_name);
+        try buf.appendSlice(gpa, "\",\"bundle\":\"");
+        try buf.appendSlice(gpa, bundleKindName(part.kind));
+        try buf.appendSlice(gpa, "\",\"part\":");
+        try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{part.part}));
+        try buf.appendSlice(gpa, ",\"parts\":");
+        try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{part.total_parts}));
+        try buf.appendSlice(gpa, ",\"bytes\":");
+        try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{part.bytes}));
+        try buf.appendSlice(gpa, ",\"sources\":[");
+        for (part.files, 0..) |file, source_index| {
+            if (source_index != 0) try buf.appendSlice(gpa, ",");
+            try buf.appendSlice(gpa, "{\"order\":");
+            try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{source_index + 1}));
+            try buf.appendSlice(gpa, ",\"source_path\":\"");
+            try jsonEscapeAppend(&buf, gpa, file.source_path);
+            try buf.appendSlice(gpa, "\",\"bytes\":");
+            try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{file.body.len}));
+            try buf.append(gpa, '}');
+        }
+        try buf.appendSlice(gpa, "]}");
+    }
+    try buf.appendSlice(gpa, "]}\n");
+    try writeBytes(io, out_dir, "part_manifest.json", buf.items);
 }
 
 fn exportCatalogJsonl(
@@ -936,6 +1120,8 @@ fn exportIndex(
     entries: []const CatalogEntry,
     stats: ExportStats,
     include_bundles: bool,
+    split_size: usize,
+    parts: []const BundlePart,
 ) !void {
     var doc: std.ArrayList(u8) = .empty;
     defer doc.deinit(gpa);
@@ -982,25 +1168,40 @@ fn exportIndex(
         \\
     );
 
-    if (include_bundles) try doc.appendSlice(gpa,
-        \\## Combined upload bundles
-        \\
-        \\These root-level Markdown files are additive convenience bundles; the
-        \\per-file `files/**` documents and catalog remain unchanged:
-        \\
-        \\| File | Contents |
-        \\|------|----------|
-        \\| `boris-source-1.md` | First sorted-path half of packed non-docs/content sources |
-        \\| `boris-source-2.md` | Second sorted-path half of packed non-docs/content sources |
-        \\| `boris-docs.md` | All packed `docs/**` files |
-        \\| `boris-content.md` | All packed `content/**` files |
-        \\
-        \\The two source parts use whole documents and a deterministic boundary
-        \\nearest half of the packed body bytes. A large indivisible file may
-        \\still make the byte sizes uneven. Empty bundles are still emitted with
-        \\metadata explaining that they contain no files.
-        \\
-    ) else try doc.appendSlice(gpa,
+    if (include_bundles) {
+        try doc.appendSlice(gpa,
+            \\## Combined upload bundles
+            \\
+            \\These root-level Markdown files are additive convenience bundles; the
+            \\per-file `files/**` documents and catalog remain unchanged:
+            \\
+            \\| File | Contents |
+            \\|------|----------|
+            \\| `part_manifest.json` | Ordered parts, source paths, and byte counts |
+            \\
+            \\The part manifest records the configured body-byte target. Parts
+            \\contain contiguous whole documents in sorted source-path order. A
+            \\single source file larger than the target remains whole in its own part.
+            \\
+        );
+        var part_num_buf: [96]u8 = undefined;
+        try doc.appendSlice(gpa, try std.fmt.bufPrint(&part_num_buf, "Target body bytes per part: `{d}`.\n\n", .{split_size}));
+        try doc.appendSlice(gpa, "| Order | File | Bundle | Documents | Body bytes |\n|------:|------|--------|----------:|-----------:|\n");
+        for (parts, 0..) |part, part_index| {
+            try doc.appendSlice(gpa, "| ");
+            try doc.appendSlice(gpa, try std.fmt.bufPrint(&part_num_buf, "{d}", .{part_index + 1}));
+            try doc.appendSlice(gpa, " | `");
+            try doc.appendSlice(gpa, part.file_name);
+            try doc.appendSlice(gpa, "` | ");
+            try doc.appendSlice(gpa, bundleKindName(part.kind));
+            try doc.appendSlice(gpa, " | ");
+            try doc.appendSlice(gpa, try std.fmt.bufPrint(&part_num_buf, "{d}", .{part.files.len}));
+            try doc.appendSlice(gpa, " | ");
+            try doc.appendSlice(gpa, try std.fmt.bufPrint(&part_num_buf, "{d}", .{part.bytes}));
+            try doc.appendSlice(gpa, " |\n");
+        }
+        try doc.appendSlice(gpa, "\nA single source file larger than the target remains whole in its own part.\n\n");
+    } else try doc.appendSlice(gpa,
         \\## Combined upload bundles
         \\
         \\This corpus was generated with `--no-bundles`. It intentionally contains
@@ -1038,10 +1239,12 @@ fn exportIndex(
         \\
         \\| File | Role |
         \\|------|------|
-        \\| `catalog_meta.json` | format + schema_version + tool_version |
+        \\| `catalog_meta.json` | format + schema_version + tool_version + profile + split target |
         \\| `catalog.jsonl` | one JSON object per document (sorted by rag_path) |
+        \\| `profile_manifest.json` | selected profile and sorted source paths |
+        \\| `part_manifest.json` | ordered parts, source paths, and byte counts |
         \\
-        \\These two files are **not** catalog rows.
+        \\These machine files are **not** catalog rows.
         \\
     );
 
@@ -1079,20 +1282,18 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir, include_bundles: bool) !void {
     const bundles =
         \\## Combined bundles
         \\
-        \\For a small number of uploads, use the four root-level combined Markdown
-        \\files:
+        \\For a small number of uploads, use the root-level combined Markdown
+        \\parts listed in `part_manifest.json`:
         \\
-        \\- `boris-source-1.md` and `boris-source-2.md` contain all packed sources
-        \\  outside `docs/**` and `content/**`, including root `AGENTS.md`,
-        \\  `README.md`, `CHANGELOG.md`, and build files.
-        \\- `boris-docs.md` contains all packed `docs/**` files.
-        \\- `boris-content.md` contains all packed `content/**` files.
+        \\- `boris-source-N.md` contains packed sources outside `docs/**` and
+        \\  `content/**`, including root guidance and build files.
+        \\- `boris-docs[-N].md` contains packed `docs/**` files.
+        \\- `boris-content[-N].md` contains packed `content/**` files.
         \\
         \\Each entry is a whole Markdown document with `source_path` frontmatter and
-        \\a fence chosen to remain safe for the original body. The source pair is
-        \\split near half of the packed body bytes in sorted source-path order.
-        \\The boundary never splits a file or reorders documents, and empty groups
-        \\are emitted as valid bundles.
+        \\a fence chosen to remain safe for the original body. Parts are contiguous
+        \\sorted source-path ranges and never split a source file. A single source
+        \\file larger than the split target is emitted whole and may exceed it.
         \\
     ;
     const no_bundles =
@@ -1196,6 +1397,12 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
         packed_content.deinit(gpa);
     }
 
+    var bundle_parts: std.ArrayList(BundlePart) = .empty;
+    defer {
+        for (bundle_parts.items) |part| gpa.free(part.file_name);
+        bundle_parts.deinit(gpa);
+    }
+
     var stats: ExportStats = .{};
     var packed_paths: std.ArrayList([]const u8) = .empty;
     defer packed_paths.deinit(gpa);
@@ -1262,7 +1469,7 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     }
 
     if (!opts.no_bundles) {
-        try exportBundles(io, gpa, out, packed_source.items, packed_docs.items, packed_content.items);
+        try exportBundles(io, gpa, out, opts.split_size, packed_source.items, packed_docs.items, packed_content.items, &bundle_parts);
     }
 
     // Meta documents (not source rows until we add them to catalog).
@@ -1290,10 +1497,11 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     stats.catalog_entries = catalog.items.len;
 
     // INDEX after catalog is sorted (lists source rows).
-    try exportIndex(io, gpa, out, catalog.items, stats, !opts.no_bundles);
+    try exportIndex(io, gpa, out, catalog.items, stats, !opts.no_bundles, opts.split_size, bundle_parts.items);
     try exportCatalogJsonl(io, gpa, out, catalog.items);
-    try exportCatalogMeta(io, out, opts.profile);
+    try exportCatalogMeta(io, out, opts.profile, opts.split_size);
     try exportProfileManifest(io, gpa, out, opts.profile, stats, packed_paths.items);
+    try exportPartManifest(io, gpa, out, opts.profile, opts.split_size, !opts.no_bundles, bundle_parts.items);
 
     try publishManagedCorpus(io, gpa, stage_path, opts.out_dir);
 
@@ -1339,8 +1547,8 @@ pub fn main(init: std.process.Init) u8 {
                     const a = args_list.items[i];
                     if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) continue;
                     if (std.mem.eql(u8, a, "--quiet") or std.mem.eql(u8, a, "-q")) continue;
-                    if (std.mem.startsWith(u8, a, "--out=") or std.mem.startsWith(u8, a, "--root=") or std.mem.startsWith(u8, a, "--max-bytes=")) continue;
-                    if (std.mem.eql(u8, a, "--out") or std.mem.eql(u8, a, "--root")) {
+                    if (std.mem.startsWith(u8, a, "--out=") or std.mem.startsWith(u8, a, "--root=") or std.mem.startsWith(u8, a, "--max-bytes=") or std.mem.startsWith(u8, a, "--split-size=")) continue;
+                    if (std.mem.eql(u8, a, "--out") or std.mem.eql(u8, a, "--root") or std.mem.eql(u8, a, "--split-size")) {
                         i += 1;
                         continue;
                     }
@@ -1379,25 +1587,44 @@ test "parseOptions: help and defaults" {
     try std.testing.expectEqualStrings(".", o.root_dir);
     try std.testing.expect(!o.no_bundles);
     try std.testing.expectEqual(Profile.all, o.profile);
+    try std.testing.expectEqual(@as(usize, 512 * 1024), o.split_size);
 
     const h = try parseOptions(&.{ "boris-source-rag", "--help" });
     try std.testing.expect(h.help);
 
-    const o2 = try parseOptions(&.{ "boris-source-rag", "--out=./pack", "--root=../repo", "--max-bytes=1000", "--quiet", "--no-bundles", "--profile=docs" });
+    const o2 = try parseOptions(&.{ "boris-source-rag", "--out=./pack", "--root=../repo", "--max-bytes=1000", "--split-size=100", "--quiet", "--no-bundles", "--profile=docs" });
     try std.testing.expectEqualStrings("./pack", o2.out_dir);
     try std.testing.expectEqualStrings("../repo", o2.root_dir);
     try std.testing.expectEqual(@as(usize, 1000), o2.max_bytes);
+    try std.testing.expectEqual(@as(usize, 100), o2.split_size);
     try std.testing.expect(o2.quiet);
     try std.testing.expect(o2.no_bundles);
     try std.testing.expectEqual(Profile.docs, o2.profile);
 
     const o3 = try parseOptions(&.{ "boris-source-rag", "--profile", "tools" });
     try std.testing.expectEqual(Profile.tools, o3.profile);
+    const o4 = try parseOptions(&.{ "boris-source-rag", "--split-size", "256" });
+    try std.testing.expectEqual(@as(usize, 256), o4.split_size);
 }
 
 test "parseOptions: unknown flag" {
     try std.testing.expectError(error.UnknownFlag, parseOptions(&.{ "x", "--rag" }));
     try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--profile=bogus" }));
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--split-size=0" }));
+}
+
+test "profiles keep their documented scopes" {
+    try std.testing.expectEqualStrings("all", profileName(.all));
+    try std.testing.expectEqualStrings("core", profileName(.core));
+    try std.testing.expectEqualStrings("docs", profileName(.docs));
+    try std.testing.expectEqualStrings("tools", profileName(.tools));
+    try std.testing.expectEqualStrings("src", scanDirsForProfile(.core)[0]);
+    try std.testing.expectEqualStrings("layouts", scanDirsForProfile(.core)[1]);
+    try std.testing.expectEqualStrings("docs", scanDirsForProfile(.docs)[0]);
+    try std.testing.expectEqualStrings("content", scanDirsForProfile(.docs)[1]);
+    try std.testing.expectEqualStrings("scripts", scanDirsForProfile(.tools)[0]);
+    try std.testing.expectEqualStrings("SUPPORT", scanDirsForProfile(.tools)[3]);
+    try std.testing.expectEqual(@as(usize, default_scan_dirs.len), scanDirsForProfile(.all).len);
 }
 
 test "langFromPath and extensions" {
@@ -1438,23 +1665,41 @@ test "fenceLenFor handles nested fences" {
     try std.testing.expectEqual(@as(usize, 5), fenceLenFor("```` longer"));
 }
 
-test "bundle partition and classification are deterministic" {
+test "bundle partition is ordered, whole-file, and oversized-safe" {
+    const gpa = std.testing.allocator;
     const files = [_]PackedSource{
         .{ .rag_id = "a", .rag_path = "a", .source_path = "a", .lang = "text", .body = @constCast("10 bytes") },
         .{ .rag_id = "b", .rag_path = "b", .source_path = "b", .lang = "text", .body = @constCast("20 bytes here") },
         .{ .rag_id = "c", .rag_path = "c", .source_path = "c", .lang = "text", .body = @constCast("30 bytes here, yes") },
     };
-    try std.testing.expectEqual(@as(usize, 0), sourceBundleSplitIndex(&.{}));
-    try std.testing.expectEqual(@as(usize, 1), sourceBundleSplitIndex(files[0..1]));
-    try std.testing.expectEqual(@as(usize, 2), sourceBundleSplitIndex(files[0..]));
+    const parts = try partitionBundleFiles(gpa, .source, files[0..], 20);
+    defer {
+        for (parts) |part| gpa.free(part.file_name);
+        gpa.free(parts);
+    }
+    try std.testing.expectEqual(@as(usize, 3), parts.len);
+    try std.testing.expectEqualStrings("a", parts[0].files[0].source_path);
+    try std.testing.expectEqualStrings("b", parts[1].files[0].source_path);
+    try std.testing.expectEqualStrings("c", parts[2].files[0].source_path);
+    try std.testing.expectEqual(@as(usize, 8), parts[0].bytes);
+    try std.testing.expectEqual(@as(usize, 13), parts[1].bytes);
+    try std.testing.expectEqual(@as(usize, 18), parts[2].bytes);
+    try std.testing.expectEqualStrings("boris-source-1.md", parts[0].file_name);
+
+    const oversized = try partitionBundleFiles(gpa, .docs, files[2..3], 5);
+    defer {
+        for (oversized) |part| gpa.free(part.file_name);
+        gpa.free(oversized);
+    }
+    try std.testing.expectEqual(@as(usize, 1), oversized.len);
+    try std.testing.expectEqual(@as(usize, 18), oversized[0].bytes);
+    try std.testing.expectEqualStrings("boris-docs.md", oversized[0].file_name);
     try std.testing.expectEqual(BundleKind.docs, bundleKindForPath("docs/contracts/ir-schema.md"));
     try std.testing.expectEqual(BundleKind.content, bundleKindForPath("content/index.md"));
     try std.testing.expectEqual(BundleKind.source, bundleKindForPath("src/pipeline.zig"));
     try std.testing.expectEqual(BundleKind.source, bundleKindForPath("README.md"));
-    try std.testing.expectEqualStrings("boris-source-1.md", bundleFileName(.source, 1));
-    try std.testing.expectEqualStrings("boris-source-2.md", bundleFileName(.source, 2));
-    try std.testing.expectEqualStrings("boris-docs.md", bundleFileName(.docs, 0));
-    try std.testing.expectEqualStrings("boris-content.md", bundleFileName(.content, 0));
+    try std.testing.expect(isManagedBundleFileName("boris-source-12.md"));
+    try std.testing.expect(!isManagedBundleFileName("boris-source-final.md"));
 }
 
 test "looksBinary" {
@@ -1468,6 +1713,18 @@ test "renderSourceDocument wraps body" {
     defer gpa.free(doc);
     try std.testing.expect(std.mem.indexOf(u8, doc, "source_path: a.zig") != null);
     try std.testing.expect(std.mem.indexOf(u8, doc, "```zig\nconst x = 1;\n```\n") != null);
+}
+
+fn expectOutputFileEqual(
+    io: Io,
+    gpa: std.mem.Allocator,
+    out: Io.Dir,
+    path: []const u8,
+    expected: []const u8,
+) !void {
+    const actual = try readFileAlloc(io, out, path, gpa);
+    defer gpa.free(actual);
+    try std.testing.expectEqualStrings(expected, actual);
 }
 
 test "exportCorpus mini fixture" {
@@ -1512,17 +1769,21 @@ test "exportCorpus mini fixture" {
         .out_dir = out_rel,
         .quiet = true,
         .max_bytes = 512 * 1024,
+        .split_size = 20,
     });
     try std.testing.expectEqual(@as(usize, 3), stats.source_files);
     try std.testing.expectEqual(@as(usize, 1), stats.skipped);
     try std.testing.expect(stats.catalog_entries >= 3);
 
-    var out = try Io.Dir.cwd().openDir(io, out_rel, .{});
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{ .iterate = true });
     defer out.close(io);
 
     const meta = try readFileAlloc(io, out, "catalog_meta.json", gpa);
     defer gpa.free(meta);
     try std.testing.expect(std.mem.indexOf(u8, meta, format_id) != null);
+
+    const upload_guide = try readFileAlloc(io, out, "UPLOAD-GUIDE.md", gpa);
+    defer gpa.free(upload_guide);
 
     const index = try readFileAlloc(io, out, "INDEX.md", gpa);
     defer gpa.free(index);
@@ -1545,15 +1806,23 @@ test "exportCorpus mini fixture" {
 
     const source_one = try readFileAlloc(io, out, "boris-source-1.md", gpa);
     defer gpa.free(source_one);
-    try std.testing.expect(std.mem.indexOf(u8, source_one, "source_path: README.md") != null);
     const source_two = try readFileAlloc(io, out, "boris-source-2.md", gpa);
     defer gpa.free(source_two);
-    try std.testing.expect(std.mem.indexOf(u8, source_one, "source_path: src/hello.zig") != null or
-        std.mem.indexOf(u8, source_two, "source_path: src/hello.zig") != null);
+    const source_three = try readFileAlloc(io, out, "boris-source-3.md", gpa);
+    defer gpa.free(source_three);
+    try std.testing.expect(std.mem.indexOf(u8, source_one, "source_path: README.md") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source_two, "source_path: src/hello.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source_three, "source_path: tools/source-rag/main.zig") != null);
     try std.testing.expect(std.mem.indexOf(u8, source_one, "vendor/third_party.c") == null);
     try std.testing.expect(std.mem.indexOf(u8, source_two, "vendor/third_party.c") == null);
-    try std.testing.expect(std.mem.indexOf(u8, source_one, "tools/source-rag/main.zig") != null or
-        std.mem.indexOf(u8, source_two, "tools/source-rag/main.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source_three, "vendor/third_party.c") == null);
+    const part_manifest = try readFileAlloc(io, out, "part_manifest.json", gpa);
+    defer gpa.free(part_manifest);
+    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"profile\":\"all\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"order\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"source_path\":\"README.md\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"source_path\":\"src/hello.zig\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"source_path\":\"tools/source-rag/main.zig\"") != null);
     const docs_bundle = try readFileAlloc(io, out, "boris-docs.md", gpa);
     defer gpa.free(docs_bundle);
     try std.testing.expect(std.mem.indexOf(u8, docs_bundle, "No packed documents") != null);
@@ -1573,6 +1842,7 @@ test "exportCorpus mini fixture" {
         .root_dir = root_rel,
         .out_dir = out_rel,
         .quiet = true,
+        .split_size = 20,
         .test_fail_after_stage_writes = 1,
     }));
     const preserved_hello = try readFileAlloc(io, out, "files/src/hello.zig.md", gpa);
@@ -1590,6 +1860,7 @@ test "exportCorpus mini fixture" {
         .out_dir = out_rel,
         .quiet = true,
         .max_bytes = 512 * 1024,
+        .split_size = 20,
     });
 
     try std.testing.expectError(error.FileNotFound, out.statFile(io, "files/vendor/third_party.c.md", .{}));
@@ -1604,6 +1875,18 @@ test "exportCorpus mini fixture" {
     const regenerated_catalog = try readFileAlloc(io, out, "catalog.jsonl", gpa);
     defer gpa.free(regenerated_catalog);
     try std.testing.expectEqualStrings(catalog, regenerated_catalog);
+    const regenerated_parts = try readFileAlloc(io, out, "part_manifest.json", gpa);
+    defer gpa.free(regenerated_parts);
+    try std.testing.expectEqualStrings(part_manifest, regenerated_parts);
+    try expectOutputFileEqual(io, gpa, out, "INDEX.md", index);
+    try expectOutputFileEqual(io, gpa, out, "UPLOAD-GUIDE.md", upload_guide);
+    try expectOutputFileEqual(io, gpa, out, "catalog_meta.json", meta);
+    try expectOutputFileEqual(io, gpa, out, "profile_manifest.json", profile_manifest);
+    try expectOutputFileEqual(io, gpa, out, "boris-source-1.md", source_one);
+    try expectOutputFileEqual(io, gpa, out, "boris-source-2.md", source_two);
+    try expectOutputFileEqual(io, gpa, out, "boris-source-3.md", source_three);
+    try expectOutputFileEqual(io, gpa, out, "boris-docs.md", docs_bundle);
+    try expectOutputFileEqual(io, gpa, out, "boris-content.md", content_bundle);
 
     _ = try exportCorpus(io, gpa, .{
         .root_dir = root_rel,
@@ -1612,9 +1895,9 @@ test "exportCorpus mini fixture" {
         .no_bundles = true,
     });
 
-    for (bundle_file_names) |file_name| {
-        try std.testing.expectError(error.FileNotFound, out.statFile(io, file_name, .{}));
-    }
+    const no_bundle_names = try collectManagedBundleNames(io, gpa, out);
+    defer freeManagedBundleNames(gpa, no_bundle_names);
+    try std.testing.expectEqual(@as(usize, 0), no_bundle_names.len);
     const no_bundles_hello = try readFileAlloc(io, out, "files/src/hello.zig.md", gpa);
     defer gpa.free(no_bundles_hello);
     const no_bundles_catalog = try readFileAlloc(io, out, "catalog.jsonl", gpa);
@@ -1624,4 +1907,8 @@ test "exportCorpus mini fixture" {
     const no_bundles_index = try readFileAlloc(io, out, "INDEX.md", gpa);
     defer gpa.free(no_bundles_index);
     try std.testing.expect(std.mem.indexOf(u8, no_bundles_index, "--no-bundles") != null);
+    const no_bundles_parts = try readFileAlloc(io, out, "part_manifest.json", gpa);
+    defer gpa.free(no_bundles_parts);
+    try std.testing.expect(std.mem.indexOf(u8, no_bundles_parts, "\"bundles\":false") != null);
+    try std.testing.expect(std.mem.endsWith(u8, no_bundles_parts, "\"parts\":[]}\n"));
 }
