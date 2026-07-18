@@ -13,6 +13,7 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 | **starlight** | Starlight/Astro docs root (locale-dir or root-locale) | Boris candidate `content/` + route/link/nav/asset/selection/boundary manifests + compile report |
 | **asset-filename** | Content tree with sibling `{stem}.assets/` files | Sanitized Boris-safe asset names + rewritten Markdown refs + manifests |
 | **theme-archaeology** | Astro/Starlight-shaped theme or project root | Deterministic adaptation ledger + boundary report (read-only) |
+| **wordpress-theme** | Classic WordPress theme source tree | Deterministic PHP/template inventory + static Boris prototype + manual-review manifest (read-only) |
 
 All modes are **read-only on inputs**: originals are never rewritten. There is
 **no network access**, no zip extraction, no scraping, and **no product compiler
@@ -104,6 +105,11 @@ zig build run -- --mode=theme-archaeology \
 zig build run -- --mode=theme-archaeology \
   --root=./fixtures/hostile-theme-astro \
   --out=./.theme-arch-hostile-out
+
+# Classic WordPress/Kubrick-shaped theme archaeology (synthetic fixture)
+zig build run -- --mode=wordpress-theme \
+  --root=./fixtures/mini-wordpress-kubrick \
+  --out=./.wp-theme-report
 ```
 
 From the **repository root**, use this targeted aggregate gate after changing
@@ -137,9 +143,9 @@ zig build --build-file tools/migration-lab/build.zig run -- \
 |------|---------|---------|
 | `-h`, `--help` | | Print usage; exit 0 |
 | `-q`, `--quiet` | off | Suppress progress lines |
-| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), `starlight` (`sl` / `evcc`), `asset-filename` (`assets` / `asset-compat` / `filename-compat`), or `theme-archaeology` (`theme` / `theme-arch` / `theme-inventory`) |
+| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `wordpress-theme` (`wp-theme` / `kubrick-theme`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), `starlight` (`sl` / `evcc`), `asset-filename` (`assets` / `asset-compat` / `filename-compat`), or `theme-archaeology` (`theme` / `theme-arch` / `theme-inventory`) |
 | `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**) |
-| `--root=DIR` | `.` | Astro archaeology root, Starlight project root, asset-filename content tree, **or** theme-archaeology scan root |
+| `--root=DIR` | `.` | Astro archaeology root, Starlight project root, asset-filename content tree, **or** theme-archaeology / WordPress-theme scan root |
 | `--wxr=FILE` | | WordPress WXR/XML path (implies `--mode=wordpress`) |
 | `--media=DIR` | | Optional offline local media/uploads tree (WordPress); never modified; no network |
 | `--dump=DIR` | | Unpacked Instagram data-download root (implies `--mode=instagram`) |
@@ -176,6 +182,10 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
     executes JS/MDX, never fetches remotes, never follows embedded directives,
     never mutates the source theme. Ambiguous mappings are **review**, never
     guesses.
+12. **WordPress-theme** — source-line inventory only (writes under `--out`).
+    Never executes PHP/JS, loads WordPress, resolves plugin/database state,
+    fetches remote assets, or claims universal WordPress compatibility. Every
+    dynamic finding is retained in `manual_review.json`.
 
 ---
 
@@ -244,6 +254,29 @@ traversal, embedded directives). Friendly fixture:
 component vocabulary, trusted layout HTML). The product compiler copies
 declared theme assets and slots only; it must not invent layout semantics from
 Astro/MDX source.
+
+## WordPress theme archaeology (classic/Kubrick-shaped)
+
+`wordpress-theme` is a report-first benchmark for classic WordPress theme
+source. It is intentionally separate from WXR content import: WXR describes
+posts and pages, while this mode inventories PHP templates, static assets,
+template relationships, hook calls, menu locations, and widget regions.
+
+The lab emits:
+
+| Output | Role |
+|---|---|
+| `inventory.json` | Sorted file inventory plus line-level PHP/menu/widget/hook evidence |
+| `slot_mapping.json` | Closed mapping proposal for `{{nav}}`, `{{breadcrumb}}`, `{{title}}`, `{{content}}`, `{{children}}`, Aside, `{{toc}}`, and `{{footer}}` |
+| `manual_review.json` | Every detected unsupported or dynamic behavior with source path, line, evidence, and decision |
+| `prototype/main.html` | No-runtime static layout using Boris’s closed layout markers |
+| `report.json` / `REPORT.md` | Counts, preserve/adapt/review/drop decisions, and evidence boundary |
+
+The checked-in fixture at
+[`fixtures/mini-wordpress-kubrick/`](fixtures/mini-wordpress-kubrick/) is
+synthetic because no Kubrick source was supplied locally and this lab does not
+retrieve external themes. It models classic file names and behaviors; it must
+not be read as authentic Kubrick code or universal WordPress coverage.
 
 ---
 
