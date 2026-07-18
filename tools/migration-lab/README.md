@@ -500,6 +500,13 @@ candidates beyond Boris's 16-relations-per-page product bound remain in the
 sidecar; none are silently truncated. The sidecar never writes `relations:` to
 generated Markdown and does not change Boris core grammar or IR.
 
+Duplicate resolved `(proposed_kind, resolved_entity)` tuples are compared in
+source order. The first tuple retains its ordinary ordinal and limit status.
+Every later duplicate remains visible with `proposed_kind: "relates_to"`,
+`review_reason: "duplicate_product_relation"`, and null ordinal/limit fields;
+it does not consume another product-limit slot. Here `proposed_kind` records a
+defensible semantic mapping, not eligibility for automatic emission.
+
 ### Boundary classes
 
 | Class | Meaning |

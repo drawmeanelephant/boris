@@ -820,6 +820,7 @@ fn collectRelationCandidatesForPage(
 ) !void {
     const raw_values = try extractRawRelationValues(a, page.raw_frontmatter);
     var relation_ordinal: usize = 0;
+    var seen_product_relations: std.StringHashMapUnmanaged(void) = .empty;
     for (raw_values) |raw| {
         if (!relationFieldProposesKind(raw.source_field)) {
             try out.append(a, .{
@@ -869,11 +870,19 @@ fn collectRelationCandidatesForPage(
             if (std.mem.eql(u8, resolved, page.entity_id)) {
                 review_reason = "self_target_not_product_relation";
             } else {
-                relation_ordinal += 1;
-                ordinal = relation_ordinal;
-                within_limit = relation_ordinal <= product_relation_limit;
                 proposed_kind = "relates_to";
-                if (!within_limit.?) review_reason = "product_relation_limit_exceeded";
+                const tuple_key = try std.fmt.allocPrint(a, "relates_to={s}", .{resolved});
+                if (seen_product_relations.get(tuple_key) != null) {
+                    // Keep the defensible proposal visible, but duplicate tuples are
+                    // ineligible for product emission and consume no limit ordinal.
+                    review_reason = "duplicate_product_relation";
+                } else {
+                    try seen_product_relations.put(a, tuple_key, {});
+                    relation_ordinal += 1;
+                    ordinal = relation_ordinal;
+                    within_limit = relation_ordinal <= product_relation_limit;
+                    if (!within_limit.?) review_reason = "product_relation_limit_exceeded";
+                }
             }
         }
         try out.append(a, .{
@@ -909,10 +918,10 @@ fn collectRelationCandidates(
         fn less(_: void, x: RelationCandidate, y: RelationCandidate) bool {
             var order = std.mem.order(u8, x.source_entity, y.source_entity);
             if (order != .eq) return order == .lt;
-            order = std.mem.order(u8, x.source_field, y.source_field);
-            if (order != .eq) return order == .lt;
             if (x.source_line != y.source_line) return x.source_line < y.source_line;
             if (x.value_index != y.value_index) return x.value_index < y.value_index;
+            order = std.mem.order(u8, x.source_field, y.source_field);
+            if (order != .eq) return order == .lt;
             return std.mem.order(u8, x.raw_value, y.raw_value) == .lt;
         }
     }.less);
@@ -3747,18 +3756,20 @@ fn writeRelationCandidates(
     var ambiguous_n: usize = 0;
     var review_only_n: usize = 0;
     var over_limit_n: usize = 0;
+    var duplicate_n: usize = 0;
     for (candidates) |candidate| {
         if (std.mem.eql(u8, candidate.target_resolution, "resolved")) resolved_n += 1;
         if (std.mem.eql(u8, candidate.target_resolution, "unresolved")) unresolved_n += 1;
         if (std.mem.eql(u8, candidate.target_resolution, "ambiguous")) ambiguous_n += 1;
         if (candidate.proposed_kind == null) review_only_n += 1;
         if (candidate.within_product_limit != null and !candidate.within_product_limit.?) over_limit_n += 1;
+        if (candidate.review_reason != null and std.mem.eql(u8, candidate.review_reason.?, "duplicate_product_relation")) duplicate_n += 1;
     }
 
     var buf: std.ArrayList(u8) = .empty;
     try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-relation-candidates\",\n" ++
         "  \"schema_version\": 1,\n" ++
-        "  \"policy\": \"Review-first evidence only. Known Filed-shaped fields are inventoried without changing generated Markdown. relates_to is proposed only for safely normalized targets resolved in the converted entity map; no product relation is emitted. concepts and escalationPath never receive an invented kind.\",\n" ++
+        "  \"policy\": \"Review-first evidence only. Known Filed-shaped fields are inventoried without changing generated Markdown. relates_to is proposed only for safely normalized targets resolved in the converted entity map; proposed_kind records a defensible mapping, not emission eligibility. Later duplicate tuples retain proposed_kind, receive duplicate_product_relation, and have null ordinal/limit fields. No product relation is emitted. concepts and escalationPath never receive an invented kind.\",\n" ++
         "  \"product_relation_limit\": ");
     try appendUsize(&buf, a, product_relation_limit);
     try buf.appendSlice(a, ",\n  \"counts\": { \"total\": ");
@@ -3773,6 +3784,8 @@ fn writeRelationCandidates(
     try appendUsize(&buf, a, review_only_n);
     try buf.appendSlice(a, ", \"over_limit\": ");
     try appendUsize(&buf, a, over_limit_n);
+    try buf.appendSlice(a, ", \"duplicates\": ");
+    try appendUsize(&buf, a, duplicate_n);
     try buf.appendSlice(a, " },\n  \"candidates\": [\n");
     for (candidates, 0..) |candidate, i| {
         try buf.appendSlice(a, "    { \"source_path\": ");
@@ -4298,6 +4311,52 @@ test "starlight: relation candidates retain over-limit and ambiguous evidence" {
     try std.testing.expectEqualStrings("ambiguous_target_in_converted_entity_map", candidates.items[17].review_reason.?);
 }
 
+test "starlight: duplicate product relation candidates keep evidence without consuming ordinals" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var entities: EntityMap = .empty;
+    try entities.put(a, "targets/one", "targets/one");
+    try entities.put(a, "targets/two", "targets/two");
+
+    const page: SourcePage = .{
+        .source_path = "src/content/docs/en/duplicates.mdx",
+        .locale_rel = "duplicates.mdx",
+        .entity_id = "duplicates",
+        .route = "/en/duplicates",
+        .output_path = "content/duplicates.md",
+        .title = "Duplicates",
+        .parent = null,
+        .is_trunk = true,
+        .raw_frontmatter =
+        \\relatedEntries: [targets/one, targets/two]
+        \\mascotRef: one
+        \\relatedHaiku: targets/one
+        ,
+        .unmapped_fields = &.{},
+        .body = "",
+        .imports = &.{},
+        .components = &.{},
+        .stripped_blocks = &.{},
+        .link_events = &.{},
+        .component_events = &.{},
+        .bytes = 0,
+    };
+    var candidates: std.ArrayList(RelationCandidate) = .empty;
+    try collectRelationCandidatesForPage(a, page, "/en", &entities, &candidates);
+    try std.testing.expectEqual(@as(usize, 4), candidates.items.len);
+    try std.testing.expectEqual(@as(?usize, 1), candidates.items[0].relation_ordinal);
+    try std.testing.expectEqual(@as(?usize, 2), candidates.items[1].relation_ordinal);
+    for (candidates.items[2..]) |duplicate| {
+        try std.testing.expectEqualStrings("resolved", duplicate.target_resolution);
+        try std.testing.expectEqualStrings("targets/one", duplicate.resolved_entity.?);
+        try std.testing.expectEqualStrings("relates_to", duplicate.proposed_kind.?);
+        try std.testing.expect(duplicate.relation_ordinal == null);
+        try std.testing.expect(duplicate.within_product_limit == null);
+        try std.testing.expectEqualStrings("duplicate_product_relation", duplicate.review_reason.?);
+    }
+}
+
 test "starlight: link rewrite only when proven" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -4429,6 +4488,8 @@ test "starlight: locale-dir fixture is deterministic, preserves source, reports 
     try std.testing.expect(std.mem.indexOf(u8, relations, "non_scalar_value") != null);
     try std.testing.expect(std.mem.indexOf(u8, relations, "malformed_inline_list") != null);
     try std.testing.expect(std.mem.indexOf(u8, relations, "review_only_field_no_relation_kind") != null);
+    try std.testing.expect(std.mem.indexOf(u8, relations, "duplicate_product_relation") != null);
+    try std.testing.expect(std.mem.indexOf(u8, relations, "\"duplicates\": 3") != null);
 
     const report = try readFileAlloc(io, ao, "report.json", std.testing.allocator);
     defer std.testing.allocator.free(report);
