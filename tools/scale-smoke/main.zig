@@ -129,7 +129,7 @@ fn writeSection(io: Io, section: usize) !void {
         \\---
         \\# Scale Section {d}
         \\
-        \\{{include includes/common.md}}
+        \\{{{{include includes/common.md}}}}
         \\
         \\Return to [[index]].
         \\
@@ -155,7 +155,7 @@ fn writeSatellite(io: Io, page: usize, section: usize) !void {
         \\---
         \\# Scale Article {d}
         \\
-        \\{{include includes/common.md}}
+        \\{{{{include includes/common.md}}}}
         \\
         \\This Satellite belongs to [[sections/section-{d:0>4}]] and links to [[index]].
         \\
@@ -281,3 +281,37 @@ test "parse options has a modest default and accepts a large page count" {
 test "page count must be positive" {
     try std.testing.expectError(error.InvalidPageCount, parseOptions(&.{ "scale-smoke", "--pages=0" }));
 }
+
+test "writeSection and writeSatellite generate correct double-braced include strings" {
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    cwd.createDirPath(io, generated_root ++ "/content/sections") catch {};
+    cwd.createDirPath(io, generated_root ++ "/content/articles") catch {};
+    defer cwd.deleteTree(io, generated_root) catch {};
+
+    try writeSection(io, 0);
+    try writeSatellite(io, 1, 0);
+
+    var section_file = try cwd.openFile(io, generated_root ++ "/content/sections/section-0000.md", .{});
+    defer section_file.close(io);
+    var section_reader = section_file.reader(io, &.{});
+    const section_content = try section_reader.interface.allocRemaining(std.testing.allocator, .unlimited);
+    defer std.testing.allocator.free(section_content);
+
+    const sec_double = std.mem.indexOf(u8, section_content, "{{include");
+    try std.testing.expect(sec_double != null);
+    const sec_single = std.mem.indexOf(u8, section_content, "{include");
+    try std.testing.expectEqual(sec_double.? + 1, sec_single.?);
+
+    var satellite_file = try cwd.openFile(io, generated_root ++ "/content/articles/article-000001.md", .{});
+    defer satellite_file.close(io);
+    var satellite_reader = satellite_file.reader(io, &.{});
+    const satellite_content = try satellite_reader.interface.allocRemaining(std.testing.allocator, .unlimited);
+    defer std.testing.allocator.free(satellite_content);
+
+    const sat_double = std.mem.indexOf(u8, satellite_content, "{{include");
+    try std.testing.expect(sat_double != null);
+    const sat_single = std.mem.indexOf(u8, satellite_content, "{include");
+    try std.testing.expectEqual(sat_double.? + 1, sat_single.?);
+}
+

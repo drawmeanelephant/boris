@@ -181,6 +181,8 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 |----------|------|-----|
 | **Next** | Real-site dogfood | Exercise a substantial site/archive and record concrete migration, authoring, and publish gaps. |
 | **Next** | Archive-friendly layouts | Validate layout rules and child/index presentation against real archive navigation before broadening theme features. |
+| **v0.6 candidate** | `llms.txt` export | Emit a deterministic, graph-ordered community-format `llms.txt` from validated Boris content; define URL, summary, fallback, and golden-fixture contracts. Keep `llms-full.txt` as a later optional extension. |
+| **v0.6 candidate** | Source-RAG pack profiles | Split source export into bounded logical packs (core, tools, docs), add explicit scope selection and manifests, and exclude vendor/generated/cache trees by default. |
 | **Later** | Further docs packaging | README + [`docs/MIGRATION.md`](MIGRATION.md) first real site path cover inspect → convert → build → deploy; remaining gaps are sample-content version drift and deeper external-SSG cookbook depth. |
 | **Later** | Source-RAG ergonomics and publication safety | Keep the standalone source pack distinct from product RAG; prioritize evidence-backed output-size and partial-publish improvements. |
 | **Deferred** | Measurement-driven build work | Benchmark or change cache/watch/parallel behavior only after a reproducible real-site need. |
