@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en" data-layout="node-tracker">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}} · Boris2</title>
+  <link rel="stylesheet" href="{{asset-url assets/node-tracker.css}}">
+</head>
+<body>
+  <header class="topbar">
+    <a class="logo" href="{{asset-url assets/node-tracker.css}}">Boris<span>2</span></a>
+    <nav class="topnav" aria-label="Account and site links">
+      <a href="{{asset-url assets/node-tracker.css}}">Front Page</a>
+      <a href="{{asset-url assets/node-tracker.css}}">New Nodes</a>
+      <span class="static-control" title="Static showcase control">Log In</span>
+      <span class="static-control" title="Static showcase control">Create Account</span>
+    </nav>
+  </header>
+
+  <div class="page-wrap">
+    <main class="node-main">
+      <div class="crumbs">{{breadcrumb}}</div>
+      <h1 class="node-title">{{title}}</h1>
+      <p class="node-search">(thing) by <a href="{{asset-url assets/node-tracker.css}}">AdminUser</a></p>
+
+      <article class="node-body">
+        <div class="node-copy">{{content}}</div>
+        <footer class="node-footer">msg · bookmark · permalink · reputation is authored metadata</footer>
+      </article>
+
+      <section class="writeup-list" aria-labelledby="writeups">
+        <h2 id="writeups">Writeups</h2>
+        {{children}}
+      </section>
+    </main>
+
+    <aside class="epicenter" aria-label="Nodelets">
+      <section class="nodelet">
+        <h2>Search</h2>
+        <div class="nodelet-body">
+          <label for="node-search" class="visually-hidden">Search nodes</label>
+          <input id="node-search" type="search" placeholder="find a node" disabled>
+          <button type="button" disabled>Search</button>
+          <small>static preview; no search runtime</small>
+        </div>
+      </section>
+      <nav class="nodelet" aria-label="Node tracker">
+        <h2>Node Tracker</h2>
+        <div class="nodelet-body">{{nav}}</div>
+      </nav>
+      <section class="nodelet">
+        <h2>Personal Nodelet</h2>
+        <div class="nodelet-body">Welcome, Anonymous Coward<br><a href="{{asset-url assets/node-tracker.css}}">Log in</a> or register</div>
+      </section>
+    </aside>
+  </div>
+
+  <footer class="site-footer">{{footer}}</footer>
+</body>
+</html>
