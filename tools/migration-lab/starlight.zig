@@ -449,7 +449,8 @@ fn relationFieldProposesKind(field: []const u8) bool {
 fn splitFrontmatterLines(a: std.mem.Allocator, raw: []const u8) ![]const FrontmatterLine {
     var lines: std.ArrayList(FrontmatterLine) = .empty;
     var pos: usize = 0;
-    var line_no: u32 = 1;
+    // raw_frontmatter excludes the opening `---`; report actual source lines.
+    var line_no: u32 = 2;
     while (pos < raw.len) : (line_no += 1) {
         const line_end = std.mem.indexOfScalarPos(u8, raw, pos, '\n') orelse raw.len;
         var text = raw[pos..line_end];
@@ -4418,6 +4419,8 @@ test "starlight: locale-dir fixture is deterministic, preserves source, reports 
 
     const relations = try readFileAlloc(io, ao, "relation_candidates.json", std.testing.allocator);
     defer std.testing.allocator.free(relations);
+    const parsed_relations = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, relations, .{});
+    defer parsed_relations.deinit();
     try std.testing.expect(std.mem.indexOf(u8, relations, "boris-starlight-relation-candidates") != null);
     try std.testing.expect(std.mem.indexOf(u8, relations, "\"source_field\": \"relatedEntries\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, relations, "\"resolved_entity\": \"features/beta\"") != null);
@@ -4461,6 +4464,37 @@ test "starlight: locale-dir fixture is deterministic, preserves source, reports 
 
     Io.Dir.cwd().deleteTree(io, a_out) catch {};
     Io.Dir.cwd().deleteTree(io, b_out) catch {};
+}
+
+test "starlight: Filed collection-id relation objects remain review evidence" {
+    const io = std.testing.io;
+    const out_dir = "fixtures/.test-starlight-filed-relations";
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+
+    var fixture = try Io.Dir.cwd().openDir(io, "fixtures/mini-filed", .{});
+    defer fixture.close(io);
+    const before = try readFileAlloc(io, fixture, "src/content/docs/releases/v0.1.1-trust-surface-residue.md", std.testing.allocator);
+    defer std.testing.allocator.free(before);
+
+    try run(io, std.testing.allocator, .{
+        .source_root_dir = "fixtures/mini-filed",
+        .out_dir = out_dir,
+        .quiet = true,
+        .max_pages = 50,
+    });
+    var od = try Io.Dir.cwd().openDir(io, out_dir, .{});
+    defer od.close(io);
+    const candidates = try readFileAlloc(io, od, "relation_candidates.json", std.testing.allocator);
+    defer std.testing.allocator.free(candidates);
+    try std.testing.expect(std.mem.indexOf(u8, candidates, "\"source_field\": \"relatedEntries\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, candidates, "collection: docs") != null);
+    try std.testing.expect(std.mem.indexOf(u8, candidates, "reference/example") != null);
+    try std.testing.expect(std.mem.indexOf(u8, candidates, "target_not_in_converted_entity_map") != null);
+
+    const after = try readFileAlloc(io, fixture, "src/content/docs/releases/v0.1.1-trust-surface-residue.md", std.testing.allocator);
+    defer std.testing.allocator.free(after);
+    try std.testing.expectEqualStrings(before, after);
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
 }
 
 test "starlight: root-locale fixture discovery and routes" {
