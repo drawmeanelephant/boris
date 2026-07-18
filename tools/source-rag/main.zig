@@ -664,11 +664,11 @@ fn publishManagedCorpus(io: Io, gpa: std.mem.Allocator, stage_path: []const u8, 
     try removeTreeIfPresent(io, cwd, prev_path);
     try cwd.createDirPath(io, prev_path);
 
-    var stage = try cwd.openDir(io, stage_path, .{});
+    var stage = try cwd.openDir(io, stage_path, .{ .iterate = true });
     defer stage.close(io);
-    var out = try cwd.openDir(io, out_path, .{});
+    var out = try cwd.openDir(io, out_path, .{ .iterate = true });
     defer out.close(io);
-    var prev = try cwd.openDir(io, prev_path, .{});
+    var prev = try cwd.openDir(io, prev_path, .{ .iterate = true });
     defer prev.close(io);
 
     moveManagedCorpus(io, gpa, out, prev) catch |err| {
