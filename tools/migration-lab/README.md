@@ -10,7 +10,7 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 | **obsidian** | Local Obsidian vault directory | Boris Markdown + attachments inventory + review reports |
 | **notion** | Official Notion “Markdown & CSV” export (unpacked) | Boris Markdown + media inventory + review reports |
 | **filed** | Filed.fyi Astro source root | Bounded changelog/releases Boris tree + provenance/review reports |
-| **starlight** | Starlight/Astro docs root (locale-dir or root-locale) | Boris candidate `content/` + route/link/nav/asset/selection/boundary manifests + compile report |
+| **starlight** | Starlight/Astro docs root (locale-dir or root-locale) | Boris candidate `content/` + route/link/relation/nav/asset/selection/boundary manifests + compile report |
 | **asset-filename** | Content tree with sibling `{stem}.assets/` files | Sanitized Boris-safe asset names + rewritten Markdown refs + manifests |
 | **theme-archaeology** | Astro/Starlight-shaped theme or project root | Deterministic adaptation ledger + boundary report (read-only) |
 | **wordpress-theme** | Classic WordPress theme source tree | Deterministic PHP/template inventory + static Boris prototype + manual-review manifest (read-only) |
@@ -465,6 +465,7 @@ and `/…` for root-locale.
    | `selection_manifest.json` | Selected source files + exclusion reasons |
    | `route_map.json` | Route / entity / output mapping |
    | `link_review.json` | Internal links, unresolved, external, assets |
+   | `relation_candidates.json` | Review-first Filed-shaped relationship values + converted-entity resolution |
    | `heading_fragments.json` | Fragment inventory (headings **not** verified) |
    | `assets_manifest.json` | Inventory + migrated page assets (exists + SHA-256 when proven) |
    | `nav_flatten.json` | Sidebar/nav evidence (text scan only) |
@@ -480,6 +481,31 @@ and `/…` for root-locale.
    `layouts/main.html` are findable) and records the result in `compile_report.json`.
 10. **Does not** couple product `boris` into the lab binary; image copies stay
     under `--out/content/**` only.
+
+### Relationship candidate sidecar
+
+`relation_candidates.json` inventories only these known Filed-shaped source
+fields: `relatedEntries`, `relatedHaiku`, `relatedLimerick`, `relatedLorelog`,
+`mascotRef`, `concepts`, and `escalationPath`. Each deterministic row retains
+the source path, generated output path, source entity, source field and line,
+raw value, safe normalized target when available, converted-entity resolution,
+optional proposed kind, the product relation ordinal/bound evidence, and an
+explicit review reason.
+
+The lab proposes `relates_to` only for target-like values from the five
+`related*` / `mascotRef` fields that resolve against the converted entity map.
+`concepts` and `escalationPath` are always review-only. Malformed values,
+non-scalar mappings, ambiguous or unresolved targets, self-targets, and
+candidates beyond Boris's 16-relations-per-page product bound remain in the
+sidecar; none are silently truncated. The sidecar never writes `relations:` to
+generated Markdown and does not change Boris core grammar or IR.
+
+Duplicate resolved `(proposed_kind, resolved_entity)` tuples are compared in
+source order. The first tuple retains its ordinary ordinal and limit status.
+Every later duplicate remains visible with `proposed_kind: "relates_to"`,
+`review_reason: "duplicate_product_relation"`, and null ordinal/limit fields;
+it does not consume another product-limit slot. Here `proposed_kind` records a
+defensible semantic mapping, not eligibility for automatic emission.
 
 ### Boundary classes
 
@@ -498,6 +524,7 @@ and `/…` for root-locale.
 | Frontmatter `title` | **Supported** | Mapped into Boris `title` |
 | Frontmatter `id` / `parent` / `status` / `tags` | **Emitted by converter** | Source values of those keys (if any) are listed unmapped; converter owns the closed grammar |
 | Other YAML keys (`sidebar`, nested maps, sequences, …) | **Unsupported** | Retained raw in provenance; never interpreted |
+| Known Filed relationship fields | **Review evidence** | `relation_candidates.json`; no product relation emission or invented semantics |
 | Full YAML / JS config evaluation | **Unsupported** | `astro.config.*` text-scanned for sidebar evidence only |
 | Markdown body | **Supported** | Passed through after MDX import strip + untrusted-fence strip |
 | MDX imports / components | **Unsupported** | Inventoried; tags neutralized; not executed |
