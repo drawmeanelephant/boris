@@ -74,7 +74,7 @@ a:hover { color: var(--blue); }
 .prose pre { overflow-x: auto; padding: 1rem; border-left: 4px solid var(--blue); background: var(--code); color: #f6f8fa; }
 .prose pre code { padding: 0; background: transparent; color: inherit; }
 .prose table { width: 100%; border-collapse: collapse; font-size: .94rem; }
-.prose th, .prose td { padding: .55rem .65rem; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.prose th, .prose td { padding: .55rem .65rem; border: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .prose th { background: var(--wash); font-weight: 700; }
 .prose img { max-width: 100%; height: auto; }
 
@@ -99,7 +99,6 @@ a:hover { color: var(--blue); }
 .home-intro h1 { margin: 0 0 .7rem; font-size: clamp(2.5rem, 7vw, 5.5rem); line-height: .98; letter-spacing: -.06em; }
 .home-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(13rem, 17rem); gap: 3rem; padding-top: 2rem; }
 .home-map { border-left: 1px solid var(--line); padding-left: 1.25rem; }
-.prose--home h1 { display: none; }
 .home-map .site-nav ul { margin-top: .5rem; }
 .home-map .site-nav a { padding: .45rem .5rem; }
 .page-children { margin: 1.5rem 0 !important; padding: 1rem; border-top: 3px solid var(--blue); background: var(--wash); }

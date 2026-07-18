@@ -41,11 +41,6 @@ source belongs under this example; generated HTML does not.
 
 ## Check the offline boundary
 
-```bash
-rg -n 'https?://|<script|@import|url\(' \
-  test-output/agent-themes/pure --glob '*.html' --glob '*.css' || true
-```
-
-The compiled site should contain no remote stylesheets, scripts, imports, or
-font/image URLs. Open the generated `index.html` locally to inspect the wide
-and narrow layouts.
+Use the offline grep from this example's README against the generated tree. It
+should find no remote stylesheets, scripts, imports, or font/image URLs. Open
+the generated `index.html` locally to inspect the wide and narrow layouts.

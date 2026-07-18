@@ -14,8 +14,8 @@ long navigation tree.
 
 | Page | Focus |
 | --- | --- |
-| [Getting started](guides/getting-started.md) | Compile, inspect, and repeat the theme build |
-| [Reference](reference.md) | Layout markers, styling hooks, and boundaries |
+| [[guides/getting-started|Getting started]] | Compile, inspect, and repeat the theme build |
+| [[reference|Reference]] | Layout markers, styling hooks, and boundaries |
 
 <Aside kind="note">
 

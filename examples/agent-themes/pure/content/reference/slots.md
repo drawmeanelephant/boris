@@ -20,7 +20,7 @@ keys.
 | `{{nav}}` | Browse rail or compact mobile menu |
 | `{{breadcrumb}}` | Header trail above the article |
 | `{{toc}}` | On this page rail |
-| `{{children}}` | Home and section landing cards |
+| `{{children}}` | Section landing cards |
 | `{{metadata}}` | Status and tag definition list |
 | `{{footer}}` | Local static footer fragment |
 | `{{asset-url assets/pure-field-notes.css}}` | Page-relative stylesheet link |

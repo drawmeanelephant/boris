@@ -22,8 +22,6 @@ This tree exercises a complete Boris theme rather than a static mockup:
 | Page metadata and TOC | The Satellite reading layout |
 | Native components | `Aside` callouts and `Details` disclosures |
 
-{{children}}
-
 <Aside kind="tip" id="keep-it-small">
 
 Start with semantic HTML and a few local rules. A theme should make the
@@ -42,5 +40,5 @@ CDN.
 
 ## The next two stops
 
-- [Guides](guides.md) — build and inspect the example.
-- [Reference](reference.md) — see how the closed Boris slots map to the layout.
+- [[guides|Guides]] — build and inspect the example.
+- [[reference|Reference]] — see how the closed Boris slots map to the layout.

@@ -28,7 +28,7 @@ the compiler's default layout or the meaning of any frontmatter key.
 
 ## Read the slot map
 
-The [Slots and accessibility](reference/slots.md) page maps every marker used
+The [[reference/slots|Slots and accessibility]] page maps every marker used
 by the layouts and explains what happens when the viewport narrows.
 
 ## Original decisions
