@@ -21,6 +21,8 @@ file bytes and source lines only. PHP and JavaScript are never executed.
 The fixture contains 15 files: 9 PHP templates, 5 static assets/stylesheets,
 and one fixture README. The generated `inventory.json` records every sorted
 path, byte length, SHA-256, template classification, and line-level signal.
+The canonical generated bundle is checked in under
+[`wordpress-kubrick-theme-archaeology-artifacts/`](wordpress-kubrick-theme-archaeology-artifacts/).
 
 | Evidence class | Count | Examples |
 |---|---:|---|
@@ -37,8 +39,10 @@ state, and rendered output are outside the evidence boundary.
 
 ## Static Boris prototype
 
-The generated `prototype/main.html` is a no-runtime layout using only Boris’s
-closed layout markers. `slot_mapping.json` records the source evidence and
+The generated [`prototype/main.html`](wordpress-kubrick-theme-archaeology-artifacts/prototype/main.html)
+is a no-runtime layout using only Boris’s closed layout markers.
+[`slot_mapping.json`](wordpress-kubrick-theme-archaeology-artifacts/slot_mapping.json)
+records the source evidence and
 decision for each requested surface:
 
 | Boris surface | Decision | Mapping |
@@ -58,7 +62,8 @@ instead of inventing a second sidebar abstraction.
 
 ## Manual-review boundary
 
-`manual_review.json` preserves 86 unsupported or dynamic findings with exact
+[`manual_review.json`](wordpress-kubrick-theme-archaeology-artifacts/manual_review.json)
+preserves 86 unsupported or dynamic findings with exact
 source path, line number, raw evidence, decision, and review reason. The output
 decision totals are:
 
