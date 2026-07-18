@@ -47,9 +47,9 @@ On this path Boris also expands includes and wiki-links before Apex (see
 ./zig-out/bin/boris --no-rag --quiet
 ```
 
-Emits `manifest.json`, `graph.json`, and `build-report.json`. IR
-`schemaVersion` is still **`0.1.0`** in product v0.2.x unless the emit shape
-changes.
+Emits `manifest.json`, `graph.json`, and `build-report.json`. Base IR
+`schemaVersion` is **`0.2.0`** (typed dependency edges + reverse index) unless
+a deliberate schema break bumps it.
 
 <Aside kind="warning">
 
