@@ -875,7 +875,7 @@ fn exportProfileManifest(
     out_dir: Io.Dir,
     profile: Profile,
     stats: ExportStats,
-    paths: []const []const u8,
+    packed_paths: []const []const u8,
 ) !void {
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
@@ -888,7 +888,7 @@ fn exportProfileManifest(
     try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{stats.catalog_entries}));
     try buf.appendSlice(gpa, ",\"skipped\":");
     try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d},\"paths\":[", .{stats.skipped}));
-    for (paths, 0..) |path, index| {
+    for (packed_paths, 0..) |path, index| {
         if (index != 0) try buf.appendSlice(gpa, ",");
         try buf.append(gpa, '"');
         try jsonEscapeAppend(&buf, gpa, path);
@@ -1197,6 +1197,8 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     }
 
     var stats: ExportStats = .{};
+    var packed_paths: std.ArrayList([]const u8) = .empty;
+    defer packed_paths.deinit(gpa);
     var stage_writes: usize = 0;
 
     log(opts, "\nSource RAG → {s}/  (root={s})\n", .{ opts.out_dir, opts.root_dir });
@@ -1254,6 +1256,7 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
             .docs => try packed_docs.append(gpa, packed_file),
             .content => try packed_content.append(gpa, packed_file),
         }
+        try packed_paths.append(gpa, source_path);
         stats.source_files += 1;
         log(opts, "  source     {s}\n", .{source_path});
     }
@@ -1290,7 +1293,7 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     try exportIndex(io, gpa, out, catalog.items, stats, !opts.no_bundles);
     try exportCatalogJsonl(io, gpa, out, catalog.items);
     try exportCatalogMeta(io, out, opts.profile);
-    try exportProfileManifest(io, gpa, out, opts.profile, stats, paths);
+    try exportProfileManifest(io, gpa, out, opts.profile, stats, packed_paths.items);
 
     try publishManagedCorpus(io, gpa, stage_path, opts.out_dir);
 
@@ -1498,6 +1501,7 @@ test "exportCorpus mini fixture" {
         defer root.close(io);
         try root.writeFile(io, .{ .sub_path = "README.md", .data = "# Demo\n" });
         try root.writeFile(io, .{ .sub_path = "src/hello.zig", .data = "pub fn main() void {}\n" });
+        try root.writeFile(io, .{ .sub_path = "src/skip.json", .data = &[_]u8{ '{', 0, '}' } });
         try root.writeFile(io, .{ .sub_path = "src/skip.bin", .data = &[_]u8{ 0x00, 0x01, 0x02 } });
         try root.writeFile(io, .{ .sub_path = "vendor/third_party.c", .data = "int third_party;\n" });
         try root.writeFile(io, .{ .sub_path = "tools/source-rag/main.zig", .data = "pub fn export() void {}\n" });
@@ -1510,6 +1514,7 @@ test "exportCorpus mini fixture" {
         .max_bytes = 512 * 1024,
     });
     try std.testing.expectEqual(@as(usize, 3), stats.source_files);
+    try std.testing.expectEqual(@as(usize, 1), stats.skipped);
     try std.testing.expect(stats.catalog_entries >= 3);
 
     var out = try Io.Dir.cwd().openDir(io, out_rel, .{});
@@ -1532,6 +1537,11 @@ test "exportCorpus mini fixture" {
     try std.testing.expect(std.mem.indexOf(u8, catalog, "src/hello.zig") != null);
     try std.testing.expect(std.mem.indexOf(u8, catalog, "tools/source-rag/main.zig") != null);
     try std.testing.expect(std.mem.indexOf(u8, catalog, "vendor/third_party.c") == null);
+
+    const profile_manifest = try readFileAlloc(io, out, "profile_manifest.json", gpa);
+    defer gpa.free(profile_manifest);
+    try std.testing.expect(std.mem.indexOf(u8, profile_manifest, "src/hello.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, profile_manifest, "src/skip.json") == null);
 
     const source_one = try readFileAlloc(io, out, "boris-source-1.md", gpa);
     defer gpa.free(source_one);

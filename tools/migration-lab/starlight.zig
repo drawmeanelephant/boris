@@ -495,6 +495,154 @@ fn parseAttribute(allocator: std.mem.Allocator, tag: []const u8, name: []const u
     return null;
 }
 
+fn isDynamicAssetAttribute(name: []const u8) bool {
+    const names = [_][]const u8{ "src", "srcSet", "srcset", "poster", "data-src", "data-srcset" };
+    for (names) |candidate| {
+        if (std.mem.eql(u8, name, candidate)) return true;
+    }
+    return false;
+}
+
+fn isHtmlAttributeNameChar(c: u8) bool {
+    return (c >= 'A' and c <= 'Z') or (c >= 'a' and c <= 'z') or
+        (c >= '0' and c <= '9') or c == '-' or c == ':' or c == '_';
+}
+
+fn findHtmlTagEnd(line: []const u8, start: usize) ?usize {
+    var quote: ?u8 = null;
+    var braces: usize = 0;
+    var i = start;
+    while (i < line.len) : (i += 1) {
+        const c = line[i];
+        if (quote) |q| {
+            if (c == q) quote = null;
+            continue;
+        }
+        if (c == '\'' or c == '"' or c == '`') {
+            quote = c;
+        } else if (c == '{') {
+            braces += 1;
+        } else if (c == '}' and braces > 0) {
+            braces -= 1;
+        } else if (c == '>' and braces == 0) {
+            return i;
+        }
+    }
+    return null;
+}
+
+fn findJsxExpressionEnd(line: []const u8, start: usize, tag_end: usize) ?usize {
+    if (start >= tag_end or line[start] != '{') return null;
+    var quote: ?u8 = null;
+    var braces: usize = 1;
+    var i = start + 1;
+    while (i < tag_end) : (i += 1) {
+        const c = line[i];
+        if (quote) |q| {
+            if (c == q and line[i - 1] != '\\') quote = null;
+            continue;
+        }
+        if (c == '\'' or c == '"' or c == '`') {
+            quote = c;
+        } else if (c == '{') {
+            braces += 1;
+        } else if (c == '}') {
+            braces -= 1;
+            if (braces == 0) return i;
+        }
+    }
+    return null;
+}
+
+/// Remove only dynamic JSX/HTML asset attribute values from a line. Static
+/// attributes remain byte-for-byte unchanged. The exact removed attribute is
+/// recorded as a review event so a human can restore the source expression.
+fn neutralizeDynamicAssetAttrs(
+    a: std.mem.Allocator,
+    line: []const u8,
+    line_no: u32,
+    events: *std.ArrayList(LinkEvent),
+    out: *std.ArrayList(u8),
+) !usize {
+    var cursor: usize = 0;
+    var search: usize = 0;
+    var count: usize = 0;
+
+    while (std.mem.indexOfScalarPos(u8, line, search, '<')) |tag_start| {
+        const tag_end = findHtmlTagEnd(line, tag_start) orelse break;
+        if (tag_start + 1 >= tag_end or line[tag_start + 1] == '/' or
+            line[tag_start + 1] == '!' or line[tag_start + 1] == '?')
+        {
+            search = tag_end + 1;
+            continue;
+        }
+
+        var attr_scan = tag_start + 1;
+        while (attr_scan < tag_end and isHtmlAttributeNameChar(line[attr_scan])) : (attr_scan += 1) {}
+        while (attr_scan < tag_end) {
+            while (attr_scan < tag_end and (std.ascii.isWhitespace(line[attr_scan]) or line[attr_scan] == '/')) : (attr_scan += 1) {}
+            if (attr_scan >= tag_end) break;
+
+            if (line[attr_scan] == '"' or line[attr_scan] == '\'' or line[attr_scan] == '`') {
+                const q = line[attr_scan];
+                attr_scan += 1;
+                while (attr_scan < tag_end and line[attr_scan] != q) : (attr_scan += 1) {}
+                if (attr_scan < tag_end) attr_scan += 1;
+                continue;
+            }
+            if (line[attr_scan] == '{') {
+                const expr_end = findJsxExpressionEnd(line, attr_scan, tag_end) orelse break;
+                attr_scan = expr_end + 1;
+                continue;
+            }
+
+            const attr_start = attr_scan;
+            while (attr_scan < tag_end and isHtmlAttributeNameChar(line[attr_scan])) : (attr_scan += 1) {}
+            if (attr_scan == attr_start) {
+                attr_scan += 1;
+                continue;
+            }
+            const attr_name = line[attr_start..attr_scan];
+            var value_scan = attr_scan;
+            while (value_scan < tag_end and std.ascii.isWhitespace(line[value_scan])) : (value_scan += 1) {}
+            if (value_scan >= tag_end or line[value_scan] != '=') {
+                attr_scan = value_scan;
+                continue;
+            }
+            value_scan += 1;
+            while (value_scan < tag_end and std.ascii.isWhitespace(line[value_scan])) : (value_scan += 1) {}
+            if (value_scan >= tag_end or line[value_scan] != '{') {
+                attr_scan = value_scan;
+                continue;
+            }
+            const expr_end = findJsxExpressionEnd(line, value_scan, tag_end) orelse {
+                attr_scan = value_scan + 1;
+                continue;
+            };
+
+            if (isDynamicAssetAttribute(attr_name)) {
+                try out.appendSlice(a, line[cursor..attr_start]);
+                cursor = expr_end + 1;
+                count += 1;
+                try events.append(a, .{
+                    .kind = "dynamic_asset",
+                    .target = try a.dupe(u8, line[attr_start .. expr_end + 1]),
+                    .line = line_no,
+                    .resolution = "review",
+                    .rewritten_to = "dynamic asset attribute omitted; see boundary_manifest.json",
+                    .review_reason = "dynamic_asset_expression",
+                });
+            }
+            attr_scan = expr_end + 1;
+        }
+        search = tag_end + 1;
+    }
+
+    if (count == 0) return 0;
+    try out.appendSlice(a, line[cursor..]);
+    return count;
+}
+
 fn transformStarlightMdx(a: std.mem.Allocator, body: []const u8) !TransformedMdx {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
@@ -882,11 +1030,14 @@ fn sanitizeMdxBody(a: std.mem.Allocator, body: []const u8) !struct {
     body: []const u8,
     imports: []const []const u8,
     components: []const []const u8,
+    asset_events: []const LinkEvent,
 } {
     var out: std.ArrayList(u8) = .empty;
     var imports: std.ArrayList([]const u8) = .empty;
     var components: std.ArrayList([]const u8) = .empty;
+    var asset_events: std.ArrayList(LinkEvent) = .empty;
     var pos: usize = 0;
+    var line_no: u32 = 1;
     while (pos < body.len) {
         const end = std.mem.indexOfScalarPos(u8, body, pos, '\n') orelse body.len;
         const line = body[pos..end];
@@ -898,37 +1049,46 @@ fn sanitizeMdxBody(a: std.mem.Allocator, body: []const u8) !struct {
                 try imports.append(a, try a.dupe(u8, trim(line)));
             }
         } else {
-            try scanComponentTags(a, line, &components);
+            var dynamic_line: std.ArrayList(u8) = .empty;
+            const dynamic_count = try neutralizeDynamicAssetAttrs(a, line, line_no, &asset_events, &dynamic_line);
+            defer dynamic_line.deinit(a);
+            const source_line = if (dynamic_count > 0) dynamic_line.items else line;
+            if (dynamic_count > 0) {
+                for (asset_events.items[asset_events.items.len - dynamic_count ..]) |_| {
+                    try out.appendSlice(a, "<!-- boris-migration-review: dynamic asset attribute omitted; see boundary_manifest.json -->\n");
+                }
+            }
+            try scanComponentTags(a, source_line, &components);
             // Neutralize JSX open/self-closing tags without executing them.
             var li: usize = 0;
-            while (li < line.len) {
-                if (line[li] == '<' and li + 1 < line.len) {
-                    const c1 = line[li + 1];
+            while (li < source_line.len) {
+                if (source_line[li] == '<' and li + 1 < source_line.len) {
+                    const c1 = source_line[li + 1];
                     if (c1 == '/') {
                         // Closing tag: skip through >
                         var k = li + 2;
-                        while (k < line.len and line[k] != '>') : (k += 1) {}
-                        if (k < line.len) k += 1;
-                        const tag_content = line[li + 2 .. k - 1];
+                        while (k < source_line.len and source_line[k] != '>') : (k += 1) {}
+                        if (k < source_line.len) k += 1;
+                        const tag_content = source_line[li + 2 .. k - 1];
                         var name_end: usize = 0;
                         while (name_end < tag_content.len and !std.ascii.isWhitespace(tag_content[name_end]) and tag_content[name_end] != '/' and tag_content[name_end] != '>') : (name_end += 1) {}
                         const tag_name = tag_content[0..name_end];
                         if (std.mem.eql(u8, tag_name, "Aside") or std.mem.eql(u8, tag_name, "Details")) {
-                            try out.appendSlice(a, line[li..k]);
+                            try out.appendSlice(a, source_line[li..k]);
                         }
                         li = k;
                         continue;
                     }
                     if (c1 >= 'A' and c1 <= 'Z') {
                         var k = li + 1;
-                        while (k < line.len and line[k] != '>') : (k += 1) {}
-                        if (k < line.len) k += 1;
-                        const tag_content = line[li + 1 .. k - 1];
+                        while (k < source_line.len and source_line[k] != '>') : (k += 1) {}
+                        if (k < source_line.len) k += 1;
+                        const tag_content = source_line[li + 1 .. k - 1];
                         var name_end: usize = 0;
                         while (name_end < tag_content.len and !std.ascii.isWhitespace(tag_content[name_end]) and tag_content[name_end] != '/' and tag_content[name_end] != '>') : (name_end += 1) {}
                         const tag_name = tag_content[0..name_end];
                         if (std.mem.eql(u8, tag_name, "Aside") or std.mem.eql(u8, tag_name, "Details")) {
-                            try out.appendSlice(a, line[li..k]);
+                            try out.appendSlice(a, source_line[li..k]);
                         } else {
                             try out.appendSlice(a, "<!-- unsupported-mdx-component -->");
                         }
@@ -936,12 +1096,13 @@ fn sanitizeMdxBody(a: std.mem.Allocator, body: []const u8) !struct {
                         continue;
                     }
                 }
-                try out.append(a, line[li]);
+                try out.append(a, source_line[li]);
                 li += 1;
             }
             if (has_newline) try out.append(a, '\n');
         }
         pos = if (has_newline) end + 1 else end;
+        line_no += 1;
     }
     // Dedup component names deterministically.
     std.mem.sort([]const u8, components.items, {}, struct {
@@ -964,6 +1125,7 @@ fn sanitizeMdxBody(a: std.mem.Allocator, body: []const u8) !struct {
         .body = try out.toOwnedSlice(a),
         .imports = try imports.toOwnedSlice(a),
         .components = try dedup.toOwnedSlice(a),
+        .asset_events = try asset_events.toOwnedSlice(a),
     };
 }
 
@@ -2321,7 +2483,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             .imports = mdx.imports,
             .components = mdx.components,
             .stripped_blocks = stripped.blocks,
-            .link_events = &.{},
+            .link_events = mdx.asset_events,
             .component_events = transformed.events,
             .bytes = raw.len,
         });
@@ -2427,7 +2589,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         if (p.is_synthetic) continue;
         const rewritten = try rewriteLinks(a, route_prefix, p.entity_id, p.body, &entities);
         p.body = rewritten.body;
-        p.link_events = rewritten.events;
+        var all_events: std.ArrayList(LinkEvent) = .empty;
+        try all_events.appendSlice(a, p.link_events);
+        try all_events.appendSlice(a, rewritten.events);
+        p.link_events = try all_events.toOwnedSlice(a);
     }
 
     // ---- Proven local Markdown images → page `{stem}.assets/` (F-L1) ----
@@ -2635,6 +2800,16 @@ fn buildBoundaryItems(
         }
         for (p.link_events) |ev| {
             if (std.mem.eql(u8, ev.resolution, "review")) {
+                if (ev.review_reason != null and std.mem.eql(u8, ev.review_reason.?, "dynamic_asset_expression")) {
+                    try items.append(a, .{
+                        .class = "manual_review",
+                        .source_path = p.source_path,
+                        .detail = try std.fmt.allocPrint(a, "dynamic_asset_expression:{s}", .{ev.target}),
+                        .line = ev.line,
+                        .category = "dynamic_asset",
+                    });
+                    continue;
+                }
                 try items.append(a, .{
                     .class = "manual_review",
                     .source_path = p.source_path,
@@ -3995,6 +4170,52 @@ test "starlight: F-L1 image-path fixture migrates, preserves, and fails closed" 
     Io.Dir.cwd().deleteTree(io, out_b) catch {};
 }
 
+test "starlight: dynamic asset attributes become explicit review placeholders" {
+    const io = std.testing.io;
+    const out_dir = "fixtures/.test-dynamic-asset-starlight";
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+
+    var fixture = try Io.Dir.cwd().openDir(io, "fixtures/dynamic-asset-starlight", .{});
+    defer fixture.close(io);
+    const before = try readFileAlloc(io, fixture, "src/content/docs/en/dynamic-assets.mdx", std.testing.allocator);
+    defer std.testing.allocator.free(before);
+
+    try run(io, std.testing.allocator, .{
+        .source_root_dir = "fixtures/dynamic-asset-starlight",
+        .out_dir = out_dir,
+        .quiet = true,
+        .max_pages = 10,
+    });
+
+    var od = try Io.Dir.cwd().openDir(io, out_dir, .{});
+    defer od.close(io);
+
+    const page = try readFileAlloc(io, od, "content/dynamic-assets.md", std.testing.allocator);
+    defer std.testing.allocator.free(page);
+    try std.testing.expect(std.mem.indexOf(u8, page, "<!-- boris-migration-review: dynamic asset attribute omitted; see boundary_manifest.json -->") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "src={localBirdImage.src}") == null);
+    // Static and missing static raw-HTML references retain their prior bytes.
+    try std.testing.expect(std.mem.indexOf(u8, page, "<img src=\"image.png\" alt=\"Static image\" />") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "<img src=\"missing.png\" alt=\"Missing image\" />") != null);
+
+    const boundary = try readFileAlloc(io, od, "boundary_manifest.json", std.testing.allocator);
+    defer std.testing.allocator.free(boundary);
+    try std.testing.expect(std.mem.indexOf(u8, boundary, "dynamic_asset_expression:src={localBirdImage.src}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, boundary, "\"category\": \"dynamic_asset\"") != null);
+
+    const links = try readFileAlloc(io, od, "link_review.json", std.testing.allocator);
+    defer std.testing.allocator.free(links);
+    try std.testing.expect(std.mem.indexOf(u8, links, "\"kind\": \"dynamic_asset\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, links, "src={localBirdImage.src}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, links, "dynamic_asset_expression") != null);
+
+    const after = try readFileAlloc(io, fixture, "src/content/docs/en/dynamic-assets.mdx", std.testing.allocator);
+    defer std.testing.allocator.free(after);
+    try std.testing.expectEqualStrings(before, after);
+
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+}
+
 test "starlight: dogfood relative images migrate for Boris compile surface" {
     const io = std.testing.io;
     const out_dir = "fixtures/.test-starlight-dogfood-images";
@@ -4045,10 +4266,34 @@ test "starlight: sanitizeMdxBody preserves attributed Aside and Details" {
         a.free(res.imports);
         for (res.components) |cmp| a.free(cmp);
         a.free(res.components);
+        for (res.asset_events) |event| a.free(event.target);
+        a.free(res.asset_events);
     }
 
     try std.testing.expect(std.mem.indexOf(u8, res.body, "<Details summary=\"Custom Details Summary\" open=\"true\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, res.body, "</Details>") != null);
     try std.testing.expect(std.mem.indexOf(u8, res.body, "<Aside type=\"note\" title=\"Custom Aside Title\" class=\"extra-style\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, res.body, "</Aside>") != null);
+}
+
+test "starlight: sanitize dynamic asset expression keeps exact review event" {
+    const a = std.testing.allocator;
+    const body = "<img src = {localBirdImage.src} alt=\"Bird\" />\n";
+    const res = try sanitizeMdxBody(a, body);
+    defer {
+        a.free(res.body);
+        for (res.imports) |imp| a.free(imp);
+        a.free(res.imports);
+        for (res.components) |cmp| a.free(cmp);
+        a.free(res.components);
+        for (res.asset_events) |event| a.free(event.target);
+        a.free(res.asset_events);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), res.asset_events.len);
+    try std.testing.expectEqualStrings("src = {localBirdImage.src}", res.asset_events[0].target);
+    try std.testing.expectEqualStrings("dynamic_asset_expression", res.asset_events[0].review_reason.?);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "src = {localBirdImage.src}") == null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "dynamic asset attribute omitted") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "alt=\"Bird\"") != null);
 }
