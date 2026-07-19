@@ -555,6 +555,8 @@ fn writeBytes(io: Io, root: Io.Dir, rel_path: []const u8, data: []const u8) !voi
 }
 
 /// Root files owned by this exporter. `files/` is the only managed directory.
+/// `upload_manifest.json` is written only for `--bundles-only`; it remains managed
+/// so a later default export cleans a prior bundles-only pack.
 const managed_root_file_names = [_][]const u8{
     "INDEX.md",
     "UPLOAD-GUIDE.md",
@@ -562,7 +564,19 @@ const managed_root_file_names = [_][]const u8{
     "catalog_meta.json",
     "profile_manifest.json",
     "part_manifest.json",
+    "upload_manifest.json",
 };
+
+/// Approximate token count for planning LLM uploads. Uses the documented
+/// `chars/4` heuristic on UTF-8 byte length (integer floor). Not a tokenizer.
+pub fn approxTokensFromBytes(byte_count: usize) usize {
+    return byte_count / 4;
+}
+
+fn fileByteSize(io: Io, dir: Io.Dir, rel: []const u8) !usize {
+    const st = try dir.statFile(io, rel, .{});
+    return st.size;
+}
 
 fn isManagedBundleFileName(name: []const u8) bool {
     const exact = [_][]const u8{ "boris-docs.md", "boris-content.md" };
@@ -1103,6 +1117,76 @@ fn exportPartManifest(
     try writeBytes(io, out_dir, "part_manifest.json", buf.items);
 }
 
+/// Upload planner for `--bundles-only` packs. Lists generated upload files with
+/// on-disk byte sizes, a recommended upload order, totals, and a documented
+/// `chars/4` approximate token estimate. Does not alter other manifest schemas.
+/// The planner file itself is omitted from the file list (it is not model corpus).
+fn exportUploadManifest(
+    io: Io,
+    gpa: std.mem.Allocator,
+    out_dir: Io.Dir,
+    profile: Profile,
+    split_size: usize,
+    parts: []const BundlePart,
+) !void {
+    // Recommended upload order: index + guide first, then machine sidecars, then
+    // combined parts in the same global order as part_manifest.json.
+    const sidecar_names = [_][]const u8{
+        "INDEX.md",
+        "UPLOAD-GUIDE.md",
+        "part_manifest.json",
+        "catalog_meta.json",
+        "profile_manifest.json",
+        "catalog.jsonl",
+    };
+
+    var ordered: std.ArrayList([]const u8) = .empty;
+    defer ordered.deinit(gpa);
+    try ordered.ensureTotalCapacity(gpa, sidecar_names.len + parts.len);
+    for (sidecar_names) |name| try ordered.append(gpa, name);
+    for (parts) |part| try ordered.append(gpa, part.file_name);
+
+    var total_bytes: usize = 0;
+    var file_sizes: std.ArrayList(usize) = .empty;
+    defer file_sizes.deinit(gpa);
+    try file_sizes.ensureTotalCapacity(gpa, ordered.items.len);
+    for (ordered.items) |name| {
+        const size = try fileByteSize(io, out_dir, name);
+        try file_sizes.append(gpa, size);
+        total_bytes += size;
+    }
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    var num_buf: [32]u8 = undefined;
+
+    try buf.appendSlice(gpa, "{\"profile\":\"");
+    try jsonEscapeAppend(&buf, gpa, profileName(profile));
+    try buf.appendSlice(gpa, "\",\"split_size\":");
+    try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{split_size}));
+    try buf.appendSlice(gpa, ",\"token_estimate_method\":\"chars/4\",\"total_bytes\":");
+    try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{total_bytes}));
+    try buf.appendSlice(gpa, ",\"approx_tokens\":");
+    try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{approxTokensFromBytes(total_bytes)}));
+    try buf.appendSlice(gpa, ",\"files\":[");
+
+    for (ordered.items, 0..) |name, index| {
+        if (index != 0) try buf.appendSlice(gpa, ",");
+        const size = file_sizes.items[index];
+        try buf.appendSlice(gpa, "{\"order\":");
+        try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{index + 1}));
+        try buf.appendSlice(gpa, ",\"file\":\"");
+        try jsonEscapeAppend(&buf, gpa, name);
+        try buf.appendSlice(gpa, "\",\"bytes\":");
+        try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{size}));
+        try buf.appendSlice(gpa, ",\"approx_tokens\":");
+        try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{approxTokensFromBytes(size)}));
+        try buf.append(gpa, '}');
+    }
+    try buf.appendSlice(gpa, "]}\n");
+    try writeBytes(io, out_dir, "upload_manifest.json", buf.items);
+}
+
 fn exportCatalogJsonl(
     io: Io,
     gpa: std.mem.Allocator,
@@ -1186,7 +1270,7 @@ fn exportIndex(
             \\is intentionally omitted.
             \\
             \\1. Upload this entire directory (or zip it).
-            \\2. Start from `INDEX.md` and `part_manifest.json` as the path map.
+            \\2. Start from `INDEX.md` and `upload_manifest.json` as the upload map.
             \\3. Prefer `boris-source-N.md` for implementation questions.
             \\4. Prefer `boris-docs[-N].md` for contracts and docs.
             \\5. Cite `source_path` from document frontmatter when answering.
@@ -1300,6 +1384,14 @@ fn exportIndex(
         \\| `profile_manifest.json` | selected profile and sorted source paths |
         \\| `part_manifest.json` | ordered parts, source paths, and byte counts |
         \\
+    );
+    if (opts.bundles_only) {
+        try doc.appendSlice(gpa,
+            \\| `upload_manifest.json` | recommended upload order, byte sizes, and chars/4 token estimates |
+            \\
+        );
+    }
+    try doc.appendSlice(gpa,
         \\These machine files are **not** catalog rows.
         \\
     );
@@ -1344,9 +1436,14 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir, opts: Options) !void {
         \\
         \\1. `INDEX.md`
         \\2. `UPLOAD-GUIDE.md`
-        \\3. `part_manifest.json` (upload order and byte counts)
-        \\4. `boris-source-N.md`, `boris-docs[-N].md`, `boris-content[-N].md`
-        \\5. `catalog.jsonl`, `catalog_meta.json`, `profile_manifest.json`
+        \\3. `upload_manifest.json` (recommended order, sizes, chars/4 token estimate)
+        \\4. `part_manifest.json` (authoritative part map and source paths)
+        \\5. `boris-source-N.md`, `boris-docs[-N].md`, `boris-content[-N].md`
+        \\6. `catalog.jsonl`, `catalog_meta.json`, `profile_manifest.json`
+        \\
+        \\Follow `upload_manifest.json` order when the host limits concurrent files.
+        \\Token counts there use the documented `chars/4` heuristic (floor of
+        \\UTF-8 bytes ÷ 4), not a model tokenizer.
         \\
     ;
     const bundles =
@@ -1599,6 +1696,9 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     try exportCatalogMeta(io, out, opts.profile, opts.split_size);
     try exportProfileManifest(io, gpa, out, opts.profile, stats, packed_paths.items);
     try exportPartManifest(io, gpa, out, opts.profile, opts.split_size, opts.includeBundles(), bundle_parts.items);
+    if (opts.bundles_only) {
+        try exportUploadManifest(io, gpa, out, opts.profile, opts.split_size, bundle_parts.items);
+    }
 
     try publishManagedCorpus(io, gpa, stage_path, opts.out_dir);
 
@@ -2041,6 +2141,14 @@ fn writeMiniSourceRagFixture(io: Io, gpa: std.mem.Allocator, root_rel: []const u
     try root.writeFile(io, .{ .sub_path = "tools/source-rag/main.zig", .data = "pub fn export() void {}\n" });
 }
 
+test "approxTokensFromBytes uses floor chars/4" {
+    try std.testing.expectEqual(@as(usize, 0), approxTokensFromBytes(0));
+    try std.testing.expectEqual(@as(usize, 0), approxTokensFromBytes(3));
+    try std.testing.expectEqual(@as(usize, 1), approxTokensFromBytes(4));
+    try std.testing.expectEqual(@as(usize, 2), approxTokensFromBytes(9));
+    try std.testing.expectEqual(@as(usize, 100), approxTokensFromBytes(400));
+}
+
 test "exportCorpus default mode still emits files/" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -2068,6 +2176,8 @@ test "exportCorpus default mode still emits files/" {
     try std.testing.expect(pathExists(io, out, "boris-source-1.md"));
     try std.testing.expect(pathExists(io, out, "INDEX.md"));
     try std.testing.expect(pathExists(io, out, "part_manifest.json"));
+    // Default exports must not emit the bundles-only upload planner.
+    try std.testing.expect(!pathExists(io, out, "upload_manifest.json"));
 }
 
 test "exportCorpus bundles-only omits files/, removes stale files/, is deterministic, and keeps manifests consistent" {
@@ -2117,6 +2227,7 @@ test "exportCorpus bundles-only omits files/, removes stale files/, is determini
     try std.testing.expect(pathExists(io, out, "catalog_meta.json"));
     try std.testing.expect(pathExists(io, out, "profile_manifest.json"));
     try std.testing.expect(pathExists(io, out, "part_manifest.json"));
+    try std.testing.expect(pathExists(io, out, "upload_manifest.json"));
     try std.testing.expect(pathExists(io, out, "boris-source-1.md"));
     try std.testing.expect(pathExists(io, out, "boris-docs.md"));
     try std.testing.expect(pathExists(io, out, "boris-content.md"));
@@ -2125,10 +2236,13 @@ test "exportCorpus bundles-only omits files/, removes stale files/, is determini
     defer gpa.free(index);
     try std.testing.expect(std.mem.indexOf(u8, index, "--bundles-only") != null);
     try std.testing.expect(std.mem.indexOf(u8, index, "files/**` tree") != null or std.mem.indexOf(u8, index, "files/**") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index, "upload_manifest.json") != null);
 
     const guide = try readFileAlloc(io, out, "UPLOAD-GUIDE.md", gpa);
     defer gpa.free(guide);
     try std.testing.expect(std.mem.indexOf(u8, guide, "--bundles-only") != null);
+    try std.testing.expect(std.mem.indexOf(u8, guide, "upload_manifest.json") != null);
+    try std.testing.expect(std.mem.indexOf(u8, guide, "chars/4") != null);
 
     const catalog = try readFileAlloc(io, out, "catalog.jsonl", gpa);
     defer gpa.free(catalog);
@@ -2150,6 +2264,58 @@ test "exportCorpus bundles-only omits files/, removes stale files/, is determini
     try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"source_path\":\"src/hello.zig\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"source_path\":\"tools/source-rag/main.zig\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"file\":\"boris-source-1.md\"") != null);
+
+    const upload_manifest = try readFileAlloc(io, out, "upload_manifest.json", gpa);
+    defer gpa.free(upload_manifest);
+    try std.testing.expect(std.mem.indexOf(u8, upload_manifest, "\"profile\":\"all\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, upload_manifest, "\"split_size\":20") != null);
+    try std.testing.expect(std.mem.indexOf(u8, upload_manifest, "\"token_estimate_method\":\"chars/4\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, upload_manifest, "\"total_bytes\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, upload_manifest, "\"approx_tokens\":") != null);
+    // Recommended order: index/guide first, then sidecars, then parts.
+    try std.testing.expect(std.mem.indexOf(u8, upload_manifest, "\"order\":1,\"file\":\"INDEX.md\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, upload_manifest, "\"order\":2,\"file\":\"UPLOAD-GUIDE.md\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, upload_manifest, "\"order\":3,\"file\":\"part_manifest.json\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, upload_manifest, "\"file\":\"boris-source-1.md\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, upload_manifest, "\"file\":\"boris-docs.md\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, upload_manifest, "\"file\":\"boris-content.md\"") != null);
+    // Planner is not listed inside itself; existing manifests stay unchanged.
+    try std.testing.expect(std.mem.indexOf(u8, upload_manifest, "upload_manifest.json") == null);
+    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "upload_manifest") == null);
+    try std.testing.expect(std.mem.indexOf(u8, profile_manifest, "upload_manifest") == null);
+
+    // Per-file sizes and totals match on-disk bytes and chars/4.
+    var expected_total: usize = 0;
+    const upload_files = [_][]const u8{
+        "INDEX.md",
+        "UPLOAD-GUIDE.md",
+        "part_manifest.json",
+        "catalog_meta.json",
+        "profile_manifest.json",
+        "catalog.jsonl",
+        "boris-source-1.md",
+        "boris-source-2.md",
+        "boris-source-3.md",
+        "boris-docs.md",
+        "boris-content.md",
+    };
+    for (upload_files) |name| {
+        const size = try fileByteSize(io, out, name);
+        expected_total += size;
+        var size_needle: [96]u8 = undefined;
+        const size_frag = try std.fmt.bufPrint(&size_needle, "\"file\":\"{s}\",\"bytes\":{d},\"approx_tokens\":{d}", .{
+            name,
+            size,
+            approxTokensFromBytes(size),
+        });
+        try std.testing.expect(std.mem.indexOf(u8, upload_manifest, size_frag) != null);
+    }
+    var total_needle: [96]u8 = undefined;
+    const total_frag = try std.fmt.bufPrint(&total_needle, "\"total_bytes\":{d},\"approx_tokens\":{d}", .{
+        expected_total,
+        approxTokensFromBytes(expected_total),
+    });
+    try std.testing.expect(std.mem.indexOf(u8, upload_manifest, total_frag) != null);
 
     // Internal consistency: every packed path appears in both manifests and catalog.
     const expected_paths = [_][]const u8{ "README.md", "src/hello.zig", "tools/source-rag/main.zig" };
@@ -2192,9 +2358,23 @@ test "exportCorpus bundles-only omits files/, removes stale files/, is determini
     try expectOutputFileEqual(io, gpa, out, "catalog_meta.json", meta);
     try expectOutputFileEqual(io, gpa, out, "profile_manifest.json", profile_manifest);
     try expectOutputFileEqual(io, gpa, out, "part_manifest.json", part_manifest);
+    try expectOutputFileEqual(io, gpa, out, "upload_manifest.json", upload_manifest);
     try expectOutputFileEqual(io, gpa, out, "boris-source-1.md", source_one);
     try expectOutputFileEqual(io, gpa, out, "boris-source-2.md", source_two);
     try expectOutputFileEqual(io, gpa, out, "boris-source-3.md", source_three);
     try expectOutputFileEqual(io, gpa, out, "boris-docs.md", docs_bundle);
     try expectOutputFileEqual(io, gpa, out, "boris-content.md", content_bundle);
+
+    // Returning to default export removes the bundles-only planner and restores files/.
+    _ = try exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out_rel,
+        .quiet = true,
+        .split_size = 20,
+    });
+    try std.testing.expect(pathExists(io, out, "files/src/hello.zig.md"));
+    try std.testing.expect(!pathExists(io, out, "upload_manifest.json"));
+    const user_note_after = try readFileAlloc(io, out, "user-note.txt", gpa);
+    defer gpa.free(user_note_after);
+    try std.testing.expectEqualStrings("preserve unrelated output\n", user_note_after);
 }

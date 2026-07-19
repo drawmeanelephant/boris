@@ -82,6 +82,7 @@ source-rag/
   catalog_meta.json     # format + schema_version + tool_version + profile + split target
   profile_manifest.json  # selected profile, counts, and sorted packed paths
   part_manifest.json     # profile, ordered parts, source paths, and byte counts
+  upload_manifest.json   # --bundles-only only: upload order, sizes, chars/4 token estimates
   files/**              # one markdown document per source path (omitted with --bundles-only)
 ```
 
@@ -165,6 +166,7 @@ Emitted artifacts:
 | `catalog_meta.json` | Format + schema + profile + split target |
 | `profile_manifest.json` | Selected profile, counts, sorted packed paths |
 | `part_manifest.json` | Ordered parts, sources, and body byte counts |
+| `upload_manifest.json` | Recommended upload order, on-disk sizes, total bytes, chars/4 tokens |
 | `boris-source-*.md` / `boris-docs[-*].md` / `boris-content[-*].md` | Combined parts |
 
 Not emitted: the per-file `files/**` tree. Catalog rows still inventory each
@@ -172,10 +174,49 @@ packed source with stable `rag_path` values under `files/` so catalogs and
 manifests stay aligned; those paths are logical ids, not on-disk documents in
 this mode.
 
+### upload_manifest.json (`--bundles-only` only)
+
+Default and `--no-bundles` exports do **not** write this file. Existing
+`catalog_meta.json`, `catalog.jsonl`, `profile_manifest.json`, and
+`part_manifest.json` schemas are unchanged.
+
+```json
+{
+  "profile": "all",
+  "split_size": 524288,
+  "token_estimate_method": "chars/4",
+  "total_bytes": 1234567,
+  "approx_tokens": 308641,
+  "files": [
+    {"order": 1, "file": "INDEX.md", "bytes": 1200, "approx_tokens": 300},
+    {"order": 2, "file": "UPLOAD-GUIDE.md", "bytes": 1800, "approx_tokens": 450}
+  ]
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `profile` | Selected export profile |
+| `split_size` | Configured body-byte target for combined parts |
+| `token_estimate_method` | Always `"chars/4"` — documented planning heuristic, not a tokenizer |
+| `total_bytes` | Sum of on-disk byte sizes of listed upload files |
+| `approx_tokens` | `floor(total_bytes / 4)` |
+| `files[].order` | Recommended upload order (1-based) |
+| `files[].file` | Generated upload filename |
+| `files[].bytes` | On-disk size of that file |
+| `files[].approx_tokens` | `floor(bytes / 4)` for that file |
+
+Recommended order: `INDEX.md`, `UPLOAD-GUIDE.md`, machine sidecars
+(`part_manifest.json`, `catalog_meta.json`, `profile_manifest.json`,
+`catalog.jsonl`), then combined parts in `part_manifest.json` global order.
+`upload_manifest.json` itself is a planning sidecar and is **not** listed in
+`files` (so totals describe the corpus you actually upload to a model).
+
 A successful `--bundles-only` rerun uses the same staged publication path as a
 normal export. Managed artifacts from the previous pack (including a prior
-`files/` tree) are replaced; stale per-file documents are removed. Unrelated
-siblings beside the managed corpus are left alone. Two successive successful
+`files/` tree) are replaced; stale per-file documents are removed. A later
+default export also removes a prior `upload_manifest.json`. Unrelated siblings
+beside the managed corpus are left alone. Two successive successful
 `--bundles-only` runs on the same input produce byte-identical managed output.
 
 ### Profiles
@@ -279,16 +320,19 @@ Do not invent APIs that are not present in the corpus.
 
 1. Generate with `zig build source-rag -- --bundles-only` (add `--profile` /
    `--split-size` as needed).
-2. Upload the whole output directory, or at minimum:
+2. Open `upload_manifest.json` for recommended order, per-file sizes, total
+   upload bytes, and approximate tokens (`chars/4`).
+3. Upload the whole output directory, or at minimum the files listed in
+   `upload_manifest.json` (plus the planner itself if you want it for later):
    - `INDEX.md`, `UPLOAD-GUIDE.md`
-   - `part_manifest.json` (authoritative part order)
+   - `part_manifest.json` (authoritative part/source map)
    - every `boris-source-*.md`, `boris-docs[-*].md`, `boris-content[-*].md`
    - `catalog.jsonl`, `catalog_meta.json`, `profile_manifest.json`
-3. Upload parts in `part_manifest.json` order when the host limits concurrent
+4. Upload in `upload_manifest.json` order when the host limits concurrent
    files; keep whole parts (never hand-split a part mid-document).
-4. Prefer `boris-source-N.md` for implementation questions and `boris-docs`
+5. Prefer `boris-source-N.md` for implementation questions and `boris-docs`
    parts for contracts.
-5. Cite `source_path` from each embedded document’s frontmatter.
+6. Cite `source_path` from each embedded document’s frontmatter.
 
 Suggested system prompt snippet (bundles-only):
 
