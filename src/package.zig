@@ -10,8 +10,9 @@
 //! Reuses `pipeline.run` and `rag.run`. No new dependencies.
 //!
 //! Determinism: fixed archive basename, mtime=0 tar headers, sorted file
-//! order, no host timestamps in paths. On failure: no final archive; stage
-//! cleaned up.
+//! order, no host timestamps in paths. On failure: no final archive when none
+//! existed; a prior archive is preserved (move-aside install, not
+//! delete-before-write). Stage cleaned up on both success and content failure.
 
 const std = @import("std");
 const Io = std.Io;
@@ -51,6 +52,10 @@ pub const Options = struct {
     /// System seeds for RAG (same default as product RAG).
     system_docs_dir: []const u8 = "docs/rag/system",
     quiet: bool = false,
+    /// Test-only: after the temp archive is fully written and closed, fail
+    /// before installing it under the final name. Proves a prior archive
+    /// survives a failed publish (no delete-before-install).
+    test_fail_before_archive_install: bool = false,
 };
 
 pub const FailureKind = pipeline.FailureKind;
@@ -194,6 +199,18 @@ fn renderSha256Sums(
     return try buf.toOwnedSlice(gpa);
 }
 
+/// Write a complete temp archive, then install it under `archive_name`.
+///
+/// **Never deletes the live archive before the replacement is ready.** Order:
+/// 1. Write `.{archive}.tmp` fully and close it (prior `archive_name` untouched).
+/// 2. If a prior archive exists, move it aside to `.{archive}.prev`.
+/// 3. Rename the temp into `archive_name`; on failure restore `.prev` when present.
+/// 4. Drop `.prev` only after a successful install.
+///
+/// Same-directory rename replaces the final name without a torn partial file.
+/// Cross-device **atomic** replace is not claimed (stage temp and final share
+/// one `packages_dir` handle / parent). Concurrent readers may briefly observe
+/// the previous archive under the `.prev` name during the swap window.
 fn writeTarFromStage(
     io: Io,
     gpa: std.mem.Allocator,
@@ -201,41 +218,79 @@ fn writeTarFromStage(
     paths: []const []const u8,
     out_dir: Io.Dir,
     archive_name: []const u8,
+    test_fail_before_install: bool,
 ) !void {
-    // Stage → temp archive → rename into place (no partial final name).
     const tmp_name = try std.fmt.allocPrint(gpa, ".{s}.tmp", .{archive_name});
     defer gpa.free(tmp_name);
+    const prev_name = try std.fmt.allocPrint(gpa, ".{s}.prev", .{archive_name});
+    defer gpa.free(prev_name);
 
+    // Drop leftovers from an interrupted prior install only — not the live archive.
     out_dir.deleteFile(io, tmp_name) catch {};
-    out_dir.deleteFile(io, archive_name) catch {};
+    out_dir.deleteFile(io, prev_name) catch {};
 
-    var tar_file = try out_dir.createFile(io, tmp_name, .{});
-    errdefer {
+    {
+        var tar_file = try out_dir.createFile(io, tmp_name, .{});
+        errdefer {
+            tar_file.close(io);
+            out_dir.deleteFile(io, tmp_name) catch {};
+        }
+
+        var write_buf: [64 * 1024]u8 = undefined;
+        var file_writer = tar_file.writer(io, &write_buf);
+        const w = &file_writer.interface;
+
+        var tar_w: std.tar.Writer = .{ .underlying_writer = w };
+        try tar_w.setRoot(archive_root);
+
+        // Fixed mode/mtime for reproducibility (mtime=0; mode 0o644).
+        const file_opts: std.tar.Writer.Options = .{ .mode = 0o644, .mtime = 0 };
+
+        for (paths) |rel| {
+            const data = try readFileAlloc(io, stage, rel, gpa);
+            defer gpa.free(data);
+            try tar_w.writeFileBytes(rel, data, file_opts);
+        }
+        // Two zero blocks — optional per std docs; keep for common tar tools.
+        try tar_w.finishPedantically();
+        try w.flush();
         tar_file.close(io);
+    }
+
+    // Failure after a complete temp write must still leave any prior archive.
+    if (test_fail_before_install) {
         out_dir.deleteFile(io, tmp_name) catch {};
+        return error.TestInjectedArchiveInstallFailure;
     }
 
-    var write_buf: [64 * 1024]u8 = undefined;
-    var file_writer = tar_file.writer(io, &write_buf);
-    const w = &file_writer.interface;
+    // Move existing archive aside only after the replacement temp is complete.
+    const had_prev = blk: {
+        out_dir.rename(archive_name, out_dir, prev_name, io) catch |err| switch (err) {
+            error.FileNotFound => break :blk false,
+            else => {
+                // Destination may already be free under another name, or the
+                // platform may refuse rename-over-self; try direct install and
+                // surface the original error if that also fails.
+                out_dir.rename(tmp_name, out_dir, archive_name, io) catch {
+                    out_dir.deleteFile(io, tmp_name) catch {};
+                    return err;
+                };
+                break :blk false;
+            },
+        };
+        break :blk true;
+    };
 
-    var tar_w: std.tar.Writer = .{ .underlying_writer = w };
-    try tar_w.setRoot(archive_root);
+    out_dir.rename(tmp_name, out_dir, archive_name, io) catch |err| {
+        if (had_prev) {
+            // Put the previous archive back under the public name.
+            out_dir.rename(prev_name, out_dir, archive_name, io) catch {};
+        }
+        out_dir.deleteFile(io, tmp_name) catch {};
+        return err;
+    };
 
-    // Fixed mode/mtime for reproducibility (mtime=0; mode 0o644).
-    const file_opts: std.tar.Writer.Options = .{ .mode = 0o644, .mtime = 0 };
-
-    for (paths) |rel| {
-        const data = try readFileAlloc(io, stage, rel, gpa);
-        defer gpa.free(data);
-        try tar_w.writeFileBytes(rel, data, file_opts);
-    }
-    // Two zero blocks — optional per std docs; keep for common tar tools.
-    try tar_w.finishPedantically();
-    try w.flush();
-    tar_file.close(io);
-
-    try out_dir.rename(tmp_name, out_dir, archive_name, io);
+    if (had_prev) out_dir.deleteFile(io, prev_name) catch {};
 }
 
 /// Build a review package from a known content root.
@@ -342,7 +397,15 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !Result {
     defer packages.close(io);
 
     log(opts, "boris-package: tar → {s}\n", .{archive_rel});
-    try writeTarFromStage(io, gpa, stage, all_paths, packages, opts.archive_name);
+    try writeTarFromStage(
+        io,
+        gpa,
+        stage,
+        all_paths,
+        packages,
+        opts.archive_name,
+        opts.test_fail_before_archive_install,
+    );
 
     // Success: drop stage; keep only the archive.
     cwd.deleteTree(io, stage_rel) catch {};
@@ -718,6 +781,97 @@ test "package: content failure leaves no archive" {
     // No leftover stage.
     if (cwd.openDir(io, packages_dir ++ "/.boris-package-stage", .{})) |*d| {
         d.close(io);
+        try std.testing.expect(false);
+    } else |_| {}
+}
+
+test "package: failed install preserves previous archive" {
+    // Confirmed defect class: delete-before-install destroyed the live archive
+    // when a later write/install step failed. Injection fails only after the
+    // replacement temp is complete; the prior archive must remain byte-identical.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    const packages_dir = "test-output/package-preserve-prev";
+    cwd.deleteTree(io, packages_dir) catch {};
+    defer cwd.deleteTree(io, packages_dir) catch {};
+
+    var first = try run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/valid/content",
+        .packages_dir = packages_dir,
+        .include_rag = false,
+        .quiet = true,
+    });
+    defer freeResult(gpa, &first);
+    try std.testing.expect(first.ok);
+
+    var pkg = try cwd.openDir(io, packages_dir, .{});
+    defer pkg.close(io);
+    const prior = try readFileAlloc(io, pkg, default_archive_name, gpa);
+    defer gpa.free(prior);
+    try std.testing.expect(prior.len > 0);
+
+    const failed = run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/valid/content",
+        .packages_dir = packages_dir,
+        .include_rag = false,
+        .quiet = true,
+        .test_fail_before_archive_install = true,
+    });
+    try std.testing.expectError(error.TestInjectedArchiveInstallFailure, failed);
+
+    const after = try readFileAlloc(io, pkg, default_archive_name, gpa);
+    defer gpa.free(after);
+    try std.testing.expectEqualSlices(u8, prior, after);
+
+    // No install leftovers after a failed install.
+    if (pkg.openFile(io, "." ++ default_archive_name ++ ".tmp", .{})) |*f| {
+        f.close(io);
+        try std.testing.expect(false);
+    } else |_| {}
+    if (pkg.openFile(io, "." ++ default_archive_name ++ ".prev", .{})) |*f| {
+        f.close(io);
+        try std.testing.expect(false);
+    } else |_| {}
+}
+
+test "package: second success replaces via move-aside without leftover prev" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    const packages_dir = "test-output/package-replace-ok";
+    cwd.deleteTree(io, packages_dir) catch {};
+    defer cwd.deleteTree(io, packages_dir) catch {};
+
+    var first = try run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/valid/content",
+        .packages_dir = packages_dir,
+        .include_rag = false,
+        .quiet = true,
+    });
+    defer freeResult(gpa, &first);
+    try std.testing.expect(first.ok);
+
+    var second = try run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/valid/content",
+        .packages_dir = packages_dir,
+        .include_rag = false,
+        .quiet = true,
+    });
+    defer freeResult(gpa, &second);
+    try std.testing.expect(second.ok);
+
+    var pkg = try cwd.openDir(io, packages_dir, .{});
+    defer pkg.close(io);
+    var tar_file = try pkg.openFile(io, default_archive_name, .{});
+    defer tar_file.close(io);
+    // Leftover move-aside / temp names must not linger after success.
+    if (pkg.openFile(io, "." ++ default_archive_name ++ ".tmp", .{})) |*f| {
+        f.close(io);
+        try std.testing.expect(false);
+    } else |_| {}
+    if (pkg.openFile(io, "." ++ default_archive_name ++ ".prev", .{})) |*f| {
+        f.close(io);
         try std.testing.expect(false);
     } else |_| {}
 }
