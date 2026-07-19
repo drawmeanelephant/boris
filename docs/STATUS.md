@@ -200,6 +200,8 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | **Shipped on main / v0.7** | Migration relationship candidates | Filed-shaped relationship metadata is preserved in a deterministic review sidecar before any explicit mapping to Boris's existing bounded semantic `relations`; the [real-site dogfood pass](dogfood/filed-relation-candidates-v07.md) validates 1,370 retained values without automatic emission. |
 | **Next** | Relationship object shapes + site-wide target inventory | Recognize the proven Filed `{slug}` shape, then distinguish selected, inventoried, ambiguous, and absent targets while keeping conversion bounded and review-first. |
 | **Next** | Archive-friendly layouts | Validate layout rules and child/index presentation against real archive navigation before broadening theme features. |
+| **Shipped on main / v0.7** | Ledger-driven theme materialization | [`theme-materialize`](../tools/migration-lab/README.md) turns an archaeology ledger into a reviewable static Boris theme draft: approved assets and licenses are copied, a closed slot shell is generated, and all other source-framework behavior remains explicit review work. |
+| **Later** | Real-theme materialization dogfood | Run archaeology → materialization → Boris compilation on one static theme sample, preserve the reports, and document the manual decisions required before treating the result as an author-facing theme. |
 | **Shipped on main / v0.7** | Source-RAG deterministic partitioning | Complete-file bundle parts, explicit manifests, profiles, and bounded `--split-size` output (PR #163). |
 | **Shipped on main / v0.6** | `llms.txt` export | Deterministic graph-ordered export with URL, summary, fallback, and contract coverage (PR #150). `llms-full.txt` remains later. |
 | **Shipped on main / v0.6** | Source-RAG pack profiles | Bounded logical packs with explicit scope selection, manifests, and vendor/generated/cache exclusions (PR #149). |
@@ -212,7 +214,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | # | Feature | Note |
 |---|---------|------|
-| — | **Product v0.6.1** | Astro/WordPress migration-lab hardening, source-RAG manifest correctness, and five additional zero-dependency theme showcases; base IR remains 0.2 |
+| — | **Product v0.6.1** | Tagged/released: Astro/WordPress migration-lab hardening, source-RAG manifest correctness, five additional zero-dependency theme showcases, and the Filed.fyi preflight case study; base IR remains 0.2 |
 | — | **Product v0.6.0** | Deterministic `llms.txt`, bounded source-RAG profiles, and Stitch-calibrated zero-dependency theme prototypes; base IR remains 0.2 |
 | — | **Product v0.5.2** | Migration-lab packaging: WP media materialize, Filed parent-key normalize, Starlight F-L1 image paths + calibration, bounded dogfood; core compiler surface unchanged; base IR remains 0.2 |
 | — | **Product v0.5.1** | Tagged/released: content-local assets, reference theme, bounded real-site adoption evidence, migration-lab asset/theme aids, and worktree-safe release cleanliness checks; base IR remains 0.2 |
@@ -276,7 +278,7 @@ on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 | Publish | **Honest limit + fallback** | Cross-volume **atomic** replace still not claimed. HTML stage / IR publish fall back to copy+delete on `error.CrossDevice`; RAG already had directory copy fallback. Same-parent staging remains the common path. |
 | Dialect | **Enforced** | Author key is **`parent` only**. `parentEntry` / `parent_entry` → `EFRONTMATTER` on all product parse paths. Do not reintroduce aliases. |
 | Migration | **Documented** | Bare `boris` is HTML under `dist/`. Old IR scripts need `--out` / `--no-rag`. README + help text carry the note. |
-| Release state | **v0.6.1 release candidate** | Product/compiler metadata `0.6.1`; tag after the release gate is green on the release-cut merge. Prior tag `v0.6.0` remains historical. |
+| Release state | **v0.6.1 tagged/released** | Product/compiler metadata `0.6.1`; `v0.6.1` is the completed release cut and `main` is in v0.7 development. |
 
 ---
 
