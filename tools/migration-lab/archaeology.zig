@@ -393,6 +393,17 @@ fn writeBytes(io: Io, root: Io.Dir, rel_path: []const u8, data: []const u8) !voi
     try root.writeFile(io, .{ .sub_path = rel_path, .data = data });
 }
 
+/// Shared deterministic file walk for migration-lab modes that inspect an
+/// already-generated tree without changing it.
+pub fn collectFiles(
+    io: Io,
+    gpa: std.mem.Allocator,
+    retain: std.mem.Allocator,
+    root: Io.Dir,
+) ![]const []const u8 {
+    return try collectAllPaths(io, gpa, retain, root);
+}
+
 fn pathExists(io: Io, root: Io.Dir, rel: []const u8) bool {
     _ = root.statFile(io, rel, .{}) catch return false;
     return true;
@@ -890,6 +901,11 @@ fn resolveRelative(allocator: std.mem.Allocator, from_file: []const u8, target: 
         }
     }
     return out;
+}
+
+/// Public wrapper for migration-lab output audits.
+pub fn resolveRelativeUrl(allocator: std.mem.Allocator, from_file: []const u8, target: []const u8) ![]u8 {
+    return try resolveRelative(allocator, from_file, target);
 }
 
 fn pathSetContains(paths: []const []const u8, needle: []const u8) bool {

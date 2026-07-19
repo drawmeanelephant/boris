@@ -43,6 +43,7 @@ const asset_filename = @import("asset_filename.zig");
 const theme_archaeology = @import("theme_archaeology.zig");
 const theme_materialize = @import("theme_materialize.zig");
 const wordpress_theme = @import("wordpress_theme.zig");
+const link_audit = @import("link_audit.zig");
 
 pub const ExitCode = enum(u8) {
     success = 0,
@@ -66,6 +67,7 @@ pub const Mode = enum {
     theme_archaeology,
     theme_materialize,
     wordpress_theme,
+    link_audit,
 
     pub fn parse(s: []const u8) ?Mode {
         if (std.mem.eql(u8, s, "astro")) return .astro;
@@ -87,6 +89,8 @@ pub const Mode = enum {
         if (std.mem.eql(u8, s, "wordpress-theme") or std.mem.eql(u8, s, "wp-theme") or
             std.mem.eql(u8, s, "kubrick-theme"))
             return .wordpress_theme;
+        if (std.mem.eql(u8, s, "link-audit") or std.mem.eql(u8, s, "links") or
+            std.mem.eql(u8, s, "output-audit")) return .link_audit;
         return null;
     }
 };
@@ -270,7 +274,7 @@ fn printUsage() void {
         \\Common options:
         \\  -h, --help         Show this help and exit
         \\  -q, --quiet        Suppress progress lines
-        \\  --mode=MODE        astro (default) | wordpress | wordpress-theme | instagram | obsidian | notion | filed | starlight | asset-filename | theme-archaeology | theme-materialize
+        \\  --mode=MODE        astro (default) | wordpress | wordpress-theme | instagram | obsidian | notion | filed | starlight | asset-filename | theme-archaeology | theme-materialize | link-audit
         \\  --out=DIR          Output directory (default: migration-report)
         \\
         \\Astro mode:
@@ -293,6 +297,12 @@ fn printUsage() void {
         \\  Writes: theme/**, materialize-manifest.json, MATERIALIZE-REPORT.md, PROVENANCE.md
         \\  Only preserve CSS/fonts/images and closed static layout shells are emitted.
         \\  No JS/MDX/PHP execution, remote fetch, symlinks, or guessed mappings.
+        \\
+        \\Link audit (generated-output validation):
+        \\  --mode=link-audit   Scan static HTML output for missing local routes/fragments
+        \\  --root=DIR          Generated HTML tree (required; never modified)
+        \\  Writes: link_audit.json, REPORT.md
+        \\  External, mailto, tel, data, and hash-only links are not audited.
         \\
         \\WordPress theme archaeology (read-only PHP source scan):
         \\  --mode=wordpress-theme  Inventory classic theme files, assets, hooks,
@@ -587,6 +597,20 @@ pub fn main(init: std.process.Init) u8 {
                 .quiet = opts.quiet,
             }) catch |err| {
                 std.log.err("migration-lab (wordpress-theme) failed: {s}", .{@errorName(err)});
+                return ExitCode.io_error.int();
+            };
+        },
+        .link_audit => {
+            if (std.mem.eql(u8, opts.root_dir, opts.out_dir)) {
+                std.log.err("--out must differ from --root", .{});
+                return ExitCode.usage.int();
+            }
+            link_audit.run(io, gpa, .{
+                .root_dir = opts.root_dir,
+                .out_dir = opts.out_dir,
+                .quiet = opts.quiet,
+            }) catch |err| {
+                std.log.err("migration-lab (link-audit) failed: {s}", .{@errorName(err)});
                 return ExitCode.io_error.int();
             };
         },
