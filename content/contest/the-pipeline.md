@@ -36,6 +36,20 @@ That emits a static site from the repository’s own `content/` tree. The same
 tree includes this page, [[agents|the agent stories]], normal docs pages,
 includes, wiki-links, parent/child navigation, Asides, and Details.
 
+## Preview the Build Week field guide
+
+The repository includes a zero-dependency Field Guide theme that makes this
+section and the agent stories ready to browse as a cohesive static demo:
+
+```bash
+./zig-out/bin/boris --theme examples/agent-themes/chota/theme --quiet
+open dist/contest.html
+```
+
+That command uses the same source tree and compiler path as the default build;
+it only selects a different static layout and stylesheet. No client framework,
+CDN, or deployment service is required to inspect the result locally.
+
 ## Why separate outputs matter
 
 HTML is for readers. JSON IR is for inspection and integration. RAG and Context
