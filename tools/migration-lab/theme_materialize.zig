@@ -63,6 +63,18 @@ fn startsWithDecision(decision: []const u8, expected: []const u8) bool {
     return std.mem.eql(u8, decision, expected);
 }
 
+/// A `preserve` asset row is only safe to copy when archaeology found no
+/// companion `drop` evidence for the same source file. This is most important
+/// for CSS: copying a stylesheet with a remote `@import` or traversal `url()`
+/// would reintroduce a dependency the ledger explicitly rejected.
+fn hasDroppedCompanionEvidence(entries: []const std.json.Value, source_path: []const u8) bool {
+    for (entries) |entry| {
+        if (std.mem.eql(u8, jsonString(entry, "source_path"), source_path) and
+            std.mem.eql(u8, jsonString(entry, "decision"), "drop")) return true;
+    }
+    return false;
+}
+
 fn markerPath(proposed: []const u8, marker: []const u8) ?[]const u8 {
     const start = std.mem.indexOf(u8, proposed, marker) orelse return null;
     const rest = proposed[start..];
@@ -260,6 +272,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
     for (entries.array.items) |entry| {
         if (!std.mem.eql(u8, jsonString(entry, "category"), "css") or
             !std.mem.eql(u8, jsonString(entry, "decision"), "preserve")) continue;
+        if (hasDroppedCompanionEvidence(entries.array.items, jsonString(entry, "source_path"))) continue;
         if (markerPath(jsonString(entry, "proposed_boris_equivalent"), "theme/assets/")) |candidate| {
             if (isSafeRelativePath(candidate)) {
                 css_path = if (std.mem.startsWith(u8, candidate, "theme/")) candidate["theme/".len..] else candidate;
@@ -286,6 +299,12 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
         if (startsWithDecision(decision, "preserve") and
             (std.mem.eql(u8, category, "css") or std.mem.eql(u8, category, "font") or std.mem.eql(u8, category, "image")))
         {
+            if (hasDroppedCompanionEvidence(entries.array.items, source_path)) {
+                action.status = "refused";
+                action.detail = "source has dropped remote or unsafe dependency evidence";
+                try actions.append(a, action);
+                continue;
+            }
             const destination = markerPath(proposed, "theme/assets/") orelse {
                 action.status = "refused";
                 action.detail = "preserve asset has no safe theme/assets destination";
@@ -426,4 +445,39 @@ test "theme materialize refuses unsafe ledger paths" {
     try std.testing.expect(!isSafeRelativePath("css/..\\escape.css"));
     try std.testing.expect(!isSafeRelativePath("/absolute.css"));
     try std.testing.expect(isSafeRelativePath("public/css/site.css"));
+}
+
+test "theme materialize hostile fixture refuses unsafe stylesheet copies" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const root = "fixtures/hostile-theme-astro";
+    const arch = "fixtures/.tmp-theme-materialize-hostile-arch";
+    const out = "fixtures/.tmp-theme-materialize-hostile-out";
+    Io.Dir.cwd().deleteTree(io, arch) catch {};
+    Io.Dir.cwd().deleteTree(io, out) catch {};
+    defer {
+        Io.Dir.cwd().deleteTree(io, arch) catch {};
+        Io.Dir.cwd().deleteTree(io, out) catch {};
+    }
+
+    try archaeology.run(io, gpa, .{ .root_dir = root, .out_dir = arch, .quiet = true });
+    try run(io, gpa, .{ .root_dir = root, .ledger_path = arch ++ "/adaptation_ledger.json", .out_dir = out, .quiet = true });
+
+    var output = try Io.Dir.cwd().openDir(io, out, .{});
+    defer output.close(io);
+    try std.testing.expectError(error.FileNotFound, output.openFile(io, "theme/assets/css/remote-ref.css", .{}));
+    try std.testing.expectError(error.FileNotFound, output.openFile(io, "theme/assets/evil.css", .{}));
+
+    var image = try output.openFile(io, "theme/assets/images/dup.png", .{});
+    image.close(io);
+    const layout = try readFile(io, output, "theme/layouts/main.html", gpa);
+    defer gpa.free(layout);
+    try std.testing.expect(std.mem.indexOf(u8, layout, "{{content}}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, layout, "stylesheet") == null);
+    try std.testing.expect(std.mem.indexOf(u8, layout, "https://") == null);
+    try std.testing.expect(std.mem.indexOf(u8, layout, "<script") == null);
+
+    const report = try readFile(io, output, "MATERIALIZE-REPORT.md", gpa);
+    defer gpa.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "source has dropped remote or unsafe dependency evidence") != null);
 }
