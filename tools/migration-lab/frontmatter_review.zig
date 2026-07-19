@@ -315,7 +315,7 @@ pub fn emitMd(a: std.mem.Allocator, result: ScanResult) ![]u8 {
     try buf.appendSlice(a,
         \\---
         \\
-        \_Machine-readable twin: `frontmatter_review.json`._
+        \\_Machine-readable twin: `frontmatter_review.json`._
         \\
     );
     return buf.toOwnedSlice(a);
