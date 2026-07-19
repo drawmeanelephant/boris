@@ -32,6 +32,22 @@ fn trim(s: []const u8) []const u8 {
     return std.mem.trim(u8, s, " \t\r");
 }
 
+/// Escape a string for safe inclusion in a Markdown table cell.
+/// Replaces `|` with `\|` and strips bare newlines so the table stays
+/// single-row.  The caller owns the returned slice.
+fn escapeMdCell(a: std.mem.Allocator, s: []const u8) ![]u8 {
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(a);
+    for (s) |c| {
+        switch (c) {
+            '|' => try buf.appendSlice(a, "\\|"),
+            '\n', '\r' => try buf.appendSlice(a, " "),
+            else => try buf.append(a, c),
+        }
+    }
+    return buf.toOwnedSlice(a);
+}
+
 /// One unknown-key occurrence inside a single source file.
 pub const KeyOccurrence = struct {
     /// Exact key bytes as found in source (no normalisation).
@@ -70,6 +86,9 @@ pub const ScanResult = struct {
 
 /// Parse a single file's frontmatter and return its unknown-key occurrences.
 /// Allocations go into `a`; the caller owns the returned slice.
+/// Strict closing-fence detection: requires `\n---` (optionally followed by
+/// `\r\n` or `\n`) immediately after the frontmatter body.  A missing or
+/// malformed closing fence sets `incompatible_fence = true`.
 pub fn scanFile(a: std.mem.Allocator, source: []const u8) !struct { occurrences: []KeyOccurrence, incompatible_fence: bool } {
     var list: std.ArrayList(KeyOccurrence) = .empty;
     errdefer list.deinit(a);
@@ -84,11 +103,22 @@ pub fn scanFile(a: std.mem.Allocator, source: []const u8) !struct { occurrences:
         return .{ .occurrences = try list.toOwnedSlice(a), .incompatible_fence = false };
     };
 
-    // Find the closing fence.
-    const close = std.mem.indexOfPos(u8, source, after_open, "\n---") orelse {
+    // Strict closing-fence detection: the fence must appear as `\n---` and be
+    // followed only by EOF, `\n`, or `\r\n`.  A `---` that is part of a value
+    // (e.g. `value: ---`) cannot satisfy this because it is not at column 0
+    // after a newline.
+    const close_start = std.mem.indexOfPos(u8, source, after_open, "\n---") orelse {
         return .{ .occurrences = try list.toOwnedSlice(a), .incompatible_fence = true };
     };
-    const frontmatter = source[after_open..close];
+    // Verify that what follows the `\n---` is EOF, LF, or CRLF.
+    const fence_end = close_start + 4; // points just after `\n---`
+    const valid_close = fence_end >= source.len or
+        source[fence_end] == '\n' or
+        (source[fence_end] == '\r' and fence_end + 1 < source.len and source[fence_end + 1] == '\n');
+    if (!valid_close) {
+        return .{ .occurrences = try list.toOwnedSlice(a), .incompatible_fence = true };
+    }
+    const frontmatter = source[after_open..close_start];
 
     var pos: usize = 0;
     var line_no: usize = 2; // opening fence is line 1
@@ -265,12 +295,17 @@ pub fn emitMd(a: std.mem.Allocator, result: ScanResult) ![]u8 {
             } else {
                 try buf.appendSlice(a, "| Line | Key | Raw value |\n|-----:|-----|-----------|\n");
                 for (file.unknown_keys) |occ| {
+                    // Escape table cell values to prevent Markdown table breakage.
+                    const escaped_key = try escapeMdCell(a, occ.key);
+                    defer a.free(escaped_key);
+                    const escaped_val = try escapeMdCell(a, occ.value);
+                    defer a.free(escaped_val);
                     try buf.appendSlice(a, "| ");
                     try appendUsize(&buf, a, occ.line);
                     try buf.appendSlice(a, " | `");
-                    try buf.appendSlice(a, occ.key);
+                    try buf.appendSlice(a, escaped_key);
                     try buf.appendSlice(a, "` | `");
-                    try buf.appendSlice(a, occ.value);
+                    try buf.appendSlice(a, escaped_val);
                     try buf.appendSlice(a, "` |\n");
                 }
                 try buf.append(a, '\n');
@@ -280,7 +315,7 @@ pub fn emitMd(a: std.mem.Allocator, result: ScanResult) ![]u8 {
     try buf.appendSlice(a,
         \\---
         \\
-        \\_Machine-readable twin: `frontmatter_review.json`._
+        \_Machine-readable twin: `frontmatter_review.json`._
         \\
     );
     return buf.toOwnedSlice(a);
@@ -459,6 +494,30 @@ test "scanFile: list item lines under tags are skipped" {
     try std.testing.expectEqual(@as(usize, 0), r.occurrences.len);
 }
 
+test "escapeMdCell: pipe is escaped" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const out = try escapeMdCell(a, "a|b|c");
+    try std.testing.expectEqualStrings("a\\|b\\|c", out);
+}
+
+test "escapeMdCell: newlines become spaces" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const out = try escapeMdCell(a, "line1\nline2");
+    try std.testing.expectEqualStrings("line1 line2", out);
+}
+
+test "escapeMdCell: plain string is unchanged" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const out = try escapeMdCell(a, "simple-value");
+    try std.testing.expectEqualStrings("simple-value", out);
+}
+
 test "emitJson: unknown_keys array present and ordered" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -514,6 +573,31 @@ test "emitMd: section headers and table present" {
     try std.testing.expect(std.mem.indexOf(u8, md, "pages/beta.md") != null);
     try std.testing.expect(std.mem.indexOf(u8, md, "mascotId") != null);
     try std.testing.expect(std.mem.indexOf(u8, md, "| Line |") != null);
+}
+
+test "emitMd: pipe in value is escaped in table cell" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const result = ScanResult{
+        .source_root = "content",
+        .files = &.{
+            .{
+                .source_path = "pages/piped.md",
+                .unknown_keys = &.{
+                    .{ .key = "someKey", .line = 2, .value = "foo|bar" },
+                },
+                .incompatible_fence = false,
+            },
+        },
+        .total_unknown_keys = 1,
+        .total_occurrences = 1,
+    };
+    const md = try emitMd(a, result);
+    // The pipe in "foo|bar" must be escaped so the table is not broken.
+    try std.testing.expect(std.mem.indexOf(u8, md, "foo\\|bar") != null);
+    try std.testing.expect(std.mem.indexOf(u8, md, "foo|bar") == null or
+        std.mem.indexOf(u8, md, "foo\\|bar") != null);
 }
 
 test "emitMd: no-unknown case says None" {
