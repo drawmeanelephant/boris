@@ -12,6 +12,7 @@
 //!   theme-archaeology — Read-only Astro/Starlight theme inventory → adaptation ledger + boundary report
 //!   theme-materialize — Ledger-driven safe static Boris theme materialization
 //!   wordpress-theme — Read-only classic WordPress PHP theme inventory → static prototype + review manifest
+//!   frontmatter-review — Scan a content tree for unsupported frontmatter keys → JSON + MD report
 //!
 //! Never rewrites inputs. Not part of the Boris product compiler pipeline.
 //!
@@ -24,6 +25,7 @@
 //!   zig build run -- --mode=obsidian --vault=./fixtures/mini-obsidian --out=./.out-obs
 //!   zig build run -- --mode=notion --export=./fixtures/mini-notion --out=./.out-notion
 //!   zig build run -- --mode=starlight --root=./fixtures/mini-starlight --out=./.out-sl
+//!   zig build run -- --mode=frontmatter-review --content=./content --out=./.out-fmreview
 //!   zig build test
 //!
 //! From repo root:
@@ -44,6 +46,7 @@ const theme_archaeology = @import("theme_archaeology.zig");
 const theme_materialize = @import("theme_materialize.zig");
 const wordpress_theme = @import("wordpress_theme.zig");
 const link_audit = @import("link_audit.zig");
+const frontmatter_review = @import("frontmatter_review.zig");
 
 pub const ExitCode = enum(u8) {
     success = 0,
@@ -68,6 +71,7 @@ pub const Mode = enum {
     theme_materialize,
     wordpress_theme,
     link_audit,
+    frontmatter_review,
 
     pub fn parse(s: []const u8) ?Mode {
         if (std.mem.eql(u8, s, "astro")) return .astro;
@@ -91,6 +95,9 @@ pub const Mode = enum {
             return .wordpress_theme;
         if (std.mem.eql(u8, s, "link-audit") or std.mem.eql(u8, s, "links") or
             std.mem.eql(u8, s, "output-audit")) return .link_audit;
+        if (std.mem.eql(u8, s, "frontmatter-review") or std.mem.eql(u8, s, "fm-review") or
+            std.mem.eql(u8, s, "fmreview"))
+            return .frontmatter_review;
         return null;
     }
 };
@@ -123,6 +130,8 @@ pub const Options = struct {
     out_dir: []const u8 = "migration-report",
     /// Existing theme-archaeology adaptation ledger for theme-materialize mode.
     ledger_path: ?[]const u8 = null,
+    /// Content tree root for frontmatter-review mode.
+    content_dir: ?[]const u8 = null,
 };
 
 pub const ParseError = error{
@@ -256,6 +265,16 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
             options.boris_bin = args[index];
+        } else if (std.mem.startsWith(u8, arg, "--content=")) {
+            const value = arg["--content=".len..];
+            if (value.len == 0) return error.MissingValue;
+            options.content_dir = value;
+            options.mode = .frontmatter_review;
+        } else if (std.mem.eql(u8, arg, "--content")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            options.content_dir = args[index];
+            options.mode = .frontmatter_review;
         } else {
             return error.UnknownFlag;
         }
@@ -274,8 +293,17 @@ fn printUsage() void {
         \\Common options:
         \\  -h, --help         Show this help and exit
         \\  -q, --quiet        Suppress progress lines
-        \\  --mode=MODE        astro (default) | wordpress | wordpress-theme | instagram | obsidian | notion | filed | starlight | asset-filename | theme-archaeology | theme-materialize | link-audit
+        \\  --mode=MODE        astro (default) | wordpress | wordpress-theme | instagram | obsidian | notion | filed | starlight | asset-filename | theme-archaeology | theme-materialize | link-audit | frontmatter-review
         \\  --out=DIR          Output directory (default: migration-report)
+        \\
+        \\Frontmatter review (read-only unsupported-key audit):
+        \\  --mode=frontmatter-review  Scan a content tree for keys outside the Boris
+        \\                     closed grammar {id, title, parent, status, tags}
+        \\  --content=DIR      Content tree root (required; never modified)
+        \\  Writes: frontmatter_review.json, FRONTMATTER_REVIEW.md
+        \\  Aliases: fm-review | fmreview
+        \\  (--content implies --mode=frontmatter-review)
+        \\  No source file is modified. Unclosed fences are flagged, not crashed on.
         \\
         \\Astro mode:
         \\  --root=DIR         Astro project/export root to scan (default: .)
@@ -614,6 +642,25 @@ pub fn main(init: std.process.Init) u8 {
                 return ExitCode.io_error.int();
             };
         },
+        .frontmatter_review => {
+            const content = opts.content_dir orelse {
+                std.log.err("frontmatter-review mode requires --content=DIR", .{});
+                printUsage();
+                return ExitCode.usage.int();
+            };
+            if (std.mem.eql(u8, content, opts.out_dir)) {
+                std.log.err("--out must differ from --content", .{});
+                return ExitCode.usage.int();
+            }
+            frontmatter_review.run(io, gpa, .{
+                .source_root = content,
+                .out_dir = opts.out_dir,
+                .quiet = opts.quiet,
+            }) catch |err| {
+                std.log.err("migration-lab (frontmatter-review) failed: {s}", .{@errorName(err)});
+                return ExitCode.io_error.int();
+            };
+        },
     }
     return ExitCode.success.int();
 }
@@ -634,6 +681,7 @@ test {
     _ = theme_archaeology;
     _ = theme_materialize;
     _ = wordpress_theme;
+    _ = frontmatter_review;
 }
 
 test "parseOptions: defaults and astro flags" {
@@ -808,6 +856,27 @@ test "parseOptions: starlight flags" {
 
     const o2 = try parseOptions(&.{ "boris-migration-lab", "--mode=sl", "--root", "./r" });
     try std.testing.expect(o2.mode == .starlight);
+}
+
+test "parseOptions: frontmatter-review flags" {
+    const o = try parseOptions(&.{
+        "boris-migration-lab",
+        "--content=fixtures/fm-review-mixed",
+        "--out=./.fmreview-out",
+    });
+    try std.testing.expect(o.mode == .frontmatter_review);
+    try std.testing.expectEqualStrings("fixtures/fm-review-mixed", o.content_dir.?);
+    try std.testing.expectEqualStrings("./.fmreview-out", o.out_dir);
+
+    const o2 = try parseOptions(&.{ "boris-migration-lab", "--mode=frontmatter-review", "--content", "./c", "--out", "./o" });
+    try std.testing.expect(o2.mode == .frontmatter_review);
+    try std.testing.expectEqualStrings("./c", o2.content_dir.?);
+
+    const o3 = try parseOptions(&.{ "boris-migration-lab", "--mode=fm-review", "--content=./c", "--out=./o" });
+    try std.testing.expect(o3.mode == .frontmatter_review);
+
+    const o4 = try parseOptions(&.{ "boris-migration-lab", "--mode=fmreview", "--content=./c", "--out=./o" });
+    try std.testing.expect(o4.mode == .frontmatter_review);
 }
 
 test "parseOptions: unknown flag" {
