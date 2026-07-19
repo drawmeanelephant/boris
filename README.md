@@ -17,6 +17,13 @@ an AI Context Bundle, or a graph-ordered `llms.txt` map.
 Living phase note: [`docs/STATUS.md`](docs/STATUS.md) · history:
 [`CHANGELOG.md`](CHANGELOG.md).
 
+**Demo:** [`WordPress Theme Test Data migration walkthrough`](docs/dogfood/wordpress-theme-test-data-demo.md)
+· [`demo packet instructions`](docs/dogfood/wordpress-theme-test-data-demo.md#local-artifact)
+
+The complete generated packet is intentionally kept outside the tracked core
+tree. It includes a 186-page converted site, JSON IR, RAG output, and a
+zero-dependency reference theme for local hosting or video capture.
+
 **v0.5.2:** migration-lab packaging on the v0.5.1 compiler surface — WordPress
 local media materialization, Filed parent-key normalize, Starlight F-L1 image
 paths and component-mapping calibration, plus bounded dogfood evidence —
