@@ -35,6 +35,9 @@ zig build source-rag -- --out=./uploads/source-rag
 # Avoid the optional combined bundles and their intentional duplicate bytes
 zig build source-rag -- --no-bundles
 
+# Bundles-only upload pack (no per-file files/** tree)
+zig build source-rag -- --bundles-only
+
 # Partition combined bundles at a 256 KiB body-byte target (whole files only)
 zig build source-rag -- --split-size=262144
 
@@ -57,7 +60,10 @@ zig-out/bin/boris-source-rag --out=./source-rag --quiet
 | `--max-bytes=N` | `524288` | Skip files larger than N bytes |
 | `--split-size=N` | `524288` | Target body bytes per combined bundle part |
 | `--no-bundles` | off | Omit combined convenience bundles and parts |
+| `--bundles-only` | off | Emit combined bundles + sidecars only; omit `files/**` |
 | `--profile=NAME` | `all` | Select `all`, `core`, `docs`, or `tools` input scope |
+
+`--no-bundles` and `--bundles-only` are mutually exclusive.
 
 Exit codes: **0** success, **2** usage, **3** I/O error.
 
@@ -76,7 +82,7 @@ source-rag/
   catalog_meta.json     # format + schema_version + tool_version + profile + split target
   profile_manifest.json  # selected profile, counts, and sorted packed paths
   part_manifest.json     # profile, ordered parts, source paths, and byte counts
-  files/**              # one markdown document per source path
+  files/**              # one markdown document per source path (omitted with --bundles-only)
 ```
 
 Each source document looks like:
@@ -135,6 +141,42 @@ counts. Use it to upload parts in order or to verify that no source was
 duplicated or omitted. `--no-bundles` omits all combined part files and emits
 the same manifest with `"bundles":false` and an empty `parts` array; the
 per-file corpus and sidecars remain available.
+
+### Bundles-only mode (`--bundles-only`)
+
+Use this when the upload target prefers a small number of large Markdown parts
+instead of hundreds of per-file documents:
+
+```bash
+zig build source-rag -- --bundles-only --out=./uploads/source-rag
+# optional: bound each part
+zig build source-rag -- --bundles-only --split-size=262144
+# optional: narrower scope
+zig build source-rag -- --bundles-only --profile=core
+```
+
+Emitted artifacts:
+
+| Artifact | Role |
+|----------|------|
+| `INDEX.md` | Retrieval map (notes that `files/**` is omitted) |
+| `UPLOAD-GUIDE.md` | Upload / system-prompt guidance for the bundles pack |
+| `catalog.jsonl` | One JSON object per source (logical `files/...` rag paths) |
+| `catalog_meta.json` | Format + schema + profile + split target |
+| `profile_manifest.json` | Selected profile, counts, sorted packed paths |
+| `part_manifest.json` | Ordered parts, sources, and body byte counts |
+| `boris-source-*.md` / `boris-docs[-*].md` / `boris-content[-*].md` | Combined parts |
+
+Not emitted: the per-file `files/**` tree. Catalog rows still inventory each
+packed source with stable `rag_path` values under `files/` so catalogs and
+manifests stay aligned; those paths are logical ids, not on-disk documents in
+this mode.
+
+A successful `--bundles-only` rerun uses the same staged publication path as a
+normal export. Managed artifacts from the previous pack (including a prior
+`files/` tree) are replaced; stale per-file documents are removed. Unrelated
+siblings beside the managed corpus are left alone. Two successive successful
+`--bundles-only` runs on the same input produce byte-identical managed output.
 
 ### Profiles
 
@@ -215,6 +257,8 @@ If a notebook says “you didn’t pack the source,” use **this** tool and upl
 
 ## LLM upload tips
 
+### Default pack (`files/**` + bundles)
+
 1. Upload the **entire** `source-rag/` folder (or zip).
 2. Pin or open `INDEX.md` as the path map.
 3. Prefer `files/src/**` for implementation questions.
@@ -227,6 +271,31 @@ Suggested system prompt snippet:
 You are answering questions about this repository using the source RAG corpus.
 Prefer files under files/src/ for implementation details.
 Prefer files/docs/contracts/ for normative IR and machine contracts.
+Cite source_path from document frontmatter when you rely on a file.
+Do not invent APIs that are not present in the corpus.
+```
+
+### Bundles-only upload workflow
+
+1. Generate with `zig build source-rag -- --bundles-only` (add `--profile` /
+   `--split-size` as needed).
+2. Upload the whole output directory, or at minimum:
+   - `INDEX.md`, `UPLOAD-GUIDE.md`
+   - `part_manifest.json` (authoritative part order)
+   - every `boris-source-*.md`, `boris-docs[-*].md`, `boris-content[-*].md`
+   - `catalog.jsonl`, `catalog_meta.json`, `profile_manifest.json`
+3. Upload parts in `part_manifest.json` order when the host limits concurrent
+   files; keep whole parts (never hand-split a part mid-document).
+4. Prefer `boris-source-N.md` for implementation questions and `boris-docs`
+   parts for contracts.
+5. Cite `source_path` from each embedded document’s frontmatter.
+
+Suggested system prompt snippet (bundles-only):
+
+```
+You are answering questions about this repository using the source RAG corpus.
+Prefer boris-source-N.md for implementation details.
+Prefer boris-docs parts for normative IR and machine contracts.
 Cite source_path from document frontmatter when you rely on a file.
 Do not invent APIs that are not present in the corpus.
 ```

@@ -30,8 +30,11 @@ pub const ExitCode = enum(u8) {
 pub const Options = struct {
     help: bool = false,
     quiet: bool = false,
-    /// Skip the four combined Markdown convenience bundles.
+    /// Skip the combined Markdown convenience bundles.
     no_bundles: bool = false,
+    /// Emit combined bundles and sidecars only; omit the per-file `files/` tree.
+    /// Mutually exclusive with `no_bundles`.
+    bundles_only: bool = false,
     /// Named input scope. `all` preserves the historical complete export.
     profile: Profile = .all,
     /// Corpus output directory (relative to process cwd unless absolute).
@@ -46,6 +49,14 @@ pub const Options = struct {
     /// Test-only deterministic failure injection after this many staged source
     /// documents have been written. Not accepted by the CLI.
     test_fail_after_stage_writes: ?usize = null,
+
+    pub fn includeBundles(self: Options) bool {
+        return !self.no_bundles;
+    }
+
+    pub fn includePerFileDocs(self: Options) bool {
+        return !self.bundles_only;
+    }
 };
 
 pub const Profile = enum { all, core, docs, tools };
@@ -196,6 +207,8 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             opts.quiet = true;
         } else if (std.mem.eql(u8, a, "--no-bundles")) {
             opts.no_bundles = true;
+        } else if (std.mem.eql(u8, a, "--bundles-only")) {
+            opts.bundles_only = true;
         } else if (std.mem.startsWith(u8, a, "--profile=")) {
             const v = a["--profile=".len..];
             if (v.len == 0) return error.MissingValue;
@@ -240,6 +253,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             return error.UnknownFlag;
         }
     }
+    if (opts.no_bundles and opts.bundles_only) return error.InvalidValue;
     return opts;
 }
 
@@ -257,11 +271,14 @@ fn printUsage() void {
         \\  -h, --help           Show this help and exit 0
         \\  -q, --quiet          Suppress progress lines
         \\  --no-bundles         Skip combined bundles; emit per-file corpus and sidecars
+        \\  --bundles-only       Emit combined bundles and sidecars; omit files/** tree
         \\  --profile=NAME       Input scope: all (default), core, docs, or tools
         \\  --out=DIR            Output corpus root (default: source-rag)
         \\  --root=DIR           Project root to scan (default: .)
         \\  --max-bytes=N        Skip files larger than N bytes (default: 524288)
         \\  --split-size=N       Target body bytes per combined bundle part (default: 524288)
+        \\
+        \\  --no-bundles and --bundles-only are mutually exclusive.
         \\
         \\Default scan (when present under --root):
         \\  dirs:  src docs content layouts scripts tools test SUPPORT
@@ -271,7 +288,7 @@ fn printUsage() void {
         \\  INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json
         \\  profile_manifest.json  part_manifest.json
         \\  boris-source-N.md  boris-docs[-N].md  boris-content[-N].md  (bundles)
-        \\  files/**  (one markdown document per source path)
+        \\  files/**  (one markdown document per source path; omitted with --bundles-only)
         \\
         \\Exit codes: 0 success, 2 usage, 3 I/O error
         \\
@@ -392,7 +409,11 @@ fn jsonEscapeAppend(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const 
 // ---------------------------------------------------------------------------
 
 fn pathExists(io: Io, root: Io.Dir, rel: []const u8) bool {
-    _ = root.statFile(io, rel, .{}) catch return false;
+    _ = root.statFile(io, rel, .{}) catch {
+        var child = root.openDir(io, rel, .{}) catch return false;
+        child.close(io);
+        return true;
+    };
     return true;
 }
 
@@ -1119,8 +1140,7 @@ fn exportIndex(
     out_dir: Io.Dir,
     entries: []const CatalogEntry,
     stats: ExportStats,
-    include_bundles: bool,
-    split_size: usize,
+    opts: Options,
     parts: []const BundlePart,
 ) !void {
     var doc: std.ArrayList(u8) = .empty;
@@ -1157,35 +1177,71 @@ fn exportIndex(
         try doc.appendSlice(gpa, line);
     }
 
-    try doc.appendSlice(gpa,
-        \\## How to use
-        \\
-        \\1. Upload this entire directory (or zip it).
-        \\2. Start from `INDEX.md` as the path map.
-        \\3. Prefer `files/src/**` for implementation questions.
-        \\4. Prefer `files/docs/contracts/**` for IR / machine contracts.
-        \\5. Cite `source_path` from document frontmatter when answering.
-        \\
-    );
-
-    if (include_bundles) {
+    if (opts.bundles_only) {
         try doc.appendSlice(gpa,
-            \\## Combined upload bundles
+            \\## How to use
             \\
-            \\These root-level Markdown files are additive convenience bundles; the
-            \\per-file `files/**` documents and catalog remain unchanged:
+            \\This corpus was generated with `--bundles-only`: combined upload
+            \\parts and catalog sidecars are present; the per-file `files/**` tree
+            \\is intentionally omitted.
             \\
-            \\| File | Contents |
-            \\|------|----------|
-            \\| `part_manifest.json` | Ordered parts, source paths, and byte counts |
-            \\
-            \\The part manifest records the configured body-byte target. Parts
-            \\contain contiguous whole documents in sorted source-path order. A
-            \\single source file larger than the target remains whole in its own part.
+            \\1. Upload this entire directory (or zip it).
+            \\2. Start from `INDEX.md` and `part_manifest.json` as the path map.
+            \\3. Prefer `boris-source-N.md` for implementation questions.
+            \\4. Prefer `boris-docs[-N].md` for contracts and docs.
+            \\5. Cite `source_path` from document frontmatter when answering.
             \\
         );
+    } else {
+        try doc.appendSlice(gpa,
+            \\## How to use
+            \\
+            \\1. Upload this entire directory (or zip it).
+            \\2. Start from `INDEX.md` as the path map.
+            \\3. Prefer `files/src/**` for implementation questions.
+            \\4. Prefer `files/docs/contracts/**` for IR / machine contracts.
+            \\5. Cite `source_path` from document frontmatter when answering.
+            \\
+        );
+    }
+
+    if (opts.includeBundles()) {
+        if (opts.bundles_only) {
+            try doc.appendSlice(gpa,
+                \\## Combined upload bundles
+                \\
+                \\These root-level Markdown files are the primary upload surface for
+                \\this `--bundles-only` pack. The catalog still inventories each
+                \\source path; per-file `files/**` documents are not emitted:
+                \\
+                \\| File | Contents |
+                \\|------|----------|
+                \\| `part_manifest.json` | Ordered parts, source paths, and byte counts |
+                \\
+                \\The part manifest records the configured body-byte target. Parts
+                \\contain contiguous whole documents in sorted source-path order. A
+                \\single source file larger than the target remains whole in its own part.
+                \\
+            );
+        } else {
+            try doc.appendSlice(gpa,
+                \\## Combined upload bundles
+                \\
+                \\These root-level Markdown files are additive convenience bundles; the
+                \\per-file `files/**` documents and catalog remain unchanged:
+                \\
+                \\| File | Contents |
+                \\|------|----------|
+                \\| `part_manifest.json` | Ordered parts, source paths, and byte counts |
+                \\
+                \\The part manifest records the configured body-byte target. Parts
+                \\contain contiguous whole documents in sorted source-path order. A
+                \\single source file larger than the target remains whole in its own part.
+                \\
+            );
+        }
         var part_num_buf: [96]u8 = undefined;
-        try doc.appendSlice(gpa, try std.fmt.bufPrint(&part_num_buf, "Target body bytes per part: `{d}`.\n\n", .{split_size}));
+        try doc.appendSlice(gpa, try std.fmt.bufPrint(&part_num_buf, "Target body bytes per part: `{d}`.\n\n", .{opts.split_size}));
         try doc.appendSlice(gpa, "| Order | File | Bundle | Documents | Body bytes |\n|------:|------|--------|----------:|-----------:|\n");
         for (parts, 0..) |part, part_index| {
             try doc.appendSlice(gpa, "| ");
@@ -1251,7 +1307,7 @@ fn exportIndex(
     try writeBytes(io, out_dir, "INDEX.md", doc.items);
 }
 
-fn exportUploadGuide(io: Io, out_dir: Io.Dir, include_bundles: bool) !void {
+fn exportUploadGuide(io: Io, out_dir: Io.Dir, opts: Options) !void {
     const common_prefix =
         \\---
         \\rag_id: meta/upload-guide
@@ -1271,12 +1327,26 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir, include_bundles: bool) !void {
         \\
         \\Upload the **entire** generated directory (`source-rag/` by default).
         \\
+    ;
+    const full_subset =
         \\Minimum useful subset:
         \\
         \\1. `INDEX.md`
         \\2. `files/src/**`
         \\3. `files/docs/contracts/**` (if present)
         \\4. `files/AGENTS.md` / `files/README.md` (if present)
+        \\
+    ;
+    const bundles_only_subset =
+        \\This corpus was generated with `--bundles-only`. There is no `files/**`
+        \\tree; upload the combined Markdown parts plus the index and catalog
+        \\sidecars:
+        \\
+        \\1. `INDEX.md`
+        \\2. `UPLOAD-GUIDE.md`
+        \\3. `part_manifest.json` (upload order and byte counts)
+        \\4. `boris-source-N.md`, `boris-docs[-N].md`, `boris-content[-N].md`
+        \\5. `catalog.jsonl`, `catalog_meta.json`, `profile_manifest.json`
         \\
     ;
     const bundles =
@@ -1304,7 +1374,7 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir, include_bundles: bool) !void {
         \\per-file `files/**` documents with `INDEX.md` and the catalog sidecars.
         \\
     ;
-    const common_suffix =
+    const full_prompt =
         \\## Suggested system prompt
         \\
         \\```
@@ -1315,6 +1385,20 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir, include_bundles: bool) !void {
         \\Do not invent APIs that are not present in the corpus.
         \\```
         \\
+    ;
+    const bundles_only_prompt =
+        \\## Suggested system prompt
+        \\
+        \\```
+        \\You are answering questions about this repository using the source RAG corpus.
+        \\Prefer boris-source-N.md for implementation details.
+        \\Prefer boris-docs parts for normative IR and machine contracts.
+        \\Cite source_path from document frontmatter when you rely on a file.
+        \\Do not invent APIs that are not present in the corpus.
+        \\```
+        \\
+    ;
+    const common_suffix =
         \\## Regenerating
         \\
         \\From the repo root (Zig 0.16+):
@@ -1323,6 +1407,8 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir, include_bundles: bool) !void {
         \\zig build source-rag
         \\# or
         \\zig-out/bin/boris-source-rag --out=./source-rag
+        \\# bundles only (no files/** tree)
+        \\zig build source-rag -- --bundles-only
         \\```
         \\
         \\## Integrity
@@ -1332,11 +1418,14 @@ fn exportUploadGuide(io: Io, out_dir: Io.Dir, include_bundles: bool) !void {
         \\- No timestamps or random ids in corpus files.
         \\
     ;
-    const body = if (include_bundles)
-        common_prefix ++ bundles ++ common_suffix
+
+    const body_text = if (opts.bundles_only)
+        common_prefix ++ bundles_only_subset ++ bundles ++ bundles_only_prompt ++ common_suffix
+    else if (opts.includeBundles())
+        common_prefix ++ full_subset ++ bundles ++ full_prompt ++ common_suffix
     else
-        common_prefix ++ no_bundles ++ common_suffix;
-    try writeBytes(io, out_dir, "UPLOAD-GUIDE.md", body);
+        common_prefix ++ full_subset ++ no_bundles ++ full_prompt ++ common_suffix;
+    try writeBytes(io, out_dir, "UPLOAD-GUIDE.md", body_text);
 }
 
 fn sortCatalog(entries: []CatalogEntry) void {
@@ -1376,7 +1465,7 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
 
     var out = try cwd.openDir(io, stage_path, .{});
     defer out.close(io);
-    try out.createDirPath(io, "files");
+    if (opts.includePerFileDocs()) try out.createDirPath(io, "files");
 
     var catalog: std.ArrayList(CatalogEntry) = .empty;
     defer catalog.deinit(gpa);
@@ -1432,13 +1521,21 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
         const lang = langFromPath(source_path);
         const rag_path = try ragPathForSource(arena, source_path);
         const rag_id = try ragIdForSource(arena, source_path);
-        const doc = try renderSourceDocument(gpa, rag_id, rag_path, source_path, lang, data);
-        defer gpa.free(doc);
 
-        try writeBytes(io, out, rag_path, doc);
-        stage_writes += 1;
-        if (opts.test_fail_after_stage_writes) |limit| {
-            if (stage_writes >= limit) return error.TestInjectedStageWriteFailure;
+        if (opts.includePerFileDocs()) {
+            const doc = try renderSourceDocument(gpa, rag_id, rag_path, source_path, lang, data);
+            defer gpa.free(doc);
+            try writeBytes(io, out, rag_path, doc);
+            stage_writes += 1;
+            if (opts.test_fail_after_stage_writes) |limit| {
+                if (stage_writes >= limit) return error.TestInjectedStageWriteFailure;
+            }
+        } else {
+            // Bundles-only still needs a deterministic progress point for tests.
+            stage_writes += 1;
+            if (opts.test_fail_after_stage_writes) |limit| {
+                if (stage_writes >= limit) return error.TestInjectedStageWriteFailure;
+            }
         }
 
         try catalog.append(gpa, .{
@@ -1468,12 +1565,12 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
         log(opts, "  source     {s}\n", .{source_path});
     }
 
-    if (!opts.no_bundles) {
+    if (opts.includeBundles()) {
         try exportBundles(io, gpa, out, opts.split_size, packed_source.items, packed_docs.items, packed_content.items, &bundle_parts);
     }
 
     // Meta documents (not source rows until we add them to catalog).
-    try exportUploadGuide(io, out, !opts.no_bundles);
+    try exportUploadGuide(io, out, opts);
     try catalog.append(gpa, .{
         .rag_id = "meta/upload-guide",
         .rag_path = "UPLOAD-GUIDE.md",
@@ -1497,11 +1594,11 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     stats.catalog_entries = catalog.items.len;
 
     // INDEX after catalog is sorted (lists source rows).
-    try exportIndex(io, gpa, out, catalog.items, stats, !opts.no_bundles, opts.split_size, bundle_parts.items);
+    try exportIndex(io, gpa, out, catalog.items, stats, opts, bundle_parts.items);
     try exportCatalogJsonl(io, gpa, out, catalog.items);
     try exportCatalogMeta(io, out, opts.profile, opts.split_size);
     try exportProfileManifest(io, gpa, out, opts.profile, stats, packed_paths.items);
-    try exportPartManifest(io, gpa, out, opts.profile, opts.split_size, !opts.no_bundles, bundle_parts.items);
+    try exportPartManifest(io, gpa, out, opts.profile, opts.split_size, opts.includeBundles(), bundle_parts.items);
 
     try publishManagedCorpus(io, gpa, stage_path, opts.out_dir);
 
@@ -1586,6 +1683,9 @@ test "parseOptions: help and defaults" {
     try std.testing.expectEqualStrings("source-rag", o.out_dir);
     try std.testing.expectEqualStrings(".", o.root_dir);
     try std.testing.expect(!o.no_bundles);
+    try std.testing.expect(!o.bundles_only);
+    try std.testing.expect(o.includeBundles());
+    try std.testing.expect(o.includePerFileDocs());
     try std.testing.expectEqual(Profile.all, o.profile);
     try std.testing.expectEqual(@as(usize, 512 * 1024), o.split_size);
 
@@ -1599,18 +1699,26 @@ test "parseOptions: help and defaults" {
     try std.testing.expectEqual(@as(usize, 100), o2.split_size);
     try std.testing.expect(o2.quiet);
     try std.testing.expect(o2.no_bundles);
+    try std.testing.expect(!o2.includeBundles());
     try std.testing.expectEqual(Profile.docs, o2.profile);
 
     const o3 = try parseOptions(&.{ "boris-source-rag", "--profile", "tools" });
     try std.testing.expectEqual(Profile.tools, o3.profile);
     const o4 = try parseOptions(&.{ "boris-source-rag", "--split-size", "256" });
     try std.testing.expectEqual(@as(usize, 256), o4.split_size);
+
+    const o5 = try parseOptions(&.{ "boris-source-rag", "--bundles-only", "--split-size=128" });
+    try std.testing.expect(o5.bundles_only);
+    try std.testing.expect(o5.includeBundles());
+    try std.testing.expect(!o5.includePerFileDocs());
+    try std.testing.expectEqual(@as(usize, 128), o5.split_size);
 }
 
 test "parseOptions: unknown flag" {
     try std.testing.expectError(error.UnknownFlag, parseOptions(&.{ "x", "--rag" }));
     try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--profile=bogus" }));
     try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--split-size=0" }));
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--no-bundles", "--bundles-only" }));
 }
 
 test "profiles keep their documented scopes" {
@@ -1911,4 +2019,182 @@ test "exportCorpus mini fixture" {
     defer gpa.free(no_bundles_parts);
     try std.testing.expect(std.mem.indexOf(u8, no_bundles_parts, "\"bundles\":false") != null);
     try std.testing.expect(std.mem.endsWith(u8, no_bundles_parts, "\"parts\":[]}\n"));
+}
+
+/// Shared mini project tree for export layout tests.
+fn writeMiniSourceRagFixture(io: Io, gpa: std.mem.Allocator, root_rel: []const u8) !void {
+    try Io.Dir.cwd().createDirPath(io, root_rel);
+    {
+        const src_rel = try std.fmt.allocPrint(gpa, "{s}/src", .{root_rel});
+        defer gpa.free(src_rel);
+        try Io.Dir.cwd().createDirPath(io, src_rel);
+    }
+    {
+        const tool_rel = try std.fmt.allocPrint(gpa, "{s}/tools/source-rag", .{root_rel});
+        defer gpa.free(tool_rel);
+        try Io.Dir.cwd().createDirPath(io, tool_rel);
+    }
+    var root = try Io.Dir.cwd().openDir(io, root_rel, .{});
+    defer root.close(io);
+    try root.writeFile(io, .{ .sub_path = "README.md", .data = "# Demo\n" });
+    try root.writeFile(io, .{ .sub_path = "src/hello.zig", .data = "pub fn main() void {}\n" });
+    try root.writeFile(io, .{ .sub_path = "tools/source-rag/main.zig", .data = "pub fn export() void {}\n" });
+}
+
+test "exportCorpus default mode still emits files/" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/bundles-only-default-root", .{tmp.sub_path});
+    defer gpa.free(root_rel);
+    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/bundles-only-default-out", .{tmp.sub_path});
+    defer gpa.free(out_rel);
+
+    try writeMiniSourceRagFixture(io, gpa, root_rel);
+    _ = try exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out_rel,
+        .quiet = true,
+        .split_size = 20,
+    });
+
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{ .iterate = true });
+    defer out.close(io);
+    try std.testing.expect(pathExists(io, out, "files/src/hello.zig.md"));
+    try std.testing.expect(pathExists(io, out, "files/README.md"));
+    try std.testing.expect(pathExists(io, out, "boris-source-1.md"));
+    try std.testing.expect(pathExists(io, out, "INDEX.md"));
+    try std.testing.expect(pathExists(io, out, "part_manifest.json"));
+}
+
+test "exportCorpus bundles-only omits files/, removes stale files/, is deterministic, and keeps manifests consistent" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/bundles-only-root", .{tmp.sub_path});
+    defer gpa.free(root_rel);
+    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/bundles-only-out", .{tmp.sub_path});
+    defer gpa.free(out_rel);
+
+    try writeMiniSourceRagFixture(io, gpa, root_rel);
+
+    // Seed a full default export so files/ exists and must be scrubbed later.
+    _ = try exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out_rel,
+        .quiet = true,
+        .split_size = 20,
+    });
+
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{ .iterate = true });
+    defer out.close(io);
+    try std.testing.expect(pathExists(io, out, "files/src/hello.zig.md"));
+    try out.writeFile(io, .{ .sub_path = "user-note.txt", .data = "preserve unrelated output\n" });
+
+    const first = try exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out_rel,
+        .quiet = true,
+        .split_size = 20,
+        .bundles_only = true,
+    });
+    try std.testing.expectEqual(@as(usize, 3), first.source_files);
+
+    // Per-file tree omitted; prior files/ removed by successful staged publish.
+    try std.testing.expect(!pathExists(io, out, "files"));
+    try std.testing.expect(!pathExists(io, out, "files/src/hello.zig.md"));
+
+    // Bundles and sidecars present.
+    try std.testing.expect(pathExists(io, out, "INDEX.md"));
+    try std.testing.expect(pathExists(io, out, "UPLOAD-GUIDE.md"));
+    try std.testing.expect(pathExists(io, out, "catalog.jsonl"));
+    try std.testing.expect(pathExists(io, out, "catalog_meta.json"));
+    try std.testing.expect(pathExists(io, out, "profile_manifest.json"));
+    try std.testing.expect(pathExists(io, out, "part_manifest.json"));
+    try std.testing.expect(pathExists(io, out, "boris-source-1.md"));
+    try std.testing.expect(pathExists(io, out, "boris-docs.md"));
+    try std.testing.expect(pathExists(io, out, "boris-content.md"));
+
+    const index = try readFileAlloc(io, out, "INDEX.md", gpa);
+    defer gpa.free(index);
+    try std.testing.expect(std.mem.indexOf(u8, index, "--bundles-only") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index, "files/**` tree") != null or std.mem.indexOf(u8, index, "files/**") != null);
+
+    const guide = try readFileAlloc(io, out, "UPLOAD-GUIDE.md", gpa);
+    defer gpa.free(guide);
+    try std.testing.expect(std.mem.indexOf(u8, guide, "--bundles-only") != null);
+
+    const catalog = try readFileAlloc(io, out, "catalog.jsonl", gpa);
+    defer gpa.free(catalog);
+    try std.testing.expect(std.mem.indexOf(u8, catalog, "src/hello.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, catalog, "\"rag_path\":\"files/src/hello.zig.md\"") != null);
+
+    const profile_manifest = try readFileAlloc(io, out, "profile_manifest.json", gpa);
+    defer gpa.free(profile_manifest);
+    try std.testing.expect(std.mem.indexOf(u8, profile_manifest, "\"profile\":\"all\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, profile_manifest, "\"source_files\":3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, profile_manifest, "src/hello.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, profile_manifest, "README.md") != null);
+    try std.testing.expect(std.mem.indexOf(u8, profile_manifest, "tools/source-rag/main.zig") != null);
+
+    const part_manifest = try readFileAlloc(io, out, "part_manifest.json", gpa);
+    defer gpa.free(part_manifest);
+    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"bundles\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"source_path\":\"README.md\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"source_path\":\"src/hello.zig\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"source_path\":\"tools/source-rag/main.zig\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"file\":\"boris-source-1.md\"") != null);
+
+    // Internal consistency: every packed path appears in both manifests and catalog.
+    const expected_paths = [_][]const u8{ "README.md", "src/hello.zig", "tools/source-rag/main.zig" };
+    for (expected_paths) |path| {
+        try std.testing.expect(std.mem.indexOf(u8, profile_manifest, path) != null);
+        try std.testing.expect(std.mem.indexOf(u8, part_manifest, path) != null);
+        try std.testing.expect(std.mem.indexOf(u8, catalog, path) != null);
+    }
+
+    const source_one = try readFileAlloc(io, out, "boris-source-1.md", gpa);
+    defer gpa.free(source_one);
+    const source_two = try readFileAlloc(io, out, "boris-source-2.md", gpa);
+    defer gpa.free(source_two);
+    const source_three = try readFileAlloc(io, out, "boris-source-3.md", gpa);
+    defer gpa.free(source_three);
+    const docs_bundle = try readFileAlloc(io, out, "boris-docs.md", gpa);
+    defer gpa.free(docs_bundle);
+    const content_bundle = try readFileAlloc(io, out, "boris-content.md", gpa);
+    defer gpa.free(content_bundle);
+    const meta = try readFileAlloc(io, out, "catalog_meta.json", gpa);
+    defer gpa.free(meta);
+
+    // Unrelated siblings survive staged publish.
+    const user_note = try readFileAlloc(io, out, "user-note.txt", gpa);
+    defer gpa.free(user_note);
+    try std.testing.expectEqualStrings("preserve unrelated output\n", user_note);
+
+    // Second bundles-only run is byte-identical for managed artifacts.
+    _ = try exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out_rel,
+        .quiet = true,
+        .split_size = 20,
+        .bundles_only = true,
+    });
+    try std.testing.expect(!pathExists(io, out, "files"));
+    try expectOutputFileEqual(io, gpa, out, "INDEX.md", index);
+    try expectOutputFileEqual(io, gpa, out, "UPLOAD-GUIDE.md", guide);
+    try expectOutputFileEqual(io, gpa, out, "catalog.jsonl", catalog);
+    try expectOutputFileEqual(io, gpa, out, "catalog_meta.json", meta);
+    try expectOutputFileEqual(io, gpa, out, "profile_manifest.json", profile_manifest);
+    try expectOutputFileEqual(io, gpa, out, "part_manifest.json", part_manifest);
+    try expectOutputFileEqual(io, gpa, out, "boris-source-1.md", source_one);
+    try expectOutputFileEqual(io, gpa, out, "boris-source-2.md", source_two);
+    try expectOutputFileEqual(io, gpa, out, "boris-source-3.md", source_three);
+    try expectOutputFileEqual(io, gpa, out, "boris-docs.md", docs_bundle);
+    try expectOutputFileEqual(io, gpa, out, "boris-content.md", content_bundle);
 }
