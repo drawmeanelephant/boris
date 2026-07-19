@@ -10,7 +10,7 @@ an AI Context Bundle, or a graph-ordered `llms.txt` map.
 | | |
 |--|--|
 | Language | Zig **0.16.0** (`build.zig.zon` / CI pin) |
-| Product | **0.6.1** / compiler **boris/0.6.1** |
+| Product | **0.7.0** / compiler **boris/0.7.0** |
 | IR schema | **0.2.0** (typed dependency endpoints + reverse index) |
 | License | [MIT](LICENSE) |
 
@@ -33,6 +33,10 @@ without changing IR 0.2.
 showcases: Astro dynamic-asset normalization, WordPress theme archaeology,
 source-RAG manifest correctness, and Pure, Chota, journal, Cozy Corner, and
 Node Tracker examples. Base IR remains `0.2.0`.
+
+**v0.7.0:** read-only generated-output link auditing, deterministic theme
+materialization, expanded migration-lab dogfood, and contest-facing
+agent/demo documentation. Base IR remains `0.2.0`.
 
 ---
 
@@ -408,6 +412,6 @@ after exit 0.
   includes + wiki-links, typed IR dependency edges + reverse index,
   Documentation Intelligence, Context Bundles, layout selection, Textile
   compatibility, and migration labs as **standalone developer aids**. Product
-  **v0.6.1**.
+  **v0.7.0**.
 - **Next:** continue bounded real-site dogfood and migration hardening — see
   [`docs/STATUS.md`](docs/STATUS.md).

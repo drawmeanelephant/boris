@@ -3,8 +3,8 @@
 All notable changes to Boris are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
-Versioning: the current product cut is **v0.6.1** with base IR
-`schemaVersion` **`0.2.0`** and compiler id **`boris/0.6.1`**. Breaking IR
+Versioning: the current product cut is **v0.7.0** with base IR
+`schemaVersion` **`0.2.0`** and compiler id **`boris/0.7.0`**. Breaking IR
 changes must bump `schemaVersion` and update `docs/contracts/`. Product version
 bumps may update `compiler_id` / `boris_version` without changing IR schema.
 
@@ -21,6 +21,30 @@ How to use going forward:
   link the relevant contract when the IR or acceptance surface moves.
 
 ---
+
+## [Unreleased]
+
+_No changes yet._
+
+## [0.7.0] — 2026-07-19
+
+The v0.7.0 release keeps base IR `0.2.0` and conditional semantic-relation IR
+`0.3.0`; it adds bounded migration-lab tooling and real-site evidence without
+changing the core content grammar or IR schema.
+
+### Added
+
+- Added a read-only generated-output link audit for missing routes and heading
+  fragments, with deterministic JSON and Markdown reports.
+- Added deterministic theme materialization from a reviewed adaptation ledger,
+  including safe asset copying, layout stubs, provenance, and review reports.
+- Added expanded Astro/Starlight, WordPress, Filed.fyi, and theme dogfood
+  evidence plus contest-facing demo, agent, and migration documentation.
+
+### Docs
+
+- Updated release metadata, migration status, contracts, and the mechanical
+  release gate for v0.7.0 while keeping base IR 0.2.0.
 
 ## [0.6.1] — 2026-07-18
 
@@ -50,10 +74,6 @@ correctness, and a family of zero-dependency theme examples.
 
 - Updated release metadata, status, contracts, fixtures, sample content, and
   the mechanical release gate for v0.6.1 while keeping base IR 0.2.0.
-
-## [Unreleased]
-
-_No changes yet._
 
 ---
 

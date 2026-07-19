@@ -1,8 +1,8 @@
 # Project status — Boris
 
-**As of:** 2026-07-18 · current product release **v0.6.1** /
-compiler **boris/0.6.1** · Zig **0.16.0**<br>
-**Phase:** v0.7 development after the tagged v0.6.1 release.<br>
+**As of:** 2026-07-19 · current product release candidate **v0.7.0** /
+compiler **boris/0.7.0** · Zig **0.16.0**<br>
+**Phase:** v0.7.0 release candidate after the tagged v0.6.1 release.<br>
 IR `schemaVersion` is **`0.2.0`**.
 
 **Version boundary:** `v0.6.1` packages post-`v0.6.0` migration-lab hardening,
@@ -79,6 +79,14 @@ profile-manifest correctness, five additional zero-dependency theme
 showcases, and the complete real-site dogfood preflight case study for `filed.fyi`. 
 These remain migration aids and examples; Boris core and base IR
 `0.2.0` are unchanged.
+
+### What v0.7.0 adds
+
+The v0.7.0 candidate packages read-only generated-output link auditing,
+deterministic theme materialization, expanded Astro/Starlight and WordPress
+dogfood evidence, and contest-facing demo and agent documentation. These
+remain migration aids and examples; Boris core and base IR `0.2.0` are
+unchanged.
 
 **0.2.0** packaged ApexMarkdown Unified, HTML default CLI, graph-aware nav +
 TOC, and P2/P3 incremental / watch / jobs / multi-target. Tag: `v0.2.0`.
@@ -214,6 +222,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | # | Feature | Note |
 |---|---------|------|
+| — | **Product v0.7.0 candidate** | Generated-output link audit, theme materialization, expanded migration dogfood, and contest/demo documentation; base IR remains 0.2 |
 | — | **Product v0.6.1** | Tagged/released: Astro/WordPress migration-lab hardening, source-RAG manifest correctness, five additional zero-dependency theme showcases, and the Filed.fyi preflight case study; base IR remains 0.2 |
 | — | **Product v0.6.0** | Deterministic `llms.txt`, bounded source-RAG profiles, and Stitch-calibrated zero-dependency theme prototypes; base IR remains 0.2 |
 | — | **Product v0.5.2** | Migration-lab packaging: WP media materialize, Filed parent-key normalize, Starlight F-L1 image paths + calibration, bounded dogfood; core compiler surface unchanged; base IR remains 0.2 |
@@ -278,7 +287,7 @@ on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 | Publish | **Honest limit + fallback** | Cross-volume **atomic** replace still not claimed. HTML stage / IR publish fall back to copy+delete on `error.CrossDevice`; RAG already had directory copy fallback. Same-parent staging remains the common path. |
 | Dialect | **Enforced** | Author key is **`parent` only**. `parentEntry` / `parent_entry` → `EFRONTMATTER` on all product parse paths. Do not reintroduce aliases. |
 | Migration | **Documented** | Bare `boris` is HTML under `dist/`. Old IR scripts need `--out` / `--no-rag`. README + help text carry the note. |
-| Release state | **v0.6.1 tagged/released** | Product/compiler metadata `0.6.1`; `v0.6.1` is the completed release cut and `main` is in v0.7 development. |
+| Release state | **v0.7.0 candidate** | Product/compiler metadata `0.7.0`; gate passed on the merged main base, pending release-branch review and tag. |
 
 ---
 
