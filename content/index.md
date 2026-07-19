@@ -33,6 +33,7 @@ offers `--context`, `check`, and `impact` (see [[getting-started]]).
 
 | Page | What you’ll learn |
 |------|-------------------|
+| [[contest|Build Week field guide]] | What shipped, how it was built, and the honest boundaries |
 | [[getting-started|Getting started]] | Build Boris, first site, three modes |
 | [[guides/cli-and-modes|CLI and modes]] | HTML default vs `--out` vs `--rag` |
 | [[guides/overview|Content model]] | Pipeline + Trunk/Satellite |
