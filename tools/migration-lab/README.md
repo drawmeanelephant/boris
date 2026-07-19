@@ -15,6 +15,7 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 | **theme-archaeology** | Astro/Starlight-shaped theme or project root | Deterministic adaptation ledger + boundary report (read-only) |
 | **theme-materialize** | Theme source tree + `adaptation_ledger.json` | Safe Boris theme draft + materialization, manifest, provenance, and review reports |
 | **wordpress-theme** | Classic WordPress theme source tree | Deterministic PHP/template inventory + static Boris prototype + manual-review manifest (read-only) |
+| **link-audit** | Generated static HTML tree | Missing local routes/fragments report; external links are left out of scope |
 
 All modes are **read-only on inputs**: originals are never rewritten. There is
 **no network access**, no zip extraction, no scraping, and **no product compiler
@@ -111,6 +112,11 @@ zig build run -- --mode=theme-archaeology \
 zig build run -- --mode=wordpress-theme \
   --root=./fixtures/mini-wordpress-kubrick \
   --out=./.wp-theme-report
+
+# Audit an already-generated static site for missing local routes/fragments
+zig build run -- --mode=link-audit \
+  --root=./dist \
+  --out=./.link-audit-report
 ```
 
 From the **repository root**, use this targeted aggregate gate after changing
@@ -157,7 +163,7 @@ zig build --build-file tools/migration-lab/build.zig run -- \
 | `-q`, `--quiet` | off | Suppress progress lines |
 | `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `wordpress-theme` (`wp-theme` / `kubrick-theme`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), `starlight` (`sl` / `evcc`), `asset-filename` (`assets` / `asset-compat` / `filename-compat`), `theme-archaeology` (`theme` / `theme-arch` / `theme-inventory`), or `theme-materialize` (`materialize` / `theme-materialise`) |
 | `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**) |
-| `--root=DIR` | `.` | Astro archaeology root, Starlight project root, asset-filename content tree, **or** theme-archaeology / WordPress-theme scan root |
+| `--root=DIR` | `.` | Astro archaeology root, Starlight project root, asset-filename content tree, theme scan root, or generated HTML tree for `link-audit` |
 | `--ledger=FILE` | | Required by `theme-materialize`; adaptation ledger emitted by `theme-archaeology` |
 | `--wxr=FILE` | | WordPress WXR/XML path (implies `--mode=wordpress`) |
 | `--media=DIR` | | Optional offline local media/uploads tree (WordPress); never modified; no network |
