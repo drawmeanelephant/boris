@@ -10,6 +10,7 @@
 //!   starlight  — Starlight/Astro docs dogfood (locale-dir or root-locale) → Boris candidate + boundary manifests
 //!   asset-filename — Sanitize content-local asset filenames to Boris ASCII path grammar
 //!   theme-archaeology — Read-only Astro/Starlight theme inventory → adaptation ledger + boundary report
+//!   theme-materialize — Ledger-driven safe static Boris theme materialization
 //!   wordpress-theme — Read-only classic WordPress PHP theme inventory → static prototype + review manifest
 //!
 //! Never rewrites inputs. Not part of the Boris product compiler pipeline.
@@ -40,6 +41,7 @@ const filed = @import("filed.zig");
 const starlight = @import("starlight.zig");
 const asset_filename = @import("asset_filename.zig");
 const theme_archaeology = @import("theme_archaeology.zig");
+const theme_materialize = @import("theme_materialize.zig");
 const wordpress_theme = @import("wordpress_theme.zig");
 
 pub const ExitCode = enum(u8) {
@@ -62,6 +64,7 @@ pub const Mode = enum {
     starlight,
     asset_filename,
     theme_archaeology,
+    theme_materialize,
     wordpress_theme,
 
     pub fn parse(s: []const u8) ?Mode {
@@ -78,6 +81,9 @@ pub const Mode = enum {
         if (std.mem.eql(u8, s, "theme-archaeology") or std.mem.eql(u8, s, "theme") or
             std.mem.eql(u8, s, "theme-arch") or std.mem.eql(u8, s, "theme-inventory"))
             return .theme_archaeology;
+        if (std.mem.eql(u8, s, "theme-materialize") or std.mem.eql(u8, s, "theme-materialise") or
+            std.mem.eql(u8, s, "materialize"))
+            return .theme_materialize;
         if (std.mem.eql(u8, s, "wordpress-theme") or std.mem.eql(u8, s, "wp-theme") or
             std.mem.eql(u8, s, "kubrick-theme"))
             return .wordpress_theme;
@@ -111,6 +117,8 @@ pub const Options = struct {
     boris_bin: ?[]const u8 = null,
     /// Report/output directory (created if missing). Never writes into inputs.
     out_dir: []const u8 = "migration-report",
+    /// Existing theme-archaeology adaptation ledger for theme-materialize mode.
+    ledger_path: ?[]const u8 = null,
 };
 
 pub const ParseError = error{
@@ -202,6 +210,14 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
             options.out_dir = args[index];
+        } else if (std.mem.startsWith(u8, arg, "--ledger=")) {
+            const value = arg["--ledger=".len..];
+            if (value.len == 0) return error.MissingValue;
+            options.ledger_path = value;
+        } else if (std.mem.eql(u8, arg, "--ledger")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            options.ledger_path = args[index];
         } else if (std.mem.startsWith(u8, arg, "--filed-root=")) {
             const value = arg["--filed-root=".len..];
             if (value.len == 0) return error.MissingValue;
@@ -254,7 +270,7 @@ fn printUsage() void {
         \\Common options:
         \\  -h, --help         Show this help and exit
         \\  -q, --quiet        Suppress progress lines
-        \\  --mode=MODE        astro (default) | wordpress | wordpress-theme | instagram | obsidian | notion | filed | starlight | asset-filename | theme-archaeology
+        \\  --mode=MODE        astro (default) | wordpress | wordpress-theme | instagram | obsidian | notion | filed | starlight | asset-filename | theme-archaeology | theme-materialize
         \\  --out=DIR          Output directory (default: migration-report)
         \\
         \\Astro mode:
@@ -269,6 +285,14 @@ fn printUsage() void {
         \\  Aliases: theme | theme-arch | theme-inventory
         \\  No JS/MDX execution, no remote fetch, no directive following.
         \\  Ambiguous mappings are review items, never guesses.
+        \\
+        \\Theme materialize (ledger-driven static theme draft):
+        \\  --mode=theme-materialize  Consume an archaeology ledger; never execute source
+        \\  --root=DIR                 Original read-only theme source tree
+        \\  --ledger=FILE              adaptation_ledger.json from theme-archaeology
+        \\  Writes: theme/**, materialize-manifest.json, MATERIALIZE-REPORT.md, PROVENANCE.md
+        \\  Only preserve CSS/fonts/images and closed static layout shells are emitted.
+        \\  No JS/MDX/PHP execution, remote fetch, symlinks, or guessed mappings.
         \\
         \\WordPress theme archaeology (read-only PHP source scan):
         \\  --mode=wordpress-theme  Inventory classic theme files, assets, hooks,
@@ -532,6 +556,26 @@ pub fn main(init: std.process.Init) u8 {
                 return ExitCode.io_error.int();
             };
         },
+        .theme_materialize => {
+            const ledger = opts.ledger_path orelse {
+                std.log.err("theme-materialize mode requires --ledger=FILE", .{});
+                printUsage();
+                return ExitCode.usage.int();
+            };
+            if (std.mem.eql(u8, opts.root_dir, opts.out_dir) or std.mem.eql(u8, ledger, opts.out_dir)) {
+                std.log.err("--out must differ from --root and --ledger", .{});
+                return ExitCode.usage.int();
+            }
+            theme_materialize.run(io, gpa, .{
+                .root_dir = opts.root_dir,
+                .ledger_path = ledger,
+                .out_dir = opts.out_dir,
+                .quiet = opts.quiet,
+            }) catch |err| {
+                std.log.err("migration-lab (theme-materialize) failed: {s}", .{@errorName(err)});
+                return ExitCode.io_error.int();
+            };
+        },
         .wordpress_theme => {
             if (std.mem.eql(u8, opts.root_dir, opts.out_dir)) {
                 std.log.err("--out must differ from --root", .{});
@@ -564,6 +608,7 @@ test {
     _ = starlight;
     _ = asset_filename;
     _ = theme_archaeology;
+    _ = theme_materialize;
     _ = wordpress_theme;
 }
 
