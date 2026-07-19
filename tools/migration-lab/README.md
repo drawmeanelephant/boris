@@ -13,6 +13,7 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 | **starlight** | Starlight/Astro docs root (locale-dir or root-locale) | Boris candidate `content/` + route/link/relation/nav/asset/selection/boundary manifests + compile report |
 | **asset-filename** | Content tree with sibling `{stem}.assets/` files | Sanitized Boris-safe asset names + rewritten Markdown refs + manifests |
 | **theme-archaeology** | Astro/Starlight-shaped theme or project root | Deterministic adaptation ledger + boundary report (read-only) |
+| **theme-materialize** | Theme source tree + `adaptation_ledger.json` | Safe Boris theme draft + materialization, manifest, provenance, and review reports |
 | **wordpress-theme** | Classic WordPress theme source tree | Deterministic PHP/template inventory + static Boris prototype + manual-review manifest (read-only) |
 
 All modes are **read-only on inputs**: originals are never rewritten. There is
@@ -34,7 +35,7 @@ coupling**. All code and fixtures live under `tools/migration-lab/`.
 | Starlight format id | `boris-starlight-migration-lab` |
 | Asset-filename format id | `boris-asset-filename-lab` |
 | Theme-archaeology format id | `boris-theme-archaeology-lab` |
-| Schema | Astro/Instagram/Obsidian/Notion/Filed/Starlight/Asset-filename/Theme-archaeology `1`; WordPress **`3`** |
+| Schema | Astro/Instagram/Obsidian/Notion/Filed/Starlight/Asset-filename/Theme-archaeology/Theme-materialize `1`; WordPress **`3`** |
 
 Companion author guide: [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
 
@@ -135,6 +136,17 @@ zig build --build-file tools/migration-lab/build.zig run -- \
   --mode=notion \
   --export=tools/migration-lab/fixtures/mini-notion \
   --out=/tmp/notion-mig-report
+
+# Theme archaeology → safe Boris theme draft
+zig build --build-file tools/migration-lab/build.zig run -- \
+  --mode=theme-archaeology \
+  --root=./fixtures/mini-theme-astro \
+  --out=/tmp/theme-arch-out
+zig build --build-file tools/migration-lab/build.zig run -- \
+  --mode=theme-materialize \
+  --root=./fixtures/mini-theme-astro \
+  --ledger=/tmp/theme-arch-out/adaptation_ledger.json \
+  --out=/tmp/theme-materialize-out
 ```
 
 ### Flags
@@ -143,9 +155,10 @@ zig build --build-file tools/migration-lab/build.zig run -- \
 |------|---------|---------|
 | `-h`, `--help` | | Print usage; exit 0 |
 | `-q`, `--quiet` | off | Suppress progress lines |
-| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `wordpress-theme` (`wp-theme` / `kubrick-theme`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), `starlight` (`sl` / `evcc`), `asset-filename` (`assets` / `asset-compat` / `filename-compat`), or `theme-archaeology` (`theme` / `theme-arch` / `theme-inventory`) |
+| `--mode=MODE` | `astro` | `astro`, `wordpress` (`wp` / `wxr`), `wordpress-theme` (`wp-theme` / `kubrick-theme`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), `starlight` (`sl` / `evcc`), `asset-filename` (`assets` / `asset-compat` / `filename-compat`), `theme-archaeology` (`theme` / `theme-arch` / `theme-inventory`), or `theme-materialize` (`materialize` / `theme-materialise`) |
 | `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**) |
 | `--root=DIR` | `.` | Astro archaeology root, Starlight project root, asset-filename content tree, **or** theme-archaeology / WordPress-theme scan root |
+| `--ledger=FILE` | | Required by `theme-materialize`; adaptation ledger emitted by `theme-archaeology` |
 | `--wxr=FILE` | | WordPress WXR/XML path (implies `--mode=wordpress`) |
 | `--media=DIR` | | Optional offline local media/uploads tree (WordPress); never modified; no network |
 | `--dump=DIR` | | Unpacked Instagram data-download root (implies `--mode=instagram`) |
@@ -243,6 +256,28 @@ Each row in `adaptation_ledger.json` has:
 | **preserve** | Static CSS/fonts/images/license bytes transferable without reinterpretation |
 | **adapt** | Closed mapping exists (layout → `theme/layouts/*.html` slots; Aside/Details tags) |
 | **review** | Ambiguous or multi-valid (sidebar, unknown components, analytics placement) |
+
+## Theme materialization (safe draft)
+
+`theme-materialize` is the deliberately narrow second step after theme
+archaeology. It consumes the archaeology ledger and emits a reviewable Boris
+theme draft under `--out/theme/`. It copies only static assets whose ledger
+decision is `preserve`, preserves recorded license files, and emits a closed
+static layout shell for approved `adapt` layout rows. It does not execute
+Astro, PHP, JavaScript, MDX, or template expressions, and it never modifies
+the source tree.
+
+```bash
+zig build run -- --mode=theme-materialize \
+  --root=./fixtures/mini-theme-astro \
+  --ledger=/tmp/theme-arch-out/adaptation_ledger.json \
+  --out=/tmp/theme-materialize-out
+```
+
+The output includes `materialize-manifest.json`, `MATERIALIZE-REPORT.md`, and
+`PROVENANCE.md` when provenance rows are present. Treat the generated theme as
+a starting point for human review, not as a promise that a source framework's
+runtime behavior has been converted.
 | **drop** | Out of scope or refused (remote fetch, traversal, islands, inline runtime scripts) |
 
 Hostile fixture: [`fixtures/hostile-theme-astro/`](fixtures/hostile-theme-astro/)
