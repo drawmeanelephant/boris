@@ -19,6 +19,9 @@ particular task or that every name has a verified patch.
 record. It distinguishes named Codex workers from honorary external tools and
 labels thin evidence as an investigation/support lane.
 
+[[agents/roll-call|Build Week Roll Call]] preserves the full observed worker
+roster, while keeping individual technical attribution evidence-bound.
+
 ## Start with a few stories
 
 The roster is intentionally broader than a contest walkthrough. These four
