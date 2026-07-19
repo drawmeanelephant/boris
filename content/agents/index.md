@@ -19,6 +19,22 @@ particular task or that every name has a verified patch.
 record. It distinguishes named Codex workers from honorary external tools and
 labels thin evidence as an investigation/support lane.
 
+## Start with a few stories
+
+The roster is intentionally broader than a contest walkthrough. These four
+pages make the collaboration legible before a reader dives into every name:
+
+| Story | Why read it |
+|---|---|
+| [[agents/bacon|Bacon]] | The release-review ethic: evidence before applause. |
+| [[agents/grok|Grok]] | A bounded external-collaborator record with merged migration and layout artifacts. |
+| [[agents/codex-session-success-story|Codex session story]] | One narrow task, including a tool failure and the corrective path. |
+| [[agents/credits|Credits & roster]] | The complete attribution map and its stated limits. |
+
+These are not a claim that every named worker is a persistent character or a
+separate author. They are a way to leave the useful parts of collaboration
+behind in a form the next reader can inspect.
+
 ## The roster
 
 | Page | Grounding |
