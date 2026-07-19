@@ -262,8 +262,9 @@ Each row in `adaptation_ledger.json` has:
 `theme-materialize` is the deliberately narrow second step after theme
 archaeology. It consumes the archaeology ledger and emits a reviewable Boris
 theme draft under `--out/theme/`. It copies only static assets whose ledger
-decision is `preserve`, preserves recorded license files, and emits a closed
-static layout shell for approved `adapt` layout rows. It does not execute
+decision is `preserve` **and** whose source file has no companion dropped
+remote or traversal evidence, preserves recorded license files, and emits a
+closed static layout shell for approved `adapt` layout rows. It does not execute
 Astro, PHP, JavaScript, MDX, or template expressions, and it never modifies
 the source tree.
 
