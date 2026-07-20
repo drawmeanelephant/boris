@@ -283,7 +283,7 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
 }
 
 fn printUsage() void {
-    std.debug.print(
+    std.debug.print("{s}", .{
         \\boris-migration-lab — Astro / WordPress / Instagram / Obsidian / Notion / Starlight → Boris migration laboratory
         \\
         \\Usage:
@@ -398,7 +398,7 @@ fn printUsage() void {
         \\Safety: no network, no destructive source writes, originals preserved.
         \\Exit codes: 0 success, 2 usage, 3 I/O error
         \\
-    , .{});
+    });
 }
 
 pub fn main(init: std.process.Init) u8 {
