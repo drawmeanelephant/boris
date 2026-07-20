@@ -106,7 +106,7 @@ TOC, and P2/P3 incremental / watch / jobs / multi-target. Tag: `v0.2.0`.
 | LLM knowledge pack of this project | Deterministic `rag/` corpus | `boris --rag` |
 | Grounded context for an LLM | Deterministic bundle with hashes + graph | `boris --context` |
 | Edit → rebuild only what changed | Incremental dirty-set HTML | `--incremental` / `--watch` |
-| Faster multi-page HTML | Bounded parallel page workers | `--jobs N` |
+| Optional bounded page workers | Deterministic HTML workers; measure render-heavy trees | `--jobs N` |
 | Draft vs prod from one tree | Isolated multi-target outputs | `--target name=dir` |
 
 **Why it feels quick (honest, not brochure):** pages are not glued into one giant
