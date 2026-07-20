@@ -75,12 +75,14 @@ graph**, not a mini web app.
 | Markdown that looks like modern docs | Real **ApexMarkdown Unified** in-process (tables, footnotes, lists, …) — not a toy stub |
 | Callouts that stay on the page | Constrained `<Aside>` components in document order |
 | Structure you can trust | Trunk/Satellite parents, wiki targets, and includes **fail the build** when invalid |
-| Rebuilds that stay lean | Skip unchanged pages (`--incremental` / `--watch`); parallel HTML with `--jobs N` |
+| Rebuilds that stay lean | Skip unchanged pages (`--incremental` / `--watch`); optional bounded HTML workers via `--jobs N` |
 | Same content, different products | HTML, JSON IR, RAG pack, or Context Bundle from one tree |
 
 Performance shape is **design intent** (stream layout + body, wipe page scratch,
-optional incremental/parallel) — not a published stopwatch claim. Measure your
-tree before advertising numbers.
+optional incremental/parallel) — not a published stopwatch claim. `--jobs`
+preserves deterministic HTML output but is not a universal speedup: the current
+in-process Markdown engine is serialized for safety, so measure your tree before
+advertising numbers.
 
 ---
 
@@ -222,7 +224,7 @@ Exit codes: **0** success · **1** content · **2** usage · **3** I/O.
 |---------|--------|
 | `boris` | **HTML site** under `dist/` (default) |
 | `boris --html-dir DIR` | HTML under `DIR` |
-| `boris --jobs N` / `--watch` / `--incremental` | Faster / live / skip-unchanged HTML builds |
+| `boris --jobs N` / `--watch` / `--incremental` | Optional workers / live / skip-unchanged HTML builds |
 | `boris --out DIR` | **JSON IR** under `DIR` (no HTML) |
 | `boris --no-rag` | Explicit IR (default out `.boris`) |
 | `boris --rag` / `--rag-dir DIR` | **RAG corpus** only |
@@ -246,7 +248,7 @@ Exit codes: **0** success · **1** content · **2** usage · **3** I/O.
 | `--target NAME=DIR` | — | Named HTML root (not with `--html-dir`); any order |
 | `--target-layout N=P` | — | Per-target layout; may precede or follow `--target` |
 | `--layout-rule T S P` | — | Per-page HTML layout: selector is `id:`, `glob:`, or `role:` |
-| `--jobs N` / `-j N` | `1` | Parallel HTML workers `1–64` |
+| `--jobs N` / `-j N` | `1` | Optional bounded HTML workers `1–64`; measure render-heavy trees |
 | `--incremental` / `--watch` | off | Dirty-set rebuilds; watch implies incremental; OK with `--target` |
 | `--quiet` | off | Less stderr; exit codes unchanged |
 
