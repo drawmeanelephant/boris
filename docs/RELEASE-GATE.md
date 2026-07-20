@@ -10,7 +10,7 @@ Run locally:
 zig build
 zig build test
 zig build test-apex-hostile
-zig build test-apex-sanitize   # optional; documents skip if sanitizers unavailable
+zig build test-apex-sanitize   # optional; record PASS or an explicit host/tool skip
 zig build run -- --input fixtures/content/valid --out .tmp/boris-ir
 zig build run -- --input fixtures/content/valid --rag-dir .tmp/boris-rag
 zig build run -- --input test/fixtures/html/content --html-dir .tmp/boris-dist
@@ -33,6 +33,14 @@ CI (`.github/workflows/ci.yml`) pins **Zig 0.16.0** and runs `zig build`,
 migration laboratory; changes under `tools/migration-lab/` additionally run its
 Linux-only targeted gate: `zig build --build-file tools/migration-lab/build.zig test`.
 Sanitizer remains optional and must not be claimed if it only skipped.
+
+### Sanitizer evidence
+
+The sanitizer command is an optional host-qualified check, not an automatic
+pass. A release record must say either `PASS` with the host and toolchain that
+actually ran ASan/UBSan, or `SKIP` with the host and the concrete reason the
+instrumented run was unavailable. A successful ordinary test run, an empty
+sanitizer log, or a green wrapper command does not count as sanitizer evidence.
 
 ## Checklist
 

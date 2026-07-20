@@ -1,10 +1,10 @@
 # Roadmap — post Feature 8 (historical draft + current direction)
 
-**As of:** 2026-07-16 · current product release **v0.5.1** / base IR
+**As of:** 2026-07-19 · current product release **v0.7.0** / base IR
 **0.2.0** · historical planning record · not a substitute for
 [`STATUS.md`](STATUS.md)
-**Current direction:** `v0.5.1` is tagged/released (compiler `boris/0.5.1`).
-Through v0.5.1 the tree includes knowledge-system exports, layout/theme work,
+**Current direction:** `v0.7.0` is tagged/released (compiler `boris/0.7.0`).
+Through v0.7.0 the tree includes knowledge-system exports, layout/theme work,
 Textile, migration labs, static showcase, agent-lore dogfood, native
 `<Details>`, content-local page assets, the reference theme, and bounded
 real-site adoption evidence. Historical version claims below preserve the
@@ -15,7 +15,7 @@ ergonomics/publication safety, and measurement only after a reproducible need.
 Normative behavior: [`docs/contracts/`](contracts/). Hard constraints:
 [`AGENTS.md`](../AGENTS.md). Living phase: [`STATUS.md`](STATUS.md).
 
-### Current direction after v0.5.1
+### Historical direction after v0.5.1
 
 1. Dogfood Boris against real sites and archives; turn observed gaps into
    focused authoring, layout, conversion, or publish work.

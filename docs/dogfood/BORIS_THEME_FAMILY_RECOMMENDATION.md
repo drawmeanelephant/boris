@@ -6,6 +6,12 @@ This report presents a technical evaluation and strategic recommendation compari
 
 Both themes have been verified to compile **40/40 identical documentation pages recursively** with **100% byte-for-byte determinism** and **zero CDNs, external scripts, or external font-face network dependencies**.
 
+> **Status:** This is a design calibration record, not a shipped theme-preset
+> contract. Boris does not currently provide named `minimalist` or `corporate`
+> presets. The production CLI accepts an explicit theme directory via
+> `--theme PATH`; these prototypes remain reference material for hand-authored
+> themes and migration work.
+
 ---
 
 ## 1. Core Structural Commonalities & Layout Portability
@@ -38,15 +44,16 @@ While sharing the same semantic HTML layout tree, the two themes express entirel
 
 ## 3. Structural Recommendation for Boris Core
 
-To establish a premium out-of-the-box user experience, we recommend shipping **both themes as the "Boris Default Theme Family"** using a simple theme-select flag.
+To establish a reusable theme family without inventing a new product CLI, keep
+the layout contract shared and select a concrete theme with `--theme PATH`.
 
 ### Shipping Architecture
 
 ```mermaid
 graph TD
-    A[Boris Compiler] -->|theme flag| B{Select Theme}
-    B -->|"--theme minimalist"| C[prototype/theme.css]
-    B -->|"--theme corporate"| D[prototype_corporate/theme.css]
+    A[Boris Compiler] -->|"--theme PATH"| B{Select Theme Directory}
+    B -->|"explicit path"| C[prototype/theme.css]
+    B -->|"explicit path"| D[prototype_corporate/theme.css]
     C --> E[layouts/main.html]
     D --> E[layouts/main.html]
     E --> F[Unified Compiled Site]
