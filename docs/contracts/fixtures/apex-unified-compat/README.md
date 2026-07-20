@@ -1,7 +1,7 @@
 # ApexMarkdown Unified compatibility fixture
 
 **Read-only audit** of Apex Unified features as exercised through Boris
-(HTML path, host adapter `vendor/apex/apex.c`, pin ApexMarkdown **v1.1.11**).
+(HTML path, host adapter `vendor/apex/apex.c`, pin ApexMarkdown **v1.1.12**).
 
 Normative product ABI boundary: [`../../apex-abi.md`](../../apex-abi.md).  
 Upstream feature inventory: [`../../../../vendor/apex-markdown/pages/index.md`](../../../../vendor/apex-markdown/pages/index.md).

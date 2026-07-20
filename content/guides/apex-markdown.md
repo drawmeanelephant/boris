@@ -6,7 +6,7 @@ tags: [markdown, showcase, apex]
 
 # Apex Markdown Showcase
 
-Boris renders page bodies with **ApexMarkdown Unified** (vendored pin v1.1.11)
+Boris renders page bodies with **ApexMarkdown Unified** (vendored pin v1.1.12)
 through an in-process C ABI host adapter — not a toy stub and not a subprocess.
 This page is a living gallery of constructs that matter on documentation sites.
 

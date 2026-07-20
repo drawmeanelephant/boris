@@ -8,11 +8,12 @@ ABI (`vendor/apex/apex.h`). Campaign archive:
 | Field | Value |
 |-------|--------|
 | **Upstream** | https://github.com/ApexMarkdown/apex |
-| **Release tag** | `v1.1.11` |
-| **Upstream commit** | `47d25d594b04143cdd747922d7fee8d66b3c5082` |
-| **VERSION file** | `1.1.11` |
+| **Release tag** | `v1.1.12` |
+| **Upstream tag object** | `1e5efb580980d40f378ce51590f5c817e71d628c` |
+| **Upstream commit** | `2d62f4b81380379f35cd0d06444a18c223306f9` |
+| **VERSION file** | `1.1.12` |
 | **License** | MIT (`LICENSE`) — Copyright (c) 2026 Brett Terpstra |
-| **Pinned for Boris** | 2026-07-15 (Feature 1 campaign Chat 1) |
+| **Pinned for Boris** | 2026-07-20 (ApexMarkdown v1.1.12 upgrade) |
 | **Product role** | Static libs linked; host `apex_render` is Unified adapter (Chat 3) |
 
 ## Nested upstream dependencies (snapshot SHAs)
@@ -25,6 +26,19 @@ ABI (`vendor/apex/apex.h`). Campaign archive:
 Nested `.git` metadata was **removed** so this tree is a flat Boris-owned
 snapshot (no network required after clone of boris). cmark-gfm is Apex’s
 engine substrate only — **not** Boris’s public Markdown product surface.
+
+## Boris-local patches
+
+The v1.1.12 source tree is otherwise an upstream snapshot. Boris retains these
+local files/policies:
+
+| Path | Patch | Reason |
+|------|-------|--------|
+| `.gitignore` | Do not blanket-ignore `*.cmake`; retain vendored CMake modules | Fresh offline/CI configure must include cmark-gfm’s source modules |
+| `VENDOR.md` | Boris provenance, build policy, and adapter notes | Reproducible vendoring record |
+
+The host ABI and adapter remain in `vendor/apex/`; they are Boris code and are
+not part of the upstream snapshot.
 
 ## What is not committed
 

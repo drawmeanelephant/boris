@@ -136,7 +136,7 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | Capability | Status |
 |------------|--------|
 | Default HTML site (`boris` → `dist/`) | **Done** (Feature 2) |
-| ApexMarkdown Unified (tables, footnotes, …) | **Done** (Feature 1; pin v1.1.11) |
+| ApexMarkdown Unified (tables, footnotes, …) | **Done** (Feature 1; pin v1.1.12) |
 | Trunk/Satellite graph + closed frontmatter | **Done** |
 | `<Aside>` kinds + document order | **Done** |
 | Closed `<Details>` disclosure component | **Shipped in v0.5.0** (native HTML + deterministic RAG projection) |
