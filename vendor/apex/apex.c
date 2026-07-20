@@ -36,7 +36,7 @@
 #define BORIS_APEX_ERR_RENDER 3
 
 const char *apex_version(void) {
-    return "boris-apex/apex-markdown-1.1.11+unified";
+    return "boris-apex/apex-markdown-1.1.12+unified";
 }
 
 static void boris_apex_options(apex_options *opts) {

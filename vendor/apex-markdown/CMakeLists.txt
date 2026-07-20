@@ -6,7 +6,7 @@ if(POLICY CMP0000)
 endif()
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Minimum CMake policy version" FORCE)
 
-project(apex VERSION 1.1.11 LANGUAGES C)
+project(apex VERSION 1.1.12 LANGUAGES C)
 
 # Set C standard
 set(CMAKE_C_STANDARD 99)
@@ -137,6 +137,7 @@ set(APEX_LIB_SOURCES
     src/extensions/emoji.c
     src/extensions/special_markers.c
     src/extensions/ial.c
+    src/extensions/bear_image_attrs.c
     src/extensions/definition_list.c
     src/extensions/advanced_footnotes.c
     src/extensions/advanced_tables.c
@@ -354,6 +355,7 @@ add_executable(apex_test_runner
     tests/test_links.c
     tests/test_tables.c
     tests/test_ial.c
+    tests/test_bear_image_attrs.c
     tests/test_extensions.c
     tests/test_output.c
     tests/test_marked_integration.c

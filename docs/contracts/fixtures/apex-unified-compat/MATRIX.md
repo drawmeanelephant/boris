@@ -1,6 +1,6 @@
 # ApexMarkdown Unified · Boris compatibility matrix
 
-**As of:** 2026-07-15 · Boris product path · ApexMarkdown pin **v1.1.11** · host
+**As of:** 2026-07-20 · Boris product path · ApexMarkdown pin **v1.1.12** · host
 adapter Unified (`APEX_MODE_UNIFIED`, fragment HTML, `unsafe=true`).  
 **Source inventory:** `vendor/apex-markdown/pages/index.md`  
 **Evidence:** fixture HTML under `test-output/apex-unified-compat/` (local),
