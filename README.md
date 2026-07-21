@@ -169,9 +169,10 @@ reviewed or uploaded to an LLM when useful.
 - [x] Incremental/watch builds, bounded jobs, multi-target output, and assets.
 - [x] RAG, Context Bundle, and `llms.txt` exports.
 - [x] Migration labs and real-site dogfood evidence.
-- [x] v0.7.0 release and ApexMarkdown 1.1.12 integration.
-- [ ] v0.8 relationship inventory and archive-layout dogfood.
-- [ ] v0.8 real-theme materialization and controlled migration benchmarks.
+- [x] v0.7.0 release and migration-lab theme/link evidence.
+- [x] v0.8.0 release packaging, ApexMarkdown 1.1.12, and source-RAG upload ergonomics.
+- [ ] Relationship inventory and archive-layout dogfood.
+- [ ] Real-theme materialization and controlled migration benchmarks.
 - [ ] Broader migration fixtures for Astro/Starlight and WordPress.
 - [ ] Explicit metadata/provenance namespace for custom source fields.
 

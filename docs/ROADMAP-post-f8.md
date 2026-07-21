@@ -1,16 +1,18 @@
 # Roadmap — post Feature 8 (historical draft + current direction)
 
-**As of:** 2026-07-19 · current product release **v0.7.0** / base IR
+**As of:** 2026-07-21 · current product release candidate **v0.8.0** / base IR
 **0.2.0** · historical planning record · not a substitute for
 [`STATUS.md`](STATUS.md)
-**Current direction:** `v0.7.0` is tagged/released (compiler `boris/0.7.0`).
-Through v0.7.0 the tree includes knowledge-system exports, layout/theme work,
-Textile, migration labs, static showcase, agent-lore dogfood, native
-`<Details>`, content-local page assets, the reference theme, and bounded
-real-site adoption evidence. Historical version claims below preserve the
-post-F8 decision record. Active work is limited to further real-site dogfood,
-archive-friendly layouts, user-facing documentation packaging, source-RAG
-ergonomics/publication safety, and measurement only after a reproducible need.
+**Current direction:** `v0.8.0` packages post-v0.7 release hardening,
+source-RAG upload ergonomics, migration review tooling, and ApexMarkdown
+v1.1.12 (compiler `boris/0.8.0`). Through v0.8.0 the tree includes
+knowledge-system exports, layout/theme work, Textile, migration labs, static
+showcase, agent-lore dogfood, native `<Details>`, content-local page assets,
+the reference theme, and bounded real-site adoption evidence. Historical
+version claims below preserve the post-F8 decision record. Active work is
+limited to further real-site dogfood, archive-friendly layouts, user-facing
+documentation packaging, source-RAG ergonomics/publication safety, and
+measurement only after a reproducible need.
 
 Normative behavior: [`docs/contracts/`](contracts/). Hard constraints:
 [`AGENTS.md`](../AGENTS.md). Living phase: [`STATUS.md`](STATUS.md).
