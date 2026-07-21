@@ -1,15 +1,15 @@
 # Project status — Boris
 
-**As of:** 2026-07-19 · current product release candidate **v0.7.0** /
-compiler **boris/0.7.0** · Zig **0.16.0**<br>
-**Phase:** v0.7.0 release candidate after the tagged v0.6.1 release.<br>
+**As of:** 2026-07-21 · current product release candidate **v0.8.0** /
+compiler **boris/0.8.0** · Zig **0.16.0**<br>
+**Phase:** v0.8.0 release candidate after the tagged v0.7.0 release.<br>
 IR `schemaVersion` is **`0.2.0`**.
 
-**Version boundary:** `v0.6.1` packages post-`v0.6.0` migration-lab hardening,
-theme showcases, and source-RAG correctness fixes on the same base IR. `v0.6.0` packages post-`v0.5.2` exports, source-RAG profiles,
-work on the same compiler surface; base IR remains `0.2.0`. Tag `v0.5.1`
-remains at the certified PR #127 merge commit. Semantic relations retain their
-documented conditional IR `0.3.0` artifacts.
+**Version boundary:** `v0.8.0` packages post-`v0.7.0` release hardening,
+source-RAG upload ergonomics, migration-lab review modes, the ApexMarkdown
+v1.1.12 vendor update, and contest-facing documentation evidence. Base IR
+remains `0.2.0`. Semantic relations retain their documented conditional IR
+`0.3.0` artifacts.
 
 **Feature 8 status:** F8.0 contracts and F8.1–F8.3 are complete. IR 0.2
 publishes typed `parent` / `include` / `reference` edges and deterministic
@@ -82,11 +82,19 @@ These remain migration aids and examples; Boris core and base IR
 
 ### What v0.7.0 adds
 
-The v0.7.0 candidate packages read-only generated-output link auditing,
+The v0.7.0 cut packages read-only generated-output link auditing,
 deterministic theme materialization, expanded Astro/Starlight and WordPress
 dogfood evidence, and contest-facing demo and agent documentation. These
 remain migration aids and examples; Boris core and base IR `0.2.0` are
 unchanged.
+
+### What v0.8.0 adds
+
+The v0.8.0 candidate packages post-v0.7 release hardening: safer package archive
+publication, source-RAG upload manifests and bundle-only exports, migration-lab
+frontmatter and relationship review reports, ApexMarkdown v1.1.12, and clearer
+contest/release evidence. Core IR remains `0.2.0`; conditional semantic
+relations remain `0.3.0`.
 
 **0.2.0** packaged ApexMarkdown Unified, HTML default CLI, graph-aware nav +
 TOC, and P2/P3 incremental / watch / jobs / multi-target. Tag: `v0.2.0`.
@@ -210,7 +218,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 | **Next** | Archive-friendly layouts | Validate layout rules and child/index presentation against real archive navigation before broadening theme features. |
 | **Shipped on main / v0.7** | Ledger-driven theme materialization | [`theme-materialize`](../tools/migration-lab/README.md) turns an archaeology ledger into a reviewable static Boris theme draft: approved assets and licenses are copied, a closed slot shell is generated, and all other source-framework behavior remains explicit review work. |
 | **Later** | Real-theme materialization dogfood | Run archaeology → materialization → Boris compilation on one static theme sample, preserve the reports, and document the manual decisions required before treating the result as an author-facing theme. |
-| **Shipped on main / v0.7** | Source-RAG deterministic partitioning | Complete-file bundle parts, explicit manifests, profiles, and bounded `--split-size` output (PR #163). |
+| **Shipped on main / v0.8** | Source-RAG deterministic partitioning | Complete-file bundle parts, explicit manifests, profiles, bounded `--split-size`, `--bundles-only`, and upload manifests. |
 | **Shipped on main / v0.6** | `llms.txt` export | Deterministic graph-ordered export with URL, summary, fallback, and contract coverage (PR #150). `llms-full.txt` remains later. |
 | **Shipped on main / v0.6** | Source-RAG pack profiles | Bounded logical packs with explicit scope selection, manifests, and vendor/generated/cache exclusions (PR #149). |
 | **Shipped on main / v0.6** | Stitch-calibrated theme prototypes | Milligram-inspired and corporate zero-dependency examples with slot, manual-review, and deterministic calibration reports (PR #152). |
@@ -222,7 +230,8 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | # | Feature | Note |
 |---|---------|------|
-| — | **Product v0.7.0 candidate** | Generated-output link audit, theme materialization, expanded migration dogfood, and contest/demo documentation; base IR remains 0.2 |
+| — | **Product v0.8.0 candidate** | Source-RAG upload ergonomics, frontmatter-review migration lab, safer package archive publication, ApexMarkdown v1.1.12, and contest/release evidence; base IR remains 0.2 |
+| — | **Product v0.7.0** | Generated-output link audit, theme materialization, expanded migration dogfood, and contest/demo documentation; base IR remains 0.2 |
 | — | **Product v0.6.1** | Tagged/released: Astro/WordPress migration-lab hardening, source-RAG manifest correctness, five additional zero-dependency theme showcases, and the Filed.fyi preflight case study; base IR remains 0.2 |
 | — | **Product v0.6.0** | Deterministic `llms.txt`, bounded source-RAG profiles, and Stitch-calibrated zero-dependency theme prototypes; base IR remains 0.2 |
 | — | **Product v0.5.2** | Migration-lab packaging: WP media materialize, Filed parent-key normalize, Starlight F-L1 image paths + calibration, bounded dogfood; core compiler surface unchanged; base IR remains 0.2 |
@@ -287,7 +296,7 @@ on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 | Publish | **Honest limit + fallback** | Cross-volume **atomic** replace still not claimed. HTML stage / IR publish fall back to copy+delete on `error.CrossDevice`; RAG already had directory copy fallback. Same-parent staging remains the common path. |
 | Dialect | **Enforced** | Author key is **`parent` only**. `parentEntry` / `parent_entry` → `EFRONTMATTER` on all product parse paths. Do not reintroduce aliases. |
 | Migration | **Documented** | Bare `boris` is HTML under `dist/`. Old IR scripts need `--out` / `--no-rag`. README + help text carry the note. |
-| Release state | **v0.7.0 candidate** | Product/compiler metadata `0.7.0`; gate passed on the merged main base, pending release-branch review and tag. |
+| Release state | **v0.8.0 candidate** | Product/compiler metadata `0.8.0`; release gate pending on the release branch before tag. |
 
 ---
 
