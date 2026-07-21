@@ -7,7 +7,7 @@ IR `schemaVersion` is **`0.2.0`**.
 
 **Version boundary:** `v0.8.0` packages post-`v0.7.0` release hardening,
 source-RAG upload ergonomics, migration-lab review modes, the ApexMarkdown
-v1.1.12 vendor update, and contest-facing documentation evidence. Base IR
+v1.1.13 vendor update, and contest-facing documentation evidence. Base IR
 remains `0.2.0`. Semantic relations retain their documented conditional IR
 `0.3.0` artifacts.
 
@@ -92,7 +92,7 @@ unchanged.
 
 The v0.8.0 candidate packages post-v0.7 release hardening: safer package archive
 publication, source-RAG upload manifests and bundle-only exports, migration-lab
-frontmatter and relationship review reports, ApexMarkdown v1.1.12, and clearer
+frontmatter and relationship review reports, ApexMarkdown v1.1.13, and clearer
 contest/release evidence. Core IR remains `0.2.0`; conditional semantic
 relations remain `0.3.0`.
 
@@ -144,7 +144,7 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | Capability | Status |
 |------------|--------|
 | Default HTML site (`boris` → `dist/`) | **Done** (Feature 2) |
-| ApexMarkdown Unified (tables, footnotes, …) | **Done** (Feature 1; pin v1.1.12) |
+| ApexMarkdown Unified (tables, footnotes, …) | **Done** (Feature 1; pin v1.1.13) |
 | Trunk/Satellite graph + closed frontmatter | **Done** |
 | `<Aside>` kinds + document order | **Done** |
 | Closed `<Details>` disclosure component | **Shipped in v0.5.0** (native HTML + deterministic RAG projection) |
@@ -230,7 +230,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | # | Feature | Note |
 |---|---------|------|
-| — | **Product v0.8.0 candidate** | Source-RAG upload ergonomics, frontmatter-review migration lab, safer package archive publication, ApexMarkdown v1.1.12, and contest/release evidence; base IR remains 0.2 |
+| — | **Product v0.8.0 candidate** | Source-RAG upload ergonomics, frontmatter-review migration lab, safer package archive publication, ApexMarkdown v1.1.13, and contest/release evidence; base IR remains 0.2 |
 | — | **Product v0.7.0** | Generated-output link audit, theme materialization, expanded migration dogfood, and contest/demo documentation; base IR remains 0.2 |
 | — | **Product v0.6.1** | Tagged/released: Astro/WordPress migration-lab hardening, source-RAG manifest correctness, five additional zero-dependency theme showcases, and the Filed.fyi preflight case study; base IR remains 0.2 |
 | — | **Product v0.6.0** | Deterministic `llms.txt`, bounded source-RAG profiles, and Stitch-calibrated zero-dependency theme prototypes; base IR remains 0.2 |

@@ -1,7 +1,7 @@
 # ApexMarkdown Unified compatibility fixture
 
 **Read-only audit** of Apex Unified features as exercised through Boris
-(HTML path, host adapter `vendor/apex/apex.c`, pin ApexMarkdown **v1.1.12**).
+(HTML path, host adapter `vendor/apex/apex.c`, pin ApexMarkdown **v1.1.13**).
 
 Normative product ABI boundary: [`../../apex-abi.md`](../../apex-abi.md).  
 Upstream feature inventory: [`../../../../vendor/apex-markdown/pages/index.md`](../../../../vendor/apex-markdown/pages/index.md).
@@ -12,7 +12,7 @@ Upstream feature inventory: [`../../../../vendor/apex-markdown/pages/index.md`](
 | [`REPORT.md`](REPORT.md) | Method, evidence, gate commands, findings |
 | `content/` | Trunk/Satellite site exercising feature families |
 | `theme/layouts/main.html` | Minimal layout (`{{content}}` only) |
-| `assets/pixel.png` | 1×1 PNG for image probes |
+| `content/features/images.assets/pixel.png` | 1×1 PNG for image probes |
 
 ## Classifications
 
