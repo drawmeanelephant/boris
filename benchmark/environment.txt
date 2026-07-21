@@ -1,0 +1,56 @@
+# Shell-compatible template. Copy this file elsewhere before editing.
+FILED_SOURCE_DIR=/absolute/path/to/filed.fyi
+BENCHMARK_ROOT=/absolute/path/to/benchmark-artifacts
+
+# If Astro 7 is genuinely unavailable, remove astro7 and explain why here.
+BENCHMARK_IMPLEMENTATIONS="astro6 astro7 boris"
+ASTRO7_UNAVAILABLE_REASON=""
+
+# Install/checkout/build setup is never timed or included in samples.
+BENCHMARK_SETUP_COMMAND=:
+
+# Each checkout must be pinned exactly: git rev-parse REF == HEAD.
+ASTRO6_DIR=/absolute/path/to/astro6-checkout
+ASTRO6_REF=PINNED_ASTRO_6_COMMIT_OR_TAG
+ASTRO7_DIR=/absolute/path/to/astro7-checkout
+ASTRO7_REF=PINNED_ASTRO_7_COMMIT_OR_TAG
+BORIS_DIR=/absolute/path/to/boris-checkout
+BORIS_REF=PINNED_BORIS_COMMIT_OR_TAG
+
+# Commands run from the implementation checkout. They may use the exported
+# BENCHMARK_SOURCE_DIR, BENCHMARK_OUTPUT_DIR, BENCHMARK_CACHE_DIR, and
+# BENCHMARK_RUN_DIR variables. Do not write into source.
+ASTRO6_A_SOURCE_DIR="$FILED_SOURCE_DIR"
+ASTRO6_B_SOURCE_DIR="$FILED_SOURCE_DIR"
+ASTRO6_C_SOURCE_DIR="$FILED_SOURCE_DIR"
+ASTRO6_D_SOURCE_DIR="$FILED_SOURCE_DIR"
+ASTRO7_A_SOURCE_DIR="$FILED_SOURCE_DIR"
+ASTRO7_B_SOURCE_DIR="$FILED_SOURCE_DIR"
+ASTRO7_C_SOURCE_DIR="$FILED_SOURCE_DIR"
+ASTRO7_D_SOURCE_DIR="$FILED_SOURCE_DIR"
+BORIS_A_SOURCE_DIR="$FILED_SOURCE_DIR"
+BORIS_B_SOURCE_DIR="$FILED_SOURCE_DIR"
+BORIS_C_SOURCE_DIR="$FILED_SOURCE_DIR"
+BORIS_D_SOURCE_DIR="$FILED_SOURCE_DIR"
+
+ASTRO6_A_COMMAND='npm run build -- --outDir "$BENCHMARK_OUTPUT_DIR"'
+ASTRO6_B_COMMAND="$ASTRO6_A_COMMAND"
+ASTRO6_C_COMMAND="$ASTRO6_A_COMMAND"
+ASTRO6_D_COMMAND="$ASTRO6_A_COMMAND"
+ASTRO7_A_COMMAND="$ASTRO6_A_COMMAND"
+ASTRO7_B_COMMAND="$ASTRO6_A_COMMAND"
+ASTRO7_C_COMMAND="$ASTRO6_A_COMMAND"
+ASTRO7_D_COMMAND="$ASTRO6_A_COMMAND"
+BORIS_A_COMMAND='"$BORIS_DIR/zig-out/bin/boris" --input "$BENCHMARK_SOURCE_DIR" --html-dir "$BENCHMARK_OUTPUT_DIR"'
+BORIS_B_COMMAND="$BORIS_A_COMMAND"
+BORIS_C_COMMAND="$BORIS_A_COMMAND --incremental"
+BORIS_D_COMMAND="$BORIS_C_COMMAND"
+
+# D preparation is unmeasured: baseline, then one deterministic edit in a
+# writable D source copy. Replace all placeholders with real commands.
+ASTRO6_D_BASELINE_COMMAND="$ASTRO6_B_COMMAND"
+ASTRO6_D_EDIT_COMMAND=': # replace with deterministic one-page edit'
+ASTRO7_D_BASELINE_COMMAND="$ASTRO7_B_COMMAND"
+ASTRO7_D_EDIT_COMMAND=': # replace with deterministic one-page edit'
+BORIS_D_BASELINE_COMMAND="$BORIS_B_COMMAND"
+BORIS_D_EDIT_COMMAND=': # replace with deterministic one-page edit'
