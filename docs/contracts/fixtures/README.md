@@ -32,6 +32,12 @@ ApexMarkdown Unified compatibility (read-only audit) lives under:
 |---------|------|
 | `apex-unified-compat/` | Feature fixtures + `MATRIX.md` / `REPORT.md` for Unified surface through Boris |
 
+The optional Emoji Kitchen portability experiment lives under:
+
+| Fixture | Role |
+|---------|------|
+| `emoji-kitchen-prototype/` | Non-rendered context cases for a future local-only parser/asset adapter |
+
 HTML integration coverage is in `src/compile.zig` / `src/wikilink.zig`; the
 release gate smokes the missing-fragment fixture for exit **1**. Fragment
 existence is validated on the **HTML** path only (requires Apex-rendered ids);
