@@ -16,6 +16,7 @@ const wikilink = @import("wikilink.zig");
 const textile = @import("textile.zig");
 const diag = @import("diag.zig");
 const content_asset = @import("content_asset.zig");
+const doclink = @import("doclink.zig");
 
 pub const Options = struct {
     input_format: identity.InputFormat = .markdown,
@@ -121,13 +122,23 @@ pub fn renderSource(
     if (parsed.diagnostic != null) return error.ParseFailed;
     const body = try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path, options.quiet);
 
+    // Graph-backed Markdown documentation links → canonical page URLs
+    // (pre-Apex). This runs before include expansion so source-relative links
+    // retain the owning page's source context; included fragments are a
+    // deliberate first-slice limitation.
+    const with_doc_links = doclink.rewrite(arena, body, .{
+        .nodes = options.nodes,
+        .source_path = source_path,
+        .output_path = output_path,
+    }) catch return error.ReferenceFailed;
+
     var include_fail: include_mod.FailInfo = .{};
     const expanded = include_mod.expandIncludes(
         io,
         content_dir,
         gpa,
         arena,
-        body,
+        with_doc_links,
         source_path,
         &include_fail,
     ) catch |err| {
@@ -241,16 +252,15 @@ test "shared body pipeline preserves include wiki Aside render order" {
 
     const nodes = [_]graph_mod.Node{.{
         .id = "guides/target",
-        .source_path = "target.md",
+        .source_path = "guides/target.md",
         .title = "Target",
     }};
-    const html = try renderSource(io, gpa, content_dir, &whiteboard,
-        "Before\n\n{{include includes/fragment.md}}\n\n[[guides/target]]\n\n<Aside kind=\"tip\">\nInside\n</Aside>\n\nAfter\n",
-        "index.md", "index.html", .{ .nodes = &nodes });
+    const html = try renderSource(io, gpa, content_dir, &whiteboard, "Before\n\n{{include includes/fragment.md}}\n\n[[guides/target]]\n\n[Docs](guides/target.md?x=1&y=2#section)\n\n<Aside kind=\"tip\">\nInside\n</Aside>\n\nAfter\n", "index.md", "index.html", .{ .nodes = &nodes });
 
     const before = std.mem.indexOf(u8, html, "Before").?;
     const included = std.mem.indexOf(u8, html, "Included").?;
     const wiki = std.mem.indexOf(u8, html, "href=\"guides/target.html\"").?;
+    try std.testing.expect(std.mem.indexOf(u8, html, "href=\"guides/target.html?x=1&amp;y=2#section\"") != null);
     const aside_at = std.mem.indexOf(u8, html, "<aside").?;
     const after = std.mem.indexOf(u8, html, "After").?;
     try std.testing.expect(before < included and included < wiki and wiki < aside_at and aside_at < after);
