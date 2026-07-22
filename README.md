@@ -170,7 +170,7 @@ reviewed or uploaded to an LLM when useful.
 - [x] RAG, Context Bundle, and `llms.txt` exports.
 - [x] Migration labs and real-site dogfood evidence.
 - [x] v0.7.0 release and migration-lab theme/link evidence.
-- [x] v0.8.0 release packaging, ApexMarkdown 1.1.12, and source-RAG upload ergonomics.
+- [x] v0.8.0 release packaging, ApexMarkdown 1.1.13, and source-RAG upload ergonomics.
 - [ ] Relationship inventory and archive-layout dogfood.
 - [ ] Real-theme materialization and controlled migration benchmarks.
 - [ ] Broader migration fixtures for Astro/Starlight and WordPress.

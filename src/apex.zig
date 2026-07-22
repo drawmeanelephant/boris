@@ -698,7 +698,7 @@ fn fidelityRender(md: []const u8, arena: *std.heap.ArenaAllocator) ![]const u8 {
 /// callout). Substring structural checks remain for the rest of U1–U17; these
 /// goldens catch Apex version-drift in attribute shape and nesting.
 ///
-/// Pin: ApexMarkdown v1.1.12 Unified via host adapter (Feature 1 Chat 4 +
+/// Pin: ApexMarkdown v1.1.13 Unified via host adapter (Feature 1 Chat 4 +
 /// external audit F-004). Update only when intentionally upgrading the pin.
 fn fidelityEqualGolden(hay: []const u8, golden: []const u8) !void {
     if (!std.mem.eql(u8, hay, golden)) {

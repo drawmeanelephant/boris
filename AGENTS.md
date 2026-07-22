@@ -79,17 +79,31 @@ and the verification command. Keep speculative hardening separate from defects.
 
 ## Branch discipline (multi-agent)
 
-`main` is the integration line. Agents and humans do not share a dirty working
-tree on `main` as a default workspace. Treat concurrent agent sessions as
-separate writers that must not land on top of each other without a merge base.
+`main` is the release/integration line. Agents and humans do not share a dirty
+working tree on `main` as a default workspace. Treat concurrent agent sessions
+as separate writers that must not land on top of each other without a merge
+base.
+
+### Temporary afterparty integration line
+
+During the OpenAI Build Week judging window, `afterparty` is the active
+integration line and `main` is frozen. Substantive work starts from
+`afterparty`, topic branches target `afterparty` in pull requests, and no work
+is merged into `main` until the user explicitly reopens the release line.
+Afterparty work remains subject to the same contracts, tests, and review
+discipline as main; this is a branch-routing exception, not a product-policy
+exception.
 
 ### Hard rules for agents
 
 1. **Never commit or push directly to `main`** unless the user explicitly orders
    a direct land (hotfix, docs-only fast path they named). Default path is a
    topic branch → PR → merge.
-2. **Start every substantive task on a fresh branch** from up-to-date `main`:
-   `git fetch origin && git checkout main && git pull --ff-only && git checkout -b <name>`.
+2. **Start every substantive task on a fresh branch** from the active
+   integration line. During judging, use up-to-date `afterparty`:
+   `git fetch origin && git checkout afterparty && git pull --ff-only && git checkout -b <name>`.
+   Once judging ends, resume branching from `main` unless the user names a
+   different integration line.
 3. **Branch names:** short, owned prefix when useful — `codex/…`, `grok/…`,
    `feat/…`, `fix/…`, `docs/…`, `chore/…`. One concern per branch.
 4. **Do not rewrite shared history** on `main` or on someone else's published
@@ -100,9 +114,11 @@ separate writers that must not land on top of each other without a merge base.
    merge your topic branch before opening/updating a PR.
 6. **One agent owns a branch** until it is merged or abandoned. Do not two-write
    the same branch or the same hot files without an explicit handoff.
-7. **Land via PR** when remote collaboration or CI matters. Preferred merge is
-   squash or merge commit per repo default; keep history readable. After merge,
-   delete the topic branch and return local checkout to `main`.
+7. **Land via PR** when remote collaboration or CI matters. During the
+   afterparty freeze, target PRs at `afterparty`; do not open a PR to `main` for
+   ordinary work. Preferred merge is squash or merge commit per repo default;
+   keep history readable. After merge, delete the topic branch and return local
+   checkout to the active integration line.
 8. **Generated / ignored outputs** (`dist/`, `rag/`, `source-rag/`, zig cache)
    are not branch currency — do not commit them to “win” a merge.
 9. **Report completion using canonical evidence template:** All substantive agent
@@ -132,6 +148,25 @@ When the hosting plan allows repository rulesets or classic branch protection
 Until GitHub enforces the above, **these AGENTS rules are binding** for every
 coding agent in this repo. Do not treat a missing GitHub lock as permission to
 drive-by `main`.
+
+### Intended GitHub protection on `afterparty` during judging
+
+Protect `refs/heads/afterparty` for the duration of the judging window:
+
+| Rule | Setting |
+|------|---------|
+| Target | `refs/heads/afterparty` only |
+| Direct pushes | Blocked (require pull request) |
+| Force push | Blocked (`non_fast_forward`) |
+| Branch deletion | Blocked until judging ends |
+| Stale reviews | Dismiss on new push |
+| Required approvals | `0` while solo; raise when co-maintainers exist |
+| Required status checks | CI job(s) from `.github/workflows/ci.yml` once stable green |
+| Admin bypass | Allowed for repository admin during the temporary freeze |
+
+When judging ends, review `afterparty` as a batch and land it in `main` through
+one deliberate pull request. Remove or revise this temporary section when the
+release line reopens.
 
 | Doc | Role |
 |-----|------|
