@@ -888,7 +888,9 @@ fn exportProjectionManifest(
             try appendJsonQuoted(&doc, gpa, chunk.page.source_path);
             try doc.appendSlice(gpa, ",\"source_sha256\":");
             try appendJsonQuoted(&doc, gpa, &chunk.source_sha256);
-            try doc.print(gpa, ",\"part\":{d},\"part_count\":{d}}}", .{ chunk.number, chunk.count });
+            try doc.print(gpa, ",\"part\":{d},\"part_count\":{d},\"continuation\":", .{ chunk.number, chunk.count });
+            try appendJsonQuoted(&doc, gpa, if (chunk.count == 1) "single" else if (chunk.number == 1) "continues" else if (chunk.number == chunk.count) "continued" else "continues");
+            try doc.append(gpa, '}');
         }
         try doc.appendSlice(gpa, "]}");
     }
@@ -1878,6 +1880,99 @@ test "rag export: scoped bundles are capped, graph-closed, and deterministic" {
     defer repeated.deinit();
     try std.testing.expect(repeated.ok());
     try expectDirsByteIdentical(io, gpa, paths.out_a, paths.out_b);
+}
+
+test "rag manifest: continuation is emitted for single and split chunks" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var paths = try ragTestPaths(gpa, tmp.sub_path[0..]);
+    defer paths.deinit(gpa);
+    try writeRagFixtures(io, gpa, paths.content, paths.system);
+
+    var content = try Io.Dir.cwd().openDir(io, paths.content, .{});
+    defer content.close(io);
+    var expanded: std.ArrayList(u8) = .empty;
+    defer expanded.deinit(gpa);
+    try expanded.appendSlice(gpa,
+        \\---
+        \\title: M Mid
+        \\parent: a-first
+        \\---
+        \\
+        \\# M Mid
+        \\
+    );
+    for (0..16) |i| {
+        try expanded.print(gpa, "Paragraph {d} supplies a stable boundary for manifest continuation coverage.\n\n", .{i});
+    }
+    try content.writeFile(io, .{ .sub_path = "m-mid.md", .data = expanded.items });
+
+    var split = try run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_a,
+        .system_docs_dir = paths.system,
+        .scope = "m-mid",
+        .split_size = 700,
+        .bundles_only = true,
+        .quiet = true,
+    });
+    defer split.deinit();
+    try std.testing.expect(split.ok());
+
+    var split_out = try Io.Dir.cwd().openDir(io, paths.out_a, .{});
+    defer split_out.close(io);
+    const split_manifest = try readFileAlloc(io, split_out, "manifest.json", gpa);
+    defer gpa.free(split_manifest);
+    var split_json = try std.json.parseFromSlice(std.json.Value, gpa, split_manifest, .{});
+    defer split_json.deinit();
+    var saw_single = false;
+    var saw_split = false;
+    var split_chunks: usize = 0;
+    for (split_json.value.object.get("parts").?.array.items) |part| {
+        for (part.object.get("chunks").?.array.items) |chunk| {
+            split_chunks += 1;
+            const part_count = chunk.object.get("part_count").?.integer;
+            const continuation = chunk.object.get("continuation").?.string;
+            if (part_count == 1) {
+                saw_single = true;
+                try std.testing.expectEqualStrings("single", continuation);
+            } else {
+                saw_split = true;
+                const part_number = chunk.object.get("part").?.integer;
+                const expected = if (part_number == 1) "continues" else if (part_number == part_count) "continued" else "continues";
+                try std.testing.expectEqualStrings(expected, continuation);
+            }
+        }
+    }
+    try std.testing.expect(saw_single);
+    try std.testing.expect(saw_split);
+    try std.testing.expect(split_chunks > 2);
+
+    var unsplit = try run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_b,
+        .system_docs_dir = paths.system,
+        .bundles_only = true,
+        .quiet = true,
+    });
+    defer unsplit.deinit();
+    try std.testing.expect(unsplit.ok());
+
+    var unsplit_out = try Io.Dir.cwd().openDir(io, paths.out_b, .{});
+    defer unsplit_out.close(io);
+    const unsplit_manifest = try readFileAlloc(io, unsplit_out, "manifest.json", gpa);
+    defer gpa.free(unsplit_manifest);
+    var unsplit_json = try std.json.parseFromSlice(std.json.Value, gpa, unsplit_manifest, .{});
+    defer unsplit_json.deinit();
+    for (unsplit_json.value.object.get("parts").?.array.items) |part| {
+        for (part.object.get("chunks").?.array.items) |chunk| {
+            try std.testing.expectEqual(@as(i64, 1), chunk.object.get("part_count").?.integer);
+            try std.testing.expectEqualStrings("single", chunk.object.get("continuation").?.string);
+        }
+    }
 }
 
 test "rag vs IR: identical diagnostic categories; no graph RAG on failure" {
