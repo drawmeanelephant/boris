@@ -121,6 +121,13 @@ exception.
    checkout to the active integration line.
 8. **Generated / ignored outputs** (`dist/`, `rag/`, `source-rag/`, zig cache)
    are not branch currency — do not commit them to “win” a merge.
+9. **Report completion using canonical evidence template:** All substantive agent
+   work must conclude with a full evidence block following
+   [`docs/COMPLETION-REPORT-TEMPLATE.md`](docs/COMPLETION-REPORT-TEMPLATE.md).
+   Required evidence includes status, branch/worktree, commit/PR, changed files,
+   preserved files, implementation summary, known gaps, exact commands run, gate
+   results, determinism result where relevant, generated artifacts, and blockers/next
+   card. This report is required even when a task is blocked.
 
 ### Intended GitHub protection on `main`
 
@@ -167,6 +174,7 @@ release line reopens.
 | `AGENTS.md` (this file) | Hard constraints and long-term direction |
 | `docs/STATUS.md` | Living “where we are” + next work |
 | `docs/RELEASE-GATE.md` | Mechanical ship checks; `scripts/release-gate.sh` |
+| `docs/COMPLETION-REPORT-TEMPLATE.md` | Canonical completion-report template for delegated work |
 | `CHANGELOG.md` | What changed; add bullets under Unreleased as you land work |
 | `docs/contracts/` | Normative IR, frontmatter, graph, diagnostics, fixtures |
 | `docs/rag/system/` | Curated narrative seeds (product RAG) |
