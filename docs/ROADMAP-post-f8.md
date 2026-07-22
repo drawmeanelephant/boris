@@ -5,7 +5,7 @@
 [`STATUS.md`](STATUS.md)
 **Current direction:** `v0.8.0` packages post-v0.7 release hardening,
 source-RAG upload ergonomics, migration review tooling, and ApexMarkdown
-v1.1.12 (compiler `boris/0.8.0`). Through v0.8.0 the tree includes
+v1.1.13 (compiler `boris/0.8.0`). Through v0.8.0 the tree includes
 knowledge-system exports, layout/theme work, Textile, migration labs, static
 showcase, agent-lore dogfood, native `<Details>`, content-local page assets,
 the reference theme, and bounded real-site adoption evidence. Historical

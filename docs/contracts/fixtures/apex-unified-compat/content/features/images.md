@@ -9,18 +9,18 @@ tags: [audit, apex, images]
 
 ## IAL first (attributes expected)
 
-![pixel-ial-first](../../assets/pixel.png){width=120px .screenshot}
+![pixel-ial-first](images.assets/pixel.png){width=120px .screenshot}
 
-![pixel-ial-percent](../../assets/pixel.png){: width="50%" }
+![pixel-ial-percent](images.assets/pixel.png){: width="50%" }
 
 ## Plain image (no IAL)
 
-![pixel-plain](../../assets/pixel.png)
+![pixel-plain](images.assets/pixel.png)
 
 ## IAL after a plain image (regression probe)
 
-![pixel-ial-after](../../assets/pixel.png){width=80px .after-plain}
+![pixel-ial-after](images.assets/pixel.png){width=80px .after-plain}
 
 ## Title caption path
 
-![pixel titled](../../assets/pixel.png "Title caption probe")
+![pixel titled](images.assets/pixel.png "Title caption probe")
