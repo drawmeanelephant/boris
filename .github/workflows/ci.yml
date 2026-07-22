@@ -139,3 +139,4 @@ jobs:
           echo "migration-lab-test result: ${migration_lab_test}"
           test "${build_and_test}" = "success"
           test "${migration_lab_test}" = "success" || test "${migration_lab_test}" = "skipped"
+          
