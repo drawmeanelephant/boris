@@ -18,6 +18,15 @@ pub const CatalogEntry = struct {
     tags: []const u8 = "",
 };
 
+/// Provenance carried by an upload chunk. Full page documents intentionally
+/// keep their historical frontmatter shape; only segmented upload documents
+/// add these fields.
+pub const ChunkInfo = struct {
+    number: usize,
+    count: usize,
+    source_sha256: []const u8,
+};
+
 pub const Stats = struct {
     system_docs: usize,
     content_pages: usize,
@@ -103,6 +112,10 @@ fn renderBody(segments: []const aside.Segment, allocator: std.mem.Allocator) ![]
     return try out.toOwnedSlice(allocator);
 }
 
+pub fn renderRagBody(segments: []const aside.Segment, allocator: std.mem.Allocator) ![]const u8 {
+    return renderBody(segments, allocator);
+}
+
 fn pageTitle(page: graph_mod.Node) []const u8 {
     return page.title orelse page.id;
 }
@@ -137,28 +150,71 @@ pub fn renderSystemDocument(gpa: std.mem.Allocator, rag_id: []const u8, rag_path
 
 pub fn renderContentDocument(gpa: std.mem.Allocator, scratch: std.mem.Allocator, page: graph_mod.Node, pages: []const graph_mod.Node, rag_id: []const u8, rag_path: []const u8, segments: []const aside.Segment) ![]u8 {
     const body = try renderBody(segments, scratch);
+    return renderContentDocumentBody(gpa, page, rag_id, rag_path, body, pages);
+}
+
+fn renderContentDocumentWithChunk(
+    gpa: std.mem.Allocator,
+    page: graph_mod.Node,
+    rag_id: []const u8,
+    rag_path: []const u8,
+    body: []const u8,
+    pages: []const graph_mod.Node,
+    chunk: ?ChunkInfo,
+) ![]u8 {
     const title = pageTitle(page);
     const parent = page.parent orelse "";
-    const tags = try formatTags(scratch, page.tags);
+    const tags = try formatTags(gpa, page.tags);
+    defer gpa.free(tags);
     var related: std.ArrayList(u8) = .empty;
-    defer related.deinit(scratch);
-    try related.appendSlice(scratch, "related:\n");
-    if (parent.len > 0) try related.print(scratch, "  - content/pages/{s}.md\n", .{parent});
+    defer related.deinit(gpa);
+    try related.appendSlice(gpa, "related:\n");
+    if (parent.len > 0) try related.print(gpa, "  - content/pages/{s}.md\n", .{parent});
     for (pages) |other| {
         if (other.role != .satellite) continue;
         const other_parent = other.parent orelse continue;
-        if (std.mem.eql(u8, other_parent, page.id)) try related.print(scratch, "  - content/pages/{s}.md\n", .{other.id});
+        if (std.mem.eql(u8, other_parent, page.id)) try related.print(gpa, "  - content/pages/{s}.md\n", .{other.id});
     }
     var doc: std.ArrayList(u8) = .empty;
     errdefer doc.deinit(gpa);
     try doc.print(gpa, "---\nrag_id: {s}\nrag_path: {s}\ncategory: content\nentity_id: {s}\nsource_path: {s}\nrole: {s}\n", .{ rag_id, rag_path, page.id, page.source_path, page.role.name() });
     if (parent.len > 0) try doc.print(gpa, "parent_entry: {s}\n", .{parent});
     try doc.print(gpa, "title: {s}\ntags: {s}\n", .{ title, tags });
+    if (chunk) |info| {
+        try doc.print(gpa, "source_sha256: {s}\npart: {d}\npart_count: {d}\ncontinuation: {s}\n", .{
+            info.source_sha256,
+            info.number,
+            info.count,
+            if (info.count == 1) "single" else if (info.number == 1) "continues" else if (info.number == info.count) "continued" else "continues",
+        });
+    }
     try doc.appendSlice(gpa, related.items);
     try doc.print(gpa, "---\n\n# {s}\n\n", .{title});
     try doc.appendSlice(gpa, body);
     if (body.len == 0 or body[body.len - 1] != '\n') try doc.append(gpa, '\n');
     return try doc.toOwnedSlice(gpa);
+}
+
+pub fn renderContentDocumentBody(gpa: std.mem.Allocator, page: graph_mod.Node, rag_id: []const u8, rag_path: []const u8, body: []const u8, pages: []const graph_mod.Node) ![]u8 {
+    return renderContentDocumentWithChunk(gpa, page, rag_id, rag_path, body, pages, null);
+}
+
+pub fn renderContentDocumentChunk(
+    gpa: std.mem.Allocator,
+    page: graph_mod.Node,
+    rag_id: []const u8,
+    rag_path: []const u8,
+    body: []const u8,
+    pages: []const graph_mod.Node,
+    source_sha256: []const u8,
+    number: usize,
+    count: usize,
+) ![]u8 {
+    return renderContentDocumentWithChunk(gpa, page, rag_id, rag_path, body, pages, .{
+        .number = number,
+        .count = count,
+        .source_sha256 = source_sha256,
+    });
 }
 
 pub fn contentCatalogEntry(allocator: std.mem.Allocator, page: graph_mod.Node, rag_id: []const u8, rag_path: []const u8) !CatalogEntry {

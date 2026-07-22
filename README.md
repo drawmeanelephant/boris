@@ -79,6 +79,8 @@ Useful first commands:
 ./zig-out/bin/boris --out .boris --quiet       # JSON IR
 ./zig-out/bin/boris --rag --quiet              # RAG corpus
 ./zig-out/bin/boris --context --quiet          # AI Context Bundle
+./zig-out/bin/boris --rag-dir ./uploads/rag --scope mascots --split-size 262144 --bundles-only
+./zig-out/bin/boris --context-dir ./uploads/context --scope mascots/genny --split-size 131072
 ./zig-out/bin/boris --llms --quiet             # llms.txt
 ./zig-out/bin/boris check                      # graph-health report
 ./zig-out/bin/boris impact getting-started    # dependency impact report
@@ -105,6 +107,30 @@ Ship docs with one binary.
 The author-facing parent key is `parent`. Legacy names such as `parentEntry`
 and `parent_entry` are intentionally rejected; see the
 [frontmatter contract](docs/contracts/frontmatter.md).
+
+### Scoped upload bundles
+
+RAG and Context exports validate the complete graph before projecting a scope.
+An entity collection includes its structural parents and one-hop semantic
+neighbors; ordinary Markdown links do not expand the scope.
+
+```bash
+# Whole-site RAG (the historical default)
+./zig-out/bin/boris --rag --rag-dir ./uploads/rag
+
+# Folder-scoped RAG, capped for upload, with only parts and manifests
+./zig-out/bin/boris --rag-dir ./uploads/rag/mascots \
+  --scope mascots --split-size 262144 --bundles-only
+
+# Single-record Context Bundle with complete pages plus upload parts
+./zig-out/bin/boris --context-dir ./uploads/context/genny \
+  --scope mascots/028.genny-compileheart --split-size 131072
+```
+
+`--split-size` is a byte cap, not a token estimate. Parts split only at safe
+Markdown paragraph or heading boundaries outside fenced code; an indivisible
+block larger than the cap fails without replacing an existing export. Treat
+the manifests as the record of exactly what an LLM received.
 
 ## Outputs from one content tree
 

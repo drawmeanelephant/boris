@@ -107,11 +107,19 @@ pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .out_dir = context_dir,
         .quiet = opts.quiet,
         .input_format = opts.input_format,
-    }) catch |err| {
+        .scope = opts.scope,
+        .split_size = opts.split_size,
+    }) catch |err| switch (err) {
+        error.InvalidScope, error.OversizedBlock => {
+            if (!opts.quiet) std.debug.print("error: export projection failed: {s}\n", .{@errorName(err)});
+            return .content_error;
+        },
+        else => {
         if (!opts.quiet) {
             std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
         }
         return .io_error;
+        }
     };
     defer result.deinit();
 
@@ -393,11 +401,20 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .system_docs_dir = "docs/rag/system",
         .quiet = opts.quiet,
         .input_format = opts.input_format,
-    }) catch |err| {
+        .scope = opts.scope,
+        .split_size = opts.split_size,
+        .bundles_only = opts.bundles_only,
+    }) catch |err| switch (err) {
+        error.InvalidScope, error.OversizedBlock => {
+            if (!opts.quiet) std.debug.print("error: export projection failed: {s}\n", .{@errorName(err)});
+            return .content_error;
+        },
+        else => {
         if (!opts.quiet) {
             std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
         }
         return .io_error;
+        }
     };
     defer result.deinit();
 

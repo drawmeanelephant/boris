@@ -56,3 +56,17 @@ schema versions. A relation-bearing graph remains identifiable as IR 0.3 in
 
 Invalid content is a content failure (exit `1`) and leaves the previous context
 directory untouched. I/O failures use exit `3`.
+
+## Scoped and segmented bundles
+
+`--scope VALUE` selects an exact entity or collection prefix. Full graph
+validation always precedes projection; output includes transitive `parent`
+closure and one-hop semantic relation neighbors, with parent closure for those
+neighbors. `--split-size BYTES` adds deterministic `parts/part-N.md` upload
+documents and records scope, closure policy, full-graph count, selected count,
+relation count, cap, parts, and chunks in `manifest.json`. The complete
+provenance page remains under `pages/`; upload chunks repeat its metadata and
+split only at blank-line or heading boundaries outside fenced source blocks.
+Frontmatter and provenance headers are never cut. An indivisible paragraph,
+heading block, or fenced block larger than the cap fails explicitly without
+publishing a partial directory.
