@@ -47,6 +47,12 @@ pub const catalog_schema_version: u32 = 1;
 /// Product version stamped into `catalog_meta.json`.
 pub const boris_version = pipeline.boris_version;
 
+fn relationCountForPages(pages: []const graph_mod.Node) usize {
+    var count: usize = 0;
+    for (pages) |page| count += page.semantic_relations.len;
+    return count;
+}
+
 pub const RagOptions = struct {
     /// Content root (same as IR `--input`).
     content_root: []const u8 = "content",
@@ -84,7 +90,9 @@ pub const RagStats = struct {
     published: bool = false,
     graph_pages: usize = 0,
     selected_pages: usize = 0,
+    graph_relation_count: usize = 0,
     relation_count: usize = 0,
+    bundles_only: bool = false,
     part_count: usize = 0,
     chunk_count: usize = 0,
 };
@@ -536,7 +544,9 @@ fn exportContentPages(
         const doc = try rag_emit.renderContentDocumentBody(gpa, p, rag_id, rag_path, rendered_body, pages);
         defer gpa.free(doc);
         try writeBytes(io, out_dir, rag_path, doc);
-        try appendCatalog(catalog, gpa, arena, try rag_emit.contentCatalogEntry(arena, p, rag_id, rag_path));
+        if (!opts.bundles_only) {
+            try appendCatalog(catalog, gpa, arena, try rag_emit.contentCatalogEntry(arena, p, rag_id, rag_path));
+        }
         if (opts.split_size != null or opts.bundles_only) {
             const cap = opts.split_size orelse 524288;
             const source_hash = cache.hexDigest(cache.hashBytes(source));
@@ -548,7 +558,7 @@ fn exportContentPages(
             const pieces = try export_scope.partitionMarkdown(gpa, rendered_body, body_budget);
             defer gpa.free(pieces);
             for (pieces, 0..) |piece, i| {
-                const chunk_doc = try rag_emit.renderContentDocumentChunk(gpa, p, rag_id, rag_path, piece, pages, &source_hash, i + 1, pieces.len);
+                const chunk_doc = try rag_emit.renderContentDocumentChunkWithOptions(gpa, p, rag_id, rag_path, piece, pages, &source_hash, i + 1, pieces.len, !opts.bundles_only);
                 if (chunk_doc.len > cap) {
                     gpa.free(chunk_doc);
                     return error.OversizedBlock;
@@ -568,6 +578,19 @@ fn appendJsonQuoted(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, value: []co
     try buf.append(gpa, '"');
 }
 
+fn rewriteBundleChunkPath(gpa: std.mem.Allocator, doc: []const u8, part_number: usize) ![]u8 {
+    const key = "rag_path: ";
+    const start = std.mem.indexOf(u8, doc, key) orelse return try gpa.dupe(u8, doc);
+    const value_start = start + key.len;
+    const value_end = std.mem.indexOfScalarPos(u8, doc, value_start, '\n') orelse doc.len;
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(gpa);
+    try out.appendSlice(gpa, doc[0..value_start]);
+    try out.print(gpa, "parts/part-{d}.md", .{part_number});
+    try out.appendSlice(gpa, doc[value_end..]);
+    return try out.toOwnedSlice(gpa);
+}
+
 fn exportBundleParts(
     io: Io,
     gpa: std.mem.Allocator,
@@ -576,6 +599,7 @@ fn exportBundleParts(
     opts: RagOptions,
     graph_page_count: usize,
     selected_page_count: usize,
+    graph_relation_count: usize,
     relation_count: usize,
 ) ![]const BundlePart {
     if (opts.split_size == null and !opts.bundles_only) return try gpa.alloc(BundlePart, 0);
@@ -591,14 +615,33 @@ fn exportBundleParts(
     try current.appendSlice(gpa, prefix);
     var first_chunk: usize = 0;
     for (chunks, 0..) |chunk, i| {
-        if (prefix.len + chunk.doc.len > cap) return error.OversizedBlock;
-        if (current.items.len > prefix.len and current.items.len + chunk.doc.len > cap) {
+        var chunk_doc = chunk.doc;
+        var owned_chunk_doc = false;
+        if (opts.bundles_only) {
+            chunk_doc = try rewriteBundleChunkPath(gpa, chunk.doc, parts.items.len + 1);
+            owned_chunk_doc = true;
+        }
+        if (prefix.len + chunk_doc.len > cap) {
+            if (owned_chunk_doc) gpa.free(chunk_doc);
+            return error.OversizedBlock;
+        }
+        if (current.items.len > prefix.len and current.items.len + chunk_doc.len > cap) {
+            if (owned_chunk_doc) gpa.free(chunk_doc);
             try parts.append(gpa, .{ .doc = try current.toOwnedSlice(gpa), .first_chunk = first_chunk, .last_chunk = i });
             current = .empty;
             try current.appendSlice(gpa, prefix);
             first_chunk = i;
+            if (opts.bundles_only) {
+                chunk_doc = try rewriteBundleChunkPath(gpa, chunk.doc, parts.items.len + 1);
+                owned_chunk_doc = true;
+                if (prefix.len + chunk_doc.len > cap) {
+                    gpa.free(chunk_doc);
+                    return error.OversizedBlock;
+                }
+            }
         }
-        try current.appendSlice(gpa, chunk.doc);
+        try current.appendSlice(gpa, chunk_doc);
+        if (owned_chunk_doc) gpa.free(chunk_doc);
     }
     if (current.items.len > prefix.len) {
         try parts.append(gpa, .{ .doc = try current.toOwnedSlice(gpa), .first_chunk = first_chunk, .last_chunk = chunks.len });
@@ -616,7 +659,7 @@ fn exportBundleParts(
     defer manifest.deinit(gpa);
     try manifest.print(gpa, "{{\n  \"format\":\"boris-rag-parts\",\n  \"schema_version\":1,\n  \"scope\":", .{});
     try appendJsonQuoted(&manifest, gpa, opts.scope orelse "");
-    try manifest.print(gpa, ",\n  \"scope_closure\":\"parents+semantic-relations\",\n  \"graph_page_count\":{d},\n  \"selected_page_count\":{d},\n  \"relation_count\":{d},\n  \"split_size\":{d},\n  \"part_count\":{d},\n  \"chunk_count\":{d},\n  \"parts\":[", .{ graph_page_count, selected_page_count, relation_count, cap, parts.items.len, chunks.len });
+    try manifest.print(gpa, ",\n  \"scope_closure\":\"parents+semantic-relations\",\n  \"graph_page_count\":{d},\n  \"selected_page_count\":{d},\n  \"graph_relation_count\":{d},\n  \"selected_relation_count\":{d},\n  \"relation_count\":{d},\n  \"split_size\":{d},\n  \"part_count\":{d},\n  \"chunk_count\":{d},\n  \"parts\":[", .{ graph_page_count, selected_page_count, graph_relation_count, relation_count, relation_count, cap, parts.items.len, chunks.len });
     for (parts.items, 0..) |part, i| {
         if (i > 0) try manifest.append(gpa, ',');
         try manifest.print(gpa, "{{\"path\":\"parts/part-{d}.md\",\"bytes\":{d},\"chunks\":[", .{ i + 1, part.doc.len });
@@ -690,7 +733,7 @@ fn exportGraphDocs(
             try doc.appendSlice(gpa, p.id);
             try doc.appendSlice(gpa, ".md` |\n");
         }
-        const emitted = try rag_emit.renderEntityCatalog(gpa, pages);
+        const emitted = try rag_emit.renderEntityCatalog(gpa, pages, !opts.bundles_only);
         defer gpa.free(emitted);
         try writeBytes(io, out_dir, "graph/entity-catalog.md", emitted);
         try appendCatalog(catalog, gpa, arena, .{
@@ -791,7 +834,7 @@ fn exportGraphDocs(
         }
         try doc.appendSlice(gpa, "```\n");
 
-        const emitted = try rag_emit.renderRelations(gpa, pages);
+        const emitted = try rag_emit.renderRelations(gpa, pages, !opts.bundles_only);
         defer gpa.free(emitted);
         try writeBytes(io, out_dir, "graph/relations.md", emitted);
         try appendCatalog(catalog, gpa, arena, .{
@@ -831,7 +874,7 @@ fn exportProjectionManifest(
     defer doc.deinit(gpa);
     try doc.print(gpa, "{{\n  \"format\":\"{s}\",\n  \"schema_version\":1,\n  \"compiler\":\"{s}\",\n  \"scope\":", .{ catalog_format, boris_version });
     try appendJsonQuoted(&doc, gpa, opts.scope orelse "");
-    try doc.print(gpa, ",\n  \"scope_closure\":\"parents+semantic-relations\",\n  \"graph_page_count\":{d},\n  \"selected_page_count\":{d},\n  \"relation_count\":{d},\n  \"split_size\":", .{ stats.graph_pages, stats.selected_pages, stats.relation_count });
+    try doc.print(gpa, ",\n  \"scope_closure\":\"parents+semantic-relations\",\n  \"graph_page_count\":{d},\n  \"selected_page_count\":{d},\n  \"graph_relation_count\":{d},\n  \"selected_relation_count\":{d},\n  \"relation_count\":{d},\n  \"split_size\":", .{ stats.graph_pages, stats.selected_pages, stats.graph_relation_count, stats.relation_count, stats.relation_count });
     if (opts.split_size) |size| try doc.print(gpa, "{d}", .{size}) else try doc.appendSlice(gpa, "null");
     try doc.print(gpa, ",\n  \"part_count\":{d},\n  \"chunk_count\":{d},\n  \"bundles_only\":{s},\n  \"parts\":[", .{ stats.part_count, stats.chunk_count, if (opts.bundles_only) "true" else "false" });
     for (parts, 0..) |part, i| {
@@ -978,56 +1021,16 @@ fn exportIndex(
         .content_pages = stats.content_pages,
         .graph_docs = stats.graph_docs,
         .catalog_entries = stats.catalog_entries,
+        .bundles_only = stats.bundles_only,
     }, boris_version);
     defer gpa.free(emitted);
     try writeBytes(io, out_dir, "INDEX.md", emitted);
 }
 
-fn exportUploadGuide(io: Io, out_dir: Io.Dir) !void {
-    const text =
-        \\---
-        \\rag_id: meta/upload-guide
-        \\rag_path: UPLOAD-GUIDE.md
-        \\category: meta
-        \\tags: [upload, grok, gemini, llm, rag]
-        \\related:
-        \\  - INDEX.md
-        \\---
-        \\
-        \\# Upload guide — Grok, Gemini, and similar chat LLMs
-        \\
-        \\## What to upload
-        \\
-        \\Upload the **entire** generated RAG directory. Prefer folder upload when
-        \\the product supports it.
-        \\
-        \\Minimum useful set if you must subset:
-        \\
-        \\1. `INDEX.md` (always)
-        \\2. All of `system/` (Boris behavior)
-        \\3. All of `content/` (site knowledge)
-        \\4. All of `graph/` (relations)
-        \\
-        \\Optional for scripts: `catalog.jsonl` and `catalog_meta.json` (machine
-        \\files; not catalog rows).
-        \\
-        \\## Regenerating this corpus
-        \\
-        \\```bash
-        \\zig build run -- --input content --rag
-        \\zig build run -- --input content --rag-dir ./uploads/boris-rag
-        \\```
-        \\
-        \\## Integrity notes
-        \\
-        \\- Paths inside documents are logical RAG paths (not OS-absolute).
-        \\- Content segments mirror `entity_id` (`guides/intro` → `content/pages/guides/intro.md`).
-        \\- Graph-dependent files are published only after shared `graph.validate` succeeds.
-        \\- Parsed `<Aside>` callouts appear as `:::kind` export blocks (not authoring syntax).
-        \\
-    ;
-    _ = text;
-    try writeBytes(io, out_dir, "UPLOAD-GUIDE.md", rag_emit.upload_guide);
+fn exportUploadGuide(io: Io, gpa: std.mem.Allocator, out_dir: Io.Dir, bundles_only: bool) !void {
+    const guide = try rag_emit.renderUploadGuide(gpa, bundles_only);
+    defer gpa.free(guide);
+    try writeBytes(io, out_dir, "UPLOAD-GUIDE.md", guide);
 }
 
 // ---------------------------------------------------------------------------
@@ -1244,6 +1247,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
     }
 
     var stats: RagStats = .{};
+    stats.bundles_only = opts.bundles_only;
 
     log(opts, "\nExporting RAG corpus → {s}/\n", .{opts.out_dir});
 
@@ -1258,6 +1262,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
 
         stats.graph_pages = result.compile.pages.items.len;
         stats.selected_pages = selected_pages.len;
+        stats.graph_relation_count = relationCountForPages(result.compile.pages.items);
         for (selected_pages) |page| stats.relation_count += page.semantic_relations.len;
         stats.system_docs = try exportSystemDocs(io, gpa, retain, stage_dir, opts, &catalog);
         stats.content_pages = try exportContentPages(
@@ -1281,7 +1286,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
             opts,
         );
 
-        const parts = try exportBundleParts(io, gpa, stage_dir, chunks.items, opts, stats.graph_pages, stats.selected_pages, stats.relation_count);
+        const parts = try exportBundleParts(io, gpa, stage_dir, chunks.items, opts, stats.graph_pages, stats.selected_pages, stats.graph_relation_count, stats.relation_count);
         defer {
             for (parts) |part| gpa.free(part.doc);
             gpa.free(parts);
@@ -1289,7 +1294,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
         stats.part_count = parts.len;
         stats.chunk_count = chunks.items.len;
 
-        try exportUploadGuide(io, stage_dir);
+        try exportUploadGuide(io, gpa, stage_dir, opts.bundles_only);
         try appendCatalog(&catalog, gpa, retain, .{
             .rag_id = "meta/upload-guide",
             .rag_path = "UPLOAD-GUIDE.md",
@@ -1803,9 +1808,36 @@ test "rag export: scoped bundles are capped, graph-closed, and deterministic" {
     defer parsed.deinit();
     try std.testing.expectEqualStrings("m-mid", parsed.value.object.get("scope").?.string);
     try std.testing.expectEqual(@as(i64, 2), parsed.value.object.get("selected_page_count").?.integer);
+    try std.testing.expectEqual(@as(i64, 0), parsed.value.object.get("graph_relation_count").?.integer);
+    try std.testing.expectEqual(@as(i64, 0), parsed.value.object.get("selected_relation_count").?.integer);
     try std.testing.expectEqual(@as(i64, 2), parsed.value.object.get("part_count").?.integer);
     const parts = parsed.value.object.get("parts").?.array.items;
     for (parts) |part| try std.testing.expect(part.object.get("bytes").?.integer <= 700);
+    const part_manifest = try readFileAlloc(io, out, "part_manifest.json", gpa);
+    defer gpa.free(part_manifest);
+    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"entity_id\":\"a-first\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"entity_id\":\"m-mid\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"source_path\":\"a-first.md\"") != null);
+
+    const index = try readFileAlloc(io, out, "INDEX.md", gpa);
+    defer gpa.free(index);
+    try std.testing.expect(std.mem.indexOf(u8, index, "parts/**") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index, "content/pages/**") == null);
+    try std.testing.expect(std.mem.indexOf(u8, index, "content/pages/") == null);
+    const upload = try readFileAlloc(io, out, "UPLOAD-GUIDE.md", gpa);
+    defer gpa.free(upload);
+    try std.testing.expect(std.mem.indexOf(u8, upload, "parts/") != null);
+    try std.testing.expect(std.mem.indexOf(u8, upload, "All of `content/`") == null);
+    const catalog = try readFileAlloc(io, out, "catalog.jsonl", gpa);
+    defer gpa.free(catalog);
+    try std.testing.expect(std.mem.indexOf(u8, catalog, "\"category\":\"content\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, catalog, "content/pages/") == null);
+    const entity_catalog = try readFileAlloc(io, out, "graph/entity-catalog.md", gpa);
+    defer gpa.free(entity_catalog);
+    try std.testing.expect(std.mem.indexOf(u8, entity_catalog, "content/pages/") == null);
+    const relations = try readFileAlloc(io, out, "graph/relations.md", gpa);
+    defer gpa.free(relations);
+    try std.testing.expect(std.mem.indexOf(u8, relations, "content/pages/") == null);
 
     const before_failed_scope = try readFileAlloc(io, out, "manifest.json", gpa);
     defer gpa.free(before_failed_scope);
