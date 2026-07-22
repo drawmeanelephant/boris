@@ -26,6 +26,7 @@
 
 const std = @import("std");
 const Io = std.Io;
+const cache = @import("cache.zig");
 const diag = @import("diag.zig");
 const graph_mod = @import("graph.zig");
 const identity = @import("identity.zig");
@@ -34,6 +35,8 @@ const aside = @import("aside.zig");
 const pipeline = @import("pipeline.zig");
 const rag_emit = @import("rag_emit.zig");
 const textile = @import("textile.zig");
+const export_scope = @import("export_scope.zig");
+const json_out = @import("json_out.zig");
 
 /// Machine format id written into `catalog_meta.json`.
 pub const catalog_format = "boris-rag";
@@ -53,6 +56,23 @@ pub const RagOptions = struct {
     system_docs_dir: []const u8 = "docs/rag/system",
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
+    scope: ?[]const u8 = null,
+    split_size: ?usize = null,
+    bundles_only: bool = false,
+};
+
+const BundleChunk = struct {
+    page: graph_mod.Node,
+    doc: []const u8,
+    number: usize,
+    count: usize,
+    source_sha256: [64]u8,
+};
+
+const BundlePart = struct {
+    doc: []const u8,
+    first_chunk: usize,
+    last_chunk: usize,
 };
 
 pub const RagStats = struct {
@@ -62,6 +82,11 @@ pub const RagStats = struct {
     catalog_entries: usize = 0,
     /// True when a complete graph-dependent corpus was published.
     published: bool = false,
+    graph_pages: usize = 0,
+    selected_pages: usize = 0,
+    relation_count: usize = 0,
+    part_count: usize = 0,
+    chunk_count: usize = 0,
 };
 
 pub const RagResult = struct {
@@ -475,6 +500,7 @@ fn exportContentPages(
     content_root: []const u8,
     opts: RagOptions,
     catalog: *std.ArrayList(CatalogEntry),
+    chunks: *std.ArrayList(BundleChunk),
 ) !usize {
     const cwd = Io.Dir.cwd();
     var content_dir = try cwd.openDir(io, content_root, .{});
@@ -506,14 +532,111 @@ fn exportContentPages(
         if (tok.hasErrors()) return error.UnexpectedParseFailure;
         const rag_path = try identity.ragPagePath(arena, p.id);
         const rag_id = try std.fmt.allocPrint(arena, "content/{s}", .{p.id});
-        const doc = try rag_emit.renderContentDocument(gpa, scratch, p, pages, rag_id, rag_path, tok.segments);
+        const rendered_body = try rag_emit.renderRagBody(tok.segments, scratch);
+        const doc = try rag_emit.renderContentDocumentBody(gpa, p, rag_id, rag_path, rendered_body, pages);
         defer gpa.free(doc);
         try writeBytes(io, out_dir, rag_path, doc);
         try appendCatalog(catalog, gpa, arena, try rag_emit.contentCatalogEntry(arena, p, rag_id, rag_path));
+        if (opts.split_size != null or opts.bundles_only) {
+            const cap = opts.split_size orelse 524288;
+            const source_hash = cache.hexDigest(cache.hashBytes(source));
+            const max_number = rendered_body.len + 1;
+            const probe = try rag_emit.renderContentDocumentChunk(gpa, p, rag_id, rag_path, "", pages, &source_hash, max_number, max_number);
+            defer gpa.free(probe);
+            if (probe.len > cap) return error.OversizedBlock;
+            const body_budget = cap - probe.len;
+            const pieces = try export_scope.partitionMarkdown(gpa, rendered_body, body_budget);
+            defer gpa.free(pieces);
+            for (pieces, 0..) |piece, i| {
+                const chunk_doc = try rag_emit.renderContentDocumentChunk(gpa, p, rag_id, rag_path, piece, pages, &source_hash, i + 1, pieces.len);
+                if (chunk_doc.len > cap) {
+                    gpa.free(chunk_doc);
+                    return error.OversizedBlock;
+                }
+                try chunks.append(gpa, .{ .page = p, .doc = chunk_doc, .number = i + 1, .count = pieces.len, .source_sha256 = source_hash });
+            }
+        }
         n += 1;
         log(opts, "  rag page    {s}\n", .{rag_path});
     }
     return n;
+}
+
+fn appendJsonQuoted(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, value: []const u8) !void {
+    try buf.append(gpa, '"');
+    try json_out.escapeAppend(buf, gpa, value);
+    try buf.append(gpa, '"');
+}
+
+fn exportBundleParts(
+    io: Io,
+    gpa: std.mem.Allocator,
+    out_dir: Io.Dir,
+    chunks: []const BundleChunk,
+    opts: RagOptions,
+    graph_page_count: usize,
+    selected_page_count: usize,
+    relation_count: usize,
+) ![]const BundlePart {
+    if (opts.split_size == null and !opts.bundles_only) return try gpa.alloc(BundlePart, 0);
+    const cap = opts.split_size orelse 524288;
+    const prefix = "# Boris RAG bundle\n\n";
+    var parts: std.ArrayList(BundlePart) = .empty;
+    errdefer {
+        for (parts.items) |part| gpa.free(part.doc);
+        parts.deinit(gpa);
+    }
+    var current: std.ArrayList(u8) = .empty;
+    defer current.deinit(gpa);
+    try current.appendSlice(gpa, prefix);
+    var first_chunk: usize = 0;
+    for (chunks, 0..) |chunk, i| {
+        if (prefix.len + chunk.doc.len > cap) return error.OversizedBlock;
+        if (current.items.len > prefix.len and current.items.len + chunk.doc.len > cap) {
+            try parts.append(gpa, .{ .doc = try current.toOwnedSlice(gpa), .first_chunk = first_chunk, .last_chunk = i });
+            current = .empty;
+            try current.appendSlice(gpa, prefix);
+            first_chunk = i;
+        }
+        try current.appendSlice(gpa, chunk.doc);
+    }
+    if (current.items.len > prefix.len) {
+        try parts.append(gpa, .{ .doc = try current.toOwnedSlice(gpa), .first_chunk = first_chunk, .last_chunk = chunks.len });
+    }
+
+    if (parts.items.len > 0) try out_dir.createDirPath(io, "parts");
+    for (parts.items, 0..) |part, i| {
+        const path = try std.fmt.allocPrint(gpa, "parts/part-{d}.md", .{i + 1});
+        defer gpa.free(path);
+        try writeBytes(io, out_dir, path, part.doc);
+    }
+    if (opts.bundles_only) try out_dir.deleteTree(io, "content");
+
+    var manifest: std.ArrayList(u8) = .empty;
+    defer manifest.deinit(gpa);
+    try manifest.print(gpa, "{{\n  \"format\":\"boris-rag-parts\",\n  \"schema_version\":1,\n  \"scope\":", .{});
+    try appendJsonQuoted(&manifest, gpa, opts.scope orelse "");
+    try manifest.print(gpa, ",\n  \"scope_closure\":\"parents+semantic-relations\",\n  \"graph_page_count\":{d},\n  \"selected_page_count\":{d},\n  \"relation_count\":{d},\n  \"split_size\":{d},\n  \"part_count\":{d},\n  \"chunk_count\":{d},\n  \"parts\":[", .{ graph_page_count, selected_page_count, relation_count, cap, parts.items.len, chunks.len });
+    for (parts.items, 0..) |part, i| {
+        if (i > 0) try manifest.append(gpa, ',');
+        try manifest.print(gpa, "{{\"path\":\"parts/part-{d}.md\",\"bytes\":{d},\"chunks\":[", .{ i + 1, part.doc.len });
+        for (chunks[part.first_chunk..part.last_chunk], 0..) |chunk, j| {
+            if (j > 0) try manifest.append(gpa, ',');
+            try manifest.appendSlice(gpa, "{\"entity_id\":");
+            try appendJsonQuoted(&manifest, gpa, chunk.page.id);
+            try manifest.appendSlice(gpa, ",\"source_path\":");
+            try appendJsonQuoted(&manifest, gpa, chunk.page.source_path);
+            try manifest.appendSlice(gpa, ",\"source_sha256\":");
+            try appendJsonQuoted(&manifest, gpa, &chunk.source_sha256);
+            try manifest.print(gpa, ",\"part\":{d},\"part_count\":{d},\"continuation\":", .{ chunk.number, chunk.count });
+            try appendJsonQuoted(&manifest, gpa, if (chunk.count == 1) "single" else if (chunk.number == 1) "continues" else if (chunk.number == chunk.count) "continued" else "continues");
+            try manifest.append(gpa, '}');
+        }
+        try manifest.appendSlice(gpa, "]}");
+    }
+    try manifest.appendSlice(gpa, "]\n}\n");
+    try writeBytes(io, out_dir, "part_manifest.json", manifest.items);
+    return try parts.toOwnedSlice(gpa);
 }
 
 // ---------------------------------------------------------------------------
@@ -693,6 +816,41 @@ fn exportCatalogMeta(io: Io, gpa: std.mem.Allocator, out_dir: Io.Dir) !void {
     const text = try rag_emit.renderCatalogMeta(gpa, catalog_format, catalog_schema_version, boris_version);
     defer gpa.free(text);
     try writeBytes(io, out_dir, "catalog_meta.json", text);
+}
+
+fn exportProjectionManifest(
+    io: Io,
+    gpa: std.mem.Allocator,
+    out_dir: Io.Dir,
+    opts: RagOptions,
+    stats: RagStats,
+    chunks: []const BundleChunk,
+    parts: []const BundlePart,
+) !void {
+    var doc: std.ArrayList(u8) = .empty;
+    defer doc.deinit(gpa);
+    try doc.print(gpa, "{{\n  \"format\":\"{s}\",\n  \"schema_version\":1,\n  \"compiler\":\"{s}\",\n  \"scope\":", .{ catalog_format, boris_version });
+    try appendJsonQuoted(&doc, gpa, opts.scope orelse "");
+    try doc.print(gpa, ",\n  \"scope_closure\":\"parents+semantic-relations\",\n  \"graph_page_count\":{d},\n  \"selected_page_count\":{d},\n  \"relation_count\":{d},\n  \"split_size\":", .{ stats.graph_pages, stats.selected_pages, stats.relation_count });
+    if (opts.split_size) |size| try doc.print(gpa, "{d}", .{size}) else try doc.appendSlice(gpa, "null");
+    try doc.print(gpa, ",\n  \"part_count\":{d},\n  \"chunk_count\":{d},\n  \"bundles_only\":{s},\n  \"parts\":[", .{ stats.part_count, stats.chunk_count, if (opts.bundles_only) "true" else "false" });
+    for (parts, 0..) |part, i| {
+        if (i > 0) try doc.append(gpa, ',');
+        try doc.print(gpa, "{{\"path\":\"parts/part-{d}.md\",\"bytes\":{d},\"chunks\":[", .{ i + 1, part.doc.len });
+        for (chunks[part.first_chunk..part.last_chunk], 0..) |chunk, j| {
+            if (j > 0) try doc.append(gpa, ',');
+            try doc.appendSlice(gpa, "{\"entity_id\":");
+            try appendJsonQuoted(&doc, gpa, chunk.page.id);
+            try doc.appendSlice(gpa, ",\"source_path\":");
+            try appendJsonQuoted(&doc, gpa, chunk.page.source_path);
+            try doc.appendSlice(gpa, ",\"source_sha256\":");
+            try appendJsonQuoted(&doc, gpa, &chunk.source_sha256);
+            try doc.print(gpa, ",\"part\":{d},\"part_count\":{d}}}", .{ chunk.number, chunk.count });
+        }
+        try doc.appendSlice(gpa, "]}");
+    }
+    try doc.appendSlice(gpa, "]\n}\n");
+    try writeBytes(io, out_dir, "manifest.json", doc.items);
 }
 
 /// Fixed field order: rag_id, rag_path, category, title, entity_id, role, parent_entry, tags.
@@ -1065,6 +1223,9 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
         return result;
     }
 
+    const selected_pages = try export_scope.selectPages(result.arena.allocator(), result.compile.pages.items, opts.scope);
+    defer result.arena.allocator().free(selected_pages);
+
     const retain = result.arena.allocator();
     const stage_rel = try std.fmt.allocPrint(gpa, "{s}.boris-rag-stage", .{opts.out_dir});
     defer gpa.free(stage_rel);
@@ -1072,9 +1233,15 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
     const cwd = Io.Dir.cwd();
     cwd.deleteTree(io, stage_rel) catch {};
     try ensureDirPath(io, stage_rel);
+    errdefer cwd.deleteTree(io, stage_rel) catch {};
 
     var catalog: std.ArrayList(CatalogEntry) = .empty;
     defer catalog.deinit(gpa);
+    var chunks: std.ArrayList(BundleChunk) = .empty;
+    defer chunks.deinit(gpa);
+    defer {
+        for (chunks.items) |chunk| gpa.free(chunk.doc);
+    }
 
     var stats: RagStats = .{};
 
@@ -1089,26 +1256,38 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
         try stage_dir.createDirPath(io, "content/pages");
         try stage_dir.createDirPath(io, "graph");
 
+        stats.graph_pages = result.compile.pages.items.len;
+        stats.selected_pages = selected_pages.len;
+        for (selected_pages) |page| stats.relation_count += page.semantic_relations.len;
         stats.system_docs = try exportSystemDocs(io, gpa, retain, stage_dir, opts, &catalog);
         stats.content_pages = try exportContentPages(
             io,
             gpa,
             retain,
             stage_dir,
-            result.compile.pages.items,
+            selected_pages,
             opts.content_root,
             opts,
             &catalog,
+            &chunks,
         );
         stats.graph_docs = try exportGraphDocs(
             io,
             gpa,
             retain,
             stage_dir,
-            result.compile.pages.items,
+            selected_pages,
             &catalog,
             opts,
         );
+
+        const parts = try exportBundleParts(io, gpa, stage_dir, chunks.items, opts, stats.graph_pages, stats.selected_pages, stats.relation_count);
+        defer {
+            for (parts) |part| gpa.free(part.doc);
+            gpa.free(parts);
+        }
+        stats.part_count = parts.len;
+        stats.chunk_count = chunks.items.len;
 
         try exportUploadGuide(io, stage_dir);
         try appendCatalog(&catalog, gpa, retain, .{
@@ -1132,6 +1311,9 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
         try exportIndex(io, gpa, stage_dir, catalog.items, stats);
         try exportCatalogJsonl(io, gpa, stage_dir, catalog.items);
         try exportCatalogMeta(io, gpa, stage_dir);
+        if (opts.scope != null or opts.split_size != null or opts.bundles_only) {
+            try exportProjectionManifest(io, gpa, stage_dir, opts, stats, chunks.items, parts);
+        }
     }
 
     // Publish only after the full stage tree is written and handles closed.
@@ -1585,6 +1767,85 @@ test "rag export: valid corpus, dual-run determinism, catalog, H1, system order"
     defer gpa.free(index);
     try std.testing.expect(std.mem.indexOf(u8, index, "catalog_meta.json") != null);
     try std.testing.expect(std.mem.indexOf(u8, index, "content/pages/a-first.md") != null);
+}
+
+test "rag export: scoped bundles are capped, graph-closed, and deterministic" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var paths = try ragTestPaths(gpa, tmp.sub_path[0..]);
+    defer paths.deinit(gpa);
+    try writeRagFixtures(io, gpa, paths.content, paths.system);
+
+    var scoped = try run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_a,
+        .system_docs_dir = paths.system,
+        .scope = "m-mid",
+        .split_size = 700,
+        .bundles_only = true,
+        .quiet = true,
+    });
+    defer scoped.deinit();
+    try std.testing.expect(scoped.ok());
+    try std.testing.expectEqual(@as(usize, 4), scoped.stats.graph_pages);
+    try std.testing.expectEqual(@as(usize, 2), scoped.stats.selected_pages);
+    try std.testing.expectEqual(@as(usize, 2), scoped.stats.chunk_count);
+
+    var out = try Io.Dir.cwd().openDir(io, paths.out_a, .{});
+    defer out.close(io);
+    try std.testing.expectError(error.FileNotFound, out.statFile(io, "content", .{}));
+    const manifest = try readFileAlloc(io, out, "manifest.json", gpa);
+    defer gpa.free(manifest);
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, manifest, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("m-mid", parsed.value.object.get("scope").?.string);
+    try std.testing.expectEqual(@as(i64, 2), parsed.value.object.get("selected_page_count").?.integer);
+    try std.testing.expectEqual(@as(i64, 2), parsed.value.object.get("part_count").?.integer);
+    const parts = parsed.value.object.get("parts").?.array.items;
+    for (parts) |part| try std.testing.expect(part.object.get("bytes").?.integer <= 700);
+
+    const before_failed_scope = try readFileAlloc(io, out, "manifest.json", gpa);
+    defer gpa.free(before_failed_scope);
+    try std.testing.expectError(error.InvalidScope, run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_a,
+        .system_docs_dir = paths.system,
+        .scope = "missing",
+        .split_size = 700,
+        .bundles_only = true,
+        .quiet = true,
+    }));
+    const after_failed_scope = try readFileAlloc(io, out, "manifest.json", gpa);
+    defer gpa.free(after_failed_scope);
+    try std.testing.expectEqualStrings(before_failed_scope, after_failed_scope);
+    try std.testing.expectError(error.OversizedBlock, run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_a,
+        .system_docs_dir = paths.system,
+        .scope = "m-mid",
+        .split_size = 100,
+        .bundles_only = true,
+        .quiet = true,
+    }));
+    const after_oversized = try readFileAlloc(io, out, "manifest.json", gpa);
+    defer gpa.free(after_oversized);
+    try std.testing.expectEqualStrings(before_failed_scope, after_oversized);
+
+    var repeated = try run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_b,
+        .system_docs_dir = paths.system,
+        .scope = "m-mid",
+        .split_size = 700,
+        .bundles_only = true,
+        .quiet = true,
+    });
+    defer repeated.deinit();
+    try std.testing.expect(repeated.ok());
+    try expectDirsByteIdentical(io, gpa, paths.out_a, paths.out_b);
 }
 
 test "rag vs IR: identical diagnostic categories; no graph RAG on failure" {

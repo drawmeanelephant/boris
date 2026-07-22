@@ -48,6 +48,9 @@ partial corpus (staging is discarded; prior `rag/` is left untouched).
 |------|----------|
 | `--rag` | RAG-only; default output dir `rag` |
 | `--rag-dir DIR` | RAG-only; output dir `DIR` (implies RAG-only) |
+| `--scope VALUE` | Entity id or collection-prefix projection after full graph validation |
+| `--split-size BYTES` | Deterministic byte cap for upload parts |
+| `--bundles-only` | Emit upload parts/manifests and omit per-page files |
 | `--out` with `--rag` / `--rag-dir` | **Invalid** (usage exit 2) |
 
 Default system-seed root: `docs/rag/system`. If missing, the `system/` segment
@@ -214,9 +217,27 @@ any), then children by entity id ascending.
 
 ---
 
+## Scoped and segmented exports
+
+`--scope` accepts an exact entity id or collection prefix (`mascots` selects
+`mascots` and descendants). Boris validates the complete graph first, then
+projects selected pages, transitive structural parents, and one-hop semantic
+relation neighbors. Related pages receive their own parent closure; ordinary
+Markdown links are not semantic edges.
+
+`--split-size` writes deterministic `parts/part-N.md` files and a
+`part_manifest.json`. The cap is bytes, not an approximate token count. Upload
+chunks repeat the page provenance header and split only at blank-line or
+heading boundaries outside fenced code. A single paragraph, heading block, or
+fenced block that cannot fit fails explicitly; no partial output is published.
+Each chunk records entity id, source path/hash, part number/count, and
+continuation state in the chunk frontmatter and manifest. `manifest.json`
+records scope, closure, full-graph and selected counts, relation count, split
+size, parts, and chunks. Unscoped exports without these flags retain the
+existing tree/schema.
+
 ## Out of scope
 
-- Chunking
 - Embeddings
 - Database storage
 - Upload integrations / network clients

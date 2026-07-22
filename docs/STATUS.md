@@ -150,6 +150,7 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | Closed `<Details>` disclosure component | **Shipped in v0.5.0** (native HTML + deterministic RAG projection) |
 | JSON IR (`--out` / `--no-rag`) | **Done** |
 | RAG export (`--rag` / `--rag-dir`) | **Done** |
+| Scoped/segmented product RAG + Context exports | **Done (graph-closed, block-boundary parts)** |
 | Incremental / watch / `--jobs` / multi-target | **Done** (P2–P3 on HTML path) |
 | CI Linux + macOS | **Done** |
 | Graph-aware HTML nav (`{{nav}}` / breadcrumb / title) | **Done** (Feature 6 MVP) |
