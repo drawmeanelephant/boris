@@ -28,6 +28,7 @@ is **not** proof that every surface is the default CLI product.
 | Semantic relations (IR 0.3) | **Implemented** — bounded author relations with deliberate schema change; see `semantic-relations.md` |
 | AI Context Bundle (`--context`) | **Implemented** — deterministic provenance-rich export; see `context-bundle.md` |
 | Includes + wiki-links (HTML) | **Implemented** — pre-Apex; see `includes-and-wiki-links.md` |
+| Graph-backed Markdown documentation links | **Implemented first slice** — pre-Apex; see `documentation-links.md` |
 | IR 0.2 dependency edges + reverse index | **Implemented (F8.1–F8.3 shipped)** — `--out` emits typed edges and `reverseIndex`; incremental HTML uses the same reverse-walk dirty-set (v0.3.1) |
 | Documentation Intelligence | **Implemented first slice** — `check` / `impact`; see [documentation-intelligence.md](documentation-intelligence.md) |
 | Textile compatibility | **Implemented, explicit opt-in** — bounded `.textile` body adapter via `--textile`; see [textile-compatibility.md](textile-compatibility.md) |
@@ -53,6 +54,7 @@ per topic:
 | Watch Mode | [watch-mode.md](watch-mode.md) |
 | Multi-target isolated outputs | [multi-target-isolated-output.md](multi-target-isolated-output.md) |
 | Includes + wiki-links | [includes-and-wiki-links.md](includes-and-wiki-links.md) |
+| Graph-backed Markdown documentation links | [documentation-links.md](documentation-links.md) |
 | Heading IDs + wiki fragments | [heading-ids.md](heading-ids.md) |
 | Templating + themes (F9.1 / F9.2) | [templating-and-themes.md](templating-and-themes.md) |
 | Content-local page assets | [content-local-assets.md](content-local-assets.md) |
@@ -78,6 +80,7 @@ per topic:
 | [watch-mode.md](watch-mode.md) | Opt-in watch mode, event coalescing/normalization, rebuild serialization, safe recovery |
 | [multi-target-isolated-output.md](multi-target-isolated-output.md) | Multi-target CLI/config, output isolation, cache namespaces (P3.3) |
 | [includes-and-wiki-links.md](includes-and-wiki-links.md) | `{{include}}` + `[[wiki]]` pre-Apex; cycles; fragment tree; IR 0.2 edge projection |
+| [documentation-links.md](documentation-links.md) | Existing-page inline Markdown-link rewrite to canonical HTML hrefs |
 | [heading-ids.md](heading-ids.md) | Apex heading `id` harvest; `[[entity#heading]]` match + URL rules |
 | [templating-and-themes.md](templating-and-themes.md) | Closed layout plan, theme assets, UTF-8/orphan hardening (F9.1 / F9.2) |
 | [content-local-assets.md](content-local-assets.md) | Page sibling `{stem}.assets/` discovery, Markdown image rewrite, target copy/scrub |
