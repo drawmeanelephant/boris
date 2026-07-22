@@ -38,7 +38,9 @@ fails. It does not parse frontmatter or graph edges independently.
   `source_path`, graph role, parent, semantic relations, and lowercase SHA-256
   of the exact source bytes used for the bundle.
 - `manifest.json` records the bundle schema, product/compiler id, IR schema,
-  content-root label, page count, relation count, and generated artifact paths.
+  content-root label, page count, full/selected relation counts, and generated
+  artifact paths. The compatibility alias `relation_count` remains the
+  selected relation count.
 - Markdown source is fenced with a dynamically sized backtick fence so source
   content cannot terminate its own provenance section.
 - The exporter stages beside the final directory. A completed publish removes
@@ -62,9 +64,15 @@ directory untouched. I/O failures use exit `3`.
 `--scope VALUE` selects an exact entity or collection prefix. Full graph
 validation always precedes projection; output includes transitive `parent`
 closure and one-hop semantic relation neighbors, with parent closure for those
-neighbors. `--split-size BYTES` adds deterministic `parts/part-N.md` upload
-documents and records scope, closure policy, full-graph count, selected count,
-relation count, cap, parts, and chunks in `manifest.json`. The complete
+neighbors. The page documents and bundle are scoped, but `graph.json` remains
+the complete validated graph-shaped IR artifact; `manifest.json` marks this as
+`graph_scope: "full"` so consumers do not mistake it for a projected graph.
+This preserves the canonical IR graph contract while making the deliberate
+topology exposure explicit. `--split-size BYTES` adds deterministic
+`parts/part-N.md` upload documents and records scope, closure policy, full-graph
+count, selected count, full/selected relation counts, cap, parts, and chunks in
+`manifest.json`. The cap is the total UTF-8 byte size of each emitted part,
+including its fixed bundle header and every chunk document. The complete
 provenance page remains under `pages/`; upload chunks repeat its metadata and
 split only at blank-line or heading boundaries outside fenced source blocks.
 Frontmatter and provenance headers are never cut. An indivisible paragraph,

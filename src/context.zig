@@ -310,12 +310,17 @@ fn renderManifest(
     try buf.appendSlice(gpa, ",\n  \"scope\": ");
     try appendQuoted(&buf, gpa, opts.scope orelse "");
     try buf.appendSlice(gpa, ",\n  \"scope_closure\": \"parents+semantic-relations\"");
+    try buf.appendSlice(gpa, ",\n  \"graph_scope\": \"full\"");
     try buf.appendSlice(gpa, ",\n  \"graph_page_count\": ");
     try json_out.writeUsize(&buf, gpa, result.pages.items.len);
     try buf.appendSlice(gpa, ",\n  \"page_count\": ");
     try json_out.writeUsize(&buf, gpa, artifacts.len);
     try buf.appendSlice(gpa, ",\n  \"selected_page_count\": ");
     try json_out.writeUsize(&buf, gpa, artifacts.len);
+    try buf.appendSlice(gpa, ",\n  \"graph_relation_count\": ");
+    try json_out.writeUsize(&buf, gpa, relationCount(result));
+    try buf.appendSlice(gpa, ",\n  \"selected_relation_count\": ");
+    try json_out.writeUsize(&buf, gpa, relationCountArtifacts(artifacts));
     try buf.appendSlice(gpa, ",\n  \"relation_count\": ");
     try json_out.writeUsize(&buf, gpa, relationCountArtifacts(artifacts));
     try buf.appendSlice(gpa, ",\n  \"split_size\": ");
@@ -542,4 +547,38 @@ test "context chunks preserve provenance and fenced source boundaries" {
         try std.testing.expect(std.mem.indexOf(u8, chunk.doc, "part_count:") != null);
         try std.testing.expectEqual(i + 1, chunk.number);
     }
+}
+
+test "scoped context explicitly marks its graph as full" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const base = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}", .{tmp.sub_path});
+    defer gpa.free(base);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{base});
+    defer gpa.free(content);
+    const out = try std.fmt.allocPrint(gpa, "{s}/context", .{base});
+    defer gpa.free(out);
+    try Io.Dir.cwd().createDirPath(io, content);
+    var content_dir = try Io.Dir.cwd().openDir(io, content, .{});
+    defer content_dir.close(io);
+    try content_dir.writeFile(io, .{ .sub_path = "page.md", .data = "# Page\n\nBody.\n" });
+
+    var result = try run(io, gpa, .{
+        .content_root = content,
+        .out_dir = out,
+        .scope = "page",
+        .quiet = true,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok());
+
+    var out_dir = try Io.Dir.cwd().openDir(io, out, .{});
+    defer out_dir.close(io);
+    const manifest = try readFileAlloc(io, out_dir, "manifest.json", gpa);
+    defer gpa.free(manifest);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"graph_scope\": \"full\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"selected_page_count\": 1") != null);
 }

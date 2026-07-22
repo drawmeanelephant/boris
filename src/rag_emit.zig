@@ -32,6 +32,7 @@ pub const Stats = struct {
     content_pages: usize,
     graph_docs: usize,
     catalog_entries: usize,
+    bundles_only: bool = false,
 };
 
 pub fn sortCatalogByRagPath(entries: []CatalogEntry) void {
@@ -161,6 +162,7 @@ fn renderContentDocumentWithChunk(
     body: []const u8,
     pages: []const graph_mod.Node,
     chunk: ?ChunkInfo,
+    content_paths_present: bool,
 ) ![]u8 {
     const title = pageTitle(page);
     const parent = page.parent orelse "";
@@ -169,11 +171,15 @@ fn renderContentDocumentWithChunk(
     var related: std.ArrayList(u8) = .empty;
     defer related.deinit(gpa);
     try related.appendSlice(gpa, "related:\n");
-    if (parent.len > 0) try related.print(gpa, "  - content/pages/{s}.md\n", .{parent});
+    if (parent.len > 0) {
+        if (content_paths_present) try related.print(gpa, "  - content/pages/{s}.md\n", .{parent}) else try related.appendSlice(gpa, "  - parts/ (see part_manifest.json)\n");
+    }
     for (pages) |other| {
         if (other.role != .satellite) continue;
         const other_parent = other.parent orelse continue;
-        if (std.mem.eql(u8, other_parent, page.id)) try related.print(gpa, "  - content/pages/{s}.md\n", .{other.id});
+        if (std.mem.eql(u8, other_parent, page.id)) {
+            if (content_paths_present) try related.print(gpa, "  - content/pages/{s}.md\n", .{other.id}) else try related.appendSlice(gpa, "  - parts/ (see part_manifest.json)\n");
+        }
     }
     var doc: std.ArrayList(u8) = .empty;
     errdefer doc.deinit(gpa);
@@ -196,7 +202,7 @@ fn renderContentDocumentWithChunk(
 }
 
 pub fn renderContentDocumentBody(gpa: std.mem.Allocator, page: graph_mod.Node, rag_id: []const u8, rag_path: []const u8, body: []const u8, pages: []const graph_mod.Node) ![]u8 {
-    return renderContentDocumentWithChunk(gpa, page, rag_id, rag_path, body, pages, null);
+    return renderContentDocumentWithChunk(gpa, page, rag_id, rag_path, body, pages, null, true);
 }
 
 pub fn renderContentDocumentChunk(
@@ -210,39 +216,68 @@ pub fn renderContentDocumentChunk(
     number: usize,
     count: usize,
 ) ![]u8 {
+    return renderContentDocumentChunkWithOptions(gpa, page, rag_id, rag_path, body, pages, source_sha256, number, count, true);
+}
+
+pub fn renderContentDocumentChunkWithOptions(
+    gpa: std.mem.Allocator,
+    page: graph_mod.Node,
+    rag_id: []const u8,
+    rag_path: []const u8,
+    body: []const u8,
+    pages: []const graph_mod.Node,
+    source_sha256: []const u8,
+    number: usize,
+    count: usize,
+    content_paths_present: bool,
+) ![]u8 {
     return renderContentDocumentWithChunk(gpa, page, rag_id, rag_path, body, pages, .{
         .number = number,
         .count = count,
         .source_sha256 = source_sha256,
-    });
+    }, content_paths_present);
 }
 
 pub fn contentCatalogEntry(allocator: std.mem.Allocator, page: graph_mod.Node, rag_id: []const u8, rag_path: []const u8) !CatalogEntry {
     return .{ .rag_id = rag_id, .rag_path = rag_path, .category = "content", .title = pageTitle(page), .entity_id = page.id, .role = page.role.name(), .parent_entry = page.parent orelse "", .tags = try formatTags(allocator, page.tags) };
 }
 
-pub fn renderEntityCatalog(gpa: std.mem.Allocator, pages: []const graph_mod.Node) ![]u8 {
+pub fn renderEntityCatalog(gpa: std.mem.Allocator, pages: []const graph_mod.Node, content_paths_present: bool) ![]u8 {
     var doc: std.ArrayList(u8) = .empty;
     errdefer doc.deinit(gpa);
     try doc.appendSlice(gpa, "---\nrag_id: graph/entity-catalog\nrag_path: graph/entity-catalog.md\ncategory: graph\ntags: [graph, catalog, entities]\nrelated:\n  - graph/relations.md\n---\n\n# Entity catalog\n\nContent entities after shared scan / parse / graph validation.\nPages are the only first-class graph nodes; asides are not nodes.\n\n| entity_id | title | role | source | RAG path |\n|-----------|-------|------|--------|----------|\n");
-    for (pages) |page| try doc.print(gpa, "| `{s}` | {s} | {s} | `{s}` | `content/pages/{s}.md` |\n", .{ page.id, pageTitle(page), page.role.name(), page.source_path, page.id });
+    for (pages) |page| {
+        if (content_paths_present) {
+            try doc.print(gpa, "| `{s}` | {s} | {s} | `{s}` | `content/pages/{s}.md` |\n", .{ page.id, pageTitle(page), page.role.name(), page.source_path, page.id });
+        } else {
+            try doc.print(gpa, "| `{s}` | {s} | {s} | `{s}` | *(in parts; see part_manifest.json)* |\n", .{ page.id, pageTitle(page), page.role.name(), page.source_path });
+        }
+    }
     return try doc.toOwnedSlice(gpa);
 }
 
-pub fn renderRelations(gpa: std.mem.Allocator, pages: []const graph_mod.Node) ![]u8 {
+pub fn renderRelations(gpa: std.mem.Allocator, pages: []const graph_mod.Node, content_paths_present: bool) ![]u8 {
     var doc: std.ArrayList(u8) = .empty;
     errdefer doc.deinit(gpa);
     try doc.appendSlice(gpa, "---\nrag_id: graph/relations\nrag_path: graph/relations.md\ncategory: graph\ntags: [graph, relations, trunk, satellite]\nrelated:\n  - graph/entity-catalog.md\n---\n\n# Graph relations (Trunk → Satellite)\n\nEdges come from satellite frontmatter `parent: <trunk-entity-id>`.\nHubs and satellite lists are ordered by `entity_id`. Edge list is\nordered by source id then target id. Invalid graphs never publish\nthis file (shared `graph.validate` must pass first).\n\n## Trunk hubs\n\n");
     for (pages) |page| {
         if (page.role != .trunk) continue;
-        try doc.print(gpa, "### `{s}` — {s}\n\n- Trunk RAG: `content/pages/{s}.md`\n- Satellites:\n", .{ page.id, pageTitle(page), page.id });
+        if (content_paths_present) {
+            try doc.print(gpa, "### `{s}` — {s}\n\n- Trunk RAG: `content/pages/{s}.md`\n- Satellites:\n", .{ page.id, pageTitle(page), page.id });
+        } else {
+            try doc.print(gpa, "### `{s}` — {s}\n\n- Trunk RAG: *(in parts; see part_manifest.json)*\n- Satellites:\n", .{ page.id, pageTitle(page) });
+        }
         var any = false;
         for (pages) |child| {
             if (child.role != .satellite) continue;
             const parent = child.parent orelse continue;
             if (!std.mem.eql(u8, parent, page.id)) continue;
             any = true;
-            try doc.print(gpa, "  - `{s}` ({s}) → `content/pages/{s}.md`\n", .{ child.id, pageTitle(child), child.id });
+            if (content_paths_present) {
+                try doc.print(gpa, "  - `{s}` ({s}) → `content/pages/{s}.md`\n", .{ child.id, pageTitle(child), child.id });
+            } else {
+                try doc.print(gpa, "  - `{s}` ({s}) → *(in parts; see part_manifest.json)*\n", .{ child.id, pageTitle(child) });
+            }
         }
         if (!any) try doc.appendSlice(gpa, "  - *(none)*\n");
         try doc.append(gpa, '\n');
@@ -296,8 +331,14 @@ pub fn renderIndex(gpa: std.mem.Allocator, catalog: []const CatalogEntry, stats:
     var doc: std.ArrayList(u8) = .empty;
     errdefer doc.deinit(gpa);
     try doc.appendSlice(gpa, "---\nrag_id: meta/index\nrag_path: INDEX.md\ncategory: meta\ntags: [index, catalog, retrieval-map]\n---\n\n# Boris RAG corpus — INDEX\n\nMaster retrieval map for the Boris product RAG pack. Upload this\ndirectory tree to a chat LLM knowledge base.\n\n## Counts\n\n");
-    try doc.print(gpa, "| Segment | Count |\n|---------|------:|\n| system | {d} |\n| content pages | {d} |\n| graph | {d} |\n| catalog entries | {d} |\n\n", .{ stats.system_docs, stats.content_pages, stats.graph_docs, stats.catalog_entries });
-    try doc.appendSlice(gpa, "## Generated artifacts\n\n| Path | Role |\n|------|------|\n| `INDEX.md` | This retrieval map (catalog row) |\n| `UPLOAD-GUIDE.md` | Upload notes (catalog row) |\n| `catalog.jsonl` | Machine catalog — **not** a catalog row |\n| `catalog_meta.json` | Format + versions — **not** a catalog row |\n| `system/**` | Curated architecture seeds |\n| `content/pages/**` | Content page segments |\n| `graph/entity-catalog.md` | Entity table |\n| `graph/relations.md` | Trunk → Satellite edges |\n\n## Full catalog\n\n| rag_path | category | title | entity_id |\n|----------|----------|-------|-----------|\n");
+    try doc.print(gpa, "| Segment | Count |\n|---------|------:|\n| system | {d} |\n| {s} | {d} |\n| graph | {d} |\n| catalog entries | {d} |\n\n", .{ stats.system_docs, if (stats.bundles_only) "content pages represented in parts" else "content pages", stats.content_pages, stats.graph_docs, stats.catalog_entries });
+    try doc.appendSlice(gpa, "## Generated artifacts\n\n| Path | Role |\n|------|------|\n| `INDEX.md` | This retrieval map (catalog row) |\n| `UPLOAD-GUIDE.md` | Upload notes (catalog row) |\n| `catalog.jsonl` | Machine catalog — **not** a catalog row |\n| `catalog_meta.json` | Format + versions — **not** a catalog row |\n| `system/**` | Curated architecture seeds |\n");
+    if (stats.bundles_only) {
+        try doc.appendSlice(gpa, "| `parts/**` | Uploadable content bundles |\n| `part_manifest.json` | Ordered chunk provenance |\n");
+    } else {
+        try doc.appendSlice(gpa, "| `content/pages/**` | Content page segments |\n");
+    }
+    try doc.appendSlice(gpa, "| `graph/entity-catalog.md` | Entity table |\n| `graph/relations.md` | Trunk → Satellite edges |\n\n## Full catalog\n\n| rag_path | category | title | entity_id |\n|----------|----------|-------|-----------|\n");
     for (catalog) |entry| {
         try doc.print(gpa, "| `{s}` | {s} | {s} | ", .{ entry.rag_path, entry.category, entry.title });
         if (entry.entity_id.len > 0) try doc.print(gpa, "`{s}`", .{entry.entity_id}) else try doc.appendSlice(gpa, "—");
@@ -307,7 +348,19 @@ pub fn renderIndex(gpa: std.mem.Allocator, catalog: []const CatalogEntry, stats:
     return try doc.toOwnedSlice(gpa);
 }
 
-pub const upload_guide = "---\nrag_id: meta/upload-guide\nrag_path: UPLOAD-GUIDE.md\ncategory: meta\ntags: [upload, grok, gemini, llm, rag]\nrelated:\n  - INDEX.md\n---\n\n# Upload guide — Grok, Gemini, and similar chat LLMs\n\n## What to upload\n\nUpload the **entire** generated RAG directory. Prefer folder upload when\nthe product supports it.\n\nMinimum useful set if you must subset:\n\n1. `INDEX.md` (always)\n2. All of `system/` (Boris behavior)\n3. All of `content/` (site knowledge)\n4. All of `graph/` (relations)\n\nOptional for scripts: `catalog.jsonl` and `catalog_meta.json` (machine\nfiles; not catalog rows).\n\n## Regenerating this corpus\n\n```bash\nzig build run -- --input content --rag\nzig build run -- --input content --rag-dir ./uploads/boris-rag\n```\n\n## Integrity notes\n\n- Paths inside documents are logical RAG paths (not OS-absolute).\n- Content segments mirror `entity_id` (`guides/intro` → `content/pages/guides/intro.md`).\n- Graph-dependent files are published only after shared `graph.validate` succeeds.\n- Parsed `<Aside>` callouts appear as `:::kind` export blocks (not authoring syntax).\n";
+pub fn renderUploadGuide(gpa: std.mem.Allocator, bundles_only: bool) ![]u8 {
+    const content_set = if (bundles_only)
+        "3. All of `parts/` and `part_manifest.json` (site knowledge bundles)\n"
+    else
+        "3. All of `content/` (site knowledge)\n";
+    var doc: std.ArrayList(u8) = .empty;
+    errdefer doc.deinit(gpa);
+    try doc.appendSlice(gpa, "---\nrag_id: meta/upload-guide\nrag_path: UPLOAD-GUIDE.md\ncategory: meta\ntags: [upload, grok, gemini, llm, rag]\nrelated:\n  - INDEX.md\n---\n\n# Upload guide — Grok, Gemini, and similar chat LLMs\n\n## What to upload\n\nUpload the **entire** generated RAG directory. Prefer folder upload when\nthe product supports it.\n\nMinimum useful set if you must subset:\n\n1. `INDEX.md` (always)\n2. All of `system/` (Boris behavior)\n");
+    try doc.appendSlice(gpa, content_set);
+    try doc.appendSlice(gpa, "4. All of `graph/` (relations)\n\nOptional for scripts: `catalog.jsonl` and `catalog_meta.json` (machine\nfiles; not catalog rows).\n\n## Regenerating this corpus\n\n```bash\nzig build run -- --input content --rag\nzig build run -- --input content --rag-dir ./uploads/boris-rag\n```\n\n## Integrity notes\n\n- Paths inside documents are logical RAG paths (not OS-absolute).\n- Graph-dependent files are published only after shared `graph.validate` succeeds.\n- Parsed `<Aside>` callouts appear as `:::kind` export blocks (not authoring syntax).\n");
+    if (bundles_only) try doc.appendSlice(gpa, "- `content/pages/**` is intentionally omitted; the ordered `parts/` documents are the content payload.\n");
+    return try doc.toOwnedSlice(gpa);
+}
 
 test "catalog JSONL field order and escaping are stable" {
     const bytes = try renderCatalogJsonl(std.testing.allocator, &.{.{ .rag_id = "content/quote", .rag_path = "content/pages/quote.md", .category = "content", .title = "Say \"hi\"\nthere", .entity_id = "quote", .role = "trunk", .tags = "[content, trunk]" }});
