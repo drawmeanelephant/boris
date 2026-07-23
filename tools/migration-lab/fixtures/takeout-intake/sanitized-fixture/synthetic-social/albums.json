@@ -1,0 +1,9 @@
+[
+  {
+    "id": "album-demo-001",
+    "title": "Synthetic field notes",
+    "created_at": "2024-02-29T12:00:00Z",
+    "post_ids": ["post-demo-001", "post-demo-002"],
+    "media_ids": ["media-demo-001"]
+  }
+]

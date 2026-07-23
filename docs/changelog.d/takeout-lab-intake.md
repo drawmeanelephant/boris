@@ -1,0 +1,1 @@
+- Added a provider-neutral [takeout migration-lab intake contract](../contracts/takeout-lab-intake.md) with ignored raw-local boundaries, a synthetic social fixture, and importer evidence requirements. Real Facebook, Instagram, and Google Takeout samples are still required before provider adapters can claim compatibility.

@@ -1,0 +1,33 @@
+{
+  "schema": "boris-takeout-fixture",
+  "schema_version": 1,
+  "fixture_id": "synthetic-social-v1",
+  "source_family": "synthetic-social",
+  "provider": "none",
+  "export_version": "synthetic-contract-1",
+  "export_date": "2026-07-22",
+  "privacy_scrub_status": "synthetic-only-no-personal-data",
+  "files_included": [
+    { "path": "sanitized-fixture/synthetic-social/albums.json", "role": "album records" },
+    { "path": "sanitized-fixture/synthetic-social/links.json", "role": "link records" },
+    { "path": "sanitized-fixture/synthetic-social/media.json", "role": "media records" },
+    { "path": "sanitized-fixture/synthetic-social/media/demo-lantern.svg", "role": "synthetic image asset" },
+    { "path": "sanitized-fixture/synthetic-social/posts.json", "role": "post records" },
+    { "path": "expected-output/synthetic-social/expected-summary.json", "role": "review expectation" },
+    { "path": "review-notes/synthetic-social.md", "role": "fixture review notes" }
+  ],
+  "expected_pages": [
+    "posts/post-demo-001",
+    "posts/post-demo-002",
+    "albums/album-demo-001"
+  ],
+  "expected_assets": [
+    "media/demo-lantern.svg"
+  ],
+  "known_omissions": [
+    "No provider-specific field names or export directory claims",
+    "No comments, reactions, audience settings, account identifiers, or private messages",
+    "No timezone ambiguity, duplicate records, or unsupported binary media case",
+    "No real Facebook, Instagram, or Google Takeout bytes"
+  ]
+}
