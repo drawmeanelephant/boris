@@ -2918,6 +2918,65 @@ test "html fixture golden: expected/ matches compile output" {
     }
 }
 
+test "html fixture golden: documentation links and local assets" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-doc-links-golden", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    const first_dist = try std.fmt.allocPrint(gpa, "{s}/first", .{work});
+    defer gpa.free(first_dist);
+    const second_dist = try std.fmt.allocPrint(gpa, "{s}/second", .{work});
+    defer gpa.free(second_dist);
+    const content = "test/fixtures/doc-links/content";
+    const layout = "test/fixtures/doc-links/layouts/main.html";
+    const expected = "test/fixtures/doc-links/expected";
+    const expected_files = [_][]const u8{
+        "index.html",
+        "reference.html",
+        "guides/start.html",
+        "guides/start.assets/diagram.svg",
+    };
+
+    const first_stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = first_dist,
+        .layout_path = layout,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 3), first_stats.pages_written);
+
+    const second_stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = second_dist,
+        .layout_path = layout,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 3), second_stats.pages_written);
+
+    var first_dir = try cwd.openDir(io, first_dist, .{});
+    defer first_dir.close(io);
+    var second_dir = try cwd.openDir(io, second_dist, .{});
+    defer second_dir.close(io);
+    var expected_dir = try cwd.openDir(io, expected, .{});
+    defer expected_dir.close(io);
+
+    for (expected_files) |rel| {
+        const got_first = try readAllFile(io, first_dir, rel, gpa);
+        defer gpa.free(got_first);
+        const got_second = try readAllFile(io, second_dir, rel, gpa);
+        defer gpa.free(got_second);
+        const want = try readAllFile(io, expected_dir, rel, gpa);
+        defer gpa.free(want);
+        try std.testing.expectEqualStrings(want, got_first);
+        try std.testing.expectEqualStrings(got_first, got_second);
+    }
+}
+
 test "Feature 7 HTML: include expands and wiki becomes relative href" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
