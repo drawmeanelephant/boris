@@ -1,0 +1,10 @@
+[
+  {
+    "id": "media-demo-001",
+    "kind": "image",
+    "path": "media/demo-lantern.svg",
+    "media_type": "image/svg+xml",
+    "width": 160,
+    "height": 90
+  }
+]

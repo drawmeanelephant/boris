@@ -40,6 +40,11 @@ coupling**. All code and fixtures live under `tools/migration-lab/`.
 
 Companion author guide: [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
 
+Future Facebook, Instagram, and Google Takeout dogfooding starts with the
+provider-neutral [takeout intake contract](../../docs/contracts/takeout-lab-intake.md)
+and its synthetic fixture lane under `fixtures/takeout-intake/`. This is an
+intake convention, not another migration mode or a claim of provider support.
+
 ---
 
 ## Quick start
