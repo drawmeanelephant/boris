@@ -171,10 +171,62 @@ pub fn computePageFingerprintThemeInput(
 ///   - return sorted entity IDs with duplicates removed
 ///
 /// The returned slice is owned by the caller and allocated using the provided allocator.
+/// Entity-id / source-path → owning node id, built once and reused across many
+/// `getAffectedPagesIndexed` calls.
+///
+/// The reverse walk needs to answer "is this key a page, and which one?" for
+/// every endpoint it pops. Doing that with a linear scan over `nodes` makes an
+/// incremental build quadratic in page count, because the walk runs once per
+/// dirty page. Resolution order matches the original scan exactly: nodes are
+/// visited in order, and within a node `id` is registered before `sourcePath`,
+/// so the first node matching a key still wins.
+pub const NodeLookup = struct {
+    map: std.StringHashMapUnmanaged([]const u8) = .{},
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, nodes: []const graph_mod.Node) !NodeLookup {
+        var self: NodeLookup = .{ .allocator = allocator };
+        errdefer self.deinit();
+        try self.map.ensureTotalCapacity(allocator, @intCast(nodes.len * 2));
+        for (nodes) |node| {
+            // Keys are borrowed from `nodes`; the lookup must not outlive them.
+            if (!self.map.contains(node.id)) {
+                self.map.putAssumeCapacity(node.id, node.id);
+            }
+            if (!self.map.contains(node.source_path)) {
+                self.map.putAssumeCapacity(node.source_path, node.id);
+            }
+        }
+        return self;
+    }
+
+    pub fn deinit(self: *NodeLookup) void {
+        self.map.deinit(self.allocator);
+    }
+
+    /// Owning node id when `key` names a page by entity id or source path.
+    pub fn pageId(self: *const NodeLookup, key: []const u8) ?[]const u8 {
+        return self.map.get(key);
+    }
+};
+
 pub fn getAffectedPages(
     allocator: std.mem.Allocator,
     changed_path: []const u8,
     nodes: []const graph_mod.Node,
+    dep_index: *const dependency.DependencyIndex,
+) ![]const []const u8 {
+    var lookup = try NodeLookup.init(allocator, nodes);
+    defer lookup.deinit();
+    return getAffectedPagesIndexed(allocator, changed_path, &lookup, dep_index);
+}
+
+/// `getAffectedPages` with a caller-owned `NodeLookup`, so a caller running the
+/// walk once per dirty page builds the index once instead of per call.
+pub fn getAffectedPagesIndexed(
+    allocator: std.mem.Allocator,
+    changed_path: []const u8,
+    lookup: *const NodeLookup,
     dep_index: *const dependency.DependencyIndex,
 ) ![]const []const u8 {
     var affected_ids: std.StringHashMapUnmanaged(void) = .{};
@@ -193,15 +245,9 @@ pub fn getAffectedPages(
         if (visited.contains(curr)) continue;
         try visited.put(allocator, curr, {});
 
-        var is_page = false;
-        var page_id: []const u8 = "";
-        for (nodes) |node| {
-            if (std.mem.eql(u8, node.id, curr) or std.mem.eql(u8, node.source_path, curr)) {
-                is_page = true;
-                page_id = node.id;
-                break;
-            }
-        }
+        const resolved = lookup.pageId(curr);
+        const is_page = resolved != null;
+        const page_id: []const u8 = resolved orelse "";
 
         if (is_page) {
             try affected_ids.put(allocator, page_id, {});

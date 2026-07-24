@@ -1355,20 +1355,32 @@ fn expandDirtySet(
     nodes: []const graph_mod.Node,
     dep_index: *const dependency.DependencyIndex,
 ) !void {
+    // Both lookups are built once. Previously the node scan inside
+    // getAffectedPages and the entity-id scan below were linear, and both ran
+    // once per dirty page — quadratic in page count on a cold incremental
+    // build, where every page is dirty.
+    var lookup = try cache.NodeLookup.init(gpa, nodes);
+    defer lookup.deinit();
+
+    var by_entity_id: std.StringHashMapUnmanaged(usize) = .{};
+    defer by_entity_id.deinit(gpa);
+    try by_entity_id.ensureTotalCapacity(gpa, @intCast(pages.len));
+    for (pages, 0..) |page, idx| {
+        // First writer wins, matching the previous scan's `break` on first match.
+        if (!by_entity_id.contains(page.entity_id)) {
+            by_entity_id.putAssumeCapacity(page.entity_id, idx);
+        }
+    }
+
     for (pages, 0..) |page, page_idx| {
         if (!is_dirty[page_idx]) continue;
-        const affected = try cache.getAffectedPages(gpa, page.source_path, nodes, dep_index);
+        const affected = try cache.getAffectedPagesIndexed(gpa, page.source_path, &lookup, dep_index);
         defer {
             for (affected) |id| gpa.free(id);
             gpa.free(affected);
         }
         for (affected) |id| {
-            for (pages, 0..) |candidate, candidate_idx| {
-                if (std.mem.eql(u8, candidate.entity_id, id)) {
-                    is_dirty[candidate_idx] = true;
-                    break;
-                }
-            }
+            if (by_entity_id.get(id)) |candidate_idx| is_dirty[candidate_idx] = true;
         }
     }
 }
@@ -1959,8 +1971,7 @@ fn compilePagesInner(
             // Prefer staged (just-written) bytes; fall back to final dist for cached pages.
             const maybe_bytes: ?[]u8 = if (readFileAlloc(io, stage_dir, page.output_path, gpa)) |b|
                 b
-            else |_|
-                if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |b| b else |_| null;
+            else |_| if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |b| b else |_| null;
             if (maybe_bytes) |bytes| {
                 defer gpa.free(bytes);
                 out_size = bytes.len;
