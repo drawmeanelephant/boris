@@ -324,6 +324,15 @@ pub fn loadAndPromoteFormat(
     }
 }
 
+/// Optional rendering inputs for `renderAndPublishPage`. Defaults keep the
+/// minimal path (no graph chrome, headings, theme, or page assets).
+pub const RenderOptions = struct {
+    site: ?*const FrozenSite = null,
+    heading_index: ?*const wikilink.HeadingIndex = null,
+    theme: ?*const theme_mod.ThemeBundle = null,
+    page_assets: ?*const content_asset.PageAssetBundle = null,
+};
+
 /// Render one page body through Apex into the Whiteboard and publish HTML.
 ///
 /// **Caller owns Whiteboard lifecycle:** must `reset(.free_all)` only after
@@ -334,8 +343,8 @@ pub fn loadAndPromoteFormat(
 /// function re-reads source for the body only — parse views stay on the
 /// Whiteboard until return.
 ///
-/// When `site` is non-null and the layout has graph chrome slots, those
-/// fragments are rendered from the frozen graph on the Whiteboard.
+/// When `render_opts.site` is non-null and the layout has graph chrome slots,
+/// those fragments are rendered from the frozen graph on the Whiteboard.
 /// `{{toc}}` is built from rendered body HTML (page-local; no graph required).
 pub fn renderAndPublishPage(
     io: Io,
@@ -347,81 +356,7 @@ pub fn renderAndPublishPage(
     doc_arena: *std.heap.ArenaAllocator,
     options: CompileOptions,
     page_index: usize,
-) !void {
-    return renderAndPublishPageWithSite(io, gpa, content_dir, dist_dir, page, layout, doc_arena, options, page_index, null);
-}
-
-pub fn renderAndPublishPageWithSite(
-    io: Io,
-    gpa: std.mem.Allocator,
-    content_dir: Io.Dir,
-    dist_dir: Io.Dir,
-    page: *const DurablePage,
-    layout: assemble.Layout,
-    doc_arena: *std.heap.ArenaAllocator,
-    options: CompileOptions,
-    page_index: usize,
-    site: ?*const FrozenSite,
-) !void {
-    return renderAndPublishPageWithSiteAndHeadings(
-        io,
-        gpa,
-        content_dir,
-        dist_dir,
-        page,
-        layout,
-        doc_arena,
-        options,
-        page_index,
-        site,
-        null,
-    );
-}
-
-pub fn renderAndPublishPageWithSiteAndHeadings(
-    io: Io,
-    gpa: std.mem.Allocator,
-    content_dir: Io.Dir,
-    dist_dir: Io.Dir,
-    page: *const DurablePage,
-    layout: assemble.Layout,
-    doc_arena: *std.heap.ArenaAllocator,
-    options: CompileOptions,
-    page_index: usize,
-    site: ?*const FrozenSite,
-    heading_index: ?*const wikilink.HeadingIndex,
-) !void {
-    return renderAndPublishPageWithTheme(
-        io,
-        gpa,
-        content_dir,
-        dist_dir,
-        page,
-        layout,
-        doc_arena,
-        options,
-        page_index,
-        site,
-        heading_index,
-        null,
-        null,
-    );
-}
-
-pub fn renderAndPublishPageWithTheme(
-    io: Io,
-    gpa: std.mem.Allocator,
-    content_dir: Io.Dir,
-    dist_dir: Io.Dir,
-    page: *const DurablePage,
-    layout: assemble.Layout,
-    doc_arena: *std.heap.ArenaAllocator,
-    options: CompileOptions,
-    page_index: usize,
-    site: ?*const FrozenSite,
-    heading_index: ?*const wikilink.HeadingIndex,
-    theme: ?*const theme_mod.ThemeBundle,
-    page_assets: ?*const content_asset.PageAssetBundle,
+    render_opts: RenderOptions,
 ) !void {
     const arena = doc_arena.allocator();
 
@@ -432,9 +367,9 @@ pub fn renderAndPublishPageWithTheme(
     const html = try html_body.renderSource(io, gpa, content_dir, doc_arena, source, page.source_path, page.output_path, .{
         .input_format = options.input_format,
         .quiet = options.quiet,
-        .nodes = if (site) |s| s.nodes else &.{},
-        .heading_index = heading_index,
-        .page_assets = page_assets,
+        .nodes = if (render_opts.site) |s| s.nodes else &.{},
+        .heading_index = render_opts.heading_index,
+        .page_assets = render_opts.page_assets,
     });
 
     var slots: assemble.SlotValues = .{ .content = html };
@@ -446,7 +381,7 @@ pub fn renderAndPublishPageWithTheme(
         slots.metadata = try renderMetadata(arena, page);
     }
     if (layout.has_footer) {
-        slots.footer = if (theme) |t| t.footer() else "";
+        slots.footer = if (render_opts.theme) |t| t.footer() else "";
     }
     if (layout.has_asset_url) {
         const paths = layout.assetPaths();
@@ -457,7 +392,7 @@ pub fn renderAndPublishPageWithTheme(
         slots.asset_hrefs = hrefs;
     }
 
-    if (site) |s| {
+    if (render_opts.site) |s| {
         const gi = s.indexOf(page.entity_id) orelse return error.GraphValidationFailed;
         const node = s.nodes[gi];
         if (layout.has_nav) {
@@ -550,36 +485,35 @@ fn collectTransitIncludes(
     }
 }
 
-fn writeCacheManifest(writer: anytype, manifest: CacheManifest) !void {
+fn writeCacheManifest(allocator: std.mem.Allocator, writer: anytype, manifest: CacheManifest) !void {
     // Buffer via ArrayList so entity_id / paths / fingerprints go through json_out escaping.
-    const gpa = std.heap.page_allocator;
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(gpa);
+    defer buf.deinit(allocator);
 
-    try buf.appendSlice(gpa, "{\n  \"format_version\": ");
-    try json_out.writeString(&buf, gpa, manifest.format_version);
-    try buf.appendSlice(gpa, ",\n  \"entries\": [\n");
+    try buf.appendSlice(allocator, "{\n  \"format_version\": ");
+    try json_out.writeString(&buf, allocator, manifest.format_version);
+    try buf.appendSlice(allocator, ",\n  \"entries\": [\n");
     for (manifest.entries, 0..) |entry, i| {
-        try buf.appendSlice(gpa, "    {\n      \"entity_id\": ");
-        try json_out.writeString(&buf, gpa, entry.entity_id);
-        try buf.appendSlice(gpa, ",\n      \"fingerprint\": ");
-        try json_out.writeString(&buf, gpa, entry.fingerprint);
-        try buf.appendSlice(gpa, ",\n      \"output_path\": ");
-        try json_out.writeString(&buf, gpa, entry.output_path);
-        try buf.appendSlice(gpa, ",\n      \"selected_layout\": ");
-        try json_out.writeString(&buf, gpa, entry.selected_layout);
-        try buf.appendSlice(gpa, ",\n      \"output_size\": ");
-        try json_out.writeUsize(&buf, gpa, @intCast(entry.output_size));
-        try buf.appendSlice(gpa, ",\n      \"output_digest\": ");
-        try json_out.writeString(&buf, gpa, entry.output_digest);
-        try buf.appendSlice(gpa, "\n    }");
+        try buf.appendSlice(allocator, "    {\n      \"entity_id\": ");
+        try json_out.writeString(&buf, allocator, entry.entity_id);
+        try buf.appendSlice(allocator, ",\n      \"fingerprint\": ");
+        try json_out.writeString(&buf, allocator, entry.fingerprint);
+        try buf.appendSlice(allocator, ",\n      \"output_path\": ");
+        try json_out.writeString(&buf, allocator, entry.output_path);
+        try buf.appendSlice(allocator, ",\n      \"selected_layout\": ");
+        try json_out.writeString(&buf, allocator, entry.selected_layout);
+        try buf.appendSlice(allocator, ",\n      \"output_size\": ");
+        try json_out.writeUsize(&buf, allocator, @intCast(entry.output_size));
+        try buf.appendSlice(allocator, ",\n      \"output_digest\": ");
+        try json_out.writeString(&buf, allocator, entry.output_digest);
+        try buf.appendSlice(allocator, "\n    }");
         if (i + 1 < manifest.entries.len) {
-            try buf.appendSlice(gpa, ",\n");
+            try buf.appendSlice(allocator, ",\n");
         } else {
-            try buf.append(gpa, '\n');
+            try buf.append(allocator, '\n');
         }
     }
-    try buf.appendSlice(gpa, "  ]\n}\n");
+    try buf.appendSlice(allocator, "  ]\n}\n");
     try writer.writeAll(buf.items);
 }
 
@@ -1013,7 +947,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
                 &inv.pages[page_index]
             else
                 null;
-            renderAndPublishPageWithTheme(
+            renderAndPublishPage(
                 ctx.io,
                 ctx.gpa,
                 ctx.content_dir,
@@ -1023,10 +957,12 @@ fn parallelWorker(ctx: *ParallelContext) void {
                 &doc_arena,
                 ctx.options,
                 page_index,
-                ctx.site,
-                ctx.heading_index,
-                ctx.theme,
-                page_assets,
+                .{
+                    .site = ctx.site,
+                    .heading_index = ctx.heading_index,
+                    .theme = ctx.theme,
+                    .page_assets = page_assets,
+                },
             ) catch |err| {
                 ctx.mutex.lockUncancelable(ctx.io);
                 if (ctx.shared_error == null) {
@@ -1969,7 +1905,7 @@ fn compilePagesInner(
             stats.pages_attempted += 1;
 
             if (is_dirty[page_index]) {
-                try renderAndPublishPageWithTheme(
+                try renderAndPublishPage(
                     io,
                     gpa,
                     content_dir,
@@ -1979,10 +1915,12 @@ fn compilePagesInner(
                     &doc_arena,
                     options,
                     page_index,
-                    site,
-                    &heading_index,
-                    &theme_bundle,
-                    &content_assets.pages[page_index],
+                    .{
+                        .site = site,
+                        .heading_index = &heading_index,
+                        .theme = &theme_bundle,
+                        .page_assets = &content_assets.pages[page_index],
+                    },
                 );
                 stats.pages_written += 1;
                 if (!options.quiet) {
@@ -2049,7 +1987,7 @@ fn compilePagesInner(
 
         var m_buf: [4096]u8 = undefined;
         var m_writer = atomic_manifest.file.writer(io, &m_buf);
-        try writeCacheManifest(&m_writer.interface, .{
+        try writeCacheManifest(gpa, &m_writer.interface, .{
             .format_version = cache.CACHE_FORMAT_VERSION,
             .entries = cache_entries,
         });
@@ -2454,7 +2392,7 @@ test "render failure: whiteboard resets and no final output published" {
     const page = &db.items()[0];
     const result = renderAndPublishPage(io, gpa, content_dir, dist_dir, page, layout, &doc_arena, .{
         .test_fail_render_at = 0,
-    }, 0);
+    }, 0, .{});
     try std.testing.expectError(error.TestInjectedRenderFailure, result);
 
     // Production loop always resets after return — do so here.
