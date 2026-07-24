@@ -1177,27 +1177,26 @@ fn headingHarvestKey(
     return out;
 }
 
-fn writeHeadingHarvestCache(writer: anytype, entries: []const HeadingHarvestWriteEntry) !void {
-    const gpa = std.heap.page_allocator;
+fn writeHeadingHarvestCache(allocator: std.mem.Allocator, writer: anytype, entries: []const HeadingHarvestWriteEntry) !void {
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(gpa);
-    try buf.appendSlice(gpa, "{\n  \"format\": ");
-    try json_out.writeString(&buf, gpa, HEADING_HARVEST_FORMAT);
-    try buf.appendSlice(gpa, ",\n  \"entries\": [\n");
+    defer buf.deinit(allocator);
+    try buf.appendSlice(allocator, "{\n  \"format\": ");
+    try json_out.writeString(&buf, allocator, HEADING_HARVEST_FORMAT);
+    try buf.appendSlice(allocator, ",\n  \"entries\": [\n");
     for (entries, 0..) |e, i| {
-        try buf.appendSlice(gpa, "    {\n      \"entity_id\": ");
-        try json_out.writeString(&buf, gpa, e.entity_id);
-        try buf.appendSlice(gpa, ",\n      \"harvest_key\": ");
-        try json_out.writeString(&buf, gpa, e.harvest_key);
-        try buf.appendSlice(gpa, ",\n      \"ids\": [");
+        try buf.appendSlice(allocator, "    {\n      \"entity_id\": ");
+        try json_out.writeString(&buf, allocator, e.entity_id);
+        try buf.appendSlice(allocator, ",\n      \"harvest_key\": ");
+        try json_out.writeString(&buf, allocator, e.harvest_key);
+        try buf.appendSlice(allocator, ",\n      \"ids\": [");
         for (e.ids, 0..) |id, j| {
-            try json_out.writeString(&buf, gpa, id);
-            if (j + 1 < e.ids.len) try buf.appendSlice(gpa, ", ");
+            try json_out.writeString(&buf, allocator, id);
+            if (j + 1 < e.ids.len) try buf.appendSlice(allocator, ", ");
         }
-        try buf.appendSlice(gpa, "]\n    }");
-        if (i + 1 < entries.len) try buf.appendSlice(gpa, ",\n") else try buf.append(gpa, '\n');
+        try buf.appendSlice(allocator, "]\n    }");
+        if (i + 1 < entries.len) try buf.appendSlice(allocator, ",\n") else try buf.append(allocator, '\n');
     }
-    try buf.appendSlice(gpa, "  ]\n}\n");
+    try buf.appendSlice(allocator, "  ]\n}\n");
     try writer.writeAll(buf.items);
 }
 
@@ -2004,7 +2003,7 @@ fn compilePagesInner(
             defer atomic_hh.deinit(io);
             var hh_buf: [4096]u8 = undefined;
             var hh_writer = atomic_hh.file.writer(io, &hh_buf);
-            try writeHeadingHarvestCache(&hh_writer.interface, heading_snapshot.entries);
+            try writeHeadingHarvestCache(gpa, &hh_writer.interface, heading_snapshot.entries);
             try hh_writer.flush();
             try atomic_hh.replace(io);
         }
