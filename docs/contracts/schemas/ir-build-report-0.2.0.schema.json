@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boris IR build-report.json (v0.2)",
+  "description": "Machine-readable twin of the `build-report.json` section of docs/contracts/ir-schema.md. The prose contract remains normative. Unlike manifest.json and graph.json, this file is published on content failure too (ok: false, non-empty diagnostics).",
+  "type": "object",
+  "required": ["schemaVersion", "ok", "contentRoot", "outDir", "pageCount", "errorCount", "diagnostics"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "0.2.0" },
+    "ok": {
+      "type": "boolean",
+      "description": "true iff zero error diagnostics and freeze succeeded."
+    },
+    "contentRoot": { "type": "string" },
+    "outDir": { "type": "string" },
+    "pageCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Page nodes retained after successful parses."
+    },
+    "errorCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of severity=error diagnostics."
+    },
+    "diagnostics": {
+      "type": "array",
+      "description": "Sorted diagnostics; see docs/contracts/diagnostics.md for the closed code set.",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    }
+  },
+  "$defs": {
+    "diagnostic": {
+      "type": "object",
+      "description": "Key order: severity, code, message, remediation, sourcePath, line, column, id.",
+      "required": ["severity", "code", "message", "remediation", "sourcePath", "line", "column", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "severity": { "type": "string" },
+        "code": {
+          "type": "string",
+          "description": "Stable diagnostic code from the closed set, e.g. EDUPLICATEID."
+        },
+        "message": { "type": "string" },
+        "remediation": { "type": "string" },
+        "sourcePath": {
+          "type": ["string", "null"],
+          "description": "null when the diagnostic is not attributable to one source file."
+        },
+        "line": { "type": ["integer", "null"], "minimum": 0 },
+        "column": { "type": ["integer", "null"], "minimum": 0 },
+        "id": {
+          "type": ["string", "null"],
+          "description": "Entity id when the diagnostic is attributable to one page."
+        }
+      }
+    }
+  }
+}
