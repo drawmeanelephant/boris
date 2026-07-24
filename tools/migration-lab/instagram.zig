@@ -64,6 +64,7 @@ pub const MediaItem = struct {
     creation_timestamp: ?i64 = null,
     title: []const u8 = "",
     encoding_repaired: bool = false,
+    encoding_suspect: bool = false,
     present: bool = false,
     theme_rel: []const u8 = "", // assets/media/...
 };
@@ -93,6 +94,7 @@ pub const IgRecord = struct {
     title: []const u8, // caption (UTF-8, with auditable Meta repair when needed)
     creation_timestamp: ?i64,
     encoding_repaired: bool,
+    encoding_suspect: bool,
     media: []MediaItem,
     entity_id: []const u8,
     id_strategy: []const u8, // durable_export_id | fallback_hash
@@ -304,14 +306,37 @@ fn jsonGetI64(obj: std.json.Value, key: []const u8) ?i64 {
 pub const TextRepair = struct {
     text: []const u8,
     repaired: bool,
+    /// A mojibake signature survives in `text`. Either the caption mixed escaped
+    /// and genuine Unicode (so the repair declined), or it was encoded more than
+    /// once (so a single pass was not enough). Provenance must not claim clean
+    /// `utf-8` for these — they need a human.
+    residue: bool,
 };
+
+/// Detect the byte signature of Latin-1 mis-decoded UTF-8: a codepoint in the
+/// UTF-8 *lead* range (U+00C2–U+00F4) immediately followed by one in the
+/// *continuation* range (U+0080–U+00BF). Genuine prose does not produce this
+/// pairing; `Ã©`, `Â£`, and `â€™` all do.
+fn hasMojibakeResidue(s: []const u8) bool {
+    if (!std.unicode.utf8ValidateSlice(s)) return false;
+    var i: usize = 0;
+    var prev_lead = false;
+    while (i < s.len) {
+        const width = std.unicode.utf8ByteSequenceLength(s[i]) catch return false;
+        const codepoint = std.unicode.utf8Decode(s[i .. i + width]) catch return false;
+        if (prev_lead and codepoint >= 0x80 and codepoint <= 0xbf) return true;
+        prev_lead = codepoint >= 0xc2 and codepoint <= 0xf4;
+        i += width;
+    }
+    return false;
+}
 
 /// Repair Meta's JSON export form where UTF-8 bytes were escaped as individual
 /// Latin-1 code points (for example `\\u00c3\\u00a9` for `é`). Only accept the
 /// conversion when the resulting bytes are valid UTF-8; ordinary Unicode text
 /// therefore remains byte-for-byte unchanged.
 pub fn repairMetaEscapedUtf8(allocator: std.mem.Allocator, input: []const u8) !TextRepair {
-    if (!std.unicode.utf8ValidateSlice(input)) return .{ .text = input, .repaired = false };
+    if (!std.unicode.utf8ValidateSlice(input)) return .{ .text = input, .repaired = false, .residue = false };
 
     var candidate: std.ArrayList(u8) = .empty;
     errdefer candidate.deinit(allocator);
@@ -321,8 +346,10 @@ pub fn repairMetaEscapedUtf8(allocator: std.mem.Allocator, input: []const u8) !T
         const width = try std.unicode.utf8ByteSequenceLength(input[i]);
         const codepoint = try std.unicode.utf8Decode(input[i .. i + width]);
         if (codepoint > 0xff) {
+            // Mixed escaped and genuine Unicode: converting would corrupt the
+            // genuine half, so decline — but say so, rather than reporting clean.
             candidate.deinit(allocator);
-            return .{ .text = input, .repaired = false };
+            return .{ .text = input, .repaired = false, .residue = hasMojibakeResidue(input) };
         }
         const byte: u8 = @intCast(codepoint);
         try candidate.append(allocator, byte);
@@ -332,9 +359,30 @@ pub fn repairMetaEscapedUtf8(allocator: std.mem.Allocator, input: []const u8) !T
 
     if (!changed or !std.unicode.utf8ValidateSlice(candidate.items)) {
         candidate.deinit(allocator);
-        return .{ .text = input, .repaired = false };
+        return .{ .text = input, .repaired = false, .residue = hasMojibakeResidue(input) };
     }
-    return .{ .text = try candidate.toOwnedSlice(allocator), .repaired = true };
+    const repaired = try candidate.toOwnedSlice(allocator);
+    // A multiply-encoded caption still looks like mojibake after one pass. Flag
+    // it instead of stamping `meta-latin1-repaired` on a half-finished repair.
+    return .{ .text = repaired, .repaired = true, .residue = hasMojibakeResidue(repaired) };
+}
+
+/// Reject media URIs that would escape the dump on read or the output root on
+/// write. Meta exports only ever reference dump-relative media paths, so an
+/// absolute path, a `..` component, a Windows separator, or a drive prefix is
+/// corruption or a hostile archive — never a convertible record. Mirrors the
+/// theme-adversarial trio (escape-dotdot / absolute / backslash).
+pub fn isSafeMediaUri(uri: []const u8) bool {
+    if (uri.len == 0) return false;
+    if (uri[0] == '/') return false; // absolute: openat ignores the dir fd
+    if (std.mem.indexOfScalar(u8, uri, '\\') != null) return false;
+    if (std.mem.indexOfScalar(u8, uri, 0) != null) return false;
+    if (uri.len >= 2 and uri[1] == ':') return false; // C:\… / C:foo
+    var it = std.mem.splitScalar(u8, uri, '/');
+    while (it.next()) |segment| {
+        if (std.mem.eql(u8, segment, "..")) return false;
+    }
+    return true;
 }
 
 fn parseMediaObject(retain: std.mem.Allocator, v: std.json.Value) !MediaItem {
@@ -347,6 +395,7 @@ fn parseMediaObject(retain: std.mem.Allocator, v: std.json.Value) !MediaItem {
         .creation_timestamp = ts,
         .title = title,
         .encoding_repaired = title_repair.repaired,
+        .encoding_suspect = title_repair.residue,
     };
 }
 
@@ -364,6 +413,7 @@ fn parseRecordObject(
     const title_repair = try repairMetaEscapedUtf8(retain, jsonGetString(v, "title"));
     var title = title_repair.text;
     var encoding_repaired = title_repair.repaired;
+    var encoding_suspect = title_repair.residue;
     var ts = jsonGetI64(v, "creation_timestamp");
 
     if (v == .object) {
@@ -397,7 +447,10 @@ fn parseRecordObject(
     if (ts == null and media_list.items.len > 0) {
         ts = media_list.items[0].creation_timestamp;
     }
-    for (media_list.items) |media| encoding_repaired = encoding_repaired or media.encoding_repaired;
+    for (media_list.items) |media| {
+        encoding_repaired = encoding_repaired or media.encoding_repaired;
+        encoding_suspect = encoding_suspect or media.encoding_suspect;
+    }
     const title_owned = try retain.dupe(u8, title);
     const source_owned = try retain.dupe(u8, source_path);
 
@@ -408,10 +461,16 @@ fn parseRecordObject(
         .title = title_owned,
         .creation_timestamp = ts,
         .encoding_repaired = encoding_repaired,
+        .encoding_suspect = encoding_suspect,
         .media = try media_list.toOwnedSlice(retain),
         .entity_id = "",
         .id_strategy = "",
-        .conversion = if (encoding_repaired) .transformed else .exact,
+        .conversion = if (encoding_suspect)
+            .human_review
+        else if (encoding_repaired)
+            .transformed
+        else
+            .exact,
         .notes = &.{},
         .output_path = "",
     };
@@ -595,6 +654,7 @@ fn parseHtmlPostsFile(
         // caption
         var caption: []const u8 = "";
         var encoding_repaired = false;
+        var encoding_suspect = false;
         if (std.mem.indexOf(u8, block, "_a6-h _a6-i\">")) |c0| {
             const cs = c0 + "_a6-h _a6-i\">".len;
             if (std.mem.indexOfPos(u8, block, cs, "</div>")) |ce| {
@@ -605,6 +665,7 @@ fn parseHtmlPostsFile(
                 const repair = try repairMetaEscapedUtf8(retain, unesc);
                 caption = repair.text;
                 encoding_repaired = repair.repaired;
+                encoding_suspect = repair.residue;
             }
         }
         // date
@@ -631,6 +692,7 @@ fn parseHtmlPostsFile(
                 .creation_timestamp = ts,
                 .title = caption,
                 .encoding_repaired = encoding_repaired,
+                .encoding_suspect = encoding_suspect,
             });
         }
 
@@ -647,6 +709,7 @@ fn parseHtmlPostsFile(
             .title = if (caption.len > 0) caption else try retain.dupe(u8, ""),
             .creation_timestamp = ts,
             .encoding_repaired = encoding_repaired,
+            .encoding_suspect = encoding_suspect,
             .media = try media_list.toOwnedSlice(retain),
             .entity_id = "",
             .id_strategy = "",
@@ -785,6 +848,9 @@ fn assignEntityIds(retain: std.mem.Allocator, records: []IgRecord) !void {
         if (rec.encoding_repaired) {
             try notes.append(retain, try retain.dupe(u8, "repaired Meta Latin-1 escaped UTF-8 text"));
         }
+        if (rec.encoding_suspect) {
+            try notes.append(retain, try retain.dupe(u8, "mojibake signature remains after repair attempt; caption needs manual review"));
+        }
 
         rec.entity_id = entity;
         rec.id_strategy = try retain.dupe(u8, strategy);
@@ -798,6 +864,25 @@ fn classifyMediaPresence(io: Io, dump: Io.Dir, rec: *IgRecord, retain: std.mem.A
         // normalize uri (no leading ./)
         var uri = m.uri;
         if (std.mem.startsWith(u8, uri, "./")) uri = uri[2..];
+
+        // A hostile or corrupt dump can name a path that escapes the dump on
+        // read and the output root on write. Refuse before touching the
+        // filesystem, and leave `theme_rel` empty so the copy pass skips it.
+        if (!isSafeMediaUri(uri)) {
+            m.present = false;
+            m.theme_rel = "";
+            rec.conversion = ConversionClass.worse(rec.conversion, .human_review);
+            var unsafe_notes: std.ArrayList([]const u8) = .empty;
+            try unsafe_notes.appendSlice(retain, rec.notes);
+            try unsafe_notes.append(retain, try std.fmt.allocPrint(
+                retain,
+                "unsafe media uri rejected (not read, not copied): {s}",
+                .{m.uri},
+            ));
+            rec.notes = try unsafe_notes.toOwnedSlice(retain);
+            continue;
+        }
+
         m.present = pathExists(io, dump, uri);
         if (!m.present) {
             rec.conversion = ConversionClass.worse(rec.conversion, .human_review);
@@ -886,13 +971,20 @@ fn writeRecordMarkdown(allocator: std.mem.Allocator, rec: IgRecord) ![]u8 {
     try body.print(allocator, "- **source:** `{s}` (record index {d})\n", .{ rec.source_json_path, rec.source_index });
     try body.print(allocator, "- **entity id strategy:** `{s}`\n\n", .{rec.id_strategy});
 
-    // caption original bytes as fenced block (preserve)
+    // Caption bytes stay verbatim inside a fence — but the caption is untrusted
+    // and may carry a fence of its own. Size ours to outrank the longest backtick
+    // run in the text (CommonMark: a closing fence must be at least as long as
+    // the opening one), otherwise the caption escapes into live Markdown and the
+    // product host renders raw HTML for trusted authors.
     try body.appendSlice(allocator, "## Caption\n\n");
     if (rec.title.len > 0) {
-        try body.appendSlice(allocator, "```\n");
+        const fence_len = @max(3, longestBacktickRun(rec.title) + 1);
+        try body.appendNTimes(allocator, '`', fence_len);
+        try body.append(allocator, '\n');
         try body.appendSlice(allocator, rec.title);
         if (rec.title[rec.title.len - 1] != '\n') try body.append(allocator, '\n');
-        try body.appendSlice(allocator, "```\n\n");
+        try body.appendNTimes(allocator, '`', fence_len);
+        try body.appendSlice(allocator, "\n\n");
     } else {
         try body.appendSlice(allocator, "_Empty caption._\n\n");
     }
@@ -943,7 +1035,13 @@ fn writeRecordMarkdown(allocator: std.mem.Allocator, rec: IgRecord) ![]u8 {
     try body.print(allocator, "kind: {s}\n", .{rec.kind.name()});
     try body.print(allocator, "creation_timestamp: {s}\n", .{ts_s});
     try body.print(allocator, "conversion: {s}\n", .{rec.conversion.jsonName()});
-    try body.print(allocator, "encoding: {s}\n", .{if (rec.encoding_repaired) "meta-latin1-repaired" else "utf-8"});
+    const encoding_label: []const u8 = if (rec.encoding_suspect)
+        "suspected-mojibake-unrepaired"
+    else if (rec.encoding_repaired)
+        "meta-latin1-repaired"
+    else
+        "utf-8";
+    try body.print(allocator, "encoding: {s}\n", .{encoding_label});
     try body.appendSlice(allocator, "media:\n");
     for (rec.media) |m| {
         try body.print(allocator, "  - uri: {s}\n", .{m.uri});
@@ -963,6 +1061,22 @@ fn writeRecordMarkdown(allocator: std.mem.Allocator, rec: IgRecord) ![]u8 {
 /// Source stays `content/{entity_id}.md`; do not link the `.md` source path.
 fn publishedHtmlHref(entity_id: []const u8, buf: []u8) ![]const u8 {
     return try std.fmt.bufPrint(buf, "{s}.html", .{entity_id});
+}
+
+/// Longest run of consecutive backticks in `s` — sizes a code fence that
+/// untrusted caption text cannot close early.
+fn longestBacktickRun(s: []const u8) usize {
+    var best: usize = 0;
+    var current: usize = 0;
+    for (s) |c| {
+        if (c == '`') {
+            current += 1;
+            if (current > best) best = current;
+        } else {
+            current = 0;
+        }
+    }
+    return best;
 }
 
 /// Escape `]` and `\` so caption text cannot break `[label](href)` links.
@@ -1268,6 +1382,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
                     .title = try retain.dupe(u8, "MALFORMED_JSON"),
                     .creation_timestamp = null,
                     .encoding_repaired = false,
+                    .encoding_suspect = false,
                     .media = &.{},
                     .entity_id = "",
                     .id_strategy = "",
@@ -1321,7 +1436,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             if (m.present and (std.mem.endsWith(u8, m.uri, ".mp4") or std.mem.endsWith(u8, m.uri, ".mov"))) {
                 status = "video";
             }
-            if (m.present) {
+            if (m.present and m.theme_rel.len > 0) {
                 // theme path is assets/media/... — strip "assets/" for write under theme/
                 const under_theme = m.theme_rel; // assets/...
                 copyFileRel(io, dump, m.uri, out_root, try std.fmt.allocPrint(retain, "theme/{s}", .{under_theme})) catch {
@@ -1487,6 +1602,109 @@ test "repairMetaEscapedUtf8 repairs Meta JSON escapes and preserves normal UTF-8
     const ordinary = try repairMetaEscapedUtf8(std.testing.allocator, "café 😊");
     try std.testing.expect(!ordinary.repaired);
     try std.testing.expectEqualStrings("café 😊", ordinary.text);
+}
+
+test "isSafeMediaUri rejects dump/output escapes and keeps ordinary media paths" {
+    // Ordinary Takeout shapes stay convertible.
+    try std.testing.expect(isSafeMediaUri("media/posts/202401/photo_1.jpg"));
+    try std.testing.expect(isSafeMediaUri("media/other/a.b..c.jpg")); // dots, not a component
+    try std.testing.expect(isSafeMediaUri("media/..hidden/x.jpg"));
+
+    // Escapes.
+    try std.testing.expect(!isSafeMediaUri(""));
+    try std.testing.expect(!isSafeMediaUri("../../../etc/passwd"));
+    try std.testing.expect(!isSafeMediaUri("media/../../escape.jpg"));
+    try std.testing.expect(!isSafeMediaUri(".."));
+    try std.testing.expect(!isSafeMediaUri("/etc/hosts")); // absolute bypasses the dir fd
+    try std.testing.expect(!isSafeMediaUri("..\\..\\escape.jpg")); // Windows separator
+    try std.testing.expect(!isSafeMediaUri("media\\posts\\x.jpg"));
+    try std.testing.expect(!isSafeMediaUri("C:/Windows/win.ini")); // drive prefix
+    try std.testing.expect(!isSafeMediaUri("a\x00b"));
+}
+
+test "repairMetaEscapedUtf8 flags residue instead of claiming clean utf-8" {
+    const gpa = std.testing.allocator;
+
+    // Mixed escaped + genuine Unicode: repair must decline AND report residue,
+    // otherwise a corrupted caption is stamped `encoding: utf-8`.
+    const mixed = try repairMetaEscapedUtf8(gpa, "caf\u{c3}\u{a9} \u{1F60A}");
+    defer if (mixed.repaired) gpa.free(mixed.text);
+    try std.testing.expect(!mixed.repaired);
+    try std.testing.expect(mixed.residue);
+
+    // Doubly encoded: one pass leaves mojibake behind, so it is not "repaired
+    // and clean" — the residue flag keeps provenance honest.
+    const double = try repairMetaEscapedUtf8(gpa, "caf\u{c3}\u{83}\u{c2}\u{a9}");
+    defer if (double.repaired) gpa.free(double.text);
+    try std.testing.expect(double.repaired);
+    try std.testing.expect(double.residue);
+
+    // Single-pass mojibake repairs cleanly, with no residue.
+    const single = try repairMetaEscapedUtf8(gpa, "caf\u{c3}\u{a9}");
+    defer if (single.repaired) gpa.free(single.text);
+    try std.testing.expect(single.repaired);
+    try std.testing.expect(!single.residue);
+    try std.testing.expectEqualStrings("café", single.text);
+
+    // Genuine prose is never flagged.
+    for ([_][]const u8{ "café 😊", "über", "A\u{f1}o", "plain ascii", "" }) |ok| {
+        const r = try repairMetaEscapedUtf8(gpa, ok);
+        defer if (r.repaired) gpa.free(r.text);
+        try std.testing.expect(!r.repaired);
+        try std.testing.expect(!r.residue);
+    }
+}
+
+test "longestBacktickRun sizes a fence untrusted captions cannot close" {
+    try std.testing.expectEqual(@as(usize, 0), longestBacktickRun("no ticks"));
+    try std.testing.expectEqual(@as(usize, 3), longestBacktickRun("a\n```\nb"));
+    try std.testing.expectEqual(@as(usize, 5), longestBacktickRun("`` ````` ```"));
+}
+
+test "fixture: hostile instagram dump cannot escape dump or output root" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    const dump = "fixtures/hostile-instagram";
+    const out = "fixtures/.ig-hostile-out";
+    Io.Dir.cwd().deleteTree(io, out) catch {};
+    defer Io.Dir.cwd().deleteTree(io, out) catch {};
+
+    try run(io, gpa, .{ .dump_dir = dump, .out_dir = out, .quiet = true });
+
+    var out_root = try Io.Dir.cwd().openDir(io, out, .{});
+    defer out_root.close(io);
+
+    const report = try readFileAlloc(io, out_root, "report.json", gpa);
+    defer gpa.free(report);
+
+    // Every hostile uri is refused by name, and none is reported as converted.
+    for ([_][]const u8{
+        "../../../ESCAPED.txt",
+        "/etc/hosts",
+        "..\\\\..\\\\ESCAPED.txt",
+        "C:/Windows/win.ini",
+    }) |bad| {
+        try std.testing.expect(std.mem.indexOf(u8, report, bad) != null);
+    }
+    try std.testing.expect(std.mem.indexOf(u8, report, "unsafe media uri rejected") != null);
+
+    // Nothing hostile was copied into the theme tree.
+    try std.testing.expect(!pathExists(io, out_root, "theme/assets/etc/hosts"));
+    try std.testing.expect(!pathExists(io, out_root, "theme/assets/../ESCAPED.txt"));
+    try std.testing.expect(!pathExists(io, out_root, "ESCAPED.txt"));
+
+    // The benign control record still converts — the guard is not over-broad.
+    try std.testing.expect(pathExists(io, out_root, "theme/assets/media/posts/202401/ok_1111111111111111111.jpg"));
+
+    // A caption carrying its own fence stays inside a wider fence rather than
+    // escaping into live Markdown (the host renders raw HTML for trusted authors).
+    const fence_page = try readFileAlloc(io, out_root, "content/instagram/post-1111111111111111111-2.md", gpa);
+    defer gpa.free(fence_page);
+    try std.testing.expect(std.mem.indexOf(u8, fence_page, "````") != null);
+
+    // Mixed and doubly-encoded captions are flagged, never stamped clean.
+    try std.testing.expect(std.mem.indexOf(u8, report, "mojibake signature remains") != null);
 }
 
 test "fixture: instagram mode end-to-end + determinism + source immutability" {
