@@ -793,6 +793,10 @@ media_manifest.json            # clean provenance for a later enrichment pass (n
 Each page uses **closed Boris frontmatter only**: `id`, `title`, `parent`,
 `status`, `tags`. Caption bytes, timestamp, source JSON/HTML path, media URIs,
 theme asset paths, and conversion notes live in the body + provenance comment.
+JSON captions using Meta's escaped Latin-1/UTF-8 form are repaired only when
+the resulting bytes validate as UTF-8; repaired pages are marked
+`meta-latin1-repaired` in provenance and classified as `transformed`. Ordinary
+UTF-8 captions remain unchanged.
 
 | Class | Typical cause |
 |-------|----------------|

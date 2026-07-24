@@ -63,6 +63,7 @@ pub const MediaItem = struct {
     uri: []const u8,
     creation_timestamp: ?i64 = null,
     title: []const u8 = "",
+    encoding_repaired: bool = false,
     present: bool = false,
     theme_rel: []const u8 = "", // assets/media/...
 };
@@ -89,8 +90,9 @@ pub const IgRecord = struct {
     kind: RecordKind,
     source_json_path: []const u8, // dump-relative path to JSON/HTML source
     source_index: usize, // 0-based index within that file
-    title: []const u8, // caption (original bytes preserved as UTF-8 slice)
+    title: []const u8, // caption (UTF-8, with auditable Meta repair when needed)
     creation_timestamp: ?i64,
+    encoding_repaired: bool,
     media: []MediaItem,
     entity_id: []const u8,
     id_strategy: []const u8, // durable_export_id | fallback_hash
@@ -299,14 +301,52 @@ fn jsonGetI64(obj: std.json.Value, key: []const u8) ?i64 {
     };
 }
 
+pub const TextRepair = struct {
+    text: []const u8,
+    repaired: bool,
+};
+
+/// Repair Meta's JSON export form where UTF-8 bytes were escaped as individual
+/// Latin-1 code points (for example `\\u00c3\\u00a9` for `é`). Only accept the
+/// conversion when the resulting bytes are valid UTF-8; ordinary Unicode text
+/// therefore remains byte-for-byte unchanged.
+pub fn repairMetaEscapedUtf8(allocator: std.mem.Allocator, input: []const u8) !TextRepair {
+    if (!std.unicode.utf8ValidateSlice(input)) return .{ .text = input, .repaired = false };
+
+    var candidate: std.ArrayList(u8) = .empty;
+    errdefer candidate.deinit(allocator);
+    var changed = false;
+    var i: usize = 0;
+    while (i < input.len) {
+        const width = try std.unicode.utf8ByteSequenceLength(input[i]);
+        const codepoint = try std.unicode.utf8Decode(input[i .. i + width]);
+        if (codepoint > 0xff) {
+            candidate.deinit(allocator);
+            return .{ .text = input, .repaired = false };
+        }
+        const byte: u8 = @intCast(codepoint);
+        try candidate.append(allocator, byte);
+        if (width != 1 or input[i] != byte) changed = true;
+        i += width;
+    }
+
+    if (!changed or !std.unicode.utf8ValidateSlice(candidate.items)) {
+        candidate.deinit(allocator);
+        return .{ .text = input, .repaired = false };
+    }
+    return .{ .text = try candidate.toOwnedSlice(allocator), .repaired = true };
+}
+
 fn parseMediaObject(retain: std.mem.Allocator, v: std.json.Value) !MediaItem {
     const uri = try retain.dupe(u8, jsonGetString(v, "uri"));
-    const title = try retain.dupe(u8, jsonGetString(v, "title"));
+    const title_repair = try repairMetaEscapedUtf8(retain, jsonGetString(v, "title"));
+    const title = if (title_repair.repaired) title_repair.text else try retain.dupe(u8, title_repair.text);
     const ts = jsonGetI64(v, "creation_timestamp");
     return .{
         .uri = uri,
         .creation_timestamp = ts,
         .title = title,
+        .encoding_repaired = title_repair.repaired,
     };
 }
 
@@ -321,7 +361,9 @@ fn parseRecordObject(
     errdefer media_list.deinit(retain);
 
     // title / caption at record level
-    var title = jsonGetString(v, "title");
+    const title_repair = try repairMetaEscapedUtf8(retain, jsonGetString(v, "title"));
+    var title = title_repair.text;
+    var encoding_repaired = title_repair.repaired;
     var ts = jsonGetI64(v, "creation_timestamp");
 
     if (v == .object) {
@@ -355,7 +397,7 @@ fn parseRecordObject(
     if (ts == null and media_list.items.len > 0) {
         ts = media_list.items[0].creation_timestamp;
     }
-
+    for (media_list.items) |media| encoding_repaired = encoding_repaired or media.encoding_repaired;
     const title_owned = try retain.dupe(u8, title);
     const source_owned = try retain.dupe(u8, source_path);
 
@@ -365,10 +407,11 @@ fn parseRecordObject(
         .source_index = index,
         .title = title_owned,
         .creation_timestamp = ts,
+        .encoding_repaired = encoding_repaired,
         .media = try media_list.toOwnedSlice(retain),
         .entity_id = "",
         .id_strategy = "",
-        .conversion = .exact,
+        .conversion = if (encoding_repaired) .transformed else .exact,
         .notes = &.{},
         .output_path = "",
     };
@@ -551,6 +594,7 @@ fn parseHtmlPostsFile(
 
         // caption
         var caption: []const u8 = "";
+        var encoding_repaired = false;
         if (std.mem.indexOf(u8, block, "_a6-h _a6-i\">")) |c0| {
             const cs = c0 + "_a6-h _a6-i\">".len;
             if (std.mem.indexOfPos(u8, block, cs, "</div>")) |ce| {
@@ -558,7 +602,9 @@ fn parseHtmlPostsFile(
                 const stripped = try stripTags(gpa, raw);
                 defer gpa.free(stripped);
                 const unesc = try htmlUnescapeBasic(retain, stripped);
-                caption = unesc;
+                const repair = try repairMetaEscapedUtf8(retain, unesc);
+                caption = repair.text;
+                encoding_repaired = repair.repaired;
             }
         }
         // date
@@ -584,6 +630,7 @@ fn parseHtmlPostsFile(
                 .uri = try retain.dupe(u8, src),
                 .creation_timestamp = ts,
                 .title = caption,
+                .encoding_repaired = encoding_repaired,
             });
         }
 
@@ -599,6 +646,7 @@ fn parseHtmlPostsFile(
             .source_index = index,
             .title = if (caption.len > 0) caption else try retain.dupe(u8, ""),
             .creation_timestamp = ts,
+            .encoding_repaired = encoding_repaired,
             .media = try media_list.toOwnedSlice(retain),
             .entity_id = "",
             .id_strategy = "",
@@ -733,6 +781,9 @@ fn assignEntityIds(retain: std.mem.Allocator, records: []IgRecord) !void {
         if (rec.title.len == 0) {
             rec.conversion = ConversionClass.worse(rec.conversion, .human_review);
             try notes.append(retain, try retain.dupe(u8, "empty caption"));
+        }
+        if (rec.encoding_repaired) {
+            try notes.append(retain, try retain.dupe(u8, "repaired Meta Latin-1 escaped UTF-8 text"));
         }
 
         rec.entity_id = entity;
@@ -892,6 +943,7 @@ fn writeRecordMarkdown(allocator: std.mem.Allocator, rec: IgRecord) ![]u8 {
     try body.print(allocator, "kind: {s}\n", .{rec.kind.name()});
     try body.print(allocator, "creation_timestamp: {s}\n", .{ts_s});
     try body.print(allocator, "conversion: {s}\n", .{rec.conversion.jsonName()});
+    try body.print(allocator, "encoding: {s}\n", .{if (rec.encoding_repaired) "meta-latin1-repaired" else "utf-8"});
     try body.appendSlice(allocator, "media:\n");
     for (rec.media) |m| {
         try body.print(allocator, "  - uri: {s}\n", .{m.uri});
@@ -1215,6 +1267,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
                     .source_index = 0,
                     .title = try retain.dupe(u8, "MALFORMED_JSON"),
                     .creation_timestamp = null,
+                    .encoding_repaired = false,
                     .media = &.{},
                     .entity_id = "",
                     .id_strategy = "",
@@ -1425,6 +1478,17 @@ test "parseIgDateString basic" {
     try std.testing.expect(ts != null);
 }
 
+test "repairMetaEscapedUtf8 repairs Meta JSON escapes and preserves normal UTF-8" {
+    const repaired = try repairMetaEscapedUtf8(std.testing.allocator, "caf\u{c3}\u{a9} \u{f0}\u{9f}\u{98}\u{8a}");
+    defer if (repaired.repaired) std.testing.allocator.free(repaired.text);
+    try std.testing.expect(repaired.repaired);
+    try std.testing.expectEqualStrings("café 😊", repaired.text);
+
+    const ordinary = try repairMetaEscapedUtf8(std.testing.allocator, "café 😊");
+    try std.testing.expect(!ordinary.repaired);
+    try std.testing.expectEqualStrings("café 😊", ordinary.text);
+}
+
 test "fixture: instagram mode end-to-end + determinism + source immutability" {
     const io = std.testing.io;
     const gpa = std.testing.allocator;
@@ -1488,6 +1552,12 @@ test "fixture: instagram mode end-to-end + determinism + source immutability" {
     const photo = try readFileAlloc(io, a_root, photo_path, gpa);
     defer gpa.free(photo);
     try std.testing.expect(photo.len > 0);
+
+    const repaired_page = try readFileAlloc(io, a_root, "content/instagram/post-8888888888888888888.md", gpa);
+    defer gpa.free(repaired_page);
+    try std.testing.expect(std.mem.indexOf(u8, repaired_page, "café 😊") != null);
+    try std.testing.expect(std.mem.indexOf(u8, repaired_page, "cafÃ©") == null);
+    try std.testing.expect(std.mem.indexOf(u8, repaired_page, "encoding: meta-latin1-repaired") != null);
 }
 
 test "publishedHtmlHref matches entity_id.html" {
