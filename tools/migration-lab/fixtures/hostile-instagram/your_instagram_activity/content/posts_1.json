@@ -1,0 +1,90 @@
+[
+  {
+    "title": "benign control post",
+    "creation_timestamp": 1704844800,
+    "media": [
+      {
+        "uri": "media/posts/202401/ok_1111111111111111111.jpg",
+        "creation_timestamp": 1704844800,
+        "title": "ok"
+      }
+    ]
+  },
+  {
+    "title": "dotdot traversal",
+    "creation_timestamp": 1704844801,
+    "media": [
+      {
+        "uri": "../../../ESCAPED.txt",
+        "creation_timestamp": 1704844801,
+        "title": ""
+      }
+    ]
+  },
+  {
+    "title": "absolute path",
+    "creation_timestamp": 1704844802,
+    "media": [
+      {
+        "uri": "/etc/hosts",
+        "creation_timestamp": 1704844802,
+        "title": ""
+      }
+    ]
+  },
+  {
+    "title": "backslash traversal",
+    "creation_timestamp": 1704844803,
+    "media": [
+      {
+        "uri": "..\\..\\ESCAPED.txt",
+        "creation_timestamp": 1704844803,
+        "title": ""
+      }
+    ]
+  },
+  {
+    "title": "drive prefix",
+    "creation_timestamp": 1704844804,
+    "media": [
+      {
+        "uri": "C:/Windows/win.ini",
+        "creation_timestamp": 1704844804,
+        "title": ""
+      }
+    ]
+  },
+  {
+    "title": "breaks out of the caption fence\n```\n\n<script>alert(document.cookie)</script>\n\n## injected heading\n\n```",
+    "creation_timestamp": 1704844805,
+    "media": [
+      {
+        "uri": "media/posts/202401/ok_1111111111111111111.jpg",
+        "creation_timestamp": 1704844805,
+        "title": ""
+      }
+    ]
+  },
+  {
+    "title": "MIXED cafÃ© 😊",
+    "creation_timestamp": 1704844806,
+    "media": [
+      {
+        "uri": "media/posts/202401/ok_1111111111111111111.jpg",
+        "creation_timestamp": 1704844806,
+        "title": ""
+      }
+    ]
+  },
+  {
+    "title": "DOUBLE cafÃÂ©",
+    "creation_timestamp": 1704844807,
+    "media": [
+      {
+        "uri": "media/posts/202401/ok_1111111111111111111.jpg",
+        "creation_timestamp": 1704844807,
+        "title": ""
+      }
+    ]
+  }
+]

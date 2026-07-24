@@ -796,7 +796,18 @@ theme asset paths, and conversion notes live in the body + provenance comment.
 JSON captions using Meta's escaped Latin-1/UTF-8 form are repaired only when
 the resulting bytes validate as UTF-8; repaired pages are marked
 `meta-latin1-repaired` in provenance and classified as `transformed`. Ordinary
-UTF-8 captions remain unchanged.
+UTF-8 captions remain unchanged. A caption that still carries a mojibake
+signature after the attempt — mixed escaped and genuine Unicode, or text encoded
+more than once — is marked `suspected-mojibake-unrepaired` and classed
+`human_review`; the lab never reports such a caption as clean `utf-8`.
+
+The dump is untrusted input. Media URIs that would escape the dump on read or
+the output root on write — a `..` component, an absolute path, a Windows
+separator, or a drive prefix — are rejected before any filesystem access, class
+the record `human_review`, and appear in the report as
+`unsafe media uri rejected`. Caption bytes are preserved verbatim inside a fence
+sized to outrank the longest backtick run in the caption itself, so caption text
+cannot escape into live Markdown. See `fixtures/hostile-instagram/`.
 
 | Class | Typical cause |
 |-------|----------------|
