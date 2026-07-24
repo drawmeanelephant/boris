@@ -380,6 +380,25 @@ pub fn build(b: *std.Build) void {
     const run_hardening_tests = b.addRunArtifact(hardening_tests);
     run_hardening_tests.setCwd(b.path("."));
 
+    // --- IR ↔ published JSON Schema conformance --------------------------
+    const ir_schema_mod = b.createModule(.{
+        .root_source_file = b.path("src/ir_schema_conformance_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkApex(ir_schema_mod, b, false);
+    ir_schema_mod.addOptions("build_options", apex_opts);
+    const ir_schema_tests = b.addTest(.{
+        .root_module = ir_schema_mod,
+    });
+    const run_ir_schema_tests = b.addRunArtifact(ir_schema_tests);
+    run_ir_schema_tests.setCwd(b.path("."));
+    const test_ir_schema_step = b.step(
+        "test-ir-schema",
+        "Validate emitted IR against the published JSON Schemas",
+    );
+    test_ir_schema_step.dependOn(&run_ir_schema_tests.step);
+
     // Layout-selection hostile integration (PR #50 audit harness; no product patches).
     const layout_hostile_mod = b.createModule(.{
         .root_source_file = b.path("src/layout_select_hostile_test.zig"),
@@ -523,6 +542,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_layout_select_tests.step);
     test_step.dependOn(&run_compile_tests.step);
     test_step.dependOn(&run_hardening_tests.step);
+    test_step.dependOn(&run_ir_schema_tests.step);
     test_step.dependOn(&run_layout_hostile_tests.step);
     test_step.dependOn(&run_fuzz_tests.step);
     test_step.dependOn(&run_source_rag_tests.step);

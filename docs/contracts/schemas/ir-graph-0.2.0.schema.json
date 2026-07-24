@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boris IR graph.json (v0.2)",
+  "description": "Machine-readable twin of the `graph.json` section of docs/contracts/ir-schema.md. The prose contract remains normative. Node bodies are deliberately absent: nodes carry bodyOffset only, and consumers re-read source from sourcePath.",
+  "type": "object",
+  "required": ["schemaVersion", "frozen", "nodes", "edges", "reverseIndex", "nav"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "0.2.0" },
+    "frozen": {
+      "type": "boolean",
+      "description": "true only after a successful graph freeze; graph.json is not published otherwise."
+    },
+    "nodes": {
+      "type": "array",
+      "description": "Full node objects sorted by id.",
+      "items": { "$ref": "#/$defs/node" }
+    },
+    "edges": {
+      "type": "array",
+      "description": "Direct authored edges only — no transitive include closure. Sorted by (from.type, from.value, to.type, to.value, kind); array position is the stable edge index used by reverseIndex.",
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "reverseIndex": {
+      "type": "array",
+      "description": "One entry per distinct endpoint appearing as an edge `to`. Targets with no incoming edge are omitted. Sorted by (target.type, target.value).",
+      "items": { "$ref": "#/$defs/reverseIndexEntry" }
+    },
+    "nav": {
+      "type": "array",
+      "description": "One entry per page, same order as nodes (entity id ascending).",
+      "items": { "$ref": "#/$defs/navEntry" }
+    }
+  },
+  "$defs": {
+    "endpoint": {
+      "type": "object",
+      "description": "Key order: type, value. Values never contain an absolute path; `source` uses / separators.",
+      "required": ["type", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": ["page", "source"],
+          "description": "`page` = a node in this graph; `source` = file bytes consumed via {{include}}, not promoted to a page."
+        },
+        "value": { "type": "string" }
+      }
+    },
+    "node": {
+      "type": "object",
+      "description": "Key order: index, id, sourcePath, role, parent, parentIndex, title, status, tags, bodyOffset. There is no `body` field.",
+      "required": [
+        "index", "id", "sourcePath", "role", "parent",
+        "parentIndex", "title", "status", "tags", "bodyOffset"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "id": { "type": "string" },
+        "sourcePath": { "type": "string" },
+        "role": { "enum": ["trunk", "satellite"] },
+        "parent": { "type": ["string", "null"] },
+        "parentIndex": { "type": ["integer", "null"], "minimum": 0 },
+        "title": { "type": ["string", "null"] },
+        "status": { "enum": ["draft", "published", "archived", null] },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "May be empty; author order preserved."
+        },
+        "bodyOffset": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Byte offset of body start in the source file."
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "description": "Key order: from, to, kind.",
+      "required": ["from", "to", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "from": { "$ref": "#/$defs/endpoint" },
+        "to": { "$ref": "#/$defs/endpoint" },
+        "kind": {
+          "enum": ["parent", "include", "reference"],
+          "description": "Closed v0.2 set. `parent`: page->page. `include`: page|source -> source. `reference`: page|source -> page. `layout` and `asset` are not valid IR edge kinds."
+        }
+      }
+    },
+    "reverseIndexEntry": {
+      "type": "object",
+      "description": "Key order: target, incomingEdges.",
+      "required": ["target", "incomingEdges"],
+      "additionalProperties": false,
+      "properties": {
+        "target": { "$ref": "#/$defs/endpoint" },
+        "incomingEdges": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "description": "Ascending indices into the sorted edges array; never omitted, no duplicates."
+        }
+      }
+    },
+    "navEntry": {
+      "type": "object",
+      "description": "Key order: index, id, breadcrumb, children, siblings. Empty arrays are written as [], never omitted.",
+      "required": ["index", "id", "breadcrumb", "children", "siblings"],
+      "additionalProperties": false,
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "id": { "type": "string" },
+        "breadcrumb": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "description": "Parent chain root -> self inclusive, as node indices."
+        },
+        "children": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "description": "Direct child node indices, entity id ascending."
+        },
+        "siblings": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "description": "Same-Trunk satellite peers excluding self; empty for a Trunk."
+        }
+      }
+    }
+  }
+}
