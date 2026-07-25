@@ -72,7 +72,7 @@ fn mapPathError(err: anyerror, quiet: bool) ?ExitCode {
 /// - usage errors are handled before this (exit 2)
 /// - I/O / system errors → 3
 pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
-    if (opts.command != .build) return runIntelligence(io, gpa, opts);
+    if (opts.command == .check or opts.command == .impact) return runIntelligence(io, gpa, opts);
     switch (opts.mode) {
         .rag => return runRag(io, gpa, opts),
         .context => return runContext(io, gpa, opts),

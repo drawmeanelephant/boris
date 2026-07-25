@@ -30,6 +30,7 @@ pub const Command = enum {
     build,
     check,
     impact,
+    watch,
 };
 
 pub const AnalysisFormat = enum {
@@ -178,7 +179,14 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var analysis_report: ?[]const u8 = null;
 
     var i: usize = if (args.len > 0) 1 else 0;
-    if (i < args.len and std.mem.eql(u8, args[i], "check")) {
+    if (i < args.len and std.mem.eql(u8, args[i], "build")) {
+        command = .build;
+        i += 1;
+    } else if (i < args.len and std.mem.eql(u8, args[i], "watch")) {
+        command = .watch;
+        saw_watch = true;
+        i += 1;
+    } else if (i < args.len and std.mem.eql(u8, args[i], "check")) {
         command = .check;
         i += 1;
     } else if (i < args.len and std.mem.eql(u8, args[i], "impact")) {
@@ -487,11 +495,11 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     // Explicit IR: --out and/or --no-rag (bare CLI is HTML, not IR).
     const wants_ir = saw_out or saw_no_rag;
 
-    if (command != .build) {
+    if (command == .check or command == .impact) {
         if (wants_rag or wants_ir or wants_context or wants_llms or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
             return error.ConflictingFlags;
         }
-    } else if (saw_format or saw_report) {
+    } else if ((command == .build or command == .watch) and (saw_format or saw_report)) {
         return error.ConflictingFlags;
     }
 
@@ -739,12 +747,14 @@ pub fn printUsage() void {
     std.debug.print(
         \\Boris — Zig content compiler (HTML site + IR + optional RAG)
         \\
-        \\Usage: boris [options]
+        \\Usage: boris <command> [options]
         \\
         \\Modes:
+        \\  build               Build the HTML site (default command)
+        \\  watch               Build HTML, then watch and rebuild on changes
         \\  check               Read-only graph health report (CI findings exit 1)
         \\  impact <ID>         Read-only transitive impact report for a page
-        \\  (default)           HTML site → pages under dist/ (content/ + layouts/main.html)
+        \\  (no command)        Same as build
         \\  --html              Explicit HTML site mode → --html-dir (default dist)
         \\  --html-dir <DIR>    HTML site mode with output directory DIR
         \\  --target NAME=DIR   HTML multi-target mode (repeatable; order-independent); implies HTML
@@ -773,7 +783,7 @@ pub fn printUsage() void {
         \\  --layout-rule T S P HTML layout rule: TARGET SELECTOR LAYOUT_PATH (repeatable; max 256/target)
         \\                      Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
         \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
-        \\  --watch             Local-development watch mode for HTML builds (implies --incremental)
+        \\  --watch             Compatibility flag; same as the watch command
         \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
         \\  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
         \\  --format human|json  Analysis output format for check/impact (default human)
@@ -1012,6 +1022,25 @@ test "parse: documentation intelligence commands" {
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "impact" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--out", ".boris" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--format", "json" }));
+}
+
+test "parse: explicit build and watch commands are stable aliases" {
+    var build = try parseOptions(std.testing.allocator, &.{ "boris", "build", "--html-dir", "site" });
+    defer build.deinit(std.testing.allocator);
+    try expectEqual(Command.build, build.command);
+    try expectEqual(Mode.html, build.mode);
+    try expect(!build.watch);
+    try expectEqualStrings("site", build.html_dir.?);
+
+    var watch = try parseOptions(std.testing.allocator, &.{ "boris", "watch", "--input", "docs" });
+    defer watch.deinit(std.testing.allocator);
+    try expectEqual(Command.watch, watch.command);
+    try expectEqual(Mode.html, watch.mode);
+    try expect(watch.watch);
+    try expect(watch.incremental);
+    try expectEqualStrings("docs", watch.input_dir);
+
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "watch", "--format", "json" }));
 }
 
 test "parse: --out selects IR mode" {
