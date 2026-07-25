@@ -8,6 +8,7 @@ const Io = std.Io;
 const identity = @import("identity.zig");
 const pipeline = @import("pipeline.zig");
 const target_mod = @import("target.zig");
+const source_io = @import("source_io.zig");
 const graph = @import("graph.zig");
 
 pub const format = "llms.txt";
@@ -182,7 +183,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !Result {
     defer {
         gpa.free(sources);
     }
-    for (result.compile.pages.items, 0..) |page, index| sources[index] = try readFileAlloc(io, content_dir, page.source_path, arena);
+    for (result.compile.pages.items, 0..) |page, index| sources[index] = try source_io.readPageAlloc(io, content_dir, page.source_path, arena);
     const output = try render(gpa, &result.compile, sources);
     defer gpa.free(output);
     try publish(io, gpa, opts.out_path, output);

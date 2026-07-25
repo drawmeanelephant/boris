@@ -12,6 +12,7 @@ const pipeline = @import("pipeline.zig");
 const identity = @import("identity.zig");
 const export_scope = @import("export_scope.zig");
 const target_mod = @import("target.zig");
+const source_io = @import("source_io.zig");
 
 pub const format = "boris-context";
 pub const schema_version: u32 = 1;
@@ -463,7 +464,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: ContextOptions) !ContextResult 
     result.selected_pages = selected.len;
     result.relation_count = relationCountPages(selected);
     for (selected) |page| {
-        const source = try readFileAlloc(io, content_dir, page.source_path, arena);
+        const source = try source_io.readPageAlloc(io, content_dir, page.source_path, arena);
         const digest = cache.hexDigest(cache.hashBytes(source));
         const page_doc = try renderPageDoc(gpa, page, source, &digest);
         const page_hash = hexDigest(page_doc);

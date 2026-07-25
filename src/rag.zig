@@ -31,6 +31,7 @@ const diag = @import("diag.zig");
 const graph_mod = @import("graph.zig");
 const identity = @import("identity.zig");
 const target_mod = @import("target.zig");
+const source_io = @import("source_io.zig");
 const parser = @import("parser.zig");
 const aside = @import("aside.zig");
 const pipeline = @import("pipeline.zig");
@@ -524,7 +525,7 @@ fn exportContentPages(
         _ = doc_arena.reset(.free_all);
         const scratch = doc_arena.allocator();
 
-        const source = try readFileAlloc(io, content_dir, p.source_path, scratch);
+        const source = try source_io.readPageAlloc(io, content_dir, p.source_path, scratch);
         const parsed = parser.parse(source);
         if (parsed.diagnostic != null) {
             // Should not happen after successful compile; treat as I/O-class abort.
