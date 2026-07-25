@@ -315,7 +315,22 @@ pub fn loadAndPromoteFormat(
         defer gpa.free(source);
 
         const parsed = parser.parse(source);
-        if (parsed.diagnostic != null) return error.ParseFailed;
+        if (parsed.diagnostic) |pd| {
+            if (!quiet) {
+                const text = try diag.formatText(.{
+                    .severity = .error_,
+                    .code = diag.parserCategoryToCode(pd.category),
+                    .message = pd.message,
+                    .remediation = "Fix the frontmatter or encoding for this file",
+                    .source_path = disc.source_path,
+                    .line = pd.line,
+                    .column = pd.column,
+                }, gpa);
+                defer gpa.free(text);
+                std.debug.print("{s}\n", .{text});
+            }
+            return error.ParseFailed;
+        }
         var body_arena = std.heap.ArenaAllocator.init(gpa);
         defer body_arena.deinit();
         _ = try html_body.bodyForInput(body_arena.allocator(), input_format, source, parsed.doc.body, parsed.doc.body_offset, disc.source_path, quiet);
