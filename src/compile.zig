@@ -1407,7 +1407,44 @@ fn stageRelForDist(gpa: std.mem.Allocator, dist_dir: []const u8) ![]u8 {
 }
 
 /// Publish all files under `stage_dir` into `final_dir` via same-parent rename.
-/// Creates intermediate directories under `final_dir` as needed.
+fn ensureValidParentDirs(io: Io, final_dir: Io.Dir, parent_rel: []const u8) !void {
+    if (parent_rel.len == 0 or std.mem.eql(u8, parent_rel, ".")) return;
+
+    var start: usize = 0;
+    while (start < parent_rel.len) {
+        if (parent_rel[start] == '/' or parent_rel[start] == '\\') {
+            start += 1;
+            continue;
+        }
+        const slash = std.mem.indexOfAnyPos(u8, parent_rel, start, "/\\") orelse parent_rel.len;
+        const progressive = parent_rel[0..slash];
+        if (progressive.len > 0 and !std.mem.eql(u8, progressive, ".") and !std.mem.eql(u8, progressive, "..")) {
+            if (final_dir.statFile(io, progressive, .{ .follow_symlinks = false })) |st| {
+                if (st.kind == .sym_link or st.kind != .directory) {
+                    return error.TargetOutputSymlink;
+                }
+            } else |err| switch (err) {
+                error.FileNotFound => {
+                    final_dir.createDir(io, progressive, .default_dir) catch |mk_err| switch (mk_err) {
+                        error.PathAlreadyExists => {
+                            const re_st = final_dir.statFile(io, progressive, .{ .follow_symlinks = false }) catch return mk_err;
+                            if (re_st.kind == .sym_link or re_st.kind != .directory) {
+                                return error.TargetOutputSymlink;
+                            }
+                        },
+                        else => return mk_err,
+                    };
+                },
+                else => return err,
+            }
+        }
+        if (slash >= parent_rel.len) break;
+        start = slash + 1;
+    }
+}
+
+/// Creates intermediate directories under `final_dir` as needed, rejecting any
+/// symlinks or non-directory components along destination parent paths (H-03).
 ///
 /// Prefer rename (atomic-ish on same filesystem). On `error.CrossDevice` (and
 /// only that), fall back to `copyFile` + delete source. Cross-volume **atomic**
@@ -1430,13 +1467,13 @@ fn publishStageTree(
 
         if (std.fs.path.dirname(entry.path)) |parent| {
             if (parent.len > 0) {
-                final_dir.createDirPath(io, parent) catch {};
+                try ensureValidParentDirs(io, final_dir, parent);
             }
         }
         entry.dir.rename(entry.basename, final_dir, entry.path, io) catch |err| switch (err) {
             error.CrossDevice => {
                 try entry.dir.copyFile(entry.basename, final_dir, entry.path, io, .{
-                    .make_path = true,
+                    .make_path = false,
                     .replace = true,
                 });
                 entry.dir.deleteFile(io, entry.basename) catch {};

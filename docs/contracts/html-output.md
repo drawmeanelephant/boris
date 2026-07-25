@@ -343,6 +343,10 @@ On the OS/filesystem where `zig build test` runs:
   destination may see `error.AccessDenied` during replace.
 - IR JSON publication atomicity (separate staging path under `.boris/`).
 
+### Symlink safety below output root (H-03)
+
+During staged file publication (`publishStageTree`), every destination parent path component relative to the output root is validated with no-follow semantics (`statFile` with `follow_symlinks = false`). If any parent component along the destination path is a symlink or a non-directory file, publication immediately fails with `error.TargetOutputSymlink`. Symlinked parent directories below the output root are rejected and never traversed or followed.
+
 ---
 
 ## Testing matrix (release-relevant)
