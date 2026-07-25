@@ -79,6 +79,14 @@ note "2. zig build test"
 zig build test
 pass "test suite succeeded"
 
+# --- 2a. CLI process contract ---------------------------------------------
+note "2a. CLI process contract"
+if test/cli-contract.sh "${BORIS}"; then
+  pass "CLI process contract succeeded"
+else
+  fail "CLI process contract failed"
+fi
+
 # --- 3. RAG dual export determinism --------------------------------------
 note "3. RAG generation twice + byte-for-byte comparison"
 rm -rf "${RAG_A}" "${RAG_B}"
