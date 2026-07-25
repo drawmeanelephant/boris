@@ -731,6 +731,9 @@ else
   is_generated_path() {
     case "$1" in
       dist|dist/*|packages|packages/*|rag|rag/*|rag1|rag1/*|rag2|rag2/*|.boris|.boris/*|.boris-*|.boris-*/*|test-output|test-output/*|.release-gate|.release-gate/*|.zig-cache|.zig-cache/*|zig-out|zig-out/*) return 0 ;;
+      # Nested build output from standalone tools (tools/<name>/zig-out/...).
+      # Without these the root-anchored patterns above miss a tool's binaries.
+      */zig-out|*/zig-out/*|*/.zig-cache|*/.zig-cache/*) return 0 ;;
       *) return 1 ;;
     esac
   }
@@ -738,6 +741,9 @@ else
     # Approved to exist as local/untracked (and normally gitignored).
     case "$1" in
       dist|dist/*|packages|packages/*|rag|rag/*|rag1|rag1/*|rag2|rag2/*|.boris|.boris/*|.boris-*|.boris-*/*|test-output|test-output/*|.release-gate|.release-gate/*|.zig-cache|.zig-cache/*|zig-out|zig-out/*) return 0 ;;
+      # Nested build output from standalone tools (tools/<name>/zig-out/...).
+      # Without these the root-anchored patterns above miss a tool's binaries.
+      */zig-out|*/zig-out/*|*/.zig-cache|*/.zig-cache/*) return 0 ;;
       *) return 1 ;;
     esac
   }

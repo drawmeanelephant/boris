@@ -14,7 +14,9 @@ zig-cache/
 /rag2/
 /source-rag/
 /test-output/
-/zig-out/
+# Unanchored so nested tool builds (tools/<name>/zig-out/) are covered too, not
+# just the repo root — matches how .zig-cache/ and zig-cache/ are handled above.
+zig-out/
 
 # ApexMarkdown vendor: cmake/local build trees (sources stay tracked)
 /vendor/apex-markdown/build/
