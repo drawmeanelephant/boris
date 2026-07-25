@@ -11,6 +11,7 @@ const json_out = @import("json_out.zig");
 const pipeline = @import("pipeline.zig");
 const identity = @import("identity.zig");
 const export_scope = @import("export_scope.zig");
+const target_mod = @import("target.zig");
 
 pub const format = "boris-context";
 pub const schema_version: u32 = 1;
@@ -431,6 +432,7 @@ fn renderContextChunks(
 /// Compile and publish a complete deterministic context bundle.
 pub fn run(io: Io, gpa: std.mem.Allocator, opts: ContextOptions) !ContextResult {
     if (std.fs.path.isAbsolute(opts.content_root)) return error.AbsoluteContentRoot;
+    try target_mod.validateExportPath(io, gpa, opts.content_root, opts.out_dir);
 
     var result = ContextResult{ .compile = try pipeline.compile(io, gpa, .{
         .content_root = opts.content_root,

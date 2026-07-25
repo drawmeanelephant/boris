@@ -30,6 +30,7 @@ const cache = @import("cache.zig");
 const diag = @import("diag.zig");
 const graph_mod = @import("graph.zig");
 const identity = @import("identity.zig");
+const target_mod = @import("target.zig");
 const parser = @import("parser.zig");
 const aside = @import("aside.zig");
 const pipeline = @import("pipeline.zig");
@@ -1205,6 +1206,7 @@ fn publishCorpus(
 /// Graph validation runs **before** any graph-dependent corpus write. On
 /// content failure, no RAG tree is published (staging is discarded).
 pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
+    try target_mod.validateExportPath(io, gpa, opts.content_root, opts.out_dir);
     var result: RagResult = .{
         .arena = std.heap.ArenaAllocator.init(gpa),
         .compile = undefined,

@@ -209,6 +209,11 @@ change on any page dirties every page using graph chrome. Layouts without graph
 chrome keep the prior page-local fingerprint inputs
 (source, includes, layout bytes, entity id, target identity).
 
+Resolved inline Markdown links to discovered pages are also recorded as
+render-only cache dependencies. A target page source-path or output-path
+change therefore dirties its HTML referrers; these cache dependencies are not
+published as IR or RAG semantic edges.
+
 ### Incremental cache freshness (output digest)
 
 On `--incremental`, a page is **reused** only when all of the following hold:

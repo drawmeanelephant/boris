@@ -13,6 +13,9 @@ pub const Options = struct {
     nodes: []const graph_mod.Node,
     source_path: []const u8,
     output_path: []const u8,
+    /// Optional cache-only collection of resolved page references. These are
+    /// deliberately not emitted as graph/RAG semantic edges.
+    reference_ids: ?*std.ArrayList([]const u8) = null,
 };
 
 const Destination = struct {
@@ -268,12 +271,22 @@ fn splitSuffix(destination: []const u8) struct { path: []const u8, suffix: []con
     return .{ .path = destination[0..i], .suffix = destination[i..] };
 }
 
-fn rewriteDestination(allocator: std.mem.Allocator, destination: []const u8, options: Options, nodes: *const std.StringHashMapUnmanaged(graph_mod.Node)) !?[]u8 {
+fn destinationNode(
+    allocator: std.mem.Allocator,
+    destination: []const u8,
+    options: Options,
+    nodes: *const std.StringHashMapUnmanaged(graph_mod.Node),
+) !?graph_mod.Node {
     const split = splitSuffix(destination);
     if (!(std.mem.endsWith(u8, split.path, ".md") or std.mem.endsWith(u8, split.path, ".mdx"))) return null;
     const resolved = try resolveSourcePath(allocator, options.source_path, split.path) orelse return null;
     defer allocator.free(resolved);
-    const node = findNodeBySource(nodes, resolved) orelse return null;
+    return findNodeBySource(nodes, resolved);
+}
+
+fn rewriteDestination(allocator: std.mem.Allocator, destination: []const u8, options: Options, nodes: *const std.StringHashMapUnmanaged(graph_mod.Node)) !?[]u8 {
+    const split = splitSuffix(destination);
+    const node = try destinationNode(allocator, destination, options, nodes) orelse return null;
     const target_output = identity.htmlOutputPath(allocator, node.id) catch return null;
     defer allocator.free(target_output);
     const href = identity.relativeHref(allocator, options.output_path, target_output) catch return null;
@@ -367,6 +380,11 @@ pub fn rewrite(allocator: std.mem.Allocator, body: []const u8, options: Options)
             if (findLabelEnd(body, i)) |label_end| {
                 if (label_end + 1 < body.len and body[label_end + 1] == '(') {
                     if (parseDestination(body, label_end + 1)) |dest| {
+                        if (options.reference_ids) |references| {
+                            if (try destinationNode(allocator, body[dest.start..dest.end], options, &nodes)) |node| {
+                                try references.append(allocator, node.id);
+                            }
+                        }
                         const maybe = try rewriteDestination(allocator, body[dest.start..dest.end], options, &nodes);
                         if (maybe) |href| {
                             defer allocator.free(href);
@@ -404,6 +422,22 @@ test "documentation links resolve relative and root paths with suffixes" {
         "[relative](../guide.html) [root](../guide.html?view=all#setup) [nested](../nested/index.html)",
         result,
     );
+}
+
+test "documentation links can be collected for incremental invalidation" {
+    const gpa = std.testing.allocator;
+    const nodes = testNodes();
+    var references: std.ArrayList([]const u8) = .empty;
+    defer references.deinit(gpa);
+    const result = try rewrite(gpa, "[guide](../guide.md) [external](https://example.test/guide.md)", .{
+        .nodes = &nodes,
+        .source_path = "docs/page.md",
+        .output_path = "docs/page.html",
+        .reference_ids = &references,
+    });
+    defer gpa.free(result);
+    try std.testing.expectEqual(@as(usize, 1), references.items.len);
+    try std.testing.expectEqualStrings("guide", references.items[0]);
 }
 
 test "documentation links preserve titles, angle destinations, and escaping" {

@@ -121,11 +121,10 @@ fn resolveNormalized(gpa: Allocator, cwd_path: []const u8, rel: []const u8) ![]u
     return abs;
 }
 
-/// Walk progressive components of a relative path and reject any existing symlink.
-/// Best-effort: missing path components are ignored; absolute-path edge cases on
-/// Windows that cannot be stated relative to cwd are skipped (workspace resolve
-/// still applies).
-/// Reject any existing symlink component on a relative output/layout path.
+/// Walk progressive components of a path and reject any existing symlink.
+/// Missing path components are ignored. Absolute paths are checked using their
+/// absolute progressive prefixes; callers still constrain them to the workspace
+/// before publication.
 /// Call at validate time and again immediately before opening output dirs
 /// to shrink the TOCTOU window after validateTargets.
 pub fn rejectSymlinkAlongPath(io: Io, cwd: Io.Dir, gpa: Allocator, rel_path: []const u8) !void {
@@ -136,9 +135,9 @@ pub fn rejectSymlinkAlongPath(io: Io, cwd: Io.Dir, gpa: Allocator, rel_path: []c
     normalizeSlashesInPlace(norm);
     norm = stripTrailingSlash(norm);
 
-    // Skip drive-absolute prefixes like `C:/...` — only walk relative trees.
+    // Drive-absolute paths are not portable to a relative Io.Dir walk. The
+    // workspace membership check still rejects drive paths outside the cwd.
     if (norm.len >= 2 and norm[1] == ':') return;
-    if (norm.len > 0 and norm[0] == '/') return;
 
     var start: usize = 0;
     while (start < norm.len) {
@@ -149,7 +148,9 @@ pub fn rejectSymlinkAlongPath(io: Io, cwd: Io.Dir, gpa: Allocator, rel_path: []c
         }
         const slash = std.mem.indexOfScalarPos(u8, norm, start, '/') orelse norm.len;
         const progressive = norm[0..slash];
-        if (progressive.len > 0 and !std.mem.eql(u8, progressive, ".") and !std.mem.eql(u8, progressive, "..")) {
+        if (progressive.len > 0 and !std.mem.eql(u8, progressive, ".") and !std.mem.eql(u8, progressive, "..") and
+            !(progressive.len == 1 and progressive[0] == '/'))
+        {
             if (cwd.statFile(io, progressive, .{ .follow_symlinks = false })) |st| {
                 if (st.kind == .sym_link) {
                     return error.TargetOutputSymlink;
@@ -159,6 +160,31 @@ pub fn rejectSymlinkAlongPath(io: Io, cwd: Io.Dir, gpa: Allocator, rel_path: []c
         if (slash >= norm.len) break;
         start = slash + 1;
     }
+}
+
+/// Validate a generated export destination before any staging or publication.
+/// Destinations must remain inside the workspace and must not equal or nest
+/// with the content root. This is shared by non-HTML exporters, which do not
+/// use multi-target HTML validation.
+pub fn validateExportPath(
+    io: Io,
+    gpa: Allocator,
+    content_root: []const u8,
+    output_path: []const u8,
+) !void {
+    if (output_path.len == 0) return error.EmptyTargetDirectory;
+    const cwd_owned = try std.process.currentPathAlloc(io, gpa);
+    defer gpa.free(cwd_owned);
+    normalizeSlashesInPlace(cwd_owned);
+    const cwd_path = stripTrailingSlash(cwd_owned);
+    const case_insensitive = caseInsensitiveFs();
+    const output_abs = try resolveNormalized(gpa, cwd_path, output_path);
+    defer gpa.free(output_abs);
+    if (!hasAbsPathPrefix(output_abs, cwd_path, case_insensitive)) return error.WorkspaceEscape;
+    const content_abs = try resolveNormalized(gpa, cwd_path, content_root);
+    defer gpa.free(content_abs);
+    if (pathsNestOrEqual(output_abs, content_abs, case_insensitive)) return error.TargetOutputCollision;
+    try rejectSymlinkAlongPath(io, Io.Dir.cwd(), gpa, output_path);
 }
 
 /// Validate target name grammar. Must be non-empty alphanumeric plus '-', '_', '.'.
@@ -391,6 +417,15 @@ test "hasAbsPathPrefix boundary" {
     try std.testing.expect(!hasAbsPathPrefix("/tmp/ws2/out", "/tmp/ws", false));
     try std.testing.expect(hasAbsPathPrefix("/tmp/ws/dist/prod", "/tmp/ws/dist", false));
     try std.testing.expect(!hasAbsPathPrefix("/tmp/ws/dist-prod", "/tmp/ws/dist", false));
+}
+
+test "validateExportPath rejects content aliases and workspace escapes" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    try std.testing.expectError(error.TargetOutputCollision, validateExportPath(io, gpa, "content", "content"));
+    try std.testing.expectError(error.TargetOutputCollision, validateExportPath(io, gpa, "content", "content/rag"));
+    try std.testing.expectError(error.WorkspaceEscape, validateExportPath(io, gpa, "content", "../outside"));
+    try validateExportPath(io, gpa, "content", "rag-out");
 }
 
 test "validateTargets overlap, nesting, sort, and escape checks" {

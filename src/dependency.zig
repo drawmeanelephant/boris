@@ -7,6 +7,8 @@ pub const DependencyKind = enum {
     include,
     reference,
     asset,
+    /// Render-only Markdown link used for incremental HTML invalidation.
+    html_link,
 
     pub fn name(self: DependencyKind) []const u8 {
         return switch (self) {
@@ -14,6 +16,7 @@ pub const DependencyKind = enum {
             .layout => "layout",
             .include => "include",
             .reference => "reference",
+            .html_link => "html-link",
             .asset => "asset",
         };
     }
