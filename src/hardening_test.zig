@@ -660,3 +660,94 @@ test "hardening: aside API smoke" {
     try std.testing.expect(!r.hasErrors());
     try std.testing.expectEqual(@as(usize, 1), r.asides.len);
 }
+
+// ---------------------------------------------------------------------------
+// H-05: Direct IR export safety validation
+// ---------------------------------------------------------------------------
+
+test "hardening: H-05 direct IR export safety constraints" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var work = try WorkDir.create(gpa, io, "ir-export-safety");
+    defer work.cleanup();
+
+    try work.writeFile("content/index.md",
+        \\---
+        \\title: Safety Test Page
+        \\---
+        \\
+        \\Safety test body content.
+        \\
+    );
+
+    const content_dir = try work.join("content");
+    defer gpa.free(content_dir);
+
+    // 1. Reject output equal to content root
+    {
+        const err = pipeline.run(io, gpa, .{
+            .content_root = content_dir,
+            .out_dir = content_dir,
+            .quiet = true,
+        });
+        try std.testing.expectError(error.TargetOutputCollision, err);
+
+        // Verify content file still exists and was not corrupted
+        const index_data = try work.readFile("content/index.md", gpa);
+        defer gpa.free(index_data);
+        try std.testing.expect(std.mem.indexOf(u8, index_data, "Safety test body content") != null);
+    }
+
+    // 2. Reject output nested under content root
+    {
+        const nested_out = try work.join("content/nested_ir");
+        defer gpa.free(nested_out);
+
+        const err = pipeline.run(io, gpa, .{
+            .content_root = content_dir,
+            .out_dir = nested_out,
+            .quiet = true,
+        });
+        try std.testing.expectError(error.TargetOutputCollision, err);
+
+        // Verify nested directory was not created or populated
+        var nested_dir = Io.Dir.cwd().openDir(io, nested_out, .{});
+        if (nested_dir) |*d| {
+            d.close(io);
+            return error.TestUnexpectedResult;
+        } else |_| {}
+    }
+
+    // 3. Reject workspace escape
+    {
+        const err = pipeline.run(io, gpa, .{
+            .content_root = content_dir,
+            .out_dir = "../outside-ir-target",
+            .quiet = true,
+        });
+        try std.testing.expectError(error.WorkspaceEscape, err);
+    }
+
+    // 4. Reject output symlink along path
+    {
+        const target_dir = try work.join("real_target");
+        defer gpa.free(target_dir);
+        try Io.Dir.cwd().createDirPath(io, target_dir);
+
+        const symlink_out = try work.join("symlink_ir");
+        defer gpa.free(symlink_out);
+
+        // Create symlink pointing to real_target
+        Io.Dir.cwd().symLink(io, "real_target", symlink_out, .{}) catch |sym_err| {
+            // Skip symlink test if OS/platform disallows symlinks in test env
+            if (sym_err != error.AccessDenied and sym_err != error.PermissionDenied) {
+                try std.testing.expectError(error.TargetOutputSymlink, pipeline.run(io, gpa, .{
+                    .content_root = content_dir,
+                    .out_dir = symlink_out,
+                    .quiet = true,
+                }));
+            }
+        };
+    }
+}
+

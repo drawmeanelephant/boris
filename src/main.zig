@@ -49,6 +49,23 @@ const ProdRunner = struct {
     }
 };
 
+/// Map path validation errors (collisions, escapes, symlinks, empty dirs) to usage (exit code 2).
+fn mapPathError(err: anyerror, quiet: bool) ?ExitCode {
+    switch (err) {
+        error.EmptyTargetDirectory,
+        error.TargetOutputCollision,
+        error.TargetOutputSymlink,
+        error.WorkspaceEscape,
+        => {
+            if (!quiet) {
+                std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
+            }
+            return .usage;
+        },
+        else => return null,
+    }
+}
+
 /// Map pipeline result to process exit code.
 ///
 /// - validation / content errors → 1
@@ -72,6 +89,7 @@ pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .quiet = opts.quiet,
         .input_format = opts.input_format,
     }) catch |err| {
+        if (mapPathError(err, opts.quiet)) |code| return code;
         if (!opts.quiet) {
             std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
         }
@@ -110,16 +128,24 @@ pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .scope = opts.scope,
         .split_size = opts.split_size,
     }) catch |err| switch (err) {
+        error.EmptyTargetDirectory,
+        error.TargetOutputCollision,
+        error.TargetOutputSymlink,
+        error.WorkspaceEscape,
+        => {
+            if (!opts.quiet) std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
+            return .usage;
+        },
         error.InvalidScope, error.OversizedBlock => {
             if (!opts.quiet) std.debug.print("error: export projection failed: {s}\n", .{@errorName(err)});
             return .content_error;
         },
         else => {
-        if (!opts.quiet) {
-            std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
-        }
-        return .io_error;
-        }
+            if (!opts.quiet) {
+                std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+            }
+            return .io_error;
+        },
     };
     defer result.deinit();
 
@@ -151,6 +177,7 @@ pub fn runLlms(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .quiet = opts.quiet,
         .input_format = opts.input_format,
     }) catch |err| {
+        if (mapPathError(err, opts.quiet)) |code| return code;
         if (!opts.quiet) std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
         return .io_error;
     };
@@ -405,16 +432,24 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .split_size = opts.split_size,
         .bundles_only = opts.bundles_only,
     }) catch |err| switch (err) {
+        error.EmptyTargetDirectory,
+        error.TargetOutputCollision,
+        error.TargetOutputSymlink,
+        error.WorkspaceEscape,
+        => {
+            if (!opts.quiet) std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
+            return .usage;
+        },
         error.InvalidScope, error.OversizedBlock => {
             if (!opts.quiet) std.debug.print("error: export projection failed: {s}\n", .{@errorName(err)});
             return .content_error;
         },
         else => {
-        if (!opts.quiet) {
-            std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
-        }
-        return .io_error;
-        }
+            if (!opts.quiet) {
+                std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+            }
+            return .io_error;
+        },
     };
     defer result.deinit();
 

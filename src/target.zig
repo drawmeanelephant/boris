@@ -185,7 +185,17 @@ pub fn validateExportPath(
     defer gpa.free(content_abs);
     if (pathsNestOrEqual(output_abs, content_abs, case_insensitive)) return error.TargetOutputCollision;
     try rejectSymlinkAlongPath(io, Io.Dir.cwd(), gpa, output_path);
+
+    // Reserve compiler-derived IR stage path: `{output_path}.boris-stage`
+    const stage_path = try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{output_path});
+    defer gpa.free(stage_path);
+    const stage_abs = try resolveNormalized(gpa, cwd_path, stage_path);
+    defer gpa.free(stage_abs);
+    if (!hasAbsPathPrefix(stage_abs, cwd_path, case_insensitive)) return error.WorkspaceEscape;
+    if (pathsNestOrEqual(stage_abs, content_abs, case_insensitive)) return error.TargetOutputCollision;
+    try rejectSymlinkAlongPath(io, Io.Dir.cwd(), gpa, stage_path);
 }
+
 
 /// Validate target name grammar. Must be non-empty alphanumeric plus '-', '_', '.'.
 /// Must not be "." or "..".
@@ -357,6 +367,25 @@ pub fn validateTargets(
             }
         }
 
+        // Reserve compiler-derived IR stage path for target plan
+        const stage_path = try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{plan.output_dir});
+        defer gpa.free(stage_path);
+        const stage_abs = try resolveNormalized(gpa, cwd_path, stage_path);
+        defer gpa.free(stage_abs);
+
+        if (!hasAbsPathPrefix(stage_abs, cwd_path, case_insensitive)) {
+            return error.WorkspaceEscape;
+        }
+        if (pathsNestOrEqual(stage_abs, content_abs, case_insensitive)) {
+            return error.TargetOutputCollision;
+        }
+        for (protected_layouts.items) |prot| {
+            if (pathsNestOrEqual(stage_abs, prot, case_insensitive)) {
+                return error.TargetOutputCollision;
+            }
+        }
+        try rejectSymlinkAlongPath(io, cwd_dir, gpa, stage_path);
+
         // Reject symlink at the target root or any intermediate component.
         try rejectSymlinkAlongPath(io, cwd_dir, gpa, plan.output_dir);
 
@@ -365,6 +394,9 @@ pub fn validateTargets(
             const path_b = other.resolved_output_dir;
 
             if (pathsNestOrEqual(path_a, path_b, case_insensitive)) {
+                return error.TargetOutputCollision;
+            }
+            if (pathsNestOrEqual(stage_abs, path_b, case_insensitive)) {
                 return error.TargetOutputCollision;
             }
         }
