@@ -591,33 +591,24 @@ fn countHexTempNames(io: Io, dir: Io.Dir) !usize {
     return n;
 }
 
-/// Best-effort recursive scrub of orphan atomic temps and `*.tmp` files under `dist_dir`.
-/// Safe after interrupted builds (SIGKILL) where `Atomic.deinit` never ran.
+/// Best-effort scrub of orphan atomic temps under `.boris-cache/` namespace.
+/// Confined strictly to `.boris-cache/` when present; never performs recursive
+/// or heuristic deletion over the live published output tree.
 /// Never fails the compile: all errors are swallowed.
-///
-/// `dist_dir` should be opened with `.iterate = true` when possible; if not
-/// iterable, this is a no-op.
 pub fn scrubStaleAtomicTemps(io: Io, dist_dir: Io.Dir, gpa: std.mem.Allocator) void {
-    scrubStaleAtomicTempsRec(io, dist_dir, gpa) catch {};
-}
+    _ = gpa;
+    var cache_dir = dist_dir.openDir(io, ".boris-cache", .{ .iterate = true }) catch return;
+    defer cache_dir.close(io);
 
-fn scrubStaleAtomicTempsRec(io: Io, dir: Io.Dir, gpa: std.mem.Allocator) !void {
-    var walker = try dir.walkSelectively(gpa);
-    defer walker.deinit();
-
-    while (try walker.next(io)) |entry| {
-        if (entry.kind == .directory) {
-            try walker.enter(io, entry);
-            continue;
-        }
+    var it = cache_dir.iterate();
+    while (it.next(io) catch null) |entry| {
         if (entry.kind != .file) continue;
-
-        const name = entry.basename;
+        const name = entry.name;
         const is_tmp_suffix = std.mem.endsWith(u8, name, ".tmp") or
             std.mem.containsAtLeast(u8, name, 1, ".tmp.");
-        if (!isAtomicTempName(name) and !is_tmp_suffix) continue;
-
-        entry.dir.deleteFile(io, name) catch {};
+        if (isAtomicTempName(name) or is_tmp_suffix) {
+            cache_dir.deleteFile(io, name) catch {};
+        }
     }
 }
 
@@ -634,42 +625,55 @@ test "isAtomicTempName" {
     try std.testing.expect(!isAtomicTempName("g123456789abcdef")); // non-hex
 }
 
-test "scrubStaleAtomicTemps removes orphan hex and .tmp files" {
+test "scrubStaleAtomicTemps preserves legitimate user assets and cleans boris-cache" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    // Unique tmp path: fixed zig-cache/* dirs race across parallel test executables.
+
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-scrub-temps", .{tmp.sub_path});
     defer gpa.free(work);
     try cwd.createDirPath(io, work);
 
-    const orphan = try std.fmt.allocPrint(gpa, "{s}/0123456789abcdef", .{work});
-    defer gpa.free(orphan);
-    const page_tmp = try std.fmt.allocPrint(gpa, "{s}/page.html.tmp", .{work});
-    defer gpa.free(page_tmp);
-    const keep = try std.fmt.allocPrint(gpa, "{s}/keep.html", .{work});
-    defer gpa.free(keep);
-    const nested = try std.fmt.allocPrint(gpa, "{s}/nested", .{work});
-    defer gpa.free(nested);
-    const nested_orphan = try std.fmt.allocPrint(gpa, "{s}/nested/fedcba9876543210", .{work});
-    defer gpa.free(nested_orphan);
+    const asset_hex = try std.fmt.allocPrint(gpa, "{s}/assets/0123456789abcdef", .{work});
+    defer gpa.free(asset_hex);
+    const asset_tmp = try std.fmt.allocPrint(gpa, "{s}/assets/worker.tmp", .{work});
+    defer gpa.free(asset_tmp);
 
-    try cwd.writeFile(io, .{ .sub_path = orphan, .data = "orphan" });
-    try cwd.writeFile(io, .{ .sub_path = page_tmp, .data = "tmp" });
-    try cwd.writeFile(io, .{ .sub_path = keep, .data = "keep" });
-    try cwd.createDirPath(io, nested);
-    try cwd.writeFile(io, .{ .sub_path = nested_orphan, .data = "nested-orphan" });
+    const cache_dir_path = try std.fmt.allocPrint(gpa, "{s}/.boris-cache", .{work});
+    defer gpa.free(cache_dir_path);
+    const cache_orphan_hex = try std.fmt.allocPrint(gpa, "{s}/.boris-cache/0123456789abcdef", .{work});
+    defer gpa.free(cache_orphan_hex);
+    const cache_orphan_tmp = try std.fmt.allocPrint(gpa, "{s}/.boris-cache/manifest.json.tmp", .{work});
+    defer gpa.free(cache_orphan_tmp);
+    const cache_keep = try std.fmt.allocPrint(gpa, "{s}/.boris-cache/manifest.json", .{work});
+    defer gpa.free(cache_keep);
+
+    const assets_dir_path = try std.fmt.allocPrint(gpa, "{s}/assets", .{work});
+    defer gpa.free(assets_dir_path);
+
+    try cwd.createDirPath(io, assets_dir_path);
+    try cwd.createDirPath(io, cache_dir_path);
+
+    try cwd.writeFile(io, .{ .sub_path = asset_hex, .data = "asset-hex" });
+    try cwd.writeFile(io, .{ .sub_path = asset_tmp, .data = "asset-tmp" });
+    try cwd.writeFile(io, .{ .sub_path = cache_orphan_hex, .data = "orphan" });
+    try cwd.writeFile(io, .{ .sub_path = cache_orphan_tmp, .data = "tmp" });
+    try cwd.writeFile(io, .{ .sub_path = cache_keep, .data = "keep" });
 
     var dir = try cwd.openDir(io, work, .{ .iterate = true });
     defer dir.close(io);
     scrubStaleAtomicTemps(io, dir, gpa);
 
-    try std.testing.expectError(error.FileNotFound, cwd.access(io, orphan, .{}));
-    try std.testing.expectError(error.FileNotFound, cwd.access(io, page_tmp, .{}));
-    try std.testing.expectError(error.FileNotFound, cwd.access(io, nested_orphan, .{}));
-    try cwd.access(io, keep, .{});
+    // Live assets in subdirectories like assets/ are preserved.
+    try cwd.access(io, asset_hex, .{});
+    try cwd.access(io, asset_tmp, .{});
+
+    // Boris-cache orphan files are scrubbed; valid cache files remain.
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, cache_orphan_hex, .{}));
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, cache_orphan_tmp, .{}));
+    try cwd.access(io, cache_keep, .{});
 }
 
 test "layout split is zero-copy into raw" {

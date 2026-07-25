@@ -328,6 +328,9 @@ On the OS/filesystem where `zig build test` runs:
 - Successful publish leaves the final file with full prefix|html|suffix bytes.
 - Failed write/flush/publish deletes only the current temp; **prior final file
   is preserved** (fault-injection tests).
+- Orphan temp cleanup (`assemble.scrubStaleAtomicTemps`) is confined strictly
+  to the `.boris-cache/` namespace; live published user and theme assets (such as
+  `assets/0123456789abcdef` or `assets/worker.tmp`) are preserved across rebuilds.
 - No leftover hex temp names after success or injected publish failure.
 - Flush completes before Whiteboard reset in the compile loop.
 

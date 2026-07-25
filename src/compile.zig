@@ -2489,6 +2489,57 @@ test "write failure: prior final remains and temp cleaned" {
     }
 }
 
+test "B-02 regression: failed rebuild preserves prior assets/0123456789abcdef and assets/worker.tmp" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-b02-rebuild-preserve-assets", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<x>{{content}}</x>");
+    try writeTreeFile(io, work, "content/index.md", "# Page\n\nbody text\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+
+    try writeTreeFile(io, work, "dist/assets/0123456789abcdef", "legitimate-asset-hex-data");
+    try writeTreeFile(io, work, "dist/assets/worker.tmp", "legitimate-asset-tmp-data");
+
+    // Second build fails (injected publish failure).
+    try std.testing.expectError(error.TestInjectedWriteFailure, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .test_fail_publish_at = 0,
+    }));
+
+    var dist_dir = try cwd.openDir(io, dist, .{ .iterate = true });
+    defer dist_dir.close(io);
+
+    const hex_asset = try readAllFile(io, dist_dir, "assets/0123456789abcdef", gpa);
+    defer gpa.free(hex_asset);
+    try std.testing.expectEqualStrings("legitimate-asset-hex-data", hex_asset);
+
+    const tmp_asset = try readAllFile(io, dist_dir, "assets/worker.tmp", gpa);
+    defer gpa.free(tmp_asset);
+    try std.testing.expectEqualStrings("legitimate-asset-tmp-data", tmp_asset);
+}
+
 test "success publish then whiteboard reset; PageDb metadata intact" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
