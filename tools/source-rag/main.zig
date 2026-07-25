@@ -583,6 +583,23 @@ fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Alloc
     return try reader.interface.allocRemaining(allocator, .unlimited);
 }
 
+/// Read a scanned source file while bounding the allocation used to decide
+/// whether it exceeds `max_bytes`. The extra byte preserves the existing
+/// skip-large decision without loading an arbitrarily large input.
+fn readSourceAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Allocator, max_bytes: usize) ![]u8 {
+    var file = try dir.openFile(io, path, .{});
+    defer file.close(io);
+    const stat = try file.stat(io);
+    const size = std.math.cast(usize, stat.size) orelse return error.FileTooBig;
+    var reader = file.reader(io, &.{});
+    if (size <= max_bytes) return try reader.interface.readAlloc(allocator, size);
+
+    const prefix = try allocator.alloc(u8, max_bytes + 1);
+    errdefer allocator.free(prefix);
+    try reader.interface.readSliceAll(prefix);
+    return prefix;
+}
+
 fn ensureParent(io: Io, root: Io.Dir, rel_path: []const u8) !void {
     if (std.fs.path.dirname(rel_path)) |parent| {
         if (parent.len > 0) try root.createDirPath(io, parent);
@@ -2024,7 +2041,7 @@ fn exportPackTree(
     defer packed_paths.deinit(gpa);
 
     for (paths) |source_path| {
-        const data = readFileAlloc(io, root, source_path, gpa) catch |err| {
+        const data = readSourceAlloc(io, root, source_path, gpa, opts.max_bytes) catch |err| {
             log(opts, "  skip read  {s} ({s})\n", .{ source_path, @errorName(err) });
             stats.skipped += 1;
             continue;
@@ -3049,6 +3066,24 @@ test "approxTokensFromBytes uses floor chars/4" {
     try std.testing.expectEqual(@as(usize, 1), approxTokensFromBytes(4));
     try std.testing.expectEqual(@as(usize, 2), approxTokensFromBytes(9));
     try std.testing.expectEqual(@as(usize, 100), approxTokensFromBytes(400));
+}
+
+test "readSourceAlloc bounds oversized source allocation" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const path = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/oversized-source.txt", .{tmp.sub_path});
+    defer gpa.free(path);
+    const data = try gpa.alloc(u8, 4097);
+    defer gpa.free(data);
+    @memset(data, 'x');
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = data });
+
+    const got = try readSourceAlloc(io, Io.Dir.cwd(), path, gpa, 4096);
+    defer gpa.free(got);
+    try std.testing.expectEqual(@as(usize, 4097), got.len);
 }
 
 test "exportCorpus default mode still emits files/" {
