@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boris documentation intelligence report (v0.2)",
+  "type": "object",
+  "required": ["format", "schemaVersion", "compiler", "input", "summary", "nodes", "edges", "sourceLocations", "pages", "sources", "findings", "impact", "diagnostics"],
+  "properties": {
+    "format": {"const": "boris-documentation-intelligence"},
+    "schemaVersion": {"const": "0.2.0"},
+    "compiler": {"type": "string", "pattern": "^boris/"},
+    "input": {"type": "string"},
+    "summary": {
+      "type": "object",
+      "required": ["pages", "roots", "satellites", "sourceEndpoints", "unreferencedPages", "hotspots"],
+      "properties": {
+        "pages": {"type": "integer", "minimum": 0},
+        "roots": {"type": "integer", "minimum": 0},
+        "satellites": {"type": "integer", "minimum": 0},
+        "sourceEndpoints": {"type": "integer", "minimum": 0},
+        "unreferencedPages": {"type": "integer", "minimum": 0},
+        "hotspots": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "nodes": {"type": "array", "items": {"$ref": "#/$defs/node"}},
+    "edges": {"type": "array", "items": {"$ref": "#/$defs/edge"}},
+    "sourceLocations": {"type": "array", "items": {"$ref": "#/$defs/location"}},
+    "pages": {"type": "array", "items": {"$ref": "#/$defs/page"}},
+    "sources": {"type": "array", "items": {"type": "string"}},
+    "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "impact": {"anyOf": [{"type": "null"}, {"type": "array", "items": {"$ref": "#/$defs/endpoint"}}]},
+    "diagnostics": {"type": "array", "items": {"$ref": "#/$defs/diagnostic"}}
+  },
+  "$defs": {
+    "endpoint": {
+      "type": "object",
+      "required": ["type", "value"],
+      "properties": {"type": {"enum": ["page", "source"]}, "value": {"type": "string"}},
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "required": ["type", "id", "sourcePath", "parent"],
+      "properties": {"type": {"const": "page"}, "id": {"type": "string"}, "sourcePath": {"type": "string"}, "parent": {"anyOf": [{"type": "null"}, {"type": "string"}]}},
+      "additionalProperties": false
+    },
+    "page": {
+      "type": "object",
+      "required": ["id", "parent"],
+      "properties": {"id": {"type": "string"}, "parent": {"anyOf": [{"type": "null"}, {"type": "string"}]}},
+      "additionalProperties": false
+    },
+    "edge": {
+      "type": "object",
+      "required": ["from", "to", "kind"],
+      "properties": {"from": {"$ref": "#/$defs/endpoint"}, "to": {"$ref": "#/$defs/endpoint"}, "kind": {"enum": ["parent", "include", "reference"]}},
+      "additionalProperties": false
+    },
+    "location": {
+      "type": "object",
+      "required": ["type", "value", "sourcePath", "line", "column"],
+      "properties": {"type": {"enum": ["page", "source"]}, "value": {"type": "string"}, "sourcePath": {"type": "string"}, "line": {"type": "integer", "minimum": 1}, "column": {"type": "integer", "minimum": 1}},
+      "additionalProperties": false
+    },
+    "finding": {
+      "type": "object",
+      "required": ["code", "type", "value", "count", "sourcePath", "line", "column"],
+      "properties": {"code": {"type": "string"}, "type": {"enum": ["page", "source"]}, "value": {"type": "string"}, "count": {"type": "integer", "minimum": 0}, "sourcePath": {"anyOf": [{"type": "null"}, {"type": "string"}]}, "line": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}, "column": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}},
+      "additionalProperties": false
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": ["severity", "code", "message", "remediation", "sourcePath", "line", "column", "id"],
+      "properties": {"severity": {"enum": ["error", "warning", "info"]}, "code": {"type": "string"}, "message": {"type": "string"}, "remediation": {"type": "string"}, "sourcePath": {"anyOf": [{"type": "null"}, {"type": "string"}]}, "line": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}, "column": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 1}]}, "id": {"anyOf": [{"type": "null"}, {"type": "string"}]}},
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
