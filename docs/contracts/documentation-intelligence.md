@@ -62,12 +62,21 @@ The first slice reports facts already represented by the frozen graph:
 No semantic relations (`relates_to`, `supersedes`, and similar) belong in this
 contract. Those require a later frontmatter and IR design.
 
-## JSON report
+The machine-readable twin is [`schemas/documentation-intelligence-0.2.0.schema.json`](schemas/documentation-intelligence-0.2.0.schema.json).
+
+## JSON report (schema 0.2.0)
 
 The initial report is a new analysis artifact, not an IR schema change. Its
 arrays are sorted by canonical endpoint or entity id; no hash-map order may
 enter output. It contains a format/schema/compiler header, input path, summary
-counts, page/source records, stable findings, and an optional impact result.
+counts, page nodes, typed dependency edges, source locations, stable findings,
+an optional impact result, and a diagnostics array. The `nodes` and `edges`
+arrays are the consumer-facing graph projection; the older `pages` and
+`sources` arrays remain as compatibility summaries. `sourceLocations` uses
+content-relative paths and 1-based line/column values. Valid analysis reports
+have an empty diagnostics array; invalid content returns the compiler's
+deterministic `build-report.json` diagnostics contract instead of a partial
+analysis report.
 
 Rules:
 
@@ -76,9 +85,11 @@ Rules:
    policy justifies it.
 3. `impact` is `null` for `check`; for `impact ID` it contains the normalized
    requested endpoint and sorted transitive dependents.
-4. No timestamps, absolute paths, hostnames, random IDs, or generated prose
+4. Node, edge, finding, and source-location arrays use fixed key order and
+   canonical sorting. Diagnostics use the shared diagnostic field contract.
+5. No timestamps, absolute paths, hostnames, random IDs, or generated prose
    enter the JSON report.
-5. The report is deterministic for identical inputs on one host, matching the
+6. The report is deterministic for identical inputs on one host, matching the
    existing IR/RAG determinism claim.
 
 ## CLI and exit behavior

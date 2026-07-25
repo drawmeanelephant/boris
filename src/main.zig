@@ -72,7 +72,7 @@ fn mapPathError(err: anyerror, quiet: bool) ?ExitCode {
 /// - usage errors are handled before this (exit 2)
 /// - I/O / system errors → 3
 pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
-    if (opts.command != .build) return runIntelligence(io, gpa, opts);
+    if (opts.command == .check or opts.command == .impact) return runIntelligence(io, gpa, opts);
     switch (opts.mode) {
         .rag => return runRag(io, gpa, opts),
         .context => return runContext(io, gpa, opts),
@@ -342,7 +342,7 @@ fn renderAnalysisJson(
 ) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     var w = BufferWriter{ .buf = &out, .gpa = gpa };
-    try w.writeAll("{\n  \"format\": \"boris-documentation-intelligence\",\n  \"schemaVersion\": \"0.1.0\",\n  \"compiler\": ");
+    try w.writeAll("{\n  \"format\": \"boris-documentation-intelligence\",\n  \"schemaVersion\": \"0.2.0\",\n  \"compiler\": ");
     try json_out.writeString(&out, gpa, pipeline.compiler_id);
     try w.writeAll(",\n  \"input\": ");
     try json_out.writeString(&out, gpa, opts.input_dir);
@@ -358,7 +358,42 @@ fn renderAnalysisJson(
     try json_out.writeUsize(&out, gpa, report.summary.unreferenced_pages);
     try w.writeAll(",\n    \"hotspots\": ");
     try json_out.writeUsize(&out, gpa, report.summary.hotspots);
-    try w.writeAll("\n  },\n  \"pages\": [");
+    try w.writeAll("\n  },\n  \"nodes\": [");
+    for (pages, 0..) |page, i| {
+        if (i > 0) try w.writeAll(",");
+        try w.writeAll("{\"type\":\"page\",\"id\":");
+        try json_out.writeString(&out, gpa, page.id);
+        try w.writeAll(",\"sourcePath\":");
+        try json_out.writeString(&out, gpa, page.source_path);
+        try w.writeAll(",\"parent\":");
+        if (page.parent) |parent| try json_out.writeString(&out, gpa, parent) else try json_out.writeNull(&out, gpa);
+        try w.writeAll("}");
+    }
+    try w.writeAll("],\n  \"edges\": [");
+    for (edges, 0..) |edge, i| {
+        if (i > 0) try w.writeAll(",");
+        try w.writeAll("{\"from\":{\"type\":");
+        try json_out.writeString(&out, gpa, @tagName(edge.from.type));
+        try w.writeAll(",\"value\":");
+        try json_out.writeString(&out, gpa, edge.from.value);
+        try w.writeAll("},\"to\":{\"type\":");
+        try json_out.writeString(&out, gpa, @tagName(edge.to.type));
+        try w.writeAll(",\"value\":");
+        try json_out.writeString(&out, gpa, edge.to.value);
+        try w.writeAll("},\"kind\":");
+        try json_out.writeString(&out, gpa, edge.kind);
+        try w.writeAll("}");
+    }
+    try w.writeAll("],\n  \"sourceLocations\": [");
+    for (pages, 0..) |page, i| {
+        if (i > 0) try w.writeAll(",");
+        try w.writeAll("{\"type\":\"page\",\"value\":");
+        try json_out.writeString(&out, gpa, page.id);
+        try w.writeAll(",\"sourcePath\":");
+        try json_out.writeString(&out, gpa, page.source_path);
+        try w.writeAll(",\"line\":1,\"column\":1}");
+    }
+    try w.writeAll("],\n  \"pages\": [");
     for (pages, 0..) |page, i| {
         if (i > 0) try w.writeAll(",");
         try w.writeAll("{\"id\":");
@@ -399,6 +434,21 @@ fn renderAnalysisJson(
         try json_out.writeString(&out, gpa, finding.endpoint.value);
         try w.writeAll(",\"count\":");
         try json_out.writeUsize(&out, gpa, finding.count);
+        try w.writeAll(",\"sourcePath\":");
+        var finding_source: ?[]const u8 = null;
+        if (finding.endpoint.type == .page) {
+            for (pages) |page| {
+                if (std.mem.eql(u8, page.id, finding.endpoint.value)) {
+                    finding_source = page.source_path;
+                    break;
+                }
+            }
+        }
+        if (finding_source) |source| try json_out.writeString(&out, gpa, source) else try json_out.writeNull(&out, gpa);
+        try w.writeAll(",\"line\":");
+        if (finding_source != null) try json_out.writeUsize(&out, gpa, 1) else try json_out.writeNull(&out, gpa);
+        try w.writeAll(",\"column\":");
+        if (finding_source != null) try json_out.writeUsize(&out, gpa, 1) else try json_out.writeNull(&out, gpa);
         try w.writeAll("}");
     }
     try w.writeAll("],\n  \"impact\": ");
@@ -414,7 +464,7 @@ fn renderAnalysisJson(
         }
         try w.writeAll("]");
     } else try json_out.writeNull(&out, gpa);
-    try w.writeAll("\n}\n");
+    try w.writeAll(",\n  \"diagnostics\": []\n}\n");
     return out.toOwnedSlice(gpa);
 }
 

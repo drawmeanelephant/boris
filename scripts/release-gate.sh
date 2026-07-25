@@ -519,6 +519,20 @@ if [[ "${DI_CHECK_EC}" -eq 1 ]] && diff -u "${DI_EXPECTED}/check.json" "${DI_CHE
 else
   fail "check JSON golden or exit code mismatch (got ${DI_CHECK_EC})"
 fi
+
+# Explicit command spellings are part of the public CLI contract.  Keep the
+# watch smoke non-blocking by exercising its help route; a live watch session
+# is covered by the dedicated watch-mode contract and tests.
+CLI_CONTRACT_IR="${DI_PROBE}/explicit-build-ir"
+if "${BORIS}" build --input="${DI_CONTENT}" --out="${CLI_CONTRACT_IR}" --quiet \
+  && [[ -f "${CLI_CONTRACT_IR}/manifest.json" ]] \
+  && [[ -f "${CLI_CONTRACT_IR}/graph.json" ]] \
+  && [[ -f "${CLI_CONTRACT_IR}/build-report.json" ]] \
+  && "${BORIS}" watch --help >/dev/null 2>&1; then
+  pass "explicit build/watch command routing"
+else
+  fail "explicit build/watch command routing"
+fi
 if "${BORIS}" impact guides/reference --input="${DI_CONTENT}" --format=json --report="${DI_IMPACT_JSON}" --quiet \
   && diff -u "${DI_EXPECTED}/impact.json" "${DI_IMPACT_JSON}" >/dev/null; then
   pass "impact JSON golden + exit 0"
