@@ -5,6 +5,7 @@
 //! allocator (typically the long-lived arena for a compile run).
 
 const std = @import("std");
+const parser = @import("parser.zig");
 
 pub const Severity = enum {
     error_,
@@ -63,6 +64,16 @@ pub const Code = enum {
         return @tagName(self);
     }
 };
+
+/// Convert the parser's closed categories to the shared diagnostic codes.
+/// Keeping this mapping here lets every product path preserve parser detail.
+pub fn parserCategoryToCode(cat: parser.Category) Code {
+    return switch (cat) {
+        .EFRONTMATTER => .EFRONTMATTER,
+        .EINVALIDUTF8 => .EINVALIDUTF8,
+        .EINVALIDPATH => .EINVALIDPATH,
+    };
+}
 
 pub const Diagnostic = struct {
     severity: Severity,
@@ -182,4 +193,10 @@ test "Code names match contract strings" {
     try std.testing.expectEqualStrings("EREFERENCEMISSING", Code.EREFERENCEMISSING.name());
     try std.testing.expectEqualStrings("EUSAGE", Code.EUSAGE.name());
     try std.testing.expectEqualStrings("EIO", Code.EIO.name());
+}
+
+test "parser categories map to shared diagnostic codes" {
+    try std.testing.expectEqual(Code.EFRONTMATTER, parserCategoryToCode(.EFRONTMATTER));
+    try std.testing.expectEqual(Code.EINVALIDUTF8, parserCategoryToCode(.EINVALIDUTF8));
+    try std.testing.expectEqual(Code.EINVALIDPATH, parserCategoryToCode(.EINVALIDPATH));
 }

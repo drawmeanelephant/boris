@@ -563,14 +563,6 @@ fn freezeDependencyIndex(gpa: std.mem.Allocator, result: *Result) !void {
     }
 }
 
-fn parserCategoryToCode(cat: parser.Category) diag.Code {
-    return switch (cat) {
-        .EFRONTMATTER => .EFRONTMATTER,
-        .EINVALIDUTF8 => .EINVALIDUTF8,
-        .EINVALIDPATH => .EINVALIDPATH,
-    };
-}
-
 fn statusName(st: ?page_mod.Status) ?[]const u8 {
     if (st) |s| return s.name();
     return null;
@@ -841,7 +833,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         if (parsed.diagnostic) |pd| {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
-                .code = parserCategoryToCode(pd.category),
+                .code = diag.parserCategoryToCode(pd.category),
                 .message = try retain.dupe(u8, pd.message),
                 .remediation = try retain.dupe(u8, "Fix the frontmatter or encoding for this file"),
                 .source_path = disc.source_path,

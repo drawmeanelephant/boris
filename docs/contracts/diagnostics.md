@@ -119,6 +119,11 @@ On the HTML path, component tokenizer failures are emitted as structured
 full-source line/column of the offending tag; the CLI does not replace them
 with a bare internal `ComponentFailed` error.
 
+HTML parser failures follow the same rule: when a defensive HTML-path parse
+check encounters invalid frontmatter, UTF-8, or a path, it preserves the
+parser category, source path, and line/column in the emitted diagnostic before
+returning the stable `ParseFailed` control error.
+
 ### Mapping notes
 
 | Issue class | Primary code |

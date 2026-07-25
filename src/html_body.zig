@@ -74,6 +74,25 @@ fn printComponentDiagnostics(
     }
 }
 
+fn parserDiagnostic(source_path: []const u8, parsed: parser.Diagnostic) diag.Diagnostic {
+    return .{
+        .severity = .error_,
+        .code = diag.parserCategoryToCode(parsed.category),
+        .message = parsed.message,
+        .remediation = "Fix the frontmatter or encoding for this file",
+        .source_path = source_path,
+        .line = parsed.line,
+        .column = parsed.column,
+    };
+}
+
+fn printParserDiagnostic(gpa: std.mem.Allocator, source_path: []const u8, parsed: parser.Diagnostic) !void {
+    const structured = parserDiagnostic(source_path, parsed);
+    const text = try diag.formatText(structured, gpa);
+    defer gpa.free(text);
+    std.debug.print("{s}\n", .{text});
+}
+
 /// Convert a parsed page body when the whole tree explicitly uses Textile.
 /// Returned bytes are views into the supplied Whiteboard allocator.
 pub fn bodyForInput(
@@ -119,7 +138,10 @@ pub fn renderSource(
 ) ![]const u8 {
     const arena = doc_arena.allocator();
     const parsed = parser.parse(source);
-    if (parsed.diagnostic != null) return error.ParseFailed;
+    if (parsed.diagnostic) |pd| {
+        if (!options.quiet) try printParserDiagnostic(gpa, source_path, pd);
+        return error.ParseFailed;
+    }
     const body = try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path, options.quiet);
 
     // Graph-backed Markdown documentation links → canonical page URLs
@@ -232,6 +254,19 @@ test "component diagnostics use ECOMPONENT and full-source locator" {
         "error: ECOMPONENT: bad-component.md:7:1: Figure: unregistered component tag [Use only <Aside kind=\"…\" id=\"…\"> with allowlisted kind/id, outside fenced code]",
         text,
     );
+}
+
+test "parser diagnostics retain shared code and source locator" {
+    const parsed = parser.parse("---\nunknown: value\n---\n\nBody\n");
+    try std.testing.expect(parsed.diagnostic != null);
+    const structured = parserDiagnostic("bad-frontmatter.md", parsed.diagnostic.?);
+
+    try std.testing.expectEqual(diag.Code.EFRONTMATTER, structured.code);
+    try std.testing.expectEqual(@as(?u32, 2), structured.line);
+    try std.testing.expectEqual(@as(?u32, 1), structured.column);
+    const text = try diag.formatText(structured, std.testing.allocator);
+    defer std.testing.allocator.free(text);
+    try std.testing.expect(std.mem.startsWith(u8, text, "error: EFRONTMATTER: bad-frontmatter.md:2:1: "));
 }
 
 test "shared body pipeline preserves include wiki Aside render order" {
