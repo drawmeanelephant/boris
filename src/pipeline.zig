@@ -18,6 +18,7 @@ const wikilink = @import("wikilink.zig");
 const dependency = @import("dependency.zig");
 const identity = @import("identity.zig");
 const textile = @import("textile.zig");
+const source_io = @import("source_io.zig");
 const doclink = @import("doclink.zig");
 
 pub const schema_version = "0.2.0";
@@ -369,7 +370,7 @@ fn resolveDependencies(
     defer resolver.deinit();
 
     for (result.pages.items) |page| {
-        const source = readFileAlloc(io, content_dir, page.source_path, gpa) catch |err| {
+        const source = source_io.readPageAlloc(io, content_dir, page.source_path, gpa) catch |err| {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
                 .code = .EIO,
@@ -442,7 +443,7 @@ pub fn populateDependencyIndexFormat(
     defer resolver.deinit();
 
     for (nodes) |page| {
-        const source = readFileAlloc(io, content_dir, page.source_path, gpa) catch |err| {
+        const source = source_io.readPageAlloc(io, content_dir, page.source_path, gpa) catch |err| {
             if (!quiet) std.debug.print("error: EIO: failed to read {s}: {s}\n", .{ page.source_path, @errorName(err) });
             return err;
         };
@@ -820,7 +821,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
 
     // Per-file scratch: freed after each promote so no parser slice can leak.
     for (scan_list.items()) |disc| {
-        const source = readFileAlloc(io, content_dir, disc.source_path, gpa) catch |err| {
+        const source = source_io.readPageAlloc(io, content_dir, disc.source_path, gpa) catch |err| {
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
                 .code = .EIO,

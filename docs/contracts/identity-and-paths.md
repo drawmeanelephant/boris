@@ -113,7 +113,9 @@ Letter case is **preserved**. Platform separators must not leak into graph keys.
 
 1. Single shared derivation function for all pages (`canonicalEntityId` only).
 2. Entity ids **never** start with `/`, **never** contain `\`, and **never**
-   contain empty, `.`, or `..` segments.
+   contain empty, `.`, or `..` segments. URL-significant `#`, `?`, and `%`
+   characters are also rejected so ids cannot change path/query/fragment
+   interpretation when used in public hrefs.
 3. Entity id length ≤ 255 UTF-8 bytes.
 4. Empty ID is forbidden (e.g. a file named only `.md` is invalid).
 5. ID uniqueness across the content root is **byte-exact** →

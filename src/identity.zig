@@ -161,7 +161,7 @@ pub fn validateEntityId(id: []const u8) bool {
         if (seg.len == 0) return false;
         if (std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, "..")) return false;
         for (seg) |c| {
-            if (c == ' ' or c == '\t' or c == '\n' or c == '\r') return false;
+            if (c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == '#' or c == '?' or c == '%') return false;
         }
         if (i < id.len) i += 1; // skip '/'
     }
@@ -269,24 +269,27 @@ pub fn relativeHref(allocator: std.mem.Allocator, from_output: []const u8, to_ou
     const to_dir = std.fs.path.dirnamePosix(to_output) orelse "";
     const to_base = std.fs.path.basenamePosix(to_output);
 
-    // Split directory paths into components (empty dir → zero components).
-    var from_parts: [32][]const u8 = undefined;
-    var to_parts: [32][]const u8 = undefined;
-    const from_n = splitPathComponents(from_dir, &from_parts);
-    const to_n = splitPathComponents(to_dir, &to_parts);
+    // Split directory paths into allocator-owned component tables. Do not
+    // truncate deep site paths; relative links must remain exact at any depth.
+    var from_parts: std.ArrayList([]const u8) = .empty;
+    defer from_parts.deinit(allocator);
+    var to_parts: std.ArrayList([]const u8) = .empty;
+    defer to_parts.deinit(allocator);
+    try splitPathComponents(from_dir, &from_parts, allocator);
+    try splitPathComponents(to_dir, &to_parts, allocator);
 
     var common: usize = 0;
-    while (common < from_n and common < to_n) : (common += 1) {
-        if (!std.mem.eql(u8, from_parts[common], to_parts[common])) break;
+    while (common < from_parts.items.len and common < to_parts.items.len) : (common += 1) {
+        if (!std.mem.eql(u8, from_parts.items[common], to_parts.items[common])) break;
     }
 
-    var up = from_n - common;
+    var up = from_parts.items.len - common;
     // Build: (../)* + remaining to_dir components + basename
     var total: usize = 0;
     total += up * 3; // "../"
     var i = common;
-    while (i < to_n) : (i += 1) {
-        total += to_parts[i].len + 1; // component + '/'
+    while (i < to_parts.items.len) : (i += 1) {
+        total += to_parts.items[i].len + 1; // component + '/'
     }
     total += to_base.len;
 
@@ -300,9 +303,9 @@ pub fn relativeHref(allocator: std.mem.Allocator, from_output: []const u8, to_ou
         off += 3;
     }
     i = common;
-    while (i < to_n) : (i += 1) {
-        @memcpy(out[off .. off + to_parts[i].len], to_parts[i]);
-        off += to_parts[i].len;
+    while (i < to_parts.items.len) : (i += 1) {
+        @memcpy(out[off .. off + to_parts.items[i].len], to_parts.items[i]);
+        off += to_parts.items[i].len;
         out[off] = '/';
         off += 1;
     }
@@ -312,22 +315,18 @@ pub fn relativeHref(allocator: std.mem.Allocator, from_output: []const u8, to_ou
     return out;
 }
 
-fn splitPathComponents(dir: []const u8, out: [][]const u8) usize {
-    if (dir.len == 0) return 0;
-    var n: usize = 0;
+fn splitPathComponents(dir: []const u8, out: *std.ArrayList([]const u8), allocator: std.mem.Allocator) !void {
+    if (dir.len == 0) return;
     var start: usize = 0;
     var i: usize = 0;
     while (i <= dir.len) : (i += 1) {
         if (i == dir.len or dir[i] == '/') {
             if (i > start) {
-                if (n >= out.len) return n; // truncate defensively
-                out[n] = dir[start..i];
-                n += 1;
+                try out.append(allocator, dir[start..i]);
             }
             start = i + 1;
         }
     }
-    return n;
 }
 
 // ---------------------------------------------------------------------------
@@ -500,4 +499,25 @@ test "validateEntityId shape" {
     try std.testing.expect(!validateEntityId("a/./b"));
     try std.testing.expect(!validateEntityId("a/b/"));
     try std.testing.expect(!validateEntityId("has space"));
+    try std.testing.expect(!validateEntityId("has#fragment"));
+    try std.testing.expect(!validateEntityId("has?query"));
+    try std.testing.expect(!validateEntityId("has%escape"));
+}
+
+test "relativeHref does not truncate deep paths" {
+    const gpa = std.testing.allocator;
+    var from: std.ArrayList(u8) = .empty;
+    defer from.deinit(gpa);
+    var to: std.ArrayList(u8) = .empty;
+    defer to.deinit(gpa);
+    for (0..40) |_| {
+        try from.appendSlice(gpa, "from/");
+        try to.appendSlice(gpa, "to/");
+    }
+    try from.appendSlice(gpa, "page.html");
+    try to.appendSlice(gpa, "target.html");
+    const href = try relativeHref(gpa, from.items, to.items);
+    defer gpa.free(href);
+    try std.testing.expect(std.mem.startsWith(u8, href, "../../../../"));
+    try std.testing.expect(std.mem.endsWith(u8, href, "to/target.html"));
 }

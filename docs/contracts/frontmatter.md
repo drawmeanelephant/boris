@@ -244,6 +244,11 @@ Constants live on `page.zig` (`max_source_bytes`, `max_frontmatter_bytes`,
 `max_frontmatter_fields`, `max_title_bytes`, `max_entity_id_bytes`,
 `max_tag_count`, `max_tag_bytes`) and are re-exported by `parser.zig`.
 
+Authoring-page readers enforce the total-source bound before parsing: they
+allocate at most `max_source_bytes + 1` bytes, with the extra byte preserving
+the parser's stable `EFRONTMATTER` oversized-source diagnostic. Include
+fragments retain their separate expansion budget.
+
 ---
 
 ## Examples

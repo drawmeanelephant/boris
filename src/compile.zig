@@ -56,6 +56,7 @@ const theme_mod = @import("theme.zig");
 const layout_select = @import("layout_select.zig");
 const textile = @import("textile.zig");
 const content_asset = @import("content_asset.zig");
+const source_io = @import("source_io.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -310,7 +311,7 @@ pub fn loadAndPromoteFormat(
     defer content_dir.close(io);
 
     for (scan_list.items()) |disc| {
-        const source = try readFileAlloc(io, content_dir, disc.source_path, gpa);
+        const source = try source_io.readPageAlloc(io, content_dir, disc.source_path, gpa);
         defer gpa.free(source);
 
         const parsed = parser.parse(source);
@@ -360,7 +361,7 @@ pub fn renderAndPublishPage(
 ) !void {
     const arena = doc_arena.allocator();
 
-    const source = try readFileAlloc(io, content_dir, page.source_path, arena);
+    const source = try source_io.readPageAlloc(io, content_dir, page.source_path, arena);
     if (options.test_fail_render_at) |idx| {
         if (idx == page_index) return error.TestInjectedRenderFailure;
     }
@@ -613,7 +614,7 @@ const SharedCompileState = struct {
         }
 
         for (db.items(), 0..) |p, i| {
-            const src = try readFileAlloc(io, content_dir, p.source_path, gpa);
+            const src = try source_io.readPageAlloc(io, content_dir, p.source_path, gpa);
             source_bytes[i] = src;
             sources_filled = i + 1;
         }
@@ -1303,7 +1304,7 @@ fn buildSiteHeadingIndex(
 
         _ = doc_arena.reset(.free_all);
         const arena = doc_arena.allocator();
-        const source = try readFileAlloc(io, content_dir, page.source_path, arena);
+        const source = try source_io.readPageAlloc(io, content_dir, page.source_path, arena);
         const html = try html_body.renderSource(io, gpa, content_dir, &doc_arena, source, page.source_path, page.output_path, .{
             .input_format = input_format,
             .quiet = quiet,
