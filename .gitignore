@@ -26,3 +26,6 @@ zig-cache/
 
 # Local smoke kit / agent kit
 /boris-agent-kit/
+
+# Takeout migration lab: real exports stay local and uncommitted.
+/tools/migration-lab/fixtures/takeout-intake/raw-local/

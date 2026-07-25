@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boris IR manifest.json (v0.2)",
+  "description": "Machine-readable twin of the `manifest.json` section of docs/contracts/ir-schema.md. The prose contract remains normative; this schema exists so consumers do not hand-roll parsers. Key order (schemaVersion, compiler, contentRoot, pageCount, pages) is required by the determinism contract but cannot be expressed in JSON Schema.",
+  "type": "object",
+  "required": ["schemaVersion", "compiler", "contentRoot", "pageCount", "pages"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "0.2.0",
+      "description": "Exactly \"0.2.0\" for this contract revision."
+    },
+    "compiler": {
+      "type": "string",
+      "description": "Compiler identity, e.g. \"boris/0.8.0\"."
+    },
+    "contentRoot": {
+      "type": "string",
+      "description": "Content root path as passed to the pipeline; no trailing slash."
+    },
+    "pageCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Equal to pages.length."
+    },
+    "pages": {
+      "type": "array",
+      "description": "Page summaries sorted by id (unsigned UTF-8 byte order).",
+      "items": { "$ref": "#/$defs/pageSummary" }
+    }
+  },
+  "$defs": {
+    "pageSummary": {
+      "type": "object",
+      "description": "Key order: index, id, sourcePath, role, parent, title, status.",
+      "required": ["index", "id", "sourcePath", "role", "parent", "title", "status"],
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Stable 0-based index after id sort / freeze."
+        },
+        "id": { "type": "string", "description": "Entity id." },
+        "sourcePath": { "type": "string", "description": "Canonical content-root-relative source path." },
+        "role": { "enum": ["trunk", "satellite"] },
+        "parent": {
+          "type": ["string", "null"],
+          "description": "Parent entity id, or null for a Trunk."
+        },
+        "title": { "type": ["string", "null"] },
+        "status": { "enum": ["draft", "published", "archived", null] }
+      }
+    }
+  }
+}

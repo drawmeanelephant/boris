@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, afterparty]
   pull_request:
-    branches: [main]
+    branches: [main, afterparty]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -139,4 +139,3 @@ jobs:
           echo "migration-lab-test result: ${migration_lab_test}"
           test "${build_and_test}" = "success"
           test "${migration_lab_test}" = "success" || test "${migration_lab_test}" = "skipped"
-          

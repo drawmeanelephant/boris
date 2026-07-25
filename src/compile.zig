@@ -324,6 +324,15 @@ pub fn loadAndPromoteFormat(
     }
 }
 
+/// Optional rendering inputs for `renderAndPublishPage`. Defaults keep the
+/// minimal path (no graph chrome, headings, theme, or page assets).
+pub const RenderOptions = struct {
+    site: ?*const FrozenSite = null,
+    heading_index: ?*const wikilink.HeadingIndex = null,
+    theme: ?*const theme_mod.ThemeBundle = null,
+    page_assets: ?*const content_asset.PageAssetBundle = null,
+};
+
 /// Render one page body through Apex into the Whiteboard and publish HTML.
 ///
 /// **Caller owns Whiteboard lifecycle:** must `reset(.free_all)` only after
@@ -334,8 +343,8 @@ pub fn loadAndPromoteFormat(
 /// function re-reads source for the body only — parse views stay on the
 /// Whiteboard until return.
 ///
-/// When `site` is non-null and the layout has graph chrome slots, those
-/// fragments are rendered from the frozen graph on the Whiteboard.
+/// When `render_opts.site` is non-null and the layout has graph chrome slots,
+/// those fragments are rendered from the frozen graph on the Whiteboard.
 /// `{{toc}}` is built from rendered body HTML (page-local; no graph required).
 pub fn renderAndPublishPage(
     io: Io,
@@ -347,81 +356,7 @@ pub fn renderAndPublishPage(
     doc_arena: *std.heap.ArenaAllocator,
     options: CompileOptions,
     page_index: usize,
-) !void {
-    return renderAndPublishPageWithSite(io, gpa, content_dir, dist_dir, page, layout, doc_arena, options, page_index, null);
-}
-
-pub fn renderAndPublishPageWithSite(
-    io: Io,
-    gpa: std.mem.Allocator,
-    content_dir: Io.Dir,
-    dist_dir: Io.Dir,
-    page: *const DurablePage,
-    layout: assemble.Layout,
-    doc_arena: *std.heap.ArenaAllocator,
-    options: CompileOptions,
-    page_index: usize,
-    site: ?*const FrozenSite,
-) !void {
-    return renderAndPublishPageWithSiteAndHeadings(
-        io,
-        gpa,
-        content_dir,
-        dist_dir,
-        page,
-        layout,
-        doc_arena,
-        options,
-        page_index,
-        site,
-        null,
-    );
-}
-
-pub fn renderAndPublishPageWithSiteAndHeadings(
-    io: Io,
-    gpa: std.mem.Allocator,
-    content_dir: Io.Dir,
-    dist_dir: Io.Dir,
-    page: *const DurablePage,
-    layout: assemble.Layout,
-    doc_arena: *std.heap.ArenaAllocator,
-    options: CompileOptions,
-    page_index: usize,
-    site: ?*const FrozenSite,
-    heading_index: ?*const wikilink.HeadingIndex,
-) !void {
-    return renderAndPublishPageWithTheme(
-        io,
-        gpa,
-        content_dir,
-        dist_dir,
-        page,
-        layout,
-        doc_arena,
-        options,
-        page_index,
-        site,
-        heading_index,
-        null,
-        null,
-    );
-}
-
-pub fn renderAndPublishPageWithTheme(
-    io: Io,
-    gpa: std.mem.Allocator,
-    content_dir: Io.Dir,
-    dist_dir: Io.Dir,
-    page: *const DurablePage,
-    layout: assemble.Layout,
-    doc_arena: *std.heap.ArenaAllocator,
-    options: CompileOptions,
-    page_index: usize,
-    site: ?*const FrozenSite,
-    heading_index: ?*const wikilink.HeadingIndex,
-    theme: ?*const theme_mod.ThemeBundle,
-    page_assets: ?*const content_asset.PageAssetBundle,
+    render_opts: RenderOptions,
 ) !void {
     const arena = doc_arena.allocator();
 
@@ -432,9 +367,9 @@ pub fn renderAndPublishPageWithTheme(
     const html = try html_body.renderSource(io, gpa, content_dir, doc_arena, source, page.source_path, page.output_path, .{
         .input_format = options.input_format,
         .quiet = options.quiet,
-        .nodes = if (site) |s| s.nodes else &.{},
-        .heading_index = heading_index,
-        .page_assets = page_assets,
+        .nodes = if (render_opts.site) |s| s.nodes else &.{},
+        .heading_index = render_opts.heading_index,
+        .page_assets = render_opts.page_assets,
     });
 
     var slots: assemble.SlotValues = .{ .content = html };
@@ -446,7 +381,7 @@ pub fn renderAndPublishPageWithTheme(
         slots.metadata = try renderMetadata(arena, page);
     }
     if (layout.has_footer) {
-        slots.footer = if (theme) |t| t.footer() else "";
+        slots.footer = if (render_opts.theme) |t| t.footer() else "";
     }
     if (layout.has_asset_url) {
         const paths = layout.assetPaths();
@@ -457,7 +392,7 @@ pub fn renderAndPublishPageWithTheme(
         slots.asset_hrefs = hrefs;
     }
 
-    if (site) |s| {
+    if (render_opts.site) |s| {
         const gi = s.indexOf(page.entity_id) orelse return error.GraphValidationFailed;
         const node = s.nodes[gi];
         if (layout.has_nav) {
@@ -550,36 +485,35 @@ fn collectTransitIncludes(
     }
 }
 
-fn writeCacheManifest(writer: anytype, manifest: CacheManifest) !void {
+fn writeCacheManifest(allocator: std.mem.Allocator, writer: anytype, manifest: CacheManifest) !void {
     // Buffer via ArrayList so entity_id / paths / fingerprints go through json_out escaping.
-    const gpa = std.heap.page_allocator;
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(gpa);
+    defer buf.deinit(allocator);
 
-    try buf.appendSlice(gpa, "{\n  \"format_version\": ");
-    try json_out.writeString(&buf, gpa, manifest.format_version);
-    try buf.appendSlice(gpa, ",\n  \"entries\": [\n");
+    try buf.appendSlice(allocator, "{\n  \"format_version\": ");
+    try json_out.writeString(&buf, allocator, manifest.format_version);
+    try buf.appendSlice(allocator, ",\n  \"entries\": [\n");
     for (manifest.entries, 0..) |entry, i| {
-        try buf.appendSlice(gpa, "    {\n      \"entity_id\": ");
-        try json_out.writeString(&buf, gpa, entry.entity_id);
-        try buf.appendSlice(gpa, ",\n      \"fingerprint\": ");
-        try json_out.writeString(&buf, gpa, entry.fingerprint);
-        try buf.appendSlice(gpa, ",\n      \"output_path\": ");
-        try json_out.writeString(&buf, gpa, entry.output_path);
-        try buf.appendSlice(gpa, ",\n      \"selected_layout\": ");
-        try json_out.writeString(&buf, gpa, entry.selected_layout);
-        try buf.appendSlice(gpa, ",\n      \"output_size\": ");
-        try json_out.writeUsize(&buf, gpa, @intCast(entry.output_size));
-        try buf.appendSlice(gpa, ",\n      \"output_digest\": ");
-        try json_out.writeString(&buf, gpa, entry.output_digest);
-        try buf.appendSlice(gpa, "\n    }");
+        try buf.appendSlice(allocator, "    {\n      \"entity_id\": ");
+        try json_out.writeString(&buf, allocator, entry.entity_id);
+        try buf.appendSlice(allocator, ",\n      \"fingerprint\": ");
+        try json_out.writeString(&buf, allocator, entry.fingerprint);
+        try buf.appendSlice(allocator, ",\n      \"output_path\": ");
+        try json_out.writeString(&buf, allocator, entry.output_path);
+        try buf.appendSlice(allocator, ",\n      \"selected_layout\": ");
+        try json_out.writeString(&buf, allocator, entry.selected_layout);
+        try buf.appendSlice(allocator, ",\n      \"output_size\": ");
+        try json_out.writeUsize(&buf, allocator, @intCast(entry.output_size));
+        try buf.appendSlice(allocator, ",\n      \"output_digest\": ");
+        try json_out.writeString(&buf, allocator, entry.output_digest);
+        try buf.appendSlice(allocator, "\n    }");
         if (i + 1 < manifest.entries.len) {
-            try buf.appendSlice(gpa, ",\n");
+            try buf.appendSlice(allocator, ",\n");
         } else {
-            try buf.append(gpa, '\n');
+            try buf.append(allocator, '\n');
         }
     }
-    try buf.appendSlice(gpa, "  ]\n}\n");
+    try buf.appendSlice(allocator, "  ]\n}\n");
     try writer.writeAll(buf.items);
 }
 
@@ -1013,7 +947,7 @@ fn parallelWorker(ctx: *ParallelContext) void {
                 &inv.pages[page_index]
             else
                 null;
-            renderAndPublishPageWithTheme(
+            renderAndPublishPage(
                 ctx.io,
                 ctx.gpa,
                 ctx.content_dir,
@@ -1023,10 +957,12 @@ fn parallelWorker(ctx: *ParallelContext) void {
                 &doc_arena,
                 ctx.options,
                 page_index,
-                ctx.site,
-                ctx.heading_index,
-                ctx.theme,
-                page_assets,
+                .{
+                    .site = ctx.site,
+                    .heading_index = ctx.heading_index,
+                    .theme = ctx.theme,
+                    .page_assets = page_assets,
+                },
             ) catch |err| {
                 ctx.mutex.lockUncancelable(ctx.io);
                 if (ctx.shared_error == null) {
@@ -1241,27 +1177,26 @@ fn headingHarvestKey(
     return out;
 }
 
-fn writeHeadingHarvestCache(writer: anytype, entries: []const HeadingHarvestWriteEntry) !void {
-    const gpa = std.heap.page_allocator;
+fn writeHeadingHarvestCache(allocator: std.mem.Allocator, writer: anytype, entries: []const HeadingHarvestWriteEntry) !void {
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(gpa);
-    try buf.appendSlice(gpa, "{\n  \"format\": ");
-    try json_out.writeString(&buf, gpa, HEADING_HARVEST_FORMAT);
-    try buf.appendSlice(gpa, ",\n  \"entries\": [\n");
+    defer buf.deinit(allocator);
+    try buf.appendSlice(allocator, "{\n  \"format\": ");
+    try json_out.writeString(&buf, allocator, HEADING_HARVEST_FORMAT);
+    try buf.appendSlice(allocator, ",\n  \"entries\": [\n");
     for (entries, 0..) |e, i| {
-        try buf.appendSlice(gpa, "    {\n      \"entity_id\": ");
-        try json_out.writeString(&buf, gpa, e.entity_id);
-        try buf.appendSlice(gpa, ",\n      \"harvest_key\": ");
-        try json_out.writeString(&buf, gpa, e.harvest_key);
-        try buf.appendSlice(gpa, ",\n      \"ids\": [");
+        try buf.appendSlice(allocator, "    {\n      \"entity_id\": ");
+        try json_out.writeString(&buf, allocator, e.entity_id);
+        try buf.appendSlice(allocator, ",\n      \"harvest_key\": ");
+        try json_out.writeString(&buf, allocator, e.harvest_key);
+        try buf.appendSlice(allocator, ",\n      \"ids\": [");
         for (e.ids, 0..) |id, j| {
-            try json_out.writeString(&buf, gpa, id);
-            if (j + 1 < e.ids.len) try buf.appendSlice(gpa, ", ");
+            try json_out.writeString(&buf, allocator, id);
+            if (j + 1 < e.ids.len) try buf.appendSlice(allocator, ", ");
         }
-        try buf.appendSlice(gpa, "]\n    }");
-        if (i + 1 < entries.len) try buf.appendSlice(gpa, ",\n") else try buf.append(gpa, '\n');
+        try buf.appendSlice(allocator, "]\n    }");
+        if (i + 1 < entries.len) try buf.appendSlice(allocator, ",\n") else try buf.append(allocator, '\n');
     }
-    try buf.appendSlice(gpa, "  ]\n}\n");
+    try buf.appendSlice(allocator, "  ]\n}\n");
     try writer.writeAll(buf.items);
 }
 
@@ -1420,20 +1355,32 @@ fn expandDirtySet(
     nodes: []const graph_mod.Node,
     dep_index: *const dependency.DependencyIndex,
 ) !void {
+    // Both lookups are built once. Previously the node scan inside
+    // getAffectedPages and the entity-id scan below were linear, and both ran
+    // once per dirty page — quadratic in page count on a cold incremental
+    // build, where every page is dirty.
+    var lookup = try cache.NodeLookup.init(gpa, nodes);
+    defer lookup.deinit();
+
+    var by_entity_id: std.StringHashMapUnmanaged(usize) = .{};
+    defer by_entity_id.deinit(gpa);
+    try by_entity_id.ensureTotalCapacity(gpa, @intCast(pages.len));
+    for (pages, 0..) |page, idx| {
+        // First writer wins, matching the previous scan's `break` on first match.
+        if (!by_entity_id.contains(page.entity_id)) {
+            by_entity_id.putAssumeCapacity(page.entity_id, idx);
+        }
+    }
+
     for (pages, 0..) |page, page_idx| {
         if (!is_dirty[page_idx]) continue;
-        const affected = try cache.getAffectedPages(gpa, page.source_path, nodes, dep_index);
+        const affected = try cache.getAffectedPagesIndexed(gpa, page.source_path, &lookup, dep_index);
         defer {
             for (affected) |id| gpa.free(id);
             gpa.free(affected);
         }
         for (affected) |id| {
-            for (pages, 0..) |candidate, candidate_idx| {
-                if (std.mem.eql(u8, candidate.entity_id, id)) {
-                    is_dirty[candidate_idx] = true;
-                    break;
-                }
-            }
+            if (by_entity_id.get(id)) |candidate_idx| is_dirty[candidate_idx] = true;
         }
     }
 }
@@ -1969,7 +1916,7 @@ fn compilePagesInner(
             stats.pages_attempted += 1;
 
             if (is_dirty[page_index]) {
-                try renderAndPublishPageWithTheme(
+                try renderAndPublishPage(
                     io,
                     gpa,
                     content_dir,
@@ -1979,10 +1926,12 @@ fn compilePagesInner(
                     &doc_arena,
                     options,
                     page_index,
-                    site,
-                    &heading_index,
-                    &theme_bundle,
-                    &content_assets.pages[page_index],
+                    .{
+                        .site = site,
+                        .heading_index = &heading_index,
+                        .theme = &theme_bundle,
+                        .page_assets = &content_assets.pages[page_index],
+                    },
                 );
                 stats.pages_written += 1;
                 if (!options.quiet) {
@@ -2022,8 +1971,7 @@ fn compilePagesInner(
             // Prefer staged (just-written) bytes; fall back to final dist for cached pages.
             const maybe_bytes: ?[]u8 = if (readFileAlloc(io, stage_dir, page.output_path, gpa)) |b|
                 b
-            else |_|
-                if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |b| b else |_| null;
+            else |_| if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |b| b else |_| null;
             if (maybe_bytes) |bytes| {
                 defer gpa.free(bytes);
                 out_size = bytes.len;
@@ -2049,7 +1997,7 @@ fn compilePagesInner(
 
         var m_buf: [4096]u8 = undefined;
         var m_writer = atomic_manifest.file.writer(io, &m_buf);
-        try writeCacheManifest(&m_writer.interface, .{
+        try writeCacheManifest(gpa, &m_writer.interface, .{
             .format_version = cache.CACHE_FORMAT_VERSION,
             .entries = cache_entries,
         });
@@ -2066,7 +2014,7 @@ fn compilePagesInner(
             defer atomic_hh.deinit(io);
             var hh_buf: [4096]u8 = undefined;
             var hh_writer = atomic_hh.file.writer(io, &hh_buf);
-            try writeHeadingHarvestCache(&hh_writer.interface, heading_snapshot.entries);
+            try writeHeadingHarvestCache(gpa, &hh_writer.interface, heading_snapshot.entries);
             try hh_writer.flush();
             try atomic_hh.replace(io);
         }
@@ -2454,7 +2402,7 @@ test "render failure: whiteboard resets and no final output published" {
     const page = &db.items()[0];
     const result = renderAndPublishPage(io, gpa, content_dir, dist_dir, page, layout, &doc_arena, .{
         .test_fail_render_at = 0,
-    }, 0);
+    }, 0, .{});
     try std.testing.expectError(error.TestInjectedRenderFailure, result);
 
     // Production loop always resets after return — do so here.
@@ -2915,6 +2863,65 @@ test "html fixture golden: expected/ matches compile output" {
         const exp = try readAllFile(io, exp_dir, rel, gpa);
         defer gpa.free(exp);
         try std.testing.expectEqualStrings(exp, got);
+    }
+}
+
+test "html fixture golden: documentation links and local assets" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-doc-links-golden", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    const first_dist = try std.fmt.allocPrint(gpa, "{s}/first", .{work});
+    defer gpa.free(first_dist);
+    const second_dist = try std.fmt.allocPrint(gpa, "{s}/second", .{work});
+    defer gpa.free(second_dist);
+    const content = "test/fixtures/doc-links/content";
+    const layout = "test/fixtures/doc-links/layouts/main.html";
+    const expected = "test/fixtures/doc-links/expected";
+    const expected_files = [_][]const u8{
+        "index.html",
+        "reference.html",
+        "guides/start.html",
+        "guides/start.assets/diagram.svg",
+    };
+
+    const first_stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = first_dist,
+        .layout_path = layout,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 3), first_stats.pages_written);
+
+    const second_stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = second_dist,
+        .layout_path = layout,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 3), second_stats.pages_written);
+
+    var first_dir = try cwd.openDir(io, first_dist, .{});
+    defer first_dir.close(io);
+    var second_dir = try cwd.openDir(io, second_dist, .{});
+    defer second_dir.close(io);
+    var expected_dir = try cwd.openDir(io, expected, .{});
+    defer expected_dir.close(io);
+
+    for (expected_files) |rel| {
+        const got_first = try readAllFile(io, first_dir, rel, gpa);
+        defer gpa.free(got_first);
+        const got_second = try readAllFile(io, second_dir, rel, gpa);
+        defer gpa.free(got_second);
+        const want = try readAllFile(io, expected_dir, rel, gpa);
+        defer gpa.free(want);
+        try std.testing.expectEqualStrings(want, got_first);
+        try std.testing.expectEqualStrings(got_first, got_second);
     }
 }
 

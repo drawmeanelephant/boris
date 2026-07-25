@@ -8,12 +8,12 @@ ABI (`vendor/apex/apex.h`). Campaign archive:
 | Field | Value |
 |-------|--------|
 | **Upstream** | https://github.com/ApexMarkdown/apex |
-| **Release tag** | `v1.1.12` |
-| **Upstream tag object** | `1e5efb580980d40f378ce51590f5c817e71d628c` |
-| **Upstream commit** | `2d62f4b81380379f35cd0d06444a18c223306f9` |
-| **VERSION file** | `1.1.12` |
+| **Release tag** | `v1.1.13` |
+| **Upstream tag object** | `0a2fb339a7675b80053eda75bb8def5efb2e7d83` |
+| **Upstream commit** | `8d70820cdfc2f32c2f11d8020f8a66268cd064ff` |
+| **VERSION file** | `1.1.13` |
 | **License** | MIT (`LICENSE`) — Copyright (c) 2026 Brett Terpstra |
-| **Pinned for Boris** | 2026-07-20 (ApexMarkdown v1.1.12 upgrade) |
+| **Pinned for Boris** | 2026-07-21 (ApexMarkdown v1.1.13 upgrade) |
 | **Product role** | Static libs linked; host `apex_render` is Unified adapter (Chat 3) |
 
 ## Nested upstream dependencies (snapshot SHAs)
@@ -29,7 +29,7 @@ engine substrate only — **not** Boris’s public Markdown product surface.
 
 ## Boris-local patches
 
-The v1.1.12 source tree is otherwise an upstream snapshot. Boris retains these
+The v1.1.13 source tree is otherwise an upstream snapshot. Boris retains these
 local files/policies:
 
 | Path | Patch | Reason |

@@ -37,6 +37,10 @@ pub const Options = struct {
     bundles_only: bool = false,
     /// Named input scope. `all` preserves the historical complete export.
     profile: Profile = .all,
+    /// Output segmentation axis, orthogonal to `profile`. `none` preserves the
+    /// historical single flat corpus; `tool` emits one self-contained pack per
+    /// segment under `packs/` behind a root router.
+    pack_by: PackBy = .none,
     /// Corpus output directory (relative to process cwd unless absolute).
     out_dir: []const u8 = "source-rag",
     /// Project root to scan (relative to process cwd unless absolute).
@@ -60,6 +64,24 @@ pub const Options = struct {
 };
 
 pub const Profile = enum { all, core, docs, tools };
+
+/// Output segmentation axis. Orthogonal to `Profile`: `profile` selects which
+/// files are scanned, `pack_by` selects how the scanned set is split across
+/// output packs.
+pub const PackBy = enum { none, tool };
+
+pub fn packByName(pack_by: PackBy) []const u8 {
+    return switch (pack_by) {
+        .none => "none",
+        .tool => "tool",
+    };
+}
+
+fn parsePackBy(value: []const u8) ParseError!PackBy {
+    if (std.mem.eql(u8, value, "none")) return .none;
+    if (std.mem.eql(u8, value, "tool")) return .tool;
+    return error.InvalidValue;
+}
 
 pub fn profileName(profile: Profile) []const u8 {
     return switch (profile) {
@@ -93,6 +115,7 @@ pub const default_scan_dirs = [_][]const u8{
     "scripts",
     "tools",
     "test",
+    "fixtures",
     "SUPPORT",
 };
 
@@ -146,7 +169,7 @@ fn scanDirsForProfile(profile: Profile) []const []const u8 {
         .all => &default_scan_dirs,
         .core => &[_][]const u8{ "src", "layouts" },
         .docs => &[_][]const u8{ "docs", "content" },
-        .tools => &[_][]const u8{ "scripts", "tools", "test", "SUPPORT" },
+        .tools => &[_][]const u8{ "scripts", "tools", "test", "fixtures", "SUPPORT" },
     };
 }
 
@@ -189,6 +212,9 @@ pub const ExportStats = struct {
     source_files: usize = 0,
     skipped: usize = 0,
     catalog_entries: usize = 0,
+    /// Total packed body bytes. Authoritative size for pack routing; any token
+    /// figure derived from it is an approximation.
+    bytes: usize = 0,
 };
 
 // ---------------------------------------------------------------------------
@@ -217,6 +243,14 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             i += 1;
             if (i >= args.len or args[i].len == 0) return error.MissingValue;
             opts.profile = try parseProfile(args[i]);
+        } else if (std.mem.startsWith(u8, a, "--pack-by=")) {
+            const v = a["--pack-by=".len..];
+            if (v.len == 0) return error.MissingValue;
+            opts.pack_by = try parsePackBy(v);
+        } else if (std.mem.eql(u8, a, "--pack-by")) {
+            i += 1;
+            if (i >= args.len or args[i].len == 0) return error.MissingValue;
+            opts.pack_by = try parsePackBy(args[i]);
         } else if (std.mem.startsWith(u8, a, "--out=")) {
             const v = a["--out=".len..];
             if (v.len == 0) return error.MissingValue;
@@ -273,6 +307,7 @@ fn printUsage() void {
         \\  --no-bundles         Skip combined bundles; emit per-file corpus and sidecars
         \\  --bundles-only       Emit combined bundles and sidecars; omit files/** tree
         \\  --profile=NAME       Input scope: all (default), core, docs, or tools
+        \\  --pack-by=AXIS       Output split: none (default) or tool
         \\  --out=DIR            Output corpus root (default: source-rag)
         \\  --root=DIR           Project root to scan (default: .)
         \\  --max-bytes=N        Skip files larger than N bytes (default: 524288)
@@ -289,6 +324,11 @@ fn printUsage() void {
         \\  profile_manifest.json  part_manifest.json
         \\  boris-source-N.md  boris-docs[-N].md  boris-content[-N].md  (bundles)
         \\  files/**  (one markdown document per source path; omitted with --bundles-only)
+        \\
+        \\With --pack-by=tool the same tree is emitted once per pack under
+        \\packs/<name>/, and the root keeps only INDEX.md (a router over the
+        \\packs) and pack_manifest.json. Packs are core, docs, content, and one
+        \\per tools/<name>/, discovered from the scanned paths.
         \\
         \\Exit codes: 0 success, 2 usage, 3 I/O error
         \\
@@ -565,6 +605,17 @@ const managed_root_file_names = [_][]const u8{
     "profile_manifest.json",
     "part_manifest.json",
     "upload_manifest.json",
+    "pack_manifest.json",
+};
+
+/// Managed directory trees, moved whole by the atomic publish.
+///
+/// `packs` is one tree rather than a per-pack entry precisely so this list stays
+/// fixed while the set of packs varies: replacing the tree retires packs that no
+/// longer exist instead of stranding them in the output.
+const managed_tree_names = [_][]const u8{
+    "files",
+    packs_dir_name,
 };
 
 /// Approximate token count for planning LLM uploads. Uses the documented
@@ -635,7 +686,7 @@ fn deleteManagedBundleFiles(io: Io, gpa: std.mem.Allocator, out: Io.Dir) !void {
 }
 
 fn deleteManagedFiles(io: Io, gpa: std.mem.Allocator, out: Io.Dir) !void {
-    try removeTreeIfPresent(io, out, "files");
+    for (managed_tree_names) |tree_name| try removeTreeIfPresent(io, out, tree_name);
     for (managed_root_file_names) |file_name| {
         out.deleteFile(io, file_name) catch |err| switch (err) {
             error.FileNotFound => {},
@@ -669,7 +720,9 @@ fn moveManagedBundleFiles(io: Io, gpa: std.mem.Allocator, from: Io.Dir, to: Io.D
 }
 
 fn restorePreviousManagedCorpus(io: Io, gpa: std.mem.Allocator, prev: Io.Dir, out: Io.Dir) !void {
-    _ = try moveIfPresent(io, prev, "files", out);
+    for (managed_tree_names) |tree_name| {
+        _ = try moveIfPresent(io, prev, tree_name, out);
+    }
     for (managed_root_file_names) |file_name| {
         _ = try moveIfPresent(io, prev, file_name, out);
     }
@@ -677,7 +730,9 @@ fn restorePreviousManagedCorpus(io: Io, gpa: std.mem.Allocator, prev: Io.Dir, ou
 }
 
 fn moveManagedCorpus(io: Io, gpa: std.mem.Allocator, from: Io.Dir, to: Io.Dir) !void {
-    _ = try moveIfPresent(io, from, "files", to);
+    for (managed_tree_names) |tree_name| {
+        _ = try moveIfPresent(io, from, tree_name, to);
+    }
     for (managed_root_file_names) |file_name| {
         _ = try moveIfPresent(io, from, file_name, to);
     }
@@ -805,6 +860,172 @@ fn bundleByteCount(files: []const PackedSource) usize {
     for (files) |file| total += file.body.len;
     return total;
 }
+
+// ---------------------------------------------------------------------------
+// Pack partitioning (`--pack-by=tool`)
+// ---------------------------------------------------------------------------
+
+/// Parent directory for every emitted pack.
+///
+/// Packs live under one tree rather than as top-level siblings so the atomic
+/// publish keeps moving a fixed set of managed paths. The set of packs changes
+/// between runs; the set of managed paths must not, or a pack removed from the
+/// repo would be stranded in the output forever.
+const packs_dir_name = "packs";
+
+/// Pack matching the `.core` input scope: compiler sources and layouts, plus the
+/// root-level files every scan collects.
+const core_pack_name = "core";
+
+/// Pack matching the `.docs` input scope.
+const docs_pack_name = "docs";
+
+/// Pack holding the part of the `.tools` input scope that belongs to no
+/// individual tool.
+const tooling_pack_name = "tooling";
+
+const tool_pack_prefix = "tools-";
+
+/// Leading path segment of a repo-relative path; the whole name for a root file.
+fn topLevelSegment(source_path: []const u8) []const u8 {
+    if (std.mem.indexOfScalar(u8, source_path, '/')) |slash| return source_path[0..slash];
+    return source_path;
+}
+
+fn segmentInProfileScope(segment: []const u8, profile: Profile) bool {
+    for (scanDirsForProfile(profile)) |dir| {
+        if (std.mem.eql(u8, segment, dir)) return true;
+    }
+    return false;
+}
+
+/// Total assignment of one scanned repo-relative path to exactly one pack.
+///
+/// Pack boundaries are **derived from `scanDirsForProfile`** rather than restated
+/// here, so the packs follow the project's own declared input scopes instead of a
+/// second, independently-drifting list: `.docs` becomes the `docs` pack, `.core`
+/// plus the root files become `core`, and `.tools` splits into one pack per
+/// `tools/<name>/` with its remainder (`scripts`, `test`, `SUPPORT`) in `tooling`.
+///
+/// Tool packs come from the scanned paths, so a tool added to the repo gets its
+/// own pack with no change here. Anything outside every declared scope falls to
+/// `core`, which keeps the assignment total: no scanned file is dropped and none
+/// is emitted into two packs.
+fn packNameForPath(arena: std.mem.Allocator, source_path: []const u8) ![]const u8 {
+    // `tools/<name>/**` is the axis this flag splits on, so it is resolved before
+    // the enclosing `.tools` scope.
+    if (std.mem.startsWith(u8, source_path, "tools/")) {
+        const rest = source_path["tools/".len..];
+        if (std.mem.indexOfScalar(u8, rest, '/')) |slash| {
+            if (slash > 0) {
+                return try std.fmt.allocPrint(arena, "{s}{s}", .{ tool_pack_prefix, rest[0..slash] });
+            }
+        }
+        // A loose file directly under `tools/` belongs to no individual tool but
+        // is still part of the `.tools` scope.
+        return tooling_pack_name;
+    }
+
+    const segment = topLevelSegment(source_path);
+    if (segmentInProfileScope(segment, .docs)) return docs_pack_name;
+    if (segmentInProfileScope(segment, .tools)) return tooling_pack_name;
+    return core_pack_name;
+}
+
+/// One output pack: a name and the scanned paths assigned to it.
+const Pack = struct {
+    name: []const u8,
+    paths: std.ArrayList([]const u8),
+};
+
+/// Group scanned paths into packs, ordered by name so a given repo state always
+/// produces the same output tree.
+fn partitionPacks(
+    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    paths: []const []const u8,
+) ![]Pack {
+    var packs: std.ArrayList(Pack) = .empty;
+    errdefer {
+        for (packs.items) |*pack| pack.paths.deinit(gpa);
+        packs.deinit(gpa);
+    }
+
+    for (paths) |source_path| {
+        const name = try packNameForPath(arena, source_path);
+        const pack = blk: {
+            for (packs.items) |*candidate| {
+                if (std.mem.eql(u8, candidate.name, name)) break :blk candidate;
+            }
+            try packs.append(gpa, .{ .name = name, .paths = .empty });
+            break :blk &packs.items[packs.items.len - 1];
+        };
+        try pack.paths.append(gpa, source_path);
+    }
+
+    std.mem.sort(Pack, packs.items, {}, struct {
+        fn less(_: void, a: Pack, b: Pack) bool {
+            return std.mem.order(u8, a.name, b.name) == .lt;
+        }
+    }.less);
+    return try packs.toOwnedSlice(gpa);
+}
+
+fn freePacks(gpa: std.mem.Allocator, packs: []Pack) void {
+    for (packs) |*pack| pack.paths.deinit(gpa);
+    gpa.free(packs);
+}
+
+/// What a pack contains, for the root router. Describes the material only — no
+/// consumer, product, or vendor is named, so the same corpus serves any reader.
+fn packPurpose(arena: std.mem.Allocator, name: []const u8) ![]const u8 {
+    if (std.mem.eql(u8, name, core_pack_name)) {
+        return "Compiler sources, layouts, and root project guidance.";
+    }
+    if (std.mem.eql(u8, name, docs_pack_name)) {
+        return "Normative contracts, design records, documentation, and the site content the compiler consumes.";
+    }
+    if (std.mem.eql(u8, name, tooling_pack_name)) {
+        return "Build, release, and test machinery: scripts, test fixtures, and support material.";
+    }
+    if (std.mem.startsWith(u8, name, tool_pack_prefix)) {
+        return try std.fmt.allocPrint(
+            arena,
+            "Sources and fixtures for the `tools/{s}/` auxiliary tool.",
+            .{name[tool_pack_prefix.len..]},
+        );
+    }
+    return "Project sources.";
+}
+
+/// Questions a pack is the right place to answer. Kept behavioural rather than
+/// tied to any retrieval stack or consumer.
+fn packQuestions(arena: std.mem.Allocator, name: []const u8) ![]const u8 {
+    if (std.mem.eql(u8, name, core_pack_name)) {
+        return "How the compiler parses, resolves, and emits; how a page is laid out.";
+    }
+    if (std.mem.eql(u8, name, docs_pack_name)) {
+        return "What a contract requires; why a design decision was taken; what the demo site contains.";
+    }
+    if (std.mem.eql(u8, name, tooling_pack_name)) {
+        return "How the project is built, gated, and released; what valid and invalid input fixtures look like.";
+    }
+    if (std.mem.startsWith(u8, name, tool_pack_prefix)) {
+        return try std.fmt.allocPrint(
+            arena,
+            "How `tools/{s}/` works, what it converts or checks, and how to run it.",
+            .{name[tool_pack_prefix.len..]},
+        );
+    }
+    return "General questions about this repository.";
+}
+
+/// Router row for one emitted pack.
+const PackSummary = struct {
+    name: []const u8,
+    files: usize,
+    bytes: usize,
+};
 
 const BundlePart = struct {
     kind: BundleKind,
@@ -1535,6 +1756,143 @@ fn sortCatalog(entries: []CatalogEntry) void {
 
 /// Export a source RAG corpus. The complete next corpus is generated under a
 /// sibling staging directory and only then published into `out_dir`.
+/// Method used for every approximate token figure in generated artifacts.
+///
+/// Recorded alongside the numbers so a reader can see they are a heuristic
+/// rather than any particular tokenizer's count. Bytes remain authoritative.
+const token_estimate_method = "bytes/4";
+
+/// Write the root router for `--pack-by=tool`: a human-readable `INDEX.md` and a
+/// machine-readable `pack_manifest.json` describing every emitted pack.
+///
+/// Deliberately names no consumer, product, or vendor: the packs are described
+/// by what they contain and what they answer, so the same corpus serves a chat
+/// upload, a local retrieval pipeline, or a person reading the files.
+fn exportPackRouter(
+    io: Io,
+    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    out_dir: Io.Dir,
+    opts: Options,
+    packs: []const PackSummary,
+    totals: ExportStats,
+) !void {
+    var doc: std.ArrayList(u8) = .empty;
+    defer doc.deinit(gpa);
+    var num_buf: [32]u8 = undefined;
+
+    try doc.appendSlice(gpa,
+        \\---
+        \\rag_id: meta/index
+        \\rag_path: INDEX.md
+        \\category: meta
+        \\tags: [index, router, source-rag]
+        \\---
+        \\
+        \\# Source RAG corpus — pack router
+        \\
+        \\This corpus is split into self-contained packs under `packs/`. Each pack
+        \\carries its own `INDEX.md`, catalog, manifests, and bundles, so a pack can
+        \\be used on its own without the rest of the tree.
+        \\
+        \\Start here, pick the pack whose questions match yours, and use that pack.
+        \\
+        \\## Packs
+        \\
+        \\| Pack | Bytes | ~Tokens | Files | Contents |
+        \\|------|------:|--------:|------:|----------|
+        \\
+    );
+    for (packs) |pack| {
+        try doc.appendSlice(gpa, "| `packs/");
+        try doc.appendSlice(gpa, pack.name);
+        try doc.appendSlice(gpa, "/` | ");
+        try doc.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{pack.bytes}));
+        try doc.appendSlice(gpa, " | ");
+        try doc.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{approxTokensFromBytes(pack.bytes)}));
+        try doc.appendSlice(gpa, " | ");
+        try doc.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{pack.files}));
+        try doc.appendSlice(gpa, " | ");
+        try doc.appendSlice(gpa, try packPurpose(arena, pack.name));
+        try doc.appendSlice(gpa, " |\n");
+    }
+
+    try doc.appendSlice(gpa,
+        \\
+        \\## Questions each pack answers
+        \\
+    );
+    for (packs) |pack| {
+        try doc.appendSlice(gpa, "\n- **`");
+        try doc.appendSlice(gpa, pack.name);
+        try doc.appendSlice(gpa, "`** — ");
+        try doc.appendSlice(gpa, try packQuestions(arena, pack.name));
+    }
+
+    try doc.appendSlice(gpa,
+        \\
+        \\
+        \\## Sizes
+        \\
+        \\`bytes` is the packed body size and is authoritative. `~tokens` is an
+        \\approximation computed as `
+    );
+    try doc.appendSlice(gpa, token_estimate_method);
+    try doc.appendSlice(gpa,
+        \\` on that byte count; it is not a
+        \\tokenizer result and will differ from any specific tokenizer. Use it for
+        \\rough capacity planning only, and prefer `bytes` when the exact figure
+        \\matters.
+        \\
+        \\Totals:
+    );
+    try doc.appendSlice(gpa, " ");
+    try doc.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{packs.len}));
+    try doc.appendSlice(gpa, " packs, ");
+    try doc.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{totals.source_files}));
+    try doc.appendSlice(gpa, " source files, ");
+    try doc.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{totals.bytes}));
+    try doc.appendSlice(gpa, " bytes.\n\nThe machine-readable form of this table is `pack_manifest.json`.\n");
+    try writeBytes(io, out_dir, "INDEX.md", doc.items);
+
+    // ---- pack_manifest.json ----
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try buf.appendSlice(gpa, "{\"format\":\"boris-source-rag-packs\",\"schema_version\":1,\"profile\":\"");
+    try buf.appendSlice(gpa, profileName(opts.profile));
+    try buf.appendSlice(gpa, "\",\"pack_by\":\"");
+    try buf.appendSlice(gpa, packByName(opts.pack_by));
+    try buf.appendSlice(gpa, "\",\"packs_dir\":\"");
+    try buf.appendSlice(gpa, packs_dir_name);
+    try buf.appendSlice(gpa, "\",\"token_estimate_method\":\"");
+    try buf.appendSlice(gpa, token_estimate_method);
+    try buf.appendSlice(gpa, "\",\"total_bytes\":");
+    try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{totals.bytes}));
+    try buf.appendSlice(gpa, ",\"total_source_files\":");
+    try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{totals.source_files}));
+    try buf.appendSlice(gpa, ",\"packs\":[");
+    for (packs, 0..) |pack, index| {
+        if (index != 0) try buf.appendSlice(gpa, ",");
+        try buf.appendSlice(gpa, "{\"name\":\"");
+        try jsonEscapeAppend(&buf, gpa, pack.name);
+        try buf.appendSlice(gpa, "\",\"path\":\"");
+        try jsonEscapeAppend(&buf, gpa, try std.fmt.allocPrint(arena, "{s}/{s}", .{ packs_dir_name, pack.name }));
+        try buf.appendSlice(gpa, "\",\"source_files\":");
+        try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{pack.files}));
+        try buf.appendSlice(gpa, ",\"bytes\":");
+        try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{pack.bytes}));
+        try buf.appendSlice(gpa, ",\"tokens_approx\":");
+        try buf.appendSlice(gpa, try std.fmt.bufPrint(&num_buf, "{d}", .{approxTokensFromBytes(pack.bytes)}));
+        try buf.appendSlice(gpa, ",\"purpose\":\"");
+        try jsonEscapeAppend(&buf, gpa, try packPurpose(arena, pack.name));
+        try buf.appendSlice(gpa, "\",\"answers\":\"");
+        try jsonEscapeAppend(&buf, gpa, try packQuestions(arena, pack.name));
+        try buf.appendSlice(gpa, "\"}");
+    }
+    try buf.appendSlice(gpa, "]}\n");
+    try writeBytes(io, out_dir, "pack_manifest.json", buf.items);
+}
+
 pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
@@ -1562,6 +1920,78 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
 
     var out = try cwd.openDir(io, stage_path, .{});
     defer out.close(io);
+
+    var stats: ExportStats = .{};
+    var stage_writes: usize = 0;
+
+    log(opts, "\nSource RAG → {s}/  (root={s})\n", .{ opts.out_dir, opts.root_dir });
+
+    switch (opts.pack_by) {
+        .none => {
+            stats = try exportPackTree(io, gpa, arena, root, out, paths, opts, &stage_writes);
+        },
+        .tool => {
+            const packs = try partitionPacks(gpa, arena, paths);
+            defer freePacks(gpa, packs);
+
+            try out.createDirPath(io, packs_dir_name);
+            var packs_dir = try out.openDir(io, packs_dir_name, .{});
+            defer packs_dir.close(io);
+
+            var summaries: std.ArrayList(PackSummary) = .empty;
+            defer summaries.deinit(gpa);
+
+            for (packs) |pack| {
+                log(opts, "\n  pack       {s}/{s}  ({d} files)\n", .{ packs_dir_name, pack.name, pack.paths.items.len });
+                try packs_dir.createDirPath(io, pack.name);
+                var pack_out = try packs_dir.openDir(io, pack.name, .{});
+                defer pack_out.close(io);
+
+                const pack_stats = try exportPackTree(io, gpa, arena, root, pack_out, pack.paths.items, opts, &stage_writes);
+                try summaries.append(gpa, .{
+                    .name = pack.name,
+                    .files = pack_stats.source_files,
+                    .bytes = pack_stats.bytes,
+                });
+                stats.source_files += pack_stats.source_files;
+                stats.skipped += pack_stats.skipped;
+                stats.catalog_entries += pack_stats.catalog_entries;
+                stats.bytes += pack_stats.bytes;
+            }
+
+            try exportPackRouter(io, gpa, arena, out, opts, summaries.items, stats);
+        },
+    }
+
+    try publishManagedCorpus(io, gpa, stage_path, opts.out_dir);
+
+    log(opts, "\nDone: {d} source files, {d} catalog entries, {d} skipped → {s}/\n", .{
+        stats.source_files,
+        stats.catalog_entries,
+        stats.skipped,
+        opts.out_dir,
+    });
+
+    return stats;
+}
+
+/// Emit one complete, self-contained corpus tree into `out`: the per-file
+/// documents, combined bundles, catalog, and sidecar manifests.
+///
+/// Flat output calls this once with every scanned path and the stage root, which
+/// is why `--pack-by=none` stays byte-identical to the historical export: same
+/// inputs, same calls, same order. Pack output calls it once per pack with that
+/// pack's paths and its own directory.
+fn exportPackTree(
+    io: Io,
+    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    root: Io.Dir,
+    out: Io.Dir,
+    paths: []const []const u8,
+    opts: Options,
+    stage_writes: *usize,
+) !ExportStats {
     if (opts.includePerFileDocs()) try out.createDirPath(io, "files");
 
     var catalog: std.ArrayList(CatalogEntry) = .empty;
@@ -1592,9 +2022,6 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     var stats: ExportStats = .{};
     var packed_paths: std.ArrayList([]const u8) = .empty;
     defer packed_paths.deinit(gpa);
-    var stage_writes: usize = 0;
-
-    log(opts, "\nSource RAG → {s}/  (root={s})\n", .{ opts.out_dir, opts.root_dir });
 
     for (paths) |source_path| {
         const data = readFileAlloc(io, root, source_path, gpa) catch |err| {
@@ -1623,15 +2050,15 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
             const doc = try renderSourceDocument(gpa, rag_id, rag_path, source_path, lang, data);
             defer gpa.free(doc);
             try writeBytes(io, out, rag_path, doc);
-            stage_writes += 1;
+            stage_writes.* += 1;
             if (opts.test_fail_after_stage_writes) |limit| {
-                if (stage_writes >= limit) return error.TestInjectedStageWriteFailure;
+                if (stage_writes.* >= limit) return error.TestInjectedStageWriteFailure;
             }
         } else {
             // Bundles-only still needs a deterministic progress point for tests.
-            stage_writes += 1;
+            stage_writes.* += 1;
             if (opts.test_fail_after_stage_writes) |limit| {
-                if (stage_writes >= limit) return error.TestInjectedStageWriteFailure;
+                if (stage_writes.* >= limit) return error.TestInjectedStageWriteFailure;
             }
         }
 
@@ -1659,6 +2086,7 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
         }
         try packed_paths.append(gpa, source_path);
         stats.source_files += 1;
+        stats.bytes += data.len;
         log(opts, "  source     {s}\n", .{source_path});
     }
 
@@ -1700,15 +2128,6 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
         try exportUploadManifest(io, gpa, out, opts.profile, opts.split_size, bundle_parts.items);
     }
 
-    try publishManagedCorpus(io, gpa, stage_path, opts.out_dir);
-
-    log(opts, "\nDone: {d} source files, {d} catalog entries, {d} skipped → {s}/\n", .{
-        stats.source_files,
-        stats.catalog_entries,
-        stats.skipped,
-        opts.out_dir,
-    });
-
     return stats;
 }
 
@@ -1744,8 +2163,8 @@ pub fn main(init: std.process.Init) u8 {
                     const a = args_list.items[i];
                     if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) continue;
                     if (std.mem.eql(u8, a, "--quiet") or std.mem.eql(u8, a, "-q")) continue;
-                    if (std.mem.startsWith(u8, a, "--out=") or std.mem.startsWith(u8, a, "--root=") or std.mem.startsWith(u8, a, "--max-bytes=") or std.mem.startsWith(u8, a, "--split-size=")) continue;
-                    if (std.mem.eql(u8, a, "--out") or std.mem.eql(u8, a, "--root") or std.mem.eql(u8, a, "--split-size")) {
+                    if (std.mem.startsWith(u8, a, "--out=") or std.mem.startsWith(u8, a, "--root=") or std.mem.startsWith(u8, a, "--max-bytes=") or std.mem.startsWith(u8, a, "--split-size=") or std.mem.startsWith(u8, a, "--profile=") or std.mem.startsWith(u8, a, "--pack-by=")) continue;
+                    if (std.mem.eql(u8, a, "--out") or std.mem.eql(u8, a, "--root") or std.mem.eql(u8, a, "--split-size") or std.mem.eql(u8, a, "--profile") or std.mem.eql(u8, a, "--pack-by")) {
                         i += 1;
                         continue;
                     }
@@ -1830,8 +2249,14 @@ test "profiles keep their documented scopes" {
     try std.testing.expectEqualStrings("layouts", scanDirsForProfile(.core)[1]);
     try std.testing.expectEqualStrings("docs", scanDirsForProfile(.docs)[0]);
     try std.testing.expectEqualStrings("content", scanDirsForProfile(.docs)[1]);
+    // Full contents, not a spot check: this list gates what reaches the corpus,
+    // so a silent addition or reordering should fail loudly here.
+    try std.testing.expectEqual(@as(usize, 5), scanDirsForProfile(.tools).len);
     try std.testing.expectEqualStrings("scripts", scanDirsForProfile(.tools)[0]);
-    try std.testing.expectEqualStrings("SUPPORT", scanDirsForProfile(.tools)[3]);
+    try std.testing.expectEqualStrings("tools", scanDirsForProfile(.tools)[1]);
+    try std.testing.expectEqualStrings("test", scanDirsForProfile(.tools)[2]);
+    try std.testing.expectEqualStrings("fixtures", scanDirsForProfile(.tools)[3]);
+    try std.testing.expectEqualStrings("SUPPORT", scanDirsForProfile(.tools)[4]);
     try std.testing.expectEqual(@as(usize, default_scan_dirs.len), scanDirsForProfile(.all).len);
 }
 
@@ -2139,6 +2564,483 @@ fn writeMiniSourceRagFixture(io: Io, gpa: std.mem.Allocator, root_rel: []const u
     try root.writeFile(io, .{ .sub_path = "README.md", .data = "# Demo\n" });
     try root.writeFile(io, .{ .sub_path = "src/hello.zig", .data = "pub fn main() void {}\n" });
     try root.writeFile(io, .{ .sub_path = "tools/source-rag/main.zig", .data = "pub fn export() void {}\n" });
+}
+
+/// Fixture with every pack shape: core sources, docs, content, and two tools.
+/// `extra_tool` adds a tool that no code path knows about, which is how the
+/// dynamic-discovery guarantee is exercised.
+fn writePackByToolFixture(
+    io: Io,
+    gpa: std.mem.Allocator,
+    root_rel: []const u8,
+    extra_tool: ?[]const u8,
+) !void {
+    const dirs = [_][]const u8{ "src", "docs", "content", "tools/alpha-tool", "tools/beta-tool" };
+    for (dirs) |dir| {
+        const rel = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ root_rel, dir });
+        defer gpa.free(rel);
+        try Io.Dir.cwd().createDirPath(io, rel);
+    }
+    if (extra_tool) |name| {
+        const rel = try std.fmt.allocPrint(gpa, "{s}/tools/{s}", .{ root_rel, name });
+        defer gpa.free(rel);
+        try Io.Dir.cwd().createDirPath(io, rel);
+    }
+
+    var root = try Io.Dir.cwd().openDir(io, root_rel, .{});
+    defer root.close(io);
+    try root.writeFile(io, .{ .sub_path = "README.md", .data = "# Demo\n" });
+    try root.writeFile(io, .{ .sub_path = "build.zig", .data = "pub fn build() void {}\n" });
+    try root.writeFile(io, .{ .sub_path = "src/hello.zig", .data = "pub fn main() void {}\n" });
+    try root.writeFile(io, .{ .sub_path = "docs/contract.md", .data = "# Contract\n" });
+    try root.writeFile(io, .{ .sub_path = "content/index.md", .data = "# Index\n" });
+    try root.writeFile(io, .{ .sub_path = "tools/alpha-tool/main.zig", .data = "pub fn alpha() void {}\n" });
+    try root.writeFile(io, .{ .sub_path = "tools/beta-tool/main.zig", .data = "pub fn beta() void {}\n" });
+    if (extra_tool) |name| {
+        const rel = try std.fmt.allocPrint(gpa, "tools/{s}/main.zig", .{name});
+        defer gpa.free(rel);
+        try root.writeFile(io, .{ .sub_path = rel, .data = "pub fn extra() void {}\n" });
+    }
+}
+
+test "profile scopes partition the default scan exactly" {
+    // The pack layout is derived from these scopes, so this asserts the property
+    // the derivation depends on: every scanned directory belongs to exactly one
+    // profile. A directory added to default_scan_dirs without a profile — or
+    // listed in two — fails here rather than silently landing in core.
+    const scoped = [_]Profile{ .core, .docs, .tools };
+    for (default_scan_dirs) |dir| {
+        var hits: usize = 0;
+        for (scoped) |profile| {
+            if (segmentInProfileScope(dir, profile)) hits += 1;
+        }
+        if (hits != 1) {
+            std.debug.print("scan dir '{s}' belongs to {d} profile scopes, expected 1\n", .{ dir, hits });
+            return error.ScanDirNotInExactlyOneProfile;
+        }
+    }
+
+    // ...and no profile claims a directory outside the default scan.
+    for (scoped) |profile| {
+        for (scanDirsForProfile(profile)) |dir| {
+            var found = false;
+            for (default_scan_dirs) |candidate| {
+                if (std.mem.eql(u8, dir, candidate)) found = true;
+            }
+            try std.testing.expect(found);
+        }
+    }
+}
+
+test "packNameForPath follows the declared profile scopes" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    // Every scanned directory maps to the pack implied by its profile scope,
+    // checked against scanDirsForProfile rather than a restated list.
+    for (default_scan_dirs) |dir| {
+        if (std.mem.eql(u8, dir, "tools")) {
+            // The `.tools` scope splits per tool, so a file inside a tool
+            // directory gets that tool's pack.
+            try std.testing.expectEqualStrings(
+                "tools-probe-tool",
+                try packNameForPath(arena, "tools/probe-tool/file.md"),
+            );
+            continue;
+        }
+        const probe = try std.fmt.allocPrint(arena, "{s}/probe.md", .{dir});
+        const pack = try packNameForPath(arena, probe);
+        if (segmentInProfileScope(dir, .docs)) {
+            try std.testing.expectEqualStrings(docs_pack_name, pack);
+        } else if (segmentInProfileScope(dir, .tools)) {
+            try std.testing.expectEqualStrings(tooling_pack_name, pack);
+        } else {
+            try std.testing.expectEqualStrings(core_pack_name, pack);
+        }
+    }
+
+    // Timothy's grouping, spelled out: content ships with docs, and scripts and
+    // test are tooling rather than core.
+    try std.testing.expectEqualStrings("docs", try packNameForPath(arena, "docs/contracts/ir-schema.md"));
+    try std.testing.expectEqualStrings("docs", try packNameForPath(arena, "content/index.md"));
+    try std.testing.expectEqualStrings("tooling", try packNameForPath(arena, "scripts/release-gate.sh"));
+    try std.testing.expectEqualStrings("tooling", try packNameForPath(arena, "test/fixtures/valid-site/content/index.md"));
+    try std.testing.expectEqualStrings("tooling", try packNameForPath(arena, "SUPPORT/notes.md"));
+    try std.testing.expectEqualStrings("core", try packNameForPath(arena, "src/pipeline.zig"));
+    try std.testing.expectEqualStrings("core", try packNameForPath(arena, "layouts/main.html"));
+    try std.testing.expectEqualStrings("core", try packNameForPath(arena, "README.md"));
+
+    // Per-tool packs, including one no code path knows about.
+    try std.testing.expectEqualStrings("tools-migration-lab", try packNameForPath(arena, "tools/migration-lab/main.zig"));
+    try std.testing.expectEqualStrings("tools-source-rag", try packNameForPath(arena, "tools/source-rag/main.zig"));
+    try std.testing.expectEqualStrings("tools-brand-new", try packNameForPath(arena, "tools/brand-new/deep/nested.zig"));
+    // A loose file directly under tools/ stays in the `.tools` remainder.
+    try std.testing.expectEqualStrings("tooling", try packNameForPath(arena, "tools/README.md"));
+}
+
+test "partitionPacks is exhaustive and disjoint" {
+    const gpa = std.testing.allocator;
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const paths = [_][]const u8{
+        "AGENTS.md",
+        "content/index.md",
+        "docs/contract.md",
+        "src/a.zig",
+        "src/b.zig",
+        "tools/alpha/main.zig",
+        "tools/beta/main.zig",
+        "tools/beta/util.zig",
+        "tools/README.md",
+    };
+
+    const packs = try partitionPacks(gpa, arena, &paths);
+    defer freePacks(gpa, packs);
+
+    // Every input path lands in exactly one pack: none dropped, none duplicated.
+    var seen: usize = 0;
+    for (packs) |pack| seen += pack.paths.items.len;
+    try std.testing.expectEqual(paths.len, seen);
+    for (paths) |path| {
+        var hits: usize = 0;
+        for (packs) |pack| {
+            for (pack.paths.items) |candidate| {
+                if (std.mem.eql(u8, candidate, path)) hits += 1;
+            }
+        }
+        try std.testing.expectEqual(@as(usize, 1), hits);
+    }
+
+    // Names are sorted so the same repo state always yields the same tree.
+    try std.testing.expectEqual(@as(usize, 5), packs.len);
+    try std.testing.expectEqualStrings("core", packs[0].name);
+    try std.testing.expectEqualStrings("docs", packs[1].name);
+    try std.testing.expectEqualStrings("tooling", packs[2].name);
+    try std.testing.expectEqualStrings("tools-alpha", packs[3].name);
+    try std.testing.expectEqualStrings("tools-beta", packs[4].name);
+
+    // core holds the root file plus both src files; content joins docs; the
+    // loose tools/README.md is the `.tools` remainder.
+    try std.testing.expectEqual(@as(usize, 3), packs[0].paths.items.len);
+    try std.testing.expectEqual(@as(usize, 2), packs[1].paths.items.len);
+    try std.testing.expectEqual(@as(usize, 1), packs[2].paths.items.len);
+}
+
+test "packs reproduce the declared profile scopes exactly" {
+    // The totality criterion: the packs are not a new segmentation, they are the
+    // existing profile scopes with `.tools` split per tool. So each profile's
+    // scan must equal the union of its packs -- exactly, both directions.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/pack-scope-root", .{tmp.sub_path});
+    defer gpa.free(root_rel);
+
+    try writePackByToolFixture(io, gpa, root_rel, "extra-tool");
+    // Segments that belong to the `.tools` scope but no individual tool.
+    {
+        const scripts_rel = try std.fmt.allocPrint(gpa, "{s}/scripts", .{root_rel});
+        defer gpa.free(scripts_rel);
+        try Io.Dir.cwd().createDirPath(io, scripts_rel);
+        const test_rel = try std.fmt.allocPrint(gpa, "{s}/test/fixtures", .{root_rel});
+        defer gpa.free(test_rel);
+        try Io.Dir.cwd().createDirPath(io, test_rel);
+        var root_dir = try Io.Dir.cwd().openDir(io, root_rel, .{});
+        defer root_dir.close(io);
+        try root_dir.writeFile(io, .{ .sub_path = "scripts/release-gate.sh", .data = "#!/bin/sh\n" });
+        try root_dir.writeFile(io, .{ .sub_path = "test/fixtures/case.md", .data = "# Case\n" });
+        try root_dir.writeFile(io, .{ .sub_path = "tools/README.md", .data = "# Tools\n" });
+    }
+
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    var root = try Io.Dir.cwd().openDir(io, root_rel, .{ .iterate = true });
+    defer root.close(io);
+
+    const cases = [_]struct { profile: Profile, packs: []const []const u8 }{
+        .{ .profile = .core, .packs = &.{core_pack_name} },
+        .{ .profile = .docs, .packs = &.{docs_pack_name} },
+        .{ .profile = .tools, .packs = &.{ tooling_pack_name, "tools-alpha-tool", "tools-beta-tool", "tools-extra-tool" } },
+    };
+
+    for (cases) |case| {
+        const scanned = try collectSourcePaths(io, gpa, arena, root, "out", case.profile);
+        defer gpa.free(scanned);
+        try std.testing.expect(scanned.len > 0);
+
+        // Every path the profile scans lands in one of that profile's packs.
+        for (scanned) |path| {
+            const pack = try packNameForPath(arena, path);
+            var matched = false;
+            for (case.packs) |expected| {
+                if (std.mem.eql(u8, pack, expected)) matched = true;
+            }
+            if (!matched) {
+                std.debug.print(
+                    "profile {s}: path '{s}' landed in pack '{s}', outside that profile's packs\n",
+                    .{ profileName(case.profile), path, pack },
+                );
+                return error.PackOutsideProfileScope;
+            }
+        }
+
+        // ...and nothing else does, so the union is exact rather than merely
+        // covering. Checked against the full scan.
+        const all = try collectSourcePaths(io, gpa, arena, root, "out", .all);
+        defer gpa.free(all);
+        var in_packs: usize = 0;
+        for (all) |path| {
+            const pack = try packNameForPath(arena, path);
+            for (case.packs) |expected| {
+                if (std.mem.eql(u8, pack, expected)) in_packs += 1;
+            }
+        }
+        try std.testing.expectEqual(scanned.len, in_packs);
+    }
+}
+
+test "parseOptions: pack-by" {
+    const d = try parseOptions(&.{"boris-source-rag"});
+    try std.testing.expectEqual(PackBy.none, d.pack_by);
+
+    const a = try parseOptions(&.{ "boris-source-rag", "--pack-by=tool" });
+    try std.testing.expectEqual(PackBy.tool, a.pack_by);
+
+    const b = try parseOptions(&.{ "boris-source-rag", "--pack-by", "none" });
+    try std.testing.expectEqual(PackBy.none, b.pack_by);
+
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--pack-by=bogus" }));
+    try std.testing.expectError(error.MissingValue, parseOptions(&.{ "x", "--pack-by=" }));
+    try std.testing.expectEqualStrings("tool", packByName(.tool));
+    try std.testing.expectEqualStrings("none", packByName(.none));
+}
+
+test "pack-by=tool discovers a tool pack with no code change" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/pack-discover-root", .{tmp.sub_path});
+    defer gpa.free(root_rel);
+    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/pack-discover-out", .{tmp.sub_path});
+    defer gpa.free(out_rel);
+
+    // `never-seen-tool` appears nowhere in this source file.
+    try writePackByToolFixture(io, gpa, root_rel, "never-seen-tool");
+    const stats = try exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out_rel,
+        .quiet = true,
+        .pack_by = .tool,
+    });
+
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{ .iterate = true });
+    defer out.close(io);
+
+    try std.testing.expect(pathExists(io, out, "packs/tools-never-seen-tool/INDEX.md"));
+    try std.testing.expect(pathExists(io, out, "packs/tools-never-seen-tool/files/tools/never-seen-tool/main.zig.md"));
+    try std.testing.expect(pathExists(io, out, "packs/tools-alpha-tool/INDEX.md"));
+    try std.testing.expect(pathExists(io, out, "packs/tools-beta-tool/INDEX.md"));
+    try std.testing.expect(pathExists(io, out, "packs/core/files/src/hello.zig.md"));
+    try std.testing.expect(pathExists(io, out, "packs/docs/files/docs/contract.md"));
+    // content ships inside the docs pack, matching the `.docs` profile scope.
+    try std.testing.expect(pathExists(io, out, "packs/docs/files/content/index.md"));
+
+    // The router names the discovered pack.
+    const router = try readFileAlloc(io, out, "INDEX.md", gpa);
+    defer gpa.free(router);
+    try std.testing.expect(std.mem.indexOf(u8, router, "packs/tools-never-seen-tool/") != null);
+
+    const manifest = try readFileAlloc(io, out, "pack_manifest.json", gpa);
+    defer gpa.free(manifest);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"name\":\"tools-never-seen-tool\"") != null);
+
+    // 8 fixture files: README, build.zig, src, docs, content, three tool mains.
+    try std.testing.expectEqual(@as(usize, 8), stats.source_files);
+}
+
+test "pack-by=none emits the historical flat tree and no pack artifacts" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/pack-flat-root", .{tmp.sub_path});
+    defer gpa.free(root_rel);
+    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/pack-flat-out", .{tmp.sub_path});
+    defer gpa.free(out_rel);
+
+    try writePackByToolFixture(io, gpa, root_rel, null);
+    const flat = try exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out_rel,
+        .quiet = true,
+    });
+
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{ .iterate = true });
+    defer out.close(io);
+    try std.testing.expect(pathExists(io, out, "files/src/hello.zig.md"));
+    try std.testing.expect(pathExists(io, out, "INDEX.md"));
+    try std.testing.expect(pathExists(io, out, "catalog.jsonl"));
+    // Default output gains nothing from this feature.
+    try std.testing.expect(!pathExists(io, out, "packs"));
+    try std.testing.expect(!pathExists(io, out, "pack_manifest.json"));
+
+    // The same scan split into packs covers exactly the same files.
+    const out2_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/pack-flat-out2", .{tmp.sub_path});
+    defer gpa.free(out2_rel);
+    const packed_stats = try exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out2_rel,
+        .quiet = true,
+        .pack_by = .tool,
+    });
+    try std.testing.expectEqual(flat.source_files, packed_stats.source_files);
+    try std.testing.expectEqual(flat.bytes, packed_stats.bytes);
+}
+
+test "each pack carries its own manifests and composes with split-size and bundles-only" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/pack-manifest-root", .{tmp.sub_path});
+    defer gpa.free(root_rel);
+    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/pack-manifest-out", .{tmp.sub_path});
+    defer gpa.free(out_rel);
+
+    try writePackByToolFixture(io, gpa, root_rel, null);
+    _ = try exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out_rel,
+        .quiet = true,
+        .pack_by = .tool,
+        .bundles_only = true,
+        .split_size = 8,
+    });
+
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{ .iterate = true });
+    defer out.close(io);
+
+    const pack_names = [_][]const u8{ "core", "docs", "tools-alpha-tool", "tools-beta-tool" };
+    for (pack_names) |name| {
+        const sidecars = [_][]const u8{ "INDEX.md", "UPLOAD-GUIDE.md", "catalog.jsonl", "catalog_meta.json", "profile_manifest.json", "part_manifest.json", "upload_manifest.json" };
+        for (sidecars) |sidecar| {
+            const rel = try std.fmt.allocPrint(gpa, "packs/{s}/{s}", .{ name, sidecar });
+            defer gpa.free(rel);
+            try std.testing.expect(pathExists(io, out, rel));
+        }
+        // bundles-only composes per pack: no files/ tree inside any pack.
+        const files_rel = try std.fmt.allocPrint(gpa, "packs/{s}/files", .{name});
+        defer gpa.free(files_rel);
+        try std.testing.expect(!pathExists(io, out, files_rel));
+    }
+
+    // split-size composes per pack: core holds two sources over an 8-byte
+    // target, so its bundle is split rather than emitted whole.
+    try std.testing.expect(pathExists(io, out, "packs/core/boris-source-2.md"));
+}
+
+test "generated router artifacts name no vendor or product" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/pack-neutral-root", .{tmp.sub_path});
+    defer gpa.free(root_rel);
+    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/pack-neutral-out", .{tmp.sub_path});
+    defer gpa.free(out_rel);
+
+    try writePackByToolFixture(io, gpa, root_rel, null);
+    _ = try exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out_rel,
+        .quiet = true,
+        .pack_by = .tool,
+    });
+
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{ .iterate = true });
+    defer out.close(io);
+
+    // Scoped to tool-authored prose. Packed source legitimately names the
+    // systems it migrates from, so the whole corpus cannot be asserted on.
+    const authored = [_][]const u8{ "INDEX.md", "pack_manifest.json", "packs/core/UPLOAD-GUIDE.md", "packs/core/INDEX.md" };
+    const vendors = [_][]const u8{ "ChatGPT", "OpenAI", "GPT-4", "Claude", "Anthropic", "Gemini", "Copilot", "Notebook LM", "NotebookLM" };
+    for (authored) |rel| {
+        const body = try readFileAlloc(io, out, rel, gpa);
+        defer gpa.free(body);
+        for (vendors) |vendor| {
+            if (std.mem.indexOf(u8, body, vendor) != null) {
+                std.debug.print("vendor string '{s}' leaked into generated {s}\n", .{ vendor, rel });
+                return error.VendorNameInGeneratedArtifact;
+            }
+        }
+    }
+
+    // Any token figure is labelled as an approximation with its method recorded.
+    const manifest = try readFileAlloc(io, out, "pack_manifest.json", gpa);
+    defer gpa.free(manifest);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"tokens_approx\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"token_estimate_method\":\"bytes/4\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, manifest, "\"bytes\":") != null);
+}
+
+test "a pack that disappears is not stranded in the published output" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/pack-stale-root", .{tmp.sub_path});
+    defer gpa.free(root_rel);
+    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/pack-stale-out", .{tmp.sub_path});
+    defer gpa.free(out_rel);
+
+    try writePackByToolFixture(io, gpa, root_rel, "temporary-tool");
+    _ = try exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out_rel,
+        .quiet = true,
+        .pack_by = .tool,
+    });
+    {
+        var out = try Io.Dir.cwd().openDir(io, out_rel, .{ .iterate = true });
+        defer out.close(io);
+        try std.testing.expect(pathExists(io, out, "packs/tools-temporary-tool/INDEX.md"));
+    }
+
+    // Drop the tool from the repo and re-export into the same output root.
+    const tool_rel = try std.fmt.allocPrint(gpa, "{s}/tools/temporary-tool", .{root_rel});
+    defer gpa.free(tool_rel);
+    try Io.Dir.cwd().deleteTree(io, tool_rel);
+
+    _ = try exportCorpus(io, gpa, .{
+        .root_dir = root_rel,
+        .out_dir = out_rel,
+        .quiet = true,
+        .pack_by = .tool,
+    });
+
+    var out = try Io.Dir.cwd().openDir(io, out_rel, .{ .iterate = true });
+    defer out.close(io);
+    try std.testing.expect(!pathExists(io, out, "packs/tools-temporary-tool"));
+    try std.testing.expect(pathExists(io, out, "packs/tools-alpha-tool/INDEX.md"));
 }
 
 test "approxTokensFromBytes uses floor chars/4" {

@@ -11,6 +11,24 @@ selection.
 The v0.8.0 compiler emits this unchanged dependency shape with
 `schemaVersion: "0.2.0"` and compiler id `boris/0.8.0`.
 
+### Machine-readable schemas
+
+This document is **normative**. For consumers that would otherwise hand-roll a
+parser from prose, the same shapes are published as JSON Schema (draft 2020-12):
+
+| Artifact | Schema |
+|----------|--------|
+| `manifest.json` | [`schemas/ir-manifest-0.2.0.schema.json`](schemas/ir-manifest-0.2.0.schema.json) |
+| `graph.json` | [`schemas/ir-graph-0.2.0.schema.json`](schemas/ir-graph-0.2.0.schema.json) |
+| `build-report.json` | [`schemas/ir-build-report-0.2.0.schema.json`](schemas/ir-build-report-0.2.0.schema.json) |
+
+Where the two disagree, this document wins and the schema is a bug. They are
+kept honest mechanically: `zig build test-ir-schema` validates freshly emitted
+IR against each schema and fails on drift in either direction — a required
+property the emitter dropped, or a property the emitter added that the schema
+does not describe. Key order is required by the determinism contract but cannot
+be expressed in JSON Schema, so it remains prose-only here.
+
 ---
 
 ## Artifacts

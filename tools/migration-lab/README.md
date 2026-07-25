@@ -40,6 +40,11 @@ coupling**. All code and fixtures live under `tools/migration-lab/`.
 
 Companion author guide: [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
 
+Future Facebook, Instagram, and Google Takeout dogfooding starts with the
+provider-neutral [takeout intake contract](../../docs/contracts/takeout-lab-intake.md)
+and its synthetic fixture lane under `fixtures/takeout-intake/`. This is an
+intake convention, not another migration mode or a claim of provider support.
+
 ---
 
 ## Quick start
@@ -788,6 +793,21 @@ media_manifest.json            # clean provenance for a later enrichment pass (n
 Each page uses **closed Boris frontmatter only**: `id`, `title`, `parent`,
 `status`, `tags`. Caption bytes, timestamp, source JSON/HTML path, media URIs,
 theme asset paths, and conversion notes live in the body + provenance comment.
+JSON captions using Meta's escaped Latin-1/UTF-8 form are repaired only when
+the resulting bytes validate as UTF-8; repaired pages are marked
+`meta-latin1-repaired` in provenance and classified as `transformed`. Ordinary
+UTF-8 captions remain unchanged. A caption that still carries a mojibake
+signature after the attempt — mixed escaped and genuine Unicode, or text encoded
+more than once — is marked `suspected-mojibake-unrepaired` and classed
+`human_review`; the lab never reports such a caption as clean `utf-8`.
+
+The dump is untrusted input. Media URIs that would escape the dump on read or
+the output root on write — a `..` component, an absolute path, a Windows
+separator, or a drive prefix — are rejected before any filesystem access, class
+the record `human_review`, and appear in the report as
+`unsafe media uri rejected`. Caption bytes are preserved verbatim inside a fence
+sized to outrank the longest backtick run in the caption itself, so caption text
+cannot escape into live Markdown. See `fixtures/hostile-instagram/`.
 
 | Class | Typical cause |
 |-------|----------------|

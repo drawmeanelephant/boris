@@ -57,6 +57,12 @@ pub const Options = struct {
     rag_dir: ?[]const u8 = null,
     /// Context bundle directory. Set for context mode only (default `context`).
     context_dir: ?[]const u8 = null,
+    /// Optional entity or collection-prefix projection for RAG/context.
+    scope: ?[]const u8 = null,
+    /// Optional byte cap for deterministic RAG/context bundle parts.
+    split_size: ?usize = null,
+    /// Product RAG: emit upload-ready parts without per-page files.
+    bundles_only: bool = false,
     /// `llms.txt` output path (default `llms.txt`).
     llms_path: ?[]const u8 = null,
     /// HTML output directory. Set for HTML mode only (default `dist`).
@@ -117,6 +123,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var context_dir: []const u8 = default_context_dir;
     var llms_path: []const u8 = default_llms_path;
     var html_dir: []const u8 = default_html_dir;
+    var scope: ?[]const u8 = null;
+    var split_size: ?usize = null;
+    var bundles_only = false;
 
     var saw_quiet = false;
     var saw_input = false;
@@ -126,6 +135,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_rag_dir = false;
     var saw_context = false;
     var saw_context_dir = false;
+    var saw_scope = false;
+    var saw_split_size = false;
+    var saw_bundles_only = false;
     var saw_llms = false;
     var saw_llms_path = false;
     var saw_html = false;
@@ -189,6 +201,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
                 .out_dir = out_dir,
                 .rag_dir = null,
                 .context_dir = null,
+                .scope = null,
+                .split_size = null,
+                .bundles_only = false,
                 .llms_path = null,
                 .html_dir = null,
                 .targets = .{ .items = &.{}, .capacity = 0 },
@@ -217,6 +232,13 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (std.mem.eql(u8, a, "--context")) {
             if (saw_context) return error.DuplicateFlag;
             saw_context = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--bundles-only")) {
+            if (saw_bundles_only) return error.DuplicateFlag;
+            saw_bundles_only = true;
+            bundles_only = true;
             continue;
         }
 
@@ -379,6 +401,23 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        if (std.mem.eql(u8, a, "--scope") or std.mem.startsWith(u8, a, "--scope=")) {
+            if (saw_scope) return error.DuplicateFlag;
+            saw_scope = true;
+            scope = try takeValue(args, &i, a, "--scope");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--split-size") or std.mem.startsWith(u8, a, "--split-size=")) {
+            if (saw_split_size) return error.DuplicateFlag;
+            saw_split_size = true;
+            const raw = try takeValue(args, &i, a, "--split-size");
+            const parsed = std.fmt.parseInt(usize, raw, 10) catch return error.InvalidValue;
+            if (parsed == 0) return error.InvalidValue;
+            split_size = parsed;
+            continue;
+        }
+
         if (std.mem.eql(u8, a, "--llms-path") or std.mem.startsWith(u8, a, "--llms-path=")) {
             if (saw_llms_path) return error.DuplicateFlag;
             saw_llms_path = true;
@@ -462,6 +501,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     // Explicit --out must never be combined with RAG-only selection.
     if (saw_out and wants_rag) return error.ConflictingFlags;
     if (wants_context and (wants_rag or wants_ir)) return error.ConflictingFlags;
+    if ((saw_scope or saw_split_size) and !(wants_rag or wants_context)) return error.ConflictingFlags;
+    if (bundles_only and !wants_rag) return error.ConflictingFlags;
     if (wants_llms and (wants_rag or wants_ir or wants_context or explicit_html)) return error.ConflictingFlags;
     // Explicit HTML selectors own the output destination; refuse IR/RAG flags.
     if (explicit_html and (wants_rag or wants_context or saw_out)) {
@@ -577,6 +618,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .input_dir = input_dir,
             .out_dir = out_dir,
             .rag_dir = null,
+            .scope = null,
+            .split_size = null,
+            .bundles_only = false,
             .llms_path = null,
             .html_dir = null,
             .targets = targets,
@@ -594,6 +638,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .out_dir = null,
             .rag_dir = rag_dir,
             .context_dir = null,
+            .scope = scope,
+            .split_size = split_size,
+            .bundles_only = bundles_only,
             .llms_path = null,
             .html_dir = null,
             .targets = targets,
@@ -607,6 +654,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .out_dir = null,
             .rag_dir = null,
             .context_dir = context_dir,
+            .scope = scope,
+            .split_size = split_size,
+            .bundles_only = false,
             .llms_path = null,
             .html_dir = null,
             .targets = targets,
@@ -624,6 +674,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .out_dir = null,
             .rag_dir = null,
             .context_dir = null,
+            .scope = null,
+            .split_size = null,
+            .bundles_only = false,
             .llms_path = llms_path,
             .targets = targets,
             .command = command,
@@ -640,6 +693,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .out_dir = null,
             .rag_dir = null,
             .context_dir = null,
+            .scope = null,
+            .split_size = null,
+            .bundles_only = false,
             .llms_path = null,
             .html_dir = if (has_explicit_targets) null else html_dir,
             .html_layout = html_layout,
@@ -698,6 +754,9 @@ pub fn printUsage() void {
         \\  --rag-dir <DIR>     RAG-only mode with output directory DIR
         \\  --context           Context-only mode → bundle under --context-dir (default context)
         \\  --context-dir DIR   Context-only mode with output directory DIR
+        \\  --scope VALUE       RAG/context entity id or collection prefix
+        \\  --split-size BYTES  RAG/context deterministic bundle byte cap
+        \\  --bundles-only      RAG upload parts only; omit per-page files
         \\  --llms              Deterministic llms.txt export → llms.txt
         \\  --llms-path PATH    llms.txt export path (implies --llms)
         \\
@@ -732,9 +791,11 @@ pub fn printUsage() void {
         \\RAG artifacts (success; same graph validation as IR):
         \\  INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json
         \\  system/**  content/pages/**  graph/entity-catalog.md  graph/relations.md
+        \\  parts/part-N.md + part_manifest.json (with --split-size / --bundles-only)
         \\
         \\Context artifacts (success; same graph validation as IR/RAG):
         \\  bundle.md  manifest.json  graph.json  pages/<entity-id>.md
+        \\  parts/part-N.md (with --split-size)
         \\
         \\Conflicts (exit 2):
         \\  --rag with --no-rag
@@ -960,6 +1021,30 @@ test "parse: --out selects IR mode" {
     try expectEqualStrings(".boris", o.out_dir.?);
     try expect(o.html_dir == null);
     try expect(o.rag_dir == null);
+}
+
+test "parse: scoped and segmented exports stay on RAG/context surfaces" {
+    var rag = try parseOptions(std.testing.allocator, &.{
+        "boris", "--rag-dir", "uploads/rag", "--scope", "mascots", "--split-size", "262144", "--bundles-only",
+    });
+    defer rag.deinit(std.testing.allocator);
+    try expectEqual(Mode.rag, rag.mode);
+    try expectEqualStrings("mascots", rag.scope.?);
+    try expectEqual(@as(usize, 262144), rag.split_size.?);
+    try expect(rag.bundles_only);
+
+    var context = try parseOptions(std.testing.allocator, &.{
+        "boris", "--context-dir", "uploads/context", "--scope", "mascots/genny", "--split-size=131072",
+    });
+    defer context.deinit(std.testing.allocator);
+    try expectEqual(Mode.context, context.mode);
+    try expectEqualStrings("mascots/genny", context.scope.?);
+    try expectEqual(@as(usize, 131072), context.split_size.?);
+    try expect(!context.bundles_only);
+
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--rag", "--split-size", "0" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--scope", "mascots" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--context", "--bundles-only" }));
 }
 
 test "parse: valid modes table" {

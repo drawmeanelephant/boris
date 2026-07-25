@@ -1,0 +1,18 @@
+[
+  {
+    "id": "post-demo-001",
+    "published_at": "2024-02-29T12:34:56Z",
+    "text": "A synthetic post about a lantern.",
+    "album_id": "album-demo-001",
+    "media_ids": ["media-demo-001"],
+    "link_ids": ["link-demo-001"]
+  },
+  {
+    "id": "post-demo-002",
+    "published_at": "2024-03-01T08:00:00Z",
+    "text": "A second synthetic post with no media.",
+    "album_id": "album-demo-001",
+    "media_ids": [],
+    "link_ids": ["link-demo-002"]
+  }
+]

@@ -20,7 +20,7 @@ tested** behavior from **platform-qualified** publication notes.
 |----------|--------------|
 | Layout load + closed plan (`{{content}}` + optional slots / `asset-url`) | Process-RSS guarantees |
 | Whiteboard per-page arena lifecycle | Generic component HTML / MDX |
-| Ordered body stream: Apex(markdown) + Aside HTML | Mega-string assembly |
+| Ordered body stream: pre-Apex link/image rewrites + Apex(markdown) + Aside HTML | Mega-string assembly |
 | Three-write layout splice | Cross-volume atomic rename claims |
 | Temp-file publish via Zig 0.16 Atomic API | Full YAML frontmatter / MDX |
 | PageDb durable metadata only | Multi-OS CI atomicity matrix for every FS |

@@ -1,7 +1,7 @@
 # Apex Unified compatibility audit report
 
-**Date:** 2026-07-15  
-**Branch:** `grok/apex-feature-matrix`  
+**Date:** 2026-07-21
+**Branch:** `afterparty`
 **Base:** fresh `origin/main`  
 **Scope:** Read-only compatibility matrix for ApexMarkdown Unified features
 documented in `vendor/apex-markdown/pages/index.md`, exercised **through Boris**

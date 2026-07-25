@@ -7,6 +7,7 @@ Synthetic **Instagram data-download** (Takeout-style) tree for
 mini-instagram/
   your_instagram_activity/content/
     posts_1.json      # posts: simple, carousel, video, missing, dup basenames, unicode, empty, no-title
+    posts_2.json      # multipart export + Meta's escaped Latin-1/UTF-8 caption form
     reels.json
     stories.json
     other_content.json
@@ -28,6 +29,7 @@ mini-instagram/
 | Unicode caption | seventh |
 | Empty media / deleted-like | eighth |
 | Caption-less media | ninth |
+| Meta escaped caption | `posts_2.json` — repaired to valid UTF-8 and marked in provenance |
 | Reel | reels.json |
 | Story | stories.json |
 | Unknown other archive | other_content.json |

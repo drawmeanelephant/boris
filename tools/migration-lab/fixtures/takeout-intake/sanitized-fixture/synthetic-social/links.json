@@ -1,0 +1,14 @@
+[
+  {
+    "id": "link-demo-001",
+    "label": "Synthetic internal note",
+    "url": "notes/lantern.md",
+    "kind": "document"
+  },
+  {
+    "id": "link-demo-002",
+    "label": "Reserved example URL",
+    "url": "https://example.invalid/demo",
+    "kind": "external"
+  }
+]
