@@ -751,3 +751,78 @@ test "hardening: H-05 direct IR export safety constraints" {
     }
 }
 
+// ---------------------------------------------------------------------------
+// H-03: Prevent HTML publication from following symlinks below output root
+// ---------------------------------------------------------------------------
+
+test "hardening: H-03 prevent HTML publication from following symlinks below output root" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var work = try WorkDir.create(gpa, io, "h03-symlink-publish");
+    defer work.cleanup();
+
+    // 1. Create content directory with a page that outputs to guides/page.html
+    try work.writeFile("content/guides/page.md",
+        \\---
+        \\title: Symlink Target Page
+        \\---
+        \\
+        \\This page should fail to publish.
+        \\
+    );
+
+    // 2. Create outside directory with a sentinel file
+    const outside_dir = try work.join("outside_target");
+    defer gpa.free(outside_dir);
+    try Io.Dir.cwd().createDirPath(io, outside_dir);
+
+    const sentinel_path = try std.fmt.allocPrint(gpa, "{s}/sentinel.txt", .{outside_dir});
+    defer gpa.free(sentinel_path);
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = sentinel_path, .data = "ORIGINAL_SENTINEL_CONTENT" });
+
+    // 3. Create dist output root and dist/guides as a symlink to outside_dir
+    const dist_path = try work.join("dist");
+    defer gpa.free(dist_path);
+    try Io.Dir.cwd().createDirPath(io, dist_path);
+
+    const symlink_path = try std.fmt.allocPrint(gpa, "{s}/guides", .{dist_path});
+    defer gpa.free(symlink_path);
+
+    // Symlink creation: if unsupported / denied, explicitly skip test
+    Io.Dir.cwd().symLink(io, outside_dir, symlink_path, .{}) catch |sym_err| switch (sym_err) {
+        error.AccessDenied, error.PermissionDenied => return error.SkipZigTest,
+        else => return sym_err,
+    };
+
+    const content_dir = try work.join("content");
+    defer gpa.free(content_dir);
+
+    const layout_path = "layouts/main.html";
+
+    // 4. Attempt to run HTML site compilation, which publishes guides/page.html
+    const err = compile.compileHtmlSite(io, gpa, .{
+        .content_root = content_dir,
+        .dist_dir = dist_path,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+
+    // 5. Assert publication fails with TargetOutputSymlink
+    try std.testing.expectError(error.TargetOutputSymlink, err);
+
+    // 6. Assert the outside sentinel and directory remain unchanged
+    const sentinel_bytes = try Io.Dir.cwd().readFileAlloc(io, sentinel_path, gpa, .unlimited);
+    defer gpa.free(sentinel_bytes);
+    try std.testing.expectEqualStrings("ORIGINAL_SENTINEL_CONTENT", sentinel_bytes);
+
+    // Assert page.html was NOT written to outside_dir
+    const page_in_outside = try std.fmt.allocPrint(gpa, "{s}/page.html", .{outside_dir});
+    defer gpa.free(page_in_outside);
+    var f = Io.Dir.cwd().openFile(io, page_in_outside, .{});
+    if (f) |*file| {
+        file.close(io);
+        return error.TestUnexpectedResult;
+    } else |_| {}
+}
+
+
