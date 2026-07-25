@@ -115,6 +115,7 @@ pub const default_scan_dirs = [_][]const u8{
     "scripts",
     "tools",
     "test",
+    "fixtures",
     "SUPPORT",
 };
 
@@ -168,7 +169,7 @@ fn scanDirsForProfile(profile: Profile) []const []const u8 {
         .all => &default_scan_dirs,
         .core => &[_][]const u8{ "src", "layouts" },
         .docs => &[_][]const u8{ "docs", "content" },
-        .tools => &[_][]const u8{ "scripts", "tools", "test", "SUPPORT" },
+        .tools => &[_][]const u8{ "scripts", "tools", "test", "fixtures", "SUPPORT" },
     };
 }
 
@@ -2248,8 +2249,14 @@ test "profiles keep their documented scopes" {
     try std.testing.expectEqualStrings("layouts", scanDirsForProfile(.core)[1]);
     try std.testing.expectEqualStrings("docs", scanDirsForProfile(.docs)[0]);
     try std.testing.expectEqualStrings("content", scanDirsForProfile(.docs)[1]);
+    // Full contents, not a spot check: this list gates what reaches the corpus,
+    // so a silent addition or reordering should fail loudly here.
+    try std.testing.expectEqual(@as(usize, 5), scanDirsForProfile(.tools).len);
     try std.testing.expectEqualStrings("scripts", scanDirsForProfile(.tools)[0]);
-    try std.testing.expectEqualStrings("SUPPORT", scanDirsForProfile(.tools)[3]);
+    try std.testing.expectEqualStrings("tools", scanDirsForProfile(.tools)[1]);
+    try std.testing.expectEqualStrings("test", scanDirsForProfile(.tools)[2]);
+    try std.testing.expectEqualStrings("fixtures", scanDirsForProfile(.tools)[3]);
+    try std.testing.expectEqualStrings("SUPPORT", scanDirsForProfile(.tools)[4]);
     try std.testing.expectEqual(@as(usize, default_scan_dirs.len), scanDirsForProfile(.all).len);
 }
 
