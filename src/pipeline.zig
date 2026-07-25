@@ -20,6 +20,7 @@ const identity = @import("identity.zig");
 const textile = @import("textile.zig");
 const source_io = @import("source_io.zig");
 const doclink = @import("doclink.zig");
+const target_mod = @import("target.zig");
 
 pub const schema_version = "0.2.0";
 pub const compiler_id = "boris/0.8.0";
@@ -623,8 +624,12 @@ pub fn renderBuildReport(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
 /// claimed. Not proven cross-platform atomic for concurrent readers. Temp
 /// staging path names never appear inside JSON.
 fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result) !void {
+    if (result.out_dir.len > 0 and result.content_root.len > 0) {
+        try target_mod.validateExportPath(io, gpa, result.content_root, result.out_dir);
+    }
     const cwd = Io.Dir.cwd();
     try cwd.createDirPath(io, result.out_dir);
+
 
     const report = try renderBuildReport(gpa, result);
     defer gpa.free(report);
@@ -972,6 +977,8 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
 /// Full IR pipeline. Validates the whole graph before publishing artifacts.
 /// Graph-dependent IR is published only when validation succeeds.
 pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
+    try target_mod.validateExportPath(io, gpa, options.content_root, options.out_dir);
+
     var result = try compile(io, gpa, .{
         .content_root = options.content_root,
         .quiet = options.quiet,
