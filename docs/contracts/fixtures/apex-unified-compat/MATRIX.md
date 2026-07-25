@@ -42,6 +42,7 @@ Class codes:
 | Image captions (alt/title → figcaption) | **1** | `<figcaption>` | fixture | Default Unified `enable_image_captions` |
 | Image IAL (width/class/style) | **4** | Works when IAL images appear **before** any plain image; **attrs dropped** for IAL images after a plain image on the same page | fixture | High-impact surprise |
 | Raw HTML | **1** | Pass-through `p`/`div`/`script` | fixture | Host `unsafe=true` (trusted authors) |
+| Raw HTML block containing a blank line | **4** | Blank line ends the HTML block; a following line indented **4+ spaces** becomes an indented code block and is escaped | probe | Keep continuation lines at **3 spaces or fewer**, or keep the HTML contiguous |
 | Autolinks (URL + email) | **1** | `<a href=https…>` / `mailto:` | fixture | Works |
 | Smart typography | **1** | Curly quotes, em/en dashes, ellipsis | fixture | Works |
 | Heading auto ids | **1** | GFM-style `id` on `h1`–`h6` | heading-ids contract + fixture | Works |
@@ -58,6 +59,25 @@ Class codes:
 | Bibliography generation | **3** | No bibliography block | fixture | Product non-goal until packaging exists |
 
 Definition-list base syntax is **1**; nested block content under a definition is **4**.
+
+Raw HTML pass-through is **1**; a raw HTML block interrupted by a blank line is **4**.
+The trigger is indentation depth, not the blank line itself — the blank line closes the
+block, and the next line is then judged on its own. Indent it 4+ spaces and it is an
+indented code block, so the markup is escaped rather than passed through:
+
+```markdown
+<div class="outer">
+  <ul>
+    <li>one</li>
+
+    <li>two</li>
+  </ul>
+</div>
+```
+
+Here the second `<li>` follows the blank line at 4 spaces, so it emits
+`<pre><code>&lt;li&gt;two&lt;/li&gt;</code></pre>` instead of a list item. Re-indenting
+that one line to 3 spaces or fewer restores pass-through; nothing else changes.
 
 ---
 
