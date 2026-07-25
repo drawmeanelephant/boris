@@ -14,6 +14,11 @@ the existing canonical output-path functions.
 This is a rendered-HTML convenience only. It does not create graph edges,
 change RAG/search data, or invent pages for missing targets.
 
+The incremental HTML cache records resolved links separately as render
+dependencies. This keeps a target page rename or output-path change from
+leaving a cached referrer with a stale `href`, without turning ordinary
+Markdown links into IR, graph, or RAG semantic edges.
+
 ## Rewrite boundary
 
 The rewriter operates on structured inline Markdown link destinations. It is

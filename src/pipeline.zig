@@ -18,6 +18,7 @@ const wikilink = @import("wikilink.zig");
 const dependency = @import("dependency.zig");
 const identity = @import("identity.zig");
 const textile = @import("textile.zig");
+const doclink = @import("doclink.zig");
 
 pub const schema_version = "0.2.0";
 pub const compiler_id = "boris/0.8.0";
@@ -321,8 +322,26 @@ const DependencyResolver = struct {
     }
 
     fn scanPage(self: *DependencyResolver, page: PageEntry, body: []const u8) !void {
+        return self.scanPageWithHtmlLinks(page, body, false);
+    }
+
+    fn scanPageWithHtmlLinks(self: *DependencyResolver, page: PageEntry, body: []const u8, include_html_links: bool) !void {
         const from: Endpoint = .{ .type = .page, .value = page.id };
         try self.scanWiki(body, page.source_path, from);
+        if (include_html_links) {
+            var references: std.ArrayList([]const u8) = .empty;
+            defer references.deinit(self.gpa);
+            const rewritten = try doclink.rewrite(self.gpa, body, .{
+                .nodes = self.nodes,
+                .source_path = page.source_path,
+                .output_path = page.id,
+                .reference_ids = &references,
+            });
+            self.gpa.free(rewritten);
+            for (references.items) |id| {
+                try self.appendEdge(from, .{ .type = .page, .value = id }, "html-link");
+            }
+        }
         var stack: std.ArrayList([]const u8) = .empty;
         defer stack.deinit(self.gpa);
         try stack.append(self.gpa, page.source_path);
@@ -433,9 +452,9 @@ pub fn populateDependencyIndexFormat(
             const adapted = try textile.toMarkdown(source[page.body_offset..], gpa);
             if (!adapted.isOk()) return error.InvalidTextile;
             defer gpa.free(adapted.markdown);
-            try resolver.scanPage(page, adapted.markdown);
+            try resolver.scanPageWithHtmlLinks(page, adapted.markdown, true);
         } else {
-            try resolver.scanPage(page, source[page.body_offset..]);
+            try resolver.scanPageWithHtmlLinks(page, source[page.body_offset..], true);
         }
         if (page.parent) |parent| {
             try resolver.appendEdge(
@@ -481,6 +500,8 @@ pub fn populateDependencyIndexFormat(
             .include
         else if (std.mem.eql(u8, edge.kind, "reference"))
             .reference
+        else if (std.mem.eql(u8, edge.kind, "html-link"))
+            .html_link
         else
             unreachable;
         try index.addDependency(edge.from.value, edge.to.value, kind);
@@ -1213,6 +1234,37 @@ test "F8 graph-native fixture matches full graph golden" {
     );
     defer gpa.free(expected);
     try std.testing.expectEqualStrings(expected, actual);
+}
+
+test "incremental dependency index records ordinary Markdown links separately" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const content = try outRel(gpa, &tmp, "content");
+    defer gpa.free(content);
+    const cwd = Io.Dir.cwd();
+    try cwd.createDirPath(io, content);
+    var dir = try cwd.openDir(io, content, .{});
+    defer dir.close(io);
+    try dir.writeFile(io, .{ .sub_path = "index.md", .data = "[Guide](guide.md)\n" });
+    try dir.writeFile(io, .{ .sub_path = "guide.md", .data = "# Guide\n" });
+
+    var index = dependency.DependencyIndex.init(gpa);
+    defer index.deinit();
+    const nodes = [_]graph_mod.Node{
+        .{ .id = "guide", .source_path = "guide.md" },
+        .{ .id = "index", .source_path = "index.md" },
+    };
+    var retain_arena = std.heap.ArenaAllocator.init(gpa);
+    defer retain_arena.deinit();
+    try populateDependencyIndex(io, gpa, retain_arena.allocator(), content, &nodes, true, &index);
+    const deps = index.forward.get("index") orelse return error.TestUnexpectedResult;
+    var found = false;
+    for (deps.items) |dep| {
+        if (dep.kind == .html_link and std.mem.eql(u8, dep.path, "guide")) found = true;
+    }
+    try std.testing.expect(found);
 }
 
 test "include and wiki failures prevent dependency graph freeze and publication" {

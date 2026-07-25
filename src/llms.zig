@@ -7,6 +7,7 @@ const std = @import("std");
 const Io = std.Io;
 const identity = @import("identity.zig");
 const pipeline = @import("pipeline.zig");
+const target_mod = @import("target.zig");
 const graph = @import("graph.zig");
 
 pub const format = "llms.txt";
@@ -66,7 +67,8 @@ fn pageTitle(page: graph.Node) []const u8 {
 fn summary(gpa: std.mem.Allocator, source: []const u8, fallback: []const u8) ![]u8 {
     const body = if (std.mem.startsWith(u8, source, "---\n"))
         if (std.mem.indexOfPos(u8, source, 4, "---\n")) |end| source[end + 4 ..] else source
-        else source;
+    else
+        source;
     var line_start: usize = 0;
     var paragraph: std.ArrayList(u8) = .empty;
     errdefer paragraph.deinit(gpa);
@@ -165,6 +167,7 @@ fn publish(io: Io, gpa: std.mem.Allocator, path: []const u8, data: []const u8) !
 
 pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !Result {
     if (std.fs.path.isAbsolute(opts.content_root) or std.fs.path.isAbsolute(opts.out_path)) return error.AbsolutePath;
+    try target_mod.validateExportPath(io, gpa, opts.content_root, opts.out_path);
     var result = Result{ .compile = try pipeline.compile(io, gpa, .{
         .content_root = opts.content_root,
         .quiet = opts.quiet,
