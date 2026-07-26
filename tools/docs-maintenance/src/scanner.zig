@@ -281,17 +281,24 @@ pub const Scanner = struct {
                     continue;
                 }
 
+                var claim_source: ?[]u8 = try self.allocator.dupe(u8, begin_path);
+                errdefer if (claim_source) |owned| self.allocator.free(owned);
+
                 try claims_in_file.append(self.allocator, .{
                     .dossier_path = dossier_path,
-                    .source_path = try self.allocator.dupe(u8, begin_path),
+                    .source_path = claim_source.?,
                     .begin_line = active_begin_line,
                     .end_line = line_num,
                     .is_valid = true,
                 });
+                claim_source = null;
 
                 // StringHashMap stores the key slice; retain an owned copy
                 // because the active marker path is freed below.
-                try distinct_claimed_sources.put(try self.allocator.dupe(u8, begin_path), {});
+                var distinct_source: ?[]u8 = try self.allocator.dupe(u8, begin_path);
+                errdefer if (distinct_source) |owned| self.allocator.free(owned);
+                try distinct_claimed_sources.put(distinct_source.?, {});
+                distinct_source = null;
             }
         }
 
@@ -309,13 +316,21 @@ pub const Scanner = struct {
 
         for (claims_in_file.items) |claim| {
             if (claim.is_valid) {
+                var claim_dossier_path: ?[]u8 = try self.allocator.dupe(u8, claim.dossier_path);
+                errdefer if (claim_dossier_path) |owned| self.allocator.free(owned);
+
+                var claim_source_path: ?[]u8 = try self.allocator.dupe(u8, claim.source_path);
+                errdefer if (claim_source_path) |owned| self.allocator.free(owned);
+
                 try self.claims.append(self.allocator, .{
-                    .dossier_path = try self.allocator.dupe(u8, claim.dossier_path),
-                    .source_path = try self.allocator.dupe(u8, claim.source_path),
+                    .dossier_path = claim_dossier_path.?,
+                    .source_path = claim_source_path.?,
                     .begin_line = claim.begin_line,
                     .end_line = claim.end_line,
                     .is_valid = true,
                 });
+                claim_dossier_path = null;
+                claim_source_path = null;
             }
         }
 
@@ -545,4 +560,28 @@ fn diagnosticLessThan(_: void, lhs: model.Diagnostic, rhs: model.Diagnostic) boo
 
 fn stringLessThan(_: void, lhs: []const u8, rhs: []const u8) bool {
     return std.mem.order(u8, lhs, rhs) == .lt;
+}
+
+fn dossierMarkerAllocationFailureCase(allocator: std.mem.Allocator) !void {
+    var sc = Scanner.init(allocator, .{
+        .repo_root = ".",
+        .source_root = "src",
+        .dossier_root = "docs/boris/src",
+    });
+    defer sc.deinit();
+
+    _ = try sc.parseDossierMarkers(
+        "docs/boris/src/alpha/surface.md",
+        "<!-- BORIS-SOURCE-DOC BEGIN path=\"src/alpha.zig\" -->\n" ++
+            "Alpha module documentation details.\n" ++
+            "<!-- BORIS-SOURCE-DOC END path=\"src/alpha.zig\" -->\n",
+    );
+}
+
+test "dossier marker ownership survives allocation failures" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        dossierMarkerAllocationFailureCase,
+        .{},
+    );
 }

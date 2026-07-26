@@ -36,30 +36,35 @@ test "valid repo scan & relationships" {
         try std.testing.expect(std.mem.order(u8, rec.path, next_rec.path) == .lt);
     }
 
-    // Verification 2: Check alpha.zig has its dossier and beta.zig is the
-    // only source without one. This catches claim-path lifetime regressions.
-    var has_alpha_claim = false;
-    var has_beta_no_dossier = false;
-    var has_alpha_no_dossier = false;
-    var has_alpha_dossier_without_source = false;
-    for (inv.relationships) |rel| {
-        if (rel.kind == .source_without_dossier and std.mem.eql(u8, rel.source_path, "src/beta.zig")) {
-            has_beta_no_dossier = true;
+    // Verification 2: Prove Alpha and its marked dossier are present, and
+    // Beta is the sole undocumented source. This catches claim-path lifetime
+    // regressions without relying only on the absence of error relationships.
+    var alpha_source_count: usize = 0;
+    var alpha_dossier_count: usize = 0;
+    var undocumented_sources: usize = 0;
+    for (inv.records) |rec| {
+        if (rec.kind == .zig_source and std.mem.eql(u8, rec.path, "src/alpha.zig")) {
+            alpha_source_count += 1;
         }
-        if (rel.kind == .source_without_dossier and std.mem.eql(u8, rel.source_path, "src/alpha.zig")) {
-            has_alpha_no_dossier = true;
-        }
-        if (rel.kind == .dossier_without_source and std.mem.eql(u8, rel.source_path, "src/alpha.zig")) {
-            has_alpha_dossier_without_source = true;
-        }
-        if (rel.kind == .duplicate_dossier_claim and std.mem.eql(u8, rel.source_path, "src/alpha.zig")) {
-            has_alpha_claim = true;
+        if (rec.kind == .source_dossier and
+            rec.has_dossier_marker and
+            std.mem.eql(u8, rec.path, "docs/boris/src/alpha/surface.md"))
+        {
+            alpha_dossier_count += 1;
         }
     }
-    try std.testing.expect(has_beta_no_dossier);
-    try std.testing.expect(!has_alpha_no_dossier);
-    try std.testing.expect(!has_alpha_dossier_without_source);
-    try std.testing.expect(!has_alpha_claim);
+
+    for (inv.relationships) |rel| {
+        if (rel.kind == .source_without_dossier and std.mem.eql(u8, rel.source_path, "src/beta.zig")) {
+            undocumented_sources += 1;
+            continue;
+        }
+        try std.testing.expect(!(std.mem.eql(u8, rel.source_path, "src/alpha.zig")));
+    }
+    try std.testing.expectEqual(@as(usize, 1), alpha_source_count);
+    try std.testing.expectEqual(@as(usize, 1), alpha_dossier_count);
+    try std.testing.expectEqual(@as(usize, 1), undocumented_sources);
+    try std.testing.expectEqualStrings("src/beta.zig", inv.relationships[0].source_path);
 
     // Verification 3: SHA-256 evidence set digest is 64 hex chars
     try std.testing.expectEqual(@as(usize, 64), inv.evidence_set_sha256.len);
