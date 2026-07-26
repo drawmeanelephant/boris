@@ -19,14 +19,15 @@ release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
   `v0.8.0` tag/metadata discrepancy. The tag currently resolves to a commit
   carrying 0.7.0 metadata and is not an ancestor of `afterparty`; no agent has
   moved it.
-- The current afterparty merge set is PRs **#228–#236**: generated-output
+- The current afterparty merge set is PRs **#228–#238**: generated-output
   hygiene, docs-maintenance hardening, default-site layout polish, rendered
-  search foundation and CLI hardening, standalone-tool CI, nested hierarchy,
-  and human-first documentation IA.
-- Search is a **standalone rendered-HTML indexer** today. Its normative
+  search foundation, CLI hardening, browser UI, and staged publication,
+  standalone-tool CI, nested hierarchy, human-first documentation IA, and the
+  status/relationship/archive audit work in PR #238.
+- Rendered-site search is **shipped on `afterparty`**: the compiler produces the
+  search artifact from its staged live-page overlay and the default layout has
+  a small browser UI with a no-JavaScript navigation fallback. Its normative
   artifact surface is [`rendered-search.md`](contracts/rendered-search.md).
-  Browser UI and compiler-stage publication must be described as complete only
-  when their code and tests land on the integration line.
 
 ## What works
 
@@ -38,7 +39,7 @@ release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | HTML navigation and layouts | **Done** — graph-backed nav, breadcrumbs, TOC, closed layout slots, assets, layout rules, incremental/watch/jobs, and isolated targets. |
 | Machine outputs | **Done** — IR 0.2, RAG, Context Bundles, and `llms.txt`; semantic relations retain their documented conditional IR 0.3 artifacts. |
 | Migration laboratories | **Done as bounded developer tools** — read-only review, conversion aids, relationship candidates, and theme materialization; they do not widen Boris author grammar. |
-| Rendered-site search | **Done as a standalone tool** — deterministic final-HTML extraction under `tools/search-index`; no compiler-owned publication claim yet. |
+| Rendered-site search | **Done on `afterparty`** — deterministic staged compiler publication, standalone CLI, browser UI, zero-results state, and no-JavaScript navigation fallback. |
 | Archive-layout audit fixture | **Ready to land** — deterministic fixture and black-box audit are on the current topic branch; manual visual/keyboard review remains required. |
 | Relationship slug-object hardening | **Ready to land** — fail-closed `{ slug: "…" }` extraction coverage is on the current topic branch; inventory and resolution remain separate work. |
 

@@ -1,8 +1,8 @@
 # Rendered-site search artifacts
 
-**Status:** normative v1 contract for the standalone rendered-output producer.
-The browser UI and compiler publication are follow-up seams; neither is a
-second producer or a reason to widen this format.
+**Status:** normative v1 contract for the shared rendered-output producer,
+compiler publication, standalone CLI, and browser consumer. Neither consumer
+is a second producer or a reason to widen this format.
 
 ## Source and ownership
 
@@ -10,12 +10,10 @@ The producer consumes the exact final HTML pages under one rendered output
 root. It never reads Markdown, PageDb, IR, or RAG. The shared implementation is
 `src/search_index.zig`; `tools/search-index` is its standalone CLI wrapper.
 
-The eventual compiler integration must pass the staged live-page overlay to
-that same producer. It must not reconstruct this JSON or extract from source
-content. The component that publishes a target owns stale-file cleanup: before
-the target is committed, it must remove an old `_boris/search/search-index.json`
-when the current build has no search artifact. The producer itself only writes
-the requested file and does not sweep unrelated files.
+The compiler passes its staged live-page overlay to that same producer; it does
+not reconstruct this JSON or extract from source content. The target publisher
+owns stale-file cleanup as part of the staged target commit. The producer writes
+only the requested artifact and does not sweep unrelated files.
 
 ## Published files
 
@@ -173,6 +171,7 @@ cmp docs/contracts/fixtures/rendered-search/expected/search-index.json \
   /tmp/boris-rendered-search-contract/search-index.json
 ```
 
-The compiler integration and browser UI verification remain unresolved seams
-until those follow-up cards exist; this contract deliberately records the
-shared-producer requirement for both.
+Compiler integration is covered by `src/compile.zig` tests for the staged
+overlay, stale-page removal, and an empty site. The default browser UI validates
+the v1 root marker and fields before rendering text-only result links; its
+no-JavaScript fallback remains ordinary documentation navigation.
