@@ -5,28 +5,63 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{title}} · Boris</title>
   <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    :root {
+      color-scheme: light dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --page-width: 78rem;
+      --reading-width: 52rem;
+      --line: color-mix(in srgb, CanvasText 16%, transparent);
+      --soft: color-mix(in srgb, Canvas 94%, CanvasText 6%);
+      --accent: #4f7cff;
+    }
     body {
-      max-width: 56rem;
+      max-width: var(--page-width);
       margin: 0 auto;
-      padding: 1.5rem 1rem 3rem;
-      line-height: 1.55;
-      display: grid;
-      gap: 1.5rem;
+      padding: 1.5rem 1.25rem 4rem;
+      line-height: 1.65;
+      background: Canvas;
+      color: CanvasText;
     }
     @media (min-width: 48rem) {
       body {
-        grid-template-columns: 14rem minmax(0, 1fr);
+        display: grid;
+        grid-template-columns: 15rem minmax(0, 1fr);
+        grid-template-areas:
+          "nav breadcrumb"
+          "nav toc"
+          "nav main"
+          "nav footer";
+        grid-template-rows: auto auto 1fr auto;
+        column-gap: 2.5rem;
+        row-gap: 0.85rem;
         align-items: start;
       }
-      .site-nav { grid-column: 1; grid-row: 1 / span 2; }
-      .breadcrumb { grid-column: 2; }
-      main { grid-column: 2; }
+      .site-nav { grid-area: nav; }
+      .breadcrumb { grid-area: breadcrumb; }
+      .page-toc { grid-area: toc; }
+      main { grid-area: main; }
+      .site-footer { grid-area: footer; }
     }
     .site-nav {
       font-size: 0.9rem;
       position: sticky;
       top: 1rem;
+      max-height: calc(100vh - 2rem);
+      overflow: auto;
+      padding: 1rem 0.85rem;
+      border: 1px solid var(--line);
+      border-radius: 0.9rem;
+      background: var(--soft);
+      scrollbar-width: thin;
+    }
+    .site-nav::before {
+      content: "BORIS / DOCUMENTATION";
+      display: block;
+      margin: 0 0 0.85rem;
+      color: color-mix(in srgb, CanvasText 62%, transparent);
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
     }
     .site-nav ul {
       list-style: none;
@@ -35,13 +70,26 @@
     }
     .site-nav > ul > li { margin: 0.35rem 0; }
     .site-nav ul ul {
-      margin: 0.25rem 0 0.5rem 0.75rem;
-      padding-left: 0.5rem;
+      margin: 0.25rem 0 0.5rem 0.25rem;
+      padding-left: 0.7rem;
       border-left: 2px solid color-mix(in srgb, CanvasText 15%, transparent);
     }
-    .site-nav a { text-decoration: none; color: inherit; }
-    .site-nav a:hover { text-decoration: underline; }
-    .site-nav .is-current > a { font-weight: 700; }
+    .site-nav a {
+      display: block;
+      padding: 0.18rem 0.35rem;
+      border-radius: 0.35rem;
+      text-decoration: none;
+      color: inherit;
+    }
+    .site-nav a:hover {
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      text-decoration: none;
+    }
+    .site-nav .is-current > a {
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+      box-shadow: inset 3px 0 var(--accent);
+      font-weight: 750;
+    }
     .breadcrumb ol {
       list-style: none;
       margin: 0;
@@ -58,6 +106,28 @@
       opacity: 0.5;
     }
     .breadcrumb a { color: inherit; }
+    main {
+      width: 100%;
+      max-width: var(--reading-width);
+      box-sizing: border-box;
+      padding: clamp(1.35rem, 3vw, 2.5rem);
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      background: var(--soft);
+      box-shadow: 0 1rem 3rem color-mix(in srgb, CanvasText 5%, transparent);
+    }
+    main h1,
+    main h2,
+    main h3 { line-height: 1.2; letter-spacing: -0.02em; }
+    main h1 { margin-top: 0; font-size: clamp(2rem, 5vw, 3.25rem); }
+    main h2 { margin-top: 2.25rem; }
+    main a { color: color-mix(in srgb, var(--accent) 82%, CanvasText); }
+    main img { max-width: 100%; height: auto; }
+    main table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+    main th, main td { min-width: 9rem; padding: 0.65rem 0.8rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    main th { background: color-mix(in srgb, CanvasText 7%, transparent); }
+    main pre { overflow-x: auto; padding: 1rem; border-radius: 0.65rem; background: color-mix(in srgb, CanvasText 9%, Canvas); }
+    main code { font-size: 0.92em; }
     .admonition {
       margin: 1.25rem 0;
       padding: 0.75rem 1rem;
@@ -107,8 +177,19 @@
     .page-toc__l3 { padding-left: 1.5rem; }
     .page-toc a { color: inherit; text-decoration: none; }
     .page-toc a:hover { text-decoration: underline; }
+    .site-footer {
+      max-width: var(--reading-width);
+      padding: 1rem 0;
+      color: color-mix(in srgb, CanvasText 62%, transparent);
+      font-size: 0.8rem;
+    }
     @media (min-width: 48rem) {
-      .page-toc { grid-column: 2; }
+      .page-toc { max-width: var(--reading-width); }
+    }
+    @media (max-width: 47.99rem) {
+      .site-nav { max-height: 18rem; margin-bottom: 1rem; }
+      .breadcrumb { margin-bottom: 0.85rem; }
+      main { margin-top: 0.85rem; }
     }
   </style>
 </head>
@@ -119,5 +200,6 @@
 <main>
 {{content}}
 </main>
+<footer class="site-footer">Boris · deterministic documentation compiler · Load → Roll → Ignite → Reset</footer>
 </body>
 </html>
