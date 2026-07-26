@@ -7,6 +7,8 @@
 **Product metadata:** `v0.8.0` / `boris/0.8.0`; base IR `schemaVersion` **`0.2.0`**.
 **Phase:** post-v0.8 integration and release reconciliation.
 
+**Build baseline:** Zig **0.16** and CMake for the vendored ApexMarkdown static libraries.
+
 Boris is a Zig documentation compiler: Markdown in, validated documentation
 graph out as HTML by default, with optional IR, RAG, Context Bundle, and
 `llms.txt` exports. It is not a Node SSG, an MDX runtime, or a migration
