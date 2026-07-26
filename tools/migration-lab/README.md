@@ -537,10 +537,15 @@ and `/…` for root-locale.
 Every Starlight run also writes `relationship_target_inventory.json` and a
 short Markdown summary. The inventory follows the migration mode's normal
 Markdown discovery and selection rules, preserving one path-derived exact key
-per discovered source page. It records source provenance, the original and
-normalized key, converted-page evidence when the page was selected, and an
-explicit eligibility or exclusion reason. Duplicate exact keys are retained as
-separate rows with `duplicate_exact_key`; no first match is selected.
+per discovered source page. Version 2 records `source_slug_state`: a safe
+explicit `frontmatter.slug` becomes the exact key; missing, empty, and invalid
+slug values retain a deterministic path-derived fallback and their state. Files
+under the discovered content root that are not Markdown/MDX are explicit
+`unsupported_source_file_type` rows rather than pages. It records source
+provenance, the original and normalized key, converted-page evidence when the
+page was selected, and an explicit eligibility or exclusion reason. Duplicate
+exact keys are retained as separate rows with `duplicate_exact_key`; no first
+match is selected.
 
 This is a versioned discovery artifact for later human-review classification.
 It performs no fuzzy matching, candidate classification, semantic-relation
