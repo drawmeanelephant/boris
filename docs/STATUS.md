@@ -1,8 +1,9 @@
 # Project status — Boris
 
-**As of:** 2026-07-21 · current product release candidate **v0.8.0** /
+**As of:** 2026-07-26 · current product release candidate **v0.8.0** /
 compiler **boris/0.8.0** · Zig **0.16.0**<br>
-**Phase:** v0.8.0 release candidate after the tagged v0.7.0 release.<br>
+**Phase:** v0.8.0 release candidate plus the temporary `afterparty`
+integration line during Build Week judging; `main` remains frozen.<br>
 IR `schemaVersion` is **`0.2.0`**.
 
 **Version boundary:** `v0.8.0` packages post-`v0.7.0` release hardening,
@@ -171,6 +172,9 @@ Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
 | Bounded Textile input | **Shipped in v0.4.0** (`--textile`; explicit whole-tree compatibility adapter) |
 | Optional static theme showcase | **Shipped in v0.4.0** (`examples/static-theme-showcase/`; hand-authored CSS, not product chrome) |
 | Agent-lore content dogfood | **Shipped in v0.4.0** (tracked sample content only; private 250MB source data remains excluded/ignored) |
+| Docs-maintenance evidence tool | **Shipped** (`tools/docs-maintenance/`; deterministic dossiers and reports; generated tool output remains ignored) |
+| Default dogfood layout polish | **Shipped on `afterparty`** (PR #230; responsive reading column, bounded navigation rail, and improved code/table presentation) |
+| Rendered-site search index foundation | **Shipped on `afterparty`** (PR #231; standalone deterministic HTML indexer; browser UI and staged compiler publication remain next) |
 | Full YAML / MDX / embedded HTTP server | **Not now** |
 
 ### Commands
@@ -187,6 +191,11 @@ zig build test
 ./zig-out/bin/boris --jobs 4 --quiet
 ./zig-out/bin/boris --watch
 ./zig-out/bin/boris --target prod=dist/prod --target stage=dist/stage
+
+# Rendered-site search index foundation (standalone tool; UI/integration next)
+zig build --build-file tools/search-index/build.zig test
+zig build --build-file tools/search-index/build.zig run -- \
+  --root=./dist --out=./dist/_boris/search
 
 # CMake is compile-time only (static ApexMarkdown libs)
 zig build test-apex-hostile
@@ -211,6 +220,20 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 ---
 
 ## Next (active roadmap)
+
+### Afterparty tracking (current bounded cards)
+
+| Order | Card | State |
+|------:|------|-------|
+| 1 | Post-contest documentation information architecture: establish Start Here / Learn / Reference / Architecture / Archive and demote agent-lore from the primary nav without changing Trunk → Satellite semantics | **Next** |
+| 2 | Rendered-site search PR-2: browser UI, ranking/excerpts, zero-results state, and no-JavaScript fallback using the PR #231 index seam | **Next** |
+| 3 | Compiler staged search publication: pass the exact live-page overlay to the shared indexer and publish search artifacts with the HTML target commit | **Later** |
+| 4 | Release bookkeeping: assemble retained `docs/changelog.d/` fragments into the next dated `CHANGELOG.md` section only at release cut | **Release cut** |
+
+The current afterparty merge set is PRs **#228–#231**: generated-output
+ignore hygiene, docs-maintenance allocation/lifetime hardening, default layout
+polish, and the rendered-search index foundation. Their fragments remain in
+`docs/changelog.d/` by design until the release-owner procedure is run.
 
 | Priority | Item | Why |
 |----------|------|-----|
