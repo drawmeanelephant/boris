@@ -5364,7 +5364,7 @@ test "F9.1 legacy layouts/main.html still renders without theme assets" {
     defer gpa.free(index_path);
     const html = try readFileAlloc(io, cwd, index_path, gpa);
     defer gpa.free(html);
-    try std.testing.expect(std.mem.indexOf(u8, html, "<main>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<main data-boris-search-root>") != null);
     // No managed assets/ tree required for legacy layout
     const assets = try std.fmt.allocPrint(gpa, "{s}/assets", .{dist});
     defer gpa.free(assets);
