@@ -206,10 +206,21 @@ pub const Scanner = struct {
         var active_begin_line: u32 = 0;
 
         var claims_in_file: std.ArrayListUnmanaged(model.DossierClaim) = .empty;
-        defer claims_in_file.deinit(self.allocator);
+        defer {
+            for (claims_in_file.items) |claim| {
+                self.allocator.free(claim.source_path);
+            }
+            claims_in_file.deinit(self.allocator);
+        }
 
         var distinct_claimed_sources = std.StringHashMap(void).init(self.allocator);
-        defer distinct_claimed_sources.deinit();
+        defer {
+            var key_it = distinct_claimed_sources.keyIterator();
+            while (key_it.next()) |key| {
+                self.allocator.free(key.*);
+            }
+            distinct_claimed_sources.deinit();
+        }
 
         var line_num: u32 = 1;
         var line_iter = std.mem.splitScalar(u8, content, '\n');
@@ -272,13 +283,15 @@ pub const Scanner = struct {
 
                 try claims_in_file.append(self.allocator, .{
                     .dossier_path = dossier_path,
-                    .source_path = begin_path,
+                    .source_path = try self.allocator.dupe(u8, begin_path),
                     .begin_line = active_begin_line,
                     .end_line = line_num,
                     .is_valid = true,
                 });
 
-                try distinct_claimed_sources.put(begin_path, {});
+                // StringHashMap stores the key slice; retain an owned copy
+                // because the active marker path is freed below.
+                try distinct_claimed_sources.put(try self.allocator.dupe(u8, begin_path), {});
             }
         }
 
