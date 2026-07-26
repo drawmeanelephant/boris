@@ -10,4 +10,4 @@
 - Instagram caption provenance distinguishes `suspected-mojibake-unrepaired` from
   `utf-8`: mixed escaped/genuine Unicode and doubly-encoded captions are flagged
   for review rather than reported as clean. See
-  [`tools/migration-lab/README.md`](../tools/migration-lab/README.md).
+  [migration-lab guide](/tools/migration-lab/README.md).
