@@ -309,7 +309,6 @@ test "harness: invalid graph diagnostics" {
         .{ .name = "missing-parent", .fixture = "docs/contracts/fixtures/missing-parent/content", .code = .E_PARENT_MISSING },
         .{ .name = "self-parent", .fixture = "docs/contracts/fixtures/self-parent/content", .code = .E_PARENT_SELF },
         .{ .name = "cycle", .fixture = "docs/contracts/fixtures/cycles/content", .code = .E_PARENT_CYCLE },
-        .{ .name = "sat-of-sat", .fixture = "docs/contracts/fixtures/satellite-of-satellite/content", .code = .E_PARENT_NOT_TRUNK },
     };
 
     for (cases) |c| {

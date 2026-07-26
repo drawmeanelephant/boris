@@ -47,7 +47,55 @@ pub fn siteNavMaterial(allocator: std.mem.Allocator, nodes: []const graph_mod.No
     return try buf.toOwnedSlice(allocator);
 }
 
-/// Full site forest for `{{nav}}`.
+fn breadcrumbContains(nav: []const graph_mod.NavEntry, current_index: u32, index: u32) bool {
+    for (nav[current_index].breadcrumb) |crumb| {
+        if (crumb == index) return true;
+    }
+    return false;
+}
+
+fn appendNavNode(
+    allocator: std.mem.Allocator,
+    buf: *std.ArrayList(u8),
+    nodes: []const graph_mod.Node,
+    nav: []const graph_mod.NavEntry,
+    index: u32,
+    current_index: u32,
+    current_output_path: []const u8,
+    is_root: bool,
+) !void {
+    const node = nodes[index];
+    const out_path = try outputPathFor(allocator, node);
+    defer allocator.free(out_path);
+    const href = try identity.relativeHref(allocator, current_output_path, out_path);
+    defer allocator.free(href);
+    const is_current = index == current_index;
+    const is_ancestor = !is_current and breadcrumbContains(nav, current_index, index);
+
+    try buf.appendSlice(allocator, "<li class=\"");
+    try buf.appendSlice(allocator, if (is_root) "site-nav__trunk" else "site-nav__satellite");
+    if (is_current) try buf.appendSlice(allocator, " is-current");
+    if (is_ancestor) try buf.appendSlice(allocator, " is-ancestor");
+    try buf.appendSlice(allocator, "\"><a href=\"");
+    try appendEscaped(buf, allocator, href);
+    try buf.appendSlice(allocator, "\"");
+    if (is_current) try buf.appendSlice(allocator, " aria-current=\"page\"");
+    try buf.appendSlice(allocator, ">");
+    try appendEscaped(buf, allocator, displayTitle(node));
+    try buf.appendSlice(allocator, "</a>");
+
+    const children = nav[index].children;
+    if (children.len > 0) {
+        try buf.appendSlice(allocator, "\n<ul>\n");
+        for (children) |child_index| {
+            try appendNavNode(allocator, buf, nodes, nav, child_index, current_index, current_output_path, false);
+        }
+        try buf.appendSlice(allocator, "</ul>\n");
+    }
+    try buf.appendSlice(allocator, "</li>\n");
+}
+
+/// Full site forest for `{{nav}}`, recursively rendering the frozen hierarchy.
 pub fn renderNav(
     allocator: std.mem.Allocator,
     nodes: []const graph_mod.Node,
@@ -62,52 +110,14 @@ pub fn renderNav(
 
     for (nodes, 0..) |node, i| {
         if (node.parent != null) continue; // trunks only (id order among frozen nodes)
-        const idx: u32 = @intCast(i);
-        const out_path = try outputPathFor(allocator, node);
-        defer allocator.free(out_path);
-        const href = try identity.relativeHref(allocator, current_output_path, out_path);
-        defer allocator.free(href);
-
-        try buf.appendSlice(allocator, "<li class=\"site-nav__trunk");
-        if (idx == current_index) try buf.appendSlice(allocator, " is-current");
-        try buf.appendSlice(allocator, "\"><a href=\"");
-        try appendEscaped(&buf, allocator, href);
-        try buf.appendSlice(allocator, "\"");
-        if (idx == current_index) try buf.appendSlice(allocator, " aria-current=\"page\"");
-        try buf.appendSlice(allocator, ">");
-        try appendEscaped(&buf, allocator, displayTitle(node));
-        try buf.appendSlice(allocator, "</a>");
-
-        const children = nav[i].children;
-        if (children.len > 0) {
-            try buf.appendSlice(allocator, "\n<ul>\n");
-            for (children) |ci| {
-                const child = nodes[ci];
-                const child_out = try outputPathFor(allocator, child);
-                defer allocator.free(child_out);
-                const child_href = try identity.relativeHref(allocator, current_output_path, child_out);
-                defer allocator.free(child_href);
-                try buf.appendSlice(allocator, "<li class=\"site-nav__satellite");
-                if (ci == current_index) try buf.appendSlice(allocator, " is-current");
-                try buf.appendSlice(allocator, "\"><a href=\"");
-                try appendEscaped(&buf, allocator, child_href);
-                try buf.appendSlice(allocator, "\"");
-                if (ci == current_index) try buf.appendSlice(allocator, " aria-current=\"page\"");
-                try buf.appendSlice(allocator, ">");
-                try appendEscaped(&buf, allocator, displayTitle(child));
-                try buf.appendSlice(allocator, "</a></li>\n");
-            }
-            try buf.appendSlice(allocator, "</ul>\n");
-        }
-        try buf.appendSlice(allocator, "</li>\n");
+        try appendNavNode(allocator, &buf, nodes, nav, @intCast(i), current_index, current_output_path, true);
     }
 
     try buf.appendSlice(allocator, "</ul>\n</nav>");
     return try buf.toOwnedSlice(allocator);
 }
 
-/// Direct frozen children for `{{children}}`. Satellites have no children in
-/// Boris's one-level Trunk/Satellite graph, so their fragment is empty.
+/// Direct frozen children for `{{children}}`.
 pub fn renderChildren(
     allocator: std.mem.Allocator,
     nodes: []const graph_mod.Node,
@@ -200,6 +210,7 @@ test "renderNav forest and breadcrumb" {
     var nodes = [_]graph_mod.Node{
         .{ .id = "guides/intro", .source_path = "guides/intro.md", .title = "Intro", .parent = null },
         .{ .id = "guides/tips", .source_path = "guides/tips.md", .title = "Tips", .parent = "guides/intro" },
+        .{ .id = "guides/tips/deep", .source_path = "guides/tips/deep.md", .title = "Deep Tips", .parent = "guides/tips" },
         .{ .id = "index", .source_path = "index.md", .title = "Home", .parent = null },
     };
     var diags: std.ArrayList(diag.Diagnostic) = .empty;
@@ -211,22 +222,24 @@ test "renderNav forest and breadcrumb" {
     const nav = try graph_mod.buildNav(gpa, g.nodes);
     defer graph_mod.freeNav(gpa, nav);
 
-    var tips_i: u32 = 0;
+    var deep_i: u32 = 0;
     for (g.nodes, 0..) |n, i| {
-        if (std.mem.eql(u8, n.id, "guides/tips")) tips_i = @intCast(i);
+        if (std.mem.eql(u8, n.id, "guides/tips/deep")) deep_i = @intCast(i);
     }
-    const html = try renderNav(gpa, g.nodes, nav, tips_i, "guides/tips.html");
+    const html = try renderNav(gpa, g.nodes, nav, deep_i, "guides/tips/deep.html");
     defer gpa.free(html);
     try std.testing.expect(std.mem.indexOf(u8, html, "site-nav") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "is-current") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "../index.html") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "href=\"intro.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "href=\"../intro.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "href=\"deep.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "site-nav__satellite is-ancestor") != null);
 
-    const crumb = try renderBreadcrumb(gpa, g.nodes, nav, tips_i, "guides/tips.html");
+    const crumb = try renderBreadcrumb(gpa, g.nodes, nav, deep_i, "guides/tips/deep.html");
     defer gpa.free(crumb);
     try std.testing.expect(std.mem.indexOf(u8, crumb, "breadcrumb") != null);
     try std.testing.expect(std.mem.indexOf(u8, crumb, "aria-current=\"page\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, crumb, "Tips") != null);
+    try std.testing.expect(std.mem.indexOf(u8, crumb, "Deep Tips") != null);
 }
 
 test "renderChildren is id-sorted, escaped, relative, and empty for satellite" {

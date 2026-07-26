@@ -312,11 +312,10 @@ pub const RefProblems = struct {
     dup_id: bool = false,
     self_parent: bool = false,
     missing_parent: bool = false,
-    not_trunk: bool = false,
     cycle: bool = false,
 
     pub fn any(self: RefProblems) bool {
-        return self.dup_id or self.self_parent or self.missing_parent or self.not_trunk or self.cycle;
+        return self.dup_id or self.self_parent or self.missing_parent or self.cycle;
     }
 };
 
@@ -343,19 +342,14 @@ pub fn referenceCheck(nodes: []const graph_mod.Node) RefProblems {
                 continue;
             }
             var found = false;
-            var parent_has_parent = false;
             for (nodes) |cand| {
                 if (std.mem.eql(u8, cand.id, par)) {
                     found = true;
-                    parent_has_parent = cand.parent != null;
                     break;
                 }
             }
             if (!found) {
                 p.missing_parent = true;
-            } else if (parent_has_parent) {
-                // Satellite-of-satellite: parent itself has a parent.
-                p.not_trunk = true;
             }
         }
     }
@@ -399,7 +393,6 @@ fn productionProblems(diags: []const diag.Diagnostic) RefProblems {
             .EDUPLICATEID => p.dup_id = true,
             .EPARENTSELF => p.self_parent = true,
             .EPARENTMISSING => p.missing_parent = true,
-            .EPARENTNOTTRUNK => p.not_trunk = true,
             .EPARENTCYCLE => p.cycle = true,
             else => {},
         }
@@ -451,7 +444,7 @@ fn generateRandomGraph(
             }
         },
         2 => {
-            // Chain 0←1←2←… (satellite-of-satellite for depth>1).
+            // Chain 0←1←2←… (a valid nested parent hierarchy).
             if (n >= 2 and !force_dup) {
                 var i: usize = 1;
                 while (i < n) : (i += 1) nodes[i].parent = nodes[i - 1].id;
@@ -520,33 +513,20 @@ pub fn runGraphTopologyFuzz(seed: u64, iterations: usize) !void {
         try graph_mod.validate(gpa, retain, work[0..n], &diags);
         const prod = productionProblems(diags.items);
 
-        // Agreement on categories. Note: production may report multiple codes;
-        // reference is independent. Each flag that is true on one side must be
-        // true on the other when the scenario is "pure" — but mixed scenarios
-        // (cycle + not_trunk) can both fire. We require bidirectional inclusion
-        // of the *primary* structural faults we model.
+        // Agreement on categories. Production and reference both allow
+        // multi-level parent chains; cycles remain the only chain topology
+        // failure.
         try std.testing.expectEqual(ref.dup_id, prod.dup_id);
         try std.testing.expectEqual(ref.self_parent, prod.self_parent);
         try std.testing.expectEqual(ref.missing_parent, prod.missing_parent);
 
-        // not_trunk: production reports EPARENTNOTTRUNK when parent has a parent.
-        // Cycles that are also chains may interact; require: if ref.not_trunk and
-        // not a pure cycle-only two-node swap, prod should see not_trunk OR cycle.
-        if (ref.not_trunk and !ref.cycle) {
-            try std.testing.expect(prod.not_trunk);
-        }
-        if (prod.not_trunk) {
-            try std.testing.expect(ref.not_trunk or ref.cycle);
-        }
-
         // Cycles: when ref detects a cycle (and no dups that obscure indexing),
-        // production should report EPARENTCYCLE unless satellite-of-satellite
-        // short-circuits parent_index for multi-hop (still should see not_trunk).
+        // production should report EPARENTCYCLE.
         if (ref.cycle and !ref.dup_id) {
-            try std.testing.expect(prod.cycle or prod.not_trunk or prod.self_parent);
+            try std.testing.expect(prod.cycle or prod.self_parent);
         }
         if (prod.cycle) {
-            try std.testing.expect(ref.cycle or ref.not_trunk);
+            try std.testing.expect(ref.cycle);
         }
 
         // Healthy star/all-trunk graphs: both sides clean.
@@ -593,14 +573,14 @@ test "fuzz: reference checker known cases" {
         };
         try std.testing.expect(referenceCheck(&nodes).cycle);
     }
-    // Satellite of satellite.
+    // Multi-level hierarchy is valid.
     {
         var nodes = [_]graph_mod.Node{
             .{ .id = "t", .source_path = "t.md" },
             .{ .id = "m", .source_path = "m.md", .parent = "t" },
             .{ .id = "l", .source_path = "l.md", .parent = "m" },
         };
-        try std.testing.expect(referenceCheck(&nodes).not_trunk);
+        try std.testing.expect(!referenceCheck(&nodes).any());
     }
     // Dup.
     {

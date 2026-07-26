@@ -18,7 +18,7 @@ arbitrary keys. Bracket `tags` lists are the only list form.
 |-----|----------|--------|
 | `id` | no | Override path-derived entity id |
 | `title` | no | Page title (≤512 UTF-8 bytes) |
-| `parent` | no | Entity id of parent **Trunk** (satellites only) |
+| `parent` | no | Entity id of the direct parent page (satellites only) |
 | `status` | no | `draft` \| `published` \| `archived` |
 | `tags` | no | `[a, b, "c"]` list form only |
 
@@ -46,7 +46,8 @@ status: published
 ---
 ```
 
-`parent` must name an existing trunk id. No satellite-of-satellite, no cycles.
+`parent` must name an existing page id. Parent chains may be nested, but may not
+contain cycles.
 
 ## Forbidden
 

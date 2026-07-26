@@ -241,7 +241,6 @@ test "hardening: IR and RAG match graph diagnostic categories" {
         .{ .root = "docs/contracts/fixtures/missing-parent/content", .code = .EPARENTMISSING },
         .{ .root = "docs/contracts/fixtures/self-parent/content", .code = .EPARENTSELF },
         .{ .root = "docs/contracts/fixtures/cycles/content", .code = .EPARENTCYCLE },
-        .{ .root = "docs/contracts/fixtures/satellite-of-satellite/content", .code = .EPARENTNOTTRUNK },
         .{ .root = "docs/contracts/fixtures/longer-cycle/content", .code = .EPARENTCYCLE },
     };
 
@@ -824,5 +823,4 @@ test "hardening: H-03 prevent HTML publication from following symlinks below out
         return error.TestUnexpectedResult;
     } else |_| {}
 }
-
 

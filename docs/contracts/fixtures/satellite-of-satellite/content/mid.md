@@ -5,4 +5,4 @@ parent: trunk
 
 # Mid
 
-Satellite of trunk; cannot itself be a parent in v0.1.
+Satellite of trunk; may itself own nested Satellites.

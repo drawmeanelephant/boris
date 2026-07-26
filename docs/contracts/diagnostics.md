@@ -95,7 +95,7 @@ must emit exactly these strings (no underscore variants such as `E_DUP_ID`).
 | `EDUPLICATEID` | error | Two pages would share the same `id` (byte-exact) | `graph.diagnoseDuplicateIds` |
 | `EPARENTMISSING` | error | `parent` id not in the page set | `graph.validateTopology` |
 | `EPARENTSELF` | error | `parent` equals the page’s own `id` | `graph.validateTopology` |
-| `EPARENTNOTTRUNK` | error | `parent` resolves to a Satellite (satellite-of-satellite) | `graph.validateTopology` |
+| `EPARENTNOTTRUNK` | retired | Historical one-hop contract; no longer emitted for hierarchical parent chains | — |
 | `EPARENTCYCLE` | error | Cycle in parent edges | `graph.validateTopology` |
 | `EFRONTMATTER` | error | Unclosed fence, bad line, unknown key, duplicate key, unsupported syntax, empty/oversize value, invalid status/tags | `parser.parse` → pipeline |
 | `EINVALIDUTF8` | error | Source not valid UTF-8, or leading UTF-8 BOM | `parser.parse` → pipeline |
@@ -205,7 +205,7 @@ categories** and non-publication of graph IR on failure.
 | `EDUPLICATEID` | `duplicate-id`, `docs/contracts/fixtures/duplicate-ids` |
 | `EPARENTMISSING` | `missing-parent`, contract `missing-parent` |
 | `EPARENTSELF` | `self-parent`, contract `self-parent` |
-| `EPARENTNOTTRUNK` | `satellite-of-satellite` |
+| `EPARENTNOTTRUNK` | retired historical one-hop fixture; no longer emitted |
 | `EPARENTCYCLE` | `cycle`, contract `cycles` / `longer-cycle` |
 | `EFRONTMATTER` | `duplicate-key`, `unclosed-frontmatter`, `nested-mapping` |
 | `EINVALIDUTF8` | `invalid-utf8` |

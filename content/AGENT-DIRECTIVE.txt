@@ -79,7 +79,7 @@ arbitrary keys. Title is **optional**. Status only `draft` | `published` |
 
 - **Trunk** = omit `parent`.
 - **Satellite** = `parent: <trunk-entity-id>`.
-- No satellite-of-satellite, cycles, missing parents, or broken demo pages
+- No cycles, missing parents, or broken demo pages; nested parent chains are valid
   under `content/` (negative fixtures live under `fixtures/` / contracts).
 
 ### Aside — only registered component

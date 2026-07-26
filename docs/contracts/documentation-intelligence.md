@@ -40,7 +40,8 @@ valid page by definition. Until configurable entry points exist, the report
 uses these precise categories:
 
 - **root** — a valid Trunk with no `parent`.
-- **satellite** — a valid page with a Trunk parent.
+- **satellite** — a valid page with a direct parent; that parent may itself be
+  a Satellite.
 - **unreferenced** — no incoming `reference` edge from another page.
 - **include-source** — a source dependency endpoint referenced by one or more
   pages or included sources.
