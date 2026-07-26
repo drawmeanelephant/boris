@@ -4,6 +4,7 @@ const std = @import("std");
 
 pub const format = "boris-rendered-search-index";
 pub const schema_version: u32 = 1;
+pub const output_path = "_boris/search/search-index.json";
 
 pub const Error = error{ MultipleSearchRoots, MissingSearchRoot };
 
@@ -89,6 +90,72 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
 
 fn jsonString(out: *std.ArrayList(u8), a: std.mem.Allocator, value: []const u8) !void { try out.append(a, '"'); for (value) |c| switch (c) { '"' => try out.appendSlice(a, "\\\""), '\\' => try out.appendSlice(a, "\\\\"), '\n' => try out.appendSlice(a, "\\n"), '\r' => try out.appendSlice(a, "\\r"), '\t' => try out.appendSlice(a, "\\t"), else => try out.append(a, c) }; try out.append(a, '"'); }
 pub fn writeJson(a: std.mem.Allocator, documents: []const Document) ![]u8 { var out: std.ArrayList(u8) = .empty; errdefer out.deinit(a); try out.appendSlice(a, "{\n  \"format\": \"boris-rendered-search-index\",\n  \"schema_version\": 1,\n  \"documents\": ["); for (documents, 0..) |d, di| { if (di > 0) try out.appendSlice(a, ","); try out.appendSlice(a, "\n    {\n      \"path\": "); try jsonString(&out, a, d.path); try out.appendSlice(a, ",\n      \"title\": "); try jsonString(&out, a, d.title); try out.appendSlice(a, ",\n      \"sections\": ["); for (d.sections, 0..) |s, si| { if (si > 0) try out.appendSlice(a, ","); var prefix: [96]u8 = undefined; const prefix_text = try std.fmt.bufPrint(&prefix, "\n        {{\"level\": {d}, \"heading\": ", .{s.level}); try out.appendSlice(a, prefix_text); try jsonString(&out, a, s.heading); try out.appendSlice(a, ", \"fragment\": "); try jsonString(&out, a, s.fragment); try out.appendSlice(a, ", \"text\": "); try jsonString(&out, a, s.text); try out.appendSlice(a, ", \"code\": "); try jsonString(&out, a, s.code); try out.appendSlice(a, "}"); } try out.appendSlice(a, "\n      ]\n    }"); } try out.appendSlice(a, "\n  ]\n}\n"); return out.toOwnedSlice(a); }
+
+fn readFileAlloc(io: std.Io, dir: std.Io.Dir, path: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    var file = try dir.openFile(io, path, .{});
+    defer file.close(io);
+    var reader = file.reader(io, &.{});
+    return try reader.interface.allocRemaining(allocator, .unlimited);
+}
+
+fn readOverlayFile(
+    io: std.Io,
+    staged_dir: std.Io.Dir,
+    live_dir: std.Io.Dir,
+    path: []const u8,
+    allocator: std.mem.Allocator,
+) ![]u8 {
+    return readFileAlloc(io, staged_dir, path, allocator) catch |err| switch (err) {
+        error.FileNotFound => readFileAlloc(io, live_dir, path, allocator),
+        else => return err,
+    };
+}
+
+/// Produce the target-owned search artifact from a staged/live HTML overlay.
+///
+/// `page_paths` is the complete live PageDb output set, not merely the dirty
+/// set. A staged page wins when present; cached pages are read from `live_dir`.
+/// This keeps search generation in the same target commit as HTML while
+/// excluding removed pages from the new artifact.
+pub fn writeOverlay(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    staged_dir: std.Io.Dir,
+    live_dir: std.Io.Dir,
+    page_paths: []const []const u8,
+    require_root_marker: bool,
+) !void {
+    const paths = try allocator.alloc([]const u8, page_paths.len);
+    defer allocator.free(paths);
+    @memcpy(paths, page_paths);
+    std.mem.sort([]const u8, paths, {}, struct {
+        fn less(_: void, left: []const u8, right: []const u8) bool {
+            return std.mem.order(u8, left, right) == .lt;
+        }
+    }.less);
+
+    var documents: std.ArrayList(Document) = .empty;
+    defer {
+        for (documents.items) |document| freeDocument(allocator, document);
+        documents.deinit(allocator);
+    }
+    for (paths) |path| {
+        const html = try readOverlayFile(io, staged_dir, live_dir, path, allocator);
+        defer allocator.free(html);
+        const document = try indexHtml(allocator, path, html, require_root_marker);
+        try documents.append(allocator, document);
+    }
+
+    const json = try writeJson(allocator, documents.items);
+    defer allocator.free(json);
+    var atomic = try staged_dir.createFileAtomic(io, output_path, .{ .replace = true, .make_path = true });
+    defer atomic.deinit(io);
+    var buffer: [4096]u8 = undefined;
+    var writer = atomic.file.writer(io, &buffer);
+    try writer.interface.writeAll(json);
+    try writer.interface.flush();
+    try atomic.replace(io);
+}
 
 pub fn freeDocument(a: std.mem.Allocator, d: Document) void { a.free(d.path); a.free(d.title); for (d.sections) |s| { a.free(s.heading); a.free(s.fragment); a.free(s.text); a.free(s.code); } a.free(d.sections); }
 
