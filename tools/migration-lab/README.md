@@ -541,7 +541,10 @@ explicit review reason.
 
 The lab recognizes the proven `{slug: ...}` object shape for `relatedHaiku`
 and `relatedLimerick`; other object shapes and fields remain review-only. It
-proposes `relates_to` only for target-like values from the five
+accepts only a single string `slug` member: empty values, unquoted numeric,
+boolean, or null values, extra members, nested values, and arrays stay as
+source-located review rows with their original value intact.
+It proposes `relates_to` only for target-like values from the five
 `related*` / `mascotRef` fields that resolve against the converted entity map.
 `concepts` and `escalationPath` are always review-only. Malformed values,
 non-scalar mappings, ambiguous or unresolved targets, self-targets, and

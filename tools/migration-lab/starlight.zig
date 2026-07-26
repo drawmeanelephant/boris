@@ -507,6 +507,37 @@ fn scalarLooksNonScalar(value: []const u8) bool {
     return v[0] == '{' or v[0] == '|' or v[0] == '>' or v[0] == '&' or v[0] == '*';
 }
 
+/// The review extractor only accepts YAML string scalars for a proven `slug`
+/// member.  This is intentionally narrower than general YAML: an unquoted
+/// number, boolean, or null is evidence to review, not a target identifier.
+/// Quoted spellings remain strings and are normalized by `unquoteRelationScalar`.
+fn isBareYamlNonString(value: []const u8) bool {
+    const v = trim(value);
+    if (v.len == 0 or v[0] == '\'' or v[0] == '"') return false;
+    if (std.ascii.eqlIgnoreCase(v, "true") or std.ascii.eqlIgnoreCase(v, "false") or
+        std.ascii.eqlIgnoreCase(v, "null") or std.mem.eql(u8, v, "~")) return true;
+
+    var index: usize = 0;
+    if (v[index] == '+' or v[index] == '-') index += 1;
+    const integer_start = index;
+    while (index < v.len and std.ascii.isDigit(v[index])) : (index += 1) {}
+    if (index == integer_start) return false;
+    if (index < v.len and v[index] == '.') {
+        index += 1;
+        const fraction_start = index;
+        while (index < v.len and std.ascii.isDigit(v[index])) : (index += 1) {}
+        if (index == fraction_start) return false;
+    }
+    if (index < v.len and (v[index] == 'e' or v[index] == 'E')) {
+        index += 1;
+        if (index < v.len and (v[index] == '+' or v[index] == '-')) index += 1;
+        const exponent_start = index;
+        while (index < v.len and std.ascii.isDigit(v[index])) : (index += 1) {}
+        if (index == exponent_start) return false;
+    }
+    return index == v.len;
+}
+
 fn relationFieldAllowsSlugObject(field: []const u8) bool {
     return std.mem.eql(u8, field, "relatedHaiku") or
         std.mem.eql(u8, field, "relatedLimerick");
@@ -542,7 +573,9 @@ fn appendInlineSlugObject(
         };
         const key = trim(pair[0..colon]);
         const item_value = trim(pair[colon + 1 ..]);
-        if (!std.mem.eql(u8, key, "slug") or item_value.len == 0 or scalarLooksNonScalar(item_value) or target != null) {
+        if (!std.mem.eql(u8, key, "slug") or item_value.len == 0 or scalarLooksNonScalar(item_value) or
+            isBareYamlNonString(item_value) or target != null)
+        {
             malformed = true;
         } else {
             target = item_value;
@@ -660,7 +693,7 @@ fn parseObjectItem(
         if (std.mem.eql(u8, key, "id")) {
             if (target != null) malformed = true else target = value;
         } else if (std.mem.eql(u8, key, "slug") and relationFieldAllowsSlugObject(field)) {
-            if (target != null or collection != null) malformed = true else target = value;
+            if (target != null or collection != null or isBareYamlNonString(value)) malformed = true else target = value;
         } else if (std.mem.eql(u8, key, "collection")) {
             if (collection != null) malformed = true else collection = value;
         } else {
@@ -4432,6 +4465,125 @@ test "starlight: proven slug relation objects resolve only for haiku and limeric
     try std.testing.expectEqualStrings("relatedHaiku", candidates.items[3].source_field);
     try std.testing.expectEqualStrings("not_attempted", candidates.items[3].target_resolution);
     try std.testing.expectEqualStrings("non_scalar_or_ambiguous_object", candidates.items[3].review_reason.?);
+}
+
+test "starlight: slug objects retain malformed scalar and structural evidence" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var entities: EntityMap = .empty;
+    try entities.put(a, "poems/one", "poems/one");
+    try entities.put(a, "poems/雪", "poems/雪");
+
+    const page: SourcePage = .{
+        .source_path = "src/content/docs/en/shape-matrix.mdx",
+        .locale_rel = "shape-matrix.mdx",
+        .entity_id = "shape-matrix",
+        .route = "/en/shape-matrix",
+        .output_path = "content/shape-matrix.md",
+        .title = "Shape matrix",
+        .parent = null,
+        .is_trunk = true,
+        .raw_frontmatter =
+        \\relatedHaiku: {slug: poems/one}
+        \\relatedHaiku: {slug: }
+        \\relatedHaiku: {}
+        \\relatedHaiku: {slug: 7}
+        \\relatedHaiku: {slug: true}
+        \\relatedHaiku: {slug: null}
+        \\relatedHaiku: {slug: poems/one, title: extra}
+        \\relatedHaiku: {slug: {value: poems/one}}
+        \\relatedHaiku: [{slug: poems/one}]
+        \\relatedHaiku: {slug: poems/雪}
+        \\relatedHaiku: {slug: ../escape}
+        ,
+        .unmapped_fields = &.{},
+        .body = "",
+        .imports = &.{},
+        .components = &.{},
+        .stripped_blocks = &.{},
+        .link_events = &.{},
+        .component_events = &.{},
+        .bytes = 0,
+    };
+
+    var candidates: std.ArrayList(RelationCandidate) = .empty;
+    try collectRelationCandidatesForPage(a, page, "/en", &entities, &candidates);
+    try std.testing.expectEqual(@as(usize, 11), candidates.items.len);
+    try std.testing.expectEqual(@as(u32, 2), candidates.items[0].source_line);
+    try std.testing.expectEqualStrings("{slug: poems/one}", candidates.items[0].raw_value);
+    try std.testing.expectEqualStrings("poems/one", candidates.items[0].normalized_target.?);
+    try std.testing.expectEqualStrings("resolved", candidates.items[0].target_resolution);
+
+    // Empty/missing, typed scalars, extra keys, nesting, and arrays remain
+    // source-located review rows; no partial target is accepted.
+    for (candidates.items[1..9]) |candidate| {
+        try std.testing.expect(candidate.normalized_target == null);
+        try std.testing.expectEqualStrings("not_attempted", candidate.target_resolution);
+        try std.testing.expect(candidate.review_reason != null);
+    }
+    try std.testing.expectEqualStrings("malformed_inline_list", candidates.items[8].review_reason.?);
+
+    try std.testing.expectEqualStrings("poems/雪", candidates.items[9].normalized_target.?);
+    try std.testing.expectEqualStrings("resolved", candidates.items[9].target_resolution);
+    try std.testing.expectEqualStrings("{slug: ../escape}", candidates.items[10].raw_value);
+    try std.testing.expect(candidates.items[10].normalized_target == null);
+    try std.testing.expectEqualStrings("malformed_or_non_target_scalar", candidates.items[10].review_reason.?);
+}
+
+test "starlight: duplicate slug candidates from distinct pages retain deterministic provenance" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var entities: EntityMap = .empty;
+    try entities.put(a, "poems/one", "poems/one");
+
+    const page_a: SourcePage = .{
+        .source_path = "src/content/docs/en/a.mdx",
+        .locale_rel = "a.mdx",
+        .entity_id = "a",
+        .route = "/en/a",
+        .output_path = "content/a.md",
+        .title = "A",
+        .parent = null,
+        .is_trunk = true,
+        .raw_frontmatter = "relatedHaiku: {slug: poems/one}",
+        .unmapped_fields = &.{},
+        .body = "",
+        .imports = &.{},
+        .components = &.{},
+        .stripped_blocks = &.{},
+        .link_events = &.{},
+        .component_events = &.{},
+        .bytes = 0,
+    };
+    const page_b: SourcePage = .{
+        .source_path = "src/content/docs/en/b.mdx",
+        .locale_rel = "b.mdx",
+        .entity_id = "b",
+        .route = "/en/b",
+        .output_path = "content/b.md",
+        .title = "B",
+        .parent = null,
+        .is_trunk = true,
+        .raw_frontmatter = "relatedLimerick: {slug: poems/one}",
+        .unmapped_fields = &.{},
+        .body = "",
+        .imports = &.{},
+        .components = &.{},
+        .stripped_blocks = &.{},
+        .link_events = &.{},
+        .component_events = &.{},
+        .bytes = 0,
+    };
+    const candidates = try collectRelationCandidates(a, &.{ page_b, page_a }, "/en", &entities);
+    try std.testing.expectEqual(@as(usize, 2), candidates.len);
+    try std.testing.expectEqualStrings("a", candidates[0].source_entity);
+    try std.testing.expectEqualStrings("b", candidates[1].source_entity);
+    for (candidates) |candidate| {
+        try std.testing.expectEqualStrings("poems/one", candidate.normalized_target.?);
+        try std.testing.expectEqualStrings("poems/one", candidate.resolved_entity.?);
+    }
 }
 
 test "starlight: duplicate product relation candidates keep evidence without consuming ordinals" {
