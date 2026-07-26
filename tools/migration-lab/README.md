@@ -512,6 +512,7 @@ and `/…` for root-locale.
    | `selection_manifest.json` | Selected source files + exclusion reasons |
    | `route_map.json` | Route / entity / output mapping |
    | `link_review.json` | Internal links, unresolved, external, assets |
+   | `relationship_target_inventory.json` / `RELATIONSHIP_TARGET_INVENTORY.md` | Site-wide deterministic exact-key target discovery, including selection/exclusion and duplicate-key evidence; no candidate classification |
    | `relation_candidates.json` | Review-first Filed-shaped relationship values + converted-entity resolution |
    | `heading_fragments.json` | Fragment inventory (headings **not** verified) |
    | `assets_manifest.json` | Inventory + migrated page assets (exists + SHA-256 when proven) |
@@ -530,6 +531,22 @@ and `/…` for root-locale.
     under `--out/content/**` only.
 
 ### Relationship candidate sidecar
+
+### Relationship target inventory
+
+Every Starlight run also writes `relationship_target_inventory.json` and a
+short Markdown summary. The inventory follows the migration mode's normal
+Markdown discovery and selection rules, preserving one path-derived exact key
+per discovered source page. It records source provenance, the original and
+normalized key, converted-page evidence when the page was selected, and an
+explicit eligibility or exclusion reason. Duplicate exact keys are retained as
+separate rows with `duplicate_exact_key`; no first match is selected.
+
+This is a versioned discovery artifact for later human-review classification.
+It performs no fuzzy matching, candidate classification, semantic-relation
+emission, or source/converted-page mutation. The lab's source format remains
+Markdown/MDX only; files outside its established discovery rules are not
+silently treated as relationship targets.
 
 `relation_candidates.json` inventories only these known Filed-shaped source
 fields: `relatedEntries`, `relatedHaiku`, `relatedLimerick`, `relatedLorelog`,
