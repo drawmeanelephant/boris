@@ -57,6 +57,7 @@ const layout_select = @import("layout_select.zig");
 const textile = @import("textile.zig");
 const content_asset = @import("content_asset.zig");
 const source_io = @import("source_io.zig");
+const search_index = @import("search_index.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -2074,6 +2075,15 @@ fn compilePagesInner(
     }
 
     // Commit: rename staged files into final dist (final untouched until this point).
+    // Search is produced from the complete live-page overlay before this commit:
+    // dirty pages come from stage_dir, cached pages from dist_dir, and removed
+    // pages are excluded by the current PageDb output set.
+    var live_page_paths = try gpa.alloc([]const u8, db.len());
+    defer gpa.free(live_page_paths);
+    for (db.items(), 0..) |page, page_idx| live_page_paths[page_idx] = page.output_path;
+    try search_index.writeOverlay(io, gpa, stage_dir, dist_dir, live_page_paths, false);
+
+    // The search artifact is part of the same staged target commit as HTML.
     try publishStageTree(io, gpa, stage_dir, dist_dir);
 
     // Live page-output set for this build. Shared by stale cleanup AND the theme
@@ -4401,6 +4411,90 @@ test "compileHtmlSiteMulti - success, validation, and isolation" {
         });
         try std.testing.expectError(error.TargetOutputCollision, res);
     }
+}
+
+test "HTML publish produces search from live overlay and removes stale pages" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/search-compile", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nChanged on rebuild.\n");
+    try writeTreeFile(io, work, "content/guides/child.md", "# Child\n\nNested page.\n");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+    });
+
+    // Change only the root page. The nested page is cached in dist and must be
+    // overlaid into the newly staged search artifact.
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nChanged again.\n");
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+    });
+
+    const search_path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dist, search_index.output_path });
+    defer gpa.free(search_path);
+    var search_json = try readFileAlloc(io, cwd, search_path, gpa);
+    defer gpa.free(search_json);
+    try std.testing.expect(std.mem.indexOf(u8, search_json, "\"path\": \"index.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, search_json, "\"path\": \"guides/child.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, search_json, "Changed again.") != null);
+
+    // Remove the nested source page. HTML stale cleanup and search publication
+    // must agree on the current PageDb live set.
+    const child_source = try std.fmt.allocPrint(gpa, "{s}/guides/child.md", .{content});
+    defer gpa.free(child_source);
+    try cwd.deleteFile(io, child_source);
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+    });
+    gpa.free(search_json);
+    search_json = try readFileAlloc(io, cwd, search_path, gpa);
+    try std.testing.expect(std.mem.indexOf(u8, search_json, "guides/child.html") == null);
+
+    // An empty content tree still publishes a valid empty artifact rather than
+    // leaving the previous index as a stale target-owned file.
+    const index_source = try std.fmt.allocPrint(gpa, "{s}/index.md", .{content});
+    defer gpa.free(index_source);
+    try cwd.deleteFile(io, index_source);
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+    });
+    gpa.free(search_json);
+    search_json = try readFileAlloc(io, cwd, search_path, gpa);
+    try std.testing.expectEqualStrings(
+        "{\n  \"format\": \"boris-rendered-search-index\",\n  \"schema_version\": 1,\n  \"documents\": [\n  ]\n}\n",
+        search_json,
+    );
 }
 
 test "Feature 9 HTML: heading fragment wiki links resolve to rendered ids" {

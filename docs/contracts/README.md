@@ -62,6 +62,7 @@ per topic:
 | AI Context Bundle | [context-bundle.md](context-bundle.md) |
 | Documentation Intelligence | [documentation-intelligence.md](documentation-intelligence.md) |
 | Textile compatibility adapter | [textile-compatibility.md](textile-compatibility.md) |
+| Rendered-site search artifacts | [rendered-search.md](rendered-search.md) |
 
 ### Normative documents (IR v0.2 target) — full list
 
@@ -89,6 +90,7 @@ per topic:
 | [documentation-intelligence.md](documentation-intelligence.md) | Read-only graph health and impact analysis (`check` / `impact`); schema twin under `schemas/` |
 | [cli.md](cli.md) | Stable command routing, exit codes, and report-consumer boundary |
 | [textile-compatibility.md](textile-compatibility.md) | Explicit bounded `.textile`-to-Markdown input mode |
+| [rendered-search.md](rendered-search.md) | Deterministic v1 search JSON for rendered HTML pages; browser/compiler seams are explicit |
 
 ## Redirect / compatibility paths (non-normative)
 
