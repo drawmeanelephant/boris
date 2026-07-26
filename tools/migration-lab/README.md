@@ -545,7 +545,9 @@ under the discovered content root that are not Markdown/MDX are explicit
 provenance, the original and normalized key, converted-page evidence when the
 page was selected, and an explicit eligibility or exclusion reason. Duplicate
 exact keys are retained as separate rows with `duplicate_exact_key`; no first
-match is selected.
+match is selected. Draft frontmatter remains conversion evidence under the
+existing migration rules, but is explicitly excluded from relationship-target
+eligibility with `draft_frontmatter`.
 
 This is a versioned discovery artifact for later human-review classification.
 It performs no fuzzy matching, candidate classification, semantic-relation

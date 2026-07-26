@@ -1067,6 +1067,21 @@ fn sourceSlugEvidence(a: std.mem.Allocator, raw: []const u8) !SourceSlugEvidence
     return fallback;
 }
 
+/// Draft source pages remain inventory evidence but are never conversion
+/// candidates. This is intentionally a narrow, line-oriented migration rule.
+fn hasDraftFrontmatter(a: std.mem.Allocator, raw: []const u8) !bool {
+    const parsed = try parseFrontmatterLite(a, raw, "");
+    if (parsed.frontmatter.len == 0) return false;
+    const lines = try splitFrontmatterLines(a, parsed.frontmatter);
+    for (lines) |line| {
+        const field = topLevelField(line) orelse continue;
+        const value = unquoteRelationScalar(field.value) orelse continue;
+        if (std.mem.eql(u8, field.key, "draft") and std.ascii.eqlIgnoreCase(value, "true")) return true;
+        if (std.mem.eql(u8, field.key, "status") and std.ascii.eqlIgnoreCase(value, "draft")) return true;
+    }
+    return false;
+}
+
 fn collectRelationshipTargetInventory(
     a: std.mem.Allocator,
     io: Io,
@@ -1099,8 +1114,11 @@ fn collectRelationshipTargetInventory(
                 break;
             }
         }
-        const eligibility: []const u8 = if (selection.selected) "eligible" else "excluded";
-        const reason: ?[]const u8 = if (!selection.selected)
+        const draft = try hasDraftFrontmatter(a, raw);
+        const eligibility: []const u8 = if (draft or !selection.selected) "excluded" else "eligible";
+        const reason: ?[]const u8 = if (draft)
+            "draft_frontmatter"
+        else if (!selection.selected)
             selection.reason
         else if (duplicate)
             "duplicate_exact_key"
@@ -5030,6 +5048,10 @@ test "starlight: locale-dir fixture is deterministic, preserves source, reports 
     try std.testing.expect(std.mem.indexOf(u8, targets, "\"source_slug_state\": \"missing_fallback_path\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, targets, "\"source_slug_state\": \"not_markdown\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, targets, "unsupported_source_file_type") != null);
+    try std.testing.expect(std.mem.count(u8, targets, "\"normalized_lookup_key\": \"inventory/shared\"") == 2);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"duplicate_exact_key_records\": 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"normalized_lookup_key\": \"inventory/draft\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "draft_frontmatter") != null);
 
     const report = try readFileAlloc(io, ao, "report.json", std.testing.allocator);
     defer std.testing.allocator.free(report);
