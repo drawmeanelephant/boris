@@ -693,8 +693,8 @@ else
   fail "mixed input family did not fail closed in both modes"
 fi
 
-# --- 5. Invalid fixtures: exit codes + diagnostic codes ------------------
-note "5. Invalid fixtures produce expected exit codes and diagnostic codes"
+# --- 5. Graph fixtures: valid freeze + invalid diagnostics ----------------
+note "5. Graph fixtures produce expected valid freezes and invalid diagnostics"
 run_bad() {
   local name="$1"
   local code="$2"
@@ -723,11 +723,24 @@ run_bad() {
   fi
 }
 
+run_good() {
+  local name="$1"
+  local path="docs/contracts/fixtures/${name}/content"
+  local out="${GATE_DIR}/ir-${name}"
+  rm -rf "${out}"
+  if "${BORIS}" --input="${path}" --out="${out}" --quiet \
+    && grep -q '"frozen": true' "${out}/graph.json"; then
+    pass "${name}: valid graph fixture freezes successfully"
+  else
+    fail "${name}: expected valid graph fixture to freeze"
+  fi
+}
+
 run_bad missing-parent EPARENTMISSING
 run_bad self-parent EPARENTSELF
 run_bad cycles EPARENTCYCLE
 run_bad longer-cycle EPARENTCYCLE
-run_bad satellite-of-satellite EPARENTNOTTRUNK
+run_good satellite-of-satellite
 run_bad duplicate-ids EDUPLICATEID
 run_bad malformed-frontmatter EFRONTMATTER
 run_bad duplicate-key EFRONTMATTER
