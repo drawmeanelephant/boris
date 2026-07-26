@@ -194,6 +194,23 @@ const RelationCandidate = struct {
     review_reason: ?[]const u8,
 };
 
+/// Site-wide, exact-key target evidence for the relationship review workflow.
+/// This is deliberately independent from relation candidate resolution: a later
+/// card may compare candidates to this artifact, but this inventory never picks
+/// a relation, guesses a match, or changes converted Markdown.
+const RelationshipTargetInventoryRow = struct {
+    source_path: []const u8,
+    source_location: []const u8,
+    source_slug_state: []const u8, // explicit | missing_fallback_path | empty_fallback_path | invalid_fallback_path | not_markdown
+    original_target_key: ?[]const u8,
+    normalized_lookup_key: ?[]const u8,
+    candidate_entity_id: ?[]const u8,
+    candidate_output_route: ?[]const u8,
+    eligibility: []const u8, // eligible | excluded | unsupported | invalid
+    reason: ?[]const u8,
+    selected: bool,
+};
+
 const RawRelationValue = struct {
     source_field: []const u8,
     source_line: u32,
@@ -1013,6 +1030,138 @@ fn collectRelationCandidates(
         }
     }.less);
     return try out.toOwnedSlice(a);
+}
+
+const SourceSlugEvidence = struct {
+    state: []const u8,
+    value: ?[]const u8,
+    location: []const u8,
+};
+
+fn sourceSlugEvidence(a: std.mem.Allocator, raw: []const u8) !SourceSlugEvidence {
+    const fallback: SourceSlugEvidence = .{ .state = "missing_fallback_path", .value = null, .location = "path-derived entity id" };
+    if (!std.mem.startsWith(u8, raw, "---\n") and !std.mem.startsWith(u8, raw, "---\r\n")) return fallback;
+    const start: usize = if (std.mem.startsWith(u8, raw, "---\r\n")) 5 else 4;
+    const end = std.mem.indexOfPos(u8, raw, start, "\n---\n") orelse std.mem.indexOfPos(u8, raw, start, "\n---\r\n") orelse return .{
+        .state = "invalid_fallback_path", .value = null, .location = "unterminated frontmatter",
+    };
+    const frontmatter = raw[start..end];
+    var line_no: usize = 2;
+    var pos: usize = 0;
+    while (pos < frontmatter.len) : (line_no += 1) {
+        const line_end = std.mem.indexOfScalarPos(u8, frontmatter, pos, '\n') orelse frontmatter.len;
+        const line = frontmatter[pos..line_end];
+        if (line.len > 0 and line[0] != ' ' and line[0] != '\t') {
+            if (std.mem.indexOfScalar(u8, line, ':')) |colon| {
+                if (std.mem.eql(u8, trim(line[0..colon]), "slug")) {
+                    const value = unquoteRelationScalar(trim(line[colon + 1 ..]));
+                    const location = try std.fmt.allocPrint(a, "frontmatter.slug line {d}", .{line_no});
+                    if (value == null or value.?.len == 0) return .{ .state = "empty_fallback_path", .value = null, .location = location };
+                    if (!isTargetLikeEntityId(value.?)) return .{ .state = "invalid_fallback_path", .value = null, .location = location };
+                    return .{ .state = "explicit", .value = try a.dupe(u8, value.?), .location = location };
+                }
+            }
+        }
+        pos = if (line_end == frontmatter.len) frontmatter.len else line_end + 1;
+    }
+    return fallback;
+}
+
+/// Draft source pages remain inventory evidence but are never conversion
+/// candidates. This is intentionally a narrow, line-oriented migration rule.
+fn hasDraftFrontmatter(a: std.mem.Allocator, raw: []const u8) !bool {
+    const parsed = try parseFrontmatterLite(a, raw, "");
+    if (parsed.frontmatter.len == 0) return false;
+    const lines = try splitFrontmatterLines(a, parsed.frontmatter);
+    for (lines) |line| {
+        const field = topLevelField(line) orelse continue;
+        const value = unquoteRelationScalar(field.value) orelse continue;
+        if (std.mem.eql(u8, field.key, "draft") and std.ascii.eqlIgnoreCase(value, "true")) return true;
+        if (std.mem.eql(u8, field.key, "status") and std.ascii.eqlIgnoreCase(value, "draft")) return true;
+    }
+    return false;
+}
+
+fn collectRelationshipTargetInventory(
+    a: std.mem.Allocator,
+    io: Io,
+    source: Io.Dir,
+    selection_rows: []const SelectionRow,
+    pages: []const SourcePage,
+    content_files: []const []const u8,
+) ![]const RelationshipTargetInventoryRow {
+    // Count original exact keys before collision disambiguation.  The converted
+    // page map is intentionally only evidence; duplicate keys remain explicit.
+    var key_counts: std.StringHashMapUnmanaged(usize) = .empty;
+    for (selection_rows) |row| {
+        const raw = try readFileAlloc(io, source, row.source_path, a);
+        const slug = try sourceSlugEvidence(a, raw);
+        const key = slug.value orelse try entityIdFromLocaleRel(a, row.content_rel);
+        const entry = try key_counts.getOrPut(a, key);
+        if (entry.found_existing) entry.value_ptr.* += 1 else entry.value_ptr.* = 1;
+    }
+
+    var rows: std.ArrayList(RelationshipTargetInventoryRow) = .empty;
+    for (selection_rows) |selection| {
+        const raw = try readFileAlloc(io, source, selection.source_path, a);
+        const slug = try sourceSlugEvidence(a, raw);
+        const key = slug.value orelse try entityIdFromLocaleRel(a, selection.content_rel);
+        const duplicate = key_counts.get(key).? > 1;
+        var page: ?SourcePage = null;
+        for (pages) |candidate| {
+            if (!candidate.is_synthetic and std.mem.eql(u8, candidate.source_path, selection.source_path)) {
+                page = candidate;
+                break;
+            }
+        }
+        const draft = try hasDraftFrontmatter(a, raw);
+        const eligibility: []const u8 = if (draft or !selection.selected) "excluded" else "eligible";
+        const reason: ?[]const u8 = if (draft)
+            "draft_frontmatter"
+        else if (!selection.selected)
+            selection.reason
+        else if (duplicate)
+            "duplicate_exact_key"
+        else
+            null;
+        try rows.append(a, .{
+            .source_path = selection.source_path,
+            .source_location = slug.location,
+            .source_slug_state = slug.state,
+            .original_target_key = key,
+            .normalized_lookup_key = key,
+            .candidate_entity_id = if (page) |p| p.entity_id else null,
+            .candidate_output_route = if (page) |p| p.route else null,
+            .eligibility = eligibility,
+            .reason = reason,
+            .selected = selection.selected,
+        });
+    }
+    for (content_files) |path| {
+        if (isMarkdownName(path)) continue;
+        try rows.append(a, .{
+            .source_path = path,
+            .source_location = "non-Markdown file under discovered content root",
+            .source_slug_state = "not_markdown",
+            .original_target_key = null,
+            .normalized_lookup_key = null,
+            .candidate_entity_id = null,
+            .candidate_output_route = null,
+            .eligibility = "unsupported",
+            .reason = "unsupported_source_file_type",
+            .selected = false,
+        });
+    }
+    std.mem.sort(RelationshipTargetInventoryRow, rows.items, {}, struct {
+        fn less(_: void, x: RelationshipTargetInventoryRow, y: RelationshipTargetInventoryRow) bool {
+            if (x.normalized_lookup_key == null) return y.normalized_lookup_key != null;
+            if (y.normalized_lookup_key == null) return false;
+            const key_order = std.mem.order(u8, x.normalized_lookup_key.?, y.normalized_lookup_key.?);
+            if (key_order != .eq) return key_order == .lt;
+            return std.mem.order(u8, x.source_path, y.source_path) == .lt;
+        }
+    }.less);
+    return try rows.toOwnedSlice(a);
 }
 
 fn categoryForBlockStart(line: []const u8) ?[]const u8 {
@@ -2606,6 +2755,32 @@ fn collectMarkdownFiles(
     }
 }
 
+/// Collect regular files under the established content-root discovery boundary.
+/// Unlike `collectMarkdownFiles`, this is inventory evidence only: non-Markdown
+/// files are never considered pages or converted.
+fn collectContentFiles(
+    io: Io,
+    a: std.mem.Allocator,
+    root: Io.Dir,
+    rel_dir: []const u8,
+    out: *std.ArrayList([]const u8),
+    skip_locale_siblings: bool,
+) !void {
+    var dir = try root.openDir(io, rel_dir, .{ .iterate = true });
+    defer dir.close(io);
+    var it = dir.iterate();
+    while (try it.next(io)) |entry| {
+        if (entry.kind == .directory) {
+            if (isSkipDir(entry.name)) continue;
+            if (skip_locale_siblings and looksLikeLocaleDirName(entry.name)) continue;
+            const child = try std.fmt.allocPrint(a, "{s}/{s}", .{ rel_dir, entry.name });
+            try collectContentFiles(io, a, root, child, out, false);
+        } else if (entry.kind == .file) {
+            try out.append(a, try std.fmt.allocPrint(a, "{s}/{s}", .{ rel_dir, entry.name }));
+        }
+    }
+}
+
 fn listPublicAssets(io: Io, a: std.mem.Allocator, root: Io.Dir, rel_dir: []const u8, out: *std.ArrayList(AssetEntry)) !void {
     var dir = root.openDir(io, rel_dir, .{ .iterate = true }) catch return;
     defer dir.close(io);
@@ -3039,6 +3214,13 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             return std.mem.order(u8, x, y) == .lt;
         }
     }.less);
+    var content_files: std.ArrayList([]const u8) = .empty;
+    try collectContentFiles(io, a, source, content_root, &content_files, skip_locale_siblings);
+    std.mem.sort([]const u8, content_files.items, {}, struct {
+        fn less(_: void, x: []const u8, y: []const u8) bool {
+            return std.mem.order(u8, x, y) == .lt;
+        }
+    }.less);
 
     // Deterministic candidate selection: sort order, drop underscore partials, cap max_pages.
     // No preferred-section allowlist (evcc-specific paths are not privileged).
@@ -3234,6 +3416,9 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     // Review-first relationship evidence from known Filed-shaped frontmatter.
     // This never mutates generated Markdown or product relation semantics.
     const relation_candidates = try collectRelationCandidates(a, pages.items, route_prefix, &entities);
+    // Whole-site target evidence is intentionally separate from candidate
+    // resolution, which remains bounded to the converted slice above.
+    const relationship_target_inventory = try collectRelationshipTargetInventory(a, io, source, selection_rows.items, pages.items, content_files.items);
 
     // Link rewrite pass (wiki targets only; Markdown images handled next).
     for (pages.items) |*p| {
@@ -3350,6 +3535,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     try writeProvenance(a, io, out, opts, content, pages.items);
     try writeLinkReview(a, io, out, pages.items);
     try writeRelationCandidates(a, io, out, relation_candidates);
+    try writeRelationshipTargetInventory(a, io, out, relationship_target_inventory);
     try writeHeadingFragments(a, io, out, pages.items);
     try writeSelectionManifest(a, io, out, content, selection_rows.items, opts.max_pages);
     try writeBoundaryManifest(a, io, out, boundary.items);
@@ -3922,6 +4108,86 @@ fn writeRelationCandidates(
     }
     try buf.appendSlice(a, "  ]\n}\n");
     try writeFile(io, out, "relation_candidates.json", buf.items);
+}
+
+fn writeRelationshipTargetInventory(
+    a: std.mem.Allocator,
+    io: Io,
+    out: Io.Dir,
+    rows: []const RelationshipTargetInventoryRow,
+) !void {
+    var eligible: usize = 0;
+    var excluded: usize = 0;
+    var unsupported: usize = 0;
+    var duplicate_keys: usize = 0;
+    for (rows) |row| {
+        if (std.mem.eql(u8, row.eligibility, "eligible")) eligible += 1;
+        if (std.mem.eql(u8, row.eligibility, "excluded")) excluded += 1;
+        if (std.mem.eql(u8, row.eligibility, "unsupported")) unsupported += 1;
+        if (row.reason) |reason| {
+            if (std.mem.eql(u8, reason, "duplicate_exact_key")) duplicate_keys += 1;
+        }
+    }
+
+    var json: std.ArrayList(u8) = .empty;
+    try json.appendSlice(a,
+        "{\n  \"format\": \"boris-starlight-relationship-target-inventory\",\n" ++
+            "  \"schema_version\": 2,\n" ++
+            "  \"policy\": \"Site-wide deterministic discovery evidence only. Explicit frontmatter.slug keys are retained when safe; missing, empty, or invalid slug values fall back to a path-derived exact key with their state recorded. Non-Markdown files under the discovered content root remain explicit unsupported rows. Duplicate exact keys remain visible. This artifact does not select targets, perform fuzzy matching, emit relations, or mutate source or converted pages.\",\n" ++
+            "  \"counts\": { \"total\": ");
+    try appendUsize(&json, a, rows.len);
+    try json.appendSlice(a, ", \"eligible\": ");
+    try appendUsize(&json, a, eligible);
+    try json.appendSlice(a, ", \"excluded\": ");
+    try appendUsize(&json, a, excluded);
+    try json.appendSlice(a, ", \"unsupported\": ");
+    try appendUsize(&json, a, unsupported);
+    try json.appendSlice(a, ", \"duplicate_exact_key_records\": ");
+    try appendUsize(&json, a, duplicate_keys);
+    try json.appendSlice(a, " },\n  \"targets\": [\n");
+    for (rows, 0..) |row, i| {
+        try json.appendSlice(a, "    { \"source_path\": ");
+        try appendJson(&json, a, row.source_path);
+        try json.appendSlice(a, ", \"source_location\": ");
+        try appendJson(&json, a, row.source_location);
+        try json.appendSlice(a, ", \"source_slug_state\": ");
+        try appendJson(&json, a, row.source_slug_state);
+        try json.appendSlice(a, ", \"original_target_key\": ");
+        if (row.original_target_key) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, ", \"normalized_lookup_key\": ");
+        if (row.normalized_lookup_key) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, ", \"candidate_entity_id\": ");
+        if (row.candidate_entity_id) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, ", \"candidate_output_route\": ");
+        if (row.candidate_output_route) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, ", \"eligibility\": ");
+        try appendJson(&json, a, row.eligibility);
+        try json.appendSlice(a, ", \"reason\": ");
+        if (row.reason) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, ", \"selected\": ");
+        try appendBool(&json, a, row.selected);
+        try json.appendSlice(a, " }");
+        if (i + 1 < rows.len) try json.append(a, ',');
+        try json.append(a, '\n');
+    }
+    try json.appendSlice(a, "  ]\n}\n");
+    try writeFile(io, out, "relationship_target_inventory.json", json.items);
+
+    var markdown: std.ArrayList(u8) = .empty;
+    try markdown.appendSlice(a, "# Relationship target inventory\n\n");
+    try markdown.appendSlice(a, "This deterministic sidecar is discovery evidence only; it does not classify relationship candidates or alter generated content.\n\n");
+    try markdown.appendSlice(a, "| Total | Eligible | Excluded | Unsupported | Duplicate-key records |\n|---:|---:|---:|---:|---:|\n| ");
+    try appendUsize(&markdown, a, rows.len);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, eligible);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, excluded);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, unsupported);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, duplicate_keys);
+    try markdown.appendSlice(a, " |\n");
+    try writeFile(io, out, "RELATIONSHIP_TARGET_INVENTORY.md", markdown.items);
 }
 
 fn writeSelectionManifest(
@@ -4724,6 +4990,8 @@ test "starlight: locale-dir fixture is deterministic, preserves source, reports 
         "selection_manifest.json",
         "link_review.json",
         "relation_candidates.json",
+        "relationship_target_inventory.json",
+        "RELATIONSHIP_TARGET_INVENTORY.md",
         "assets_manifest.json",
         "boundary_manifest.json",
         "heading_fragments.json",
@@ -4765,6 +5033,25 @@ test "starlight: locale-dir fixture is deterministic, preserves source, reports 
     try std.testing.expect(std.mem.indexOf(u8, relations, "review_only_field_no_relation_kind") != null);
     try std.testing.expect(std.mem.indexOf(u8, relations, "duplicate_product_relation") != null);
     try std.testing.expect(std.mem.indexOf(u8, relations, "\"duplicates\": 3") != null);
+
+    const targets = try readFileAlloc(io, ao, "relationship_target_inventory.json", std.testing.allocator);
+    defer std.testing.allocator.free(targets);
+    const parsed_targets = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, targets, .{});
+    defer parsed_targets.deinit();
+    try std.testing.expect(std.mem.indexOf(u8, targets, "boris-starlight-relationship-target-inventory") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"normalized_lookup_key\": \"features/alpha\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"candidate_output_route\": \"/en/features/alpha\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"eligibility\": \"excluded\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"schema_version\": 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"normalized_lookup_key\": \"inventory/über\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"source_slug_state\": \"empty_fallback_path\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"source_slug_state\": \"missing_fallback_path\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"source_slug_state\": \"not_markdown\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "unsupported_source_file_type") != null);
+    try std.testing.expect(std.mem.count(u8, targets, "\"normalized_lookup_key\": \"inventory/shared\"") == 2);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"duplicate_exact_key_records\": 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "\"normalized_lookup_key\": \"inventory/draft\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, targets, "draft_frontmatter") != null);
 
     const report = try readFileAlloc(io, ao, "report.json", std.testing.allocator);
     defer std.testing.allocator.free(report);
