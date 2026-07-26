@@ -4,6 +4,11 @@ All notable changes to the standalone `boris-docs-maintenance` developer tool wi
 
 ## [Unreleased]
 
+### Fixed
+- Preserve dossier marker paths while deriving source/dossier relationships, so
+  valid claims are not reported as missing after the scan completes.
+- Make dossier claim ownership transfers safe under allocation failure.
+
 ### Added
 - Initial release of the standalone documentation maintenance developer tool (`tools/docs-maintenance/`).
 - Deterministic scanner for inventorying evidence sets, parsing `BORIS-SOURCE-DOC` markers, and computing evidence digests.
