@@ -507,6 +507,57 @@ fn scalarLooksNonScalar(value: []const u8) bool {
     return v[0] == '{' or v[0] == '|' or v[0] == '>' or v[0] == '&' or v[0] == '*';
 }
 
+fn relationFieldAllowsSlugObject(field: []const u8) bool {
+    return std.mem.eql(u8, field, "relatedHaiku") or
+        std.mem.eql(u8, field, "relatedLimerick");
+}
+
+/// Filed's haiku/limerick references are commonly emitted as `{slug: ...}`
+/// objects. Recognize only that proven shape; all other object shapes remain
+/// explicit review evidence.
+fn appendInlineSlugObject(
+    a: std.mem.Allocator,
+    out: *std.ArrayList(RawRelationValue),
+    field: []const u8,
+    line: u32,
+    value_index: *usize,
+    value: []const u8,
+) !bool {
+    const v = trim(value);
+    if (v.len < 2 or v[0] != '{' or v[v.len - 1] != '}') return false;
+    if (!relationFieldAllowsSlugObject(field)) return false;
+
+    const raw_inner = trim(v[1 .. v.len - 1]);
+    var target: ?[]const u8 = null;
+    var malformed = false;
+    var start: usize = 0;
+    var i: usize = 0;
+    while (i <= raw_inner.len) : (i += 1) {
+        if (i != raw_inner.len and raw_inner[i] != ',') continue;
+        const pair = trim(raw_inner[start..i]);
+        const colon = std.mem.indexOfScalar(u8, pair, ':') orelse {
+            malformed = true;
+            start = i + 1;
+            continue;
+        };
+        const key = trim(pair[0..colon]);
+        const item_value = trim(pair[colon + 1 ..]);
+        if (!std.mem.eql(u8, key, "slug") or item_value.len == 0 or scalarLooksNonScalar(item_value) or target != null) {
+            malformed = true;
+        } else {
+            target = item_value;
+        }
+        start = i + 1;
+    }
+
+    if (target == null or malformed) {
+        try appendRawRelationValue(a, out, field, line, value_index, v, null, null, "non_scalar_or_ambiguous_object");
+    } else {
+        try appendRawRelationValue(a, out, field, line, value_index, v, target, null, null);
+    }
+    return true;
+}
+
 fn parseInlineRelationValues(
     a: std.mem.Allocator,
     out: *std.ArrayList(RawRelationValue),
@@ -521,6 +572,7 @@ fn parseInlineRelationValues(
         return;
     }
     if (v[0] != '[') {
+        if (try appendInlineSlugObject(a, out, field, line, value_index, v)) return;
         if (scalarLooksNonScalar(v)) {
             try appendRawRelationValue(a, out, field, line, value_index, v, null, null, "non_scalar_value");
         } else {
@@ -607,6 +659,8 @@ fn parseObjectItem(
         }
         if (std.mem.eql(u8, key, "id")) {
             if (target != null) malformed = true else target = value;
+        } else if (std.mem.eql(u8, key, "slug") and relationFieldAllowsSlugObject(field)) {
+            if (target != null or collection != null) malformed = true else target = value;
         } else if (std.mem.eql(u8, key, "collection")) {
             if (collection != null) malformed = true else collection = value;
         } else {
@@ -4322,6 +4376,62 @@ test "starlight: relation candidates retain over-limit and ambiguous evidence" {
     try std.testing.expectEqualStrings("ambiguous", candidates.items[17].target_resolution);
     try std.testing.expect(candidates.items[17].proposed_kind == null);
     try std.testing.expectEqualStrings("ambiguous_target_in_converted_entity_map", candidates.items[17].review_reason.?);
+}
+
+test "starlight: proven slug relation objects resolve only for haiku and limerick" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var entities: EntityMap = .empty;
+    try entities.put(a, "poems/one", "poems/one");
+
+    const page: SourcePage = .{
+        .source_path = "src/content/docs/en/source.mdx",
+        .locale_rel = "source.mdx",
+        .entity_id = "source",
+        .route = "/en/source",
+        .output_path = "content/source.md",
+        .title = "Source",
+        .parent = null,
+        .is_trunk = true,
+        .raw_frontmatter =
+        \\relatedHaiku: {slug: poems/one}
+        \\relatedLimerick:
+        \\  - slug: poems/one
+        \\mascotRef: {slug: poems/one}
+        \\relatedHaiku: {id: poems/one}
+        ,
+        .unmapped_fields = &.{},
+        .body = "",
+        .imports = &.{},
+        .components = &.{},
+        .stripped_blocks = &.{},
+        .link_events = &.{},
+        .component_events = &.{},
+        .bytes = 0,
+    };
+
+    var candidates: std.ArrayList(RelationCandidate) = .empty;
+    try collectRelationCandidatesForPage(a, page, "/en", &entities, &candidates);
+    try std.testing.expectEqual(@as(usize, 4), candidates.items.len);
+
+    try std.testing.expectEqualStrings("relatedHaiku", candidates.items[0].source_field);
+    try std.testing.expectEqualStrings("resolved", candidates.items[0].target_resolution);
+    try std.testing.expectEqualStrings("poems/one", candidates.items[0].resolved_entity.?);
+    try std.testing.expectEqualStrings("relates_to", candidates.items[0].proposed_kind.?);
+
+    try std.testing.expectEqualStrings("relatedLimerick", candidates.items[1].source_field);
+    try std.testing.expectEqualStrings("resolved", candidates.items[1].target_resolution);
+    try std.testing.expectEqualStrings("poems/one", candidates.items[1].resolved_entity.?);
+    try std.testing.expectEqualStrings("duplicate_product_relation", candidates.items[1].review_reason.?);
+
+    try std.testing.expectEqualStrings("mascotRef", candidates.items[2].source_field);
+    try std.testing.expectEqualStrings("not_attempted", candidates.items[2].target_resolution);
+    try std.testing.expectEqualStrings("non_scalar_value", candidates.items[2].review_reason.?);
+
+    try std.testing.expectEqualStrings("relatedHaiku", candidates.items[3].source_field);
+    try std.testing.expectEqualStrings("not_attempted", candidates.items[3].target_resolution);
+    try std.testing.expectEqualStrings("non_scalar_or_ambiguous_object", candidates.items[3].review_reason.?);
 }
 
 test "starlight: duplicate product relation candidates keep evidence without consuming ordinals" {

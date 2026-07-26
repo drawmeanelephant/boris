@@ -539,7 +539,9 @@ raw value, safe normalized target when available, converted-entity resolution,
 optional proposed kind, the product relation ordinal/bound evidence, and an
 explicit review reason.
 
-The lab proposes `relates_to` only for target-like values from the five
+The lab recognizes the proven `{slug: ...}` object shape for `relatedHaiku`
+and `relatedLimerick`; other object shapes and fields remain review-only. It
+proposes `relates_to` only for target-like values from the five
 `related*` / `mascotRef` fields that resolve against the converted entity map.
 `concepts` and `escalationPath` are always review-only. Malformed values,
 non-scalar mappings, ambiguous or unresolved targets, self-targets, and
