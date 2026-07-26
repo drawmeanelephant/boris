@@ -25,6 +25,7 @@ Layout selection (`--layout-rule`) lives under:
 | `layout-rules/` | Multi-layout theme + exact/glob/role selection markers |
 | `layout-rules/adversarial/` | Frontmatter `layout:` rejection; mixed theme roots |
 | `layout-rules/hostile/` | Hostile integration harness fixtures + audit report |
+| `archive-layout-audit/` | Realistic archive-shaped acceptance fixture, deterministic audit, and black-box harness |
 
 ApexMarkdown Unified compatibility (read-only audit) lives under:
 
