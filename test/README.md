@@ -9,6 +9,9 @@ Zig/C ABI, path discovery, graph validation, and deterministic artifacts.
 # Full default suite (unit + fixture + hardening + fuzz)
 zig build test
 
+# Black-box compiler/CLI contract smoke (build first if needed)
+test/cli-contract.sh
+
 # Hardening integration subset
 zig build test-harness
 
@@ -22,6 +25,10 @@ zig build test-apex-hostile
 
 All steps are **single-threaded**. No test relies on filesystem enumeration
 order (paths and entity ids are sorted before assertions).
+
+The CLI contract smoke exercises the process boundary rather than only Zig
+parser units: explicit command routing, report goldens, repeated-output
+determinism, and distinct content/usage/I/O exit classes.
 
 ## Disposable output
 
