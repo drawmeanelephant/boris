@@ -259,13 +259,13 @@ pub fn renderEntityCatalog(gpa: std.mem.Allocator, pages: []const graph_mod.Node
 pub fn renderRelations(gpa: std.mem.Allocator, pages: []const graph_mod.Node, content_paths_present: bool) ![]u8 {
     var doc: std.ArrayList(u8) = .empty;
     errdefer doc.deinit(gpa);
-    try doc.appendSlice(gpa, "---\nrag_id: graph/relations\nrag_path: graph/relations.md\ncategory: graph\ntags: [graph, relations, trunk, satellite]\nrelated:\n  - graph/entity-catalog.md\n---\n\n# Graph relations (Trunk → Satellite)\n\nEdges come from satellite frontmatter `parent: <trunk-entity-id>`.\nHubs and satellite lists are ordered by `entity_id`. Edge list is\nordered by source id then target id. Invalid graphs never publish\nthis file (shared `graph.validate` must pass first).\n\n## Trunk hubs\n\n");
+    try doc.appendSlice(gpa, "---\nrag_id: graph/relations\nrag_path: graph/relations.md\ncategory: graph\ntags: [graph, hierarchy, trunk, satellite]\nrelated:\n  - graph/entity-catalog.md\n---\n\n# Graph relations (parent hierarchy)\n\nEdges come from page frontmatter `parent: <entity-id>`. Hubs and direct child\nlists are ordered by `entity_id`; parent chains may be nested but must remain\nacyclic. Invalid graphs never publish this file (shared `graph.validate` must\npass first).\n\n## Hierarchy hubs\n\n");
     for (pages) |page| {
-        if (page.role != .trunk) continue;
+        const kind = if (page.role == .trunk) "Root RAG" else "Parent RAG";
         if (content_paths_present) {
-            try doc.print(gpa, "### `{s}` — {s}\n\n- Trunk RAG: `content/pages/{s}.md`\n- Satellites:\n", .{ page.id, pageTitle(page), page.id });
+            try doc.print(gpa, "### `{s}` — {s}\n\n- {s}: `content/pages/{s}.md`\n- Children:\n", .{ page.id, pageTitle(page), kind, page.id });
         } else {
-            try doc.print(gpa, "### `{s}` — {s}\n\n- Trunk RAG: *(in parts; see part_manifest.json)*\n- Satellites:\n", .{ page.id, pageTitle(page) });
+            try doc.print(gpa, "### `{s}` — {s}\n\n- {s}: *(in parts; see part_manifest.json)*\n- Children:\n", .{ page.id, pageTitle(page), kind });
         }
         var any = false;
         for (pages) |child| {
@@ -286,7 +286,7 @@ pub fn renderRelations(gpa: std.mem.Allocator, pages: []const graph_mod.Node, co
     const Pair = struct { src: []const u8, tgt: []const u8 };
     var pairs: std.ArrayList(Pair) = .empty;
     defer pairs.deinit(gpa);
-    for (pages) |page| if (page.role == .satellite) if (page.parent) |parent| try pairs.append(gpa, .{ .src = page.id, .tgt = parent });
+    for (pages) |page| if (page.parent) |parent| try pairs.append(gpa, .{ .src = page.id, .tgt = parent });
     std.mem.sort(Pair, pairs.items, {}, struct {
         fn less(_: void, a: Pair, b: Pair) bool {
             const order = std.mem.order(u8, a.src, b.src);
@@ -338,7 +338,7 @@ pub fn renderIndex(gpa: std.mem.Allocator, catalog: []const CatalogEntry, stats:
     } else {
         try doc.appendSlice(gpa, "| `content/pages/**` | Content page segments |\n");
     }
-    try doc.appendSlice(gpa, "| `graph/entity-catalog.md` | Entity table |\n| `graph/relations.md` | Trunk → Satellite edges |\n\n## Full catalog\n\n| rag_path | category | title | entity_id |\n|----------|----------|-------|-----------|\n");
+    try doc.appendSlice(gpa, "| `graph/entity-catalog.md` | Entity table |\n| `graph/relations.md` | Parent hierarchy edges |\n\n## Full catalog\n\n| rag_path | category | title | entity_id |\n|----------|----------|-------|-----------|\n");
     for (catalog) |entry| {
         try doc.print(gpa, "| `{s}` | {s} | {s} | ", .{ entry.rag_path, entry.category, entry.title });
         if (entry.entity_id.len > 0) try doc.print(gpa, "`{s}`", .{entry.entity_id}) else try doc.appendSlice(gpa, "—");

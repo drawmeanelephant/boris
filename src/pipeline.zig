@@ -1424,13 +1424,11 @@ test "invalid graph fixtures emit stable categories" {
     const dir_cases = [_]Case{
         .{ .root = "docs/contracts/fixtures/missing-parent/content", .code = .EPARENTMISSING },
         .{ .root = "docs/contracts/fixtures/self-parent/content", .code = .EPARENTSELF },
-        .{ .root = "docs/contracts/fixtures/satellite-of-satellite/content", .code = .EPARENTNOTTRUNK },
         .{ .root = "docs/contracts/fixtures/cycles/content", .code = .EPARENTCYCLE },
         .{ .root = "docs/contracts/fixtures/longer-cycle/content", .code = .EPARENTCYCLE },
         .{ .root = "docs/contracts/fixtures/case-id-collision/content", .code = .EINVALIDPATH },
         .{ .root = "fixtures/content/invalid/duplicate-id", .code = .EDUPLICATEID },
         .{ .root = "fixtures/content/invalid/cycle", .code = .EPARENTCYCLE },
-        .{ .root = "fixtures/content/invalid/satellite-of-satellite", .code = .EPARENTNOTTRUNK },
     };
 
     for (dir_cases, 0..) |c, i| {
@@ -1539,15 +1537,22 @@ test "fixtures/content/valid builds and orders by id" {
     });
     defer result.deinit();
     try std.testing.expect(result.ok);
-    // empty-no-fm, nested/deep/page, satellite-child (parent home), trunk-root (id home)
-    try std.testing.expectEqual(@as(usize, 4), result.pages.items.len);
-    // Sorted by id: empty-no-fm, home (from trunk-root id:), nested/deep/page, satellite-child
+    // empty-no-fm, three-level hierarchy, nested/deep/page, satellite-child,
+    // trunk-root (id home)
+    try std.testing.expectEqual(@as(usize, 7), result.pages.items.len);
+    // Sorted by id: empty-no-fm, hierarchy leaf/mid/trunk, home, nested/deep/page,
+    // satellite-child.
     try std.testing.expectEqualStrings("empty-no-fm", result.pages.items[0].id);
-    try std.testing.expectEqualStrings("home", result.pages.items[1].id);
-    try std.testing.expect(result.pages.items[1].role == .trunk);
-    try std.testing.expectEqualStrings("nested/deep/page", result.pages.items[2].id);
-    try std.testing.expectEqualStrings("satellite-child", result.pages.items[3].id);
-    try std.testing.expect(result.pages.items[3].role == .satellite);
+    try std.testing.expectEqualStrings("hierarchy-leaf", result.pages.items[1].id);
+    try std.testing.expect(result.pages.items[1].role == .satellite);
+    try std.testing.expectEqualStrings("hierarchy-mid", result.pages.items[2].id);
+    try std.testing.expect(result.pages.items[2].role == .satellite);
+    try std.testing.expectEqualStrings("hierarchy-trunk", result.pages.items[3].id);
+    try std.testing.expect(result.pages.items[3].role == .trunk);
+    try std.testing.expectEqualStrings("home", result.pages.items[4].id);
+    try std.testing.expectEqualStrings("nested/deep/page", result.pages.items[5].id);
+    try std.testing.expectEqualStrings("satellite-child", result.pages.items[6].id);
+    try std.testing.expect(result.pages.items[6].role == .satellite);
 }
 
 test "promoted metadata survives source buffer free (via PageDb unit + pipeline)" {

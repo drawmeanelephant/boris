@@ -225,7 +225,7 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 
 | Order | Card | State |
 |------:|------|-------|
-| 1 | Post-contest documentation information architecture: establish Start Here / Learn / Reference / Architecture / Archive and demote agent-lore from the primary nav without changing Trunk → Satellite semantics | **Next** |
+| 1 | Documentation information architecture: establish Start Here / Learn / Reference / Architecture / Archive and demote agent-lore from the primary nav; hierarchy foundation now supports nested parent chains without changing direct Trunk → Satellite edge semantics | **In progress** |
 | 2 | Rendered-site search PR-2: browser UI, ranking/excerpts, zero-results state, and no-JavaScript fallback using the PR #231 index seam | **Next** |
 | 3 | Compiler staged search publication: pass the exact live-page overlay to the shared indexer and publish search artifacts with the HTML target commit | **Later** |
 | 4 | Release bookkeeping: assemble retained `docs/changelog.d/` fragments into the next dated `CHANGELOG.md` section only at release cut | **Release cut** |

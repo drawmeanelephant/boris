@@ -1013,9 +1013,9 @@ test "fixture: graph-invalid files still parse (not parser errors)" {
         "fixtures/content/invalid/cycle/b.md",
         "fixtures/content/invalid/duplicate-id/a.md",
         "fixtures/content/invalid/duplicate-id/b.md",
-        "fixtures/content/invalid/satellite-of-satellite/trunk.md",
-        "fixtures/content/invalid/satellite-of-satellite/mid.md",
-        "fixtures/content/invalid/satellite-of-satellite/leaf.md",
+        "fixtures/content/valid/multi-level-hierarchy/trunk.md",
+        "fixtures/content/valid/multi-level-hierarchy/mid.md",
+        "fixtures/content/valid/multi-level-hierarchy/leaf.md",
     };
     const gpa = std.testing.allocator;
     for (paths) |p| {

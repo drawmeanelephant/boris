@@ -138,7 +138,7 @@ Every page has exactly one role after resolution:
 ### Normative rules
 
 1. A **Trunk** has no `parent`.
-2. A **Satellite** has **exactly one** `parent` naming a **Trunk** entity id.
+2. A **Satellite** has **exactly one** `parent` naming another page entity id.
 3. The `parent` value is a full **entity id** (see
    [identity-and-paths.md](identity-and-paths.md)), **not** a filesystem path
    with `.md`, a URL, or a display title.
@@ -150,15 +150,12 @@ Every page has exactly one role after resolution:
 | Two pages share the same `id` | [`EDUPLICATEID`](diagnostics.md) |
 | `parent` id not present in the page set | [`EPARENTMISSING`](diagnostics.md) |
 | `parent` equals own `id` | [`EPARENTSELF`](diagnostics.md) |
-| `parent` resolves to a Satellite | [`EPARENTNOTTRUNK`](diagnostics.md) |
 | Cycle in parent edges | [`EPARENTCYCLE`](diagnostics.md) |
 
-6. **Satellite-of-satellite** is unsupported: multi-hop chains are hard errors,
-   not a nested navigation feature.
-7. Multiple satellites may share the same Trunk parent.
-8. Valid graphs are a **one-level forest**: roots are Trunks; every Satellite
-   edges to exactly one Trunk.
-9. **Do not claim the structure is a DAG (or frozen forest) until validation
+6. Multiple Satellites may share the same parent.
+7. Valid graphs are rooted forests: roots are Trunks and every Satellite edges
+   to exactly one page in the same forest.
+8. **Do not claim the structure is a DAG (or frozen forest) until validation
    succeeds and freeze runs.** On failure, `frozen` is never true and
    `graph.json` is not published.
 
@@ -168,9 +165,8 @@ Every page has exactly one role after resolution:
 2. [`EDUPLICATEID`](diagnostics.md) (global; detected before map overwrite can hide it)
 3. [`EPARENTSELF`](diagnostics.md)
 4. [`EPARENTMISSING`](diagnostics.md)
-5. [`EPARENTNOTTRUNK`](diagnostics.md)
-6. After all pages processed: [`EPARENTCYCLE`](diagnostics.md) (global)
-7. Include/reference diagnostics in stable locus order after page identity and
+5. After all pages processed: [`EPARENTCYCLE`](diagnostics.md) (global)
+6. Include/reference diagnostics in stable locus order after page identity and
    topology are known valid
 
 Diagnostics are sorted for emit by (`sourcePath`, `line`, `column`, `code`,
@@ -393,7 +389,7 @@ Key order: `from`, `to`, `kind`. Endpoint object key order is `type`, `value`.
 
 | `kind` | Allowed `from` | Required `to` | Meaning |
 |--------|----------------|---------------|---------|
-| `"parent"` | `page` | `page` | Satellite depends on its Trunk parent |
+| `"parent"` | `page` | `page` | Satellite depends on its direct parent page |
 | `"include"` | `page` or `source` | `source` | Body directly contains an active include of target bytes |
 | `"reference"` | `page` or `source` | `page` | Body directly contains an active wiki-link to target entity |
 
@@ -468,14 +464,14 @@ index, id, breadcrumb, children, siblings
 | `id` | string | Entity id (redundant with `nodes[i].id`; stable for consumers) |
 | `breadcrumb` | array of integer | Parent chain **root → self** (inclusive), node indices |
 | `children` | array of integer | Direct child node indices, entity id ascending |
-| `siblings` | array of integer | Same-Trunk satellite peers **excluding self**, id ascending; **empty for Trunk** |
+| `siblings` | array of integer | Direct peers sharing the same parent, id ascending; **empty for root Trunks** |
 
 #### Normative rules
 
 1. **Input:** frozen nodes only (`parent_index` remapped after id sort). No I/O.
 2. **Breadcrumb:** walk `parent_index` from the page to the root Trunk, then
-   emit root → self. For a Trunk this is `[selfIndex]`. For a Satellite in the
-   v0.2 one-level forest this is `[parentIndex, selfIndex]`.
+   emit root → self. For a Trunk this is `[selfIndex]`; deeper pages include
+   every validated ancestor in order.
 3. **Children:** every node `c` with `c.parentIndex == page.index`, ordered by
    entity id. Equivalent to scanning the id-sorted node array once and
    appending — **do not** sort via hash-map iteration.
@@ -483,8 +479,8 @@ index, id, breadcrumb, children, siblings
    children of `P` excluding self (id order). If the page is a Trunk,
    `siblings` is `[]` (other roots are **not** siblings).
 5. **Empty arrays** are written as `[]`, never omitted.
-6. v0.2 forests are one-level: satellites never have children under valid
-graphs; multi-hop chains remain hard errors at validate time.
+6. Valid forests may have arbitrary finite depth; cycles remain hard errors at
+   validate time.
 
 Example (dependency fields abbreviated; the F8 fixture pins the complete edge
 and reverse-index skeleton):

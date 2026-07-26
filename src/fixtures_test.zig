@@ -14,7 +14,6 @@ const required_categories = [_][]const u8{
     "EDUPLICATEID",
     "EPARENTMISSING",
     "EPARENTSELF",
-    "EPARENTNOTTRUNK",
     "EPARENTCYCLE",
     "EFRONTMATTER",
     "EINVALIDUTF8",

@@ -134,7 +134,7 @@ Exactly these six keys are accepted. **No aliases.**
 |-----|----------|-------|-------|
 | `id` | no | plain/dquoted entity id | Override path-derived id; shape rules in [identity-and-paths.md](identity-and-paths.md) |
 | `title` | no | plain/dquoted string | ≤512 UTF-8 bytes |
-| `parent` | no | plain/dquoted entity id | Foreign key to a **Trunk** entity id; ≤255 bytes |
+| `parent` | no | plain/dquoted entity id | Foreign key to a direct parent page; ≤255 bytes |
 | `status` | no | `draft` \| `published` \| `archived` | Exact spellings only |
 | `tags` | no | `[a, b, "c"]` only | Bracket list; plain or double-quoted items |
 | `relations` | no | `[kind=target, …]` only | Bounded semantic relations; closed kinds and validation in [semantic-relations.md](semantic-relations.md) |
@@ -179,12 +179,13 @@ There is **no** scheduled removal date in repository planning material for the R
 | `parent` omitted or null | **Trunk** |
 | `parent` present (non-empty entity id) | **Satellite** |
 
-Further graph rules (missing parent, self-parent, satellite-of-satellite,
-cycles, duplicate ids) are specified in [ir-schema.md](ir-schema.md) and
+Further graph rules (missing parent, self-parent, cycles, duplicate ids) are
+specified in [ir-schema.md](ir-schema.md) and
 diagnostics in [diagnostics.md](diagnostics.md).
 
-A **Trunk** has no `parent` field (or omits it).  
-A **Satellite** has **exactly one** `parent` naming a Trunk entity id.
+A **Trunk** has no `parent` field (or omits it). A **Satellite** has exactly
+one `parent` naming another page in the hierarchy. A Satellite may itself have
+Satellites; parent chains are finite and must be acyclic.
 
 ---
 

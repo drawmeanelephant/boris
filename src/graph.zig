@@ -205,14 +205,12 @@ pub fn validate(
 /// Checks (in order):
 ///   1. `EPARENTSELF` — parent equals own id
 ///   2. `EPARENTMISSING` — parent id not in the page set
-///   3. `EPARENTNOTTRUNK` — parent is itself a satellite (hard error)
-///   4. `EPARENTCYCLE` — DFS with visiting (gray) set
+///   3. `EPARENTCYCLE` — DFS with visiting (gray) set
 ///
 /// Algorithm (single-threaded):
 ///   1. Hash map entity id → index (O(n))
 ///   2. Validate + classify each node (O(n) expected)
-///   3. Multi-hop / satellite-of-satellite pass
-///   4. DFS gray-set cycle detection (roadmap-safe if nesting is later allowed)
+///   3. DFS gray-set cycle detection
 pub fn validateTopology(
     list_gpa: std.mem.Allocator,
     retain: std.mem.Allocator,
@@ -260,30 +258,6 @@ pub fn validateTopology(
         } else {
             n.role = .trunk;
             n.parent_index = null;
-        }
-    }
-
-    // Satellite-of-satellite: parent exists but is itself a satellite.
-    // v0.1 model is one-level only; multi-hop has no defined semantics — hard fail.
-    for (nodes) |n| {
-        if (n.parent_index) |pi| {
-            const parent = nodes[pi];
-            if (parent.parent != null) {
-                try diags.append(list_gpa, .{
-                    .severity = .error_,
-                    .code = .EPARENTNOTTRUNK,
-                    .message = try std.fmt.allocPrint(
-                        retain,
-                        "parent \"{s}\" is a satellite (multi-hop parent chains are unsupported in v0.1)",
-                        .{parent.id},
-                    ),
-                    .remediation = try retain.dupe(u8, "Point parent at a trunk page (no parent of its own)"),
-                    .source_path = n.source_path,
-                    .line = 1,
-                    .column = 1,
-                    .id = n.id,
-                });
-            }
         }
     }
 
@@ -533,8 +507,7 @@ pub fn buildNav(list_gpa: std.mem.Allocator, nodes: []const Node) ![]NavEntry {
     return nav;
 }
 
-/// Root → self node-index chain. v0.1 graphs are one-level forests (depth ≤ 2),
-/// but the walk follows `parent_index` generically without assuming depth.
+/// Root → self node-index chain for the validated hierarchy.
 fn buildBreadcrumb(list_gpa: std.mem.Allocator, nodes: []const Node, start: usize) ![]u32 {
     var chain: std.ArrayList(u32) = .empty;
     errdefer chain.deinit(list_gpa);
@@ -559,8 +532,8 @@ fn buildBreadcrumb(list_gpa: std.mem.Allocator, nodes: []const Node, start: usiz
     return try chain.toOwnedSlice(list_gpa);
 }
 
-/// Trunk-level siblings: other direct children of the same parent, excluding self.
-/// Empty for Trunk pages (no parent) and for nodes with an unresolved parent.
+/// Siblings: other direct children of the same parent, excluding self.
+/// Empty for root Trunks and nodes with an unresolved parent.
 fn buildSiblings(
     list_gpa: std.mem.Allocator,
     child_lists: []const std.ArrayList(u32),
@@ -751,13 +724,13 @@ test "freeze emits layout edges when layout_path set" {
     }
 }
 
-test "validateTopology satellite-of-satellite is hard error EPARENTNOTTRUNK" {
+test "validateTopology accepts multi-level hierarchy" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const retain = arena.allocator();
 
-    // trunk t ← sat s1 ← sat s2 (two-hop, unsupported)
+    // trunk t ← sat s1 ← sat s2 (two-hop hierarchy)
     var nodes = [_]Node{
         .{ .id = "t", .source_path = "t.md" },
         .{ .id = "s1", .source_path = "s1.md", .parent = "t" },
@@ -767,18 +740,7 @@ test "validateTopology satellite-of-satellite is hard error EPARENTNOTTRUNK" {
     defer diags.deinit(gpa);
     try validateTopology(gpa, retain, &nodes, &diags);
 
-    var not_trunk: usize = 0;
-    for (diags.items) |d| {
-        if (d.code == .EPARENTNOTTRUNK) {
-            not_trunk += 1;
-            try std.testing.expect(d.severity == .error_);
-            try std.testing.expect(d.isError());
-            try std.testing.expectEqualStrings("s2", d.id);
-        }
-    }
-    try std.testing.expectEqual(@as(usize, 1), not_trunk);
-    try std.testing.expectEqual(@as(usize, 1), diag.countErrors(diags.items));
-    // Still classifies both as satellites; does not invent multi-hop semantics.
+    try std.testing.expectEqual(@as(usize, 0), diag.countErrors(diags.items));
     try std.testing.expect(nodes[1].role == .satellite);
     try std.testing.expect(nodes[2].role == .satellite);
 }

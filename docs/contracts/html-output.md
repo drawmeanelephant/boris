@@ -108,7 +108,7 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
 
    | Marker | Value |
    |--------|--------|
-   | `{{nav}}` | Full site forest (Trunks id-ascending, nested Satellites id-ascending) |
+   | `{{nav}}` | Full site forest (root Trunks id-ascending, recursively nested children id-ascending) |
    | `{{breadcrumb}}` | Parent chain root → current page (inclusive) |
    | `{{title}}` | Page title, or entity id when title is absent (HTML-escaped text) |
    | `{{toc}}` | In-page outline from **this page’s** body headings (h1–h3 with `id`) |
@@ -136,14 +136,16 @@ Before any page render, the HTML path:
 
 ### Site nav HTML (normative shape)
 
-When `{{nav}}` is present, emit a deterministic forest (no hash-map order):
+When `{{nav}}` is present, emit a deterministic rooted forest (no hash-map order):
 
 ```html
 <nav class="site-nav" aria-label="Site">
   <ul>
     <li class="site-nav__trunk[ is-current]"><a href="REL">TITLE</a>
       <ul>
-        <li class="site-nav__satellite[ is-current]"><a href="REL">TITLE</a></li>
+        <li class="site-nav__satellite[ is-current| is-ancestor]"><a href="REL">TITLE</a>
+          <ul>… recursively nested children …</ul>
+        </li>
       </ul>
     </li>
   </ul>
@@ -157,8 +159,8 @@ When `{{nav}}` is present, emit a deterministic forest (no hash-map order):
 - `is-current` marks the `li` for the page being rendered; the current link may
   use `aria-current="page"`.
 - The named `nav` landmark and nested `ul` / `li` structure are part of the
-  emitted HTML contract; a Satellite list is nested inside its owning Trunk
-  list item.
+  emitted HTML contract; every direct child list is nested inside its owning
+  page list item. `is-ancestor` marks the current page's validated ancestors.
 
 When `{{breadcrumb}}` is present:
 
@@ -190,8 +192,7 @@ When `{{children}}` is present, Boris emits only the current frozen node's
   never a leading-`/` site-absolute path.
 - `TITLE` is the child title when set, otherwise its entity id. Link text and
   `href` are HTML-escaped.
-- A page with no direct children, including every Satellite under the current
-  one-level graph contract, emits the empty fragment (no wrapper).
+- A page with no direct children emits the empty fragment (no wrapper).
 - The non-empty fragment is a named `nav` landmark containing one unordered
   list; each child is a list item containing its link.
 - This slot does not create virtual pages, recursive graph navigation,

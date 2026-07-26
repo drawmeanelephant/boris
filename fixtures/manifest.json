@@ -21,6 +21,21 @@
       "path": "content/valid/empty-no-fm.md",
       "role": "trunk",
       "notes": "Empty page, no frontmatter; path-derived id empty-no-fm; title null"
+    },
+    {
+      "path": "content/valid/multi-level-hierarchy/trunk.md",
+      "role": "trunk",
+      "notes": "Root of a deterministic three-level parent hierarchy"
+    },
+    {
+      "path": "content/valid/multi-level-hierarchy/mid.md",
+      "role": "satellite",
+      "notes": "Direct child that also owns a nested Satellite"
+    },
+    {
+      "path": "content/valid/multi-level-hierarchy/leaf.md",
+      "role": "satellite",
+      "notes": "Third-level Satellite parented to mid"
     }
   ],
   "invalid": [
@@ -44,15 +59,6 @@
       "expectedCategory": "EPARENTSELF",
       "paths": [
         "content/invalid/self-parent.md"
-      ]
-    },
-    {
-      "suite": "satellite-of-satellite",
-      "expectedCategory": "EPARENTNOTTRUNK",
-      "paths": [
-        "content/invalid/satellite-of-satellite/trunk.md",
-        "content/invalid/satellite-of-satellite/mid.md",
-        "content/invalid/satellite-of-satellite/leaf.md"
       ]
     },
     {
@@ -103,7 +109,6 @@
     "EDUPLICATEID",
     "EPARENTMISSING",
     "EPARENTSELF",
-    "EPARENTNOTTRUNK",
     "EPARENTCYCLE",
     "EFRONTMATTER",
     "EINVALIDUTF8",

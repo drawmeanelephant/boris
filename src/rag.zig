@@ -758,34 +758,26 @@ fn exportGraphDocs(
             \\rag_id: graph/relations
             \\rag_path: graph/relations.md
             \\category: graph
-            \\tags: [graph, relations, trunk, satellite]
+            \\tags: [graph, relations, hierarchy, trunk, satellite]
             \\related:
             \\  - graph/entity-catalog.md
             \\---
             \\
-            \\# Graph relations (Trunk → Satellite)
+            \\# Graph relations (parent hierarchy)
             \\
-            \\Edges come from satellite frontmatter `parent: <trunk-entity-id>`.
-            \\Hubs and satellite lists are ordered by `entity_id`. Edge list is
-            \\ordered by source id then target id. Invalid graphs never publish
-            \\this file (shared `graph.validate` must pass first).
+            \\Edges come from page frontmatter `parent: <entity-id>`. Hubs and
+            \\direct child lists are ordered by `entity_id`; parent chains may be
+            \\nested but must remain acyclic. Invalid graphs never publish this
+            \\file (shared `graph.validate` must pass first).
             \\
-            \\## Trunk hubs
+            \\## Hierarchy hubs
             \\
             \\
         );
 
         for (pages) |p| {
-            if (p.role != .trunk) continue;
-            try doc.appendSlice(gpa, "### `");
-            try doc.appendSlice(gpa, p.id);
-            try doc.appendSlice(gpa, "` — ");
-            try doc.appendSlice(gpa, pageTitle(p));
-            try doc.appendSlice(gpa, "\n\n");
-            try doc.appendSlice(gpa, "- Trunk RAG: `content/pages/");
-            try doc.appendSlice(gpa, p.id);
-            try doc.appendSlice(gpa, ".md`\n");
-            try doc.appendSlice(gpa, "- Satellites:\n");
+            const kind = if (p.role == .trunk) "Root RAG" else "Parent RAG";
+            try doc.print(gpa, "### `{s}` — {s}\n\n- {s}: `content/pages/{s}.md`\n- Children:\n", .{ p.id, pageTitle(p), kind, p.id });
             var any = false;
             for (pages) |child| {
                 if (child.role != .satellite) continue;
@@ -816,7 +808,6 @@ fn exportGraphDocs(
         var pairs: std.ArrayList(EdgePair) = .empty;
         defer pairs.deinit(gpa);
         for (pages) |p| {
-            if (p.role != .satellite) continue;
             const par = p.parent orelse continue;
             try pairs.append(gpa, .{ .src = p.id, .tgt = par });
         }
@@ -843,8 +834,8 @@ fn exportGraphDocs(
             .rag_id = "graph/relations",
             .rag_path = "graph/relations.md",
             .category = "graph",
-            .title = "Graph relations (Trunk → Satellite)",
-            .tags = "[graph, relations, trunk, satellite]",
+            .title = "Graph relations (parent hierarchy)",
+            .tags = "[graph, relations, hierarchy, trunk, satellite]",
         });
         n += 1;
         log(opts, "  rag graph   graph/relations.md\n", .{});
@@ -967,7 +958,7 @@ fn exportIndex(
         \\| `system/**` | Curated architecture seeds |
         \\| `content/pages/**` | Content page segments |
         \\| `graph/entity-catalog.md` | Entity table |
-        \\| `graph/relations.md` | Trunk → Satellite edges |
+        \\| `graph/relations.md` | Parent hierarchy edges |
         \\
         \\## Full catalog
         \\
