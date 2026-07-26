@@ -29,9 +29,17 @@ worktree and asserts the Git-native predicate still enables the check.
 
 CI (`.github/workflows/ci.yml`) pins **Zig 0.16.0** and runs `zig build`,
 `zig build test`, and `zig build test-apex-hostile` on `ubuntu-latest` and
-`macos-latest`. The root aggregate deliberately excludes the standalone
-migration laboratory; changes under `tools/migration-lab/` additionally run its
-Linux-only targeted gate: `zig build --build-file tools/migration-lab/build.zig test`.
+`macos-latest`. The root aggregate deliberately excludes standalone tools;
+changes under `tools/migration-lab/` additionally run its Linux-only targeted
+gate, while changes under `tools/search-index/`, `tools/docs-maintenance/`, or
+the shared `src/search_index.zig` run both standalone tool gates on Ubuntu and
+macOS:
+
+```bash
+zig build --build-file tools/migration-lab/build.zig test
+zig build --build-file tools/search-index/build.zig test
+zig build --build-file tools/docs-maintenance/build.zig test
+```
 Sanitizer remains optional and must not be claimed if it only skipped.
 
 ### Sanitizer evidence
