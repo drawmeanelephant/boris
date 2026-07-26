@@ -1,5 +1,6 @@
 ---
 title: Frontmatter Reference
+parent: reference
 status: published
 tags: [reference, authoring]
 ---

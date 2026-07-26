@@ -32,15 +32,15 @@ fails with a diagnostic instead of quietly becoming broken navigation.
 | Better AI grounding | Deterministic RAG, Context Bundle, and `llms.txt` outputs with provenance |
 | A path off an old site | Bounded Zig migration labs that preserve review items instead of guessing them away |
 
-## Take the short tour
+## Choose your next step
 
 | Page | What you’ll learn |
 |------|-------------------|
-| [[contest|Boris at Build Week]] | What shipped, how it was built, the pipeline, and the boundaries |
-| [[contest/the-pipeline|The output pipeline]] | Markdown to HTML, IR, RAG, Context Bundles, and `llms.txt` |
-| [[agents|Agent Field Notes]] | Evidence-bound collaboration stories and credits |
-| [[getting-started|Getting started]] | Build Boris and ship your first site |
-| [[guides/overview|The content model]] | Trunks, Satellites, validation, and the authoring workflow |
+| [[start-here|Start Here]] | Install Boris, build the sample site, and learn the essential commands |
+| [[learn|Learn]] | Understand the content model, Markdown authoring, and output workflow |
+| [[reference|Reference]] | Look up frontmatter, diagnostics, and precise compiler behavior |
+| [[architecture|Architecture]] | Follow the graph, pipeline, IR, RAG, and design boundaries |
+| [[archive|Archive]] | Browse Build Week history and evidence-bound agent field notes |
 
 ## Small by design, not by accident
 

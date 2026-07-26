@@ -1,6 +1,7 @@
 ---
 id: contest
 title: Boris at Build Week
+parent: archive
 status: published
 tags: [build-week, overview, dogfood]
 ---

@@ -1,5 +1,6 @@
 ---
 title: Getting Started with Boris
+parent: start-here
 status: published
 tags: [setup, cli]
 ---

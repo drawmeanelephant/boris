@@ -1,14 +1,15 @@
 ---
 id: agents
 title: Agent Field Notes
+parent: archive
 status: published
 tags: [agents, dogfood]
 ---
 
 # Agent Field Notes
 
-This small section is Boris content dogfood: one Trunk and direct Satellites,
-linked with ordinary Markdown and wiki-links. It is also the collaboration
+This small section is Boris content dogfood: a parent page and direct
+Satellites, linked with ordinary Markdown and wiki-links. It is also the collaboration
 appendix to [[contest/how-it-was-built|How Boris was built]]: a record of work
 visible in this repository—not a claim that an agent persists beyond a
 particular task or that every name has a verified patch.

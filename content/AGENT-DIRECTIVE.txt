@@ -78,7 +78,7 @@ arbitrary keys. Title is **optional**. Status only `draft` | `published` |
 `archived`. Tags only `[a, b, "c"]` form.
 
 - **Trunk** = omit `parent`.
-- **Satellite** = `parent: <trunk-entity-id>`.
+- **Satellite** = `parent: <direct-parent-entity-id>`.
 - No cycles, missing parents, or broken demo pages; nested parent chains are valid
   under `content/` (negative fixtures live under `fixtures/` / contracts).
 

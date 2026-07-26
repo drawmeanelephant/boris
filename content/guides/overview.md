@@ -1,5 +1,6 @@
 ---
 title: Content Model Overview
+parent: learn
 status: published
 tags: [guides, architecture]
 ---
@@ -7,7 +8,7 @@ tags: [guides, architecture]
 # Content Model & Pipeline
 
 Boris treats your docs as a **validated graph**, not a flat file dump. Pages are
-**Trunks** (roots) or **Satellites** (children of a trunk). Frontmatter is a
+**Trunks** (roots) or **Satellites** (pages with a direct parent). Frontmatter is a
 **closed key grammar** — not full YAML.
 
 ## Pipeline: Load → Roll → Ignite → Reset
