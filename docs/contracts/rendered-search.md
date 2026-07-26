@@ -14,6 +14,13 @@ rendered heading `id` as `fragment` when present, normalized prose, and
 separately searchable code text. Documents are path-sorted bytewise for stable
 JSON output.
 
+The standalone CLI accepts both `--option value` and `--option=value` forms.
+Explicit `--pages-file` entries must be unique, normalized output-relative
+`.html` paths with no `.` / `..` components, and must not traverse symlinks.
+Recursive discovery rejects symlinks and excludes the output directory when it
+is nested below the rendered root. Published index files use atomic replacement
+where the host filesystem supports the normal same-volume rename semantics.
+
 Layouts may mark the precise extraction root with `<main
 data-boris-search-root>{{content}}</main>`. Multiple marked roots fail. The
 standalone extractor can require the marker; otherwise it falls back to the
