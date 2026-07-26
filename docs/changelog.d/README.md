@@ -25,6 +25,9 @@ find docs/changelog.d -maxdepth 1 -type f -name '[0-9]*-*.md' -print | LC_ALL=C 
 git diff --check -- AGENTS.md CHANGELOG.md docs/changelog.d
 ```
 
+`INVENTORY.md` is release-bookkeeping evidence, not a fragment; release owners
+must continue to use the numeric-filename command above when assembling notes.
+
 ## Release-owner procedure
 
 1. List fragments with the command above. Process categories in this order:
