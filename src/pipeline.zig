@@ -23,11 +23,11 @@ const doclink = @import("doclink.zig");
 const target_mod = @import("target.zig");
 
 pub const schema_version = "0.2.0";
-pub const compiler_id = "boris/0.8.0";
+pub const compiler_id = "boris/0.8.1";
 pub const semantic_schema_version = "0.3.0";
-pub const semantic_compiler_id = "boris/0.8.0+semantic-relations";
+pub const semantic_compiler_id = "boris/0.8.1+semantic-relations";
 /// Product version string (package / catalog_meta.boris_version).
-pub const boris_version = "0.8.0";
+pub const boris_version = "0.8.1";
 
 pub const Options = struct {
     content_root: []const u8 = "content",

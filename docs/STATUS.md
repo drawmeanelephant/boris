@@ -4,7 +4,7 @@
 
 **Integration line:** `afterparty` during the Build Week judging window; `main` is frozen.
 
-**Product metadata:** `v0.8.0` / `boris/0.8.0`; base IR `schemaVersion` **`0.2.0`**.
+**Product metadata:** `v0.8.1 candidate` / `boris/0.8.1`; base IR `schemaVersion` **`0.2.0`**.
 **Phase:** post-v0.8 integration and release reconciliation.
 
 **Build baseline:** Zig **0.16** and CMake for the vendored ApexMarkdown static libraries.
@@ -17,15 +17,16 @@ release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## Read this first
 
-- The next release is **not ready to tag** until a release owner resolves the
-  `v0.8.0` tag/metadata discrepancy. The tag currently resolves to a commit
-  carrying 0.7.0 metadata and is not an ancestor of `afterparty`; no agent has
-  moved it.
-- The current afterparty merge set is PRs **#228–#238**: generated-output
+- The next release is **v0.8.1 candidate**. It must not be tagged until release
+  context is complete. The historical `v0.8.0` tag remains preserved as
+  erroneous evidence: it resolves to a commit carrying 0.7.0 metadata and is
+  not an ancestor of `afterparty`.
+- The current afterparty merge set is PRs **#228–#244**: generated-output
   hygiene, docs-maintenance hardening, default-site layout polish, rendered
   search foundation, CLI hardening, browser UI, and staged publication,
   standalone-tool CI, nested hierarchy, human-first documentation IA, and the
-  status/relationship/archive audit work in PR #238.
+  status, release-packet, fragment-normalization, relationship-inventory,
+  theme-dogfood, and archive-review work in PRs #238–#244.
 - Rendered-site search is **shipped on `afterparty`**: the compiler produces the
   search artifact from its staged live-page overlay and the default layout has
   a small browser UI with a no-JavaScript navigation fallback. Its normative
@@ -42,8 +43,9 @@ release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | Machine outputs | **Done** — IR 0.2, RAG, Context Bundles, and `llms.txt`; semantic relations retain their documented conditional IR 0.3 artifacts. |
 | Migration laboratories | **Done as bounded developer tools** — read-only review, conversion aids, relationship candidates, and theme materialization; they do not widen Boris author grammar. |
 | Rendered-site search | **Done on `afterparty`** — deterministic staged compiler publication, standalone CLI, browser UI, zero-results state, and no-JavaScript navigation fallback. |
-| Archive-layout audit fixture | **Ready to land** — deterministic fixture and black-box audit are on the current topic branch; manual visual/keyboard review remains required. |
-| Relationship slug-object hardening | **Ready to land** — fail-closed `{ slug: "…" }` extraction coverage is on the current topic branch; inventory and resolution remain separate work. |
+| Relationship review inventory | **Done on `afterparty`** — schema-v2 exact target inventory preserves provenance, duplicate keys, slug states, draft exclusion, unsupported-file rows, and deterministic JSON/Markdown reports. |
+| Archive-layout evidence | **Done mechanically** — deterministic fixture, black-box audit, and link audit pass; browser viewport and keyboard review remain explicitly unverified. |
+| Twenty Twenty materialization dogfood | **Done** — bounded GPL-evidenced archaeology → reviewed ledger → static materialization → Boris build → link audit; no PHP/JS runtime behavior was adopted. |
 
 ### Common commands
 
@@ -71,16 +73,14 @@ zig build test-layout-hostile
 
 | Order | Card | State | Boundary / verification |
 |---:|---|---|---|
-| 1 | Release-state decision | **Release owner needed** | Decide how to recover the v0.8.0 tag/metadata mismatch; do not retag, publish, or consume fragments by accident. Then run [`release-gate.sh`](../scripts/release-gate.sh). |
-| 2 | Relationship target inventory | **Next** | Deterministic migration-lab inventory only: exact keys, provenance, duplicates, eligibility. No core frontmatter change or automatic semantic-relation emission. |
-| 3 | Relationship candidate classification | **After inventory** | Report `selected`, `inventoried`, `ambiguous`, `absent`, or `invalid`; no fuzzy matching or first-match behavior. |
-| 4 | Archive-layout manual review | **Next after fixture lands** | Review the archive fixture at mobile, tablet, and desktop widths; record evidence before changing layout behavior. |
-| 5 | Archive presentation fixes | **Evidence-gated** | Small, framework-free HTML/CSS or layout fixes only after the audit identifies a reproducible issue. |
-| 6 | Real-theme materialization dogfood | **Later** | One licensed static sample through archaeology → reviewed ledger → materialization → Boris build → link audit. Not a universal converter. |
-| 7 | Migration-guide executable pass | **Later** | Verify the existing inspect → review → representative conversion → build → deploy path without implying CMS/MDX/framework parity. |
-| 8 | Source-RAG ergonomics measurement | **Later** | Measure profiles, bundle sizes, and publish modes before changing behavior. Keep product RAG distinct. |
-| 9 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
-| 10 | Build optimization | **Deferred** | Measure cold/repeated/parallel/incremental runs first; preserve current deterministic coordinator model unless data justifies change. |
+| 1 | Release-state decision | **Decided — pending release context** | Preserve the erroneous v0.8.0 tag and use the new v0.8.1 identifier; do not tag or publish until release context is complete. Then run [`release-gate.sh`](../scripts/release-gate.sh). |
+| 2 | Relationship candidate classification | **Next** | Join candidates to the completed exact-key inventory as `selected`, `inventoried`, `ambiguous`, `absent`, or `invalid`; no fuzzy matching or automatic relation emission. |
+| 3 | Archive browser review | **Next evidence pass** | Inspect the retained fixture at 375px, 768px, and 1440px plus keyboard traversal; record actual evidence before changing layout behavior. |
+| 4 | Archive presentation fixes | **Evidence-gated** | Small, framework-free HTML/CSS or layout fixes only after the browser review finds a reproducible issue. |
+| 5 | Migration-guide executable pass | **Later** | Verify the existing inspect → review → representative conversion → build → deploy path without implying CMS/MDX/framework parity. |
+| 6 | Source-RAG ergonomics measurement | **Later** | Measure profiles, bundle sizes, and publish modes before changing behavior. Keep product RAG distinct. |
+| 7 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
+| 8 | Build optimization | **Deferred** | Measure cold/repeated/parallel/incremental runs first; preserve current deterministic coordinator model unless data justifies change. |
 
 ## Release bookkeeping
 
@@ -92,11 +92,12 @@ owner alone assembles and removes/archives fragments in deterministic order.
 
 The release audit found these follow-ups:
 
-- Resolve the `v0.8.0` tag/metadata contradiction before describing v0.8.0 as a
-  completed tagged release.
-- Classify the remaining unnumbered fragments and add missing category headings
-  before assembly. Existing numeric fragments remain retained; none were
-  consumed by the audit.
+- Preserve the historical `v0.8.0` tag as erroneous evidence; the next
+  candidate is `v0.8.1`, which remains untagged until release context is
+  complete.
+- All retained fragments have numeric names, a permitted category heading, and
+  a deterministic 33-row [`fragment inventory`](changelog.d/INVENTORY.md).
+  The release owner still decides whether and when to consume them.
 - The release gate now correctly accepts the validated nested hierarchy fixture.
 
 ## Product boundaries that remain deliberate

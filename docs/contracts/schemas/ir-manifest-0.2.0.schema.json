@@ -12,7 +12,7 @@
     },
     "compiler": {
       "type": "string",
-      "description": "Compiler identity, e.g. \"boris/0.8.0\"."
+      "description": "Compiler identity, e.g. \"boris/0.8.1\"."
     },
     "contentRoot": {
       "type": "string",
