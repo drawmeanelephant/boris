@@ -1,354 +1,133 @@
 # Project status — Boris
 
-**As of:** 2026-07-26 · current product release candidate **v0.8.0** /
-compiler **boris/0.8.0** · Zig **0.16.0**<br>
-**Phase:** v0.8.0 release candidate plus the temporary `afterparty`
-integration line during Build Week judging; `main` remains frozen.<br>
-IR `schemaVersion` is **`0.2.0`**.
+**As of:** 2026-07-26
 
-**Version boundary:** `v0.8.0` packages post-`v0.7.0` release hardening,
-source-RAG upload ergonomics, migration-lab review modes, the ApexMarkdown
-v1.1.13 vendor update, and contest-facing documentation evidence. Base IR
-remains `0.2.0`. Semantic relations retain their documented conditional IR
-`0.3.0` artifacts.
+**Integration line:** `afterparty` during the Build Week judging window; `main` is frozen.
 
-**Feature 8 status:** F8.0 contracts and F8.1–F8.3 are complete. IR 0.2
-publishes typed `parent` / `include` / `reference` edges and deterministic
-`reverseIndex`; incremental HTML consumes the same resolver and reverse-walk
-semantics. Fingerprints remain the content-addressed change detector.
+**Product metadata:** `v0.8.0` / `boris/0.8.0`; base IR `schemaVersion` **`0.2.0`**.
+**Phase:** post-v0.8 integration and release reconciliation.
 
-**Knowledge-system track:** Documentation Intelligence, bounded semantic
-relations, and deterministic AI Context Bundles are merged on `main` via PRs
-#43 and #44. Relations use conditional IR 0.3 artifacts; Context Bundles use
-their own `boris-context` schema 1 and preserve source-relative provenance.
-These capabilities shipped in v0.4.0.
+Boris is a Zig documentation compiler: Markdown in, validated documentation
+graph out as HTML by default, with optional IR, RAG, Context Bundle, and
+`llms.txt` exports. It is not a Node SSG, an MDX runtime, or a migration
+framework. Normative behavior lives in [`docs/contracts/`](contracts/);
+release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 
-Living snapshot for agents and humans. Prefer this and [`CHANGELOG.md`](../CHANGELOG.md)
-over archaeology. Normative behavior: [`docs/contracts/`](contracts/).
+## Read this first
 
-### What 0.4.0 is
+- The next release is **not ready to tag** until a release owner resolves the
+  `v0.8.0` tag/metadata discrepancy. The tag currently resolves to a commit
+  carrying 0.7.0 metadata and is not an ancestor of `afterparty`; no agent has
+  moved it.
+- The current afterparty merge set is PRs **#228–#236**: generated-output
+  hygiene, docs-maintenance hardening, default-site layout polish, rendered
+  search foundation and CLI hardening, standalone-tool CI, nested hierarchy,
+  and human-first documentation IA.
+- Search is a **standalone rendered-HTML indexer** today. Its normative
+  artifact surface is [`rendered-search.md`](contracts/rendered-search.md).
+  Browser UI and compiler-stage publication must be described as complete only
+  when their code and tests land on the integration line.
 
-Product **v0.4.0** extends the v0.3.1 graph-native compiler with knowledge-system
-exports, Documentation Intelligence, heading-aware links, hardened theme assets
-and per-page layout selection, bounded Textile input, migration laboratories,
-and tracked agent-lore content dogfood. Its initial Astro, WordPress, and
-Instagram migration labs remain developer aids, not runtime dependencies. Bare
-`boris` remains HTML → `dist/`;
-IR/RAG remain opt-in. Relation-free output stays IR 0.2, while semantic relations
-use their conditional IR 0.3 artifacts.
+## What works
 
-### What v0.5.0 adds
+| Capability | Current state |
+|---|---|
+| Default site build | **Done** — `boris` writes HTML to `dist/`. |
+| Markdown rendering | **Done** — in-process ApexMarkdown Unified, including tables and footnotes. |
+| Content graph | **Done** — closed frontmatter, validated Trunk/Satellite hierarchy, includes, wiki links, heading targets, and recursive validated parent chains. |
+| HTML navigation and layouts | **Done** — graph-backed nav, breadcrumbs, TOC, closed layout slots, assets, layout rules, incremental/watch/jobs, and isolated targets. |
+| Machine outputs | **Done** — IR 0.2, RAG, Context Bundles, and `llms.txt`; semantic relations retain their documented conditional IR 0.3 artifacts. |
+| Migration laboratories | **Done as bounded developer tools** — read-only review, conversion aids, relationship candidates, and theme materialization; they do not widen Boris author grammar. |
+| Rendered-site search | **Done as a standalone tool** — deterministic final-HTML extraction under `tools/search-index`; no compiler-owned publication claim yet. |
+| Archive-layout audit fixture | **Ready to land** — deterministic fixture and black-box audit are on the current topic branch; manual visual/keyboard review remains required. |
+| Relationship slug-object hardening | **Ready to land** — fail-closed `{ slug: "…" }` extraction coverage is on the current topic branch; inventory and resolution remain separate work. |
 
-The v0.5.0 release adds the closed native `<Details>` component and
-source-located invalid-component diagnostics. It also packages post-v0.4
-source-RAG publication hardening, bounded Obsidian/Notion/Starlight/Filed
-migration-lab evidence, and the judge-verified docs path. Migration labs remain
-developer tools: they do not become Boris runtime dependencies or universal
-converters.
-
-### What v0.5.1 adds
-
-The v0.5.1 cut certifies secure content-local page assets, an
-accessibility-forward reference theme, bounded Starlight and Filed.fyi
-adoption evidence, asset-name sanitization and theme-archaeology migration
-aids, and a release gate that works correctly inside linked Git worktrees.
-These are additive capabilities; base IR remains `0.2.0`.
-
-### What v0.5.2 adds
-
-The v0.5.2 cut packages standalone migration-lab improvements on the v0.5.1
-compiler surface: WordPress local media materialization into page
-`{stem}.assets/`, Filed legacy parent-key normalization under `--out`,
-Starlight F-L1 image-path resolution, and improved Starlight component-mapping
-calibration, plus bounded dogfood evidence. Core product `src/` behavior and
-base IR `0.2.0` are unchanged. Migration labs remain developer aids, not
-runtime dependencies or universal importers.
-
-### What v0.6.0 adds
-
-The v0.6.0 cut adds deterministic `llms.txt` export, bounded source-RAG pack
-profiles with explicit exclusions, and two zero-dependency Stitch-calibrated
-theme prototypes. These additions preserve base IR `0.2.0`; semantic relations
-retain their conditional IR `0.3.0` artifacts. Theme and migration work remains
-developer tooling and examples, not a new runtime or framework dependency.
-
-### What v0.6.1 adds
-
-The v0.6.1 cut packages the dynamic Astro/Starlight asset-expression
-normalization fix, the read-only WordPress theme archaeology lab, source-RAG
-profile-manifest correctness, five additional zero-dependency theme
-showcases, and the complete real-site dogfood preflight case study for `filed.fyi`. 
-These remain migration aids and examples; Boris core and base IR
-`0.2.0` are unchanged.
-
-### What v0.7.0 adds
-
-The v0.7.0 cut packages read-only generated-output link auditing,
-deterministic theme materialization, expanded Astro/Starlight and WordPress
-dogfood evidence, and contest-facing demo and agent documentation. These
-remain migration aids and examples; Boris core and base IR `0.2.0` are
-unchanged.
-
-### What v0.8.0 adds
-
-The v0.8.0 candidate packages post-v0.7 release hardening: safer package archive
-publication, source-RAG upload manifests and bundle-only exports, migration-lab
-frontmatter and relationship review reports, ApexMarkdown v1.1.13, and clearer
-contest/release evidence. Core IR remains `0.2.0`; conditional semantic
-relations remain `0.3.0`.
-
-**0.2.0** packaged ApexMarkdown Unified, HTML default CLI, graph-aware nav +
-TOC, and P2/P3 incremental / watch / jobs / multi-target. Tag: `v0.2.0`.
-
----
-
-## What you get (outcomes first)
-
-| You want… | You get… | How |
-|-----------|----------|-----|
-| A docs site from Markdown | HTML under `dist/` | `boris` (default) |
-| Tables, footnotes, callouts, real Markdown | ApexMarkdown Unified, not a toy stub | Feature 1 — in-process render |
-| Callouts that stay in the page | Constrained `<Aside>` in document order | Shared compile path |
-| Shared fragments + internal page links | `{{include}}` + `[[entity-id]]` / `[[entity-id#heading]]` (HTML) | Feature 7 + F9 heading fragments |
-| “Did my graph still make sense?” | Fail-loud Trunk/Satellite validation | Exit **1** + diagnostics |
-| Machine-readable graph/IR | JSON under `.boris/` | `boris --out .boris` |
-| LLM knowledge pack of this project | Deterministic `rag/` corpus | `boris --rag` |
-| Grounded context for an LLM | Deterministic bundle with hashes + graph | `boris --context` |
-| Edit → rebuild only what changed | Incremental dirty-set HTML | `--incremental` / `--watch` |
-| Optional bounded page workers | Deterministic HTML workers; measure render-heavy trees | `--jobs N` |
-| Draft vs prod from one tree | Isolated multi-target outputs | `--target name=dir` |
-
-**Why it feels quick (honest, not brochure):** pages are not glued into one giant
-HTML string. Layout chrome and body slices stream to the writer; per-page scratch
-is wiped after each page. Unchanged pages can be skipped when you ask for
-`--incremental`. That is a **design for lean builds**, not a published benchmark
-claim — measure your tree before advertising numbers.
-
-Internal names you may see in contracts (Whiteboard, host `apex_render`,
-fingerprints) are **implementation detail**. Authors and most sessions should
-think in outcomes above.
-
----
-
-## One-line product
-
-**Boris is a Zig documentation compiler:** load Markdown, validate a
-Trunk/Satellite graph, ignite HTML (default), IR, or RAG, reset page scratch —
-not a Node SSG stack.
-
-Teaching beat (narrative only): **Load → Roll → Ignite → Reset**.
-
----
-
-## What works (capability map)
-
-| Capability | Status |
-|------------|--------|
-| Default HTML site (`boris` → `dist/`) | **Done** (Feature 2) |
-| ApexMarkdown Unified (tables, footnotes, …) | **Done** (Feature 1; pin v1.1.13) |
-| Trunk/Satellite graph + closed frontmatter | **Done** |
-| `<Aside>` kinds + document order | **Done** |
-| Closed `<Details>` disclosure component | **Shipped in v0.5.0** (native HTML + deterministic RAG projection) |
-| JSON IR (`--out` / `--no-rag`) | **Done** |
-| RAG export (`--rag` / `--rag-dir`) | **Done** |
-| Scoped/segmented product RAG + Context exports | **Done (graph-closed, block-boundary parts)** |
-| Incremental / watch / `--jobs` / multi-target | **Done** (P2–P3 on HTML path) |
-| CI Linux + macOS | **Done** |
-| Graph-aware HTML nav (`{{nav}}` / breadcrumb / title) | **Done** (Feature 6 MVP) |
-| In-page heading `{{toc}}` | **Done** (Feature 6 follow-on) |
-| Boris-mediated includes + wiki-links | **Done** (Feature 7; HTML path; Apex FS includes off) |
-| Wiki `[[id#heading]]` section targets | **Done** (F9; Apex heading ids; see `heading-ids.md`) |
-| Page layout selection (`--layout-rule`) | **Done** (exact/glob/role; one theme/target) |
-| Layout-selection hostile/path gate | **Done** (`zig build test-layout-hostile`; lexical path rejection) |
-| Apex Unified compatibility matrix | **Shipped in v0.4.0** (fixtures + matrix; compatibility evidence, not a new renderer) |
-| Astro, WordPress, and Instagram migration labs | **Shipped in v0.4.0** (bounded conversion/reconnaissance labs + adversarial preservation fixtures; not runtime dependencies) |
-| Obsidian vault + Notion Markdown/CSV migration labs | **Shipped in v0.5.0** (phase-1 developer aids under `tools/migration-lab/`; not runtime dependencies) |
-| Starlight proof slice (locale-dir + root-locale) | **Shipped in v0.5.0** (`--mode=starlight` under `tools/migration-lab/`; content-root discovery for `docs/en/` or root-locale `docs/`; bounded convert + manifests; not a runtime dependency) |
-| Content-local sibling page assets | **Shipped in v0.5.1** (secure `{stem}.assets/` publishing with stale cleanup and target isolation) |
-| Reference theme and real-site adoption workflow | **Shipped in v0.5.1** (framework-free theme example plus bounded Filed.fyi/Starlight evidence) |
-| Migration asset-name sanitization and theme archaeology | **Shipped in v0.5.1** (developer-only migration-lab reports; core remains strict and deterministic) |
-| WordPress media materialize + Filed parent normalize | **Shipped in v0.5.2** (developer-only migration-lab; product grammar stays closed) |
-| Starlight F-L1 image paths + component-mapping calibration | **Shipped in v0.5.2** (developer-only migration-lab; not universal MDX/Starlight parity) |
-| Bounded Textile input | **Shipped in v0.4.0** (`--textile`; explicit whole-tree compatibility adapter) |
-| Optional static theme showcase | **Shipped in v0.4.0** (`examples/static-theme-showcase/`; hand-authored CSS, not product chrome) |
-| Agent-lore content dogfood | **Shipped in v0.4.0** (tracked sample content only; private 250MB source data remains excluded/ignored) |
-| Docs-maintenance evidence tool | **Shipped** (`tools/docs-maintenance/`; deterministic dossiers and reports; generated tool output remains ignored) |
-| Default dogfood layout polish | **Shipped on `afterparty`** (PR #230; responsive reading column, bounded navigation rail, and improved code/table presentation) |
-| Rendered-site search index foundation | **Shipped on `afterparty`** (PR #231; standalone deterministic HTML indexer; browser UI and staged compiler publication remain next) |
-| Full YAML / MDX / embedded HTTP server | **Not now** |
-
-### Commands
+### Common commands
 
 ```bash
 zig build
 zig build test
 ./scripts/release-gate.sh
 
-./zig-out/bin/boris --help
 ./zig-out/bin/boris --quiet                         # HTML → dist/
 ./zig-out/bin/boris --out .boris --quiet            # IR only
 ./zig-out/bin/boris --rag --quiet                   # RAG → rag/
-./zig-out/bin/boris --jobs 4 --quiet
-./zig-out/bin/boris --watch
-./zig-out/bin/boris --target prod=dist/prod --target stage=dist/stage
+./zig-out/bin/boris --context --quiet               # Context Bundle
+./zig-out/bin/boris --llms --quiet                  # llms.txt
+./zig-out/bin/boris --incremental --jobs 4 --quiet
 
-# Rendered-site search index foundation (standalone tool; UI/integration next)
 zig build --build-file tools/search-index/build.zig test
 zig build --build-file tools/search-index/build.zig run -- \
   --root=./dist --out=./dist/_boris/search
 
-# CMake is compile-time only (static ApexMarkdown libs)
-zig build test-apex-hostile
-zig build test-apex-sanitize   # optional
+zig build --build-file tools/migration-lab/build.zig test
 zig build test-layout-hostile
 ```
 
-Host tools: **Zig 0.16** + **CMake** at build time. Pin:
-[`vendor/apex-markdown/VENDOR.md`](../vendor/apex-markdown/VENDOR.md).
+## Active roadmap
 
-Exit codes: `0` ok · `1` content · `2` usage · `3` I/O.
+| Order | Card | State | Boundary / verification |
+|---:|---|---|---|
+| 1 | Release-state decision | **Release owner needed** | Decide how to recover the v0.8.0 tag/metadata mismatch; do not retag, publish, or consume fragments by accident. Then run [`release-gate.sh`](../scripts/release-gate.sh). |
+| 2 | Relationship target inventory | **Next** | Deterministic migration-lab inventory only: exact keys, provenance, duplicates, eligibility. No core frontmatter change or automatic semantic-relation emission. |
+| 3 | Relationship candidate classification | **After inventory** | Report `selected`, `inventoried`, `ambiguous`, `absent`, or `invalid`; no fuzzy matching or first-match behavior. |
+| 4 | Archive-layout manual review | **Next after fixture lands** | Review the archive fixture at mobile, tablet, and desktop widths; record evidence before changing layout behavior. |
+| 5 | Archive presentation fixes | **Evidence-gated** | Small, framework-free HTML/CSS or layout fixes only after the audit identifies a reproducible issue. |
+| 6 | Real-theme materialization dogfood | **Later** | One licensed static sample through archaeology → reviewed ledger → materialization → Boris build → link audit. Not a universal converter. |
+| 7 | Migration-guide executable pass | **Later** | Verify the existing inspect → review → representative conversion → build → deploy path without implying CMS/MDX/framework parity. |
+| 8 | Source-RAG ergonomics measurement | **Later** | Measure profiles, bundle sizes, and publish modes before changing behavior. Keep product RAG distinct. |
+| 9 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
+| 10 | Build optimization | **Deferred** | Measure cold/repeated/parallel/incremental runs first; preserve current deterministic coordinator model unless data justifies change. |
 
-### Pipeline (short)
+## Release bookkeeping
 
-```text
-Load  → discover Markdown under content/
-Roll  → frontmatter + Aside tokenize + graph roles
-Ignite → validate → HTML | IR | RAG
-Reset → free per-page scratch (HTML) / arena (IR/RAG)
-```
+`CHANGELOG.md` is the historical release record; fragments under
+[`docs/changelog.d/`](changelog.d/) are the queued release input. During normal
+work, add one fragment for user- or contract-visible changes rather than editing
+`CHANGELOG.md`’s shared **Unreleased** section. At release cut, the release
+owner alone assembles and removes/archives fragments in deterministic order.
 
----
+The release audit found these follow-ups:
 
-## Next (active roadmap)
+- Resolve the `v0.8.0` tag/metadata contradiction before describing v0.8.0 as a
+  completed tagged release.
+- Classify the remaining unnumbered fragments and add missing category headings
+  before assembly. Existing numeric fragments remain retained; none were
+  consumed by the audit.
+- The release gate now correctly accepts the validated nested hierarchy fixture.
 
-### Afterparty tracking (current bounded cards)
+## Product boundaries that remain deliberate
 
-| Order | Card | State |
-|------:|------|-------|
-| 1 | Documentation information architecture: Start Here / Learn / Reference / Architecture / Archive now organize the dogfood tree and demote agent-lore from the primary nav | **Done on topic branch** |
-| 2 | Rendered-site search PR-2: browser UI, ranking/excerpts, zero-results state, and no-JavaScript fallback using the PR #231 index seam | **Next** |
-| 3 | Compiler staged search publication: pass the exact live-page overlay to the shared indexer and publish search artifacts with the HTML target commit | **Later** |
-| 4 | Release bookkeeping: assemble retained `docs/changelog.d/` fragments into the next dated `CHANGELOG.md` section only at release cut | **Release cut** |
+| Not now | Reason |
+|---|---|
+| Subprocess Markdown rendering | Apex remains in-process through the C ABI. |
+| Node/React/Astro/Next as the compiler | Boris itself is the Zig compiler. |
+| Full YAML frontmatter or arbitrary MDX | The author grammar and registered components are intentionally closed. |
+| Embedded HTTP server | Serve generated `dist/` with any ordinary static host. |
+| Universal migration conversion | Migration labs are review-first, bounded developer tools. |
+| Speed or cross-OS-byte-identity claims | Measure the specific workload and platform first. |
 
-The current afterparty merge set is PRs **#228–#231**: generated-output
-ignore hygiene, docs-maintenance allocation/lifetime hardening, default layout
-polish, and the rendered-search index foundation. Their fragments remain in
-`docs/changelog.d/` by design until the release-owner procedure is run.
+## Risk and environment notes
 
-| Priority | Item | Why |
-|----------|------|-----|
-| **Shipped on main / v0.7** | Migration relationship candidates | Filed-shaped relationship metadata is preserved in a deterministic review sidecar before any explicit mapping to Boris's existing bounded semantic `relations`; the [real-site dogfood pass](dogfood/filed-relation-candidates-v07.md) validates 1,370 retained values without automatic emission. |
-| **Next** | Relationship object shapes + site-wide target inventory | Recognize the proven Filed `{slug}` shape, then distinguish selected, inventoried, ambiguous, and absent targets while keeping conversion bounded and review-first. |
-| **Next** | Archive-friendly layouts | Validate layout rules and child/index presentation against real archive navigation before broadening theme features. |
-| **Shipped on main / v0.7** | Ledger-driven theme materialization | [`theme-materialize`](../tools/migration-lab/README.md) turns an archaeology ledger into a reviewable static Boris theme draft: approved assets and licenses are copied, a closed slot shell is generated, and all other source-framework behavior remains explicit review work. |
-| **Later** | Real-theme materialization dogfood | Run archaeology → materialization → Boris compilation on one static theme sample, preserve the reports, and document the manual decisions required before treating the result as an author-facing theme. |
-| **Shipped on main / v0.8** | Source-RAG deterministic partitioning | Complete-file bundle parts, explicit manifests, profiles, bounded `--split-size`, `--bundles-only`, and upload manifests. |
-| **Shipped on main / v0.6** | `llms.txt` export | Deterministic graph-ordered export with URL, summary, fallback, and contract coverage (PR #150). `llms-full.txt` remains later. |
-| **Shipped on main / v0.6** | Source-RAG pack profiles | Bounded logical packs with explicit scope selection, manifests, and vendor/generated/cache exclusions (PR #149). |
-| **Shipped on main / v0.6** | Stitch-calibrated theme prototypes | Milligram-inspired and corporate zero-dependency examples with slot, manual-review, and deterministic calibration reports (PR #152). |
-| **Later** | Further docs packaging | README + [`docs/MIGRATION.md`](MIGRATION.md) first real site path cover inspect → convert → build → deploy; remaining gaps are sample-content version drift and deeper external-SSG cookbook depth. |
-| **Later** | Source-RAG ergonomics and publication safety | Keep the standalone source pack distinct from product RAG; prioritize evidence-backed output-size and partial-publish improvements. |
-| **Deferred** | Measurement-driven build work | Benchmark or change cache/watch/parallel behavior only after a reproducible real-site need. |
+- HTML/IR/RAG publication uses staging and rename where supported; cross-volume
+  whole-tree atomicity is not claimed.
+- Symlink tests may skip when the host denies symlink creation.
+- Default HTML assumes trusted author input because Apex raw HTML passes through.
+- `--jobs` is bounded HTML rendering; graph discovery, resolution, and commit
+  phases remain coordinated for deterministic output.
+- Generated directories (`dist/`, `rag/`, `source-rag/`, caches, and temporary
+  release-gate output) are not source-of-truth or review currency.
 
-### Current release and shipped history (do not re-open as greenfield)
+## Documentation map
 
-| # | Feature | Note |
-|---|---------|------|
-| — | **Product v0.8.0 candidate** | Source-RAG upload ergonomics, frontmatter-review migration lab, safer package archive publication, ApexMarkdown v1.1.13, and contest/release evidence; base IR remains 0.2 |
-| — | **Product v0.7.0** | Generated-output link audit, theme materialization, expanded migration dogfood, and contest/demo documentation; base IR remains 0.2 |
-| — | **Product v0.6.1** | Tagged/released: Astro/WordPress migration-lab hardening, source-RAG manifest correctness, five additional zero-dependency theme showcases, and the Filed.fyi preflight case study; base IR remains 0.2 |
-| — | **Product v0.6.0** | Deterministic `llms.txt`, bounded source-RAG profiles, and Stitch-calibrated zero-dependency theme prototypes; base IR remains 0.2 |
-| — | **Product v0.5.2** | Migration-lab packaging: WP media materialize, Filed parent-key normalize, Starlight F-L1 image paths + calibration, bounded dogfood; core compiler surface unchanged; base IR remains 0.2 |
-| — | **Product v0.5.1** | Tagged/released: content-local assets, reference theme, bounded real-site adoption evidence, migration-lab asset/theme aids, and worktree-safe release cleanliness checks; base IR remains 0.2 |
-| — | **Product v0.5.0** | Tagged/released: native Details, source-RAG publication hardening, Obsidian/Notion/Starlight/Filed evidence, and judge-facing docs |
-| — | **Product v0.4.0** | Tagged/released: knowledge-system exports, Documentation Intelligence, layout/theme work, Textile, migration labs, static theme showcase, and agent-lore dogfood; base IR remains 0.2 |
-| — | **Product v0.3.1** | F8.3 reverse-index incremental dirty-set; IR remains 0.2 |
-| — | **Product v0.3.0** | Feature 8.1–8.2 / IR 0.2 graph-native dependencies |
-| — | **Product v0.2.1** | Feature 7 + dogfood + F7 polish; tag `v0.2.1` |
-| — | **Product v0.2.0** | Features 1+2+6 + P2/P3; tag `v0.2.0` |
-| 8.0 | IR 0.2 contracts | Typed endpoint, edge order, reverse-index, and fixture contract frozen |
-| 8.1–8.2 | Graph-native IR | Resolve/freeze direct dependencies; emit IR 0.2; full golden + release gate |
-| 8.3 | Reverse-index dirty-set | HTML fingerprints seed dirty pages; shared reverse semantics expand dependents |
-| 1 | ApexMarkdown Unified | Real engine under host ABI |
-| 2 | HTML default CLI | Bare `boris` → `dist/`; IR via `--out` |
-| 3 | `--jobs N` | Parallel independent page renders |
-| 4 | `--watch` | Debounced rebuild loop |
-| 5 | `--target` multi-output | Isolated roots + caches |
-| 6 | Graph-aware HTML nav (MVP) | `{{nav}}` forest + breadcrumb + title; HTML graph gate |
-| 6b | In-page `{{toc}}` | h1–h3 outline from rendered body ids (`src/html_toc.zig`) |
-| 7 | Includes + wiki-links | `{{include}}` + `[[entity-id]]` pre-Apex; cycles/missing fail loud; `includes/` not pages |
-| 9 | Heading-target wiki links | `[[entity-id#heading-id]]` matches Apex-rendered ids; fail loud on missing |
-| 9.1 | Closed layout plan + theme assets | `metadata` / `footer` / `asset-url`; target-owned asset copy; see `templating-and-themes.md` |
-| 9.2 | Theme/template hardening | Layout UTF-8 at split; orphan theme-asset scrub; fixture/failure coverage; see `templating-and-themes.md` |
-| 9.3 | Page layout selection | `--layout-rule TARGET SELECTOR LAYOUT_PATH`; exact/glob/role precedence, one managed theme per target (PR #50) |
-| 9.3a | Layout-selection hostile coverage | Determinism, fallback, isolation, and invalid/mixed path coverage; focused `test-layout-hostile` gate (PR #51) |
-| — | Apex Unified compatibility evidence | Matrix + fixtures document the supported Boris-facing surface (PR #52) |
-| — | Migration laboratories | Astro archaeology, WordPress conversion, Instagram Takeout, and adversarial preservation fixtures are developer aids, not Boris product pipelines (PRs #53–#54, #77–#78) |
-| — | Filed.fyi first-slice adoption pass | Bounded real-site dogfood: filed/astro/theme/asset-filename/starlight labs + product compile of changelog/releases; evidence in [`docs/dogfood/filed-fyi-adoption-pass.md`](dogfood/filed-fyi-adoption-pass.md) (not full-site conversion) |
-| — | Filed.fyi representative-slice pass | Second bounded dogfood: full-tree inventory + hand-converted landing/nested/asset/links/hard-MDX pages; evidence in [`docs/dogfood/filed-fyi-v051-representative-slice.md`](dogfood/filed-fyi-v051-representative-slice.md) (not full-site conversion) |
-| — | Filed.fyi full-site preflight case study | Third bounded dogfood: whole-site inventory (567 pages, 19 assets) + 200-page candidate cap conversion + perfect GREEN compilation under core Boris compiler; evidence in [`docs/dogfood/filed-fyi-case-study.md`](dogfood/filed-fyi-case-study.md) |
-| — | Starlight F-L1 archive image paths | **CLOSED** (PR #131 fix + #132 audit + post-merge re-verify): proven relative/public Markdown images → page `{stem}.assets/`; missing/escape fail loud. Evidence: [`docs/dogfood/filed-fyi-archive-layout-audit.md`](dogfood/filed-fyi-archive-layout-audit.md). **F-L2** Unicode asset-filename sanitization remains separate / non-blocking |
-| — | Agent-lore content dogfood | Tracked sample content exercises a documentation section without committing the private 250MB source dataset (PR #79) |
-| — | Bounded Textile compatibility | Explicit fail-closed `.textile` tree mode through the normal Boris pipeline (PR #55) |
-| — | Post-layout correctness fixes | Theme asset/page-output preservation, owned fragment keys, precise wiki diagnostics, managed-theme watch coverage, non-incremental stale sweep preservation, footer UTF-8 gate, and incremental heading-index reuse (PRs #65–#72) |
-
-P2 (fingerprints, incremental, layout edges) and P3 scale-out are **complete**
-on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
-
----
-
-## Not now
-
-| Idea | Why |
-|------|-----|
-| Subprocess markdown (`pandoc`, etc.) | Forbidden — in-process Apex only |
-| Next/Astro/React as the site compiler | Boris *is* the compiler |
-| Unrestricted MDX | Asides only; no JS evaluation |
-| Full YAML frontmatter | Closed key grammar is intentional |
-| Embedded HTTP dev server | Use any static file server on `dist/` |
-| “Instant” or RSS-flat performance claims | Measure first; design is lean, not magic |
-
----
-
-## Risks (mitigated / permanent honesty)
-
-| ID | Status | Resolution |
-|----|--------|------------|
-| **D2** | **Mitigated** | `scripts/build-apex-markdown.sh` configures Apex with system libyaml discovery disabled. Product never feeds YAML metadata into Apex options; frontmatter is Boris-owned. See `vendor/apex-markdown/VENDOR.md`. |
-| **D3** | **Mitigated** | Same script stamps `build/.boris-apex-stamp` and skips cmake when archives + policy are current. Force rebuild: `BORIS_FORCE_APEX_BUILD=1`. |
-| **D4** | **Mitigated (not formal proof)** | U18 + parallel Unified site compile gates permanent. CLI default stays `--jobs 1`; `--jobs N` smoke-validated for product Apex options (plugins/includes off). See `docs/contracts/parallel-rendering.md`. |
-| Publish | **Honest limit + fallback** | Cross-volume **atomic** replace still not claimed. HTML stage / IR publish fall back to copy+delete on `error.CrossDevice`; RAG already had directory copy fallback. Same-parent staging remains the common path. |
-| Dialect | **Enforced** | Author key is **`parent` only**. `parentEntry` / `parent_entry` → `EFRONTMATTER` on all product parse paths. Do not reintroduce aliases. |
-| Migration | **Documented** | Bare `boris` is HTML under `dist/`. Old IR scripts need `--out` / `--no-rag`. README + help text carry the note. |
-| Release state | **v0.8.0 candidate** | Product/compiler metadata `0.8.0`; release gate pending on the release branch before tag. |
-
----
-
-## Documentation map (live tree only)
-
-| Doc | Role |
-|-----|------|
-| [`README.md`](../README.md) | Human front door — outcomes, quickstart, AI/migration honesty |
-| [`docs/MIGRATION.md`](MIGRATION.md) | Author migration path + fixture commands |
-| [`AGENTS.md`](../AGENTS.md) | Hard constraints for contributors/agents |
-| **This file** | Where we are + next |
-| [`CHANGELOG.md`](../CHANGELOG.md) | What landed |
-| [`docs/contracts/`](contracts/) | **Normative** machine contracts + fixtures |
-| [`docs/RELEASE-GATE.md`](RELEASE-GATE.md) | Ship checklist / `release-gate.sh` |
-| [`docs/ROADMAP-post-f8.md`](ROADMAP-post-f8.md) | Post-F8 planning history + post-F9.2 future (not living phase banner) |
-| [`docs/rag/system/`](rag/system/) | RAG narrative seeds (not contracts) |
-| [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) | Standalone migration laboratories (not product runtime) |
-| [`content/AGENT-DIRECTIVE.txt`](../content/AGENT-DIRECTIVE.txt) | Sample-content rebuild brief |
-
----
-
-## Platform notes (do not overclaim)
-
-- Symlink tests skipped when the host denies create
-- IR/RAG/HTML publish uses staging + rename; not every FS is whole-tree atomic
-- Dual-run determinism claimed per CI host, not cross-OS bit-identical trees
-- Watch uses portable polling fallback; native FS events are platform-qualified
-- HTML path assumes **trusted** authors (raw HTML passthrough in Apex adapter)
-
-**North star:** Zig Markdown documentation compiler — load, roll, ignite, reset —
-validated metadata and graph-aware docs, not a polyglot web framework.
+| Document | Use it for |
+|---|---|
+| [`README.md`](../README.md) | Product outcomes and quick start |
+| [`docs/contracts/`](contracts/) | Normative compiler and artifact behavior |
+| [`CHANGELOG.md`](../CHANGELOG.md) | Released-history record |
+| [`docs/changelog.d/`](changelog.d/) | Pending release fragments |
+| [`docs/MIGRATION.md`](MIGRATION.md) | Bounded author migration workflow |
+| [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) | Standalone migration-lab commands |
+| [`tools/search-index/README.md`](../tools/search-index/README.md) | Rendered search tool |
+| [`docs/RELEASE-GATE.md`](RELEASE-GATE.md) | Mechanical ship checks |
+| [`AGENTS.md`](../AGENTS.md) | Repository policy and agent constraints |
