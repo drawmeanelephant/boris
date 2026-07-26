@@ -472,6 +472,53 @@ fn isUnderOutDir(rel: []const u8, out_rel: []const u8) bool {
     return isUnderPrefix(rel, out_rel);
 }
 
+fn normalizePathSeparators(path: []u8) void {
+    for (path) |*c| {
+        if (c.* == '\\') c.* = '/';
+    }
+}
+
+fn stripTrailingPathSeparator(path: []u8) []u8 {
+    if (path.len > 1 and path[path.len - 1] == '/') return path[0 .. path.len - 1];
+    return path;
+}
+
+/// Resolve the scan/output relationship lexically from the process cwd.
+/// Output nested under root is safe when excluded by its normalized relative
+/// path; equal roots and output ancestors are rejected before publication.
+fn resolveOutputSkip(
+    io: Io,
+    gpa: std.mem.Allocator,
+    root_path: []const u8,
+    out_path: []const u8,
+) !struct { root_abs: []u8, out_abs: []u8, out_skip: []const u8 } {
+    const cwd_owned = try std.process.currentPathAlloc(io, gpa);
+    defer gpa.free(cwd_owned);
+    normalizePathSeparators(cwd_owned);
+    const cwd_path = stripTrailingPathSeparator(cwd_owned);
+
+    const root_abs = try std.fs.path.resolve(gpa, &.{ cwd_path, root_path });
+    errdefer gpa.free(root_abs);
+    normalizePathSeparators(root_abs);
+    const root_norm = stripTrailingPathSeparator(root_abs);
+
+    const out_abs = try std.fs.path.resolve(gpa, &.{ cwd_path, out_path });
+    errdefer gpa.free(out_abs);
+    normalizePathSeparators(out_abs);
+    const out_norm = stripTrailingPathSeparator(out_abs);
+
+    if (std.mem.eql(u8, root_norm, out_norm) or isUnderPrefix(root_norm, out_norm)) {
+        return error.SourceRagOutputCollision;
+    }
+
+    const out_skip: []const u8 = if (isUnderPrefix(out_norm, root_norm)) blk: {
+        const start = if (std.mem.eql(u8, root_norm, "/")) 1 else root_norm.len + 1;
+        break :blk out_norm[start..];
+    } else "";
+
+    return .{ .root_abs = root_abs, .out_abs = out_abs, .out_skip = out_skip };
+}
+
 /// Skip generated, cache, and vendor trees at repo root only (not `docs/rag/`, `tools/source-rag/`).
 fn isSkippedTopLevelTree(rel: []const u8) bool {
     for (skip_top_level_dirs) |top| {
@@ -1915,18 +1962,15 @@ pub fn exportCorpus(io: Io, gpa: std.mem.Allocator, opts: Options) !ExportStats 
     defer arena_state.deinit();
     const arena = arena_state.allocator();
 
+    const paths_info = try resolveOutputSkip(io, gpa, opts.root_dir, opts.out_dir);
+    defer gpa.free(paths_info.root_abs);
+    defer gpa.free(paths_info.out_abs);
+
     const cwd = Io.Dir.cwd();
     var root = try cwd.openDir(io, opts.root_dir, .{ .iterate = true });
     defer root.close(io);
 
-    // Skip the output tree when it lives under the scan root (e.g. ./source-rag).
-    const out_skip = blk: {
-        const o = opts.out_dir;
-        if (std.mem.startsWith(u8, o, "./")) break :blk o[2..];
-        break :blk o;
-    };
-
-    const paths = try collectSourcePaths(io, gpa, arena, root, out_skip, opts.profile);
+    const paths = try collectSourcePaths(io, gpa, arena, root, paths_info.out_skip, opts.profile);
     defer gpa.free(paths);
 
     const stage_path = try std.fmt.allocPrint(gpa, "{s}.boris-source-rag-stage", .{opts.out_dir});
@@ -2255,6 +2299,58 @@ test "parseOptions: unknown flag" {
     try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--profile=bogus" }));
     try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--split-size=0" }));
     try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--no-bundles", "--bundles-only" }));
+}
+
+test "resolveOutputSkip canonicalizes nested paths and rejects collisions" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    const nested = try resolveOutputSkip(io, gpa, "./.zig-cache/tmp/boris-rag-root", ".zig-cache/tmp/boris-rag-root/./docs/../docs/generated");
+    defer gpa.free(nested.root_abs);
+    defer gpa.free(nested.out_abs);
+    try std.testing.expectEqualStrings("docs/generated", nested.out_skip);
+
+    try std.testing.expectError(
+        error.SourceRagOutputCollision,
+        resolveOutputSkip(io, gpa, ".zig-cache/tmp/boris-rag-root", "./.zig-cache/tmp/boris-rag-root"),
+    );
+    try std.testing.expectError(
+        error.SourceRagOutputCollision,
+        resolveOutputSkip(io, gpa, ".zig-cache/tmp/boris-rag-root", ".zig-cache/tmp"),
+    );
+}
+
+test "exportCorpus nested output is excluded across repeated runs" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const root_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/nested-root", .{tmp.sub_path});
+    defer gpa.free(root_rel);
+    const out_rel = try std.fmt.allocPrint(gpa, "{s}/docs/generated", .{root_rel});
+    defer gpa.free(out_rel);
+    const catalog_rel = try std.fmt.allocPrint(gpa, "{s}/catalog.jsonl", .{out_rel});
+    defer gpa.free(catalog_rel);
+
+    try Io.Dir.cwd().createDirPath(io, root_rel);
+    var root = try Io.Dir.cwd().openDir(io, root_rel, .{});
+    defer root.close(io);
+    try root.createDirPath(io, "docs");
+    try root.writeFile(io, .{ .sub_path = "README.md", .data = "# Nested output\n" });
+    try root.writeFile(io, .{ .sub_path = "docs/guide.md", .data = "# Guide\n" });
+
+    const first = try exportCorpus(io, gpa, .{ .root_dir = root_rel, .out_dir = out_rel, .quiet = true });
+    const first_catalog = try readFileAlloc(io, Io.Dir.cwd(), catalog_rel, gpa);
+    defer gpa.free(first_catalog);
+
+    const second = try exportCorpus(io, gpa, .{ .root_dir = root_rel, .out_dir = out_rel, .quiet = true });
+    const second_catalog = try readFileAlloc(io, Io.Dir.cwd(), catalog_rel, gpa);
+    defer gpa.free(second_catalog);
+
+    try std.testing.expectEqual(first.source_files, second.source_files);
+    try std.testing.expectEqual(first.bytes, second.bytes);
+    try std.testing.expectEqualStrings(first_catalog, second_catalog);
 }
 
 test "profiles keep their documented scopes" {

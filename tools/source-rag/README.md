@@ -327,6 +327,13 @@ successful corpus intact. Documents excluded by a newer exporter therefore
 cannot remain in the pack after a successful publish. It never removes the
 selected output directory or unrelated files beside the generated artifacts.
 
+`--root` and `--out` are resolved from the process working directory before
+scanning. An output directory nested under the scan root is allowed and is
+excluded using its normalized root-relative path, so absolute paths and `./` /
+`..` spellings behave identically across reruns. An output directory equal to
+the scan root, or an ancestor containing it, is rejected to prevent managed
+artifacts from colliding with source files.
+
 ---
 
 ## Product RAG vs source RAG
