@@ -8,32 +8,36 @@
     :root {
       color-scheme: light dark;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      --page-width: 78rem;
-      --reading-width: 52rem;
-      --line: color-mix(in srgb, CanvasText 16%, transparent);
-      --soft: color-mix(in srgb, Canvas 94%, CanvasText 6%);
-      --accent: #4f7cff;
+      --page-width: 84rem;
+      --reading-width: 54rem;
+      --line: color-mix(in srgb, CanvasText 15%, transparent);
+      --soft: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+      --muted: color-mix(in srgb, CanvasText 62%, transparent);
+      --accent: #d9572b;
+      --accent-ink: color-mix(in srgb, var(--accent) 80%, CanvasText);
     }
     body {
       max-width: var(--page-width);
       margin: 0 auto;
-      padding: 1.5rem 1.25rem 4rem;
-      line-height: 1.65;
-      background: Canvas;
+      padding: clamp(1rem, 2.5vw, 2.5rem) clamp(1rem, 3vw, 2rem) 4rem;
+      line-height: 1.7;
+      background:
+        radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--accent) 10%, Canvas) 0, transparent 26rem),
+        Canvas;
       color: CanvasText;
     }
     @media (min-width: 48rem) {
       body {
         display: grid;
-        grid-template-columns: 15rem minmax(0, 1fr);
+        grid-template-columns: 17rem minmax(0, 1fr);
         grid-template-areas:
           "nav breadcrumb"
           "nav toc"
           "nav main"
           "nav footer";
         grid-template-rows: auto auto 1fr auto;
-        column-gap: 2.5rem;
-        row-gap: 0.85rem;
+        column-gap: clamp(1.5rem, 4vw, 4rem);
+        row-gap: 1rem;
         align-items: start;
       }
       .site-nav { grid-area: nav; }
@@ -44,23 +48,44 @@
       .site-footer { grid-area: footer; }
     }
     .site-sidebar {
-      font-size: 0.9rem;
+      font-size: 0.88rem;
       position: sticky;
       top: 1rem;
       max-height: calc(100vh - 2rem);
       overflow: auto;
-      padding: 1rem 0.85rem;
+      padding: 1rem;
       border: 1px solid var(--line);
-      border-radius: 0.9rem;
-      background: var(--soft);
+      border-radius: 1rem;
+      background: color-mix(in srgb, Canvas 92%, transparent);
+      box-shadow: 0 1rem 3rem color-mix(in srgb, CanvasText 4%, transparent);
       scrollbar-width: thin;
     }
     .site-search {
       margin: 0 0 1rem;
       padding: 0.8rem;
       border: 1px solid var(--line);
-      border-radius: 0.9rem;
-      background: var(--soft);
+      border-radius: 0.7rem;
+      background: color-mix(in srgb, var(--accent) 5%, Canvas);
+    }
+    .site-brand {
+      margin: 0 0 1.25rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .site-brand__name {
+      display: block;
+      color: var(--accent-ink);
+      font-size: 1.35rem;
+      font-weight: 850;
+      letter-spacing: -0.055em;
+      text-transform: uppercase;
+    }
+    .site-brand__tagline {
+      display: block;
+      margin-top: 0.3rem;
+      color: var(--muted);
+      font-size: 0.77rem;
+      line-height: 1.45;
     }
     .site-search__label {
       display: block;
@@ -106,29 +131,38 @@
     @media (min-width: 48rem) {
       .site-nav { position: static; max-height: none; }
     }
-    .site-nav::before {
-      content: "BORIS / DOCUMENTATION";
-      display: block;
-      margin: 0 0 0.85rem;
-      color: color-mix(in srgb, CanvasText 62%, transparent);
-      font-size: 0.68rem;
+    .site-menu { margin-top: 1.2rem; }
+    .site-menu > summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 0.7rem;
       font-weight: 800;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .site-menu > .site-nav { margin-top: 0.65rem; }
+    .site-nav::before {
+      content: "Browse the docs";
+      display: block;
+      margin: 0 0 0.7rem;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 700;
     }
     .site-nav ul {
       list-style: none;
       margin: 0;
       padding: 0;
     }
-    .site-nav > ul > li { margin: 0.35rem 0; }
+    .site-nav > ul > li { margin: 0.2rem 0; }
     .site-nav ul ul {
-      margin: 0.25rem 0 0.5rem 0.25rem;
-      padding-left: 0.7rem;
+      margin: 0.2rem 0 0.35rem 0.35rem;
+      padding-left: 0.65rem;
       border-left: 2px solid color-mix(in srgb, CanvasText 15%, transparent);
     }
     .site-nav a {
       display: block;
-      padding: 0.18rem 0.35rem;
+      padding: 0.24rem 0.4rem;
       border-radius: 0.35rem;
       text-decoration: none;
       color: inherit;
@@ -149,8 +183,8 @@
       display: flex;
       flex-wrap: wrap;
       gap: 0.35rem;
-      font-size: 0.85rem;
-      opacity: 0.85;
+      font-size: 0.8rem;
+      color: var(--muted);
     }
     .breadcrumb li:not(:last-child)::after {
       content: "/";
@@ -162,22 +196,24 @@
       width: 100%;
       max-width: var(--reading-width);
       box-sizing: border-box;
-      padding: clamp(1.35rem, 3vw, 2.5rem);
+      padding: clamp(1.5rem, 4vw, 3.25rem);
       border: 1px solid var(--line);
       border-radius: 1rem;
-      background: var(--soft);
-      box-shadow: 0 1rem 3rem color-mix(in srgb, CanvasText 5%, transparent);
+      background: color-mix(in srgb, Canvas 97%, transparent);
+      box-shadow: 0 1.25rem 3rem color-mix(in srgb, CanvasText 6%, transparent);
     }
     main h1,
     main h2,
     main h3 { line-height: 1.2; letter-spacing: -0.02em; }
-    main h1 { margin-top: 0; font-size: clamp(2rem, 5vw, 3.25rem); }
-    main h2 { margin-top: 2.25rem; }
-    main a { color: color-mix(in srgb, var(--accent) 82%, CanvasText); }
+    main h1 { margin-top: 0; font-size: clamp(2.25rem, 6vw, 4rem); }
+    main h2 { margin-top: 2.75rem; font-size: clamp(1.4rem, 3vw, 2rem); }
+    main h3 { margin-top: 1.75rem; }
+    main a { color: var(--accent-ink); text-decoration-thickness: 0.08em; text-underline-offset: 0.14em; }
+    main a:hover { color: var(--accent); }
     main img { max-width: 100%; height: auto; }
     main table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
     main th, main td { min-width: 9rem; padding: 0.65rem 0.8rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-    main th { background: color-mix(in srgb, CanvasText 7%, transparent); }
+    main th { background: color-mix(in srgb, var(--accent) 9%, Canvas); }
     main pre { overflow-x: auto; padding: 1rem; border-radius: 0.65rem; background: color-mix(in srgb, CanvasText 9%, Canvas); }
     main code { font-size: 0.92em; }
     .admonition {
@@ -202,6 +238,44 @@
     .admonition--note { border-left-color: #48a; }
     .admonition--warning { border-left-color: #c80; }
     .admonition--danger { border-left-color: #c33; }
+    main blockquote {
+      margin: 1.5rem 0;
+      padding: 0.35rem 1rem;
+      border-left: 3px solid var(--accent);
+      color: color-mix(in srgb, CanvasText 78%, Canvas);
+      background: color-mix(in srgb, var(--accent) 5%, Canvas);
+    }
+    main > h1 + p,
+    main > p:first-of-type:not(.eyebrow) {
+      font-size: 1.15rem;
+      color: color-mix(in srgb, CanvasText 82%, Canvas);
+    }
+    .eyebrow {
+      margin: 0 0 0.65rem;
+      color: var(--accent-ink);
+      font-size: 0.74rem !important;
+      font-weight: 800;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+    .home-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem;
+      margin: 1.5rem 0 2rem;
+    }
+    .home-actions a {
+      display: inline-block;
+      padding: 0.55rem 0.85rem;
+      border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line));
+      border-radius: 0.5rem;
+      background: color-mix(in srgb, var(--accent) 8%, Canvas);
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .home-actions a:hover { background: color-mix(in srgb, var(--accent) 16%, Canvas); }
+    .home-actions a:first-child { color: Canvas; background: var(--accent); border-color: var(--accent); }
+    .home-actions a:first-child:hover { color: Canvas; background: color-mix(in srgb, var(--accent) 88%, CanvasText); }
     .details {
       margin: 1.25rem 0;
       padding: 0.75rem 1rem;
@@ -232,7 +306,7 @@
     .site-footer {
       max-width: var(--reading-width);
       padding: 1rem 0;
-      color: color-mix(in srgb, CanvasText 62%, transparent);
+      color: var(--muted);
       font-size: 0.8rem;
     }
     @media (min-width: 48rem) {
@@ -240,7 +314,7 @@
     }
     @media (max-width: 47.99rem) {
       .site-sidebar { position: static; max-height: none; margin-bottom: 1rem; }
-      .site-nav { max-height: 18rem; }
+      .site-nav { max-height: 20rem; overflow: auto; padding-right: 0.25rem; }
       .breadcrumb { margin-bottom: 0.85rem; }
       main { margin-top: 0.85rem; }
     }
@@ -248,6 +322,10 @@
 </head>
 <body>
 <aside class="site-sidebar">
+<header class="site-brand">
+<span class="site-brand__name">Boris</span>
+<span class="site-brand__tagline">A native compiler for documentation you can inspect, publish, and reuse.</span>
+</header>
 <section class="site-search" data-boris-search-ui aria-labelledby="site-search-label">
 <form action="/_boris/search/" method="get" role="search">
 <label class="site-search__label" id="site-search-label" for="site-search-input">Search documentation</label>
@@ -260,7 +338,10 @@
 <ol class="site-search__results" data-boris-search-results aria-label="Search results"></ol>
 <noscript><p class="site-search__fallback">Search needs JavaScript in this static site. Use the documentation navigation above.</p></noscript>
 </section>
+<details class="site-menu" open>
+<summary>Documentation menu</summary>
 {{nav}}
+</details>
 </aside>
 {{breadcrumb}}
 {{toc}}

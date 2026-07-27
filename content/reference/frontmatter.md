@@ -22,6 +22,7 @@ arbitrary keys. Bracket `tags` lists are the only list form.
 | `parent` | no | Entity id of the direct parent page (satellites only) |
 | `status` | no | `draft` \| `published` \| `archived` |
 | `tags` | no | `[a, b, "c"]` list form only |
+| `relations` | no | `[kind=target, …]` bounded semantic relation list |
 
 ## Examples
 
@@ -31,6 +32,7 @@ arbitrary keys. Bracket `tags` lists are the only list form.
 ---
 title: My Guide Overview
 status: published
+relations: [relates_to=guides/overview]
 tags: [guides]
 ---
 ```
