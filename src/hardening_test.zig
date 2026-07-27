@@ -796,7 +796,9 @@ test "hardening: H-03 prevent HTML publication from following symlinks below out
     const content_dir = try work.join("content");
     defer gpa.free(content_dir);
 
-    const layout_path = "layouts/main.html";
+    try work.writeFile("layouts/main.html", "<main>{{content}}</main>");
+    const layout_path = try work.join("layouts/main.html");
+    defer gpa.free(layout_path);
 
     // 4. Attempt to run HTML site compilation, which publishes guides/page.html
     const err = compile.compileHtmlSite(io, gpa, .{
@@ -823,4 +825,3 @@ test "hardening: H-03 prevent HTML publication from following symlinks below out
         return error.TestUnexpectedResult;
     } else |_| {}
 }
-

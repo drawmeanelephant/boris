@@ -24,7 +24,7 @@ const layout_ref = theme_alpha ++ "/layouts/reference.html";
 const layout_section = theme_alpha ++ "/layouts/section.html";
 const layout_alt = theme_alpha ++ "/layouts/alt.html";
 const layout_beta_main = theme_beta ++ "/layouts/main.html";
-const product_default_layout = "layouts/main.html";
+const product_default_layout = "themes/boris/layouts/main.html";
 
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;

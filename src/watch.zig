@@ -525,7 +525,7 @@ fn sleepMs(io: Io, ms: i64) !void {
 }
 
 /// Default layout path used by watch rebuilds (shared global layout for this slice).
-pub const default_watch_layout: []const u8 = "layouts/main.html";
+pub const default_watch_layout: []const u8 = "themes/boris/layouts/main.html";
 
 /// Coordinator running the debounced watch and serialized rebuild cycles.
 pub const WatchCoordinator = struct {

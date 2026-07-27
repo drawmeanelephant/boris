@@ -68,8 +68,8 @@ pub const Options = struct {
     llms_path: ?[]const u8 = null,
     /// HTML output directory. Set for HTML mode only (default `dist`).
     html_dir: ?[]const u8 = null,
-    /// Global HTML layout template (default `layouts/main.html`).
-    html_layout: []const u8 = "layouts/main.html",
+    /// Global HTML layout template (default managed Boris theme).
+    html_layout: []const u8 = "themes/boris/layouts/main.html",
     /// When set, `html_layout` was allocated for `--theme` sugar and must be freed.
     owned_html_layout: bool = false,
     /// Explicit incremental HTML build mode (HTML mode only).
@@ -110,7 +110,7 @@ const default_rag_dir = "rag";
 const default_context_dir = "context";
 const default_llms_path = "llms.txt";
 const default_html_dir = "dist";
-const default_html_layout = "layouts/main.html";
+const default_html_layout = "themes/boris/layouts/main.html";
 
 /// Parse argv into `Options`. Does not print, exit, or touch the filesystem.
 ///
@@ -776,7 +776,7 @@ pub fn printUsage() void {
         \\  --out <DIR>         IR output directory (selects IR mode; default: .boris)
         \\  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
         \\  --html-dir <DIR>    HTML output directory (implies HTML; default: dist)
-        \\  --html-layout PATH  Global layout template (default: layouts/main.html)
+        \\  --html-layout PATH  Global layout template (default: themes/boris/layouts/main.html)
         \\  --theme ROOT        Theme root sugar → ROOT/layouts/main.html (+ managed assets/)
         \\  --target NAME=DIR   Named HTML output root (repeatable; exclusive with --html-dir)
         \\  --target-layout N=P Per-target layout (NAME=PATH; may precede or follow --target)
@@ -985,6 +985,7 @@ test "parse: default is HTML mode" {
     try expect(o.out_dir == null);
     try expect(o.rag_dir == null);
     try expectEqualStrings(default_html_dir, o.html_dir.?);
+    try expectEqualStrings(default_html_layout, o.html_layout);
     try expectEqual(@as(usize, 1), o.targets.items.len);
     try expectEqualStrings("default", o.targets.items[0].name);
     try expectEqualStrings(default_html_dir, o.targets.items[0].output_dir);

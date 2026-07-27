@@ -1,14 +1,18 @@
 ---
-title: Boris — The Content Exit Hatch
+title: Boris Documentation
 status: published
 tags: [home, zig]
 ---
 
-# Boris: The Content Exit Hatch
+<p class="eyebrow">Boris documentation</p>
 
-Write Markdown. Validate how the pages relate. Publish a fast static site—and
-when you need them, emit structured IR, a RAG corpus, an AI Context Bundle, and
-`llms.txt` from the same source tree.
+# Build a site you can understand later
+
+Write Markdown. Make its relationships explicit. Boris turns that one source
+tree into a dependable static site—and, when useful, structured IR, a RAG
+corpus, an AI Context Bundle, and `llms.txt`.
+
+<p class="home-actions"><a href="start-here.html">Build your first site</a><a href="learn.html">Learn the content model</a><a href="reference.html">Look up a rule</a></p>
 
 Boris is a local Zig documentation compiler for people who want a durable way
 out of framework churn, opaque content silos, and “the navigation probably
@@ -22,25 +26,25 @@ fails with a diagnostic instead of quietly becoming broken navigation.
 
 </Aside>
 
+## Pick the path you are on
+
+| You are here to… | Start here |
+|---|---|
+| Publish a first documentation site | [[start-here|Start Here]] — the short, working path |
+| Write and organize pages | [[learn|Learn]] — content, Markdown, navigation, and outputs |
+| Find an exact command or rule | [[reference|Reference]] — authoring, diagnostics, CLI, and outputs |
+| Understand the compiler’s boundaries | [[architecture|Architecture]] — graph, pipeline, and design choices |
+| Evaluate or migrate an existing site | [[guides/migration|Migration guide]] — a bounded, review-first workflow |
+
 ## One source tree, several useful outputs
 
 | You need | Boris gives you |
-|---|---|
-| A site readers can open anywhere | Static HTML under `dist/`, with layouts, navigation, TOC, assets, Asides, and Details |
+|------|-------------------|
+| A site readers can open anywhere | Static HTML under `dist/`, with navigation, TOC, assets, Asides, and Details |
 | Structure you can trust | A validated Trunk/Satellite graph, includes, heading targets, and diagnostics |
 | Data for tools and automation | JSON IR with typed edges and a reverse index |
 | Better AI grounding | Deterministic RAG, Context Bundle, and `llms.txt` outputs with provenance |
-| A path off an old site | Bounded Zig migration labs that preserve review items instead of guessing them away |
-
-## Choose your next step
-
-| Page | What you’ll learn |
-|------|-------------------|
-| [[start-here|Start Here]] | Install Boris, build the sample site, and learn the essential commands |
-| [[learn|Learn]] | Understand the content model, Markdown authoring, and output workflow |
-| [[reference|Reference]] | Look up frontmatter, diagnostics, and precise compiler behavior |
-| [[architecture|Architecture]] | Follow the graph, pipeline, IR, RAG, and design boundaries |
-| [[archive|Archive]] | Browse Build Week history and evidence-bound agent field notes |
+| A path off an old site | A bounded migration workflow that preserves review items instead of guessing them away |
 
 ## Small by design, not by accident
 
@@ -53,6 +57,8 @@ The teaching rhythm is **Load → Roll → Ignite → Reset**: discover the cont
 resolve the graph, emit a chosen output, then clear page scratch and move on.
 The metaphor is optional; the contracts and generated artifacts are not.
 
-This site is Boris dogfood. The pages you are reading are compiled from the
-same `content/` tree used in the examples: ordinary Markdown, real includes,
-wiki-links, parent/child navigation, and deliberately closed components.
+This site is Boris dogfood. Its public documentation lives in the same
+`content/` tree it compiles: ordinary Markdown, real includes, wiki-links,
+parent/child navigation, and deliberately closed components. Repository
+contracts remain the maintainer-grade source for exact compatibility rules;
+the reference section here turns those rules into a usable authoring guide.

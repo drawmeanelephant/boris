@@ -32,7 +32,9 @@ Modules:
 - `src/compile.zig` — site loop, PageDb promote, Whiteboard, Apex render
 - `src/assemble.zig` — closed layout plan, zero-copy splice, Atomic publish
 - `src/theme.zig` — theme root, asset inventory/copy, collision checks (F9.1)
-- `layouts/main.html` — default template (exactly one `{{content}}`)
+- `themes/boris/layouts/main.html` — default managed theme template (exactly
+  one `{{content}}`); its copied stylesheet is emitted as
+  `assets/css/boris.css`
 - `src/apex.zig` — in-process markdown → HTML (m8)
 - `src/cache.zig` / `src/dependency.zig` — fingerprints and indexes (P2)
 - `src/watch.zig` — opt-in watch loop (P3.2)
@@ -101,7 +103,7 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
 
 ## Layout
 
-1. Template (e.g. `layouts/main.html`) is scanned once for **known** markers.
+1. Template (e.g. `themes/boris/layouts/main.html`) is scanned once for **known** markers.
    Load layout once at startup into **long-lived** ownership.
 2. **Required marker:** exactly one `{{content}}` (page body: Apex + Aside HTML).
 3. **Optional markers** (each at most once):

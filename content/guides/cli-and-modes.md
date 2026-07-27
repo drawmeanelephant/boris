@@ -35,7 +35,7 @@ Multi-target isolated outputs:
 | `--jobs N` / `-j N` | `1` | Parallel page workers `1–64` |
 | `--incremental` | off | Skip unchanged pages |
 | `--watch` | off | Debounced rebuild; implies incremental |
-| `--html-layout PATH` | `layouts/main.html` | Must contain `{{content}}` once |
+| `--html-layout PATH` | `themes/boris/layouts/main.html` | Must contain `{{content}}` once |
 
 On this path Boris also expands includes and wiki-links before Apex (see
 [[getting-started]] and [[guides/overview|content model]]).

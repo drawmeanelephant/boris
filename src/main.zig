@@ -28,7 +28,7 @@ pub const parseOptions = cli.parseOptions;
 const default_out = ".boris";
 const default_rag = "rag";
 const default_html = "dist";
-const default_layout = "layouts/main.html";
+const default_layout = "themes/boris/layouts/main.html";
 
 /// Production runner: help text + IR / RAG / HTML pipelines.
 const ProdRunner = struct {
@@ -930,7 +930,7 @@ test "runPipeline: HTML fixture exits 0" {
     const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cli-html", .{tmp.sub_path});
     defer gpa.free(out);
 
-    // Uses repo `layouts/main.html` (default_layout) + HTML content fixture.
+    // Uses the repo's managed Boris theme (default_layout) + HTML content fixture.
     const code = runPipeline(io, gpa, .{
         .mode = .html,
         .input_dir = "test/fixtures/html/content",

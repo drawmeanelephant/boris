@@ -16,7 +16,7 @@ To support multiple explicitly named HTML build targets, we introduce a repeatab
 
 Layout selection:
 ```text
---html-layout <PATH>           # global default (default: layouts/main.html)
+--html-layout <PATH>           # global default (default: themes/boris/layouts/main.html)
 --target-layout <NAME>=<PATH>  # per-target override (NAME must match a --target or "default")
 --layout-rule <TARGET> <SELECTOR> <LAYOUT_PATH>  # repeatable page layout rules (HTML only)
 ```
