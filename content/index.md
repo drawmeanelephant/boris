@@ -1,64 +1,65 @@
 ---
 title: Boris Documentation
 status: published
-tags: [home, zig]
+tags: [home, zig, documentation]
 ---
 
-<p class="eyebrow">Boris documentation</p>
+# Boris — a compiler for documentation that stays honest
 
-# Build a site you can understand later
-
-Write Markdown. Make its relationships explicit. Boris turns that one source
-tree into a dependable static site—and, when useful, structured IR, a RAG
-corpus, an AI Context Bundle, and `llms.txt`.
-
-<p class="home-actions"><a href="start-here.html">Build your first site</a><a href="learn.html">Learn the content model</a><a href="reference.html">Look up a rule</a></p>
-
-Boris is a local Zig documentation compiler for people who want a durable way
-out of framework churn, opaque content silos, and “the navigation probably
-works” publishing. It is not a hosted CMS or a JavaScript site stack.
+Boris is a zero-dependency static documentation compiler written in Zig. You write clean Markdown files with explicit page relationships (`parent` and wiki-links), and Boris validates your documentation graph before emitting static HTML, a client-side search index, JSON IR, RAG packages, AI Context Bundles, and `llms.txt`—all from a single fast, native binary with no JavaScript runtime or Node.js toolchain required.
 
 <Aside kind="info">
 
-**A content tree with receipts.** Boris checks parent relationships,
-wiki-link targets, headings, and includes before it publishes. Invalid structure
-fails with a diagnostic instead of quietly becoming broken navigation.
+**Layer 1 Summary:** Boris is not a JS site stack or hosted CMS. It is a local C/Zig binary that turns Markdown files into a validated graph and produces static outputs for both human readers and AI agents.
 
 </Aside>
 
-## Pick the path you are on
+## 5-Minute Quickstart (Layer 2)
 
-| You are here to… | Start here |
-|---|---|
-| Publish a first documentation site | [[start-here|Start Here]] — the short, working path |
-| Write and organize pages | [[learn|Learn]] — content, Markdown, navigation, and outputs |
-| Find an exact command or rule | [[reference|Reference]] — authoring, diagnostics, CLI, and outputs |
-| Understand the compiler’s boundaries | [[architecture|Architecture]] — graph, pipeline, and design choices |
-| Evaluate or migrate an existing site | [[guides/migration|Migration guide]] — a bounded, review-first workflow |
+Get your complete documentation site—including HTML, full-text search, and AI machine exports—up and running in 4 commands:
 
-## One source tree, several useful outputs
+```bash
+# 1. Compile the site with the corporate layout
+./zig-out/bin/boris --theme examples/prototype-corporate --html-dir dist
 
-| You need | Boris gives you |
-|------|-------------------|
-| A site readers can open anywhere | Static HTML under `dist/`, with navigation, TOC, assets, Asides, and Details |
-| Structure you can trust | A validated Trunk/Satellite graph, includes, heading targets, and diagnostics |
-| Data for tools and automation | JSON IR with typed edges and a reverse index |
-| Better AI grounding | Deterministic RAG, Context Bundle, and `llms.txt` outputs with provenance |
-| A path off an old site | A bounded migration workflow that preserves review items instead of guessing them away |
+# 2. Build the client-side search index
+zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=./dist/_boris/search
 
-## Small by design, not by accident
+# 3. Generate machine exports for AI agents (RAG corpus, IR, Context Bundle, llms.txt)
+./zig-out/bin/boris --rag --rag-dir dist/rag --quiet
+./zig-out/bin/boris --out dist/.boris --quiet
+./zig-out/bin/boris --llms --llms-path dist/llms.txt --quiet
+./zig-out/bin/boris --context --context-dir dist/context --quiet
 
-The compiler stays close to the work: one Zig binary, ApexMarkdown Unified
-called in-process, HTML written directly to disk, and no required client
-runtime. The HTML path supports incremental rebuilds, watch mode, bounded
-parallel page rendering, and isolated build targets when the site needs them.
+# 4. Open dist/index.html in your browser
+```
 
-The teaching rhythm is **Load → Roll → Ignite → Reset**: discover the content,
-resolve the graph, emit a chosen output, then clear page scratch and move on.
-The metaphor is optional; the contracts and generated artifacts are not.
+**Visible Outcome:** A complete, beautifully styled documentation site under `dist/` with graph-backed sidebar navigation, breadcrumbs, table-of-contents, instant client-side search, and AI-ready markdown/JSON packages.
 
-This site is Boris dogfood. Its public documentation lives in the same
-`content/` tree it compiles: ordinary Markdown, real includes, wiki-links,
-parent/child navigation, and deliberately closed components. Repository
-contracts remain the maintainer-grade source for exact compatibility rules;
-the reference section here turns those rules into a usable authoring guide.
+## Documentation Navigation Map (Layer 3)
+
+Explore how Boris works under the hood and how to leverage its capabilities:
+
+| Goal | Destination | What you will learn |
+|---|---|---|
+| **Get Started** | [[getting-started|Getting Started]] | Step-by-step setup, first useful action, and common developer/agent hesitations |
+| **Understand Mental Model** | [[guides/overview|Content Model & Pipeline]] | Trunk/Satellite graphs, fail-loud validation, and the 4-stage pipeline |
+| **Explore CLI & Modes** | [[guides/cli-and-modes|CLI & Output Modes]] | HTML, IR, RAG, Context, `llms.txt`, watch mode, check mode, and `--jobs` |
+| **Search & Layouts** | [[guides/search-and-ui|Search & Themes]] | Standalone search index tool, HTML marker tokens, zero-JS fallbacks |
+| **AI Agent Export** | [[guides/rag-export|RAG & AI Outputs]] | How LLMs and agents consume Boris documentation |
+| **Markdown & Components** | [[guides/apex-markdown|ApexMarkdown]] | In-process Markdown features, callout Aside components, wiki-links, and includes |
+| **Troubleshooting** | [[reference/diagnostics|Diagnostics & Error Codes]] | Diagnostic codes (`EFRONTMATTER`, `EGRAPH`, `EINC`), closed grammar rules, and fixes |
+
+## One source, several outputs
+
+Boris compiles the same frozen, validated content graph into all required formats without duplication:
+
+```bash
+./zig-out/bin/boris                          # HTML site → dist/
+./zig-out/bin/boris --out .boris             # JSON IR → .boris/
+./zig-out/bin/boris --rag                    # RAG corpus → rag/
+./zig-out/bin/boris --context                # AI Context Bundle → context/
+./zig-out/bin/boris --llms                   # llms.txt → llms.txt
+```
+
+Validation runs *before* any file is written. If a parent link or wiki-link is broken, Boris fails loudly with exit code `1`—preventing partial or corrupt publications.

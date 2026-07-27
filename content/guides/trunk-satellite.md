@@ -1,61 +1,87 @@
 ---
-title: Trunk and Satellite Pages
+title: Trunk & Satellite — Content Hierarchy
 parent: guides/overview
 status: published
-tags: [graph, content]
+tags: [guides, graph, hierarchy]
 ---
 
-# Trunk and Satellite Pages
+# Trunk & Satellite — Content Hierarchy
 
-The content graph has two roles.
+Boris organizes every page into one of two roles based on whether it has a `parent` key in its frontmatter. This determines where the page appears in navigation and how Boris validates the site structure.
 
-## Trunks
+## The two roles
 
-A **Trunk** is a top-level node.
+**Trunk** — A page without a `parent`. It is a root node in the content graph. A site can have multiple Trunks. Each Trunk becomes a top-level item in the navigation sidebar.
 
-- Omit `parent` in frontmatter.
-- Example: this site’s `guides/overview` page is a trunk.
+**Satellite** — A page with a `parent` key. It is a child of its parent in the content graph. Satellites appear nested under their parent in navigation.
 
-## Satellites
+## Declaring a parent
 
-A **Satellite** is any page with a direct parent. A Satellite may itself own
-Satellite children, so the graph can describe a real documentation hierarchy.
+Set `parent` to the entity id of the parent page:
 
-- Set `parent: <direct-parent-entity-id>`.
-- Entity ids default to the path without extension (`guides/overview.md` →
-  `guides/overview`). Prefer path-derived ids unless you override with `id:`.
-
-### Example satellite frontmatter
-
-```yaml
+```markdown
 ---
-title: My Satellite Page
-parent: guides/overview
+title: Advanced Configuration
+parent: getting-started
 status: published
 ---
 ```
 
-## Validation (hard errors)
+The entity id is the file path relative to `content/`, without the `.md` extension. So:
 
-The compiler fails the build (exit **1**) when:
+- `content/getting-started.md` has entity id `getting-started`
+- `content/guides/building-pages.md` has entity id `guides/building-pages`
 
-| Rule | Meaning |
-|------|---------|
-| Missing parent | `parent` id does not exist |
-| Self-parent | page parents itself |
-| Cycles | parent chain loops |
-| Duplicate ids | two pages share an entity id |
+## Validation rules
 
-Do **not** put intentionally broken pages under `content/` — use
-`fixtures/content/invalid/` or contract fixtures for negative cases.
+Boris enforces these rules before publishing:
 
-## How nav uses the graph
+1. **Every `parent` must resolve.** The parent's entity id must be a page that exists. If it does not exist, Boris exits with a `EGRAPH` diagnostic.
 
-Site `{{nav}}` and `{{breadcrumb}}` are derived recursively from the frozen
-Trunk/Satellite forest. Changing a title or parent dirties pages that embed the
-forest when incremental builds include nav material in fingerprints.
+2. **No cycles.** A page cannot be its own ancestor. Boris checks for cycles and rejects them.
 
-Wiki-links use the same entity-id space as `parent`. A bare link to
-[[guides/overview]] resolves to this section’s trunk. See
-[[reference/frontmatter|frontmatter reference]] and the
-[[guides/overview|content model overview]].
+3. **Satellites must have exactly one parent.** A page cannot declare multiple parents.
+
+4. **Includes and wiki-links must also resolve.** Broken references anywhere in the content tree fail the build.
+
+<Aside kind="tip">
+
+Run `boris check` to validate the graph without publishing. This is useful in CI pipelines where you want to verify content structure without writing any output files.
+
+</Aside>
+
+## Navigation output
+
+When your HTML layout includes the `{{nav}}` marker, Boris generates a sidebar from the validated graph:
+
+- Trunk pages appear as top-level items
+- Satellite pages appear indented under their parent
+- The current page is marked as active
+- Ancestors of the current page are marked as ancestors
+
+The `{{breadcrumb}}` marker generates a breadcrumb trail from the current page back to its root Trunk.
+
+## Deep hierarchies
+
+There is no depth limit on nesting. A Satellite can itself be the parent of other Satellites:
+
+```text
+index (Trunk)
+  getting-started (Satellite of index)
+  guides (Satellite of index)
+    guides/overview (Satellite of guides)
+    guides/building-pages (Satellite of guides)
+      guides/building-pages/examples (Satellite of guides/building-pages)
+```
+
+Boris validates the full chain at graph freeze time, not page-by-page.
+
+## Impact analysis
+
+Use `boris impact` to see which pages depend on a given page:
+
+```bash
+./zig-out/bin/boris impact guides/overview
+```
+
+This shows all pages that have `guides/overview` in their ancestor chain, plus any pages that wiki-link or include it. Useful when you are about to rename or restructure a page.

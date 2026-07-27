@@ -1,23 +1,24 @@
 ---
 title: Building Pages
-parent: learn
+parent: guides/overview
 status: published
 tags: [guides, authoring, search]
 ---
 
 # Building Pages
 
-Pages are ordinary Markdown files under `content/`. Boris discovers them,
-checks their relationships, renders them to HTML, and builds the search index
-from the HTML that was actually published.
+Pages are Markdown files under `content/`. This guide covers everything you need to create, link, organize, and publish documentation pages.
 
-## 1. Create a Markdown file
+## Create a Markdown file
 
-Use a lowercase, case-sensitive `.md` or `.mdx` path. The path becomes the
-default entity id and the output route. For example,
-`content/guides/deploying.md` becomes `guides/deploying.html`.
+Use a lowercase `.md` path. The file path (relative to `content/`, without the extension) becomes the page's **entity id** and its output URL. For example:
 
-Start each page with Boris frontmatter:
+- `content/guides/deploying.md` → entity id `guides/deploying` → output `guides/deploying.html`
+- `content/index.md` → entity id `index` → output `index.html`
+
+## Write frontmatter
+
+Every page starts with Boris frontmatter — a YAML block that declares the page's identity and position in the graph:
 
 ```markdown
 ---
@@ -29,85 +30,106 @@ tags: [deployment, html]
 
 # Deploying a Boris Site
 
-Write the page here. Use normal Markdown headings so the page gets a useful
-table of contents and searchable sections.
+Content goes here.
 ```
 
-The accepted author keys are `id`, `title`, `parent`, `status`, and `tags`.
-Use [[reference/frontmatter|the frontmatter reference]] for defaults and
-failure cases. A page without `parent` is a Trunk; a page with `parent` is a
-Satellite whose value must be another page's entity id.
+The accepted frontmatter keys are:
 
-## 2. Link and reuse content
+| Key | Required | Description |
+|---|---|---|
+| `title` | Yes | Displayed in the browser tab, navigation sidebar, and TOC |
+| `parent` | No | Entity id of the parent page. Omit for Trunk (root) pages |
+| `status` | No | `published` (default) or `draft`. Draft pages are excluded from outputs |
+| `id` | No | Override the default entity id derived from the file path |
+| `tags` | No | Array of strings for categorization |
 
-Link to another page by entity id rather than by output filename:
+<Aside kind="warning">
+
+Unknown frontmatter keys are rejected with `EFRONTMATTER`. Boris uses a closed grammar — only the five keys above are accepted.
+
+</Aside>
+
+## Set a parent
+
+A page with `parent` is a Satellite — it appears as a child in the navigation sidebar under its parent. The parent must be the **entity id** of another page that actually exists:
 
 ```markdown
-See [[guides/trunk-satellite|the page hierarchy]] or
-[[reference/frontmatter#parent|the parent key]].
+---
+parent: guides/overview
+---
 ```
 
-Shared snippets live under `content/includes/` and are not published as pages:
+A page without `parent` is a Trunk — it appears as a top-level navigation item.
+
+Boris validates every `parent` reference before publishing. If the referenced page does not exist, the build fails with a diagnostic error.
+
+## Link to other pages
+
+Use wiki-links to reference other pages by entity id:
 
 ```markdown
-{{include includes/shared-tip.md}}
+See [[reference/frontmatter|the frontmatter reference]] for key definitions.
 ```
 
-Includes and wiki-links are expanded before Markdown rendering. They remain
-literal inside fenced code blocks.
+Wiki-links accept three forms:
 
-## 3. Build and inspect the site
+```markdown
+[[entity-id]]                     # uses the page title as link text
+[[entity-id|Custom link text]]    # explicit link text
+[[entity-id#heading-id|text]]     # link to a specific heading
+```
 
-From the repository root:
+Boris validates all wiki-link targets before publishing. Broken wiki-links fail the build.
+
+## Include shared snippets
+
+Store reusable fragments under `content/includes/`. These files are **not** published as pages — they are snippet-only:
+
+```markdown
+{{include includes/shared-warning.md}}
+```
+
+Includes are expanded before Markdown rendering. They work inside regular text but remain literal inside fenced code blocks.
+
+## Draft pages
+
+Mark a page as draft to exclude it from all outputs:
+
+```markdown
+---
+status: draft
+---
+```
+
+Draft pages are not published to HTML, IR, RAG, or `llms.txt`. Wiki-links to draft pages are treated as broken references.
+
+## Build and view the site
 
 ```bash
-zig build
-./zig-out/bin/boris --quiet
+./zig-out/bin/boris
 ```
 
-Open `dist/index.html`, or serve `dist/` with any static file server. The
-default managed theme supplies navigation, breadcrumbs, a table of contents,
-responsive styling, and the search box. To rebuild quickly while editing:
+Open `dist/index.html` or serve `dist/` with any static file server. Navigation, breadcrumbs, and the table of contents are generated automatically from the validated graph.
+
+To rebuild automatically while authoring:
 
 ```bash
 ./zig-out/bin/boris --watch --quiet
 ```
 
-## Search that stays in sync
+## Add search to your site
 
-The HTML compiler automatically writes:
-
-```text
-dist/_boris/search/search-index.json
-```
-
-That artifact is generated from the final rendered pages, not from Markdown or
-IR. It includes page titles, headings, prose, and code; it excludes navigation,
-footers, scripts, styles, hidden content, and explicit search-exclude regions.
-
-The search box in the default layout loads that JSON in the browser. Search is
-case-insensitive, folds accents, collapses whitespace, ranks title and heading
-matches above body text, and returns up to twelve section links with excerpts.
-Press `/` to focus it and `Escape` to clear it. If JavaScript is disabled, the
-normal documentation navigation remains available.
-
-For a custom layout, keep the search root marker on the page body:
-
-```html
-<main data-boris-search-root>{{content}}</main>
-```
-
-If you are indexing an already-rendered site outside the normal compiler path,
-the same producer is available as `boris-search-index`; see the
-[[reference/outputs|outputs reference]] for the command and artifact contract.
-
-## Before committing a page
+Run the search indexer after building HTML:
 
 ```bash
-zig build test
-./zig-out/bin/boris --quiet
+zig build --build-file tools/search-index/build.zig run -- \
+  --root=./dist --out=./dist/_boris/search
 ```
 
-If a parent, wiki-link, include, or frontmatter key is wrong, the build fails
-with a diagnostic. Fix the source and rebuild; Boris does not silently publish
-broken navigation.
+The indexer reads the rendered HTML (not Markdown) and writes `dist/_boris/search/search-index.json`. If your layout includes the Boris search UI, it loads this file automatically. See [[guides/search-and-ui|Search & Browser UI]] for layout integration details.
+
+## Next steps
+
+- [[guides/trunk-satellite|Trunk & Satellite]] — deeper explanation of the hierarchy rules
+- [[guides/themes-and-layouts|Themes & Layouts]] — customize the site appearance
+- [[reference/frontmatter|Frontmatter Reference]] — complete key specifications

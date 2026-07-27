@@ -1,81 +1,67 @@
 ---
-title: CLI and Run Modes
+title: CLI & Output Modes
 parent: getting-started
 status: published
 tags: [cli, guides]
 ---
 
-# CLI and Run Modes
+# CLI & Output Modes
 
-Boris has three product surfaces. **Default is HTML.** Older scripts that
-assumed bare `boris` wrote IR must pass `--out` (or `--no-rag`).
+Boris provides a clean, single-binary CLI surface. This guide covers output modes, parallel execution, watch mode, and CLI exit codes.
 
-## 1. HTML site (default)
+<Aside kind="info">
 
-Writes under `dist/` (or `--html-dir`).
-
-```bash
-./zig-out/bin/boris
-./zig-out/bin/boris --html-dir custom_dist/
-./zig-out/bin/boris --jobs 4 --quiet
-./zig-out/bin/boris --watch
-./zig-out/bin/boris --incremental --quiet
-```
-
-Multi-target isolated outputs:
-
-```bash
-./zig-out/bin/boris \
-  --target prod=dist/prod \
-  --target stage=dist/stage
-```
-
-| Flag | Default | Notes |
-|------|---------|--------|
-| `--jobs N` / `-j N` | `1` | Parallel page workers `1–64` |
-| `--incremental` | off | Skip unchanged pages |
-| `--watch` | off | Debounced rebuild; implies incremental |
-| `--html-layout PATH` | `themes/boris/layouts/main.html` | Must contain `{{content}}` once |
-
-On this path Boris also expands includes and wiki-links before Apex (see
-[[getting-started]] and [[guides/overview|content model]]).
-
-## 2. JSON IR
-
-```bash
-./zig-out/bin/boris --out .boris
-./zig-out/bin/boris --no-rag --quiet
-```
-
-Emits `manifest.json`, `graph.json`, and `build-report.json`. Base IR
-`schemaVersion` is **`0.2.0`** (typed dependency edges + reverse index) unless
-a deliberate schema break bumps it.
-
-<Aside kind="warning">
-
-`--out` selects **IR mode** — it does not write the HTML site. Use bare `boris`
-(or `--html-dir`) for `dist/`.
+**Layer 1 Summary:** Running `./zig-out/bin/boris` without flags emits static HTML to `dist/`. Passing `--out`, `--rag`, `--context`, or `--llms` selects a specific machine export mode. Modes are mutually exclusive.
 
 </Aside>
 
-## 3. RAG corpus
+---
+
+## Output Modes Summary
+
+| Desired Output | Command Line | Primary Flag | Default Location |
+|---|---|---|---|
+| **Static HTML Site** | `./zig-out/bin/boris` | Default | `dist/` |
+| **Custom Theme HTML** | `./zig-out/bin/boris --theme examples/prototype-corporate` | `--theme` | `dist/` |
+| **JSON IR Graph** | `./zig-out/bin/boris --out .boris` | `--out` | `.boris/` |
+| **RAG Corpus** | `./zig-out/bin/boris --rag --rag-dir dist/rag` | `--rag` | `rag/` |
+| **AI Context Bundle** | `./zig-out/bin/boris --context --context-dir dist/context` | `--context` | `context/` |
+| **`llms.txt` Index** | `./zig-out/bin/boris --llms --llms-path dist/llms.txt` | `--llms` | `llms.txt` |
+| **Check Graph Only** | `./zig-out/bin/boris check` | `check` subcommand | None (Memory only) |
+
+---
+
+## HTML Build Flags
 
 ```bash
-./zig-out/bin/boris --rag --quiet
-./zig-out/bin/boris --rag-dir ./uploads/rag --quiet
+# Render with custom output folder
+./zig-out/bin/boris --html-dir public
+
+# Render with parallel workers (up to 64 jobs)
+./zig-out/bin/boris --jobs 4 --quiet
+
+# Watch mode for authoring (automatically re-renders changed pages)
+./zig-out/bin/boris --watch --quiet
+
+# Incremental build mode (skips unchanged pages based on hash)
+./zig-out/bin/boris --incremental --quiet
 ```
 
-There is **no** `zig build rag` product step. Details:
-[[guides/rag-export|RAG export]].
+---
 
-## Conflicts
+## Conflict Rules & Exit Codes
 
-Incompatible mode combinations exit **2** (usage). Example:
+Output modes cannot be combined in a single invocation. Attempting to pass conflicting mode flags (e.g. `--out` and `--rag` together) exits immediately with code `2` (usage error).
 
-```bash
-./zig-out/bin/boris --out .boris --rag   # invalid
-```
+### Standard Exit Codes:
+- `0` — Success. All pages parsed, validated, and rendered cleanly.
+- `1` — Content or Graph Error (`EFRONTMATTER`, `EGRAPH`, `EINC`). Validation failed; no files written.
+- `2` — CLI Usage Error. Invalid flag combination or bad argument.
+- `3` — I/O or System Error. Cannot read `content/` directory or write output.
 
-Exit codes: `0` ok · `1` content · `2` usage · `3` I/O.
+---
 
-Back to [[getting-started|Getting started]].
+## Next Steps
+
+- [[getting-started|Getting Started]] — 5-minute quickstart guide.
+- [[reference/commands|CLI Reference]] — Complete flag dictionary and options.

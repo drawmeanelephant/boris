@@ -1,6 +1,6 @@
 ---
 title: Apex Markdown Showcase
-parent: learn
+parent: guides/overview
 status: published
 tags: [markdown, showcase, apex]
 ---

@@ -1,51 +1,60 @@
 ---
-title: Diagnostics
+title: Diagnostics & Troubleshooting
 parent: reference
 status: published
-tags: [reference, errors]
+tags: [reference, errors, diagnostics]
 ---
 
-# Diagnostics
+# Diagnostics & Troubleshooting
 
-Boris fails loudly when source relationships are unsafe. Start with the stable
-diagnostic code, then fix the named file and rebuild. A content failure exits
-`1`; an invalid command exits `2`; an I/O failure exits `3`.
+Boris fails loudly when frontmatter or graph relationships are invalid. Validation runs during the **Roll phase** before any files are written to disk.
 
-## The errors authors see most often
+<Aside kind="info">
 
-| Code | Usually means | First fix to try |
+**Layer 1 Summary:** If a build fails with exit code `1`, Boris outputs a diagnostic error naming the exact file, line number, column, error code, and reason. No corrupted or partial output is written.
+
+</Aside>
+
+---
+
+## Stable Error Codes & Solutions
+
+| Diagnostic Code | Description / Cause | Actionable Solution |
 |---|---|---|
-| `EFRONTMATTER` | An unknown key, malformed field, or YAML-like construct | Compare the header with [[reference/frontmatter|Frontmatter Reference]] |
-| `EPARENTMISSING` | `parent:` names no page | Use the exact entity id of an existing page |
-| `EPARENTSELF` | A page names itself as parent | Remove or correct `parent:` |
-| `EPARENTCYCLE` | Parent pages loop back to each other | Break the cycle; every chain needs a Trunk root |
-| `EDUPLICATEID` | Two source files resolve to one id | Rename a path or add one distinct `id:` override |
-| `EREFERENCEMISSING` | A wiki-link page or heading target does not exist | Correct the target id or rebuild once and copy the rendered heading id |
-| `EINCLUDEMISSING` | An include file cannot be read | Check the content-root-relative include path |
-| `EINCLUDECYCLE` | Includes expand back into themselves | Make the shared fragment one-directional |
-| `ECOMPONENT` | An Aside or registered component is malformed | Check tag spelling, quoted attributes, and closing tag |
-| `EINVALIDUTF8` | Source is not UTF-8, or begins with a UTF-8 BOM | Save as BOM-free UTF-8 |
+| `EFRONTMATTER` | Frontmatter contains an unpermitted key or syntax error | Remove unpermitted keys. Allowed keys are **`id`**, **`title`**, **`parent`**, **`status`**, and **`tags`**. Ensure parent key is `parent:` (not `parentEntry`). |
+| `EPARENTMISSING` | `parent:` names a page ID that does not exist in `content/` | Verify spelling of parent entity ID. Ensure the parent page exists under `content/`. |
+| `EPARENTSELF` | A page names itself as its own `parent` | Remove or fix the self-referencing `parent` key. |
+| `EPARENTCYCLE` | Parent links form a circular loop (A → B → A) | Break the cycle. Every path must terminate at a Trunk root page with no parent. |
+| `EDUPLICATEID` | Two Markdown files resolve to the same entity ID | Rename one of the files or provide a unique `id:` override in frontmatter. |
+| `EREFERENCEMISSING` | A wiki-link points to a non-existent page or target | Correct the target ID in your wiki-link tag (e.g. `[[getting-started]]`). |
+| `EINCLUDEMISSING` | An include path cannot be found | Check file path relative to `content/`. Includes must live in `content/includes/`. |
+| `EINCLUDECYCLE` | An include snippet transcludes itself directly or indirectly | Remove recursive include references. |
+| `ECOMPONENT` | An Aside component has malformed syntax or unclosed tags | Check tag closing syntax: ensure `&lt;Aside kind="info"&gt;` has a matching `&lt;/Aside&gt;`. |
 
-## Read the location before changing the model
+---
 
-Human-readable diagnostics name a source path, line, and column when known:
+## Diagnostic Output Format
+
+When an error occurs, Boris prints a standardized diagnostic format:
 
 ```text
-error: EFRONTMATTER: bad.md:2:1: unknown key "category"
+error: EFRONTMATTER: content/getting-started.md:4:1: unknown key "author"
 ```
 
-The same structured diagnostic appears in the JSON build report for IR builds.
-The code is stable; the message is there to tell you what to change. Do not
-paper over a graph error with a regular Markdown link—use the intended
-`parent`, include, or wiki-link relationship.
+To validate your content graph without generating any output files:
 
-## A quick recovery loop
+```bash
+./zig-out/bin/boris check
+```
 
-1. Read the first error and its source location.
-2. Make the smallest source correction.
-3. Run `boris check` when you only want validation, or `boris` to publish.
-4. If the error names a heading fragment, inspect the generated heading id and
-   update the page-and-heading target exactly.
+- Exit Code `0`: Graph is valid and ready to publish.
+- Exit Code `1`: Diagnostic error detected.
+- Exit Code `2`: Command-line usage error.
+- Exit Code `3`: File system I/O error.
 
-For the full, machine-facing diagnostic contract, see the
-[repository contract](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/diagnostics.md).
+---
+
+## Next Steps
+
+- [[reference/frontmatter|Frontmatter Reference]] — Complete documentation of accepted YAML keys.
+- [[reference/commands|CLI Reference]] — Flag definitions and exit codes.

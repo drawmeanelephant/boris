@@ -1,77 +1,110 @@
 ---
-title: Getting Started with Boris
-parent: start-here
+title: Getting Started
 status: published
-tags: [setup, cli]
+tags: [setup, quickstart, cli]
 ---
 
-# Getting Started
+# Getting Started with Boris
 
-Build Boris, compile this sample site, and try the product modes.
+Boris is a zero-dependency static documentation compiler written in Zig. You write clean Markdown files with explicit page relationships (`parent` and wiki-links), and Boris validates your documentation graph before emitting static HTML, a client-side search index, JSON IR, RAG packages, AI Context Bundles, and `llms.txt`—all from a single fast, native binary with no JavaScript runtime or Node.js toolchain required.
 
-## Prerequisites
+<Aside kind="info">
 
-- **Zig 0.16+** (CI pin: 0.16.0)
-- **CMake** at *compile time only* (builds vendored ApexMarkdown static libs)
+**Layer 1 Summary:** Boris takes Markdown files in `content/`, validates parent references and links, and writes static HTML and AI machine packages to disk. No Node.js, no bundlers, no runtime dependencies.
 
-## First site build
+</Aside>
+
+## Prerequisites & Building
+
+Building Boris requires two standard tools:
+
+- **Zig 0.16+** — the compiler language Boris is written in ([ziglang.org](https://ziglang.org/download/)).
+- **CMake** — used once at compile time to build the vendored ApexMarkdown static library.
 
 ```bash
 git clone https://github.com/drawmeanelephant/boris.git
 cd boris
 zig build
-./zig-out/bin/boris --quiet          # HTML → dist/
 ```
 
-Open `dist/index.html` (or serve `dist/` with any static file server). You should
-see site nav on the left, breadcrumb, and a page TOC when the body has headings.
+The compiled binary is written directly to `./zig-out/bin/boris`.
 
-## Product modes
+---
 
-| Mode | Command | Output |
-|------|---------|--------|
-| **HTML (default)** | `./zig-out/bin/boris` | `dist/` |
-| **JSON IR** | `./zig-out/bin/boris --out .boris` | `.boris/` |
-| **RAG corpus** | `./zig-out/bin/boris --rag` | `rag/` |
-| **Context Bundle** | `./zig-out/bin/boris --context` | `context/` |
+## 5-Minute Concrete Value Path (Layer 2)
 
-Read-only analysis (not publish modes): `boris check`, `boris impact <id>`.
+Complete your first useful action in under 5 minutes without reading any compiler source code:
 
+### Step 1: Render the Corporate HTML Site
 ```bash
-./zig-out/bin/boris --out .boris --quiet
-./zig-out/bin/boris --rag --quiet
-./zig-out/bin/boris --context --quiet
+./zig-out/bin/boris --theme examples/prototype-corporate --html-dir dist
 ```
+*Outcome:* Boris scans `content/`, parses frontmatter, validates parent graph hierarchy, and emits responsive HTML files to `dist/` with graph-backed sidebar navigation.
 
-<Aside kind="tip">
+### Step 2: Generate the Client-Side Search Index
+```bash
+zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=./dist/_boris/search
+```
+*Outcome:* The search index tool reads rendered HTML under `dist/` and writes `dist/_boris/search/search-index.json`.
 
-HTML helpers (valid alone, no extra mode flag): `--watch`, `--incremental`,
-`--jobs N` (default jobs is still 1). See [[guides/cli-and-modes|CLI and modes]].
+### Step 3: Export AI & Machine Packages
+```bash
+./zig-out/bin/boris --rag --rag-dir dist/rag --quiet
+./zig-out/bin/boris --out dist/.boris --quiet
+./zig-out/bin/boris --llms --llms-path dist/llms.txt --quiet
+./zig-out/bin/boris --context --context-dir dist/context --quiet
+```
+*Outcome:* Creates `dist/rag/` (Markdown RAG corpus), `dist/.boris/` (JSON IR), `dist/llms.txt`, and `dist/context/` (AI Context Bundle) from the exact same frozen content graph.
+
+### Step 4: Validate Without Publishing
+```bash
+./zig-out/bin/boris check
+```
+*Outcome:* Validates all page parent chains, wiki-links, and includes in memory without writing any files to disk. Exit code `0` confirms clean validation.
+
+---
+
+## Common Hesitations & Misconceptions (Developer & Agent Ore)
+
+Every mistaken assumption when discovering a new tool is documentation ore. Here are the most frequent hesitation points:
+
+<Aside kind="warning">
+
+### Gotcha 1: Output modes are mutually exclusive
+**Hesitation:** Running `./zig-out/bin/boris --rag --out .boris` expecting both HTML, RAG, and IR in one invocation.  
+**Reality:** Output modes (`--rag`, `--out`, `--llms`, `--context`, default HTML) are **mutually exclusive per invocation**. Run separate commands to generate all outputs.
 
 </Aside>
 
-## What you need as an author
+<Aside kind="warning">
 
-1. Markdown under `content/` (case-sensitive `.md` / `.mdx`).
-2. Closed frontmatter — only `id`, `title`, `parent`, `status`, `tags`
-   ([[reference/frontmatter|frontmatter reference]]).
-3. Optional layout chrome in `themes/boris/layouts/main.html` (`{{content}}`
-   required; `{{nav}}` / `{{breadcrumb}}` / `{{title}}` / `{{toc}}` optional).
-   Its CSS lives separately at `themes/boris/assets/css/boris.css` and is copied
-   into every generated site.
-4. Optional **includes** and **wiki-links** (Boris expands them on the HTML path
-   **before** Apex). Syntax examples stay raw inside fences; live forms below
-   resolve at compile time.
+### Gotcha 2: Search indexing is decoupled from HTML rendering
+**Hesitation:** Running `./zig-out/bin/boris` and opening `dist/index.html`, then wondering why search returns no results.  
+**Reality:** Boris compiles HTML deterministically without bundling a JavaScript engine. To enable search, run `zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=./dist/_boris/search` after HTML rendering.
 
-```markdown
-{{include includes/shared-tip.md}}
+</Aside>
 
-See also [[guides/overview|the content model]].
-```
+<Aside kind="warning">
 
-{{include includes/shared-tip.md}}
+### Gotcha 3: Accepted frontmatter keys are strictly closed
+**Hesitation:** Adding custom YAML frontmatter fields like `author: Jane`, `date: 2026-07-27`, or using legacy names like `parentEntry`.  
+**Reality:** Boris enforces a closed frontmatter contract of exactly 5 allowed keys: `id`, `title`, `parent`, `status`, and `tags`. The parent key **must be `parent` only**. Any extra key raises `EFRONTMATTER` and halts the build.
 
-{{include includes/authoring-note.md}}
+</Aside>
 
-Next: the [[guides/overview|content model]] or jump straight to
-[[guides/trunk-satellite|Trunk vs Satellite]].
+<Aside kind="warning">
+
+### Gotcha 4: Broken links stop the build before writing output
+**Hesitation:** Expecting a partial website build when a page contains an unresolvable wiki-link target or invalid parent.  
+**Reality:** Boris executes **Load → Roll → Ignite → Reset**. Graph validation (Roll phase) happens *before* any output file is written (Ignite phase). If validation fails, Boris exits with code `1` and a diagnostic message—no broken site is ever published.
+
+</Aside>
+
+---
+
+## Next Steps
+
+- [[guides/overview|Content Model & Pipeline]] — Understand Trunk & Satellite pages, graph validation, and pipeline stages.
+- [[guides/cli-and-modes|CLI & Output Modes]] — Learn about watch mode, `--jobs` parallelism, and output paths.
+- [[guides/search-and-ui|Search & Themes]] — Customizing layouts, marker tokens, and search UI.
+- [[reference/commands|CLI Reference]] — Full breakdown of flags, options, and exit codes.
