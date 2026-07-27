@@ -55,8 +55,10 @@ HTML helpers (valid alone, no extra mode flag): `--watch`, `--incremental`,
 1. Markdown under `content/` (case-sensitive `.md` / `.mdx`).
 2. Closed frontmatter — only `id`, `title`, `parent`, `status`, `tags`
    ([[reference/frontmatter|frontmatter reference]]).
-3. Optional layout chrome in `layouts/main.html` (`{{content}}` required;
-   `{{nav}}` / `{{breadcrumb}}` / `{{title}}` / `{{toc}}` optional).
+3. Optional layout chrome in `themes/boris/layouts/main.html` (`{{content}}`
+   required; `{{nav}}` / `{{breadcrumb}}` / `{{title}}` / `{{toc}}` optional).
+   Its CSS lives separately at `themes/boris/assets/css/boris.css` and is copied
+   into every generated site.
 4. Optional **includes** and **wiki-links** (Boris expands them on the HTML path
    **before** Apex). Syntax examples stay raw inside fences; live forms below
    resolve at compile time.

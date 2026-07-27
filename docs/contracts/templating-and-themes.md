@@ -2,8 +2,9 @@
 
 **Status:** F9.1 + F9.2 + layout selection implemented (closed layout plan,
 metadata/footer/asset-url, target-owned assets, layout UTF-8 at split,
-orphan asset scrub, `--layout-rule` selection). Later slices (external
-stylesheets, DaisyUI experiment, IR layout/asset edges) remain open per §12.
+orphan asset scrub, `--layout-rule` selection). The default Boris theme ships
+an external copied stylesheet; DaisyUI and IR layout/asset edges remain open
+per §12.
 
 **Authority:** normative for the F9.1/F9.2 HTML theme path. Subordinate contracts:
 [HTML output](html-output.md), [multi-target](multi-target-isolated-output.md),
@@ -16,7 +17,7 @@ or application-language dependency.
 
 ## 1. Problem and design boundary
 
-`layouts/main.html` is already useful for a small site: it has `content`,
+`themes/boris/layouts/main.html` is the shipped small-site theme: it has `content`,
 `title`, `nav`, `breadcrumb`, `toc`, and `children` markers. Real documentation sites
 usually need a theme-owned stylesheet, a stable footer, page metadata, several
 page shapes, and more than one output target. The practical extension is a
@@ -182,7 +183,7 @@ For each `(target, page)` pair:
 3. Role rule for the page’s resolved role.
 4. Target fallback (`--target-layout NAME=PATH`).
 5. Global fallback (`--html-layout`, including `--theme ROOT` sugar).
-6. Product default `layouts/main.html`.
+6. Product default `themes/boris/layouts/main.html`.
 
 Rule declaration order never affects selection. Canonical rule order for
 diagnostics and plan digests is `(selector rank, selector bytes, layout path)`.
@@ -378,15 +379,17 @@ remain per-target and deterministic.
 
 Migration is deliberately additive:
 
-1. Keep `layouts/main.html` working as the v0.3.1 default. Existing layouts
-   containing only the current five markers remain valid.
+1. Ship `themes/boris/layouts/main.html` as the default, with its stylesheet
+   copied from `themes/boris/assets/`. Existing layouts containing only the
+   current five markers remain valid when selected explicitly.
 2. Continue accepting `--html-layout PATH` and `--target-layout NAME=PATH`.
    These are the compatibility bridge for a layout outside a theme root.
 3. Introduce a theme root with `layouts/main.html` and `assets/`; `--theme`
    should be syntactic sugar for selecting that layout plus its asset root,
    not a second renderer.
-4. Move the current inline `<style>` from `layouts/main.html` into a copied
-   theme CSS file, then replace it with `{{asset-url assets/css/docs.css}}`.
+4. Keep CSS in a copied theme asset and link it with
+   `{{asset-url assets/css/boris.css}}`; do not grow the default layout with
+   inline stylesheet rules.
 5. Add `metadata`, `footer`, and page layout rules only when their contracts
    and fixture goldens are implemented. A missing optional marker does not
    force every existing layout to change.
@@ -500,4 +503,5 @@ Node, a bundler, or network access.
 - Fixtures: `docs/contracts/fixtures/layout-rules/`; pure selector module
   `src/layout_select.zig`. No IR schema change; no DaisyUI/Node/CSS pipeline.
 
-The existing `layouts/main.html` remains the regression fixture throughout.
+Explicit legacy layouts remain regression fixtures; the product default is the
+managed Boris theme.

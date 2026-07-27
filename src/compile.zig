@@ -184,7 +184,7 @@ pub const CompileOptions = struct {
     content_root: []const u8 = "content",
     dist_dir: []const u8 = "dist",
     /// Fallback layout path (global / --target-layout / product default).
-    layout_path: []const u8 = "layouts/main.html",
+    layout_path: []const u8 = "themes/boris/layouts/main.html",
     /// Target-owned layout rules (`--layout-rule`). Empty → one layout for all pages.
     layout_rules: []const layout_select.LayoutRule = &.{},
     quiet: bool = true,
@@ -5436,7 +5436,7 @@ test "F9.1 referenced asset change invalidates page fingerprint material" {
     try std.testing.expectEqualStrings("v2", css);
 }
 
-test "F9.1 legacy layouts/main.html still renders without theme assets" {
+test "F9.1 default managed Boris theme publishes its stylesheet" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
@@ -5445,11 +5445,11 @@ test "F9.1 legacy layouts/main.html still renders without theme assets" {
     const dist = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f91-legacy", .{tmp.sub_path});
     defer gpa.free(dist);
 
-    // Use real sample content + default layout when present
+    // Use real sample content + the product default managed theme.
     const stats = try compileHtmlSite(io, gpa, .{
         .content_root = "content",
         .dist_dir = dist,
-        .layout_path = "layouts/main.html",
+        .layout_path = "themes/boris/layouts/main.html",
         .quiet = true,
     });
     try std.testing.expect(stats.pages_written > 0);
@@ -5459,10 +5459,12 @@ test "F9.1 legacy layouts/main.html still renders without theme assets" {
     const html = try readFileAlloc(io, cwd, index_path, gpa);
     defer gpa.free(html);
     try std.testing.expect(std.mem.indexOf(u8, html, "<main data-boris-search-root>") != null);
-    // No managed assets/ tree required for legacy layout
-    const assets = try std.fmt.allocPrint(gpa, "{s}/assets", .{dist});
-    defer gpa.free(assets);
-    try std.testing.expectError(error.FileNotFound, cwd.access(io, assets, .{}));
+    try std.testing.expect(std.mem.indexOf(u8, html, "href=\"assets/css/boris.css\"") != null);
+    const css_path = try std.fmt.allocPrint(gpa, "{s}/assets/css/boris.css", .{dist});
+    defer gpa.free(css_path);
+    const css = try readFileAlloc(io, cwd, css_path, gpa);
+    defer gpa.free(css);
+    try std.testing.expect(std.mem.indexOf(u8, css, ".site-sidebar") != null);
 }
 
 // ---------------------------------------------------------------------------

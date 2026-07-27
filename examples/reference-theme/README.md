@@ -12,7 +12,7 @@ chrome and is **not** required to build or ship Boris.
 | Framework CSS | **None** — hand-authored local stylesheet |
 | Node / npm / Tailwind / CDN | **Forbidden** |
 | JS runtime | **None** (native `<details>` only) |
-| Default CLI site | Still `content/` + `layouts/main.html` |
+| Default CLI site | `content/` + the managed `themes/boris/` theme |
 
 Use this tree when you want a readable, keyboard-friendly reference for
 authoring a theme that exercises post-v0.5 capabilities (closed `Details`,
