@@ -133,12 +133,33 @@
     }
     .site-menu { margin-top: 1.2rem; }
     .site-menu > summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.55rem 0.65rem;
+      border: 1px solid var(--line);
+      border-radius: 0.55rem;
+      background: color-mix(in srgb, var(--accent) 5%, Canvas);
       cursor: pointer;
-      color: var(--muted);
+      color: CanvasText;
       font-size: 0.7rem;
       font-weight: 800;
       letter-spacing: 0.1em;
       text-transform: uppercase;
+    }
+    .site-menu > summary::-webkit-details-marker { display: none; }
+    .site-menu > summary::after {
+      content: "+";
+      color: var(--accent-ink);
+      font-size: 1rem;
+      letter-spacing: 0;
+    }
+    .site-menu[open] > summary::after { content: "−"; }
+    .site-menu > summary:hover { background: color-mix(in srgb, var(--accent) 11%, Canvas); }
+    .site-menu > summary:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent);
+      outline-offset: 3px;
     }
     .site-menu > .site-nav { margin-top: 0.65rem; }
     .site-nav::before {
