@@ -169,11 +169,31 @@ Selectors: `id:ENTITY_ID`, `role:trunk`, `role:satellite`, `glob:PATTERN`.
 
 ---
 
-## Exit codes
+## Exit codes & diagnostic troubleshooting {#exit-codes}
 
-| Code | Meaning |
-|---:|---|
-| `0` | Success |
-| `1` | Content or graph validation error; or `check` found policy violations |
-| `2` | Invalid flag or flag combination |
-| `3` | I/O or system error |
+Boris uses deterministic exit codes to signal success, content validation errors, usage conflicts, and system failures.
+
+### Exit code reference
+
+| Code | Meaning | Diagnostic Trigger |
+|---:|---|---|
+| `0` | Success | Build or command completed cleanly |
+| `1` | Content/graph error | `EFRONTMATTER`, `EGRAPH`, missing parent ID, dead wiki-link, or `check` failure |
+| `2` | Usage / flag conflict | Combining mutually exclusive flags, invalid target syntax, or missing layout |
+| `3` | I/O / System error | Input directory missing, permission denied writing output, or corrupted disk |
+
+### Common CLI Troubleshooting Matrix
+
+| Symptom / Error | Primary Cause | Resolution Step |
+|---|---|---|
+| `Exit 2: mode flag conflict` | Passed `--rag` with `--no-rag` or `--out` with HTML flags | Separate IR, HTML, RAG, and Context invocations into distinct commands |
+| `Exit 2: --target exclusive with --html-dir` | Passed both single-target and multi-target output flags | Omit `--html-dir` when using `--target NAME=DIR` |
+| `Exit 1: EGRAPH parent 'foo' not found` | A satellite page references a non-existent parent entity ID | Create the parent page or fix the `parent:` frontmatter key |
+| `Exit 1: dead wiki-link &#91;&#91;bar&#93;&#93;` | A page contains a wiki-link to an entity ID that does not exist | Verify target page entity ID or status in `content/` |
+| `Exit 3: missing content directory` | Ran `boris` from a folder without a `content/` directory | Use `--input PATH` to point to the content root directory |
+
+### Diagnostic Resolution Steps
+
+1. **Run `boris check`**: Run `boris check` to inspect content graph health without writing output files.
+2. **Review Exit Code**: Check stderr output and exit code (`echo $?`) to distinguish usage errors (code 2) from graph errors (code 1).
+3. **Isolate Modes**: Ensure each build command selects exactly one output mode (`HTML`, `--out`, `--rag`, `--context`, or `--llms`).

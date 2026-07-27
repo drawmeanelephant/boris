@@ -90,11 +90,23 @@ tags: [setup, quickstart, cli]
 Page content starts here.
 ```
 
-## Common errors
+## Diagnostic Troubleshooting & Common Errors
 
-| Error | Cause | Fix |
+Boris enforces strict, closed frontmatter syntax. Any key outside `title`, `parent`, `status`, `id`, and `tags` produces an immediate `EFRONTMATTER` diagnostic and halts the build.
+
+### Diagnostic Matrix
+
+| Error Diagnostic | Root Cause | Exact Resolution |
 |---|---|---|
-| `EFRONTMATTER: unknown key 'sidebar_position'` | An unknown key was found in frontmatter | Remove the unknown key |
-| `EFRONTMATTER: missing required key 'title'` | The `title` key is absent | Add a `title` key |
-| `EGRAPH: parent 'guides/intro' not found` | The `parent` value does not resolve to an existing page | Fix the entity id or create the parent page |
-| `EGRAPH: duplicate entity id 'getting-started'` | Two pages produce the same entity id | Add an `id` override to one of them |
+| `EFRONTMATTER: unknown key 'sidebar_position'` | Unrecognized key in YAML frontmatter header | Remove the unsupported key or move metadata to body content |
+| `EFRONTMATTER: unknown key 'parent_entry'` | Used legacy `parent_entry` or `parentEntry` key name | Rename the key to `parent:` (Boris only accepts `parent`) |
+| `EFRONTMATTER: missing required key 'title'` | Page header omitted the required `title` key | Add a string `title: "Page Title"` to the frontmatter block |
+| `EFRONTMATTER: invalid status value` | Value of `status:` is not `published` or `draft` | Set `status: published` or `status: draft` |
+| `EGRAPH: parent 'guides/intro' not found` | `parent:` ID does not match any published entity | Verify target page exists and has `status: published` |
+| `EGRAPH: duplicate entity id 'getting-started'` | Two Markdown files derive or set the same ID | Use an explicit `id:` override or rename one of the files |
+
+### Step-by-Step Frontmatter Audit
+
+1. **Verify Closed Grammar**: Ensure frontmatter contains *only* `title`, `parent`, `status`, `id`, or `tags`.
+2. **Check Parent Key Name**: Confirm parent key is written as `parent:` — not `parent_entry`, `parentEntry`, or `parent_id`.
+3. **Confirm Parent Target**: Run `boris check` to verify every `parent:` value maps to a valid published Trunk or Satellite entity ID.

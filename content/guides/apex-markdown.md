@@ -134,7 +134,23 @@ Use rules sparingly between major blocks; prefer headings for navigation.
 - Explicit link: [Zig language site](https://ziglang.org)
 - Autolink-style URL: https://ziglang.org
 - Inline repo link: [Boris on GitHub](https://github.com/drawmeanelephant/boris)
-- Wiki-link (Boris, pre-Apex): [[getting-started|Getting started]]
+
+### Wiki-links (`&#91;&#91;entity-id&#93;&#93;`)
+
+Boris expands wiki-links by entity ID before Apex rendering, enabling graph validation and automatic link resolution across your site.
+
+```markdown
+- Simple entity ID: [[getting-started]]
+- With custom label: [[getting-started|Install and Setup Guide]]
+- With heading fragment: [[reference/commands#exit-codes|CLI Exit Codes]]
+```
+
+**Live rendered examples:**
+- Simple entity ID: [[getting-started]]
+- With custom label: [[getting-started|Install and Setup Guide]]
+- With heading fragment: [[reference/commands#exit-codes|CLI Exit Codes]]
+
+### Images
 
 Images use ordinary Markdown. Prefer local assets under your content tree when
 you ship a real site; external URLs work for demos. IAL can set width/class:
@@ -296,6 +312,18 @@ Indented code (four spaces) is CommonMark-compatible:
 
 GFM pipe tables with column alignment:
 
+```markdown
+| Feature | Status | Alignment demo |
+| :--- | :---: | ---: |
+| ApexMarkdown Unified | Yes | left / center / right |
+| Graph validation | Yes | Trunk / Satellite |
+| Nested Asides | No | Contract forbids |
+| Site nav + TOC | Yes | Layout markers |
+| Includes + wiki-links | Yes | Before Apex; fences stay raw |
+```
+
+**Live rendered table:**
+
 | Feature | Status | Alignment demo |
 | :--- | :---: | ---: |
 | ApexMarkdown Unified | Yes | left / center / right |
@@ -310,6 +338,18 @@ Cells may contain *emphasis*, `code`, and [links](https://ziglang.org).
 
 Rowspan (`^^`), colspan (`<<`), and a `Table:` caption line:
 
+```markdown
+| Left | Mid | Right |
+| ---: | :---: | :--- |
+| A | B | C |
+| ^^ | spans up | D |
+| E | << | (colspan into empty/left) |
+
+Table: Advanced caption example
+```
+
+**Live rendered advanced table:**
+
 | Left | Mid | Right |
 | ---: | :---: | :--- |
 | A | B | C |
@@ -319,6 +359,12 @@ Rowspan (`^^`), colspan (`<<`), and a `Table:` caption line:
 Table: Advanced caption example
 
 Per-cell alignment markers in the header row:
+
+```markdown
+| :Left | Right: | :Center: |
+| --- | --- | --- |
+| L | R | C |
+```
 
 | :Left | Right: | :Center: |
 | --- | --- | --- |
@@ -377,6 +423,23 @@ Docs often need side notes without breaking the main sentence flow. Apex
 supports footnote references and hoists definitions into a footnotes section
 with back-refs.[^syntax] Keep labels unique for clarity.[^second]
 
+### Copy-pasteable Footnote Snippets
+
+Named reference footnote:
+
+```markdown
+Reference in body text.[^syntax]
+
+[^syntax]: Named footnote definitions must sit at the bottom of the page.
+```
+
+Inline footnotes (no named definition block needed):
+
+```markdown
+- Kramdown-style: Here is a footnote.^[Inline footnote body.]
+- MultiMarkdown-style: Here is another.[^Inline body for MMD.]
+```
+
 Put *named* footnote definitions at the **end of the page** (after all other
 sections). Mid-document definitions can swallow following headings.
 
@@ -430,8 +493,20 @@ These are **not** Apex features; they run (or apply) around the engine:
 | Aside components | Tokenize around Apex markdown segments |
 | Layout nav / toc markers | After body HTML is produced |
 
+### Transclusion Includes (`&#123;&#123;include path&#125;&#125;`)
+
+Include directives expand reusable Markdown fragments stored under `content/includes/` into a page body before Apex runs.
+
+```markdown
+{{include includes/shared-tip.md}}
+```
+
+**Live included fragment:**
+
+{{include includes/shared-tip.md}}
+
 Fenced examples of includes and wiki-links stay literal (correct fence
-behavior). Live forms appear on [[getting-started]] and [[guides/overview]].
+behavior). Live forms also appear on [[getting-started]] and [[guides/overview]].
 
 ## What is deliberately not product surface
 

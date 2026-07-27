@@ -184,3 +184,21 @@ Format: plain text, UTF-8, community `llms.txt` standard.
 ```
 
 The file reflects the current validated graph. Indentation depth matches the Trunk/Satellite hierarchy. Each entry includes the page title (linked) and a one-line summary derived from the page's first paragraph.
+
+---
+
+## Diagnostic Troubleshooting for Output Artifacts
+
+| Issue / Symptom | Primary Cause | Remediation Procedure |
+|---|---|---|
+| `search-index.json` missing | HTML compiler built site, but search index tool was not invoked | Run `zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=./dist/_boris/search` |
+| RAG corpus missing `parts/` | `--split-size` flag was omitted during RAG build | Pass `--split-size BYTES` (e.g. `--split-size 2000000`) to enable part chunking |
+| `dist/.boris/` missing IR | Default CLI run without `--out` flag | Run `./zig-out/bin/boris --out dist/.boris` to generate JSON IR files |
+| `llms.txt` missing | Default CLI run without `--llms` flag | Run `./zig-out/bin/boris --llms --llms-path dist/llms.txt` |
+| `context/bundle.md` missing | Default CLI run without `--context` flag | Run `./zig-out/bin/boris --context --context-dir dist/context` |
+
+### Output Verification Checklist
+
+1. **HTML Site**: Verify HTML files exist under `dist/` or target directories (`dist/corporate`, `dist/minimalist`).
+2. **Search Index**: Verify `dist/_boris/search/search-index.json` exists and validates with schema version 1.
+3. **Machine Exports**: Confirm `dist/rag/catalog.jsonl`, `dist/.boris/manifest.json`, `dist/context/bundle.md`, and `dist/llms.txt` are populated.
