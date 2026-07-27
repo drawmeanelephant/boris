@@ -1100,7 +1100,7 @@ fn collectFragmentTargetSet(
         seen.clearRetainingCapacity();
 
         const body = include_mod.bodyOfSource(shared.source_bytes[page_idx]);
-        var fail: wikilink.FailInfo = .{};
+        var fail: wikilink.FailInfo = .{ .line_base = include_mod.lineBaseOfSource(shared.source_bytes[page_idx]) };
         try wikilink.collectFragmentTargetIds(body, gpa, &raw_ids, &seen, &fail, page.source_path);
 
         const inc_owned = shared.include_bytes[page_idx];
@@ -1771,6 +1771,9 @@ fn compilePagesInner(
         // Wiki reference material from page body + transitive include fragment bodies
         // so title/path renames dirty parents that only wiki-link via includes.
         const body_for_wiki = include_mod.bodyOfSource(shared.source_bytes[page_idx]);
+        // Scanners measure offsets in the body; the diagnostics contract
+        // specifies the full-source line. Shift by the frontmatter.
+        const fail_line_base = include_mod.lineBaseOfSource(shared.source_bytes[page_idx]);
         const inc_paths = shared.include_paths[page_idx];
         var wiki_bodies = try gpa.alloc([]const u8, 1 + inc_owned.len);
         defer gpa.free(wiki_bodies);
@@ -1782,7 +1785,7 @@ fn compilePagesInner(
             wiki_bodies[1 + j] = include_mod.bodyOfSource(inc_file);
             wiki_paths[1 + j] = inc_paths[j];
         }
-        var wiki_fail: wikilink.FailInfo = .{};
+        var wiki_fail: wikilink.FailInfo = .{ .line_base = fail_line_base };
         const ref_material = wikilink.referenceMaterialMulti(
             gpa,
             wiki_bodies,
@@ -1805,7 +1808,7 @@ fn compilePagesInner(
         // cached). Asset *bytes* are not fingerprint inputs: a byte-only change
         // republishes the file without re-rendering HTML.
         {
-            var asset_fail: content_asset.FailInfo = .{};
+            var asset_fail: content_asset.FailInfo = .{ .line_base = fail_line_base };
             const rewritten = content_asset.rewriteImageLinks(
                 gpa,
                 body_for_wiki,
