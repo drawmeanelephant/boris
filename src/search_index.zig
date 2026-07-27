@@ -11,91 +11,12 @@ pub const Error = error{ MultipleSearchRoots, MissingSearchRoot };
 pub const Section = struct { level: u8, heading: []const u8, fragment: []const u8, text: []const u8, code: []const u8 };
 pub const Document = struct { path: []const u8, title: []const u8, sections: []const Section };
 const MutableSection = struct { level: u8 = 0, heading: std.ArrayList(u8) = .empty, fragment: std.ArrayList(u8) = .empty, prose: std.ArrayList(u8) = .empty, code: std.ArrayList(u8) = .empty };
-const Tag = struct { name: []const u8, closing: bool, self_closing: bool, end: usize };
+const html_scan = @import("html_scan.zig");
+const Tag = html_scan.Tag;
 const Range = struct { start: usize, end: usize };
-
-fn isNameChar(c: u8) bool { return std.ascii.isAlphanumeric(c) or c == '-' or c == ':'; }
-
-fn tagAt(html: []const u8, start: usize) ?Tag {
-    if (start >= html.len or html[start] != '<') return null;
-    if (std.mem.startsWith(u8, html[start..], "<!--")) { const end = std.mem.indexOfPos(u8, html, start + 4, "-->") orelse return null; return .{ .name = "!comment", .closing = false, .self_closing = true, .end = end + 2 }; }
-    var i = start + 1; var closing = false;
-    if (i < html.len and html[i] == '/') { closing = true; i += 1; }
-    while (i < html.len and std.ascii.isWhitespace(html[i])) : (i += 1) {}
-    const name_start = i; while (i < html.len and isNameChar(html[i])) : (i += 1) {}
-    if (i == name_start) return null; const name = html[name_start..i];
-    var quote: ?u8 = null; var last_nonspace: u8 = 0;
-    while (i < html.len) : (i += 1) { const c = html[i]; if (quote) |q| { if (c == q) quote = null; } else if (c == '"' or c == '\'') quote = c else if (c == '>') return .{ .name = name, .closing = closing, .self_closing = last_nonspace == '/', .end = i } else if (!std.ascii.isWhitespace(c)) last_nonspace = c; }
-    return null;
-}
-
-/// One parsed attribute. `value` is null for a valueless (boolean) attribute
-/// such as the marker in `<main data-boris-search-root>`.
-const Attr = struct { name: []const u8, value: ?[]const u8 };
-
-/// Walks a tag's attributes. One parser backs both `attrValue` and `hasAttr`
-/// so they cannot disagree about where an attribute name starts and ends.
-const AttrIter = struct {
-    tag: []const u8,
-    i: usize,
-
-    fn init(tag: []const u8) AttrIter {
-        var i: usize = 1; if (i < tag.len and tag[i] == '/') i += 1;
-        while (i < tag.len and isNameChar(tag[i])) : (i += 1) {}
-        return .{ .tag = tag, .i = i };
-    }
-
-    fn next(self: *AttrIter) ?Attr {
-        const tag = self.tag;
-        var i = self.i;
-        while (i < tag.len) {
-            while (i < tag.len and (std.ascii.isWhitespace(tag[i]) or tag[i] == '/')) : (i += 1) {}
-            if (i >= tag.len or tag[i] == '>') break;
-            const ns = i; while (i < tag.len and isNameChar(tag[i])) : (i += 1) {}
-            if (i == ns) { i += 1; continue; }
-            const name = tag[ns..i];
-            var j = i; while (j < tag.len and std.ascii.isWhitespace(tag[j])) : (j += 1) {}
-            // No `=` follows: a boolean attribute. Yield it rather than skip it.
-            if (j >= tag.len or tag[j] != '=') { self.i = i; return .{ .name = name, .value = null }; }
-            j += 1; while (j < tag.len and std.ascii.isWhitespace(tag[j])) : (j += 1) {}
-            if (j >= tag.len) break;
-            const q = tag[j];
-            if (q == '"' or q == '\'') {
-                j += 1; const vs = j; while (j < tag.len and tag[j] != q) : (j += 1) {}
-                const v = tag[vs..j];
-                self.i = if (j < tag.len) j + 1 else j;
-                return .{ .name = name, .value = v };
-            }
-            const vs = j; while (j < tag.len and !std.ascii.isWhitespace(tag[j]) and tag[j] != '>') : (j += 1) {}
-            self.i = j;
-            return .{ .name = name, .value = tag[vs..j] };
-        }
-        self.i = i;
-        return null;
-    }
-};
-
-/// Value of `wanted`, or null. A valueless attribute yields no value, which
-/// preserves this function's previous behavior for its callers.
-fn attrValue(tag: []const u8, wanted: []const u8) ?[]const u8 {
-    var it = AttrIter.init(tag);
-    while (it.next()) |a| { if (a.value) |v| { if (std.ascii.eqlIgnoreCase(a.name, wanted)) return v; } }
-    return null;
-}
-
-/// True when `wanted` is present as an attribute NAME, with or without a value.
-///
-/// This is deliberately not a substring test. Boris documents these marker
-/// names on its own site, and a heading id is slugified from its text, so
-/// `<h3 id="document-root-marker-data-boris-search-root">` would otherwise
-/// count as a second search root and fail the build with MultipleSearchRoots.
-/// The same fault let `aria-hidden="false"` satisfy a test for `hidden`,
-/// dropping explicitly visible content from the index.
-fn hasAttr(tag: []const u8, wanted: []const u8) bool {
-    var it = AttrIter.init(tag);
-    while (it.next()) |a| { if (std.ascii.eqlIgnoreCase(a.name, wanted)) return true; }
-    return false;
-}
+const tagAt = html_scan.tagAt;
+const attrValue = html_scan.attrValue;
+const hasAttr = html_scan.hasAttr;
 
 fn matchingRange(html: []const u8, open_start: usize, name: []const u8) ?Range {
     const open = tagAt(html, open_start) orelse return null; var depth: usize = 1; var i = open.end + 1;

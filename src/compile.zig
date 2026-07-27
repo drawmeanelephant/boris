@@ -58,6 +58,7 @@ const textile = @import("textile.zig");
 const content_asset = @import("content_asset.zig");
 const source_io = @import("source_io.zig");
 const search_index = @import("search_index.zig");
+const link_audit = @import("link_audit.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -2082,6 +2083,44 @@ fn compilePagesInner(
     defer gpa.free(live_page_paths);
     for (db.items(), 0..) |page, page_idx| live_page_paths[page_idx] = page.output_path;
     try search_index.writeOverlay(io, gpa, stage_dir, dist_dir, live_page_paths, false);
+
+    // Output link audit: every published local `href`/`src` must resolve to an
+    // output this build intends to keep. It runs on the same staged/live
+    // overlay as search, before the commit below, so a failure leaves the
+    // published tree untouched. Codes are the v0.3 closed set in
+    // `docs/contracts/diagnostics.md`.
+    //
+    // The intended set is pages plus published assets. Resolving against the
+    // filesystem instead would accept a stale file that this build's own
+    // cleanup is about to delete.
+    {
+        var audit_assets: std.ArrayList([]const u8) = .empty;
+        defer audit_assets.deinit(gpa);
+        const audit_content_outs = try content_assets.collectOutputPaths(gpa);
+        defer gpa.free(audit_content_outs);
+        try audit_assets.appendSlice(gpa, audit_content_outs);
+        for (theme_bundle.assets) |a| try audit_assets.append(gpa, a.rel_path);
+
+        var findings: std.ArrayList(link_audit.Finding) = .empty;
+        defer link_audit.freeFindings(gpa, &findings);
+        try link_audit.audit(io, gpa, stage_dir, dist_dir, live_page_paths, audit_assets.items, .{}, &findings);
+        if (findings.items.len != 0) {
+            for (findings.items) |f| {
+                std.debug.print("error: {s}: {s}:{d}: {s}=\"{s}\" {s}\n", .{
+                    f.code.name(),
+                    f.source,
+                    f.line,
+                    f.attribute,
+                    f.target,
+                    switch (f.code) {
+                        .EROUTEESCAPE => "climbs above the output root and can never be served [point it at a published output, or drop the reference]",
+                        else => "does not resolve to a published output [fix the path, or publish the file it names]",
+                    },
+                });
+            }
+            return error.LinkAuditFailed;
+        }
+    }
 
     // The search artifact is part of the same staged target commit as HTML.
     try publishStageTree(io, gpa, stage_dir, dist_dir);
