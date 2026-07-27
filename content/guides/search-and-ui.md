@@ -7,11 +7,11 @@ tags: [guides, search, ui]
 
 # Search & Browser UI
 
-Boris provides a fast, client-side full-text search engine. This guide explains how HTML search indexing operates as a standalone tool, how layout marker tokens work, and how to enable the search modal in custom layouts.
+Boris provides a fast, client-side full-text search engine. This guide explains how HTML search indexing works, how layout marker attributes work, and how to enable the search UI in custom layouts.
 
-<Aside kind="warning">
+<Aside kind="info">
 
-**Crucial Gotcha (Documentation Ore):** Running `./zig-out/bin/boris` compiles your static HTML site but **does not automatically build the search index**. The search index tool is a separate standalone Zig binary. You must run `zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=./dist/_boris/search` after rendering HTML.
+**The compiler builds the search index for you.** Running `./zig-out/bin/boris` writes `dist/_boris/search/search-index.json` as part of the same staged commit as the HTML — no extra step is required. One producer serves both paths: the compiler passes its staged live-page overlay to the same extractor that backs the standalone CLI. Reach for the standalone CLI when you need to index a rendered tree Boris did not build, or to re-index one in place.
 
 </Aside>
 
@@ -36,41 +36,44 @@ dist/_boris/search/search-index.json
 
 ---
 
-## Running the Indexer
+## Building the index
 
-Execute the HTML build first, followed by the search indexer:
+An ordinary build already produces the index:
 
 ```bash
-# 1. Build HTML
 ./zig-out/bin/boris --theme examples/prototype-corporate --html-dir dist
+# writes dist/**.html and dist/_boris/search/search-index.json
+```
 
-# 2. Build Search Index
+To index a rendered tree Boris did not build, or to re-index one in place, run the standalone CLI:
+
+```bash
 zig build --build-file tools/search-index/build.zig run -- \
   --root=./dist --out=./dist/_boris/search
 ```
 
-The indexer recursively inspects `.html` files under `--root`, excludes `--out` to prevent indexing the output JSON itself, and atomically generates `search-index.json`.
+The CLI recursively inspects `.html` files under `--root`, excludes `--out` to prevent indexing the output JSON itself, and atomically generates `search-index.json`. Pass `--require-root-marker` to fail any page missing an explicit root marker instead of falling back.
 
 ---
 
 ## Layout Data Attributes
 
-### 1. Document Root Marker: `data-search-root`
+### 1. Document root marker
 Tag your layout's main content area with the search root attribute so the indexer extracts prose from the main body:
 
 ```html
-<main data-search-root>
+<main data-boris-search-root>
   {{content}}
 </main>
 ```
 
 If omitted, the indexer falls back to searching `<main>`, then `<body>`.
 
-### 2. Exclusion Marker: `data-search-exclude`
+### 2. Exclusion marker
 Exclude navigation elements, version notices, or dynamic elements from indexing:
 
 ```html
-<div data-search-exclude>
+<div data-boris-search-exclude>
   This content will not be indexed.
 </div>
 ```
