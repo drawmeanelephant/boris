@@ -4,42 +4,216 @@ status: published
 tags: [home, zig, documentation]
 ---
 
-# Boris — a static documentation compiler that stays honest
+# Write expressive Markdown. Ship a complete documentation site.
 
-Boris is a zero-dependency static documentation compiler. You write rich Markdown files with explicit page relationships (`parent` and wiki-links), and Boris validates your documentation graph before emitting static HTML, a client-side search index, JSON IR, RAG packages, AI Context Bundles, and `llms.txt`—all from a single fast, native binary with no JavaScript runtime or Node.js toolchain required.
+Boris compiles your Markdown graph into a polished static site for human readers alongside aligned editions for search tools, AI agents, and crawler indexes when generated from the same source revision.
+
+[[getting-started|Get Started in 5 Minutes]] · [Explore Documentation Map](#documentation-navigation-map)
+
+<div class="specimen-grid">
+  <div class="specimen-card">
+    <div class="specimen-card__header">Live Rendered Site Output</div>
+    <div class="specimen-card__body">
+      <p class="eyebrow">Rendered Frame Preview</p>
+      <p><strong>Graph-backed layout:</strong> Sticky navigation sidebar, breadcrumb hierarchy, in-page TOC anchors, and styled callout asides.</p>
+    </div>
+  </div>
+  <div class="specimen-card">
+    <div class="specimen-card__header">Repository Evidence</div>
+    <div class="specimen-card__body">
+      <p>Captured from actual local HTTP server builds:</p>
+      <ul>
+        <li><a href="../docs/evidence/pass3/desktop.png">Desktop Viewport (1280×800)</a></li>
+        <li><a href="../docs/evidence/pass3/mobile.png">Mobile Viewport (375×812)</a></li>
+        <li><a href="../docs/evidence/pass3/search_open.png">Search Modal Open</a></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+---
+
+## Authoring Specimen & Rendered Output
+
+*Condensed specimen adapted from `content/guides/overview.md`:*
+
+<div class="specimen-grid">
+  <div class="specimen-card">
+    <div class="specimen-card__header">1. Markdown Source (content/guides/overview.md)</div>
+    <div class="specimen-card__body">
+
+```markdown
+---
+title: Content Model & Pipeline
+parent: guides
+status: published
+---
+
+# Content Model & Pipeline
+
+Boris compiles Markdown through four phases:
+**Load → Roll → Ignite → Reset**.
+See [[guides/trunk-satellite|Trunk & Satellite]] for hierarchy.
 
 <Aside kind="info">
-
-**Layer 1 Summary:** Boris is not a JS site stack or hosted CMS. It is a local native binary that turns Markdown files into a validated graph and produces static outputs for both human readers and AI agents.
-
+**Graph Validation:** Parent chains and wiki-links are
+verified before writing files to disk.
 </Aside>
 
-## At a Glance: Boris vs. Alternatives
+| Phase | Action |
+| :--- | :--- |
+| **Load** | Discover Markdown files |
+| **Roll** | Parse frontmatter & validate graph |
+```
 
-| Approach | Build Toolchain | Link & Graph Safety | Machine Outputs | Client JS Footprint |
-| :--- | :--- | :--- | :--- | :--- |
-| **Plain Markdown** | None | Broken links in prod | Manual scraping | None |
-| **JS Frameworks (Docusaurus, Astro)** | Node.js, npm, Webpack/Vite | Best-effort / optional plugins | Custom scripts required | Large JS bundles (React/Hydration) |
-| **Boris Documentation Compiler** | **Single native Zig binary** | **Strict Fail-Loud Validation** | **Native RAG, IR, Context, `llms.txt`** | **Zero required JS** |
+    </div>
+  </div>
+  <div class="specimen-card">
+    <div class="specimen-card__header">2. Rendered Page Output (dist/guides/overview/index.html)</div>
+    <div class="specimen-card__body">
 
-## Essential Concepts
+<p class="eyebrow">Home / User Guides / Content Model & Pipeline</p>
+<h3 style="margin-top:0.25rem;">Content Model & Pipeline</h3>
+<p>Boris compiles Markdown through four phases: <strong>Load → Roll → Ignite → Reset</strong>. See <a href="../guides/trunk-satellite/index.html">Trunk & Satellite</a> for hierarchy.</p>
 
-Trunk Node
-: A root page without a `parent` key. Serves as the top-level anchor of a navigation section.
+<aside class="admonition admonition--info" aria-label="Info" style="margin: 0.75rem 0;">
+  <p><strong>Graph Validation:</strong> Parent chains and wiki-links are verified before writing files to disk.</p>
+</aside>
 
-Satellite Node
-: A page declaring `parent: <entity-id>` in its frontmatter. Nests under its parent in navigation.
+<table style="font-size: 0.82rem; margin-top: 0.5rem;">
+  <thead><tr><th>Phase</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Load</strong></td><td>Discover Markdown files</td></tr>
+    <tr><td><strong>Roll</strong></td><td>Parse frontmatter &amp; validate graph</td></tr>
+  </tbody>
+</table>
 
-Entity ID
-: Page identifier derived from path (e.g. `guides/overview.md` becomes `guides/overview`).
+    </div>
+  </div>
+</div>
 
-Callout Aside
-: Registered in-document component (`&lt;Aside kind="note|tip|info|warning|danger"&gt;`) for structured callouts.
+---
 
-Machine Exports
-: Native target formats (`--rag`, `--out`, `--context`, `--llms`) emitted from the exact same validated graph.
+## One Source, Aligned Editions
 
-## 5-Minute Quickstart
+Boris’s human and machine editions originate from the same validated documentation source and relationships when generated from the same source revision. The standalone search tool then indexes the resulting HTML.
+
+*Real output excerpts generated from commit `0568f096aebdd55f6321f907e4c82336e7019769`:*
+
+<div class="edition-grid">
+  <div class="edition-card">
+    <span class="edition-card__tag">Human Site</span>
+    <h3>Static HTML Site</h3>
+    <p>Default compilation mode writing styled HTML pages with sticky sidebars, breadcrumbs, and TOCs.</p>
+    <code>./zig-out/bin/boris</code>
+    <pre style="margin-top:0.5rem;font-size:0.75rem;"><code>&lt;nav class="breadcrumb"&gt;
+  &lt;ol&gt;&lt;li&gt;Boris Documentation&lt;/li&gt;&lt;/ol&gt;
+&lt;/nav&gt;</code></pre>
+  </div>
+
+  <div class="edition-card">
+    <span class="edition-card__tag">Browser Search</span>
+    <h3>Rendered-Site Search Index</h3>
+    <p>Standalone search tool parsing section fragments and headings directly from rendered HTML.</p>
+    <code>zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=./dist/_boris/search</code>
+    <pre style="margin-top:0.5rem;font-size:0.75rem;"><code>{"format":"boris-rendered-search-index",
+ "documents":[{"path":"getting-started.html"}]}</code></pre>
+  </div>
+
+  <div class="edition-card">
+    <span class="edition-card__tag">Programmatic</span>
+    <h3>JSON IR 0.2.0</h3>
+    <p>Structured intermediate representation capturing frozen graph topology and frontmatter metadata.</p>
+    <code>./zig-out/bin/boris --out .boris</code>
+    <pre style="margin-top:0.5rem;font-size:0.75rem;"><code>{"schemaVersion":"0.2.0",
+ "compiler":"boris/0.8.1",
+ "pageCount":22}</code></pre>
+  </div>
+
+  <div class="edition-card">
+    <span class="edition-card__tag">AI & LLM</span>
+    <h3>RAG Corpus & Catalog</h3>
+    <p>Markdown chunk corpus and JSONL catalog formatted for direct vector database ingestion.</p>
+    <code>./zig-out/bin/boris --rag</code>
+    <pre style="margin-top:0.5rem;font-size:0.75rem;"><code>{"rag_id":"content/getting-started",
+ "rag_path":"content/pages/getting-started.md"}</code></pre>
+  </div>
+
+  <div class="edition-card">
+    <span class="edition-card__tag">Context Bundle</span>
+    <h3>AI Context Bundle Directory</h3>
+    <p>Directory containing aggregated <code>bundle.md</code>, graph, manifest, and page artifacts.</p>
+    <code>./zig-out/bin/boris --context</code>
+    <pre style="margin-top:0.5rem;font-size:0.75rem;"><code>dist/context/
+├── bundle.md (aggregated text)
+├── graph.json & manifest.json
+└── pages/ (page artifacts)</code></pre>
+  </div>
+
+  <div class="edition-card">
+    <span class="edition-card__tag">Machine Index</span>
+    <h3>LLM Documentation Index</h3>
+    <p>Standardized <code>llms.txt</code> index mapping documentation routes for AI assistants and web crawlers.</p>
+    <code>./zig-out/bin/boris --llms</code>
+    <pre style="margin-top:0.5rem;font-size:0.75rem;"><code># Boris documentation
+> Generated from validated Trunk/Satellite graph.
+- [Getting Started](/getting-started/)</code></pre>
+  </div>
+</div>
+
+---
+
+## Verified Site-Building Capabilities
+
+Boris directly provides the documentation-site capabilities shown below:
+
+<div class="feature-grid">
+  <div class="feature-card">
+    <h3>Themes & Layout Templates</h3>
+    <p>Modular HTML layout templates (<code>themes/boris/layouts/main.html</code>) with explicit slot tokens (<code>{{nav}}</code>, <code>{{breadcrumb}}</code>, <code>{{toc}}</code>, <code>{{content}}</code>).</p>
+  </div>
+  <div class="feature-card">
+    <h3>Graph-Backed Navigation Tree</h3>
+    <p>Automatic multi-level sidebar navigation tree generated directly from <code>parent</code> frontmatter declarations.</p>
+  </div>
+  <div class="feature-card">
+    <h3>Breadcrumb Trail & TOC</h3>
+    <p>Breadcrumb navigation chains and in-page table of contents anchors automatically derived from heading levels (<code>h1</code>–<code>h3</code>).</p>
+  </div>
+  <div class="feature-card">
+    <h3>Page-Local Static Assets</h3>
+    <p>Theme CSS assets (<code>themes/boris/assets/css/boris.css</code>) copied directly to output directories without external asset pipelines.</p>
+  </div>
+  <div class="feature-card">
+    <h3>Incremental & Parallel Builds</h3>
+    <p><code>--incremental</code> mode skips unchanged pages; <code>--jobs N</code> distributes HTML rendering across worker threads.</p>
+  </div>
+  <div class="feature-card">
+    <h3>Watch Mode & Check Mode</h3>
+    <p><code>--watch</code> continuously re-compiles on file edits; <code>check</code> validates content graph relationships without writing files.</p>
+  </div>
+</div>
+
+---
+
+## Build-Time Graph Safety & Product Scope
+
+Boris validates parent relationships and supported internal wiki-links during the Roll phase before any output file is written to disk. If a parent reference or wiki-link fails to resolve, Boris halts with exit code 1:
+
+```text
+Diagnostic: EGRAPH - Unresolved wiki-link target 'guides/non-existent' in 'index.md'
+Build status: FAILED (Exit code 1) — No output written to dist/
+```
+
+### Focused Product Boundaries
+
+- **Zero Node/npm Toolchain:** Single native executable written in Zig. No `package.json`, no `node_modules` dependency tree to audit or update, and no JavaScript build steps for core site compilation.
+- **Zero Required Client JS:** Navigation, breadcrumbs, TOC, page reading, and responsive layouts function entirely with standard HTML/CSS and zero JavaScript.
+- **Closed Frontmatter Grammar:** Enforces a strict 5-key frontmatter contract (<code>id</code>, <code>title</code>, <code>parent</code>, <code>status</code>, <code>tags</code>). Unknown keys emit clear <code>EFRONTMATTER</code> diagnostic errors.
+
+---
+
+## 2-Command Quickstart
 
 Get your static documentation site up and running in two commands:
 
@@ -48,80 +222,33 @@ zig build
 ./zig-out/bin/boris
 ```
 
-Open `dist/index.html` in your browser to view your site with graph-backed sidebar navigation, breadcrumbs, and in-page table of contents.
+Open <code>dist/index.html</code> in your browser to view your site.
 
-### Optional Build Branches
+### Optional Build Invocations
 
-- **Add Client-Side Search Index**:
+- **Generate Client-Side Search Index**:
   ```bash
   zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=./dist/_boris/search
   ```
-- **Export Machine AI Artifacts** (`dist/rag/`, `dist/.boris/`, `dist/context/`, `dist/llms.txt`):
+- **Export Aligned Machine Editions**:
   ```bash
-  ./zig-out/bin/boris --rag --rag-dir dist/rag --quiet
-  ./zig-out/bin/boris --out dist/.boris --quiet
-  ./zig-out/bin/boris --llms --llms-path dist/llms.txt --quiet
-  ./zig-out/bin/boris --context --context-dir dist/context --quiet
+  ./zig-out/bin/boris --out .boris --quiet
+  ./zig-out/bin/boris --rag --quiet
+  ./zig-out/bin/boris --context --quiet
+  ./zig-out/bin/boris --llms --quiet
   ```
 
-## Source-to-Output Specimen
-
-Here is how a single Markdown source page transforms into human site HTML and machine outputs:
-
-### 1. Markdown Source (`content/getting-started.md`)
-```markdown
 ---
-title: Getting Started
-parent: index
-status: published
----
-# Getting Started with Boris
 
-See [[guides/overview|Content Model]] for pipeline details.
-```
-
-### 2. Validated Graph Structure (Roll Phase)
-```text
-Node: getting-started (Satellite of index)
-Links: [[guides/overview]] → VALIDATED
-```
-
-### 3. Human HTML Output (`dist/getting-started.html`)
-```html
-<nav class="sidebar"><ul><li><a href="/getting-started.html" class="active">Getting Started</a></li></ul></nav>
-<main><h1>Getting Started with Boris</h1><p>See <a href="/guides/overview.html">Content Model</a> for pipeline details.</p></main>
-```
-
-### 4. Machine Export Record (`dist/rag/catalog.jsonl`)
-```json
-{"entity_id":"getting-started","title":"Getting Started","parent":"index","status":"published"}
-```
-
-## Documentation Navigation Map
-
-Explore how Boris works under the hood and how to leverage its capabilities:
+<h2 id="documentation-navigation-map">Documentation Navigation Map</h2>
 
 | Goal | Destination | What you will learn |
-|---|---|---|
+| :--- | :--- | :--- |
 | **Get Started** | [[getting-started|Getting Started]] | Step-by-step setup, first useful action, and common hesitations |
-| **Why Boris?** | [[comparison|Comparison & Rationale]] | Contrast Boris with Docusaurus, Astro, MDX, CMSs, and plain Markdown |
-| **Understand Mental Model** | [[guides/overview|Content Model & Pipeline]] | Trunk/Satellite graphs, fail-loud validation, and the 4-stage pipeline |
-| **Explore CLI & Modes** | [[guides/cli-and-modes|CLI & Output Modes]] | HTML, IR, RAG, Context, `llms.txt`, watch mode, check mode, and `--jobs` |
+| **Why Boris?** | [[comparison|Comparison & Rationale]] | Contrast Boris with JS site generators and plain Markdown |
+| **Understand Mental Model** | [[guides/overview|Content Model & Pipeline]] | Trunk/Satellite page graphs, fail-loud validation, and the 4-stage pipeline |
+| **Explore CLI & Modes** | [[guides/cli-and-modes|CLI & Output Modes]] | HTML, IR, RAG, Context, <code>llms.txt</code>, watch mode, check mode, and <code>--jobs</code> |
 | **Search & Layouts** | [[guides/search-and-ui|Search & Themes]] | Standalone search index tool, HTML marker tokens, zero-JS fallbacks |
 | **AI Agent Export** | [[guides/rag-export|RAG & AI Outputs]] | How LLMs and agents consume Boris documentation |
 | **Markdown & Components** | [[guides/apex-markdown|ApexMarkdown]] | In-process Markdown features, callout Aside components, wiki-links, and includes |
-| **Troubleshooting** | [[reference/diagnostics|Diagnostics & Error Codes]] | Diagnostic codes (`EFRONTMATTER`, `EGRAPH`, `EINC`), closed grammar rules, and fixes |
-
-## One source, several outputs
-
-Boris compiles the same frozen, validated content graph into all required formats without duplication:
-
-```bash
-./zig-out/bin/boris                          # HTML site → dist/
-./zig-out/bin/boris --out .boris             # JSON IR → .boris/
-./zig-out/bin/boris --rag                    # RAG corpus → rag/
-./zig-out/bin/boris --context                # AI Context Bundle → context/
-./zig-out/bin/boris --llms                   # llms.txt → llms.txt
-```
-
-Validation runs *before* any file is written. If a parent link or wiki-link is broken, Boris fails loudly with exit code `1`—preventing partial or corrupt publications.
+| **Troubleshooting** | [[reference/diagnostics|Diagnostics & Error Codes]] | Diagnostic codes (<code>EFRONTMATTER</code>, <code>EGRAPH</code>), closed grammar rules, and fixes |
