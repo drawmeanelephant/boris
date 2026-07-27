@@ -150,6 +150,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         try md.appendSlice(gpa, "| Source | Line | Target | Kind | Reason |\n|---|---:|---|---|---|\n");
         for (findings.items) |f| try appendFmt(&md, gpa, "| `{s}` | {d} | `{s}` | `{s}` | {s} |\n", .{ f.source, f.line, f.target, f.kind, f.reason });
     }
+    try Io.Dir.cwd().createDirPath(io, opts.out_dir);
     var out = try Io.Dir.cwd().openDir(io, opts.out_dir, .{});
     defer out.close(io);
     try writeFile(io, out, "link_audit.json", json.items);
