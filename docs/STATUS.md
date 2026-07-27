@@ -44,6 +44,7 @@ release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | Migration laboratories | **Done as bounded developer tools** — read-only review, conversion aids, relationship candidates, and theme materialization; they do not widen Boris author grammar. |
 | Rendered-site search | **Done on `afterparty`** — deterministic staged compiler publication, standalone CLI, browser UI, zero-results state, and no-JavaScript navigation fallback. |
 | Relationship review inventory | **Done on `afterparty`** — schema-v2 exact target inventory preserves provenance, duplicate keys, slug states, draft exclusion, unsupported-file rows, and deterministic JSON/Markdown reports. |
+| Relationship candidate classification | **Ready in PR #246** — exact eligible-key review output reports `inventoried`, `ambiguous`, `absent`, and `invalid`; no automatic selection or relation emission. |
 | Archive-layout evidence | **Done mechanically** — deterministic fixture, black-box audit, and link audit pass; browser viewport and keyboard review remain explicitly unverified. |
 | Twenty Twenty materialization dogfood | **Done** — bounded GPL-evidenced archaeology → reviewed ledger → static materialization → Boris build → link audit; no PHP/JS runtime behavior was adopted. |
 
@@ -74,7 +75,7 @@ zig build test-layout-hostile
 | Order | Card | State | Boundary / verification |
 |---:|---|---|---|
 | 1 | Release-state decision | **Decided — pending release context** | Preserve the erroneous v0.8.0 tag and use the new v0.8.1 identifier; do not tag or publish until release context is complete. Then run [`release-gate.sh`](../scripts/release-gate.sh). |
-| 2 | Relationship candidate classification | **Next** | Join candidates to the completed exact-key inventory as `selected`, `inventoried`, `ambiguous`, `absent`, or `invalid`; no fuzzy matching or automatic relation emission. |
+| 2 | Relationship candidate classification | **Ready in PR #246** | Exact eligible-key review evidence is complete; `selected` remains reserved for a future explicit rule. |
 | 3 | Archive browser review | **Next evidence pass** | Inspect the retained fixture at 375px, 768px, and 1440px plus keyboard traversal; record actual evidence before changing layout behavior. |
 | 4 | Archive presentation fixes | **Evidence-gated** | Small, framework-free HTML/CSS or layout fixes only after the browser review finds a reproducible issue. |
 | 5 | Migration-guide executable pass | **Later** | Verify the existing inspect → review → representative conversion → build → deploy path without implying CMS/MDX/framework parity. |
