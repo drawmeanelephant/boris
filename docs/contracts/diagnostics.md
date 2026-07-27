@@ -85,10 +85,16 @@ string first), then `line`, `column`, `code`, `message` — all ascending.
 
 ---
 
-## Error categories (v0.2 closed set)
+## Error categories (v0.3 closed set)
 
 These codes are the **stable machine-readable categories**. Implementations
 must emit exactly these strings (no underscore variants such as `E_DUP_ID`).
+
+v0.3 adds `EROUTEMISSING`, `EROUTEESCAPE`, and `EFRAGMENTMISSING` for the
+published-output link audit. Every v0.2 code keeps its exact spelling and
+meaning, so a consumer written against v0.2 stays correct; it will encounter
+codes it does not recognize only on a build that publishes a local reference the
+site cannot serve.
 
 | Code | Severity | When | Emitted by |
 |------|----------|------|------------|
@@ -111,6 +117,9 @@ must emit exactly these strings (no underscore variants such as `E_DUP_ID`).
 | `ERELATIONSELF` | error | Semantic relation targets its source page | semantic relation validation → IR |
 | `ERELATIONDUPLICATE` | error | Same semantic `(kind,target)` tuple appears more than once | semantic relation validation / parser → IR |
 | `EASSET` | error | Content-local page asset path invalid, outside the owning page’s sibling tree, missing, symlink, not a regular file, or published-path collision | `content_asset` → HTML |
+| `EROUTEMISSING` | error | Published local `href`/`src` resolves to no output this build intends to keep | `link_audit` → HTML commit |
+| `EROUTEESCAPE` | error | Published local `href`/`src` climbs above the output root and can never be served | `link_audit` → HTML commit |
+| `EFRAGMENTMISSING` | reserved | Published local reference resolves, but its `#fragment` is not an id on the target page. Not yet emitted; see [documentation-links.md](documentation-links.md) | — |
 | `EUSAGE` | error | CLI usage / flag error (unknown flag, conflicts, malformed options) | CLI (exit 2; not in build-report) |
 | `EIO` | error | I/O or system failure (missing content root, unreadable file, unexpected runtime) | pipeline / CLI (exit 3 when pure I/O) |
 

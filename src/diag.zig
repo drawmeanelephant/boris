@@ -57,6 +57,13 @@ pub const Code = enum {
     ERELATIONDUPLICATE,
     /// Content-local page asset path/missing/symlink/collision failures.
     EASSET,
+    /// Published local `href`/`src` resolves to no output this build keeps.
+    EROUTEMISSING,
+    /// Published local `href`/`src` climbs above the output root.
+    EROUTEESCAPE,
+    /// Reserved: published reference resolves but its `#fragment` is not an id
+    /// on the target page. Not yet emitted; see `link_audit.zig`.
+    EFRAGMENTMISSING,
     EUSAGE,
     EIO,
 
