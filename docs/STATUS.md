@@ -21,7 +21,7 @@ release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
   context is complete. The historical `v0.8.0` tag remains preserved as
   erroneous evidence: it resolves to a commit carrying 0.7.0 metadata and is
   not an ancestor of `afterparty`.
-- The current afterparty merge set is PRs **#228–#244**: generated-output
+- The current afterparty merge set is PRs **#228–#246**: generated-output
   hygiene, docs-maintenance hardening, default-site layout polish, rendered
   search foundation, CLI hardening, browser UI, and staged publication,
   standalone-tool CI, nested hierarchy, human-first documentation IA, and the
@@ -44,7 +44,9 @@ release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | Migration laboratories | **Done as bounded developer tools** — read-only review, conversion aids, relationship candidates, and theme materialization; they do not widen Boris author grammar. |
 | Rendered-site search | **Done on `afterparty`** — deterministic staged compiler publication, standalone CLI, browser UI, zero-results state, and no-JavaScript navigation fallback. |
 | Relationship review inventory | **Done on `afterparty`** — schema-v2 exact target inventory preserves provenance, duplicate keys, slug states, draft exclusion, unsupported-file rows, and deterministic JSON/Markdown reports. |
-| Relationship candidate classification | **Ready in PR #246** — exact eligible-key review output reports `inventoried`, `ambiguous`, `absent`, and `invalid`; no automatic selection or relation emission. |
+| Relationship candidate classification | **Done on `afterparty`** — exact eligible-key review output reports `inventoried`, `ambiguous`, `absent`, and `invalid`; no automatic selection or relation emission. |
+| Migration-guide executable pass | **Evidence complete** — the 69-page Starlight dogfood converted, compiled to HTML/IR/RAG, and produced a deployable static tree; human review remains required for 109 preserved, 1 stripped, and 79 manual-review findings plus four link-audit misses. |
+| Source-RAG ergonomics measurement | **Measured** — flat, no-bundle, bundles-only, core/docs profiles, and per-tool packs were timed and sized; no behavior change is justified by this snapshot. |
 | Archive-layout evidence | **Done mechanically** — deterministic fixture, black-box audit, and link audit pass; browser viewport and keyboard review remain explicitly unverified. |
 | Twenty Twenty materialization dogfood | **Done** — bounded GPL-evidenced archaeology → reviewed ledger → static materialization → Boris build → link audit; no PHP/JS runtime behavior was adopted. |
 
@@ -75,11 +77,11 @@ zig build test-layout-hostile
 | Order | Card | State | Boundary / verification |
 |---:|---|---|---|
 | 1 | Release-state decision | **Decided — pending release context** | Preserve the erroneous v0.8.0 tag and use the new v0.8.1 identifier; do not tag or publish until release context is complete. Then run [`release-gate.sh`](../scripts/release-gate.sh). |
-| 2 | Relationship candidate classification | **Ready in PR #246** | Exact eligible-key review evidence is complete; `selected` remains reserved for a future explicit rule. |
+| 2 | Relationship candidate classification | **Done on `afterparty`** | Exact eligible-key review evidence is complete; `selected` remains reserved for a future explicit rule. |
 | 3 | Archive browser review | **Next evidence pass** | Inspect the retained fixture at 375px, 768px, and 1440px plus keyboard traversal; record actual evidence before changing layout behavior. |
 | 4 | Archive presentation fixes | **Evidence-gated** | Small, framework-free HTML/CSS or layout fixes only after the browser review finds a reproducible issue. |
-| 5 | Migration-guide executable pass | **Later** | Verify the existing inspect → review → representative conversion → build → deploy path without implying CMS/MDX/framework parity. |
-| 6 | Source-RAG ergonomics measurement | **Later** | Measure profiles, bundle sizes, and publish modes before changing behavior. Keep product RAG distinct. |
+| 5 | Migration-guide executable pass | **Evidence complete — review findings remain** | 69-page Starlight dogfood converted and compiled successfully; review the retained MDX/frontmatter/link/asset findings and four generated-site missing routes before claiming a clean migration. |
+| 6 | Source-RAG ergonomics measurement | **Measured — no behavior change** | Default flat export: 988 source files, 16,012 KiB on disk, 1.48s. `--no-bundles`: 9,468 KiB, 1.13s. Bundles-only at 256 KiB: 7,084 KiB, 28 parts, 1.14s. Core/docs bundles-only: 1,668/3,448 KiB. Tools per-pack: 6 packs, 2,224 KiB, 0.61s. Keep product RAG distinct. |
 | 7 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
 | 8 | Build optimization | **Deferred** | Measure cold/repeated/parallel/incremental runs first; preserve current deterministic coordinator model unless data justifies change. |
 
