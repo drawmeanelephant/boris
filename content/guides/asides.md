@@ -1,72 +1,156 @@
 ---
-title: Using Asides
+title: Asides & Admonitions
 parent: guides/overview
 status: published
-tags: [components, authoring]
+tags: [guides, asides, components]
 ---
 
-# Using Asides
+# Asides & Admonitions
 
-Boris registers one authoring component: **Aside**. Asides are semantic
-callouts that stay **in document order**. They are not graph nodes and not
-separate HTML pages.
-
-(Write the tag only inside fenced code samples or as real callouts — bare
-angle-bracket tags outside fences are parsed as components.)
+Boris supports semantic callout blocks called **Asides**. Use them to draw attention to important information without breaking prose flow.
 
 ## Syntax
 
-Opening and closing tags use the form below. The close tag must start a line.
+```markdown
+<Aside kind="note">
 
-```html
-<Aside kind="tip" id="optional-anchor">
-
-Body markdown here. Close tag must start a line.
+This is a note. It appears inline with the content.
 
 </Aside>
 ```
 
-## Kinds
+The `kind` attribute determines the visual style and semantic meaning.
 
-| Kind | Typical use |
-|------|-------------|
-| `note` | Default when `kind` is omitted |
-| `tip` | Actionable advice |
-| `info` | Neutral context |
-| `warning` | Caution |
-| `danger` | Hard stop / do-not |
+## Available kinds
 
-## Authoring rules
+| Kind | Use for | Example Syntax |
+|---|---|---|
+| `note` | Background context, implementation details, helpful explanations | `&lt;Aside kind="note"&gt;...&lt;/Aside&gt;` |
+| `tip` | Performance optimizations, best practices, efficiency suggestions | `&lt;Aside kind="tip"&gt;...&lt;/Aside&gt;` |
+| `info` | General informational callouts and architectural notes | `&lt;Aside kind="info"&gt;...&lt;/Aside&gt;` |
+| `warning` | Breaking changes, compatibility issues, potential problems | `&lt;Aside kind="warning"&gt;...&lt;/Aside&gt;` |
+| `danger` | High-risk actions that could cause data loss or security issues | `&lt;Aside kind="danger"&gt;...&lt;/Aside&gt;` |
 
-<Aside kind="danger">
+## Live Examples
 
-- Attribute values must be **double-quoted**.
-- Nested asides are not allowed.
-- Only `Aside` is registered — invented tags (Figure, Broside, …) fail with
-  `ECOMPONENT`.
-- Optional `id`: `[A-Za-z0-9][A-Za-z0-9_-]*`, max 64 characters.
+Here are copy-pasteable snippets and live rendered examples for all 5 Aside kinds:
 
-</Aside>
+### 1. Note
 
-## Live examples
+```markdown
+<Aside kind="note">
 
-<Aside kind="tip" id="aside-tip-example">
-
-Prefer short, actionable tips. Asides render in place — they never become their
-own site pages.
+**Note:** Boris uses closed frontmatter. Only `title`, `parent`, `status`, `id`, and `tags` are accepted.
 
 </Aside>
+```
 
 <Aside kind="note">
 
-Notes are the default kind when you omit `kind`.
+**Note:** Boris uses closed frontmatter. Only `title`, `parent`, `status`, `id`, and `tags` are accepted.
 
 </Aside>
 
-## Export-only `:::kind`
+### 2. Tip
 
-RAG packs may contain `:::kind` fences. That form is **export packaging only**,
-not an authoring dialect. In `content/` always use the Aside tags shown above.
+```markdown
+<Aside kind="tip">
 
-Related: [[guides/overview|content model]], [[guides/apex-markdown|Apex showcase]],
-and [[reference/frontmatter|frontmatter]].
+**Tip:** Use `boris check` in CI to validate content graph relationships before rendering.
+
+</Aside>
+```
+
+<Aside kind="tip">
+
+**Tip:** Use `boris check` in CI to validate content graph relationships before rendering.
+
+</Aside>
+
+### 3. Info
+
+```markdown
+<Aside kind="info">
+
+**Info:** Bare `boris` builds HTML under `dist/`. IR mode requires `--out`, and RAG export requires `--rag`.
+
+</Aside>
+```
+
+<Aside kind="info">
+
+**Info:** Bare `boris` builds HTML under `dist/`. IR mode requires `--out`, and RAG export requires `--rag`.
+
+</Aside>
+
+### 4. Warning
+
+```markdown
+<Aside kind="warning">
+
+**Warning:** The `parent` key must reference another page's exact entity id. File paths and titles are rejected.
+
+</Aside>
+```
+
+<Aside kind="warning">
+
+**Warning:** The `parent` key must reference another page's exact entity id. File paths and titles are rejected.
+
+</Aside>
+
+### 5. Danger
+
+```markdown
+<Aside kind="danger">
+
+**Danger:** Do not edit files under `dist/` directly. Outputs are completely overwritten on build.
+
+</Aside>
+```
+
+<Aside kind="danger">
+
+**Danger:** Do not edit files under `dist/` directly. Outputs are completely overwritten on build.
+
+</Aside>
+
+## Rich Content Inside Asides
+
+Asides support full Markdown formatting inside their body, including bold text, inline code, lists, and links:
+
+```markdown
+<Aside kind="tip">
+
+### Best Practices
+
+- Keep parent links explicit and validated.
+- Use `&#91;&#91;wiki-links&#93;&#93;` for safe cross-referencing: see [[guides/overview|Overview]].
+- Store reusable fragments in `content/includes/`.
+
+</Aside>
+```
+
+<Aside kind="tip">
+
+### Best Practices
+
+- Keep parent links explicit and validated.
+- Use `&#91;&#91;wiki-links&#93;&#93;` for safe cross-referencing: see [[guides/overview|Overview]].
+- Store reusable fragments in `content/includes/`.
+
+</Aside>
+
+## Rules and constraints
+
+- The opening tag <code>&lt;Aside kind="..."&gt;</code> and closing tag <code>&lt;/Aside&gt;</code> must each be on their own line.
+- Always include blank lines between the tags and the Markdown body content.
+- Asides are **in-document** components — they stay in document order and do not produce separate pages or navigation nodes.
+- Only the `kind` attribute is accepted (`note`, `tip`, `info`, `warning`, `danger`). Unknown attributes or unrecognized tags produce a component error.
+- Asides appear in RAG and IR export packaging using `:::kind` syntax — this is an export-only representation. Do not use `:::kind` syntax in your `content/` source files.
+
+## Next steps
+
+- [[guides/building-pages|Building Pages]] — other page authoring features
+- [[guides/apex-markdown|Apex Markdown Reference]] — the full set of Markdown extensions Boris supports
+

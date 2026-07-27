@@ -1,6 +1,6 @@
 ---
 title: Apex Markdown Showcase
-parent: learn
+parent: guides/overview
 status: published
 tags: [markdown, showcase, apex]
 ---
@@ -33,42 +33,30 @@ those lines stay **backslash-inert** (`\:::`, `\[@key]`, …).
 `PRODUCT-OFF` samples are deliberate Boris non-goals (do not enable without a
 product decision). Remaining inventory: [Pending Apex samples](#pending-apex-samples).
 
-## At a glance
+## Feature Support Classification
 
-| Construct | Status | Jump |
-| :--- | :---: | :--- |
-| Emphasis / strong / strike | **Live** | [Inline](#inline-formatting) |
-| Inline code | **Live** | [Inline](#inline-formatting) |
-| Sub / superscript | **Live** | [Inline](#inline-formatting) |
-| Smart typography | **Live** | [Inline](#inline-formatting) |
-| Headings + IAL ids/classes | **Live** | [Headings](#headings-and-attributes) |
-| Nested lists | **Live** | [Lists](#lists) |
-| Task lists | **Live** | [Task lists](#task-lists) |
-| Blockquotes | **Live** | [Blockquotes](#blockquotes) |
-| Apex callouts (`> [!NOTE]`) | **Live** | [Callouts](#apex-callouts) |
-| Collapsible callouts (`-` / `+`) | **Live** | [Callouts](#apex-callouts) |
-| Python-Markdown `!!!` callouts | Product-off | [Callouts](#apex-callouts) |
-| Fenced code (no external highlighter) | **Live** | [Code](#fenced-code) |
-| Syntax highlighting (Pygments/…) | Product-off | [Code](#fenced-code) |
-| GFM tables (basic align) | **Live** | [Tables](#tables) |
-| Advanced tables (rowspan/colspan/caption) | **Live** | [Tables](#tables) |
-| Grid tables | Pending (engine flag) | [Tables](#tables) |
-| Definition lists | **Live** | [Definition lists](#definition-lists) |
-| Math | **Live** | [Math](#math) |
-| Footnotes (reference + inline) | **Live** | [Footnotes](#footnotes) |
-| Abbreviations + emoji | **Live** | [Abbreviations](#abbreviations-and-emoji) |
-| Links and images | **Live** | [Links](#links-and-images) |
-| Image IAL / size attrs | **Live** | [Links](#links-and-images) |
-| Bracketed spans + paragraph IAL | **Live** | [Spans and IAL](#bracketed-spans-and-paragraph-ial) |
-| Horizontal rules | **Live** | [Breaks](#paragraphs-breaks-and-rules) |
-| Trusted raw HTML | **Live** (sample fenced) | [Raw HTML](#raw-html-trusted-authors) |
-| Fenced divs (`:::`) | Pending (long-page quirk) | [Fenced divs](#fenced-divs) |
-| Critic Markup | **Live** | [Critic Markup](#critic-markup) |
-| Citations / bibliography | Pending / product-off | [Pending](#pending-apex-samples) |
-| Indices | Pending | [Pending](#pending-apex-samples) |
-| Apex TOC markers | Pending / product-off | [Pending](#pending-apex-samples) |
-| Apex file includes | Product-off | [Pending](#pending-apex-samples) |
-| Apex-native wiki + `#section` | Pending / product | [Pending](#pending-apex-samples) |
+Constructs are categorized into 5 explicit support tiers:
+
+| Construct | Classification | Support Tier | Jump |
+| :--- | :--- | :---: | :--- |
+| Callout `&lt;Aside&gt;` components | **Product Core** | Supported | [[guides/asides|Asides]] |
+| Wiki-links (`&#91;&#91;entity-id&#93;&#93;`) | **Product Core** | Supported | [Wiki-links](#wiki-links) |
+| Transclusion includes (`&#123;&#123;include path&#125;&#125;`) | **Product Core** | Supported | [Includes](#transclusion-includes) |
+| Closed frontmatter & Graph rules | **Product Core** | Supported | [[guides/overview|Overview]] |
+| GFM tables (pipe & alignment) | **Engine Feature** | Supported | [Tables](#tables) |
+| Advanced tables (rowspan/colspan/caption) | **Engine Feature** | Supported | [Advanced tables](#advanced-tables) |
+| Definition lists | **Engine Feature** | Supported | [Definition lists](#definition-lists) |
+| Footnotes (reference & inline) | **Engine Feature** | Supported | [Footnotes](#footnotes) |
+| Task lists | **Engine Feature** | Supported | [Task lists](#task-lists) |
+| Heading & Paragraph IAL (`{#id .class}`) | **Engine Feature** | Supported | [Headings](#headings-and-attributes) |
+| Critic Markup (`{++add++}`, `{--del--}`) | **Engine Feature** | Supported | [Critic Markup](#critic-markup) |
+| Math syntax (`$a^2 + b^2 = c^2$`) | **Theme-Dependent** | Requires Math CSS/JS | [Math](#math) |
+| Client Search Indexing | **Theme-Dependent** | Requires Search Tool | [[guides/search-and-ui|Search Guide]] |
+| Python-Markdown `!!!` callouts | **Pending / Off** | Disabled (Product Off) | [Callouts](#apex-callouts) |
+| Grid tables | **Pending / Off** | Engine Flag Off | [Pending](#pending-apex-samples) |
+| External syntax highlighters | **Pending / Off** | Disabled (Product Off) | [Code](#fenced-code) |
+| Apex-native file includes | **Pending / Off** | Disabled (Product Off) | [Pending](#pending-apex-samples) |
+| Fenced divs (`:::`) | **Internal Test Fixture** | Test Fixture U12 Only | [Fenced divs](#fenced-divs) |
 
 ## Headings and attributes
 
@@ -134,7 +122,23 @@ Use rules sparingly between major blocks; prefer headings for navigation.
 - Explicit link: [Zig language site](https://ziglang.org)
 - Autolink-style URL: https://ziglang.org
 - Inline repo link: [Boris on GitHub](https://github.com/drawmeanelephant/boris)
-- Wiki-link (Boris, pre-Apex): [[getting-started|Getting started]]
+
+### Wiki-links (`&#91;&#91;entity-id&#93;&#93;`) {#wiki-links}
+
+Boris expands wiki-links by entity ID before Apex rendering, enabling graph validation and automatic link resolution across your site.
+
+```markdown
+- Simple entity ID: [[getting-started]]
+- With custom label: [[getting-started|Install and Setup Guide]]
+- With heading fragment: [[reference/commands#exit-codes|CLI Exit Codes]]
+```
+
+**Live rendered examples:**
+- Simple entity ID: [[getting-started]]
+- With custom label: [[getting-started|Install and Setup Guide]]
+- With heading fragment: [[reference/commands#exit-codes|CLI Exit Codes]]
+
+### Images
 
 Images use ordinary Markdown. Prefer local assets under your content tree when
 you ship a real site; external URLs work for demos. IAL can set width/class:
@@ -296,6 +300,18 @@ Indented code (four spaces) is CommonMark-compatible:
 
 GFM pipe tables with column alignment:
 
+```markdown
+| Feature | Status | Alignment demo |
+| :--- | :---: | ---: |
+| ApexMarkdown Unified | Yes | left / center / right |
+| Graph validation | Yes | Trunk / Satellite |
+| Nested Asides | No | Contract forbids |
+| Site nav + TOC | Yes | Layout markers |
+| Includes + wiki-links | Yes | Before Apex; fences stay raw |
+```
+
+**Live rendered table:**
+
 | Feature | Status | Alignment demo |
 | :--- | :---: | ---: |
 | ApexMarkdown Unified | Yes | left / center / right |
@@ -310,6 +326,18 @@ Cells may contain *emphasis*, `code`, and [links](https://ziglang.org).
 
 Rowspan (`^^`), colspan (`<<`), and a `Table:` caption line:
 
+```markdown
+| Left | Mid | Right |
+| ---: | :---: | :--- |
+| A | B | C |
+| ^^ | spans up | D |
+| E | << | (colspan into empty/left) |
+
+Table: Advanced caption example
+```
+
+**Live rendered advanced table:**
+
 | Left | Mid | Right |
 | ---: | :---: | :--- |
 | A | B | C |
@@ -319,6 +347,12 @@ Rowspan (`^^`), colspan (`<<`), and a `Table:` caption line:
 Table: Advanced caption example
 
 Per-cell alignment markers in the header row:
+
+```markdown
+| :Left | Right: | :Center: |
+| --- | --- | --- |
+| L | R | C |
+```
 
 | :Left | Right: | :Center: |
 | --- | --- | --- |
@@ -377,6 +411,23 @@ Docs often need side notes without breaking the main sentence flow. Apex
 supports footnote references and hoists definitions into a footnotes section
 with back-refs.[^syntax] Keep labels unique for clarity.[^second]
 
+### Copy-pasteable Footnote Snippets
+
+Named reference footnote:
+
+```markdown
+Reference in body text.[^syntax]
+
+[^syntax]: Named footnote definitions must sit at the bottom of the page.
+```
+
+Inline footnotes (no named definition block needed):
+
+```markdown
+- Kramdown-style: Here is a footnote.^[Inline footnote body.]
+- MultiMarkdown-style: Here is another.[^Inline body for MMD.]
+```
+
 Put *named* footnote definitions at the **end of the page** (after all other
 sections). Mid-document definitions can swallow following headings.
 
@@ -430,8 +481,20 @@ These are **not** Apex features; they run (or apply) around the engine:
 | Aside components | Tokenize around Apex markdown segments |
 | Layout nav / toc markers | After body HTML is produced |
 
+### Transclusion Includes (`&#123;&#123;include path&#125;&#125;`)
+
+Include directives expand reusable Markdown fragments stored under `content/includes/` into a page body before Apex runs.
+
+```markdown
+{{include includes/shared-tip.md}}
+```
+
+**Live included fragment:**
+
+{{include includes/shared-tip.md}}
+
 Fenced examples of includes and wiki-links stay literal (correct fence
-behavior). Live forms appear on [[getting-started]] and [[guides/overview]].
+behavior). Live forms also appear on [[getting-started]] and [[guides/overview]].
 
 ## What is deliberately not product surface
 

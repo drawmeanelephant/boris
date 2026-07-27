@@ -57,9 +57,30 @@ relative to the content root:
 Files in `includes/` are intentionally not published as pages. An include may
 include another fragment, but cycles and missing files fail with a diagnostic.
 
-## Semantic relations are not dependencies
-
 `relations` describes author-intended knowledge links such as `relates_to`,
 `implements`, `depends_on`, and `supersedes`. It does not alter the navigation
 tree or make a page rebuild when the related page changes. Keep it for a
 meaningful conceptual assertion, not as another way to make a sidebar.
+
+---
+
+## Diagnostic Troubleshooting for Graph Relationships
+
+| Error Diagnostic | Cause | Resolution |
+|---|---|---|
+| `EPARENTMISSING` | `parent:` key references an entity ID that does not exist in `content/` | Create target parent page or fix `parent:` string to match existing entity ID |
+| `EPARENTCYCLE` | Parent relationships form a loop (e.g. A → B → A) | Break the cyclic link by pointing one page to a Trunk or index page |
+| `EREFERENCEMISSING` | `&#91;&#91;bar&#93;&#93;` targets an entity ID that is not published | Add target page, change status from `draft` to `published`, or update wiki-link |
+| `EINCLUDEMISSING` | `&#123;&#123;include path&#125;&#125;` points to a non-existent fragment | Check fragment filepath relative to `content/` root |
+| `EINCLUDECYCLE` | Directives form a recursive include loop | Remove circular `&#123;&#123;include fragment.md&#125;&#125;` reference |
+
+### Graph Health Audit Commands
+
+1. **Run Full Graph Check**:
+   ```bash
+   ./zig-out/bin/boris check
+   ```
+2. **Inspect Page Impact**:
+   ```bash
+   ./zig-out/bin/boris impact guides/overview
+   ```

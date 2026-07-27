@@ -13,7 +13,7 @@
 <span class="site-brand__tagline">A native compiler for documentation you can inspect, publish, and reuse.</span>
 </header>
 <section class="site-search" data-boris-search-ui aria-labelledby="site-search-label">
-<form action="/_boris/search/" method="get" role="search">
+<form action="_boris/search/" method="get" role="search" data-boris-search-form>
 <label class="site-search__label" id="site-search-label" for="site-search-input">Search documentation</label>
 <div class="site-search__controls">
 <input id="site-search-input" name="q" type="search" autocomplete="off" placeholder="Search…" spellcheck="false">
@@ -44,7 +44,16 @@
   const form = ui.querySelector("form");
   const status = ui.querySelector("[data-boris-search-status]");
   const results = ui.querySelector("[data-boris-search-results]");
-  const indexUrl = new URL("/_boris/search/search-index.json", document.baseURI);
+  // Derive site-root-relative prefix from the page-relative theme stylesheet href
+  // emitted by asset-url ("" from index.html, "../" from guides/overview.html, …).
+  const siteRootPrefix = (() => {
+    const sheet = document.querySelector('link[rel="stylesheet"][href*="assets/"]');
+    const href = sheet ? (sheet.getAttribute("href") || "") : "";
+    const marker = href.lastIndexOf("assets/");
+    return marker >= 0 ? href.slice(0, marker) : "";
+  })();
+  if (form) form.action = siteRootPrefix + "_boris/search/";
+  const indexUrl = new URL(siteRootPrefix + "_boris/search/search-index.json", document.baseURI);
   const expectedFormat = "boris-rendered-search-index";
   const expectedSchema = 1;
   let documents = [];
@@ -87,7 +96,7 @@
     setStatus(`${matches.length} result${matches.length === 1 ? "" : "s"}.`);
     matches.slice(0, 12).forEach(match => {
       const item = document.createElement("li"); item.className = "site-search__result";
-      const link = document.createElement("a"); link.href = new URL("/" + String(match.doc.path).replace(/^\/+/, "") + (match.section.fragment ? "#" + match.section.fragment : ""), document.baseURI).href;
+      const link = document.createElement("a"); link.href = new URL(siteRootPrefix + String(match.doc.path).replace(/^\/+/, "") + (match.section.fragment ? "#" + match.section.fragment : ""), document.baseURI).href;
       const title = document.createElement("span"); title.className = "site-search__title"; title.textContent = match.section.heading || match.doc.title;
       const path = document.createElement("span"); path.className = "site-search__path"; path.textContent = String(match.doc.path) + (match.section.fragment ? "#" + String(match.section.fragment) : "");
       const text = document.createElement("span"); text.className = "site-search__excerpt"; text.textContent = excerpt(match.section, terms);

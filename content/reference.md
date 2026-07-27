@@ -7,20 +7,11 @@ tags: [reference, lookup]
 
 # Reference
 
-Use this section when you already know the question and need the exact rule.
-These pages put the practical product contract next to the guide that uses it,
-so you do not need to leave the site to answer a normal authoring question.
+Exact rules, keys, flags, and specifications. Use this section when you know the question and need the precise answer.
 
-| Need | Page |
-|---|---|
-| Frontmatter keys and defaults | [[reference/frontmatter|Frontmatter Reference]] |
-| Build, check, impact, and watch commands | [[reference/commands|Command Reference]] |
-| HTML, IR, RAG, Context Bundle, and `llms.txt` | [[reference/outputs|Outputs and Artifacts]] |
-| A compiler error and what to do next | [[reference/diagnostics|Diagnostics]] |
-| Parent chains, wiki-links, and includes | [[reference/relationships|Relationships]] |
-| Move a legacy site carefully | [[guides/migration|Migration guide]] |
-
-The repository’s [`docs/contracts/`](https://github.com/drawmeanelephant/boris/tree/afterparty/docs/contracts)
-remain normative for integrations and compatibility guarantees. When this
-guide and a contract disagree, follow the contract and file a documentation
-correction.
+- [[reference/commands]] — Every CLI command, flag, and exit code
+- [[reference/frontmatter]] — Frontmatter key definitions, types, and defaults
+- [[reference/relationships]] — Parent chain rules, wiki-link rules, and include rules
+- [[reference/outputs]] — HTML, IR, RAG, Context Bundle, search index, and `llms.txt` artifact specs
+- [[reference/diagnostics]] — Error codes, diagnostics, and recovery steps
+- [[markdown-feature-usage]] — Inventory of Markdown features, usage rationale, and support tiers
