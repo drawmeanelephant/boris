@@ -51,6 +51,7 @@ Live links (entity ids, optional labels, optional section targets): see
 
 | Guide | Topic |
 |-------|--------|
+| [[guides/building-pages|Building pages]] | Authoring, builds, and rendered search |
 | [[guides/trunk-satellite|Trunk and Satellite]] | Roles, `parent`, validation rules |
 | [[guides/asides|Asides]] | Constrained callouts in document order |
 | [[guides/apex-markdown|Apex Markdown]] | Unified gallery (tables, math, footnotes, callouts, …) |
