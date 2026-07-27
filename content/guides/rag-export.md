@@ -28,6 +28,53 @@ Boris is built from the ground up for both human readers and AI agents. From a s
 
 ---
 
+## Machine Export Specimen
+
+Here is how a source page is represented across the 4 native machine export formats:
+
+### 1. Source Markdown (`content/guides/asides.md`)
+```markdown
+---
+title: Asides & Admonitions
+parent: guides/overview
+status: published
+---
+<Aside kind="tip">
+
+Use `boris check` in CI pipelines.
+
+</Aside>
+```
+
+### 2. JSON IR Record (`dist/.boris/manifest.json`)
+```json
+{
+  "entity_id": "guides/asides",
+  "title": "Asides & Admonitions",
+  "parent": "guides/overview",
+  "status": "published"
+}
+```
+
+### 3. RAG Corpus Record (`dist/rag/catalog.jsonl`)
+```json
+{"entity_id":"guides/asides","title":"Asides & Admonitions","path":"content/pages/guides/asides.md","status":"published"}
+```
+
+### 4. RAG Body Representation (`dist/rag/content/pages/guides/asides.md`)
+```markdown
+:::tip
+Use `boris check` in CI pipelines.
+:::
+```
+
+### 5. `llms.txt` Entry (`dist/llms.txt`)
+```text
+  - [Asides & Admonitions](/guides/asides/): Semantic callout blocks in Boris
+```
+
+---
+
 ## 1. JSON Intermediate Representation (IR)
 
 The JSON IR exports a typed, versioned graph snapshot of your entire documentation suite.

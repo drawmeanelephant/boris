@@ -20,10 +20,19 @@ Think of Boris as a compiler for your site's structure. Every `.md` file is a no
 
 ## Nodes in the Graph: Trunk & Satellite
 
-Every Markdown file under `content/` becomes a graph node identified by its path relative to `content/` (without the `.md` extension). Nodes take one of two roles:
+Every Markdown file under `content/` becomes a graph node identified by its path relative to `content/` (without the `.md` extension).
 
-1. **Trunk Node** — A root page with no `parent` declared. It serves as the top-level anchor of a navigation branch. A site can have multiple Trunks (e.g., `index`, `getting-started`, `reference`).
-2. **Satellite Node** — A page with a `parent` key in its frontmatter pointing to another node's ID. It becomes a child of that node in the site hierarchy.
+Trunk Node
+: A root page with no `parent` declared. Serves as a top-level anchor of a navigation section (e.g., `index`, `getting-started`, `reference`).
+
+Satellite Node
+: A page with a `parent` key declaring its direct parent's Entity ID. Nests under its parent in navigation.
+
+Entity ID
+: Canonical node identifier derived from file path relative to `content/` without extension (`content/guides/overview.md` → `guides/overview`).
+
+Graph Freeze
+: The moment during the Roll phase when frontmatter and links are validated and frozen in memory before any file is written to disk.
 
 ```markdown
 ---

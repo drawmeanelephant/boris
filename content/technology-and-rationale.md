@@ -9,6 +9,17 @@ tags: [architecture, zig, rationale]
 
 Boris makes specific, deliberate technical choices. This page explains what those choices are, why they were made, and what they mean for you as someone running the tool.
 
+## Core Architectural Pillars
+
+Deterministic Memory
+: Per-page arena allocation ensures scratch memory is freed upon page reset, keeping total RSS flat throughout long build runs.[^arena]
+
+In-Process Apex C ABI
+: Markdown rendering is invoked via direct memory pointer calls into vendored ApexMarkdown, eliminating subprocess IPC overhead.[^cabi]
+
+Fail-Loud Graph Freeze
+: Parent relationships, wiki-links, and transclusion includes are validated before any output file is written to disk.
+
 ## Why Zig?
 
 Boris is written in Zig 0.16. Zig was chosen for three properties that matter directly to a documentation compiler:
@@ -69,3 +80,6 @@ If you changed the content model for each output format separately, they would d
 | Closed frontmatter grammar | Every key has a defined meaning; rejections are diagnostic |
 | No required client JS runtime | Works everywhere; no build toolchain needed |
 | Single-source multi-output | All outputs are consistent with each other by construction |
+
+[^arena]: Per-page arena allocation ensures that memory scratch space allocated while parsing a page is freed immediately upon page reset, keeping total RSS flat throughout long build runs.
+[^cabi]: Direct C ABI binding links ApexMarkdown directly into the host Zig executable, executing markdown transformation in-memory without child processes.

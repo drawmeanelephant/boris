@@ -49,7 +49,7 @@ Unknown frontmatter keys are rejected with `EFRONTMATTER`. Boris uses a closed g
 
 </Aside>
 
-## Set a parent
+## Set a parent {#set-parent}
 
 A page with `parent` is a Satellite — it appears as a child in the navigation sidebar under its parent. The parent must be the **entity id** of another page that actually exists:
 
@@ -63,7 +63,7 @@ A page without `parent` is a Trunk — it appears as a top-level navigation item
 
 Boris validates every `parent` reference before publishing. If the referenced page does not exist, the build fails with a diagnostic error.
 
-## Link to other pages
+## Link to other pages {#wiki-links}
 
 Use wiki-links to reference other pages by entity id:
 
@@ -81,7 +81,7 @@ Wiki-links accept three forms:
 
 Boris validates all wiki-link targets before publishing. Broken wiki-links fail the build.
 
-## Include shared snippets
+## Include shared snippets {#snippet-includes}
 
 Store reusable fragments under `content/includes/`. These files are **not** published as pages — they are snippet-only:
 

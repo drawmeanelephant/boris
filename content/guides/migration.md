@@ -62,11 +62,45 @@ Start with a small representative section of your site. For each page:
 
 1. Create the file under `content/` with a Boris-compatible path.
 2. Rewrite frontmatter to use only the five Boris keys (`id`, `title`, `parent`, `status`, `tags`).
-3. Replace SSG-specific shortcodes with Boris equivalents:
-   - Callout/admonition blocks → <code>&lt;Aside kind="..."&gt;</code>
-   - Cross-page links → `<pre><code>&#91;&#91;entity-id&#124;Link text&#93;&#93;</code></pre>` wiki-links
-   - Transclusion/includes → `<pre><code>&#123;&#123;include includes/snippet.md&#125;&#125;</code></pre>`
+3. Replace SSG-specific shortcodes with Boris `&lt;Aside&gt;` callouts and [[guides/apex-markdown#wiki-links|wiki-links]].
 4. Remove MDX `import` statements and executable component usage.
+
+### Frontmatter Migration Specimen (Critic Markup)
+
+Here is a visual revision specimen showing how to clean frontmatter during migration:
+
+```markdown
+---
+title: Deploying your App
+{~~parentEntry~>parent~~}: guides/overview
+{--sidebar_position: 3--}
+{--author: Jane Doe--}
+status: published
+{++tags: [deployment, ops]++}
+---
+```
+
+Rendered revision: {--sidebar_position: 3--} is removed, {~~parentEntry~>parent~~} is renamed to `parent`, and {++tags: [deployment, ops]++} is added.
+
+### Shortcode to Aside Conversion
+
+#### Before (Proprietary SSG Shortcode)
+```markdown
+:::tip Performance
+Use caching headers on static assets.
+:::
+```
+
+#### After (Boris Native Aside Component)
+```markdown
+<Aside kind="tip">
+
+### Performance
+
+Use caching headers on static assets.
+
+</Aside>
+```
 
 ## Step 4: Validate before expanding
 

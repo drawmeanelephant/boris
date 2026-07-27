@@ -14,3 +14,4 @@ Exact rules, keys, flags, and specifications. Use this section when you know the
 - [[reference/relationships]] — Parent chain rules, wiki-link rules, and include rules
 - [[reference/outputs]] — HTML, IR, RAG, Context Bundle, search index, and `llms.txt` artifact specs
 - [[reference/diagnostics]] — Error codes, diagnostics, and recovery steps
+- [[markdown-feature-usage]] — Inventory of Markdown features, usage rationale, and support tiers

@@ -33,42 +33,30 @@ those lines stay **backslash-inert** (`\:::`, `\[@key]`, …).
 `PRODUCT-OFF` samples are deliberate Boris non-goals (do not enable without a
 product decision). Remaining inventory: [Pending Apex samples](#pending-apex-samples).
 
-## At a glance
+## Feature Support Classification
 
-| Construct | Status | Jump |
-| :--- | :---: | :--- |
-| Emphasis / strong / strike | **Live** | [Inline](#inline-formatting) |
-| Inline code | **Live** | [Inline](#inline-formatting) |
-| Sub / superscript | **Live** | [Inline](#inline-formatting) |
-| Smart typography | **Live** | [Inline](#inline-formatting) |
-| Headings + IAL ids/classes | **Live** | [Headings](#headings-and-attributes) |
-| Nested lists | **Live** | [Lists](#lists) |
-| Task lists | **Live** | [Task lists](#task-lists) |
-| Blockquotes | **Live** | [Blockquotes](#blockquotes) |
-| Apex callouts (`> [!NOTE]`) | **Live** | [Callouts](#apex-callouts) |
-| Collapsible callouts (`-` / `+`) | **Live** | [Callouts](#apex-callouts) |
-| Python-Markdown `!!!` callouts | Product-off | [Callouts](#apex-callouts) |
-| Fenced code (no external highlighter) | **Live** | [Code](#fenced-code) |
-| Syntax highlighting (Pygments/…) | Product-off | [Code](#fenced-code) |
-| GFM tables (basic align) | **Live** | [Tables](#tables) |
-| Advanced tables (rowspan/colspan/caption) | **Live** | [Tables](#tables) |
-| Grid tables | Pending (engine flag) | [Tables](#tables) |
-| Definition lists | **Live** | [Definition lists](#definition-lists) |
-| Math | **Live** | [Math](#math) |
-| Footnotes (reference + inline) | **Live** | [Footnotes](#footnotes) |
-| Abbreviations + emoji | **Live** | [Abbreviations](#abbreviations-and-emoji) |
-| Links and images | **Live** | [Links](#links-and-images) |
-| Image IAL / size attrs | **Live** | [Links](#links-and-images) |
-| Bracketed spans + paragraph IAL | **Live** | [Spans and IAL](#bracketed-spans-and-paragraph-ial) |
-| Horizontal rules | **Live** | [Breaks](#paragraphs-breaks-and-rules) |
-| Trusted raw HTML | **Live** (sample fenced) | [Raw HTML](#raw-html-trusted-authors) |
-| Fenced divs (`:::`) | Pending (long-page quirk) | [Fenced divs](#fenced-divs) |
-| Critic Markup | **Live** | [Critic Markup](#critic-markup) |
-| Citations / bibliography | Pending / product-off | [Pending](#pending-apex-samples) |
-| Indices | Pending | [Pending](#pending-apex-samples) |
-| Apex TOC markers | Pending / product-off | [Pending](#pending-apex-samples) |
-| Apex file includes | Product-off | [Pending](#pending-apex-samples) |
-| Apex-native wiki + `#section` | Pending / product | [Pending](#pending-apex-samples) |
+Constructs are categorized into 5 explicit support tiers:
+
+| Construct | Classification | Support Tier | Jump |
+| :--- | :--- | :---: | :--- |
+| Callout `&lt;Aside&gt;` components | **Product Core** | Supported | [Asides](file:///Users/tbuddy/dev/drawmeanelephant/boris/worktrees/uncle-gravity/content/guides/asides.md) |
+| Wiki-links (`&#91;&#91;entity-id&#93;&#93;`) | **Product Core** | Supported | [Wiki-links](#wiki-links) |
+| Transclusion includes (`&#123;&#123;include path&#125;&#125;`) | **Product Core** | Supported | [Includes](#transclusion-includes) |
+| Closed frontmatter & Graph rules | **Product Core** | Supported | [Overview](file:///Users/tbuddy/dev/drawmeanelephant/boris/worktrees/uncle-gravity/content/guides/overview.md) |
+| GFM tables (pipe & alignment) | **Engine Feature** | Supported | [Tables](#tables) |
+| Advanced tables (rowspan/colspan/caption) | **Engine Feature** | Supported | [Advanced tables](#advanced-tables) |
+| Definition lists | **Engine Feature** | Supported | [Definition lists](#definition-lists) |
+| Footnotes (reference & inline) | **Engine Feature** | Supported | [Footnotes](#footnotes) |
+| Task lists | **Engine Feature** | Supported | [Task lists](#task-lists) |
+| Heading & Paragraph IAL (`{#id .class}`) | **Engine Feature** | Supported | [Headings](#headings-and-attributes) |
+| Critic Markup (`{++add++}`, `{--del--}`) | **Engine Feature** | Supported | [Critic Markup](#critic-markup) |
+| Math syntax (`$a^2 + b^2 = c^2$`) | **Theme-Dependent** | Requires Math CSS/JS | [Math](#math) |
+| Client Search Indexing | **Theme-Dependent** | Requires Search Tool | [Search Guide](file:///Users/tbuddy/dev/drawmeanelephant/boris/worktrees/uncle-gravity/content/guides/search-and-ui.md) |
+| Python-Markdown `!!!` callouts | **Pending / Off** | Disabled (Product Off) | [Callouts](#apex-callouts) |
+| Grid tables | **Pending / Off** | Engine Flag Off | [Pending](#pending-apex-samples) |
+| External syntax highlighters | **Pending / Off** | Disabled (Product Off) | [Code](#fenced-code) |
+| Apex-native file includes | **Pending / Off** | Disabled (Product Off) | [Pending](#pending-apex-samples) |
+| Fenced divs (`:::`) | **Internal Test Fixture** | Test Fixture U12 Only | [Fenced divs](#fenced-divs) |
 
 ## Headings and attributes
 
@@ -135,7 +123,7 @@ Use rules sparingly between major blocks; prefer headings for navigation.
 - Autolink-style URL: https://ziglang.org
 - Inline repo link: [Boris on GitHub](https://github.com/drawmeanelephant/boris)
 
-### Wiki-links (`&#91;&#91;entity-id&#93;&#93;`)
+### Wiki-links (`&#91;&#91;entity-id&#93;&#93;`) {#wiki-links}
 
 Boris expands wiki-links by entity ID before Apex rendering, enabling graph validation and automatic link resolution across your site.
 

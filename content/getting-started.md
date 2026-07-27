@@ -14,6 +14,8 @@ Boris is a zero-dependency static documentation compiler written in Zig. You wri
 
 </Aside>
 
+{{include includes/shared-tip.md}}
+
 ## Prerequisites & Building
 
 Building Boris requires two standard tools:
@@ -34,6 +36,14 @@ The compiled binary is written directly to `./zig-out/bin/boris`.
 ## 5-Minute Concrete Value Path (Layer 2)
 
 Complete your first useful action in under 5 minutes without reading any compiler source code:
+
+### Setup Checklist
+
+- [x] **Compile Boris binary**: `zig build` produces `./zig-out/bin/boris`.
+- [x] **Render HTML site**: `./zig-out/bin/boris --theme examples/prototype-corporate --html-dir dist`.
+- [x] **Build search index**: `zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=./dist/_boris/search`.
+- [x] **Generate machine exports**: Export RAG, IR, Context, and `llms.txt`.
+- [ ] **Verify in browser**: Open `dist/index.html` to inspect rendered pages and search.
 
 ### Step 1: Render the Corporate HTML Site
 ```bash

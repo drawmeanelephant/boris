@@ -11,9 +11,11 @@ Boris organizes every page into one of two roles based on whether it has a `pare
 
 ## The two roles
 
-**Trunk** — A page without a `parent`. It is a root node in the content graph. A site can have multiple Trunks. Each Trunk becomes a top-level item in the navigation sidebar.
+Trunk Role
+: A root page without a `parent` key. Forms the top-level anchor of a site section. A site can have multiple Trunks (e.g. `index`, `getting-started`, `reference`).
 
-**Satellite** — A page with a `parent` key. It is a child of its parent in the content graph. Satellites appear nested under their parent in navigation.
+Satellite Role
+: A page with a `parent` key. Nests directly under its parent in navigation and breadcrumbs.
 
 ## Declaring a parent
 
