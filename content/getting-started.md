@@ -6,11 +6,11 @@ tags: [setup, quickstart, cli]
 
 # Getting Started with Boris
 
-Boris is a zero-dependency static documentation compiler written in Zig. You write clean Markdown files with explicit page relationships (`parent` and wiki-links), and Boris validates your documentation graph before emitting static HTML, a client-side search index, JSON IR, RAG packages, AI Context Bundles, and `llms.txt`—all from a single fast, native binary with no JavaScript runtime or Node.js toolchain required.
+Boris is a zero-dependency static documentation compiler written in Zig. You write clean Markdown files with explicit page relationships (`parent` and wiki-links), and Boris validates your documentation graph before emitting static HTML. Optional machine packages (JSON IR, RAG, AI Context Bundles, and `llms.txt`) use the same native binary in separate invocations. Client-side search indexing is a separate standalone Zig tool that reads the rendered HTML.
 
 <Aside kind="info">
 
-**Layer 1 Summary:** Boris takes Markdown files in `content/`, validates parent references and links, and writes static HTML and AI machine packages to disk. No Node.js, no bundlers, no runtime dependencies.
+**Layer 1 Summary:** Boris takes Markdown files in `content/`, validates parent references and supported internal links, and writes static HTML (or an optional machine package) to disk. No Node.js, no bundlers, no runtime dependencies for the core compiler.
 
 </Aside>
 
@@ -44,7 +44,7 @@ Complete your first useful action in under 5 minutes:
 *Outcome:* Boris scans `content/`, parses frontmatter, validates parent graph hierarchy, and emits responsive HTML files to `dist/` with graph-backed sidebar navigation.
 
 ### Step 2: Open in Browser
-Open `dist/index.html` in your web browser. You will see a complete static documentation site generated directly from your content graph.
+Open `dist/index.html` in your web browser for a first look at the generated site. Navigation, breadcrumbs, and reading work over `file://`. Client-side search needs a real HTTP origin at the site root (or a configured URL prefix) plus the search index from Branch A below — see [[guides/search-and-ui|Search & Browser UI]].
 
 ---
 
@@ -89,7 +89,7 @@ Every mistaken assumption when discovering a new tool is documentation ore. Here
 
 ### Gotcha 2: Search indexing is decoupled from HTML rendering
 **Hesitation:** Running `./zig-out/bin/boris` and opening `dist/index.html`, then wondering why search returns no results.  
-**Reality:** Boris compiles HTML deterministically without bundling a JavaScript engine. To enable search, run `zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=./dist/_boris/search` after HTML rendering.
+**Reality:** The default HTML compiler does not emit the search index. After HTML rendering, run `zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=./dist/_boris/search`. Search also needs an HTTP origin that can fetch the index relative to the rendered site root; plain `file://` browsing is fine for reading pages but not for the search UI.
 
 </Aside>
 

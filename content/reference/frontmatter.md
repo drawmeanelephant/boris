@@ -40,7 +40,7 @@ parent: guides/overview
 
 The entity id of the parent page. This determines where the page appears in the navigation hierarchy and breadcrumb trail.
 
-- The `parent` must resolve to an existing page. Broken parent references fail the build with `EGRAPH`.
+- The `parent` must resolve to an existing page. Broken parent references fail the build with `EPARENTMISSING`.
 - Setting `parent` makes this page a **Satellite**. Omitting it makes it a **Trunk**.
 - There is no default parent — Trunks have no parent.
 - The value is an entity id, not a file path or a display title.
@@ -102,8 +102,8 @@ Boris enforces strict, closed frontmatter syntax. Any key outside `title`, `pare
 | `EFRONTMATTER: unknown key 'parent_entry'` | Used legacy `parent_entry` or `parentEntry` key name | Rename the key to `parent:` (Boris only accepts `parent`) |
 | `EFRONTMATTER: missing required key 'title'` | Page header omitted the required `title` key | Add a string `title: "Page Title"` to the frontmatter block |
 | `EFRONTMATTER: invalid status value` | Value of `status:` is not `published` or `draft` | Set `status: published` or `status: draft` |
-| `EGRAPH: parent 'guides/intro' not found` | `parent:` ID does not match any published entity | Verify target page exists and has `status: published` |
-| `EGRAPH: duplicate entity id 'getting-started'` | Two Markdown files derive or set the same ID | Use an explicit `id:` override or rename one of the files |
+| `EPARENTMISSING: parent 'guides/intro' not found` | `parent:` ID does not match any published entity | Verify target page exists and has `status: published` |
+| `EDUPLICATEID: duplicate entity id 'getting-started'` | Two Markdown files derive or set the same ID | Use an explicit `id:` override or rename one of the files |
 
 ### Step-by-Step Frontmatter Audit
 

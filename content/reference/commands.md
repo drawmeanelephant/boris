@@ -36,7 +36,7 @@ Each mode is exclusive — one mode per invocation.
 |---|---|---|
 | `--html-dir DIR` | `dist` | Output directory for the HTML site |
 | `--theme ROOT` | — | Theme root directory (shorthand for `--html-layout ROOT/layouts/main.html`) |
-| `--html-layout PATH` | `layouts/main.html` | Path to the HTML layout template |
+| `--html-layout PATH` | `themes/boris/layouts/main.html` | Path to the HTML layout template |
 | `--incremental` | off | Only re-render pages that have changed (content-addressed) |
 | `--watch` | off | Build, then watch and rebuild on file changes (implies incremental) |
 | `--jobs N`, `-j N` | `1` | Number of parallel page rendering workers (max 64) |
@@ -178,7 +178,7 @@ Boris uses deterministic exit codes to signal success, content validation errors
 | Code | Meaning | Diagnostic Trigger |
 |---:|---|---|
 | `0` | Success | Build or command completed cleanly |
-| `1` | Content/graph error | `EFRONTMATTER`, `EGRAPH`, missing parent ID, dead wiki-link, or `check` failure |
+| `1` | Content/graph error | `EFRONTMATTER`, `EPARENTMISSING`, `EREFERENCEMISSING`, include failures, or `check` failure |
 | `2` | Usage / flag conflict | Combining mutually exclusive flags, invalid target syntax, or missing layout |
 | `3` | I/O / System error | Input directory missing, permission denied writing output, or corrupted disk |
 
@@ -188,8 +188,8 @@ Boris uses deterministic exit codes to signal success, content validation errors
 |---|---|---|
 | `Exit 2: mode flag conflict` | Passed `--rag` with `--no-rag` or `--out` with HTML flags | Separate IR, HTML, RAG, and Context invocations into distinct commands |
 | `Exit 2: --target exclusive with --html-dir` | Passed both single-target and multi-target output flags | Omit `--html-dir` when using `--target NAME=DIR` |
-| `Exit 1: EGRAPH parent 'foo' not found` | A satellite page references a non-existent parent entity ID | Create the parent page or fix the `parent:` frontmatter key |
-| `Exit 1: dead wiki-link &#91;&#91;bar&#93;&#93;` | A page contains a wiki-link to an entity ID that does not exist | Verify target page entity ID or status in `content/` |
+| `Exit 1: EPARENTMISSING` | A satellite page references a non-existent parent entity ID | Create the parent page or fix the `parent:` frontmatter key |
+| `Exit 1: EREFERENCEMISSING` | A page contains a wiki-link to an entity ID that does not exist | Verify target page entity ID or status in `content/` |
 | `Exit 3: missing content directory` | Ran `boris` from a folder without a `content/` directory | Use `--input PATH` to point to the content root directory |
 
 ### Diagnostic Resolution Steps

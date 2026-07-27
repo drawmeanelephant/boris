@@ -11,7 +11,7 @@ Boris is built from the ground up for both human readers and AI agents. From a s
 
 <Aside kind="info">
 
-**Layer 1 & 3 Summary:** Machine exports share the exact same frozen, validated Trunk/Satellite graph as HTML output. A site that passes `boris check` generates 100% consistent JSON IR, RAG corpora, Context Bundles, and `llms.txt`.
+**Layer 1 & 3 Summary:** Machine exports share the same frozen, validated Trunk/Satellite graph model as HTML output. HTML, IR, RAG, Context, and `llms.txt` are separate invocations — generate them from the same source revision when you need aligned editions.
 
 </Aside>
 

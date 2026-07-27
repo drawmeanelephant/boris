@@ -19,13 +19,13 @@ Boris compiles your Markdown graph into a polished static site for human readers
     </div>
   </div>
   <div class="specimen-card">
-    <div class="specimen-card__header">Repository Evidence</div>
+    <div class="specimen-card__header">Rendered Site Evidence</div>
     <div class="specimen-card__body">
-      <p>Captured from actual local HTTP server builds:</p>
+      <p>Screenshots captured from a local HTTP server and published as content-local assets:</p>
       <ul>
-        <li><a href="../docs/evidence/pass3/desktop.png">Desktop Viewport (1280×800)</a></li>
-        <li><a href="../docs/evidence/pass3/mobile.png">Mobile Viewport (375×812)</a></li>
-        <li><a href="../docs/evidence/pass3/search_open.png">Search Modal Open</a></li>
+        <li><a href="index.assets/desktop.png">Desktop Viewport (1280×800)</a></li>
+        <li><a href="index.assets/mobile.png">Mobile Viewport (375×812)</a></li>
+        <li><a href="index.assets/search_open.png">Search Modal Open</a></li>
       </ul>
     </div>
   </div>
@@ -69,12 +69,12 @@ verified before writing files to disk.
     </div>
   </div>
   <div class="specimen-card">
-    <div class="specimen-card__header">2. Rendered Page Output (dist/guides/overview/index.html)</div>
+    <div class="specimen-card__header">2. Rendered Page Output (dist/guides/overview.html)</div>
     <div class="specimen-card__body">
 
 <p class="eyebrow">Home / User Guides / Content Model & Pipeline</p>
 <h3 style="margin-top:0.25rem;">Content Model & Pipeline</h3>
-<p>Boris compiles Markdown through four phases: <strong>Load → Roll → Ignite → Reset</strong>. See <a href="../guides/trunk-satellite/index.html">Trunk & Satellite</a> for hierarchy.</p>
+<p>Boris compiles Markdown through four phases: <strong>Load → Roll → Ignite → Reset</strong>. See <a href="trunk-satellite.html">Trunk & Satellite</a> for hierarchy.</p>
 
 <aside class="admonition admonition--info" aria-label="Info" style="margin: 0.75rem 0;">
   <p><strong>Graph Validation:</strong> Parent chains and wiki-links are verified before writing files to disk.</p>
@@ -142,11 +142,11 @@ Boris’s human and machine editions originate from the same validated documenta
   <div class="edition-card">
     <span class="edition-card__tag">Context Bundle</span>
     <h3>AI Context Bundle Directory</h3>
-    <p>Directory containing aggregated <code>bundle.md</code>, graph, manifest, and page artifacts.</p>
-    <code>./zig-out/bin/boris --context</code>
+    <p>Directory containing aggregated <code>bundle.md</code>, graph, manifest, and page artifacts. Default destination is <code>context/</code>; use <code>--context-dir</code> to place it under <code>dist/</code>.</p>
+    <code>./zig-out/bin/boris --context --context-dir dist/context</code>
     <pre style="margin-top:0.5rem;font-size:0.75rem;"><code>dist/context/
 ├── bundle.md (aggregated text)
-├── graph.json & manifest.json
+├── graph.json &amp; manifest.json
 └── pages/ (page artifacts)</code></pre>
   </div>
 
@@ -201,7 +201,7 @@ Boris directly provides the documentation-site capabilities shown below:
 Boris validates parent relationships and supported internal wiki-links during the Roll phase before any output file is written to disk. If a parent reference or wiki-link fails to resolve, Boris halts with exit code 1:
 
 ```text
-Diagnostic: EGRAPH - Unresolved wiki-link target 'guides/non-existent' in 'index.md'
+error: EREFERENCEMISSING: content/index.md:12:1: unresolved wiki-link target "guides/non-existent"
 Build status: FAILED (Exit code 1) — No output written to dist/
 ```
 
@@ -251,4 +251,4 @@ Open <code>dist/index.html</code> in your browser to view your site.
 | **Search & Layouts** | [[guides/search-and-ui|Search & Themes]] | Standalone search index tool, HTML marker tokens, zero-JS fallbacks |
 | **AI Agent Export** | [[guides/rag-export|RAG & AI Outputs]] | How LLMs and agents consume Boris documentation |
 | **Markdown & Components** | [[guides/apex-markdown|ApexMarkdown]] | In-process Markdown features, callout Aside components, wiki-links, and includes |
-| **Troubleshooting** | [[reference/diagnostics|Diagnostics & Error Codes]] | Diagnostic codes (<code>EFRONTMATTER</code>, <code>EGRAPH</code>), closed grammar rules, and fixes |
+| **Troubleshooting** | [[reference/diagnostics|Diagnostics & Error Codes]] | Diagnostic codes (<code>EFRONTMATTER</code>, <code>EPARENTMISSING</code>, <code>EREFERENCEMISSING</code>), closed grammar rules, and fixes |

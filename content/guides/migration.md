@@ -21,12 +21,12 @@ Use the migration lab to analyze your existing content tree:
 
 ```bash
 zig build --build-file tools/migration-lab/build.zig run -- \
-  --source /path/to/my-old-site/content \
-  --mode frontmatter-review \
-  --report frontmatter-review.md
+  --mode=frontmatter-review \
+  --content=/path/to/my-old-site/content \
+  --out=./.out-fmreview
 ```
 
-This reads all Markdown files under `--source` and produces a report of:
+This reads all Markdown files under `--content` and produces a report of:
 - Frontmatter keys found and their frequency
 - Unknown keys (those that Boris would reject)
 - `parent` equivalents from common SSG formats
@@ -47,14 +47,16 @@ A common pattern:
 
 For sites with complex sidebars, run the relationship candidate extractor:
 
+For framework-specific trees, pick a named mode and its required input path — for example Astro (`--mode=astro --root=...`), Obsidian (`--mode=obsidian --vault=...`), or Starlight (`--mode=starlight --root=...`). There is no generic `--source` workflow.
+
 ```bash
 zig build --build-file tools/migration-lab/build.zig run -- \
-  --source /path/to/my-old-site \
-  --mode relationship-review \
-  --report relationship-candidates.md
+  --mode=astro \
+  --root=/path/to/my-old-site \
+  --out=./.out-astro-review
 ```
 
-This identifies candidate `parent` relationships based on directory structure and common patterns. The report is for **human review** — Boris does not auto-select relationships.
+Mode reports identify candidate structure, frontmatter, and conversion issues for **human review** — Boris does not auto-select relationships or silently rewrite your site.
 
 ## Step 3: Convert pages incrementally
 
@@ -108,7 +110,7 @@ Use caching headers on static assets.
 ./zig-out/bin/boris check
 ```
 
-Validate the graph before adding more pages. Fix any `EGRAPH` or `EFRONTMATTER` errors before continuing.
+Validate the graph before adding more pages. Fix any `EPARENTMISSING`, `EREFERENCEMISSING`, or `EFRONTMATTER` errors before continuing.
 
 ## Step 5: Expand and iterate
 

@@ -92,10 +92,19 @@ To enable full-text search in your theme layout:
 ```
 
 ### Search Script Features:
-- Fetches `/_boris/search/search-index.json` on initial focus/keystroke.
+- Fetches `_boris/search/search-index.json` relative to the rendered site root (derived from the theme stylesheet's page-relative `assets/` href in the managed layouts).
 - Scores matches weighted by heading match > prose match > code match.
 - Keyboard navigation: `/` focuses input; `Escape` clears search and closes result modal.
-- Zero JavaScript Fallback: If JavaScript is disabled, navigation menus and breadcrumbs remain 100% functional.
+- Zero JavaScript Fallback: If JavaScript is disabled, navigation menus and breadcrumbs remain fully functional.
+
+### Hosting assumptions
+
+Search is a same-origin browser feature:
+
+- Serve the rendered root over HTTP(S). Opening nested pages via `file://` can still show content, but the search UI needs a real origin that can `fetch` the index.
+- Deploy the whole rendered tree together so `_boris/search/search-index.json` sits beside the HTML pages.
+- Managed and prototype layouts resolve the index and result links relative to the site root using the theme asset prefix, so URL-prefix deploys and nested `{entity_id}.html` paths work when the full tree is published. Root-absolute `/_boris/...` URLs are not required.
+- Rebuild the index after HTML changes; stale HTML without a matching index yields "Search index unavailable."
 
 ---
 

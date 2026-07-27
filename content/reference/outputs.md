@@ -159,7 +159,7 @@ context/
       overview.md
 ```
 
-The `bundle.md` file concatenates all pages in graph order (Trunks first, then their Satellites depth-first), separated by horizontal rules and page metadata headers. It is designed to be pasted or uploaded as a single context document.
+The `bundle.md` file concatenates all pages in **canonical entity-id order**, separated by horizontal rules and page metadata headers. It is designed to be pasted or uploaded as a single context document.
 
 ---
 

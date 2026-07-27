@@ -55,7 +55,7 @@ Output modes cannot be combined in a single invocation. Attempting to pass confl
 
 ### Standard Exit Codes:
 - `0` — Success. All pages parsed, validated, and rendered cleanly.
-- `1` — Content or Graph Error (`EFRONTMATTER`, `EGRAPH`, `EINC`). Validation failed; no files written.
+- `1` — Content or Graph Error (`EFRONTMATTER`, `EPARENTMISSING`, `EREFERENCEMISSING`, `EINCLUDEMISSING`, …). Validation failed; no files written.
 - `2` — CLI Usage Error. Invalid flag combination or bad argument.
 - `3` — I/O or System Error. Cannot read `content/` directory or write output.
 

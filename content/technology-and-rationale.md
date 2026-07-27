@@ -11,20 +11,20 @@ Boris makes specific, deliberate technical choices. This page explains what thos
 
 ## Core Architectural Pillars
 
-Deterministic Memory
-: Per-page arena allocation ensures scratch memory is freed upon page reset, keeping total RSS flat throughout long build runs.[^arena]
+Deterministic Per-Page Scratch
+: Per-page arena allocation frees rendering scratch after each page publish. Durable metadata stays in a long-lived `PageDb` for the run. Process RSS is not claimed to be flat.[^arena]
 
 In-Process Apex C ABI
 : Markdown rendering is invoked via direct memory pointer calls into vendored ApexMarkdown, eliminating subprocess IPC overhead.[^cabi]
 
 Fail-Loud Graph Freeze
-: Parent relationships, wiki-links, and transclusion includes are validated before any output file is written to disk.
+: Parent relationships, supported wiki-links, and transclusion includes are validated before any output file is written to disk.
 
 ## Why Zig?
 
 Boris is written in Zig 0.16. Zig was chosen for three properties that matter directly to a documentation compiler:
 
-**Deterministic memory.** Zig has no garbage collector and no hidden allocations. Boris controls its own memory precisely — per-page arena allocation for rendering scratch, explicit free at page reset, and no retained heap state between pages. This means memory usage stays flat even when building large sites.
+**Deterministic per-page scratch.** Zig has no garbage collector and no hidden allocations. Boris controls rendering scratch with a per-page arena that is reset after each page is published. Narrow durable metadata (title, parent, paths) is promoted into a long-lived `PageDb` for the rest of the run. That is deliberate retained state — not "no heap between pages" — and Boris does not claim flat process RSS across large builds.
 
 **Single static binary.** `zig build` produces one self-contained binary with no runtime dependencies. Users do not need to manage a Node package tree, a Python virtualenv, or a Ruby gem set. The binary runs on macOS and Linux without installation.
 
@@ -44,11 +44,11 @@ Most static site generators treat content as a flat file tree — they render ea
 
 Each page has an optional `parent` key in its frontmatter. Boris builds the full Trunk/Satellite hierarchy from these declarations, validates that every parent reference resolves to a real page, checks for cycles, and verifies that wiki-links and includes point at pages that exist. This validation runs **before any output file is written**.
 
-The practical consequence: you cannot accidentally publish a site with a broken page reference. Boris exits with code `1` and a human-readable diagnostic pointing at the specific page and the specific problem. No partial output is committed.
+The practical consequence: you cannot accidentally publish a site with a broken parent chain or supported internal wiki-link/include. External URLs and arbitrary raw HTML links are not universally validated. When a validated relationship fails, Boris exits with code `1` and a human-readable diagnostic pointing at the specific page and problem. No partial output is committed.
 
 <Aside kind="info">
 
-This also means the `{{nav}}` sidebar in your HTML layout is produced from the **same frozen, validated graph** used for IR and RAG — not a best-effort directory scan done separately for HTML. All outputs are consistent by construction.
+This also means the `{{nav}}` sidebar in your HTML layout is produced from the **same frozen, validated graph** used for IR and RAG — not a best-effort directory scan done separately for HTML. HTML, IR, RAG, Context, and `llms.txt` are separate invocations; they stay aligned when generated from the same source revision.
 
 </Aside>
 
@@ -66,20 +66,20 @@ The one optional JavaScript feature is the search UI — a small inline script t
 
 ## Why a single-source multi-output model?
 
-Generating HTML, JSON IR, RAG, Context Bundle, and `llms.txt` from the same validated graph means these outputs are **always consistent**. The HTML navigation matches the IR graph. The RAG corpus contains the same pages as the HTML site. The `llms.txt` file reflects the current published state.
+Generating HTML, JSON IR, RAG, Context Bundle, and `llms.txt` from the same validated graph keeps those editions aligned **when they are produced from the same source revision**. Each mode is a separate invocation: the HTML navigation matches the IR graph from that revision, the RAG corpus lists the same published pages, and `llms.txt` reflects that published state.
 
-If you changed the content model for each output format separately, they would drift. Boris solves this by running graph validation once and then routing the frozen, validated graph to whichever output format you requested.
+If each output format used a different content model, they would drift. Boris solves the structural half by validating the graph once per invocation and routing the frozen graph to the requested emitter. Cross-mode alignment is an operational choice (same source revision), not a single multi-writer transaction.
 
 ## Summary
 
 | Choice | Reason |
 |---|---|
-| Zig | Deterministic memory, single binary, direct C interop |
+| Zig | Explicit scratch control, single binary, direct C interop |
 | ApexMarkdown in-process | No subprocess overhead; consistent across builds |
 | Validated content graph | Breaks loudly before publishing, not silently after |
 | Closed frontmatter grammar | Every key has a defined meaning; rejections are diagnostic |
 | No required client JS runtime | Works everywhere; no build toolchain needed |
-| Single-source multi-output | All outputs are consistent with each other by construction |
+| Single-source multi-output | Same graph model per mode; align by generating from one revision |
 
-[^arena]: Per-page arena allocation ensures that memory scratch space allocated while parsing a page is freed immediately upon page reset, keeping total RSS flat throughout long build runs.
+[^arena]: Per-page arena allocation frees rendering scratch after each page publish. Durable `PageDb` metadata is retained for the run. Process RSS is not claimed.
 [^cabi]: Direct C ABI binding links ApexMarkdown directly into the host Zig executable, executing markdown transformation in-memory without child processes.

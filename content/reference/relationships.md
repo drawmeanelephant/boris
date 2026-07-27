@@ -68,11 +68,11 @@ meaningful conceptual assertion, not as another way to make a sidebar.
 
 | Error Diagnostic | Cause | Resolution |
 |---|---|---|
-| `EGRAPH: parent 'foo' not found` | `parent:` key references an entity ID that does not exist in `content/` | Create target parent page or fix `parent:` string to match existing entity ID |
-| `EGRAPH: parent cycle detected` | Parent relationships form a loop (e.g. A → B → A) | Break the cyclic link by pointing one page to a Trunk or index page |
-| `EGRAPH: dead wiki-link &#91;&#91;bar&#93;&#93;` | `&#91;&#91;bar&#93;&#93;` targets an entity ID that is not published | Add target page, change status from `draft` to `published`, or update wiki-link |
-| `EINCLUDE: file not found 'includes/missing.md'` | `&#123;&#123;include path&#125;&#125;` points to a non-existent fragment | Check fragment filepath relative to `content/` root |
-| `EINCLUDE: include cycle detected` | Directives form a recursive include loop | Remove circular `&#123;&#123;include fragment.md&#125;&#125;` reference |
+| `EPARENTMISSING` | `parent:` key references an entity ID that does not exist in `content/` | Create target parent page or fix `parent:` string to match existing entity ID |
+| `EPARENTCYCLE` | Parent relationships form a loop (e.g. A → B → A) | Break the cyclic link by pointing one page to a Trunk or index page |
+| `EREFERENCEMISSING` | `&#91;&#91;bar&#93;&#93;` targets an entity ID that is not published | Add target page, change status from `draft` to `published`, or update wiki-link |
+| `EINCLUDEMISSING` | `&#123;&#123;include path&#125;&#125;` points to a non-existent fragment | Check fragment filepath relative to `content/` root |
+| `EINCLUDECYCLE` | Directives form a recursive include loop | Remove circular `&#123;&#123;include fragment.md&#125;&#125;` reference |
 
 ### Graph Health Audit Commands
 

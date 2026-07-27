@@ -38,13 +38,13 @@ The entity id is the file path relative to `content/`, without the `.md` extensi
 
 Boris enforces these rules before publishing:
 
-1. **Every `parent` must resolve.** The parent's entity id must be a page that exists. If it does not exist, Boris exits with a `EGRAPH` diagnostic.
+1. **Every `parent` must resolve.** The parent's entity id must be a page that exists. If it does not exist, Boris exits with an `EPARENTMISSING` diagnostic.
 
 2. **No cycles.** A page cannot be its own ancestor. Boris checks for cycles and rejects them.
 
 3. **Satellites must have exactly one parent.** A page cannot declare multiple parents.
 
-4. **Includes and wiki-links must also resolve.** Broken references anywhere in the content tree fail the build.
+4. **Includes and wiki-links must also resolve.** Broken supported internal references (wiki-links and `{{include}}` targets) fail the build. External URLs and arbitrary raw HTML links are outside this guarantee.
 
 <Aside kind="tip">
 

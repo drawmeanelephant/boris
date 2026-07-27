@@ -7,12 +7,12 @@ tags: [guides, architecture, pipeline]
 
 # Plain English Mental Model & Pipeline
 
-Boris treats your documentation as a **validated directed graph**, not an arbitrary pile of Markdown files. Understanding this mental model clarifies how Boris operates and guarantees zero broken links in production.
+Boris treats your documentation as a **validated directed graph**, not an arbitrary pile of Markdown files. Understanding this mental model clarifies how Boris operates and why parent relationships and supported internal references fail loudly before publish.
 
 <Aside kind="info">
 
 **The Mental Model in Plain English:**  
-Think of Boris as a compiler for your site's structure. Every `.md` file is a node in a tree. You explicitly state each page's parent node using `parent: <id>`. Before generating any HTML or machine packages, Boris freezes the whole tree, verifies that every parent exists and every link points to a real target. If anything is missing or cyclic, it stops instantly and points out the exact error line. Once validated, it renders your site and machine exports cleanly and predictably.
+Think of Boris as a compiler for your site's structure. Every `.md` file is a node in a tree. You explicitly state each page's parent node using `parent: <id>`. Before generating any HTML or machine packages, Boris freezes the whole tree, verifies that every parent exists and that supported Boris internal references (wiki-links, includes, and related graph edges) resolve. External URLs, arbitrary raw HTML links, and every possible page reference are outside that guarantee. If a validated relationship is missing or cyclic, Boris stops and points at the exact error. Once validation passes, it renders the requested output cleanly and predictably.
 
 </Aside>
 
@@ -65,7 +65,7 @@ Every Boris execution follows a strict 4-stage pipeline, regardless of output mo
 [ 3. IGNITE ] Route validated graph to requested target (HTML, IR, RAG, Context, llms.txt)
      │
      ▼
-[ 4. RESET ]  Free per-page arena scratch memory (flat memory usage)
+[ 4. RESET ]  Free per-page arena scratch after each page publish
 ```
 
 ### 1. Load (Discovery)
@@ -84,7 +84,7 @@ The validated, frozen graph is passed to the requested target emitter:
 - **LLMS Emitter (`--llms`):** Produces `llms.txt` listing all published pages.
 
 ### 4. Reset (Scratch Cleanup)
-Boris frees the per-page arena allocator scratch memory after rendering each page. Memory consumption remains low and flat even when rendering thousands of pages.
+Boris frees the per-page arena allocator scratch after publishing each page. Durable metadata (titles, parents, paths) lives in a long-lived `PageDb` for the rest of the run. Boris does **not** claim flat process RSS across large builds; the supported guarantee is that per-page scratch is reset after each page.
 
 ---
 
@@ -99,7 +99,7 @@ Link directly to any page by its entity ID:
 See [[guides/building-pages|Building Pages]] for details on page construction.
 ```
 
-If `guides/building-pages` does not exist as a page in `content/`, Boris catches it during the **Roll** phase and stops the build with `EGRAPH`.
+If `guides/building-pages` does not exist as a page in `content/`, Boris catches it during the **Roll** phase and stops the build with `EREFERENCEMISSING`.
 
 ### Snippet Includes
 Transclude shared content snippets from `content/includes/`:
@@ -112,12 +112,14 @@ Files under `content/includes/` are transcluded in-place into the host page befo
 
 ---
 
-## Single-Source Multi-Output Guarantee
+## Single-Source Multi-Output Alignment
 
-Because HTML, JSON IR, RAG packages, AI Context Bundles, and `llms.txt` are all emitted from the exact same frozen, validated graph, **all outputs are 100% consistent by definition**:
-- The sidebar navigation in HTML matches the graph in JSON IR.
-- The RAG corpus contains the exact same published pages as the live HTML site.
-- The `llms.txt` file accurately reflects the published hierarchy.
+HTML, JSON IR, RAG packages, AI Context Bundles, and `llms.txt` all start from the same validated content graph **when generated from the same source revision**. They are separate invocations, so alignment requires running the desired exporters against that shared revision:
+- The sidebar navigation in HTML matches the graph in JSON IR from the same revision.
+- The RAG corpus contains the same published pages as the HTML site from the same revision.
+- The `llms.txt` file reflects the published hierarchy from the same revision.
+
+Rendered-site search is a separate standalone tool that indexes the HTML output after it is built.
 
 ---
 
@@ -126,4 +128,4 @@ Because HTML, JSON IR, RAG packages, AI Context Bundles, and `llms.txt` are all 
 - [[guides/trunk-satellite|Trunk & Satellite Graph Rules]] — Detailed rules for graph structure and parent links.
 - [[guides/search-and-ui|Search & Layout UI]] — How layouts, theme markers, and search indices operate.
 - [[guides/rag-export|RAG & Machine Export]] — Generating outputs for AI agents and LLM tools.
-- [[reference/diagnostics|Diagnostics Reference]] — Diagnostic codes (`EFRONTMATTER`, `EGRAPH`, `EINC`) and troubleshooting.
+- [[reference/diagnostics|Diagnostics Reference]] — Diagnostic codes (`EFRONTMATTER`, `EPARENTMISSING`, `EREFERENCEMISSING`, `EINCLUDEMISSING`) and troubleshooting.

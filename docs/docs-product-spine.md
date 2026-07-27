@@ -12,7 +12,7 @@
    Write clean Markdown with rich built-in components—callout `<Aside>` blocks, footnotes, tables, wiki-links (`[[page-id]]`), and transclusion includes (`{{include snippet.md}}`)—without managing npm packages, JSX imports, or MDX bundlers.
 
 2. **Validated Site Graph & Complete Static Engine**  
-   Boris builds complete static documentation sites—not just isolated HTML renders. It enforces explicit page hierarchies (`parent: <id>`) and validates links before writing files, ensuring zero broken links in production alongside graph-backed navigation, breadcrumbs, TOC, and client-side full-text search.
+   Boris builds complete static documentation sites—not just isolated HTML renders. It enforces explicit page hierarchies (`parent: <id>`) and validates parent chains plus supported internal references before writing files, alongside graph-backed navigation, breadcrumbs, TOC, and optional client-side full-text search.
 
 3. **Single-Source Multi-Output (Human & Machine)**  
    From one frozen, validated content tree, Boris publishes static HTML for human readers, client-side search indices, JSON IR schemas for developer tooling, RAG corpora (`--rag`) for vector DBs, AI Context Bundles (`--context`) for LLM prompts, and standard `llms.txt` for crawlers.
@@ -21,7 +21,7 @@
 
 ## Primary Audiences
 
-- **Technical Documentation Authors & Technical Writers**: Want expressive Markdown with callouts, transclusion, and zero broken links without setting up complex JS site frameworks.
+- **Technical Documentation Authors & Technical Writers**: Want expressive Markdown with callouts, transclusion, and fail-loud parent/wiki-link validation without setting up complex JS site frameworks.
 - **Systems Developers & Platform Engineers**: Want a fast, single-binary static site generator with zero runtime dependencies (no Node.js/npm) that runs natively on CI/CD pipelines.
 - **AI Tool Integrators & Developer Experience Engineers**: Need structured, deterministic RAG corpora, machine IR, and LLM context bundles generated automatically alongside static docs.
 
@@ -76,7 +76,7 @@ The documentation is organized around a 4-stage narrative progression:
 | `content/reference/commands.md` | Developers / Operators | What are all the exact CLI flags and options? | Look up specific command parameters | Complete CLI Specification | Reference | Leads with **Implementation Detail** |
 | `content/reference/frontmatter.md` | Content Authors | What frontmatter keys are accepted? | Format page frontmatter correctly | Closed Frontmatter Grammar | Reference | Leads with **Specification** |
 | `content/reference/outputs.md` | Tool Builders | What are the schemas for JSON IR, RAG, and Context? | Parse JSON IR and RAG catalogs programmatically | Machine Output Schemas | Reference | Leads with **Specification** |
-| `content/reference/diagnostics.md` | All Users | How do I fix compiler error codes? | Resolve `EFRONTMATTER`, `EGRAPH`, `EINC` errors | Diagnostic Error Codes | Reference | Leads with **Actionable Fixes** |
+| `content/reference/diagnostics.md` | All Users | How do I fix compiler error codes? | Resolve `EFRONTMATTER`, `EPARENTMISSING`, `EREFERENCEMISSING`, `EINCLUDEMISSING` errors | Diagnostic Error Codes | Reference | Leads with **Actionable Fixes** |
 | `content/reference/relationships.md` | Authors / Devs | How are page relationship types classified? | Review parent, link, and semantic relations | Relationship Classification | Reference | Leads with **Specification** |
 
 ---

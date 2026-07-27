@@ -20,7 +20,7 @@
 </div>
 <div class="header-actions">
 <div class="search-container" data-boris-search-ui>
-<form action="/_boris/search/" method="get" role="search">
+<form action="_boris/search/" method="get" role="search" data-boris-search-form>
 <svg class="search-icon" fill="none" stroke="currentColor" viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
 <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path>
 </svg>
@@ -84,7 +84,16 @@
 
   const expectedFormat = "boris-rendered-search-index";
   const expectedSchema = 1;
-  const indexUrl = new URL("/_boris/search/search-index.json", document.baseURI).href;
+  // Derive site-root-relative prefix from the page-relative theme stylesheet href
+  // emitted by asset-url ("" from index.html, "../" from nested pages, …).
+  const siteRootPrefix = (() => {
+    const sheet = document.querySelector('link[rel="stylesheet"][href*="assets/"]');
+    const href = sheet ? (sheet.getAttribute("href") || "") : "";
+    const marker = href.lastIndexOf("assets/");
+    return marker >= 0 ? href.slice(0, marker) : "";
+  })();
+  if (form && form.setAttribute) form.action = siteRootPrefix + "_boris/search/";
+  const indexUrl = new URL(siteRootPrefix + "_boris/search/search-index.json", document.baseURI).href;
   let documents = [];
 
   const normalize = text => String(text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
@@ -142,7 +151,7 @@
     setStatus(`${matches.length} result${matches.length === 1 ? "" : "s"}`);
     matches.slice(0, 12).forEach(match => {
       const item = document.createElement("li"); item.className = "site-search__result";
-      const link = document.createElement("a"); link.href = new URL("/" + String(match.doc.path).replace(/^\/+/, "") + (match.section.fragment ? "#" + match.section.fragment : ""), document.baseURI).href;
+      const link = document.createElement("a"); link.href = new URL(siteRootPrefix + String(match.doc.path).replace(/^\/+/, "") + (match.section.fragment ? "#" + match.section.fragment : ""), document.baseURI).href;
       const title = document.createElement("span"); title.className = "site-search__title"; title.textContent = match.section.heading || match.doc.title;
       const path = document.createElement("span"); path.className = "site-search__path"; path.textContent = String(match.doc.path) + (match.section.fragment ? "#" + String(match.section.fragment) : "");
       const text = document.createElement("span"); text.className = "site-search__excerpt"; text.textContent = excerpt(match.section, terms);

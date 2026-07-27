@@ -267,9 +267,10 @@ IR schema change.
 
 ### Added
 
-- Added a durable public [agent credits and roster](/content/agents/credits.md)
+- Added a durable public [agent credits and roster](https://github.com/drawmeanelephant/boris/blob/v0.7.0/content/agents/credits.md)
   that distinguishes Codex worker records from honorary external tools and
-  preserves evidence boundaries.
+  preserves evidence boundaries. (Historical path; the agent-lore tree was
+  later retired from the product documentation spine.)
 - Added a developer-only, reversible Filed.fyi changelog/releases first slice in
   the [migration laboratory](/tools/migration-lab/README.md), with raw
   provenance, explicit unmapped-field reports, and mechanical stripping reports
@@ -293,7 +294,8 @@ IR schema change.
   duplicate-byte convenience files while retaining the per-file corpus and
   catalog artifacts. See [source-RAG usage](/tools/source-rag/README.md).
 - Expanded the tracked agent-lore dogfood section with evidence-bounded Codex
-  task records. Links: [agent field notes](/content/agents/index.md).
+  task records. Links: [agent field notes](https://github.com/drawmeanelephant/boris/blob/v0.7.0/content/agents/index.md)
+  (historical path; later retired from the product documentation spine).
 - Added a compact, hand-authored archive-theme example showing the deterministic
   `{{children}}` layout slot for future visual imports. See the
   [archive-theme example](/examples/archive-theme/).
