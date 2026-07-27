@@ -15,7 +15,7 @@
    Boris builds complete static documentation sites—not just isolated HTML renders. It enforces explicit page hierarchies (`parent: <id>`) and validates parent chains plus supported internal references before writing files, alongside graph-backed navigation, breadcrumbs, TOC, and optional client-side full-text search.
 
 3. **Single-Source Multi-Output (Human & Machine)**  
-   From one frozen, validated content tree, Boris publishes static HTML for human readers, client-side search indices, JSON IR schemas for developer tooling, RAG corpora (`--rag`) for vector DBs, AI Context Bundles (`--context`) for LLM prompts, and standard `llms.txt` for crawlers.
+   From one frozen, validated content tree, Boris publishes static HTML for human readers, client-side search indices (via `tools/search-index`), JSON IR schemas for developer tooling (`--out`), RAG corpora (`--rag`) for vector DBs, AI Context Bundles (`--context`) for LLM prompts, and standard `llms.txt` (`--llms`) for crawlers.
 
 ---
 
@@ -23,7 +23,7 @@
 
 - **Technical Documentation Authors & Technical Writers**: Want expressive Markdown with callouts, transclusion, and fail-loud parent/wiki-link validation without setting up complex JS site frameworks.
 - **Systems Developers & Platform Engineers**: Want a fast, single-binary static site generator with zero runtime dependencies (no Node.js/npm) that runs natively on CI/CD pipelines.
-- **AI Tool Integrators & Developer Experience Engineers**: Need structured, deterministic RAG corpora, machine IR, and LLM context bundles generated automatically alongside static docs.
+- **AI Tool Integrators & Developer Experience Engineers**: Need structured, deterministic RAG corpora, machine IR, and LLM context bundles generated via dedicated CLI invocations alongside static docs.
 
 ---
 
@@ -83,9 +83,8 @@ The documentation is organized around a 4-stage narrative progression:
 
 ## Duplicated or Misplaced Material Remediation
 
-1. **Pipeline Jargon on Homepage**:  
-   - *Problem*: `content/index.md` previously led with internal memory pipeline terms ("Load, Roll, Ignite, Reset").
-   - *Fix*: Move "Load, Roll, Ignite, Reset" to `guides/overview.md` and `technology-and-rationale.md`. Lead `index.md` with the 4 user narrative pillars.
+1. **Pipeline Sequence on Homepage**:  
+   - *Final Design*: The homepage specimen retains "Load → Roll → Ignite → Reset" as a high-level 4-stage narrative sequence, while detailed memory and C ABI mechanics live in `guides/overview.md` and `technology-and-rationale.md`.
 
 2. **Decoupled Search Index Gotcha**:  
    - *Problem*: Mentioned in multiple pages without a central explanation.

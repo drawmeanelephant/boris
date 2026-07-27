@@ -25,7 +25,7 @@ Boris compiles your Markdown graph into a polished static site for human readers
       <ul>
         <li><a href="index.assets/desktop.png">Desktop Viewport (1280×800)</a></li>
         <li><a href="index.assets/mobile.png">Mobile Viewport (375×812)</a></li>
-        <li><a href="index.assets/search_open.png">Search Modal Open</a></li>
+        <li><a href="index.assets/search_open.png">Search Results Open</a></li>
       </ul>
     </div>
   </div>
@@ -44,38 +44,18 @@ Boris compiles your Markdown graph into a polished static site for human readers
 
 ```markdown
 ---
-title: Content Model & Pipeline
+title: Site Structure & Page Graph
 parent: guides
 status: published
 ---
 
-# Content Model & Pipeline
+Think of Boris as a compiler for your site's structure.
 
-Boris compiles Markdown through four phases:
-**Load → Roll → Ignite → Reset**.
-See [[guides/trunk-satellite|Trunk & Satellite]] for hierarchy.
+<Aside kind="tip">
 
-<Aside kind="info">
-**Graph Validation:** Parent chains and wiki-links are
-verified before writing files to disk.
+Every parent relationship must resolve before HTML is written.
+
 </Aside>
-
-| Phase | Action |
-| :--- | :--- |
-| **Load** | Discover Markdown files |
-| **Roll** | Parse frontmatter & validate graph |
-```
-
-    </div>
-  </div>
-  <div class="specimen-card">
-    <div class="specimen-card__header">2. Rendered Page Output (dist/guides/overview.html)</div>
-    <div class="specimen-card__body">
-
-<p class="eyebrow">Home / User Guides / Content Model & Pipeline</p>
-<h3 style="margin-top:0.25rem;">Content Model & Pipeline</h3>
-<p>Boris compiles Markdown through four phases: <strong>Load → Roll → Ignite → Reset</strong>. See <a href="trunk-satellite.html">Trunk & Satellite</a> for hierarchy.</p>
-
 <aside class="admonition admonition--info" aria-label="Info" style="margin: 0.75rem 0;">
   <p><strong>Graph Validation:</strong> Parent chains and wiki-links are verified before writing files to disk.</p>
 </aside>
@@ -98,7 +78,7 @@ verified before writing files to disk.
 
 Boris’s human and machine editions originate from the same validated documentation source and relationships when generated from the same source revision. The standalone search tool then indexes the resulting HTML.
 
-*Real output excerpts generated from commit `0568f096aebdd55f6321f907e4c82336e7019769`:*
+*Real output excerpts generated from current source revision:*
 
 <div class="edition-grid">
   <div class="edition-card">

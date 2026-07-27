@@ -149,7 +149,7 @@ Output directory:
 
 ```text
 context/
-  bundle.md         # full site content in one Markdown document, ordered by graph
+  bundle.md         # full site content in one Markdown document, ordered by canonical entity ID
   manifest.json     # page list, build metadata, and schema version
   graph.json        # graph snapshot (same structure as IR graph.json)
   pages/            # one Markdown file per page
@@ -195,7 +195,7 @@ The file reflects the current validated graph. Indentation depth matches the Tru
 | RAG corpus missing `parts/` | `--split-size` flag was omitted during RAG build | Pass `--split-size BYTES` (e.g. `--split-size 2000000`) to enable part chunking |
 | `dist/.boris/` missing IR | Default CLI run without `--out` flag | Run `./zig-out/bin/boris --out dist/.boris` to generate JSON IR files |
 | `llms.txt` missing | Default CLI run without `--llms` flag | Run `./zig-out/bin/boris --llms --llms-path dist/llms.txt` |
-| `context/bundle.md` missing | Default CLI run without `--context` flag | Run `./zig-out/bin/boris --context --context-dir dist/context` |
+| `dist/context/bundle.md` missing | Default CLI run without `--context` flag | Run `./zig-out/bin/boris --context --context-dir dist/context` |
 
 ### Output Verification Checklist
 

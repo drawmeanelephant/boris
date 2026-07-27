@@ -60,7 +60,7 @@ Boris splices content into your layout by replacing **marker tokens**. All marke
 | `{{nav}}` | Full site navigation tree as nested `<ul>` lists |
 | `{{breadcrumb}}` | Breadcrumb trail from root to current page |
 | `{{toc}}` | In-page table of contents from `h1`–`h3` headings |
-| `{{footer}}` | Rendered footer (if the page has a footer section) |
+| `{{footer}}` | Optional layout footer fragment loaded from the theme's `footer.html` file |
 | `{{asset-url PATH}}` | Path to a theme asset, adjusted for the current page depth |
 
 ## Referencing assets in your layout
@@ -71,7 +71,7 @@ Use `{{asset-url}}` to reference assets from your layout without hardcoding path
 <link rel="stylesheet" href="{{asset-url assets/theme.css}}">
 ```
 
-Boris replaces `{{asset-url assets/theme.css}}` with the correct relative path from the current page's location to the asset. A page at `guides/building-pages.html` gets `../../assets/theme.css`; a page at `index.html` gets `assets/theme.css`.
+Boris replaces `{{asset-url assets/theme.css}}` with the correct relative path from the current page's location to the asset. A page at `guides/building-pages.html` gets `../assets/theme.css`; a page at `index.html` gets `assets/theme.css`.
 
 ## Minimal layout example
 
@@ -87,7 +87,7 @@ This is the minimum layout Boris requires:
   <link rel="stylesheet" href="{{asset-url assets/theme.css}}">
 </head>
 <body>
-  <nav>{{nav}}</nav>
+  <aside>{{nav}}</aside>
   <main data-search-root>{{content}}</main>
 </body>
 </html>
@@ -116,7 +116,7 @@ Layout rule selectors:
 | `role:satellite` | All Satellite pages |
 | `glob:PATTERN` | Pages whose entity id matches the glob pattern |
 
-Rules are evaluated in declaration order and are additive within a target. The `--theme` flag sets the default layout; rules override it selectively.
+Layout selection precedence follows explicit resolution rules: exact `id:` matches take highest priority, followed by specific `glob:` patterns, role fallbacks (`role:trunk` / `role:satellite`), and target default layout fallbacks. Declaration order does not alter selection precedence. The `--theme` flag sets the default layout; rules override it selectively.
 
 ## Multiple output targets
 

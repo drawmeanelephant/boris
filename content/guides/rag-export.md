@@ -119,8 +119,8 @@ Combines all pages into a single cohesive Markdown document optimized for LLM co
 ```
 
 ### Generated Files:
-- `bundle.md` — All published pages merged in graph-topological order with clear section headers.
-- `manifest.json` — Page index and character/word counts.
+- `bundle.md` — All published pages merged in canonical entity-ID order with clear section headers.
+- `manifest.json` — Schema specifications, provenance digest, page and relationship counts, and artifact paths.
 
 ---
 
@@ -136,7 +136,7 @@ Generates a hierarchical Markdown index conforming to the `llms.txt` standard fo
 
 ## Complete Multi-Output Generation Script
 
-To generate HTML and all 4 machine formats cleanly in one build pass:
+To generate HTML and all 4 machine formats cleanly in one scripted workflow against one source revision:
 
 ```bash
 # 1. HTML Site
