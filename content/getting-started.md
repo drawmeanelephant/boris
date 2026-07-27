@@ -35,29 +35,28 @@ The compiled binary is written directly to `./zig-out/bin/boris`.
 
 ## 5-Minute Concrete Value Path (Layer 2)
 
-Complete your first useful action in under 5 minutes without reading any compiler source code:
+Complete your first useful action in under 5 minutes:
 
-### Setup Checklist
-
-- [x] **Compile Boris binary**: `zig build` produces `./zig-out/bin/boris`.
-- [x] **Render HTML site**: `./zig-out/bin/boris --theme examples/prototype-corporate --html-dir dist`.
-- [x] **Build search index**: `zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=./dist/_boris/search`.
-- [x] **Generate machine exports**: Export RAG, IR, Context, and `llms.txt`.
-- [ ] **Verify in browser**: Open `dist/index.html` to inspect rendered pages and search.
-
-### Step 1: Render the Corporate HTML Site
+### Step 1: Render the HTML Site
 ```bash
-./zig-out/bin/boris --theme examples/prototype-corporate --html-dir dist
+./zig-out/bin/boris
 ```
 *Outcome:* Boris scans `content/`, parses frontmatter, validates parent graph hierarchy, and emits responsive HTML files to `dist/` with graph-backed sidebar navigation.
 
-### Step 2: Generate the Client-Side Search Index
+### Step 2: Open in Browser
+Open `dist/index.html` in your web browser. You will see a complete static documentation site generated directly from your content graph.
+
+---
+
+## Optional Build Branches
+
+### Branch A: Add Client-Side Search
 ```bash
 zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=./dist/_boris/search
 ```
 *Outcome:* The search index tool reads rendered HTML under `dist/` and writes `dist/_boris/search/search-index.json`.
 
-### Step 3: Export AI & Machine Packages
+### Branch B: Export Machine & AI Packages
 ```bash
 ./zig-out/bin/boris --rag --rag-dir dist/rag --quiet
 ./zig-out/bin/boris --out dist/.boris --quiet
@@ -66,7 +65,7 @@ zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=.
 ```
 *Outcome:* Creates `dist/rag/` (Markdown RAG corpus), `dist/.boris/` (JSON IR), `dist/llms.txt`, and `dist/context/` (AI Context Bundle) from the exact same frozen content graph.
 
-### Step 4: Validate Without Publishing
+### Branch C: Validate Graph Without Writing Files
 ```bash
 ./zig-out/bin/boris check
 ```

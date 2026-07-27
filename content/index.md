@@ -41,24 +41,28 @@ Machine Exports
 
 ## 5-Minute Quickstart
 
-Validate your setup step-by-step:
+Get your static documentation site up and running in two commands:
 
-- [x] Step 1: Render the HTML site:
-  ```bash
-  ./zig-out/bin/boris --theme examples/prototype-corporate --html-dir dist
-  ```
-- [x] Step 2: Build the client-side search index:
+```bash
+zig build
+./zig-out/bin/boris
+```
+
+Open `dist/index.html` in your browser to view your site with graph-backed sidebar navigation, breadcrumbs, and in-page table of contents.
+
+### Optional Build Branches
+
+- **Add Client-Side Search Index**:
   ```bash
   zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=./dist/_boris/search
   ```
-- [x] Step 3: Generate machine exports for AI agents:
+- **Export Machine AI Artifacts** (`dist/rag/`, `dist/.boris/`, `dist/context/`, `dist/llms.txt`):
   ```bash
   ./zig-out/bin/boris --rag --rag-dir dist/rag --quiet
   ./zig-out/bin/boris --out dist/.boris --quiet
   ./zig-out/bin/boris --llms --llms-path dist/llms.txt --quiet
   ./zig-out/bin/boris --context --context-dir dist/context --quiet
   ```
-- [ ] Step 4: Open `dist/index.html` in your browser.
 
 ## Source-to-Output Specimen
 

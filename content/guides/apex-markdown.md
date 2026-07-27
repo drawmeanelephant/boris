@@ -39,10 +39,10 @@ Constructs are categorized into 5 explicit support tiers:
 
 | Construct | Classification | Support Tier | Jump |
 | :--- | :--- | :---: | :--- |
-| Callout `&lt;Aside&gt;` components | **Product Core** | Supported | [Asides](file:///Users/tbuddy/dev/drawmeanelephant/boris/worktrees/uncle-gravity/content/guides/asides.md) |
+| Callout `&lt;Aside&gt;` components | **Product Core** | Supported | [[guides/asides|Asides]] |
 | Wiki-links (`&#91;&#91;entity-id&#93;&#93;`) | **Product Core** | Supported | [Wiki-links](#wiki-links) |
 | Transclusion includes (`&#123;&#123;include path&#125;&#125;`) | **Product Core** | Supported | [Includes](#transclusion-includes) |
-| Closed frontmatter & Graph rules | **Product Core** | Supported | [Overview](file:///Users/tbuddy/dev/drawmeanelephant/boris/worktrees/uncle-gravity/content/guides/overview.md) |
+| Closed frontmatter & Graph rules | **Product Core** | Supported | [[guides/overview|Overview]] |
 | GFM tables (pipe & alignment) | **Engine Feature** | Supported | [Tables](#tables) |
 | Advanced tables (rowspan/colspan/caption) | **Engine Feature** | Supported | [Advanced tables](#advanced-tables) |
 | Definition lists | **Engine Feature** | Supported | [Definition lists](#definition-lists) |
@@ -51,7 +51,7 @@ Constructs are categorized into 5 explicit support tiers:
 | Heading & Paragraph IAL (`{#id .class}`) | **Engine Feature** | Supported | [Headings](#headings-and-attributes) |
 | Critic Markup (`{++add++}`, `{--del--}`) | **Engine Feature** | Supported | [Critic Markup](#critic-markup) |
 | Math syntax (`$a^2 + b^2 = c^2$`) | **Theme-Dependent** | Requires Math CSS/JS | [Math](#math) |
-| Client Search Indexing | **Theme-Dependent** | Requires Search Tool | [Search Guide](file:///Users/tbuddy/dev/drawmeanelephant/boris/worktrees/uncle-gravity/content/guides/search-and-ui.md) |
+| Client Search Indexing | **Theme-Dependent** | Requires Search Tool | [[guides/search-and-ui|Search Guide]] |
 | Python-Markdown `!!!` callouts | **Pending / Off** | Disabled (Product Off) | [Callouts](#apex-callouts) |
 | Grid tables | **Pending / Off** | Engine Flag Off | [Pending](#pending-apex-samples) |
 | External syntax highlighters | **Pending / Off** | Disabled (Product Off) | [Code](#fenced-code) |
