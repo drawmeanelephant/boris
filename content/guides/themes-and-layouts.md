@@ -88,7 +88,7 @@ This is the minimum layout Boris requires:
 </head>
 <body>
   <aside>{{nav}}</aside>
-  <main data-search-root>{{content}}</main>
+  <main data-boris-search-root>{{content}}</main>
 </body>
 </html>
 ```
