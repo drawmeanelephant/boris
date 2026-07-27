@@ -211,6 +211,21 @@ const RelationshipTargetInventoryRow = struct {
     selected: bool,
 };
 
+/// Exact-key, review-first join of relationship candidates to the target
+/// inventory. This never writes Boris product relations or picks a target
+/// without an explicit selection rule.
+const RelationshipCandidateClassification = struct {
+    source_path: []const u8,
+    source_line: u32,
+    source_field: []const u8,
+    raw_value: []const u8,
+    normalized_lookup_key: ?[]const u8,
+    classification: []const u8, // selected | inventoried | ambiguous | absent | invalid
+    matching_inventory_source_paths: []const []const u8,
+    selection_rule: ?[]const u8,
+    review_note: ?[]const u8,
+};
+
 const RawRelationValue = struct {
     source_field: []const u8,
     source_line: u32,
@@ -1043,7 +1058,9 @@ fn sourceSlugEvidence(a: std.mem.Allocator, raw: []const u8) !SourceSlugEvidence
     if (!std.mem.startsWith(u8, raw, "---\n") and !std.mem.startsWith(u8, raw, "---\r\n")) return fallback;
     const start: usize = if (std.mem.startsWith(u8, raw, "---\r\n")) 5 else 4;
     const end = std.mem.indexOfPos(u8, raw, start, "\n---\n") orelse std.mem.indexOfPos(u8, raw, start, "\n---\r\n") orelse return .{
-        .state = "invalid_fallback_path", .value = null, .location = "unterminated frontmatter",
+        .state = "invalid_fallback_path",
+        .value = null,
+        .location = "unterminated frontmatter",
     };
     const frontmatter = raw[start..end];
     var line_no: usize = 2;
@@ -1162,6 +1179,54 @@ fn collectRelationshipTargetInventory(
         }
     }.less);
     return try rows.toOwnedSlice(a);
+}
+
+fn classifyRelationshipCandidates(
+    a: std.mem.Allocator,
+    candidates: []const RelationCandidate,
+    inventory: []const RelationshipTargetInventoryRow,
+) ![]const RelationshipCandidateClassification {
+    var out: std.ArrayList(RelationshipCandidateClassification) = .empty;
+    for (candidates) |candidate| {
+        var matches: std.ArrayList([]const u8) = .empty;
+        if (candidate.normalized_target) |key| {
+            for (inventory) |target| {
+                if (target.normalized_lookup_key) |target_key| {
+                    if (std.mem.eql(u8, key, target_key) and std.mem.eql(u8, target.eligibility, "eligible")) {
+                        try matches.append(a, target.source_path);
+                    }
+                }
+            }
+        }
+        const classification: []const u8 = if (candidate.normalized_target == null)
+            "invalid"
+        else if (matches.items.len == 0)
+            "absent"
+        else if (matches.items.len == 1)
+            "inventoried"
+        else
+            "ambiguous";
+        const note: ?[]const u8 = if (std.mem.eql(u8, classification, "invalid"))
+            candidate.review_reason orelse "unsupported_candidate_value"
+        else if (std.mem.eql(u8, classification, "absent"))
+            "no_exact_eligible_inventory_target"
+        else if (std.mem.eql(u8, classification, "ambiguous"))
+            "multiple_exact_eligible_inventory_targets"
+        else
+            "exact_eligible_target_requires_human_selection";
+        try out.append(a, .{
+            .source_path = candidate.source_path,
+            .source_line = candidate.source_line,
+            .source_field = candidate.source_field,
+            .raw_value = candidate.raw_value,
+            .normalized_lookup_key = candidate.normalized_target,
+            .classification = classification,
+            .matching_inventory_source_paths = try matches.toOwnedSlice(a),
+            .selection_rule = null,
+            .review_note = note,
+        });
+    }
+    return try out.toOwnedSlice(a);
 }
 
 fn categoryForBlockStart(line: []const u8) ?[]const u8 {
@@ -3419,6 +3484,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     // Whole-site target evidence is intentionally separate from candidate
     // resolution, which remains bounded to the converted slice above.
     const relationship_target_inventory = try collectRelationshipTargetInventory(a, io, source, selection_rows.items, pages.items, content_files.items);
+    const relationship_candidate_classification = try classifyRelationshipCandidates(a, relation_candidates, relationship_target_inventory);
 
     // Link rewrite pass (wiki targets only; Markdown images handled next).
     for (pages.items) |*p| {
@@ -3536,6 +3602,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     try writeLinkReview(a, io, out, pages.items);
     try writeRelationCandidates(a, io, out, relation_candidates);
     try writeRelationshipTargetInventory(a, io, out, relationship_target_inventory);
+    try writeRelationshipCandidateClassification(a, io, out, relationship_candidate_classification);
     try writeHeadingFragments(a, io, out, pages.items);
     try writeSelectionManifest(a, io, out, content, selection_rows.items, opts.max_pages);
     try writeBoundaryManifest(a, io, out, boundary.items);
@@ -4130,11 +4197,10 @@ fn writeRelationshipTargetInventory(
     }
 
     var json: std.ArrayList(u8) = .empty;
-    try json.appendSlice(a,
-        "{\n  \"format\": \"boris-starlight-relationship-target-inventory\",\n" ++
-            "  \"schema_version\": 2,\n" ++
-            "  \"policy\": \"Site-wide deterministic discovery evidence only. Explicit frontmatter.slug keys are retained when safe; missing, empty, or invalid slug values fall back to a path-derived exact key with their state recorded. Non-Markdown files under the discovered content root remain explicit unsupported rows. Duplicate exact keys remain visible. This artifact does not select targets, perform fuzzy matching, emit relations, or mutate source or converted pages.\",\n" ++
-            "  \"counts\": { \"total\": ");
+    try json.appendSlice(a, "{\n  \"format\": \"boris-starlight-relationship-target-inventory\",\n" ++
+        "  \"schema_version\": 2,\n" ++
+        "  \"policy\": \"Site-wide deterministic discovery evidence only. Explicit frontmatter.slug keys are retained when safe; missing, empty, or invalid slug values fall back to a path-derived exact key with their state recorded. Non-Markdown files under the discovered content root remain explicit unsupported rows. Duplicate exact keys remain visible. This artifact does not select targets, perform fuzzy matching, emit relations, or mutate source or converted pages.\",\n" ++
+        "  \"counts\": { \"total\": ");
     try appendUsize(&json, a, rows.len);
     try json.appendSlice(a, ", \"eligible\": ");
     try appendUsize(&json, a, eligible);
@@ -4188,6 +4254,80 @@ fn writeRelationshipTargetInventory(
     try appendUsize(&markdown, a, duplicate_keys);
     try markdown.appendSlice(a, " |\n");
     try writeFile(io, out, "RELATIONSHIP_TARGET_INVENTORY.md", markdown.items);
+}
+
+fn writeRelationshipCandidateClassification(
+    a: std.mem.Allocator,
+    io: Io,
+    out: Io.Dir,
+    rows: []const RelationshipCandidateClassification,
+) !void {
+    var selected: usize = 0;
+    var inventoried: usize = 0;
+    var ambiguous: usize = 0;
+    var absent: usize = 0;
+    var invalid: usize = 0;
+    for (rows) |row| {
+        if (std.mem.eql(u8, row.classification, "selected")) selected += 1;
+        if (std.mem.eql(u8, row.classification, "inventoried")) inventoried += 1;
+        if (std.mem.eql(u8, row.classification, "ambiguous")) ambiguous += 1;
+        if (std.mem.eql(u8, row.classification, "absent")) absent += 1;
+        if (std.mem.eql(u8, row.classification, "invalid")) invalid += 1;
+    }
+    var json: std.ArrayList(u8) = .empty;
+    try json.appendSlice(a, "{\n  \"format\": \"boris-starlight-relationship-candidate-classification\",\n  \"schema_version\": 1,\n  \"policy\": \"Exact eligible inventory-key matching only. selected requires an explicit rule and is not inferred by this tool. This report is review evidence only; it emits no Boris semantic relations and mutates no source or converted page.\",\n  \"counts\": { \"selected\": ");
+    try appendUsize(&json, a, selected);
+    try json.appendSlice(a, ", \"inventoried\": ");
+    try appendUsize(&json, a, inventoried);
+    try json.appendSlice(a, ", \"ambiguous\": ");
+    try appendUsize(&json, a, ambiguous);
+    try json.appendSlice(a, ", \"absent\": ");
+    try appendUsize(&json, a, absent);
+    try json.appendSlice(a, ", \"invalid\": ");
+    try appendUsize(&json, a, invalid);
+    try json.appendSlice(a, " },\n  \"candidates\": [\n");
+    for (rows, 0..) |row, i| {
+        try json.appendSlice(a, "    { \"source_path\": ");
+        try appendJson(&json, a, row.source_path);
+        try json.appendSlice(a, ", \"source_line\": ");
+        try appendUsize(&json, a, @intCast(row.source_line));
+        try json.appendSlice(a, ", \"source_field\": ");
+        try appendJson(&json, a, row.source_field);
+        try json.appendSlice(a, ", \"raw_value\": ");
+        try appendJson(&json, a, row.raw_value);
+        try json.appendSlice(a, ", \"normalized_lookup_key\": ");
+        if (row.normalized_lookup_key) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, ", \"classification\": ");
+        try appendJson(&json, a, row.classification);
+        try json.appendSlice(a, ", \"matching_inventory_source_paths\": [");
+        for (row.matching_inventory_source_paths, 0..) |path, mi| {
+            if (mi > 0) try json.appendSlice(a, ", ");
+            try appendJson(&json, a, path);
+        }
+        try json.appendSlice(a, "], \"selection_rule\": ");
+        if (row.selection_rule) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, ", \"review_note\": ");
+        if (row.review_note) |value| try appendJson(&json, a, value) else try json.appendSlice(a, "null");
+        try json.appendSlice(a, " }");
+        if (i + 1 < rows.len) try json.append(a, ',');
+        try json.append(a, '\n');
+    }
+    try json.appendSlice(a, "  ]\n}\n");
+    try writeFile(io, out, "relationship_candidate_classification.json", json.items);
+
+    var markdown: std.ArrayList(u8) = .empty;
+    try markdown.appendSlice(a, "# Relationship candidate classification\n\nThis deterministic sidecar is exact-key review evidence only; it does not select targets without an explicit rule or emit Boris relations.\n\n| Selected | Inventoried | Ambiguous | Absent | Invalid |\n|---:|---:|---:|---:|---:|\n| ");
+    try appendUsize(&markdown, a, selected);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, inventoried);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, ambiguous);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, absent);
+    try markdown.appendSlice(a, " | ");
+    try appendUsize(&markdown, a, invalid);
+    try markdown.appendSlice(a, " |\n");
+    try writeFile(io, out, "RELATIONSHIP_CANDIDATE_CLASSIFICATION.md", markdown.items);
 }
 
 fn writeSelectionManifest(
@@ -4992,6 +5132,8 @@ test "starlight: locale-dir fixture is deterministic, preserves source, reports 
         "relation_candidates.json",
         "relationship_target_inventory.json",
         "RELATIONSHIP_TARGET_INVENTORY.md",
+        "relationship_candidate_classification.json",
+        "RELATIONSHIP_CANDIDATE_CLASSIFICATION.md",
         "assets_manifest.json",
         "boundary_manifest.json",
         "heading_fragments.json",
@@ -5052,6 +5194,14 @@ test "starlight: locale-dir fixture is deterministic, preserves source, reports 
     try std.testing.expect(std.mem.indexOf(u8, targets, "\"duplicate_exact_key_records\": 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, targets, "\"normalized_lookup_key\": \"inventory/draft\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, targets, "draft_frontmatter") != null);
+
+    const classification = try readFileAlloc(io, ao, "relationship_candidate_classification.json", std.testing.allocator);
+    defer std.testing.allocator.free(classification);
+    try std.testing.expect(std.mem.indexOf(u8, classification, "boris-starlight-relationship-candidate-classification") != null);
+    try std.testing.expect(std.mem.indexOf(u8, classification, "\"classification\": \"inventoried\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, classification, "\"classification\": \"ambiguous\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, classification, "\"classification\": \"absent\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, classification, "\"classification\": \"invalid\"") != null);
 
     const report = try readFileAlloc(io, ao, "report.json", std.testing.allocator);
     defer std.testing.allocator.free(report);

@@ -512,7 +512,8 @@ and `/…` for root-locale.
    | `selection_manifest.json` | Selected source files + exclusion reasons |
    | `route_map.json` | Route / entity / output mapping |
    | `link_review.json` | Internal links, unresolved, external, assets |
-   | `relationship_target_inventory.json` / `RELATIONSHIP_TARGET_INVENTORY.md` | Site-wide deterministic exact-key target discovery, including selection/exclusion and duplicate-key evidence; no candidate classification |
+| `relationship_target_inventory.json` / `RELATIONSHIP_TARGET_INVENTORY.md` | Site-wide deterministic exact-key target discovery, including selection/exclusion and duplicate-key evidence |
+| `relationship_candidate_classification.json` / `RELATIONSHIP_CANDIDATE_CLASSIFICATION.md` | Exact eligible-key review join: `selected`, `inventoried`, `ambiguous`, `absent`, or `invalid`; no relation emission |
    | `relation_candidates.json` | Review-first Filed-shaped relationship values + converted-entity resolution |
    | `heading_fragments.json` | Fragment inventory (headings **not** verified) |
    | `assets_manifest.json` | Inventory + migrated page assets (exists + SHA-256 when proven) |
@@ -549,11 +550,22 @@ match is selected. Draft frontmatter remains conversion evidence under the
 existing migration rules, but is explicitly excluded from relationship-target
 eligibility with `draft_frontmatter`.
 
-This is a versioned discovery artifact for later human-review classification.
-It performs no fuzzy matching, candidate classification, semantic-relation
-emission, or source/converted-page mutation. The lab's source format remains
+This is a versioned discovery artifact for the exact-key review join below. It
+performs no fuzzy matching, semantic-relation emission, or source/converted-page
+mutation. The lab's source format remains
 Markdown/MDX only; files outside its established discovery rules are not
 silently treated as relationship targets.
+
+### Relationship candidate classification
+
+Every relationship candidate receives one deterministic classification in
+`relationship_candidate_classification.json`: `selected` requires an existing
+explicit mapping rule (none is inferred), `inventoried` means one eligible
+exact-key target exists, `ambiguous` means multiple eligible exact-key targets
+exist, `absent` means none exists, and `invalid` means the source value is not a
+supported target scalar. Matching is case-sensitive and exact; the report never
+guesses from titles, paths, or fuzzy text, emits no Boris relations, and mutates
+neither source nor converted pages.
 
 `relation_candidates.json` inventories only these known Filed-shaped source
 fields: `relatedEntries`, `relatedHaiku`, `relatedLimerick`, `relatedLorelog`,
