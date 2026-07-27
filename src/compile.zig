@@ -5544,6 +5544,7 @@ test "F9.1 adversarial: asset-url without theme root fails" {
     // Bare `layouts/…` is the only path form with null theme root (contract).
     // Write a temporary layout under repo `layouts/` and remove it after.
     const layout_path = "layouts/.boris-f91-theme-root-missing.html";
+    try cwd.createDirPath(io, "layouts");
     try cwd.writeFile(io, .{
         .sub_path = layout_path,
         .data = "<html><link href=\"{{asset-url assets/css/docs.css}}\">{{content}}</html>",
