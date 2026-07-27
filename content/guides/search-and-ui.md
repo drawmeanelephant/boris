@@ -58,7 +58,7 @@ The CLI recursively inspects `.html` files under `--root`, excludes `--out` to p
 
 ## Layout Data Attributes
 
-### 1. Document root marker
+### 1. Document root marker: `data-boris-search-root`
 Tag your layout's main content area with the search root attribute so the indexer extracts prose from the main body:
 
 ```html
@@ -69,7 +69,7 @@ Tag your layout's main content area with the search root attribute so the indexe
 
 If omitted, the indexer falls back to searching `<main>`, then `<body>`.
 
-### 2. Exclusion marker
+### 2. Exclusion marker: `data-boris-search-exclude`
 Exclude navigation elements, version notices, or dynamic elements from indexing:
 
 ```html

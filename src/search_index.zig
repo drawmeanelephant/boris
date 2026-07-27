@@ -29,13 +29,73 @@ fn tagAt(html: []const u8, start: usize) ?Tag {
     return null;
 }
 
+/// One parsed attribute. `value` is null for a valueless (boolean) attribute
+/// such as the marker in `<main data-boris-search-root>`.
+const Attr = struct { name: []const u8, value: ?[]const u8 };
+
+/// Walks a tag's attributes. One parser backs both `attrValue` and `hasAttr`
+/// so they cannot disagree about where an attribute name starts and ends.
+const AttrIter = struct {
+    tag: []const u8,
+    i: usize,
+
+    fn init(tag: []const u8) AttrIter {
+        var i: usize = 1; if (i < tag.len and tag[i] == '/') i += 1;
+        while (i < tag.len and isNameChar(tag[i])) : (i += 1) {}
+        return .{ .tag = tag, .i = i };
+    }
+
+    fn next(self: *AttrIter) ?Attr {
+        const tag = self.tag;
+        var i = self.i;
+        while (i < tag.len) {
+            while (i < tag.len and (std.ascii.isWhitespace(tag[i]) or tag[i] == '/')) : (i += 1) {}
+            if (i >= tag.len or tag[i] == '>') break;
+            const ns = i; while (i < tag.len and isNameChar(tag[i])) : (i += 1) {}
+            if (i == ns) { i += 1; continue; }
+            const name = tag[ns..i];
+            var j = i; while (j < tag.len and std.ascii.isWhitespace(tag[j])) : (j += 1) {}
+            // No `=` follows: a boolean attribute. Yield it rather than skip it.
+            if (j >= tag.len or tag[j] != '=') { self.i = i; return .{ .name = name, .value = null }; }
+            j += 1; while (j < tag.len and std.ascii.isWhitespace(tag[j])) : (j += 1) {}
+            if (j >= tag.len) break;
+            const q = tag[j];
+            if (q == '"' or q == '\'') {
+                j += 1; const vs = j; while (j < tag.len and tag[j] != q) : (j += 1) {}
+                const v = tag[vs..j];
+                self.i = if (j < tag.len) j + 1 else j;
+                return .{ .name = name, .value = v };
+            }
+            const vs = j; while (j < tag.len and !std.ascii.isWhitespace(tag[j]) and tag[j] != '>') : (j += 1) {}
+            self.i = j;
+            return .{ .name = name, .value = tag[vs..j] };
+        }
+        self.i = i;
+        return null;
+    }
+};
+
+/// Value of `wanted`, or null. A valueless attribute yields no value, which
+/// preserves this function's previous behavior for its callers.
 fn attrValue(tag: []const u8, wanted: []const u8) ?[]const u8 {
-    var i: usize = 1; if (i < tag.len and tag[i] == '/') i += 1; while (i < tag.len and isNameChar(tag[i])) : (i += 1) {}
-    while (i < tag.len) { while (i < tag.len and (std.ascii.isWhitespace(tag[i]) or tag[i] == '/')) : (i += 1) {} if (i >= tag.len or tag[i] == '>') break; const ns = i; while (i < tag.len and isNameChar(tag[i])) : (i += 1) {} if (i == ns) { i += 1; continue; } const name = tag[ns..i]; while (i < tag.len and std.ascii.isWhitespace(tag[i])) : (i += 1) {} if (i >= tag.len or tag[i] != '=') continue; i += 1; while (i < tag.len and std.ascii.isWhitespace(tag[i])) : (i += 1) {} if (i >= tag.len) break; const q = tag[i]; if (q == '"' or q == '\'') { i += 1; const vs = i; while (i < tag.len and tag[i] != q) : (i += 1) {} if (std.ascii.eqlIgnoreCase(name, wanted)) return tag[vs..i]; if (i < tag.len) i += 1; } else { const vs = i; while (i < tag.len and !std.ascii.isWhitespace(tag[i]) and tag[i] != '>') : (i += 1) {} if (std.ascii.eqlIgnoreCase(name, wanted)) return tag[vs..i]; } }
+    var it = AttrIter.init(tag);
+    while (it.next()) |a| { if (a.value) |v| { if (std.ascii.eqlIgnoreCase(a.name, wanted)) return v; } }
     return null;
 }
 
-fn hasAttr(tag: []const u8, wanted: []const u8) bool { return attrValue(tag, wanted) != null or std.mem.indexOf(u8, tag, wanted) != null; }
+/// True when `wanted` is present as an attribute NAME, with or without a value.
+///
+/// This is deliberately not a substring test. Boris documents these marker
+/// names on its own site, and a heading id is slugified from its text, so
+/// `<h3 id="document-root-marker-data-boris-search-root">` would otherwise
+/// count as a second search root and fail the build with MultipleSearchRoots.
+/// The same fault let `aria-hidden="false"` satisfy a test for `hidden`,
+/// dropping explicitly visible content from the index.
+fn hasAttr(tag: []const u8, wanted: []const u8) bool {
+    var it = AttrIter.init(tag);
+    while (it.next()) |a| { if (std.ascii.eqlIgnoreCase(a.name, wanted)) return true; }
+    return false;
+}
 
 fn matchingRange(html: []const u8, open_start: usize, name: []const u8) ?Range {
     const open = tagAt(html, open_start) orelse return null; var depth: usize = 1; var i = open.end + 1;
@@ -174,4 +234,45 @@ test "explicit root failures stay fail-loud" {
         "<body><article>fallback is not allowed</article></body>",
         true,
     ));
+}
+
+test "a marker name inside another attribute's value is not a marker" {
+    // A page documenting these markers slugifies the name into its heading id.
+    // Matching that as a root gave MultipleSearchRoots on a page with one root.
+    const html = "<main data-boris-search-root>" ++
+        "<h3 id=\"document-root-marker-data-boris-search-root\">Document root marker</h3>" ++
+        "<p>Prose about data-boris-search-root.</p>" ++
+        "</main>";
+    const d = try indexHtml(std.testing.allocator, "guides/search.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expectEqualStrings("document-root-marker-data-boris-search-root", d.sections[0].fragment);
+}
+
+test "attribute presence is matched by name, not by substring" {
+    // Valueless markers must be found...
+    try std.testing.expect(hasAttr("<main data-boris-search-root>", "data-boris-search-root"));
+    try std.testing.expect(hasAttr("<main data-boris-search-root=\"\">", "data-boris-search-root"));
+    try std.testing.expect(hasAttr("<main DATA-BORIS-SEARCH-ROOT>", "data-boris-search-root"));
+    // ...without matching the name inside an id, class, or longer attribute.
+    try std.testing.expect(!hasAttr("<h3 id=\"x-data-boris-search-root\">", "data-boris-search-root"));
+    try std.testing.expect(!hasAttr("<div data-boris-search-root-note=\"x\">", "data-boris-search-root"));
+    // `aria-hidden="false"` previously satisfied a test for `hidden`, which
+    // dropped explicitly visible content from the index.
+    try std.testing.expect(!hasAttr("<div aria-hidden=\"false\">", "hidden"));
+    try std.testing.expect(hasAttr("<div hidden>", "hidden"));
+    try std.testing.expect(!hasAttr("<span data-inert-marker=\"x\">", "inert"));
+}
+
+test "attrValue still reads only valued attributes" {
+    try std.testing.expectEqualStrings("false", attrValue("<div aria-hidden=\"false\">", "aria-hidden").?);
+    try std.testing.expectEqualStrings("x", attrValue("<div id='x'>", "id").?);
+    try std.testing.expectEqualStrings("x", attrValue("<div id=x>", "id").?);
+    try std.testing.expect(attrValue("<main data-boris-search-root>", "data-boris-search-root") == null);
+}
+
+test "explicitly visible content is indexed" {
+    const html = "<main data-boris-search-root><div aria-hidden=\"false\"><p>Visible prose.</p></div></main>";
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    try std.testing.expect(std.mem.indexOf(u8, d.sections[0].text, "Visible prose") != null);
 }
