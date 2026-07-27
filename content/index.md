@@ -6,11 +6,11 @@ tags: [home, zig, documentation]
 
 # Boris — a compiler for documentation that stays honest
 
-Boris is a zero-dependency static documentation compiler written in Zig. You write clean Markdown files with explicit page relationships (`parent` and wiki-links), and Boris validates your documentation graph before emitting static HTML, a client-side search index, JSON IR, RAG packages, AI Context Bundles, and `llms.txt`—all from a single fast, native binary with no JavaScript runtime or Node.js toolchain required.
+Boris is a zero-dependency static documentation compiler. You write rich Markdown files with explicit page relationships (`parent` and wiki-links), and Boris validates your documentation graph before emitting static HTML, a client-side search index, JSON IR, RAG packages, AI Context Bundles, and `llms.txt`—all from a single fast, native binary with no JavaScript runtime or Node.js toolchain required.
 
 <Aside kind="info">
 
-**Layer 1 Summary:** Boris is not a JS site stack or hosted CMS. It is a local C/Zig binary that turns Markdown files into a validated graph and produces static outputs for both human readers and AI agents.
+**Layer 1 Summary:** Boris is not a JS site stack or hosted CMS. It is a local native binary that turns Markdown files into a validated graph and produces static outputs for both human readers and AI agents.
 
 </Aside>
 
@@ -43,6 +43,7 @@ Explore how Boris works under the hood and how to leverage its capabilities:
 | Goal | Destination | What you will learn |
 |---|---|---|
 | **Get Started** | [[getting-started|Getting Started]] | Step-by-step setup, first useful action, and common developer/agent hesitations |
+| **Why Boris?** | [[comparison|Comparison & Rationale]] | Contrast Boris with Docusaurus, Astro, MDX, CMSs, and plain Markdown |
 | **Understand Mental Model** | [[guides/overview|Content Model & Pipeline]] | Trunk/Satellite graphs, fail-loud validation, and the 4-stage pipeline |
 | **Explore CLI & Modes** | [[guides/cli-and-modes|CLI & Output Modes]] | HTML, IR, RAG, Context, `llms.txt`, watch mode, check mode, and `--jobs` |
 | **Search & Layouts** | [[guides/search-and-ui|Search & Themes]] | Standalone search index tool, HTML marker tokens, zero-JS fallbacks |
