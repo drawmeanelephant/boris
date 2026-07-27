@@ -127,7 +127,7 @@ src/ir_emit.zig
 ```json
 {
   "schemaVersion": "0.2.0",
-  "compiler": "boris0.8.0",
+  "compiler": "boris/0.8.1",
   "contentRoot": "content",
   "pageCount": 3,
   "pages": [

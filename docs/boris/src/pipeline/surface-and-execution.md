@@ -14,10 +14,10 @@ tags: [boris, zig, source-reference, surface, pipeline, compiler]
 
 ```zig
 pub const schema_version = "0.2.0";
-pub const compiler_id = "boris/0.8.0";
+pub const compiler_id = "boris/0.8.1";
 pub const semantic_schema_version = "0.3.0";
-pub const semantic_compiler_id = "boris/0.8.0+semantic-relations";
-pub const boris_version = "0.8.0";
+pub const semantic_compiler_id = "boris/0.8.1+semantic-relations";
+pub const boris_version = "0.8.1";
 ```
 
 These are the sole source of truth for all version strings embedded in emitted JSON. `ir_emit.zig` receives them as a struct argument from `renderManifest`, `renderGraph`, and `renderBuildReport`. Callers outside `pipeline.zig` should reference these constants rather than hardcoding version strings.
