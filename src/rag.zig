@@ -314,19 +314,6 @@ fn countAtxH1(text: []const u8) usize {
 // Tags / titles helpers
 // ---------------------------------------------------------------------------
 
-fn formatTags(arena: std.mem.Allocator, tags: []const []const u8) ![]const u8 {
-    if (tags.len == 0) return try arena.dupe(u8, "[]");
-    var buf: std.ArrayList(u8) = .empty;
-    errdefer buf.deinit(arena);
-    try buf.append(arena, '[');
-    for (tags, 0..) |t, i| {
-        if (i > 0) try buf.appendSlice(arena, ", ");
-        try buf.appendSlice(arena, t);
-    }
-    try buf.append(arena, ']');
-    return try buf.toOwnedSlice(arena);
-}
-
 fn pageTitle(p: graph_mod.Node) []const u8 {
     if (p.title) |t| return t;
     return p.id;
@@ -407,6 +394,29 @@ fn extractTagsLine(source: []const u8) []const u8 {
     return "";
 }
 
+/// Split a system-doc `tags:` line into its items so the emitter can encode each
+/// one. Returns an empty slice when the line is absent or is not a flow
+/// sequence; the caller supplies the default in that case.
+fn extractTagTokens(arena: std.mem.Allocator, source: []const u8) ![]const []const u8 {
+    const line = extractTagsLine(source);
+    if (line.len < 2 or line[0] != '[' or line[line.len - 1] != ']') return &.{};
+    const inner = std.mem.trim(u8, line[1 .. line.len - 1], " \t");
+    if (inner.len == 0) return &.{};
+
+    var list: std.ArrayList([]const u8) = .empty;
+    errdefer list.deinit(arena);
+    var it = std.mem.splitScalar(u8, inner, ',');
+    while (it.next()) |raw| {
+        var token = std.mem.trim(u8, raw, " \t");
+        if (token.len >= 2 and token[0] == '"' and token[token.len - 1] == '"') {
+            token = token[1 .. token.len - 1];
+        }
+        if (token.len == 0) continue;
+        try list.append(arena, token);
+    }
+    return try list.toOwnedSlice(arena);
+}
+
 fn extractRagId(source: []const u8, fallback: []const u8) []const u8 {
     if (!std.mem.startsWith(u8, source, "---")) return fallback;
     var i: usize = 3;
@@ -478,8 +488,9 @@ fn exportSystemDocs(
         const rag_path = try std.fmt.allocPrint(arena, "system/{s}", .{rel});
         const fallback_id = try std.fmt.allocPrint(arena, "system/{s}", .{titleFromFilename(rel)});
         const rag_id = extractRagId(source, fallback_id);
-        const tags = extractTagsLine(source);
-        const tags_out = if (tags.len > 0) tags else "[boris, system]";
+        const parsed_tags = try extractTagTokens(arena, source);
+        const default_tags = [_][]const u8{ "boris", "system" };
+        const tags_out: []const []const u8 = if (parsed_tags.len > 0) parsed_tags else &default_tags;
 
         const doc = try rag_emit.renderSystemDocument(gpa, rag_id, rag_path, tags_out, body);
         defer gpa.free(doc);
@@ -489,7 +500,7 @@ fn exportSystemDocs(
             .rag_path = rag_path,
             .category = "system",
             .title = title,
-            .tags = tags_out,
+            .tags = try rag_emit.formatTags(arena, tags_out),
         });
         count += 1;
         log(opts, "  rag system  {s}\n", .{rag_path});
