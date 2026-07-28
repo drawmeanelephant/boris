@@ -66,6 +66,7 @@ pub const MediaItem = struct {
     encoding_repaired: bool = false,
     encoding_suspect: bool = false,
     present: bool = false,
+    destination_rejected: bool = false,
     theme_rel: []const u8 = "", // assets/media/...
 };
 
@@ -569,7 +570,10 @@ pub fn extractHashtags(allocator: std.mem.Allocator, caption: []const u8) ![]con
         if (end == start) continue;
         const tag = caption[start..end];
         var duplicate = false;
-        for (tags.items) |old| if (asciiCaseEqual(old, tag)) { duplicate = true; break; };
+        for (tags.items) |old| if (asciiCaseEqual(old, tag)) {
+            duplicate = true;
+            break;
+        };
         if (!duplicate) try tags.append(allocator, try allocator.dupe(u8, tag));
         i = end - 1;
     }
@@ -616,7 +620,10 @@ fn appendEscapedCaptionByte(out: *std.ArrayList(u8), allocator: std.mem.Allocato
         '<' => try out.appendSlice(allocator, "&lt;"),
         '>' => try out.appendSlice(allocator, "&gt;"),
         '&' => try out.appendSlice(allocator, "&amp;"),
-        '\\', '`', '*', '_', '[', ']', '(', ')', '#', '!', '+', '-' => { try out.append(allocator, '\\'); try out.append(allocator, c); },
+        '\\', '`', '*', '_', '[', ']', '(', ')', '#', '!', '+', '-' => {
+            try out.append(allocator, '\\');
+            try out.append(allocator, c);
+        },
         else => try out.append(allocator, c),
     }
 }
@@ -1154,7 +1161,7 @@ fn assignEntityIds(retain: std.mem.Allocator, records: []IgRecord) !void {
             try notes.append(retain, try retain.dupe(u8, "carousel: multiple media items"));
         }
         for (rec.media) |m| {
-            if (std.mem.endsWith(u8, m.uri, ".mp4") or std.mem.endsWith(u8, m.uri, ".mov")) {
+            if (isVideoThemeAsset(m.theme_rel) or std.mem.endsWith(u8, m.uri, ".mp4") or std.mem.endsWith(u8, m.uri, ".mov")) {
                 rec.conversion = ConversionClass.worse(rec.conversion, .transformed);
                 try notes.append(retain, try retain.dupe(u8, "video media present (no embed; path preserved)"));
             }
@@ -1227,8 +1234,119 @@ fn classifyMediaPresence(io: Io, dump: Io.Dir, rec: *IgRecord, retain: std.mem.A
             try notes.append(retain, try std.fmt.allocPrint(retain, "missing media: {s}", .{uri}));
             rec.notes = try notes.toOwnedSlice(retain);
         }
-        // theme destination preserves media/… under assets/
-        m.theme_rel = try std.fmt.allocPrint(retain, "assets/{s}", .{uri});
+    }
+}
+
+/// Extract a public-media extension without trusting the rest of the archive
+/// filename. Source URIs are retained as provenance, but never reused as
+/// destination names. A query, fragment, control byte, or unsupported suffix
+/// is not a media type assertion and therefore cannot become a theme asset.
+fn validatedMediaExtension(allocator: std.mem.Allocator, source_uri: []const u8) !?[]u8 {
+    if (source_uri.len == 0) return null;
+    for (source_uri) |c| {
+        if (c < 0x20 or c == 0x7f or c == '?' or c == '#' or c == '\\') return null;
+    }
+    const basename = if (std.mem.lastIndexOfScalar(u8, source_uri, '/')) |slash|
+        source_uri[slash + 1 ..]
+    else
+        source_uri;
+    const dot = std.mem.lastIndexOfScalar(u8, basename, '.') orelse return null;
+    if (dot == 0 or dot + 1 == basename.len) return null;
+    const raw = basename[dot + 1 ..];
+    if (raw.len > 4) return null;
+    const ext = try allocator.alloc(u8, raw.len);
+    for (raw, 0..) |c, i| ext[i] = if (c >= 'A' and c <= 'Z') c + ('a' - 'A') else c;
+    if (std.mem.eql(u8, ext, "jpg") or
+        std.mem.eql(u8, ext, "jpeg") or
+        std.mem.eql(u8, ext, "png") or
+        std.mem.eql(u8, ext, "gif") or
+        std.mem.eql(u8, ext, "webp") or
+        std.mem.eql(u8, ext, "mp4") or
+        std.mem.eql(u8, ext, "mov")) return ext;
+    allocator.free(ext);
+    return null;
+}
+
+fn isVideoThemeAsset(theme_rel: []const u8) bool {
+    return std.mem.endsWith(u8, theme_rel, ".mp4") or std.mem.endsWith(u8, theme_rel, ".mov");
+}
+
+/// A destination must never accidentally become a copied Meta basename. This
+/// recognizes the long underscore-separated numeric groups common in exports;
+/// source URIs may contain these names and remain provenance evidence.
+fn hasOpaqueMetaBasename(path: []const u8) bool {
+    const basename = if (std.mem.lastIndexOfScalar(u8, path, '/')) |slash| path[slash + 1 ..] else path;
+    const stem = if (std.mem.lastIndexOfScalar(u8, basename, '.')) |dot| basename[0..dot] else basename;
+    var groups: usize = 0;
+    var numeric_groups: usize = 0;
+    var parts = std.mem.splitScalar(u8, stem, '_');
+    while (parts.next()) |part| {
+        if (part.len == 0) continue;
+        groups += 1;
+        var all_digits = part.len >= 6;
+        for (part) |c| {
+            if (c < '0' or c > '9') all_digits = false;
+        }
+        if (all_digits) numeric_groups += 1;
+    }
+    return groups >= 3 and numeric_groups >= 3;
+}
+
+fn appendMediaReviewNote(retain: std.mem.Allocator, rec: *IgRecord, note: []const u8) !void {
+    var notes: std.ArrayList([]const u8) = .empty;
+    try notes.appendSlice(retain, rec.notes);
+    try notes.append(retain, try retain.dupe(u8, note));
+    rec.notes = try notes.toOwnedSlice(retain);
+}
+
+/// Theme media paths are derived from the final public entity id, never the
+/// source URI. Record order is stable before this function runs, and the media
+/// loop intentionally keeps the provider's source-array order for carousels.
+fn assignMediaDestinations(retain: std.mem.Allocator, records: []IgRecord) !void {
+    var used: std.StringHashMapUnmanaged(void) = .{};
+    defer used.deinit(retain);
+
+    for (records) |*rec| {
+        for (rec.media, 0..) |*m, media_index| {
+            const ext = (try validatedMediaExtension(retain, m.uri)) orelse {
+                m.present = false;
+                m.destination_rejected = true;
+                m.theme_rel = "";
+                rec.conversion = ConversionClass.worse(rec.conversion, .human_review);
+                try appendMediaReviewNote(retain, rec, "unsupported or unsafe media extension; not copied");
+                continue;
+            };
+            defer retain.free(ext);
+            if (std.mem.eql(u8, ext, "mp4") or std.mem.eql(u8, ext, "mov")) {
+                rec.conversion = ConversionClass.worse(rec.conversion, .transformed);
+            }
+            var destination = try std.fmt.allocPrint(
+                retain,
+                "assets/media/{s}-{d:0>2}.{s}",
+                .{ rec.entity_id, media_index + 1, ext },
+            );
+            var collision: usize = 2;
+            while (used.contains(destination)) {
+                const previous = destination;
+                destination = try std.fmt.allocPrint(
+                    retain,
+                    "assets/media/{s}-{d:0>2}-{d}.{s}",
+                    .{ rec.entity_id, media_index + 1, collision, ext },
+                );
+                retain.free(previous);
+                collision += 1;
+            }
+            if (hasOpaqueMetaBasename(destination)) {
+                m.present = false;
+                m.destination_rejected = true;
+                m.theme_rel = "";
+                rec.conversion = ConversionClass.worse(rec.conversion, .human_review);
+                try appendMediaReviewNote(retain, rec, "opaque Meta-style generated media basename rejected");
+                continue;
+            }
+            try used.put(retain, destination, {});
+            m.theme_rel = destination;
+        }
     }
 }
 
@@ -1323,7 +1441,7 @@ fn writeRecordMarkdown(allocator: std.mem.Allocator, rec: IgRecord, tag_pages: [
     } else {
         var present_images: usize = 0;
         for (rec.media) |m| {
-            if (m.present and !std.mem.endsWith(u8, m.uri, ".mp4") and !std.mem.endsWith(u8, m.uri, ".mov")) present_images += 1;
+            if (m.present and !isVideoThemeAsset(m.theme_rel)) present_images += 1;
         }
         if (present_images > 1) try body.appendSlice(allocator, "<div class=\"instagram-gallery\">\n");
         for (rec.media) |m| {
@@ -1333,7 +1451,7 @@ fn writeRecordMarkdown(allocator: std.mem.Allocator, rec: IgRecord, tag_pages: [
             const alt_source = if (m.title.len > 0) m.title else if (display_title.len > 0) display_title else kindFallbackSlug(rec.kind);
             const alt = try escapeHtmlAttr(allocator, alt_source);
             defer allocator.free(alt);
-            if (std.mem.endsWith(u8, m.uri, ".mp4") or std.mem.endsWith(u8, m.uri, ".mov")) {
+            if (isVideoThemeAsset(m.theme_rel)) {
                 const html_href = try escapeHtmlAttr(allocator, href);
                 defer allocator.free(html_href);
                 try body.print(allocator, "<video class=\"instagram-video\" controls preload=\"metadata\" src=\"{s}\">\n  <a href=\"{s}\">Download the video</a>\n</video>\n\n", .{ html_href, html_href });
@@ -1342,9 +1460,13 @@ fn writeRecordMarkdown(allocator: std.mem.Allocator, rec: IgRecord, tag_pages: [
                 defer allocator.free(html_href);
                 try body.print(allocator, "  <figure class=\"instagram-gallery__item\"><img src=\"{s}\" alt=\"{s}\"></figure>\n", .{ html_href, alt });
             } else {
-                const md_alt = try escapeMdLinkLabel(allocator, alt_source);
-                defer allocator.free(md_alt);
-                try body.print(allocator, "![{s}]({s})\n\n", .{ md_alt, href });
+                // Markdown image destinations are intentionally restricted to
+                // a page-local `.assets/` directory by product Boris. Theme
+                // assets are public site paths, so use the same escaped raw
+                // HTML shape as galleries and video to retain this link.
+                const html_href = try escapeHtmlAttr(allocator, href);
+                defer allocator.free(html_href);
+                try body.print(allocator, "<img src=\"{s}\" alt=\"{s}\">\n\n", .{ html_href, alt });
             }
         }
         if (present_images > 1) try body.appendSlice(allocator, "</div>\n\n");
@@ -1430,7 +1552,10 @@ fn escapeMdLinkLabel(allocator: std.mem.Allocator, label: []const u8) ![]u8 {
             '<' => try out.appendSlice(allocator, "&lt;"),
             '>' => try out.appendSlice(allocator, "&gt;"),
             '&' => try out.appendSlice(allocator, "&amp;"),
-            '\\', '[', ']', '(', ')', '`' => { try out.append(allocator, '\\'); try out.append(allocator, c); },
+            '\\', '[', ']', '(', ')', '`' => {
+                try out.append(allocator, '\\');
+                try out.append(allocator, c);
+            },
             else => try out.append(allocator, c),
         }
     }
@@ -1453,7 +1578,10 @@ fn buildHashtagPages(allocator: std.mem.Allocator, records: []const IgRecord) ![
         var n: usize = 2;
         while (true) {
             var occupied = false;
-            for (pages.items) |page| if (std.mem.eql(u8, page.slug, slug)) { occupied = true; break; };
+            for (pages.items) |page| if (std.mem.eql(u8, page.slug, slug)) {
+                occupied = true;
+                break;
+            };
             if (!occupied) break;
             slug = try std.fmt.allocPrint(allocator, "{s}-{d}", .{ base_slug, n });
             n += 1;
@@ -1463,7 +1591,9 @@ fn buildHashtagPages(allocator: std.mem.Allocator, records: []const IgRecord) ![
         try pages.append(allocator, .{ .display = try allocator.dupe(u8, tag), .slug = slug, .record_indexes = indexes });
     };
     std.mem.sort(HashtagPage, pages.items, {}, struct {
-        fn less(_: void, a: HashtagPage, b: HashtagPage) bool { return std.mem.order(u8, a.slug, b.slug) == .lt; }
+        fn less(_: void, a: HashtagPage, b: HashtagPage) bool {
+            return std.mem.order(u8, a.slug, b.slug) == .lt;
+        }
     }.less);
     return try pages.toOwnedSlice(allocator);
 }
@@ -1530,7 +1660,12 @@ fn writeTrunkMarkdown(allocator: std.mem.Allocator, records: []const IgRecord, t
     var earliest: ?i64 = null;
     var latest: ?i64 = null;
     for (records) |record| {
-        switch (record.kind) { .post => posts += 1, .reel => reels += 1, .story => stories += 1, .other, .unknown => other += 1 }
+        switch (record.kind) {
+            .post => posts += 1,
+            .reel => reels += 1,
+            .story => stories += 1,
+            .other, .unknown => other += 1,
+        }
         if (record.creation_timestamp) |ts| {
             if (earliest == null or ts < earliest.?) earliest = ts;
             if (latest == null or ts > latest.?) latest = ts;
@@ -1584,7 +1719,7 @@ fn writeTrunkMarkdown(allocator: std.mem.Allocator, records: []const IgRecord, t
         const date = try formatHumanUtc(allocator, r.creation_timestamp);
         defer allocator.free(date);
         try body.print(allocator, "<article class=\"instagram-feed__item\"><p class=\"instagram-feed__meta\">{s} · {s}</p><h2><a href=\"{s}\">{s}</a></h2>", .{ date, r.kind.name(), href, label });
-        for (r.media) |media| if (media.present and !std.mem.endsWith(u8, media.uri, ".mp4") and !std.mem.endsWith(u8, media.uri, ".mov")) {
+        for (r.media) |media| if (media.present and !isVideoThemeAsset(media.theme_rel)) {
             const asset = try relativePublishedHref(allocator, "instagram", media.theme_rel);
             defer allocator.free(asset);
             const alt = try escapeHtmlAttr(allocator, if (media.title.len > 0) media.title else label);
@@ -1780,7 +1915,7 @@ fn emitReportMd(gpa: std.mem.Allocator, report: Report) ![]u8 {
                 if (ti > 0) try buf.appendSlice(gpa, ", ");
                 try buf.print(gpa, "#{s}", .{tag});
             }
-            try buf.append( gpa, '\n');
+            try buf.append(gpa, '\n');
         }
         if (p.notes.len > 0) {
             try buf.appendSlice(gpa, "- notes:\n");
@@ -1916,6 +2051,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     for (records.items) |*rec| {
         try classifyMediaPresence(io, dump, rec, retain);
     }
+    try assignMediaDestinations(retain, records.items);
 
     // Sort records for deterministic output: timestamp asc, entity_id
     std.mem.sort(IgRecord, records.items, {}, struct {
@@ -1950,8 +2086,8 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
 
     for (records.items) |*rec| {
         for (rec.media) |*m| {
-            var status: []const u8 = if (m.present) "present" else "missing";
-            if (m.present and (std.mem.endsWith(u8, m.uri, ".mp4") or std.mem.endsWith(u8, m.uri, ".mov"))) {
+            var status: []const u8 = if (m.destination_rejected) "skipped" else if (m.present) "present" else "missing";
+            if (m.present and isVideoThemeAsset(m.theme_rel)) {
                 status = "video";
             }
             if (m.present and m.theme_rel.len > 0) {
@@ -2004,7 +2140,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
 
         const iso = try formatIsoTimestamp(retain, rec.creation_timestamp);
         var cover_asset: []const u8 = "";
-        for (rec.media) |media| if (media.present and !std.mem.endsWith(u8, media.uri, ".mp4") and !std.mem.endsWith(u8, media.uri, ".mov")) { cover_asset = media.theme_rel; break; };
+        for (rec.media) |media| if (media.present and !isVideoThemeAsset(media.theme_rel)) {
+            cover_asset = media.theme_rel;
+            break;
+        };
         const pr: PageRecord = .{
             .output_path = rec.output_path,
             .entity_id = rec.entity_id,
@@ -2215,6 +2354,66 @@ test "isSafeMediaUri rejects dump/output escapes and keeps ordinary media paths"
     try std.testing.expect(!isSafeMediaUri("a\x00b"));
 }
 
+test "validated media extensions are allowlisted and lowercase" {
+    const gpa = std.testing.allocator;
+    const jpg = (try validatedMediaExtension(gpa, "media/posts/photo.JPEG")).?;
+    defer gpa.free(jpg);
+    try std.testing.expectEqualStrings("jpeg", jpg);
+    const mov = (try validatedMediaExtension(gpa, "media/reels/video.MOV")).?;
+    defer gpa.free(mov);
+    try std.testing.expectEqualStrings("mov", mov);
+    try std.testing.expect((try validatedMediaExtension(gpa, "media/posts/no-extension")) == null);
+    try std.testing.expect((try validatedMediaExtension(gpa, "media/posts/script.jpg.exe")) == null);
+    try std.testing.expect((try validatedMediaExtension(gpa, "media/posts/photo.jpg?download=1")) == null);
+    try std.testing.expect((try validatedMediaExtension(gpa, "media/posts/photo.jpg#fragment")) == null);
+    try std.testing.expect((try validatedMediaExtension(gpa, "media/posts/photo\\.jpg")) == null);
+}
+
+test "human media destinations use record ids, source order, and safe extensions" {
+    const gpa = std.testing.allocator;
+    var carousel = [_]MediaItem{
+        .{ .uri = "media/posts/opaque_1111111111111111111_a.JPG" },
+        .{ .uri = "media/posts/opaque_2222222222222222222_b.png" },
+        .{ .uri = "media/posts/opaque_3333333333333333333_c.MP4" },
+    };
+    var captionless = [_]MediaItem{.{ .uri = "media/posts/opaque_4444444444444444444.jpg" }};
+    var undated = [_]MediaItem{.{ .uri = "media/posts/opaque_5555555555555555555.mov" }};
+    var records = [_]IgRecord{
+        .{ .kind = .post, .source_json_path = "posts.json", .source_index = 0, .title = "", .creation_timestamp = 0, .encoding_repaired = false, .encoding_suspect = false, .media = &carousel, .entity_id = "instagram/posts/2024/11/2024-11-19-human-post-slug", .id_strategy = "test", .conversion = .exact, .notes = &.{}, .output_path = "" },
+        .{ .kind = .post, .source_json_path = "posts.json", .source_index = 1, .title = "", .creation_timestamp = 0, .encoding_repaired = false, .encoding_suspect = false, .media = &captionless, .entity_id = "instagram/posts/2024/01/2024-01-15-photo-post", .id_strategy = "test", .conversion = .exact, .notes = &.{}, .output_path = "" },
+        .{ .kind = .reel, .source_json_path = "reels.json", .source_index = 0, .title = "", .creation_timestamp = null, .encoding_repaired = false, .encoding_suspect = false, .media = &undated, .entity_id = "instagram/reels/undated/reel", .id_strategy = "test", .conversion = .exact, .notes = &.{}, .output_path = "" },
+    };
+    try assignMediaDestinations(gpa, &records);
+    defer {
+        for (carousel) |m| gpa.free(m.theme_rel);
+        for (captionless) |m| gpa.free(m.theme_rel);
+        for (undated) |m| gpa.free(m.theme_rel);
+    }
+    try std.testing.expectEqualStrings("assets/media/instagram/posts/2024/11/2024-11-19-human-post-slug-01.jpg", carousel[0].theme_rel);
+    try std.testing.expectEqualStrings("assets/media/instagram/posts/2024/11/2024-11-19-human-post-slug-02.png", carousel[1].theme_rel);
+    try std.testing.expectEqualStrings("assets/media/instagram/posts/2024/11/2024-11-19-human-post-slug-03.mp4", carousel[2].theme_rel);
+    try std.testing.expectEqualStrings("assets/media/instagram/posts/2024/01/2024-01-15-photo-post-01.jpg", captionless[0].theme_rel);
+    try std.testing.expectEqualStrings("assets/media/instagram/reels/undated/reel-01.mov", undated[0].theme_rel);
+    try std.testing.expect(isVideoThemeAsset(carousel[2].theme_rel));
+    try std.testing.expect(!hasOpaqueMetaBasename(carousel[0].theme_rel));
+    try std.testing.expect(hasOpaqueMetaBasename("assets/media/118274741_241841870327375_6450238268085367473_n_17890506610615222.jpg"));
+}
+
+test "media destination collision adds a deterministic counter" {
+    const gpa = std.testing.allocator;
+    var first_media = [_]MediaItem{.{ .uri = "media/posts/one.jpg" }};
+    var second_media = [_]MediaItem{.{ .uri = "media/posts/two.jpg" }};
+    var records = [_]IgRecord{
+        .{ .kind = .post, .source_json_path = "a.json", .source_index = 0, .title = "", .creation_timestamp = null, .encoding_repaired = false, .encoding_suspect = false, .media = &first_media, .entity_id = "instagram/posts/undated/photo-post", .id_strategy = "test", .conversion = .exact, .notes = &.{}, .output_path = "" },
+        .{ .kind = .post, .source_json_path = "b.json", .source_index = 0, .title = "", .creation_timestamp = null, .encoding_repaired = false, .encoding_suspect = false, .media = &second_media, .entity_id = "instagram/posts/undated/photo-post", .id_strategy = "test", .conversion = .exact, .notes = &.{}, .output_path = "" },
+    };
+    try assignMediaDestinations(gpa, &records);
+    defer gpa.free(first_media[0].theme_rel);
+    defer gpa.free(second_media[0].theme_rel);
+    try std.testing.expectEqualStrings("assets/media/instagram/posts/undated/photo-post-01.jpg", first_media[0].theme_rel);
+    try std.testing.expectEqualStrings("assets/media/instagram/posts/undated/photo-post-01-2.jpg", second_media[0].theme_rel);
+}
+
 test "repairMetaEscapedUtf8 flags residue instead of claiming clean utf-8" {
     const gpa = std.testing.allocator;
 
@@ -2278,7 +2477,7 @@ test "fixture: symlinked Instagram media is refused" {
     const report = try readFileAlloc(io, root, "report.json", gpa);
     defer gpa.free(report);
     try std.testing.expect(std.mem.indexOf(u8, report, "symlink media path rejected") != null);
-    try std.testing.expect(!pathExists(io, root, "theme/assets/media/posts/alias.jpg"));
+    try std.testing.expect(!pathExists(io, root, "theme/assets/media/instagram/posts/2024/01/2024-01-01-linked-media-01.jpg"));
 }
 
 test "fixture: hostile instagram dump cannot escape dump or output root" {
@@ -2315,7 +2514,7 @@ test "fixture: hostile instagram dump cannot escape dump or output root" {
     try std.testing.expect(!pathExists(io, out_root, "ESCAPED.txt"));
 
     // The benign control record still converts — the guard is not over-broad.
-    try std.testing.expect(pathExists(io, out_root, "theme/assets/media/posts/202401/ok_1111111111111111111.jpg"));
+    try std.testing.expect(pathExists(io, out_root, "theme/assets/media/instagram/posts/2024/01/2024-01-10-benign-control-post-01.jpg"));
 
     // A hostile caption is emitted as escaped text, never a live HTML/script
     // node or a code-fenced compiler receipt.
@@ -2384,20 +2583,100 @@ test "fixture: instagram mode end-to-end + determinism + source immutability" {
     try std.testing.expect(std.mem.indexOf(u8, ja, "missing") != null);
     try std.testing.expect(std.mem.indexOf(u8, ja, "boris-instagram-migration-lab") != null);
 
-    // theme css + at least one copied media
+    // theme css + a physically copied, human-named media file. This asserts
+    // bytes, not merely a rewritten Markdown reference.
     const css = try readFileAlloc(io, a_root, "theme/assets/css/site.css", gpa);
     defer gpa.free(css);
-    // photo should be copied
-    const photo_path = "theme/assets/media/posts/202401/photo_1111111111111111111.jpg";
+    const source_photo = try readFileAlloc(io, dump_dir, "media/posts/202401/photo_1111111111111111111.jpg", gpa);
+    defer gpa.free(source_photo);
+    const photo_path = "theme/assets/media/instagram/posts/2024/01/2024-01-01-simple-photo-post-with-drawmeanelephant-01.jpg";
     const photo = try readFileAlloc(io, a_root, photo_path, gpa);
     defer gpa.free(photo);
-    try std.testing.expect(photo.len > 0);
+    try std.testing.expectEqualSlices(u8, source_photo, photo);
+    try std.testing.expect(pathExists(io, b_root, photo_path));
+    const photo_b = try readFileAlloc(io, b_root, photo_path, gpa);
+    defer gpa.free(photo_b);
+    try std.testing.expectEqualSlices(u8, source_photo, photo_b);
+    try std.testing.expect(!pathExists(io, a_root, "theme/assets/media/posts/202401/photo_1111111111111111111.jpg"));
+    try std.testing.expect(pathExists(io, a_root, "theme/assets/media/instagram/posts/2024/01/2024-01-02-carousel-two-frames-caf-01.jpg"));
+    try std.testing.expect(pathExists(io, a_root, "theme/assets/media/instagram/posts/2024/01/2024-01-02-carousel-two-frames-caf-02.jpg"));
+    try std.testing.expect(pathExists(io, a_root, "theme/assets/media/instagram/posts/2024/01/2024-01-03-video-post-no-ocr-01.mp4"));
+
+    const simple_page = try readFileAlloc(io, a_root, "content/instagram/posts/2024/01/2024-01-01-simple-photo-post-with-drawmeanelephant.md", gpa);
+    defer gpa.free(simple_page);
+    try std.testing.expect(std.mem.indexOf(u8, simple_page, "2024-01-01-simple-photo-post-with-drawmeanelephant-01.jpg") != null);
+    try std.testing.expect(std.mem.indexOf(u8, simple_page, "uri: media/posts/202401/photo_1111111111111111111.jpg") != null);
+    try std.testing.expect(std.mem.indexOf(u8, simple_page, "theme: assets/media/instagram/posts/2024/01/2024-01-01-simple-photo-post-with-drawmeanelephant-01.jpg") != null);
+    try std.testing.expect(std.mem.indexOf(u8, simple_page, "assets/media/posts/202401/photo_1111111111111111111.jpg") == null);
+
+    // The hub is a separate renderer path; its thumbnail must use the copied
+    // public theme asset rather than the export tree.
+    try std.testing.expect(std.mem.indexOf(u8, trunk, "assets/media/instagram/posts/2024/01/2024-01-01-simple-photo-post-with-drawmeanelephant-01.jpg") != null);
+    try std.testing.expect(std.mem.indexOf(u8, trunk, "assets/media/posts/202401/photo_1111111111111111111.jpg") == null);
+    try std.testing.expect(std.mem.indexOf(u8, ma, "\"source_uri\": \"media/posts/202401/photo_1111111111111111111.jpg\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ma, "\"theme_asset\": \"assets/media/instagram/posts/2024/01/2024-01-01-simple-photo-post-with-drawmeanelephant-01.jpg\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ma, "\"theme_asset\": \"assets/media/posts/") == null);
+
+    const video_page = try readFileAlloc(io, a_root, "content/instagram/posts/2024/01/2024-01-03-video-post-no-ocr.md", gpa);
+    defer gpa.free(video_page);
+    try std.testing.expect(std.mem.indexOf(u8, video_page, "<video") != null);
+    try std.testing.expect(std.mem.indexOf(u8, video_page, "2024-01-03-video-post-no-ocr-01.mp4") != null);
 
     const repaired_page = try readFileAlloc(io, a_root, "content/instagram/posts/2024/01/2024-01-10-meta-escaped-caf.md", gpa);
     defer gpa.free(repaired_page);
     try std.testing.expect(std.mem.indexOf(u8, repaired_page, "café 😊") != null);
     try std.testing.expect(std.mem.indexOf(u8, repaired_page, "cafÃ©") == null);
     try std.testing.expect(std.mem.indexOf(u8, repaired_page, "encoding: meta-latin1-repaired") != null);
+}
+
+test "fixture: staged rerun removes obsolete renamed media" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const dump = "fixtures/.ig-shrinking-dump";
+    const out = "fixtures/.ig-shrinking-out";
+    Io.Dir.cwd().deleteTree(io, dump) catch {};
+    Io.Dir.cwd().deleteTree(io, out) catch {};
+    defer Io.Dir.cwd().deleteTree(io, dump) catch {};
+    defer Io.Dir.cwd().deleteTree(io, out) catch {};
+    try Io.Dir.cwd().createDirPath(io, dump ++ "/your_instagram_activity/content");
+    try Io.Dir.cwd().createDirPath(io, dump ++ "/media/posts");
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = dump ++ "/media/posts/first.jpg", .data = "first fixture bytes" });
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = dump ++ "/media/posts/second.jpg", .data = "second fixture bytes" });
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = dump ++ "/your_instagram_activity/content/posts_1.json", .data =
+        \\[{"title":"Old carousel title","creation_timestamp":1704067200,"media":[{"uri":"media/posts/first.jpg"},{"uri":"media/posts/second.jpg"}]}]
+    });
+    try run(io, gpa, .{ .dump_dir = dump, .out_dir = out, .quiet = true });
+    const old_first = "theme/assets/media/instagram/posts/2024/01/2024-01-01-old-carousel-title-01.jpg";
+    const old_second = "theme/assets/media/instagram/posts/2024/01/2024-01-01-old-carousel-title-02.jpg";
+    {
+        var root = try Io.Dir.cwd().openDir(io, out, .{});
+        defer root.close(io);
+        try std.testing.expect(pathExists(io, root, old_first));
+        try std.testing.expect(pathExists(io, root, old_second));
+    }
+
+    // A changed caption plus a shorter carousel must replace, not accumulate,
+    // owned media paths. The removed second source item remains untouched.
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = dump ++ "/your_instagram_activity/content/posts_1.json", .data =
+        \\[{"title":"New single title","creation_timestamp":1704067200,"media":[{"uri":"media/posts/first.jpg"}]}]
+    });
+    try run(io, gpa, .{ .dump_dir = dump, .out_dir = out, .quiet = true });
+    const new_first = "theme/assets/media/instagram/posts/2024/01/2024-01-01-new-single-title-01.jpg";
+    {
+        var root = try Io.Dir.cwd().openDir(io, out, .{});
+        defer root.close(io);
+        try std.testing.expect(pathExists(io, root, new_first));
+        try std.testing.expect(!pathExists(io, root, old_first));
+        try std.testing.expect(!pathExists(io, root, old_second));
+    }
+
+    // A disappearing record leaves no stale human media behind on the same
+    // owned-output directory.
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = dump ++ "/your_instagram_activity/content/posts_1.json", .data = "[]" });
+    try run(io, gpa, .{ .dump_dir = dump, .out_dir = out, .quiet = true });
+    var final_root = try Io.Dir.cwd().openDir(io, out, .{});
+    defer final_root.close(io);
+    try std.testing.expect(!pathExists(io, final_root, new_first));
 }
 
 test "publishedHtmlHref matches entity_id.html" {

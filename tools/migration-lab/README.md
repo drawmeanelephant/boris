@@ -829,7 +829,7 @@ theme/
   layouts/main.html
   footer.html
   assets/css/site.css
-  assets/media/...             # copied source media (bytes unchanged)
+  assets/media/instagram/...   # copied source media with human public names (bytes unchanged)
 report.json
 REPORT.md
 media_manifest.json            # clean provenance for a later enrichment pass (no OCR)
@@ -843,6 +843,13 @@ control syntax are escaped, while validated `@mentions` and generated hashtag
 links are the only links injected by the transformer. Dates, media, and archive
 feed cards are human-readable; source paths and conversion evidence stay out of
 the visible page body.
+Present media is copied unchanged into `theme/assets/media/instagram/<kind>/…`
+with a deterministic human destination derived from the final record identity:
+`YYYY-MM-DD-caption-slug-01.jpg`, `-02`, and so on in source carousel order.
+Only lowercase `jpg`, `jpeg`, `png`, `gif`, `webp`, `mp4`, and `mov` extensions
+are accepted for public destinations. The original Instagram URI is retained in
+the manifest and hidden page provenance as audit evidence; it is never used as
+a public filename or rendered media reference.
 JSON captions using Meta's escaped Latin-1/UTF-8 form are repaired only when
 the resulting bytes validate as UTF-8; repaired pages are marked
 `meta-latin1-repaired` in provenance and classified as `transformed`. Ordinary
