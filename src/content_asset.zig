@@ -156,13 +156,41 @@ pub fn validateWithinTreePath(path: []const u8) bool {
     return true;
 }
 
+/// Media types a `data:` URL may carry in an image slot.
+///
+/// `image/svg+xml` is deliberately absent. An inline SVG is a script-bearing
+/// document, not a picture, and admitting it here would reintroduce active
+/// content through the one image path that has no file on disk to inspect.
+const data_image_types = [_][]const u8{
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/avif",
+};
+
+/// True when a `data:` URL declares one of the media types above.
+///
+/// The old check accepted any `data:` prefix, so `data:text/html;base64,…` was
+/// passed through into an `<img src>` — a document, in an image slot, with no
+/// type validation at all.
+fn isImageDataUrl(dest: []const u8) bool {
+    const rest = dest["data:".len..];
+    const end = std.mem.indexOfAny(u8, rest, ";,") orelse return false;
+    const media_type = rest[0..end];
+    for (data_image_types) |allowed| {
+        if (std.ascii.eqlIgnoreCase(media_type, allowed)) return true;
+    }
+    return false;
+}
+
 /// True when `dest` is a non-local URL scheme Boris does not rewrite or fetch.
 pub fn isPassthroughImageDest(dest: []const u8) bool {
     if (dest.len == 0) return false;
     if (std.mem.startsWith(u8, dest, "https://")) return true;
     if (std.mem.startsWith(u8, dest, "http://")) return true;
     if (std.mem.startsWith(u8, dest, "//")) return true;
-    if (std.mem.startsWith(u8, dest, "data:")) return true;
+    if (std.mem.startsWith(u8, dest, "data:")) return isImageDataUrl(dest);
     if (std.mem.startsWith(u8, dest, "mailto:")) return true;
     return false;
 }
@@ -759,6 +787,12 @@ pub fn printDiagnostic(gpa: std.mem.Allocator, err: AssetError, source_path: []c
     };
     const locus = if (fail.locus().len > 0) fail.locus() else source_path;
     const detail = fail.detail();
+    // A rejected `data:` URL is a media-type problem, not a missing file, so
+    // say the thing the author actually has to change.
+    const guidance: []const u8 = if (std.mem.startsWith(u8, detail, "data:"))
+        "Inline data: images must declare image/png, image/jpeg, image/gif, image/webp or image/avif; image/svg+xml and document types are not images"
+    else
+        remediation;
     const msg = if (detail.len > 0)
         std.fmt.allocPrint(gpa, "{s}: {s}", .{ message, detail }) catch message
     else
@@ -769,7 +803,7 @@ pub fn printDiagnostic(gpa: std.mem.Allocator, err: AssetError, source_path: []c
         .severity = .error_,
         .code = code,
         .message = msg,
-        .remediation = remediation,
+        .remediation = guidance,
         .source_path = locus,
         .line = fail.line,
         .column = fail.column,
@@ -821,6 +855,17 @@ test "isPassthroughImageDest" {
     try std.testing.expect(isPassthroughImageDest("http://example.com/x.png"));
     try std.testing.expect(isPassthroughImageDest("//cdn/x.png"));
     try std.testing.expect(isPassthroughImageDest("data:image/png;base64,xx"));
+    try std.testing.expect(isPassthroughImageDest("data:image/jpeg,xx"));
+    try std.testing.expect(isPassthroughImageDest("data:IMAGE/WebP;base64,xx"));
+    // A document in an image slot is not an image, and neither is a
+    // script-bearing SVG. Both fall through to local-path handling and fail
+    // with EASSET rather than reaching dist/.
+    try std.testing.expect(!isPassthroughImageDest("data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=="));
+    try std.testing.expect(!isPassthroughImageDest("data:image/svg+xml;base64,xx"));
+    try std.testing.expect(!isPassthroughImageDest("data:application/javascript,alert(1)"));
+    try std.testing.expect(!isPassthroughImageDest("data:image/pngX;base64,xx"));
+    try std.testing.expect(!isPassthroughImageDest("data:"));
+    try std.testing.expect(!isPassthroughImageDest("data:image/png"));
     try std.testing.expect(!isPassthroughImageDest("intro.assets/x.svg"));
     try std.testing.expect(!isPassthroughImageDest("/abs.svg"));
 }
