@@ -41,6 +41,7 @@ per topic:
 | Topic | Canonical normative document |
 |-------|------------------------------|
 | Frontmatter grammar | [frontmatter.md](frontmatter.md) |
+| RSS 2.0 export | [rss-2.0.md](rss-2.0.md) |
 | Source paths and entity IDs | [identity-and-paths.md](identity-and-paths.md) |
 | Discovery / scanning | [scanner.md](scanner.md) |
 | Parent / graph validation (Trunk / Satellite) | [ir-schema.md](ir-schema.md) (graph section); `parent` field shape in [frontmatter.md](frontmatter.md) |
@@ -68,7 +69,8 @@ per topic:
 
 | Document | Topic |
 |----------|-------|
-| [frontmatter.md](frontmatter.md) | Closed frontmatter grammar; keys `id`, `title`, `parent`, `status`, `tags`, and bounded `relations` only |
+| [frontmatter.md](frontmatter.md) | Closed frontmatter grammar; `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, and `summary` only |
+| [rss-2.0.md](rss-2.0.md) | Deterministic RSS 2.0 projection and publication contract |
 | [identity-and-paths.md](identity-and-paths.md) | Source paths, entity ids, `/` separators, `.md`/`.mdx` case rules |
 | [scanner.md](scanner.md) | Deterministic discovery walk, sort key, symlink policy (m4) |
 | [diagnostics.md](diagnostics.md) | Stable categories (`EDUPLICATEID`, …), severity, exit codes |

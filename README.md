@@ -4,7 +4,7 @@
 
 Boris is a deterministic documentation compiler and static-site generator. It
 turns Markdown into a validated static site, then can export the same content
-graph as JSON IR, RAG, an AI Context Bundle, or `llms.txt`.
+graph as JSON IR, RAG, an AI Context Bundle, `llms.txt`, or RSS 2.0.
 
 Write content locally. Build with one native binary. Get output you can inspect,
 serve, archive, or hand to another tool.
@@ -23,7 +23,8 @@ Markdown + frontmatter
           ├── JSON IR            (--out)
           ├── RAG corpus         (--rag)
           ├── AI Context Bundle  (--context)
-          └── llms.txt map       (--llms)
+          ├── llms.txt map       (--llms)
+          └── RSS 2.0 feed       (--rss)
 ```
 
 The content model is deliberately understandable: **Trunks** are primary
@@ -39,7 +40,7 @@ cycles fail with diagnostics instead of quietly producing a broken site.
 - Closed, explicit frontmatter rather than unrestricted YAML or executable MDX.
 - Incremental builds, watch mode, isolated targets, and bounded page workers.
 - JSON IR with typed dependency edges and reverse indexes.
-- Deterministic RAG, Context Bundle, and `llms.txt` exports from the same tree.
+- Deterministic RAG, Context Bundle, `llms.txt`, and RSS 2.0 exports from the same tree.
 - Standalone migration labs for Astro/Starlight, WordPress, Instagram, Obsidian,
   Notion, and related source shapes.
 
@@ -82,6 +83,7 @@ Useful first commands:
 ./zig-out/bin/boris --rag-dir ./uploads/rag --scope mascots --split-size 262144 --bundles-only
 ./zig-out/bin/boris --context-dir ./uploads/context --scope mascots/genny --split-size 131072
 ./zig-out/bin/boris --llms --quiet             # llms.txt
+./zig-out/bin/boris --rss --site-url https://docs.example/ --rss-title "Example Docs" --rss-description "Recent updates" --quiet
 ./zig-out/bin/boris check                      # graph-health report
 ./zig-out/bin/boris impact getting-started    # dependency impact report
 zig build test
@@ -141,9 +143,17 @@ the manifests as the record of exactly what an LLM received.
 | `boris --rag` | RAG corpus | LLM retrieval and audits |
 | `boris --context` | Context Bundle | Provenance-rich agent context |
 | `boris --llms` | `llms.txt` | Lightweight machine discovery |
+| `boris --rss` | RSS 2.0 XML | Recent documentation updates |
 
 These are separate output modes from the same source tree. They do not silently
 merge into one opaque build product.
+
+RSS is opt-in and does not modify themes. After publishing `rss.xml`, add this
+standard discovery hint to a layout when the deployed feed URL is known:
+
+```html
+<link rel="alternate" type="application/rss+xml" title="Feed title" href="/rss.xml">
+```
 
 ## Benchmarking
 
@@ -185,7 +195,7 @@ deliberate scope cuts. AI accelerated exploration and execution; the project’s
 contracts, boundaries, acceptance decisions, and final merges remained
 human-steered.
 
-The `--context`, `--rag`, and `--llms` modes are practical parts of the product,
+The `--context`, `--rag`, `--llms`, and `--rss` modes are practical parts of the product,
 not hosted AI services. They emit local, deterministic artifacts that can be
 reviewed or uploaded to an LLM when useful.
 
@@ -193,7 +203,7 @@ reviewed or uploaded to an LLM when useful.
 
 - [x] Deterministic HTML, JSON IR, graph validation, and native Apex Markdown.
 - [x] Incremental/watch builds, bounded jobs, multi-target output, and assets.
-- [x] RAG, Context Bundle, and `llms.txt` exports.
+- [x] RAG, Context Bundle, `llms.txt`, and RSS 2.0 exports.
 - [x] Migration labs and real-site dogfood evidence.
 - [x] v0.7.0 release and migration-lab theme/link evidence.
 - [x] v0.8.0 release packaging, ApexMarkdown 1.1.13, and source-RAG upload ergonomics.
