@@ -102,6 +102,25 @@ pub const Sink = struct {
         try self.buf.appendSlice(self.gpa, value);
     }
 
+    /// Append a path segment in RFC 3986 percent-encoded form. This is a
+    /// structural primitive rather than an escaping opt-out: callers supply
+    /// the logical path and the sink owns the byte representation used in a
+    /// URI. A slash remains a separator so nested compiler output paths keep
+    /// their hierarchy.
+    pub fn uriPath(self: *Sink, path: []const u8) !void {
+        const hex = "0123456789ABCDEF";
+        for (path) |byte| {
+            const safe = std.ascii.isAlphanumeric(byte) or byte == '-' or byte == '.' or byte == '_' or byte == '~' or byte == '/';
+            if (safe) {
+                try self.buf.append(self.gpa, byte);
+            } else {
+                try self.buf.append(self.gpa, '%');
+                try self.buf.append(self.gpa, hex[byte >> 4]);
+                try self.buf.append(self.gpa, hex[byte & 0x0f]);
+            }
+        }
+    }
+
     // --- structured composites -------------------------------------------
 
     /// `key: <encoded scalar>\n` for YAML frontmatter.
@@ -282,4 +301,12 @@ test "num writes decimal digits" {
             try s.num(7);
         }
     }.f, "part: 7");
+}
+
+test "uriPath preserves hierarchy and percent-encodes path bytes" {
+    try expectSink(struct {
+        fn f(s: *Sink) !void {
+            try s.uriPath("guides/a b.html");
+        }
+    }.f, "guides/a%20b.html");
 }

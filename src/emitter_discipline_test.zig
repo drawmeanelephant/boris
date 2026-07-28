@@ -137,6 +137,16 @@ const modules = [_]Module{
     .{ .name = "pathutil.zig", .class = .other },
     .{ .name = "pipeline.zig", .class = .other },
     .{ .name = "rag_body.zig", .class = .other },
+    .{
+        .name = "rss.zig",
+        .class = .{ .emitter = .{
+            .encoder = .sink,
+            .note = "RSS 2.0 XML; site URLs are validated before the reviewed raw URL join",
+        } },
+        .source = @embedFile("rss.zig"),
+        .raw_trusted_allowed = 1,
+    },
+    .{ .name = "rss_date.zig", .class = .other },
     .{ .name = "scanner.zig", .class = .other },
     .{ .name = "source_io.zig", .class = .other },
     .{ .name = "structured_out.zig", .class = .other },

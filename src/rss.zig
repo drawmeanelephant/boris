@@ -6,7 +6,10 @@ const graph = @import("graph.zig");
 const identity = @import("identity.zig");
 const pipeline = @import("pipeline.zig");
 const rss_date = @import("rss_date.zig");
+const structured_out = @import("structured_out.zig");
 const target = @import("target.zig");
+
+const Sink = structured_out.Sink;
 
 pub const Options = struct {
     content_root: []const u8 = "content",
@@ -39,8 +42,73 @@ const Item = struct {
 
 pub const Error = error{ InvalidSiteUrl, InvalidXml, InvalidLimit };
 
-fn isUrlSpace(byte: u8) bool {
-    return byte <= 0x20 or byte == 0x7f;
+fn isUnreserved(byte: u8) bool {
+    return std.ascii.isAlphanumeric(byte) or byte == '-' or byte == '.' or byte == '_' or byte == '~';
+}
+
+fn isSubDelimiter(byte: u8) bool {
+    return switch (byte) {
+        '!', '$', '&', '\'', '(', ')', '*', '+', ',', ';', '=' => true,
+        else => false,
+    };
+}
+
+fn isHex(byte: u8) bool {
+    return std.ascii.isHex(byte);
+}
+
+fn validatePort(port: []const u8) Error!void {
+    if (port.len == 0) return error.InvalidSiteUrl;
+    for (port) |byte| if (!std.ascii.isDigit(byte)) return error.InvalidSiteUrl;
+    _ = std.fmt.parseInt(u16, port, 10) catch return error.InvalidSiteUrl;
+}
+
+fn validateDnsHost(host: []const u8) Error!void {
+    if (host.len == 0 or host.len > 253) return error.InvalidSiteUrl;
+    var label_start: usize = 0;
+    for (host, 0..) |byte, index| {
+        if (byte == '.') {
+            const label_len = index - label_start;
+            if (label_len == 0 or label_len > 63 or host[label_start] == '-' or host[index - 1] == '-') return error.InvalidSiteUrl;
+            label_start = index + 1;
+        } else if (!(std.ascii.isAlphanumeric(byte) or byte == '-')) {
+            return error.InvalidSiteUrl;
+        }
+    }
+    const final_label_len = host.len - label_start;
+    if (final_label_len == 0 or final_label_len > 63 or host[label_start] == '-' or host[host.len - 1] == '-') return error.InvalidSiteUrl;
+}
+
+fn validateAuthority(authority: []const u8) Error!void {
+    if (authority.len == 0 or std.mem.indexOfScalar(u8, authority, '@') != null) return error.InvalidSiteUrl;
+    if (authority[0] == '[') {
+        const close = std.mem.indexOfScalar(u8, authority, ']') orelse return error.InvalidSiteUrl;
+        if (close == 1) return error.InvalidSiteUrl;
+        _ = Io.net.Ip6Address.parse(authority[1..close], 0) catch return error.InvalidSiteUrl;
+        const remainder = authority[close + 1 ..];
+        if (remainder.len == 0) return;
+        if (remainder[0] != ':') return error.InvalidSiteUrl;
+        return validatePort(remainder[1..]);
+    }
+
+    const colon = std.mem.lastIndexOfScalar(u8, authority, ':');
+    const host = if (colon) |index| authority[0..index] else authority;
+    if (std.mem.indexOfScalar(u8, host, ':') != null) return error.InvalidSiteUrl;
+    try validateDnsHost(host);
+    if (colon) |index| try validatePort(authority[index + 1 ..]);
+}
+
+fn validatePath(path: []const u8) Error!void {
+    var index: usize = 0;
+    while (index < path.len) : (index += 1) {
+        const byte = path[index];
+        if (isUnreserved(byte) or isSubDelimiter(byte) or byte == ':' or byte == '@' or byte == '/') continue;
+        if (byte == '%' and index + 2 < path.len and isHex(path[index + 1]) and isHex(path[index + 2])) {
+            index += 2;
+            continue;
+        }
+        return error.InvalidSiteUrl;
+    }
 }
 
 /// Validate a bounded absolute deployment URL and return the no-trailing-slash
@@ -51,35 +119,22 @@ pub fn normalizedSiteUrl(allocator: std.mem.Allocator, raw: []const u8) (Error |
     if (scheme_end >= raw.len) return error.InvalidSiteUrl;
     var host_end = scheme_end;
     while (host_end < raw.len and raw[host_end] != '/' and raw[host_end] != '?' and raw[host_end] != '#') : (host_end += 1) {
-        if (isUrlSpace(raw[host_end])) return error.InvalidSiteUrl;
+        if (raw[host_end] <= 0x20 or raw[host_end] >= 0x7f) return error.InvalidSiteUrl;
     }
-    if (host_end == scheme_end) return error.InvalidSiteUrl;
-    for (raw[host_end..]) |byte| if (isUrlSpace(byte) or byte == '?' or byte == '#') return error.InvalidSiteUrl;
+    try validateAuthority(raw[scheme_end..host_end]);
+    if (host_end < raw.len and (raw[host_end] == '?' or raw[host_end] == '#')) return error.InvalidSiteUrl;
+    try validatePath(raw[host_end..]);
     var end = raw.len;
     while (end > host_end and raw[end - 1] == '/') : (end -= 1) {}
     return try allocator.dupe(u8, raw[0..end]);
 }
 
-fn appendPercentEncodedPath(buf: *std.ArrayList(u8), allocator: std.mem.Allocator, path: []const u8) !void {
-    const hex = "0123456789ABCDEF";
-    for (path) |byte| {
-        const safe = std.ascii.isAlphanumeric(byte) or byte == '-' or byte == '.' or byte == '_' or byte == '~' or byte == '/';
-        if (safe) {
-            try buf.append(allocator, byte);
-        } else {
-            try buf.append(allocator, '%');
-            try buf.append(allocator, hex[byte >> 4]);
-            try buf.append(allocator, hex[byte & 0x0f]);
-        }
-    }
-}
-
-pub fn appendPageUrl(buf: *std.ArrayList(u8), allocator: std.mem.Allocator, site_url: []const u8, entity_id: []const u8) !void {
+fn appendPageUrl(buf: *Sink, allocator: std.mem.Allocator, site_url: []const u8, entity_id: []const u8) !void {
     const output_path = try identity.safeOutputRelativePath(allocator, entity_id);
     defer allocator.free(output_path);
-    try buf.appendSlice(allocator, site_url);
-    try buf.append(allocator, '/');
-    try appendPercentEncodedPath(buf, allocator, output_path);
+    try buf.rawTrusted("normalizedSiteUrl admits only ASCII RFC 3986 URL bytes", site_url);
+    try buf.lit("/");
+    try buf.uriPath(output_path);
 }
 
 fn validateXml(value: []const u8) Error!void {
@@ -106,28 +161,6 @@ fn validateXml(value: []const u8) Error!void {
     }
 }
 
-pub fn appendXmlText(buf: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) (Error || std.mem.Allocator.Error)!void {
-    try validateXml(value);
-    for (value) |byte| switch (byte) {
-        '&' => try buf.appendSlice(allocator, "&amp;"),
-        '<' => try buf.appendSlice(allocator, "&lt;"),
-        '>' => try buf.appendSlice(allocator, "&gt;"),
-        else => try buf.append(allocator, byte),
-    };
-}
-
-pub fn appendXmlAttribute(buf: *std.ArrayList(u8), allocator: std.mem.Allocator, value: []const u8) (Error || std.mem.Allocator.Error)!void {
-    try validateXml(value);
-    for (value) |byte| switch (byte) {
-        '&' => try buf.appendSlice(allocator, "&amp;"),
-        '<' => try buf.appendSlice(allocator, "&lt;"),
-        '>' => try buf.appendSlice(allocator, "&gt;"),
-        '"' => try buf.appendSlice(allocator, "&quot;"),
-        '\'' => try buf.appendSlice(allocator, "&apos;"),
-        else => try buf.append(allocator, byte),
-    };
-}
-
 fn itemLess(_: void, a: Item, b: Item) bool {
     if (rss_date.lessThan(a.timestamp, b.timestamp)) return false;
     if (rss_date.lessThan(b.timestamp, a.timestamp)) return true;
@@ -139,15 +172,11 @@ fn eligible(node: graph.Node) bool {
     return node.status == null or std.mem.eql(u8, node.status.?, "published") or std.mem.eql(u8, node.status.?, "archived");
 }
 
-fn appendElement(buf: *std.ArrayList(u8), allocator: std.mem.Allocator, indent: []const u8, name: []const u8, value: []const u8) !void {
-    try buf.appendSlice(allocator, indent);
-    try buf.append(allocator, '<');
-    try buf.appendSlice(allocator, name);
-    try buf.append(allocator, '>');
-    try appendXmlText(buf, allocator, value);
-    try buf.appendSlice(allocator, "</");
-    try buf.appendSlice(allocator, name);
-    try buf.appendSlice(allocator, ">\n");
+fn appendElement(buf: *Sink, comptime indent: []const u8, comptime name: []const u8, value: []const u8) !void {
+    try validateXml(value);
+    try buf.lit(indent ++ "<" ++ name ++ ">");
+    try buf.field(.xml_text, value);
+    try buf.lit("</" ++ name ++ ">\n");
 }
 
 pub fn render(allocator: std.mem.Allocator, pages: []const graph.Node, options: Options) ![]u8 {
@@ -164,32 +193,33 @@ pub fn render(allocator: std.mem.Allocator, pages: []const graph.Node, options: 
     std.mem.sort(Item, items.items, {}, itemLess);
     if (items.items.len > options.limit) items.shrinkRetainingCapacity(options.limit);
 
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    try out.appendSlice(allocator, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<rss version=\"2.0\">\n  <channel>\n");
-    try appendElement(&out, allocator, "    ", "title", options.title);
-    try appendElement(&out, allocator, "    ", "link", site_url);
-    try appendElement(&out, allocator, "    ", "description", options.description);
-    try appendElement(&out, allocator, "    ", "generator", pipeline.compiler_id);
+    var out = Sink.init(allocator);
+    errdefer out.deinit();
+    try out.lit("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<rss version=\"2.0\">\n  <channel>\n");
+    try appendElement(&out, "    ", "title", options.title);
+    try appendElement(&out, "    ", "link", site_url);
+    try appendElement(&out, "    ", "description", options.description);
+    try appendElement(&out, "    ", "generator", pipeline.compiler_id);
     for (items.items) |item| {
-        try out.appendSlice(allocator, "    <item>\n");
-        try appendElement(&out, allocator, "      ", "title", item.node.title orelse item.node.id);
-        var url: std.ArrayList(u8) = .empty;
-        defer url.deinit(allocator);
+        try out.lit("    <item>\n");
+        try appendElement(&out, "      ", "title", item.node.title orelse item.node.id);
+        var url = Sink.init(allocator);
+        defer url.deinit();
         try appendPageUrl(&url, allocator, site_url, item.node.id);
-        try appendElement(&out, allocator, "      ", "link", url.items);
-        try out.appendSlice(allocator, "      <guid isPermaLink=\"true\">");
-        try appendXmlText(&out, allocator, url.items);
-        try out.appendSlice(allocator, "</guid>\n");
-        try appendElement(&out, allocator, "      ", "description", item.node.summary.?);
-        try out.appendSlice(allocator, "      <pubDate>");
-        try rss_date.appendRfc822(&out, allocator, item.timestamp);
-        try out.appendSlice(allocator, "</pubDate>\n");
-        for (item.node.tags) |tag| try appendElement(&out, allocator, "      ", "category", tag);
-        try out.appendSlice(allocator, "    </item>\n");
+        try appendElement(&out, "      ", "link", url.items());
+        try out.lit("      <guid isPermaLink=\"true\">");
+        try out.field(.xml_text, url.items());
+        try out.lit("</guid>\n");
+        try appendElement(&out, "      ", "description", item.node.summary.?);
+        var date: std.ArrayList(u8) = .empty;
+        defer date.deinit(allocator);
+        try rss_date.appendRfc822(&date, allocator, item.timestamp);
+        try appendElement(&out, "      ", "pubDate", date.items);
+        for (item.node.tags) |tag| try appendElement(&out, "      ", "category", tag);
+        try out.lit("    </item>\n");
     }
-    try out.appendSlice(allocator, "  </channel>\n</rss>\n");
-    return try out.toOwnedSlice(allocator);
+    try out.lit("  </channel>\n</rss>\n");
+    return try out.toOwnedSlice();
 }
 
 fn ensureParent(io: Io, path: []const u8) !void {
@@ -197,10 +227,11 @@ fn ensureParent(io: Io, path: []const u8) !void {
 }
 
 fn publish(io: Io, allocator: std.mem.Allocator, path: []const u8, data: []const u8) !void {
-    const stage = try std.fmt.allocPrint(allocator, "{s}.boris-stage", .{path});
-    defer allocator.free(stage);
-    const previous = try std.fmt.allocPrint(allocator, "{s}.boris-prev", .{path});
-    defer allocator.free(previous);
+    _ = allocator;
+    var stage_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const stage = try std.fmt.bufPrint(&stage_buf, "{s}.boris-stage", .{path});
+    var previous_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const previous = try std.fmt.bufPrint(&previous_buf, "{s}.boris-prev", .{path});
     const cwd = Io.Dir.cwd();
     cwd.deleteFile(io, stage) catch {};
     cwd.deleteFile(io, previous) catch {};
@@ -251,10 +282,19 @@ test "RSS renderer is deterministic, sorted, escaped, and bounded" {
 }
 
 test "XML escaping and site URL validation reject unsafe values" {
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(std.testing.allocator);
-    try appendXmlAttribute(&out, std.testing.allocator, "\"'&<>");
-    try std.testing.expectEqualStrings("&quot;&apos;&amp;&lt;&gt;", out.items);
-    try std.testing.expectError(error.InvalidXml, appendXmlText(&out, std.testing.allocator, "bad\x01"));
-    try std.testing.expectError(error.InvalidSiteUrl, normalizedSiteUrl(std.testing.allocator, "https://example.test/?x=1"));
+    try std.testing.expectError(error.InvalidXml, validateXml("bad\x01"));
+    const invalid = [_][]const u8{
+        "https://example.test/?x=1",
+        "https://example.test/<not-a-url>",
+        "https://example.test/%not-encoded",
+        "https:///docs",
+        "https://example.test:port/docs",
+        "https://user@example.test/docs",
+        "https://exa mple.test/docs",
+        "https://[::1/docs",
+    };
+    for (invalid) |url| try std.testing.expectError(error.InvalidSiteUrl, normalizedSiteUrl(std.testing.allocator, url));
+    const normalized = try normalizedSiteUrl(std.testing.allocator, "https://[2001:db8::1]:8443/docs/%E2%9C%93/");
+    defer std.testing.allocator.free(normalized);
+    try std.testing.expectEqualStrings("https://[2001:db8::1]:8443/docs/%E2%9C%93", normalized);
 }
