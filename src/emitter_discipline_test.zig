@@ -140,6 +140,7 @@ const modules = [_]Module{
     .{ .name = "scanner.zig", .class = .other },
     .{ .name = "source_io.zig", .class = .other },
     .{ .name = "structured_out.zig", .class = .other },
+    .{ .name = "svg_policy.zig", .class = .other },
     .{ .name = "target.zig", .class = .other },
     .{ .name = "textile.zig", .class = .other },
     .{ .name = "theme.zig", .class = .other },
