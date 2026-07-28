@@ -36,6 +36,7 @@
 const std = @import("std");
 const identity = @import("identity.zig");
 const page_mod = @import("page.zig");
+const unicode_policy = @import("unicode_policy.zig");
 
 pub const max_title_bytes = page_mod.max_title_bytes;
 pub const max_entity_id_bytes = page_mod.max_entity_id_bytes;
@@ -61,6 +62,9 @@ pub const Category = enum {
     EINVALIDUTF8,
     /// Frontmatter `id` fails entity-id shape rules.
     EINVALIDPATH,
+    /// Source contains a Unicode code point with no legitimate authoring use —
+    /// controls, noncharacters, bidi overrides, or smuggled tag characters.
+    EUNICODE,
 
     pub fn name(self: Category) []const u8 {
         return @tagName(self);
@@ -69,6 +73,8 @@ pub const Category = enum {
 
 pub const Diagnostic = struct {
     category: Category,
+    /// Optional specific remediation. Empty means the caller's default applies.
+    remediation: []const u8 = "",
     /// 1-based line in source; 1 when N/A.
     line: u32 = 1,
     /// 1-based byte column within the line; 1 when N/A.
@@ -91,6 +97,10 @@ pub const ParsedDocument = struct {
     body_offset: usize = 0,
     /// Parsed fields (source views). Defaults apply when keys are absent.
     meta: FrontmatterView = .{},
+    /// Advisory Unicode finding: invisible characters that are also legitimate
+    /// in some scripts, so they are reported rather than refused. Callers that
+    /// surface diagnostics should emit this at warning severity.
+    unicode_warning: ?Diagnostic = null,
 };
 
 pub const ParseResult = struct {
@@ -312,6 +322,31 @@ pub fn parse(source: []const u8) ParseResult {
     }
     if (source.len > 0 and !std.unicode.utf8ValidateSlice(source)) {
         return fail(.EINVALIDUTF8, 1, 1, "source is not valid UTF-8");
+    }
+
+    // Well-formed UTF-8 is not the same as reviewable UTF-8. Invisible code
+    // points reach every downstream consumer intact, so they are refused here
+    // rather than in an escaper that cannot see them (see unicode_policy.zig).
+    const unicode = unicode_policy.summarize(source);
+    if (unicode.rejection) |finding| {
+        const at = unicode_policy.locate(source, finding.offset);
+        return .{ .diagnostic = .{
+            .category = .EUNICODE,
+            .remediation = finding.reason.remediation(),
+            .line = at.line,
+            .column = at.column,
+            .message = finding.reason.message(),
+        } };
+    }
+    if (unicode.warning) |finding| {
+        const at = unicode_policy.locate(source, finding.offset);
+        doc.unicode_warning = .{
+            .category = .EUNICODE,
+            .remediation = finding.reason.remediation(),
+            .line = at.line,
+            .column = at.column,
+            .message = finding.reason.message(),
+        };
     }
 
     // --- optional frontmatter ---------------------------------------------

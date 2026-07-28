@@ -105,6 +105,8 @@ site cannot serve.
 | `EPARENTCYCLE` | error | Cycle in parent edges | `graph.validateTopology` |
 | `EFRONTMATTER` | error | Unclosed fence, bad line, unknown key, duplicate key, unsupported syntax, empty/oversize value, invalid status/tags | `parser.parse` → pipeline |
 | `EINVALIDUTF8` | error | Source not valid UTF-8, or leading UTF-8 BOM | `parser.parse` → pipeline |
+| `EUNICODE` | error | Source contains a code point with no legitimate authoring use: a control character, a Unicode noncharacter, a deprecated format control, an interlinear annotation, a bidi embedding/override (U+202A–U+202E), an unclosed bidi isolate, an interior U+FEFF, or a tag character outside an emoji subdivision-flag sequence | `parser.parse` → pipeline |
+| `EUNICODE` | warning | Source contains invisible characters in a shape that reads as smuggling — a run of three or more, or zero-width characters interleaved between ASCII letters. Advisory only: ZWJ, ZWNJ, ZWSP, word joiner and soft hyphen are load-bearing in emoji sequences and in Persian, Indic and CJK text, so they are reported and never rewritten | `parser.parse` → pipeline |
 | `EINVALIDPATH` | error | Path or entity id cannot be canonicalized; illegal segments; absolute path; empty / `.` / `..` components; invalid frontmatter `id:`; **or** two pages’ entity ids differ only in letter case (output collision on case-insensitive FS) | scanner / `parser.parse` / `graph.diagnoseDuplicateIds` → pipeline |
 | `ETEXTILE` | error | Explicit Textile input-family mismatch, unsupported Textile feature, malformed supported syntax, or unsafe Textile link | scanner / `textile.toMarkdown` → pipeline / HTML |
 | `ECOMPONENT` | error | Aside / component tokenizer failure (unknown PascalCase tag, nested Aside, invalid kind/id, bad attributes, unterminated Aside) | `aside.tokenizeBody` → pipeline |
@@ -218,6 +220,7 @@ categories** and non-publication of graph IR on failure.
 | `EPARENTCYCLE` | `cycle`, contract `cycles` / `longer-cycle` |
 | `EFRONTMATTER` | `duplicate-key`, `unclosed-frontmatter`, `nested-mapping` |
 | `EINVALIDUTF8` | `invalid-utf8` |
+| `EUNICODE` | `fixtures/hostile-output/unicode-smuggling` (rejects) and `fixtures/hostile-output/legitimate-punctuation` (must not reject) |
 | `EINVALIDPATH` | `invalid-path-id`, contract `invalid-id`, contract `case-id-collision` |
 
 `EUSAGE` and `EIO` are CLI/runtime categories; content-tree fixtures do not
