@@ -219,6 +219,15 @@ pub fn build(b: *std.Build) void {
     const run_content_asset_tests = b.addRunArtifact(content_asset_tests);
     run_content_asset_tests.setCwd(b.path("."));
 
+    const svg_policy_mod = b.createModule(.{
+        .root_source_file = b.path("src/svg_policy.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const svg_policy_tests = b.addTest(.{ .root_module = svg_policy_mod });
+    const run_svg_policy_tests = b.addRunArtifact(svg_policy_tests);
+    run_svg_policy_tests.setCwd(b.path("."));
+
     const layout_select_mod = b.createModule(.{
         .root_source_file = b.path("src/layout_select.zig"),
         .target = target,
@@ -614,6 +623,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_assemble_tests.step);
     test_step.dependOn(&run_theme_tests.step);
     test_step.dependOn(&run_content_asset_tests.step);
+    test_step.dependOn(&run_svg_policy_tests.step);
     test_step.dependOn(&run_layout_select_tests.step);
     test_step.dependOn(&run_compile_tests.step);
     test_step.dependOn(&run_hardening_tests.step);

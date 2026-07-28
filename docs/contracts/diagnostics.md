@@ -118,7 +118,7 @@ site cannot serve.
 | `ERELATIONMISSING` | error | Semantic relation target entity id is not in the page graph | semantic relation validation → IR |
 | `ERELATIONSELF` | error | Semantic relation targets its source page | semantic relation validation → IR |
 | `ERELATIONDUPLICATE` | error | Same semantic `(kind,target)` tuple appears more than once | semantic relation validation / parser → IR |
-| `EASSET` | error | Content-local page asset path invalid, outside the owning page’s sibling tree, missing, symlink, not a regular file, or published-path collision | `content_asset` → HTML |
+| `EASSET` | error | Content-local page asset path invalid, outside the owning page’s sibling tree, missing, symlink, not a regular file, contains active SVG content, or collides at publication | `content_asset` → HTML |
 | `EROUTEMISSING` | error | Published local `href`/`src` resolves to no output this build intends to keep | `link_audit` → HTML commit |
 | `EROUTEESCAPE` | error | Published local `href`/`src` climbs above the output root and can never be served | `link_audit` → HTML commit |
 | `EFRAGMENTMISSING` | reserved | Published local reference resolves, but its `#fragment` is not an id on the target page. Not yet emitted; see [documentation-links.md](documentation-links.md) | — |
