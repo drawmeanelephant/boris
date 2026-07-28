@@ -661,8 +661,9 @@ fn findTagPage(tags: []const HashtagPage, tag: []const u8) ?usize {
 }
 
 /// Render untrusted text as paragraphs. Markdown punctuation and raw HTML are
-/// escaped first; the only Markdown links emitted here are validated mentions
-/// and generated local hashtag pages.
+/// escaped first; validated mentions use Markdown links and generated local
+/// hashtag pages use escaped HTML anchors so Boris does not classify their
+/// public relative `.html` paths as content-local assets.
 fn renderCaption(allocator: std.mem.Allocator, rec: IgRecord, tags: []const HashtagPage) ![]u8 {
     var normalized: std.ArrayList(u8) = .empty;
     defer normalized.deinit(allocator);
@@ -702,7 +703,11 @@ fn renderCaption(allocator: std.mem.Allocator, rec: IgRecord, tags: []const Hash
                         defer allocator.free(target);
                         const href = try relativePublishedHref(allocator, rec.entity_id, target);
                         defer allocator.free(href);
-                        try out.print(allocator, "[#{s}]({s})", .{ raw_tag, href });
+                        const href_html = try escapeHtmlAttr(allocator, href);
+                        defer allocator.free(href_html);
+                        const tag_html = try escapeHtmlAttr(allocator, raw_tag);
+                        defer allocator.free(tag_html);
+                        try out.print(allocator, "<a href=\"{s}\">#{s}</a>", .{ href_html, tag_html });
                         j = end;
                         continue;
                     }
@@ -1412,7 +1417,10 @@ fn writeRecordMarkdown(allocator: std.mem.Allocator, rec: IgRecord, tag_pages: [
         tag_n += 1;
     }
 
-    const title = firstNonEmptyCaptionLine(rec.title);
+    // Boris frontmatter titles are bounded. Keep the full caption in the
+    // visible body/provenance, but use the same UTF-8-safe display title bound
+    // already used by the migration report.
+    const title = firstLineTitle(rec.title, 120);
     const display_title = if (title.len > 0) title else kindFallbackSlug(rec.kind);
     const fm = try buildFrontmatter(allocator, rec.entity_id, display_title, "instagram", "published", tags_buf[0..tag_n]);
     defer allocator.free(fm);
@@ -1627,11 +1635,13 @@ fn writeHashtagMarkdown(allocator: std.mem.Allocator, page: HashtagPage, records
         defer allocator.free(target);
         const href = try relativePublishedHref(allocator, entity, target);
         defer allocator.free(href);
-        const label = try escapeMdLinkLabel(allocator, if (firstNonEmptyCaptionLine(record.title).len > 0) firstNonEmptyCaptionLine(record.title) else kindFallbackSlug(record.kind));
+        const label = try escapeHtmlAttr(allocator, if (firstNonEmptyCaptionLine(record.title).len > 0) firstNonEmptyCaptionLine(record.title) else kindFallbackSlug(record.kind));
         defer allocator.free(label);
         const date = try formatHumanUtc(allocator, record.creation_timestamp);
         defer allocator.free(date);
-        try out.print(allocator, "- [{s}]({s}) — {s} · {s}\n", .{ label, href, date, record.kind.name() });
+        const href_html = try escapeHtmlAttr(allocator, href);
+        defer allocator.free(href_html);
+        try out.print(allocator, "- <a href=\"{s}\">{s}</a> — {s} · {s}\n", .{ href_html, label, date, record.kind.name() });
     }
     try out.appendSlice(allocator, "\n<!-- boris-migration-provenance\nsource_format: instagram-takeout\nrole: hashtag-index\ntag_slug: ");
     try out.appendSlice(allocator, page.slug);
@@ -1688,9 +1698,11 @@ fn writeTrunkMarkdown(allocator: std.mem.Allocator, records: []const IgRecord, t
             defer allocator.free(target);
             const href = try relativePublishedHref(allocator, "instagram", target);
             defer allocator.free(href);
-            const display = try escapeMdLinkLabel(allocator, tag.display);
+            const display = try escapeHtmlAttr(allocator, tag.display);
             defer allocator.free(display);
-            try body.print(allocator, "[#{s}]({s}) ({d})  ", .{ display, href, tag.record_indexes.items.len });
+            const href_html = try escapeHtmlAttr(allocator, href);
+            defer allocator.free(href_html);
+            try body.print(allocator, "<a href=\"{s}\">#{s}</a> ({d})  ", .{ href_html, display, tag.record_indexes.items.len });
         }
         try body.appendSlice(allocator, "\n\n");
     }
@@ -2712,7 +2724,8 @@ test "fixture: archive index links published .html paths that exist as content p
 
     // Must not emit source-tree .md hrefs for child records (those 404 under a
     // static server that only serves Boris HTML publish output).
-    try std.testing.expect(std.mem.indexOf(u8, trunk, "](instagram/") != null);
+    try std.testing.expect(std.mem.indexOf(u8, trunk, "href=\"instagram/tags/") != null);
+    try std.testing.expect(std.mem.indexOf(u8, trunk, "](instagram/") == null);
     try std.testing.expect(std.mem.indexOf(u8, trunk, "href=\"instagram/posts/") != null);
     try std.testing.expect(std.mem.indexOf(u8, trunk, ".html") != null);
     try std.testing.expect(std.mem.indexOf(u8, trunk, ".md)") == null);
