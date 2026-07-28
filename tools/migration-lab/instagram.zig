@@ -12,8 +12,8 @@ const std = @import("std");
 const Io = std.Io;
 
 pub const format_id = "boris-instagram-migration-lab";
-pub const schema_version: u32 = 1;
-pub const tool_version = "0.1.0";
+pub const schema_version: u32 = 2;
+pub const tool_version = "0.2.0";
 
 /// Enough for `{entity_id}.html` (product entity ids max 255 bytes + suffix).
 const maxEntityIdHrefBytes: usize = 255 + ".html".len;
@@ -96,6 +96,11 @@ pub const IgRecord = struct {
     encoding_repaired: bool,
     encoding_suspect: bool,
     media: []MediaItem,
+    /// Durable external identity remains audit evidence; it is never used as
+    /// the public route unless a collision counter is insufficient.
+    durable_id: []const u8 = "",
+    slug: []const u8 = "",
+    hashtags: []const []const u8 = &.{},
     entity_id: []const u8,
     id_strategy: []const u8, // durable_export_id | fallback_hash
     conversion: ConversionClass,
@@ -122,7 +127,17 @@ pub const PageRecord = struct {
     source_json_path: []const u8,
     media_count: usize,
     id_strategy: []const u8,
+    human_slug: []const u8,
+    iso_timestamp: []const u8,
+    hashtags: []const []const u8,
+    cover_asset: []const u8,
     notes: []const []const u8,
+};
+
+const HashtagPage = struct {
+    display: []const u8,
+    slug: []const u8,
+    record_indexes: std.ArrayList(usize) = .empty,
 };
 
 pub const Report = struct {
@@ -176,6 +191,43 @@ fn writeBytes(io: Io, root: Io.Dir, rel_path: []const u8, data: []const u8) !voi
     try root.writeFile(io, .{ .sub_path = rel_path, .data = data });
 }
 
+const output_owner_marker = ".boris-instagram-migration-owned";
+
+fn dirIsEmpty(io: Io, dir: Io.Dir) bool {
+    var it = dir.iterate();
+    return (it.next(io) catch return false) == null;
+}
+
+fn prepareOwnedStage(io: Io, final_path: []const u8, stage_path: []const u8) !void {
+    const cwd = Io.Dir.cwd();
+    if (cwd.openDir(io, final_path, .{})) |final_dir| {
+        defer final_dir.close(io);
+        if (!dirIsEmpty(io, final_dir) and !pathExists(io, final_dir, output_owner_marker)) return error.RefuseUnownedOutput;
+    } else |_| {}
+    if (cwd.openDir(io, stage_path, .{})) |stage_dir| {
+        defer stage_dir.close(io);
+        if (!dirIsEmpty(io, stage_dir) and !pathExists(io, stage_dir, output_owner_marker)) return error.RefuseUnownedStage;
+        cwd.deleteTree(io, stage_path) catch return error.StageCleanupFailed;
+    } else |_| {}
+    try cwd.createDirPath(io, stage_path);
+}
+
+fn publishOwnedStage(io: Io, final_path: []const u8, stage_path: []const u8, backup_path: []const u8) !void {
+    const cwd = Io.Dir.cwd();
+    cwd.deleteTree(io, backup_path) catch {};
+    var moved_previous = false;
+    if (cwd.openDir(io, final_path, .{})) |final_dir| {
+        final_dir.close(io);
+        try cwd.rename(final_path, cwd, backup_path, io);
+        moved_previous = true;
+    } else |_| {}
+    cwd.rename(stage_path, cwd, final_path, io) catch |err| {
+        if (moved_previous) cwd.rename(backup_path, cwd, final_path, io) catch {};
+        return err;
+    };
+    if (moved_previous) cwd.deleteTree(io, backup_path) catch {};
+}
+
 fn copyFileRel(io: Io, src_root: Io.Dir, src_rel: []const u8, dst_root: Io.Dir, dst_rel: []const u8) !void {
     try ensureParent(io, dst_root, dst_rel);
     // Read + write (no shell; preserves source bytes).
@@ -187,6 +239,20 @@ fn copyFileRel(io: Io, src_root: Io.Dir, src_rel: []const u8, dst_root: Io.Dir, 
 fn pathExists(io: Io, root: Io.Dir, rel: []const u8) bool {
     _ = root.statFile(io, rel, .{}) catch return false;
     return true;
+}
+
+fn hasSymlinkComponent(io: Io, root: Io.Dir, rel: []const u8) bool {
+    var checked: std.ArrayList(u8) = .empty;
+    defer checked.deinit(std.heap.page_allocator);
+    var parts = std.mem.splitScalar(u8, rel, '/');
+    while (parts.next()) |part| {
+        if (checked.items.len > 0) checked.append(std.heap.page_allocator, '/') catch return true;
+        checked.appendSlice(std.heap.page_allocator, part) catch return true;
+        var target: [std.fs.max_path_bytes]u8 = undefined;
+        _ = root.readLink(io, checked.items, &target) catch continue;
+        return true;
+    }
+    return false;
 }
 
 fn jsonEscapeAppend(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
@@ -281,6 +347,95 @@ pub fn firstLineTitle(caption: []const u8, max_len: usize) []const u8 {
     while (end > 0 and (line[end] & 0xC0) == 0x80) end -= 1;
     if (end == 0) end = max_len; // pathological; avoid empty
     return line[0..end];
+}
+
+fn firstNonEmptyCaptionLine(caption: []const u8) []const u8 {
+    var lines = std.mem.splitScalar(u8, caption, '\n');
+    while (lines.next()) |line| {
+        const trimmed = trimSpace(line);
+        if (trimmed.len > 0) return trimmed;
+    }
+    return "";
+}
+
+fn kindDirectory(kind: RecordKind) []const u8 {
+    return switch (kind) {
+        .post => "posts",
+        .reel => "reels",
+        .story => "stories",
+        .other, .unknown => "other",
+    };
+}
+
+fn kindFallbackSlug(kind: RecordKind) []const u8 {
+    return switch (kind) {
+        .post => "photo-post",
+        .reel => "reel",
+        .story => "story",
+        .other, .unknown => "archive-record",
+    };
+}
+
+/// A deliberately boring, ASCII-only route slug. The product permits UTF-8
+/// ids, but ASCII routes remain portable between filesystems and static hosts.
+pub fn humanSlug(allocator: std.mem.Allocator, text: []const u8, fallback: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    var dashed = true;
+    for (text) |c| {
+        if ((c >= 'a' and c <= 'z') or (c >= '0' and c <= '9')) {
+            try out.append(allocator, c);
+            dashed = false;
+        } else if (c >= 'A' and c <= 'Z') {
+            try out.append(allocator, c + ('a' - 'A'));
+            dashed = false;
+        } else if (!dashed) {
+            try out.append(allocator, '-');
+            dashed = true;
+        }
+        if (out.items.len >= 72) break;
+    }
+    while (out.items.len > 0 and out.items[out.items.len - 1] == '-') _ = out.pop();
+    if (out.items.len == 0) {
+        try out.appendSlice(allocator, fallback);
+    }
+    return try out.toOwnedSlice(allocator);
+}
+
+fn civilFromDays(days_since_epoch: i64) struct { year: i32, month: u32, day: u32 } {
+    // Howard Hinnant's civil_from_days, UTC days since 1970-01-01.
+    const z = days_since_epoch + 719468;
+    const era = @divFloor(if (z >= 0) z else z - 146096, 146097);
+    const doe = z - era * 146097;
+    const yoe = @divFloor(doe - @divFloor(doe, 1460) + @divFloor(doe, 36524) - @divFloor(doe, 146096), 365);
+    var year: i32 = @intCast(yoe + era * 400);
+    const doy = doe - (365 * yoe + @divFloor(yoe, 4) - @divFloor(yoe, 100));
+    const mp = @divFloor(5 * doy + 2, 153);
+    const day: u32 = @intCast(doy - @divFloor(153 * mp + 2, 5) + 1);
+    const month: u32 = @intCast(mp + (if (mp < 10) @as(i64, 3) else @as(i64, -9)));
+    if (month <= 2) year += 1;
+    return .{ .year = year, .month = month, .day = day };
+}
+
+fn timestampParts(ts: i64) struct { civil: @TypeOf(civilFromDays(0)), hour: u32, minute: u32, second: u32 } {
+    const days = @divFloor(ts, 86400);
+    const seconds: u32 = @intCast(ts - days * 86400);
+    return .{ .civil = civilFromDays(days), .hour = seconds / 3600, .minute = (seconds % 3600) / 60, .second = seconds % 60 };
+}
+
+pub fn formatIsoTimestamp(allocator: std.mem.Allocator, ts: ?i64) ![]u8 {
+    if (ts == null) return try allocator.dupe(u8, "");
+    const p = timestampParts(ts.?);
+    return try std.fmt.allocPrint(allocator, "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}Z", .{ @as(u32, @intCast(p.civil.year)), p.civil.month, p.civil.day, p.hour, p.minute, p.second });
+}
+
+pub fn formatHumanUtc(allocator: std.mem.Allocator, ts: ?i64) ![]u8 {
+    if (ts == null) return try allocator.dupe(u8, "Undated");
+    const months = [_][]const u8{ "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" };
+    const p = timestampParts(ts.?);
+    const ampm = if (p.hour < 12) "AM" else "PM";
+    const hour12: u32 = if (p.hour % 12 == 0) 12 else p.hour % 12;
+    return try std.fmt.allocPrint(allocator, "{s} {d}, {d} · {d}:{d:0>2} {s} UTC", .{ months[p.civil.month - 1], p.civil.day, p.civil.year, hour12, p.minute, ampm });
 }
 
 fn jsonGetString(obj: std.json.Value, key: []const u8) []const u8 {
@@ -383,6 +538,174 @@ pub fn isSafeMediaUri(uri: []const u8) bool {
         if (std.mem.eql(u8, segment, "..")) return false;
     }
     return true;
+}
+
+fn isTagByte(c: u8) bool {
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_' or c >= 0x80;
+}
+
+fn asciiCaseEqual(a: []const u8, b: []const u8) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |ac, bc| {
+        const al = if (ac >= 'A' and ac <= 'Z') ac + ('a' - 'A') else ac;
+        const bl = if (bc >= 'A' and bc <= 'Z') bc + ('a' - 'A') else bc;
+        if (al != bl) return false;
+    }
+    return true;
+}
+
+pub fn extractHashtags(allocator: std.mem.Allocator, caption: []const u8) ![]const []const u8 {
+    var tags: std.ArrayList([]const u8) = .empty;
+    errdefer {
+        for (tags.items) |tag| allocator.free(tag);
+        tags.deinit(allocator);
+    }
+    var i: usize = 0;
+    while (i < caption.len) : (i += 1) {
+        if (caption[i] != '#') continue;
+        const start = i + 1;
+        var end = start;
+        while (end < caption.len and isTagByte(caption[end])) : (end += 1) {}
+        if (end == start) continue;
+        const tag = caption[start..end];
+        var duplicate = false;
+        for (tags.items) |old| if (asciiCaseEqual(old, tag)) { duplicate = true; break; };
+        if (!duplicate) try tags.append(allocator, try allocator.dupe(u8, tag));
+        i = end - 1;
+    }
+    return try tags.toOwnedSlice(allocator);
+}
+
+fn isMentionByte(c: u8) bool {
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_' or c == '.';
+}
+
+fn isMentionBoundary(c: u8) bool {
+    return !((c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_' or c == '.' or c == '@');
+}
+
+fn mentionEnd(caption: []const u8, at: usize) ?usize {
+    if (at > 0 and !isMentionBoundary(caption[at - 1])) return null;
+    var end = at + 1;
+    while (end < caption.len and isMentionByte(caption[end])) : (end += 1) {}
+    // A sentence-ending period is punctuation, not part of the username.
+    while (end > at + 1 and caption[end - 1] == '.') end -= 1;
+    const user = caption[at + 1 .. end];
+    if (user.len == 0 or user.len > 30 or user[0] == '.' or user[user.len - 1] == '.') return null;
+    // An email's @ starts after an identifier, rejected above, and a following
+    // dot-domain must never be linked as a username.
+    return end;
+}
+
+fn escapeHtmlAttr(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    for (value) |c| switch (c) {
+        '&' => try out.appendSlice(allocator, "&amp;"),
+        '<' => try out.appendSlice(allocator, "&lt;"),
+        '>' => try out.appendSlice(allocator, "&gt;"),
+        '"' => try out.appendSlice(allocator, "&quot;"),
+        '\'' => try out.appendSlice(allocator, "&#39;"),
+        else => try out.append(allocator, c),
+    };
+    return try out.toOwnedSlice(allocator);
+}
+
+fn appendEscapedCaptionByte(out: *std.ArrayList(u8), allocator: std.mem.Allocator, c: u8) !void {
+    switch (c) {
+        '<' => try out.appendSlice(allocator, "&lt;"),
+        '>' => try out.appendSlice(allocator, "&gt;"),
+        '&' => try out.appendSlice(allocator, "&amp;"),
+        '\\', '`', '*', '_', '[', ']', '(', ')', '#', '!', '+', '-' => { try out.append(allocator, '\\'); try out.append(allocator, c); },
+        else => try out.append(allocator, c),
+    }
+}
+
+fn relativePublishedHref(allocator: std.mem.Allocator, from_entity: []const u8, target: []const u8) ![]u8 {
+    const from_dir = std.fs.path.dirname(from_entity) orelse "";
+    var from_it = std.mem.splitScalar(u8, from_dir, '/');
+    var target_it = std.mem.splitScalar(u8, target, '/');
+    var from_parts: std.ArrayList([]const u8) = .empty;
+    defer from_parts.deinit(allocator);
+    var target_parts: std.ArrayList([]const u8) = .empty;
+    defer target_parts.deinit(allocator);
+    while (from_it.next()) |part| if (part.len > 0) try from_parts.append(allocator, part);
+    while (target_it.next()) |part| if (part.len > 0) try target_parts.append(allocator, part);
+    var common: usize = 0;
+    while (common < from_parts.items.len and common < target_parts.items.len and std.mem.eql(u8, from_parts.items[common], target_parts.items[common])) : (common += 1) {}
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    for (from_parts.items[common..]) |_| try out.appendSlice(allocator, "../");
+    for (target_parts.items[common..], 0..) |part, i| {
+        if (i > 0) try out.append(allocator, '/');
+        try out.appendSlice(allocator, part);
+    }
+    if (out.items.len == 0) try out.appendSlice(allocator, "./");
+    return try out.toOwnedSlice(allocator);
+}
+
+fn tagEntity(slug: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    return try std.fmt.allocPrint(allocator, "instagram/tags/{s}", .{slug});
+}
+
+fn findTagPage(tags: []const HashtagPage, tag: []const u8) ?usize {
+    for (tags, 0..) |page, i| if (asciiCaseEqual(page.display, tag)) return i;
+    return null;
+}
+
+/// Render untrusted text as paragraphs. Markdown punctuation and raw HTML are
+/// escaped first; the only Markdown links emitted here are validated mentions
+/// and generated local hashtag pages.
+fn renderCaption(allocator: std.mem.Allocator, rec: IgRecord, tags: []const HashtagPage) ![]u8 {
+    var normalized: std.ArrayList(u8) = .empty;
+    defer normalized.deinit(allocator);
+    var i: usize = 0;
+    while (i < rec.title.len) : (i += 1) {
+        if (rec.title[i] == '\r') {
+            if (i + 1 < rec.title.len and rec.title[i + 1] == '\n') i += 1;
+            try normalized.append(allocator, '\n');
+        } else try normalized.append(allocator, rec.title[i]);
+    }
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    var line_it = std.mem.splitScalar(u8, normalized.items, '\n');
+    var first_line = true;
+    while (line_it.next()) |raw_line| {
+        var line = raw_line;
+        while (line.len > 0 and (line[line.len - 1] == ' ' or line[line.len - 1] == '\t')) line = line[0 .. line.len - 1];
+        if (!first_line) try out.append(allocator, '\n');
+        first_line = false;
+        var j: usize = 0;
+        while (j < line.len) {
+            if (line[j] == '@') if (mentionEnd(line, j)) |end| {
+                const username = line[j + 1 .. end];
+                try out.print(allocator, "[@{s}](https://www.instagram.com/{s}/)", .{ username, username });
+                j = end;
+                continue;
+            };
+            if (line[j] == '#') {
+                var end = j + 1;
+                while (end < line.len and isTagByte(line[end])) : (end += 1) {}
+                if (end > j + 1) {
+                    const raw_tag = line[j + 1 .. end];
+                    if (findTagPage(tags, raw_tag)) |tag_index| {
+                        const entity = try tagEntity(tags[tag_index].slug, allocator);
+                        defer allocator.free(entity);
+                        const target = try std.fmt.allocPrint(allocator, "{s}.html", .{entity});
+                        defer allocator.free(target);
+                        const href = try relativePublishedHref(allocator, rec.entity_id, target);
+                        defer allocator.free(href);
+                        try out.print(allocator, "[#{s}]({s})", .{ raw_tag, href });
+                        j = end;
+                        continue;
+                    }
+                }
+            }
+            try appendEscapedCaptionByte(&out, allocator, line[j]);
+            j += 1;
+        }
+    }
+    return try out.toOwnedSlice(allocator);
 }
 
 fn parseMediaObject(retain: std.mem.Allocator, v: std.json.Value) !MediaItem {
@@ -782,15 +1105,15 @@ fn assignEntityIds(retain: std.mem.Allocator, records: []IgRecord) !void {
     for (records) |*rec| {
         var notes: std.ArrayList([]const u8) = .empty;
         var strategy: []const u8 = "fallback_hash";
-        var id_core: []u8 = undefined;
+        var durable_id: []const u8 = "";
 
         // Prefer durable id from first media uri
         if (rec.media.len > 0) {
             if (extractDurableId(rec.media[0].uri)) |did| {
-                id_core = try retain.dupe(u8, did);
+                durable_id = try retain.dupe(u8, did);
                 strategy = "durable_export_id";
             } else {
-                id_core = try fallbackHashId(retain, &.{ rec.source_json_path, rec.media[0].uri, rec.title });
+                durable_id = try fallbackHashId(retain, &.{ rec.source_json_path, rec.media[0].uri, rec.title });
                 try notes.append(retain, try retain.dupe(u8, "no durable media id; used fallback_hash"));
             }
         } else {
@@ -798,28 +1121,30 @@ fn assignEntityIds(retain: std.mem.Allocator, records: []IgRecord) !void {
                 try std.fmt.allocPrint(retain, "{d}", .{t})
             else
                 try retain.dupe(u8, "nots");
-            id_core = try fallbackHashId(retain, &.{ rec.source_json_path, ts_s, rec.title, rec.kind.name() });
+            durable_id = try fallbackHashId(retain, &.{ rec.source_json_path, ts_s, rec.title, rec.kind.name() });
             try notes.append(retain, try retain.dupe(u8, "empty media; used fallback_hash"));
-            rec.conversion = ConversionClass.worse(rec.conversion, .human_review);
         }
 
-        // prefix by kind for entity path
-        const prefix = switch (rec.kind) {
-            .post => "instagram",
-            .reel => "instagram",
-            .story => "instagram",
-            .other => "instagram",
-            .unknown => "instagram",
-        };
-        var entity = try std.fmt.allocPrint(retain, "{s}/{s}-{s}", .{ prefix, rec.kind.name(), id_core });
-        // disambiguate collisions
+        const title_line = firstNonEmptyCaptionLine(rec.title);
+        const slug = try humanSlug(retain, title_line, kindFallbackSlug(rec.kind));
+        const date_prefix = if (rec.creation_timestamp) |ts| blk: {
+            const p = timestampParts(ts).civil;
+            break :blk try std.fmt.allocPrint(retain, "{d:0>4}/{d:0>2}", .{ @as(u32, @intCast(p.year)), p.month });
+        } else try retain.dupe(u8, "undated");
+        const public_stem = if (rec.creation_timestamp) |ts| blk: {
+            const p = timestampParts(ts).civil;
+            break :blk try std.fmt.allocPrint(retain, "{d:0>4}-{d:0>2}-{d:0>2}-{s}", .{ @as(u32, @intCast(p.year)), p.month, p.day, slug });
+        } else slug;
+        const base = try std.fmt.allocPrint(retain, "instagram/{s}/{s}/{s}", .{ kindDirectory(rec.kind), date_prefix, public_stem });
+        // A readable numeric suffix is deterministic because records reach this
+        // function in stable source path/index order.
+        var entity = base;
         var n: usize = 2;
         while (used.contains(entity)) {
-            const alt = try std.fmt.allocPrint(retain, "{s}/{s}-{s}-{d}", .{ prefix, rec.kind.name(), id_core, n });
+            const alt = try std.fmt.allocPrint(retain, "{s}-{d}", .{ base, n });
             entity = alt;
             n += 1;
             try notes.append(retain, try retain.dupe(u8, "entity id collision; appended counter"));
-            rec.conversion = ConversionClass.worse(rec.conversion, .human_review);
         }
         try used.put(retain, entity, {});
 
@@ -841,10 +1166,6 @@ fn assignEntityIds(retain: std.mem.Allocator, records: []IgRecord) !void {
             rec.conversion = ConversionClass.worse(rec.conversion, .unsupported);
             try notes.append(retain, try retain.dupe(u8, "non-post archive kind"));
         }
-        if (rec.title.len == 0) {
-            rec.conversion = ConversionClass.worse(rec.conversion, .human_review);
-            try notes.append(retain, try retain.dupe(u8, "empty caption"));
-        }
         if (rec.encoding_repaired) {
             try notes.append(retain, try retain.dupe(u8, "repaired Meta Latin-1 escaped UTF-8 text"));
         }
@@ -853,6 +1174,9 @@ fn assignEntityIds(retain: std.mem.Allocator, records: []IgRecord) !void {
         }
 
         rec.entity_id = entity;
+        rec.durable_id = durable_id;
+        rec.slug = slug;
+        rec.hashtags = try extractHashtags(retain, rec.title);
         rec.id_strategy = try retain.dupe(u8, strategy);
         rec.notes = try notes.toOwnedSlice(retain);
         rec.output_path = try std.fmt.allocPrint(retain, "content/{s}.md", .{entity});
@@ -880,6 +1204,17 @@ fn classifyMediaPresence(io: Io, dump: Io.Dir, rec: *IgRecord, retain: std.mem.A
                 .{m.uri},
             ));
             rec.notes = try unsafe_notes.toOwnedSlice(retain);
+            continue;
+        }
+
+        if (hasSymlinkComponent(io, dump, uri)) {
+            m.present = false;
+            m.theme_rel = "";
+            rec.conversion = ConversionClass.worse(rec.conversion, .human_review);
+            var symlink_notes: std.ArrayList([]const u8) = .empty;
+            try symlink_notes.appendSlice(retain, rec.notes);
+            try symlink_notes.append(retain, try std.fmt.allocPrint(retain, "symlink media path rejected (not read, not copied): {s}", .{m.uri}));
+            rec.notes = try symlink_notes.toOwnedSlice(retain);
             continue;
         }
 
@@ -941,20 +1276,27 @@ fn formatTimestamp(ts: ?i64, buf: *[32]u8) []const u8 {
     return "unknown";
 }
 
-fn writeRecordMarkdown(allocator: std.mem.Allocator, rec: IgRecord) ![]u8 {
-    var tags_buf: [8][]const u8 = undefined;
+fn writeRecordMarkdown(allocator: std.mem.Allocator, rec: IgRecord, tag_pages: []const HashtagPage) ![]u8 {
+    var tags_buf: [64][]const u8 = undefined;
     var tag_n: usize = 0;
     tags_buf[tag_n] = "instagram";
     tag_n += 1;
     tags_buf[tag_n] = rec.kind.name();
     tag_n += 1;
+    for (rec.hashtags) |tag| {
+        if (tag_n < tags_buf.len) {
+            tags_buf[tag_n] = tag;
+            tag_n += 1;
+        }
+    }
     if (rec.conversion == .human_review) {
         tags_buf[tag_n] = "needs-review";
         tag_n += 1;
     }
 
-    const title = firstLineTitle(rec.title, 72);
-    const fm = try buildFrontmatter(allocator, rec.entity_id, title, "instagram", "published", tags_buf[0..tag_n]);
+    const title = firstNonEmptyCaptionLine(rec.title);
+    const display_title = if (title.len > 0) title else kindFallbackSlug(rec.kind);
+    const fm = try buildFrontmatter(allocator, rec.entity_id, display_title, "instagram", "published", tags_buf[0..tag_n]);
     defer allocator.free(fm);
 
     var body: std.ArrayList(u8) = .empty;
@@ -962,65 +1304,55 @@ fn writeRecordMarkdown(allocator: std.mem.Allocator, rec: IgRecord) ![]u8 {
     try body.appendSlice(allocator, fm);
     try body.append(allocator, '\n');
 
-    try body.print(allocator, "# {s}\n\n", .{title});
+    const safe_heading = try escapeMdLinkLabel(allocator, display_title);
+    defer allocator.free(safe_heading);
+    try body.print(allocator, "# {s}\n\n", .{safe_heading});
+    const human_date = try formatHumanUtc(allocator, rec.creation_timestamp);
+    defer allocator.free(human_date);
+    try body.print(allocator, "{s}\n\n", .{human_date});
 
-    var tsbuf: [32]u8 = undefined;
-    const ts_s = formatTimestamp(rec.creation_timestamp, &tsbuf);
-    try body.print(allocator, "- **timestamp:** `{s}`\n", .{ts_s});
-    try body.print(allocator, "- **kind:** `{s}`\n", .{rec.kind.name()});
-    try body.print(allocator, "- **source:** `{s}` (record index {d})\n", .{ rec.source_json_path, rec.source_index });
-    try body.print(allocator, "- **entity id strategy:** `{s}`\n\n", .{rec.id_strategy});
-
-    // Caption bytes stay verbatim inside a fence — but the caption is untrusted
-    // and may carry a fence of its own. Size ours to outrank the longest backtick
-    // run in the text (CommonMark: a closing fence must be at least as long as
-    // the opening one), otherwise the caption escapes into live Markdown and the
-    // product host renders raw HTML for trusted authors.
-    try body.appendSlice(allocator, "## Caption\n\n");
     if (rec.title.len > 0) {
-        const fence_len = @max(3, longestBacktickRun(rec.title) + 1);
-        try body.appendNTimes(allocator, '`', fence_len);
-        try body.append(allocator, '\n');
-        try body.appendSlice(allocator, rec.title);
-        if (rec.title[rec.title.len - 1] != '\n') try body.append(allocator, '\n');
-        try body.appendNTimes(allocator, '`', fence_len);
+        const caption = try renderCaption(allocator, rec, tag_pages);
+        defer allocator.free(caption);
+        try body.appendSlice(allocator, caption);
         try body.appendSlice(allocator, "\n\n");
-    } else {
-        try body.appendSlice(allocator, "_Empty caption._\n\n");
     }
 
-    // media
-    try body.appendSlice(allocator, "## Media\n\n");
     if (rec.media.len == 0) {
-        try body.appendSlice(allocator, "_No media URIs on this record._\n\n");
+        try body.appendSlice(allocator, "No media was included with this archive record.\n\n");
     } else {
-        for (rec.media, 0..) |m, i| {
-            try body.print(allocator, "### Item {d}\n\n", .{i + 1});
-            try body.print(allocator, "- **source uri:** `{s}`\n", .{m.uri});
-            try body.print(allocator, "- **theme asset:** `{s}`\n", .{m.theme_rel});
-            try body.print(allocator, "- **status:** `{s}`\n\n", .{if (m.present) "present" else "missing"});
-            if (m.present and !std.mem.endsWith(u8, m.uri, ".mp4") and !std.mem.endsWith(u8, m.uri, ".mov")) {
-                // page is content/instagram/x.md → HTML instagram/x.html → ../assets/...
-                try body.print(allocator, "![media {d}](../{s})\n\n", .{ i + 1, m.theme_rel });
-            } else if (m.present) {
-                try body.appendSlice(allocator, "_Video file copied into theme assets; not embedded in this pass (no OCR/transcode)._\n\n");
+        var present_images: usize = 0;
+        for (rec.media) |m| {
+            if (m.present and !std.mem.endsWith(u8, m.uri, ".mp4") and !std.mem.endsWith(u8, m.uri, ".mov")) present_images += 1;
+        }
+        if (present_images > 1) try body.appendSlice(allocator, "<div class=\"instagram-gallery\">\n");
+        for (rec.media) |m| {
+            if (!m.present) continue;
+            const href = try relativePublishedHref(allocator, rec.entity_id, m.theme_rel);
+            defer allocator.free(href);
+            const alt_source = if (m.title.len > 0) m.title else if (display_title.len > 0) display_title else kindFallbackSlug(rec.kind);
+            const alt = try escapeHtmlAttr(allocator, alt_source);
+            defer allocator.free(alt);
+            if (std.mem.endsWith(u8, m.uri, ".mp4") or std.mem.endsWith(u8, m.uri, ".mov")) {
+                const html_href = try escapeHtmlAttr(allocator, href);
+                defer allocator.free(html_href);
+                try body.print(allocator, "<video class=\"instagram-video\" controls preload=\"metadata\" src=\"{s}\">\n  <a href=\"{s}\">Download the video</a>\n</video>\n\n", .{ html_href, html_href });
+            } else if (present_images > 1) {
+                const html_href = try escapeHtmlAttr(allocator, href);
+                defer allocator.free(html_href);
+                try body.print(allocator, "  <figure class=\"instagram-gallery__item\"><img src=\"{s}\" alt=\"{s}\"></figure>\n", .{ html_href, alt });
             } else {
-                try body.appendSlice(allocator, "_Media file missing from dump; URI preserved for review._\n\n");
+                const md_alt = try escapeMdLinkLabel(allocator, alt_source);
+                defer allocator.free(md_alt);
+                try body.print(allocator, "![{s}]({s})\n\n", .{ md_alt, href });
             }
         }
+        if (present_images > 1) try body.appendSlice(allocator, "</div>\n\n");
+        for (rec.media) |m| if (!m.present) {
+            try body.appendSlice(allocator, "Media asset missing from the Instagram archive export.\n\n");
+            break;
+        };
     }
-
-    // conversion notes
-    try body.appendSlice(allocator, "## Conversion notes\n\n");
-    try body.print(allocator, "- **class:** `{s}`\n", .{rec.conversion.jsonName()});
-    if (rec.notes.len == 0) {
-        try body.appendSlice(allocator, "- _none_\n");
-    } else {
-        for (rec.notes) |n| {
-            try body.print(allocator, "- {s}\n", .{n});
-        }
-    }
-    try body.append(allocator, '\n');
 
     // provenance HTML comment
     try body.appendSlice(allocator,
@@ -1030,10 +1362,15 @@ fn writeRecordMarkdown(allocator: std.mem.Allocator, rec: IgRecord) ![]u8 {
     );
     try body.print(allocator, "source_json_path: {s}\n", .{rec.source_json_path});
     try body.print(allocator, "source_index: {d}\n", .{rec.source_index});
+    try body.print(allocator, "durable_export_id: {s}\n", .{rec.durable_id});
+    try body.print(allocator, "generated_slug: {s}\n", .{rec.slug});
     try body.print(allocator, "entity_id: {s}\n", .{rec.entity_id});
     try body.print(allocator, "id_strategy: {s}\n", .{rec.id_strategy});
     try body.print(allocator, "kind: {s}\n", .{rec.kind.name()});
-    try body.print(allocator, "creation_timestamp: {s}\n", .{ts_s});
+    const iso = try formatIsoTimestamp(allocator, rec.creation_timestamp);
+    defer allocator.free(iso);
+    try body.print(allocator, "creation_timestamp: {d}\n", .{rec.creation_timestamp orelse -1});
+    try body.print(allocator, "iso_timestamp: {s}\n", .{iso});
     try body.print(allocator, "conversion: {s}\n", .{rec.conversion.jsonName()});
     const encoding_label: []const u8 = if (rec.encoding_suspect)
         "suspected-mojibake-unrepaired"
@@ -1047,6 +1384,10 @@ fn writeRecordMarkdown(allocator: std.mem.Allocator, rec: IgRecord) ![]u8 {
         try body.print(allocator, "  - uri: {s}\n", .{m.uri});
         try body.print(allocator, "    theme: {s}\n", .{m.theme_rel});
         try body.print(allocator, "    present: {s}\n", .{if (m.present) "true" else "false"});
+    }
+    if (rec.notes.len > 0) {
+        try body.appendSlice(allocator, "notes:\n");
+        for (rec.notes) |note| try body.print(allocator, "  - {s}\n", .{note});
     }
     try body.appendSlice(allocator,
         \\-->
@@ -1085,13 +1426,90 @@ fn escapeMdLinkLabel(allocator: std.mem.Allocator, label: []const u8) ![]u8 {
     errdefer out.deinit(allocator);
     try out.ensureTotalCapacity(allocator, label.len);
     for (label) |c| {
-        if (c == '\\' or c == ']') try out.append(allocator, '\\');
-        try out.append(allocator, c);
+        switch (c) {
+            '<' => try out.appendSlice(allocator, "&lt;"),
+            '>' => try out.appendSlice(allocator, "&gt;"),
+            '&' => try out.appendSlice(allocator, "&amp;"),
+            '\\', '[', ']', '(', ')', '`' => { try out.append(allocator, '\\'); try out.append(allocator, c); },
+            else => try out.append(allocator, c),
+        }
     }
     return try out.toOwnedSlice(allocator);
 }
 
-fn writeTrunkMarkdown(allocator: std.mem.Allocator, records: []const IgRecord) ![]u8 {
+fn buildHashtagPages(allocator: std.mem.Allocator, records: []const IgRecord) ![]HashtagPage {
+    var pages: std.ArrayList(HashtagPage) = .empty;
+    errdefer {
+        for (pages.items) |*page| page.record_indexes.deinit(allocator);
+        pages.deinit(allocator);
+    }
+    for (records, 0..) |record, record_index| for (record.hashtags) |tag| {
+        if (findTagPage(pages.items, tag)) |index| {
+            try pages.items[index].record_indexes.append(allocator, record_index);
+            continue;
+        }
+        const base_slug = try humanSlug(allocator, tag, "tag");
+        var slug = base_slug;
+        var n: usize = 2;
+        while (true) {
+            var occupied = false;
+            for (pages.items) |page| if (std.mem.eql(u8, page.slug, slug)) { occupied = true; break; };
+            if (!occupied) break;
+            slug = try std.fmt.allocPrint(allocator, "{s}-{d}", .{ base_slug, n });
+            n += 1;
+        }
+        var indexes: std.ArrayList(usize) = .empty;
+        try indexes.append(allocator, record_index);
+        try pages.append(allocator, .{ .display = try allocator.dupe(u8, tag), .slug = slug, .record_indexes = indexes });
+    };
+    std.mem.sort(HashtagPage, pages.items, {}, struct {
+        fn less(_: void, a: HashtagPage, b: HashtagPage) bool { return std.mem.order(u8, a.slug, b.slug) == .lt; }
+    }.less);
+    return try pages.toOwnedSlice(allocator);
+}
+
+fn writeHashtagMarkdown(allocator: std.mem.Allocator, page: HashtagPage, records: []const IgRecord) ![]u8 {
+    const entity = try tagEntity(page.slug, allocator);
+    defer allocator.free(entity);
+    const title = try std.fmt.allocPrint(allocator, "#{s}", .{page.display});
+    defer allocator.free(title);
+    const fm = try buildFrontmatter(allocator, entity, title, "instagram", "published", &.{ "instagram", "tag" });
+    defer allocator.free(fm);
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    try out.appendSlice(allocator, fm);
+    const safe_title = try escapeMdLinkLabel(allocator, title);
+    defer allocator.free(safe_title);
+    try out.print(allocator, "\n# {s}\n\n{d} archive record{s}.\n\n", .{ safe_title, page.record_indexes.items.len, if (page.record_indexes.items.len == 1) "" else "s" });
+    const order = try allocator.dupe(usize, page.record_indexes.items);
+    defer allocator.free(order);
+    std.mem.sort(usize, order, records, struct {
+        fn less(recs: []const IgRecord, a: usize, b: usize) bool {
+            const ta = recs[a].creation_timestamp orelse std.math.minInt(i64);
+            const tb = recs[b].creation_timestamp orelse std.math.minInt(i64);
+            if (ta != tb) return ta > tb;
+            return std.mem.order(u8, recs[a].entity_id, recs[b].entity_id) == .lt;
+        }
+    }.less);
+    for (order) |index| {
+        const record = records[index];
+        const target = try std.fmt.allocPrint(allocator, "{s}.html", .{record.entity_id});
+        defer allocator.free(target);
+        const href = try relativePublishedHref(allocator, entity, target);
+        defer allocator.free(href);
+        const label = try escapeMdLinkLabel(allocator, if (firstNonEmptyCaptionLine(record.title).len > 0) firstNonEmptyCaptionLine(record.title) else kindFallbackSlug(record.kind));
+        defer allocator.free(label);
+        const date = try formatHumanUtc(allocator, record.creation_timestamp);
+        defer allocator.free(date);
+        try out.print(allocator, "- [{s}]({s}) — {s} · {s}\n", .{ label, href, date, record.kind.name() });
+    }
+    try out.appendSlice(allocator, "\n<!-- boris-migration-provenance\nsource_format: instagram-takeout\nrole: hashtag-index\ntag_slug: ");
+    try out.appendSlice(allocator, page.slug);
+    try out.appendSlice(allocator, "\n-->\n");
+    return try out.toOwnedSlice(allocator);
+}
+
+fn writeTrunkMarkdown(allocator: std.mem.Allocator, records: []const IgRecord, tags: []const HashtagPage) ![]u8 {
     const fm = try buildFrontmatter(allocator, "instagram", "Instagram archive", null, "published", &.{ "instagram", "archive" });
     defer allocator.free(fm);
     var body: std.ArrayList(u8) = .empty;
@@ -1101,14 +1519,47 @@ fn writeTrunkMarkdown(allocator: std.mem.Allocator, records: []const IgRecord) !
         \\
         \\# Instagram archive
         \\
-        \\Migrated from an unpacked Instagram data-download (Takeout). Each child
-        \\page is one post, reel, story, or other archive record.
-        \\
-        \\## Records
+        \\A quiet, offline archive of posts, reels, stories, and other records.
         \\
         \\
     );
-    // chronological ascending by timestamp (nulls last), then entity_id
+    var posts: usize = 0;
+    var reels: usize = 0;
+    var stories: usize = 0;
+    var other: usize = 0;
+    var earliest: ?i64 = null;
+    var latest: ?i64 = null;
+    for (records) |record| {
+        switch (record.kind) { .post => posts += 1, .reel => reels += 1, .story => stories += 1, .other, .unknown => other += 1 }
+        if (record.creation_timestamp) |ts| {
+            if (earliest == null or ts < earliest.?) earliest = ts;
+            if (latest == null or ts > latest.?) latest = ts;
+        }
+    }
+    try body.print(allocator, "{d} records · {d} posts · {d} reels · {d} stories · {d} other\n\n", .{ records.len, posts, reels, stories, other });
+    if (earliest) |first| {
+        const first_date = try formatHumanUtc(allocator, first);
+        defer allocator.free(first_date);
+        const last_date = try formatHumanUtc(allocator, latest.?);
+        defer allocator.free(last_date);
+        try body.print(allocator, "From {s} to {s}.\n\n", .{ first_date, last_date });
+    }
+    if (tags.len > 0) {
+        try body.appendSlice(allocator, "## Hashtags\n\n");
+        for (tags) |tag| {
+            const entity = try tagEntity(tag.slug, allocator);
+            defer allocator.free(entity);
+            const target = try std.fmt.allocPrint(allocator, "{s}.html", .{entity});
+            defer allocator.free(target);
+            const href = try relativePublishedHref(allocator, "instagram", target);
+            defer allocator.free(href);
+            const display = try escapeMdLinkLabel(allocator, tag.display);
+            defer allocator.free(display);
+            try body.print(allocator, "[#{s}]({s}) ({d})  ", .{ display, href, tag.record_indexes.items.len });
+        }
+        try body.appendSlice(allocator, "\n\n");
+    }
+    try body.appendSlice(allocator, "## Archive\n\n<div class=\"instagram-feed\">\n");
     var order: std.ArrayList(usize) = .empty;
     defer order.deinit(allocator);
     try order.ensureTotalCapacity(allocator, records.len);
@@ -1120,7 +1571,7 @@ fn writeTrunkMarkdown(allocator: std.mem.Allocator, records: []const IgRecord) !
             if (ta == null and tb == null) return std.mem.order(u8, recs[a].entity_id, recs[b].entity_id) == .lt;
             if (ta == null) return false;
             if (tb == null) return true;
-            if (ta.? != tb.?) return ta.? < tb.?;
+            if (ta.? != tb.?) return ta.? > tb.?;
             return std.mem.order(u8, recs[a].entity_id, recs[b].entity_id) == .lt;
         }
     }.less);
@@ -1128,15 +1579,22 @@ fn writeTrunkMarkdown(allocator: std.mem.Allocator, records: []const IgRecord) !
     for (order.items) |i| {
         const r = records[i];
         const href = try publishedHtmlHref(r.entity_id, &href_buf);
-        const label = try escapeMdLinkLabel(allocator, firstLineTitle(r.title, 60));
+        const label = try escapeHtmlAttr(allocator, if (firstNonEmptyCaptionLine(r.title).len > 0) firstNonEmptyCaptionLine(r.title) else kindFallbackSlug(r.kind));
         defer allocator.free(label);
-        try body.print(allocator, "- [{s}]({s}) — `{s}` — {s}\n", .{
-            label,
-            href,
-            r.kind.name(),
-            r.conversion.jsonName(),
-        });
+        const date = try formatHumanUtc(allocator, r.creation_timestamp);
+        defer allocator.free(date);
+        try body.print(allocator, "<article class=\"instagram-feed__item\"><p class=\"instagram-feed__meta\">{s} · {s}</p><h2><a href=\"{s}\">{s}</a></h2>", .{ date, r.kind.name(), href, label });
+        for (r.media) |media| if (media.present and !std.mem.endsWith(u8, media.uri, ".mp4") and !std.mem.endsWith(u8, media.uri, ".mov")) {
+            const asset = try relativePublishedHref(allocator, "instagram", media.theme_rel);
+            defer allocator.free(asset);
+            const alt = try escapeHtmlAttr(allocator, if (media.title.len > 0) media.title else label);
+            defer allocator.free(alt);
+            try body.print(allocator, "<a href=\"{s}\"><img src=\"{s}\" alt=\"{s}\"></a>", .{ href, asset, alt });
+            break;
+        };
+        try body.appendSlice(allocator, "</article>\n");
     }
+    try body.appendSlice(allocator, "</div>\n");
     try body.appendSlice(allocator,
         \\
         \\<!-- boris-migration-provenance
@@ -1180,6 +1638,10 @@ fn writeThemeShell(io: Io, out_root: Io.Dir) !void {
         \\.shell{display:grid;gap:1rem;max-width:72rem;margin:0 auto}
         \\@media(min-width:50rem){.shell{grid-template-columns:14rem 1fr}}
         \\aside{font-size:.9rem}img{max-width:100%;height:auto;border-radius:.5rem}
+        \\.instagram-gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));gap:1rem;margin:1rem 0}
+        \\.instagram-gallery__item{margin:0}.instagram-gallery__item img{display:block;width:100%}
+        \\.instagram-video{display:block;width:100%;max-width:56rem;margin:1rem 0;border-radius:.5rem}
+        \\.instagram-feed{display:grid;gap:1rem}.instagram-feed__item{padding:1rem;background:#fff;border-radius:.5rem}.instagram-feed__item h2{margin:.2rem 0}.instagram-feed__meta{margin:0;color:#5c5470;font-size:.9rem}
         \\header,footer{max-width:72rem;margin:0 auto 1rem;color:#5c5470}
         \\
     );
@@ -1210,18 +1672,32 @@ fn emitReportJson(gpa: std.mem.Allocator, report: Report) ![]u8 {
         try jsonEscapeAppend(&buf, gpa, p.output_path);
         try buf.appendSlice(gpa, ",\n      \"entity_id\": ");
         try jsonEscapeAppend(&buf, gpa, p.entity_id);
+        try buf.appendSlice(gpa, ",\n      \"human_entity_id\": ");
+        try jsonEscapeAppend(&buf, gpa, p.entity_id);
+        try buf.appendSlice(gpa, ",\n      \"human_slug\": ");
+        try jsonEscapeAppend(&buf, gpa, p.human_slug);
         try buf.appendSlice(gpa, ",\n      \"kind\": ");
         try jsonEscapeAppend(&buf, gpa, p.kind);
         try buf.appendSlice(gpa, ",\n      \"title\": ");
         try jsonEscapeAppend(&buf, gpa, p.title);
         try buf.appendSlice(gpa, ",\n      \"timestamp\": ");
         if (p.timestamp) |t| try buf.print(gpa, "{d}", .{t}) else try buf.appendSlice(gpa, "null");
+        try buf.appendSlice(gpa, ",\n      \"iso_timestamp\": ");
+        if (p.iso_timestamp.len > 0) try jsonEscapeAppend(&buf, gpa, p.iso_timestamp) else try buf.appendSlice(gpa, "null");
         try buf.appendSlice(gpa, ",\n      \"conversion\": ");
         try jsonEscapeAppend(&buf, gpa, p.conversion.jsonName());
         try buf.appendSlice(gpa, ",\n      \"source_json_path\": ");
         try jsonEscapeAppend(&buf, gpa, p.source_json_path);
         try buf.print(gpa, ",\n      \"media_count\": {d},\n      \"id_strategy\": ", .{p.media_count});
         try jsonEscapeAppend(&buf, gpa, p.id_strategy);
+        try buf.appendSlice(gpa, ",\n      \"cover_asset\": ");
+        if (p.cover_asset.len > 0) try jsonEscapeAppend(&buf, gpa, p.cover_asset) else try buf.appendSlice(gpa, "null");
+        try buf.appendSlice(gpa, ",\n      \"hashtags\": [");
+        for (p.hashtags, 0..) |tag, ti| {
+            if (ti > 0) try buf.appendSlice(gpa, ", ");
+            try jsonEscapeAppend(&buf, gpa, tag);
+        }
+        try buf.appendSlice(gpa, "]");
         try buf.appendSlice(gpa, ",\n      \"notes\": [");
         for (p.notes, 0..) |n, ni| {
             if (ni > 0) try buf.appendSlice(gpa, ", ");
@@ -1287,14 +1763,25 @@ fn emitReportMd(gpa: std.mem.Allocator, report: Report) ![]u8 {
     try buf.appendSlice(gpa, "## Pages\n\n");
     for (report.pages) |p| {
         try buf.print(gpa, "### `{s}`\n\n", .{p.entity_id});
-        try buf.print(gpa, "- output: `{s}`\n- kind: `{s}`\n- conversion: `{s}`\n- source: `{s}`\n- id_strategy: `{s}`\n- media_count: {d}\n", .{
+        try buf.print(gpa, "- output: `{s}`\n- human_slug: `{s}`\n- iso_timestamp: `{s}`\n- cover_asset: `{s}`\n- kind: `{s}`\n- conversion: `{s}`\n- source: `{s}`\n- id_strategy: `{s}`\n- media_count: {d}\n", .{
             p.output_path,
+            p.human_slug,
+            p.iso_timestamp,
+            p.cover_asset,
             p.kind,
             p.conversion.jsonName(),
             p.source_json_path,
             p.id_strategy,
             p.media_count,
         });
+        if (p.hashtags.len > 0) {
+            try buf.appendSlice(gpa, "- hashtags: ");
+            for (p.hashtags, 0..) |tag, ti| {
+                if (ti > 0) try buf.appendSlice(gpa, ", ");
+                try buf.print(gpa, "#{s}", .{tag});
+            }
+            try buf.append( gpa, '\n');
+        }
         if (p.notes.len > 0) {
             try buf.appendSlice(gpa, "- notes:\n");
             for (p.notes) |n| try buf.print(gpa, "  - {s}\n", .{n});
@@ -1393,12 +1880,38 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
                 continue;
             };
             defer parsed.deinit();
-            try parseJsonArrayRecords(retain, parsed.value, kind, spath, &records);
+            switch (parsed.value) {
+                .array, .object => try parseJsonArrayRecords(retain, parsed.value, kind, spath, &records),
+                else => try records.append(retain, .{
+                    .kind = .unknown,
+                    .source_json_path = try retain.dupe(u8, spath),
+                    .source_index = 0,
+                    .title = try retain.dupe(u8, "Unsupported Instagram JSON record"),
+                    .creation_timestamp = null,
+                    .encoding_repaired = false,
+                    .encoding_suspect = false,
+                    .media = &.{},
+                    .entity_id = "",
+                    .id_strategy = "",
+                    .conversion = .unsupported,
+                    .notes = &.{try retain.dupe(u8, "unsupported scalar JSON root; placeholder emitted")},
+                    .output_path = "",
+                }),
+            }
         } else if (std.mem.endsWith(u8, spath, ".html")) {
             try parseHtmlPostsFile(retain, gpa, bytes, spath, kind, &records);
         }
     }
 
+    // Collision suffixes are based on stable export identity, never filesystem
+    // iteration or timestamp order.
+    std.mem.sort(IgRecord, records.items, {}, struct {
+        fn less(_: void, a: IgRecord, b: IgRecord) bool {
+            const source_order = std.mem.order(u8, a.source_json_path, b.source_json_path);
+            if (source_order != .eq) return source_order == .lt;
+            return a.source_index < b.source_index;
+        }
+    }.less);
     try assignEntityIds(retain, records.items);
     for (records.items) |*rec| {
         try classifyMediaPresence(io, dump, rec, retain);
@@ -1417,9 +1930,14 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         }
     }.less);
 
-    // Prepare out
-    try Io.Dir.cwd().createDirPath(io, opts.out_dir);
-    var out_root = try Io.Dir.cwd().openDir(io, opts.out_dir, .{});
+    const tag_pages = try buildHashtagPages(retain, records.items);
+
+    // Materialize the complete replacement under a lab-owned staging tree.
+    // The previous owned output is only moved aside after generation succeeds.
+    const stage_path = try std.fmt.allocPrint(retain, "{s}.instagram-stage", .{opts.out_dir});
+    const backup_path = try std.fmt.allocPrint(retain, "{s}.instagram-backup", .{opts.out_dir});
+    try prepareOwnedStage(io, opts.out_dir, stage_path);
+    var out_root = try Io.Dir.cwd().openDir(io, stage_path, .{});
     defer out_root.close(io);
 
     try writeThemeShell(io, out_root);
@@ -1430,8 +1948,8 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     var missing_media: std.ArrayList(MediaManifestEntry) = .empty;
     defer missing_media.deinit(gpa);
 
-    for (records.items) |rec| {
-        for (rec.media) |m| {
+    for (records.items) |*rec| {
+        for (rec.media) |*m| {
             var status: []const u8 = if (m.present) "present" else "missing";
             if (m.present and (std.mem.endsWith(u8, m.uri, ".mp4") or std.mem.endsWith(u8, m.uri, ".mov"))) {
                 status = "video";
@@ -1441,6 +1959,12 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
                 const under_theme = m.theme_rel; // assets/...
                 copyFileRel(io, dump, m.uri, out_root, try std.fmt.allocPrint(retain, "theme/{s}", .{under_theme})) catch {
                     status = "missing";
+                    m.present = false;
+                    rec.conversion = ConversionClass.worse(rec.conversion, .human_review);
+                    var notes: std.ArrayList([]const u8) = .empty;
+                    try notes.appendSlice(retain, rec.notes);
+                    try notes.append(retain, try std.fmt.allocPrint(retain, "media copy failed: {s}", .{m.uri}));
+                    rec.notes = try notes.toOwnedSlice(retain);
                 };
             }
             const entry: MediaManifestEntry = .{
@@ -1457,7 +1981,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     }
 
     // Write trunk + pages
-    const trunk = try writeTrunkMarkdown(gpa, records.items);
+    const trunk = try writeTrunkMarkdown(gpa, records.items, tag_pages);
     defer gpa.free(trunk);
     try writeBytes(io, out_root, "content/instagram.md", trunk);
 
@@ -1474,10 +1998,13 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     var n_other: usize = 0;
 
     for (records.items) |rec| {
-        const md = try writeRecordMarkdown(gpa, rec);
+        const md = try writeRecordMarkdown(gpa, rec, tag_pages);
         defer gpa.free(md);
         try writeBytes(io, out_root, rec.output_path, md);
 
+        const iso = try formatIsoTimestamp(retain, rec.creation_timestamp);
+        var cover_asset: []const u8 = "";
+        for (rec.media) |media| if (media.present and !std.mem.endsWith(u8, media.uri, ".mp4") and !std.mem.endsWith(u8, media.uri, ".mov")) { cover_asset = media.theme_rel; break; };
         const pr: PageRecord = .{
             .output_path = rec.output_path,
             .entity_id = rec.entity_id,
@@ -1488,6 +2015,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             .source_json_path = rec.source_json_path,
             .media_count = rec.media.len,
             .id_strategy = rec.id_strategy,
+            .human_slug = rec.slug,
+            .iso_timestamp = iso,
+            .hashtags = rec.hashtags,
+            .cover_asset = cover_asset,
             .notes = rec.notes,
         };
         try pages.append(gpa, pr);
@@ -1499,6 +2030,12 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
             .story => n_stories += 1,
             .other, .unknown => n_other += 1,
         }
+    }
+
+    for (tag_pages) |tag| {
+        const tag_md = try writeHashtagMarkdown(gpa, tag, records.items);
+        defer gpa.free(tag_md);
+        try writeBytes(io, out_root, try std.fmt.allocPrint(retain, "content/instagram/tags/{s}.md", .{tag.slug}), tag_md);
     }
 
     // Sort pages by output_path for report determinism
@@ -1539,6 +2076,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     const man = try emitMediaManifestJson(gpa, media_manifest.items);
     defer gpa.free(man);
     try writeBytes(io, out_root, "media_manifest.json", man);
+    try writeBytes(io, out_root, output_owner_marker, "format=boris-instagram-migration-lab\nschema_version=2\n");
+    // POSIX allows the directory rename while this descriptor is open; all
+    // writes above are complete, so a failed commit leaves the old tree intact.
+    try publishOwnedStage(io, opts.out_dir, stage_path, backup_path);
 
     if (!opts.quiet) {
         std.debug.print("instagram-migration-lab: wrote {s}/content/, {s}/theme/, {s}/report.json, {s}/REPORT.md, {s}/media_manifest.json\n", .{
@@ -1591,6 +2132,58 @@ test "escapeFmValue quotes specials" {
 test "parseIgDateString basic" {
     const ts = parseIgDateString("Jan 01, 2024 12:00 am");
     try std.testing.expect(ts != null);
+}
+
+test "human slug uses caption text and a stable fallback" {
+    const slug = try humanSlug(std.testing.allocator, "Hello, World!", "photo-post");
+    defer std.testing.allocator.free(slug);
+    try std.testing.expectEqualStrings("hello-world", slug);
+    const fallback = try humanSlug(std.testing.allocator, "日本語 🎨", "photo-post");
+    defer std.testing.allocator.free(fallback);
+    try std.testing.expectEqualStrings("photo-post", fallback);
+}
+
+test "UTC date and ISO formatting cover boundaries" {
+    const midnight = try formatHumanUtc(std.testing.allocator, 1704067200);
+    defer std.testing.allocator.free(midnight);
+    try std.testing.expectEqualStrings("January 1, 2024 · 12:00 AM UTC", midnight);
+    const noon = try formatHumanUtc(std.testing.allocator, 1704110400);
+    defer std.testing.allocator.free(noon);
+    try std.testing.expectEqualStrings("January 1, 2024 · 12:00 PM UTC", noon);
+    const leap = try formatIsoTimestamp(std.testing.allocator, 1709164800);
+    defer std.testing.allocator.free(leap);
+    try std.testing.expectEqualStrings("2024-02-29T00:00:00Z", leap);
+    const undated = try formatIsoTimestamp(std.testing.allocator, null);
+    defer std.testing.allocator.free(undated);
+    try std.testing.expectEqualStrings("", undated);
+}
+
+test "caption hashtag extraction deduplicates and preserves unicode" {
+    const tags = try extractHashtags(std.testing.allocator, "#One #one #日本語 #_ok #");
+    defer {
+        for (tags) |tag| std.testing.allocator.free(tag);
+        std.testing.allocator.free(tags);
+    }
+    try std.testing.expectEqual(@as(usize, 3), tags.len);
+    try std.testing.expectEqualStrings("One", tags[0]);
+    try std.testing.expectEqualStrings("日本語", tags[1]);
+}
+
+test "mentions reject email interiors and caption escaping is harmless" {
+    try std.testing.expect(mentionEnd("hi @artist", 3) != null);
+    try std.testing.expect(mentionEnd("mail me@example.com", 7) == null);
+    const escaped = try escapeHtmlAttr(std.testing.allocator, "\"<img onerror='x'>");
+    defer std.testing.allocator.free(escaped);
+    try std.testing.expectEqualStrings("&quot;&lt;img onerror=&#39;x&#39;&gt;", escaped);
+}
+
+test "relative published links work from deep Instagram pages" {
+    const page = try relativePublishedHref(std.testing.allocator, "instagram/posts/2024/01/example", "assets/media/posts/photo.jpg");
+    defer std.testing.allocator.free(page);
+    try std.testing.expectEqualStrings("../../../../assets/media/posts/photo.jpg", page);
+    const tag = try relativePublishedHref(std.testing.allocator, "instagram/posts/2024/01/example", "instagram/tags/example.html");
+    defer std.testing.allocator.free(tag);
+    try std.testing.expectEqualStrings("../../../tags/example.html", tag);
 }
 
 test "repairMetaEscapedUtf8 repairs Meta JSON escapes and preserves normal UTF-8" {
@@ -1661,6 +2254,33 @@ test "longestBacktickRun sizes a fence untrusted captions cannot close" {
     try std.testing.expectEqual(@as(usize, 5), longestBacktickRun("`` ````` ```"));
 }
 
+test "fixture: symlinked Instagram media is refused" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const dump = "fixtures/.ig-symlink-dump";
+    const out = "fixtures/.ig-symlink-out";
+    Io.Dir.cwd().deleteTree(io, dump) catch {};
+    Io.Dir.cwd().deleteTree(io, out) catch {};
+    defer Io.Dir.cwd().deleteTree(io, dump) catch {};
+    defer Io.Dir.cwd().deleteTree(io, out) catch {};
+    try Io.Dir.cwd().createDirPath(io, dump ++ "/your_instagram_activity/content");
+    try Io.Dir.cwd().createDirPath(io, dump ++ "/media/posts");
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = dump ++ "/your_instagram_activity/content/posts_1.json", .data =
+        \\[{"title":"linked media","creation_timestamp":1704067200,"media":[{"uri":"media/posts/alias.jpg"}]}]
+    });
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = dump ++ "/outside.jpg", .data = "not-for-copy" });
+    var media = try Io.Dir.cwd().openDir(io, dump ++ "/media/posts", .{});
+    defer media.close(io);
+    media.symLink(io, "../../outside.jpg", "alias.jpg", .{}) catch return;
+    try run(io, gpa, .{ .dump_dir = dump, .out_dir = out, .quiet = true });
+    var root = try Io.Dir.cwd().openDir(io, out, .{});
+    defer root.close(io);
+    const report = try readFileAlloc(io, root, "report.json", gpa);
+    defer gpa.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "symlink media path rejected") != null);
+    try std.testing.expect(!pathExists(io, root, "theme/assets/media/posts/alias.jpg"));
+}
+
 test "fixture: hostile instagram dump cannot escape dump or output root" {
     const io = std.testing.io;
     const gpa = std.testing.allocator;
@@ -1697,11 +2317,12 @@ test "fixture: hostile instagram dump cannot escape dump or output root" {
     // The benign control record still converts — the guard is not over-broad.
     try std.testing.expect(pathExists(io, out_root, "theme/assets/media/posts/202401/ok_1111111111111111111.jpg"));
 
-    // A caption carrying its own fence stays inside a wider fence rather than
-    // escaping into live Markdown (the host renders raw HTML for trusted authors).
-    const fence_page = try readFileAlloc(io, out_root, "content/instagram/post-1111111111111111111-2.md", gpa);
+    // A hostile caption is emitted as escaped text, never a live HTML/script
+    // node or a code-fenced compiler receipt.
+    const fence_page = try readFileAlloc(io, out_root, "content/instagram/posts/2024/01/2024-01-10-breaks-out-of-the-caption-fence.md", gpa);
     defer gpa.free(fence_page);
-    try std.testing.expect(std.mem.indexOf(u8, fence_page, "````") != null);
+    try std.testing.expect(std.mem.indexOf(u8, fence_page, "&lt;script&gt;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, fence_page, "## Caption") == null);
 
     // Mixed and doubly-encoded captions are flagged, never stamped clean.
     try std.testing.expect(std.mem.indexOf(u8, report, "mojibake signature remains") != null);
@@ -1764,14 +2385,15 @@ test "fixture: instagram mode end-to-end + determinism + source immutability" {
     try std.testing.expect(std.mem.indexOf(u8, ja, "boris-instagram-migration-lab") != null);
 
     // theme css + at least one copied media
-    _ = try readFileAlloc(io, a_root, "theme/assets/css/site.css", gpa);
+    const css = try readFileAlloc(io, a_root, "theme/assets/css/site.css", gpa);
+    defer gpa.free(css);
     // photo should be copied
     const photo_path = "theme/assets/media/posts/202401/photo_1111111111111111111.jpg";
     const photo = try readFileAlloc(io, a_root, photo_path, gpa);
     defer gpa.free(photo);
     try std.testing.expect(photo.len > 0);
 
-    const repaired_page = try readFileAlloc(io, a_root, "content/instagram/post-8888888888888888888.md", gpa);
+    const repaired_page = try readFileAlloc(io, a_root, "content/instagram/posts/2024/01/2024-01-10-meta-escaped-caf.md", gpa);
     defer gpa.free(repaired_page);
     try std.testing.expect(std.mem.indexOf(u8, repaired_page, "café 😊") != null);
     try std.testing.expect(std.mem.indexOf(u8, repaired_page, "cafÃ©") == null);
@@ -1812,67 +2434,13 @@ test "fixture: archive index links published .html paths that exist as content p
     // Must not emit source-tree .md hrefs for child records (those 404 under a
     // static server that only serves Boris HTML publish output).
     try std.testing.expect(std.mem.indexOf(u8, trunk, "](instagram/") != null);
-    try std.testing.expect(std.mem.indexOf(u8, trunk, ".html)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, trunk, "href=\"instagram/posts/") != null);
+    try std.testing.expect(std.mem.indexOf(u8, trunk, ".html") != null);
     try std.testing.expect(std.mem.indexOf(u8, trunk, ".md)") == null);
-
-    // Collect every child source page under content/instagram/
-    var children: std.ArrayList([]const u8) = .empty;
-    defer {
-        for (children.items) |c| gpa.free(c);
-        children.deinit(gpa);
-    }
-    var child_dir = try root.openDir(io, "content/instagram", .{ .iterate = true });
-    defer child_dir.close(io);
-    var it = child_dir.iterate();
-    while (try it.next(io)) |entry| {
-        if (entry.kind != .file) continue;
-        if (!std.mem.endsWith(u8, entry.name, ".md")) continue;
-        const entity = try std.fmt.allocPrint(gpa, "instagram/{s}", .{entry.name[0 .. entry.name.len - ".md".len]});
-        try children.append(gpa, entity);
-    }
-    try std.testing.expect(children.items.len >= 1);
-
-    // Walk markdown link targets of the form ](instagram/….html)
-    var found: usize = 0;
-    var i: usize = 0;
-    while (i < trunk.len) {
-        const marker = "](";
-        const at = std.mem.indexOfPos(u8, trunk, i, marker) orelse break;
-        const start = at + marker.len;
-        const end = std.mem.indexOfScalarPos(u8, trunk, start, ')') orelse break;
-        const href = trunk[start..end];
-        i = end + 1;
-
-        if (!std.mem.startsWith(u8, href, "instagram/")) continue;
-        // Child-record links under instagram/ must be .html only.
-        try std.testing.expect(std.mem.endsWith(u8, href, ".html"));
-        found += 1;
-
-        // Source that publishes to {entity_id}.html is content/{entity_id}.md
-        const entity = href[0 .. href.len - ".html".len];
-        const src_rel = try std.fmt.allocPrint(gpa, "content/{s}.md", .{entity});
-        defer gpa.free(src_rel);
-        const page = try readFileAlloc(io, root, src_rel, gpa);
-        defer gpa.free(page);
-        try std.testing.expect(page.len > 0);
-        // Frontmatter id must match the published path stem.
-        const id_line = try std.fmt.allocPrint(gpa, "id: {s}", .{entity});
-        defer gpa.free(id_line);
-        try std.testing.expect(std.mem.indexOf(u8, page, id_line) != null);
-
-        // Helper must round-trip the same href.
-        var href_buf: [maxEntityIdHrefBytes]u8 = undefined;
-        const expected = try publishedHtmlHref(entity, &href_buf);
-        try std.testing.expectEqualStrings(expected, href);
-    }
-    try std.testing.expectEqual(children.items.len, found);
-
-    // Every child page is linked from the index (no orphans in the reverse direction).
-    for (children.items) |entity| {
-        var href_buf: [maxEntityIdHrefBytes]u8 = undefined;
-        const href = try publishedHtmlHref(entity, &href_buf);
-        const needle = try std.fmt.allocPrint(gpa, "]({s})", .{href});
-        defer gpa.free(needle);
-        try std.testing.expect(std.mem.indexOf(u8, trunk, needle) != null);
-    }
+    const record = try readFileAlloc(io, root, "content/instagram/posts/2024/01/2024-01-01-simple-photo-post-with-drawmeanelephant.md", gpa);
+    defer gpa.free(record);
+    try std.testing.expect(std.mem.indexOf(u8, record, "id: instagram/posts/2024/01/") != null);
+    const tag_page = try readFileAlloc(io, root, "content/instagram/tags/drawmeanelephant.md", gpa);
+    defer gpa.free(tag_page);
+    try std.testing.expect(std.mem.indexOf(u8, tag_page, "parent: instagram") != null);
 }

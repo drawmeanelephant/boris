@@ -1,6 +1,6 @@
 [
   {
-    "title": "Simple photo post with #drawmeanelephant",
+    "title": "Simple photo post with #drawmeanelephant\n\nQuoted \"hello\" for @artist and @second_artist. #DrawMeAnElephant #日本語\nMarkdown [brackets](https://example.invalid), `ticks`, and <script>alert(1)</script> stay text.",
     "creation_timestamp": 1704067200,
     "media": [
       {
@@ -96,6 +96,17 @@
       {
         "uri": "media/posts/202401/photo_1111111111111111111.jpg",
         "creation_timestamp": 1704758400
+      }
+    ]
+  },
+  {
+    "title": "Simple photo post with #drawmeanelephant",
+    "creation_timestamp": 1704067200,
+    "media": [
+      {
+        "uri": "media/posts/202401/photo_1111111111111111111.jpg",
+        "creation_timestamp": 1704067200,
+        "title": "Collision copy"
       }
     ]
   }

@@ -36,7 +36,7 @@ coupling**. All code and fixtures live under `tools/migration-lab/`.
 | Starlight format id | `boris-starlight-migration-lab` |
 | Asset-filename format id | `boris-asset-filename-lab` |
 | Theme-archaeology format id | `boris-theme-archaeology-lab` |
-| Schema | Astro/Instagram/Obsidian/Notion/Filed/Starlight/Asset-filename/Theme-archaeology/Theme-materialize `1`; WordPress **`3`** |
+| Schema | Instagram **`2`**; Astro/Obsidian/Notion/Filed/Starlight/Asset-filename/Theme-archaeology/Theme-materialize `1`; WordPress **`3`** |
 
 Companion author guide: [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
 
@@ -820,7 +820,11 @@ Satellite rules). See [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
 ```text
 content/
   instagram.md                 # Trunk
-  instagram/<kind>-<id>.md     # one page per post/reel/story/other record
+  instagram/posts/YYYY/MM/YYYY-MM-DD-caption-slug.md
+  instagram/reels/YYYY/MM/YYYY-MM-DD-caption-slug.md
+  instagram/stories/YYYY/MM/YYYY-MM-DD-caption-slug.md
+  instagram/other/YYYY/MM/YYYY-MM-DD-caption-slug.md
+  instagram/tags/<tag-slug>.md # generated hashtag indexes
 theme/
   layouts/main.html
   footer.html
@@ -832,8 +836,13 @@ media_manifest.json            # clean provenance for a later enrichment pass (n
 ```
 
 Each page uses **closed Boris frontmatter only**: `id`, `title`, `parent`,
-`status`, `tags`. Caption bytes, timestamp, source JSON/HTML path, media URIs,
-theme asset paths, and conversion notes live in the body + provenance comment.
+`status`, `tags`. Public routes use UTC dates plus a caption-derived slug;
+durable export ids and fallback hashes remain in reports and final hidden
+provenance. Captions render as safe natural paragraphs: raw HTML and Markdown
+control syntax are escaped, while validated `@mentions` and generated hashtag
+links are the only links injected by the transformer. Dates, media, and archive
+feed cards are human-readable; source paths and conversion evidence stay out of
+the visible page body.
 JSON captions using Meta's escaped Latin-1/UTF-8 form are repaired only when
 the resulting bytes validate as UTF-8; repaired pages are marked
 `meta-latin1-repaired` in provenance and classified as `transformed`. Ordinary
@@ -846,16 +855,16 @@ The dump is untrusted input. Media URIs that would escape the dump on read or
 the output root on write — a `..` component, an absolute path, a Windows
 separator, or a drive prefix — are rejected before any filesystem access, class
 the record `human_review`, and appear in the report as
-`unsafe media uri rejected`. Caption bytes are preserved verbatim inside a fence
-sized to outrank the longest backtick run in the caption itself, so caption text
-cannot escape into live Markdown. See `fixtures/hostile-instagram/`.
+`unsafe media uri rejected`. Symlink/reparse-point media path components are
+also refused before copying. Caption text is escaped into ordinary paragraphs,
+so it cannot become live Markdown or HTML. See `fixtures/hostile-instagram/`.
 
 | Class | Typical cause |
 |-------|----------------|
 | `exact` | Simple photo record with durable id |
 | `transformed` | Carousel, video, reel/story, HTML-source parse |
 | `unsupported` | other/unknown archive kinds, malformed JSON placeholder |
-| `human_review` | Missing media, empty caption, id collisions |
+| `human_review` | Missing media, unsafe/symlink media path, encoding concern |
 
 Synthetic fixture: [`fixtures/mini-instagram/`](fixtures/mini-instagram/).
 
