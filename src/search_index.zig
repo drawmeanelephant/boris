@@ -12,6 +12,7 @@ pub const Section = struct { level: u8, heading: []const u8, fragment: []const u
 pub const Document = struct { path: []const u8, title: []const u8, sections: []const Section };
 const MutableSection = struct { level: u8 = 0, heading: std.ArrayList(u8) = .empty, fragment: std.ArrayList(u8) = .empty, prose: std.ArrayList(u8) = .empty, code: std.ArrayList(u8) = .empty };
 const html_scan = @import("html_scan.zig");
+const json_out = @import("json_out.zig");
 const Tag = html_scan.Tag;
 const Range = struct { start: usize, end: usize };
 const tagAt = html_scan.tagAt;
@@ -69,7 +70,14 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
     return .{ .path = try a.dupe(u8, path), .title = title.?, .sections = final };
 }
 
-fn jsonString(out: *std.ArrayList(u8), a: std.mem.Allocator, value: []const u8) !void { try out.append(a, '"'); for (value) |c| switch (c) { '"' => try out.appendSlice(a, "\\\""), '\\' => try out.appendSlice(a, "\\\\"), '\n' => try out.appendSlice(a, "\\n"), '\r' => try out.appendSlice(a, "\\r"), '\t' => try out.appendSlice(a, "\\t"), else => try out.append(a, c) }; try out.append(a, '"'); }
+/// Delegates to `json_out`, which is the one JSON escaper in this codebase.
+/// This function used to be a copy of it with the `c < 0x20` branch missing, so
+/// a control byte anywhere in a page's text shipped raw inside a JSON string
+/// and the whole search index failed to parse — client search silently dead for
+/// the entire site, not just that page. That is the cost of a second escaper.
+fn jsonString(out: *std.ArrayList(u8), a: std.mem.Allocator, value: []const u8) !void {
+    try json_out.writeString(out, a, value);
+}
 pub fn writeJson(a: std.mem.Allocator, documents: []const Document) ![]u8 { var out: std.ArrayList(u8) = .empty; errdefer out.deinit(a); try out.appendSlice(a, "{\n  \"format\": \"boris-rendered-search-index\",\n  \"schema_version\": 1,\n  \"documents\": ["); for (documents, 0..) |d, di| { if (di > 0) try out.appendSlice(a, ","); try out.appendSlice(a, "\n    {\n      \"path\": "); try jsonString(&out, a, d.path); try out.appendSlice(a, ",\n      \"title\": "); try jsonString(&out, a, d.title); try out.appendSlice(a, ",\n      \"sections\": ["); for (d.sections, 0..) |s, si| { if (si > 0) try out.appendSlice(a, ","); var prefix: [96]u8 = undefined; const prefix_text = try std.fmt.bufPrint(&prefix, "\n        {{\"level\": {d}, \"heading\": ", .{s.level}); try out.appendSlice(a, prefix_text); try jsonString(&out, a, s.heading); try out.appendSlice(a, ", \"fragment\": "); try jsonString(&out, a, s.fragment); try out.appendSlice(a, ", \"text\": "); try jsonString(&out, a, s.text); try out.appendSlice(a, ", \"code\": "); try jsonString(&out, a, s.code); try out.appendSlice(a, "}"); } try out.appendSlice(a, "\n      ]\n    }"); } try out.appendSlice(a, "\n  ]\n}\n"); return out.toOwnedSlice(a); }
 
 fn readFileAlloc(io: std.Io, dir: std.Io.Dir, path: []const u8, allocator: std.mem.Allocator) ![]u8 {
@@ -196,4 +204,18 @@ test "explicitly visible content is indexed" {
     const d = try indexHtml(std.testing.allocator, "index.html", html, true);
     defer freeDocument(std.testing.allocator, d);
     try std.testing.expect(std.mem.indexOf(u8, d.sections[0].text, "Visible prose") != null);
+}
+
+test "writeJson escapes control characters so the index stays parseable" {
+    const gpa = std.testing.allocator;
+    const sections = [_]Section{.{ .level = 1, .heading = "Heading\x01", .fragment = "h", .text = "body\x1f text", .code = "" }};
+    const docs = [_]Document{.{ .path = "index.html", .title = "Title\x01", .sections = &sections }};
+    const bytes = try writeJson(gpa, &docs);
+    defer gpa.free(bytes);
+
+    // A raw control byte inside a JSON string is invalid per RFC 8259, and one
+    // bad byte anywhere makes the whole search index unparseable.
+    for (bytes) |c| try std.testing.expect(c >= 0x20 or c == '\n');
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
+    defer parsed.deinit();
 }

@@ -645,6 +645,7 @@ pub fn build(b: *std.Build) void {
         &layout_hostile_tests.step,
         &fuzz_tests.step,
         &emitter_hostile_tests.step,
+        &ir_schema_tests.step,
         &package_exe.step,
         &package_tests.step,
     };
