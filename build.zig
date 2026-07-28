@@ -525,6 +525,71 @@ pub fn build(b: *std.Build) void {
     const run_cache_tests = b.addRunArtifact(cache_tests);
     run_cache_tests.setCwd(b.path("."));
 
+    // --- Output-encoding layer + its regression gate ----------------------
+    // encode/structured_out are pure; artifact_invariants reads published
+    // bytes; emitter_hostile compiles hostile trees through the real emitters.
+    const encode_mod = b.createModule(.{
+        .root_source_file = b.path("src/encode.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const encode_tests = b.addTest(.{ .root_module = encode_mod });
+    const run_encode_tests = b.addRunArtifact(encode_tests);
+    run_encode_tests.setCwd(b.path("."));
+
+    const structured_out_mod = b.createModule(.{
+        .root_source_file = b.path("src/structured_out.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const structured_out_tests = b.addTest(.{ .root_module = structured_out_mod });
+    const run_structured_out_tests = b.addRunArtifact(structured_out_tests);
+    run_structured_out_tests.setCwd(b.path("."));
+
+    const invariants_mod = b.createModule(.{
+        .root_source_file = b.path("src/artifact_invariants.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const invariants_tests = b.addTest(.{ .root_module = invariants_mod });
+    const run_invariants_tests = b.addRunArtifact(invariants_tests);
+    run_invariants_tests.setCwd(b.path("."));
+
+    const emitter_discipline_mod = b.createModule(.{
+        .root_source_file = b.path("src/emitter_discipline_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const emitter_discipline_tests = b.addTest(.{ .root_module = emitter_discipline_mod });
+    const run_emitter_discipline_tests = b.addRunArtifact(emitter_discipline_tests);
+    run_emitter_discipline_tests.setCwd(b.path("."));
+
+    const emitter_hostile_mod = b.createModule(.{
+        .root_source_file = b.path("src/emitter_hostile_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkApex(emitter_hostile_mod, b, false);
+    emitter_hostile_mod.addOptions("build_options", apex_opts);
+    const emitter_hostile_tests = b.addTest(.{ .root_module = emitter_hostile_mod });
+    const run_emitter_hostile_tests = b.addRunArtifact(emitter_hostile_tests);
+    run_emitter_hostile_tests.setCwd(b.path("."));
+
+    const emitter_registry = b.addSystemCommand(&.{ "bash", "scripts/emitter-discipline.sh" });
+    emitter_registry.setCwd(b.path("."));
+    emitter_registry.has_side_effects = true;
+
+    const test_emitter_step = b.step(
+        "test-emitter-discipline",
+        "Prove machine-facing emitters cannot bypass the output encoder",
+    );
+    test_emitter_step.dependOn(&run_encode_tests.step);
+    test_emitter_step.dependOn(&run_structured_out_tests.step);
+    test_emitter_step.dependOn(&run_invariants_tests.step);
+    test_emitter_step.dependOn(&run_emitter_discipline_tests.step);
+    test_emitter_step.dependOn(&run_emitter_hostile_tests.step);
+    test_emitter_step.dependOn(&emitter_registry.step);
+
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_fixtures_tests.step);
@@ -552,6 +617,12 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_cache_tests.step);
     test_step.dependOn(&run_include_tests.step);
     test_step.dependOn(&run_wikilink_tests.step);
+    test_step.dependOn(&run_encode_tests.step);
+    test_step.dependOn(&run_structured_out_tests.step);
+    test_step.dependOn(&run_invariants_tests.step);
+    test_step.dependOn(&run_emitter_discipline_tests.step);
+    test_step.dependOn(&run_emitter_hostile_tests.step);
+    test_step.dependOn(&emitter_registry.step);
 
     const test_harness_step = b.step(
         "test-harness",
@@ -573,6 +644,7 @@ pub fn build(b: *std.Build) void {
         &hardening_tests.step,
         &layout_hostile_tests.step,
         &fuzz_tests.step,
+        &emitter_hostile_tests.step,
         &package_exe.step,
         &package_tests.step,
     };
