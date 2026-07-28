@@ -40,8 +40,8 @@ Constructs are categorized into 5 explicit support tiers:
 | Construct | Classification | Support Tier | Jump |
 | :--- | :--- | :---: | :--- |
 | Callout `&lt;Aside&gt;` components | **Product Core** | Supported | [[guides/asides|Asides]] |
-| Wiki-links (`&#91;&#91;entity-id&#93;&#93;`) | **Product Core** | Supported | [Wiki-links](#wiki-links) |
-| Transclusion includes (`&#123;&#123;include path&#125;&#125;`) | **Product Core** | Supported | [Includes](#transclusion-includes) |
+| Wiki-links (`[[entity-id]]`) | **Product Core** | Supported | [Wiki-links](#wiki-links) |
+| Transclusion includes (`{{include path}}`) | **Product Core** | Supported | [Includes](#transclusion-includes) |
 | Closed frontmatter & Graph rules | **Product Core** | Supported | [[guides/overview|Overview]] |
 | GFM tables (pipe & alignment) | **Engine Feature** | Supported | [Tables](#tables) |
 | Advanced tables (rowspan/colspan/caption) | **Engine Feature** | Supported | [Advanced tables](#advanced-tables) |
@@ -123,7 +123,7 @@ Use rules sparingly between major blocks; prefer headings for navigation.
 - Autolink-style URL: https://ziglang.org
 - Inline repo link: [Boris on GitHub](https://github.com/drawmeanelephant/boris)
 
-### Wiki-links (`&#91;&#91;entity-id&#93;&#93;`) {#wiki-links}
+### Wiki-links (`[[entity-id]]`) {#wiki-links}
 
 Boris expands wiki-links by entity ID before Apex rendering, enabling graph validation and automatic link resolution across your site.
 
@@ -481,7 +481,7 @@ These are **not** Apex features; they run (or apply) around the engine:
 | Aside components | Tokenize around Apex markdown segments |
 | Layout nav / toc markers | After body HTML is produced |
 
-### Transclusion Includes (`&#123;&#123;include path&#125;&#125;`)
+### Transclusion Includes (`{{include path}}`)
 
 Include directives expand reusable Markdown fragments stored under `content/includes/` into a page body before Apex runs.
 
