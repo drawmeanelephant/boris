@@ -1,7 +1,8 @@
 //! Boris-mediated Markdown includes (`{{include path}}`).
 //!
 //! Apex file includes stay off; this module expands directives in Zig before
-//! Apex runs. Fence-aware: directives inside fenced code are left literal.
+//! Apex runs. Fence- and inline-code-aware: directives inside Markdown code
+//! are left literal.
 //!
 //! Normative: `docs/contracts/includes-and-wiki-links.md`.
 
@@ -168,6 +169,38 @@ fn lineEndIndex(body: []const u8, i: usize) usize {
     return j;
 }
 
+/// Length of the backtick run at `start`. Call only when `body[start] == '`'.
+pub fn backtickRunLength(body: []const u8, start: usize) usize {
+    var end = start;
+    while (end < body.len and body[end] == '`') : (end += 1) {}
+    return end - start;
+}
+
+/// Returns the offset immediately after a matching Markdown inline-code
+/// closer, or null when the opening run is unmatched. A closer must use the
+/// same backtick-run length as the opener; longer or shorter runs remain part
+/// of the literal code content.
+pub fn inlineCodeSpanEnd(body: []const u8, start: usize) ?usize {
+    std.debug.assert(start < body.len and body[start] == '`');
+    const run = backtickRunLength(body, start);
+    var i = start + run;
+    while (i < body.len) {
+        if (body[i] != '`') {
+            i += 1;
+            continue;
+        }
+        const candidate_run = backtickRunLength(body, i);
+        if (candidate_run == run) return i + run;
+        i += candidate_run;
+    }
+    return null;
+}
+
+test "inlineCodeSpanEnd requires a matching backtick run" {
+    try std.testing.expectEqual(@as(?usize, 7), inlineCodeSpanEnd("``a`b``", 0));
+    try std.testing.expect(inlineCodeSpanEnd("`unclosed``", 0) == null);
+}
+
 /// `FailInfo.line_base` for a body obtained via `bodyOfSource`, so the two
 /// always agree about where the body starts.
 pub fn lineBaseOfSource(source: []const u8) u32 {
@@ -260,6 +293,15 @@ pub fn scanIncludeDirectives(
 
         if (fence_ch != 0) {
             i += 1;
+            continue;
+        }
+
+        if (body[i] == '`') {
+            if (inlineCodeSpanEnd(body, i)) |end| {
+                i = end;
+            } else {
+                i += backtickRunLength(body, i);
+            }
             continue;
         }
 
@@ -487,6 +529,15 @@ fn expandRecursive(
             continue;
         }
 
+        if (body[i] == '`') {
+            if (inlineCodeSpanEnd(body, i)) |end| {
+                i = end;
+            } else {
+                i += backtickRunLength(body, i);
+            }
+            continue;
+        }
+
         if (i + 9 <= body.len and std.mem.eql(u8, body[i .. i + 9], "{{include")) {
             const start = i;
             var j = i + 9;
@@ -707,6 +758,20 @@ test "scanIncludeDirectives skips tilde fences" {
     try std.testing.expectEqualStrings("includes/b.md", list.items[1].path);
 }
 
+test "scanIncludeDirectives ignores matching inline code spans" {
+    const body =
+        \\{{include includes/before.md}}`{{include includes/missing.md}}`{{include includes/after.md}}
+        \\``{{include includes/also-missing.md}}``
+        \\
+    ;
+    var list: std.ArrayList(ScanHit) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try scanIncludeDirectives(body, std.testing.allocator, &list, null, "");
+    try std.testing.expectEqual(@as(usize, 2), list.items.len);
+    try std.testing.expectEqualStrings("includes/before.md", list.items[0].path);
+    try std.testing.expectEqualStrings("includes/after.md", list.items[1].path);
+}
+
 test "scanIncludeDirectives rejects empty path with FailInfo" {
     const body = "{{include   }}";
     var list: std.ArrayList(ScanHit) = .empty;
@@ -812,6 +877,35 @@ test "expandIncludes simple nested and cycle" {
     try std.testing.expectEqualStrings("includes/nope.md", nested_miss.detail());
     try std.testing.expectEqualStrings("includes/outer.md", nested_miss.locus());
     try std.testing.expectEqual(@as(u32, 2), nested_miss.line);
+}
+
+test "expandIncludes leaves matching inline code directives literal" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "content/includes");
+    try tmp.dir.writeFile(io, .{ .sub_path = "content/includes/before.md", .data = "BEFORE" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "content/includes/after.md", .data = "AFTER" });
+
+    var content_dir = try tmp.dir.openDir(io, "content", .{});
+    defer content_dir.close(io);
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
+    const out = try expandIncludes(
+        io,
+        content_dir,
+        gpa,
+        arena.allocator(),
+        "{{include includes/before.md}}`{{include includes/missing.md}}`{{include includes/after.md}}",
+        "page.md",
+        null,
+    );
+    try std.testing.expect(std.mem.indexOf(u8, out, "BEFORE") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "AFTER") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "`{{include includes/missing.md}}`") != null);
 }
 
 test "expandIncludes bounds exponential fan-out" {
