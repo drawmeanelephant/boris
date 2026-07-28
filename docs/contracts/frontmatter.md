@@ -26,7 +26,8 @@ Implementations must not grow into a YAML 1.1/1.2 subset by accident.
 
 ## Ownership of parsed metadata
 
-At the parser layer, field values (`id`, `title`, `parent`, tag tokens, and the
+At the parser layer, field values (`id`, `title`, `parent`, `published_at`,
+`summary`, tag tokens, and the
 body slice) are **views into the caller-supplied source buffer**. The parser
 does not allocate copies of field text. Callers that need durable storage
 (PageDb / retain arena) must **dupe** before releasing the source buffer.
@@ -128,7 +129,7 @@ Do **not** half-parse these; emit [`EFRONTMATTER`](diagnostics.md):
 
 ## Canonical author-facing keys (closed set)
 
-Exactly these six keys are accepted. **No aliases.**
+Exactly these eight keys are accepted. **No aliases.**
 
 | Key | Required | Value | Notes |
 |-----|----------|-------|-------|
@@ -138,6 +139,8 @@ Exactly these six keys are accepted. **No aliases.**
 | `status` | no | `draft` \| `published` \| `archived` | Exact spellings only |
 | `tags` | no | `[a, b, "c"]` only | Bracket list; plain or double-quoted items |
 | `relations` | no | `[kind=target, …]` only | Bounded semantic relations; closed kinds and validation in [semantic-relations.md](semantic-relations.md) |
+| `published_at` | no | `YYYY-MM-DDTHH:MM:SSZ` | Explicit UTC calendar time only; requires `summary` when present |
+| `summary` | no | plain/dquoted string | One line, 1–1,024 UTF-8 bytes; may occur without `published_at` |
 
 ### Forbidden key names and forms
 
@@ -198,6 +201,8 @@ Satellites; parent chains are finite and must be acyclic.
 | `id` | `null` at parse time; pipeline later uses path-derived entity id ([identity-and-paths.md](identity-and-paths.md)) |
 | `status` | `null` (unset) |
 | `tags` | empty list |
+| `published_at` | `null` |
+| `summary` | `null` |
 
 ### Empty page with no frontmatter
 
@@ -237,6 +242,7 @@ Unless noted, overflow → [`EFRONTMATTER`](diagnostics.md).
 | Frontmatter block bytes (inside fences, excluding fence lines) | 64 KiB | [`EFRONTMATTER`](diagnostics.md) |
 | Frontmatter field count (non-blank field lines) | 32 | [`EFRONTMATTER`](diagnostics.md) |
 | Title bytes | 512 | [`EFRONTMATTER`](diagnostics.md) |
+| Summary bytes | 1,024 | [`EFRONTMATTER`](diagnostics.md) |
 | Entity id / parent value bytes | 255 | length → [`EFRONTMATTER`](diagnostics.md); illegal **id** shape → [`EINVALIDPATH`](diagnostics.md) |
 | Tag count | 32 | [`EFRONTMATTER`](diagnostics.md) |
 | Tag token bytes (after quote strip) | 64 | [`EFRONTMATTER`](diagnostics.md) |

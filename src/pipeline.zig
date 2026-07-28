@@ -945,6 +945,8 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             .title = p.title,
             .parent = p.parent,
             .status = statusName(p.status),
+            .published_at = p.published_at,
+            .summary = p.summary,
             .tags = p.tags,
             .body_offset = p.body_offset,
             .role = if (p.parent != null) .satellite else .trunk,
