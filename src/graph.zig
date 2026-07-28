@@ -26,6 +26,9 @@ pub const Node = struct {
     parent: ?[]const u8 = null,
     parent_index: ?u32 = null,
     status: ?[]const u8 = null,
+    /// RSS-only author metadata; deliberately not serialized in the base IR.
+    published_at: ?[]const u8 = null,
+    summary: ?[]const u8 = null,
     tags: []const []const u8 = &.{},
     role: Role = .trunk,
     body_offset: usize = 0,

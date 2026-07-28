@@ -1,17 +1,19 @@
 //! Bounded frontmatter subset for Boris v0.1 metadata.
 //!
 //! Supported keys only:
-//!   id, title, parent, status, tags
+//!   id, title, parent, status, tags, published_at, summary
 //!
 //! Not YAML. Line-oriented `key: value` inside `---` fences.
 
 const std = @import("std");
 const diag = @import("diag.zig");
 const page_mod = @import("page.zig");
+const rss_date = @import("rss_date.zig");
 
 /// Re-export PageDb promotion limits (single source of truth in `page.zig`).
 pub const max_title_bytes = page_mod.max_title_bytes;
 pub const max_entity_id_bytes = page_mod.max_entity_id_bytes;
+pub const max_summary_bytes = page_mod.max_summary_bytes;
 
 pub const Status = enum {
     draft,
@@ -36,8 +38,12 @@ pub const Meta = struct {
     title: ?[]const u8 = null,
     parent: ?[]const u8 = null,
     status: ?Status = null,
+    published_at: ?[]const u8 = null,
+    summary: ?[]const u8 = null,
     /// Tags retained by caller's arena.
     tags: []const []const u8 = &.{},
+    /// Semantic relations retained by caller's arena (compatibility alignment).
+    relations: []const page_mod.SemanticRelation = &.{},
     /// Byte offset of body start in source.
     body_offset: usize = 0,
     /// True if a frontmatter block was present (even if empty).
@@ -50,6 +56,9 @@ const KeyFlags = struct {
     parent: bool = false,
     status: bool = false,
     tags: bool = false,
+    relations: bool = false,
+    published_at: bool = false,
+    summary: bool = false,
 };
 
 fn isSpace(c: u8) bool {
@@ -130,6 +139,34 @@ fn parseTagsList(retain: std.mem.Allocator, raw: []const u8) ![]const []const u8
     return try list.toOwnedSlice(retain);
 }
 
+fn parseRelationsList(retain: std.mem.Allocator, raw: []const u8) ![]const page_mod.SemanticRelation {
+    const value = trimAscii(raw);
+    if (value.len < 2 or value[0] != '[' or value[value.len - 1] != ']') return error.BadRelations;
+    const inner = trimAscii(value[1 .. value.len - 1]);
+    if (inner.len == 0) return &.{};
+    var list: std.ArrayList(page_mod.SemanticRelation) = .empty;
+    errdefer list.deinit(retain);
+    var cursor: usize = 0;
+    while (cursor < inner.len) {
+        while (cursor < inner.len and isSpace(inner[cursor])) : (cursor += 1) {}
+        const start = cursor;
+        while (cursor < inner.len and inner[cursor] != ',') : (cursor += 1) {}
+        const entry = trimAscii(inner[start..cursor]);
+        const equals = std.mem.indexOfScalar(u8, entry, '=') orelse return error.BadRelations;
+        if (equals == 0 or equals + 1 >= entry.len or std.mem.indexOfScalar(u8, entry[equals + 1 ..], '=') != null) return error.BadRelations;
+        const kind = page_mod.RelationKind.parse(trimAscii(entry[0..equals])) orelse return error.BadRelations;
+        const target = trimAscii(entry[equals + 1 ..]);
+        if (!validateId(target) or list.items.len >= page_mod.max_relation_count) return error.BadRelations;
+        for (list.items) |prior| if (prior.kind == kind and std.mem.eql(u8, prior.target, target)) return error.BadRelations;
+        try list.append(retain, .{ .kind = kind, .target = try retain.dupe(u8, target) });
+        if (cursor == inner.len) break;
+        cursor += 1;
+        while (cursor < inner.len and isSpace(inner[cursor])) : (cursor += 1) {}
+        if (cursor == inner.len) return error.BadRelations;
+    }
+    return try list.toOwnedSlice(retain);
+}
+
 fn keyColumn(line: []const u8, key: []const u8) u32 {
     if (std.mem.indexOf(u8, line, key)) |idx| {
         return @intCast(idx + 1);
@@ -206,6 +243,9 @@ pub fn parse(
 
         if (std.mem.eql(u8, line, "---")) {
             meta.body_offset = if (line_end < source.len) line_end + 1 else line_end;
+            if (meta.published_at != null and meta.summary == null) {
+                try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, 1, "published_at requires a non-empty summary", "Add summary: alongside published_at");
+            }
             return meta;
         }
 
@@ -218,7 +258,7 @@ pub fn parse(
             const col = keyColumn(line, key);
 
             if (key.len == 0) {
-                try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "empty frontmatter key", "Use a supported key: id, title, parent, status, tags");
+                try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "empty frontmatter key", "Use a supported key: id, title, parent, status, tags, relations, published_at, summary");
             } else if (std.mem.eql(u8, key, "id")) {
                 if (flags.id) {
                     try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "duplicate frontmatter key \"id\"", "Keep a single id field per document");
@@ -323,6 +363,55 @@ pub fn parse(
                         continue;
                     };
                 }
+            } else if (std.mem.eql(u8, key, "relations")) {
+                if (flags.relations) {
+                    try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "duplicate frontmatter key \"relations\"", "Keep a single relations field per document");
+                } else {
+                    flags.relations = true;
+                    meta.relations = parseRelationsList(retain, raw_val) catch {
+                        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "relations must be a bounded list like [supersedes=guides/old]", "Use only documented relation kinds and canonical target ids");
+                        line_no += 1;
+                        if (line_end < source.len) i = line_end + 1 else break;
+                        continue;
+                    };
+                }
+            } else if (std.mem.eql(u8, key, "published_at")) {
+                if (flags.published_at) {
+                    try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "duplicate frontmatter key \"published_at\"", "Keep a single published_at field per document");
+                } else {
+                    flags.published_at = true;
+                    const val = parsePlainOrQuoted(raw_val) catch {
+                        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "published_at must be a non-empty UTC timestamp", "Use YYYY-MM-DDTHH:MM:SSZ");
+                        line_no += 1;
+                        if (line_end < source.len) i = line_end + 1 else break;
+                        continue;
+                    };
+                    _ = rss_date.parse(val) catch {
+                        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "published_at must be exactly YYYY-MM-DDTHH:MM:SSZ with a valid UTC calendar date", "Use an explicit UTC timestamp such as 2026-07-28T14:30:00Z");
+                        line_no += 1;
+                        if (line_end < source.len) i = line_end + 1 else break;
+                        continue;
+                    };
+                    meta.published_at = try retain.dupe(u8, val);
+                }
+            } else if (std.mem.eql(u8, key, "summary")) {
+                if (flags.summary) {
+                    try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "duplicate frontmatter key \"summary\"", "Keep a single summary field per document");
+                } else {
+                    flags.summary = true;
+                    const val = parsePlainOrQuoted(raw_val) catch {
+                        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "summary must be a non-empty plain or double-quoted string", "Use a one-line summary");
+                        line_no += 1;
+                        if (line_end < source.len) i = line_end + 1 else break;
+                        continue;
+                    };
+                    if (val.len > max_summary_bytes) {
+                        const msg = try std.fmt.allocPrint(retain, "summary exceeds maximum length of {d} bytes (got {d})", .{ max_summary_bytes, val.len });
+                        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, msg, "Shorten the summary to at most 1024 bytes");
+                    } else {
+                        meta.summary = try retain.dupe(u8, val);
+                    }
+                }
             } else {
                 // Unknown / unsupported keys (including YAML-ish nesting attempts).
                 const msg = try std.fmt.allocPrint(retain, "unsupported frontmatter key \"{s}\"", .{key});
@@ -330,7 +419,7 @@ pub fn parse(
                     .severity = .error_,
                     .code = .EFRONTMATTER,
                     .message = msg,
-                    .remediation = try retain.dupe(u8, "Supported keys: id, title, parent, status, tags"),
+                    .remediation = try retain.dupe(u8, "Supported keys: id, title, parent, status, tags, relations, published_at, summary"),
                     .source_path = source_path,
                     .line = line_no,
                     .column = col,
@@ -386,6 +475,18 @@ test "parse title parent status tags" {
     try std.testing.expectEqual(@as(usize, 2), meta.tags.len);
     try std.testing.expectEqualStrings("a", meta.tags[0]);
     try std.testing.expectEqualStrings("b", meta.tags[1]);
+}
+
+test "compatibility parser accepts aligned RSS metadata" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+    const meta = try parse("---\npublished_at: 2026-07-28T14:30:00Z\nsummary: Brief\n---\n", "rss.md", arena.allocator(), gpa, &diags);
+    try std.testing.expectEqual(@as(usize, 0), diags.items.len);
+    try std.testing.expectEqualStrings("2026-07-28T14:30:00Z", meta.published_at.?);
+    try std.testing.expectEqualStrings("Brief", meta.summary.?);
 }
 
 // Non-product helper must match product closed set: no parentEntry alias.

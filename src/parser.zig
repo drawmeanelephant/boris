@@ -37,6 +37,7 @@ const std = @import("std");
 const identity = @import("identity.zig");
 const page_mod = @import("page.zig");
 const unicode_policy = @import("unicode_policy.zig");
+const rss_date = @import("rss_date.zig");
 
 pub const max_title_bytes = page_mod.max_title_bytes;
 pub const max_entity_id_bytes = page_mod.max_entity_id_bytes;
@@ -45,6 +46,7 @@ pub const max_tag_count = page_mod.max_tag_count;
 pub const max_source_bytes = page_mod.max_source_bytes;
 pub const max_frontmatter_bytes = page_mod.max_frontmatter_bytes;
 pub const max_frontmatter_fields = page_mod.max_frontmatter_fields;
+pub const max_summary_bytes = page_mod.max_summary_bytes;
 
 pub const Status = page_mod.Status;
 pub const FrontmatterView = page_mod.FrontmatterView;
@@ -402,6 +404,8 @@ pub fn parse(source: []const u8) ParseResult {
     var saw_title = false;
     var saw_parent = false;
     var saw_status = false;
+    var saw_published_at = false;
+    var saw_summary = false;
     var saw_tags = false;
     var saw_relations = false;
     var field_count: usize = 0;
@@ -542,6 +546,16 @@ pub fn parse(source: []const u8) ParseResult {
             } else {
                 return fail(.EFRONTMATTER, line_no, col, "status must be draft, published, or archived");
             }
+        } else if (std.mem.eql(u8, key, "published_at")) {
+            if (saw_published_at) return fail(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"published_at\"");
+            saw_published_at = true;
+            _ = rss_date.parse(value) catch return fail(.EFRONTMATTER, line_no, col, "published_at must be exactly YYYY-MM-DDTHH:MM:SSZ with a valid UTC calendar date");
+            doc.meta.published_at = value;
+        } else if (std.mem.eql(u8, key, "summary")) {
+            if (saw_summary) return fail(.EFRONTMATTER, line_no, col, "duplicate frontmatter key \"summary\"");
+            saw_summary = true;
+            if (value.len > max_summary_bytes) return fail(.EFRONTMATTER, line_no, col, "summary exceeds maximum length");
+            doc.meta.summary = value;
         } else {
             // Closed key set — including legacy parentEntry / parent_entry.
             return fail(.EFRONTMATTER, line_no, col, "unsupported frontmatter key");
@@ -550,6 +564,10 @@ pub fn parse(source: []const u8) ParseResult {
         line_no += 1;
         if (!pl[2]) break;
         fline_start = pl[1];
+    }
+
+    if (doc.meta.published_at != null and doc.meta.summary == null) {
+        return fail(.EFRONTMATTER, line_no, 1, "published_at requires a non-empty summary");
     }
 
     return .{ .doc = doc };
@@ -608,6 +626,43 @@ test "parse: valid frontmatter document" {
     // Views point into source.
     try std.testing.expect(@intFromPtr(r.doc.meta.title.?.ptr) >= @intFromPtr(src.ptr));
     try std.testing.expect(@intFromPtr(r.doc.body.ptr) >= @intFromPtr(src.ptr));
+}
+
+test "parse: RSS metadata is strict and requires summary" {
+    const valid = parse(
+        "---\npublished_at: 2026-07-28T14:30:00Z\nsummary: A concise update.\n---\n",
+    );
+    try std.testing.expect(valid.isOk());
+    try std.testing.expectEqualStrings("2026-07-28T14:30:00Z", valid.doc.meta.published_at.?);
+    try std.testing.expectEqualStrings("A concise update.", valid.doc.meta.summary.?);
+
+    const missing_summary = parse("---\npublished_at: 2026-07-28T14:30:00Z\n---\n");
+    try std.testing.expect(!missing_summary.isOk());
+    try std.testing.expectEqual(Category.EFRONTMATTER, missing_summary.category().?);
+
+    const summary_only = parse("---\nsummary: Retained for later.\n---\n");
+    try std.testing.expect(summary_only.isOk());
+    try std.testing.expectEqualStrings("Retained for later.", summary_only.doc.meta.summary.?);
+
+    const invalid = [_][]const u8{
+        "2026-02-29T14:30:00Z", "2026-07-28t14:30:00Z", "2026-07-28T14:30:00+00:00",
+    };
+    for (invalid) |timestamp| {
+        const source = try std.fmt.allocPrint(std.testing.allocator, "---\npublished_at: {s}\nsummary: S\n---\n", .{timestamp});
+        defer std.testing.allocator.free(source);
+        const result = parse(source);
+        try std.testing.expect(!result.isOk());
+    }
+}
+
+test "parse: RSS summary is bounded and duplicate-safe" {
+    var oversized: [max_summary_bytes + 1]u8 = undefined;
+    @memset(&oversized, 'x');
+    const source = try std.fmt.allocPrint(std.testing.allocator, "---\nsummary: {s}\n---\n", .{oversized});
+    defer std.testing.allocator.free(source);
+    try std.testing.expect(!parse(source).isOk());
+    const duplicate = parse("---\nsummary: One\nsummary: Two\n---\n");
+    try std.testing.expect(!duplicate.isOk());
 }
 
 test "parse: bounded semantic relations" {

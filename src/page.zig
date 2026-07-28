@@ -32,6 +32,9 @@ pub const ContentKind = identity.ContentKind;
 /// Max UTF-8 **bytes** for a frontmatter `title` value.
 pub const max_title_bytes: usize = 512;
 
+/// Max UTF-8 bytes for a frontmatter RSS summary.
+pub const max_summary_bytes: usize = 1024;
+
 /// Max UTF-8 **bytes** for one tag token (after quote strip).
 pub const max_tag_bytes: usize = 64;
 
@@ -104,6 +107,10 @@ pub const FrontmatterView = struct {
     title: ?[]const u8 = null,
     parent: ?[]const u8 = null,
     status: ?Status = null,
+    /// Optional strict UTC publication timestamp, retained verbatim for RSS.
+    published_at: ?[]const u8 = null,
+    /// Optional short plain-text description for future projections and RSS.
+    summary: ?[]const u8 = null,
     /// Tag token slices into source; only `tags[0..tag_count]` is defined.
     tags: [max_tag_count][]const u8 = undefined,
     tag_count: usize = 0,
@@ -213,6 +220,8 @@ pub const DurablePage = struct {
     source_path: []const u8,
     output_path: []const u8,
     status: ?Status = null,
+    published_at: ?[]const u8 = null,
+    summary: ?[]const u8 = null,
     /// Retain-owned tag strings (may be empty slice).
     tags: []const []const u8 = &.{},
     /// Retain-owned semantic relation targets (IR 0.3 when emitted).
@@ -328,6 +337,8 @@ pub const PageDb = struct {
             .source_path = try self.retain.dupe(u8, discovery.source_path),
             .output_path = output_path,
             .status = meta.status,
+            .published_at = try self.dupeOpt(meta.published_at),
+            .summary = try self.dupeOpt(meta.summary),
             .tags = tags_owned,
             .relations = relations_owned,
             .kind = discovery.kind,

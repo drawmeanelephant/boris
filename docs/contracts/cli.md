@@ -16,7 +16,7 @@ boris watch [build options]
 
 | Command | Purpose | Writes by default |
 |---------|---------|-------------------|
-| `build` | Compile the configured site or explicitly selected export | HTML `dist/`, or the selected `--out`, `--rag-dir`, `--context-dir`, or `--llms` path |
+| `build` | Compile the configured site or explicitly selected export | HTML `dist/`, or the selected `--out`, `--rag-dir`, `--context-dir`, `--llms`, or `--rss` path |
 | `check` | Validate the frozen graph and emit a deterministic health report | Nothing unless `--report` is supplied |
 | `impact ID` | Emit the transitive dependents of a page or source endpoint | Nothing unless `--report` is supplied |
 | `watch` | Run an HTML build, then rebuild after debounced source/layout changes | HTML output selected by build options |
@@ -26,7 +26,7 @@ boris watch [build options]
 and has identical behavior. Watch is HTML-only and implies incremental mode.
 
 `check` and `impact` are read-only analysis commands. They do not create HTML,
-IR, RAG, context, or cache artifacts. They require a valid frozen graph before
+IR, RAG, context, RSS, or cache artifacts. They require a valid frozen graph before
 analysis runs.
 
 ## Exit codes
@@ -64,6 +64,13 @@ The existing compiler export remains a separate, richer artifact contract:
 locations; `graph.json` is authoritative for frozen nodes and edges. Nova and
 other editor integrations must consume these published contracts rather than
 reimplementing frontmatter or graph resolution.
+
+## RSS mode
+
+`--rss` and `--rss-path PATH` select the deterministic RSS-only projection.
+It requires `--site-url`, `--rss-title`, and `--rss-description`; `--rss-limit`
+is 1–500 (default 20). RSS is incompatible with every other build projection,
+`check`, and `impact`. See the normative [RSS 2.0 contract](rss-2.0.md).
 
 ## Compatibility rule
 
