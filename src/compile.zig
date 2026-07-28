@@ -323,7 +323,7 @@ pub fn loadAndPromoteFormat(
                     .severity = .error_,
                     .code = diag.parserCategoryToCode(pd.category),
                     .message = pd.message,
-                    .remediation = "Fix the frontmatter or encoding for this file",
+                    .remediation = if (pd.remediation.len > 0) pd.remediation else "Fix the frontmatter or encoding for this file",
                     .source_path = disc.source_path,
                     .line = pd.line,
                     .column = pd.column,

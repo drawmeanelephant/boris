@@ -1,0 +1,5 @@
+This tree must be refused by the Unicode policy at parse time.
+
+The test asserts the compile fails, that at least one EUNICODE diagnostic is
+raised, and that nothing is published. Its presence is what tells
+src/emitter_hostile_test.zig to expect rejection rather than clean output.

@@ -840,13 +840,24 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
                 .severity = .error_,
                 .code = diag.parserCategoryToCode(pd.category),
                 .message = try retain.dupe(u8, pd.message),
-                .remediation = try retain.dupe(u8, "Fix the frontmatter or encoding for this file"),
+                .remediation = try retain.dupe(u8, if (pd.remediation.len > 0) pd.remediation else "Fix the frontmatter or encoding for this file"),
                 .source_path = disc.source_path,
                 .line = pd.line,
                 .column = pd.column,
             });
             // Skip durable page on hard parse failure.
             continue;
+        }
+        if (parsed.doc.unicode_warning) |uw| {
+            try result.diagnostics.append(gpa, .{
+                .severity = .warning,
+                .code = .EUNICODE,
+                .message = try retain.dupe(u8, uw.message),
+                .remediation = try retain.dupe(u8, uw.remediation),
+                .source_path = disc.source_path,
+                .line = uw.line,
+                .column = uw.column,
+            });
         }
 
         // Textile mode adapts only the already-frontmatter-split body. The

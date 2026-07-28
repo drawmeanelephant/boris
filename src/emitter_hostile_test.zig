@@ -105,6 +105,32 @@ test "hostile content cannot break the shape of any published artifact" {
         const content = try std.fmt.allocPrint(gpa, "{s}/{s}/content", .{ fixture_root, tree });
         defer gpa.free(content);
 
+        // A tree carrying this marker is refused at ingest instead of being
+        // published safely — the two are different guarantees and the fixture
+        // says which one it is testing.
+        const marker = try std.fmt.allocPrint(gpa, "{s}/{s}/REJECT-AT-INGEST", .{ fixture_root, tree });
+        defer gpa.free(marker);
+        const expect_rejection = blk: {
+            var f = Io.Dir.cwd().openFile(io, marker, .{}) catch break :blk false;
+            f.close(io);
+            break :blk true;
+        };
+
+        if (expect_rejection) {
+            const out = try scratchDir(gpa, io, tree);
+            defer gpa.free(out);
+            defer Io.Dir.cwd().deleteTree(io, out) catch {};
+            var r = try rag.run(io, gpa, .{ .content_root = content, .out_dir = out, .quiet = true });
+            defer r.deinit();
+            try std.testing.expect(!r.compile.ok);
+            var saw_unicode = false;
+            for (r.compile.diagnostics.items) |d| {
+                if (d.code == .EUNICODE and d.severity == .error_) saw_unicode = true;
+            }
+            try std.testing.expect(saw_unicode);
+            continue;
+        }
+
         const rag_out = try scratchDir(gpa, io, tree);
         defer gpa.free(rag_out);
         defer Io.Dir.cwd().deleteTree(io, rag_out) catch {};
