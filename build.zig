@@ -573,6 +573,7 @@ pub fn build(b: *std.Build) void {
         &hardening_tests.step,
         &layout_hostile_tests.step,
         &fuzz_tests.step,
+        &ir_schema_tests.step,
         &package_exe.step,
         &package_tests.step,
     };
