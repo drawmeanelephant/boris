@@ -4,7 +4,8 @@
 
 Boris is a deterministic documentation compiler and static-site generator. It
 turns Markdown into a validated static site, then can export the same content
-graph as JSON IR, RAG, an AI Context Bundle, `llms.txt`, or RSS 2.0.
+graph as JSON IR, RAG, an AI Context Bundle, `llms.txt`, or RSS 2.0. HTML
+builds can also publish a deterministic XML sitemap.
 
 Write content locally. Build with one native binary. Get output you can inspect,
 serve, archive, or hand to another tool.
@@ -19,7 +20,7 @@ Markdown + frontmatter
           ▼
  discover → validate graph → render
           │
-          ├── HTML site          (--html-dir or dist/)
+          ├── HTML site          (--html-dir or dist/, optional --sitemap)
           ├── JSON IR            (--out)
           ├── RAG corpus         (--rag)
           ├── AI Context Bundle  (--context)
@@ -41,6 +42,7 @@ cycles fail with diagnostics instead of quietly producing a broken site.
 - Incremental builds, watch mode, isolated targets, and bounded page workers.
 - JSON IR with typed dependency edges and reverse indexes.
 - Deterministic RAG, Context Bundle, `llms.txt`, and RSS 2.0 exports from the same tree.
+- Deterministic staged XML sitemap for one public HTML target.
 - Standalone migration labs for Astro/Starlight, WordPress, Instagram, Obsidian,
   Notion, and related source shapes.
 
@@ -84,6 +86,7 @@ Useful first commands:
 ./zig-out/bin/boris --context-dir ./uploads/context --scope mascots/genny --split-size 131072
 ./zig-out/bin/boris --llms --quiet             # llms.txt
 ./zig-out/bin/boris --rss --site-url https://docs.example/ --rss-title "Example Docs" --rss-description "Recent updates" --quiet
+./zig-out/bin/boris --sitemap --site-url https://docs.example/ --quiet
 ./zig-out/bin/boris check                      # graph-health report
 ./zig-out/bin/boris impact getting-started    # dependency impact report
 zig build test
@@ -139,14 +142,19 @@ the manifests as the record of exactly what an LLM received.
 | Command | Output | Best for |
 | --- | --- | --- |
 | `boris` | HTML under `dist/` | Publishing a static site |
+| `boris --sitemap --site-url URL` | HTML plus `sitemap.xml` | Crawler URL discovery |
 | `boris --out .boris` | JSON IR | Build tools and inspection |
 | `boris --rag` | RAG corpus | LLM retrieval and audits |
 | `boris --context` | Context Bundle | Provenance-rich agent context |
 | `boris --llms` | `llms.txt` | Lightweight machine discovery |
 | `boris --rss` | RSS 2.0 XML | Recent documentation updates |
 
-These are separate output modes from the same source tree. They do not silently
-merge into one opaque build product.
+The machine exports are separate output modes from the same source tree; they
+do not silently merge into one opaque build product. Sitemap is the exception
+shown explicitly above: it is an HTML-build flag, not a separate content projection.
+`--sitemap-path PATH` changes its target-relative path and implies
+`--sitemap`. A sitemap is a discovery hint, not a guarantee that a search
+engine will crawl or index a page.
 
 RSS is opt-in and does not modify themes. After publishing `rss.xml`, add this
 standard discovery hint to a layout when the deployed feed URL is known:

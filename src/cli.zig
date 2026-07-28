@@ -8,6 +8,8 @@ const diagnostic = @import("diagnostic.zig");
 const target_mod = @import("target.zig");
 const layout_select = @import("layout_select.zig");
 const identity = @import("identity.zig");
+const site_url_mod = @import("site_url.zig");
+const sitemap = @import("sitemap.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const RunResult = diagnostic.RunResult;
@@ -74,6 +76,8 @@ pub const Options = struct {
     rss_title: ?[]const u8 = null,
     rss_description: ?[]const u8 = null,
     rss_limit: usize = 20,
+    /// Target-root-relative sitemap path when HTML sitemap publication is enabled.
+    sitemap_path: ?[]const u8 = null,
     /// HTML output directory. Set for HTML mode only (default `dist`).
     html_dir: ?[]const u8 = null,
     /// Global HTML layout template (default managed Boris theme).
@@ -118,6 +122,7 @@ const default_rag_dir = "rag";
 const default_context_dir = "context";
 const default_llms_path = "llms.txt";
 const default_rss_path = "rss.xml";
+const default_sitemap_path = sitemap.default_output_path;
 const default_html_dir = "dist";
 const default_html_layout = "themes/boris/layouts/main.html";
 
@@ -137,6 +142,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var rss_title: ?[]const u8 = null;
     var rss_description: ?[]const u8 = null;
     var rss_limit: usize = 20;
+    var sitemap_path: []const u8 = default_sitemap_path;
     var html_dir: []const u8 = default_html_dir;
     var scope: ?[]const u8 = null;
     var split_size: ?usize = null;
@@ -161,6 +167,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_rss_title = false;
     var saw_rss_description = false;
     var saw_rss_limit = false;
+    var saw_sitemap = false;
+    var saw_sitemap_path = false;
     var saw_html = false;
     var saw_html_dir = false;
     var saw_html_layout = false;
@@ -279,6 +287,12 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (std.mem.eql(u8, a, "--rss")) {
             if (saw_rss) return error.DuplicateFlag;
             saw_rss = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--sitemap")) {
+            if (saw_sitemap) return error.DuplicateFlag;
+            saw_sitemap = true;
             continue;
         }
 
@@ -468,6 +482,14 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        if (std.mem.eql(u8, a, "--sitemap-path") or std.mem.startsWith(u8, a, "--sitemap-path=")) {
+            if (saw_sitemap_path) return error.DuplicateFlag;
+            saw_sitemap_path = true;
+            sitemap_path = try takeValue(args, &i, a, "--sitemap-path");
+            sitemap.validateOutputPath(sitemap_path) catch return error.InvalidValue;
+            continue;
+        }
+
         if (std.mem.eql(u8, a, "--site-url") or std.mem.startsWith(u8, a, "--site-url=")) {
             if (saw_site_url) return error.DuplicateFlag;
             saw_site_url = true;
@@ -550,8 +572,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     const has_explicit_targets = targets.items.len > 0;
     const has_target_layouts = target_layouts.items.len > 0;
     const has_layout_rules = pending_rules.items.len > 0;
+    const wants_sitemap = saw_sitemap or saw_sitemap_path;
     // Explicit HTML selectors (not the bare default).
-    const explicit_html = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts or saw_theme or has_layout_rules;
+    const explicit_html = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts or saw_theme or has_layout_rules or wants_sitemap;
     const wants_rag = saw_rag or saw_rag_dir;
     const wants_context = saw_context or saw_context_dir;
     const wants_llms = saw_llms or saw_llms_path;
@@ -560,7 +583,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     const wants_ir = saw_out or saw_no_rag;
 
     if (command == .check or command == .impact) {
-        if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_rss_title or saw_rss_description or saw_rss_limit or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
+        if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or wants_sitemap or saw_site_url or saw_rss_title or saw_rss_description or saw_rss_limit or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
             return error.ConflictingFlags;
         }
     } else if ((command == .build or command == .watch) and (saw_format or saw_report)) {
@@ -577,8 +600,11 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     if (bundles_only and !wants_rag) return error.ConflictingFlags;
     if (wants_llms and (wants_rag or wants_ir or wants_context or wants_rss or explicit_html)) return error.ConflictingFlags;
     if (wants_rss and (wants_rag or wants_ir or wants_context or explicit_html)) return error.ConflictingFlags;
-    if ((saw_site_url or saw_rss_title or saw_rss_description or saw_rss_limit) and !wants_rss) return error.ConflictingFlags;
+    if ((saw_rss_title or saw_rss_description or saw_rss_limit) and !wants_rss) return error.ConflictingFlags;
+    if (saw_site_url and !(wants_rss or wants_sitemap)) return error.ConflictingFlags;
     if (wants_rss and (site_url == null or rss_title == null or rss_description == null)) return error.MissingValue;
+    if (wants_sitemap and site_url == null) return error.MissingValue;
+    if (wants_sitemap and (wants_rag or wants_ir or wants_context or wants_llms or wants_rss)) return error.ConflictingFlags;
     // Explicit HTML selectors own the output destination; refuse IR/RAG flags.
     if (explicit_html and (wants_rag or wants_context or saw_out)) {
         return error.ConflictingFlags;
@@ -589,6 +615,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     }
     // Target conflict rules
     if (has_explicit_targets and saw_html_dir) return error.ConflictingFlags;
+    if (wants_sitemap and targets.items.len > 1) return error.ConflictingFlags;
     // --target-layout / --layout-rule attach to a named --target, or to the
     // synthetic "default" target on bare HTML / --html / --html-dir. Unknown
     // target names are rejected after default synthesis (InvalidValue).
@@ -612,6 +639,14 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .ir
     else
         .html;
+
+    if (site_url) |raw_url| {
+        const normalized = site_url_mod.normalized(gpa, raw_url) catch |err| switch (err) {
+            error.InvalidSiteUrl => return error.InvalidValue,
+            error.OutOfMemory => return error.OutOfMemory,
+        };
+        gpa.free(normalized);
+    }
 
     // Single-target HTML (bare CLI, --html, or --html-dir) maps to target "default".
     // --target-layout / --layout-rule may attach to this synthetic target.
@@ -799,6 +834,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .split_size = null,
             .bundles_only = false,
             .llms_path = null,
+            .sitemap_path = if (wants_sitemap) sitemap_path else null,
+            .site_url = site_url,
             .html_dir = if (has_explicit_targets) null else html_dir,
             .html_layout = html_layout,
             .owned_html_layout = owned_html_layout,
@@ -865,13 +902,15 @@ pub fn printUsage() void {
         \\  --llms-path PATH    llms.txt export path (implies --llms)
         \\  --rss               Deterministic RSS 2.0 export → rss.xml
         \\  --rss-path PATH     RSS output path (implies --rss)
+        \\  --sitemap           Add deterministic sitemap.xml to the HTML target
+        \\  --sitemap-path PATH Target-root-relative sitemap path (implies --sitemap)
         \\
         \\Options:
         \\  --input <DIR>       Content root (default: content)
         \\  --textile          Explicit .textile-only input adapter mode (no mixed trees)
         \\  --out <DIR>         IR output directory (selects IR mode; default: .boris)
         \\  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
-        \\  --site-url URL      Required absolute deployment URL for RSS
+        \\  --site-url URL      Required HTTP(S) deployment URL for RSS or sitemap
         \\  --rss-title TITLE   Required RSS channel title
         \\  --rss-description T Required RSS channel description
         \\  --rss-limit N       RSS item limit (1–500; default 20)
@@ -892,6 +931,7 @@ pub fn printUsage() void {
         \\
         \\HTML artifacts (success; Apex + layout splice):
         \\  <html-dir>/**/*.html   or   <each-target-dir>/**/*.html
+        \\  <target-dir>/sitemap.xml  (with --sitemap; path configurable)
         \\  <target-dir>/.boris-cache/manifest.json  (with --incremental / --watch)
         \\  Staging: <target-dir>.boris-stage (ephemeral; committed only on full target success)
         \\
@@ -912,6 +952,8 @@ pub fn printUsage() void {
         \\  --no-rag with --rag-dir
         \\  --context / --context-dir with --rag, --out, or HTML selectors
         \\  --rss / --rss-path with HTML, IR, RAG, Context, llms.txt, check, or impact
+        \\  --sitemap / --sitemap-path without --site-url, with non-HTML modes,
+        \\  or with multiple targets sharing one ambiguous public URL
         \\  explicit --out with --rag or --rag-dir
         \\  --html / --html-dir / --target / --target-layout / --layout-rule with --rag, --rag-dir, --context, or explicit --out
         \\  --target with --html-dir
@@ -1949,4 +1991,37 @@ test "parse: RSS mode, required channel settings, and conflicts" {
     try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D", "--rss-limit", "0" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--rag", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "relative", "--rss-title", "Docs", "--rss-description", "D" }));
+}
+
+test "parse: sitemap selection implication validation conflicts and RSS compatibility" {
+    var defaults = try parseOptions(std.testing.allocator, &.{ "boris", "--sitemap", "--site-url", "https://example.test/docs/" });
+    defer defaults.deinit(std.testing.allocator);
+    try expectEqual(Mode.html, defaults.mode);
+    try expectEqualStrings("sitemap.xml", defaults.sitemap_path.?);
+    try expectEqualStrings("https://example.test/docs/", defaults.site_url.?);
+
+    var custom = try parseOptions(std.testing.allocator, &.{ "boris", "--sitemap-path", "meta/discovery.xml", "--site-url=https://example.test" });
+    defer custom.deinit(std.testing.allocator);
+    try expectEqual(Mode.html, custom.mode);
+    try expectEqualStrings("meta/discovery.xml", custom.sitemap_path.?);
+
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap-path" }));
+    try expectError(error.EmptyValue, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap-path=" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap", "--sitemap", "--site-url", "https://example.test" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap-path", "a.xml", "--sitemap-path", "b.xml", "--site-url", "https://example.test" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap", "--site-url", "https://example.test", "--site-url", "https://other.test" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap-path", "../sitemap.xml", "--site-url", "https://example.test" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap-path", "/sitemap.xml", "--site-url", "https://example.test" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap", "--site-url", "mailto:webmaster@example.test" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap", "--site-url", "https://example.test", "--no-rag" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap", "--site-url", "https://example.test", "--rss", "--rss-title", "Docs", "--rss-description", "D" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap", "--site-url", "https://example.test", "--target", "public=dist/public", "--target", "preview=dist/preview" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--sitemap", "--site-url", "https://example.test" }));
+
+    var rss_opts = try parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D" });
+    defer rss_opts.deinit(std.testing.allocator);
+    try expectEqual(Mode.rss, rss_opts.mode);
+    try std.testing.expect(rss_opts.sitemap_path == null);
 }

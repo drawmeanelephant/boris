@@ -657,6 +657,8 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             .quiet = opts.quiet,
             .jobs = opts.jobs,
             .input_format = opts.input_format,
+            .sitemap_path = opts.sitemap_path,
+            .site_url = opts.site_url,
         }) catch |err| {
             return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
         };
@@ -675,6 +677,8 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             .quiet = opts.quiet,
             .jobs = opts.jobs,
             .input_format = opts.input_format,
+            .sitemap_path = opts.sitemap_path,
+            .site_url = opts.site_url,
         }) catch |err| {
             return mapHtmlError(err, opts.quiet, &.{}, layout_path);
         };
@@ -710,6 +714,12 @@ fn mapHtmlError(
         error.DuplicateSelector,
         error.InvalidLayoutPath,
         error.LayoutSelectionFailed,
+        error.InvalidSiteUrl,
+        error.InvalidSitemapPath,
+        error.SitemapOutputCollision,
+        error.SitemapSiteUrlRequired,
+        error.SitemapSiteUrlWithoutOutput,
+        error.AmbiguousSitemapTargets,
         => {
             if (!quiet) {
                 std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
@@ -726,6 +736,9 @@ fn mapHtmlError(
         error.IncludeFailed,
         error.ReferenceFailed,
         error.ComponentFailed,
+        error.SitemapDuplicateUrl,
+        error.SitemapUrlLimitExceeded,
+        error.SitemapSizeLimitExceeded,
         // Multi-target wrap can mix content and I/O; prefer content for graph/include
         // failures already printed, but treat pure layout load I/O as exit 3 via FileNotFound etc.
         error.MultiTargetCompilationFailed,
