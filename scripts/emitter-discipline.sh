@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Emitter registry completeness.
+# Module-classification completeness, for humans running the release gate.
 #
-# src/emitter_discipline_test.zig enforces the encoding rule on the emitters it
-# knows about. This catches the other failure: a new emitter module that is
-# never registered, and therefore inherits none of the checks.
+# The authority is src/emitter_discipline_test.zig, which runs inside
+# `zig build test` and needs no shell. This mirrors its "every source module is
+# classified" check so a reviewer can see the answer without a full test run.
 #
-# Run from the release gate and from `zig build test-emitter-discipline`.
+# The check is deliberately inverted: it does NOT look for files matching an
+# emitter naming convention. Boris's machine-facing emitters are llms.zig,
+# context.zig, rag.zig and search_index.zig — none ends in _emit.zig — so a
+# name-based check would miss a new rss.zig entirely.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,40 +21,25 @@ note() { printf '==> %s\n' "$*"; }
 pass() { printf '    OK  %s\n' "$*"; }
 fail() { printf '    FAIL %s\n' "$*"; FAIL=1; }
 
-note "Emitter registry completeness"
+note "Source module classification"
 
-shopt -s nullglob
-emitters=(src/*_emit.zig)
-shopt -u nullglob
-
-if [[ ${#emitters[@]} -eq 0 ]]; then
-  fail "no src/*_emit.zig modules found — has the naming convention changed?"
-fi
-
-for path in "${emitters[@]}"; do
+count=0
+for path in src/*.zig; do
   name="$(basename "$path")"
-  if grep -q "@embedFile(\"${name}\")" "$REGISTRY"; then
-    pass "${name} is registered"
-  else
-    fail "${name} is not registered in ${REGISTRY}"
-    printf '         Add it to the registry so its output encoding is enforced.\n'
+  count=$((count + 1))
+  if ! grep -q "\.name = \"${name}\"" "$REGISTRY"; then
+    fail "${name} is not classified in ${REGISTRY}"
+    printf '         Add it as .other, or as an emitter with the encoder it uses.\n'
   fi
 done
 
-# Any module that writes an artifact family for machine consumers should route
-# through the sink. This is advisory for modules outside the *_emit.zig naming
-# convention, but a hard failure for one that imports the encoder and then
-# bypasses it.
-note "Encoder imported but unused"
-while IFS= read -r path; do
-  if grep -q 'structured_out.zig' "$path" && ! grep -qE 'Sink|structured_out\.' "$path"; then
-    fail "$(basename "$path") imports structured_out but never uses it"
-  fi
-done < <(grep -rl 'structured_out.zig' src/ 2>/dev/null || true)
-[[ $FAIL -eq 0 ]] && pass "no dangling encoder imports"
+if [[ $count -eq 0 ]]; then
+  fail "no src/*.zig found — has the layout changed?"
+fi
 
 if [[ $FAIL -ne 0 ]]; then
   printf '\nemitter-discipline: FAILED\n'
   exit 1
 fi
+pass "all ${count} source modules are classified"
 printf '\nemitter-discipline: ok\n'
