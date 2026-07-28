@@ -34,6 +34,19 @@ pub const max_fail_str: usize = 512;
 pub const FailInfo = struct {
     line: u32 = 1,
     column: u32 = 1,
+    /// Lines of frontmatter preceding the body these offsets are measured in.
+    ///
+    /// Scanners work on the body slice, so a raw `lineColAt` result is
+    /// body-relative while `docs/contracts/diagnostics.md` specifies the
+    /// full-source line of the offending construct. Set this from the owning
+    /// page's `body_offset` and `set` will report the file line.
+    ///
+    /// It is per-`FailInfo`, not per-call: each instance describes exactly one
+    /// body, so a failure inside a nested include uses its own `FailInfo`
+    /// carrying that file's base. Keying the adjustment off the locus string
+    /// instead silently skips it, because a page reports its own path as the
+    /// locus.
+    line_base: u32 = 0,
     detail_len: usize = 0,
     detail_buf: [max_fail_str]u8 = undefined,
     /// File where line/col apply (e.g. nested include path). Empty → caller page path.
@@ -49,7 +62,7 @@ pub const FailInfo = struct {
     }
 
     pub fn set(self: *FailInfo, line: u32, column: u32, detail_s: []const u8, locus_s: []const u8) void {
-        self.line = line;
+        self.line = line + self.line_base;
         self.column = column;
         self.detail_len = copyCap(&self.detail_buf, detail_s);
         self.locus_len = copyCap(&self.locus_buf, locus_s);
@@ -103,6 +116,16 @@ pub fn validateIncludePath(path: []const u8) bool {
     return true;
 }
 
+/// Lines occupied by frontmatter before `body_offset`, for `FailInfo.line_base`.
+/// A body-relative line 1 sits on file line `frontmatterLineBase(..) + 1`.
+pub fn frontmatterLineBase(source: []const u8, body_offset: usize) u32 {
+    var lines: u32 = 0;
+    for (source[0..@min(body_offset, source.len)]) |c| {
+        if (c == '\n') lines += 1;
+    }
+    return lines;
+}
+
 pub fn lineColAt(source: []const u8, offset: usize) struct { line: u32, column: u32 } {
     var line: u32 = 1;
     var col: u32 = 1;
@@ -143,6 +166,14 @@ fn lineEndIndex(body: []const u8, i: usize) usize {
     var j = i;
     while (j < body.len and body[j] != '\n') : (j += 1) {}
     return j;
+}
+
+/// `FailInfo.line_base` for a body obtained via `bodyOfSource`, so the two
+/// always agree about where the body starts.
+pub fn lineBaseOfSource(source: []const u8) u32 {
+    const parsed = parser.parse(source);
+    if (parsed.diagnostic != null) return 0;
+    return frontmatterLineBase(source, parsed.doc.body_offset);
 }
 
 /// Body of a file: if frontmatter parses cleanly, return body slice; else whole source.
@@ -875,4 +906,24 @@ test "expandIncludes rejects symlink targets and symlink path components" {
         expandIncludes(io, content_dir, gpa, arena.allocator(), "{{include linked/secret.md}}", "page.md", &dir_fail),
     );
     try std.testing.expectEqualStrings("linked/secret.md", dir_fail.detail());
+}
+
+test "diagnostic lines are full-source, not body-relative" {
+    const source = "---\ntitle: T\nstatus: published\ntags: [a]\n---\n\n# T\n\nbad\n";
+    // Frontmatter occupies lines 1-5, so a body-relative line 4 is file line 9.
+    try std.testing.expectEqual(@as(u32, 5), lineBaseOfSource(source));
+
+    var fail: FailInfo = .{ .line_base = lineBaseOfSource(source) };
+    fail.set(4, 5, "detail", "page.md");
+    try std.testing.expectEqual(@as(u32, 9), fail.line);
+    try std.testing.expectEqual(@as(u32, 5), fail.column);
+
+    // The adjustment must not key off the locus: a page reports its own path
+    // there, which previously suppressed it entirely.
+    var with_empty_locus: FailInfo = .{ .line_base = 5 };
+    with_empty_locus.set(4, 1, "detail", "");
+    try std.testing.expectEqual(@as(u32, 9), with_empty_locus.line);
+
+    // A source whose frontmatter does not parse has no offset to apply.
+    try std.testing.expectEqual(@as(u32, 0), lineBaseOfSource("no frontmatter here\n"));
 }

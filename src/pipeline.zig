@@ -223,10 +223,11 @@ const DependencyResolver = struct {
         });
     }
 
-    fn scanWiki(self: *DependencyResolver, body: []const u8, locus: []const u8, from: Endpoint) !void {
+    fn scanWiki(self: *DependencyResolver, body: []const u8, locus: []const u8, from: Endpoint, line_base: u32) !void {
         var hits: std.ArrayList(wikilink.WikiHit) = .empty;
         defer hits.deinit(self.gpa);
-        var fail: wikilink.FailInfo = .{};
+        // Offsets are body-relative; the diagnostics contract wants the file line.
+        var fail: wikilink.FailInfo = .{ .line_base = line_base };
         wikilink.scanWikiLinks(body, self.gpa, &hits, &fail, locus) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => {
@@ -257,10 +258,12 @@ const DependencyResolver = struct {
         from: Endpoint,
         stack: *std.ArrayList([]const u8),
         depth: usize,
+        line_base: u32,
     ) !void {
         var hits: std.ArrayList(include_mod.ScanHit) = .empty;
         defer hits.deinit(self.gpa);
-        var fail: include_mod.FailInfo = .{};
+        // Offsets are body-relative; the diagnostics contract wants the file line.
+        var fail: include_mod.FailInfo = .{ .line_base = line_base };
         include_mod.scanIncludeDirectives(body, self.gpa, &hits, &fail, locus) catch |err| switch (err) {
             error.OutOfMemory => return error.OutOfMemory,
             else => {
@@ -315,21 +318,21 @@ const DependencyResolver = struct {
             defer _ = stack.pop();
             const source_body = include_mod.bodyOfSource(source);
             const source_from: Endpoint = .{ .type = .source, .value = hit.path };
-            try self.scanWiki(source_body, hit.path, source_from);
-            try self.scanIncludes(source_body, hit.path, source_from, stack, depth + 1);
+            try self.scanWiki(source_body, hit.path, source_from, include_mod.lineBaseOfSource(source));
+            try self.scanIncludes(source_body, hit.path, source_from, stack, depth + 1, include_mod.lineBaseOfSource(source));
 
             const retained_path = try self.retain.dupe(u8, hit.path);
             try self.scanned_sources.put(self.gpa, retained_path, {});
         }
     }
 
-    fn scanPage(self: *DependencyResolver, page: PageEntry, body: []const u8) !void {
-        return self.scanPageWithHtmlLinks(page, body, false);
+    fn scanPage(self: *DependencyResolver, page: PageEntry, body: []const u8, line_base: u32) !void {
+        return self.scanPageWithHtmlLinks(page, body, false, line_base);
     }
 
-    fn scanPageWithHtmlLinks(self: *DependencyResolver, page: PageEntry, body: []const u8, include_html_links: bool) !void {
+    fn scanPageWithHtmlLinks(self: *DependencyResolver, page: PageEntry, body: []const u8, include_html_links: bool, line_base: u32) !void {
         const from: Endpoint = .{ .type = .page, .value = page.id };
-        try self.scanWiki(body, page.source_path, from);
+        try self.scanWiki(body, page.source_path, from, line_base);
         if (include_html_links) {
             var references: std.ArrayList([]const u8) = .empty;
             defer references.deinit(self.gpa);
@@ -347,7 +350,7 @@ const DependencyResolver = struct {
         var stack: std.ArrayList([]const u8) = .empty;
         defer stack.deinit(self.gpa);
         try stack.append(self.gpa, page.source_path);
-        try self.scanIncludes(body, page.source_path, from, &stack, 0);
+        try self.scanIncludes(body, page.source_path, from, &stack, 0, line_base);
     }
 };
 
@@ -390,9 +393,9 @@ fn resolveDependencies(
             const adapted = try textile.toMarkdown(source[page.body_offset..], gpa);
             if (!adapted.isOk()) return error.InvalidTextile;
             defer gpa.free(adapted.markdown);
-            try resolver.scanPage(page, adapted.markdown);
+            try resolver.scanPage(page, adapted.markdown, 0);
         } else {
-            try resolver.scanPage(page, source[page.body_offset..]);
+            try resolver.scanPage(page, source[page.body_offset..], include_mod.frontmatterLineBase(source, page.body_offset));
         }
     }
 }
@@ -454,9 +457,9 @@ pub fn populateDependencyIndexFormat(
             const adapted = try textile.toMarkdown(source[page.body_offset..], gpa);
             if (!adapted.isOk()) return error.InvalidTextile;
             defer gpa.free(adapted.markdown);
-            try resolver.scanPageWithHtmlLinks(page, adapted.markdown, true);
+            try resolver.scanPageWithHtmlLinks(page, adapted.markdown, true, 0);
         } else {
-            try resolver.scanPageWithHtmlLinks(page, source[page.body_offset..], true);
+            try resolver.scanPageWithHtmlLinks(page, source[page.body_offset..], true, include_mod.frontmatterLineBase(source, page.body_offset));
         }
         if (page.parent) |parent| {
             try resolver.appendEdge(
