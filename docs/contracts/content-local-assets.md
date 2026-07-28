@@ -39,9 +39,11 @@ Rules:
 2. Discovery walks regular files under the sibling root recursively.
 3. **Symlinks are rejected** (asset root, intermediate segments, and leaf files).
 4. Directories are not publishable assets; only regular files are inventoried.
-5. Missing sibling root is allowed (empty inventory).
-6. Inventory order is bytewise sorted by within-tree path (deterministic copy).
-7. Extension policy for pages is unchanged: non-page files under content are
+5. SVG is inspected before publication. Files containing active constructs are
+   rejected with `EASSET`; Boris never rewrites or sanitizes an author's SVG.
+6. Missing sibling root is allowed (empty inventory).
+7. Inventory order is bytewise sorted by within-tree path (deterministic copy).
+8. Extension policy for pages is unchanged: non-page files under content are
    ignored by page discovery and only enter the build via this asset path.
 
 Path grammar for within-tree segments (ASCII-only, fail closed):
@@ -120,6 +122,10 @@ Copy rules:
 - Theme `assets/` remains separate under the target root `assets/` prefix.
 - Preflight **collision** when a content-local published path equals a page
   HTML output path or a theme asset path (`EASSET` / `AssetCollision`).
+- SVG with `<script>`, `<foreignObject>`, `iframe`, `object`, `embed`, `on*`
+  handlers, `javascript:` URLs, or document/entity declarations is rejected.
+  The error names the asset path and first rejected construct. This is a
+  publication policy, not a sanitizer: safe SVG bytes are copied exactly.
 
 ---
 
@@ -150,7 +156,7 @@ Stale cleanup:
 
 | Code | When |
 |------|------|
-| `EASSET` | Invalid/out-of-tree path, missing file, symlink, non-file, or published-path collision |
+| `EASSET` | Invalid/out-of-tree path, missing file, symlink, non-file, active SVG, or published-path collision |
 
 Exit **1** (content) on `EASSET` during HTML compile. IR/RAG paths do not
 publish content-local assets and do not rewrite Markdown images.

@@ -20,6 +20,7 @@ const Io = std.Io;
 const identity = @import("identity.zig");
 const include_mod = @import("include.zig");
 const diag = @import("diag.zig");
+const svg_policy = @import("svg_policy.zig");
 
 pub const AssetError = error{
     AssetPath,
@@ -27,6 +28,7 @@ pub const AssetError = error{
     AssetSymlink,
     AssetNotFile,
     AssetCollision,
+    AssetUnsafeSvg,
     ReadFailed,
     OutOfMemory,
 };
@@ -244,6 +246,7 @@ pub fn loadPageAssets(
     content_dir: Io.Dir,
     source_path: []const u8,
     entity_id: []const u8,
+    fail_out: ?*FailInfo,
 ) !PageAssetBundle {
     var bundle: PageAssetBundle = .{
         .gpa = gpa,
@@ -313,6 +316,12 @@ pub fn loadPageAssets(
 
         const bytes = try readFileAlloc(io, content_dir, source_rel, gpa);
         errdefer gpa.free(bytes);
+        if (isSvgPath(within_buf) and svg_policy.default_policy == .refuse_active_content) {
+            if (svg_policy.firstViolation(bytes)) |violation| {
+                setAssetFail(fail_out, source_rel, violation.description());
+                return error.AssetUnsafeSvg;
+            }
+        }
         const output_rel = try outputRelFor(entity_id, within_buf, gpa);
         errdefer gpa.free(output_rel);
 
@@ -341,6 +350,7 @@ pub fn loadSiteAssets(
     content_dir: Io.Dir,
     source_paths: []const []const u8,
     entity_ids: []const []const u8,
+    fail_out: ?*FailInfo,
 ) !SiteAssetInventory {
     std.debug.assert(source_paths.len == entity_ids.len);
     var inv: SiteAssetInventory = .{ .gpa = gpa };
@@ -356,10 +366,18 @@ pub fn loadSiteAssets(
     }
 
     for (source_paths, entity_ids, 0..) |sp, eid, i| {
-        inv.pages[i] = try loadPageAssets(io, gpa, content_dir, sp, eid);
+        inv.pages[i] = try loadPageAssets(io, gpa, content_dir, sp, eid, fail_out);
         filled = i + 1;
     }
     return inv;
+}
+
+fn isSvgPath(path: []const u8) bool {
+    return path.len > 4 and std.ascii.eqlIgnoreCase(path[path.len - 4 ..], ".svg");
+}
+
+fn setAssetFail(fail_out: ?*FailInfo, source_rel: []const u8, detail: []const u8) void {
+    if (fail_out) |fail| fail.set(1, 1, detail, source_rel);
 }
 
 /// Fail when a content-local asset path collides with a page HTML path or theme asset.
@@ -767,6 +785,7 @@ pub fn printDiagnostic(gpa: std.mem.Allocator, err: AssetError, source_path: []c
         error.AssetSymlink => .EASSET,
         error.AssetNotFile => .EASSET,
         error.AssetCollision => .EASSET,
+        error.AssetUnsafeSvg => .EASSET,
         else => .EIO,
     };
     const message: []const u8 = switch (err) {
@@ -775,6 +794,7 @@ pub fn printDiagnostic(gpa: std.mem.Allocator, err: AssetError, source_path: []c
         error.AssetSymlink => "content-local asset path rejects symlinks",
         error.AssetNotFile => "content-local asset must be a regular file",
         error.AssetCollision => "content-local asset path collides with page or theme output",
+        error.AssetUnsafeSvg => "content-local SVG contains active content",
         else => "content-local asset I/O failure",
     };
     const remediation: []const u8 = switch (err) {
@@ -783,6 +803,7 @@ pub fn printDiagnostic(gpa: std.mem.Allocator, err: AssetError, source_path: []c
         error.AssetSymlink => "Replace symlinks with regular files under <stem>.assets/",
         error.AssetNotFile => "Publish only regular files under <stem>.assets/",
         error.AssetCollision => "Rename the asset or page so published paths do not collide",
+        error.AssetUnsafeSvg => "Remove the named active construct or publish an inert SVG; Boris does not sanitize assets",
         else => "Check content-local asset files are readable regular files",
     };
     const locus = if (fail.locus().len > 0) fail.locus() else source_path;
@@ -897,7 +918,7 @@ test "loadPageAssets discovers nested files sorted" {
     var content_dir = try cwd.openDir(io, content_path, .{});
     defer content_dir.close(io);
 
-    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro");
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
     defer bundle.deinit();
 
     try std.testing.expectEqual(@as(usize, 2), bundle.entries.len);
@@ -925,7 +946,7 @@ test "rewriteImageLinks rewrites sibling asset and leaves remote" {
     var content_dir = try cwd.openDir(io, content_path, .{});
     defer content_dir.close(io);
 
-    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro");
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
     defer bundle.deinit();
 
     const body =
@@ -959,7 +980,7 @@ test "rewriteImageLinks rejects traversal absolute backslash and outside tree" {
     var content_dir = try cwd.openDir(io, content_path, .{});
     defer content_dir.close(io);
 
-    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro");
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
     defer bundle.deinit();
 
     try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](../secret.png)\n", &bundle, "guides/intro.html", null));
@@ -1003,7 +1024,7 @@ test "copyAssetsToOutput and scrub orphans" {
     var content_dir = try cwd.openDir(io, content_path, .{});
     defer content_dir.close(io);
 
-    var inv = try loadSiteAssets(io, gpa, content_dir, &.{"index.md"}, &.{"index"});
+    var inv = try loadSiteAssets(io, gpa, content_dir, &.{"index.md"}, &.{"index"}, null);
     defer inv.deinit();
 
     const out_rel = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
@@ -1025,7 +1046,7 @@ test "copyAssetsToOutput and scrub orphans" {
     try cwd.deleteFile(io, drop_src);
 
     inv.deinit();
-    inv = try loadSiteAssets(io, gpa, content_dir, &.{"index.md"}, &.{"index"});
+    inv = try loadSiteAssets(io, gpa, content_dir, &.{"index.md"}, &.{"index"}, null);
 
     try copyAssetsToOutput(io, out_dir, &inv);
     scrubOrphanContentAssets(io, out_dir, gpa, &inv);
@@ -1070,11 +1091,34 @@ test "id override rewrites to entity-scoped asset URL" {
     var content_dir = try cwd.openDir(io, content_path, .{});
     defer content_dir.close(io);
 
-    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "custom");
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "custom", null);
     defer bundle.deinit();
     try std.testing.expectEqualStrings("custom.assets/d.svg", bundle.entries[0].output_rel);
 
     const out = try rewriteImageLinks(gpa, "![d](intro.assets/d.svg)\n", &bundle, "custom.html", null);
     defer gpa.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "custom.assets/d.svg") != null);
+}
+
+test "loadPageAssets rejects active SVG and records the asset construct" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-active-svg", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# hi\\n");
+    try writeTreeFile(io, work, "content/index.assets/logo.SVG", "<svg><script>alert(1)</script></svg>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var fail: FailInfo = .{};
+    try std.testing.expectError(error.AssetUnsafeSvg, loadPageAssets(io, gpa, content_dir, "index.md", "index", &fail));
+    try std.testing.expectEqualStrings("index.assets/logo.SVG", fail.locus());
+    try std.testing.expectEqualStrings("active SVG <script> element", fail.detail());
 }

