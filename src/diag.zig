@@ -35,6 +35,9 @@ pub const Code = enum {
     EFRONTMATTER,
     EINVALIDUTF8,
     EINVALIDPATH,
+    /// Source contains an invisible or non-interchange Unicode code point.
+    /// Error for the reject tier; warning for the dual-use tier.
+    EUNICODE,
     /// Explicit Textile-mode adapter failures and input-family mismatches.
     ETEXTILE,
     /// Aside / registered-component tokenizer failures (milestone 10).
@@ -79,6 +82,7 @@ pub fn parserCategoryToCode(cat: parser.Category) Code {
         .EFRONTMATTER => .EFRONTMATTER,
         .EINVALIDUTF8 => .EINVALIDUTF8,
         .EINVALIDPATH => .EINVALIDPATH,
+        .EUNICODE => .EUNICODE,
     };
 }
 

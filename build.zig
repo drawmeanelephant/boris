@@ -534,6 +534,16 @@ pub fn build(b: *std.Build) void {
     const run_cache_tests = b.addRunArtifact(cache_tests);
     run_cache_tests.setCwd(b.path("."));
 
+    // --- Ingest-time Unicode policy ---------------------------------------
+    const unicode_policy_mod = b.createModule(.{
+        .root_source_file = b.path("src/unicode_policy.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const unicode_policy_tests = b.addTest(.{ .root_module = unicode_policy_mod });
+    const run_unicode_policy_tests = b.addRunArtifact(unicode_policy_tests);
+    run_unicode_policy_tests.setCwd(b.path("."));
+
     // --- Output-encoding layer + its regression gate ----------------------
     // encode/structured_out are pure; artifact_invariants reads published
     // bytes; emitter_hostile compiles hostile trees through the real emitters.
@@ -627,6 +637,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_cache_tests.step);
     test_step.dependOn(&run_include_tests.step);
     test_step.dependOn(&run_wikilink_tests.step);
+    test_step.dependOn(&run_unicode_policy_tests.step);
     test_step.dependOn(&run_encode_tests.step);
     test_step.dependOn(&run_structured_out_tests.step);
     test_step.dependOn(&run_invariants_tests.step);

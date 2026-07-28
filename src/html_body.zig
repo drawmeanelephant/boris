@@ -79,7 +79,7 @@ fn parserDiagnostic(source_path: []const u8, parsed: parser.Diagnostic) diag.Dia
         .severity = .error_,
         .code = diag.parserCategoryToCode(parsed.category),
         .message = parsed.message,
-        .remediation = "Fix the frontmatter or encoding for this file",
+        .remediation = if (parsed.remediation.len > 0) parsed.remediation else "Fix the frontmatter or encoding for this file",
         .source_path = source_path,
         .line = parsed.line,
         .column = parsed.column,
