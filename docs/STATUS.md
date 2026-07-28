@@ -11,7 +11,7 @@
 
 Boris is a Zig documentation compiler: Markdown in, validated documentation
 graph out as HTML by default, with optional IR, RAG, Context Bundle, and
-`llms.txt` exports. It is not a Node SSG, an MDX runtime, or a migration
+`llms.txt`, and RSS 2.0 exports. It is not a Node SSG, an MDX runtime, or a migration
 framework. Normative behavior lives in [`docs/contracts/`](contracts/);
 release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 
@@ -40,7 +40,7 @@ release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | Markdown rendering | **Done** — in-process ApexMarkdown Unified, including tables and footnotes. |
 | Content graph | **Done** — closed frontmatter, validated Trunk/Satellite hierarchy, includes, wiki links, heading targets, and recursive validated parent chains. |
 | HTML navigation and layouts | **Done** — graph-backed nav, breadcrumbs, TOC, closed layout slots, assets, layout rules, incremental/watch/jobs, and isolated targets. |
-| Machine outputs | **Done** — IR 0.2, RAG, Context Bundles, and `llms.txt`; semantic relations retain their documented conditional IR 0.3 artifacts. |
+| Machine outputs | **Done** — IR 0.2, RAG, Context Bundles, `llms.txt`, and deterministic RSS 2.0; semantic relations retain their documented conditional IR 0.3 artifacts. |
 | Migration laboratories | **Done as bounded developer tools** — read-only review, conversion aids, relationship candidates, and theme materialization; they do not widen Boris author grammar. |
 | Rendered-site search | **Done on `afterparty`** — deterministic staged compiler publication, standalone CLI, browser UI, zero-results state, and no-JavaScript navigation fallback. |
 | Relationship review inventory | **Done on `afterparty`** — schema-v2 exact target inventory preserves provenance, duplicate keys, slug states, draft exclusion, unsupported-file rows, and deterministic JSON/Markdown reports. |
@@ -62,6 +62,7 @@ zig build test
 ./zig-out/bin/boris --rag --quiet                   # RAG → rag/
 ./zig-out/bin/boris --context --quiet               # Context Bundle
 ./zig-out/bin/boris --llms --quiet                  # llms.txt
+./zig-out/bin/boris --rss --site-url https://docs.example/ --rss-title "Example Docs" --rss-description "Recent updates" --quiet
 ./zig-out/bin/boris --incremental --jobs 4 --quiet
 
 zig build --build-file tools/search-index/build.zig test

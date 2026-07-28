@@ -22,6 +22,8 @@ pub const Mode = enum {
     context,
     /// Deterministic community `llms.txt` export.
     llms,
+    /// Deterministic RSS 2.0 export.
+    rss,
     /// HTML site render under `--html-dir` (default `dist`). Default bare CLI.
     html,
 };
@@ -66,6 +68,12 @@ pub const Options = struct {
     bundles_only: bool = false,
     /// `llms.txt` output path (default `llms.txt`).
     llms_path: ?[]const u8 = null,
+    /// RSS XML output path (default `rss.xml`).
+    rss_path: ?[]const u8 = null,
+    site_url: ?[]const u8 = null,
+    rss_title: ?[]const u8 = null,
+    rss_description: ?[]const u8 = null,
+    rss_limit: usize = 20,
     /// HTML output directory. Set for HTML mode only (default `dist`).
     html_dir: ?[]const u8 = null,
     /// Global HTML layout template (default managed Boris theme).
@@ -109,6 +117,7 @@ const default_out_dir = ".boris";
 const default_rag_dir = "rag";
 const default_context_dir = "context";
 const default_llms_path = "llms.txt";
+const default_rss_path = "rss.xml";
 const default_html_dir = "dist";
 const default_html_layout = "themes/boris/layouts/main.html";
 
@@ -123,6 +132,11 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var rag_dir: []const u8 = default_rag_dir;
     var context_dir: []const u8 = default_context_dir;
     var llms_path: []const u8 = default_llms_path;
+    var rss_path: []const u8 = default_rss_path;
+    var site_url: ?[]const u8 = null;
+    var rss_title: ?[]const u8 = null;
+    var rss_description: ?[]const u8 = null;
+    var rss_limit: usize = 20;
     var html_dir: []const u8 = default_html_dir;
     var scope: ?[]const u8 = null;
     var split_size: ?usize = null;
@@ -141,6 +155,12 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_bundles_only = false;
     var saw_llms = false;
     var saw_llms_path = false;
+    var saw_rss = false;
+    var saw_rss_path = false;
+    var saw_site_url = false;
+    var saw_rss_title = false;
+    var saw_rss_description = false;
+    var saw_rss_limit = false;
     var saw_html = false;
     var saw_html_dir = false;
     var saw_html_layout = false;
@@ -253,6 +273,12 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (std.mem.eql(u8, a, "--llms")) {
             if (saw_llms) return error.DuplicateFlag;
             saw_llms = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--rss")) {
+            if (saw_rss) return error.DuplicateFlag;
+            saw_rss = true;
             continue;
         }
 
@@ -434,6 +460,43 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        if (std.mem.eql(u8, a, "--rss-path") or std.mem.startsWith(u8, a, "--rss-path=")) {
+            if (saw_rss_path) return error.DuplicateFlag;
+            saw_rss_path = true;
+            rss_path = try takeValue(args, &i, a, "--rss-path");
+            if (std.fs.path.isAbsolute(rss_path)) return error.InvalidValue;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--site-url") or std.mem.startsWith(u8, a, "--site-url=")) {
+            if (saw_site_url) return error.DuplicateFlag;
+            saw_site_url = true;
+            site_url = try takeValue(args, &i, a, "--site-url");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--rss-title") or std.mem.startsWith(u8, a, "--rss-title=")) {
+            if (saw_rss_title) return error.DuplicateFlag;
+            saw_rss_title = true;
+            rss_title = try takeValue(args, &i, a, "--rss-title");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--rss-description") or std.mem.startsWith(u8, a, "--rss-description=")) {
+            if (saw_rss_description) return error.DuplicateFlag;
+            saw_rss_description = true;
+            rss_description = try takeValue(args, &i, a, "--rss-description");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--rss-limit") or std.mem.startsWith(u8, a, "--rss-limit=")) {
+            if (saw_rss_limit) return error.DuplicateFlag;
+            saw_rss_limit = true;
+            rss_limit = std.fmt.parseInt(usize, try takeValue(args, &i, a, "--rss-limit"), 10) catch return error.InvalidValue;
+            if (rss_limit < 1 or rss_limit > 500) return error.InvalidValue;
+            continue;
+        }
+
         if (std.mem.eql(u8, a, "--html-dir") or std.mem.startsWith(u8, a, "--html-dir=")) {
             if (saw_html_dir) return error.DuplicateFlag;
             saw_html_dir = true;
@@ -492,11 +555,12 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     const wants_rag = saw_rag or saw_rag_dir;
     const wants_context = saw_context or saw_context_dir;
     const wants_llms = saw_llms or saw_llms_path;
+    const wants_rss = saw_rss or saw_rss_path;
     // Explicit IR: --out and/or --no-rag (bare CLI is HTML, not IR).
     const wants_ir = saw_out or saw_no_rag;
 
     if (command == .check or command == .impact) {
-        if (wants_rag or wants_ir or wants_context or wants_llms or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
+        if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_rss_title or saw_rss_description or saw_rss_limit or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
             return error.ConflictingFlags;
         }
     } else if ((command == .build or command == .watch) and (saw_format or saw_report)) {
@@ -511,13 +575,16 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     if (wants_context and (wants_rag or wants_ir)) return error.ConflictingFlags;
     if ((saw_scope or saw_split_size) and !(wants_rag or wants_context)) return error.ConflictingFlags;
     if (bundles_only and !wants_rag) return error.ConflictingFlags;
-    if (wants_llms and (wants_rag or wants_ir or wants_context or explicit_html)) return error.ConflictingFlags;
+    if (wants_llms and (wants_rag or wants_ir or wants_context or wants_rss or explicit_html)) return error.ConflictingFlags;
+    if (wants_rss and (wants_rag or wants_ir or wants_context or explicit_html)) return error.ConflictingFlags;
+    if ((saw_site_url or saw_rss_title or saw_rss_description or saw_rss_limit) and !wants_rss) return error.ConflictingFlags;
+    if (wants_rss and (site_url == null or rss_title == null or rss_description == null)) return error.MissingValue;
     // Explicit HTML selectors own the output destination; refuse IR/RAG flags.
     if (explicit_html and (wants_rag or wants_context or saw_out)) {
         return error.ConflictingFlags;
     }
     // HTML-only options conflict with IR or RAG selection (default HTML is fine).
-    if ((saw_jobs or saw_watch or saw_incremental) and (wants_ir or wants_rag or wants_context)) {
+    if ((saw_jobs or saw_watch or saw_incremental) and (wants_ir or wants_rag or wants_context or wants_rss)) {
         return error.ConflictingFlags;
     }
     // Target conflict rules
@@ -539,6 +606,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .context
     else if (wants_llms)
         .llms
+    else if (wants_rss)
+        .rss
     else if (wants_ir)
         .ir
     else
@@ -693,6 +762,31 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .analysis_report = analysis_report,
             .input_format = if (saw_textile) .textile else .markdown,
         },
+        .rss => .{
+            .help = false,
+            .quiet = quiet,
+            .mode = .rss,
+            .input_dir = input_dir,
+            .out_dir = null,
+            .rag_dir = null,
+            .context_dir = null,
+            .scope = null,
+            .split_size = null,
+            .bundles_only = false,
+            .llms_path = null,
+            .rss_path = rss_path,
+            .site_url = site_url,
+            .rss_title = rss_title,
+            .rss_description = rss_description,
+            .rss_limit = rss_limit,
+            .html_dir = null,
+            .targets = targets,
+            .command = command,
+            .impact_id = impact_id,
+            .analysis_format = analysis_format,
+            .analysis_report = analysis_report,
+            .input_format = if (saw_textile) .textile else .markdown,
+        },
         .html => .{
             .help = false,
             .quiet = quiet,
@@ -769,12 +863,18 @@ pub fn printUsage() void {
         \\  --bundles-only      RAG upload parts only; omit per-page files
         \\  --llms              Deterministic llms.txt export → llms.txt
         \\  --llms-path PATH    llms.txt export path (implies --llms)
+        \\  --rss               Deterministic RSS 2.0 export → rss.xml
+        \\  --rss-path PATH     RSS output path (implies --rss)
         \\
         \\Options:
         \\  --input <DIR>       Content root (default: content)
         \\  --textile          Explicit .textile-only input adapter mode (no mixed trees)
         \\  --out <DIR>         IR output directory (selects IR mode; default: .boris)
         \\  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
+        \\  --site-url URL      Required absolute deployment URL for RSS
+        \\  --rss-title TITLE   Required RSS channel title
+        \\  --rss-description T Required RSS channel description
+        \\  --rss-limit N       RSS item limit (1–500; default 20)
         \\  --html-dir <DIR>    HTML output directory (implies HTML; default: dist)
         \\  --html-layout PATH  Global layout template (default: themes/boris/layouts/main.html)
         \\  --theme ROOT        Theme root sugar → ROOT/layouts/main.html (+ managed assets/)
@@ -811,6 +911,7 @@ pub fn printUsage() void {
         \\  --rag with --no-rag
         \\  --no-rag with --rag-dir
         \\  --context / --context-dir with --rag, --out, or HTML selectors
+        \\  --rss / --rss-path with HTML, IR, RAG, Context, llms.txt, check, or impact
         \\  explicit --out with --rag or --rag-dir
         \\  --html / --html-dir / --target / --target-layout / --layout-rule with --rag, --rag-dir, --context, or explicit --out
         \\  --target with --html-dir
@@ -1836,4 +1937,16 @@ test "parse: llms mode and path" {
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--llms", "--rag" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--llms", "--html" }));
     try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--llms-path", "/tmp/llms.txt" }));
+}
+
+test "parse: RSS mode, required channel settings, and conflicts" {
+    var opts = try parseOptions(std.testing.allocator, &.{ "boris", "--rss-path", "public/rss.xml", "--site-url", "https://example.test/docs/", "--rss-title=Docs", "--rss-description", "Recent updates", "--rss-limit", "20" });
+    defer opts.deinit(std.testing.allocator);
+    try expectEqual(Mode.rss, opts.mode);
+    try expectEqualStrings("public/rss.xml", opts.rss_path.?);
+    try expectEqualStrings("https://example.test/docs/", opts.site_url.?);
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D", "--rss-limit", "0" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--rag", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D" }));
 }

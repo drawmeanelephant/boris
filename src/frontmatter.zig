@@ -42,6 +42,8 @@ pub const Meta = struct {
     summary: ?[]const u8 = null,
     /// Tags retained by caller's arena.
     tags: []const []const u8 = &.{},
+    /// Semantic relations retained by caller's arena (compatibility alignment).
+    relations: []const page_mod.SemanticRelation = &.{},
     /// Byte offset of body start in source.
     body_offset: usize = 0,
     /// True if a frontmatter block was present (even if empty).
@@ -54,6 +56,7 @@ const KeyFlags = struct {
     parent: bool = false,
     status: bool = false,
     tags: bool = false,
+    relations: bool = false,
     published_at: bool = false,
     summary: bool = false,
 };
@@ -133,6 +136,34 @@ fn parseTagsList(retain: std.mem.Allocator, raw: []const u8) ![]const []const u8
         if (i >= inner.len) return error.BadTags;
     }
 
+    return try list.toOwnedSlice(retain);
+}
+
+fn parseRelationsList(retain: std.mem.Allocator, raw: []const u8) ![]const page_mod.SemanticRelation {
+    const value = trimAscii(raw);
+    if (value.len < 2 or value[0] != '[' or value[value.len - 1] != ']') return error.BadRelations;
+    const inner = trimAscii(value[1 .. value.len - 1]);
+    if (inner.len == 0) return &.{};
+    var list: std.ArrayList(page_mod.SemanticRelation) = .empty;
+    errdefer list.deinit(retain);
+    var cursor: usize = 0;
+    while (cursor < inner.len) {
+        while (cursor < inner.len and isSpace(inner[cursor])) : (cursor += 1) {}
+        const start = cursor;
+        while (cursor < inner.len and inner[cursor] != ',') : (cursor += 1) {}
+        const entry = trimAscii(inner[start..cursor]);
+        const equals = std.mem.indexOfScalar(u8, entry, '=') orelse return error.BadRelations;
+        if (equals == 0 or equals + 1 >= entry.len or std.mem.indexOfScalar(u8, entry[equals + 1 ..], '=') != null) return error.BadRelations;
+        const kind = page_mod.RelationKind.parse(trimAscii(entry[0..equals])) orelse return error.BadRelations;
+        const target = trimAscii(entry[equals + 1 ..]);
+        if (!validateId(target) or list.items.len >= page_mod.max_relation_count) return error.BadRelations;
+        for (list.items) |prior| if (prior.kind == kind and std.mem.eql(u8, prior.target, target)) return error.BadRelations;
+        try list.append(retain, .{ .kind = kind, .target = try retain.dupe(u8, target) });
+        if (cursor == inner.len) break;
+        cursor += 1;
+        while (cursor < inner.len and isSpace(inner[cursor])) : (cursor += 1) {}
+        if (cursor == inner.len) return error.BadRelations;
+    }
     return try list.toOwnedSlice(retain);
 }
 
@@ -327,6 +358,18 @@ pub fn parse(
                     meta.tags = parseTagsList(retain, raw_val) catch {
                         try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "tags must be a simple list like [a, b]", "Use tags: [tag1, tag2] with plain or double-quoted items");
                         meta.tags = &.{};
+                        line_no += 1;
+                        if (line_end < source.len) i = line_end + 1 else break;
+                        continue;
+                    };
+                }
+            } else if (std.mem.eql(u8, key, "relations")) {
+                if (flags.relations) {
+                    try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "duplicate frontmatter key \"relations\"", "Keep a single relations field per document");
+                } else {
+                    flags.relations = true;
+                    meta.relations = parseRelationsList(retain, raw_val) catch {
+                        try pushDiag(list_gpa, retain, diags, source_path, .EFRONTMATTER, line_no, col, "relations must be a bounded list like [supersedes=guides/old]", "Use only documented relation kinds and canonical target ids");
                         line_no += 1;
                         if (line_end < source.len) i = line_end + 1 else break;
                         continue;
