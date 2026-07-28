@@ -3282,7 +3282,7 @@ test "Feature 7 HTML: fail-loud missing wiki target" {
     }));
 }
 
-test "Feature 7 HTML: fenced include and wiki stay literal" {
+test "Feature 7 HTML: fenced and inline-code include and wiki stay literal" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
@@ -3308,6 +3308,8 @@ test "Feature 7 HTML: fenced include and wiki stay literal" {
         \\{{include includes/secret.md}}
         \\[[fenced/wiki]]
         \\~~~
+        \\
+        \\Inline `{{include includes/secret.md}}` and `[[fenced/wiki]]` remain literal.
         \\
         \\Live text.
         \\

@@ -3,8 +3,8 @@
 //!
 //! Resolved against the frozen page graph by entity id **before** Apex.
 //! Optional heading fragments match Apex-rendered `id` attributes on the
-//! target page (see `docs/contracts/heading-ids.md`). Fence-aware: links
-//! inside fenced code stay literal.
+//! target page (see `docs/contracts/heading-ids.md`). Fence- and
+//! inline-code-aware: links inside Markdown code stay literal.
 //!
 //! Normative: `docs/contracts/includes-and-wiki-links.md`,
 //! `docs/contracts/heading-ids.md`.
@@ -197,6 +197,15 @@ pub fn scanWikiLinks(
 
         if (fence_ch != 0) {
             i += 1;
+            continue;
+        }
+
+        if (body[i] == '`') {
+            if (include_mod.inlineCodeSpanEnd(body, i)) |end| {
+                i = end;
+            } else {
+                i += include_mod.backtickRunLength(body, i);
+            }
             continue;
         }
 
@@ -706,6 +715,20 @@ test "scanWikiLinks skips tilde fences" {
     try std.testing.expectEqualStrings("guides/b", list.items[1].entity_id);
 }
 
+test "scanWikiLinks ignores matching inline code spans" {
+    const body =
+        \\[[guides/before]]`[[missing#]]`[[guides/after]]
+        \\``[[missing/also]]``
+        \\
+    ;
+    var list: std.ArrayList(WikiHit) = .empty;
+    defer list.deinit(std.testing.allocator);
+    try scanWikiLinks(body, std.testing.allocator, &list, null, "");
+    try std.testing.expectEqual(@as(usize, 2), list.items.len);
+    try std.testing.expectEqualStrings("guides/before", list.items[0].entity_id);
+    try std.testing.expectEqualStrings("guides/after", list.items[1].entity_id);
+}
+
 test "scanWikiLinks fragment and label" {
     const body = "See [[guides/a#section-one]] and [[guides/a#code-x-y|Code]].";
     var list: std.ArrayList(WikiHit) = .empty;
@@ -764,6 +787,26 @@ test "rewriteWikiLinks relative href" {
     defer gpa.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "[Content Model](guides/overview.html)") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "[[") == null);
+}
+
+test "wiki inline code spans stay out of rewrite and fingerprint material" {
+    const gpa = std.testing.allocator;
+    const nodes = [_]graph_mod.Node{.{
+        .id = "guides/live",
+        .source_path = "guides/live.md",
+        .title = "Live",
+        .role = .trunk,
+        .index = 0,
+    }};
+    const body = "[[guides/live]] `[[missing/page#missing-heading]]`";
+    const out = try rewriteWikiLinks(gpa, body, &nodes, "index.html", null);
+    defer gpa.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "[Live](guides/live.html)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "`[[missing/page#missing-heading]]`") != null);
+
+    const material = try referenceMaterial(gpa, "`[[missing/page]]`", &nodes);
+    defer gpa.free(material);
+    try std.testing.expectEqualStrings("", material);
 }
 
 test "rewriteWikiLinks with validated fragment" {
@@ -880,6 +923,25 @@ test "scanWikiLinks fragment inside fence is skipped" {
     try scanWikiLinks(body, std.testing.allocator, &list, null, "");
     try std.testing.expectEqual(@as(usize, 1), list.items.len);
     try std.testing.expectEqualStrings("live", list.items[0].fragment.?);
+}
+
+test "collectFragmentTargetIds ignores inline code spans" {
+    const gpa = std.testing.allocator;
+    var ids: std.ArrayList([]const u8) = .empty;
+    defer ids.deinit(gpa);
+    var seen: std.StringHashMapUnmanaged(void) = .{};
+    defer seen.deinit(gpa);
+
+    try collectFragmentTargetIds(
+        "`[[guides/ignored#nope]]` [[guides/live#section]]",
+        gpa,
+        &ids,
+        &seen,
+        null,
+        "page.md",
+    );
+    try std.testing.expectEqual(@as(usize, 1), ids.items.len);
+    try std.testing.expectEqualStrings("guides/live", ids.items[0]);
 }
 
 test "HeadingIndex lookup distinguishes unknown entity from unknown fragment" {
