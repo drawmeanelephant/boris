@@ -37,9 +37,13 @@ ascending; the limit is applied after sorting.
 
 ## URLs and XML
 
-`--site-url` is an absolute HTTP(S) URL of at most 2,048 bytes with a non-empty
-host and no query or fragment. It may include a deployment base path. Channel
-and item URLs normalize joining to one slash and use Boris's safe
+`--site-url` is an absolute HTTP(S) URI of at most 2,048 bytes with a non-empty
+DNS host or bracketed IPv6 host, an optional decimal port, and no user
+credentials, query, or fragment. It is ASCII RFC 3986 syntax: a path may use
+unreserved characters, sub-delimiters, `:`, `@`, `/`, and valid percent
+escapes; raw spaces, control bytes, non-ASCII bytes, and URI delimiters such as
+`<` are rejected. It may include a deployment base path. Channel and item URLs
+normalize joining to one slash and use Boris's safe
 `{entity-id}.html` output path, percent-encoding path bytes as needed without
 escaping the configured base path.
 
