@@ -154,7 +154,11 @@ pub fn renderSource(
         .output_path = output_path,
     }) catch return error.ReferenceFailed;
 
-    var include_fail: include_mod.FailInfo = .{};
+    // Scanners below measure offsets in the body slice, but the diagnostics
+    // contract specifies the full-source line. Shift by the frontmatter.
+    const fail_line_base = include_mod.frontmatterLineBase(source, parsed.doc.body_offset);
+
+    var include_fail: include_mod.FailInfo = .{ .line_base = fail_line_base };
     const expanded = include_mod.expandIncludes(
         io,
         content_dir,
@@ -168,7 +172,7 @@ pub fn renderSource(
         return error.IncludeFailed;
     };
 
-    var wiki_fail: wikilink.FailInfo = .{};
+    var wiki_fail: wikilink.FailInfo = .{ .line_base = fail_line_base };
     const with_wiki = wikilink.rewriteWikiLinksOpts(arena, expanded, options.nodes, output_path, &wiki_fail, .{
         .heading_index = options.heading_index,
         .validate_fragments = options.heading_index != null,
@@ -179,7 +183,7 @@ pub fn renderSource(
 
     // Content-local Markdown images → published sibling-tree URLs (pre-Apex).
     const with_assets = if (options.page_assets) |bundle| blk: {
-        var asset_fail: content_asset.FailInfo = .{};
+        var asset_fail: content_asset.FailInfo = .{ .line_base = fail_line_base };
         break :blk content_asset.rewriteImageLinks(arena, with_wiki, bundle, output_path, &asset_fail) catch |err| {
             if (!options.quiet) content_asset.printDiagnostic(gpa, err, source_path, asset_fail);
             return error.AssetFailed;
