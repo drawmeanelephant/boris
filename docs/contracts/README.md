@@ -92,6 +92,7 @@ per topic:
 | [semantic-relations.md](semantic-relations.md) | Bounded author relations and deliberate IR 0.3 schema plan |
 | [context-bundle.md](context-bundle.md) | Deterministic provenance-rich AI context export (`--context`) |
 | [documentation-intelligence.md](documentation-intelligence.md) | Read-only graph health and impact analysis (`check` / `impact`); schema twin under `schemas/` |
+| [publication-profile.md](publication-profile.md) | Strict internal schema-v1 publication-profile parser and static-plan boundary; execution is not yet exposed |
 | [cli.md](cli.md) | Stable command routing, exit codes, and report-consumer boundary |
 | [textile-compatibility.md](textile-compatibility.md) | Explicit bounded `.textile`-to-Markdown input mode |
 | [rendered-search.md](rendered-search.md) | Deterministic v1 search JSON for rendered HTML pages; browser/compiler seams are explicit |

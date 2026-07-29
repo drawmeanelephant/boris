@@ -129,6 +129,20 @@ pub fn build(b: *std.Build) void {
     const run_pipeline_tests = b.addRunArtifact(pipeline_tests);
     run_pipeline_tests.setCwd(b.path("."));
 
+    // --- Publication profile parser + static planner (Slice 1) -----------
+    const publication_profile_mod = b.createModule(.{
+        .root_source_file = b.path("src/publication_profile.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkApex(publication_profile_mod, b, false);
+    publication_profile_mod.addOptions("build_options", apex_opts);
+    const publication_profile_tests = b.addTest(.{ .root_module = publication_profile_mod });
+    const run_publication_profile_tests = b.addRunArtifact(publication_profile_tests);
+    run_publication_profile_tests.setCwd(b.path("."));
+    const test_publication_profile_step = b.step("test-publication-profile", "Run publication profile parser and planner tests");
+    test_publication_profile_step.dependOn(&run_publication_profile_tests.step);
+
     const graph_mod = b.createModule(.{
         .root_source_file = b.path("src/graph.zig"),
         .target = target,
@@ -642,6 +656,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_parser_tests.step);
     test_step.dependOn(&run_textile_tests.step);
     test_step.dependOn(&run_pipeline_tests.step);
+    test_step.dependOn(&run_publication_profile_tests.step);
     test_step.dependOn(&run_graph_tests.step);
     test_step.dependOn(&run_aside_tests.step);
     test_step.dependOn(&run_rag_tests.step);
