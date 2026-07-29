@@ -47,6 +47,7 @@ const theme_materialize = @import("theme_materialize.zig");
 const wordpress_theme = @import("wordpress_theme.zig");
 const link_audit = @import("link_audit.zig");
 const frontmatter_review = @import("frontmatter_review.zig");
+const publication = @import("publication.zig");
 
 pub const ExitCode = enum(u8) {
     success = 0,
@@ -2053,6 +2054,7 @@ test "wordpress: re-run into same out dir wipes stale content" {
 
     var out = try Io.Dir.cwd().openDir(io, out_dir, .{});
     defer out.close(io);
+    try out.access(io, publication.marker_name, .{});
     // Stale paths gone
     const stale_md = out.access(io, "content/posts/stale-ghost.md", .{});
     try std.testing.expect(stale_md == error.FileNotFound or stale_md == error.PathNotFound);
@@ -2067,6 +2069,26 @@ test "wordpress: re-run into same out dir wipes stale content" {
     try std.testing.expect(std.mem.indexOf(u8, man, "\"status\": \"copied\"") != null);
 
     Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+}
+
+test "wordpress: refuses an unowned output tree without deleting it" {
+    const io = std.testing.io;
+    const out_dir = "fixtures/.tmp-wxr-unowned-output";
+    Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+    defer Io.Dir.cwd().deleteTree(io, out_dir) catch {};
+    try Io.Dir.cwd().createDirPath(io, out_dir);
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = out_dir ++ "/KEEP", .data = "preserve me" });
+
+    try std.testing.expectError(error.OutputNotOwned, wordpress.run(io, std.testing.allocator, .{
+        .wxr_path = "fixtures/mini-wxr/export.xml",
+        .out_dir = out_dir,
+        .quiet = true,
+    }));
+
+    var out = try Io.Dir.cwd().openDir(io, out_dir, .{});
+    defer out.close(io);
+    var keep = try out.openFile(io, "KEEP", .{});
+    defer keep.close(io);
 }
 
 test "wordpress: media symlink escape is rejected" {

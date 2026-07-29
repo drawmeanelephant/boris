@@ -8,6 +8,7 @@
 
 const std = @import("std");
 const Io = std.Io;
+const publication = @import("publication.zig");
 
 pub const format_id = "boris-wordpress-migration-lab";
 /// Schema 3 adds per-page `excerpt` / `is_sticky` fields and explicit empty-slug /
@@ -1281,10 +1282,9 @@ fn isMediaPath(url: []const u8) bool {
     const ext = fileExtension(url);
     if (ext.len == 0) return false;
     const media_exts = [_][]const u8{
-        ".png",  ".jpg",  ".jpeg", ".gif",  ".webp", ".svg",  ".pdf",
-        ".mp4",  ".m4v",  ".webm", ".ogv",  ".mov",
-        ".mp3",  ".ogg",  ".wav",  ".m4a",  ".aac",  ".flac",
-        ".zip",
+        ".png", ".jpg", ".jpeg", ".gif",  ".webp", ".svg", ".pdf",
+        ".mp4", ".m4v", ".webm", ".ogv",  ".mov",  ".mp3", ".ogg",
+        ".wav", ".m4a", ".aac",  ".flac", ".zip",
     };
     for (media_exts) |e| {
         if (std.ascii.eqlIgnoreCase(ext, e)) return true;
@@ -1380,10 +1380,10 @@ fn looksLikeMediaTarget(target: []const u8) bool {
 fn extractRawMediaUrls(allocator: std.mem.Allocator, text: []const u8, post_id: []const u8, output: []const u8, media: *std.ArrayList(MediaRef)) !void {
     // Single-URL attributes
     const attrs = [_][]const u8{
-        "src=\"",         "href=\"",         "src='",         "href='",
-        "data-src=\"",    "data-src='",      "data-lazy-src=\"", "data-lazy-src='",
-        "mp3=\"",         "mp4=\"",          "m4v=\"",        "ogg=\"",
-        "wav=\"",         "poster=\"",       "poster='",
+        "src=\"",      "href=\"",    "src='",            "href='",
+        "data-src=\"", "data-src='", "data-lazy-src=\"", "data-lazy-src='",
+        "mp3=\"",      "mp4=\"",     "m4v=\"",           "ogg=\"",
+        "wav=\"",      "poster=\"",  "poster='",
     };
     for (attrs) |pat| {
         var from: usize = 0;
@@ -3024,169 +3024,199 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         }
     }.less);
 
-    // Prepare out dir. Wipe lab-owned outputs so re-runs into the same --out are
-    // free of stale content/.assets and report sidecars (never touches inputs).
-    try Io.Dir.cwd().createDirPath(io, opts.out_dir);
+    var input_paths: [2][]const u8 = undefined;
+    input_paths[0] = opts.wxr_path;
+    var input_count: usize = 1;
+    if (opts.media_dir) |media_dir| {
+        input_paths[input_count] = media_dir;
+        input_count += 1;
+    }
+    var output_publication = try publication.Publication.begin(
+        io,
+        gpa,
+        opts.out_dir,
+        input_paths[0..input_count],
+        format_id,
+    );
+    defer {
+        output_publication.abandon(io, gpa);
+        output_publication.deinit(gpa);
+    }
     {
-        const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{opts.out_dir});
-        defer gpa.free(content_path);
-        Io.Dir.cwd().deleteTree(io, content_path) catch {};
-        const sidecar_names = [_][]const u8{ "report.json", "REPORT.md", "media_manifest.json" };
-        for (sidecar_names) |name| {
-            const p = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ opts.out_dir, name });
-            defer gpa.free(p);
-            Io.Dir.cwd().deleteFile(io, p) catch {};
+        var out_root = try Io.Dir.cwd().openDir(io, output_publication.stage_path, .{});
+        defer out_root.close(io);
+
+        var pages: std.ArrayList(PageRecord) = .empty;
+        defer pages.deinit(gpa);
+        var parents: std.ArrayList(ParentRel) = .empty;
+        defer parents.deinit(gpa);
+        var all_links: std.ArrayList(LinkFinding) = .empty;
+        defer all_links.deinit(gpa);
+        var all_media: std.ArrayList(MediaRef) = .empty;
+        defer all_media.deinit(gpa);
+        var media_manifest: std.ArrayList(MediaManifestEntry) = .empty;
+        defer media_manifest.deinit(gpa);
+        var all_features: std.ArrayList(FeatureFinding) = .empty;
+        defer all_features.deinit(gpa);
+        var unsupported: std.ArrayList(UnsupportedItem) = .empty;
+        defer unsupported.deinit(gpa);
+        var all_comments: std.ArrayList(CommentRecord) = .empty;
+        defer all_comments.deinit(gpa);
+        var human: std.ArrayList(HumanReview) = .empty;
+        defer human.deinit(gpa);
+        var provenance: std.ArrayList(Provenance) = .empty;
+        defer provenance.deinit(gpa);
+
+        // Site-level taxonomy cardinality (before per-page conversion).
+        var tax_cats: usize = 0;
+        var tax_tags: usize = 0;
+        var tax_other: usize = 0;
+        for (doc.taxonomies) |t| {
+            if (std.mem.eql(u8, t.domain, "category")) tax_cats += 1 else if (std.mem.eql(u8, t.domain, "tag") or std.mem.eql(u8, t.domain, "post_tag")) tax_tags += 1 else tax_other += 1;
         }
-    }
-    var out_root = try Io.Dir.cwd().openDir(io, opts.out_dir, .{});
-    defer out_root.close(io);
-
-    var pages: std.ArrayList(PageRecord) = .empty;
-    defer pages.deinit(gpa);
-    var parents: std.ArrayList(ParentRel) = .empty;
-    defer parents.deinit(gpa);
-    var all_links: std.ArrayList(LinkFinding) = .empty;
-    defer all_links.deinit(gpa);
-    var all_media: std.ArrayList(MediaRef) = .empty;
-    defer all_media.deinit(gpa);
-    var media_manifest: std.ArrayList(MediaManifestEntry) = .empty;
-    defer media_manifest.deinit(gpa);
-    var all_features: std.ArrayList(FeatureFinding) = .empty;
-    defer all_features.deinit(gpa);
-    var unsupported: std.ArrayList(UnsupportedItem) = .empty;
-    defer unsupported.deinit(gpa);
-    var all_comments: std.ArrayList(CommentRecord) = .empty;
-    defer all_comments.deinit(gpa);
-    var human: std.ArrayList(HumanReview) = .empty;
-    defer human.deinit(gpa);
-    var provenance: std.ArrayList(Provenance) = .empty;
-    defer provenance.deinit(gpa);
-
-    // Site-level taxonomy cardinality (before per-page conversion).
-    var tax_cats: usize = 0;
-    var tax_tags: usize = 0;
-    var tax_other: usize = 0;
-    for (doc.taxonomies) |t| {
-        if (std.mem.eql(u8, t.domain, "category")) tax_cats += 1 else if (std.mem.eql(u8, t.domain, "tag") or std.mem.eql(u8, t.domain, "post_tag")) tax_tags += 1 else tax_other += 1;
-    }
-    const taxonomy_stats: TaxonomyStats = .{
-        .total = doc.taxonomies.len,
-        .categories = tax_cats,
-        .tags = tax_tags,
-        .other = tax_other,
-        .high_cardinality = doc.taxonomies.len >= high_cardinality_taxonomy_threshold,
-        .threshold = high_cardinality_taxonomy_threshold,
-    };
-    if (taxonomy_stats.high_cardinality) {
-        try all_features.append(gpa, .{
-            .source_post_id = "site",
-            .source_output = "(site)",
-            .code = "high_cardinality_taxonomy",
-            .classification = .human_review,
-            .excerpt = try std.fmt.allocPrint(retain, "{d} taxonomies", .{doc.taxonomies.len}),
-            .message = try std.fmt.allocPrint(retain, "Export declares {d} taxonomies (threshold {d}); review category/tag mapping before bulk import", .{ doc.taxonomies.len, high_cardinality_taxonomy_threshold }),
-        });
-    }
-
-    // Basename-only references are ambiguous when uploads contains more than
-    // one file of that name. Preserve the inventory detail in the report;
-    // never pretend an offline migration can choose one safely.
-    for (media_files, 0..) |media, index| {
-        const basename = std.fs.path.basename(media);
-        if (index > 0 and std.mem.eql(u8, basename, std.fs.path.basename(media_files[index - 1]))) continue;
-        var matches: usize = 0;
-        for (media_files) |other| {
-            if (std.mem.eql(u8, basename, std.fs.path.basename(other))) matches += 1;
-        }
-        if (matches > 1) {
+        const taxonomy_stats: TaxonomyStats = .{
+            .total = doc.taxonomies.len,
+            .categories = tax_cats,
+            .tags = tax_tags,
+            .other = tax_other,
+            .high_cardinality = doc.taxonomies.len >= high_cardinality_taxonomy_threshold,
+            .threshold = high_cardinality_taxonomy_threshold,
+        };
+        if (taxonomy_stats.high_cardinality) {
             try all_features.append(gpa, .{
-                .source_post_id = "media-inventory",
-                .source_output = "(media inventory)",
-                .code = "duplicate_media_basename",
+                .source_post_id = "site",
+                .source_output = "(site)",
+                .code = "high_cardinality_taxonomy",
                 .classification = .human_review,
-                .excerpt = try retain.dupe(u8, basename),
-                .message = try std.fmt.allocPrint(retain, "{d} local media files share basename '{s}'; basename-only references require review", .{ matches, basename }),
+                .excerpt = try std.fmt.allocPrint(retain, "{d} taxonomies", .{doc.taxonomies.len}),
+                .message = try std.fmt.allocPrint(retain, "Export declares {d} taxonomies (threshold {d}); review category/tag mapping before bulk import", .{ doc.taxonomies.len, high_cardinality_taxonomy_threshold }),
             });
         }
-    }
 
-    // Map post_id → entity_id for pages/posts
-    var id_to_entity: std.StringHashMapUnmanaged([]const u8) = .empty;
-    defer id_to_entity.deinit(gpa);
-    for (metas.items) |m| {
-        try id_to_entity.put(gpa, m.item.post_id, m.entity_id);
-    }
+        // Basename-only references are ambiguous when uploads contains more than
+        // one file of that name. Preserve the inventory detail in the report;
+        // never pretend an offline migration can choose one safely.
+        for (media_files, 0..) |media, index| {
+            const basename = std.fs.path.basename(media);
+            if (index > 0 and std.mem.eql(u8, basename, std.fs.path.basename(media_files[index - 1]))) continue;
+            var matches: usize = 0;
+            for (media_files) |other| {
+                if (std.mem.eql(u8, basename, std.fs.path.basename(other))) matches += 1;
+            }
+            if (matches > 1) {
+                try all_features.append(gpa, .{
+                    .source_post_id = "media-inventory",
+                    .source_output = "(media inventory)",
+                    .code = "duplicate_media_basename",
+                    .classification = .human_review,
+                    .excerpt = try retain.dupe(u8, basename),
+                    .message = try std.fmt.allocPrint(retain, "{d} local media files share basename '{s}'; basename-only references require review", .{ matches, basename }),
+                });
+            }
+        }
 
-    // Also emit trunk landing stubs for posts/ and pages/ when we have those types
-    var have_posts = false;
-    var have_pages = false;
-    for (metas.items) |m| {
-        if (std.mem.eql(u8, m.item.post_type, "post")) have_posts = true;
-        if (std.mem.eql(u8, m.item.post_type, "page")) have_pages = true;
-    }
+        // Map post_id → entity_id for pages/posts
+        var id_to_entity: std.StringHashMapUnmanaged([]const u8) = .empty;
+        defer id_to_entity.deinit(gpa);
+        for (metas.items) |m| {
+            try id_to_entity.put(gpa, m.item.post_id, m.entity_id);
+        }
 
-    // Convert each post/page
-    for (metas.items) |m| {
-        const item = m.item;
-        var conv = try convertItemBody(retain, item, m.output_path, opts.wxr_path);
+        // Also emit trunk landing stubs for posts/ and pages/ when we have those types
+        var have_posts = false;
+        var have_pages = false;
+        for (metas.items) |m| {
+            if (std.mem.eql(u8, m.item.post_type, "post")) have_posts = true;
+            if (std.mem.eql(u8, m.item.post_type, "page")) have_pages = true;
+        }
 
-        // Collect categories / tags (post formats are not Boris tags)
-        var cats: std.ArrayList([]const u8) = .empty;
-        var tags: std.ArrayList([]const u8) = .empty;
-        var code_list: std.ArrayList([]const u8) = .empty;
-        for (conv.feature_codes) |fc| try code_list.append(retain, fc);
-        for (item.categories) |c| {
-            if (std.mem.eql(u8, c.domain, "category")) {
-                try cats.append(retain, c.nicename);
-            } else if (std.mem.eql(u8, c.domain, "post_tag") or std.mem.eql(u8, c.domain, "tag")) {
-                try tags.append(retain, c.nicename);
-            } else if (std.mem.eql(u8, c.domain, "post_format")) {
-                // Post formats are WP presentation metadata, not tags.
-                conv.classification = ConversionClass.worse(conv.classification, .unsupported);
-                try appendUniqueCode(retain, &code_list, "post_format");
+        // Convert each post/page
+        for (metas.items) |m| {
+            const item = m.item;
+            var conv = try convertItemBody(retain, item, m.output_path, opts.wxr_path);
+
+            // Collect categories / tags (post formats are not Boris tags)
+            var cats: std.ArrayList([]const u8) = .empty;
+            var tags: std.ArrayList([]const u8) = .empty;
+            var code_list: std.ArrayList([]const u8) = .empty;
+            for (conv.feature_codes) |fc| try code_list.append(retain, fc);
+            for (item.categories) |c| {
+                if (std.mem.eql(u8, c.domain, "category")) {
+                    try cats.append(retain, c.nicename);
+                } else if (std.mem.eql(u8, c.domain, "post_tag") or std.mem.eql(u8, c.domain, "tag")) {
+                    try tags.append(retain, c.nicename);
+                } else if (std.mem.eql(u8, c.domain, "post_format")) {
+                    // Post formats are WP presentation metadata, not tags.
+                    conv.classification = ConversionClass.worse(conv.classification, .unsupported);
+                    try appendUniqueCode(retain, &code_list, "post_format");
+                    try all_features.append(gpa, .{
+                        .source_post_id = try retain.dupe(u8, item.post_id),
+                        .source_output = try retain.dupe(u8, m.output_path),
+                        .code = "post_format",
+                        .classification = .unsupported,
+                        .excerpt = try retain.dupe(u8, c.nicename),
+                        .message = try std.fmt.allocPrint(retain, "WordPress post format '{s}' is not a Boris page feature; flagged for human review (not converted to tags)", .{c.nicename}),
+                    });
+                } else {
+                    // other taxonomies → tags + human review
+                    try tags.append(retain, c.nicename);
+                    conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                    try appendUniqueCode(retain, &code_list, "unknown_taxonomy");
+                }
+            }
+            if (cats.items.len + tags.items.len >= high_cardinality_terms_threshold) {
+                conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                try appendUniqueCode(retain, &code_list, "high_cardinality_terms");
                 try all_features.append(gpa, .{
                     .source_post_id = try retain.dupe(u8, item.post_id),
                     .source_output = try retain.dupe(u8, m.output_path),
-                    .code = "post_format",
-                    .classification = .unsupported,
-                    .excerpt = try retain.dupe(u8, c.nicename),
-                    .message = try std.fmt.allocPrint(retain, "WordPress post format '{s}' is not a Boris page feature; flagged for human review (not converted to tags)", .{c.nicename}),
+                    .code = "high_cardinality_terms",
+                    .classification = .human_review,
+                    .excerpt = try std.fmt.allocPrint(retain, "{d} terms", .{cats.items.len + tags.items.len}),
+                    .message = try std.fmt.allocPrint(retain, "Page has {d} categories+tags (threshold {d}); review tag merge into closed Boris tags", .{ cats.items.len + tags.items.len, high_cardinality_terms_threshold }),
                 });
-            } else {
-                // other taxonomies → tags + human review
-                try tags.append(retain, c.nicename);
-                conv.classification = ConversionClass.worse(conv.classification, .human_review);
-                try appendUniqueCode(retain, &code_list, "unknown_taxonomy");
             }
-        }
-        if (cats.items.len + tags.items.len >= high_cardinality_terms_threshold) {
-            conv.classification = ConversionClass.worse(conv.classification, .human_review);
-            try appendUniqueCode(retain, &code_list, "high_cardinality_terms");
-            try all_features.append(gpa, .{
-                .source_post_id = try retain.dupe(u8, item.post_id),
-                .source_output = try retain.dupe(u8, m.output_path),
-                .code = "high_cardinality_terms",
-                .classification = .human_review,
-                .excerpt = try std.fmt.allocPrint(retain, "{d} terms", .{cats.items.len + tags.items.len}),
-                .message = try std.fmt.allocPrint(retain, "Page has {d} categories+tags (threshold {d}); review tag merge into closed Boris tags", .{ cats.items.len + tags.items.len, high_cardinality_terms_threshold }),
-            });
-        }
 
-        // Parent proposal
-        var proposed_parent: ?[]const u8 = null;
-        const parent_id = item.post_parent;
-        if (parent_id.len > 0 and !std.mem.eql(u8, parent_id, "0")) {
-            if (id_to_entity.get(parent_id)) |pe| {
-                // Boris is one-level: satellites parent trunks only.
-                // If parent is itself a satellite, flag human review and parent to type trunk.
-                if (std.mem.eql(u8, item.post_type, "page")) {
-                    // Prefer direct parent entity; note depth risk.
-                    const parent_item = by_id.get(parent_id);
-                    const parent_of_parent = if (parent_item) |pi| pi.post_parent else "0";
-                    if (parent_of_parent.len > 0 and !std.mem.eql(u8, parent_of_parent, "0")) {
-                        proposed_parent = "pages";
-                        conv.classification = ConversionClass.worse(conv.classification, .human_review);
-                        try appendUniqueCode(retain, &code_list, "deep_page_hierarchy");
+            // Parent proposal
+            var proposed_parent: ?[]const u8 = null;
+            const parent_id = item.post_parent;
+            if (parent_id.len > 0 and !std.mem.eql(u8, parent_id, "0")) {
+                if (id_to_entity.get(parent_id)) |pe| {
+                    // Boris is one-level: satellites parent trunks only.
+                    // If parent is itself a satellite, flag human review and parent to type trunk.
+                    if (std.mem.eql(u8, item.post_type, "page")) {
+                        // Prefer direct parent entity; note depth risk.
+                        const parent_item = by_id.get(parent_id);
+                        const parent_of_parent = if (parent_item) |pi| pi.post_parent else "0";
+                        if (parent_of_parent.len > 0 and !std.mem.eql(u8, parent_of_parent, "0")) {
+                            proposed_parent = "pages";
+                            conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                            try appendUniqueCode(retain, &code_list, "deep_page_hierarchy");
+                            try parents.append(gpa, .{
+                                .child_post_id = item.post_id,
+                                .child_entity_id = m.entity_id,
+                                .parent_post_id = parent_id,
+                                .parent_entity_id = pe,
+                                .reason = "wp_post_parent",
+                                .confidence = "low",
+                                .note = "Parent is not a trunk; Boris allows one hop only — proposed parent pages trunk",
+                            });
+                        } else {
+                            // Parent page becomes a trunk candidate; child parents to parent entity.
+                            // Actually Boris: only trunks can be parents. Parent page without parent is trunk-like.
+                            proposed_parent = pe;
+                            try parents.append(gpa, .{
+                                .child_post_id = item.post_id,
+                                .child_entity_id = m.entity_id,
+                                .parent_post_id = parent_id,
+                                .parent_entity_id = pe,
+                                .reason = "wp_post_parent",
+                                .confidence = "medium",
+                                .note = "Page hierarchy mapped to parent entity id; ensure parent has no parent (trunk)",
+                            });
+                        }
+                    } else {
+                        proposed_parent = "posts";
                         try parents.append(gpa, .{
                             .child_post_id = item.post_id,
                             .child_entity_id = m.entity_id,
@@ -3194,930 +3224,907 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
                             .parent_entity_id = pe,
                             .reason = "wp_post_parent",
                             .confidence = "low",
-                            .note = "Parent is not a trunk; Boris allows one hop only — proposed parent pages trunk",
-                        });
-                    } else {
-                        // Parent page becomes a trunk candidate; child parents to parent entity.
-                        // Actually Boris: only trunks can be parents. Parent page without parent is trunk-like.
-                        proposed_parent = pe;
-                        try parents.append(gpa, .{
-                            .child_post_id = item.post_id,
-                            .child_entity_id = m.entity_id,
-                            .parent_post_id = parent_id,
-                            .parent_entity_id = pe,
-                            .reason = "wp_post_parent",
-                            .confidence = "medium",
-                            .note = "Page hierarchy mapped to parent entity id; ensure parent has no parent (trunk)",
+                            .note = "Non-page parent ignored for Boris graph; using posts trunk",
                         });
                     }
                 } else {
-                    proposed_parent = "posts";
+                    proposed_parent = if (std.mem.eql(u8, item.post_type, "page")) "pages" else "posts";
+                    conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                    try appendUniqueCode(retain, &code_list, "missing_parent_item");
                     try parents.append(gpa, .{
                         .child_post_id = item.post_id,
                         .child_entity_id = m.entity_id,
                         .parent_post_id = parent_id,
-                        .parent_entity_id = pe,
+                        .parent_entity_id = null,
                         .reason = "wp_post_parent",
                         .confidence = "low",
-                        .note = "Non-page parent ignored for Boris graph; using posts trunk",
+                        .note = "Parent post_id not present as post/page in export",
                     });
                 }
             } else {
-                proposed_parent = if (std.mem.eql(u8, item.post_type, "page")) "pages" else "posts";
-                conv.classification = ConversionClass.worse(conv.classification, .human_review);
-                try appendUniqueCode(retain, &code_list, "missing_parent_item");
-                try parents.append(gpa, .{
-                    .child_post_id = item.post_id,
-                    .child_entity_id = m.entity_id,
-                    .parent_post_id = parent_id,
-                    .parent_entity_id = null,
-                    .reason = "wp_post_parent",
-                    .confidence = "low",
-                    .note = "Parent post_id not present as post/page in export",
-                });
+                // Top-level: posts → parent posts trunk; pages → no parent (trunk) or parent pages
+                if (std.mem.eql(u8, item.post_type, "post")) {
+                    proposed_parent = "posts";
+                } else if (std.mem.eql(u8, item.post_type, "page")) {
+                    proposed_parent = null; // trunk page
+                }
             }
-        } else {
-            // Top-level: posts → parent posts trunk; pages → no parent (trunk) or parent pages
-            if (std.mem.eql(u8, item.post_type, "post")) {
-                proposed_parent = "posts";
-            } else if (std.mem.eql(u8, item.post_type, "page")) {
-                proposed_parent = null; // trunk page
-            }
-        }
 
-        // Status mapping: password-protected publish posts become draft for safety.
-        var status_boris = mapWpStatus(item.status);
-        if (item.post_password.len > 0) {
-            status_boris = "draft";
-        }
-        if (statusFeatureCode(item.status, item.post_password)) |scode| {
-            conv.classification = ConversionClass.worse(conv.classification, .human_review);
-            try appendUniqueCode(retain, &code_list, scode);
-            // Keep legacy umbrella code for non-publish without a more specific code.
-            if (std.mem.eql(u8, scode, "non_publish_status") or
-                std.mem.eql(u8, scode, "status_draft") or
-                std.mem.eql(u8, scode, "status_future") or
-                std.mem.eql(u8, scode, "status_private") or
-                std.mem.eql(u8, scode, "status_pending") or
-                std.mem.eql(u8, scode, "status_password_protected"))
-            {
+            // Status mapping: password-protected publish posts become draft for safety.
+            var status_boris = mapWpStatus(item.status);
+            if (item.post_password.len > 0) {
+                status_boris = "draft";
+            }
+            if (statusFeatureCode(item.status, item.post_password)) |scode| {
+                conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                try appendUniqueCode(retain, &code_list, scode);
+                // Keep legacy umbrella code for non-publish without a more specific code.
+                if (std.mem.eql(u8, scode, "non_publish_status") or
+                    std.mem.eql(u8, scode, "status_draft") or
+                    std.mem.eql(u8, scode, "status_future") or
+                    std.mem.eql(u8, scode, "status_private") or
+                    std.mem.eql(u8, scode, "status_pending") or
+                    std.mem.eql(u8, scode, "status_password_protected"))
+                {
+                    try all_features.append(gpa, .{
+                        .source_post_id = try retain.dupe(u8, item.post_id),
+                        .source_output = try retain.dupe(u8, m.output_path),
+                        .code = try retain.dupe(u8, scode),
+                        .classification = .human_review,
+                        .excerpt = try std.fmt.allocPrint(retain, "wp:status={s}", .{item.status}),
+                        .message = try std.fmt.allocPrint(retain, "WordPress status '{s}'{s} mapped to Boris status '{s}'; author review required before publish", .{
+                            item.status,
+                            if (item.post_password.len > 0) " (password-protected)" else "",
+                            status_boris,
+                        }),
+                    });
+                }
+            }
+
+            // Empty / long titles and empty bodies
+            if (item.title.len == 0) {
+                conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                try appendUniqueCode(retain, &code_list, "empty_title");
                 try all_features.append(gpa, .{
                     .source_post_id = try retain.dupe(u8, item.post_id),
                     .source_output = try retain.dupe(u8, m.output_path),
-                    .code = try retain.dupe(u8, scode),
+                    .code = "empty_title",
                     .classification = .human_review,
-                    .excerpt = try std.fmt.allocPrint(retain, "wp:status={s}", .{item.status}),
-                    .message = try std.fmt.allocPrint(retain, "WordPress status '{s}'{s} mapped to Boris status '{s}'; author review required before publish", .{
-                        item.status,
-                        if (item.post_password.len > 0) " (password-protected)" else "",
-                        status_boris,
-                    }),
+                    .excerpt = "(empty title)",
+                    .message = "Missing title; used slug as Boris title fallback",
+                });
+            } else if (item.title.len >= long_title_threshold) {
+                conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                try appendUniqueCode(retain, &code_list, "long_title");
+                try all_features.append(gpa, .{
+                    .source_post_id = try retain.dupe(u8, item.post_id),
+                    .source_output = try retain.dupe(u8, m.output_path),
+                    .code = "long_title",
+                    .classification = .human_review,
+                    .excerpt = try excerptUtf8(retain, item.title, 60),
+                    .message = try std.fmt.allocPrint(retain, "Title is {d} bytes (threshold {d}); review layout fit", .{ item.title.len, long_title_threshold }),
                 });
             }
-        }
+            if (item.content_encoded.len == 0) {
+                conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                try appendUniqueCode(retain, &code_list, "empty_body");
+                try all_features.append(gpa, .{
+                    .source_post_id = try retain.dupe(u8, item.post_id),
+                    .source_output = try retain.dupe(u8, m.output_path),
+                    .code = "empty_body",
+                    .classification = .human_review,
+                    .excerpt = "(empty content:encoded)",
+                    .message = "Missing body; page emitted with empty Markdown body for review",
+                });
+            }
 
-        // Empty / long titles and empty bodies
-        if (item.title.len == 0) {
-            conv.classification = ConversionClass.worse(conv.classification, .human_review);
-            try appendUniqueCode(retain, &code_list, "empty_title");
-            try all_features.append(gpa, .{
-                .source_post_id = try retain.dupe(u8, item.post_id),
-                .source_output = try retain.dupe(u8, m.output_path),
-                .code = "empty_title",
-                .classification = .human_review,
-                .excerpt = "(empty title)",
-                .message = "Missing title; used slug as Boris title fallback",
-            });
-        } else if (item.title.len >= long_title_threshold) {
-            conv.classification = ConversionClass.worse(conv.classification, .human_review);
-            try appendUniqueCode(retain, &code_list, "long_title");
-            try all_features.append(gpa, .{
-                .source_post_id = try retain.dupe(u8, item.post_id),
-                .source_output = try retain.dupe(u8, m.output_path),
-                .code = "long_title",
-                .classification = .human_review,
-                .excerpt = try excerptUtf8(retain, item.title, 60),
-                .message = try std.fmt.allocPrint(retain, "Title is {d} bytes (threshold {d}); review layout fit", .{ item.title.len, long_title_threshold }),
-            });
-        }
-        if (item.content_encoded.len == 0) {
-            conv.classification = ConversionClass.worse(conv.classification, .human_review);
-            try appendUniqueCode(retain, &code_list, "empty_body");
-            try all_features.append(gpa, .{
-                .source_post_id = try retain.dupe(u8, item.post_id),
-                .source_output = try retain.dupe(u8, m.output_path),
-                .code = "empty_body",
-                .classification = .human_review,
-                .excerpt = "(empty content:encoded)",
-                .message = "Missing body; page emitted with empty Markdown body for review",
-            });
-        }
+            // Empty / missing wp:post_name — slug was synthesized; never silent.
+            if (item.post_name.len == 0) {
+                conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                try appendUniqueCode(retain, &code_list, "empty_slug");
+                try all_features.append(gpa, .{
+                    .source_post_id = try retain.dupe(u8, item.post_id),
+                    .source_output = try retain.dupe(u8, m.output_path),
+                    .code = "empty_slug",
+                    .classification = .human_review,
+                    .excerpt = try retain.dupe(u8, m.slug),
+                    .message = try std.fmt.allocPrint(retain, "Missing wp:post_name; synthesized entity slug '{s}' from title (or 'untitled')", .{m.slug}),
+                });
+            }
 
-        // Empty / missing wp:post_name — slug was synthesized; never silent.
-        if (item.post_name.len == 0) {
-            conv.classification = ConversionClass.worse(conv.classification, .human_review);
-            try appendUniqueCode(retain, &code_list, "empty_slug");
-            try all_features.append(gpa, .{
-                .source_post_id = try retain.dupe(u8, item.post_id),
-                .source_output = try retain.dupe(u8, m.output_path),
-                .code = "empty_slug",
-                .classification = .human_review,
-                .excerpt = try retain.dupe(u8, m.slug),
-                .message = try std.fmt.allocPrint(retain, "Missing wp:post_name; synthesized entity slug '{s}' from title (or 'untitled')", .{m.slug}),
-            });
-        }
+            // Sticky posts have no Boris equivalent — report explicitly.
+            const sticky = std.mem.eql(u8, item.is_sticky, "1");
+            if (sticky) {
+                conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                try appendUniqueCode(retain, &code_list, "sticky_post");
+                try all_features.append(gpa, .{
+                    .source_post_id = try retain.dupe(u8, item.post_id),
+                    .source_output = try retain.dupe(u8, m.output_path),
+                    .code = "sticky_post",
+                    .classification = .human_review,
+                    .excerpt = "wp:is_sticky=1",
+                    .message = "WordPress sticky flag has no Boris frontmatter equivalent; preserved in report for author review",
+                });
+            }
 
-        // Sticky posts have no Boris equivalent — report explicitly.
-        const sticky = std.mem.eql(u8, item.is_sticky, "1");
-        if (sticky) {
-            conv.classification = ConversionClass.worse(conv.classification, .human_review);
-            try appendUniqueCode(retain, &code_list, "sticky_post");
-            try all_features.append(gpa, .{
-                .source_post_id = try retain.dupe(u8, item.post_id),
-                .source_output = try retain.dupe(u8, m.output_path),
-                .code = "sticky_post",
-                .classification = .human_review,
-                .excerpt = "wp:is_sticky=1",
-                .message = "WordPress sticky flag has no Boris frontmatter equivalent; preserved in report for author review",
-            });
-        }
+            // Excerpt: preserve in body + report (not closed frontmatter).
+            if (item.excerpt_encoded.len > 0) {
+                try appendUniqueCode(retain, &code_list, "excerpt_preserved");
+                try all_features.append(gpa, .{
+                    .source_post_id = try retain.dupe(u8, item.post_id),
+                    .source_output = try retain.dupe(u8, m.output_path),
+                    .code = "excerpt_preserved",
+                    .classification = .transformed,
+                    .excerpt = try excerptUtf8(retain, item.excerpt_encoded, 80),
+                    .message = "WordPress excerpt preserved in Markdown body (not a closed Boris frontmatter field)",
+                });
+                // Excerpt alone does not force human_review; keep current class at least transformed.
+                if (conv.classification == .exact) conv.classification = .transformed;
+            }
 
-        // Excerpt: preserve in body + report (not closed frontmatter).
-        if (item.excerpt_encoded.len > 0) {
-            try appendUniqueCode(retain, &code_list, "excerpt_preserved");
-            try all_features.append(gpa, .{
-                .source_post_id = try retain.dupe(u8, item.post_id),
-                .source_output = try retain.dupe(u8, m.output_path),
-                .code = "excerpt_preserved",
-                .classification = .transformed,
-                .excerpt = try excerptUtf8(retain, item.excerpt_encoded, 80),
-                .message = "WordPress excerpt preserved in Markdown body (not a closed Boris frontmatter field)",
-            });
-            // Excerpt alone does not force human_review; keep current class at least transformed.
-            if (conv.classification == .exact) conv.classification = .transformed;
-        }
-
-        // Comments / trackbacks / pingbacks: never render into page Markdown.
-        if (item.comments.len > 0) {
-            conv.classification = ConversionClass.worse(conv.classification, .unsupported);
-            var n_comment: usize = 0;
-            var n_ping: usize = 0;
-            var n_track: usize = 0;
-            const preserved_comments_path = try std.fmt.allocPrint(retain, "content/_preserved/comments-{s}.md", .{item.post_id});
-            var cbody: std.ArrayList(u8) = .empty;
-            try cbody.appendSlice(retain, "---\n");
-            try cbody.print(retain, "title: \"Comments for post {s}\"\n", .{item.post_id});
-            try cbody.appendSlice(retain, "status: draft\n");
-            try cbody.appendSlice(retain, "tags: [preserved, wordpress, comments]\n");
-            try cbody.appendSlice(retain, "---\n\n");
-            try cbody.appendSlice(retain, "<!-- boris-migration-provenance\n");
-            try cbody.appendSlice(retain, "source_format: wordpress-wxr\n");
-            try cbody.print(retain, "post_id: {s}\n", .{item.post_id});
-            try cbody.appendSlice(retain, "post_type: comments\n");
-            try cbody.appendSlice(retain, "conversion: unsupported\n");
-            try cbody.appendSlice(retain, "-->\n\n");
-            try cbody.appendSlice(retain, "> **Preserved WordPress comments / trackbacks / pingbacks** — not page Markdown.\n\n");
-            for (item.comments) |cm| {
-                const label = commentTypeLabel(cm.comment_type);
-                if (std.mem.eql(u8, label, "pingback")) n_ping += 1 else if (std.mem.eql(u8, label, "trackback")) n_track += 1 else n_comment += 1;
-                try appendUniqueCode(retain, &code_list, featureCodeForCommentType(cm.comment_type));
-                const excerpt = try excerptUtf8(retain, cm.content, 160);
-                try all_comments.append(gpa, .{
-                    .parent_post_id = item.post_id,
-                    .comment_id = cm.comment_id,
-                    .author = cm.author,
-                    .comment_type = try retain.dupe(u8, label),
-                    .date = cm.date,
-                    .approved = cm.approved,
-                    .content_excerpt = excerpt,
+            // Comments / trackbacks / pingbacks: never render into page Markdown.
+            if (item.comments.len > 0) {
+                conv.classification = ConversionClass.worse(conv.classification, .unsupported);
+                var n_comment: usize = 0;
+                var n_ping: usize = 0;
+                var n_track: usize = 0;
+                const preserved_comments_path = try std.fmt.allocPrint(retain, "content/_preserved/comments-{s}.md", .{item.post_id});
+                var cbody: std.ArrayList(u8) = .empty;
+                try cbody.appendSlice(retain, "---\n");
+                try cbody.print(retain, "title: \"Comments for post {s}\"\n", .{item.post_id});
+                try cbody.appendSlice(retain, "status: draft\n");
+                try cbody.appendSlice(retain, "tags: [preserved, wordpress, comments]\n");
+                try cbody.appendSlice(retain, "---\n\n");
+                try cbody.appendSlice(retain, "<!-- boris-migration-provenance\n");
+                try cbody.appendSlice(retain, "source_format: wordpress-wxr\n");
+                try cbody.print(retain, "post_id: {s}\n", .{item.post_id});
+                try cbody.appendSlice(retain, "post_type: comments\n");
+                try cbody.appendSlice(retain, "conversion: unsupported\n");
+                try cbody.appendSlice(retain, "-->\n\n");
+                try cbody.appendSlice(retain, "> **Preserved WordPress comments / trackbacks / pingbacks** — not page Markdown.\n\n");
+                for (item.comments) |cm| {
+                    const label = commentTypeLabel(cm.comment_type);
+                    if (std.mem.eql(u8, label, "pingback")) n_ping += 1 else if (std.mem.eql(u8, label, "trackback")) n_track += 1 else n_comment += 1;
+                    try appendUniqueCode(retain, &code_list, featureCodeForCommentType(cm.comment_type));
+                    const excerpt = try excerptUtf8(retain, cm.content, 160);
+                    try all_comments.append(gpa, .{
+                        .parent_post_id = item.post_id,
+                        .comment_id = cm.comment_id,
+                        .author = cm.author,
+                        .comment_type = try retain.dupe(u8, label),
+                        .date = cm.date,
+                        .approved = cm.approved,
+                        .content_excerpt = excerpt,
+                        .preserved_path = preserved_comments_path,
+                        .classification = .unsupported,
+                    });
+                    try cbody.print(retain, "### {s} `{s}` by {s}\n\n", .{ label, cm.comment_id, if (cm.author.len > 0) cm.author else "(anonymous)" });
+                    try cbody.print(retain, "- date: `{s}`\n- approved: `{s}`\n\n", .{ cm.date, cm.approved });
+                    try cbody.appendSlice(retain, "```\n");
+                    try cbody.appendSlice(retain, cm.content);
+                    if (cm.content.len == 0 or cm.content[cm.content.len - 1] != '\n') try cbody.append(retain, '\n');
+                    try cbody.appendSlice(retain, "```\n\n");
+                }
+                try writeBytes(io, out_root, preserved_comments_path, cbody.items);
+                try provenance.append(gpa, .{
+                    .output_path = preserved_comments_path,
+                    .source_export = opts.wxr_path,
+                    .post_id = item.post_id,
+                    .post_type = "comments",
+                    .guid = "",
+                    .post_name = "",
+                    .author = "",
+                    .post_date = "",
+                    .link = "",
+                    .conversion = .unsupported,
+                });
+                try unsupported.append(gpa, .{
+                    .post_id = item.post_id,
+                    .post_type = "comments",
+                    .title = try std.fmt.allocPrint(retain, "comments for {s}", .{item.post_id}),
+                    .reason = "comments/trackbacks/pingbacks are not Boris content; preserved for human review only",
                     .preserved_path = preserved_comments_path,
-                    .classification = .unsupported,
                 });
-                try cbody.print(retain, "### {s} `{s}` by {s}\n\n", .{ label, cm.comment_id, if (cm.author.len > 0) cm.author else "(anonymous)" });
-                try cbody.print(retain, "- date: `{s}`\n- approved: `{s}`\n\n", .{ cm.date, cm.approved });
-                try cbody.appendSlice(retain, "```\n");
-                try cbody.appendSlice(retain, cm.content);
-                if (cm.content.len == 0 or cm.content[cm.content.len - 1] != '\n') try cbody.append(retain, '\n');
-                try cbody.appendSlice(retain, "```\n\n");
+                try all_features.append(gpa, .{
+                    .source_post_id = try retain.dupe(u8, item.post_id),
+                    .source_output = try retain.dupe(u8, m.output_path),
+                    .code = "wp_comments",
+                    .classification = .unsupported,
+                    .excerpt = try std.fmt.allocPrint(retain, "{d} comment artifact(s)", .{item.comments.len}),
+                    .message = try std.fmt.allocPrint(retain, "Export carries {d} comment(s), {d} pingback(s), {d} trackback(s); preserved under `{s}` (not page Markdown)", .{ n_comment, n_ping, n_track, preserved_comments_path }),
+                });
             }
-            try writeBytes(io, out_root, preserved_comments_path, cbody.items);
-            try provenance.append(gpa, .{
-                .output_path = preserved_comments_path,
-                .source_export = opts.wxr_path,
-                .post_id = item.post_id,
-                .post_type = "comments",
-                .guid = "",
-                .post_name = "",
-                .author = "",
-                .post_date = "",
-                .link = "",
-                .conversion = .unsupported,
-            });
-            try unsupported.append(gpa, .{
-                .post_id = item.post_id,
-                .post_type = "comments",
-                .title = try std.fmt.allocPrint(retain, "comments for {s}", .{item.post_id}),
-                .reason = "comments/trackbacks/pingbacks are not Boris content; preserved for human review only",
-                .preserved_path = preserved_comments_path,
-            });
-            try all_features.append(gpa, .{
-                .source_post_id = try retain.dupe(u8, item.post_id),
-                .source_output = try retain.dupe(u8, m.output_path),
-                .code = "wp_comments",
-                .classification = .unsupported,
-                .excerpt = try std.fmt.allocPrint(retain, "{d} comment artifact(s)", .{item.comments.len}),
-                .message = try std.fmt.allocPrint(retain, "Export carries {d} comment(s), {d} pingback(s), {d} trackback(s); preserved under `{s}` (not page Markdown)", .{ n_comment, n_ping, n_track, preserved_comments_path }),
-            });
-        }
 
-        // Boris tags: merge WP tags + categories (categories become tags for closed grammar)
-        var boris_tags: std.ArrayList([]const u8) = .empty;
-        for (tags.items) |t| try boris_tags.append(retain, t);
-        for (cats.items) |c| {
-            // avoid dups
-            var dup = false;
-            for (boris_tags.items) |t| {
-                if (std.mem.eql(u8, t, c)) dup = true;
+            // Boris tags: merge WP tags + categories (categories become tags for closed grammar)
+            var boris_tags: std.ArrayList([]const u8) = .empty;
+            for (tags.items) |t| try boris_tags.append(retain, t);
+            for (cats.items) |c| {
+                // avoid dups
+                var dup = false;
+                for (boris_tags.items) |t| {
+                    if (std.mem.eql(u8, t, c)) dup = true;
+                }
+                if (!dup) try boris_tags.append(retain, c);
             }
-            if (!dup) try boris_tags.append(retain, c);
-        }
 
-        const display_title = if (item.title.len > 0) item.title else m.slug;
-        const fm = try buildFrontmatter(retain, display_title, proposed_parent, status_boris, boris_tags.items);
+            const display_title = if (item.title.len > 0) item.title else m.slug;
+            const fm = try buildFrontmatter(retain, display_title, proposed_parent, status_boris, boris_tags.items);
 
-        // Resolve links against site URLs and item links
-        for (conv.links) |lnk| {
-            var resolved = lnk;
-            resolved.source_post_id = try retain.dupe(u8, lnk.source_post_id);
-            resolved.source_output = try retain.dupe(u8, lnk.source_output);
-            resolved.kind = try retain.dupe(u8, lnk.kind);
-            resolved.target = try retain.dupe(u8, lnk.target);
-            resolved.status = try retain.dupe(u8, lnk.status);
+            // Resolve links against site URLs and item links
+            for (conv.links) |lnk| {
+                var resolved = lnk;
+                resolved.source_post_id = try retain.dupe(u8, lnk.source_post_id);
+                resolved.source_output = try retain.dupe(u8, lnk.source_output);
+                resolved.kind = try retain.dupe(u8, lnk.kind);
+                resolved.target = try retain.dupe(u8, lnk.target);
+                resolved.status = try retain.dupe(u8, lnk.status);
 
-            if (std.mem.eql(u8, lnk.status, "external_skipped")) {
-                // Check if actually site-local
-                const base = if (doc.base_blog_url.len > 0) doc.base_blog_url else doc.base_site_url;
-                if (base.len > 0 and std.mem.startsWith(u8, lnk.target, base)) {
-                    resolved.status = try retain.dupe(u8, "unresolved");
-                    resolved.kind = try retain.dupe(u8, "internal_href");
-                    // try match by link
+                if (std.mem.eql(u8, lnk.status, "external_skipped")) {
+                    // Check if actually site-local
+                    const base = if (doc.base_blog_url.len > 0) doc.base_blog_url else doc.base_site_url;
+                    if (base.len > 0 and std.mem.startsWith(u8, lnk.target, base)) {
+                        resolved.status = try retain.dupe(u8, "unresolved");
+                        resolved.kind = try retain.dupe(u8, "internal_href");
+                        // try match by link
+                        for (doc.items) |it2| {
+                            if (it2.link.len > 0 and (std.mem.eql(u8, it2.link, lnk.target) or std.mem.startsWith(u8, lnk.target, it2.link))) {
+                                resolved.resolved_post_id = try retain.dupe(u8, it2.post_id);
+                                resolved.status = try retain.dupe(u8, "ok");
+                                break;
+                            }
+                        }
+                    }
+                } else {
                     for (doc.items) |it2| {
-                        if (it2.link.len > 0 and (std.mem.eql(u8, it2.link, lnk.target) or std.mem.startsWith(u8, lnk.target, it2.link))) {
+                        if (it2.link.len > 0 and std.mem.eql(u8, it2.link, lnk.target)) {
+                            resolved.resolved_post_id = try retain.dupe(u8, it2.post_id);
+                            resolved.status = try retain.dupe(u8, "ok");
+                            break;
+                        }
+                        if (it2.post_name.len > 0 and (std.mem.endsWith(u8, lnk.target, it2.post_name) or std.mem.endsWith(u8, lnk.target, try std.fmt.allocPrint(retain, "{s}/", .{it2.post_name})))) {
                             resolved.resolved_post_id = try retain.dupe(u8, it2.post_id);
                             resolved.status = try retain.dupe(u8, "ok");
                             break;
                         }
                     }
                 }
-            } else {
-                for (doc.items) |it2| {
-                    if (it2.link.len > 0 and std.mem.eql(u8, it2.link, lnk.target)) {
-                        resolved.resolved_post_id = try retain.dupe(u8, it2.post_id);
-                        resolved.status = try retain.dupe(u8, "ok");
-                        break;
-                    }
-                    if (it2.post_name.len > 0 and (std.mem.endsWith(u8, lnk.target, it2.post_name) or std.mem.endsWith(u8, lnk.target, try std.fmt.allocPrint(retain, "{s}/", .{it2.post_name})))) {
-                        resolved.resolved_post_id = try retain.dupe(u8, it2.post_id);
-                        resolved.status = try retain.dupe(u8, "ok");
-                        break;
-                    }
+                try all_links.append(gpa, resolved);
+                if (std.mem.eql(u8, resolved.status, "unresolved") and std.mem.eql(u8, resolved.kind, "internal_href")) {
+                    conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                    try appendUniqueCode(retain, &code_list, "unresolved_internal_link");
                 }
             }
-            try all_links.append(gpa, resolved);
-            if (std.mem.eql(u8, resolved.status, "unresolved") and std.mem.eql(u8, resolved.kind, "internal_href")) {
-                conv.classification = ConversionClass.worse(conv.classification, .human_review);
-                try appendUniqueCode(retain, &code_list, "unresolved_internal_link");
-            }
-        }
 
-        // Media matching + materialization into page-local `{stem}.assets/`.
-        var rewrites: std.ArrayList(MediaRewrite) = .empty;
-        var used_within: std.StringHashMapUnmanaged([]const u8) = .empty; // within → local_path
-        const page_stem = pageStemFromOutput(m.output_path);
-        const asset_root = try pageAssetRoot(retain, m.output_path);
-        for (conv.media_refs) |mr| {
-            var entry = mr;
-            entry.source_post_id = try retain.dupe(u8, mr.source_post_id);
-            entry.source_output = try retain.dupe(u8, mr.source_output);
-            entry.referenced = try retain.dupe(u8, mr.referenced);
+            // Media matching + materialization into page-local `{stem}.assets/`.
+            var rewrites: std.ArrayList(MediaRewrite) = .empty;
+            var used_within: std.StringHashMapUnmanaged([]const u8) = .empty; // within → local_path
+            const page_stem = pageStemFromOutput(m.output_path);
+            const asset_root = try pageAssetRoot(retain, m.output_path);
+            for (conv.media_refs) |mr| {
+                var entry = mr;
+                entry.source_post_id = try retain.dupe(u8, mr.source_post_id);
+                entry.source_output = try retain.dupe(u8, mr.source_output);
+                entry.referenced = try retain.dupe(u8, mr.referenced);
 
-            const match = try matchMediaReference(retain, media_files, opts.media_dir != null, mr.referenced);
-            var man: MediaManifestEntry = .{
-                .source_output = m.output_path,
-                .original_reference = entry.referenced,
-                .upload_key = if (match.upload_key) |k| try retain.dupe(u8, k) else null,
-                .matched_source = null,
-                .emitted_asset_path = null,
-                .status = "missing",
-                .reason = try retain.dupe(u8, match.reason),
-            };
+                const match = try matchMediaReference(retain, media_files, opts.media_dir != null, mr.referenced);
+                var man: MediaManifestEntry = .{
+                    .source_output = m.output_path,
+                    .original_reference = entry.referenced,
+                    .upload_key = if (match.upload_key) |k| try retain.dupe(u8, k) else null,
+                    .matched_source = null,
+                    .emitted_asset_path = null,
+                    .status = "missing",
+                    .reason = try retain.dupe(u8, match.reason),
+                };
 
-            switch (match.kind) {
-                .found => {
-                    const local = match.local_path.?;
-                    // Symlink / non-regular sources are rejected (escape risk).
-                    if (media_root_opt) |mroot| {
-                        if (isSymlink(io, mroot, local)) {
+                switch (match.kind) {
+                    .found => {
+                        const local = match.local_path.?;
+                        // Symlink / non-regular sources are rejected (escape risk).
+                        if (media_root_opt) |mroot| {
+                            if (isSymlink(io, mroot, local)) {
+                                entry.local_path = try retain.dupe(u8, local);
+                                entry.status = "rejected";
+                                man.status = "rejected";
+                                man.matched_source = try retain.dupe(u8, local);
+                                man.reason = try retain.dupe(u8, "symlink_escape");
+                                conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                                try appendUniqueCode(retain, &code_list, "media_symlink_rejected");
+                                try all_media.append(gpa, entry);
+                                try media_manifest.append(gpa, man);
+                                continue;
+                            }
+                        }
+
+                        const within_pair = try withinTreeForMedia(retain, match.upload_key, local);
+                        var within = within_pair[0];
+                        const sanitize_note = within_pair[1];
+                        within = try disambiguateWithin(retain, within, &used_within, local);
+                        try used_within.put(retain, within, try retain.dupe(u8, local));
+
+                        const dest_path = try std.fmt.allocPrint(retain, "{s}/{s}", .{ asset_root, within });
+                        // Boris content-local image destinations reject query strings and
+                        // fragments; drop both and record the limitation in the manifest.
+                        const md_ref = try std.fmt.allocPrint(retain, "{s}.assets/{s}", .{ page_stem, within });
+                        const had_query = urlHasQuery(mr.referenced);
+                        const had_frag = urlFragment(mr.referenced) != null;
+
+                        var copy_ok = false;
+                        var copy_reason: []const u8 = "";
+                        if (media_root_opt) |mroot| {
+                            copyMediaFile(io, mroot, out_root, local, dest_path) catch |err| {
+                                copy_reason = switch (err) {
+                                    error.SymlinkRejected => "symlink_escape",
+                                    error.DestinationCollision => "destination_collision",
+                                    else => "copy_failed",
+                                };
+                            };
+                            if (copy_reason.len == 0) copy_ok = true;
+                        } else {
+                            copy_reason = "media_dir_not_provided";
+                        }
+
+                        if (copy_ok) {
+                            entry.local_path = try retain.dupe(u8, local);
+                            entry.status = "present";
+                            man.matched_source = try retain.dupe(u8, local);
+                            man.emitted_asset_path = dest_path;
+                            man.status = "copied";
+                            // Document query/fragment drops and lookup notes.
+                            var reason_parts: std.ArrayList([]const u8) = .empty;
+                            if (match.reason.len > 0) try reason_parts.append(retain, match.reason);
+                            if (had_query) try reason_parts.append(retain, "query_string_dropped");
+                            if (had_frag) try reason_parts.append(retain, "fragment_dropped");
+                            if (sanitize_note.len > 0) try reason_parts.append(retain, sanitize_note);
+                            if (reason_parts.items.len == 0) {
+                                man.reason = "";
+                            } else if (reason_parts.items.len == 1) {
+                                man.reason = try retain.dupe(u8, reason_parts.items[0]);
+                            } else {
+                                var rb: std.ArrayList(u8) = .empty;
+                                for (reason_parts.items, 0..) |p, i| {
+                                    if (i > 0) try rb.append(retain, ';');
+                                    try rb.appendSlice(retain, p);
+                                }
+                                man.reason = try rb.toOwnedSlice(retain);
+                            }
+                            try rewrites.append(retain, .{
+                                .original = entry.referenced,
+                                .rewritten = md_ref,
+                            });
+                        } else {
                             entry.local_path = try retain.dupe(u8, local);
                             entry.status = "rejected";
-                            man.status = "rejected";
                             man.matched_source = try retain.dupe(u8, local);
-                            man.reason = try retain.dupe(u8, "symlink_escape");
+                            man.status = "rejected";
+                            man.reason = try retain.dupe(u8, copy_reason);
                             conv.classification = ConversionClass.worse(conv.classification, .human_review);
-                            try appendUniqueCode(retain, &code_list, "media_symlink_rejected");
-                            try all_media.append(gpa, entry);
-                            try media_manifest.append(gpa, man);
-                            continue;
+                            try appendUniqueCode(retain, &code_list, "media_copy_rejected");
                         }
-                    }
-
-                    const within_pair = try withinTreeForMedia(retain, match.upload_key, local);
-                    var within = within_pair[0];
-                    const sanitize_note = within_pair[1];
-                    within = try disambiguateWithin(retain, within, &used_within, local);
-                    try used_within.put(retain, within, try retain.dupe(u8, local));
-
-                    const dest_path = try std.fmt.allocPrint(retain, "{s}/{s}", .{ asset_root, within });
-                    // Boris content-local image destinations reject query strings and
-                    // fragments; drop both and record the limitation in the manifest.
-                    const md_ref = try std.fmt.allocPrint(retain, "{s}.assets/{s}", .{ page_stem, within });
-                    const had_query = urlHasQuery(mr.referenced);
-                    const had_frag = urlFragment(mr.referenced) != null;
-
-                    var copy_ok = false;
-                    var copy_reason: []const u8 = "";
-                    if (media_root_opt) |mroot| {
-                        copyMediaFile(io, mroot, out_root, local, dest_path) catch |err| {
-                            copy_reason = switch (err) {
-                                error.SymlinkRejected => "symlink_escape",
-                                error.DestinationCollision => "destination_collision",
-                                else => "copy_failed",
-                            };
-                        };
-                        if (copy_reason.len == 0) copy_ok = true;
-                    } else {
-                        copy_reason = "media_dir_not_provided";
-                    }
-
-                    if (copy_ok) {
-                        entry.local_path = try retain.dupe(u8, local);
-                        entry.status = "present";
-                        man.matched_source = try retain.dupe(u8, local);
-                        man.emitted_asset_path = dest_path;
-                        man.status = "copied";
-                        // Document query/fragment drops and lookup notes.
-                        var reason_parts: std.ArrayList([]const u8) = .empty;
-                        if (match.reason.len > 0) try reason_parts.append(retain, match.reason);
-                        if (had_query) try reason_parts.append(retain, "query_string_dropped");
-                        if (had_frag) try reason_parts.append(retain, "fragment_dropped");
-                        if (sanitize_note.len > 0) try reason_parts.append(retain, sanitize_note);
-                        if (reason_parts.items.len == 0) {
-                            man.reason = "";
-                        } else if (reason_parts.items.len == 1) {
-                            man.reason = try retain.dupe(u8, reason_parts.items[0]);
-                        } else {
-                            var rb: std.ArrayList(u8) = .empty;
-                            for (reason_parts.items, 0..) |p, i| {
-                                if (i > 0) try rb.append(retain, ';');
-                                try rb.appendSlice(retain, p);
-                            }
-                            man.reason = try rb.toOwnedSlice(retain);
-                        }
-                        try rewrites.append(retain, .{
-                            .original = entry.referenced,
-                            .rewritten = md_ref,
-                        });
-                    } else {
-                        entry.local_path = try retain.dupe(u8, local);
-                        entry.status = "rejected";
-                        man.matched_source = try retain.dupe(u8, local);
-                        man.status = "rejected";
-                        man.reason = try retain.dupe(u8, copy_reason);
+                    },
+                    .missing => {
+                        entry.local_path = null;
+                        entry.status = "missing";
+                        man.status = "missing";
+                        if (man.reason.len == 0) man.reason = try retain.dupe(u8, "local_media_not_found");
                         conv.classification = ConversionClass.worse(conv.classification, .human_review);
-                        try appendUniqueCode(retain, &code_list, "media_copy_rejected");
-                    }
-                },
-                .missing => {
-                    entry.local_path = null;
-                    entry.status = "missing";
-                    man.status = "missing";
-                    if (man.reason.len == 0) man.reason = try retain.dupe(u8, "local_media_not_found");
-                    conv.classification = ConversionClass.worse(conv.classification, .human_review);
-                    if (opts.media_dir == null) {
-                        try appendUniqueCode(retain, &code_list, "media_unverified");
-                    } else {
-                        try appendUniqueCode(retain, &code_list, "missing_media");
-                    }
-                },
-                .ambiguous => {
-                    entry.local_path = null;
-                    entry.status = "ambiguous";
-                    man.status = "ambiguous";
-                    if (man.reason.len == 0) man.reason = try retain.dupe(u8, "duplicate_media_basename");
-                    conv.classification = ConversionClass.worse(conv.classification, .human_review);
-                    try appendUniqueCode(retain, &code_list, "ambiguous_media");
-                },
-                .rejected => {
-                    entry.local_path = null;
-                    entry.status = "rejected";
-                    man.status = "rejected";
-                    if (man.reason.len == 0) man.reason = try retain.dupe(u8, "rejected");
-                    conv.classification = ConversionClass.worse(conv.classification, .human_review);
-                    try appendUniqueCode(retain, &code_list, "media_rejected");
-                },
+                        if (opts.media_dir == null) {
+                            try appendUniqueCode(retain, &code_list, "media_unverified");
+                        } else {
+                            try appendUniqueCode(retain, &code_list, "missing_media");
+                        }
+                    },
+                    .ambiguous => {
+                        entry.local_path = null;
+                        entry.status = "ambiguous";
+                        man.status = "ambiguous";
+                        if (man.reason.len == 0) man.reason = try retain.dupe(u8, "duplicate_media_basename");
+                        conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                        try appendUniqueCode(retain, &code_list, "ambiguous_media");
+                    },
+                    .rejected => {
+                        entry.local_path = null;
+                        entry.status = "rejected";
+                        man.status = "rejected";
+                        if (man.reason.len == 0) man.reason = try retain.dupe(u8, "rejected");
+                        conv.classification = ConversionClass.worse(conv.classification, .human_review);
+                        try appendUniqueCode(retain, &code_list, "media_rejected");
+                    },
+                }
+                try all_media.append(gpa, entry);
+                try media_manifest.append(gpa, man);
             }
-            try all_media.append(gpa, entry);
-            try media_manifest.append(gpa, man);
-        }
 
-        // Apply verified rewrites to the page body (unresolved refs left intact).
-        if (rewrites.items.len > 0) {
-            const rewritten_body = try rewriteMediaReferences(retain, conv.markdown_body, rewrites.items);
-            conv.markdown_body = rewritten_body;
-            conv.classification = ConversionClass.worse(conv.classification, .transformed);
-            try appendUniqueCode(retain, &code_list, "media_materialized");
-        }
+            // Apply verified rewrites to the page body (unresolved refs left intact).
+            if (rewrites.items.len > 0) {
+                const rewritten_body = try rewriteMediaReferences(retain, conv.markdown_body, rewrites.items);
+                conv.markdown_body = rewritten_body;
+                conv.classification = ConversionClass.worse(conv.classification, .transformed);
+                try appendUniqueCode(retain, &code_list, "media_materialized");
+            }
 
-        for (conv.features) |f| {
-            try all_features.append(gpa, .{
-                .source_post_id = try retain.dupe(u8, f.source_post_id),
-                .source_output = try retain.dupe(u8, f.source_output),
-                .code = try retain.dupe(u8, f.code),
-                .classification = f.classification,
-                .excerpt = try retain.dupe(u8, f.excerpt),
-                .message = try retain.dupe(u8, f.message),
-            });
-        }
+            for (conv.features) |f| {
+                try all_features.append(gpa, .{
+                    .source_post_id = try retain.dupe(u8, f.source_post_id),
+                    .source_output = try retain.dupe(u8, f.source_output),
+                    .code = try retain.dupe(u8, f.code),
+                    .classification = f.classification,
+                    .excerpt = try retain.dupe(u8, f.excerpt),
+                    .message = try retain.dupe(u8, f.message),
+                });
+            }
 
-        const prov: Provenance = .{
-            .output_path = m.output_path,
-            .source_export = opts.wxr_path,
-            .post_id = item.post_id,
-            .post_type = item.post_type,
-            .guid = item.guid,
-            .post_name = item.post_name,
-            .author = item.creator,
-            .post_date = item.post_date,
-            .link = item.link,
-            .conversion = conv.classification,
-        };
-        const prov_comment = try buildProvenanceComment(retain, prov);
+            const prov: Provenance = .{
+                .output_path = m.output_path,
+                .source_export = opts.wxr_path,
+                .post_id = item.post_id,
+                .post_type = item.post_type,
+                .guid = item.guid,
+                .post_name = item.post_name,
+                .author = item.creator,
+                .post_date = item.post_date,
+                .link = item.link,
+                .conversion = conv.classification,
+            };
+            const prov_comment = try buildProvenanceComment(retain, prov);
 
-        // Assemble file after final classification
-        var file_buf: std.ArrayList(u8) = .empty;
-        try file_buf.appendSlice(retain, fm);
-        try file_buf.append(retain, '\n');
-        try file_buf.appendSlice(retain, prov_comment);
-        try file_buf.append(retain, '\n');
-        if (item.excerpt_encoded.len > 0) {
-            const excerpt_block = try formatPreservedExcerpt(retain, item.excerpt_encoded);
-            try file_buf.appendSlice(retain, excerpt_block);
-        }
-        try file_buf.appendSlice(retain, conv.markdown_body);
-        if (conv.markdown_body.len == 0 or conv.markdown_body[conv.markdown_body.len - 1] != '\n') {
+            // Assemble file after final classification
+            var file_buf: std.ArrayList(u8) = .empty;
+            try file_buf.appendSlice(retain, fm);
             try file_buf.append(retain, '\n');
-        }
-        try writeBytes(io, out_root, m.output_path, file_buf.items);
-
-        const codes_slice = try code_list.toOwnedSlice(retain);
-        try pages.append(gpa, .{
-            .output_path = m.output_path,
-            .post_id = item.post_id,
-            .post_type = item.post_type,
-            .title = item.title,
-            .slug = m.slug,
-            .source_slug = item.post_name,
-            .author = item.creator,
-            .post_date = item.post_date,
-            .post_date_gmt = item.post_date_gmt,
-            .excerpt = item.excerpt_encoded,
-            .is_sticky = sticky,
-            .status_wp = item.status,
-            .status_boris = status_boris,
-            .categories = try cats.toOwnedSlice(retain),
-            .tags = try tags.toOwnedSlice(retain),
-            .parent_post_id = parent_id,
-            .proposed_entity_id = m.entity_id,
-            .proposed_parent = proposed_parent,
-            .proposed_frontmatter = fm,
-            .conversion = conv.classification,
-            .feature_codes = codes_slice,
-        });
-
-        try provenance.append(gpa, prov);
-
-        if (conv.classification == .human_review or conv.classification == .unsupported) {
-            try human.append(gpa, .{
-                .source_post_id = item.post_id,
-                .source_output = m.output_path,
-                .reason = if (conv.classification == .unsupported)
-                    "Contains unsupported constructs preserved in body; author review required"
-                else
-                    "Flagged for human review (status, media, hierarchy, or links)",
-                .codes = codes_slice,
-            });
-        }
-    }
-
-    // Trunk stubs
-    if (have_posts) {
-        const fm = try buildFrontmatter(retain, "Posts", null, "published", &.{"posts"});
-        const body =
-            \\<!-- boris-migration-provenance
-            \\source_format: wordpress-wxr
-            \\synthetic: trunk-stub
-            \\entity_id: posts
-            \\conversion: exact
-            \\-->
-            \\
-            \\# Posts
-            \\
-            \\Trunk landing for migrated WordPress posts.
-            \\
-        ;
-        var buf: std.ArrayList(u8) = .empty;
-        try buf.appendSlice(retain, fm);
-        try buf.append(retain, '\n');
-        try buf.appendSlice(retain, body);
-        try writeBytes(io, out_root, "content/posts.md", buf.items);
-        try provenance.append(gpa, .{
-            .output_path = "content/posts.md",
-            .source_export = opts.wxr_path,
-            .post_id = "synthetic:posts",
-            .post_type = "trunk",
-            .guid = "",
-            .post_name = "posts",
-            .author = "",
-            .post_date = "",
-            .link = "",
-            .conversion = .exact,
-        });
-        try pages.append(gpa, .{
-            .output_path = "content/posts.md",
-            .post_id = "synthetic:posts",
-            .post_type = "trunk",
-            .title = "Posts",
-            .slug = "posts",
-            .source_slug = "posts",
-            .author = "",
-            .post_date = "",
-            .post_date_gmt = "",
-            .excerpt = "",
-            .is_sticky = false,
-            .status_wp = "publish",
-            .status_boris = "published",
-            .categories = &.{},
-            .tags = &.{"posts"},
-            .parent_post_id = "0",
-            .proposed_entity_id = "posts",
-            .proposed_parent = null,
-            .proposed_frontmatter = fm,
-            .conversion = .exact,
-            .feature_codes = &.{},
-        });
-    }
-    if (have_pages) {
-        const fm = try buildFrontmatter(retain, "Pages", null, "published", &.{"pages"});
-        const body =
-            \\<!-- boris-migration-provenance
-            \\source_format: wordpress-wxr
-            \\synthetic: trunk-stub
-            \\entity_id: pages
-            \\conversion: exact
-            \\-->
-            \\
-            \\# Pages
-            \\
-            \\Trunk landing for migrated WordPress pages (use when hierarchy was flattened).
-            \\
-        ;
-        var buf: std.ArrayList(u8) = .empty;
-        try buf.appendSlice(retain, fm);
-        try buf.append(retain, '\n');
-        try buf.appendSlice(retain, body);
-        try writeBytes(io, out_root, "content/pages.md", buf.items);
-        try provenance.append(gpa, .{
-            .output_path = "content/pages.md",
-            .source_export = opts.wxr_path,
-            .post_id = "synthetic:pages",
-            .post_type = "trunk",
-            .guid = "",
-            .post_name = "pages",
-            .author = "",
-            .post_date = "",
-            .link = "",
-            .conversion = .exact,
-        });
-        try pages.append(gpa, .{
-            .output_path = "content/pages.md",
-            .post_id = "synthetic:pages",
-            .post_type = "trunk",
-            .title = "Pages",
-            .slug = "pages",
-            .source_slug = "pages",
-            .author = "",
-            .post_date = "",
-            .post_date_gmt = "",
-            .excerpt = "",
-            .is_sticky = false,
-            .status_wp = "publish",
-            .status_boris = "published",
-            .categories = &.{},
-            .tags = &.{"pages"},
-            .parent_post_id = "0",
-            .proposed_entity_id = "pages",
-            .proposed_parent = null,
-            .proposed_frontmatter = fm,
-            .conversion = .exact,
-            .feature_codes = &.{},
-        });
-    }
-
-    // Unsupported item types: preserve raw under content/_preserved/
-    for (doc.items) |item| {
-        if (std.mem.eql(u8, item.post_type, "post") or std.mem.eql(u8, item.post_type, "page")) continue;
-        const safe_type = try sanitizeEntitySegment(retain, item.post_type);
-        const safe_id = if (item.post_id.len > 0) item.post_id else "unknown";
-        const path = try std.fmt.allocPrint(retain, "content/_preserved/{s}-{s}.md", .{ safe_type, safe_id });
-        const reason = if (std.mem.eql(u8, item.post_type, "attachment"))
-            "attachment item; not a Boris page — preserved for media inventory"
-        else if (std.mem.eql(u8, item.post_type, "nav_menu_item"))
-            "WordPress menu item (nav_menu_item); not a Boris page — preserved as unsupported menu artifact"
-        else if (std.mem.eql(u8, item.post_type, "wp_block") or std.mem.eql(u8, item.post_type, "wp_template") or std.mem.eql(u8, item.post_type, "wp_navigation"))
-            "WordPress theme/block artifact; not a Boris page — preserved for human review"
-        else
-            "non post/page post_type; preserved raw for review";
-        if (std.mem.eql(u8, item.post_type, "nav_menu_item")) {
-            try all_features.append(gpa, .{
-                .source_post_id = try retain.dupe(u8, item.post_id),
-                .source_output = path,
-                .code = "wp_menu",
-                .classification = .unsupported,
-                .excerpt = try retain.dupe(u8, if (item.title.len > 0) item.title else "nav_menu_item"),
-                .message = "nav_menu_item is a WordPress menu artifact, not meaning-preserving Markdown",
-            });
-        }
-
-        var body: std.ArrayList(u8) = .empty;
-        try body.appendSlice(retain, "---\n");
-        try body.print(retain, "title: {s}\n", .{if (item.title.len > 0) item.title else safe_id});
-        try body.appendSlice(retain, "status: draft\n");
-        try body.appendSlice(retain, "tags: [preserved, wordpress]\n");
-        try body.appendSlice(retain, "---\n\n");
-        try body.appendSlice(retain, "<!-- boris-migration-provenance\n");
-        try body.appendSlice(retain, "source_format: wordpress-wxr\n");
-        try body.print(retain, "post_id: {s}\n", .{item.post_id});
-        try body.print(retain, "post_type: {s}\n", .{item.post_type});
-        try body.appendSlice(retain, "conversion: unsupported\n");
-        try body.appendSlice(retain, "-->\n\n");
-        try body.appendSlice(retain, "> **Preserved unsupported WordPress item** — not silently discarded.\n\n");
-        try body.print(retain, "- post_type: `{s}`\n", .{item.post_type});
-        try body.print(retain, "- post_id: `{s}`\n", .{item.post_id});
-        try body.print(retain, "- guid: `{s}`\n", .{item.guid});
-        try body.print(retain, "- attachment_url: `{s}`\n", .{item.attachment_url});
-        try body.print(retain, "- link: `{s}`\n\n", .{item.link});
-        try body.appendSlice(retain, "### Original content:encoded\n\n");
-        try body.appendSlice(retain, "```html\n");
-        try body.appendSlice(retain, item.content_encoded);
-        if (item.content_encoded.len > 0 and item.content_encoded[item.content_encoded.len - 1] != '\n') try body.append(retain, '\n');
-        try body.appendSlice(retain, "```\n");
-        try writeBytes(io, out_root, path, body.items);
-
-        try unsupported.append(gpa, .{
-            .post_id = item.post_id,
-            .post_type = item.post_type,
-            .title = item.title,
-            .reason = reason,
-            .preserved_path = path,
-        });
-        try provenance.append(gpa, .{
-            .output_path = path,
-            .source_export = opts.wxr_path,
-            .post_id = item.post_id,
-            .post_type = item.post_type,
-            .guid = item.guid,
-            .post_name = item.post_name,
-            .author = item.creator,
-            .post_date = item.post_date,
-            .link = item.link,
-            .conversion = .unsupported,
-        });
-
-        // Attachment media inventory (report only — not materialized into page assets).
-        if (std.mem.eql(u8, item.post_type, "attachment") and item.attachment_url.len > 0) {
-            var entry: MediaRef = .{
-                .source_post_id = item.post_id,
-                .source_output = path,
-                .referenced = item.attachment_url,
-                .local_path = null,
-                .status = "attachment_only",
-            };
-            const match = try matchMediaReference(retain, media_files, opts.media_dir != null, item.attachment_url);
-            var man: MediaManifestEntry = .{
-                .source_output = path,
-                .original_reference = item.attachment_url,
-                .upload_key = if (match.upload_key) |k| try retain.dupe(u8, k) else mediaRelativeKey(item.attachment_url),
-                .matched_source = null,
-                .emitted_asset_path = null,
-                .status = "rejected",
-                .reason = try retain.dupe(u8, "attachment_inventory_only_not_materialized"),
-            };
-            switch (match.kind) {
-                .found => {
-                    entry.local_path = match.local_path;
-                    entry.status = "present";
-                    man.matched_source = match.local_path;
-                    // Keep rejected/not-materialized: attachments are not Boris pages.
-                },
-                .missing => {
-                    entry.status = "missing";
-                    man.status = "missing";
-                    man.reason = try retain.dupe(u8, if (match.reason.len > 0) match.reason else "local_media_not_found");
-                },
-                .ambiguous => {
-                    entry.status = "ambiguous";
-                    man.status = "ambiguous";
-                    man.reason = try retain.dupe(u8, if (match.reason.len > 0) match.reason else "duplicate_media_basename");
-                },
-                .rejected => {
-                    entry.status = "rejected";
-                    man.status = "rejected";
-                    man.reason = try retain.dupe(u8, if (match.reason.len > 0) match.reason else "rejected");
-                },
+            try file_buf.appendSlice(retain, prov_comment);
+            try file_buf.append(retain, '\n');
+            if (item.excerpt_encoded.len > 0) {
+                const excerpt_block = try formatPreservedExcerpt(retain, item.excerpt_encoded);
+                try file_buf.appendSlice(retain, excerpt_block);
             }
-            try all_media.append(gpa, entry);
-            try media_manifest.append(gpa, man);
-        }
-    }
+            try file_buf.appendSlice(retain, conv.markdown_body);
+            if (conv.markdown_body.len == 0 or conv.markdown_body[conv.markdown_body.len - 1] != '\n') {
+                try file_buf.append(retain, '\n');
+            }
+            try writeBytes(io, out_root, m.output_path, file_buf.items);
 
-    // Slug conflicts
-    var slug_conflicts: std.ArrayList(SlugConflict) = .empty;
-    defer slug_conflicts.deinit(gpa);
-    var slug_it = slug_to_ids.iterator();
-    while (slug_it.next()) |e| {
-        if (e.value_ptr.items.len < 2) continue;
-        var paths: std.ArrayList([]const u8) = .empty;
-        for (e.value_ptr.items) |pid| {
-            for (metas.items) |m| {
-                if (std.mem.eql(u8, m.item.post_id, pid)) {
-                    try paths.append(retain, m.output_path);
+            const codes_slice = try code_list.toOwnedSlice(retain);
+            try pages.append(gpa, .{
+                .output_path = m.output_path,
+                .post_id = item.post_id,
+                .post_type = item.post_type,
+                .title = item.title,
+                .slug = m.slug,
+                .source_slug = item.post_name,
+                .author = item.creator,
+                .post_date = item.post_date,
+                .post_date_gmt = item.post_date_gmt,
+                .excerpt = item.excerpt_encoded,
+                .is_sticky = sticky,
+                .status_wp = item.status,
+                .status_boris = status_boris,
+                .categories = try cats.toOwnedSlice(retain),
+                .tags = try tags.toOwnedSlice(retain),
+                .parent_post_id = parent_id,
+                .proposed_entity_id = m.entity_id,
+                .proposed_parent = proposed_parent,
+                .proposed_frontmatter = fm,
+                .conversion = conv.classification,
+                .feature_codes = codes_slice,
+            });
+
+            try provenance.append(gpa, prov);
+
+            if (conv.classification == .human_review or conv.classification == .unsupported) {
+                try human.append(gpa, .{
+                    .source_post_id = item.post_id,
+                    .source_output = m.output_path,
+                    .reason = if (conv.classification == .unsupported)
+                        "Contains unsupported constructs preserved in body; author review required"
+                    else
+                        "Flagged for human review (status, media, hierarchy, or links)",
+                    .codes = codes_slice,
+                });
+            }
+        }
+
+        // Trunk stubs
+        if (have_posts) {
+            const fm = try buildFrontmatter(retain, "Posts", null, "published", &.{"posts"});
+            const body =
+                \\<!-- boris-migration-provenance
+                \\source_format: wordpress-wxr
+                \\synthetic: trunk-stub
+                \\entity_id: posts
+                \\conversion: exact
+                \\-->
+                \\
+                \\# Posts
+                \\
+                \\Trunk landing for migrated WordPress posts.
+                \\
+            ;
+            var buf: std.ArrayList(u8) = .empty;
+            try buf.appendSlice(retain, fm);
+            try buf.append(retain, '\n');
+            try buf.appendSlice(retain, body);
+            try writeBytes(io, out_root, "content/posts.md", buf.items);
+            try provenance.append(gpa, .{
+                .output_path = "content/posts.md",
+                .source_export = opts.wxr_path,
+                .post_id = "synthetic:posts",
+                .post_type = "trunk",
+                .guid = "",
+                .post_name = "posts",
+                .author = "",
+                .post_date = "",
+                .link = "",
+                .conversion = .exact,
+            });
+            try pages.append(gpa, .{
+                .output_path = "content/posts.md",
+                .post_id = "synthetic:posts",
+                .post_type = "trunk",
+                .title = "Posts",
+                .slug = "posts",
+                .source_slug = "posts",
+                .author = "",
+                .post_date = "",
+                .post_date_gmt = "",
+                .excerpt = "",
+                .is_sticky = false,
+                .status_wp = "publish",
+                .status_boris = "published",
+                .categories = &.{},
+                .tags = &.{"posts"},
+                .parent_post_id = "0",
+                .proposed_entity_id = "posts",
+                .proposed_parent = null,
+                .proposed_frontmatter = fm,
+                .conversion = .exact,
+                .feature_codes = &.{},
+            });
+        }
+        if (have_pages) {
+            const fm = try buildFrontmatter(retain, "Pages", null, "published", &.{"pages"});
+            const body =
+                \\<!-- boris-migration-provenance
+                \\source_format: wordpress-wxr
+                \\synthetic: trunk-stub
+                \\entity_id: pages
+                \\conversion: exact
+                \\-->
+                \\
+                \\# Pages
+                \\
+                \\Trunk landing for migrated WordPress pages (use when hierarchy was flattened).
+                \\
+            ;
+            var buf: std.ArrayList(u8) = .empty;
+            try buf.appendSlice(retain, fm);
+            try buf.append(retain, '\n');
+            try buf.appendSlice(retain, body);
+            try writeBytes(io, out_root, "content/pages.md", buf.items);
+            try provenance.append(gpa, .{
+                .output_path = "content/pages.md",
+                .source_export = opts.wxr_path,
+                .post_id = "synthetic:pages",
+                .post_type = "trunk",
+                .guid = "",
+                .post_name = "pages",
+                .author = "",
+                .post_date = "",
+                .link = "",
+                .conversion = .exact,
+            });
+            try pages.append(gpa, .{
+                .output_path = "content/pages.md",
+                .post_id = "synthetic:pages",
+                .post_type = "trunk",
+                .title = "Pages",
+                .slug = "pages",
+                .source_slug = "pages",
+                .author = "",
+                .post_date = "",
+                .post_date_gmt = "",
+                .excerpt = "",
+                .is_sticky = false,
+                .status_wp = "publish",
+                .status_boris = "published",
+                .categories = &.{},
+                .tags = &.{"pages"},
+                .parent_post_id = "0",
+                .proposed_entity_id = "pages",
+                .proposed_parent = null,
+                .proposed_frontmatter = fm,
+                .conversion = .exact,
+                .feature_codes = &.{},
+            });
+        }
+
+        // Unsupported item types: preserve raw under content/_preserved/
+        for (doc.items) |item| {
+            if (std.mem.eql(u8, item.post_type, "post") or std.mem.eql(u8, item.post_type, "page")) continue;
+            const safe_type = try sanitizeEntitySegment(retain, item.post_type);
+            const safe_id = if (item.post_id.len > 0) item.post_id else "unknown";
+            const path = try std.fmt.allocPrint(retain, "content/_preserved/{s}-{s}.md", .{ safe_type, safe_id });
+            const reason = if (std.mem.eql(u8, item.post_type, "attachment"))
+                "attachment item; not a Boris page — preserved for media inventory"
+            else if (std.mem.eql(u8, item.post_type, "nav_menu_item"))
+                "WordPress menu item (nav_menu_item); not a Boris page — preserved as unsupported menu artifact"
+            else if (std.mem.eql(u8, item.post_type, "wp_block") or std.mem.eql(u8, item.post_type, "wp_template") or std.mem.eql(u8, item.post_type, "wp_navigation"))
+                "WordPress theme/block artifact; not a Boris page — preserved for human review"
+            else
+                "non post/page post_type; preserved raw for review";
+            if (std.mem.eql(u8, item.post_type, "nav_menu_item")) {
+                try all_features.append(gpa, .{
+                    .source_post_id = try retain.dupe(u8, item.post_id),
+                    .source_output = path,
+                    .code = "wp_menu",
+                    .classification = .unsupported,
+                    .excerpt = try retain.dupe(u8, if (item.title.len > 0) item.title else "nav_menu_item"),
+                    .message = "nav_menu_item is a WordPress menu artifact, not meaning-preserving Markdown",
+                });
+            }
+
+            var body: std.ArrayList(u8) = .empty;
+            try body.appendSlice(retain, "---\n");
+            try body.print(retain, "title: {s}\n", .{if (item.title.len > 0) item.title else safe_id});
+            try body.appendSlice(retain, "status: draft\n");
+            try body.appendSlice(retain, "tags: [preserved, wordpress]\n");
+            try body.appendSlice(retain, "---\n\n");
+            try body.appendSlice(retain, "<!-- boris-migration-provenance\n");
+            try body.appendSlice(retain, "source_format: wordpress-wxr\n");
+            try body.print(retain, "post_id: {s}\n", .{item.post_id});
+            try body.print(retain, "post_type: {s}\n", .{item.post_type});
+            try body.appendSlice(retain, "conversion: unsupported\n");
+            try body.appendSlice(retain, "-->\n\n");
+            try body.appendSlice(retain, "> **Preserved unsupported WordPress item** — not silently discarded.\n\n");
+            try body.print(retain, "- post_type: `{s}`\n", .{item.post_type});
+            try body.print(retain, "- post_id: `{s}`\n", .{item.post_id});
+            try body.print(retain, "- guid: `{s}`\n", .{item.guid});
+            try body.print(retain, "- attachment_url: `{s}`\n", .{item.attachment_url});
+            try body.print(retain, "- link: `{s}`\n\n", .{item.link});
+            try body.appendSlice(retain, "### Original content:encoded\n\n");
+            try body.appendSlice(retain, "```html\n");
+            try body.appendSlice(retain, item.content_encoded);
+            if (item.content_encoded.len > 0 and item.content_encoded[item.content_encoded.len - 1] != '\n') try body.append(retain, '\n');
+            try body.appendSlice(retain, "```\n");
+            try writeBytes(io, out_root, path, body.items);
+
+            try unsupported.append(gpa, .{
+                .post_id = item.post_id,
+                .post_type = item.post_type,
+                .title = item.title,
+                .reason = reason,
+                .preserved_path = path,
+            });
+            try provenance.append(gpa, .{
+                .output_path = path,
+                .source_export = opts.wxr_path,
+                .post_id = item.post_id,
+                .post_type = item.post_type,
+                .guid = item.guid,
+                .post_name = item.post_name,
+                .author = item.creator,
+                .post_date = item.post_date,
+                .link = item.link,
+                .conversion = .unsupported,
+            });
+
+            // Attachment media inventory (report only — not materialized into page assets).
+            if (std.mem.eql(u8, item.post_type, "attachment") and item.attachment_url.len > 0) {
+                var entry: MediaRef = .{
+                    .source_post_id = item.post_id,
+                    .source_output = path,
+                    .referenced = item.attachment_url,
+                    .local_path = null,
+                    .status = "attachment_only",
+                };
+                const match = try matchMediaReference(retain, media_files, opts.media_dir != null, item.attachment_url);
+                var man: MediaManifestEntry = .{
+                    .source_output = path,
+                    .original_reference = item.attachment_url,
+                    .upload_key = if (match.upload_key) |k| try retain.dupe(u8, k) else mediaRelativeKey(item.attachment_url),
+                    .matched_source = null,
+                    .emitted_asset_path = null,
+                    .status = "rejected",
+                    .reason = try retain.dupe(u8, "attachment_inventory_only_not_materialized"),
+                };
+                switch (match.kind) {
+                    .found => {
+                        entry.local_path = match.local_path;
+                        entry.status = "present";
+                        man.matched_source = match.local_path;
+                        // Keep rejected/not-materialized: attachments are not Boris pages.
+                    },
+                    .missing => {
+                        entry.status = "missing";
+                        man.status = "missing";
+                        man.reason = try retain.dupe(u8, if (match.reason.len > 0) match.reason else "local_media_not_found");
+                    },
+                    .ambiguous => {
+                        entry.status = "ambiguous";
+                        man.status = "ambiguous";
+                        man.reason = try retain.dupe(u8, if (match.reason.len > 0) match.reason else "duplicate_media_basename");
+                    },
+                    .rejected => {
+                        entry.status = "rejected";
+                        man.status = "rejected";
+                        man.reason = try retain.dupe(u8, if (match.reason.len > 0) match.reason else "rejected");
+                    },
+                }
+                try all_media.append(gpa, entry);
+                try media_manifest.append(gpa, man);
+            }
+        }
+
+        // Slug conflicts
+        var slug_conflicts: std.ArrayList(SlugConflict) = .empty;
+        defer slug_conflicts.deinit(gpa);
+        var slug_it = slug_to_ids.iterator();
+        while (slug_it.next()) |e| {
+            if (e.value_ptr.items.len < 2) continue;
+            var paths: std.ArrayList([]const u8) = .empty;
+            for (e.value_ptr.items) |pid| {
+                for (metas.items) |m| {
+                    if (std.mem.eql(u8, m.item.post_id, pid)) {
+                        try paths.append(retain, m.output_path);
+                    }
+                }
+            }
+            // Sort ids for determinism
+            std.mem.sort([]const u8, e.value_ptr.items, {}, struct {
+                fn less(_: void, a: []const u8, b: []const u8) bool {
+                    return std.mem.order(u8, a, b) == .lt;
+                }
+            }.less);
+            try slug_conflicts.append(gpa, .{
+                .slug = e.key_ptr.*,
+                .post_ids = try retain.dupe([]const u8, e.value_ptr.items),
+                .output_paths = try paths.toOwnedSlice(retain),
+                .kind = "duplicate_post_name",
+            });
+            // human review for conflicting pages
+            for (e.value_ptr.items) |pid| {
+                for (pages.items) |*p| {
+                    if (std.mem.eql(u8, p.post_id, pid)) {
+                        p.conversion = ConversionClass.worse(p.conversion, .human_review);
+                    }
                 }
             }
         }
-        // Sort ids for determinism
-        std.mem.sort([]const u8, e.value_ptr.items, {}, struct {
-            fn less(_: void, a: []const u8, b: []const u8) bool {
-                return std.mem.order(u8, a, b) == .lt;
+        std.mem.sort(SlugConflict, slug_conflicts.items, {}, struct {
+            fn less(_: void, a: SlugConflict, b: SlugConflict) bool {
+                return std.mem.order(u8, a.slug, b.slug) == .lt;
             }
         }.less);
-        try slug_conflicts.append(gpa, .{
-            .slug = e.key_ptr.*,
-            .post_ids = try retain.dupe([]const u8, e.value_ptr.items),
-            .output_paths = try paths.toOwnedSlice(retain),
-            .kind = "duplicate_post_name",
-        });
-        // human review for conflicting pages
-        for (e.value_ptr.items) |pid| {
-            for (pages.items) |*p| {
-                if (std.mem.eql(u8, p.post_id, pid)) {
-                    p.conversion = ConversionClass.worse(p.conversion, .human_review);
-                }
+
+        // Missing media list
+        var missing: std.ArrayList(MediaRef) = .empty;
+        defer missing.deinit(gpa);
+        for (all_media.items) |m| {
+            if (std.mem.eql(u8, m.status, "missing")) try missing.append(gpa, m);
+        }
+
+        // Sort report arrays for determinism
+        std.mem.sort(PageRecord, pages.items, {}, struct {
+            fn less(_: void, a: PageRecord, b: PageRecord) bool {
+                return std.mem.order(u8, a.output_path, b.output_path) == .lt;
             }
+        }.less);
+        std.mem.sort(ParentRel, parents.items, {}, struct {
+            fn less(_: void, a: ParentRel, b: ParentRel) bool {
+                return std.mem.order(u8, a.child_entity_id, b.child_entity_id) == .lt;
+            }
+        }.less);
+        std.mem.sort(LinkFinding, all_links.items, {}, struct {
+            fn less(_: void, a: LinkFinding, b: LinkFinding) bool {
+                const o = std.mem.order(u8, a.source_output, b.source_output);
+                if (o != .eq) return o == .lt;
+                return std.mem.order(u8, a.target, b.target) == .lt;
+            }
+        }.less);
+        std.mem.sort(MediaRef, all_media.items, {}, struct {
+            fn less(_: void, a: MediaRef, b: MediaRef) bool {
+                const o = std.mem.order(u8, a.source_output, b.source_output);
+                if (o != .eq) return o == .lt;
+                return std.mem.order(u8, a.referenced, b.referenced) == .lt;
+            }
+        }.less);
+        std.mem.sort(MediaRef, missing.items, {}, struct {
+            fn less(_: void, a: MediaRef, b: MediaRef) bool {
+                return std.mem.order(u8, a.referenced, b.referenced) == .lt;
+            }
+        }.less);
+        std.mem.sort(MediaManifestEntry, media_manifest.items, {}, struct {
+            fn less(_: void, a: MediaManifestEntry, b: MediaManifestEntry) bool {
+                const o = std.mem.order(u8, a.source_output, b.source_output);
+                if (o != .eq) return o == .lt;
+                const o2 = std.mem.order(u8, a.original_reference, b.original_reference);
+                if (o2 != .eq) return o2 == .lt;
+                return std.mem.order(u8, a.status, b.status) == .lt;
+            }
+        }.less);
+        std.mem.sort(FeatureFinding, all_features.items, {}, struct {
+            fn less(_: void, a: FeatureFinding, b: FeatureFinding) bool {
+                const o = std.mem.order(u8, a.source_output, b.source_output);
+                if (o != .eq) return o == .lt;
+                return std.mem.order(u8, a.code, b.code) == .lt;
+            }
+        }.less);
+        std.mem.sort(UnsupportedItem, unsupported.items, {}, struct {
+            fn less(_: void, a: UnsupportedItem, b: UnsupportedItem) bool {
+                return std.mem.order(u8, a.preserved_path, b.preserved_path) == .lt;
+            }
+        }.less);
+        std.mem.sort(CommentRecord, all_comments.items, {}, struct {
+            fn less(_: void, a: CommentRecord, b: CommentRecord) bool {
+                const o = std.mem.order(u8, a.parent_post_id, b.parent_post_id);
+                if (o != .eq) return o == .lt;
+                return std.mem.order(u8, a.comment_id, b.comment_id) == .lt;
+            }
+        }.less);
+        std.mem.sort(HumanReview, human.items, {}, struct {
+            fn less(_: void, a: HumanReview, b: HumanReview) bool {
+                return std.mem.order(u8, a.source_output, b.source_output) == .lt;
+            }
+        }.less);
+        std.mem.sort(Provenance, provenance.items, {}, struct {
+            fn less(_: void, a: Provenance, b: Provenance) bool {
+                return std.mem.order(u8, a.output_path, b.output_path) == .lt;
+            }
+        }.less);
+
+        const report: Report = .{
+            .source_export = opts.wxr_path,
+            .media_dir = opts.media_dir,
+            .site_title = doc.title,
+            .base_site_url = doc.base_site_url,
+            .base_blog_url = doc.base_blog_url,
+            .authors = doc.authors,
+            .taxonomies = doc.taxonomies,
+            .taxonomy_stats = taxonomy_stats,
+            .pages = pages.items,
+            .parent_relationships = parents.items,
+            .links = all_links.items,
+            .media_references = all_media.items,
+            .missing_media = missing.items,
+            .features = all_features.items,
+            .slug_conflicts = slug_conflicts.items,
+            .unsupported_items = unsupported.items,
+            .comments = all_comments.items,
+            .human_review = human.items,
+            .provenance = provenance.items,
+        };
+
+        const json = try emitJson(gpa, report);
+        defer gpa.free(json);
+        const md = try emitMarkdown(gpa, report, media_manifest.items);
+        defer gpa.free(md);
+        const man_json = try emitMediaManifest(gpa, media_manifest.items);
+        defer gpa.free(man_json);
+
+        try writeBytes(io, out_root, "report.json", json);
+        try writeBytes(io, out_root, "REPORT.md", md);
+        try writeBytes(io, out_root, "media_manifest.json", man_json);
+
+        if (!opts.quiet) {
+            std.debug.print("wordpress-migration-lab: wrote {s}/content/, {s}/report.json, {s}/REPORT.md, {s}/media_manifest.json\n", .{
+                opts.out_dir,
+                opts.out_dir,
+                opts.out_dir,
+                opts.out_dir,
+            });
+            var n_copied: usize = 0;
+            for (media_manifest.items) |e| {
+                if (std.mem.eql(u8, e.status, "copied")) n_copied += 1;
+            }
+            std.debug.print("  pages={d} features={d} missing_media={d} media_copied={d} human_review={d} preserved={d}\n", .{
+                report.pages.len,
+                report.features.len,
+                report.missing_media.len,
+                n_copied,
+                report.human_review.len,
+                report.unsupported_items.len,
+            });
         }
     }
-    std.mem.sort(SlugConflict, slug_conflicts.items, {}, struct {
-        fn less(_: void, a: SlugConflict, b: SlugConflict) bool {
-            return std.mem.order(u8, a.slug, b.slug) == .lt;
-        }
-    }.less);
-
-    // Missing media list
-    var missing: std.ArrayList(MediaRef) = .empty;
-    defer missing.deinit(gpa);
-    for (all_media.items) |m| {
-        if (std.mem.eql(u8, m.status, "missing")) try missing.append(gpa, m);
-    }
-
-    // Sort report arrays for determinism
-    std.mem.sort(PageRecord, pages.items, {}, struct {
-        fn less(_: void, a: PageRecord, b: PageRecord) bool {
-            return std.mem.order(u8, a.output_path, b.output_path) == .lt;
-        }
-    }.less);
-    std.mem.sort(ParentRel, parents.items, {}, struct {
-        fn less(_: void, a: ParentRel, b: ParentRel) bool {
-            return std.mem.order(u8, a.child_entity_id, b.child_entity_id) == .lt;
-        }
-    }.less);
-    std.mem.sort(LinkFinding, all_links.items, {}, struct {
-        fn less(_: void, a: LinkFinding, b: LinkFinding) bool {
-            const o = std.mem.order(u8, a.source_output, b.source_output);
-            if (o != .eq) return o == .lt;
-            return std.mem.order(u8, a.target, b.target) == .lt;
-        }
-    }.less);
-    std.mem.sort(MediaRef, all_media.items, {}, struct {
-        fn less(_: void, a: MediaRef, b: MediaRef) bool {
-            const o = std.mem.order(u8, a.source_output, b.source_output);
-            if (o != .eq) return o == .lt;
-            return std.mem.order(u8, a.referenced, b.referenced) == .lt;
-        }
-    }.less);
-    std.mem.sort(MediaRef, missing.items, {}, struct {
-        fn less(_: void, a: MediaRef, b: MediaRef) bool {
-            return std.mem.order(u8, a.referenced, b.referenced) == .lt;
-        }
-    }.less);
-    std.mem.sort(MediaManifestEntry, media_manifest.items, {}, struct {
-        fn less(_: void, a: MediaManifestEntry, b: MediaManifestEntry) bool {
-            const o = std.mem.order(u8, a.source_output, b.source_output);
-            if (o != .eq) return o == .lt;
-            const o2 = std.mem.order(u8, a.original_reference, b.original_reference);
-            if (o2 != .eq) return o2 == .lt;
-            return std.mem.order(u8, a.status, b.status) == .lt;
-        }
-    }.less);
-    std.mem.sort(FeatureFinding, all_features.items, {}, struct {
-        fn less(_: void, a: FeatureFinding, b: FeatureFinding) bool {
-            const o = std.mem.order(u8, a.source_output, b.source_output);
-            if (o != .eq) return o == .lt;
-            return std.mem.order(u8, a.code, b.code) == .lt;
-        }
-    }.less);
-    std.mem.sort(UnsupportedItem, unsupported.items, {}, struct {
-        fn less(_: void, a: UnsupportedItem, b: UnsupportedItem) bool {
-            return std.mem.order(u8, a.preserved_path, b.preserved_path) == .lt;
-        }
-    }.less);
-    std.mem.sort(CommentRecord, all_comments.items, {}, struct {
-        fn less(_: void, a: CommentRecord, b: CommentRecord) bool {
-            const o = std.mem.order(u8, a.parent_post_id, b.parent_post_id);
-            if (o != .eq) return o == .lt;
-            return std.mem.order(u8, a.comment_id, b.comment_id) == .lt;
-        }
-    }.less);
-    std.mem.sort(HumanReview, human.items, {}, struct {
-        fn less(_: void, a: HumanReview, b: HumanReview) bool {
-            return std.mem.order(u8, a.source_output, b.source_output) == .lt;
-        }
-    }.less);
-    std.mem.sort(Provenance, provenance.items, {}, struct {
-        fn less(_: void, a: Provenance, b: Provenance) bool {
-            return std.mem.order(u8, a.output_path, b.output_path) == .lt;
-        }
-    }.less);
-
-    const report: Report = .{
-        .source_export = opts.wxr_path,
-        .media_dir = opts.media_dir,
-        .site_title = doc.title,
-        .base_site_url = doc.base_site_url,
-        .base_blog_url = doc.base_blog_url,
-        .authors = doc.authors,
-        .taxonomies = doc.taxonomies,
-        .taxonomy_stats = taxonomy_stats,
-        .pages = pages.items,
-        .parent_relationships = parents.items,
-        .links = all_links.items,
-        .media_references = all_media.items,
-        .missing_media = missing.items,
-        .features = all_features.items,
-        .slug_conflicts = slug_conflicts.items,
-        .unsupported_items = unsupported.items,
-        .comments = all_comments.items,
-        .human_review = human.items,
-        .provenance = provenance.items,
-    };
-
-    const json = try emitJson(gpa, report);
-    defer gpa.free(json);
-    const md = try emitMarkdown(gpa, report, media_manifest.items);
-    defer gpa.free(md);
-    const man_json = try emitMediaManifest(gpa, media_manifest.items);
-    defer gpa.free(man_json);
-
-    try writeBytes(io, out_root, "report.json", json);
-    try writeBytes(io, out_root, "REPORT.md", md);
-    try writeBytes(io, out_root, "media_manifest.json", man_json);
-
-    if (!opts.quiet) {
-        std.debug.print("wordpress-migration-lab: wrote {s}/content/, {s}/report.json, {s}/REPORT.md, {s}/media_manifest.json\n", .{
-            opts.out_dir,
-            opts.out_dir,
-            opts.out_dir,
-            opts.out_dir,
-        });
-        var n_copied: usize = 0;
-        for (media_manifest.items) |e| {
-            if (std.mem.eql(u8, e.status, "copied")) n_copied += 1;
-        }
-        std.debug.print("  pages={d} features={d} missing_media={d} media_copied={d} human_review={d} preserved={d}\n", .{
-            report.pages.len,
-            report.features.len,
-            report.missing_media.len,
-            n_copied,
-            report.human_review.len,
-            report.unsupported_items.len,
-        });
-    }
+    try output_publication.commit(io, gpa);
 }

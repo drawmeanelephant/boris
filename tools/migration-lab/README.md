@@ -186,7 +186,9 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
 
 ## Safety rules
 
-1. **Preserve originals** — only writes under `--out`.
+1. **Preserve originals** — only writes under `--out`; WordPress and theme
+   modes refuse any source/output overlap (including an output ancestor) before
+   creating a stage.
 2. **No network** — no fetches, no package installs, no oEmbed expansion.
 3. **No destructive source ops** — no delete/rename of WXR, media, vault, or scan-root files.
 4. **No product coupling** — does not import `src/` compiler modules; not in root `zig build test`.
@@ -210,6 +212,13 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
     Never executes PHP/JS, loads WordPress, resolves plugin/database state,
     fetches remote assets, or claims universal WordPress compatibility. Every
     dynamic finding is retained in `manual_review.json`.
+13. **WordPress and theme publication** — `wordpress`, `wordpress-theme`,
+    `theme-archaeology`, and `theme-materialize` write a complete sibling stage
+    and replace only an output carrying their exact
+    `.boris-migration-lab-output` ownership marker. A non-empty unmarked
+    `--out`, source/output symlink, or stale unowned stage is refused without
+    mutation. Successful reruns replace the complete owned tree, so stale
+    generated files cannot survive.
 
 ---
 
@@ -309,14 +318,18 @@ source. It is intentionally separate from WXR content import: WXR describes
 posts and pages, while this mode inventories PHP templates, static assets,
 template relationships, hook calls, menu locations, and widget regions.
 
+For block themes/FSE, it additionally inventories root `theme.json` and direct
+`templates/*.html` as bytes-and-hashes evidence only. It does not parse block
+JSON, render block markup, execute PHP or JavaScript, or claim WordPress parity.
+
 The lab emits:
 
 | Output | Role |
 |---|---|
 | `inventory.json` | Sorted file inventory plus line-level PHP/menu/widget/hook evidence |
-| `slot_mapping.json` | Closed mapping proposal for `{{nav}}`, `{{breadcrumb}}`, `{{title}}`, `{{content}}`, `{{children}}`, Aside, `{{toc}}`, and `{{footer}}` |
+| `slot_mapping.json` | Line-evidenced Boris slot candidates, all requiring human review; absent evidence produces no candidate |
 | `manual_review.json` | Every detected unsupported or dynamic behavior with source path, line, evidence, and decision |
-| `prototype/main.html` | No-runtime static layout using Boris’s closed layout markers |
+| `prototype/main.html` | Minimal no-runtime Boris layout contract smoke input (one `{{title}}`, one `{{content}}`, no asset claim) |
 | `report.json` / `REPORT.md` | Counts, preserve/adapt/review/drop decisions, and evidence boundary |
 
 The checked-in fixture at
@@ -324,6 +337,11 @@ The checked-in fixture at
 synthetic because no Kubrick source was supplied locally and this lab does not
 retrieve external themes. It models classic file names and behaviors; it must
 not be read as authentic Kubrick code or universal WordPress coverage.
+
+The prototype is deliberately not a theme converter: source assets remain
+inventory evidence and are not copied or referenced. Candidate slots require
+an exact scanned source line and remain review items; missing evidence is not
+filled from WordPress conventions or template filenames.
 
 ---
 
