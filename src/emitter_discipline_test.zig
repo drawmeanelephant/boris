@@ -145,6 +145,7 @@ const modules = [_]Module{
     .{ .name = "parser.zig", .class = .other },
     .{ .name = "pathutil.zig", .class = .other },
     .{ .name = "pipeline.zig", .class = .other },
+    .{ .name = "publication_profile.zig", .class = .other },
     .{ .name = "rag_body.zig", .class = .other },
     .{
         .name = "rss.zig",

@@ -1,0 +1,110 @@
+# Publication profile (schema v1, Slice 1)
+
+**Status:** normative parser and static-plan contract. Profile execution is not
+available in this slice: Boris does not yet accept or advertise `--profile`.
+The internal API parses and validates a selected local profile only; it does
+not discover content, create outputs, read environment variables, contact a
+network service, or invoke a publisher.
+
+## Selected profile workspace
+
+A caller explicitly selects one profile file. Its path is normalized against
+the invocation CWD and the normalized parent directory is the profile
+workspace root. Every path in the profile, and every future profile-mode CLI
+path override, is workspace-relative. Absolute paths, drive-rooted paths,
+backslashes, empty segments, `.` segments, and `..` segments are rejected.
+There is no Git-root, package-root, parent-directory, or conventional-file-name
+discovery. Legacy no-profile invocations retain their CWD-relative behavior.
+
+The parsed plan stores only canonical workspace-relative paths; the owned
+workspace root carries the absolute path used by a future coordinator.
+
+## Strict JSON and bounds
+
+The profile is UTF-8 JSON with no embedded NUL. The Boris parser rejects
+malformed JSON, comments, trailing data, coercion, duplicate keys, and unknown
+keys at every object level. Duplicate rejection is a Boris parser requirement;
+the companion JSON Schema cannot express it alone.
+
+| Bound | Value |
+|---|---:|
+| Profile bytes | 262,144 |
+| JSON nesting | 16 containers |
+| Decoded string bytes | 4,096 |
+| Path bytes | 1,024 |
+| Targets | 32 |
+| Any supported array | 256 |
+| Layout rules per target | 256 |
+| Target-name bytes | 64 |
+| Site title/description bytes | 1,024 |
+
+Crossing a bound fails before a plan is returned. `schema_version` is an exact
+non-negative integer `1`; floats, negative values, and integer overflows do
+not coerce to it.
+
+## Schema v1
+
+The root has exactly these fields:
+
+| Field | Required | Meaning |
+|---|---|---|
+| `format` | yes | Exact string `boris-publication-profile` |
+| `schema_version` | yes | Exact integer `1` |
+| `input` | no | Content root, default `content` |
+| `input_format` | no | `markdown` (default) or `textile` |
+| `site` | no | Closed `url`, `title`, `description` object |
+| `targets` | no | Closed HTML-target array |
+| `editions` | no | Closed `ir`, `rag`, `context` object |
+
+Each target requires `name` and `output`; optional fields are `public`, exactly
+one of `theme`/`layout`, `layout_rules`, `sitemap`, `rss`, and `llms`.
+`layout_rules` entries contain exactly `selector` and `layout` and use the
+existing closed selector grammar and canonical ordering. A target's `sitemap`,
+`rss`, and `llms` objects respectively allow only `path`, `path`/`limit`, and
+`path`. Project editions require `output`; RAG also accepts `scope`,
+`split_size`, and `bundles_only`, while Context accepts `scope` and
+`split_size`.
+
+URL validation is the existing bounded RSS/sitemap HTTP(S) grammar. Sitemap,
+RSS, and llms paths are target-relative and use the existing compiler-owned
+namespace protections. At least one HTML target or machine edition is required.
+
+## Normalization, ownership, and overrides
+
+`PublicationPlan` is owned immutable-semantic publication intent: input,
+format, metadata, canonical targets/rules, and selected editions. It owns every
+string and rule slice; no raw JSON node, JSON key slice, or argv view crosses
+the parser boundary. `PublicationExecution` separately contains `jobs`,
+`incremental`, and `quiet`; those controls are deliberately absent from plan
+identity.
+
+Targets sort by name; layout rules sort by existing selector canonical order.
+Object-key order has no semantic effect. `ProfileOverrides` retains omitted
+versus explicit state. Precedence is compiled profile defaults, then selected
+profile values, then explicit profile-mode overrides; static validation runs
+again after overrides. A global HTML output override is rejected when a profile
+contains multiple targets.
+
+## Static validation and the deferred boundary
+
+Before discovery, Slice 1 validates discriminator/version, types and bounds,
+site requirements, unique target names, at most one public target, public
+artifact placement, theme/layout exclusivity, selector rules, lexical path
+containment, target/edition/input/layout/theme overlaps, machine-root
+separation, target-local public-artifact collisions, and known compiler-owned
+roots (`.boris-cache`, `_boris/search`).
+
+Dynamic ownership validation is deliberately deferred: it requires the
+discovered content, layouts, assets, routes, and staged output inventory to
+detect page/asset/derived-route collisions, actual filesystem conflicts, and
+symlink races. This slice performs no publication, so it cannot claim those
+checks or commit semantics.
+
+## Offline and availability boundary
+
+Profile parsing is local, deterministic, and offline. URLs are strings to
+validate, never endpoints to probe. There are no includes, aliases,
+expressions, environment substitution, network access, plugins, deployment
+settings, secrets, watch configuration, source-RAG, migration labs, or generic
+tasks in schema v1. Public CLI exposure remains deferred until a coordinator
+can execute every configured entry without silently ignoring any of them.
