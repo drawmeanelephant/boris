@@ -323,9 +323,9 @@ The lab emits:
 | Output | Role |
 |---|---|
 | `inventory.json` | Sorted file inventory plus line-level PHP/menu/widget/hook evidence |
-| `slot_mapping.json` | Closed mapping proposal for `{{nav}}`, `{{breadcrumb}}`, `{{title}}`, `{{content}}`, `{{children}}`, Aside, `{{toc}}`, and `{{footer}}` |
+| `slot_mapping.json` | Line-evidenced Boris slot candidates, all requiring human review; absent evidence produces no candidate |
 | `manual_review.json` | Every detected unsupported or dynamic behavior with source path, line, evidence, and decision |
-| `prototype/main.html` | No-runtime static layout using Boris’s closed layout markers |
+| `prototype/main.html` | Minimal no-runtime Boris layout contract smoke input (one `{{title}}`, one `{{content}}`, no asset claim) |
 | `report.json` / `REPORT.md` | Counts, preserve/adapt/review/drop decisions, and evidence boundary |
 
 The checked-in fixture at
@@ -333,6 +333,11 @@ The checked-in fixture at
 synthetic because no Kubrick source was supplied locally and this lab does not
 retrieve external themes. It models classic file names and behaviors; it must
 not be read as authentic Kubrick code or universal WordPress coverage.
+
+The prototype is deliberately not a theme converter: source assets remain
+inventory evidence and are not copied or referenced. Candidate slots require
+an exact scanned source line and remain review items; missing evidence is not
+filled from WordPress conventions or template filenames.
 
 ---
 

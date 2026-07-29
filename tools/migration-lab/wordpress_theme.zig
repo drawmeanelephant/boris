@@ -530,12 +530,47 @@ fn emitManualReview(a: std.mem.Allocator, signals: []const Signal) ![]u8 {
     return try b.toOwnedSlice(a);
 }
 
-fn emitSlots(a: std.mem.Allocator) ![]u8 {
-    return try a.dupe(u8, "{\n  \"format\": \"boris-wordpress-theme-static-prototype\",\n  \"schema_version\": 1,\n  \"slots\": [\n    { \"slot\": \"nav\", \"source\": [\"header.php\", \"functions.php\"], \"decision\": \"adapt\", \"mapping\": \"wp_nav_menu() is a candidate for {{nav}} after graph review\" },\n    { \"slot\": \"breadcrumb\", \"source\": [\"header.php\", \"single.php\", \"page.php\"], \"decision\": \"review\", \"mapping\": \"WordPress conditional/link logic is not inferred; use Boris graph breadcrumb\" },\n    { \"slot\": \"title\", \"source\": [\"index.php\", \"single.php\", \"page.php\"], \"decision\": \"adapt\", \"mapping\": \"the_title() → {{title}}\" },\n    { \"slot\": \"content\", \"source\": [\"index.php\", \"single.php\", \"page.php\"], \"decision\": \"adapt\", \"mapping\": \"the_content() → {{content}}\" },\n    { \"slot\": \"children\", \"source\": [\"sidebar.php\"], \"decision\": \"review\", \"mapping\": \"wp_list_pages() may become {{children}} only after hierarchy review\" },\n    { \"slot\": \"Aside\", \"source\": [\"sidebar.php\"], \"decision\": \"review\", \"mapping\": \"widget output is not a direct slot; selected static content may become inline <Aside>\" },\n    { \"slot\": \"toc\", \"source\": [\"sidebar.php\"], \"decision\": \"review\", \"mapping\": \"no evidence of a stable heading outline; use {{toc}} only after content review\" },\n    { \"slot\": \"footer\", \"source\": [\"footer.php\"], \"decision\": \"adapt\", \"mapping\": \"static footer shell → {{footer}}; wp_footer() callbacks remain review items\" }\n  ]\n}\n");
+fn slotForSignal(signal: Signal) ?[]const u8 {
+    if (std.mem.eql(u8, signal.name, "the_title") or std.mem.eql(u8, signal.name, "wp_title")) return "title";
+    if (std.mem.eql(u8, signal.name, "the_content")) return "content";
+    if (std.mem.startsWith(u8, signal.name, "wp_nav_menu")) return "nav";
+    if (std.mem.eql(u8, signal.name, "wp_list_pages")) return "children";
+    if (std.mem.eql(u8, signal.name, "get_footer")) return "footer";
+    return null;
+}
+
+fn appendSlotCandidateJson(b: *std.ArrayList(u8), a: std.mem.Allocator, signal: Signal, slot: []const u8) !void {
+    try b.appendSlice(a, "    { \"slot\": ");
+    try appendJson(b, a, slot);
+    try b.appendSlice(a, ", \"source_path\": ");
+    try appendJson(b, a, signal.source_path);
+    try b.appendSlice(a, ", \"line\": ");
+    try appendUsize(b, a, signal.line);
+    try b.appendSlice(a, ", \"evidence\": ");
+    try appendJson(b, a, signal.evidence);
+    try b.appendSlice(a, ", \"decision\": \"review\", \"proposed_layout_marker\": \"{{");
+    try b.appendSlice(a, slot);
+    try b.appendSlice(a, "}}\" }");
+}
+
+fn emitSlots(a: std.mem.Allocator, signals: []const Signal) ![]u8 {
+    var b: std.ArrayList(u8) = .empty;
+    try b.appendSlice(a, "{\n  \"format\": \"boris-wordpress-theme-static-prototype\",\n  \"schema_version\": 1,\n  \"evidence_policy\": \"Candidates are emitted only from detected source lines; none is an automatic conversion or a claim about absent source evidence.\",\n  \"candidates\": [\n");
+    var first = true;
+    for (signals) |signal| {
+        const slot = slotForSignal(signal) orelse continue;
+        if (!first) try b.appendSlice(a, ",\n");
+        first = false;
+        try appendSlotCandidateJson(&b, a, signal, slot);
+    }
+    try b.appendSlice(a, "\n  ]\n}\n");
+    return try b.toOwnedSlice(a);
 }
 
 fn emitPrototype(a: std.mem.Allocator) ![]u8 {
-    return try a.dupe(u8, "<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>{{title}}</title>\n  <link rel=\"stylesheet\" href=\"{{asset-url theme/assets/css/style.css}}\">\n</head>\n<body>\n  <header class=\"site-header\">\n    <a class=\"site-brand\" href=\"/\">Classic Theme Prototype</a>\n    <nav aria-label=\"Primary\">{{nav}}</nav>\n    <div class=\"breadcrumb\">{{breadcrumb}}</div>\n  </header>\n  <main>\n    <article>\n      <h1>{{title}}</h1>\n      {{content}}\n      <!-- Direct child pages are emitted by the graph-aware {{children}} slot when selected. -->\n      {{children}}\n    </article>\n    <aside class=\"toc\" aria-label=\"On this page\">{{toc}}</aside>\n  </main>\n  <!-- Aside is an ordered inline content component, not a WordPress sidebar/widget slot. -->\n  <footer>{{footer}}</footer>\n</body>\n</html>\n");
+    // This validates only the Boris layout contract. It does not assert that a
+    // source stylesheet or optional WordPress shell has been materialised.
+    return try a.dupe(u8, "<!doctype html>\n<html>\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>{{title}}</title>\n</head>\n<body>\n  <main>\n    {{content}}\n  </main>\n</body>\n</html>\n");
 }
 
 fn emitReport(a: std.mem.Allocator, root: []const u8, files: []const FileRec, signals: []const Signal) ![]u8 {
@@ -631,7 +666,25 @@ fn emitReportMd(a: std.mem.Allocator, files: []const FileRec, signals: []const S
         try b.appendSlice(a, f.sha256);
         try b.appendSlice(a, "` |\n");
     }
-    try b.appendSlice(a, "\n## Prototype slot decisions\n\n| Boris surface | Evidence | Decision | Boundary |\n|---|---|---|---|\n| `{{nav}}` | `wp_nav_menu()` / menu registration | adapt + review | graph-backed nav is available; menu locations and labels need human confirmation |\n| `{{breadcrumb}}` | template shell context only | review | no WordPress conditional URL semantics are inferred |\n| `{{title}}` | `the_title()` | adapt | title output is a direct content mapping |\n| `{{content}}` | `the_content()` | adapt | loop context becomes one Boris page |\n| `{{children}}` | `wp_list_pages()` | review | only use after parent/child graph review |\n| Aside | sidebar/widget output | review | Aside is inline content, not a widget runtime |\n| `{{toc}}` | no stable TOC hook found | review | use Boris heading outline only after content review |\n| `{{footer}}` | `footer.php` / `wp_footer()` | adapt + review | static shell maps; callback output remains manual |\n\n## Dynamic findings\n\n");
+    try b.appendSlice(a, "\n## Prototype contract and slot evidence\n\nThe prototype is a minimal valid Boris layout: it contains one `{{title}}` and one `{{content}}`, with no `asset-url` helper because this mode inventories source files and does not materialise assets. It is a compiler-contract smoke input, not a converted WordPress theme.\n\n`slot_mapping.json` records only candidates with exact line evidence below. A missing candidate is not inferred from filenames, template roles, or WordPress conventions. Every candidate remains `review`; this lab does not select a layout slot or convert runtime behavior.\n\n| Boris marker candidate | Source line | Evidence | Decision |\n|---|---|---|---|\n");
+    var candidate_found = false;
+    for (signals) |signal| {
+        const slot = slotForSignal(signal) orelse continue;
+        candidate_found = true;
+        try b.appendSlice(a, "| `{{");
+        try b.appendSlice(a, slot);
+        try b.appendSlice(a, "}}` | `");
+        try b.appendSlice(a, signal.source_path);
+        try b.appendSlice(a, ":");
+        try appendUsize(&b, a, signal.line);
+        try b.appendSlice(a, "` | `");
+        for (signal.evidence) |c| {
+            if (c != '`' and c != '\n' and c != '\r' and c != '|') try b.append(a, c);
+        }
+        try b.appendSlice(a, "` | review |\n");
+    }
+    if (!candidate_found) try b.appendSlice(a, "| — | — | No direct slot evidence detected | review |\n");
+    try b.appendSlice(a, "\n## Dynamic findings\n\n");
     for (signals) |s| {
         try b.appendSlice(a, "- `");
         try b.appendSlice(a, s.source_path);
@@ -684,7 +737,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
     errdefer if (out_open) out.close(io);
     try writeBytes(io, out, "inventory.json", try emitInventory(a, opts.root_dir, files.items, signals.items));
     try writeBytes(io, out, "manual_review.json", try emitManualReview(a, signals.items));
-    try writeBytes(io, out, "slot_mapping.json", try emitSlots(a));
+    try writeBytes(io, out, "slot_mapping.json", try emitSlots(a, signals.items));
     try writeBytes(io, out, "prototype/main.html", try emitPrototype(a));
     try writeBytes(io, out, "report.json", try emitReport(a, opts.root_dir, files.items, signals.items));
     try writeBytes(io, out, "REPORT.md", try emitReportMd(a, files.items, signals.items));
@@ -743,11 +796,93 @@ test "fixture mini-wordpress-kubrick: deterministic inventory and review preserv
     try std.testing.expect(std.mem.indexOf(u8, review, "wp_enqueue_script") != null);
     const prototype = try readFileAlloc(io, da, "prototype/main.html", a);
     defer a.free(prototype);
-    try std.testing.expect(std.mem.indexOf(u8, prototype, "{{nav}}") != null);
-    try std.testing.expect(std.mem.indexOf(u8, prototype, "{{breadcrumb}}") != null);
-    try std.testing.expect(std.mem.indexOf(u8, prototype, "{{title}}") != null);
-    try std.testing.expect(std.mem.indexOf(u8, prototype, "{{content}}") != null);
-    try std.testing.expect(std.mem.indexOf(u8, prototype, "{{children}}") != null);
-    try std.testing.expect(std.mem.indexOf(u8, prototype, "{{toc}}") != null);
-    try std.testing.expect(std.mem.indexOf(u8, prototype, "{{footer}}") != null);
+    try std.testing.expectEqual(@as(usize, 1), countOccurrences(prototype, "{{title}}"));
+    try std.testing.expectEqual(@as(usize, 1), countOccurrences(prototype, "{{content}}"));
+    try std.testing.expect(std.mem.indexOf(u8, prototype, "{{asset-url") == null);
+    const slots = try readFileAlloc(io, da, "slot_mapping.json", a);
+    defer a.free(slots);
+    try std.testing.expect(std.mem.indexOf(u8, slots, "\"candidates\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, slots, "\"decision\": \"review\"") != null);
+}
+
+fn countOccurrences(haystack: []const u8, needle: []const u8) usize {
+    var count: usize = 0;
+    var pos: usize = 0;
+    while (std.mem.indexOfPos(u8, haystack, pos, needle)) |at| {
+        count += 1;
+        pos = at + needle.len;
+    }
+    return count;
+}
+
+test "wordpress-theme: emitted prototype compiles with product Boris" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch |err| {
+            std.debug.panic("failed to clean WordPress theme compile test directory: {s}", .{@errorName(err)});
+        };
+        tmp.parent_dir.close(io);
+    }
+
+    const test_root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/wordpress-theme-prototype", .{tmp.sub_path});
+    defer gpa.free(test_root);
+    const report_out = try std.fmt.allocPrint(gpa, "{s}/report", .{test_root});
+    defer gpa.free(report_out);
+    const content_out = try std.fmt.allocPrint(gpa, "{s}/content", .{test_root});
+    defer gpa.free(content_out);
+    const theme_out = try std.fmt.allocPrint(gpa, "{s}/theme", .{test_root});
+    defer gpa.free(theme_out);
+    const theme_layouts = try std.fmt.allocPrint(gpa, "{s}/layouts", .{theme_out});
+    defer gpa.free(theme_layouts);
+    const html_out = try std.fmt.allocPrint(gpa, "{s}/html", .{test_root});
+    defer gpa.free(html_out);
+
+    try run(io, gpa, .{
+        .root_dir = "fixtures/mini-wordpress-kubrick",
+        .out_dir = report_out,
+        .quiet = true,
+    });
+    var report = try Io.Dir.cwd().openDir(io, report_out, .{});
+    defer report.close(io);
+    const prototype = try readFileAlloc(io, report, "prototype/main.html", gpa);
+    defer gpa.free(prototype);
+
+    try Io.Dir.cwd().createDirPath(io, content_out);
+    try Io.Dir.cwd().createDirPath(io, theme_layouts);
+    var content = try Io.Dir.cwd().openDir(io, content_out, .{});
+    defer content.close(io);
+    try content.writeFile(io, .{ .sub_path = "index.md", .data = "---\ntitle: Prototype smoke\n---\n\n# Prototype smoke\n" });
+    var theme = try Io.Dir.cwd().openDir(io, theme_out, .{});
+    defer theme.close(io);
+    try theme.writeFile(io, .{ .sub_path = "layouts/main.html", .data = prototype });
+
+    const content_from_root = try std.fmt.allocPrint(gpa, "tools/migration-lab/{s}", .{content_out});
+    defer gpa.free(content_from_root);
+    const theme_from_root = try std.fmt.allocPrint(gpa, "tools/migration-lab/{s}", .{theme_out});
+    defer gpa.free(theme_from_root);
+    const html_from_root = try std.fmt.allocPrint(gpa, "tools/migration-lab/{s}", .{html_out});
+    defer gpa.free(html_from_root);
+    const result = try std.process.run(gpa, io, .{
+        .argv = &.{ "zig-out/bin/boris", "--input", content_from_root, "--theme", theme_from_root, "--html-dir", html_from_root, "--quiet" },
+        .cwd = .{ .path = "../.." },
+        .stdout_limit = .limited(64 * 1024),
+        .stderr_limit = .limited(64 * 1024),
+    });
+    defer gpa.free(result.stdout);
+    defer gpa.free(result.stderr);
+    const code: u8 = switch (result.term) {
+        .exited => |c| c,
+        else => 255,
+    };
+    if (code != 0) std.debug.print("boris prototype compile failed code={d} stderr={s} stdout={s}\n", .{ code, result.stderr, result.stdout });
+    try std.testing.expectEqual(@as(u8, 0), code);
+
+    var html = try Io.Dir.cwd().openDir(io, html_out, .{});
+    defer html.close(io);
+    const page = try readFileAlloc(io, html, "index.html", gpa);
+    defer gpa.free(page);
+    try std.testing.expect(std.mem.indexOf(u8, page, "Prototype smoke") != null);
 }
