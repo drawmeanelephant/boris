@@ -2140,16 +2140,23 @@ test "wordpress: generated content compiles with product Boris" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
 
+    var tmp = std.testing.tmpDir(.{});
+    defer cleanupTestTmpDir(io, &tmp);
+
+    const test_root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/wordpress-compile", .{tmp.sub_path});
+    defer gpa.free(test_root);
+    const lab_out = try std.fmt.allocPrint(gpa, "{s}/converted", .{test_root});
+    defer gpa.free(lab_out);
+    const clean_out = try std.fmt.allocPrint(gpa, "{s}/compile-input", .{test_root});
+    defer gpa.free(clean_out);
+    const html_out = try std.fmt.allocPrint(gpa, "{s}/html", .{test_root});
+    defer gpa.free(html_out);
+
     // Lab tests use cwd = tools/migration-lab. Boris validates layout paths without `..`
     // and requires HTML output inside the workspace, so spawn with cwd = repo root.
     //
     // Hostile refs (absolute, basename-only, file:) are intentional review fixtures and
     // would fail product EASSET; compile a filtered tree of successfully materialised pages.
-    const lab_out = "fixtures/.tmp-media-wxr-compile";
-    const clean_out = "fixtures/.tmp-media-wxr-compile-clean";
-    Io.Dir.cwd().deleteTree(io, lab_out) catch {};
-    Io.Dir.cwd().deleteTree(io, clean_out) catch {};
-
     try wordpress.run(io, gpa, .{
         .wxr_path = "fixtures/media-wxr/export.xml",
         .media_dir = "fixtures/media-wxr/media",
@@ -2158,15 +2165,16 @@ test "wordpress: generated content compiles with product Boris" {
     });
 
     const boris_from_lab = "../../zig-out/bin/boris";
-    var boris_probe = Io.Dir.cwd().openFile(io, boris_from_lab, .{}) catch {
-        Io.Dir.cwd().deleteTree(io, lab_out) catch {};
-        return; // product binary not built
-    };
+    var boris_probe = try Io.Dir.cwd().openFile(io, boris_from_lab, .{});
     boris_probe.close(io);
 
     // Copy only pages whose media was materialised (or have no local media refs).
-    try Io.Dir.cwd().createDirPath(io, clean_out ++ "/content/posts");
-    try Io.Dir.cwd().createDirPath(io, clean_out ++ "/content/pages");
+    const clean_posts = try std.fmt.allocPrint(gpa, "{s}/content/posts", .{clean_out});
+    defer gpa.free(clean_posts);
+    const clean_pages = try std.fmt.allocPrint(gpa, "{s}/content/pages", .{clean_out});
+    defer gpa.free(clean_pages);
+    try Io.Dir.cwd().createDirPath(io, clean_posts);
+    try Io.Dir.cwd().createDirPath(io, clean_pages);
     const keep = [_][]const u8{
         "content/posts.md",
         "content/pages.md",
@@ -2207,13 +2215,12 @@ test "wordpress: generated content compiles with product Boris" {
         try copyTreeRecursive(io, gpa, src_root, dst_root, tree);
     }
 
-    const content_from_root = "tools/migration-lab/fixtures/.tmp-media-wxr-compile-clean/content";
-    const html_from_root = "test-output/wp-media-compile-html";
+    const content_from_root = try std.fmt.allocPrint(gpa, "tools/migration-lab/{s}/content", .{clean_out});
+    defer gpa.free(content_from_root);
+    const html_from_root = try std.fmt.allocPrint(gpa, "tools/migration-lab/{s}", .{html_out});
+    defer gpa.free(html_from_root);
     const boris_from_root = "zig-out/bin/boris";
-    const layout_from_root = "layouts/main.html";
-
-    Io.Dir.cwd().deleteTree(io, "../../test-output/wp-media-compile-html") catch {};
-    try Io.Dir.cwd().createDirPath(io, "../../test-output");
+    const layout_from_root = "themes/boris/layouts/main.html";
 
     const argv = [_][]const u8{
         boris_from_root,
@@ -2223,18 +2230,13 @@ test "wordpress: generated content compiles with product Boris" {
         html_from_root,
         "--html-layout",
         layout_from_root,
-        "--quiet",
     };
-    const result = std.process.run(gpa, io, .{
+    const result = try std.process.run(gpa, io, .{
         .argv = &argv,
         .cwd = .{ .path = "../.." },
         .stdout_limit = .limited(64 * 1024),
         .stderr_limit = .limited(64 * 1024),
-    }) catch {
-        Io.Dir.cwd().deleteTree(io, lab_out) catch {};
-        Io.Dir.cwd().deleteTree(io, clean_out) catch {};
-        return;
-    };
+    });
     defer gpa.free(result.stdout);
     defer gpa.free(result.stderr);
 
@@ -2247,7 +2249,7 @@ test "wordpress: generated content compiles with product Boris" {
     }
     try std.testing.expectEqual(@as(u8, 0), code);
 
-    var html_root = try Io.Dir.cwd().openDir(io, "../../test-output/wp-media-compile-html", .{});
+    var html_root = try Io.Dir.cwd().openDir(io, html_out, .{});
     defer html_root.close(io);
     const pub_hero = try wordpress.readFileAlloc(io, html_root, "posts/full-upload.assets/2024/01/hero.png", gpa);
     defer gpa.free(pub_hero);
@@ -2255,10 +2257,15 @@ test "wordpress: generated content compiles with product Boris" {
     const pub_nested = try wordpress.readFileAlloc(io, html_root, "pages/nested-diagram.assets/2024/06/diagram.png", gpa);
     defer gpa.free(pub_nested);
     try std.testing.expect(pub_nested.len > 0);
+}
 
-    Io.Dir.cwd().deleteTree(io, lab_out) catch {};
-    Io.Dir.cwd().deleteTree(io, clean_out) catch {};
-    Io.Dir.cwd().deleteTree(io, "../../test-output/wp-media-compile-html") catch {};
+fn cleanupTestTmpDir(io: Io, tmp: *std.testing.TmpDir) void {
+    tmp.dir.close(io);
+    tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch |err| {
+        std.debug.panic("failed to clean WordPress compile test directory: {s}", .{@errorName(err)});
+    };
+    tmp.parent_dir.close(io);
+    tmp.* = undefined;
 }
 
 fn copyTreeRecursive(io: Io, gpa: std.mem.Allocator, src_root: Io.Dir, dst_root: Io.Dir, rel: []const u8) !void {
