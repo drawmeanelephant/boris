@@ -26,6 +26,7 @@
 const std = @import("std");
 const diag = @import("diag.zig");
 const html_scan = @import("html_scan.zig");
+const route_resolver = @import("route_resolver.zig");
 
 pub const Finding = struct {
     code: diag.Code,
@@ -52,23 +53,12 @@ pub const Options = struct {};
 /// grammar rather than being treated as one URL.
 const url_attributes = [_][]const u8{ "href", "src" };
 
-/// Maximum percent-decoding passes. Decoding to stability defeats multiply
-/// encoded traversal such as `%252e%252e`; the bound stops a decoding loop.
-const max_decode_passes = 4;
-
 /// True when the target carries any URI scheme, is protocol-relative, is empty,
 /// or is a same-document fragment. A generic scheme test is used rather than an
 /// allowlist so `ftp:`, `blob:`, `urn:`, and future schemes are not mistaken for
 /// local paths. Grammar: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":".
 fn isIgnoredTarget(target: []const u8) bool {
-    if (target.len == 0 or target[0] == '#') return true;
-    if (std.mem.startsWith(u8, target, "//")) return true;
-    if (!std.ascii.isAlphabetic(target[0])) return false;
-    for (target, 0..) |c, i| {
-        if (c == ':') return i > 0;
-        if (!std.ascii.isAlphanumeric(c) and c != '+' and c != '-' and c != '.') return false;
-    }
-    return false;
+    return route_resolver.isExternalOrEmpty(target) or target[0] == '#';
 }
 
 /// True for a Markdown destination the link rewriter deliberately left alone.
@@ -80,129 +70,12 @@ fn isIgnoredTarget(target: []const u8) bool {
 /// href should remain publishable at all is a question for that contract, not
 /// something to decide by making the build fail here.
 fn isUnrewrittenMarkdownTarget(target: []const u8) bool {
-    const path = stripQuery(stripFragment(target));
+    const path = route_resolver.stripQuery(route_resolver.stripFragment(target));
     return std.mem.endsWith(u8, path, ".md") or std.mem.endsWith(u8, path, ".mdx");
 }
 
-fn stripFragment(target: []const u8) []const u8 {
-    if (std.mem.indexOfScalar(u8, target, '#')) |i| return target[0..i];
-    return target;
-}
-
-fn stripQuery(target: []const u8) []const u8 {
-    if (std.mem.indexOfScalar(u8, target, '?')) |i| return target[0..i];
-    return target;
-}
-
-/// Percent-decode to stability and normalize backslashes to `/`. Widening what
-/// counts as a separator can only cause a reference to be reported, never to be
-/// silently accepted, which is the safe direction for a publication gate.
-fn decodeToStability(gpa: std.mem.Allocator, raw: []const u8) ![]u8 {
-    var current = try gpa.dupe(u8, raw);
-    errdefer gpa.free(current);
-    var pass: usize = 0;
-    while (pass < max_decode_passes) : (pass += 1) {
-        var out: std.ArrayList(u8) = .empty;
-        errdefer out.deinit(gpa);
-        var i: usize = 0;
-        var changed = false;
-        while (i < current.len) {
-            if (current[i] == '%' and i + 2 < current.len) {
-                const hi = std.fmt.charToDigit(current[i + 1], 16) catch {
-                    try out.append(gpa, current[i]);
-                    i += 1;
-                    continue;
-                };
-                const lo = std.fmt.charToDigit(current[i + 2], 16) catch {
-                    try out.append(gpa, current[i]);
-                    i += 1;
-                    continue;
-                };
-                const byte = @as(u8, hi) * 16 + @as(u8, lo);
-                try out.append(gpa, if (byte == '\\') '/' else byte);
-                i += 3;
-                changed = true;
-                continue;
-            }
-            try out.append(gpa, if (current[i] == '\\') '/' else current[i]);
-            i += 1;
-        }
-        const next = try out.toOwnedSlice(gpa);
-        gpa.free(current);
-        current = next;
-        if (!changed) break;
-    }
-    return current;
-}
-
-pub const Resolution = union(enum) {
-    /// Output-root-relative path the browser would request.
-    path: []u8,
-    /// Target climbs above the output root and can never be served.
-    escapes_root,
-};
-
-/// Resolve `target` against `source` using URL-reference semantics, refusing any
-/// result that leaves the output root.
-pub fn resolveWithinRoot(
-    gpa: std.mem.Allocator,
-    source: []const u8,
-    target: []const u8,
-) !Resolution {
-    // A query-only or fragment-only reference addresses the source document.
-    const no_fragment = stripFragment(target);
-    if (no_fragment.len == 0 or no_fragment[0] == '?') return .{ .path = try gpa.dupe(u8, source) };
-
-    const decoded = try decodeToStability(gpa, stripQuery(no_fragment));
-    defer gpa.free(decoded);
-
-    var segments: std.ArrayList([]const u8) = .empty;
-    defer segments.deinit(gpa);
-
-    if (!std.mem.startsWith(u8, decoded, "/")) {
-        if (std.fs.path.dirnamePosix(source)) |dir| {
-            var it = std.mem.splitScalar(u8, dir, '/');
-            while (it.next()) |seg| {
-                if (seg.len != 0 and !std.mem.eql(u8, seg, ".")) try segments.append(gpa, seg);
-            }
-        }
-    }
-
-    // A trailing `/` and a trailing `.`/`..` segment independently mean the
-    // reference names a directory. Tracked apart so that walking the segments
-    // cannot clear the trailing-slash signal recorded before the walk.
-    const trailing_slash = std.mem.endsWith(u8, decoded, "/");
-    var ended_on_dot_segment = false;
-    var it = std.mem.splitScalar(u8, decoded, '/');
-    while (it.next()) |seg| {
-        if (seg.len == 0) continue;
-        if (std.mem.eql(u8, seg, ".")) {
-            ended_on_dot_segment = true;
-            continue;
-        }
-        if (std.mem.eql(u8, seg, "..")) {
-            if (segments.items.len == 0) return .escapes_root;
-            _ = segments.pop();
-            ended_on_dot_segment = true;
-            continue;
-        }
-        ended_on_dot_segment = false;
-        try segments.append(gpa, seg);
-    }
-    const directory_reference = trailing_slash or ended_on_dot_segment;
-
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(gpa);
-    for (segments.items, 0..) |seg, i| {
-        if (i > 0) try out.append(gpa, '/');
-        try out.appendSlice(gpa, seg);
-    }
-    if (directory_reference or out.items.len == 0) {
-        if (out.items.len > 0) try out.append(gpa, '/');
-        try out.appendSlice(gpa, "index.html");
-    }
-    return .{ .path = try out.toOwnedSlice(gpa) };
-}
+pub const Resolution = route_resolver.Resolution;
+pub const resolveWithinRoot = route_resolver.resolveWithinRoot;
 
 fn lineNumber(html: []const u8, offset: usize) u32 {
     var line: u32 = 1;

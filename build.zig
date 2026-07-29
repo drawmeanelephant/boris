@@ -143,6 +143,21 @@ pub fn build(b: *std.Build) void {
     const test_publication_profile_step = b.step("test-publication-profile", "Run publication profile parser and planner tests");
     test_publication_profile_step.dependOn(&run_publication_profile_tests.step);
 
+    // --- Internal Boris Doctor rendered snapshot analyzer -----------------
+    const doctor_mod = b.createModule(.{
+        .root_source_file = b.path("src/doctor.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const doctor_tests = b.addTest(.{ .root_module = doctor_mod });
+    const run_doctor_tests = b.addRunArtifact(doctor_tests);
+    run_doctor_tests.setCwd(b.path("."));
+    const test_doctor_step = b.step(
+        "test-doctor",
+        "Run internal Doctor rendered HTML and search snapshot tests",
+    );
+    test_doctor_step.dependOn(&run_doctor_tests.step);
+
     const graph_mod = b.createModule(.{
         .root_source_file = b.path("src/graph.zig"),
         .target = target,
@@ -657,6 +672,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_textile_tests.step);
     test_step.dependOn(&run_pipeline_tests.step);
     test_step.dependOn(&run_publication_profile_tests.step);
+    test_step.dependOn(&run_doctor_tests.step);
     test_step.dependOn(&run_graph_tests.step);
     test_step.dependOn(&run_aside_tests.step);
     test_step.dependOn(&run_rag_tests.step);
