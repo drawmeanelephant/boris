@@ -318,6 +318,10 @@ source. It is intentionally separate from WXR content import: WXR describes
 posts and pages, while this mode inventories PHP templates, static assets,
 template relationships, hook calls, menu locations, and widget regions.
 
+For block themes/FSE, it additionally inventories root `theme.json` and direct
+`templates/*.html` as bytes-and-hashes evidence only. It does not parse block
+JSON, render block markup, execute PHP or JavaScript, or claim WordPress parity.
+
 The lab emits:
 
 | Output | Role |
