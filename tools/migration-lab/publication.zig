@@ -234,7 +234,7 @@ fn isOwnedDirectory(
     path: []const u8,
     marker: []const u8,
 ) bool {
-    var dir = cwd.openDir(io, path, .{}) catch return false;
+    var dir = cwd.openDir(io, path, .{ .iterate = true }) catch return false;
     defer dir.close(io);
     const found = readMarker(io, allocator, dir) orelse return false;
     defer allocator.free(found);
@@ -248,7 +248,7 @@ fn isEmptyOrOwned(
     path: []const u8,
     marker: []const u8,
 ) bool {
-    var dir = cwd.openDir(io, path, .{}) catch return false;
+    var dir = cwd.openDir(io, path, .{ .iterate = true }) catch return false;
     defer dir.close(io);
     return directoryIsEmpty(io, dir) or isOwnedDirectory(io, allocator, cwd, path, marker);
 }
