@@ -1,0 +1,1 @@
+{"format":"boris-astro-import-policy","schema_version":1,"source_system":"astro","supported_frontmatter":["id","title","status","tags"],"supported_source":"explicit .md beneath --content-root with ordinary Markdown only","non_goals":["apply","asset-copy","mdx","route-observation","parent-inference"]}

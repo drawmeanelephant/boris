@@ -65,6 +65,7 @@ per topic:
 | Documentation Intelligence | [documentation-intelligence.md](documentation-intelligence.md) |
 | Textile compatibility adapter | [textile-compatibility.md](textile-compatibility.md) |
 | Rendered-site search artifacts | [rendered-search.md](rendered-search.md) |
+| Astro plan-only migration intake | [astro-import-plan.md](astro-import-plan.md) |
 
 ### Normative documents (IR v0.2 target) — full list
 
@@ -96,6 +97,7 @@ per topic:
 | [cli.md](cli.md) | Stable command routing, exit codes, and report-consumer boundary |
 | [textile-compatibility.md](textile-compatibility.md) | Explicit bounded `.textile`-to-Markdown input mode |
 | [rendered-search.md](rendered-search.md) | Deterministic v1 search JSON for rendered HTML pages; browser/compiler seams are explicit |
+| [astro-import-plan.md](astro-import-plan.md) | Plan-only plain-Markdown Astro intake; snapshot, identity, and digest rules |
 
 ## Redirect / compatibility paths (non-normative)
 
