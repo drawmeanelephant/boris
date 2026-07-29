@@ -14,12 +14,14 @@ temporary sibling-safe directory outside the source checkout.
 
 ## Bounded result
 
-The selected root yielded **567 quarantine rows** and no proposed creates.
-This is expected evidence for the deliberately narrow first slice: its source
-uses unsupported content rather than the explicit plain-`.md` profile. The
-generated source snapshot, plan, and report were 237,673, 390,634, and 41,050
-bytes respectively. No source paths, page text, or private output were retained
-in this repository.
+The selected root yielded **567 quarantine rows**, **11 unsupported
+directory-inventory rows**, and no proposed creates. This is expected evidence
+for the deliberately narrow first slice: its source uses unsupported content
+rather than the explicit plain-`.md` profile. The complete-tree hardening makes
+directory evidence explicit rather than omitting it from the snapshot. The
+generated source snapshot, plan, and bounded report were 362,725, 396,653, and
+7,001 bytes respectively. No source paths, page text, or private output were
+retained in this repository.
 
 This does not claim universal Astro compatibility or a completed import. The
 next card is a reviewed, non-applying expansion only after additional supported
