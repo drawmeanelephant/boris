@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const Io = std.Io;
+const publication = @import("publication.zig");
 
 pub const format_id = "boris-wordpress-theme-archaeology-lab";
 pub const schema_version: u32 = 1;
@@ -657,7 +658,6 @@ pub fn refuseOutputInsideSource(source: []const u8, out: []const u8) !void {
 }
 
 pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
-    try refuseOutputInsideSource(opts.root_dir, opts.out_dir);
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const a = arena.allocator();
@@ -674,9 +674,14 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
         if (std.ascii.eqlIgnoreCase(fileExtension(f.path), ".css") and std.ascii.eqlIgnoreCase(std.fs.path.basename(f.path), "style.css")) try scanStyle(a, f.path, data, &signals);
     }
     std.mem.sort(Signal, signals.items, {}, signalLess);
-    Io.Dir.cwd().createDirPath(io, opts.out_dir) catch return error.IoFailure;
-    var out = try Io.Dir.cwd().openDir(io, opts.out_dir, .{});
-    defer out.close(io);
+    var output_publication = try publication.Publication.begin(io, gpa, opts.out_dir, &.{opts.root_dir}, format_id);
+    defer {
+        output_publication.abandon(io, gpa);
+        output_publication.deinit(gpa);
+    }
+    var out = try Io.Dir.cwd().openDir(io, output_publication.stage_path, .{});
+    var out_open = true;
+    errdefer if (out_open) out.close(io);
     try writeBytes(io, out, "inventory.json", try emitInventory(a, opts.root_dir, files.items, signals.items));
     try writeBytes(io, out, "manual_review.json", try emitManualReview(a, signals.items));
     try writeBytes(io, out, "slot_mapping.json", try emitSlots(a));
@@ -684,6 +689,9 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
     try writeBytes(io, out, "report.json", try emitReport(a, opts.root_dir, files.items, signals.items));
     try writeBytes(io, out, "REPORT.md", try emitReportMd(a, files.items, signals.items));
     if (!opts.quiet) std.debug.print("wordpress-theme-lab: wrote {s} ({d} files, {d} findings)\n", .{ opts.out_dir, files.items.len, signals.items.len });
+    out.close(io);
+    out_open = false;
+    try output_publication.commit(io, gpa);
 }
 
 test "classifyTemplate: classic WordPress hierarchy" {

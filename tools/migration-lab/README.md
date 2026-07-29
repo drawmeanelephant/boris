@@ -186,7 +186,9 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
 
 ## Safety rules
 
-1. **Preserve originals** — only writes under `--out`.
+1. **Preserve originals** — only writes under `--out`; WordPress and theme
+   modes refuse any source/output overlap (including an output ancestor) before
+   creating a stage.
 2. **No network** — no fetches, no package installs, no oEmbed expansion.
 3. **No destructive source ops** — no delete/rename of WXR, media, vault, or scan-root files.
 4. **No product coupling** — does not import `src/` compiler modules; not in root `zig build test`.
@@ -210,6 +212,13 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
     Never executes PHP/JS, loads WordPress, resolves plugin/database state,
     fetches remote assets, or claims universal WordPress compatibility. Every
     dynamic finding is retained in `manual_review.json`.
+13. **WordPress and theme publication** — `wordpress`, `wordpress-theme`,
+    `theme-archaeology`, and `theme-materialize` write a complete sibling stage
+    and replace only an output carrying their exact
+    `.boris-migration-lab-output` ownership marker. A non-empty unmarked
+    `--out`, source/output symlink, or stale unowned stage is refused without
+    mutation. Successful reruns replace the complete owned tree, so stale
+    generated files cannot survive.
 
 ---
 
