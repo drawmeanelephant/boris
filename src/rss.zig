@@ -6,6 +6,7 @@ const graph = @import("graph.zig");
 const identity = @import("identity.zig");
 const pipeline = @import("pipeline.zig");
 const rss_date = @import("rss_date.zig");
+const site_url_mod = @import("site_url.zig");
 const structured_out = @import("structured_out.zig");
 const target = @import("target.zig");
 
@@ -42,91 +43,10 @@ const Item = struct {
 
 pub const Error = error{ InvalidSiteUrl, InvalidXml, InvalidLimit };
 
-fn isUnreserved(byte: u8) bool {
-    return std.ascii.isAlphanumeric(byte) or byte == '-' or byte == '.' or byte == '_' or byte == '~';
-}
-
-fn isSubDelimiter(byte: u8) bool {
-    return switch (byte) {
-        '!', '$', '&', '\'', '(', ')', '*', '+', ',', ';', '=' => true,
-        else => false,
-    };
-}
-
-fn isHex(byte: u8) bool {
-    return std.ascii.isHex(byte);
-}
-
-fn validatePort(port: []const u8) Error!void {
-    if (port.len == 0) return error.InvalidSiteUrl;
-    for (port) |byte| if (!std.ascii.isDigit(byte)) return error.InvalidSiteUrl;
-    _ = std.fmt.parseInt(u16, port, 10) catch return error.InvalidSiteUrl;
-}
-
-fn validateDnsHost(host: []const u8) Error!void {
-    if (host.len == 0 or host.len > 253) return error.InvalidSiteUrl;
-    var label_start: usize = 0;
-    for (host, 0..) |byte, index| {
-        if (byte == '.') {
-            const label_len = index - label_start;
-            if (label_len == 0 or label_len > 63 or host[label_start] == '-' or host[index - 1] == '-') return error.InvalidSiteUrl;
-            label_start = index + 1;
-        } else if (!(std.ascii.isAlphanumeric(byte) or byte == '-')) {
-            return error.InvalidSiteUrl;
-        }
-    }
-    const final_label_len = host.len - label_start;
-    if (final_label_len == 0 or final_label_len > 63 or host[label_start] == '-' or host[host.len - 1] == '-') return error.InvalidSiteUrl;
-}
-
-fn validateAuthority(authority: []const u8) Error!void {
-    if (authority.len == 0 or std.mem.indexOfScalar(u8, authority, '@') != null) return error.InvalidSiteUrl;
-    if (authority[0] == '[') {
-        const close = std.mem.indexOfScalar(u8, authority, ']') orelse return error.InvalidSiteUrl;
-        if (close == 1) return error.InvalidSiteUrl;
-        _ = Io.net.Ip6Address.parse(authority[1..close], 0) catch return error.InvalidSiteUrl;
-        const remainder = authority[close + 1 ..];
-        if (remainder.len == 0) return;
-        if (remainder[0] != ':') return error.InvalidSiteUrl;
-        return validatePort(remainder[1..]);
-    }
-
-    const colon = std.mem.lastIndexOfScalar(u8, authority, ':');
-    const host = if (colon) |index| authority[0..index] else authority;
-    if (std.mem.indexOfScalar(u8, host, ':') != null) return error.InvalidSiteUrl;
-    try validateDnsHost(host);
-    if (colon) |index| try validatePort(authority[index + 1 ..]);
-}
-
-fn validatePath(path: []const u8) Error!void {
-    var index: usize = 0;
-    while (index < path.len) : (index += 1) {
-        const byte = path[index];
-        if (isUnreserved(byte) or isSubDelimiter(byte) or byte == ':' or byte == '@' or byte == '/') continue;
-        if (byte == '%' and index + 2 < path.len and isHex(path[index + 1]) and isHex(path[index + 2])) {
-            index += 2;
-            continue;
-        }
-        return error.InvalidSiteUrl;
-    }
-}
-
 /// Validate a bounded absolute deployment URL and return the no-trailing-slash
 /// channel form. URL path bytes are intentionally preserved as supplied.
 pub fn normalizedSiteUrl(allocator: std.mem.Allocator, raw: []const u8) (Error || std.mem.Allocator.Error)![]u8 {
-    if (raw.len == 0 or raw.len > 2048) return error.InvalidSiteUrl;
-    const scheme_end: usize = if (std.mem.startsWith(u8, raw, "https://")) 8 else if (std.mem.startsWith(u8, raw, "http://")) 7 else return error.InvalidSiteUrl;
-    if (scheme_end >= raw.len) return error.InvalidSiteUrl;
-    var host_end = scheme_end;
-    while (host_end < raw.len and raw[host_end] != '/' and raw[host_end] != '?' and raw[host_end] != '#') : (host_end += 1) {
-        if (raw[host_end] <= 0x20 or raw[host_end] >= 0x7f) return error.InvalidSiteUrl;
-    }
-    try validateAuthority(raw[scheme_end..host_end]);
-    if (host_end < raw.len and (raw[host_end] == '?' or raw[host_end] == '#')) return error.InvalidSiteUrl;
-    try validatePath(raw[host_end..]);
-    var end = raw.len;
-    while (end > host_end and raw[end - 1] == '/') : (end -= 1) {}
-    return try allocator.dupe(u8, raw[0..end]);
+    return site_url_mod.normalized(allocator, raw);
 }
 
 fn appendPageUrl(buf: *Sink, allocator: std.mem.Allocator, site_url: []const u8, entity_id: []const u8) !void {

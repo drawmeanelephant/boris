@@ -39,6 +39,7 @@ Modules:
 - `src/cache.zig` / `src/dependency.zig` — fingerprints and indexes (P2)
 - `src/watch.zig` — opt-in watch loop (P3.2)
 - `src/target.zig` — multi-target isolation (P3.3)
+- `src/sitemap.zig` — optional staged XML Sitemap Protocol projection
 
 Theme/layout vocabulary detail: [templating-and-themes.md](templating-and-themes.md).
 
@@ -324,6 +325,11 @@ Final relative paths come from centralized
 (e.g. `guides/intro.html`). No ad-hoc path joining that can escape the output
 root.
 
+When `--sitemap` or `--sitemap-path` is selected, sitemap URLs come from the
+complete current staged/live page overlay rather than a directory walk.
+Sitemap publication and previous-path ownership cleanup are part of the staged
+target transaction. See [xml-sitemap.md](xml-sitemap.md).
+
 ### Guarantees claimed (host-tested)
 
 On the OS/filesystem where `zig build test` runs:
@@ -372,6 +378,7 @@ During staged file publication (`publishStageTree`), every destination parent pa
 | Many small + one large (allocator observation) | `compile.observeWhiteboardLifecycle` |
 | Fixture goldens | `test/fixtures/html/` |
 | Incremental same-size corruption / truncation / reuse / full=inc / manifest determinism | `compile` P4 cache freshness test |
+| Sitemap overlay, exclusion, collisions, rollback, cleanup, and clean/incremental/parallel bytes | `sitemap` + `compile` tests |
 
 Run: `zig build test` (includes assemble + compile modules).
 

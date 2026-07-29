@@ -29,6 +29,10 @@ Layout selection:
    - `--target` is mutually exclusive with `--out`, `--rag`, and `--rag-dir`.
 4. **Permitted Combinations:** `--html` is allowed alongside `--target` to explicitly declare HTML mode, but is redundant. `--html-layout` and `--target-layout` are HTML-only. `--target` may be combined with `--watch`, `--incremental`, and `--jobs` (global to all targets; `--watch` implies incremental).
 5. **Global options:** `--watch`, `--incremental`, and `--jobs` apply globally to all targets.
+6. **Public sitemap URL:** `--sitemap` / `--sitemap-path` plus one unqualified
+   `--site-url` is accepted only for a single target. More than one target is
+   ambiguous and fails as usage before discovery or publication. See
+   [xml-sitemap.md](xml-sitemap.md).
 
 ### Argument-order independence:
 1. **`--target` order:** Multiple `--target` flags may appear in any order. After parse, `Options.targets` is sorted alphabetically by target name. Equivalent permutations produce equivalent configuration.

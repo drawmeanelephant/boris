@@ -565,6 +565,31 @@ pub fn build(b: *std.Build) void {
     const run_structured_out_tests = b.addRunArtifact(structured_out_tests);
     run_structured_out_tests.setCwd(b.path("."));
 
+    const site_url_mod = b.createModule(.{
+        .root_source_file = b.path("src/site_url.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const site_url_tests = b.addTest(.{ .root_module = site_url_mod });
+    const run_site_url_tests = b.addRunArtifact(site_url_tests);
+    run_site_url_tests.setCwd(b.path("."));
+
+    const sitemap_mod = b.createModule(.{
+        .root_source_file = b.path("src/sitemap.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const sitemap_tests = b.addTest(.{ .root_module = sitemap_mod });
+    const run_sitemap_tests = b.addRunArtifact(sitemap_tests);
+    run_sitemap_tests.setCwd(b.path("."));
+
+    const test_sitemap_step = b.step(
+        "test-sitemap",
+        "Run shared site URL and deterministic XML sitemap tests",
+    );
+    test_sitemap_step.dependOn(&run_site_url_tests.step);
+    test_sitemap_step.dependOn(&run_sitemap_tests.step);
+
     const invariants_mod = b.createModule(.{
         .root_source_file = b.path("src/artifact_invariants.zig"),
         .target = target,
@@ -604,6 +629,7 @@ pub fn build(b: *std.Build) void {
     );
     test_emitter_step.dependOn(&run_encode_tests.step);
     test_emitter_step.dependOn(&run_structured_out_tests.step);
+    test_emitter_step.dependOn(&run_sitemap_tests.step);
     test_emitter_step.dependOn(&run_invariants_tests.step);
     test_emitter_step.dependOn(&run_emitter_discipline_tests.step);
     test_emitter_step.dependOn(&run_emitter_hostile_tests.step);
@@ -638,6 +664,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_include_tests.step);
     test_step.dependOn(&run_wikilink_tests.step);
     test_step.dependOn(&run_unicode_policy_tests.step);
+    test_step.dependOn(&run_site_url_tests.step);
+    test_step.dependOn(&run_sitemap_tests.step);
     test_step.dependOn(&run_encode_tests.step);
     test_step.dependOn(&run_structured_out_tests.step);
     test_step.dependOn(&run_invariants_tests.step);

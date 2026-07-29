@@ -72,6 +72,16 @@ It requires `--site-url`, `--rss-title`, and `--rss-description`; `--rss-limit`
 is 1–500 (default 20). RSS is incompatible with every other build projection,
 `check`, and `impact`. See the normative [RSS 2.0 contract](rss-2.0.md).
 
+## HTML sitemap flags
+
+`--sitemap` adds `sitemap.xml` to a single HTML target.
+`--sitemap-path PATH` implies sitemap publication and selects another
+target-root-relative file. Both require the reusable `--site-url` HTTP(S) base.
+Sitemap flags are invalid with non-HTML projections, `check`, `impact`, or an
+ambiguous multi-target configuration. `--site-url` without RSS or sitemap
+selection is also a usage error. See the normative
+[XML sitemap contract](xml-sitemap.md).
+
 ## Compatibility rule
 
 Adding a flag or report field is additive only when it preserves existing

@@ -510,6 +510,9 @@ fn isRecoverableBuildError(err: anyerror) bool {
         error.InputFormatMismatch,
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
+        error.SitemapDuplicateUrl,
+        error.SitemapUrlLimitExceeded,
+        error.SitemapSizeLimitExceeded,
         => true,
         else => false,
     };
@@ -690,6 +693,8 @@ pub const WatchCoordinator = struct {
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
                 .input_format = self.options.input_format,
+                .sitemap_path = self.options.sitemap_path,
+                .site_url = self.options.site_url,
             }) catch |err| {
                 if (isRecoverableBuildError(err) or err == error.MultiTargetCompilationFailed) {
                     if (!self.options.quiet) {
@@ -711,6 +716,8 @@ pub const WatchCoordinator = struct {
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
                 .input_format = self.options.input_format,
+                .sitemap_path = self.options.sitemap_path,
+                .site_url = self.options.site_url,
             }) catch |err| {
                 if (isRecoverableBuildError(err)) {
                     if (!self.options.quiet) {
@@ -748,6 +755,8 @@ pub const WatchCoordinator = struct {
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
                 .input_format = self.options.input_format,
+                .sitemap_path = self.options.sitemap_path,
+                .site_url = self.options.site_url,
             }) catch |err| {
                 initial_success = false;
                 if (isRecoverableBuildError(err) or err == error.MultiTargetCompilationFailed) {
@@ -770,6 +779,8 @@ pub const WatchCoordinator = struct {
                 .quiet = self.options.quiet,
                 .jobs = self.options.jobs,
                 .input_format = self.options.input_format,
+                .sitemap_path = self.options.sitemap_path,
+                .site_url = self.options.site_url,
             })) |st| {
                 stats = st;
             } else |err| {
@@ -1309,6 +1320,7 @@ test "isRecoverableBuildError classification stays content-only" {
     try std.testing.expect(isRecoverableBuildError(error.ComponentFailed));
     try std.testing.expect(isRecoverableBuildError(error.LayoutMissingMarker));
     try std.testing.expect(isRecoverableBuildError(error.LayoutDuplicateMarker));
+    try std.testing.expect(isRecoverableBuildError(error.SitemapUrlLimitExceeded));
     try std.testing.expect(!isRecoverableBuildError(error.FileNotFound));
     try std.testing.expect(!isRecoverableBuildError(error.AccessDenied));
 }

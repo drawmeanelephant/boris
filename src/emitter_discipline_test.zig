@@ -78,6 +78,15 @@ const modules = [_]Module{
         } },
         .source = @embedFile("search_index.zig"),
     },
+    .{
+        .name = "sitemap.zig",
+        .class = .{ .emitter = .{
+            .encoder = .sink,
+            .note = "XML Sitemap Protocol output; absolute URLs use the shared strict site URL validator",
+        } },
+        .source = @embedFile("sitemap.zig"),
+        .raw_trusted_allowed = 1,
+    },
     .{ .name = "context.zig", .class = .{ .emitter = .{
         .encoder = .hand_rolled,
         .note = "context bundle YAML; audited by emitter_hostile_test, not yet on the sink",
@@ -148,6 +157,7 @@ const modules = [_]Module{
     },
     .{ .name = "rss_date.zig", .class = .other },
     .{ .name = "scanner.zig", .class = .other },
+    .{ .name = "site_url.zig", .class = .other },
     .{ .name = "source_io.zig", .class = .other },
     .{ .name = "structured_out.zig", .class = .other },
     .{ .name = "svg_policy.zig", .class = .other },

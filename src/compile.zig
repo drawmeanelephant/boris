@@ -58,6 +58,8 @@ const textile = @import("textile.zig");
 const content_asset = @import("content_asset.zig");
 const source_io = @import("source_io.zig");
 const search_index = @import("search_index.zig");
+const site_url = @import("site_url.zig");
+const sitemap = @import("sitemap.zig");
 const link_audit = @import("link_audit.zig");
 
 pub const PageDb = page_mod.PageDb;
@@ -204,7 +206,24 @@ pub const CompileOptions = struct {
     jobs: usize = 1,
     /// Whole-tree authoring format. Markdown is the byte-compatible default.
     input_format: identity.InputFormat = .markdown,
+    /// Target-root-relative sitemap output path; null disables the projection.
+    sitemap_path: ?[]const u8 = null,
+    /// Strict public HTTP(S) base URL, required when `sitemap_path` is set.
+    site_url: ?[]const u8 = null,
+    /// Test-only failure after sitemap staging and before target commit.
+    test_fail_after_sitemap_stage: bool = false,
 };
+
+fn validateSitemapConfig(gpa: std.mem.Allocator, options: CompileOptions) !void {
+    if (options.sitemap_path) |path| {
+        try sitemap.validateOutputPath(path);
+        const raw_url = options.site_url orelse return error.SitemapSiteUrlRequired;
+        const normalized = try site_url.normalized(gpa, raw_url);
+        gpa.free(normalized);
+    } else if (options.site_url != null) {
+        return error.SitemapSiteUrlWithoutOutput;
+    }
+}
 
 fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem.Allocator) ![]u8 {
     var file = try dir.openFile(io, path, .{});
@@ -545,6 +564,8 @@ pub fn compileHtmlSite(
 ) !CompileStats {
     const cwd = Io.Dir.cwd();
 
+    try validateSitemapConfig(gpa, options);
+
     // 0. Lexical layout-path grammar before any open (no .. / absolute escapes).
     try layout_select.validateLayoutPath(options.layout_path);
     for (options.layout_rules) |rule| {
@@ -745,6 +766,9 @@ fn isContentCompileFailure(err: anyerror) bool {
         error.ThemeSymlink,
         error.FooterSymlink,
         error.FooterInvalidUtf8,
+        error.SitemapDuplicateUrl,
+        error.SitemapUrlLimitExceeded,
+        error.SitemapSizeLimitExceeded,
         => true,
         // Layout-rule selection failures are usage (exit 2), not content.
         error.AmbiguousGlob,
@@ -752,6 +776,12 @@ fn isContentCompileFailure(err: anyerror) bool {
         error.DuplicateSelector,
         error.InvalidLayoutPath,
         error.LayoutSelectionFailed,
+        error.InvalidSiteUrl,
+        error.InvalidSitemapPath,
+        error.SitemapOutputCollision,
+        error.SitemapSiteUrlRequired,
+        error.SitemapSiteUrlWithoutOutput,
+        error.AmbiguousSitemapTargets,
         => false,
         else => false,
     };
@@ -769,6 +799,9 @@ pub fn compileHtmlSiteMulti(
     targets: []const target_mod.TargetSpec,
     base_options: CompileOptions,
 ) !void {
+    if (base_options.sitemap_path != null and targets.len > 1) return error.AmbiguousSitemapTargets;
+    try validateSitemapConfig(gpa, base_options);
+
     const plans = try target_mod.validateTargets(io, gpa, targets, .{
         .content_root = base_options.content_root,
         .layout_path = base_options.layout_path,
@@ -883,7 +916,10 @@ pub fn compileHtmlSiteMulti(
             }
             any_failed = true;
             if (err == error.AmbiguousGlob or err == error.MixedThemeRoots or
-                err == error.DuplicateSelector or err == error.LayoutSelectionFailed)
+                err == error.DuplicateSelector or err == error.LayoutSelectionFailed or
+                err == error.InvalidSiteUrl or err == error.InvalidSitemapPath or
+                err == error.SitemapOutputCollision or err == error.SitemapSiteUrlRequired or
+                err == error.SitemapSiteUrlWithoutOutput or err == error.AmbiguousSitemapTargets)
             {
                 any_usage_failed = true;
             } else {
@@ -1408,6 +1444,56 @@ fn stageRelForDist(gpa: std.mem.Allocator, dist_dir: []const u8) ![]u8 {
     return try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{dist_dir});
 }
 
+const sitemap_ownership_path = ".boris-cache/sitemap-output-path";
+
+const PriorSitemapOwnership = struct {
+    marker_present: bool = false,
+    path: ?[]u8 = null,
+
+    fn deinit(self: *PriorSitemapOwnership, gpa: std.mem.Allocator) void {
+        if (self.path) |path| gpa.free(path);
+        self.* = undefined;
+    }
+};
+
+fn readPriorSitemapOwnership(
+    io: Io,
+    gpa: std.mem.Allocator,
+    dist_dir: Io.Dir,
+) !PriorSitemapOwnership {
+    const bytes = readFileAlloc(io, dist_dir, sitemap_ownership_path, gpa) catch |err| switch (err) {
+        error.FileNotFound => return .{},
+        else => return err,
+    };
+    defer gpa.free(bytes);
+    if (bytes.len == 0 or bytes[bytes.len - 1] != '\n') return error.SitemapOwnershipCorrupt;
+    const value = std.mem.trimEnd(u8, bytes, "\r\n");
+    if (value.len == 0) return .{ .marker_present = true };
+    sitemap.validateOutputPath(value) catch return error.SitemapOwnershipCorrupt;
+    return .{
+        .marker_present = true,
+        .path = try gpa.dupe(u8, value),
+    };
+}
+
+fn stageSitemapOwnership(
+    io: Io,
+    stage_dir: Io.Dir,
+    current_path: ?[]const u8,
+) !void {
+    var atomic = try stage_dir.createFileAtomic(io, sitemap_ownership_path, .{
+        .replace = true,
+        .make_path = true,
+    });
+    defer atomic.deinit(io);
+    var buffer: [1024]u8 = undefined;
+    var writer = atomic.file.writer(io, &buffer);
+    if (current_path) |path| try writer.interface.writeAll(path);
+    try writer.interface.writeAll("\n");
+    try writer.interface.flush();
+    try atomic.replace(io);
+}
+
 /// Publish all files under `stage_dir` into `final_dir` via same-parent rename.
 fn ensureValidParentDirs(io: Io, final_dir: Io.Dir, parent_rel: []const u8) !void {
     if (parent_rel.len == 0 or std.mem.eql(u8, parent_rel, ".")) return;
@@ -1505,6 +1591,9 @@ fn compilePagesInner(
     try target_mod.rejectSymlinkAlongPath(io, cwd, gpa, options.dist_dir);
     var dist_dir = try cwd.openDir(io, options.dist_dir, .{ .iterate = true });
     defer dist_dir.close(io);
+
+    var prior_sitemap = try readPriorSitemapOwnership(io, gpa, dist_dir);
+    defer prior_sitemap.deinit(gpa);
 
     // Best-effort: remove orphan createFileAtomic temps left by interrupted runs.
     assemble.scrubStaleAtomicTemps(io, dist_dir, gpa);
@@ -1610,10 +1699,8 @@ fn compilePagesInner(
         for (db.items()) |p| try outs.append(gpa, p.output_path);
         try theme_mod.checkAssetPageCollisions(theme_bundle.assets, outs.items);
     }
-    // Always publish theme assets into staging (target-owned; not shared).
-    try theme_mod.copyAssetsToOutput(io, stage_dir, theme_bundle.assets);
-
-    // Content-local sibling assets: discover, collide-check, copy (independent of HTML dirty).
+    // Content-local sibling assets: discover and collide-check before any asset
+    // bytes are staged. Theme + content assets publish together below.
     var source_paths = try gpa.alloc([]const u8, db.len());
     defer gpa.free(source_paths);
     var entity_ids = try gpa.alloc([]const u8, db.len());
@@ -1646,7 +1733,24 @@ fn compilePagesInner(
         try theme_outs.ensureTotalCapacity(gpa, theme_bundle.assets.len);
         for (theme_bundle.assets) |a| try theme_outs.append(gpa, a.rel_path);
         try content_asset.checkCollisions(content_outs, page_outs.items, theme_outs.items);
+
+        if (options.sitemap_path) |sitemap_path| {
+            var owned_paths: std.ArrayList([]const u8) = .empty;
+            defer owned_paths.deinit(gpa);
+            try owned_paths.ensureTotalCapacity(
+                gpa,
+                page_outs.items.len + theme_outs.items.len + content_outs.len + 1,
+            );
+            try owned_paths.appendSlice(gpa, page_outs.items);
+            try owned_paths.appendSlice(gpa, theme_outs.items);
+            try owned_paths.appendSlice(gpa, content_outs);
+            try owned_paths.append(gpa, search_index.output_path);
+            try sitemap.rejectOutputCollisions(sitemap_path, owned_paths.items);
+        }
     }
+
+    // Assets are target-owned members of the same staging transaction.
+    try theme_mod.copyAssetsToOutput(io, stage_dir, theme_bundle.assets);
     try content_asset.copyAssetsToOutput(io, stage_dir, &content_assets);
 
     // Per-layout theme fingerprint material (footer + that layout's asset-url refs).
@@ -2092,6 +2196,28 @@ fn compilePagesInner(
     for (db.items(), 0..) |page, page_idx| live_page_paths[page_idx] = page.output_path;
     try search_index.writeOverlay(io, gpa, stage_dir, dist_dir, live_page_paths, false);
 
+    var sitemap_page_paths: std.ArrayList([]const u8) = .empty;
+    defer sitemap_page_paths.deinit(gpa);
+    if (options.sitemap_path) |sitemap_path| {
+        for (db.items()) |page| {
+            if (page.status == .draft) continue;
+            try sitemap_page_paths.append(gpa, page.output_path);
+        }
+        try sitemap.writeOverlay(
+            io,
+            gpa,
+            stage_dir,
+            dist_dir,
+            sitemap_path,
+            options.site_url.?,
+            sitemap_page_paths.items,
+        );
+        if (options.test_fail_after_sitemap_stage) return error.TestInjectedSitemapFailure;
+    }
+    if (options.sitemap_path != null or prior_sitemap.marker_present) {
+        try stageSitemapOwnership(io, stage_dir, options.sitemap_path);
+    }
+
     // Output link audit: every published local `href`/`src` must resolve to an
     // output this build intends to keep. It runs on the same staged/live
     // overlay as search, before the commit below, so a failure leaves the
@@ -2108,6 +2234,7 @@ fn compilePagesInner(
         defer gpa.free(audit_content_outs);
         try audit_assets.appendSlice(gpa, audit_content_outs);
         for (theme_bundle.assets) |a| try audit_assets.append(gpa, a.rel_path);
+        if (options.sitemap_path) |path| try audit_assets.append(gpa, path);
 
         var findings: std.ArrayList(link_audit.Finding) = .empty;
         defer link_audit.freeFindings(gpa, &findings);
@@ -2130,8 +2257,41 @@ fn compilePagesInner(
         }
     }
 
-    // The search artifact is part of the same staged target commit as HTML.
-    try publishStageTree(io, gpa, stage_dir, dist_dir);
+    // Move an obsolete compiler-owned sitemap aside immediately before commit.
+    // A failed commit restores it; a successful commit removes the backup with
+    // checked I/O rather than leaving best-effort post-commit debris.
+    const sitemap_backup_rel = try std.fmt.allocPrint(gpa, "{s}.boris-sitemap-prev", .{options.dist_dir});
+    defer gpa.free(sitemap_backup_rel);
+    var sitemap_backed_up = false;
+    const sitemap_changed = if (prior_sitemap.path) |old|
+        options.sitemap_path == null or !std.mem.eql(u8, old, options.sitemap_path.?)
+    else
+        false;
+    if (sitemap_changed) {
+        cwd.deleteFile(io, sitemap_backup_rel) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+        if (dist_dir.statFile(io, prior_sitemap.path.?, .{ .follow_symlinks = false })) |stat| {
+            if (stat.kind == .sym_link) return error.TargetOutputSymlink;
+            if (stat.kind != .file) return error.SitemapOwnershipCorrupt;
+            try dist_dir.rename(prior_sitemap.path.?, cwd, sitemap_backup_rel, io);
+            sitemap_backed_up = true;
+        } else |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        }
+    }
+
+    // Search, sitemap, and ownership metadata are members of the same staged
+    // target commit as HTML.
+    publishStageTree(io, gpa, stage_dir, dist_dir) catch |err| {
+        if (sitemap_backed_up) {
+            try cwd.rename(sitemap_backup_rel, dist_dir, prior_sitemap.path.?, io);
+        }
+        return err;
+    };
+    if (sitemap_backed_up) try cwd.deleteFile(io, sitemap_backup_rel);
 
     // Live page-output set for this build. Shared by stale cleanup AND the theme
     // scrub below, so a page published under `assets/` is never mistaken for an
@@ -2141,6 +2301,7 @@ fn compilePagesInner(
     for (db.items()) |p| {
         try live_paths.put(gpa, p.output_path, {});
     }
+    if (options.sitemap_path) |path| try live_paths.put(gpa, path, {});
 
     // Stale cleanup: drop published HTML for pages no longer in PageDb.
     // Prefer prior incremental manifest when present; otherwise scan dist/*.html
@@ -4544,6 +4705,267 @@ test "HTML publish produces search from live overlay and removes stale pages" {
         "{\n  \"format\": \"boris-rendered-search-index\",\n  \"schema_version\": 1,\n  \"documents\": [\n  ]\n}\n",
         search_json,
     );
+}
+
+test "HTML sitemap uses the staged live overlay and is deterministic across clean incremental and parallel builds" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/sitemap-compile", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\published_at: 2020-01-01T00:00:00Z
+        \\summary: Home summary
+        \\---
+        \\# Home
+        \\
+        \\Welcome.
+        \\
+    );
+    try writeTreeFile(io, work, "content/guide.md", "# Guide\n");
+    try writeTreeFile(io, work, "content/guides/child.md", "# Child\n");
+    try writeTreeFile(io, work, "content/café.md", "# Café\n");
+    try writeTreeFile(io, work, "content/draft.md",
+        \\---
+        \\status: draft
+        \\---
+        \\# Draft
+        \\
+    );
+    try writeTreeFile(io, work, "content/guide.assets/note.txt", "asset, not a page");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const clean_dist = try std.fmt.allocPrint(gpa, "{s}/clean", .{work});
+    defer gpa.free(clean_dist);
+    const parallel_dist = try std.fmt.allocPrint(gpa, "{s}/parallel", .{work});
+    defer gpa.free(parallel_dist);
+    const sitemap_path = "meta/discovery.xml";
+    const public_url = "https://example.test/docs&guides/";
+
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = clean_dist,
+        .layout_path = layout,
+        .quiet = true,
+        .jobs = 1,
+        .sitemap_path = sitemap_path,
+        .site_url = public_url,
+    });
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = parallel_dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+        .jobs = 4,
+        .sitemap_path = sitemap_path,
+        .site_url = public_url,
+    });
+
+    const clean_sitemap_full = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ clean_dist, sitemap_path });
+    defer gpa.free(clean_sitemap_full);
+    const parallel_sitemap_full = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ parallel_dist, sitemap_path });
+    defer gpa.free(parallel_sitemap_full);
+    const clean_bytes = try readFileAlloc(io, cwd, clean_sitemap_full, gpa);
+    defer gpa.free(clean_bytes);
+    var parallel_bytes = try readFileAlloc(io, cwd, parallel_sitemap_full, gpa);
+    defer gpa.free(parallel_bytes);
+    try std.testing.expectEqualStrings(clean_bytes, parallel_bytes);
+
+    try std.testing.expect(std.mem.indexOf(u8, clean_bytes, "https://example.test/docs&amp;guides/index.html") != null);
+    try std.testing.expect(std.mem.indexOf(u8, clean_bytes, "guides/child.html") != null);
+    try std.testing.expect(std.mem.indexOf(u8, clean_bytes, "caf%C3%A9.html") != null);
+    try std.testing.expect(std.mem.indexOf(u8, clean_bytes, "draft.html") == null);
+    try std.testing.expect(std.mem.indexOf(u8, clean_bytes, "guide.assets/note.txt") == null);
+    try std.testing.expect(std.mem.indexOf(u8, clean_bytes, search_index.output_path) == null);
+    try std.testing.expect(std.mem.indexOf(u8, clean_bytes, "published_at") == null);
+    try std.testing.expect(std.mem.indexOf(u8, clean_bytes, "lastmod") == null);
+
+    var loc_count: usize = 0;
+    var loc_at: usize = 0;
+    while (std.mem.indexOfPos(u8, clean_bytes, loc_at, "<loc>")) |at| {
+        loc_count += 1;
+        loc_at = at + "<loc>".len;
+    }
+    try std.testing.expectEqual(@as(usize, 4), loc_count);
+    for ([_][]const u8{ "index.html", "guide.html", "guides/child.html", "café.html" }) |path| {
+        const published = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ clean_dist, path });
+        defer gpa.free(published);
+        try cwd.access(io, published, .{});
+    }
+
+    // A repeated incremental+parallel run is byte-identical. Changing
+    // publication date metadata also cannot affect a timestamp-free sitemap.
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = parallel_dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+        .jobs = 4,
+        .sitemap_path = sitemap_path,
+        .site_url = public_url,
+    });
+    gpa.free(parallel_bytes);
+    parallel_bytes = try readFileAlloc(io, cwd, parallel_sitemap_full, gpa);
+    try std.testing.expectEqualStrings(clean_bytes, parallel_bytes);
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\published_at: 2040-12-31T23:59:59Z
+        \\summary: Home summary
+        \\---
+        \\# Home
+        \\
+        \\Welcome.
+        \\
+    );
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = parallel_dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+        .jobs = 4,
+        .sitemap_path = sitemap_path,
+        .site_url = public_url,
+    });
+    gpa.free(parallel_bytes);
+    parallel_bytes = try readFileAlloc(io, cwd, parallel_sitemap_full, gpa);
+    try std.testing.expectEqualStrings(clean_bytes, parallel_bytes);
+
+    // Removing a source removes both the published HTML and the obsolete URL.
+    const child_source = try std.fmt.allocPrint(gpa, "{s}/guides/child.md", .{content});
+    defer gpa.free(child_source);
+    try cwd.deleteFile(io, child_source);
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = parallel_dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+        .jobs = 4,
+        .sitemap_path = sitemap_path,
+        .site_url = public_url,
+    });
+    gpa.free(parallel_bytes);
+    parallel_bytes = try readFileAlloc(io, cwd, parallel_sitemap_full, gpa);
+    try std.testing.expect(std.mem.indexOf(u8, parallel_bytes, "guides/child.html") == null);
+    const stale_child = try std.fmt.allocPrint(gpa, "{s}/guides/child.html", .{parallel_dist});
+    defer gpa.free(stale_child);
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, stale_child, .{}));
+
+    // A failure after sitemap staging preserves the prior published sitemap
+    // and HTML transaction.
+    const before_failure = try gpa.dupe(u8, parallel_bytes);
+    defer gpa.free(before_failure);
+    try std.testing.expectError(error.TestInjectedSitemapFailure, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = parallel_dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+        .jobs = 4,
+        .sitemap_path = sitemap_path,
+        .site_url = public_url,
+        .test_fail_after_sitemap_stage = true,
+    }));
+    gpa.free(parallel_bytes);
+    parallel_bytes = try readFileAlloc(io, cwd, parallel_sitemap_full, gpa);
+    try std.testing.expectEqualStrings(before_failure, parallel_bytes);
+
+    // Changing and then disabling the projection removes the prior
+    // compiler-owned file through the checked publication transaction.
+    const replacement_path = "sitemap-next.xml";
+    const replacement_full = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ parallel_dist, replacement_path });
+    defer gpa.free(replacement_full);
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = parallel_dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+        .jobs = 4,
+        .sitemap_path = replacement_path,
+        .site_url = public_url,
+    });
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, parallel_sitemap_full, .{}));
+    try cwd.access(io, replacement_full, .{});
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = parallel_dist,
+        .layout_path = layout,
+        .quiet = true,
+        .incremental = true,
+        .jobs = 4,
+    });
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, replacement_full, .{}));
+}
+
+test "HTML sitemap rejects output ownership collisions and ambiguous multi-target URLs" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/sitemap-collisions", .{tmp.sub_path});
+    defer gpa.free(work);
+    try writeTreeFile(io, work, "layout.html", "<html>{{content}}</html>");
+    try writeTreeFile(io, work, "content/index.md", "# Home\n");
+    try writeTreeFile(io, work, "content/index.assets/note.xml", "asset");
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layout.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try std.testing.expectError(error.SitemapOutputCollision, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .sitemap_path = "index.html",
+        .site_url = "https://example.test",
+    }));
+    try std.testing.expectError(error.SitemapOutputCollision, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .sitemap_path = "index.assets/note.xml",
+        .site_url = "https://example.test",
+    }));
+    try std.testing.expectError(error.SitemapOutputCollision, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .sitemap_path = search_index.output_path,
+        .site_url = "https://example.test",
+    }));
+
+    const targets = [_]target_mod.TargetSpec{
+        .{ .name = "public", .output_dir = dist },
+        .{ .name = "preview", .output_dir = try std.fmt.allocPrint(gpa, "{s}/preview", .{work}) },
+    };
+    defer gpa.free(targets[1].output_dir);
+    try std.testing.expectError(error.AmbiguousSitemapTargets, compileHtmlSiteMulti(io, gpa, &targets, .{
+        .content_root = content,
+        .layout_path = layout,
+        .quiet = true,
+        .sitemap_path = "sitemap.xml",
+        .site_url = "https://example.test",
+    }));
 }
 
 test "Feature 9 HTML: heading fragment wiki links resolve to rendered ids" {
