@@ -144,6 +144,8 @@ Doctor does not:
 
 Expected ownership comes from the typed profile, frozen graph, theme inventory,
 content-local asset inventory, and fixed compiler namespaces.
+File extension and target location alone do not prove that an extra HTML file is
+Boris-owned.
 
 ## Audit pipeline
 
@@ -232,6 +234,10 @@ outside it are `theme`. Without a unique marker, ownership is `unknown`.
 Artifact set/byte mismatches are `publication`; invalid declared metadata/paths
 are `configuration`.
 
+When grouped evidence for `HTML_DUPLICATE_ID` spans multiple ownership regions,
+the finding uses `owner: unknown` and `fixability: not_actionable`, while
+retaining every occurrence in `evidence.related`.
+
 Doctor must not label a finding `compiler` merely because Boris produced the
 current expected bytes. It cannot prove which tool or revision created the
 observed tree.
@@ -243,7 +249,6 @@ observed tree.
 | `GRAPH_UNREFERENCED_PAGE` | graph | warning | certain | content | source_edit |
 | `TARGET_MISSING` | rendered_html | error | certain | publication | regenerate |
 | `HTML_PAGE_MISSING` | rendered_html | error | certain | publication | regenerate |
-| `HTML_PAGE_STALE` | rendered_html | error | certain | publication | regenerate |
 | `HTML_MALFORMED` | rendered_html | error | certain | unknown | source_edit or layout_edit |
 | `HTML_URL_MALFORMED` | rendered_html | error | certain | content/theme by range | source_edit or layout_edit |
 | `HTML_LOCAL_ROUTE_MISSING` | rendered_html | error | certain | content/theme by range | source_edit or layout_edit |
@@ -291,6 +296,10 @@ observed tree.
 `HTML_DUPLICATE_ID` is a warning because Apex duplicate heading IDs are a
 documented current behavior. A fragment that names the duplicated value exists,
 but is ambiguous; Doctor does not invent suffixes.
+
+Doctor v1 deliberately has no `HTML_PAGE_STALE` finding. It reports missing
+expected pages, but it does not classify extra HTML as stale until publication
+execution records an owned-output manifest.
 
 Where the table lists two possible fixability values, the emitted finding uses
 exactly one enum after content/theme ownership attribution. If attribution is
@@ -385,15 +394,26 @@ The implementation contract should add
 - no timestamps, durations, hostnames, invocation CWD, absolute paths, random
   IDs, mtimes, or locale-dependent text;
 - only profile-workspace-relative `/`-separated paths;
-- fixed key order exactly as the example;
 - JSON strings emitted through the shared `json_out` encoder.
+
+The JSON Schema constrains report structure and values. The Doctor renderer
+contract, golden fixtures, and deterministic byte tests enforce canonical key
+order exactly as shown in the example.
 
 ### Sorting
 
-Coverage uses the fixed check order shown above. A malformed or structurally
-uninspectable subject makes its affected checks `incomplete`; optional
-artifacts absent from the profile are `not_configured`; IR/RAG/Context are
-`not_in_scope`. Permission and unexpected I/O failures still produce no report.
+Coverage uses the fixed check order shown above:
+
+| Selection and inspection result | Coverage status |
+|---|---|
+| Selected and successfully inspected | `checked` |
+| Not selected by the profile | `not_configured` |
+| Outside Doctor v1 | `not_in_scope` |
+| Selected but missing, parseably malformed, or structurally uninspectable | `incomplete` |
+
+A selected missing or parseably malformed artifact produces its stable finding
+and `incomplete` coverage; it never reports `checked`. Permission denial and
+unexpected I/O failures are exit `3`, so no new report is published.
 
 Findings sort by:
 
@@ -656,7 +676,8 @@ its claims are verified.
 | Path escape | `../`, absolute, backslash, `%2e%2e`, `%252e%252e`, encoded slash; symlink parent | `HTML_LOCAL_ROUTE_ESCAPE`, `ASSET_PATH_ESCAPE`, or profile exit 2; no outside-root access |
 | Malformed HTML | unterminated tag/comment/quote/raw-text | `HTML_MALFORMED`; downstream coverage for that page is not claimed |
 | Malformed local URL | malformed percent escape or encoded separator ambiguity | `HTML_URL_MALFORMED`; no path access occurs |
-| Duplicate IDs | same ID on headings and non-headings; entity-decoded equivalents | one sorted `HTML_DUPLICATE_ID` finding per value/page |
+| Duplicate IDs | same ID on headings and non-headings; entity-decoded equivalents; occurrences inside and outside the unique search root | one sorted `HTML_DUPLICATE_ID` finding per value/page; cross-region evidence has unknown owner and is not actionable |
+| Extra HTML ownership | `404.html`, verification page, retained landing page, and host-generated page outside an ownership manifest | no `HTML_PAGE_STALE` finding; the files remain eligible for checks that do not require Boris ownership |
 | Broken relative links | nested `href` and `src`, single/double/unquoted attributes | `HTML_LOCAL_ROUTE_MISSING` at exact output line/column |
 | Missing fragments | hash-only, cross-page, query+hash, encoded Unicode, missing target ID | `HTML_FRAGMENT_MISSING`; duplicate target ID also reports its warning |
 | Missing local assets | content-local, theme, raw HTML image, stylesheet | `ASSET_MISSING` or rendered route finding; no remote fetch |

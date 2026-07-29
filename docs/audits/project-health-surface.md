@@ -120,7 +120,7 @@ mutation:
 
 | Check family | Objective fact |
 |---|---|
-| Publication inventory | Expected graph page is missing; stale page exists in a compiler-owned page set; selected target/artifact is absent; symlink or unsafe path appears below a selected root. |
+| Publication inventory | Expected graph page is missing; selected target/artifact is absent; symlink or unsafe path appears below a selected root. Extra HTML is not provably stale until publication records an owned-output manifest. |
 | HTML parse completeness | A selected document contains an unterminated or structurally unrecoverable tag, comment, quote, or raw-text element, so downstream inspection cannot be complete. |
 | ID and fragment integrity | IDs are empty or duplicated; a local same-page or cross-page fragment is absent after HTML entity and URL-fragment decoding. |
 | Asset integrity | Expected target-owned asset is missing, stale in an owned namespace, a symlink, or byte-different from its source/theme owner. |
