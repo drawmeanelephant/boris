@@ -24,6 +24,16 @@ const marker_name = ".boris-astro-import-owner";
 const state_dir = ".boris-astro-import";
 const marker_prefix = "format=boris-astro-import-apply\nschema_version=1\n";
 
+// This is deliberately test-only state, not a CLI feature. It lets the
+// lifecycle tests prove cleanup around the two operations that establish an
+// owned stage without relying on permissions or platform-specific races.
+const TestFailpoint = enum { after_stage_create, marker_write };
+var test_failpoint: ?TestFailpoint = null;
+
+fn testFail(point: TestFailpoint) !void {
+    if (builtin.is_test and test_failpoint == point) return error.TestInjectedFailure;
+}
+
 const darwin = struct {
     extern "c" fn renamex_np(from: [*:0]const u8, to: [*:0]const u8, flags: u32) c_int;
     const rename_excl: u32 = 0x00000004;
@@ -438,9 +448,14 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         if (previous_source) |prior| if (std.mem.order(u8, prior, source_path) != .lt) return error.InvalidPlan;
         previous_source = source_path;
         if (std.mem.eql(u8, class, "create")) {
+            // Check the reviewed plan's writable identities before source
+            // preparation so duplicate evidence is rejected as such, rather
+            // than relying on an incidental derived-path mismatch later.
+            const proposed_destination = (try getNullableString(object, "proposed_boris_source_path")) orelse return error.InvalidPlan;
+            const proposed_entity = (try getNullableString(object, "proposed_entity_id")) orelse return error.InvalidPlan;
+            for (writable.items) |prior| if (std.mem.eql(u8, prior, proposed_destination)) return error.DuplicateDestination;
+            for (identities.items) |prior| if (std.mem.eql(u8, prior, proposed_entity)) return error.DuplicateIdentity;
             const item = try prepareCreate(io, a, parsed_snapshot.value, content, opts.project_id, action);
-            for (writable.items) |prior| if (std.mem.eql(u8, prior, item.destination)) return error.DuplicateDestination;
-            for (identities.items) |prior| if (std.mem.eql(u8, prior, item.entity)) return error.DuplicateIdentity;
             for (sources.items) |prior| if (std.mem.eql(u8, prior, item.source_path)) return error.InvalidPlan;
             try writable.append(a, item.destination);
             try identities.append(a, item.entity);
@@ -462,11 +477,16 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
         else => return err,
     }
     try Io.Dir.cwd().createDirPath(io, stage_path);
-    var stage_active = true;
-    defer if (stage_active and ownedStage(io, a, stage_path, marker)) Io.Dir.cwd().deleteTree(io, stage_path) catch {};
+    // This flag means *this invocation* made the stage. Cleanup is therefore
+    // safe even if marker creation failed or the marker was only partially
+    // written. Pre-existing unrecognized stages return above untouched.
+    var stage_created_here = true;
+    defer if (stage_created_here) Io.Dir.cwd().deleteTree(io, stage_path) catch {};
+    try testFail(.after_stage_create);
     {
         var stage = try Io.Dir.cwd().openDir(io, stage_path, .{ .follow_symlinks = false });
         defer stage.close(io);
+        try testFail(.marker_write);
         try write(io, stage, marker_name, marker);
         var manifest: std.ArrayList(u8) = .empty;
         try manifest.appendSlice(a, "{\"format\":\"boris-astro-import-apply-manifest\",\"schema_version\":1,\"project_id\":");
@@ -516,7 +536,9 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     }
     try requireNoDestination(io, opts.destination);
     try publishNoReplace(io, a, stage_path, opts.destination);
-    stage_active = false;
+    // The stage has become the published destination. Never inspect or clean
+    // that destination through the staging lifecycle after this point.
+    stage_created_here = false;
     if (!opts.quiet) std.debug.print("migration-lab: applied reviewed Astro plan to {s}\n", .{opts.destination});
 }
 
@@ -548,6 +570,205 @@ fn rewritePlanDigest(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
     const digest = try sha256Hex(a, digest_input);
     defer a.free(digest);
     return std.fmt.allocPrint(a, "{{\"plan_digest\":\"{s}\"{s}{s}}}", .{ digest, marker, digest_input });
+}
+
+const ApplyFixture = struct {
+    root: []const u8,
+    plan_out: []const u8,
+    plan_path: []const u8,
+    destination: []const u8,
+    source_path: []const u8,
+};
+
+fn makeApplyFixture(io: Io, a: std.mem.Allocator, base: []const u8, source_rel: []const u8) !ApplyFixture {
+    const root = try std.fmt.allocPrint(a, "{s}/source", .{base});
+    const plan_out = try std.fmt.allocPrint(a, "{s}/plan", .{base});
+    const destination = try std.fmt.allocPrint(a, "{s}/destination", .{base});
+    const source_path = try std.fmt.allocPrint(a, "{s}/src/content/{s}", .{ root, source_rel });
+    try Io.Dir.cwd().createDirPath(io, std.fs.path.dirname(source_path).?);
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = source_path, .data = "---\ntitle: Planned\ntags: [one]\n---\n[unchanged](./guide.md)\n" });
+    try plan.run(io, a, .{ .root_dir = root, .content_root = "src/content", .out_dir = plan_out, .project_id = "fixture", .quiet = true });
+    return .{
+        .root = root,
+        .plan_out = plan_out,
+        .plan_path = try std.fmt.allocPrint(a, "{s}/import_plan.json", .{plan_out}),
+        .destination = destination,
+        .source_path = source_path,
+    };
+}
+
+fn fixtureOptions(fixture: ApplyFixture, plan_path: []const u8, destination: []const u8) RunOptions {
+    return .{ .root_dir = fixture.root, .content_root = "src/content", .project_id = "fixture", .plan_path = plan_path, .destination = destination, .quiet = true };
+}
+
+fn expectNoPublishedOrStage(io: Io, a: std.mem.Allocator, destination: []const u8) !void {
+    try std.testing.expectError(error.FileNotFound, Io.Dir.cwd().statFile(io, destination, .{ .follow_symlinks = false }));
+    const stage = try std.fmt.allocPrint(a, "{s}.boris-astro-import-stage", .{destination});
+    try std.testing.expectError(error.FileNotFound, Io.Dir.cwd().statFile(io, stage, .{ .follow_symlinks = false }));
+}
+
+fn replaceOnce(a: std.mem.Allocator, bytes: []const u8, needle: []const u8, replacement: []const u8) ![]u8 {
+    const at = std.mem.indexOf(u8, bytes, needle) orelse return error.InvalidPlan;
+    return std.fmt.allocPrint(a, "{s}{s}{s}", .{ bytes[0..at], replacement, bytes[at + needle.len ..] });
+}
+
+fn markerForPlan(io: Io, a: std.mem.Allocator, plan_path: []const u8) ![]u8 {
+    const bytes = try readFileAlloc(io, Io.Dir.cwd(), plan_path, a);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, bytes, .{});
+    defer parsed.deinit();
+    const digest = parsed.value.object.get("plan_digest").?.string;
+    return std.fmt.allocPrint(a, "{s}project_id=fixture\nplan_digest={s}\n", .{ marker_prefix, digest });
+}
+
+test "apply removes only stages created by this invocation before marker completion" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer cleanupTestTmp(io, &tmp);
+    const base = try std.fmt.allocPrint(a, ".zig-cache/tmp/{s}/astro-apply-lifecycle", .{tmp.sub_path});
+    const fixture = try makeApplyFixture(io, a, base, "a.md");
+
+    test_failpoint = .after_stage_create;
+    defer test_failpoint = null;
+    try std.testing.expectError(error.TestInjectedFailure, run(io, a, fixtureOptions(fixture, fixture.plan_path, fixture.destination)));
+    try expectNoPublishedOrStage(io, a, fixture.destination);
+
+    test_failpoint = .marker_write;
+    try std.testing.expectError(error.TestInjectedFailure, run(io, a, fixtureOptions(fixture, fixture.plan_path, fixture.destination)));
+    try expectNoPublishedOrStage(io, a, fixture.destination);
+
+    test_failpoint = null;
+    const stage = try std.fmt.allocPrint(a, "{s}.boris-astro-import-stage", .{fixture.destination});
+    try Io.Dir.cwd().createDirPath(io, stage);
+    var unrecognized = try Io.Dir.cwd().openDir(io, stage, .{});
+    try unrecognized.writeFile(io, .{ .sub_path = "preserve", .data = "unrecognized bytes" });
+    try std.testing.expectError(error.UnrecognizedStage, run(io, a, fixtureOptions(fixture, fixture.plan_path, fixture.destination)));
+    try std.testing.expectEqualStrings("unrecognized bytes", try readFileAlloc(io, unrecognized, "preserve", a));
+    unrecognized.close(io);
+    try Io.Dir.cwd().deleteTree(io, stage);
+
+    try Io.Dir.cwd().createDirPath(io, stage);
+    var recognized = try Io.Dir.cwd().openDir(io, stage, .{});
+    const marker = try markerForPlan(io, a, fixture.plan_path);
+    try write(io, recognized, marker_name, marker);
+    try recognized.writeFile(io, .{ .sub_path = "abandoned", .data = "old" });
+    recognized.close(io);
+    try run(io, a, fixtureOptions(fixture, fixture.plan_path, fixture.destination));
+    try std.testing.expectError(error.FileNotFound, Io.Dir.cwd().statFile(io, stage, .{}));
+    var published = try Io.Dir.cwd().openDir(io, fixture.destination, .{});
+    defer published.close(io);
+    try std.testing.expectError(error.FileNotFound, published.statFile(io, "abandoned", .{}));
+    try std.testing.expectEqualStrings(marker, try readFileAlloc(io, published, marker_name, a));
+}
+
+test "apply rejects semantic mutations and native parser failures before staging" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer cleanupTestTmp(io, &tmp);
+    const base = try std.fmt.allocPrint(a, ".zig-cache/tmp/{s}/astro-apply-semantics", .{tmp.sub_path});
+    const fixture = try makeApplyFixture(io, a, base, "a.md");
+    const original = try readFileAlloc(io, Io.Dir.cwd(), fixture.plan_path, a);
+
+    const actions = [_][]const u8{ "keep", "conflict", "update", "move", "delete", "merge", "review", "unknown" };
+    for (actions, 0..) |action, i| {
+        const class = try std.fmt.allocPrint(a, "\"class\":\"{s}\"", .{action});
+        const altered = try replaceOnce(a, original, "\"class\":\"create\"", class);
+        const signed = try rewritePlanDigest(a, altered);
+        const plan_path = try std.fmt.allocPrint(a, "{s}/action-{d}.json", .{ fixture.plan_out, i });
+        const destination = try std.fmt.allocPrint(a, "{s}/action-{d}", .{ base, i });
+        try Io.Dir.cwd().writeFile(io, .{ .sub_path = plan_path, .data = signed });
+        try std.testing.expectError(error.UnsupportedPlanAction, run(io, a, fixtureOptions(fixture, plan_path, destination)));
+        try expectNoPublishedOrStage(io, a, destination);
+    }
+
+    const invalid_title = try replaceOnce(a, original, "\"title\":\"Planned\"", "\"title\":\"bad\\\"quote\"");
+    const invalid_signed = try rewritePlanDigest(a, invalid_title);
+    const invalid_plan = try std.fmt.allocPrint(a, "{s}/native-invalid.json", .{fixture.plan_out});
+    const invalid_destination = try std.fmt.allocPrint(a, "{s}/native-invalid", .{base});
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = invalid_plan, .data = invalid_signed });
+    try std.testing.expectError(error.GeneratedBorisValidationFailed, run(io, a, fixtureOptions(fixture, invalid_plan, invalid_destination)));
+    try expectNoPublishedOrStage(io, a, invalid_destination);
+}
+
+test "apply rejects duplicate writable evidence and final identity evidence before staging" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer cleanupTestTmp(io, &tmp);
+    const base = try std.fmt.allocPrint(a, ".zig-cache/tmp/{s}/astro-apply-duplicates", .{tmp.sub_path});
+    const plan_out = try std.fmt.allocPrint(a, "{s}/plan", .{base});
+    const plan_path = try std.fmt.allocPrint(a, "{s}/import_plan.json", .{plan_out});
+    const root = "fixtures/astro-import-apply";
+    try plan.run(io, a, .{ .root_dir = root, .content_root = "src/content/docs", .out_dir = plan_out, .project_id = "duplicate-fixture", .quiet = true });
+    const original = try readFileAlloc(io, Io.Dir.cwd(), plan_path, a);
+    const fixture = ApplyFixture{ .root = root, .plan_out = plan_out, .plan_path = plan_path, .destination = "", .source_path = "" };
+
+    const duplicate_path_plan = try rewritePlanDigest(a, try replaceOnce(a, original, "\"proposed_boris_source_path\":\"content/nested/overview.md\"", "\"proposed_boris_source_path\":\"content/intro.md\""));
+    const duplicate_path = try std.fmt.allocPrint(a, "{s}/duplicate-path.json", .{plan_out});
+    const duplicate_path_destination = try std.fmt.allocPrint(a, "{s}/duplicate-path", .{base});
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = duplicate_path, .data = duplicate_path_plan });
+    try std.testing.expectError(error.DuplicateDestination, run(io, a, .{ .root_dir = fixture.root, .content_root = "src/content/docs", .project_id = "duplicate-fixture", .plan_path = duplicate_path, .destination = duplicate_path_destination, .quiet = true }));
+    try expectNoPublishedOrStage(io, a, duplicate_path_destination);
+
+    const duplicate_identity_plan = try rewritePlanDigest(a, try replaceOnce(a, original, "\"proposed_entity_id\":\"nested/overview\"", "\"proposed_entity_id\":\"guides/intro\""));
+    const duplicate_identity = try std.fmt.allocPrint(a, "{s}/duplicate-identity.json", .{plan_out});
+    const duplicate_identity_destination = try std.fmt.allocPrint(a, "{s}/duplicate-identity", .{base});
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = duplicate_identity, .data = duplicate_identity_plan });
+    try std.testing.expectError(error.DuplicateIdentity, run(io, a, .{ .root_dir = fixture.root, .content_root = "src/content/docs", .project_id = "duplicate-fixture", .plan_path = duplicate_identity, .destination = duplicate_identity_destination, .quiet = true }));
+    try expectNoPublishedOrStage(io, a, duplicate_identity_destination);
+}
+
+fn symlinkOrExplicitSkip(io: Io, target: []const u8, path: []const u8, is_directory: bool) !bool {
+    Io.Dir.cwd().symLink(io, target, path, .{ .is_directory = is_directory }) catch |err| {
+        std.debug.print("apply source-confinement symlink case skipped: {s}\n", .{@errorName(err)});
+        return false;
+    };
+    return true;
+}
+
+test "apply source confinement rejects symlinked source files, directories, and selected roots" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer cleanupTestTmp(io, &tmp);
+    const base = try std.fmt.allocPrint(a, ".zig-cache/tmp/{s}/astro-apply-symlinks", .{tmp.sub_path});
+
+    const file_case = try makeApplyFixture(io, a, try std.fmt.allocPrint(a, "{s}/file", .{base}), "a.md");
+    const external_file = try std.fmt.allocPrint(a, "{s}/external.md", .{base});
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = external_file, .data = "# outside\n" });
+    try Io.Dir.cwd().deleteFile(io, file_case.source_path);
+    if (!try symlinkOrExplicitSkip(io, external_file, file_case.source_path, false)) return;
+    try std.testing.expectError(error.SourceSnapshotMismatch, run(io, a, fixtureOptions(file_case, file_case.plan_path, file_case.destination)));
+    try expectNoPublishedOrStage(io, a, file_case.destination);
+
+    const directory_case = try makeApplyFixture(io, a, try std.fmt.allocPrint(a, "{s}/directory", .{base}), "nested/a.md");
+    const nested = try std.fmt.allocPrint(a, "{s}/src/content/nested", .{directory_case.root});
+    const external_dir = try std.fmt.allocPrint(a, "{s}/external-directory", .{base});
+    try Io.Dir.cwd().createDirPath(io, external_dir);
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/a.md", .{external_dir}), .data = "# outside\n" });
+    try Io.Dir.cwd().deleteTree(io, nested);
+    if (!try symlinkOrExplicitSkip(io, external_dir, nested, true)) return;
+    try std.testing.expectError(error.SourceSnapshotMismatch, run(io, a, fixtureOptions(directory_case, directory_case.plan_path, directory_case.destination)));
+    try expectNoPublishedOrStage(io, a, directory_case.destination);
+
+    const root_case = try makeApplyFixture(io, a, try std.fmt.allocPrint(a, "{s}/root", .{base}), "a.md");
+    const content_root = try std.fmt.allocPrint(a, "{s}/src/content", .{root_case.root});
+    const external_content = try std.fmt.allocPrint(a, "{s}/external-content", .{base});
+    try Io.Dir.cwd().createDirPath(io, external_content);
+    try Io.Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/a.md", .{external_content}), .data = "# outside\n" });
+    try Io.Dir.cwd().deleteTree(io, content_root);
+    if (!try symlinkOrExplicitSkip(io, external_content, content_root, true)) return;
+    try std.testing.expectError(error.SelectedContentRootSymlink, run(io, a, fixtureOptions(root_case, root_case.plan_path, root_case.destination)));
+    try expectNoPublishedOrStage(io, a, root_case.destination);
 }
 
 test "apply preflights the whole reviewed plan before staging and publishes verified bytes" {

@@ -28,6 +28,10 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
+    // The black-box apply test runs the installed `zig-out/bin` artifact. Its
+    // explicit install dependency below means a missing executable is a build
+    // failure, never a skip.
+
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     if (b.args) |args| {
@@ -42,6 +46,7 @@ pub fn build(b: *std.Build) void {
     const run_unit_tests = b.addRunArtifact(unit_tests);
     // Tests open fixtures/ relative to this package directory.
     run_unit_tests.setCwd(b.path("."));
+    run_unit_tests.step.dependOn(b.getInstallStep());
 
     // The WordPress integration test launches the installed product binary as
     // a black box. Build it first so this proof cannot silently skip when the
