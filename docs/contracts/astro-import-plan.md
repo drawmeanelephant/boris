@@ -10,7 +10,9 @@ existing archaeology report contract unchanged.
 
 The only candidates for `create` are explicit lowercase `.md` files below the
 user-supplied relative `--content-root`, with ordinary Markdown bodies and only
-scalar `id`, `title`, `status`, and `tags` frontmatter. The tool never runs
+bounded `id`, `title`, `status`, and `tags` frontmatter. `id`, `title`, and
+`status` use the Boris scalar grammar; `tags` uses the exact bounded bracket-list
+grammar. The tool never runs
 Astro, Node, MDX, ESM, integrations, or project JavaScript; fetches nothing;
 modifies no input; emits no Markdown; applies no action; copies no asset; and
 does not infer parents/navigation or call an inferred route observed.
@@ -18,6 +20,28 @@ does not infer parents/navigation or call an inferred route observed.
 `.mdx`, `.astro`, symlinks, executable/framework syntax, nested YAML, and
 unknown metadata are explicit `quarantine` or `unsupported` plan rows. They
 are not converted and unknown metadata is never appended to body prose.
+
+The selected content root is opened one component at a time without following
+symlinks. A symlink at the selected path or in any component between `--root`
+and that path is rejected before scanning or staging, including a symlink whose
+target remains beneath `--root`. Internal symlinks discovered after the scan
+begins are inventoried without traversal.
+
+The executable-syntax classifier is conservative and code-aware. Backtick and
+tilde fences (including marker lengths greater than three), variable-length
+backtick code spans, escaped punctuation, and indented code lines are literal
+Markdown and do not trigger MDX classification. Outside those boundaries, ESM
+imports/exports, JSX components/fragments, MDX braces, Astro directives, and
+ambiguous executable-looking syntax cannot receive `create`.
+
+The supported frontmatter grammar follows
+[`frontmatter.md`](frontmatter.md): blank/whitespace-only lines are skipped;
+inline `#` text is ordinary scalar content rather than comment syntax; a
+standalone comment-looking line is malformed because it has no `:`. Duplicate
+keys, single quotes, malformed double quotes, invalid status/tags, nested or
+multiline forms, empty values, and unknown keys are rejected. Accepted `id`,
+`title`, `status`, and `tags` are all retained in
+`proposed_closed_frontmatter` with their correct JSON types.
 
 ## Complete source evidence and scan failures
 
@@ -35,7 +59,11 @@ sha256:<64 lowercase hex or null>\n
 symlink_target:<decimal byte length>:<raw target>|null\n
 ```
 
-The stream covers directories and hidden entries as well as files. Symlinks are never followed. The committed schemas describe the full record and action shapes; they are parsing contracts, not a claim that a Draft 2020-12 validator is run by this tool or CI.
+The stream covers directories and hidden entries as well as files. Symlinks are
+never followed. The committed schemas describe the full record and action
+shapes. The migration-lab `schema-test` lane runs them through the test-only Ajv
+Draft 2020-12 implementation against exact valid runtime payloads and committed
+malformed mutation cases. Boris does not load a schema engine at runtime.
 
 ## Invocation and publication
 
@@ -83,9 +111,36 @@ wrapper is excluded. Every digest is lowercase SHA-256 hexadecimal.
 
 The snapshot records exact source, frontmatter, and body hashes, source kind,
 authored identity evidence, an explicitly `inferred_not_observed` route,
-separate Markdown-link/image and reference-class inventories, and
-classification evidence. Normal links are not assets. Proposed actions are
+typed `references` and `potential_asset_references`, and classification
+evidence. Reference syntax distinguishes inline links, inline images,
+reference-style link/image uses, reference definitions, and angle-bracket
+autolinks. Target classification distinguishes fragments, root-relative,
+source-relative, protocol-relative, HTTP, HTTPS, `mailto:`, `ftp:`, other
+explicit schemes, data URLs, reference labels, and malformed/review evidence.
+Exact duplicate typed references are deterministically deduplicated. Literal
+code examples are excluded. Normal links are never assets; image evidence is
+only a potential asset reference and makes no existence, resolution, copying,
+route, or publication claim. Proposed actions are
 only `create`, `keep`, `quarantine`, `unsupported`, `review`, or `conflict`.
 No update/move/delete/apply action exists in v1.
 
-Duplicate authored IDs, import-record IDs, normalized source paths, proposed Boris entity/source paths, or inferred routes are conflict evidence; the plan does not choose a winner. Previous manifests are accepted only when they have the exact v1 object shape, matching project/policy digests, well-formed record IDs, and unique normalized paths and IDs. They preserve ownership solely for one exact same-path record.
+Planning is phased: scan/parse, generate importer IDs, restore valid same-path
+manifest IDs, derive entity/source/route proposals, validate every proposal,
+then perform one collision pass over the exact final values before assigning
+actions. A `create` or `keep` requires a valid exact source hash, importer ID,
+nonempty Boris entity, nonescaping proposed source path, nonempty inferred
+route, proposed route, and nonempty preconditions. Invalid proposals use null,
+never empty strings.
+
+Duplicate authored IDs, generated or final import-record IDs, normalized source
+paths, proposed Boris entity/source paths, inferred routes, or proposed routes
+are conflict evidence; the plan does not choose a winner. Findings retain every
+involved normalized source path in deterministic order. Previous manifests are
+accepted only when they have the exact v1 object shape, matching project/policy
+digests, well-formed record IDs, and unique normalized paths and IDs. They
+preserve ownership solely for one exact same-path record.
+
+JSON Schema cannot prove cross-record uniqueness, same-path ownership, digest
+equality, or collision grouping. Those checks remain runtime responsibilities;
+the independent validation lane recomputes policy, source-tree, snapshot, and
+plan digests in addition to schema validation.

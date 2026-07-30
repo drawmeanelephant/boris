@@ -112,6 +112,7 @@ pub const Options = struct {
     mode: Mode = .astro,
     /// Astro project/export root to scan (relative to cwd unless absolute).
     root_dir: []const u8 = ".",
+    root_explicit: bool = false,
     /// Explicit Astro content root, relative to --root, for plan-only import.
     content_root: ?[]const u8 = null,
     /// Stable project identity required by plan-only import.
@@ -138,6 +139,7 @@ pub const Options = struct {
     boris_bin: ?[]const u8 = null,
     /// Report/output directory (created if missing). Never writes into inputs.
     out_dir: []const u8 = "migration-report",
+    out_explicit: bool = false,
     /// Existing theme-archaeology adaptation ledger for theme-materialize mode.
     ledger_path: ?[]const u8 = null,
     /// Content tree root for frontmatter-review mode.
@@ -171,10 +173,12 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             const value = arg["--root=".len..];
             if (value.len == 0) return error.MissingValue;
             options.root_dir = value;
+            options.root_explicit = true;
         } else if (std.mem.eql(u8, arg, "--root")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
             options.root_dir = args[index];
+            options.root_explicit = true;
         } else if (std.mem.startsWith(u8, arg, "--content-root=")) {
             const value = arg["--content-root=".len..];
             if (value.len == 0) return error.MissingValue;
@@ -253,10 +257,12 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             const value = arg["--out=".len..];
             if (value.len == 0) return error.MissingValue;
             options.out_dir = value;
+            options.out_explicit = true;
         } else if (std.mem.eql(u8, arg, "--out")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
             options.out_dir = args[index];
+            options.out_explicit = true;
         } else if (std.mem.startsWith(u8, arg, "--ledger=")) {
             const value = arg["--ledger=".len..];
             if (value.len == 0) return error.MissingValue;
@@ -442,6 +448,14 @@ fn printUsage() void {
     });
 }
 
+fn missingAstroImportPlanFlag(opts: Options) ?[]const u8 {
+    if (!opts.root_explicit) return "--root";
+    if (opts.content_root == null) return "--content-root";
+    if (opts.project_id == null) return "--project-id";
+    if (!opts.out_explicit) return "--out";
+    return null;
+}
+
 pub fn main(init: std.process.Init) u8 {
     const cold = init.arena.allocator();
     const gpa = init.gpa;
@@ -493,6 +507,10 @@ pub fn main(init: std.process.Init) u8 {
             };
         },
         .astro_import_plan => {
+            if (missingAstroImportPlanFlag(opts)) |flag| {
+                std.log.err("astro-import-plan requires explicit {s}", .{flag});
+                return ExitCode.usage.int();
+            }
             const content_root = opts.content_root orelse {
                 std.log.err("astro-import-plan requires --content-root=RELATIVE_DIR", .{});
                 return ExitCode.usage.int();
@@ -766,6 +784,29 @@ test "parseOptions: defaults and astro flags" {
     try std.testing.expectEqualStrings("./fixtures/mini-astro", o2.root_dir);
     try std.testing.expectEqualStrings("./.tmp-report", o2.out_dir);
     try std.testing.expect(o2.quiet);
+}
+
+test "astro-import-plan requires root content-root project-id and out explicitly" {
+    const complete = try parseOptions(&.{
+        "boris-migration-lab",
+        "--mode=astro-import-plan",
+        "--root=fixture",
+        "--content-root=content",
+        "--project-id=fixture",
+        "--out=output",
+    });
+    try std.testing.expect(missingAstroImportPlanFlag(complete) == null);
+
+    const cases = [_]struct { args: []const []const u8, missing: []const u8 }{
+        .{ .args = &.{ "x", "--mode=astro-import-plan", "--content-root=content", "--project-id=p", "--out=o" }, .missing = "--root" },
+        .{ .args = &.{ "x", "--mode=astro-import-plan", "--root=r", "--project-id=p", "--out=o" }, .missing = "--content-root" },
+        .{ .args = &.{ "x", "--mode=astro-import-plan", "--root=r", "--content-root=content", "--out=o" }, .missing = "--project-id" },
+        .{ .args = &.{ "x", "--mode=astro-import-plan", "--root=r", "--content-root=content", "--project-id=p" }, .missing = "--out" },
+    };
+    for (cases) |case| {
+        const options = try parseOptions(case.args);
+        try std.testing.expectEqualStrings(case.missing, missingAstroImportPlanFlag(options).?);
+    }
 }
 
 test "parseOptions: wordpress flags" {

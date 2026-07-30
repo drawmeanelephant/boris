@@ -56,6 +56,10 @@ From **`tools/migration-lab/`** (Zig **0.16+**):
 zig build
 zig build test
 
+# Real Draft 2020-12 contract matrix (test-only Ajv; no Boris runtime dependency)
+npm --prefix schema-validation ci --ignore-scripts
+zig build schema-test
+
 # Astro archaeology
 zig build run -- --mode=astro --root=./fixtures/mini-astro --out=./.migration-report
 
@@ -172,8 +176,8 @@ zig build --build-file tools/migration-lab/build.zig run -- \
 | `-h`, `--help` | | Print usage; exit 0 |
 | `-q`, `--quiet` | off | Suppress progress lines |
 | `--mode=MODE` | `astro` | `astro`, `astro-import-plan`, `wordpress` (`wp` / `wxr`), `wordpress-theme` (`wp-theme` / `kubrick-theme`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), `starlight` (`sl` / `evcc`), `asset-filename` (`assets` / `asset-compat` / `filename-compat`), `theme-archaeology` (`theme` / `theme-arch` / `theme-inventory`), or `theme-materialize` (`materialize` / `theme-materialise`) |
-| `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**) |
-| `--root=DIR` | `.` | Astro archaeology root, Starlight project root, asset-filename content tree, theme scan root, or generated HTML tree for `link-audit` |
+| `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**); must be explicit for `astro-import-plan` |
+| `--root=DIR` | `.` | Astro archaeology root, Starlight project root, asset-filename content tree, theme scan root, or generated HTML tree for `link-audit`; must be explicit for `astro-import-plan` |
 | `--content-root=RELATIVE_DIR` | | Required by `astro-import-plan`; approved plain-Markdown root relative to `--root` |
 | `--project-id=ID` | | Required by `astro-import-plan`; stable importer identity namespace |
 | `--previous-manifest=FILE` | | Optional valid completed-apply evidence; preserves same-path import-record IDs only |
@@ -228,9 +232,13 @@ Exit codes: **0** success, **2** usage, **3** I/O error.
     mutation. Successful reruns replace the complete owned tree, so stale
     generated files cannot survive.
 14. **Astro import plan** — never applies a plan, writes content, copies an
-    asset, executes project code, or treats an inferred route as observed. Its
-    exact supported profile and digest algorithm are in
-    [`astro-import-plan.md`](../../docs/contracts/astro-import-plan.md).
+   asset, executes project code, or treats an inferred route as observed. Its
+   exact supported profile and digest algorithm are in
+   [`astro-import-plan.md`](../../docs/contracts/astro-import-plan.md). Every
+   selected content-root component is opened without following symlinks.
+15. **Astro import schemas** — Ajv is a test-only locked dependency under
+   `schema-validation/`; it is not linked into Boris, shipped in product
+   artifacts, or required by ordinary compiler execution.
 
 ---
 
