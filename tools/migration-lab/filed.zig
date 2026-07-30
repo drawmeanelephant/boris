@@ -237,8 +237,17 @@ const ParsedSource = struct {
     parent_norm: ParentNormalization,
 };
 
+fn lineWithoutCr(line: []const u8) []const u8 {
+    return if (line.len > 0 and line[line.len - 1] == '\r') line[0 .. line.len - 1] else line;
+}
+
 fn parseSource(allocator: std.mem.Allocator, raw: []const u8, fallback_title: []const u8) !ParsedSource {
-    if (!std.mem.startsWith(u8, raw, "---\n")) {
+    // The lab must not turn encoding or fence failures into plausible pages.
+    if (!std.unicode.utf8ValidateSlice(raw) or std.mem.startsWith(u8, raw, "\xef\xbb\xbf")) {
+        return error.InvalidUtf8;
+    }
+    const opening_len: usize = if (std.mem.startsWith(u8, raw, "---\r\n")) 5 else if (std.mem.startsWith(u8, raw, "---\n")) 4 else 0;
+    if (opening_len == 0) {
         return .{
             .title = fallback_title,
             .frontmatter = "",
@@ -247,26 +256,36 @@ fn parseSource(allocator: std.mem.Allocator, raw: []const u8, fallback_title: []
             .parent_norm = .{ .status = .missing },
         };
     }
-    const end_start = std.mem.indexOfPos(u8, raw, 4, "\n---\n") orelse {
-        return .{
-            .title = fallback_title,
-            .frontmatter = raw,
-            .body = "",
-            .unmapped_fields = &.{},
-            .parent_norm = .{ .status = .missing },
-        };
-    };
-    const frontmatter = raw[4..end_start];
+    var end_start: ?usize = null;
+    var body_start: usize = raw.len;
+    var scan_pos = opening_len;
+    while (scan_pos <= raw.len) {
+        const line_end = std.mem.indexOfScalarPos(u8, raw, scan_pos, '\n') orelse raw.len;
+        if (std.mem.eql(u8, lineWithoutCr(raw[scan_pos..line_end]), "---")) {
+            end_start = scan_pos;
+            body_start = if (line_end < raw.len) line_end + 1 else raw.len;
+            break;
+        }
+        if (line_end == raw.len) break;
+        scan_pos = line_end + 1;
+    }
+    const closing_start = end_start orelse return error.UnterminatedFrontmatter;
+    const frontmatter = raw[opening_len..closing_start];
     var title: []const u8 = fallback_title;
     var unmapped: std.ArrayList([]const u8) = .empty;
+    var seen_keys: std.ArrayList([]const u8) = .empty;
+    errdefer seen_keys.deinit(allocator);
     var pos: usize = 0;
     while (pos < frontmatter.len) {
         const line_end = std.mem.indexOfScalarPos(u8, frontmatter, pos, '\n') orelse frontmatter.len;
-        const line = frontmatter[pos..line_end];
+        const line = lineWithoutCr(frontmatter[pos..line_end]);
         if (line.len > 0 and line[0] != ' ' and line[0] != '\t') {
             if (std.mem.indexOfScalar(u8, line, ':')) |colon| {
                 const key = trim(line[0..colon]);
                 var value = trim(line[colon + 1 ..]);
+                if (key.len == 0) return error.MalformedFrontmatter;
+                for (seen_keys.items) |seen| if (std.mem.eql(u8, seen, key)) return error.DuplicateFrontmatterKey;
+                try seen_keys.append(allocator, key);
                 // title is mapped; parent* keys are handled by normalizeParentKeys.
                 // All other keys remain visible as review/unmapped items.
                 if (std.mem.eql(u8, key, "title")) {
@@ -275,6 +294,8 @@ fn parseSource(allocator: std.mem.Allocator, raw: []const u8, fallback_title: []
                 } else if (!isParentKey(key)) {
                     try unmapped.append(allocator, try allocator.dupe(u8, key));
                 }
+            } else {
+                return error.MalformedFrontmatter;
             }
         }
         pos = if (line_end == frontmatter.len) frontmatter.len else line_end + 1;
@@ -284,7 +305,7 @@ fn parseSource(allocator: std.mem.Allocator, raw: []const u8, fallback_title: []
     return .{
         .title = title,
         .frontmatter = frontmatter,
-        .body = raw[end_start + "\n---\n".len ..],
+        .body = raw[body_start..],
         .unmapped_fields = try unmapped.toOwnedSlice(allocator),
         .parent_norm = parent_norm,
     };
@@ -747,6 +768,24 @@ test "parent normalize: parentEntry only" {
     try std.testing.expectEqual(@as(usize, 1), n.original_keys.len);
     try std.testing.expectEqualStrings("parentEntry", n.original_keys[0].key);
     try std.testing.expectEqual(@as(usize, 3), n.original_keys[0].line);
+}
+
+test "parse source: accepts CRLF and preserves body bytes" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const parsed = try parseSource(arena.allocator(), "---\r\ntitle: CRLF\r\n---\r\nbody\r\n", "fallback");
+    try std.testing.expectEqualStrings("CRLF", parsed.title);
+    try std.testing.expectEqualStrings("body\r\n", parsed.body);
+}
+
+test "parse source: rejects encoding and fence failures" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectError(error.InvalidUtf8, parseSource(a, "\xef\xbb\xbf---\n---\n", "fallback"));
+    try std.testing.expectError(error.UnterminatedFrontmatter, parseSource(a, "---\ntitle: Missing close\n", "fallback"));
+    try std.testing.expectError(error.MalformedFrontmatter, parseSource(a, "---\ntitle Missing colon\n---\n", "fallback"));
+    try std.testing.expectError(error.DuplicateFrontmatterKey, parseSource(a, "---\ntitle: One\ntitle: Two\n---\n", "fallback"));
 }
 
 test "parent normalize: parent_entry only" {

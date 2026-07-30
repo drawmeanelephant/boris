@@ -483,6 +483,12 @@ Rules:
 `parent_review` array for conflict/invalid rows. See
 [`docs/dogfood/filed-parent-key-normalize.md`](../../docs/dogfood/filed-parent-key-normalize.md).
 
+The adapter rejects invalid UTF-8 (including a leading BOM), malformed
+top-level field lines, duplicate keys, and unterminated frontmatter before
+writing any converted record. Existing indented Astro/YAML-shaped material is
+still inventoried as an unmapped source field rather than interpreted. CRLF
+frontmatter is accepted and body bytes are preserved after the closing fence.
+
 ### Provenance / outputs
 
 `provenance_manifest.json` retains every raw source frontmatter block, output
