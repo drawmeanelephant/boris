@@ -488,6 +488,11 @@ top-level field lines, duplicate keys, and unterminated frontmatter before
 writing any converted record. Existing indented Astro/YAML-shaped material is
 still inventoried as an unmapped source field rather than interpreted. CRLF
 frontmatter is accepted and body bytes are preserved after the closing fence.
+Comment lines are ignored as fields, while indentationless sequence
+continuations remain review-only under their owning unmapped field. The only
+mapped source scalar, `title`, must fit Boris's one-line 512-byte scalar
+grammar; block scalars, YAML escapes, structured values, and oversized titles
+fail before conversion.
 
 ### Provenance / outputs
 

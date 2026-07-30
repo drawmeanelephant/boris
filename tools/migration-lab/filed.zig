@@ -97,6 +97,42 @@ fn stripScalarQuotes(value: []const u8) []const u8 {
     return value;
 }
 
+fn isPlainSourceKey(key: []const u8) bool {
+    if (key.len == 0 or key.len > 128) return false;
+    for (key, 0..) |c, i| {
+        const valid = (c >= 'a' and c <= 'z') or
+            (c >= 'A' and c <= 'Z') or
+            (c >= '0' and c <= '9') or
+            c == '_' or c == '-';
+        if (!valid or (i == 0 and c >= '0' and c <= '9')) return false;
+    }
+    return true;
+}
+
+fn parseMappedTitle(raw: []const u8) ![]const u8 {
+    const value = trim(raw);
+    if (value.len == 0) return error.EmptyTitleValue;
+    if (value[0] == '|' or value[0] == '>' or value[0] == '[' or value[0] == '{' or
+        value[0] == '&' or value[0] == '*') return error.UnsupportedTitleValue;
+    if (std.mem.indexOfScalar(u8, value, '\r') != null or std.mem.indexOfScalar(u8, value, '\n') != null) {
+        return error.UnsupportedTitleValue;
+    }
+
+    const parsed = if (value[0] == '"') blk: {
+        if (value.len < 2 or value[value.len - 1] != '"') return error.UnsupportedTitleValue;
+        const inner = value[1 .. value.len - 1];
+        if (std.mem.indexOfScalar(u8, inner, '"') != null or std.mem.indexOfScalar(u8, inner, '\\') != null or inner.len == 0) {
+            return error.UnsupportedTitleValue;
+        }
+        break :blk inner;
+    } else blk: {
+        if (value[0] == '\'' or std.mem.indexOfScalar(u8, value, '"') != null) return error.UnsupportedTitleValue;
+        break :blk value;
+    };
+    if (parsed.len > 512) return error.TitleTooLong;
+    return parsed;
+}
+
 /// Local mirror of Boris entity-id shape rules (no product import).
 /// Parent values must be plain entity ids, never paths with `..` or spaces.
 pub fn isSafeParentId(id: []const u8) bool {
@@ -243,9 +279,8 @@ fn lineWithoutCr(line: []const u8) []const u8 {
 
 fn parseSource(allocator: std.mem.Allocator, raw: []const u8, fallback_title: []const u8) !ParsedSource {
     // The lab must not turn encoding or fence failures into plausible pages.
-    if (!std.unicode.utf8ValidateSlice(raw) or std.mem.startsWith(u8, raw, "\xef\xbb\xbf")) {
-        return error.InvalidUtf8;
-    }
+    if (!std.unicode.utf8ValidateSlice(raw)) return error.InvalidUtf8;
+    if (std.mem.startsWith(u8, raw, "\xef\xbb\xbf")) return error.UnexpectedBom;
     const opening_len: usize = if (std.mem.startsWith(u8, raw, "---\r\n")) 5 else if (std.mem.startsWith(u8, raw, "---\n")) 4 else 0;
     if (opening_len == 0) {
         return .{
@@ -275,22 +310,32 @@ fn parseSource(allocator: std.mem.Allocator, raw: []const u8, fallback_title: []
     var unmapped: std.ArrayList([]const u8) = .empty;
     var seen_keys: std.ArrayList([]const u8) = .empty;
     errdefer seen_keys.deinit(allocator);
+    var pending_sequence_key: ?[]const u8 = null;
     var pos: usize = 0;
     while (pos < frontmatter.len) {
         const line_end = std.mem.indexOfScalarPos(u8, frontmatter, pos, '\n') orelse frontmatter.len;
         const line = lineWithoutCr(frontmatter[pos..line_end]);
-        if (line.len > 0 and line[0] != ' ' and line[0] != '\t') {
+        const trimmed_line = trim(line);
+        if (trimmed_line.len == 0 or trimmed_line[0] == '#') {
+            // Comments are source evidence, not fields.
+        } else if (pending_sequence_key != null and std.mem.startsWith(u8, trimmed_line, "- ")) {
+            // Do not interpret YAML sequences. The owning field is already
+            // unmapped, and every continuation remains review-only.
+            if (std.mem.eql(u8, pending_sequence_key.?, "title")) return error.UnsupportedTitleValue;
+        } else if (line.len > 0 and line[0] != ' ' and line[0] != '\t') {
+            pending_sequence_key = null;
             if (std.mem.indexOfScalar(u8, line, ':')) |colon| {
                 const key = trim(line[0..colon]);
-                var value = trim(line[colon + 1 ..]);
-                if (key.len == 0) return error.MalformedFrontmatter;
+                const value = trim(line[colon + 1 ..]);
+                if (!isPlainSourceKey(key)) return error.MalformedSourceKey;
                 for (seen_keys.items) |seen| if (std.mem.eql(u8, seen, key)) return error.DuplicateFrontmatterKey;
                 try seen_keys.append(allocator, key);
+                if (value.len == 0) pending_sequence_key = key;
                 // title is mapped; parent* keys are handled by normalizeParentKeys.
                 // All other keys remain visible as review/unmapped items.
                 if (std.mem.eql(u8, key, "title")) {
-                    value = stripScalarQuotes(value);
-                    if (value.len > 0) title = try allocator.dupe(u8, value);
+                    title = try allocator.dupe(u8, try parseMappedTitle(value));
+                    pending_sequence_key = null;
                 } else if (!isParentKey(key)) {
                     try unmapped.append(allocator, try allocator.dupe(u8, key));
                 }
@@ -778,11 +823,34 @@ test "parse source: accepts CRLF and preserves body bytes" {
     try std.testing.expectEqualStrings("body\r\n", parsed.body);
 }
 
+test "parse source: accepts comments and inventories indentationless sequences" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const parsed = try parseSource(arena.allocator(), "---\n# retained migration note\ntitle: Filing Report\ntags:\n- one\n- two\nassetMeta:\n  width: 800\n---\nbody\n", "fallback");
+    try std.testing.expectEqualStrings("Filing Report", parsed.title);
+    try std.testing.expectEqual(@as(usize, 2), parsed.unmapped_fields.len);
+    try std.testing.expectEqualStrings("tags", parsed.unmapped_fields[0]);
+    try std.testing.expectEqualStrings("assetMeta", parsed.unmapped_fields[1]);
+}
+
+test "parse source: rejects malformed keys and unsafe mapped titles" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectError(error.MalformedSourceKey, parseSource(a, "---\n- broken: value\n---\n", "fallback"));
+    try std.testing.expectError(error.UnsupportedTitleValue, parseSource(a, "---\ntitle: |\n  many\n---\n", "fallback"));
+    var long_title: [513]u8 = undefined;
+    @memset(&long_title, 'a');
+    const source = try std.fmt.allocPrint(a, "---\ntitle: {s}\n---\n", .{long_title[0..]});
+    try std.testing.expectError(error.TitleTooLong, parseSource(a, source, "fallback"));
+}
+
 test "parse source: rejects encoding and fence failures" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    try std.testing.expectError(error.InvalidUtf8, parseSource(a, "\xef\xbb\xbf---\n---\n", "fallback"));
+    try std.testing.expectError(error.InvalidUtf8, parseSource(a, &[_]u8{ 0xff, 0xfe }, "fallback"));
+    try std.testing.expectError(error.UnexpectedBom, parseSource(a, "\xef\xbb\xbf---\n---\n", "fallback"));
     try std.testing.expectError(error.UnterminatedFrontmatter, parseSource(a, "---\ntitle: Missing close\n", "fallback"));
     try std.testing.expectError(error.MalformedFrontmatter, parseSource(a, "---\ntitle Missing colon\n---\n", "fallback"));
     try std.testing.expectError(error.DuplicateFrontmatterKey, parseSource(a, "---\ntitle: One\ntitle: Two\n---\n", "fallback"));
