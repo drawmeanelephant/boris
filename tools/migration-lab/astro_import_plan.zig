@@ -689,7 +689,9 @@ fn referenceInventory(a: std.mem.Allocator, body: []const u8) ![]const Reference
 /// catch-and-continue path here: a failed iterator, stat, read, or link read
 /// aborts before Publication.begin is reached, so partial evidence is never
 /// published.
-fn openSelectedContentRoot(io: Io, root: Io.Dir, content_root: []const u8) !Io.Dir {
+/// Opens every selected-root component without following a symlink. Apply
+/// reuses this exact capability walk when it reads reviewed source bytes.
+pub fn openSelectedContentRoot(io: Io, root: Io.Dir, content_root: []const u8) !Io.Dir {
     var current = root;
     var owned: ?Io.Dir = null;
     errdefer if (owned) |dir| dir.close(io);
@@ -802,7 +804,10 @@ fn parsePrevious(a: std.mem.Allocator, bytes: []const u8, project: []const u8, p
     if (entries != .array) return error.InvalidPreviousManifest;
     var result: std.ArrayList(Previous) = .empty;
     errdefer {
-        for (result.items) |prior| { a.free(prior.source_path); a.free(prior.import_id); }
+        for (result.items) |prior| {
+            a.free(prior.source_path);
+            a.free(prior.import_id);
+        }
         result.deinit(a);
     }
     for (entries.array.items) |entry| {
@@ -1120,7 +1125,9 @@ fn sourceTreeFingerprint(a: std.mem.Allocator, records: []const Record) ![]u8 {
 
 fn sortRecords(records: []Record) void {
     std.mem.sort(Record, records, {}, struct {
-        fn less(_: void, x: Record, y: Record) bool { return std.mem.order(u8, x.source_path, y.source_path) == .lt; }
+        fn less(_: void, x: Record, y: Record) bool {
+            return std.mem.order(u8, x.source_path, y.source_path) == .lt;
+        }
     }.less);
 }
 
@@ -1305,6 +1312,38 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RunOptions) !void {
     if (!opts.quiet) std.debug.print("migration-lab: wrote {s}/source_snapshot.json, import_plan.json, REPORT.md\n", .{opts.out_dir});
 }
 
+/// Rebuilds the complete Slice A snapshot from the live source tree and
+/// compares its canonical bytes with reviewed evidence.  Apply code uses this
+/// deliberately narrow seam rather than trusting JSON shape or a list of
+/// writable rows: hidden files, directories, symlinks, and unsupported inputs
+/// remain part of the source-tree fingerprint.
+pub fn verifyReviewedSnapshot(
+    io: Io,
+    gpa: std.mem.Allocator,
+    root_dir: []const u8,
+    content_root: []const u8,
+    project_id: []const u8,
+    reviewed_snapshot: []const u8,
+) !void {
+    if (!validProjectId(project_id) or !validRelative(content_root)) return error.InvalidImportPlanInput;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const policy = try sha256Hex(a, policy_bytes);
+    var root = try Io.Dir.cwd().openDir(io, root_dir, .{ .iterate = true, .follow_symlinks = false });
+    defer root.close(io);
+    var content = try openSelectedContentRoot(io, root, content_root);
+    defer content.close(io);
+    var records: std.ArrayList(Record) = .empty;
+    try scan(io, a, content, "", project_id, &records);
+    sortRecords(records.items);
+    const findings = try finalizeRecords(a, records.items, &.{});
+    _ = findings;
+    const tree = try sourceTreeFingerprint(a, records.items);
+    const rebuilt = try emitSnapshot(a, project_id, content_root, policy, tree, records.items);
+    if (!std.mem.eql(u8, rebuilt, reviewed_snapshot)) return error.SourceSnapshotMismatch;
+}
+
 test "record ids and policy hashes are deterministic" {
     const a = std.testing.allocator;
     const one = try recordId(a, "fixture", "docs/a.md");
@@ -1358,9 +1397,12 @@ test "tree fingerprint covers hidden paths, kinds, targets, and hashes" {
     std.crypto.hash.sha2.Sha256.hash(stream, &raw, .{});
     var expected: [64]u8 = undefined;
     const chars = "0123456789abcdef";
-    for (raw, 0..) |byte, i| { expected[i * 2] = chars[byte >> 4]; expected[i * 2 + 1] = chars[byte & 15]; }
+    for (raw, 0..) |byte, i| {
+        expected[i * 2] = chars[byte >> 4];
+        expected[i * 2 + 1] = chars[byte & 15];
+    }
     try std.testing.expectEqualStrings(&expected, got);
-    const changed = [_]Record{records[0], .{ .source_path = "link", .source_kind = "symlink", .byte_hash = null, .frontmatter_hash = null, .body_hash = null, .symlink_target = "../other", .import_id = null, .base_action = .quarantine, .action = .quarantine, .reason = "test" }};
+    const changed = [_]Record{ records[0], .{ .source_path = "link", .source_kind = "symlink", .byte_hash = null, .frontmatter_hash = null, .body_hash = null, .symlink_target = "../other", .import_id = null, .base_action = .quarantine, .action = .quarantine, .reason = "test" } };
     const tampered = try sourceTreeFingerprint(std.testing.allocator, &changed);
     defer std.testing.allocator.free(tampered);
     try std.testing.expect(!std.mem.eql(u8, got, tampered));

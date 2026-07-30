@@ -49,6 +49,7 @@ const link_audit = @import("link_audit.zig");
 const frontmatter_review = @import("frontmatter_review.zig");
 const publication = @import("publication.zig");
 const astro_import_plan = @import("astro_import_plan.zig");
+const astro_import_apply = @import("astro_import_apply.zig");
 
 pub const ExitCode = enum(u8) {
     success = 0,
@@ -63,6 +64,7 @@ pub const ExitCode = enum(u8) {
 pub const Mode = enum {
     astro,
     astro_import_plan,
+    astro_import_apply,
     wordpress,
     instagram,
     obsidian,
@@ -79,6 +81,7 @@ pub const Mode = enum {
     pub fn parse(s: []const u8) ?Mode {
         if (std.mem.eql(u8, s, "astro")) return .astro;
         if (std.mem.eql(u8, s, "astro-import-plan")) return .astro_import_plan;
+        if (std.mem.eql(u8, s, "astro-import-apply")) return .astro_import_apply;
         if (std.mem.eql(u8, s, "wordpress") or std.mem.eql(u8, s, "wp") or std.mem.eql(u8, s, "wxr")) return .wordpress;
         if (std.mem.eql(u8, s, "instagram") or std.mem.eql(u8, s, "ig") or std.mem.eql(u8, s, "takeout")) return .instagram;
         if (std.mem.eql(u8, s, "obsidian") or std.mem.eql(u8, s, "obs") or std.mem.eql(u8, s, "vault")) return .obsidian;
@@ -115,10 +118,18 @@ pub const Options = struct {
     root_explicit: bool = false,
     /// Explicit Astro content root, relative to --root, for plan-only import.
     content_root: ?[]const u8 = null,
+    content_root_explicit: bool = false,
     /// Stable project identity required by plan-only import.
     project_id: ?[]const u8 = null,
+    project_id_explicit: bool = false,
     /// Optional completed-apply manifest used only as identity evidence.
     previous_manifest: ?[]const u8 = null,
+    /// Reviewed Slice A plan for initial-create apply.
+    plan_path: ?[]const u8 = null,
+    plan_explicit: bool = false,
+    /// Previously nonexistent Boris source destination for initial-create apply.
+    destination: ?[]const u8 = null,
+    destination_explicit: bool = false,
     /// WordPress WXR/XML export path.
     wxr_path: ?[]const u8 = null,
     /// Optional local media directory (WordPress uploads mirror).
@@ -172,29 +183,39 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
         } else if (std.mem.startsWith(u8, arg, "--root=")) {
             const value = arg["--root=".len..];
             if (value.len == 0) return error.MissingValue;
+            if (options.root_explicit) return error.InvalidValue;
             options.root_dir = value;
             options.root_explicit = true;
         } else if (std.mem.eql(u8, arg, "--root")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            if (options.root_explicit) return error.InvalidValue;
             options.root_dir = args[index];
             options.root_explicit = true;
         } else if (std.mem.startsWith(u8, arg, "--content-root=")) {
             const value = arg["--content-root=".len..];
             if (value.len == 0) return error.MissingValue;
+            if (options.content_root_explicit) return error.InvalidValue;
             options.content_root = value;
+            options.content_root_explicit = true;
         } else if (std.mem.eql(u8, arg, "--content-root")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            if (options.content_root_explicit) return error.InvalidValue;
             options.content_root = args[index];
+            options.content_root_explicit = true;
         } else if (std.mem.startsWith(u8, arg, "--project-id=")) {
             const value = arg["--project-id=".len..];
             if (value.len == 0) return error.MissingValue;
+            if (options.project_id_explicit) return error.InvalidValue;
             options.project_id = value;
+            options.project_id_explicit = true;
         } else if (std.mem.eql(u8, arg, "--project-id")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            if (options.project_id_explicit) return error.InvalidValue;
             options.project_id = args[index];
+            options.project_id_explicit = true;
         } else if (std.mem.startsWith(u8, arg, "--previous-manifest=")) {
             const value = arg["--previous-manifest=".len..];
             if (value.len == 0) return error.MissingValue;
@@ -203,6 +224,30 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
             options.previous_manifest = args[index];
+        } else if (std.mem.startsWith(u8, arg, "--plan=")) {
+            const value = arg["--plan=".len..];
+            if (value.len == 0) return error.MissingValue;
+            if (options.plan_explicit) return error.InvalidValue;
+            options.plan_path = value;
+            options.plan_explicit = true;
+        } else if (std.mem.eql(u8, arg, "--plan")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            if (options.plan_explicit) return error.InvalidValue;
+            options.plan_path = args[index];
+            options.plan_explicit = true;
+        } else if (std.mem.startsWith(u8, arg, "--destination=")) {
+            const value = arg["--destination=".len..];
+            if (value.len == 0) return error.MissingValue;
+            if (options.destination_explicit) return error.InvalidValue;
+            options.destination = value;
+            options.destination_explicit = true;
+        } else if (std.mem.eql(u8, arg, "--destination")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            if (options.destination_explicit) return error.InvalidValue;
+            options.destination = args[index];
+            options.destination_explicit = true;
         } else if (std.mem.startsWith(u8, arg, "--wxr=")) {
             const value = arg["--wxr=".len..];
             if (value.len == 0) return error.MissingValue;
@@ -333,7 +378,7 @@ fn printUsage() void {
         \\Common options:
         \\  -h, --help         Show this help and exit
         \\  -q, --quiet        Suppress progress lines
-        \\  --mode=MODE        astro (default) | astro-import-plan | wordpress | wordpress-theme | instagram | obsidian | notion | filed | starlight | asset-filename | theme-archaeology | theme-materialize | link-audit | frontmatter-review
+        \\  --mode=MODE        astro (default) | astro-import-plan | astro-import-apply | wordpress | wordpress-theme | instagram | obsidian | notion | filed | starlight | asset-filename | theme-archaeology | theme-materialize | link-audit | frontmatter-review
         \\  --out=DIR          Output directory (default: migration-report)
         \\
         \\Frontmatter review (read-only unsupported-key audit):
@@ -355,6 +400,12 @@ fn printUsage() void {
         \\  Writes: source_snapshot.json, import_plan.json, REPORT.md
         \\  Supports only explicit plain .md files with scalar closed frontmatter.
         \\  MDX, Astro, executable syntax, unknown metadata, and symlinks are review rows.
+        \\
+        \\Astro initial-create apply (developer-only):
+        \\  --mode=astro-import-apply --root=DIR --content-root=RELATIVE_DIR
+        \\      --project-id=ID --plan=import_plan.json --destination=NEW_DIR
+        \\  Requires the reviewed source_snapshot.json beside --plan. Refuses any
+        \\  existing destination and writes only initial create rows atomically.
         \\
         \\Theme archaeology (read-only Astro/Starlight theme inventory):
         \\  --mode=theme-archaeology  Inventory layouts, CSS, fonts/images, nav/sidebar,
@@ -456,6 +507,15 @@ fn missingAstroImportPlanFlag(opts: Options) ?[]const u8 {
     return null;
 }
 
+fn missingAstroImportApplyFlag(opts: Options) ?[]const u8 {
+    if (!opts.root_explicit) return "--root";
+    if (opts.content_root == null) return "--content-root";
+    if (opts.project_id == null) return "--project-id";
+    if (opts.plan_path == null) return "--plan";
+    if (opts.destination == null) return "--destination";
+    return null;
+}
+
 pub fn main(init: std.process.Init) u8 {
     const cold = init.arena.allocator();
     const gpa = init.gpa;
@@ -529,6 +589,23 @@ pub fn main(init: std.process.Init) u8 {
             }) catch |err| {
                 std.log.err("migration-lab (astro-import-plan) failed: {s}", .{@errorName(err)});
                 return if (err == error.InvalidImportPlanInput or err == error.InvalidPreviousManifest) ExitCode.usage.int() else ExitCode.io_error.int();
+            };
+        },
+        .astro_import_apply => {
+            if (missingAstroImportApplyFlag(opts)) |flag| {
+                std.log.err("astro-import-apply requires explicit {s}", .{flag});
+                return ExitCode.usage.int();
+            }
+            astro_import_apply.run(io, gpa, .{
+                .root_dir = opts.root_dir,
+                .content_root = opts.content_root.?,
+                .project_id = opts.project_id.?,
+                .plan_path = opts.plan_path.?,
+                .destination = opts.destination.?,
+                .quiet = opts.quiet,
+            }) catch |err| {
+                std.log.err("migration-lab (astro-import-apply) failed: {s}", .{@errorName(err)});
+                return if (err == error.InvalidApplyInput or err == error.InvalidPlan or err == error.DestinationExists or err == error.UnsupportedPlanAction) ExitCode.usage.int() else ExitCode.io_error.int();
             };
         },
         .wordpress => {
@@ -749,6 +826,190 @@ pub fn main(init: std.process.Init) u8 {
 // Tests — shared CLI + WordPress unit/fixture + Astro regression
 // ---------------------------------------------------------------------------
 
+fn testReadFileAlloc(io: Io, dir: Io.Dir, path: []const u8, a: std.mem.Allocator) ![]u8 {
+    var file = try dir.openFile(io, path, .{});
+    defer file.close(io);
+    var reader = file.reader(io, &.{});
+    return reader.interface.allocRemaining(a, .unlimited);
+}
+
+fn testSha256Hex(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &digest, .{});
+    const out = try a.alloc(u8, 64);
+    const chars = "0123456789abcdef";
+    for (digest, 0..) |byte, i| {
+        out[i * 2] = chars[byte >> 4];
+        out[i * 2 + 1] = chars[byte & 15];
+    }
+    return out;
+}
+
+fn runCli(a: std.mem.Allocator, args: []const []const u8) !std.process.RunResult {
+    return std.process.run(a, std.testing.io, .{ .argv = args });
+}
+
+fn expectCliExit(a: std.mem.Allocator, args: []const []const u8, exit_code: u8) !void {
+    const result = try runCli(a, args);
+    defer a.free(result.stdout);
+    defer a.free(result.stderr);
+    switch (result.term) {
+        .exited => |code| if (code != exit_code) return error.UnexpectedExitCode,
+        else => return error.UnexpectedTermination,
+    }
+}
+
+fn countRegularFiles(io: Io, dir: Io.Dir) !usize {
+    var count: usize = 0;
+    var it = dir.iterate();
+    while (try it.next(io)) |entry| switch (entry.kind) {
+        .file => count += 1,
+        .directory => {
+            var child = try dir.openDir(io, entry.name, .{ .iterate = true });
+            defer child.close(io);
+            count += try countRegularFiles(io, child);
+        },
+        else => return error.UnexpectedOutputEntry,
+    };
+    return count;
+}
+
+test "astro import apply public CLI publishes and independently verifies the fixture" {
+    const io = std.testing.io;
+    const a = std.testing.allocator;
+    const cli = "zig-out/bin/boris-migration-lab";
+    try Io.Dir.cwd().access(io, cli, .{ .execute = true });
+
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const base = try std.fmt.allocPrint(a, ".zig-cache/tmp/{s}/astro-import-apply-cli", .{tmp.sub_path});
+    defer a.free(base);
+    const plan_out = try std.fmt.allocPrint(a, "{s}/plan", .{base});
+    defer a.free(plan_out);
+    const plan_path = try std.fmt.allocPrint(a, "{s}/import_plan.json", .{plan_out});
+    defer a.free(plan_path);
+    const snapshot_path = try std.fmt.allocPrint(a, "{s}/source_snapshot.json", .{plan_out});
+    defer a.free(snapshot_path);
+    const destination_one = try std.fmt.allocPrint(a, "{s}/destination-one", .{base});
+    defer a.free(destination_one);
+    const destination_two = try std.fmt.allocPrint(a, "{s}/destination-two", .{base});
+    defer a.free(destination_two);
+    const root = "fixtures/astro-import-apply";
+    const content_root = "src/content/docs";
+    const project_id = "astro-apply-cli-fixture";
+    const root_arg = try std.fmt.allocPrint(a, "--root={s}", .{root});
+    defer a.free(root_arg);
+    const content_root_arg = try std.fmt.allocPrint(a, "--content-root={s}", .{content_root});
+    defer a.free(content_root_arg);
+    const project_id_arg = try std.fmt.allocPrint(a, "--project-id={s}", .{project_id});
+    defer a.free(project_id_arg);
+    const plan_out_arg = try std.fmt.allocPrint(a, "--out={s}", .{plan_out});
+    defer a.free(plan_out_arg);
+    const plan_arg = try std.fmt.allocPrint(a, "--plan={s}", .{plan_path});
+    defer a.free(plan_arg);
+    const destination_one_arg = try std.fmt.allocPrint(a, "--destination={s}", .{destination_one});
+    defer a.free(destination_one_arg);
+    const destination_two_arg = try std.fmt.allocPrint(a, "--destination={s}", .{destination_two});
+    defer a.free(destination_two_arg);
+
+    try expectCliExit(a, &.{ cli, "--mode=astro-import-plan", root_arg, content_root_arg, project_id_arg, plan_out_arg }, 0);
+    _ = try Io.Dir.cwd().statFile(io, plan_path, .{});
+    _ = try Io.Dir.cwd().statFile(io, snapshot_path, .{});
+
+    const missing_required = [_][]const []const u8{
+        &.{ cli, "--mode=astro-import-apply", content_root_arg, project_id_arg, plan_arg, destination_one_arg },
+        &.{ cli, "--mode=astro-import-apply", root_arg, project_id_arg, plan_arg, destination_one_arg },
+        &.{ cli, "--mode=astro-import-apply", root_arg, content_root_arg, plan_arg, destination_one_arg },
+        &.{ cli, "--mode=astro-import-apply", root_arg, content_root_arg, project_id_arg, destination_one_arg },
+        &.{ cli, "--mode=astro-import-apply", root_arg, content_root_arg, project_id_arg, plan_arg },
+    };
+    for (missing_required) |args| try expectCliExit(a, args, 2);
+
+    const apply_one = [_][]const u8{ cli, "--mode=astro-import-apply", root_arg, content_root_arg, project_id_arg, plan_arg, destination_one_arg };
+    try expectCliExit(a, &apply_one, 0);
+    const manifest_path = ".boris-astro-import/manifest.json";
+    const manifest_one_path = try std.fmt.allocPrint(a, "{s}/{s}", .{ destination_one, manifest_path });
+    defer a.free(manifest_one_path);
+    const manifest_one = try testReadFileAlloc(io, Io.Dir.cwd(), manifest_one_path, a);
+    defer a.free(manifest_one);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, manifest_one, .{});
+    defer parsed.deinit();
+    const outer = parsed.value.object;
+    const manifest_digest = outer.get("manifest_digest").?.string;
+    const digest_marker = ",\"digest_input\":";
+    const digest_at = std.mem.indexOf(u8, manifest_one, digest_marker) orelse return error.InvalidManifest;
+    const recomputed_manifest_digest = try testSha256Hex(a, manifest_one[digest_at + digest_marker.len .. manifest_one.len - 1]);
+    defer a.free(recomputed_manifest_digest);
+    try std.testing.expectEqualStrings(manifest_digest, recomputed_manifest_digest);
+    const records = outer.get("digest_input").?.object.get("records").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), records.len);
+
+    const destination_one_dir = try Io.Dir.cwd().openDir(io, destination_one, .{ .iterate = true });
+    defer destination_one_dir.close(io);
+    try std.testing.expectEqual(@as(usize, 6), try countRegularFiles(io, destination_one_dir));
+    for (records) |record| {
+        const row = record.object;
+        const generated_path = row.get("boris_destination_path").?.string;
+        const generated_hash = row.get("generated_byte_hash").?.string;
+        const base_hash = row.get("base_blob_hash").?.string;
+        const generated_one = try testReadFileAlloc(io, destination_one_dir, generated_path, a);
+        defer a.free(generated_one);
+        const recomputed_generated = try testSha256Hex(a, generated_one);
+        defer a.free(recomputed_generated);
+        try std.testing.expectEqualStrings(generated_hash, recomputed_generated);
+        const blob_path = try std.fmt.allocPrint(a, ".boris-astro-import/base/{s}.md", .{base_hash});
+        defer a.free(blob_path);
+        const blob = try testReadFileAlloc(io, destination_one_dir, blob_path, a);
+        defer a.free(blob);
+        try std.testing.expectEqualStrings(generated_one, blob);
+        const recomputed_blob = try testSha256Hex(a, blob);
+        defer a.free(recomputed_blob);
+        try std.testing.expectEqualStrings(base_hash, recomputed_blob);
+    }
+    try std.testing.expectError(error.FileNotFound, destination_one_dir.statFile(io, "content/quarantined.mdx", .{}));
+    try std.testing.expectError(error.FileNotFound, destination_one_dir.statFile(io, "content/unsupported.txt", .{}));
+    const intro = try testReadFileAlloc(io, destination_one_dir, "content/intro.md", a);
+    defer a.free(intro);
+    try std.testing.expect(std.mem.indexOf(u8, intro, "[this link](./nested/overview.md)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, intro, "![this asset](/images/logo.svg)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, intro, "`{ literal braces }` stay inline code.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, intro, "Unicode café") != null);
+
+    try expectCliExit(a, &apply_one, 2);
+    const manifest_after_second_apply = try testReadFileAlloc(io, destination_one_dir, manifest_path, a);
+    defer a.free(manifest_after_second_apply);
+    try std.testing.expectEqualStrings(manifest_one, manifest_after_second_apply);
+
+    const apply_two = [_][]const u8{ cli, "--mode=astro-import-apply", root_arg, content_root_arg, project_id_arg, plan_arg, destination_two_arg };
+    try expectCliExit(a, &apply_two, 0);
+    const destination_two_dir = try Io.Dir.cwd().openDir(io, destination_two, .{ .iterate = true });
+    defer destination_two_dir.close(io);
+    try std.testing.expectEqual(@as(usize, 6), try countRegularFiles(io, destination_two_dir));
+    for (records) |record| {
+        const row = record.object;
+        const generated_path = row.get("boris_destination_path").?.string;
+        const generated_one = try testReadFileAlloc(io, destination_one_dir, generated_path, a);
+        defer a.free(generated_one);
+        const generated_two = try testReadFileAlloc(io, destination_two_dir, generated_path, a);
+        defer a.free(generated_two);
+        try std.testing.expectEqualStrings(generated_one, generated_two);
+        const base_path = try std.fmt.allocPrint(a, ".boris-astro-import/base/{s}.md", .{row.get("base_blob_hash").?.string});
+        defer a.free(base_path);
+        const base_one = try testReadFileAlloc(io, destination_one_dir, base_path, a);
+        defer a.free(base_one);
+        const base_two = try testReadFileAlloc(io, destination_two_dir, base_path, a);
+        defer a.free(base_two);
+        try std.testing.expectEqualStrings(base_one, base_two);
+    }
+    const manifest_two = try testReadFileAlloc(io, destination_two_dir, manifest_path, a);
+    defer a.free(manifest_two);
+    try std.testing.expectEqualStrings(manifest_one, manifest_two);
+}
+
 // Pull Obsidian / Notion unit/fixture tests into this test binary. (Other modes
 // already declare their fixture tests in this file; do not refAllDecls Instagram
 // here — its in-module tests currently leak under the testing allocator.)
@@ -763,6 +1024,7 @@ test {
     _ = wordpress_theme;
     _ = frontmatter_review;
     _ = astro_import_plan;
+    _ = astro_import_apply;
 }
 
 test "parseOptions: defaults and astro flags" {
@@ -807,6 +1069,15 @@ test "astro-import-plan requires root content-root project-id and out explicitly
         const options = try parseOptions(case.args);
         try std.testing.expectEqualStrings(case.missing, missingAstroImportPlanFlag(options).?);
     }
+}
+
+test "astro-import-apply requires its six logical values" {
+    const complete = try parseOptions(&.{ "x", "--mode=astro-import-apply", "--root=r", "--content-root=c", "--project-id=p", "--plan=plan.json", "--destination=destination" });
+    try std.testing.expect(missingAstroImportApplyFlag(complete) == null);
+    const missing = try parseOptions(&.{ "x", "--mode=astro-import-apply", "--root=r", "--content-root=c", "--project-id=p", "--plan=plan.json" });
+    try std.testing.expectEqualStrings("--destination", missingAstroImportApplyFlag(missing).?);
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--mode=astro-import-apply", "--root=r", "--root=other", "--content-root=c", "--project-id=p", "--plan=plan.json", "--destination=destination" }));
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--mode=astro-import-apply", "--root=r", "--content-root=c", "--project-id=p", "--plan=plan.json", "--plan=other.json", "--destination=destination" }));
 }
 
 test "parseOptions: wordpress flags" {
