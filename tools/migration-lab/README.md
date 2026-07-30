@@ -6,6 +6,7 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 |------|--------|--------|
 | **astro** | Astro project/export tree | Deterministic archaeology `report.json` + `REPORT.md` |
 | **astro-import-plan** | Explicit Astro plain-Markdown content root | Read-only source snapshot + deterministic proposed-action plan |
+| **astro-import-apply** | Reviewed Slice A plan + adjacent snapshot | Atomic first publication to a new Boris source tree |
 | **wordpress** | WordPress WXR/XML + optional local media | Boris-ready Markdown under `content/` + review reports |
 | **instagram** | Unpacked Instagram data-download (Takeout) | Boris Markdown + generated theme assets + reports |
 | **obsidian** | Local Obsidian vault directory | Boris Markdown + attachments inventory + review reports |
@@ -66,6 +67,11 @@ zig build run -- --mode=astro --root=./fixtures/mini-astro --out=./.migration-re
 # Astro import planning — no source or destination content is written
 zig build run -- --mode=astro-import-plan --root=./fixtures/astro-import-plan \
   --content-root=src/content/docs --project-id=fixture-docs --out=/tmp/astro-import-plan
+
+# Astro initial-create apply — destination must not exist
+zig build run -- --mode=astro-import-apply --root=./fixtures/astro-import-plan \
+  --content-root=src/content/docs --project-id=fixture-docs \
+  --plan=.tmp/astro-import-plan/import_plan.json --destination=.tmp/astro-boris-source
 
 # WordPress WXR → Boris Markdown + reports
 zig build run -- --mode=wordpress \
@@ -175,11 +181,13 @@ zig build --build-file tools/migration-lab/build.zig run -- \
 |------|---------|---------|
 | `-h`, `--help` | | Print usage; exit 0 |
 | `-q`, `--quiet` | off | Suppress progress lines |
-| `--mode=MODE` | `astro` | `astro`, `astro-import-plan`, `wordpress` (`wp` / `wxr`), `wordpress-theme` (`wp-theme` / `kubrick-theme`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), `starlight` (`sl` / `evcc`), `asset-filename` (`assets` / `asset-compat` / `filename-compat`), `theme-archaeology` (`theme` / `theme-arch` / `theme-inventory`), or `theme-materialize` (`materialize` / `theme-materialise`) |
+| `--mode=MODE` | `astro` | `astro`, `astro-import-plan`, `astro-import-apply`, `wordpress` (`wp` / `wxr`), `wordpress-theme` (`wp-theme` / `kubrick-theme`), `instagram` (`ig` / `takeout`), `obsidian` (`obs` / `vault`), `notion` (`md-csv` / `notion-export`), `filed` (`filed-fyi`), `starlight` (`sl` / `evcc`), `asset-filename` (`assets` / `asset-compat` / `filename-compat`), `theme-archaeology` (`theme` / `theme-arch` / `theme-inventory`), or `theme-materialize` (`materialize` / `theme-materialise`) |
 | `--out=DIR` | `migration-report` | Output directory (**must differ from inputs**); must be explicit for `astro-import-plan` |
 | `--root=DIR` | `.` | Astro archaeology root, Starlight project root, asset-filename content tree, theme scan root, or generated HTML tree for `link-audit`; must be explicit for `astro-import-plan` |
-| `--content-root=RELATIVE_DIR` | | Required by `astro-import-plan`; approved plain-Markdown root relative to `--root` |
-| `--project-id=ID` | | Required by `astro-import-plan`; stable importer identity namespace |
+| `--content-root=RELATIVE_DIR` | | Required by `astro-import-plan` and `astro-import-apply`; approved plain-Markdown root relative to `--root` |
+| `--project-id=ID` | | Required by `astro-import-plan` and `astro-import-apply`; stable importer identity namespace |
+| `--plan=FILE` | | Required by `astro-import-apply`; reviewed `import_plan.json` with adjacent `source_snapshot.json` |
+| `--destination=DIR` | | Required by `astro-import-apply`; a previously nonexistent Boris source root |
 | `--previous-manifest=FILE` | | Optional valid completed-apply evidence; preserves same-path import-record IDs only |
 | `--ledger=FILE` | | Required by `theme-materialize`; adaptation ledger emitted by `theme-archaeology` |
 | `--wxr=FILE` | | WordPress WXR/XML path (implies `--mode=wordpress`) |
