@@ -118,14 +118,18 @@ pub const Options = struct {
     root_explicit: bool = false,
     /// Explicit Astro content root, relative to --root, for plan-only import.
     content_root: ?[]const u8 = null,
+    content_root_explicit: bool = false,
     /// Stable project identity required by plan-only import.
     project_id: ?[]const u8 = null,
+    project_id_explicit: bool = false,
     /// Optional completed-apply manifest used only as identity evidence.
     previous_manifest: ?[]const u8 = null,
     /// Reviewed Slice A plan for initial-create apply.
     plan_path: ?[]const u8 = null,
+    plan_explicit: bool = false,
     /// Previously nonexistent Boris source destination for initial-create apply.
     destination: ?[]const u8 = null,
+    destination_explicit: bool = false,
     /// WordPress WXR/XML export path.
     wxr_path: ?[]const u8 = null,
     /// Optional local media directory (WordPress uploads mirror).
@@ -179,29 +183,39 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
         } else if (std.mem.startsWith(u8, arg, "--root=")) {
             const value = arg["--root=".len..];
             if (value.len == 0) return error.MissingValue;
+            if (options.root_explicit) return error.InvalidValue;
             options.root_dir = value;
             options.root_explicit = true;
         } else if (std.mem.eql(u8, arg, "--root")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            if (options.root_explicit) return error.InvalidValue;
             options.root_dir = args[index];
             options.root_explicit = true;
         } else if (std.mem.startsWith(u8, arg, "--content-root=")) {
             const value = arg["--content-root=".len..];
             if (value.len == 0) return error.MissingValue;
+            if (options.content_root_explicit) return error.InvalidValue;
             options.content_root = value;
+            options.content_root_explicit = true;
         } else if (std.mem.eql(u8, arg, "--content-root")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            if (options.content_root_explicit) return error.InvalidValue;
             options.content_root = args[index];
+            options.content_root_explicit = true;
         } else if (std.mem.startsWith(u8, arg, "--project-id=")) {
             const value = arg["--project-id=".len..];
             if (value.len == 0) return error.MissingValue;
+            if (options.project_id_explicit) return error.InvalidValue;
             options.project_id = value;
+            options.project_id_explicit = true;
         } else if (std.mem.eql(u8, arg, "--project-id")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            if (options.project_id_explicit) return error.InvalidValue;
             options.project_id = args[index];
+            options.project_id_explicit = true;
         } else if (std.mem.startsWith(u8, arg, "--previous-manifest=")) {
             const value = arg["--previous-manifest=".len..];
             if (value.len == 0) return error.MissingValue;
@@ -213,19 +227,27 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
         } else if (std.mem.startsWith(u8, arg, "--plan=")) {
             const value = arg["--plan=".len..];
             if (value.len == 0) return error.MissingValue;
+            if (options.plan_explicit) return error.InvalidValue;
             options.plan_path = value;
+            options.plan_explicit = true;
         } else if (std.mem.eql(u8, arg, "--plan")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            if (options.plan_explicit) return error.InvalidValue;
             options.plan_path = args[index];
+            options.plan_explicit = true;
         } else if (std.mem.startsWith(u8, arg, "--destination=")) {
             const value = arg["--destination=".len..];
             if (value.len == 0) return error.MissingValue;
+            if (options.destination_explicit) return error.InvalidValue;
             options.destination = value;
+            options.destination_explicit = true;
         } else if (std.mem.eql(u8, arg, "--destination")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            if (options.destination_explicit) return error.InvalidValue;
             options.destination = args[index];
+            options.destination_explicit = true;
         } else if (std.mem.startsWith(u8, arg, "--wxr=")) {
             const value = arg["--wxr=".len..];
             if (value.len == 0) return error.MissingValue;
@@ -870,6 +892,8 @@ test "astro-import-apply requires its six logical values" {
     try std.testing.expect(missingAstroImportApplyFlag(complete) == null);
     const missing = try parseOptions(&.{ "x", "--mode=astro-import-apply", "--root=r", "--content-root=c", "--project-id=p", "--plan=plan.json" });
     try std.testing.expectEqualStrings("--destination", missingAstroImportApplyFlag(missing).?);
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--mode=astro-import-apply", "--root=r", "--root=other", "--content-root=c", "--project-id=p", "--plan=plan.json", "--destination=destination" }));
+    try std.testing.expectError(error.InvalidValue, parseOptions(&.{ "x", "--mode=astro-import-apply", "--root=r", "--content-root=c", "--project-id=p", "--plan=plan.json", "--plan=other.json", "--destination=destination" }));
 }
 
 test "parseOptions: wordpress flags" {

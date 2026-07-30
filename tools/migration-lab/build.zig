@@ -11,6 +11,16 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    // Initial-create apply validates every generated file through Boris's
+    // native parser before it can be published.  Keeping this as a build-time
+    // module dependency preserves the migration lab's no-runtime-dependency
+    // boundary.
+    const boris_parser = b.createModule(.{
+        .root_source_file = b.path("../../src/parser.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    root_mod.addImport("boris_parser", boris_parser);
 
     const exe = b.addExecutable(.{
         .name = "boris-migration-lab",

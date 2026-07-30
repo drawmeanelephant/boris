@@ -689,7 +689,9 @@ fn referenceInventory(a: std.mem.Allocator, body: []const u8) ![]const Reference
 /// catch-and-continue path here: a failed iterator, stat, read, or link read
 /// aborts before Publication.begin is reached, so partial evidence is never
 /// published.
-fn openSelectedContentRoot(io: Io, root: Io.Dir, content_root: []const u8) !Io.Dir {
+/// Opens every selected-root component without following a symlink. Apply
+/// reuses this exact capability walk when it reads reviewed source bytes.
+pub fn openSelectedContentRoot(io: Io, root: Io.Dir, content_root: []const u8) !Io.Dir {
     var current = root;
     var owned: ?Io.Dir = null;
     errdefer if (owned) |dir| dir.close(io);

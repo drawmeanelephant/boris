@@ -18,6 +18,9 @@ from the live root, and requires byte equality. It rejects non-null previous
 manifest state, any action other than `create`, `quarantine`, or `unsupported`,
 duplicate writable paths or final identities, malformed fields, changed source
 bytes, symlinked selected-root components, and every existing destination.
+Every candidate is rendered and passed through Boris's native parser before a
+stage is created; a generated validation failure therefore cannot leave a
+partial destination or a stale owned stage.
 
 Only `create` rows write files. Their verified source-frontmatter envelope is
 removed and replaced with canonical Boris frontmatter in this order: `id`,
@@ -36,7 +39,7 @@ hash, base-blob hash, plan digest, and a recomputable manifest digest. No
 timestamps, hosts, machine paths, asset copies, or executable content enter it.
 
 Immediately before publication the destination is checked again, then the
-sibling stage is renamed atomically. Any earlier error removes only the stage
+sibling stage is renamed with no-replace semantics. Any earlier error removes only the stage
 recognized by its exact marker; it never modifies a pre-existing destination.
 
 Deferred: clean re-import, keep/update behavior, BASE/LOCAL/INCOMING conflicts,
