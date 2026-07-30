@@ -48,6 +48,7 @@ const wordpress_theme = @import("wordpress_theme.zig");
 const link_audit = @import("link_audit.zig");
 const frontmatter_review = @import("frontmatter_review.zig");
 const publication = @import("publication.zig");
+const astro_import_plan = @import("astro_import_plan.zig");
 
 pub const ExitCode = enum(u8) {
     success = 0,
@@ -61,6 +62,7 @@ pub const ExitCode = enum(u8) {
 
 pub const Mode = enum {
     astro,
+    astro_import_plan,
     wordpress,
     instagram,
     obsidian,
@@ -76,6 +78,7 @@ pub const Mode = enum {
 
     pub fn parse(s: []const u8) ?Mode {
         if (std.mem.eql(u8, s, "astro")) return .astro;
+        if (std.mem.eql(u8, s, "astro-import-plan")) return .astro_import_plan;
         if (std.mem.eql(u8, s, "wordpress") or std.mem.eql(u8, s, "wp") or std.mem.eql(u8, s, "wxr")) return .wordpress;
         if (std.mem.eql(u8, s, "instagram") or std.mem.eql(u8, s, "ig") or std.mem.eql(u8, s, "takeout")) return .instagram;
         if (std.mem.eql(u8, s, "obsidian") or std.mem.eql(u8, s, "obs") or std.mem.eql(u8, s, "vault")) return .obsidian;
@@ -109,6 +112,13 @@ pub const Options = struct {
     mode: Mode = .astro,
     /// Astro project/export root to scan (relative to cwd unless absolute).
     root_dir: []const u8 = ".",
+    root_explicit: bool = false,
+    /// Explicit Astro content root, relative to --root, for plan-only import.
+    content_root: ?[]const u8 = null,
+    /// Stable project identity required by plan-only import.
+    project_id: ?[]const u8 = null,
+    /// Optional completed-apply manifest used only as identity evidence.
+    previous_manifest: ?[]const u8 = null,
     /// WordPress WXR/XML export path.
     wxr_path: ?[]const u8 = null,
     /// Optional local media directory (WordPress uploads mirror).
@@ -129,6 +139,7 @@ pub const Options = struct {
     boris_bin: ?[]const u8 = null,
     /// Report/output directory (created if missing). Never writes into inputs.
     out_dir: []const u8 = "migration-report",
+    out_explicit: bool = false,
     /// Existing theme-archaeology adaptation ledger for theme-materialize mode.
     ledger_path: ?[]const u8 = null,
     /// Content tree root for frontmatter-review mode.
@@ -162,10 +173,36 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             const value = arg["--root=".len..];
             if (value.len == 0) return error.MissingValue;
             options.root_dir = value;
+            options.root_explicit = true;
         } else if (std.mem.eql(u8, arg, "--root")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
             options.root_dir = args[index];
+            options.root_explicit = true;
+        } else if (std.mem.startsWith(u8, arg, "--content-root=")) {
+            const value = arg["--content-root=".len..];
+            if (value.len == 0) return error.MissingValue;
+            options.content_root = value;
+        } else if (std.mem.eql(u8, arg, "--content-root")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            options.content_root = args[index];
+        } else if (std.mem.startsWith(u8, arg, "--project-id=")) {
+            const value = arg["--project-id=".len..];
+            if (value.len == 0) return error.MissingValue;
+            options.project_id = value;
+        } else if (std.mem.eql(u8, arg, "--project-id")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            options.project_id = args[index];
+        } else if (std.mem.startsWith(u8, arg, "--previous-manifest=")) {
+            const value = arg["--previous-manifest=".len..];
+            if (value.len == 0) return error.MissingValue;
+            options.previous_manifest = value;
+        } else if (std.mem.eql(u8, arg, "--previous-manifest")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.MissingValue;
+            options.previous_manifest = args[index];
         } else if (std.mem.startsWith(u8, arg, "--wxr=")) {
             const value = arg["--wxr=".len..];
             if (value.len == 0) return error.MissingValue;
@@ -220,10 +257,12 @@ pub fn parseOptions(args: []const []const u8) ParseError!Options {
             const value = arg["--out=".len..];
             if (value.len == 0) return error.MissingValue;
             options.out_dir = value;
+            options.out_explicit = true;
         } else if (std.mem.eql(u8, arg, "--out")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.MissingValue;
             options.out_dir = args[index];
+            options.out_explicit = true;
         } else if (std.mem.startsWith(u8, arg, "--ledger=")) {
             const value = arg["--ledger=".len..];
             if (value.len == 0) return error.MissingValue;
@@ -294,7 +333,7 @@ fn printUsage() void {
         \\Common options:
         \\  -h, --help         Show this help and exit
         \\  -q, --quiet        Suppress progress lines
-        \\  --mode=MODE        astro (default) | wordpress | wordpress-theme | instagram | obsidian | notion | filed | starlight | asset-filename | theme-archaeology | theme-materialize | link-audit | frontmatter-review
+        \\  --mode=MODE        astro (default) | astro-import-plan | wordpress | wordpress-theme | instagram | obsidian | notion | filed | starlight | asset-filename | theme-archaeology | theme-materialize | link-audit | frontmatter-review
         \\  --out=DIR          Output directory (default: migration-report)
         \\
         \\Frontmatter review (read-only unsupported-key audit):
@@ -309,6 +348,13 @@ fn printUsage() void {
         \\Astro mode:
         \\  --root=DIR         Astro project/export root to scan (default: .)
         \\  Writes: report.json, REPORT.md
+        \\
+        \\Astro import plan (developer-only; never applies an import):
+        \\  --mode=astro-import-plan --root=DIR --content-root=RELATIVE_DIR
+        \\      --project-id=ID [--previous-manifest=FILE] --out=DIR
+        \\  Writes: source_snapshot.json, import_plan.json, REPORT.md
+        \\  Supports only explicit plain .md files with scalar closed frontmatter.
+        \\  MDX, Astro, executable syntax, unknown metadata, and symlinks are review rows.
         \\
         \\Theme archaeology (read-only Astro/Starlight theme inventory):
         \\  --mode=theme-archaeology  Inventory layouts, CSS, fonts/images, nav/sidebar,
@@ -402,6 +448,14 @@ fn printUsage() void {
     });
 }
 
+fn missingAstroImportPlanFlag(opts: Options) ?[]const u8 {
+    if (!opts.root_explicit) return "--root";
+    if (opts.content_root == null) return "--content-root";
+    if (opts.project_id == null) return "--project-id";
+    if (!opts.out_explicit) return "--out";
+    return null;
+}
+
 pub fn main(init: std.process.Init) u8 {
     const cold = init.arena.allocator();
     const gpa = init.gpa;
@@ -450,6 +504,31 @@ pub fn main(init: std.process.Init) u8 {
             }) catch |err| {
                 std.log.err("migration-lab (astro) failed: {s}", .{@errorName(err)});
                 return ExitCode.io_error.int();
+            };
+        },
+        .astro_import_plan => {
+            if (missingAstroImportPlanFlag(opts)) |flag| {
+                std.log.err("astro-import-plan requires explicit {s}", .{flag});
+                return ExitCode.usage.int();
+            }
+            const content_root = opts.content_root orelse {
+                std.log.err("astro-import-plan requires --content-root=RELATIVE_DIR", .{});
+                return ExitCode.usage.int();
+            };
+            const project_id = opts.project_id orelse {
+                std.log.err("astro-import-plan requires --project-id=ID", .{});
+                return ExitCode.usage.int();
+            };
+            astro_import_plan.run(io, gpa, .{
+                .root_dir = opts.root_dir,
+                .content_root = content_root,
+                .out_dir = opts.out_dir,
+                .project_id = project_id,
+                .previous_manifest = opts.previous_manifest,
+                .quiet = opts.quiet,
+            }) catch |err| {
+                std.log.err("migration-lab (astro-import-plan) failed: {s}", .{@errorName(err)});
+                return if (err == error.InvalidImportPlanInput or err == error.InvalidPreviousManifest) ExitCode.usage.int() else ExitCode.io_error.int();
             };
         },
         .wordpress => {
@@ -683,6 +762,7 @@ test {
     _ = theme_materialize;
     _ = wordpress_theme;
     _ = frontmatter_review;
+    _ = astro_import_plan;
 }
 
 test "parseOptions: defaults and astro flags" {
@@ -704,6 +784,29 @@ test "parseOptions: defaults and astro flags" {
     try std.testing.expectEqualStrings("./fixtures/mini-astro", o2.root_dir);
     try std.testing.expectEqualStrings("./.tmp-report", o2.out_dir);
     try std.testing.expect(o2.quiet);
+}
+
+test "astro-import-plan requires root content-root project-id and out explicitly" {
+    const complete = try parseOptions(&.{
+        "boris-migration-lab",
+        "--mode=astro-import-plan",
+        "--root=fixture",
+        "--content-root=content",
+        "--project-id=fixture",
+        "--out=output",
+    });
+    try std.testing.expect(missingAstroImportPlanFlag(complete) == null);
+
+    const cases = [_]struct { args: []const []const u8, missing: []const u8 }{
+        .{ .args = &.{ "x", "--mode=astro-import-plan", "--content-root=content", "--project-id=p", "--out=o" }, .missing = "--root" },
+        .{ .args = &.{ "x", "--mode=astro-import-plan", "--root=r", "--project-id=p", "--out=o" }, .missing = "--content-root" },
+        .{ .args = &.{ "x", "--mode=astro-import-plan", "--root=r", "--content-root=content", "--out=o" }, .missing = "--project-id" },
+        .{ .args = &.{ "x", "--mode=astro-import-plan", "--root=r", "--content-root=content", "--project-id=p" }, .missing = "--out" },
+    };
+    for (cases) |case| {
+        const options = try parseOptions(case.args);
+        try std.testing.expectEqualStrings(case.missing, missingAstroImportPlanFlag(options).?);
+    }
 }
 
 test "parseOptions: wordpress flags" {

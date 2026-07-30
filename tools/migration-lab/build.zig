@@ -42,4 +42,14 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run migration-lab unit + fixture tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    const schema_test_cmd = b.addSystemCommand(&.{
+        "npm",
+        "--prefix",
+        "schema-validation",
+        "test",
+    });
+    schema_test_cmd.setCwd(b.path("."));
+    const schema_test_step = b.step("schema-test", "Run the real Draft 2020-12 Astro import schema matrix (requires npm ci in schema-validation)");
+    schema_test_step.dependOn(&schema_test_cmd.step);
 }
