@@ -588,23 +588,29 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
         } else if (std.mem.startsWith(u8, bytes, "---\n") or std.mem.startsWith(u8, bytes, "---\r\n")) {
             const open_end: usize = if (bytes[3] == '\r') 5 else 4;
             var cursor = open_end;
+            var closing_fence_start: ?usize = null;
             var close_end: ?usize = null;
             while (cursor < bytes.len) {
                 const nl = std.mem.indexOfScalarPos(u8, bytes, cursor, '\n') orelse break;
                 const current = if (nl > cursor and bytes[nl - 1] == '\r') bytes[cursor .. nl - 1] else bytes[cursor..nl];
-                if (std.mem.eql(u8, current, "---")) { close_end = nl + 1; break; }
+                if (std.mem.eql(u8, current, "---")) {
+                    closing_fence_start = cursor;
+                    close_end = nl + 1;
+                    break;
+                }
                 cursor = nl + 1;
             }
             if (close_end == null) {
                 parse_status = "malformed_frontmatter_unclosed"; disposition = .blocked_malformed_frontmatter; malformed_record = true; blocked_count += 1;
                 try jsonLine(a, &malformed, &.{ .{ .key = "source_path", .value = path }, .{ .key = "reason", .value = "unclosed_frontmatter" }, .{ .key = "parse_status", .value = parse_status } });
             } else {
+                parse_status = "parsed";
                 body_offset = close_end.?; body = bytes[body_offset..];
                 var seen = std.StringHashMap(void).init(a);
                 var active_relation_field: []const u8 = "";
                 var block_scalar = false;
                 var p = open_end;
-                const frontmatter_end = close_end.? - 4;
+                const frontmatter_end = closing_fence_start.?;
                 while (p < frontmatter_end) {
                     const nl = std.mem.indexOfScalarPos(u8, bytes, p, '\n') orelse close_end.? - 1;
                     const raw_line = bytes[p..nl];
@@ -706,8 +712,13 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
 
         const proposed = try chooseIdentity(a, path, local.items);
         for (local.items) |candidate| try candidates.append(a, .{ .source = candidate.source, .field = candidate.field, .value = candidate.value, .identity = candidate.identity, .kind = candidate.kind, .strength = candidate.strength, .selected = candidate.selected });
-        if (proposed.len == 0) { disposition = .queued_manual_review; parse_status = "identity_conflict"; }
-        else if (review_needed and disposition == .scanned) { disposition = .queued_manual_review; }
+        if (!malformed_record and proposed.len == 0) {
+            disposition = .queued_manual_review;
+            parse_status = "identity_conflict";
+        } else if (!malformed_record and review_needed and disposition == .scanned) {
+            disposition = .queued_manual_review;
+            if (std.mem.eql(u8, parse_status, "parsed")) parse_status = "parsed_with_review";
+        }
         if (malformed_record and disposition == .scanned) disposition = .blocked_malformed_frontmatter;
         const body_sha = try sha256(a, body);
         try scanReferences(a, path, bytes, body, body_offset, paths, &links, &assets, &link_count, &asset_count);
@@ -911,4 +922,106 @@ test "fixture: multiline YAML remains valid and retains every relationship targe
     try std.testing.expect(std.mem.indexOf(u8, fm_rows, "nested relationship mapping field") != null);
     try std.testing.expect(std.mem.indexOf(u8, fm_rows, "field_name\\\":\\\"id\\\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, fm_rows, "value_shape\\\":\\\"block_scalar\\\"") != null);
+}
+
+test "fixture: parse statuses and LF/CRLF fences are explicit and lossless" {
+    const io = std.testing.io;
+    const out_a = "fixtures/.test-filed-scan-status-a";
+    const out_b = "fixtures/.test-filed-scan-status-b";
+    Io.Dir.cwd().deleteTree(io, out_a) catch {};
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
+    defer Io.Dir.cwd().deleteTree(io, out_a) catch {};
+    defer Io.Dir.cwd().deleteTree(io, out_b) catch {};
+
+    const source_paths = [_][]const u8{
+        "no-frontmatter.md",
+        "parsed.md",
+        "parsed-review.md",
+        "duplicate.md",
+        "unclosed.md",
+        "malformed-field.md",
+        "lf.md",
+        "crlf.md",
+    };
+    var fixture = try Io.Dir.cwd().openDir(io, "fixtures/filed-scan-status", .{});
+    defer fixture.close(io);
+    var before: [source_paths.len][]u8 = undefined;
+    for (source_paths, 0..) |path, i| before[i] = try readFile(io, std.testing.allocator, fixture, path);
+    defer for (&before) |bytes| std.testing.allocator.free(bytes);
+
+    try run(io, std.testing.allocator, .{ .root_dir = "fixtures/filed-scan-status", .out_dir = out_a, .quiet = true });
+    try run(io, std.testing.allocator, .{ .root_dir = "fixtures/filed-scan-status", .out_dir = out_b, .quiet = true });
+
+    const output_names = [_][]const u8{
+        "migration-manifest.json",
+        "source-disposition.jsonl",
+        "frontmatter-ledger.jsonl",
+        "identity-candidates.jsonl",
+        "identity-collisions.jsonl",
+        "parent-candidates.jsonl",
+        "relation-candidates.jsonl",
+        "link-ledger.jsonl",
+        "component-ledger.jsonl",
+        "asset-ledger.jsonl",
+        "malformed-records.jsonl",
+        "REPORT.md",
+    };
+    var first_output = try Io.Dir.cwd().openDir(io, out_a, .{});
+    defer first_output.close(io);
+    var second_output = try Io.Dir.cwd().openDir(io, out_b, .{});
+    defer second_output.close(io);
+    for (output_names) |name| {
+        const left = try readFile(io, std.testing.allocator, first_output, name);
+        defer std.testing.allocator.free(left);
+        const right = try readFile(io, std.testing.allocator, second_output, name);
+        defer std.testing.allocator.free(right);
+        try std.testing.expectEqualStrings(left, right);
+    }
+    for (source_paths, 0..) |path, i| {
+        const after = try readFile(io, std.testing.allocator, fixture, path);
+        defer std.testing.allocator.free(after);
+        try std.testing.expectEqualStrings(before[i], after);
+    }
+
+    const expected = [_]struct { path: []const u8, status: []const u8, disposition: []const u8, fields: usize }{
+        .{ .path = "no-frontmatter.md", .status = "no_frontmatter", .disposition = "scanned", .fields = 0 },
+        .{ .path = "parsed.md", .status = "parsed", .disposition = "scanned", .fields = 2 },
+        .{ .path = "parsed-review.md", .status = "parsed_with_review", .disposition = "queued_manual_review", .fields = 3 },
+        .{ .path = "duplicate.md", .status = "malformed_frontmatter_duplicate_key", .disposition = "blocked_malformed_frontmatter", .fields = 3 },
+        .{ .path = "unclosed.md", .status = "malformed_frontmatter_unclosed", .disposition = "blocked_malformed_frontmatter", .fields = 0 },
+        .{ .path = "malformed-field.md", .status = "malformed_frontmatter_field", .disposition = "blocked_malformed_frontmatter", .fields = 2 },
+        .{ .path = "lf.md", .status = "parsed", .disposition = "scanned", .fields = 1 },
+        .{ .path = "crlf.md", .status = "parsed", .disposition = "scanned", .fields = 1 },
+    };
+    const source_rows = try readFile(io, std.testing.allocator, first_output, "source-disposition.jsonl");
+    defer std.testing.allocator.free(source_rows);
+    var found = [_]bool{false} ** expected.len;
+    var source_lines = std.mem.splitScalar(u8, source_rows, '\n');
+    while (source_lines.next()) |line| {
+        if (line.len == 0) continue;
+        var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, line, .{});
+        defer parsed.deinit();
+        const object = parsed.value.object;
+        const path = object.get("source_path").?.string;
+        for (expected, 0..) |want, i| {
+            if (!std.mem.eql(u8, path, want.path)) continue;
+            found[i] = true;
+            try std.testing.expectEqualStrings(want.status, object.get("parse_status").?.string);
+            try std.testing.expectEqualStrings(want.disposition, object.get("disposition").?.string);
+            try std.testing.expectEqual(@as(i64, @intCast(want.fields)), object.get("frontmatter_field_count").?.integer);
+        }
+    }
+    for (found) |was_found| try std.testing.expect(was_found);
+
+    const fm_rows = try readFile(io, std.testing.allocator, first_output, "frontmatter-ledger.jsonl");
+    defer std.testing.allocator.free(fm_rows);
+    try std.testing.expect(std.mem.indexOf(u8, fm_rows, "field_name\\\":\\\"---\\\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, fm_rows, "source_path\\\":\\\"lf.md\\\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, fm_rows, "source_path\\\":\\\"crlf.md\\\"") != null);
+
+    const malformed_rows = try readFile(io, std.testing.allocator, first_output, "malformed-records.jsonl");
+    defer std.testing.allocator.free(malformed_rows);
+    try std.testing.expect(std.mem.indexOf(u8, malformed_rows, "malformed_frontmatter_duplicate_key") != null);
+    try std.testing.expect(std.mem.indexOf(u8, malformed_rows, "malformed_frontmatter_field") != null);
+    try std.testing.expect(std.mem.indexOf(u8, malformed_rows, "malformed_frontmatter_unclosed") != null);
 }
