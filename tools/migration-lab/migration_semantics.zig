@@ -18,6 +18,7 @@ pub const FieldDisposition = enum {
     supported_direct,
     supported_normalized,
     identity_source,
+    parent_candidate,
     relation_candidate,
     body_candidate,
     sidecar_only,
@@ -68,11 +69,21 @@ pub fn isBorisKey(key: []const u8) bool {
 }
 
 pub fn dispositionForKey(key: []const u8) FieldDisposition {
+    if (std.mem.eql(u8, key, "id")) return .identity_source;
+    if (std.mem.eql(u8, key, "parent")) return .parent_candidate;
+    if (std.mem.eql(u8, key, "title") or std.mem.eql(u8, key, "status") or
+        std.mem.eql(u8, key, "tags") or std.mem.eql(u8, key, "published_at") or
+        std.mem.eql(u8, key, "summary")) return .supported_direct;
     if (std.mem.eql(u8, key, "parentEntry") or std.mem.eql(u8, key, "parent_entry")) return .supported_normalized;
-    if (std.mem.eql(u8, key, "caseNumber") or std.mem.eql(u8, key, "mascotId") or std.mem.eql(u8, key, "slug")) return .identity_source;
-    if (std.mem.startsWith(u8, key, "related") or std.mem.eql(u8, key, "mascotRef")) return .relation_candidate;
-    if (std.mem.eql(u8, key, "description") or std.mem.eql(u8, key, "severity")) return .body_candidate;
-    if (std.mem.eql(u8, key, "updatedAt") or std.mem.eql(u8, key, "date") or std.mem.eql(u8, key, "createdAt")) return .sidecar_only;
-    if (std.mem.eql(u8, key, "tableOfContents") or std.mem.eql(u8, key, "layout") or std.mem.eql(u8, key, "draft")) return .platform_residue;
+    if (std.mem.eql(u8, key, "caseNumber") or std.mem.eql(u8, key, "artifactId") or
+        std.mem.eql(u8, key, "mascotId") or std.mem.eql(u8, key, "slug")) return .identity_source;
+    if (std.mem.startsWith(u8, key, "related") or std.mem.eql(u8, key, "mascotRef") or
+        std.mem.eql(u8, key, "haikuLog") or std.mem.eql(u8, key, "limerickLog")) return .relation_candidate;
+    if (std.mem.eql(u8, key, "description") or std.mem.eql(u8, key, "severity") or
+        std.mem.eql(u8, key, "resolution")) return .body_candidate;
+    if (std.mem.eql(u8, key, "updatedAt") or std.mem.eql(u8, key, "date") or
+        std.mem.eql(u8, key, "createdAt")) return .sidecar_only;
+    if (std.mem.eql(u8, key, "tableOfContents") or std.mem.eql(u8, key, "layout") or
+        std.mem.eql(u8, key, "draft")) return .platform_residue;
     return .manual_review;
 }

@@ -5,6 +5,7 @@ const std = @import("std");
 const Io = std.Io;
 const archaeology = @import("archaeology.zig");
 const publication = @import("publication.zig");
+const semantics = @import("migration_semantics.zig");
 
 pub const format_id = "boris-filed-native-scan";
 pub const schema_version: u32 = 1;
@@ -16,7 +17,6 @@ pub const Options = struct { root_dir: []const u8, out_dir: []const u8, quiet: b
 const Pair = struct { key: []const u8, value: []const u8 };
 const OutputFile = struct { name: []const u8, data: []const u8 };
 const Disposition = enum { scanned, blocked_malformed_frontmatter, blocked_invalid_utf8, blocked_duplicate_identity, queued_manual_review, excluded_by_explicit_policy };
-const FieldDisposition = enum { supported_direct, supported_normalized, identity_source, parent_candidate, relation_candidate, body_candidate, sidecar_only, platform_residue, manual_review };
 const Candidate = struct { source: []const u8, field: []const u8, value: []const u8, identity: []const u8, kind: []const u8, strength: u8, selected: bool = false };
 const Source = struct { path: []const u8, ext: []const u8, collection: []const u8, sha: []const u8, body_sha: []const u8, field_count: usize, identity: []const u8, parse_status: []const u8, disposition: Disposition };
 const ParentRef = struct { source: []const u8, field: []const u8, target: []const u8, raw_target: []const u8 };
@@ -29,6 +29,14 @@ fn scalarValue(s: []const u8) []const u8 {
     return value;
 }
 fn lineNumber(bytes: []const u8, pos: usize) usize { return 1 + std.mem.count(u8, bytes[0..@min(pos, bytes.len)], "\n"); }
+
+fn indentation(s: []const u8) usize {
+    var count: usize = 0;
+    for (s) |c| {
+        if (c == ' ') count += 1 else if (c == '\t') count += 2 else break;
+    }
+    return count;
+}
 
 fn escape(a: std.mem.Allocator, s: []const u8) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
@@ -63,16 +71,25 @@ fn jsonLine(a: std.mem.Allocator, out: *std.ArrayList(u8), pairs: []const Pair) 
 
 fn number(a: std.mem.Allocator, value: anytype) ![]u8 { return std.fmt.allocPrint(a, "{}", .{value}); }
 
-fn sha256(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
-    var hash_bytes: [32]u8 = undefined;
-    std.crypto.hash.sha2.Sha256.hash(bytes, &hash_bytes, .{});
+fn hashBytes(bytes: []const u8) [32]u8 {
+    var digest_bytes: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(bytes, &digest_bytes, .{});
+    return digest_bytes;
+}
+
+fn hexEncode(a: std.mem.Allocator, digest_bytes: *const [32]u8) ![]u8 {
     const out = try a.alloc(u8, 64);
     const alphabet = "0123456789abcdef";
-    for (hash_bytes, 0..) |byte, i| {
+    for (digest_bytes.*, 0..) |byte, i| {
         out[i * 2] = alphabet[byte >> 4];
         out[i * 2 + 1] = alphabet[byte & 15];
     }
     return out;
+}
+
+fn sha256(a: std.mem.Allocator, bytes: []const u8) ![]u8 {
+    var digest_bytes = hashBytes(bytes);
+    return hexEncode(a, &digest_bytes);
 }
 
 fn readFile(io: Io, a: std.mem.Allocator, root: Io.Dir, path: []const u8) ![]u8 {
@@ -106,23 +123,14 @@ fn valueShape(value: []const u8) []const u8 {
     return "plain";
 }
 
-fn isBorisKey(key: []const u8) bool {
-    for ([_][]const u8{ "id", "title", "parent", "status", "tags", "relations", "published_at", "summary" }) |known| if (std.mem.eql(u8, key, known)) return true;
-    return false;
+fn fieldDisposition(key: []const u8) semantics.FieldDisposition {
+    // Filed-only legacy keys retain their review role; canonical Boris
+    // vocabulary and dispositions come from the shared migration module.
+    if (std.mem.eql(u8, key, "parentEntry") or std.mem.eql(u8, key, "parent_entry")) return .parent_candidate;
+    return semantics.dispositionForKey(key);
 }
 
-fn fieldDisposition(key: []const u8) FieldDisposition {
-    if (std.mem.eql(u8, key, "id")) return .identity_source;
-    if (std.mem.eql(u8, key, "parent") or std.mem.eql(u8, key, "parentEntry") or std.mem.eql(u8, key, "parent_entry")) return .parent_candidate;
-    if (std.mem.eql(u8, key, "caseNumber") or std.mem.eql(u8, key, "artifactId") or std.mem.eql(u8, key, "mascotId") or std.mem.eql(u8, key, "slug")) return .identity_source;
-    if (std.mem.eql(u8, key, "relations") or std.mem.startsWith(u8, key, "related") or std.mem.eql(u8, key, "mascotRef") or std.mem.eql(u8, key, "haikuLog") or std.mem.eql(u8, key, "limerickLog")) return .relation_candidate;
-    if (std.mem.eql(u8, key, "description") or std.mem.eql(u8, key, "severity") or std.mem.eql(u8, key, "resolution")) return .body_candidate;
-    if (std.mem.eql(u8, key, "updatedAt") or std.mem.eql(u8, key, "createdAt") or std.mem.eql(u8, key, "date")) return .sidecar_only;
-    if (std.mem.eql(u8, key, "tableOfContents") or std.mem.eql(u8, key, "layout") or std.mem.eql(u8, key, "draft")) return .platform_residue;
-    return if (isBorisKey(key)) .supported_direct else .manual_review;
-}
-
-fn fieldName(value: FieldDisposition) []const u8 { return @tagName(value); }
+fn fieldName(value: semantics.FieldDisposition) []const u8 { return value.name(); }
 fn dispositionName(value: Disposition) []const u8 { return @tagName(value); }
 
 fn identityKind(field: []const u8) []const u8 {
@@ -217,6 +225,13 @@ fn appendRelationTargets(a: std.mem.Allocator, source: []const u8, field: []cons
             try parents.append(a, .{ .source = source, .field = field, .target = target, .raw_target = trimmed });
         }
     }
+}
+
+fn sourceIdentity(sources: []const Source, source_path: []const u8) []const u8 {
+    for (sources) |source| {
+        if (std.mem.eql(u8, source.path, source_path)) return if (source.identity.len != 0) source.identity else source.path;
+    }
+    return source_path;
 }
 
 fn identityResolution(sources: []const Source, candidates: []const Candidate, target: []const u8) struct { status: []const u8, resolved: []const u8, entity_type: []const u8 } {
@@ -499,7 +514,7 @@ fn digest(a: std.mem.Allocator, files: []const OutputFile) ![]u8 {
     for (files) |file| { hasher.update(file.name); hasher.update(&.{0}); hasher.update(file.data); }
     var bytes: [32]u8 = undefined;
     hasher.final(&bytes);
-    return sha256(a, &bytes);
+    return hexEncode(a, &bytes);
 }
 
 fn writeManifest(a: std.mem.Allocator, output: *std.ArrayList(u8), opts: Options, tree: []const u8, out_digest: []const u8, sources: usize, fields: usize, candidates: usize, collisions: usize, parents: usize, relations: usize, links: usize, components: usize, assets: usize, blocked: usize) !void {
@@ -586,48 +601,102 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
             } else {
                 body_offset = close_end.?; body = bytes[body_offset..];
                 var seen = std.StringHashMap(void).init(a);
-                var pending_relation_field: []const u8 = "";
+                var active_relation_field: []const u8 = "";
+                var block_scalar = false;
                 var p = open_end;
-                while (p < close_end.? - 1) {
+                const frontmatter_end = close_end.? - 4;
+                while (p < frontmatter_end) {
                     const nl = std.mem.indexOfScalarPos(u8, bytes, p, '\n') orelse close_end.? - 1;
                     const raw_line = bytes[p..nl];
                     const clean = if (raw_line.len > 0 and raw_line[raw_line.len - 1] == '\r') raw_line[0 .. raw_line.len - 1] else raw_line;
                     const visible = trim(clean);
-                    if (visible.len != 0 and visible[0] != '#') {
-                        field_count += 1; frontmatter_count += 1;
-                        const colon = std.mem.indexOfScalar(u8, clean, ':');
-                        const key = if (colon) |at| trim(clean[0..at]) else "";
-                        const value = if (colon) |at| trim(clean[at + 1 ..]) else "";
-                        const indented = clean.len > 0 and (clean[0] == ' ' or clean[0] == '\t');
-                        const malformed_field = colon == null or key.len == 0 or indented;
-                        const duplicate = key.len != 0 and seen.contains(key);
-                        const fd: FieldDisposition = if (malformed_field) .manual_review else fieldDisposition(key);
-                        if (fd == .manual_review or fd == .platform_residue or fd == .sidecar_only) review_needed = true;
-                        const reason = if (malformed_field) "malformed field line" else if (duplicate) "duplicate field key" else if (isBorisKey(key)) "Boris grammar field" else "foreign field retained for review";
-                        if (malformed_field or duplicate) {
-                            disposition = .blocked_malformed_frontmatter; malformed_record = true; parse_status = if (duplicate) "malformed_frontmatter_duplicate_key" else "malformed_frontmatter_field";
-                            try jsonLine(a, &malformed, &.{ .{ .key = "source_path", .value = path }, .{ .key = "source_line", .value = try number(a, lineNumber(bytes, p)) }, .{ .key = "reason", .value = if (duplicate) "duplicate_key" else "malformed_field_line" }, .{ .key = "raw_line_hash", .value = try sha256(a, clean) } });
+                    const indent = indentation(clean);
+                    const is_comment_or_blank = visible.len == 0 or visible[0] == '#';
+                    const list_line = visible.len > 0 and visible[0] == '-';
+                    const top_level = indent == 0 and !list_line;
+
+                    // Only column-zero mapping keys are top-level fields. YAML
+                    // list items, nested mappings, and scalar continuations stay
+                    // attached to the active field and cannot become duplicate
+                    // or malformed top-level keys.
+                    if (!is_comment_or_blank and !top_level) {
+                        if (!block_scalar and active_relation_field.len == 0 and std.mem.indexOfScalar(u8, visible, ':') != null) {
+                            field_count += 1;
+                            frontmatter_count += 1;
+                            const nested_colon = std.mem.indexOfScalar(u8, visible, ':').?;
+                            const nested_key = trim(visible[0..nested_colon]);
+                            try jsonLine(a, &fm, &.{ .{ .key = "source_path", .value = path }, .{ .key = "field_name", .value = nested_key }, .{ .key = "source_line", .value = try number(a, lineNumber(bytes, p)) }, .{ .key = "value_shape", .value = valueShape(visible[nested_colon + 1 ..]) }, .{ .key = "raw_value_hash", .value = try sha256(a, visible) }, .{ .key = "proposed_disposition", .value = fieldName(.manual_review) }, .{ .key = "reason", .value = "nested mapping retained for manual review" }, .{ .key = "frontmatter_byte_start", .value = try number(a, p) }, .{ .key = "frontmatter_byte_end", .value = try number(a, nl) } });
+                            review_needed = true;
                         }
-                        if (key.len != 0) try seen.put(key, {});
-                        const raw_value = if (colon) |at| clean[at + 1 ..] else clean;
-                        try jsonLine(a, &fm, &.{ .{ .key = "source_path", .value = path }, .{ .key = "field_name", .value = key }, .{ .key = "source_line", .value = try number(a, lineNumber(bytes, p)) }, .{ .key = "value_shape", .value = valueShape(value) }, .{ .key = "raw_value_hash", .value = try sha256(a, raw_value) }, .{ .key = "proposed_disposition", .value = fieldName(fd) }, .{ .key = "reason", .value = reason }, .{ .key = "frontmatter_byte_start", .value = try number(a, p) }, .{ .key = "frontmatter_byte_end", .value = try number(a, nl) } });
-                        if (indented and pending_relation_field.len != 0 and colon != null and (std.mem.eql(u8, key, "id") or std.mem.eql(u8, key, "slug"))) {
-                            const nested_target = scalarValue(value);
-                            if (nested_target.len != 0) {
-                                if (std.mem.eql(u8, pending_relation_field, "parentEntry") or std.mem.eql(u8, pending_relation_field, "parent_entry")) {
-                                    try parents_ref.append(a, .{ .source = path, .field = pending_relation_field, .target = nested_target, .raw_target = nested_target });
+                        if (!block_scalar and active_relation_field.len != 0) {
+                            var nested = visible;
+                            if (nested.len > 0 and nested[0] == '-') nested = trim(nested[1..]);
+                            if (nested.len > 0) {
+                                if (std.mem.indexOfScalar(u8, nested, ':')) |nested_colon| {
+                                    const nested_key = trim(nested[0..nested_colon]);
+                                    const nested_raw_value = trim(nested[nested_colon + 1 ..]);
+                                    const nested_value = scalarValue(nested_raw_value);
+                                    field_count += 1;
+                                    frontmatter_count += 1;
+                                    try jsonLine(a, &fm, &.{ .{ .key = "source_path", .value = path }, .{ .key = "field_name", .value = nested_key }, .{ .key = "source_line", .value = try number(a, lineNumber(bytes, p)) }, .{ .key = "value_shape", .value = valueShape(nested_raw_value) }, .{ .key = "raw_value_hash", .value = try sha256(a, nested_raw_value) }, .{ .key = "proposed_disposition", .value = fieldName(.relation_candidate) }, .{ .key = "reason", .value = "nested relationship mapping field" }, .{ .key = "frontmatter_byte_start", .value = try number(a, p) }, .{ .key = "frontmatter_byte_end", .value = try number(a, nl) } });
+                                    if ((std.mem.eql(u8, nested_key, "id") or std.mem.eql(u8, nested_key, "slug") or std.mem.eql(u8, nested_key, "target") or std.mem.eql(u8, nested_key, "ref")) and nested_value.len != 0) {
+                                        try appendRelationTargets(a, path, active_relation_field, nested_value, &parents_ref, &relations_ref);
+                                    }
+                                } else if (list_line) {
+                                    try appendRelationTargets(a, path, active_relation_field, nested, &parents_ref, &relations_ref);
                                 }
-                                try relations_ref.append(a, .{ .source = path, .field = pending_relation_field, .target = nested_target, .raw_target = nested_target });
-                                pending_relation_field = "";
                             }
                         }
-                        if (!indented and relationField(key) and value.len == 0) pending_relation_field = key else if (!indented) pending_relation_field = "";
-                        if (fd == .identity_source and value.len != 0) {
-                            const identity_value = scalarValue(value);
-                            try local.append(a, .{ .source = path, .field = key, .value = identity_value, .identity = identity_value, .kind = identityKind(key), .strength = identityStrength(key) });
-                        }
-                        if (relationField(key)) try appendRelationTargets(a, path, key, value, &parents_ref, &relations_ref);
+                        p = nl + 1;
+                        continue;
                     }
+                    if (is_comment_or_blank) {
+                        p = nl + 1;
+                        continue;
+                    }
+                    if (list_line and active_relation_field.len == 0) {
+                        field_count += 1;
+                        frontmatter_count += 1;
+                        try jsonLine(a, &fm, &.{ .{ .key = "source_path", .value = path }, .{ .key = "field_name", .value = "" }, .{ .key = "source_line", .value = try number(a, lineNumber(bytes, p)) }, .{ .key = "value_shape", .value = "list_item" }, .{ .key = "raw_value_hash", .value = try sha256(a, visible) }, .{ .key = "proposed_disposition", .value = fieldName(.manual_review) }, .{ .key = "reason", .value = "top-level list item without an active mapping field" }, .{ .key = "frontmatter_byte_start", .value = try number(a, p) }, .{ .key = "frontmatter_byte_end", .value = try number(a, nl) } });
+                        review_needed = true;
+                        p = nl + 1;
+                        continue;
+                    }
+
+                    // A new top-level key closes the prior list/scalar context.
+                    block_scalar = false;
+                    active_relation_field = "";
+                    const colon = std.mem.indexOfScalar(u8, clean, ':');
+                    const key = if (colon) |at| trim(clean[0..at]) else "";
+                    const value = if (colon) |at| trim(clean[at + 1 ..]) else "";
+                    const malformed_field = colon == null or key.len == 0;
+                    const duplicate = key.len != 0 and seen.contains(key);
+                    const fd: semantics.FieldDisposition = if (malformed_field) .manual_review else fieldDisposition(key);
+                    field_count += 1;
+                    frontmatter_count += 1;
+                    if (fd == .manual_review or fd == .platform_residue or fd == .sidecar_only) review_needed = true;
+                    const reason = if (malformed_field) "malformed top-level field line" else if (duplicate) "duplicate top-level field key" else if (semantics.isBorisKey(key)) "Boris grammar field" else "foreign field retained for review";
+                    if (malformed_field or duplicate) {
+                        disposition = .blocked_malformed_frontmatter;
+                        malformed_record = true;
+                        parse_status = if (duplicate) "malformed_frontmatter_duplicate_key" else "malformed_frontmatter_field";
+                        try jsonLine(a, &malformed, &.{ .{ .key = "source_path", .value = path }, .{ .key = "source_line", .value = try number(a, lineNumber(bytes, p)) }, .{ .key = "reason", .value = if (duplicate) "duplicate_top_level_key" else "malformed_top_level_field_line" }, .{ .key = "raw_line_hash", .value = try sha256(a, clean) } });
+                    }
+                    if (key.len != 0) try seen.put(key, {});
+                    const raw_value = if (colon) |at| clean[at + 1 ..] else clean;
+                    try jsonLine(a, &fm, &.{ .{ .key = "source_path", .value = path }, .{ .key = "field_name", .value = key }, .{ .key = "source_line", .value = try number(a, lineNumber(bytes, p)) }, .{ .key = "value_shape", .value = valueShape(value) }, .{ .key = "raw_value_hash", .value = try sha256(a, raw_value) }, .{ .key = "proposed_disposition", .value = fieldName(fd) }, .{ .key = "reason", .value = reason }, .{ .key = "frontmatter_byte_start", .value = try number(a, p) }, .{ .key = "frontmatter_byte_end", .value = try number(a, nl) } });
+                    if (fd == .identity_source and value.len != 0) {
+                        const identity_value = scalarValue(value);
+                        try local.append(a, .{ .source = path, .field = key, .value = identity_value, .identity = identity_value, .kind = identityKind(key), .strength = identityStrength(key) });
+                    }
+                    if (relationField(key)) {
+                        if (value.len != 0) {
+                            try appendRelationTargets(a, path, key, value, &parents_ref, &relations_ref);
+                        } else {
+                            active_relation_field = key;
+                        }
+                    }
+                    if (value.len > 0 and (value[0] == '|' or value[0] == '>')) block_scalar = true;
                     p = nl + 1;
                 }
             }
@@ -677,7 +746,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
     for (parents_ref.items) |ref| {
         const resolved = identityResolution(sources.items, candidates.items, ref.target);
         const decision = if (std.mem.eql(u8, ref.field, "parent") and std.mem.eql(u8, resolved.status, "resolved")) "parent" else if (std.mem.eql(u8, ref.field, "parent")) "review" else if (std.mem.eql(u8, resolved.status, "resolved")) "relation" else "review";
-        try jsonLine(a, &parents, &.{ .{ .key = "source_id", .value = ref.source }, .{ .key = "source_field", .value = ref.field },            .{ .key = "raw_target", .value = ref.raw_target }, .{ .key = "resolved_target_candidate", .value = resolved.resolved }, .{ .key = "target_entity_type", .value = resolved.entity_type }, .{ .key = "decision", .value = decision }, .{ .key = "confidence", .value = if (std.mem.eql(u8, resolved.status, "resolved")) "high" else "low" }, .{ .key = "resolution_status", .value = resolved.status }, .{ .key = "EPARENTNOTTRUNK_risk", .value = if (std.mem.eql(u8, ref.field, "parent")) "true" else "false" } });
+        try jsonLine(a, &parents, &.{ .{ .key = "source_id", .value = sourceIdentity(sources.items, ref.source) }, .{ .key = "source_field", .value = ref.field },            .{ .key = "raw_target", .value = ref.raw_target }, .{ .key = "resolved_target_candidate", .value = resolved.resolved }, .{ .key = "target_entity_type", .value = resolved.entity_type }, .{ .key = "decision", .value = decision }, .{ .key = "confidence", .value = if (std.mem.eql(u8, resolved.status, "resolved")) "high" else "low" }, .{ .key = "resolution_status", .value = resolved.status }, .{ .key = "EPARENTNOTTRUNK_risk", .value = if (std.mem.eql(u8, ref.field, "parent")) "true" else "false" } });
     }
     for (relations_ref.items) |ref| {
         const resolved = identityResolution(sources.items, candidates.items, ref.target);
@@ -706,7 +775,9 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
     const ledger_files = [_]OutputFile{ .{ .name = "source-disposition.jsonl", .data = source_rows_sorted }, .{ .name = "frontmatter-ledger.jsonl", .data = fm_sorted }, .{ .name = "identity-candidates.jsonl", .data = identity_sorted }, .{ .name = "identity-collisions.jsonl", .data = collisions_sorted }, .{ .name = "parent-candidates.jsonl", .data = parents_sorted }, .{ .name = "relation-candidates.jsonl", .data = relations_sorted }, .{ .name = "link-ledger.jsonl", .data = links_sorted }, .{ .name = "component-ledger.jsonl", .data = components_sorted }, .{ .name = "asset-ledger.jsonl", .data = assets_sorted }, .{ .name = "malformed-records.jsonl", .data = malformed_sorted }, .{ .name = "REPORT.md", .data = report.items } };
     try validateLedgers(sources.items, paths, &ledger_files, content_count, frontmatter_count, candidates.items.len, collision_count, parents_ref.items.len, relations_ref.items.len, link_count, component_count, asset_count);
     const output_digest = try digest(a, &ledger_files);
-    var tree_bytes: [32]u8 = undefined; tree_hasher.final(&tree_bytes); const tree_digest = try sha256(a, &tree_bytes);
+    var tree_bytes: [32]u8 = undefined;
+    tree_hasher.final(&tree_bytes);
+    const tree_digest = try hexEncode(a, &tree_bytes);
     var manifest: std.ArrayList(u8) = .empty;
     var final_blocked: usize = 0;
     for (sources.items) |source| {
@@ -725,4 +796,119 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
     for (ledger_files) |file| try stage.writeFile(io, .{ .sub_path = file.name, .data = file.data });
     try publication_state.commit(io, a);
     if (!opts.quiet) std.debug.print("filed-scan: {d} content records -> {s}\n", .{ content_count, opts.out_dir });
+}
+
+test "sha256 hex uses known vectors without hashing digest bytes twice" {
+    const empty = try sha256(std.testing.allocator, "");
+    defer std.testing.allocator.free(empty);
+    try std.testing.expectEqualStrings("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", empty);
+
+    const abc = try sha256(std.testing.allocator, "abc");
+    defer std.testing.allocator.free(abc);
+    try std.testing.expectEqualStrings("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", abc);
+}
+
+test "fixture: multiline YAML remains valid and retains every relationship target" {
+    const io = std.testing.io;
+    const out_a = "fixtures/.test-filed-scan-multiline-a";
+    const out_b = "fixtures/.test-filed-scan-multiline-b";
+    Io.Dir.cwd().deleteTree(io, out_a) catch {};
+    Io.Dir.cwd().deleteTree(io, out_b) catch {};
+    defer Io.Dir.cwd().deleteTree(io, out_a) catch {};
+    defer Io.Dir.cwd().deleteTree(io, out_b) catch {};
+
+    const source_paths = [_][]const u8{ "tags.md", "description.md", "related-mappings.mdx", "related-ids.mdx", "legacy-parent.mdx" };
+    var fixture = try Io.Dir.cwd().openDir(io, "fixtures/filed-scan-multiline", .{});
+    defer fixture.close(io);
+    var before: [source_paths.len][]u8 = undefined;
+    for (source_paths, 0..) |path, i| before[i] = try readFile(io, std.testing.allocator, fixture, path);
+    defer for (&before) |bytes| std.testing.allocator.free(bytes);
+
+    try run(io, std.testing.allocator, .{ .root_dir = "fixtures/filed-scan-multiline", .out_dir = out_a, .quiet = true });
+    try run(io, std.testing.allocator, .{ .root_dir = "fixtures/filed-scan-multiline", .out_dir = out_b, .quiet = true });
+
+    const output_names = [_][]const u8{ "migration-manifest.json", "source-disposition.jsonl", "frontmatter-ledger.jsonl", "identity-candidates.jsonl", "identity-collisions.jsonl", "parent-candidates.jsonl", "relation-candidates.jsonl", "link-ledger.jsonl", "component-ledger.jsonl", "asset-ledger.jsonl", "malformed-records.jsonl", "REPORT.md" };
+    var first_output = try Io.Dir.cwd().openDir(io, out_a, .{});
+    defer first_output.close(io);
+    var second_output = try Io.Dir.cwd().openDir(io, out_b, .{});
+    defer second_output.close(io);
+    for (output_names) |name| {
+        const left = try readFile(io, std.testing.allocator, first_output, name);
+        defer std.testing.allocator.free(left);
+        const right = try readFile(io, std.testing.allocator, second_output, name);
+        defer std.testing.allocator.free(right);
+        try std.testing.expectEqualStrings(left, right);
+    }
+    for (source_paths, 0..) |path, i| {
+        const after = try readFile(io, std.testing.allocator, fixture, path);
+        defer std.testing.allocator.free(after);
+        try std.testing.expectEqualStrings(before[i], after);
+    }
+
+    const source_rows = try readFile(io, std.testing.allocator, first_output, "source-disposition.jsonl");
+    defer std.testing.allocator.free(source_rows);
+    try std.testing.expectEqual(@as(usize, 5), std.mem.count(u8, source_rows, "\n"));
+    try std.testing.expect(std.mem.indexOf(u8, source_rows, "blocked_malformed_frontmatter") == null);
+
+    const malformed_rows = try readFile(io, std.testing.allocator, first_output, "malformed-records.jsonl");
+    defer std.testing.allocator.free(malformed_rows);
+    try std.testing.expectEqual(@as(usize, 0), malformed_rows.len);
+
+    const relation_rows = try readFile(io, std.testing.allocator, first_output, "relation-candidates.jsonl");
+    defer std.testing.allocator.free(relation_rows);
+    var relation_count: usize = 0;
+    var mapping_one = false;
+    var mapping_two = false;
+    var list_one = false;
+    var list_two = false;
+    var legacy_relation = false;
+    var relation_lines = std.mem.splitScalar(u8, relation_rows, '\n');
+    while (relation_lines.next()) |line| {
+        if (line.len == 0) continue;
+        relation_count += 1;
+        var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, line, .{});
+        defer parsed.deinit();
+        const object = parsed.value.object;
+        const source_field = object.get("source_field").?.string;
+        const raw_target = object.get("raw_target").?.string;
+        const source_path = object.get("source_path").?.string;
+        if (std.mem.eql(u8, source_field, "relatedEntries") and std.mem.eql(u8, source_path, "related-mappings.mdx") and std.mem.eql(u8, raw_target, "LLG-ONE")) mapping_one = true;
+        if (std.mem.eql(u8, source_field, "relatedEntries") and std.mem.eql(u8, source_path, "related-mappings.mdx") and std.mem.eql(u8, raw_target, "MASCOT-TWO")) mapping_two = true;
+        if (std.mem.eql(u8, source_field, "relatedEntries") and std.mem.eql(u8, source_path, "related-ids.mdx") and std.mem.eql(u8, raw_target, "LLG-TWO")) list_one = true;
+        if (std.mem.eql(u8, source_field, "relatedEntries") and std.mem.eql(u8, source_path, "related-ids.mdx") and std.mem.eql(u8, raw_target, "LLG-ONE")) list_two = true;
+        if (std.mem.eql(u8, source_field, "parentEntry") and std.mem.eql(u8, raw_target, "legacy-target")) legacy_relation = true;
+    }
+    try std.testing.expectEqual(@as(usize, 5), relation_count);
+    try std.testing.expect(mapping_one);
+    try std.testing.expect(mapping_two);
+    try std.testing.expect(list_one);
+    try std.testing.expect(list_two);
+    try std.testing.expect(legacy_relation);
+
+    const parent_rows = try readFile(io, std.testing.allocator, first_output, "parent-candidates.jsonl");
+    defer std.testing.allocator.free(parent_rows);
+    var parent_review = false;
+    var parent_promoted = false;
+    var parent_lines = std.mem.splitScalar(u8, parent_rows, '\n');
+    while (parent_lines.next()) |line| {
+        if (line.len == 0) continue;
+        var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, line, .{});
+        defer parsed.deinit();
+        const object = parsed.value.object;
+        if (std.mem.eql(u8, object.get("source_id").?.string, "LEGACY-PARENT") and
+            std.mem.eql(u8, object.get("source_field").?.string, "parentEntry") and
+            std.mem.eql(u8, object.get("raw_target").?.string, "legacy-target")) {
+            parent_review = std.mem.eql(u8, object.get("decision").?.string, "review");
+            parent_promoted = std.mem.eql(u8, object.get("decision").?.string, "parent");
+        }
+    }
+    try std.testing.expect(parent_review);
+    try std.testing.expect(!parent_promoted);
+
+    const fm_rows = try readFile(io, std.testing.allocator, first_output, "frontmatter-ledger.jsonl");
+    defer std.testing.allocator.free(fm_rows);
+    try std.testing.expect(std.mem.indexOf(u8, fm_rows, "continuing on another line") == null);
+    try std.testing.expect(std.mem.indexOf(u8, fm_rows, "nested relationship mapping field") != null);
+    try std.testing.expect(std.mem.indexOf(u8, fm_rows, "field_name\\\":\\\"id\\\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, fm_rows, "value_shape\\\":\\\"block_scalar\\\"") != null);
 }

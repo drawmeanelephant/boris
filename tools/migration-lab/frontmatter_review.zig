@@ -303,8 +303,7 @@ pub fn emitMd(a: std.mem.Allocator, result: ScanResult) ![]u8 {
     try appendUsize(&buf, a, result.total_occurrences);
     try buf.appendSlice(a, "  \n**Files with unsupported keys:** ");
     try appendUsize(&buf, a, result.files.len);
-    try buf.appendSlice(a, "\n\n---\n\n## Per-file classification\n\n");
-    try buf.appendSlice(a, "## Field dispositions\n\n");
+    try buf.appendSlice(a, "\n\n---\n\n## Field dispositions\n\n");
     try buf.appendSlice(a, "| Key | Disposition | Occurrences | Affected files |\n|---|---|---:|---:|\n");
     for (result.field_summaries) |summary| {
         try buf.print(a, "| `{s}` | `{s}` | {d} | {d} |\n", .{ summary.key, summary.disposition.name(), summary.occurrence_count, summary.affected_file_count });
@@ -673,6 +672,11 @@ test "emitMd: section headers and table present" {
     try std.testing.expect(std.mem.indexOf(u8, md, "pages/beta.md") != null);
     try std.testing.expect(std.mem.indexOf(u8, md, "mascotId") != null);
     try std.testing.expect(std.mem.indexOf(u8, md, "| Line |") != null);
+    const field_header = std.mem.indexOf(u8, md, "## Field dispositions").?;
+    const file_header = std.mem.indexOf(u8, md, "## Per-file classification").?;
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, md, "## Field dispositions"));
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, md, "## Per-file classification"));
+    try std.testing.expect(field_header < file_header);
 }
 
 test "emitMd: pipe in value is escaped in table cell" {
