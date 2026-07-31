@@ -74,7 +74,7 @@ pub fn dispositionForKey(key: []const u8) FieldDisposition {
     if (std.mem.eql(u8, key, "title") or std.mem.eql(u8, key, "status") or
         std.mem.eql(u8, key, "tags") or std.mem.eql(u8, key, "published_at") or
         std.mem.eql(u8, key, "summary")) return .supported_direct;
-    if (std.mem.eql(u8, key, "parentEntry") or std.mem.eql(u8, key, "parent_entry")) return .supported_normalized;
+    if (std.mem.eql(u8, key, "parentEntry") or std.mem.eql(u8, key, "parent_entry")) return .parent_candidate;
     if (std.mem.eql(u8, key, "caseNumber") or std.mem.eql(u8, key, "artifactId") or
         std.mem.eql(u8, key, "mascotId") or std.mem.eql(u8, key, "slug")) return .identity_source;
     if (std.mem.startsWith(u8, key, "related") or std.mem.eql(u8, key, "mascotRef") or
@@ -86,4 +86,11 @@ pub fn dispositionForKey(key: []const u8) FieldDisposition {
     if (std.mem.eql(u8, key, "tableOfContents") or std.mem.eql(u8, key, "layout") or
         std.mem.eql(u8, key, "draft")) return .platform_residue;
     return .manual_review;
+}
+
+test "legacy parent aliases remain review planning candidates" {
+    try std.testing.expectEqual(FieldDisposition.parent_candidate, dispositionForKey("parentEntry"));
+    try std.testing.expectEqual(FieldDisposition.parent_candidate, dispositionForKey("parent_entry"));
+    try std.testing.expect(!isBorisKey("parentEntry"));
+    try std.testing.expect(!isBorisKey("parent_entry"));
 }
