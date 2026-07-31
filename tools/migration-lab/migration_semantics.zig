@@ -77,8 +77,9 @@ pub fn dispositionForKey(key: []const u8) FieldDisposition {
     if (std.mem.eql(u8, key, "parentEntry") or std.mem.eql(u8, key, "parent_entry")) return .parent_candidate;
     if (std.mem.eql(u8, key, "caseNumber") or std.mem.eql(u8, key, "artifactId") or
         std.mem.eql(u8, key, "mascotId") or std.mem.eql(u8, key, "slug")) return .identity_source;
-    if (std.mem.startsWith(u8, key, "related") or std.mem.eql(u8, key, "mascotRef") or
-        std.mem.eql(u8, key, "haikuLog") or std.mem.eql(u8, key, "limerickLog")) return .relation_candidate;
+    if (std.mem.eql(u8, key, "relations") or std.mem.startsWith(u8, key, "related") or
+        std.mem.eql(u8, key, "mascotRef") or std.mem.eql(u8, key, "haikuLog") or
+        std.mem.eql(u8, key, "limerickLog")) return .relation_candidate;
     if (std.mem.eql(u8, key, "description") or std.mem.eql(u8, key, "severity") or
         std.mem.eql(u8, key, "resolution")) return .body_candidate;
     if (std.mem.eql(u8, key, "updatedAt") or std.mem.eql(u8, key, "date") or
@@ -93,4 +94,9 @@ test "legacy parent aliases remain review planning candidates" {
     try std.testing.expectEqual(FieldDisposition.parent_candidate, dispositionForKey("parent_entry"));
     try std.testing.expect(!isBorisKey("parentEntry"));
     try std.testing.expect(!isBorisKey("parent_entry"));
+}
+
+test "canonical relations key maps to relation candidate" {
+    try std.testing.expectEqual(FieldDisposition.relation_candidate, dispositionForKey("relations"));
+    try std.testing.expect(isBorisKey("relations"));
 }

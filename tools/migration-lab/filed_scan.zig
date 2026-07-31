@@ -942,6 +942,7 @@ test "fixture: parse statuses and LF/CRLF fences are explicit and lossless" {
         "malformed-field.md",
         "lf.md",
         "crlf.md",
+        "canonical-relations.md",
     };
     var fixture = try Io.Dir.cwd().openDir(io, "fixtures/filed-scan-status", .{});
     defer fixture.close(io);
@@ -992,6 +993,7 @@ test "fixture: parse statuses and LF/CRLF fences are explicit and lossless" {
         .{ .path = "malformed-field.md", .status = "malformed_frontmatter_field", .disposition = "blocked_malformed_frontmatter", .fields = 2 },
         .{ .path = "lf.md", .status = "parsed", .disposition = "scanned", .fields = 1 },
         .{ .path = "crlf.md", .status = "parsed", .disposition = "scanned", .fields = 1 },
+        .{ .path = "canonical-relations.md", .status = "parsed", .disposition = "scanned", .fields = 2 },
     };
     const source_rows = try readFile(io, std.testing.allocator, first_output, "source-disposition.jsonl");
     defer std.testing.allocator.free(source_rows);
@@ -1024,4 +1026,9 @@ test "fixture: parse statuses and LF/CRLF fences are explicit and lossless" {
     try std.testing.expect(std.mem.indexOf(u8, malformed_rows, "malformed_frontmatter_duplicate_key") != null);
     try std.testing.expect(std.mem.indexOf(u8, malformed_rows, "malformed_frontmatter_field") != null);
     try std.testing.expect(std.mem.indexOf(u8, malformed_rows, "malformed_frontmatter_unclosed") != null);
+
+    const relation_rows = try readFile(io, std.testing.allocator, first_output, "relation-candidates.jsonl");
+    defer std.testing.allocator.free(relation_rows);
+    try std.testing.expect(std.mem.indexOf(u8, relation_rows, "canonical-relations.md") != null);
+    try std.testing.expect(std.mem.indexOf(u8, relation_rows, "TARGET-ONE") != null);
 }
