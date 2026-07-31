@@ -1,6 +1,6 @@
 ---
 id: RELATIONS-CANONICAL
-relations: [relates_to:TARGET-ONE]
+relations: [relates_to:PARSED-ONE]
 ---
 
 # Canonical relations

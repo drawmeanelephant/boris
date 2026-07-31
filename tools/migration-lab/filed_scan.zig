@@ -195,14 +195,32 @@ fn relationField(key: []const u8) bool {
     return false;
 }
 
+fn isUrl(target: []const u8) bool {
+    return std.mem.startsWith(u8, target, "http://") or
+        std.mem.startsWith(u8, target, "https://") or
+        std.mem.startsWith(u8, target, "mailto:") or
+        std.mem.startsWith(u8, target, "tel:") or
+        std.mem.startsWith(u8, target, "//") or
+        std.mem.indexOf(u8, target, "://") != null;
+}
+
+fn stripRelationPrefix(value: []const u8) []const u8 {
+    var target = scalarValue(value);
+    if (!isUrl(target)) {
+        if (std.mem.indexOfAny(u8, target, "=:")) |sep| {
+            target = scalarValue(target[sep + 1 ..]);
+        }
+    }
+    return target;
+}
+
 fn appendRelationTargets(a: std.mem.Allocator, source: []const u8, field: []const u8, value: []const u8, parents: *std.ArrayList(ParentRef), relations: *std.ArrayList(RelationRef)) !void {
     const trimmed = trim(value);
     if (trimmed.len >= 2 and trimmed[0] == '[' and trimmed[trimmed.len - 1] == ']') {
         var items = std.mem.splitScalar(u8, trimmed[1 .. trimmed.len - 1], ',');
         while (items.next()) |item| {
             const raw_target = trim(item);
-            var target = scalarValue(raw_target);
-            if (std.mem.indexOfScalar(u8, target, '=')) |equals| target = scalarValue(target[equals + 1 ..]);
+            const target = stripRelationPrefix(raw_target);
             if (target.len == 0) continue;
             if (std.mem.eql(u8, field, "parent")) {
                 try parents.append(a, .{ .source = source, .field = field, .target = target, .raw_target = raw_target });
@@ -215,7 +233,7 @@ fn appendRelationTargets(a: std.mem.Allocator, source: []const u8, field: []cons
         }
         return;
     }
-    const target = scalarValue(trimmed);
+    const target = stripRelationPrefix(trimmed);
     if (target.len == 0) return;
     if (std.mem.eql(u8, field, "parent")) {
         try parents.append(a, .{ .source = source, .field = field, .target = target, .raw_target = trimmed });
@@ -1030,5 +1048,7 @@ test "fixture: parse statuses and LF/CRLF fences are explicit and lossless" {
     const relation_rows = try readFile(io, std.testing.allocator, first_output, "relation-candidates.jsonl");
     defer std.testing.allocator.free(relation_rows);
     try std.testing.expect(std.mem.indexOf(u8, relation_rows, "canonical-relations.md") != null);
-    try std.testing.expect(std.mem.indexOf(u8, relation_rows, "TARGET-ONE") != null);
+    try std.testing.expect(std.mem.indexOf(u8, relation_rows, "\"raw_target\":\"relates_to:PARSED-ONE\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, relation_rows, "\"resolved_target\":\"PARSED-ONE\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, relation_rows, "\"status\":\"resolved\"") != null);
 }
