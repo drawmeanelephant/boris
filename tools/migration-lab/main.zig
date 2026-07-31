@@ -40,6 +40,7 @@ const instagram = @import("instagram.zig");
 const obsidian = @import("obsidian.zig");
 const notion = @import("notion.zig");
 const filed = @import("filed.zig");
+const filed_scan = @import("filed_scan.zig");
 const starlight = @import("starlight.zig");
 const asset_filename = @import("asset_filename.zig");
 const theme_archaeology = @import("theme_archaeology.zig");
@@ -70,6 +71,7 @@ pub const Mode = enum {
     obsidian,
     notion,
     filed,
+    filed_scan,
     starlight,
     asset_filename,
     theme_archaeology,
@@ -87,6 +89,7 @@ pub const Mode = enum {
         if (std.mem.eql(u8, s, "obsidian") or std.mem.eql(u8, s, "obs") or std.mem.eql(u8, s, "vault")) return .obsidian;
         if (std.mem.eql(u8, s, "notion") or std.mem.eql(u8, s, "md-csv") or std.mem.eql(u8, s, "notion-export")) return .notion;
         if (std.mem.eql(u8, s, "filed") or std.mem.eql(u8, s, "filed-fyi")) return .filed;
+        if (std.mem.eql(u8, s, "filed-scan")) return .filed_scan;
         if (std.mem.eql(u8, s, "starlight") or std.mem.eql(u8, s, "sl") or std.mem.eql(u8, s, "evcc")) return .starlight;
         if (std.mem.eql(u8, s, "asset-filename") or std.mem.eql(u8, s, "assets") or
             std.mem.eql(u8, s, "asset-compat") or std.mem.eql(u8, s, "filename-compat"))
@@ -378,7 +381,7 @@ fn printUsage() void {
         \\Common options:
         \\  -h, --help         Show this help and exit
         \\  -q, --quiet        Suppress progress lines
-        \\  --mode=MODE        astro (default) | astro-import-plan | astro-import-apply | wordpress | wordpress-theme | instagram | obsidian | notion | filed | starlight | asset-filename | theme-archaeology | theme-materialize | link-audit | frontmatter-review
+        \\  --mode=MODE        astro (default) | astro-import-plan | astro-import-apply | wordpress | wordpress-theme | instagram | obsidian | notion | filed | filed-scan | starlight | asset-filename | theme-archaeology | theme-materialize | link-audit | frontmatter-review
         \\  --out=DIR          Output directory (default: migration-report)
         \\
         \\Frontmatter review (read-only unsupported-key audit):
@@ -703,6 +706,16 @@ pub fn main(init: std.process.Init) u8 {
             }
             filed.run(io, gpa, .{ .source_root_dir = root, .out_dir = opts.out_dir, .quiet = opts.quiet }) catch |err| {
                 std.log.err("migration-lab (filed) failed: {s}", .{@errorName(err)});
+                return ExitCode.io_error.int();
+            };
+        },
+        .filed_scan => {
+            if (std.mem.eql(u8, opts.root_dir, opts.out_dir)) {
+                std.log.err("--out must differ from --root", .{});
+                return ExitCode.usage.int();
+            }
+            filed_scan.run(io, gpa, .{ .root_dir = opts.root_dir, .out_dir = opts.out_dir, .quiet = opts.quiet }) catch |err| {
+                std.log.err("migration-lab (filed-scan) failed: {s}", .{@errorName(err)});
                 return ExitCode.io_error.int();
             };
         },
@@ -1252,6 +1265,18 @@ test "parseOptions: frontmatter-review flags" {
 
     const o4 = try parseOptions(&.{ "boris-migration-lab", "--mode=fmreview", "--content=./c", "--out=./o" });
     try std.testing.expect(o4.mode == .frontmatter_review);
+}
+
+test "parseOptions: filed-scan flags" {
+    const o = try parseOptions(&.{
+        "boris-migration-lab",
+        "--mode=filed-scan",
+        "--root=fixtures/filed.fyi",
+        "--out=outputs/filed-native-scan",
+    });
+    try std.testing.expect(o.mode == .filed_scan);
+    try std.testing.expectEqualStrings("fixtures/filed.fyi", o.root_dir);
+    try std.testing.expectEqualStrings("outputs/filed-native-scan", o.out_dir);
 }
 
 test "parseOptions: unknown flag" {

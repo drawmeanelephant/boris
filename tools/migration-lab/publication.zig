@@ -49,8 +49,8 @@ pub const Publication = struct {
             .backup_path = try std.fmt.allocPrint(allocator, "{s}.boris-migration-lab-prev", .{final_path}),
             .marker = try std.fmt.allocPrint(allocator, "format=boris-migration-lab-output\nowner={s}\nschema_version=1\n", .{owner}),
         };
-        errdefer publication.abandon(io, allocator);
         errdefer publication.deinit(allocator);
+        errdefer publication.abandon(io, allocator);
 
         try rejectSymlinkAlongPath(io, allocator, publication.stage_path, error.OutputSymlink);
         try rejectSymlinkAlongPath(io, allocator, publication.backup_path, error.OutputSymlink);
@@ -100,7 +100,19 @@ pub const Publication = struct {
         self.active = false;
 
         if (moved_previous) {
-            cwd.deleteTree(io, self.backup_path) catch return error.BackupCleanupFailed;
+            cwd.deleteTree(io, self.backup_path) catch {
+                // The new tree is already installed, but a cleanup failure must
+                // not be reported as a successful replacement with a stale
+                // previous tree left behind. Roll back while both trees are
+                // still owned and on the same filesystem.
+                cwd.rename(self.final_path, cwd, self.stage_path, io) catch return error.BackupCleanupFailed;
+                cwd.rename(self.backup_path, cwd, self.final_path, io) catch {
+                    cwd.rename(self.stage_path, cwd, self.final_path, io) catch return error.PublishRollbackFailed;
+                    return error.BackupCleanupFailed;
+                };
+                self.active = true;
+                return error.BackupCleanupFailed;
+            };
         }
     }
 
