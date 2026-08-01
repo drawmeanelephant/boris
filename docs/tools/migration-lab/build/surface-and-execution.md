@@ -282,7 +282,7 @@ All user-visible error messages are plain stderr text via `std.log.err` or `std.
 
 **Markdown fence safety:** Instagram captions are enclosed in fences sized to outrank the longest backtick run in the caption, so caption text cannot escape into live Markdown syntax. This is a directly implemented and documented safety property. Whether all other modes apply equivalent fence sizing is uncertain — other modes produce Markdown body content from foreign bytes without explicit fence-escape evidence.
 
-**Embedded frontmatter in packed documents:** Lab-generated `content/*.md` files include Boris closed frontmatter. The lab never invents frontmatter fields outside the closed grammar (`id`, `title`, `parent`, `status`, `tags`). Provenance information is written as HTML comments (`<!-- boris-migration-provenance ... -->`), not as frontmatter fields.
+**Embedded frontmatter in packed documents:** Lab-generated `content/*.md` files include Boris closed frontmatter. The lab never invents frontmatter fields outside the closed grammar (`id`, `title`, `parent`, `status`, `tags`). Provenance information is written as HTML comments (`<!-- boris-migration-provenance ... -->`), not as frontmatter fields; the comment remains lab-owned evidence under the [publication-model contract](/docs/contracts/publication-model.md), not product metadata or publication configuration.
 
 **Output overwrite:** The lab overwrites previous output for WordPress mode (wipes lab-owned files before re-run). Other modes' overwrite behavior is uncertain. No atomic rename is used; partial overwrites on failure are possible.
 

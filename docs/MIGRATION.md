@@ -7,6 +7,11 @@ features → incremental edit → prod vs preview → deploy the static tree.
 It is **content and process** guidance — not a second compiler dialect and
 not a change to product contracts.
 
+Metadata placement and evidence vocabulary are governed by the canonical
+[publication model contract](contracts/publication-model.md). This guide
+applies that boundary to migration work; it does not create a second metadata
+grammar.
+
 | Artifact | Role |
 |----------|------|
 | This guide | Author-facing adoption sequence |
@@ -23,6 +28,7 @@ not a change to product contracts.
 |-------|------|--------------|
 | **Boris product** (`./zig-out/bin/boris`) | Validated Trunk/Satellite graph; HTML under a target dir; IR; RAG; Context Bundle; fail-loud wiki/includes/components | Universal import; link-checking ordinary `[]()` hrefs; analytics; hosting |
 | **Migration labs** (`boris-migration-lab`) | Read-only inventory / draft Markdown + preservation reports for named source shapes | Runtime dependency of `boris`; full site parity; network fetch |
+| **Publication configuration** (profile/plan/target) | Content root, target, theme/layout, URL, feed/sitemap, machine-output, and output-root choices | Page frontmatter; migration source evidence |
 | **Manual human review** | Frontmatter closure, graph shape, link rewrite, asset placement, theme trust, deploy choice | Automatic “done” from a green lab report |
 | **Future / unimplemented** | Full YAML/MDX, embedded HTTP server, universal Astro/MkDocs/Hugo importers, automatic analytics | Claimed in this guide |
 
@@ -43,6 +49,30 @@ Closed frontmatter + Trunk/Satellite + wiki/includes
       ▼
 Static output dir → any static host                ← deployment (outside Boris)
 ```
+
+### Metadata and provenance boundary
+
+Use the following routing rule during conversion:
+
+- A page `title`, identity, `parent`, status, tags, relations, body, and
+  validated structural references are document facts. They must satisfy the
+  closed [`frontmatter.md`](contracts/frontmatter.md) and graph contracts.
+- A site URL such as `https://docs.example.com`, a public/preview target,
+  theme or layout, feed/sitemap policy, machine-output scope, and deployment
+  output root are publication facts. Keep them in publication configuration,
+  not on every page.
+- Original source paths and fields, raw values, normalization decisions,
+  confidence, unsupported constructs, dropped/preserved metadata, and reviewer
+  decisions are migration provenance. Keep them in lab reports, ledgers,
+  manifests, review records, or importer sidecars.
+
+Lab-generated candidate Markdown is a proposal for Boris source, not an
+authority that widens Boris grammar. A provenance comment placed in a candidate
+body is a lab annotation; it is not product frontmatter, graph semantics, or
+proof that the candidate is correct. Review the candidate and its provenance
+before passing it to the product compiler. See the canonical
+[publication model](contracts/publication-model.md) for the ownership matrix,
+projection boundaries, and verification vocabulary.
 
 ---
 
@@ -221,12 +251,18 @@ or convert manually.
 ### 3. Review preservation / migration reports
 
 **Migration lab:** open the lab `--out` directory and confirm every
-preserve / drop / rewrite decision is intentional.
+preserve / drop / rewrite decision is intentional. Treat its manifests and
+reports as migration provenance, not as product frontmatter or publication
+configuration.
 
 **Manual human review (required even when the lab is green):**
 
-- [ ] Only `id`, `title`, `parent`, `status`, `tags`, and deliberately reviewed
-  `relations` remain in page frontmatter
+- [ ] Only keys accepted by the closed [`frontmatter.md`](contracts/frontmatter.md)
+  contract remain in page frontmatter; source-only metadata stays in provenance
+- [ ] Site URL, theme/layout, feed/sitemap policy, deployment choice, and output
+  roots are publication configuration, not page metadata
+- [ ] Source-system fields, raw values, confidence, unsupported constructs, and
+  reviewer decisions remain in lab reports/manifests/sidecars
 - [ ] Every Satellite `parent` names an existing immediate parent entity id
       (byte-exact); nested parent chains are allowed
 - [ ] Includes live under content-root `includes/` when possible
@@ -260,7 +296,9 @@ exit `0` on the compile itself. For JSON handoff:
 ### 4. Build HTML, page-local assets, IR, and RAG
 
 Modes do **not** mix: one invocation is HTML **or** IR **or** RAG **or**
-Context Bundle.
+Context Bundle. These are separate projection contracts; a future profile may
+coordinate them, but coordination does not blend their schemas or make one
+successful output proof of another.
 
 #### 4a. Contoso migration fixture — HTML
 
@@ -479,6 +517,8 @@ ls test-output/migration-preview/index.html
 - You may later give `preview` different `--layout-rule` / layout paths without
   changing content frontmatter.
 - Do **not** use one target’s `.boris-cache` as another’s.
+- The target, layout, and output-root choices are publication facts; changing
+  them does not require adding deployment or theme metadata to page frontmatter.
 
 **Future / unimplemented:** Boris does not deploy, promote, or sync targets
 to a host. Promotion is “point the host at the prod directory you built.”
@@ -495,6 +535,10 @@ to a host. Promotion is “point the host at the prod directory you built.”
 **Product behavior:** that directory is ordinary static files (`*.html`,
 copied theme `assets/`, page-local `*.assets/`). There is **no** embedded
 Boris HTTP server and **no** Node runtime required at serve time.
+
+The generated tree proves only the bounded local generation step. Deployment,
+host configuration, accessibility, and search-engine behavior remain outside
+that local claim.
 
 **Manual deployment:** copy or rsync that directory to any static host, or
 serve locally with any static file server of your choice. Open
@@ -783,6 +827,7 @@ zig build --build-file tools/migration-lab/build.zig test
 | [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) | Standalone labs |
 | [`README.md`](../README.md) | Product front door + CLI |
 | [`docs/STATUS.md`](STATUS.md) | Current phase |
+| [`docs/contracts/publication-model.md`](contracts/publication-model.md) | Document/publication/provenance ownership and projection claims |
 | [`docs/contracts/frontmatter.md`](contracts/frontmatter.md) | Normative FM grammar |
 | [`docs/contracts/includes-and-wiki-links.md`](contracts/includes-and-wiki-links.md) | Includes + wiki |
 | [`docs/contracts/heading-ids.md`](contracts/heading-ids.md) | Fragment ids |

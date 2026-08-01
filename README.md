@@ -157,6 +157,11 @@ shown explicitly above: it is an HTML-build flag, not a separate content project
 `--sitemap`. A sitemap is a discovery hint, not a guarantee that a search
 engine will crawl or index a page.
 
+The canonical [publication model](docs/contracts/publication-model.md) defines
+which values are document facts, publication facts, migration provenance, or
+projection evidence. Selecting or emitting one output does not merge its
+contract with another output or prove deployment correctness.
+
 RSS is opt-in and does not modify themes. After publishing `rss.xml`, add this
 standard discovery hint to a layout when the deployed feed URL is known:
 

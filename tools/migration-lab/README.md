@@ -42,6 +42,21 @@ coupling**. All code and fixtures live under `tools/migration-lab/`.
 
 Companion author guide: [`docs/MIGRATION.md`](../../docs/MIGRATION.md).
 
+### Ownership boundary
+
+The lab emits migration provenance and proposed Boris source. Its source paths,
+source-system fields and values, normalization decisions, confidence,
+unsupported constructs, dropped/preserved metadata, and reviewer decisions
+belong in lab reports, ledgers, manifests, review records, or importer-owned
+sidecars. They must not silently become Boris frontmatter, publication settings,
+or graph semantics. Generated candidate Markdown remains subject to the
+closed [`frontmatter.md`](../../docs/contracts/frontmatter.md) and graph
+contracts. A provenance comment in a candidate body is a lab annotation, not a
+product metadata field.
+
+The complete fact/projection/verification boundary is the canonical
+[publication model contract](../../docs/contracts/publication-model.md).
+
 Future Facebook, Instagram, and Google Takeout dogfooding starts with the
 provider-neutral [takeout intake contract](../../docs/contracts/takeout-lab-intake.md)
 and its synthetic fixture lane under `fixtures/takeout-intake/`. This is an
@@ -751,9 +766,10 @@ media_manifest.json        # deterministic source→output inventory
 ```
 
 Each page uses **closed Boris frontmatter** where possible (`title`, optional
-`parent` / `status` / `tags`), preserves compatible authored frontmatter, drops
-unknown keys into the review queue, and appends a
-`boris-migration-provenance` comment (export path, entity id, Notion page id).
+`parent` / `status` / `tags`), drops unknown source keys into the review queue,
+and may append a `boris-migration-provenance` comment (export path, entity id,
+Notion page id). That comment is a lab-owned annotation and does not widen
+product frontmatter or become publication metadata.
 
 | Class | Typical cause |
 |-------|----------------|

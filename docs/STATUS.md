@@ -14,6 +14,9 @@ graph out as HTML by default, with optional IR, RAG, Context Bundle, and
 `llms.txt`, and RSS 2.0 exports. It is not a Node SSG, an MDX runtime, or a migration
 framework. Normative behavior lives in [`docs/contracts/`](contracts/);
 release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
+The publication-model boundary is canonically defined by
+[`publication-model.md`](contracts/publication-model.md); it does not add
+frontmatter or claim a unified publication executor.
 
 ## Read this first
 
@@ -133,6 +136,7 @@ The release audit found these follow-ups:
 |---|---|
 | [`README.md`](../README.md) | Product outcomes and quick start |
 | [`docs/contracts/`](contracts/) | Normative compiler and artifact behavior |
+| [`docs/contracts/publication-model.md`](contracts/publication-model.md) | Canonical ownership of document facts, publication facts, migration provenance, projections, and verification claims |
 | [`CHANGELOG.md`](../CHANGELOG.md) | Released-history record |
 | [`docs/changelog.d/`](changelog.d/) | Pending release fragments |
 | [`docs/MIGRATION.md`](MIGRATION.md) | Bounded author migration workflow |

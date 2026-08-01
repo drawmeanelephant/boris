@@ -40,6 +40,7 @@ per topic:
 
 | Topic | Canonical normative document |
 |-------|------------------------------|
+| Publication model: document facts, publication facts, migration provenance, projections, and verification claims | [publication-model.md](publication-model.md) |
 | Frontmatter grammar | [frontmatter.md](frontmatter.md) |
 | RSS 2.0 export | [rss-2.0.md](rss-2.0.md) |
 | XML sitemap for HTML | [xml-sitemap.md](xml-sitemap.md) |
@@ -49,6 +50,7 @@ per topic:
 | JSON IR (manifest, graph, build-report) | [ir-schema.md](ir-schema.md) |
 | Diagnostics | [diagnostics.md](diagnostics.md) |
 | RAG export | [rag-export.md](rag-export.md) |
+| `llms.txt` export | [llms-txt.md](llms-txt.md) |
 | Aside / components | [components.md](components.md) |
 | Apex C ABI | [apex-abi.md](apex-abi.md) |
 | HTML output (default CLI) | [html-output.md](html-output.md) |
@@ -72,6 +74,7 @@ per topic:
 
 | Document | Topic |
 |----------|-------|
+| [publication-model.md](publication-model.md) | Canonical ownership model for document facts, publication facts, migration provenance, projections, and verification claims |
 | [frontmatter.md](frontmatter.md) | Closed frontmatter grammar; `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, and `summary` only |
 | [rss-2.0.md](rss-2.0.md) | Deterministic RSS 2.0 projection and publication contract |
 | [xml-sitemap.md](xml-sitemap.md) | Deterministic staged XML Sitemap Protocol projection for one HTML target |
@@ -80,6 +83,7 @@ per topic:
 | [diagnostics.md](diagnostics.md) | Stable categories (`EDUPLICATEID`, …), severity, exit codes |
 | [ir-schema.md](ir-schema.md) | Trunk/Satellite graph, typed dependency edges, reverse index, deterministic JSON under `.boris/` |
 | [rag-export.md](rag-export.md) | Optional RAG export; schema versioning; `:::kind` export-only |
+| [llms-txt.md](llms-txt.md) | Deterministic crawler/LLM discovery projection; URL and deployment limits |
 | [components.md](components.md) | Constrained `<Aside>` tokenizer, kinds, id grammar, nested policy (m10) |
 | [apex-abi.md](apex-abi.md) | In-process Apex C ABI, allocator lifetime, Zig error rules (m8) |
 | [html-output.md](html-output.md) | HTML Whiteboard, Aside stream, layout splice, Atomic publish (default CLI) |

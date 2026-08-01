@@ -1,6 +1,13 @@
 # Canonical publication profile
 
-Status: proposal; non-normative until contracts and implementation land
+Status: historical proposal; non-normative design rationale
+
+The canonical ownership model is now
+[`../contracts/publication-model.md`](../contracts/publication-model.md), and
+the implemented parser/static-plan surface is
+[`../contracts/publication-profile.md`](../contracts/publication-profile.md).
+The examples and invocation spellings below remain proposal text; they are not
+a current CLI or publication-plan contract.
 
 Date: 2026-07-29
 
