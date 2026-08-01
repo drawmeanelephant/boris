@@ -31,7 +31,8 @@ The build step installs the Boris binary, then runs
 `scripts/verify-publication-conformance.sh`. CI runs the same step after the
 ordinary test step. The verifier:
 
-- reads retained fixtures and `c02-includes-fragments/depth-cases.tsv`;
+- reads retained fixtures and the pipe-separated
+  `c02-includes-fragments/depth-cases.psv` declaration;
 - generates only the depth-32 and depth-33 source trees under the fixed,
   ignored `.zig-cache/publication-conformance/` tree;
 - captures stdout and stderr separately and asserts every exit code;
@@ -58,7 +59,7 @@ absent. This is observed behavior, not a production change.
 
 | Area | Retained declaration or fixture | Verifier cases |
 |---|---|---|
-| C02 includes/fragments | `c02-includes-fragments/cases/` plus `depth-cases.tsv` | `c02-01`–`c02-09`, `c02-depth-32`, `c02-depth-33` |
+| C02 includes/fragments | `c02-includes-fragments/cases/` plus pipe-separated `depth-cases.psv` | `c02-01`–`c02-09`, `c02-depth-32`, `c02-depth-33` |
 | C03 sitemap | `c03-sitemap/content/`, sitemap golden, CLI snapshots | `c03-trailing`, `c03-no-trailing`, `c03-invalid-*` |
 | C04 RSS | `c04-rss/content/`, feed and CLI snapshots | `c04-feed-2/3/4`, `c04-missing-*`, `c04-invalid-*` |
 | C08 parser/Unicode | `c08-parser-unicode/` plus repository invalid-UTF-8 corpus | `c08-valid`, `c08-invalid-*` |
@@ -67,7 +68,7 @@ absent. This is observed behavior, not a production change.
 
 ### Generated depth declaration
 
-`c02-includes-fragments/depth-cases.tsv` retains the requested depth, title,
+`c02-includes-fragments/depth-cases.psv` retains the requested depth, title,
 terminal marker, expected exit, expected HTML golden or stderr snapshot. The
 generator uses exactly these byte-stable inputs:
 
@@ -95,8 +96,8 @@ The old mechanically identical `level-NN.md` forests are not committed.
 | `cases/07-fragment-after-include` | `c02-07` | Exit 0; exact HTML golden; repeated full HTML tree |
 | `cases/08-duplicate-heading` | `c02-08` | Exit 0; exact page and `target.html` goldens; repeated full HTML tree |
 | `cases/09-nested-include-path` | `c02-09` | Exit 0; exact HTML golden; repeated full HTML tree |
-| `depth-cases.tsv: depth-32` | `c02-depth-32` | Generated 32-level chain, exit 0; exact `cases/10-depth-32/expected/index.html` |
-| `depth-cases.tsv: depth-33` | `c02-depth-33` | Generated 33-level chain, exit 1; exact `cases/11-depth-33/expected/stderr.txt`; no final HTML artifact |
+| `depth-cases.psv: depth-32` | `c02-depth-32` | Generated 32-level chain, exit 0; exact `cases/10-depth-32/expected/index.html` |
+| `depth-cases.psv: depth-33` | `c02-depth-33` | Generated 33-level chain, exit 1; exact `cases/11-depth-33/expected/stderr.txt`; no final HTML artifact |
 
 The success observations cover include placement, nested relative resolution,
 heading lookup after an include, duplicate heading id membership, and the
@@ -192,6 +193,8 @@ The retained `src/parser.zig` tests now:
 
 - free every allocated value/source or temporary list on each loop iteration;
 - assert exact `EFRONTMATTER` or `EINVALIDUTF8` categories;
+- assert representative `EFRONTMATTER` failures retain non-empty
+  human-readable diagnostic detail without pinning mutable wording;
 - assert accepted scalar, tag-token, source, and title lengths at the exact
   boundary;
 - compare full Unicode strings and body bytes, preserving decomposed marks,
@@ -231,13 +234,15 @@ repository-relative paths. Final results:
 |---|---|
 | `zig fmt --check build.zig src/*.zig` | Exit 1 because the same pre-existing files are unformatted on the base worktree: `src/apex.zig`, `src/artifact_invariants.zig`, `src/hardening_test.zig`, `src/harness.zig`, `src/layout_select_hostile_test.zig`, `src/page.zig`, `src/pipeline.zig`, `src/rss_date.zig`, `src/svg_policy.zig`, `src/target.zig`, `src/unicode_policy.zig`, `src/watch.zig`; touched `build.zig` and `src/parser.zig` pass. |
 | `zig build test-publication-conformance` | Pass; every C02/C03/C04/C08 case and repeat assertion passed. |
-| `zig build test --summary all` | Pass; 80/80 steps, 5,433/5,433 tests. |
+| `zig build test --summary all` | Pass; 80/80 steps, 5,452/5,452 tests. |
 | `zig build --summary all` | Pass; 9/9 steps. |
 | `./scripts/release-gate.sh` | Pass; `RELEASE GATE PASSED`. |
 | `git diff --check` | Exit 0; no whitespace errors (this worktree also printed a local fsmonitor IPC warning). |
 
 Additional required checks passed:
 
+- `zig test src/parser.zig`: 75/75 tests passed, including the diagnostic-detail
+  coverage added for this review.
 - A deliberately changed C02 golden made the verifier fail at `c02-01` with
   `artifact mismatch`; restoring it made the verifier pass again.
 - Two standalone verifier runs both exited 0 and their complete outputs were

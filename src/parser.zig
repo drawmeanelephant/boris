@@ -722,6 +722,49 @@ test "parse: CRLF input" {
     try std.testing.expectEqualStrings("# Body\r\n", r.doc.body);
 }
 
+fn expectDiagnosticWithMessage(result: ParseResult, expected: Category) !void {
+    try std.testing.expect(!result.isOk());
+    try std.testing.expectEqual(expected, result.category().?);
+    try std.testing.expect(std.mem.trim(u8, result.diagnostic.?.message, " \t").len > 0);
+}
+
+test "parse: EFRONTMATTER diagnostics retain category and non-empty detail" {
+    const static_sources = [_][]const u8{
+        "---\ntitle: X\n",
+        "---\ntitle: First\ntitle: Second\n---\n",
+        "---\ntitle: X\ncategory: docs\n---\n",
+        "---\ntags: not-a-list\n---\n",
+    };
+    for (static_sources) |source| {
+        try expectDiagnosticWithMessage(parse(source), .EFRONTMATTER);
+    }
+
+    const gpa = std.testing.allocator;
+    const overlong_cases = [_]struct {
+        prefix: []const u8,
+        fill: u8,
+        count: usize,
+        suffix: []const u8,
+    }{
+        .{ .prefix = "---\ntitle: ", .fill = 'X', .count = max_title_bytes + 1, .suffix = "\n---\n" },
+        .{ .prefix = "---\n", .fill = 'x', .count = max_frontmatter_bytes + 1, .suffix = "\n---\n" },
+        .{ .prefix = "---\ntags: [", .fill = 't', .count = max_tag_bytes + 1, .suffix = "]\n---\n" },
+    };
+    for (overlong_cases) |case| {
+        var source: std.ArrayList(u8) = .empty;
+        defer source.deinit(gpa);
+        try source.appendSlice(gpa, case.prefix);
+        try source.appendNTimes(gpa, case.fill, case.count);
+        try source.appendSlice(gpa, case.suffix);
+        try expectDiagnosticWithMessage(parse(source.items), .EFRONTMATTER);
+    }
+
+    const oversized_source = try gpa.alloc(u8, max_source_bytes + 1);
+    defer gpa.free(oversized_source);
+    @memset(oversized_source, 'a');
+    try expectDiagnosticWithMessage(parse(oversized_source), .EFRONTMATTER);
+}
+
 test "parse: bare CR at EOF does not close frontmatter" {
     // Isolated CR is not a line break; "---\r" at EOF is not a closing fence.
     const src = "---\ntitle: X\n---\r";

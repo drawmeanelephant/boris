@@ -25,7 +25,7 @@ pass() { printf '    OK  %s\n' "$*"; }
 fail() { printf '    FAIL %s\n' "$*" >&2; exit 1; }
 
 [[ -x "$BORIS" ]] || fail "missing installed Boris binary at ${BORIS}"
-[[ -f "$C02/depth-cases.tsv" ]] || fail "missing generated-depth declaration"
+[[ -f "$C02/depth-cases.psv" ]] || fail "missing generated-depth declaration"
 
 # This path is fixed and ignored by the repository. Keep the guard adjacent to
 # the cleanup so a future edit cannot accidentally widen the deletion scope.
@@ -83,11 +83,14 @@ assert_no_html_target() {
     fi
 }
 
-assert_no_ir_target() {
+# The IR contract publishes build-report.json on content failure, but never
+# publishes graph.json or manifest.json: docs/contracts/diagnostics.md.
+assert_failed_ir_state() {
     local path="$1"
     assert_absent "$path/graph.json"
     assert_absent "$path/manifest.json"
     assert_file "$path/build-report.json"
+    assert_contains '"ok": false' "$path/build-report.json"
 }
 
 assert_file() {
@@ -123,7 +126,7 @@ assert_tree_equal() {
     fi
 }
 
-assert_stderr_contains() {
+assert_contains() {
     local needle="$1"
     local path="$2"
     grep -F "$needle" "$path" >/dev/null || fail "${path} does not contain ${needle}"
@@ -133,10 +136,9 @@ run_html_success() {
     local name="$1"
     local input="$2"
     local expected_html="$3"
-    local extra_name="$4"
-    shift 4
-    local first="$OUT/outputs/${extra_name}-a"
-    local second="$OUT/outputs/${extra_name}-b"
+    shift 3
+    local first="$OUT/outputs/${name}-a"
+    local second="$OUT/outputs/${name}-b"
 
     run_capture "${name}-a" 0 "$BORIS" --html --input "$input" --html-dir "$first" --html-layout "$LAYOUT" --quiet "$@"
     assert_empty "$OUT/logs/${name}-a.stdout"
@@ -165,16 +167,16 @@ run_html_failure() {
 }
 
 note "C02 includes and heading fragments"
-run_html_success "c02-01" "$C02/cases/01-include-success/content" "$C02/cases/01-include-success/expected/index.html" "c02-01"
+run_html_success "c02-01" "$C02/cases/01-include-success/content" "$C02/cases/01-include-success/expected/index.html"
 run_html_failure "c02-02" "$C02/cases/02-missing-include/content" "$C02/cases/02-missing-include/expected/stderr.txt"
 run_html_failure "c02-03" "$C02/cases/03-direct-cycle/content" "$C02/cases/03-direct-cycle/expected/stderr.txt"
 run_html_failure "c02-04" "$C02/cases/04-long-cycle/content" "$C02/cases/04-long-cycle/expected/stderr.txt"
-run_html_success "c02-05" "$C02/cases/05-valid-fragment/content" "$C02/cases/05-valid-fragment/expected/index.html" "c02-05"
+run_html_success "c02-05" "$C02/cases/05-valid-fragment/content" "$C02/cases/05-valid-fragment/expected/index.html"
 run_html_failure "c02-06" "$C02/cases/06-missing-fragment/content" "$C02/cases/06-missing-fragment/expected/stderr.txt"
-run_html_success "c02-07" "$C02/cases/07-fragment-after-include/content" "$C02/cases/07-fragment-after-include/expected/index.html" "c02-07"
-run_html_success "c02-08" "$C02/cases/08-duplicate-heading/content" "$C02/cases/08-duplicate-heading/expected/index.html" "c02-08"
+run_html_success "c02-07" "$C02/cases/07-fragment-after-include/content" "$C02/cases/07-fragment-after-include/expected/index.html"
+run_html_success "c02-08" "$C02/cases/08-duplicate-heading/content" "$C02/cases/08-duplicate-heading/expected/index.html"
 assert_cmp "$C02/cases/08-duplicate-heading/expected/target.html" "$OUT/outputs/c02-08-a/target.html"
-run_html_success "c02-09" "$C02/cases/09-nested-include-path/content" "$C02/cases/09-nested-include-path/expected/index.html" "c02-09"
+run_html_success "c02-09" "$C02/cases/09-nested-include-path/content" "$C02/cases/09-nested-include-path/expected/index.html"
 
 generate_depth_case() {
     local root="$1"
@@ -224,7 +226,7 @@ while IFS='|' read -r name depth title marker expected_exit expected_html expect
         assert_no_html_target "$output"
         pass "c02-${name}: generated ${depth}-level chain, exit 1, exact diagnostic, no final HTML target"
     fi
-done <"$C02/depth-cases.tsv"
+done <"$C02/depth-cases.psv"
 
 note "C03 sitemap"
 SITE_URL='https://docs.example/docs&guides/'
@@ -321,13 +323,13 @@ for invalid in malformed-unicode bom; do
     run_capture "c08-${invalid}" 1 "$BORIS" --no-rag --input "$C08/cases/${invalid}/content" --out "$output"
     assert_empty "$OUT/logs/c08-${invalid}.stdout"
     assert_diag "$C08/cases/${invalid}/expected/stderr.txt" "$OUT/logs/c08-${invalid}.stderr"
-    assert_no_ir_target "$output"
+    assert_failed_ir_state "$output"
 done
 invalid_utf8_out="$OUT/outputs/c08-invalid-utf8"
 run_capture c08-invalid-utf8 1 "$BORIS" --no-rag --input fixtures/content/invalid --out "$invalid_utf8_out"
 assert_empty "$OUT/logs/c08-invalid-utf8.stdout"
 assert_diag "$C08/expected/invalid-utf8.stderr" "$OUT/logs/c08-invalid-utf8.stderr"
-assert_no_ir_target "$invalid_utf8_out"
+assert_failed_ir_state "$invalid_utf8_out"
 pass "c08-invalid: BOM, malformed Unicode, and invalid UTF-8 fail closed"
 
 note "Publication conformance verification passed"
