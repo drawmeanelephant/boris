@@ -1562,6 +1562,17 @@ fn publishStageFile(
     };
 }
 
+fn publishPathsEqual(left: []const u8, right: []const u8) bool {
+    if (left.len != right.len) return false;
+    for (left, right) |left_byte, right_byte| {
+        if (left_byte == right_byte) continue;
+        if ((left_byte == '/' and right_byte == '\\') or
+            (left_byte == '\\' and right_byte == '/')) continue;
+        return false;
+    }
+    return true;
+}
+
 /// Publish all files under `stage_dir` into `final_dir` via same-parent rename.
 /// When `deferred_path` is set, that file is committed only after every other
 /// staged payload has replaced successfully. The HTML coordinator uses this
@@ -1584,7 +1595,7 @@ fn publishStageTree(
         }
         if (entry.kind != .file) continue;
         if (deferred_path) |path| {
-            if (std.mem.eql(u8, entry.path, path)) continue;
+            if (publishPathsEqual(entry.path, path)) continue;
         }
         try publishStageFile(io, entry.dir, entry.basename, final_dir, entry.path);
     }
@@ -4844,6 +4855,21 @@ test "artifact inventory replacement is last during a failed target commit" {
     const staged_inventory = try readAllFile(io, stage, artifact_inventory.output_path, gpa);
     defer gpa.free(staged_inventory);
     try std.testing.expectEqualStrings("new inventory", staged_inventory);
+}
+
+test "deferred publication paths compare across host separators" {
+    try std.testing.expect(publishPathsEqual(
+        "_boris/proof/artifacts.json",
+        "_boris/proof/artifacts.json",
+    ));
+    try std.testing.expect(publishPathsEqual(
+        "_boris\\proof\\artifacts.json",
+        "_boris/proof/artifacts.json",
+    ));
+    try std.testing.expect(!publishPathsEqual(
+        "_boris/proof/other.json",
+        "_boris/proof/artifacts.json",
+    ));
 }
 
 test "HTML publication artifact inventory is complete, deterministic, isolated, and transactional" {
