@@ -224,25 +224,35 @@ No item above is inflated into a **Confirmed defect** or **Likely defect**.
 
 ## Reproduction and validation record
 
-The complete verification set is run from the repository root with repository-
-relative paths. The final PR description records the exact command output for:
+The complete verification set was run from the repository root with
+repository-relative paths. Final results:
 
-```bash
-zig fmt --check build.zig src/*.zig
-zig build test-publication-conformance
-zig build test --summary all
-zig build --summary all
-./scripts/release-gate.sh
-git diff --check
-```
+| Command | Result |
+|---|---|
+| `zig fmt --check build.zig src/*.zig` | Exit 1 because the same pre-existing files are unformatted on the base worktree: `src/apex.zig`, `src/artifact_invariants.zig`, `src/hardening_test.zig`, `src/harness.zig`, `src/layout_select_hostile_test.zig`, `src/page.zig`, `src/pipeline.zig`, `src/rss_date.zig`, `src/svg_policy.zig`, `src/target.zig`, `src/unicode_policy.zig`, `src/watch.zig`; touched `build.zig` and `src/parser.zig` pass. |
+| `zig build test-publication-conformance` | Pass; every C02/C03/C04/C08 case and repeat assertion passed. |
+| `zig build test --summary all` | Pass; 80/80 steps, 5,433/5,433 tests. |
+| `zig build --summary all` | Pass; 9/9 steps. |
+| `./scripts/release-gate.sh` | Pass; `RELEASE GATE PASSED`. |
+| `git diff --check` | Exit 0; no whitespace errors (this worktree also printed a local fsmonitor IPC warning). |
 
-It also records the clean-checkout run, deliberate golden mutation failure,
-repeat run, changed-file count, absence of committed generated output, and
-the fact that no production behavior changed. The formatter command reports
-the same pre-existing unformatted files on the base worktree; touched
-`build.zig` and `src/parser.zig` are formatted and no formatter-only
-production changes are included.
+Additional required checks passed:
 
-PR #286 merged as `0ac7ace5df98dd9d370ce827862c2060642059df` while this
-revision was in progress. The existing branch is being rebased onto that
-latest `afterparty` tip before the final validation record and push.
+- A deliberately changed C02 golden made the verifier fail at `c02-01` with
+  `artifact mismatch`; restoring it made the verifier pass again.
+- Two standalone verifier runs both exited 0 and their complete outputs were
+  byte-identical under `cmp`.
+- A clean detached worktree at the committed revision passed
+  `zig build test-publication-conformance`.
+- `git diff --name-only origin/afterparty...HEAD` reports 76 changed files,
+  below the 100-file review limit. No generated output tree is tracked, and
+  the verifier and release-gate temporary trees are cleaned after validation.
+- No production behavior changed; the only `src/` changes are parser tests.
+
+The formatter command reports the same pre-existing unformatted files on the
+base worktree; touched `build.zig` and `src/parser.zig` are formatted and no
+formatter-only production changes are included.
+
+PR #286 merged as `0ac7ace5df98dd9d370ce827862c2060642059df`. This existing
+branch was rebased onto that exact `afterparty` tip before the final validation
+and push.
