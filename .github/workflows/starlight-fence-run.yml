@@ -25,26 +25,29 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake
-          python3 -m pip install pyyaml
 
       - name: Execute staged patch and gates
         run: |
           python3 - <<'PY'
           import subprocess
-          import yaml
+          import textwrap
+          from pathlib import Path
 
-          workflow = yaml.safe_load(open('.github/workflows/starlight-fence-fix.yml'))
-          steps = workflow['jobs']['patch-test-commit']['steps']
-          wanted = {
+          source = Path('.github/workflows/starlight-fence-fix.yml').read_text()
+          wanted = (
               'Apply focused fence-aware fix and regression test',
               'Build and full tests',
               'Focused black-box Starlight proof',
               'Commit focused change and remove staging workflow',
-          }
-          for step in steps:
-              if step.get('name') not in wanted:
-                  continue
-              subprocess.run(['bash', '-euxo', 'pipefail', '-c', step['run']], check=True)
+          )
+          for name in wanted:
+              marker = f'      - name: {name}\n        run: |\n'
+              start = source.index(marker) + len(marker)
+              end = source.find('\n      - name:', start)
+              if end == -1:
+                  end = len(source)
+              script = textwrap.dedent(source[start:end])
+              subprocess.run(['bash', '-euxo', 'pipefail', '-c', script], check=True)
           PY
 
       - name: Remove wrapper from final patch
