@@ -135,16 +135,22 @@ pub fn main(init: std.process.Init) u8 {
 
 fn parseOptions(allocator: std.mem.Allocator, args: []const [:0]const u8) ParseError!Options {
     if (args.len < 2) return error.MissingCommand;
-    const command = parseCommand(args[1]) orelse if (std.mem.eql(u8, args[1], "--help") or std.mem.eql(u8, args[1], "-h")) return .{ .command = .generate, .help = true } else return error.UnknownCommand;
+    // Help genuinely wins regardless of argument position and of malformed or
+    // missing option values: honor `-h`/`--help` before validating anything
+    // else, so `run --jobs abc --help` prints help rather than a usage error.
+    for (args[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            return .{ .command = .generate, .help = true };
+        }
+    }
+    const command = parseCommand(args[1]) orelse return error.UnknownCommand;
     var options = Options{ .command = command };
     var barbs: std.ArrayList([]const u8) = .empty;
     var saw_jobs = false;
     var index: usize = 2;
     while (index < args.len) : (index += 1) {
         const arg = args[index];
-        if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
-            options.help = true;
-        } else if (std.mem.eql(u8, arg, "--force")) {
+        if (std.mem.eql(u8, arg, "--force")) {
             options.force = true;
         } else if (std.mem.startsWith(u8, arg, "--pages=")) {
             options.pages = parsePageCount(arg["--pages=".len..]) catch return error.InvalidPageCount;
@@ -239,10 +245,12 @@ fn parsePageCount(value: []const u8) !usize {
 
 /// Parse a `--jobs` value. The valid range matches the Boris compiler
 /// (`generator.min_jobs`..`generator.max_jobs`, i.e. 1..64). Zero,
-/// out-of-range, empty, and malformed values are usage errors.
+/// out-of-range, empty, and malformed values are usage errors. Delegates to
+/// `generator.validateJobs` so the CLI parser and both fixture operations
+/// share a single source of truth for the range.
 fn parseJobs(value: []const u8) !usize {
     const count = std.fmt.parseInt(usize, value, 10) catch return error.InvalidJobs;
-    if (count < generator.min_jobs or count > generator.max_jobs) return error.InvalidJobs;
+    try generator.validateJobs(count);
     return count;
 }
 
@@ -333,6 +341,29 @@ test "jobs parser accepts the Boris range and rejects invalid values" {
     try std.testing.expectError(error.InvalidJobs, parseJobs("abc"));
     try std.testing.expectError(error.InvalidJobs, parseJobs("4x"));
     try std.testing.expectError(error.InvalidJobs, parseJobs("-1"));
+}
+
+test "help wins regardless of argument position and malformed jobs values" {
+    // `--help` after a malformed jobs value must not fail parsing.
+    const after = try parseOptions(std.testing.allocator, &.{
+        "boris-testdata", "run", "--fixture", "/tmp/f", "--boris", "./boris", "--jobs", "abc", "--help",
+    });
+    defer std.testing.allocator.free(after.barb_names);
+    try std.testing.expect(after.help);
+
+    // `--help` before a malformed jobs value.
+    const before = try parseOptions(std.testing.allocator, &.{
+        "boris-testdata", "run", "--help", "--fixture", "/tmp/f", "--boris", "./boris", "--jobs", "0",
+    });
+    defer std.testing.allocator.free(before.barb_names);
+    try std.testing.expect(before.help);
+
+    // `--help` with a missing jobs value.
+    const missing = try parseOptions(std.testing.allocator, &.{
+        "boris-testdata", "run", "--fixture", "/tmp/f", "--boris", "./boris", "--jobs", "--help",
+    });
+    defer std.testing.allocator.free(missing.barb_names);
+    try std.testing.expect(missing.help);
 }
 
 test "CLI parser accepts jobs for run and republish-clean in both forms" {

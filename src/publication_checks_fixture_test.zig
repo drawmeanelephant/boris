@@ -438,6 +438,20 @@ fn captureJobsRun(
     const run_json = try readPayload(io, fixture, allocator, "results/run.json");
     const snapshot_jsonl = try readPayload(io, fixture, allocator, "results/output-snapshot.jsonl");
 
+    // The recorded evidence value must equal the exact value placed in the
+    // Boris argument vector by generator.buildBorisInvocation for this run.
+    var recorded = try std.json.parseFromSlice(std.json.Value, allocator, run_json, .{});
+    defer recorded.deinit();
+    const execution = switch (recorded.value.object.get("execution") orelse return error.InvalidRunEvidence) {
+        .object => |object| object,
+        else => return error.InvalidRunEvidence,
+    };
+    const recorded_jobs = switch (execution.get("requestedJobs") orelse return error.InvalidRunEvidence) {
+        .integer => |value| value,
+        else => return error.InvalidRunEvidence,
+    };
+    try std.testing.expectEqual(@as(i64, @intCast(jobs)), recorded_jobs);
+
     return .{
         .run_json = run_json,
         .checks_json = checks_json,
