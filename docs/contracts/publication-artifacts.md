@@ -108,7 +108,8 @@ target tree.
 The inventory is collected after selected producers have staged their bytes and
 before `publishStageTree` commits the target. `artifacts.json` is itself
 atomically staged under the target-owned `_boris/proof/` namespace and then
-committed by the same target transaction. Therefore:
+committed last by the same target transaction, after every other staged payload
+replacement succeeds. Therefore:
 
 - a render, asset, search, sitemap, inventory-write, or target-commit failure
   does not replace a prior valid inventory;
@@ -118,6 +119,11 @@ committed by the same target transaction. Therefore:
 - sequential, parallel, clean, and no-change incremental builds use the same
   producer paths and exact bytes, so their inventories are byte-identical when
   payload bytes are identical; and
+- the inventory is deferred until the final staged payload replacement, but
+  the underlying HTML publisher is per-file rather than a whole-tree rollback
+  journal. A mid-tree target-commit failure can therefore leave an earlier
+  payload replacement visible beside the prior inventory; that failed run is
+  not a successful publication and must be rerun; and
 - the normal staged-publish and cross-volume limitations documented by the
   [HTML output contract](html-output.md) continue to apply. No stronger
   universal filesystem atomicity claim is made here.

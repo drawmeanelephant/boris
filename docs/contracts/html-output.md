@@ -351,6 +351,13 @@ On the OS/filesystem where `zig build test` runs:
 - Universal cross-platform atomic replacement without multi-OS CI.
 - Cross-device / cross-volume **atomic** rename (stage commit falls back to
   copy+delete on `error.CrossDevice`; completeness only, not atomicity).
+- Whole-target rollback after a mid-tree replacement failure. The staged
+  publisher replaces files one at a time; an I/O or filesystem failure after
+  an earlier replacement may leave that replacement visible while later staged
+  paths remain from the prior target. A failed run is not a successful
+  publication and must be rerun; the publication artifact inventory is
+  deferred until the final staged payload replacement but is not a rollback
+  journal for the other payloads.
 - Windows: Zig std documents a brief window where concurrent openers of the
   destination may see `error.AccessDenied` during replace.
 - IR JSON publication atomicity (separate staging path under `.boris/`).

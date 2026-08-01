@@ -1540,11 +1540,39 @@ fn ensureValidParentDirs(io: Io, final_dir: Io.Dir, parent_rel: []const u8) !voi
 /// Prefer rename (atomic-ish on same filesystem). On `error.CrossDevice` (and
 /// only that), fall back to `copyFile` + delete source. Cross-volume **atomic**
 /// replace is still not claimed — the fallback is best-effort completeness.
+fn publishStageFile(
+    io: Io,
+    source_dir: Io.Dir,
+    source_path: []const u8,
+    final_dir: Io.Dir,
+    final_path: []const u8,
+) !void {
+    if (std.fs.path.dirname(final_path)) |parent| {
+        if (parent.len > 0) try ensureValidParentDirs(io, final_dir, parent);
+    }
+    source_dir.rename(source_path, final_dir, final_path, io) catch |err| switch (err) {
+        error.CrossDevice => {
+            try source_dir.copyFile(source_path, final_dir, final_path, io, .{
+                .make_path = false,
+                .replace = true,
+            });
+            source_dir.deleteFile(io, source_path) catch {};
+        },
+        else => return err,
+    };
+}
+
+/// Publish all files under `stage_dir` into `final_dir` via same-parent rename.
+/// When `deferred_path` is set, that file is committed only after every other
+/// staged payload has replaced successfully. The HTML coordinator uses this
+/// for the artifact inventory so a later payload replacement failure cannot
+/// expose an inventory for a partially committed target.
 fn publishStageTree(
     io: Io,
     gpa: std.mem.Allocator,
     stage_dir: Io.Dir,
     final_dir: Io.Dir,
+    deferred_path: ?[]const u8,
 ) !void {
     var walker = try stage_dir.walkSelectively(gpa);
     defer walker.deinit();
@@ -1555,22 +1583,14 @@ fn publishStageTree(
             continue;
         }
         if (entry.kind != .file) continue;
-
-        if (std.fs.path.dirname(entry.path)) |parent| {
-            if (parent.len > 0) {
-                try ensureValidParentDirs(io, final_dir, parent);
-            }
+        if (deferred_path) |path| {
+            if (std.mem.eql(u8, entry.path, path)) continue;
         }
-        entry.dir.rename(entry.basename, final_dir, entry.path, io) catch |err| switch (err) {
-            error.CrossDevice => {
-                try entry.dir.copyFile(entry.basename, final_dir, entry.path, io, .{
-                    .make_path = false,
-                    .replace = true,
-                });
-                entry.dir.deleteFile(io, entry.basename) catch {};
-            },
-            else => return err,
-        };
+        try publishStageFile(io, entry.dir, entry.basename, final_dir, entry.path);
+    }
+
+    if (deferred_path) |path| {
+        try publishStageFile(io, stage_dir, path, final_dir, path);
     }
 }
 
@@ -2365,7 +2385,7 @@ fn compilePagesInner(
 
     // Search, sitemap, and ownership metadata are members of the same staged
     // target commit as HTML.
-    publishStageTree(io, gpa, stage_dir, dist_dir) catch |err| {
+    publishStageTree(io, gpa, stage_dir, dist_dir, artifact_inventory.output_path) catch |err| {
         if (sitemap_backed_up) {
             try cwd.rename(sitemap_backup_rel, dist_dir, prior_sitemap.path.?, io);
         }
@@ -4791,6 +4811,39 @@ test "compileHtmlSiteMulti - success, validation, and isolation" {
         });
         try std.testing.expectError(error.TargetOutputCollision, res);
     }
+}
+
+test "artifact inventory replacement is last during a failed target commit" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "stage/_boris/proof");
+    try tmp.dir.createDirPath(io, "final/_boris/proof");
+    try tmp.dir.createDirPath(io, "final/index.html/block");
+    try tmp.dir.writeFile(io, .{ .sub_path = "stage/index.html", .data = "new page" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "stage/_boris/proof/artifacts.json", .data = "new inventory" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "final/_boris/proof/artifacts.json", .data = "old inventory" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "final/index.html/block/keep.txt", .data = "keep" });
+
+    var stage = try tmp.dir.openDir(io, "stage", .{ .iterate = true });
+    defer stage.close(io);
+    var final = try tmp.dir.openDir(io, "final", .{ .iterate = true });
+    defer final.close(io);
+
+    var failed = false;
+    publishStageTree(io, gpa, stage, final, artifact_inventory.output_path) catch {
+        failed = true;
+    };
+    try std.testing.expect(failed);
+
+    const inventory = try readAllFile(io, final, artifact_inventory.output_path, gpa);
+    defer gpa.free(inventory);
+    try std.testing.expectEqualStrings("old inventory", inventory);
+    const staged_inventory = try readAllFile(io, stage, artifact_inventory.output_path, gpa);
+    defer gpa.free(staged_inventory);
+    try std.testing.expectEqualStrings("new inventory", staged_inventory);
 }
 
 test "HTML publication artifact inventory is complete, deterministic, isolated, and transactional" {
