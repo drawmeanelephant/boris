@@ -157,6 +157,21 @@ pub fn build(b: *std.Build) void {
     const test_publication_plan_step = b.step("test-publication-plan", "Run publication plan renderer and schema tests");
     test_publication_plan_step.dependOn(&run_publication_plan_tests.step);
 
+    // --- Runtime publication artifact inventory ---------------------------
+    const artifact_inventory_mod = b.createModule(.{
+        .root_source_file = b.path("src/artifact_inventory.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const artifact_inventory_tests = b.addTest(.{ .root_module = artifact_inventory_mod });
+    const run_artifact_inventory_tests = b.addRunArtifact(artifact_inventory_tests);
+    run_artifact_inventory_tests.setCwd(b.path("."));
+    const test_artifact_inventory_step = b.step(
+        "test-publication-artifacts",
+        "Run publication artifact inventory and schema-shape tests",
+    );
+    test_artifact_inventory_step.dependOn(&run_artifact_inventory_tests.step);
+
     // --- Internal Boris Doctor rendered snapshot analyzer -----------------
     const doctor_mod = b.createModule(.{
         .root_source_file = b.path("src/doctor.zig"),

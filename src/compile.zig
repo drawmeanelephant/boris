@@ -61,6 +61,7 @@ const search_index = @import("search_index.zig");
 const site_url = @import("site_url.zig");
 const sitemap = @import("sitemap.zig");
 const link_audit = @import("link_audit.zig");
+const artifact_inventory = @import("artifact_inventory.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -212,6 +213,8 @@ pub const CompileOptions = struct {
     site_url: ?[]const u8 = null,
     /// Test-only failure after sitemap staging and before target commit.
     test_fail_after_sitemap_stage: bool = false,
+    /// Test-only failure before the artifact inventory writer runs.
+    test_fail_before_inventory_write: bool = false,
 };
 
 fn validateSitemapConfig(gpa: std.mem.Allocator, options: CompileOptions) !void {
@@ -1734,6 +1737,19 @@ fn compilePagesInner(
         for (theme_bundle.assets) |a| try theme_outs.append(gpa, a.rel_path);
         try content_asset.checkCollisions(content_outs, page_outs.items, theme_outs.items);
 
+        var inventory_owned_paths: std.ArrayList([]const u8) = .empty;
+        defer inventory_owned_paths.deinit(gpa);
+        try inventory_owned_paths.ensureTotalCapacity(
+            gpa,
+            page_outs.items.len + theme_outs.items.len + content_outs.len + 2,
+        );
+        try inventory_owned_paths.appendSlice(gpa, page_outs.items);
+        try inventory_owned_paths.appendSlice(gpa, theme_outs.items);
+        try inventory_owned_paths.appendSlice(gpa, content_outs);
+        try inventory_owned_paths.append(gpa, search_index.output_path);
+        if (options.sitemap_path) |sitemap_path| try inventory_owned_paths.append(gpa, sitemap_path);
+        try artifact_inventory.rejectOutputCollision(artifact_inventory.output_path, inventory_owned_paths.items);
+
         if (options.sitemap_path) |sitemap_path| {
             var owned_paths: std.ArrayList([]const u8) = .empty;
             defer owned_paths.deinit(gpa);
@@ -1745,6 +1761,7 @@ fn compilePagesInner(
             try owned_paths.appendSlice(gpa, theme_outs.items);
             try owned_paths.appendSlice(gpa, content_outs);
             try owned_paths.append(gpa, search_index.output_path);
+            try owned_paths.append(gpa, artifact_inventory.output_path);
             try sitemap.rejectOutputCollisions(sitemap_path, owned_paths.items);
         }
     }
@@ -2257,6 +2274,69 @@ fn compilePagesInner(
         }
     }
 
+    // Build the inventory from authoritative producer paths and the staged/live
+    // overlay. Page HTML may legitimately come from the live target on an
+    // incremental no-change build; copied assets and generated projections are
+    // required to be present in this build's stage.
+    var inventory_specs: std.ArrayList(artifact_inventory.Spec) = .empty;
+    defer inventory_specs.deinit(gpa);
+    try inventory_specs.ensureTotalCapacity(
+        gpa,
+        db.len() + theme_bundle.assets.len + content_assets.pages.len + 2,
+    );
+    for (db.items()) |page| {
+        try inventory_specs.append(gpa, .{
+            .path = page.output_path,
+            .kind = .html_page,
+            .producer = "html-render",
+            .required = true,
+            .allow_live = true,
+        });
+    }
+    for (theme_bundle.assets) |asset| {
+        try inventory_specs.append(gpa, .{
+            .path = asset.rel_path,
+            .kind = .theme_asset,
+            .producer = "theme-assets",
+            .required = true,
+        });
+    }
+    for (content_assets.pages) |page_assets| {
+        for (page_assets.entries) |asset| {
+            try inventory_specs.append(gpa, .{
+                .path = asset.output_rel,
+                .kind = .content_asset,
+                .producer = "content-assets",
+                .required = true,
+            });
+        }
+    }
+    try inventory_specs.append(gpa, .{
+        .path = search_index.output_path,
+        .kind = .rendered_search,
+        .producer = "rendered-search",
+        .required = true,
+        .format_version = "1",
+    });
+    if (options.sitemap_path) |sitemap_path| {
+        try inventory_specs.append(gpa, .{
+            .path = sitemap_path,
+            .kind = .sitemap,
+            .producer = "sitemap",
+            .required = true,
+            .format_version = "1",
+        });
+    }
+    if (options.test_fail_before_inventory_write) return error.TestInjectedInventoryWriteFailure;
+    try artifact_inventory.writeOverlay(
+        io,
+        gpa,
+        stage_dir,
+        dist_dir,
+        options.target_name,
+        inventory_specs.items,
+    );
+
     // Move an obsolete compiler-owned sitemap aside immediately before commit.
     // A failed commit restores it; a successful commit removes the backup with
     // checked I/O rather than leaving best-effort post-commit debris.
@@ -2428,6 +2508,71 @@ fn writeTreeFile(io: Io, root_rel: []const u8, rel: []const u8, data: []const u8
         try cwd.createDirPath(io, parent);
     }
     try cwd.writeFile(io, .{ .sub_path = full, .data = data });
+}
+
+fn readArtifactInventory(io: Io, gpa: std.mem.Allocator, dist_dir: []const u8) ![]u8 {
+    const path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dist_dir, artifact_inventory.output_path });
+    defer gpa.free(path);
+    return readFileAlloc(io, Io.Dir.cwd(), path, gpa);
+}
+
+fn readTargetPayload(io: Io, gpa: std.mem.Allocator, dist_dir: []const u8, path: []const u8) ![]u8 {
+    const full_path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dist_dir, path });
+    defer gpa.free(full_path);
+    return readFileAlloc(io, Io.Dir.cwd(), full_path, gpa);
+}
+
+fn findArtifactRecord(root: std.json.Value, path: []const u8) ?std.json.Value {
+    const artifacts = root.object.get("artifacts") orelse return null;
+    for (artifacts.array.items) |record| {
+        if (std.mem.eql(u8, record.object.get("path").?.string, path)) return record;
+    }
+    return null;
+}
+
+fn expectArtifactRecord(
+    root: std.json.Value,
+    path: []const u8,
+    kind: []const u8,
+    producer: []const u8,
+    payload: []const u8,
+) !void {
+    const record = findArtifactRecord(root, path) orelse return error.MissingArtifactRecord;
+    const object = record.object;
+    try std.testing.expectEqualStrings(kind, object.get("kind").?.string);
+    try std.testing.expectEqualStrings(producer, object.get("producer").?.string);
+    try std.testing.expect(object.get("required").?.bool);
+    try std.testing.expectEqualStrings("committed", object.get("status").?.string);
+    try std.testing.expectEqual(@as(i64, @intCast(payload.len)), object.get("bytes").?.integer);
+    const digest = cache.hexDigest(cache.hashBytes(payload));
+    try std.testing.expectEqualStrings(&digest, object.get("sha256").?.string);
+}
+
+fn expectArtifactInventoryShape(
+    gpa: std.mem.Allocator,
+    bytes: []const u8,
+    target: []const u8,
+    expected_paths: []const []const u8,
+    absent_paths: []const []const u8,
+) !void {
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    try std.testing.expectEqualStrings(artifact_inventory.artifact_format, root.get("format").?.string);
+    try std.testing.expectEqual(@as(i64, artifact_inventory.schema_version), root.get("schema_version").?.integer);
+    try std.testing.expectEqualStrings(target, root.get("target").?.string);
+    const artifacts = root.get("artifacts").?.array;
+    try std.testing.expectEqual(expected_paths.len, artifacts.items.len);
+    for (expected_paths) |path| try std.testing.expect(findArtifactRecord(parsed.value, path) != null);
+    for (absent_paths) |path| try std.testing.expect(findArtifactRecord(parsed.value, path) == null);
+    for (artifacts.items, 0..) |record, index| {
+        try std.testing.expect(std.mem.indexOf(u8, record.object.get("path").?.string, ".boris-stage") == null);
+        if (index > 0) {
+            const previous = artifacts.items[index - 1].object.get("path").?.string;
+            const current = record.object.get("path").?.string;
+            try std.testing.expect(std.mem.order(u8, previous, current) != .gt);
+        }
+    }
 }
 
 test "experimental flag is true (HTML path not default product)" {
@@ -4594,6 +4739,31 @@ test "compileHtmlSiteMulti - success, validation, and isolation" {
         try std.testing.expectEqualStrings("L<h1 id=\"alpha\">Alpha</h1>\n", alpha_a);
         try std.testing.expectEqualStrings("L<h1 id=\"alpha\">Alpha</h1>\n", alpha_b);
 
+        const multi_inventory_paths = [_][]const u8{
+            "_boris/search/search-index.json",
+            "alpha.html",
+            "beta.html",
+        };
+        const inventory_a = try readAllFile(io, dir_a, artifact_inventory.output_path, gpa);
+        defer gpa.free(inventory_a);
+        const inventory_b = try readAllFile(io, dir_b, artifact_inventory.output_path, gpa);
+        defer gpa.free(inventory_b);
+        try expectArtifactInventoryShape(gpa, inventory_a, "target_a", &multi_inventory_paths, &.{});
+        try expectArtifactInventoryShape(gpa, inventory_b, "target_b", &multi_inventory_paths, &.{});
+        var parsed_a = try std.json.parseFromSlice(std.json.Value, gpa, inventory_a, .{});
+        defer parsed_a.deinit();
+        var parsed_b = try std.json.parseFromSlice(std.json.Value, gpa, inventory_b, .{});
+        defer parsed_b.deinit();
+        for (multi_inventory_paths) |path| {
+            const record_a = findArtifactRecord(parsed_a.value, path) orelse return error.MissingArtifactRecord;
+            const record_b = findArtifactRecord(parsed_b.value, path) orelse return error.MissingArtifactRecord;
+            try std.testing.expectEqual(record_a.object.get("bytes").?.integer, record_b.object.get("bytes").?.integer);
+            try std.testing.expectEqualStrings(
+                record_a.object.get("sha256").?.string,
+                record_b.object.get("sha256").?.string,
+            );
+        }
+
         // Verify separate cache namespaces
         if (dir_a.openFile(io, ".boris-cache/manifest.json", .{})) |file| {
             file.close(io);
@@ -4621,6 +4791,209 @@ test "compileHtmlSiteMulti - success, validation, and isolation" {
         });
         try std.testing.expectError(error.TargetOutputCollision, res);
     }
+}
+
+test "HTML publication artifact inventory is complete, deterministic, isolated, and transactional" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/publication-artifacts", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "themes/docs/layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "themes/docs/assets/css/site.css", "body{color:red}");
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nInitial body.\n");
+    try writeTreeFile(io, work, "content/guides/child.md", "# Child\n\nNested page.\n");
+    try writeTreeFile(io, work, "content/index.assets/diagram.txt", "diagram-v1");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/themes/docs/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const parallel_dist = try std.fmt.allocPrint(gpa, "{s}/parallel", .{work});
+    defer gpa.free(parallel_dist);
+    const plain_dist = try std.fmt.allocPrint(gpa, "{s}/plain", .{work});
+    defer gpa.free(plain_dist);
+
+    const deployment_owned = try std.fmt.allocPrint(gpa, "{s}/deployment-owned.txt", .{dist});
+    defer gpa.free(deployment_owned);
+    try writeTreeFile(io, work, "dist/deployment-owned.txt", "deployment-owned");
+
+    const child_source = try std.fmt.allocPrint(gpa, "{s}/guides/child.md", .{content});
+    defer gpa.free(child_source);
+    const asset_source = try std.fmt.allocPrint(gpa, "{s}/index.assets/diagram.txt", .{content});
+    defer gpa.free(asset_source);
+    const stale_child = try std.fmt.allocPrint(gpa, "{s}/guides/child.html", .{dist});
+    defer gpa.free(stale_child);
+    const stale_asset = try std.fmt.allocPrint(gpa, "{s}/index.assets/diagram.txt", .{dist});
+    defer gpa.free(stale_asset);
+
+    const with_sitemap = [_][]const u8{
+        "assets/css/site.css",
+        "guides/child.html",
+        "index.assets/diagram.txt",
+        "index.html",
+        "_boris/search/search-index.json",
+        "meta/discovery.xml",
+    };
+    const without_sitemap = [_][]const u8{
+        "assets/css/site.css",
+        "index.html",
+        "_boris/search/search-index.json",
+    };
+    const no_absent_paths = [_][]const u8{};
+
+    const base_options: CompileOptions = .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .incremental = true,
+        .quiet = true,
+        .sitemap_path = "meta/discovery.xml",
+        .site_url = "https://example.test/docs",
+    };
+    _ = try compileHtmlSite(io, gpa, base_options);
+
+    var inventory_bytes = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(inventory_bytes);
+    try expectArtifactInventoryShape(gpa, inventory_bytes, "default", &with_sitemap, &no_absent_paths);
+    try std.testing.expect(std.mem.indexOf(u8, inventory_bytes, artifact_inventory.output_path) == null);
+    try std.testing.expect(std.mem.indexOf(u8, inventory_bytes, work) == null);
+
+    {
+        var parsed = try std.json.parseFromSlice(std.json.Value, gpa, inventory_bytes, .{});
+        defer parsed.deinit();
+        const page = try readTargetPayload(io, gpa, dist, "index.html");
+        defer gpa.free(page);
+        try expectArtifactRecord(parsed.value, "index.html", "html-page", "html-render", page);
+        const child = try readTargetPayload(io, gpa, dist, "guides/child.html");
+        defer gpa.free(child);
+        try expectArtifactRecord(parsed.value, "guides/child.html", "html-page", "html-render", child);
+        const theme = try readTargetPayload(io, gpa, dist, "assets/css/site.css");
+        defer gpa.free(theme);
+        try expectArtifactRecord(parsed.value, "assets/css/site.css", "theme-asset", "theme-assets", theme);
+        const content_asset_bytes = try readTargetPayload(io, gpa, dist, "index.assets/diagram.txt");
+        defer gpa.free(content_asset_bytes);
+        try expectArtifactRecord(parsed.value, "index.assets/diagram.txt", "content-asset", "content-assets", content_asset_bytes);
+        const search = try readTargetPayload(io, gpa, dist, search_index.output_path);
+        defer gpa.free(search);
+        try expectArtifactRecord(parsed.value, search_index.output_path, "rendered-search", "rendered-search", search);
+        const sitemap_bytes = try readTargetPayload(io, gpa, dist, "meta/discovery.xml");
+        defer gpa.free(sitemap_bytes);
+        try expectArtifactRecord(parsed.value, "meta/discovery.xml", "sitemap", "sitemap", sitemap_bytes);
+    }
+
+    const first_inventory = try gpa.dupe(u8, inventory_bytes);
+    defer gpa.free(first_inventory);
+    _ = try compileHtmlSite(io, gpa, base_options);
+    const repeat_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(repeat_inventory);
+    try std.testing.expectEqualStrings(first_inventory, repeat_inventory);
+
+    var parallel_options = base_options;
+    parallel_options.dist_dir = parallel_dist;
+    parallel_options.jobs = 4;
+    _ = try compileHtmlSite(io, gpa, parallel_options);
+    const parallel_inventory = try readArtifactInventory(io, gpa, parallel_dist);
+    defer gpa.free(parallel_inventory);
+    try std.testing.expectEqualStrings(first_inventory, parallel_inventory);
+
+    var old_index_digest: [64]u8 = undefined;
+    {
+        var parsed = try std.json.parseFromSlice(std.json.Value, gpa, inventory_bytes, .{});
+        defer parsed.deinit();
+        const old_record = findArtifactRecord(parsed.value, "index.html") orelse return error.MissingArtifactRecord;
+        const old_digest = old_record.object.get("sha256").?.string;
+        try std.testing.expectEqual(@as(usize, 64), old_digest.len);
+        @memcpy(old_index_digest[0..], old_digest);
+    }
+
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nChanged body.\n");
+    _ = try compileHtmlSite(io, gpa, base_options);
+    const changed_inventory = try readArtifactInventory(io, gpa, dist);
+    try expectArtifactInventoryShape(gpa, changed_inventory, "default", &with_sitemap, &no_absent_paths);
+    {
+        var parsed = try std.json.parseFromSlice(std.json.Value, gpa, changed_inventory, .{});
+        defer parsed.deinit();
+        const changed_record = findArtifactRecord(parsed.value, "index.html") orelse return error.MissingArtifactRecord;
+        try std.testing.expect(!std.mem.eql(u8, &old_index_digest, changed_record.object.get("sha256").?.string));
+        const child = try readTargetPayload(io, gpa, dist, "guides/child.html");
+        defer gpa.free(child);
+        try expectArtifactRecord(parsed.value, "guides/child.html", "html-page", "html-render", child);
+        const theme = try readTargetPayload(io, gpa, dist, "assets/css/site.css");
+        defer gpa.free(theme);
+        try expectArtifactRecord(parsed.value, "assets/css/site.css", "theme-asset", "theme-assets", theme);
+        const content_asset_bytes = try readTargetPayload(io, gpa, dist, "index.assets/diagram.txt");
+        defer gpa.free(content_asset_bytes);
+        try expectArtifactRecord(parsed.value, "index.assets/diagram.txt", "content-asset", "content-assets", content_asset_bytes);
+    }
+    gpa.free(inventory_bytes);
+    inventory_bytes = changed_inventory;
+
+    const before_failure = try gpa.dupe(u8, inventory_bytes);
+    defer gpa.free(before_failure);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nFailed transaction body.\n");
+    var inventory_failure_options = base_options;
+    inventory_failure_options.test_fail_before_inventory_write = true;
+    try std.testing.expectError(
+        error.TestInjectedInventoryWriteFailure,
+        compileHtmlSite(io, gpa, inventory_failure_options),
+    );
+    const after_inventory_failure = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(after_inventory_failure);
+    try std.testing.expectEqualStrings(before_failure, after_inventory_failure);
+
+    var sitemap_failure_options = base_options;
+    sitemap_failure_options.test_fail_after_sitemap_stage = true;
+    try std.testing.expectError(
+        error.TestInjectedSitemapFailure,
+        compileHtmlSite(io, gpa, sitemap_failure_options),
+    );
+    const after_sitemap_failure = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(after_sitemap_failure);
+    try std.testing.expectEqualStrings(before_failure, after_sitemap_failure);
+
+    try cwd.deleteFile(io, child_source);
+    try cwd.deleteFile(io, asset_source);
+    _ = try compileHtmlSite(io, gpa, base_options);
+    const pruned_inventory = try readArtifactInventory(io, gpa, dist);
+    try expectArtifactInventoryShape(
+        gpa,
+        pruned_inventory,
+        "default",
+        &[_][]const u8{
+            "assets/css/site.css",
+            "index.html",
+            "_boris/search/search-index.json",
+            "meta/discovery.xml",
+        },
+        &[_][]const u8{ "guides/child.html", "index.assets/diagram.txt" },
+    );
+    gpa.free(inventory_bytes);
+    inventory_bytes = pruned_inventory;
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, stale_child, .{}));
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, stale_asset, .{}));
+    try cwd.access(io, deployment_owned, .{});
+
+    var plain_options = base_options;
+    plain_options.dist_dir = plain_dist;
+    plain_options.sitemap_path = null;
+    plain_options.site_url = null;
+    _ = try compileHtmlSite(io, gpa, plain_options);
+    const plain_inventory = try readArtifactInventory(io, gpa, plain_dist);
+    defer gpa.free(plain_inventory);
+    try expectArtifactInventoryShape(
+        gpa,
+        plain_inventory,
+        "default",
+        &without_sitemap,
+        &[_][]const u8{"meta/discovery.xml"},
+    );
 }
 
 test "HTML publish produces search from live overlay and removes stale pages" {

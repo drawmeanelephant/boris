@@ -32,6 +32,7 @@ Modules:
 - `src/compile.zig` — site loop, PageDb promote, Whiteboard, Apex render
 - `src/assemble.zig` — closed layout plan, zero-copy splice, Atomic publish
 - `src/theme.zig` — theme root, asset inventory/copy, collision checks (F9.1)
+- `src/artifact_inventory.zig` — deterministic target-owned payload inventory
 - `themes/boris/layouts/main.html` — default managed theme template (exactly
   one `{{content}}`); its copied stylesheet is emitted as
   `assets/css/boris.css`
@@ -42,6 +43,8 @@ Modules:
 - `src/sitemap.zig` — optional staged XML Sitemap Protocol projection
 
 Theme/layout vocabulary detail: [templating-and-themes.md](templating-and-themes.md).
+The same staged target transaction publishes the first-slice payload inventory;
+see [publication-artifacts.md](publication-artifacts.md).
 
 CLI entry: bare `boris` (default), or `--html` / `--html-dir` / `--target`
 (and related flags). Library API: `compile.compileHtmlSite` (and multi-target

@@ -79,6 +79,14 @@ const modules = [_]Module{
         .source = @embedFile("search_index.zig"),
     },
     .{
+        .name = "artifact_inventory.zig",
+        .class = .{ .emitter = .{
+            .encoder = .json_out,
+            .note = "target payload inventory; record values delegate to json_out",
+        } },
+        .source = @embedFile("artifact_inventory.zig"),
+    },
+    .{
         .name = "sitemap.zig",
         .class = .{ .emitter = .{
             .encoder = .sink,
