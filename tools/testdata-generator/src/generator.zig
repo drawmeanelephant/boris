@@ -10,7 +10,11 @@ const Io = std.Io;
 
 pub const max_profile_bytes: usize = 64 * 1024;
 pub const max_template_bytes: usize = 1 * 1024 * 1024;
-pub const run_schema_version = "boris-testdata-run/4";
+pub const run_schema_version = "boris-testdata-run/5";
+pub const republish_clean_schema_version = "boris-testdata-republish-clean/2";
+/// Boris CLI bounds for the requested parallel HTML workers.
+pub const min_jobs: usize = 1;
+pub const max_jobs: usize = 64;
 
 pub const Profile = struct {
     name: []const u8,
@@ -560,6 +564,10 @@ pub const RunOptions = struct {
     allocator: std.mem.Allocator,
     fixture_path: []const u8,
     boris_path: []const u8,
+    /// Requested upper bound for Boris parallel HTML workers. This is the
+    /// worker request passed to `--jobs N`; it is never inferred from the
+    /// page count and does not measure actual thread creation.
+    jobs: usize = 1,
 };
 
 pub fn runFixture(options: RunOptions) !void {
@@ -585,8 +593,10 @@ pub fn runFixture(options: RunOptions) !void {
     var expected = try readExpectedFixture(options.io, options.allocator, fixture_abs);
     defer expected.deinit(options.allocator);
     const expected_code = expected.exit_code;
+    const jobs_arg = try std.fmt.allocPrint(options.allocator, "{d}", .{options.jobs});
+    defer options.allocator.free(jobs_arg);
     const result = try std.process.run(options.allocator, options.io, .{
-        .argv = &.{ boris_abs, "--input", input_arg, "--theme", theme_arg, "--html-dir", html_arg, "--quiet" },
+        .argv = &.{ boris_abs, "--input", input_arg, "--theme", theme_arg, "--html-dir", html_arg, "--jobs", jobs_arg, "--quiet" },
         .cwd = .{ .path = parent },
         .stdout_limit = .limited(2 * 1024 * 1024),
         .stderr_limit = .limited(2 * 1024 * 1024),
@@ -627,6 +637,7 @@ pub fn runFixture(options: RunOptions) !void {
     const passed = actual_code == expected_code and (canonical_inventory_unchanged orelse true);
 
     try writeRunEvidence(options.io, options.allocator, fixture_abs, .{
+        .requested_jobs = options.jobs,
         .expected_code = expected_code,
         .actual_code = actual_code,
         .passed = passed,
@@ -669,8 +680,10 @@ pub fn republishCleanFixture(options: RunOptions) !void {
     const theme_arg = try std.fmt.allocPrint(options.allocator, "{s}/optional-theme", .{base});
     defer options.allocator.free(theme_arg);
 
+    const jobs_arg = try std.fmt.allocPrint(options.allocator, "{d}", .{options.jobs});
+    defer options.allocator.free(jobs_arg);
     const result = try std.process.run(options.allocator, options.io, .{
-        .argv = &.{ boris_abs, "--input", input_arg, "--theme", theme_arg, "--html-dir", html_arg, "--quiet" },
+        .argv = &.{ boris_abs, "--input", input_arg, "--theme", theme_arg, "--html-dir", html_arg, "--jobs", jobs_arg, "--quiet" },
         .cwd = .{ .path = parent },
         .stdout_limit = .limited(2 * 1024 * 1024),
         .stderr_limit = .limited(2 * 1024 * 1024),
@@ -688,7 +701,11 @@ pub fn republishCleanFixture(options: RunOptions) !void {
     defer fixture.close(options.io);
     var output = std.ArrayList(u8).empty;
     defer output.deinit(options.allocator);
-    try output.appendSlice(options.allocator, "{\n  \"schemaVersion\":\"boris-testdata-republish-clean/1\",\n  \"expectedExitCode\":");
+    try output.appendSlice(options.allocator, "{\n  \"schemaVersion\":");
+    try manifest.appendJsonString(&output, options.allocator, republish_clean_schema_version);
+    try output.appendSlice(options.allocator, ",\n  \"execution\":{\"requestedJobs\":");
+    try appendDecimal(&output, options.allocator, options.jobs);
+    try output.appendSlice(options.allocator, "},\n  \"expectedExitCode\":");
     try appendDecimal(&output, options.allocator, expected.exit_code);
     try output.appendSlice(options.allocator, ",\n  \"actualExitCode\":");
     try appendDecimal(&output, options.allocator, actual_code);
@@ -711,6 +728,7 @@ pub fn republishCleanFixture(options: RunOptions) !void {
 const TreeHash = struct { hash: manifest.HashText, file_count: usize };
 
 const RunEvidenceOptions = struct {
+    requested_jobs: usize,
     expected_code: u8,
     actual_code: u8,
     passed: bool,
@@ -737,7 +755,9 @@ fn writeRunEvidence(
     defer output.deinit(allocator);
     try output.appendSlice(allocator, "{\n  \"schemaVersion\":");
     try manifest.appendJsonString(&output, allocator, run_schema_version);
-    try output.appendSlice(allocator, ",\n  \"expectedExitCode\":");
+    try output.appendSlice(allocator, ",\n  \"execution\":{\"requestedJobs\":");
+    try appendDecimal(&output, allocator, evidence.requested_jobs);
+    try output.appendSlice(allocator, "},\n  \"expectedExitCode\":");
     try appendDecimal(&output, allocator, evidence.expected_code);
     try output.appendSlice(allocator, ",\n  \"actualExitCode\":");
     try appendDecimal(&output, allocator, evidence.actual_code);
@@ -763,22 +783,6 @@ fn writeRunEvidence(
     try manifest.appendJsonString(&output, allocator, &evidence.output_tree.hash);
     try output.appendSlice(allocator, ",\n  \"outputFileCount\":");
     try appendDecimal(&output, allocator, evidence.output_tree.file_count);
-    try output.appendSlice(allocator, ",\n  \"artifactInventorySha256\":");
-    if (evidence.artifact_inventory) |inventory| {
-        try manifest.appendJsonString(&output, allocator, &inventory.sha256);
-    } else {
-        try output.appendSlice(allocator, "null");
-    }
-    try output.appendSlice(allocator, ",\n  \"artifactInventoryFileCount\":");
-    if (evidence.artifact_inventory) |inventory| {
-        try appendDecimal(&output, allocator, inventory.count);
-    } else {
-        try output.appendSlice(allocator, "null");
-    }
-    try output.appendSlice(allocator, ",\n  \"outputSnapshotSha256\":");
-    try manifest.appendJsonString(&output, allocator, &evidence.output_snapshot.sha256);
-    try output.appendSlice(allocator, ",\n  \"outputSnapshotFileCount\":");
-    try appendDecimal(&output, allocator, evidence.output_snapshot.count);
     try output.appendSlice(allocator, ",\n  \"artifactTargets\":[");
     if (evidence.artifact_inventory) |inventory| {
         try appendArtifactTargets(&output, allocator, evidence.assignments, inventory);
@@ -1823,6 +1827,7 @@ test "successful run evidence is versioned, path-valid, and deterministic" {
     const baseline_tree = try hashTree(io, a, fixture_abs, "results/boris-output");
     const snapshot = try writeOutputSnapshot(io, a, fixture_abs, "results/boris-output");
     const evidence = RunEvidenceOptions{
+        .requested_jobs = 4,
         .expected_code = 0,
         .actual_code = 0,
         .passed = true,
@@ -1854,6 +1859,21 @@ test "successful run evidence is versioned, path-valid, and deterministic" {
     };
     try std.testing.expectEqualStrings(run_schema_version, schema);
     try std.testing.expect(run.get("elapsedNs") == null);
+    const execution_object = switch (run.get("execution") orelse return error.InvalidFixture) {
+        .object => |object| object,
+        else => return error.InvalidFixture,
+    };
+    const requested_jobs = switch (execution_object.get("requestedJobs") orelse return error.InvalidFixture) {
+        .integer => |value| value,
+        else => return error.InvalidFixture,
+    };
+    try std.testing.expectEqual(@as(i64, 4), requested_jobs);
+    // v5 records the worker request in the structured execution object; the
+    // legacy flat inventory and snapshot duplicates are not repeated.
+    try std.testing.expect(run.get("artifactInventorySha256") == null);
+    try std.testing.expect(run.get("artifactInventoryFileCount") == null);
+    try std.testing.expect(run.get("outputSnapshotSha256") == null);
+    try std.testing.expect(run.get("outputSnapshotFileCount") == null);
 
     const snapshot_object = switch (run.get("poisonedOutputSnapshot") orelse return error.InvalidFixture) {
         .object => |object| object,

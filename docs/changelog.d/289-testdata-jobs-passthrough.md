@@ -1,0 +1,5 @@
+### Changed
+
+- `boris-testdata run` and `republish-clean` now accept `--jobs N` (default `1`, valid range `1..64` matching Boris; both `--jobs N` and `--jobs=N` forms are accepted) and pass the requested worker upper bound to Boris as `--jobs N`. Zero, out-of-range, empty, malformed, duplicate, and missing values are rejected deterministically, and `generate`, `validate`, and `inspect` reject `--jobs` as a usage error.
+- Run evidence moved to `boris-testdata-run/5` with a structured `execution.requestedJobs` record and no longer repeats the legacy flat `artifactInventorySha256`/`artifactInventoryFileCount` and `outputSnapshotSha256`/`outputSnapshotFileCount` fields. `republish-clean` evidence moved to `boris-testdata-republish-clean/2` with the same structured worker request.
+- Added determinism tests proving publication bytes and recorded evidence are identical across worker counts (jobs 1/4/8), including a normalization helper that replaces only `execution.requestedJobs` before comparing parsed evidence.
