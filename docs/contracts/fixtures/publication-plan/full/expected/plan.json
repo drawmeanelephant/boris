@@ -1,0 +1,52 @@
+{
+  "format": "boris-publication-plan",
+  "schema_version": 1,
+  "input": "docs",
+  "input_format": "textile",
+  "site": {
+    "url": "https://example.test/docs",
+    "title": "Example Docs",
+    "description": "Example documentation"
+  },
+  "targets": [
+    {
+      "name": "public",
+      "output": "dist/public",
+      "public": true,
+      "theme": "themes/boris",
+      "layout": null,
+      "layout_rules": [
+        {"selector": "id:guides/start", "layout": "themes/boris/layouts/home.html"},
+        {"selector": "role:trunk", "layout": "themes/boris/layouts/main.html"}
+      ],
+      "projections": {
+        "html": true,
+        "sitemap": {"path": "sitemap.xml"},
+        "rss": {"path": "feed.xml", "limit": 12},
+        "llms": {"path": "llms.txt"}
+      }
+    },
+    {
+      "name": "zeta",
+      "output": "dist/zeta",
+      "public": false,
+      "theme": null,
+      "layout": "layouts/zeta.html",
+      "layout_rules": [
+        {"selector": "id:guides/install", "layout": "layouts/install.html"},
+        {"selector": "role:satellite", "layout": "layouts/satellite.html"}
+      ],
+      "projections": {
+        "html": true,
+        "sitemap": null,
+        "rss": null,
+        "llms": null
+      }
+    }
+  ],
+  "editions": {
+    "ir": {"output": ".boris"},
+    "rag": {"output": "rag", "scope": "guides", "split_size": 65536, "bundles_only": true},
+    "context": {"output": "context", "scope": "guides/reference", "split_size": 32768}
+  }
+}

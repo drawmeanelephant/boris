@@ -375,7 +375,8 @@ Trunk
 : A top-level page. Omit `parent` in frontmatter.
 
 Satellite
-: A direct child of a trunk. Set `parent` to a trunk entity id.
+: A non-root page with one immediate parent. Set `parent` to that parent’s
+  entity id; the parent may be a Trunk or another Satellite.
 
 Aside
 : Registered callout component. Not a graph node. Stays in document order.

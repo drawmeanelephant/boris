@@ -25,7 +25,7 @@
     {
       "path": "content/valid/multi-level-hierarchy/trunk.md",
       "role": "trunk",
-      "notes": "Root of a deterministic three-level parent hierarchy"
+      "notes": "Root of a deterministic four-level parent hierarchy"
     },
     {
       "path": "content/valid/multi-level-hierarchy/mid.md",
@@ -36,6 +36,11 @@
       "path": "content/valid/multi-level-hierarchy/leaf.md",
       "role": "satellite",
       "notes": "Third-level Satellite parented to mid"
+    },
+    {
+      "path": "content/valid/multi-level-hierarchy/great-grandchild.md",
+      "role": "satellite",
+      "notes": "Fourth-level Satellite directly parented to leaf"
     }
   ],
   "invalid": [

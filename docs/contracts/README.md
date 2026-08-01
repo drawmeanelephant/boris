@@ -32,6 +32,8 @@ is **not** proof that every surface is the default CLI product.
 | IR 0.2 dependency edges + reverse index | **Implemented (F8.1–F8.3 shipped)** — `--out` emits typed edges and `reverseIndex`; incremental HTML uses the same reverse-walk dirty-set (v0.3.1) |
 | Documentation Intelligence | **Implemented first slice** — `check` / `impact`; see [documentation-intelligence.md](documentation-intelligence.md) |
 | Textile compatibility | **Implemented, explicit opt-in** — bounded `.textile` body adapter via `--textile`; see [textile-compatibility.md](textile-compatibility.md) |
+| Publication plan declaration | **Implemented** — `plan --profile PATH` emits normalized declaration JSON without publication; see [publication-plan.md](publication-plan.md) |
+| HTML publication artifact inventory | **Implemented first slice** — deterministic target-owned `artifacts.json` inventory for committed HTML payloads; see [publication-artifacts.md](publication-artifacts.md) |
 
 ## Canonical ownership (one document per topic)
 
@@ -40,6 +42,7 @@ per topic:
 
 | Topic | Canonical normative document |
 |-------|------------------------------|
+| Publication model: document facts, publication facts, migration provenance, projections, and verification claims | [publication-model.md](publication-model.md) |
 | Frontmatter grammar | [frontmatter.md](frontmatter.md) |
 | RSS 2.0 export | [rss-2.0.md](rss-2.0.md) |
 | XML sitemap for HTML | [xml-sitemap.md](xml-sitemap.md) |
@@ -49,6 +52,7 @@ per topic:
 | JSON IR (manifest, graph, build-report) | [ir-schema.md](ir-schema.md) |
 | Diagnostics | [diagnostics.md](diagnostics.md) |
 | RAG export | [rag-export.md](rag-export.md) |
+| `llms.txt` export | [llms-txt.md](llms-txt.md) |
 | Aside / components | [components.md](components.md) |
 | Apex C ABI | [apex-abi.md](apex-abi.md) |
 | HTML output (default CLI) | [html-output.md](html-output.md) |
@@ -65,6 +69,7 @@ per topic:
 | Documentation Intelligence | [documentation-intelligence.md](documentation-intelligence.md) |
 | Textile compatibility adapter | [textile-compatibility.md](textile-compatibility.md) |
 | Rendered-site search artifacts | [rendered-search.md](rendered-search.md) |
+| HTML publication artifact inventory | [publication-artifacts.md](publication-artifacts.md) |
 | Astro plan-only migration intake | [astro-import-plan.md](astro-import-plan.md) |
 | Astro initial-create migration apply | [astro-import-apply.md](astro-import-apply.md) |
 
@@ -72,6 +77,7 @@ per topic:
 
 | Document | Topic |
 |----------|-------|
+| [publication-model.md](publication-model.md) | Canonical ownership model for document facts, publication facts, migration provenance, projections, and verification claims |
 | [frontmatter.md](frontmatter.md) | Closed frontmatter grammar; `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, and `summary` only |
 | [rss-2.0.md](rss-2.0.md) | Deterministic RSS 2.0 projection and publication contract |
 | [xml-sitemap.md](xml-sitemap.md) | Deterministic staged XML Sitemap Protocol projection for one HTML target |
@@ -80,6 +86,7 @@ per topic:
 | [diagnostics.md](diagnostics.md) | Stable categories (`EDUPLICATEID`, …), severity, exit codes |
 | [ir-schema.md](ir-schema.md) | Trunk/Satellite graph, typed dependency edges, reverse index, deterministic JSON under `.boris/` |
 | [rag-export.md](rag-export.md) | Optional RAG export; schema versioning; `:::kind` export-only |
+| [llms-txt.md](llms-txt.md) | Deterministic crawler/LLM discovery projection; URL and deployment limits |
 | [components.md](components.md) | Constrained `<Aside>` tokenizer, kinds, id grammar, nested policy (m10) |
 | [apex-abi.md](apex-abi.md) | In-process Apex C ABI, allocator lifetime, Zig error rules (m8) |
 | [html-output.md](html-output.md) | HTML Whiteboard, Aside stream, layout splice, Atomic publish (default CLI) |
@@ -94,7 +101,9 @@ per topic:
 | [semantic-relations.md](semantic-relations.md) | Bounded author relations and deliberate IR 0.3 schema plan |
 | [context-bundle.md](context-bundle.md) | Deterministic provenance-rich AI context export (`--context`) |
 | [documentation-intelligence.md](documentation-intelligence.md) | Read-only graph health and impact analysis (`check` / `impact`); schema twin under `schemas/` |
-| [publication-profile.md](publication-profile.md) | Strict internal schema-v1 publication-profile parser and static-plan boundary; execution is not yet exposed |
+| [publication-profile.md](publication-profile.md) | Strict schema-v1 publication-profile parser, normalization, and static validation boundary |
+| [publication-plan.md](publication-plan.md) | Deterministic schema-v1 normalized publication declaration (`plan --profile PATH`) |
+| [publication-artifacts.md](publication-artifacts.md) | Deterministic schema-v1 inventory of committed Boris-owned HTML-target payload bytes |
 | [cli.md](cli.md) | Stable command routing, exit codes, and report-consumer boundary |
 | [textile-compatibility.md](textile-compatibility.md) | Explicit bounded `.textile`-to-Markdown input mode |
 | [rendered-search.md](rendered-search.md) | Deterministic v1 search JSON for rendered HTML pages; browser/compiler seams are explicit |

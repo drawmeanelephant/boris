@@ -41,6 +41,19 @@ and output, content-addressed cache keys, and explicit resource limits. Multiple
 targets may share a worker pool only with isolated output directories,
 configuration hashes, cache namespaces, and explicit cross-target dependencies.
 
+## Publication-model boundary
+
+The canonical ownership and claims vocabulary is
+[`docs/contracts/publication-model.md`](contracts/publication-model.md). Keep
+document facts in the closed document/graph model; keep site URL, target,
+theme/layout, feed, sitemap, machine-output, and output-root choices in the
+publication profile/plan or target configuration; and keep source-system values,
+mapping confidence, unsupported constructs, and reviewer decisions in
+migration-lab provenance. A future coordinator may conduct independently
+contracted projections from a validated corpus, but it must not blend their
+schemas or turn successful generation into a claim of accessibility, deployment
+correctness, or prose excellence.
+
 Bounded HTML page workers (`--jobs`) are the only current product concurrency
 path. Coordinator phases—discovery, parsing, graph freeze, fingerprinting, and
 dirty-set selection—remain sequential. Do not add shared-mutable concurrency or

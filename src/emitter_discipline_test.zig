@@ -79,6 +79,14 @@ const modules = [_]Module{
         .source = @embedFile("search_index.zig"),
     },
     .{
+        .name = "artifact_inventory.zig",
+        .class = .{ .emitter = .{
+            .encoder = .json_out,
+            .note = "target payload inventory; record values delegate to json_out",
+        } },
+        .source = @embedFile("artifact_inventory.zig"),
+    },
+    .{
         .name = "sitemap.zig",
         .class = .{ .emitter = .{
             .encoder = .sink,
@@ -147,6 +155,7 @@ const modules = [_]Module{
     .{ .name = "pathutil.zig", .class = .other },
     .{ .name = "pipeline.zig", .class = .other },
     .{ .name = "publication_profile.zig", .class = .other },
+    .{ .name = "publication_plan.zig", .class = .{ .emitter = .{ .encoder = .json_out, .note = "canonical normalized publication declaration" } }, .source = @embedFile("publication_plan.zig") },
     .{ .name = "rag_body.zig", .class = .other },
     .{
         .name = "rss.zig",

@@ -124,7 +124,7 @@
         "siblings": {
           "type": "array",
           "items": { "type": "integer", "minimum": 0 },
-          "description": "Same-Trunk satellite peers excluding self; empty for a Trunk."
+          "description": "Other direct children of the immediate parent, excluding self; empty for a root Trunk."
         }
       }
     }

@@ -211,6 +211,7 @@ test "renderNav forest and breadcrumb" {
         .{ .id = "guides/intro", .source_path = "guides/intro.md", .title = "Intro", .parent = null },
         .{ .id = "guides/tips", .source_path = "guides/tips.md", .title = "Tips", .parent = "guides/intro" },
         .{ .id = "guides/tips/deep", .source_path = "guides/tips/deep.md", .title = "Deep Tips", .parent = "guides/tips" },
+        .{ .id = "guides/tips/deep/deepest", .source_path = "guides/tips/deep/deepest.md", .title = "Deepest Tips", .parent = "guides/tips/deep" },
         .{ .id = "index", .source_path = "index.md", .title = "Home", .parent = null },
     };
     var diags: std.ArrayList(diag.Diagnostic) = .empty;
@@ -222,24 +223,29 @@ test "renderNav forest and breadcrumb" {
     const nav = try graph_mod.buildNav(gpa, g.nodes);
     defer graph_mod.freeNav(gpa, nav);
 
-    var deep_i: u32 = 0;
+    var deepest_i: u32 = 0;
     for (g.nodes, 0..) |n, i| {
-        if (std.mem.eql(u8, n.id, "guides/tips/deep")) deep_i = @intCast(i);
+        if (std.mem.eql(u8, n.id, "guides/tips/deep/deepest")) deepest_i = @intCast(i);
     }
-    const html = try renderNav(gpa, g.nodes, nav, deep_i, "guides/tips/deep.html");
+    const html = try renderNav(gpa, g.nodes, nav, deepest_i, "guides/tips/deep/deepest.html");
     defer gpa.free(html);
     try std.testing.expect(std.mem.indexOf(u8, html, "site-nav") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "is-current") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "../index.html") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "href=\"../intro.html\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, html, "href=\"deep.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "../../index.html") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "href=\"../../intro.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "href=\"../deep.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "href=\"deepest.html\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "site-nav__satellite is-ancestor") != null);
 
-    const crumb = try renderBreadcrumb(gpa, g.nodes, nav, deep_i, "guides/tips/deep.html");
+    const crumb = try renderBreadcrumb(gpa, g.nodes, nav, deepest_i, "guides/tips/deep/deepest.html");
     defer gpa.free(crumb);
     try std.testing.expect(std.mem.indexOf(u8, crumb, "breadcrumb") != null);
     try std.testing.expect(std.mem.indexOf(u8, crumb, "aria-current=\"page\"") != null);
+    try std.testing.expectEqual(@as(usize, 4), std.mem.count(u8, crumb, "<li"));
+    try std.testing.expect(std.mem.indexOf(u8, crumb, "Intro") != null);
+    try std.testing.expect(std.mem.indexOf(u8, crumb, "Tips") != null);
     try std.testing.expect(std.mem.indexOf(u8, crumb, "Deep Tips") != null);
+    try std.testing.expect(std.mem.indexOf(u8, crumb, "Deepest Tips") != null);
 }
 
 test "renderChildren is id-sorted, escaped, relative, and empty for satellite" {

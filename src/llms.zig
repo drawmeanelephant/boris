@@ -201,3 +201,34 @@ test "summary uses first body paragraph and falls back to title" {
     defer gpa.free(fallback);
     try std.testing.expectEqualStrings("Fallback", fallback);
 }
+
+test "llms export renders arbitrary-depth hierarchy recursively" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/hierarchy-llms.txt", .{tmp.sub_path});
+    defer gpa.free(out);
+    var result = try run(io, gpa, .{
+        .content_root = "fixtures/content/valid",
+        .out_path = out,
+        .quiet = true,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok());
+
+    const output = try readFileAlloc(io, Io.Dir.cwd(), out, gpa);
+    defer gpa.free(output);
+    const chain = [_][]const u8{
+        "[Hierarchy Trunk](/hierarchy-trunk/)",
+        "[Hierarchy Mid](/hierarchy-mid/)",
+        "[Hierarchy Leaf](/hierarchy-leaf/)",
+        "[Hierarchy Great-Grandchild](/hierarchy-great-grandchild/)",
+    };
+    var prior: usize = 0;
+    for (chain) |entry| {
+        const found = std.mem.indexOfPos(u8, output, prior, entry) orelse return error.TestExpectedEqual;
+        prior = found + entry.len;
+    }
+}

@@ -125,6 +125,16 @@ site cannot serve.
 | `EUSAGE` | error | CLI usage / flag error (unknown flag, conflicts, malformed options) | CLI (exit 2; not in build-report) |
 | `EIO` | error | I/O or system failure (missing content root, unreadable file, unexpected runtime) | pipeline / CLI (exit 3 when pure I/O) |
 
+### `EPARENTNOTTRUNK` compatibility disposition
+
+`EPARENTNOTTRUNK` is retained in the closed diagnostic-code enum and name table
+as a retired compatibility value for consumers that still recognize the
+historical one-hop contract. The current validator never emits it. A Satellite
+may name either a Trunk or another Satellite as its immediate parent; no
+diagnostic is produced merely because the parent is non-root. Current invalid
+parent topology remains covered by `EPARENTMISSING`, `EPARENTSELF`, and
+`EPARENTCYCLE`.
+
 On the HTML path, component tokenizer failures are emitted as structured
 `ECOMPONENT` diagnostics with the content-relative source path and the
 full-source line/column of the offending tag; the CLI does not replace them
@@ -216,7 +226,7 @@ categories** and non-publication of graph IR on failure.
 | `EDUPLICATEID` | `duplicate-id`, `docs/contracts/fixtures/duplicate-ids` |
 | `EPARENTMISSING` | `missing-parent`, contract `missing-parent` |
 | `EPARENTSELF` | `self-parent`, contract `self-parent` |
-| `EPARENTNOTTRUNK` | retired historical one-hop fixture; no longer emitted |
+| `EPARENTNOTTRUNK` | retired compatibility code; current validator never emits it |
 | `EPARENTCYCLE` | `cycle`, contract `cycles` / `longer-cycle` |
 | `EFRONTMATTER` | `duplicate-key`, `unclosed-frontmatter`, `nested-mapping` |
 | `EINVALIDUTF8` | `invalid-utf8` |

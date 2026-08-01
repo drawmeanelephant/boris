@@ -56,7 +56,8 @@ pub const NavEntry = struct {
     breadcrumb: []const u32,
     /// Direct children (satellites naming this page as parent), id order.
     children: []const u32,
-    /// Same-Trunk satellite peers excluding self; empty for Trunk pages.
+    /// Other direct children of this page's immediate parent, excluding self;
+    /// empty for Trunk pages.
     siblings: []const u32,
 };
 
@@ -181,9 +182,9 @@ pub fn diagnoseDuplicateIds(
 /// emit (`graph.json`, RAG `graph/*`, catalog edges). Do not reimplement parent
 /// resolution, duplicate-id checks, or cycle detection in those modules.
 ///
-/// Order is normative (contracts `parent-relationships.md`):
+/// Order is normative (contract `ir-schema.md`):
 ///   1. `EDUPLICATEID` — detect duplicate entity ids first
-///   2. Topology — self / missing / not-trunk / cycles (`validateTopology`)
+///   2. Topology — self / missing / cycles (`validateTopology`)
 ///
 /// Aggregates all diagnostics (does not abort early — callers check
 /// `diag.countErrors`). Mutates nodes' `role` / `parent_index`.
@@ -267,8 +268,8 @@ pub fn validateTopology(
     // Cycle detection via parent links (iterative DFS; gray = visiting set).
     // Each node has at most one parent, so the walk is a single chain — still
     // iterative so a pathological long parent chain cannot blow the C stack.
-    // Today cycles need mutual/parent chains; the algorithm stays even if
-    // nesting is later allowed so cycles remain proven absent, not assumed.
+    // Nested parent chains are valid; this iterative walk keeps cycle
+    // detection independent of hierarchy depth and avoids C-stack growth.
     const Color = enum { white, gray, black };
     const colors = try list_gpa.alloc(Color, nodes.len);
     defer list_gpa.free(colors);
@@ -727,25 +728,55 @@ test "freeze emits layout edges when layout_path set" {
     }
 }
 
-test "validateTopology accepts multi-level hierarchy" {
+test "validateTopology accepts four-level hierarchy with immediate parents" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const retain = arena.allocator();
 
-    // trunk t ← sat s1 ← sat s2 (two-hop hierarchy)
+    // trunk t ← sat s1 ← sat s2 ← sat s3 (three-hop hierarchy)
     var nodes = [_]Node{
         .{ .id = "t", .source_path = "t.md" },
         .{ .id = "s1", .source_path = "s1.md", .parent = "t" },
         .{ .id = "s2", .source_path = "s2.md", .parent = "s1" },
+        .{ .id = "s3", .source_path = "s3.md", .parent = "s2" },
     };
     var diags: std.ArrayList(diag.Diagnostic) = .empty;
     defer diags.deinit(gpa);
     try validateTopology(gpa, retain, &nodes, &diags);
 
     try std.testing.expectEqual(@as(usize, 0), diag.countErrors(diags.items));
+    try std.testing.expect(nodes[0].role == .trunk);
     try std.testing.expect(nodes[1].role == .satellite);
     try std.testing.expect(nodes[2].role == .satellite);
+    try std.testing.expect(nodes[3].role == .satellite);
+    try std.testing.expectEqual(@as(?u32, 0), nodes[1].parent_index);
+    try std.testing.expectEqual(@as(?u32, 1), nodes[2].parent_index);
+    try std.testing.expectEqual(@as(?u32, 2), nodes[3].parent_index);
+}
+
+test "validateTopology rejects a deep parent cycle" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+
+    var nodes = [_]Node{
+        .{ .id = "a", .source_path = "a.md", .parent = "b" },
+        .{ .id = "b", .source_path = "b.md", .parent = "c" },
+        .{ .id = "c", .source_path = "c.md", .parent = "d" },
+        .{ .id = "d", .source_path = "d.md", .parent = "a" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+
+    try validateTopology(gpa, retain, &nodes, &diags);
+    try expectCodeCount(diags.items, .EPARENTCYCLE, 4);
+    for (diags.items) |d| {
+        if (d.code == .EPARENTCYCLE) {
+            try std.testing.expect(std.mem.indexOf(u8, d.message, "a -> b -> c -> d -> a") != null);
+        }
+    }
 }
 
 test "resolve is alias of validateTopology" {
@@ -786,12 +817,15 @@ test "diagnoseDuplicateIds byte-exact still EDUPLICATEID" {
     try std.testing.expect(diags.items[0].code == .EDUPLICATEID);
 }
 
-test "buildNav breadcrumb children siblings from frozen graph" {
+test "buildNav preserves four-level breadcrumbs and direct relationships" {
     const gpa = std.testing.allocator;
-    // Two trunks; trunk `t` has satellites s-a, s-b (id order after freeze).
+    // Two trunks; t has two direct children, and s-b owns a two-level
+    // descendant chain. All non-root nodes remain Satellites.
     var nodes = [_]Node{
         .{ .id = "s-a", .source_path = "s-a.md", .parent = "t" },
         .{ .id = "s-b", .source_path = "s-b.md", .parent = "t" },
+        .{ .id = "s-b-deep", .source_path = "s-b-deep.md", .parent = "s-b" },
+        .{ .id = "s-b-great", .source_path = "s-b-great.md", .parent = "s-b-deep" },
         .{ .id = "t", .source_path = "t.md" },
         .{ .id = "u", .source_path = "u.md" },
     };
@@ -802,42 +836,67 @@ test "buildNav breadcrumb children siblings from frozen graph" {
     const g = try freeze(gpa, &nodes, null);
     defer gpa.free(g.edges);
 
-    // Freeze id order: s-a, s-b, t, u
+    // Freeze id order: s-a, s-b, s-b-deep, s-b-great, t, u
     try std.testing.expectEqualStrings("s-a", g.nodes[0].id);
     try std.testing.expectEqualStrings("s-b", g.nodes[1].id);
-    try std.testing.expectEqualStrings("t", g.nodes[2].id);
-    try std.testing.expectEqualStrings("u", g.nodes[3].id);
+    try std.testing.expectEqualStrings("s-b-deep", g.nodes[2].id);
+    try std.testing.expectEqualStrings("s-b-great", g.nodes[3].id);
+    try std.testing.expectEqualStrings("t", g.nodes[4].id);
+    try std.testing.expectEqualStrings("u", g.nodes[5].id);
 
     const nav = try buildNav(gpa, g.nodes);
     defer freeNav(gpa, nav);
-    try std.testing.expectEqual(@as(usize, 4), nav.len);
+    try std.testing.expectEqual(@as(usize, 6), nav.len);
 
-    // Trunk t: breadcrumb [self], children [s-a, s-b], no siblings
-    try std.testing.expectEqual(@as(u32, 2), nav[2].index);
-    try std.testing.expectEqual(@as(usize, 1), nav[2].breadcrumb.len);
-    try std.testing.expectEqual(@as(u32, 2), nav[2].breadcrumb[0]);
-    try std.testing.expectEqual(@as(usize, 2), nav[2].children.len);
-    try std.testing.expectEqual(@as(u32, 0), nav[2].children[0]);
-    try std.testing.expectEqual(@as(u32, 1), nav[2].children[1]);
-    try std.testing.expectEqual(@as(usize, 0), nav[2].siblings.len);
+    // Trunk t: breadcrumb [self], children [s-a, s-b], no siblings.
+    try std.testing.expectEqual(@as(u32, 4), nav[4].index);
+    try std.testing.expectEqual(@as(usize, 1), nav[4].breadcrumb.len);
+    try std.testing.expectEqual(@as(u32, 4), nav[4].breadcrumb[0]);
+    try std.testing.expectEqual(@as(usize, 2), nav[4].children.len);
+    try std.testing.expectEqual(@as(u32, 0), nav[4].children[0]);
+    try std.testing.expectEqual(@as(u32, 1), nav[4].children[1]);
+    try std.testing.expectEqual(@as(usize, 0), nav[4].siblings.len);
 
-    // Satellite s-a: breadcrumb [t, s-a], no children, sibling s-b
+    // Direct child s-a: sibling s-b only; descendants of s-b are not siblings.
     try std.testing.expectEqual(@as(usize, 2), nav[0].breadcrumb.len);
-    try std.testing.expectEqual(@as(u32, 2), nav[0].breadcrumb[0]);
+    try std.testing.expectEqual(@as(u32, 4), nav[0].breadcrumb[0]);
     try std.testing.expectEqual(@as(u32, 0), nav[0].breadcrumb[1]);
     try std.testing.expectEqual(@as(usize, 0), nav[0].children.len);
     try std.testing.expectEqual(@as(usize, 1), nav[0].siblings.len);
     try std.testing.expectEqual(@as(u32, 1), nav[0].siblings[0]);
 
-    // Satellite s-b: sibling s-a (id order)
+    // Direct child s-b: sibling s-a and direct child s-b-deep.
+    try std.testing.expectEqual(@as(usize, 2), nav[1].breadcrumb.len);
+    try std.testing.expectEqual(@as(u32, 4), nav[1].breadcrumb[0]);
+    try std.testing.expectEqual(@as(u32, 1), nav[1].breadcrumb[1]);
+    try std.testing.expectEqual(@as(usize, 1), nav[1].children.len);
+    try std.testing.expectEqual(@as(u32, 2), nav[1].children[0]);
     try std.testing.expectEqual(@as(usize, 1), nav[1].siblings.len);
     try std.testing.expectEqual(@as(u32, 0), nav[1].siblings[0]);
 
-    // Lonely trunk u
-    try std.testing.expectEqual(@as(usize, 1), nav[3].breadcrumb.len);
-    try std.testing.expectEqual(@as(u32, 3), nav[3].breadcrumb[0]);
+    // Grandchild and great-grandchild have complete breadcrumbs, direct-only
+    // children, and no peers when they are the only child of their parent.
+    try std.testing.expectEqual(@as(usize, 3), nav[2].breadcrumb.len);
+    try std.testing.expectEqual(@as(u32, 4), nav[2].breadcrumb[0]);
+    try std.testing.expectEqual(@as(u32, 1), nav[2].breadcrumb[1]);
+    try std.testing.expectEqual(@as(u32, 2), nav[2].breadcrumb[2]);
+    try std.testing.expectEqual(@as(usize, 1), nav[2].children.len);
+    try std.testing.expectEqual(@as(u32, 3), nav[2].children[0]);
+    try std.testing.expectEqual(@as(usize, 0), nav[2].siblings.len);
+
+    try std.testing.expectEqual(@as(usize, 4), nav[3].breadcrumb.len);
+    try std.testing.expectEqual(@as(u32, 4), nav[3].breadcrumb[0]);
+    try std.testing.expectEqual(@as(u32, 1), nav[3].breadcrumb[1]);
+    try std.testing.expectEqual(@as(u32, 2), nav[3].breadcrumb[2]);
+    try std.testing.expectEqual(@as(u32, 3), nav[3].breadcrumb[3]);
     try std.testing.expectEqual(@as(usize, 0), nav[3].children.len);
     try std.testing.expectEqual(@as(usize, 0), nav[3].siblings.len);
+
+    // Lonely trunk u.
+    try std.testing.expectEqual(@as(usize, 1), nav[5].breadcrumb.len);
+    try std.testing.expectEqual(@as(u32, 5), nav[5].breadcrumb[0]);
+    try std.testing.expectEqual(@as(usize, 0), nav[5].children.len);
+    try std.testing.expectEqual(@as(usize, 0), nav[5].siblings.len);
 }
 
 test "buildNav empty graph" {

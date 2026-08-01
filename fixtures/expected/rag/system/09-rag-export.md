@@ -33,7 +33,7 @@ rag/
     pages/                 # site content, path-mirrored (asides inlined)
   graph/
     entity-catalog.md      # all page entities + roles
-    relations.md           # trunk → satellites edges
+    relations.md           # direct parent → child edges
 ```
 
 ## Determinism
@@ -62,7 +62,8 @@ RAG reuses the shared `pipeline.compile` path (`graph.validate`) before writing
 page/graph segments. Same codes as IR:
 
 - Missing parent → `EPARENTMISSING`
-- Satellite-of-satellite → `EPARENTNOTTRUNK`
+- Nested Satellite parents are valid; every chain must terminate at a Trunk
+- Retired `EPARENTNOTTRUNK` is not emitted by the current validator
 - Cycles → `EPARENTCYCLE`
 - Duplicate ids → `EDUPLICATEID`
 - Component failures → `ECOMPONENT`

@@ -28,10 +28,11 @@ Markdown + frontmatter
           └── RSS 2.0 feed       (--rss)
 ```
 
-The content model is deliberately understandable: **Trunks** are primary
-pages, **Satellites** belong to a Trunk, and in-page `Aside`/`Details` blocks
-stay in document order. Broken parents, wiki-links, headings, includes, and
-cycles fail with diagnostics instead of quietly producing a broken site.
+The content model is deliberately understandable: **Trunks** are root pages,
+**Satellites** are explicitly parented non-root pages (including nested parent
+chains), and in-page `Aside`/`Details` blocks stay in document order. Broken
+parents, wiki-links, headings, includes, and cycles fail with diagnostics
+instead of quietly producing a broken site.
 
 ## Features
 
@@ -155,6 +156,11 @@ shown explicitly above: it is an HTML-build flag, not a separate content project
 `--sitemap-path PATH` changes its target-relative path and implies
 `--sitemap`. A sitemap is a discovery hint, not a guarantee that a search
 engine will crawl or index a page.
+
+The canonical [publication model](docs/contracts/publication-model.md) defines
+which values are document facts, publication facts, migration provenance, or
+projection evidence. Selecting or emitting one output does not merge its
+contract with another output or prove deployment correctness.
 
 RSS is opt-in and does not modify themes. After publishing `rss.xml`, add this
 standard discovery hint to a layout when the deployed feed URL is known:

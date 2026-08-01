@@ -238,18 +238,19 @@ test "scan: recursive fixtures/content/valid" {
 
     try scan(io, .{ .content_root = "fixtures/content/valid" }, &list);
 
-    // empty-no-fm.md, multi-level-hierarchy/*, nested/deep/page.md,
+    // empty-no-fm.md, multi-level-hierarchy/* (four pages), nested/deep/page.md,
     // satellite-child.md, trunk-root.md
-    try testing.expectEqual(@as(usize, 7), list.len());
+    try testing.expectEqual(@as(usize, 8), list.len());
 
     // Sorted by entity_id.
     try testing.expectEqualStrings("empty-no-fm", list.items()[0].entity_id);
-    try testing.expectEqualStrings("multi-level-hierarchy/leaf", list.items()[1].entity_id);
-    try testing.expectEqualStrings("multi-level-hierarchy/mid", list.items()[2].entity_id);
-    try testing.expectEqualStrings("multi-level-hierarchy/trunk", list.items()[3].entity_id);
-    try testing.expectEqualStrings("nested/deep/page", list.items()[4].entity_id);
-    try testing.expectEqualStrings("satellite-child", list.items()[5].entity_id);
-    try testing.expectEqualStrings("trunk-root", list.items()[6].entity_id);
+    try testing.expectEqualStrings("multi-level-hierarchy/great-grandchild", list.items()[1].entity_id);
+    try testing.expectEqualStrings("multi-level-hierarchy/leaf", list.items()[2].entity_id);
+    try testing.expectEqualStrings("multi-level-hierarchy/mid", list.items()[3].entity_id);
+    try testing.expectEqualStrings("multi-level-hierarchy/trunk", list.items()[4].entity_id);
+    try testing.expectEqualStrings("nested/deep/page", list.items()[5].entity_id);
+    try testing.expectEqualStrings("satellite-child", list.items()[6].entity_id);
+    try testing.expectEqualStrings("trunk-root", list.items()[7].entity_id);
 
     // Logical paths only — no host absolute prefixes.
     for (list.items()) |p| {
@@ -262,8 +263,8 @@ test "scan: recursive fixtures/content/valid" {
         try testing.expect(std.mem.indexOf(u8, p.output_path, "..") == null);
     }
 
-    try testing.expectEqualStrings("multi-level-hierarchy/leaf.md", list.items()[1].source_path);
-    try testing.expectEqualStrings("multi-level-hierarchy/leaf.html", list.items()[1].output_path);
+    try testing.expectEqualStrings("multi-level-hierarchy/great-grandchild.md", list.items()[1].source_path);
+    try testing.expectEqualStrings("multi-level-hierarchy/great-grandchild.html", list.items()[1].output_path);
     try testing.expect(list.items()[1].kind == .md);
 }
 

@@ -22,7 +22,7 @@ panel is populated.
 
 <Aside kind="note">
 
-Trunk pages are graph parents. Satellites declare `parent:` and never own
-another satellite under the current one-level graph contract.
+Trunk pages are root graph parents. Satellites declare an immediate `parent:`
+and may own nested Satellites; every chain must remain finite and acyclic.
 
 </Aside>

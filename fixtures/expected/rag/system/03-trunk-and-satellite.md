@@ -16,9 +16,9 @@ related:
 Boris does **not** treat the content tree as a flat list of unrelated files. It
 uses a **Trunk and Satellite** relational model.
 
-**Workshop analogy:** records clerk — each satellite files a direct card under
-exactly one trunk; no satellite-of-satellite filing.  
-**Invariant:** `parent` must name an existing Trunk; cycles and missing parents
+**Workshop analogy:** records clerk — each Satellite files a direct card under
+exactly one parent; parent cards may themselves have children.
+**Invariant:** `parent` must name an existing page; cycles and missing parents
 are hard errors (`EPARENT*`).
 
 ## Definitions
@@ -39,7 +39,7 @@ Legacy names `parentEntry` / `parent_entry` are **rejected** as unknown keys
 may still emit a catalog field named `parent_entry` for the same parent id —
 that is packaging, not author grammar.
 
-The value must match the trunk’s entity id (path without extension), not the
+The value must match the direct parent’s entity id (path without extension), not the
 HTML URL and not a free-form title.
 
 ## Validation (hard requirements)
@@ -51,16 +51,16 @@ Both the IR compiler (`pipeline.zig`) and RAG export (`rag.zig`) call the shared
 |------|----------|------|
 | Parent id missing from the page set | **error** | `EPARENTMISSING` |
 | Parent equals own id | **error** | `EPARENTSELF` |
-| Parent exists but is itself a satellite (multi-hop) | **error** | `EPARENTNOTTRUNK` |
 | Cycle in parent edges | **error** | `EPARENTCYCLE` |
 | Duplicate entity id | **error** | `EDUPLICATEID` |
 
-v0.1 is **one-level only**: satellites attach to trunks. Satellite-of-satellite
-is a hard error, not a multi-hop tree feature.
+Parent chains may be multiple levels deep. The graph remains a rooted forest:
+roots are Trunks, every page with a parent is a Satellite, and all chains must
+be finite and acyclic.
 
 Cycle detection uses a DFS **visiting (gray) set**.
 
-Graph docs (`relations.md`) order trunk hubs and satellite lists by
+Graph docs (`relations.md`) order every page hub and direct-child list by
 **`entity_id` lexicographic** order for deterministic builds.
 
 ## Role detection
@@ -93,6 +93,7 @@ They do not get separate entity ids or RAG fragment documents.
 
 When answering questions about a guide:
 
-1. Load the trunk segment under `rag/content/pages/...`
-2. Load satellites whose `parent_entry` equals that trunk `entity_id` (see `graph/relations.md`)
+1. Load the root or requested page segment under `rag/content/pages/...`.
+2. Follow direct child rows whose `parent_entry` equals that page’s
+   `entity_id`; recurse when the hierarchy is nested (see `graph/relations.md`).
 3. Read inlined asides from those page bodies (`:::kind` blocks) — not a separate tree

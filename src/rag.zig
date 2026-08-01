@@ -1554,6 +1554,20 @@ fn writeRagFixtures(io: Io, gpa: std.mem.Allocator, content_rel: []const u8, sys
             \\
             ,
         });
+        try content.writeFile(io, .{
+            .sub_path = "guides/deep.md",
+            .data =
+            \\---
+            \\title: Deep Guide
+            \\parent: m-mid
+            \\---
+            \\
+            \\# Deep Guide
+            \\
+            \\Nested child page.
+            \\
+            ,
+        });
     }
     {
         var sys = try cwd.openDir(io, system_rel, .{});
@@ -1675,7 +1689,7 @@ test "rag export: valid corpus, dual-run determinism, catalog, H1, system order"
     });
     defer res_a.deinit();
     try std.testing.expect(res_a.ok());
-    try std.testing.expectEqual(@as(usize, 4), res_a.stats.content_pages);
+    try std.testing.expectEqual(@as(usize, 5), res_a.stats.content_pages);
     try std.testing.expectEqual(@as(usize, 2), res_a.stats.system_docs);
     try requiredRagFilesPresent(io, paths.out_a);
 
@@ -1744,16 +1758,18 @@ test "rag export: valid corpus, dual-run determinism, catalog, H1, system order"
 
     // content order by entity id in catalog paths
     const a_c = std.mem.indexOf(u8, jsonl, "content/pages/a-first.md").?;
+    const d_c = std.mem.indexOf(u8, jsonl, "content/pages/guides/deep.md").?;
     const g_c = std.mem.indexOf(u8, jsonl, "content/pages/guides/nested.md").?;
     const m_c = std.mem.indexOf(u8, jsonl, "content/pages/m-mid.md").?;
     const z_c = std.mem.indexOf(u8, jsonl, "content/pages/z-last.md").?;
-    try std.testing.expect(a_c < g_c and g_c < m_c and m_c < z_c);
+    try std.testing.expect(a_c < d_c and d_c < g_c and g_c < m_c and m_c < z_c);
 
     // exactly one H1 per content page
     const page_paths = [_][]const u8{
         "content/pages/a-first.md",
         "content/pages/m-mid.md",
         "content/pages/z-last.md",
+        "content/pages/guides/deep.md",
         "content/pages/guides/nested.md",
     };
     for (page_paths) |pp| {
@@ -1766,6 +1782,11 @@ test "rag export: valid corpus, dual-run determinism, catalog, H1, system order"
     try std.testing.expect(std.mem.indexOf(u8, mid, "# M Mid\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, mid, "Source H1 Should Vanish") == null);
     try std.testing.expect(std.mem.indexOf(u8, mid, "## Nested H1 Becomes H2") != null);
+
+    const relations = try readFileAlloc(io, out, "graph/relations.md", gpa);
+    defer gpa.free(relations);
+    try std.testing.expect(std.mem.indexOf(u8, relations, "m-mid") != null);
+    try std.testing.expect(std.mem.indexOf(u8, relations, "guides/deep") != null);
 
     // Asides export as :::kind (non-round-trippable); raw <Aside> must not remain.
     const zpage = try readFileAlloc(io, out, "content/pages/z-last.md", gpa);
@@ -1802,7 +1823,7 @@ test "rag export: scoped bundles are capped, graph-closed, and deterministic" {
     });
     defer scoped.deinit();
     try std.testing.expect(scoped.ok());
-    try std.testing.expectEqual(@as(usize, 4), scoped.stats.graph_pages);
+    try std.testing.expectEqual(@as(usize, 5), scoped.stats.graph_pages);
     try std.testing.expectEqual(@as(usize, 2), scoped.stats.selected_pages);
     try std.testing.expectEqual(@as(usize, 2), scoped.stats.chunk_count);
 
@@ -2073,7 +2094,26 @@ test "rag export against fixtures/content/valid" {
     defer res.deinit();
     try std.testing.expect(res.ok());
     try requiredRagFilesPresent(io, out);
-    try std.testing.expect(res.stats.content_pages >= 2);
+    try std.testing.expectEqual(@as(usize, 8), res.stats.content_pages);
+
+    // The four-level fixture publishes only direct parent edges while keeping
+    // each nested relation discoverable in the deterministic relation file.
+    {
+        var first_out = try Io.Dir.cwd().openDir(io, out, .{});
+        defer first_out.close(io);
+        const relations = try readFileAlloc(io, first_out, "graph/relations.md", gpa);
+        defer gpa.free(relations);
+        const edges = [_][]const u8{
+            "parent\thierarchy-great-grandchild\t->\thierarchy-leaf",
+            "parent\thierarchy-leaf\t->\thierarchy-mid",
+            "parent\thierarchy-mid\t->\thierarchy-trunk",
+        };
+        var prior: usize = 0;
+        for (edges) |edge| {
+            const found = std.mem.indexOfPos(u8, relations, prior, edge) orelse return error.TestExpectedEqual;
+            prior = found + edge.len;
+        }
+    }
 
     // Second publish must replace via move-aside, not delete-before-install.
     var res2 = try run(io, gpa, .{

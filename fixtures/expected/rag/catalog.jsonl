@@ -5,7 +5,7 @@
 {"rag_id":"content/nested/deep/page","rag_path":"content/pages/nested/deep/page.md","category":"content","title":"Nested Deep Page","entity_id":"nested/deep/page","role":"trunk","parent_entry":"","tags":"[]"}
 {"rag_id":"content/satellite-child","rag_path":"content/pages/satellite-child.md","category":"content","title":"Child Satellite","entity_id":"satellite-child","role":"satellite","parent_entry":"home","tags":"[satellite]"}
 {"rag_id":"graph/entity-catalog","rag_path":"graph/entity-catalog.md","category":"graph","title":"Entity catalog","entity_id":"","role":"","parent_entry":"","tags":"[graph, catalog, entities]"}
-{"rag_id":"graph/relations","rag_path":"graph/relations.md","category":"graph","title":"Graph relations (Trunk → Satellite)","entity_id":"","role":"","parent_entry":"","tags":"[graph, relations, trunk, satellite]"}
+{"rag_id":"graph/relations","rag_path":"graph/relations.md","category":"graph","title":"Graph relations (parent hierarchy)","entity_id":"","role":"","parent_entry":"","tags":"[graph, hierarchy, trunk, satellite]"}
 {"rag_id":"system/overview","rag_path":"system/00-overview.md","category":"system","title":"Boris overview","entity_id":"","role":"","parent_entry":"","tags":"[boris, overview, content-compiler, zig]"}
 {"rag_id":"system/architecture-pipeline","rag_path":"system/01-architecture-pipeline.md","category":"system","title":"Architecture and compile pipeline","entity_id":"","role":"","parent_entry":"","tags":"[architecture, pipeline, phases, compile]"}
 {"rag_id":"system/data-model-page","rag_path":"system/02-data-model-page.md","category":"system","title":"Data model: Page and Frontmatter","entity_id":"","role":"","parent_entry":"","tags":"[page, data-model, frontmatter, entity-id]"}
