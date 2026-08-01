@@ -1,0 +1,54 @@
+name: Run staged Starlight fence fix
+
+on:
+  pull_request:
+    branches: [afterparty]
+
+permissions:
+  contents: write
+
+jobs:
+  run-staged-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/starlight-code-fence-shield
+          fetch-depth: 0
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake
+          python3 -m pip install pyyaml
+
+      - name: Execute staged patch and gates
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          import yaml
+
+          workflow = yaml.safe_load(open('.github/workflows/starlight-fence-fix.yml'))
+          steps = workflow['jobs']['patch-test-commit']['steps']
+          wanted = {
+              'Apply focused fence-aware fix and regression test',
+              'Build and full tests',
+              'Focused black-box Starlight proof',
+              'Commit focused change and remove staging workflow',
+          }
+          for step in steps:
+              if step.get('name') not in wanted:
+                  continue
+              subprocess.run(['bash', '-euxo', 'pipefail', '-c', step['run']], check=True)
+          PY
+
+      - name: Remove wrapper from final patch
+        run: |
+          git rm .github/workflows/starlight-fence-run.yml
+          git commit --amend --no-edit
+          git push --force-with-lease origin HEAD:codex/starlight-code-fence-shield
