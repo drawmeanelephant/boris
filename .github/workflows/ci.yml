@@ -21,6 +21,7 @@ jobs:
     outputs:
       migration_lab: ${{ steps.filter.outputs.migration_lab }}
       standalone_tools: ${{ steps.filter.outputs.standalone_tools }}
+      testdata_generator: ${{ steps.filter.outputs.testdata_generator }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,6 +43,8 @@ jobs:
               - 'tools/search-index/**'
               - 'tools/docs-maintenance/**'
               - 'src/search_index.zig'
+            testdata_generator:
+              - 'tools/testdata-generator/**'
 
   build-and-test:
     name: build-and-test (${{ matrix.os }})
@@ -154,10 +157,28 @@ jobs:
       - name: Documentation-maintenance tests
         run: zig build --build-file tools/docs-maintenance/build.zig test
 
+  testdata_generator_test:
+    name: testdata-generator-test (Linux)
+    needs: changes
+    if: needs.changes.outputs.testdata_generator == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Bounded companion tests
+        run: zig build --build-file tools/testdata-generator/build.zig test
+
   # Single required status check for branch protection / rulesets.
   ci:
     name: ci
-    needs: [build-and-test, migration-lab-test, standalone_tools_test]
+    needs: [build-and-test, migration-lab-test, standalone_tools_test, testdata_generator_test]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -166,9 +187,12 @@ jobs:
           build_and_test="${{ needs.build-and-test.result }}"
           migration_lab_test="${{ needs.migration-lab-test.result }}"
           standalone_tools_test="${{ needs.standalone_tools_test.result }}"
+          testdata_generator_test="${{ needs.testdata_generator_test.result }}"
           echo "build-and-test result: ${build_and_test}"
           echo "migration-lab-test result: ${migration_lab_test}"
           echo "standalone-tools-test result: ${standalone_tools_test}"
+          echo "testdata-generator-test result: ${testdata_generator_test}"
           test "${build_and_test}" = "success"
           test "${migration_lab_test}" = "success" || test "${migration_lab_test}" = "skipped"
           test "${standalone_tools_test}" = "success" || test "${standalone_tools_test}" = "skipped"
+          test "${testdata_generator_test}" = "success" || test "${testdata_generator_test}" = "skipped"

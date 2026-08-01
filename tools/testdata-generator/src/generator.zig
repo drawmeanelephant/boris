@@ -8,7 +8,6 @@ const markdown = @import("markdown.zig");
 
 const Io = std.Io;
 
-pub const max_pages: usize = 1_000_000;
 pub const max_profile_bytes: usize = 64 * 1024;
 pub const max_template_bytes: usize = 1 * 1024 * 1024;
 
@@ -162,7 +161,7 @@ pub const GenerateSummary = struct {
 };
 
 pub fn generate(options: GenerateOptions) !GenerateSummary {
-    if (options.pages == 0 or options.pages > max_pages) return error.InvalidPageCount;
+    if (options.pages == 0) return error.InvalidPageCount;
 
     var profile = try loadProfile(options.allocator, options.io, options.profile_selector);
     errdefer profile.deinit(options.allocator);
@@ -601,21 +600,26 @@ pub fn runFixture(options: RunOptions) !void {
     defer options.allocator.free(binary);
     const binary_hash = manifest.sha256Hex(binary);
     const baseline_tree = try hashTree(options.io, options.allocator, fixture_abs, "results/boris-output");
-    const publication = try writePublicationInventory(options.io, options.allocator, fixture_abs, "results/boris-output");
+    var artifact_inventory: ?ArtifactInventory = null;
+    defer if (artifact_inventory) |*inventory| inventory.deinit(options.allocator);
+    if (actual_code == expected_code and expected_code == 0) {
+        artifact_inventory = try readArtifactInventory(options.io, options.allocator, fixture_abs, expected.assignments);
+    }
 
     var plan = try graph.GraphPlan.init(options.allocator, expected.page_count, expected.seed);
     defer plan.deinit(options.allocator);
     if (actual_code == expected_code and expected_code == 0) {
-        try applyPostPublishBarbs(options.io, options.allocator, fixture_abs, &plan, expected.assignments);
+        try applyPostPublishBarbs(options.io, options.allocator, fixture_abs, &plan, expected.assignments, artifact_inventory.?);
     }
     const output_tree = try hashTree(options.io, options.allocator, fixture_abs, "results/boris-output");
+    const output_snapshot = try writeOutputSnapshot(options.io, options.allocator, fixture_abs, "results/boris-output");
     const passed = actual_code == expected_code;
 
     var fixture = try Io.Dir.openDirAbsolute(options.io, fixture_abs, .{});
     defer fixture.close(options.io);
     var output = std.ArrayList(u8).empty;
     defer output.deinit(options.allocator);
-    try output.appendSlice(options.allocator, "{\n  \"schemaVersion\":\"boris-testdata-run/2\",\n  \"expectedExitCode\":");
+    try output.appendSlice(options.allocator, "{\n  \"schemaVersion\":\"boris-testdata-run/3\",\n  \"expectedExitCode\":");
     try appendDecimal(&output, options.allocator, expected_code);
     try output.appendSlice(options.allocator, ",\n  \"actualExitCode\":");
     try appendDecimal(&output, options.allocator, actual_code);
@@ -633,10 +637,27 @@ pub fn runFixture(options: RunOptions) !void {
     try manifest.appendJsonString(&output, options.allocator, &output_tree.hash);
     try output.appendSlice(options.allocator, ",\n  \"outputFileCount\":");
     try appendDecimal(&output, options.allocator, output_tree.file_count);
-    try output.appendSlice(options.allocator, ",\n  \"publicationInventorySha256\":");
-    try manifest.appendJsonString(&output, options.allocator, &publication.sha256);
-    try output.appendSlice(options.allocator, ",\n  \"publicationInventoryFileCount\":");
-    try appendDecimal(&output, options.allocator, publication.count);
+    try output.appendSlice(options.allocator, ",\n  \"artifactInventorySha256\":");
+    if (artifact_inventory) |inventory| {
+        try manifest.appendJsonString(&output, options.allocator, &inventory.sha256);
+    } else {
+        try output.appendSlice(options.allocator, "null");
+    }
+    try output.appendSlice(options.allocator, ",\n  \"artifactInventoryFileCount\":");
+    if (artifact_inventory) |inventory| {
+        try appendDecimal(&output, options.allocator, inventory.count);
+    } else {
+        try output.appendSlice(options.allocator, "null");
+    }
+    try output.appendSlice(options.allocator, ",\n  \"outputSnapshotSha256\":");
+    try manifest.appendJsonString(&output, options.allocator, &output_snapshot.sha256);
+    try output.appendSlice(options.allocator, ",\n  \"outputSnapshotFileCount\":");
+    try appendDecimal(&output, options.allocator, output_snapshot.count);
+    try output.appendSlice(options.allocator, ",\n  \"artifactTargets\":[");
+    if (artifact_inventory) |inventory| {
+        try appendArtifactTargets(&output, options.allocator, expected.assignments, inventory);
+    }
+    try output.appendSlice(options.allocator, "]");
     try output.appendSlice(options.allocator, ",\n  \"postPublishBarbsApplied\":");
     try appendDecimal(&output, options.allocator, countPostPublishBarbs(expected.assignments));
     try output.appendSlice(options.allocator, ",\n  \"stdout\":");
@@ -649,7 +670,7 @@ pub fn runFixture(options: RunOptions) !void {
     if (!passed) return error.BorisExpectationMismatch;
 }
 
-pub fn repairFixture(options: RunOptions) !void {
+pub fn republishCleanFixture(options: RunOptions) !void {
     const cwd_path = try std.process.currentPathAlloc(options.io, options.allocator);
     defer options.allocator.free(cwd_path);
     const fixture_abs = try std.fs.path.resolve(options.allocator, &.{ cwd_path, options.fixture_path });
@@ -663,13 +684,13 @@ pub fn repairFixture(options: RunOptions) !void {
     defer expected.deinit(options.allocator);
     if (hasCompileFailure(expected.assignments)) return error.InvalidFixture;
 
-    const repaired_abs = try std.fs.path.join(options.allocator, &.{ fixture_abs, "results/repaired-output" });
-    defer options.allocator.free(repaired_abs);
-    if (pathExists(options.io, repaired_abs)) try deletePath(options.io, repaired_abs);
+    const clean_abs = try std.fs.path.join(options.allocator, &.{ fixture_abs, "results/republish-clean-output" });
+    defer options.allocator.free(clean_abs);
+    if (pathExists(options.io, clean_abs)) try deletePath(options.io, clean_abs);
 
     const input_arg = try std.fmt.allocPrint(options.allocator, "{s}/content", .{base});
     defer options.allocator.free(input_arg);
-    const html_arg = try std.fmt.allocPrint(options.allocator, "{s}/results/repaired-output", .{base});
+    const html_arg = try std.fmt.allocPrint(options.allocator, "{s}/results/republish-clean-output", .{base});
     defer options.allocator.free(html_arg);
     const theme_arg = try std.fmt.allocPrint(options.allocator, "{s}/optional-theme", .{base});
     defer options.allocator.free(theme_arg);
@@ -686,14 +707,14 @@ pub fn repairFixture(options: RunOptions) !void {
         .exited => |code| code,
         else => 255,
     };
-    const output_tree = try hashTree(options.io, options.allocator, fixture_abs, "results/repaired-output");
+    const output_tree = try hashTree(options.io, options.allocator, fixture_abs, "results/republish-clean-output");
     const passed = actual_code == expected.exit_code;
 
     var fixture = try Io.Dir.openDirAbsolute(options.io, fixture_abs, .{});
     defer fixture.close(options.io);
     var output = std.ArrayList(u8).empty;
     defer output.deinit(options.allocator);
-    try output.appendSlice(options.allocator, "{\n  \"schemaVersion\":\"boris-testdata-repair/1\",\n  \"expectedExitCode\":");
+    try output.appendSlice(options.allocator, "{\n  \"schemaVersion\":\"boris-testdata-republish-clean/1\",\n  \"expectedExitCode\":");
     try appendDecimal(&output, options.allocator, expected.exit_code);
     try output.appendSlice(options.allocator, ",\n  \"actualExitCode\":");
     try appendDecimal(&output, options.allocator, actual_code);
@@ -708,7 +729,7 @@ pub fn repairFixture(options: RunOptions) !void {
     try output.appendSlice(options.allocator, ",\n  \"stderr\":");
     try manifest.appendJsonString(&output, options.allocator, result.stderr);
     try output.appendSlice(options.allocator, "\n}\n");
-    try fixture.writeFile(options.io, .{ .sub_path = "results/repair.json", .data = output.items });
+    try fixture.writeFile(options.io, .{ .sub_path = "results/republish-clean.json", .data = output.items });
 
     if (!passed) return error.BorisExpectationMismatch;
 }
@@ -866,7 +887,7 @@ fn countPostPublishBarbs(assignments: []const barbs.Assignment) usize {
     return count;
 }
 
-fn writePublicationInventory(
+fn writeOutputSnapshot(
     io: Io,
     allocator: std.mem.Allocator,
     fixture_abs: []const u8,
@@ -877,17 +898,17 @@ fn writePublicationInventory(
     var results = try fixture.openDir(io, "results", .{});
     defer results.close(io);
 
-    var inventory = try manifest.Inventory.openNamed(io, results, "publication.jsonl");
-    var inventory_open = true;
+    var snapshot = try manifest.Inventory.openNamed(io, results, "output-snapshot.jsonl");
+    var snapshot_open = true;
     defer {
-        if (inventory_open) _ = inventory.close();
+        if (snapshot_open) _ = snapshot.close();
     }
 
     var output = fixture.openDir(io, output_relative, .{ .iterate = true }) catch |err| switch (err) {
         error.FileNotFound => {
-            const summary = inventory.close();
-            inventory_open = false;
-            try manifest.writePublicationSummary(io, results, allocator, output_relative, summary);
+            const summary = snapshot.close();
+            snapshot_open = false;
+            try manifest.writeOutputSnapshotSummary(io, results, allocator, output_relative, summary);
             return summary;
         },
         else => return err,
@@ -912,19 +933,386 @@ fn writePublicationInventory(
         var reader = file.reader(io, &.{});
         const bytes = try reader.interface.allocRemaining(allocator, .unlimited);
         defer allocator.free(bytes);
-        try inventory.add(allocator, path, publicationKind(path), bytes, null, null, null);
+        try snapshot.add(allocator, path, "tree-entry", bytes, null, null, null);
     }
-    const summary = inventory.close();
-    inventory_open = false;
-    try manifest.writePublicationSummary(io, results, allocator, output_relative, summary);
+    const summary = snapshot.close();
+    snapshot_open = false;
+    try manifest.writeOutputSnapshotSummary(io, results, allocator, output_relative, summary);
     return summary;
 }
 
-fn publicationKind(path: []const u8) []const u8 {
-    if (std.mem.endsWith(u8, path, ".html")) return "html-page";
-    if (std.mem.startsWith(u8, path, "_boris/search/")) return "derived-search";
-    if (std.mem.startsWith(u8, path, "assets/") or std.mem.indexOf(u8, path, ".assets/") != null) return "asset";
-    return "published-artifact";
+const ArtifactRecord = struct {
+    path: []u8 = &.{},
+    kind: []u8 = &.{},
+    bytes: u64 = 0,
+    sha256: manifest.HashText = undefined,
+    committed: bool = false,
+
+    fn deinit(self: *ArtifactRecord, allocator: std.mem.Allocator) void {
+        if (self.path.len > 0) allocator.free(self.path);
+        if (self.kind.len > 0) allocator.free(self.kind);
+        self.* = undefined;
+    }
+};
+
+const ArtifactTarget = struct {
+    index: usize,
+    path: []u8,
+    kind: []u8,
+    bytes: u64,
+    sha256: manifest.HashText,
+
+    fn deinit(self: *ArtifactTarget, allocator: std.mem.Allocator) void {
+        allocator.free(self.path);
+        allocator.free(self.kind);
+        self.* = undefined;
+    }
+};
+
+const ArtifactInventory = struct {
+    sha256: manifest.HashText,
+    count: usize,
+    targets: []ArtifactTarget,
+
+    fn deinit(self: *ArtifactInventory, allocator: std.mem.Allocator) void {
+        for (self.targets) |*target| target.deinit(allocator);
+        allocator.free(self.targets);
+        self.* = undefined;
+    }
+
+    fn targetFor(self: *const ArtifactInventory, index: usize) ?*const ArtifactTarget {
+        for (self.targets) |*target| {
+            if (target.index == index) return target;
+        }
+        return null;
+    }
+};
+
+fn readArtifactInventory(
+    io: Io,
+    allocator: std.mem.Allocator,
+    fixture_abs: []const u8,
+    assignments: []const barbs.Assignment,
+) !ArtifactInventory {
+    const inventory_path = try std.fs.path.join(allocator, &.{ fixture_abs, "results/boris-output/_boris/proof/artifacts.json" });
+    defer allocator.free(inventory_path);
+
+    const inventory_hash = try hashFileAbsolute(io, inventory_path);
+    const count = try scanArtifactInventory(io, allocator, inventory_path, &.{}, null);
+    if (count == 0) return error.InvalidArtifactInventory;
+
+    var wanted: std.ArrayList(usize) = .empty;
+    defer wanted.deinit(allocator);
+    for (assignments) |assignment| {
+        if (assignment.kind == .artifact_missing or assignment.kind == .artifact_digest_mismatch) {
+            try wanted.append(allocator, assignment.target % count);
+        }
+    }
+
+    var targets: std.ArrayList(ArtifactTarget) = .empty;
+    errdefer {
+        for (targets.items) |*target| target.deinit(allocator);
+        targets.deinit(allocator);
+    }
+    if (wanted.items.len > 0) {
+        const selected_count = try scanArtifactInventory(io, allocator, inventory_path, wanted.items, &targets);
+        if (selected_count != count) return error.InvalidArtifactInventory;
+    }
+    return .{
+        .sha256 = inventory_hash,
+        .count = count,
+        .targets = try targets.toOwnedSlice(allocator),
+    };
+}
+
+fn scanArtifactInventory(
+    io: Io,
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    wanted: []const usize,
+    targets: ?*std.ArrayList(ArtifactTarget),
+) !usize {
+    var file = try Io.Dir.openFileAbsolute(io, path, .{});
+    defer file.close(io);
+    var input_buffer: [64 * 1024]u8 = undefined;
+    var file_reader = file.readerStreaming(io, &input_buffer);
+    var reader = std.json.Reader.init(allocator, &file_reader.interface);
+    defer reader.deinit();
+
+    const root = try reader.next();
+    switch (root) {
+        .object_begin => {},
+        else => return error.InvalidArtifactInventory,
+    }
+
+    var have_artifacts = false;
+    var committed_count: usize = 0;
+    while (true) {
+        const key_token = try reader.nextAllocMax(allocator, .alloc_if_needed, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(allocator, key_token);
+        const key = jsonTokenText(key_token) orelse return error.InvalidArtifactInventory;
+        if (std.mem.eql(u8, key, "format")) {
+            const value = try readJsonString(allocator, &reader);
+            defer allocator.free(value);
+            if (!std.mem.eql(u8, value, "boris-publication-artifacts")) return error.InvalidArtifactInventory;
+        } else if (std.mem.eql(u8, key, "schema_version")) {
+            if (try readJsonInteger(allocator, &reader) != 1) return error.InvalidArtifactInventory;
+        } else if (std.mem.eql(u8, key, "target")) {
+            const value = try readJsonString(allocator, &reader);
+            defer allocator.free(value);
+            if (value.len == 0) return error.InvalidArtifactInventory;
+        } else if (std.mem.eql(u8, key, "artifacts")) {
+            if (have_artifacts) return error.InvalidArtifactInventory;
+            have_artifacts = true;
+            const array_begin = try reader.next();
+            switch (array_begin) {
+                .array_begin => {},
+                else => return error.InvalidArtifactInventory,
+            }
+            while (true) {
+                const item = try reader.next();
+                switch (item) {
+                    .array_end => break,
+                    .object_begin => {
+                        var record = try readArtifactRecord(allocator, &reader);
+                        errdefer record.deinit(allocator);
+                        if (record.committed) {
+                            const index = committed_count;
+                            committed_count = std.math.add(usize, committed_count, 1) catch return error.InvalidArtifactInventory;
+                            if (targets) |target_list| {
+                                if (containsIndex(wanted, index) and !hasTarget(target_list.items, index)) {
+                                    const target = ArtifactTarget{
+                                        .index = index,
+                                        .path = record.path,
+                                        .kind = record.kind,
+                                        .bytes = record.bytes,
+                                        .sha256 = record.sha256,
+                                    };
+                                    record.path = &.{};
+                                    record.kind = &.{};
+                                    try target_list.append(allocator, target);
+                                }
+                            }
+                        }
+                        record.deinit(allocator);
+                    },
+                    else => return error.InvalidArtifactInventory,
+                }
+            }
+        } else {
+            return error.InvalidArtifactInventory;
+        }
+    }
+    if (!have_artifacts) return error.InvalidArtifactInventory;
+    const end = try reader.next();
+    if (end != .end_of_document) return error.InvalidArtifactInventory;
+    return committed_count;
+}
+
+fn readArtifactRecord(allocator: std.mem.Allocator, reader: *std.json.Reader) !ArtifactRecord {
+    var record = ArtifactRecord{};
+    errdefer record.deinit(allocator);
+    var have_path = false;
+    var have_kind = false;
+    var have_bytes = false;
+    var have_sha256 = false;
+    var have_status = false;
+    var have_required = false;
+    var have_producer = false;
+    while (true) {
+        const key_token = try reader.nextAllocMax(allocator, .alloc_if_needed, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(allocator, key_token);
+        const key = jsonTokenText(key_token) orelse return error.InvalidArtifactInventory;
+        if (std.mem.eql(u8, key, "path")) {
+            if (have_path) return error.InvalidArtifactInventory;
+            record.path = try readJsonString(allocator, reader);
+            have_path = true;
+        } else if (std.mem.eql(u8, key, "kind")) {
+            if (have_kind) return error.InvalidArtifactInventory;
+            record.kind = try readJsonString(allocator, reader);
+            have_kind = true;
+        } else if (std.mem.eql(u8, key, "bytes")) {
+            if (have_bytes) return error.InvalidArtifactInventory;
+            record.bytes = try readJsonInteger(allocator, reader);
+            have_bytes = true;
+        } else if (std.mem.eql(u8, key, "sha256")) {
+            if (have_sha256) return error.InvalidArtifactInventory;
+            const digest = try readJsonString(allocator, reader);
+            defer allocator.free(digest);
+            if (!validDigest(digest)) return error.InvalidArtifactInventory;
+            @memcpy(record.sha256[0..], digest);
+            have_sha256 = true;
+        } else if (std.mem.eql(u8, key, "status")) {
+            if (have_status) return error.InvalidArtifactInventory;
+            const status = try readJsonString(allocator, reader);
+            defer allocator.free(status);
+            if (std.mem.eql(u8, status, "committed")) {
+                record.committed = true;
+            } else if (!std.mem.eql(u8, status, "omitted-by-plan") and !std.mem.eql(u8, status, "not-applicable")) {
+                return error.InvalidArtifactInventory;
+            }
+            have_status = true;
+        } else if (std.mem.eql(u8, key, "required")) {
+            if (have_required) return error.InvalidArtifactInventory;
+            _ = try readJsonBool(reader);
+            have_required = true;
+        } else if (std.mem.eql(u8, key, "producer")) {
+            if (have_producer) return error.InvalidArtifactInventory;
+            const producer = try readJsonString(allocator, reader);
+            defer allocator.free(producer);
+            if (producer.len == 0) return error.InvalidArtifactInventory;
+            have_producer = true;
+        } else if (std.mem.eql(u8, key, "format_version")) {
+            const token = try reader.nextAllocMax(allocator, .alloc_if_needed, 4096);
+            defer freeJsonToken(allocator, token);
+            switch (token) {
+                .null => {},
+                .string, .allocated_string => {},
+                else => return error.InvalidArtifactInventory,
+            }
+        } else {
+            return error.InvalidArtifactInventory;
+        }
+    }
+    if (!have_path or !safeArtifactPath(record.path) or !have_kind or !isArtifactKind(record.kind) or
+        !have_bytes or !have_sha256 or !have_status or !have_required or !have_producer)
+    {
+        return error.InvalidArtifactInventory;
+    }
+    return record;
+}
+
+fn readJsonString(allocator: std.mem.Allocator, reader: *std.json.Reader) ![]u8 {
+    const token = try reader.nextAllocMax(allocator, .alloc_always, 4 * 1024 * 1024);
+    switch (token) {
+        .allocated_string => |value| return value,
+        .string => |value| return allocator.dupe(u8, value),
+        else => {
+            freeJsonToken(allocator, token);
+            return error.InvalidArtifactInventory;
+        },
+    }
+}
+
+fn readJsonInteger(allocator: std.mem.Allocator, reader: *std.json.Reader) !u64 {
+    const token = try reader.nextAllocMax(allocator, .alloc_if_needed, 64);
+    defer freeJsonToken(allocator, token);
+    const value = jsonTokenText(token) orelse return error.InvalidArtifactInventory;
+    return std.fmt.parseInt(u64, value, 10) catch return error.InvalidArtifactInventory;
+}
+
+fn readJsonBool(reader: *std.json.Reader) !bool {
+    return switch (try reader.next()) {
+        .true => true,
+        .false => false,
+        else => error.InvalidArtifactInventory,
+    };
+}
+
+fn jsonTokenText(token: std.json.Token) ?[]const u8 {
+    return switch (token) {
+        .string => |value| value,
+        .allocated_string => |value| value,
+        .number => |value| value,
+        .allocated_number => |value| value,
+        else => null,
+    };
+}
+
+fn freeJsonToken(allocator: std.mem.Allocator, token: std.json.Token) void {
+    switch (token) {
+        .allocated_string => |value| allocator.free(value),
+        .allocated_number => |value| allocator.free(value),
+        else => {},
+    }
+}
+
+fn validDigest(value: []const u8) bool {
+    if (value.len != 64) return false;
+    for (value) |byte| {
+        if (!((byte >= '0' and byte <= '9') or (byte >= 'a' and byte <= 'f'))) return false;
+    }
+    return true;
+}
+
+fn safeArtifactPath(path: []const u8) bool {
+    if (path.len == 0 or path[0] == '/' or std.mem.indexOfScalar(u8, path, '\\') != null) return false;
+    var parts = std.mem.splitScalar(u8, path, '/');
+    while (parts.next()) |part| {
+        if (part.len == 0 or std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) return false;
+    }
+    return true;
+}
+
+fn isArtifactKind(kind: []const u8) bool {
+    return std.mem.eql(u8, kind, "html-page") or
+        std.mem.eql(u8, kind, "theme-asset") or
+        std.mem.eql(u8, kind, "content-asset") or
+        std.mem.eql(u8, kind, "rendered-search") or
+        std.mem.eql(u8, kind, "sitemap") or
+        std.mem.eql(u8, kind, "rss") or
+        std.mem.eql(u8, kind, "llms");
+}
+
+fn containsIndex(values: []const usize, needle: usize) bool {
+    for (values) |value| if (value == needle) return true;
+    return false;
+}
+
+fn hasTarget(values: []const ArtifactTarget, needle: usize) bool {
+    for (values) |value| if (value.index == needle) return true;
+    return false;
+}
+
+fn hashFileAbsolute(io: Io, path: []const u8) !manifest.HashText {
+    var file = try Io.Dir.openFileAbsolute(io, path, .{});
+    defer file.close(io);
+    var reader = file.readerStreaming(io, &.{});
+    var input_buffer: [64 * 1024]u8 = undefined;
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    while (true) {
+        const count = try reader.interface.readSliceShort(&input_buffer);
+        if (count == 0) break;
+        hasher.update(input_buffer[0..count]);
+    }
+    var digest: [32]u8 = undefined;
+    hasher.final(&digest);
+    return manifest.digestToHex(digest);
+}
+
+fn appendArtifactTargets(
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    assignments: []const barbs.Assignment,
+    inventory: ArtifactInventory,
+) !void {
+    var first = true;
+    for (assignments) |assignment| {
+        if (assignment.kind != .artifact_missing and assignment.kind != .artifact_digest_mismatch) continue;
+        const index = assignment.target % inventory.count;
+        const target = inventory.targetFor(index) orelse return error.InvalidArtifactInventory;
+        if (!first) try output.append(allocator, ',');
+        first = false;
+        try output.appendSlice(allocator, "{\"barb\":");
+        try manifest.appendJsonString(output, allocator, barbs.name(assignment.kind));
+        try output.appendSlice(allocator, ",\"path\":");
+        try manifest.appendJsonString(output, allocator, target.path);
+        try output.appendSlice(allocator, ",\"kind\":");
+        try manifest.appendJsonString(output, allocator, target.kind);
+        try output.appendSlice(allocator, ",\"bytes\":");
+        try appendDecimal(output, allocator, target.bytes);
+        try output.appendSlice(allocator, ",\"sha256\":");
+        try manifest.appendJsonString(output, allocator, &target.sha256);
+        try output.append(allocator, '}');
+    }
 }
 
 fn applyPostPublishBarbs(
@@ -933,6 +1321,7 @@ fn applyPostPublishBarbs(
     fixture_abs: []const u8,
     plan: *const graph.GraphPlan,
     assignments: []const barbs.Assignment,
+    artifact_inventory: ArtifactInventory,
 ) !void {
     var pass: usize = 0;
     while (pass < 2) : (pass += 1) {
@@ -948,14 +1337,14 @@ fn applyPostPublishBarbs(
                 .html_unclosed_structure,
                 => try mutateHtmlOutput(io, allocator, fixture_abs, plan.pages[assignment.target], assignment.kind),
                 .artifact_missing => {
-                    const path = try artifactPath(io, allocator, fixture_abs);
-                    defer allocator.free(path);
-                    try deleteOutputPath(io, allocator, fixture_abs, path);
+                    const target = artifactTargetForAssignment(artifact_inventory, assignment) orelse return error.InvalidArtifactInventory;
+                    try verifyArtifactTarget(io, allocator, fixture_abs, target);
+                    try deleteOutputPath(io, allocator, fixture_abs, target.path);
                 },
                 .artifact_digest_mismatch => {
-                    const path = try artifactPath(io, allocator, fixture_abs);
-                    defer allocator.free(path);
-                    try mutateDigestOutput(io, allocator, fixture_abs, path);
+                    const target = artifactTargetForAssignment(artifact_inventory, assignment) orelse return error.InvalidArtifactInventory;
+                    try verifyArtifactTarget(io, allocator, fixture_abs, target);
+                    try mutateDigestOutput(io, allocator, fixture_abs, target.path);
                 },
                 .search_stale_title => try mutateSearchTitle(io, allocator, fixture_abs),
                 .deployment_owned_extra => try writeDeploymentOwnedExtra(io, fixture_abs),
@@ -965,19 +1354,22 @@ fn applyPostPublishBarbs(
     }
 }
 
+fn artifactTargetForAssignment(inventory: ArtifactInventory, assignment: barbs.Assignment) ?*const ArtifactTarget {
+    if (inventory.count == 0) return null;
+    return inventory.targetFor(assignment.target % inventory.count);
+}
+
+fn verifyArtifactTarget(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u8, target: *const ArtifactTarget) !void {
+    const bytes = try readOutputPath(io, allocator, fixture_abs, target.path);
+    defer allocator.free(bytes);
+    if (@as(u64, bytes.len) != target.bytes) return error.InvalidArtifactInventory;
+    const actual = manifest.sha256Hex(bytes);
+    if (!std.mem.eql(u8, &actual, &target.sha256)) return error.InvalidArtifactInventory;
+}
+
 fn outputPagePath(allocator: std.mem.Allocator, page: graph.PagePlan) ![]u8 {
     var id_buffer: [192]u8 = undefined;
     return std.fmt.allocPrint(allocator, "{s}.html", .{try graph.GraphPlan.id(page, &id_buffer)});
-}
-
-fn artifactPath(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u8) ![]u8 {
-    const search = try std.fs.path.join(allocator, &.{ fixture_abs, "results/boris-output/_boris/search/search-index.json" });
-    defer allocator.free(search);
-    if (pathExists(io, search)) return allocator.dupe(u8, "_boris/search/search-index.json");
-    const preferred = try std.fs.path.join(allocator, &.{ fixture_abs, "results/boris-output/assets/css/docs.css" });
-    defer allocator.free(preferred);
-    if (pathExists(io, preferred)) return allocator.dupe(u8, "assets/css/docs.css");
-    return allocator.dupe(u8, "index.html");
 }
 
 fn readOutputPath(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u8, relative: []const u8) ![]u8 {

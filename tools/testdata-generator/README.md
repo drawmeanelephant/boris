@@ -24,7 +24,7 @@ zig build run -- generate \
 zig build run -- validate --fixture /private/tmp/boris-case
 zig build run -- inspect --input /private/tmp/boris-case --format json
 zig build run -- run --fixture /private/tmp/boris-case --boris /path/to/boris
-zig build run -- repair --fixture /private/tmp/boris-case --boris /path/to/boris
+zig build run -- republish-clean --fixture /private/tmp/boris-case --boris /path/to/boris
 ```
 
 `generate` refuses to overwrite an existing directory unless `--force` is
@@ -39,16 +39,16 @@ fixture/
   content/                    # Markdown pages and includes/
   optional-assets/            # sidecar assets for fixture cases
   optional-theme/             # copied or built-in Boris theme
-  manifest.json               # boris-testdata/1
+  manifest.json               # boris-testdata/2
   files.jsonl                 # one deterministic inventory row per input file
   expected.json               # run expectation and barb assignments
-  results/                    # Boris output, receipts, and run evidence
+  results/                    # Boris output, harness snapshots, and run evidence
     boris-output/             # baseline output, optionally poisoned after publish
-    publication.jsonl         # baseline published-output receipt
-    publication.json          # receipt summary and ownership declaration
+    output-snapshot.jsonl     # full-tree harness snapshot; non-normative
+    output-snapshot.json      # snapshot summary; not an ownership declaration
     run.json                  # subprocess and output evidence
-    repaired-output/          # clean re-publication from the same valid source
-    repair.json               # repaired-output evidence
+    republish-clean-output/   # clean comparison publication from valid source
+    republish-clean.json     # clean-comparison evidence
 ```
 
 `manifest.json` key order is fixed. Its `files` entry records the JSONL count,
@@ -59,11 +59,16 @@ pages are written; it is never built as one corpus-sized in-memory string.
 The input-file inventory deliberately excludes `manifest.json`,
 `expected.json`, and `files.jsonl` themselves to avoid a circular hash. It
 includes pages, include fragments, content-local assets, and theme files.
-After a successful Boris run, `results/publication.jsonl` records the baseline
-published output before any post-publish barb is applied. That receipt is the
-stable comparison point for artifact poison. `repair` republishes the same
-valid source without applying post-publish mutations into
-`results/repaired-output`, giving reviewers a clean inverse fixture.
+After a successful Boris run, `_boris/proof/artifacts.json` is the authoritative
+Boris-owned artifact inventory. Artifact barbs select their path, kind, byte
+count, and SHA-256 from that inventory, then mutate the output while leaving the
+inventory unchanged. `results/output-snapshot.jsonl` is a full-tree harness
+snapshot of the resulting output; it is explicitly non-normative and does not
+declare ownership. `deployment_owned_extra` is therefore absent from
+`artifacts.json` while still appearing in the snapshot.
+
+`republish-clean` publishes the same valid source into a clean comparison tree.
+It does not edit or automatically repair the poisoned output tree.
 
 ## Profiles, themes, and templates
 
@@ -118,8 +123,9 @@ The generator retains only a compact `PagePlan` array (`kind`, guide/article
 ordinals, parent index, and seed). It creates one page AST and one page byte
 buffer at a time, streams each inventory row immediately, and releases the
 page arena before continuing. `--pages` is an exact workload parameter; it is
-not part of a named workload identity. The safety ceiling is an operational
-guard, not a recommended corpus size.
+not part of a named workload identity. Positive `usize` page counts are accepted;
+checked planning and ordinary allocator/filesystem errors report workload limits
+honestly instead of imposing a named corpus ceiling.
 
 ## Barb taxonomy
 
@@ -138,15 +144,15 @@ once to override a profile's list.
 | `html_missing_fragment` | Post-publish `HTML_FRAGMENT_MISSING` finding |
 | `html_duplicate_id` | Post-publish `HTML_DUPLICATE_ID` finding |
 | `html_unclosed_structure` | Post-publish `HTML_MALFORMED` finding |
-| `artifact_missing` | Deletes one output artifact after the baseline receipt |
-| `artifact_digest_mismatch` | Changes one output byte without changing the receipt |
+| `artifact_missing` | Deletes one canonical inventoried output artifact after baseline |
+| `artifact_digest_mismatch` | Changes one canonical artifact byte without updating `artifacts.json` |
 | `search_stale_title` | Changes one search title without regenerating search |
 | `deployment_owned_extra` | Adds an unrecorded deployment file; expected no finding |
 
 These names are not random fuzz labels: they are the stable join key between
-the fixture, `expected.json`, the publication receipt, and future result
+the fixture, `expected.json`, the canonical artifact inventory, and future result
 comparison tooling. Each assignment also records its expected finding code,
-coverage state, and inverse repair. Post-publish barbs are applied by `run`
+coverage state, and clean comparison publication. Post-publish barbs are applied by `run`
 only after Boris has successfully emitted the output tree, so they do not
 masquerade as source or compiler failures.
 
@@ -154,10 +160,12 @@ masquerade as source or compiler failures.
 
 `run` invokes the supplied Boris binary as a subprocess only because it is an
 evidence collector; it never uses a subprocess to generate Markdown. The
-record at `results/run.json` includes:
+`boris-testdata-run/3` record at `results/run.json` includes:
 
 - expected and actual exit codes plus a pass/fail comparison;
 - elapsed nanoseconds;
 - the Boris binary SHA-256;
 - deterministic baseline and poisoned output-tree SHA-256 values over sorted relative paths and bytes;
+- the canonical artifact-inventory SHA-256 and selected artifact path/kind/byte/digest facts;
+- the non-normative full-tree output-snapshot hash and file count;
 - output file count, stdout, and stderr.

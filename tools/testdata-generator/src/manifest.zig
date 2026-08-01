@@ -5,7 +5,7 @@ const barbs = @import("barbs.zig");
 const graph = @import("graph.zig");
 
 pub const schema_version = "boris-testdata/2";
-pub const generator_version = "boris-testdata/0.2.0";
+pub const generator_version = "boris-testdata/0.3.0";
 
 pub const HashText = [64]u8;
 
@@ -71,6 +71,8 @@ pub const Inventory = struct {
         role: ?[]const u8,
         parent: ?[]const u8,
     ) !void {
+        const next_count = std.math.add(usize, self.count, 1) catch return error.InventoryOverflow;
+        const next_total_bytes = std.math.add(u64, self.total_bytes, @intCast(bytes.len)) catch return error.InventoryOverflow;
         var line: std.ArrayList(u8) = .empty;
         defer line.deinit(allocator);
 
@@ -99,12 +101,12 @@ pub const Inventory = struct {
 
         try self.file.writeStreamingAll(self.io, line.items);
         self.hasher.update(line.items);
-        self.count += 1;
-        self.total_bytes += bytes.len;
+        self.count = next_count;
+        self.total_bytes = next_total_bytes;
     }
 };
 
-pub fn writePublicationSummary(
+pub fn writeOutputSnapshotSummary(
     io: std.Io,
     directory: std.Io.Dir,
     allocator: std.mem.Allocator,
@@ -113,16 +115,16 @@ pub fn writePublicationSummary(
 ) !void {
     var output: std.ArrayList(u8) = .empty;
     defer output.deinit(allocator);
-    try output.appendSlice(allocator, "{\n  \"schemaVersion\":\"boris-testdata-publication/1\",\n  \"outputRoot\":");
+    try output.appendSlice(allocator, "{\n  \"schemaVersion\":\"boris-testdata-output-snapshot/1\",\n  \"outputRoot\":");
     try appendJsonString(&output, allocator, output_root);
-    try output.appendSlice(allocator, ",\n  \"receipt\":\"results/publication.jsonl\",\n  \"count\":");
+    try output.appendSlice(allocator, ",\n  \"snapshot\":\"results/output-snapshot.jsonl\",\n  \"count\":");
     try appendDecimal(&output, allocator, summary.count);
     try output.appendSlice(allocator, ",\n  \"bytes\":");
     try appendDecimal(&output, allocator, summary.total_bytes);
     try output.appendSlice(allocator, ",\n  \"sha256\":");
     try appendJsonString(&output, allocator, &summary.sha256);
-    try output.appendSlice(allocator, ",\n  \"ownership\":\"compiler-baseline\"\n}\n");
-    try directory.writeFile(io, .{ .sub_path = "publication.json", .data = output.items });
+    try output.appendSlice(allocator, ",\n  \"normative\":false\n}\n");
+    try directory.writeFile(io, .{ .sub_path = "output-snapshot.json", .data = output.items });
 }
 
 pub fn writeExpected(

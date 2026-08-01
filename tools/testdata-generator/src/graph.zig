@@ -27,6 +27,7 @@ pub const GraphPlan = struct {
     pub fn init(allocator: std.mem.Allocator, page_count: usize, seed: u64) !GraphPlan {
         if (page_count == 0) return error.InvalidPageCount;
         const pages = try allocator.alloc(PagePlan, page_count);
+        errdefer allocator.free(pages);
         var guide_count: usize = 0;
 
         pages[0] = .{
@@ -43,14 +44,19 @@ pub const GraphPlan = struct {
             const guide = offset / articles_per_guide;
             const article = offset % articles_per_guide;
             const is_guide = article == 0;
-            if (is_guide) guide_count += 1;
+            if (is_guide) guide_count = std.math.add(usize, guide_count, 1) catch return error.InvalidPageCount;
+
+            const parent_index = if (is_guide) null else blk: {
+                const guide_offset = std.math.mul(usize, guide, articles_per_guide) catch return error.InvalidPageCount;
+                break :blk std.math.add(usize, guide_offset, 1) catch return error.InvalidPageCount;
+            };
 
             page.* = .{
                 .index = index,
                 .kind = if (is_guide) .guide else .article,
                 .guide_number = guide,
                 .article_number = article,
-                .parent_index = if (is_guide) null else 1 + guide * articles_per_guide,
+                .parent_index = parent_index,
                 .seed = barbs.mix(seed, index),
             };
         }

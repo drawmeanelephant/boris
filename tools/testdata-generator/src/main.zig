@@ -11,7 +11,7 @@ const ExitCode = enum(u8) {
     system_failure = 3,
 };
 
-const Command = enum { generate, validate, inspect, run, repair };
+const Command = enum { generate, validate, inspect, run, republish_clean };
 const Format = enum { human, json };
 
 const Options = struct {
@@ -110,18 +110,18 @@ pub fn main(init: std.process.Init) u8 {
             std.debug.print("ran Boris fixture: {s}\n", .{options.fixture});
             return @intFromEnum(ExitCode.success);
         },
-        .repair => {
+        .republish_clean => {
             if (options.fixture.len == 0) {
-                std.debug.print("boris-testdata: --fixture is required for repair\n", .{});
+                std.debug.print("boris-testdata: --fixture is required for republish-clean\n", .{});
                 return @intFromEnum(ExitCode.usage);
             }
-            generator.repairFixture(.{
+            generator.republishCleanFixture(.{
                 .io = init.io,
                 .allocator = init.gpa,
                 .fixture_path = options.fixture,
                 .boris_path = options.boris,
             }) catch |err| return reportError(err);
-            std.debug.print("repaired Boris fixture: {s}\n", .{options.fixture});
+            std.debug.print("republished clean Boris fixture: {s}\n", .{options.fixture});
             return @intFromEnum(ExitCode.success);
         },
     }
@@ -190,7 +190,7 @@ fn parseOptions(allocator: std.mem.Allocator, args: []const [:0]const u8) ParseE
     }
     options.barb_names = try barbs.toOwnedSlice(allocator);
     if (options.command == .generate and options.output.len == 0) return error.MissingOutput;
-    if ((options.command == .validate or options.command == .inspect or options.command == .run or options.command == .repair) and options.fixture.len == 0 and options.output.len == 0) return error.MissingFixture;
+    if ((options.command == .validate or options.command == .inspect or options.command == .run or options.command == .republish_clean) and options.fixture.len == 0 and options.output.len == 0) return error.MissingFixture;
     return options;
 }
 
@@ -205,7 +205,7 @@ fn parseCommand(value: []const u8) ?Command {
     if (std.mem.eql(u8, value, "validate")) return .validate;
     if (std.mem.eql(u8, value, "inspect")) return .inspect;
     if (std.mem.eql(u8, value, "run")) return .run;
-    if (std.mem.eql(u8, value, "repair")) return .repair;
+    if (std.mem.eql(u8, value, "republish-clean")) return .republish_clean;
     return null;
 }
 
@@ -217,7 +217,7 @@ fn parseFormat(value: []const u8) ?Format {
 
 fn parsePageCount(value: []const u8) !usize {
     const count = try std.fmt.parseInt(usize, value, 10);
-    if (count == 0 or count > generator.max_pages) return error.InvalidPageCount;
+    if (count == 0) return error.InvalidPageCount;
     return count;
 }
 
@@ -230,10 +230,10 @@ fn printUsage() void {
         \\  boris-testdata validate --fixture DIR [--format human|json]
         \\  boris-testdata inspect --input DIR [--format human|json]
         \\  boris-testdata run --fixture DIR --boris PATH
-        \\  boris-testdata repair --fixture DIR --boris PATH
+        \\  boris-testdata republish-clean --fixture DIR --boris PATH
         \\
         \\Generate options:
-        \\  --pages N       Exact page count (default: 24; safety maximum: 1000000)
+        \\  --pages N       Exact positive page count workload (default: 24)
         \\  --seed U64      Stable SplitMix-style seed (default: 20260801)
         \\  --profile NAME  readme-realistic-v1, mild-poison-v1, nightmare-v1, preserved-edge-v1, or JSON path
         \\  --barb NAME     Repeat to override profile barbs (alias: --poison)
@@ -278,6 +278,11 @@ fn printReport(report: validator.Report, format: Format, inspection: bool) void 
     } else {
         std.debug.print("validate: failed: {s}\n", .{report.error_message});
     }
+}
+
+test "page count parser accepts positive usize workloads without a named ceiling" {
+    try std.testing.expectEqual(@as(usize, 1_000_001), try parsePageCount("1000001"));
+    try std.testing.expectError(error.InvalidPageCount, parsePageCount("0"));
 }
 
 fn reportError(err: anyerror) u8 {

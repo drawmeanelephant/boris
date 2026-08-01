@@ -128,7 +128,7 @@ pub fn repair(kind: Kind) []const u8 {
         .html_duplicate_id => "rename or remove the duplicate rendered id",
         .html_unclosed_structure => "close the rendered element at the mutation site",
         .artifact_missing => "republish or restore the inventoried artifact",
-        .artifact_digest_mismatch => "republish the artifact and its receipt",
+        .artifact_digest_mismatch => "republish the artifact so artifacts.json matches its bytes",
         .search_stale_title => "regenerate the rendered-search artifact",
         .deployment_owned_extra => "none; leave deployment-owned files outside compiler ownership",
         .unsafe_markdown_link => "none; preserve the literal author link",
@@ -170,8 +170,8 @@ pub fn description(kind: Kind) []const u8 {
         .html_missing_fragment => "add one rendered link to a missing heading fragment",
         .html_duplicate_id => "emit the same rendered id twice on one page",
         .html_unclosed_structure => "leave one bounded rendered HTML element unclosed",
-        .artifact_missing => "delete one published artifact after the baseline receipt",
-        .artifact_digest_mismatch => "change one published byte without updating its receipt",
+        .artifact_missing => "delete one published artifact after the baseline artifact inventory",
+        .artifact_digest_mismatch => "change one published byte without updating artifacts.json",
         .search_stale_title => "change one search title without regenerating the index",
         .deployment_owned_extra => "add an unrecorded deployment-owned file",
     };
@@ -204,7 +204,8 @@ pub fn assign(
 
     for (kinds, 0..) |kind, ordinal| {
         if (page_count == 0) return error.InvalidPageCount;
-        var target = @as(usize, @intCast(mix(seed, ordinal + 1) % page_count));
+        const mix_value = std.math.add(usize, ordinal, 1) catch return error.InvalidPageCount;
+        var target = @as(usize, @intCast(mix(seed, @intCast(mix_value)) % page_count));
 
         // Keep graph mutations on pages whose topology makes the mutation
         // meaningful. Page 0 is the root trunk; page 1 is a guide trunk when
