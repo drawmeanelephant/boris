@@ -167,12 +167,12 @@ masquerade as source or compiler failures.
 
 `run` invokes the supplied Boris binary as a subprocess only because it is an
 evidence collector; it never uses a subprocess to generate Markdown. The
-`boris-testdata-run/3` record at `results/run.json` includes:
+`boris-testdata-run/4` record at `results/run.json` includes:
 
 - expected and actual exit codes plus a pass/fail comparison;
 - the Boris binary SHA-256;
 - deterministic baseline and poisoned output-tree SHA-256 values over sorted relative paths and bytes;
-- the clean baseline artifact-inventory path, SHA-256, and committed-record count;
+- the clean baseline artifact-inventory path, SHA-256, and `artifactCount` of committed records;
 - selected baseline artifact indexes and path/kind/byte/digest facts;
 - the ordered list of applied post-publication mutations and a canonical-inventory-unchanged assertion;
 - the non-normative full-tree poisoned output-snapshot path, hash, and file count;

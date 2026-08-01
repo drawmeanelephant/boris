@@ -10,6 +10,7 @@ const Io = std.Io;
 
 pub const max_profile_bytes: usize = 64 * 1024;
 pub const max_template_bytes: usize = 1 * 1024 * 1024;
+pub const run_schema_version = "boris-testdata-run/4";
 
 pub const Profile = struct {
     name: []const u8,
@@ -625,85 +626,20 @@ pub fn runFixture(options: RunOptions) !void {
     } else null;
     const passed = actual_code == expected_code and (canonical_inventory_unchanged orelse true);
 
-    var fixture = try Io.Dir.openDirAbsolute(options.io, fixture_abs, .{});
-    defer fixture.close(options.io);
-    var output = std.ArrayList(u8).empty;
-    defer output.deinit(options.allocator);
-    try output.appendSlice(options.allocator, "{\n  \"schemaVersion\":\"boris-testdata-run/3\",\n  \"expectedExitCode\":");
-    try appendDecimal(&output, options.allocator, expected_code);
-    try output.appendSlice(options.allocator, ",\n  \"actualExitCode\":");
-    try appendDecimal(&output, options.allocator, actual_code);
-    try output.appendSlice(options.allocator, ",\n  \"passed\":");
-    try output.appendSlice(options.allocator, if (passed) "true" else "false");
-    try output.appendSlice(options.allocator, ",\n  \"binarySha256\":");
-    try manifest.appendJsonString(&output, options.allocator, &binary_hash);
-    try output.appendSlice(options.allocator, ",\n  \"baselineOutputTreeSha256\":");
-    try manifest.appendJsonString(&output, options.allocator, &baseline_tree.hash);
-    try output.appendSlice(options.allocator, ",\n  \"baselineOutputFileCount\":");
-    try appendDecimal(&output, options.allocator, baseline_tree.file_count);
-    try output.appendSlice(options.allocator, ",\n  \"baselineArtifactInventory\":");
-    if (artifact_inventory) |inventory| {
-        try output.appendSlice(options.allocator, "{\"path\":\"results/boris-output/_boris/proof/artifacts.json\",\"sha256\":");
-        try manifest.appendJsonString(&output, options.allocator, &inventory.sha256);
-        try output.appendSlice(options.allocator, ",\"fileCount\":");
-        try appendDecimal(&output, options.allocator, inventory.count);
-        try output.append(options.allocator, '}');
-    } else {
-        try output.appendSlice(options.allocator, "null");
-    }
-    try output.appendSlice(options.allocator, ",\n  \"outputTreeSha256\":");
-    try manifest.appendJsonString(&output, options.allocator, &output_tree.hash);
-    try output.appendSlice(options.allocator, ",\n  \"outputFileCount\":");
-    try appendDecimal(&output, options.allocator, output_tree.file_count);
-    try output.appendSlice(options.allocator, ",\n  \"artifactInventorySha256\":");
-    if (artifact_inventory) |inventory| {
-        try manifest.appendJsonString(&output, options.allocator, &inventory.sha256);
-    } else {
-        try output.appendSlice(options.allocator, "null");
-    }
-    try output.appendSlice(options.allocator, ",\n  \"artifactInventoryFileCount\":");
-    if (artifact_inventory) |inventory| {
-        try appendDecimal(&output, options.allocator, inventory.count);
-    } else {
-        try output.appendSlice(options.allocator, "null");
-    }
-    try output.appendSlice(options.allocator, ",\n  \"outputSnapshotSha256\":");
-    try manifest.appendJsonString(&output, options.allocator, &output_snapshot.sha256);
-    try output.appendSlice(options.allocator, ",\n  \"outputSnapshotFileCount\":");
-    try appendDecimal(&output, options.allocator, output_snapshot.count);
-    try output.appendSlice(options.allocator, ",\n  \"artifactTargets\":[");
-    if (artifact_inventory) |inventory| {
-        try appendArtifactTargets(&output, options.allocator, expected.assignments, inventory);
-    }
-    try output.appendSlice(options.allocator, "]");
-    try output.appendSlice(options.allocator, ",\n  \"appliedPostPublishMutations\":[");
-    if (artifact_inventory != null) {
-        try appendAppliedPostPublishMutations(&output, options.allocator, expected.assignments);
-    }
-    try output.appendSlice(options.allocator, "]");
-    try output.appendSlice(options.allocator, ",\n  \"postPublishBarbsApplied\":");
-    try appendDecimal(
-        &output,
-        options.allocator,
-        if (artifact_inventory != null) countPostPublishBarbs(expected.assignments) else 0,
-    );
-    try output.appendSlice(options.allocator, ",\n  \"canonicalArtifactInventoryUnchanged\":");
-    if (canonical_inventory_unchanged) |unchanged| {
-        try output.appendSlice(options.allocator, if (unchanged) "true" else "false");
-    } else {
-        try output.appendSlice(options.allocator, "null");
-    }
-    try output.appendSlice(options.allocator, ",\n  \"poisonedOutputSnapshot\":{\"path\":\"results/output-snapshot.json\",\"sha256\":");
-    try manifest.appendJsonString(&output, options.allocator, &output_snapshot.sha256);
-    try output.appendSlice(options.allocator, ",\"fileCount\":");
-    try appendDecimal(&output, options.allocator, output_snapshot.count);
-    try output.append(options.allocator, '}');
-    try output.appendSlice(options.allocator, ",\n  \"stdout\":");
-    try manifest.appendJsonString(&output, options.allocator, result.stdout);
-    try output.appendSlice(options.allocator, ",\n  \"stderr\":");
-    try manifest.appendJsonString(&output, options.allocator, result.stderr);
-    try output.appendSlice(options.allocator, "\n}\n");
-    try fixture.writeFile(options.io, .{ .sub_path = "results/run.json", .data = output.items });
+    try writeRunEvidence(options.io, options.allocator, fixture_abs, .{
+        .expected_code = expected_code,
+        .actual_code = actual_code,
+        .passed = passed,
+        .binary_hash = binary_hash,
+        .baseline_tree = baseline_tree,
+        .artifact_inventory = artifact_inventory,
+        .output_tree = output_tree,
+        .output_snapshot = output_snapshot,
+        .canonical_inventory_unchanged = canonical_inventory_unchanged,
+        .assignments = expected.assignments,
+        .stdout = result.stdout,
+        .stderr = result.stderr,
+    });
 
     if (!passed) return error.BorisExpectationMismatch;
 }
@@ -773,6 +709,110 @@ pub fn republishCleanFixture(options: RunOptions) !void {
 }
 
 const TreeHash = struct { hash: manifest.HashText, file_count: usize };
+
+const RunEvidenceOptions = struct {
+    expected_code: u8,
+    actual_code: u8,
+    passed: bool,
+    binary_hash: manifest.HashText,
+    baseline_tree: TreeHash,
+    artifact_inventory: ?ArtifactInventory,
+    output_tree: TreeHash,
+    output_snapshot: manifest.InventorySummary,
+    canonical_inventory_unchanged: ?bool,
+    assignments: []const barbs.Assignment,
+    stdout: []const u8,
+    stderr: []const u8,
+};
+
+fn writeRunEvidence(
+    io: Io,
+    allocator: std.mem.Allocator,
+    fixture_abs: []const u8,
+    evidence: RunEvidenceOptions,
+) !void {
+    var fixture = try Io.Dir.openDirAbsolute(io, fixture_abs, .{});
+    defer fixture.close(io);
+    var output = std.ArrayList(u8).empty;
+    defer output.deinit(allocator);
+    try output.appendSlice(allocator, "{\n  \"schemaVersion\":");
+    try manifest.appendJsonString(&output, allocator, run_schema_version);
+    try output.appendSlice(allocator, ",\n  \"expectedExitCode\":");
+    try appendDecimal(&output, allocator, evidence.expected_code);
+    try output.appendSlice(allocator, ",\n  \"actualExitCode\":");
+    try appendDecimal(&output, allocator, evidence.actual_code);
+    try output.appendSlice(allocator, ",\n  \"passed\":");
+    try output.appendSlice(allocator, if (evidence.passed) "true" else "false");
+    try output.appendSlice(allocator, ",\n  \"binarySha256\":");
+    try manifest.appendJsonString(&output, allocator, &evidence.binary_hash);
+    try output.appendSlice(allocator, ",\n  \"baselineOutputTreeSha256\":");
+    try manifest.appendJsonString(&output, allocator, &evidence.baseline_tree.hash);
+    try output.appendSlice(allocator, ",\n  \"baselineOutputFileCount\":");
+    try appendDecimal(&output, allocator, evidence.baseline_tree.file_count);
+    try output.appendSlice(allocator, ",\n  \"baselineArtifactInventory\":");
+    if (evidence.artifact_inventory) |inventory| {
+        try output.appendSlice(allocator, "{\"path\":\"results/boris-output/_boris/proof/artifacts.json\",\"sha256\":");
+        try manifest.appendJsonString(&output, allocator, &inventory.sha256);
+        try output.appendSlice(allocator, ",\"artifactCount\":");
+        try appendDecimal(&output, allocator, inventory.count);
+        try output.append(allocator, '}');
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+    try output.appendSlice(allocator, ",\n  \"outputTreeSha256\":");
+    try manifest.appendJsonString(&output, allocator, &evidence.output_tree.hash);
+    try output.appendSlice(allocator, ",\n  \"outputFileCount\":");
+    try appendDecimal(&output, allocator, evidence.output_tree.file_count);
+    try output.appendSlice(allocator, ",\n  \"artifactInventorySha256\":");
+    if (evidence.artifact_inventory) |inventory| {
+        try manifest.appendJsonString(&output, allocator, &inventory.sha256);
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+    try output.appendSlice(allocator, ",\n  \"artifactInventoryFileCount\":");
+    if (evidence.artifact_inventory) |inventory| {
+        try appendDecimal(&output, allocator, inventory.count);
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+    try output.appendSlice(allocator, ",\n  \"outputSnapshotSha256\":");
+    try manifest.appendJsonString(&output, allocator, &evidence.output_snapshot.sha256);
+    try output.appendSlice(allocator, ",\n  \"outputSnapshotFileCount\":");
+    try appendDecimal(&output, allocator, evidence.output_snapshot.count);
+    try output.appendSlice(allocator, ",\n  \"artifactTargets\":[");
+    if (evidence.artifact_inventory) |inventory| {
+        try appendArtifactTargets(&output, allocator, evidence.assignments, inventory);
+    }
+    try output.appendSlice(allocator, "]");
+    try output.appendSlice(allocator, ",\n  \"appliedPostPublishMutations\":[");
+    if (evidence.artifact_inventory != null) {
+        try appendAppliedPostPublishMutations(&output, allocator, evidence.assignments);
+    }
+    try output.appendSlice(allocator, "]");
+    try output.appendSlice(allocator, ",\n  \"postPublishBarbsApplied\":");
+    try appendDecimal(
+        &output,
+        allocator,
+        if (evidence.artifact_inventory != null) countPostPublishBarbs(evidence.assignments) else 0,
+    );
+    try output.appendSlice(allocator, ",\n  \"canonicalArtifactInventoryUnchanged\":");
+    if (evidence.canonical_inventory_unchanged) |unchanged| {
+        try output.appendSlice(allocator, if (unchanged) "true" else "false");
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+    try output.appendSlice(allocator, ",\n  \"poisonedOutputSnapshot\":{\"path\":\"results/output-snapshot.jsonl\",\"sha256\":");
+    try manifest.appendJsonString(&output, allocator, &evidence.output_snapshot.sha256);
+    try output.appendSlice(allocator, ",\"fileCount\":");
+    try appendDecimal(&output, allocator, evidence.output_snapshot.count);
+    try output.append(allocator, '}');
+    try output.appendSlice(allocator, ",\n  \"stdout\":");
+    try manifest.appendJsonString(&output, allocator, evidence.stdout);
+    try output.appendSlice(allocator, ",\n  \"stderr\":");
+    try manifest.appendJsonString(&output, allocator, evidence.stderr);
+    try output.appendSlice(allocator, "\n}\n");
+    try fixture.writeFile(io, .{ .sub_path = "results/run.json", .data = output.items });
+}
 
 fn hashTree(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u8, relative: []const u8) !TreeHash {
     var root = try Io.Dir.openDirAbsolute(io, fixture_abs, .{ .iterate = true });
@@ -1735,4 +1775,159 @@ test "artifact mutations use clean baseline targets across overlapping surfaces"
     try std.testing.expect(!pathExists(io, mutated_path));
     const after_missing_hash = try hashFileAbsolute(io, inventory_path);
     try std.testing.expectEqual(selected.sha256, after_missing_hash);
+}
+
+test "successful run evidence is versioned, path-valid, and deterministic" {
+    const a = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_arena = std.heap.ArenaAllocator.init(a);
+    defer path_arena.deinit();
+    const pa = path_arena.allocator();
+
+    const fixture_rel = try std.fmt.allocPrint(pa, ".zig-cache/tmp/{s}/run-evidence", .{tmp.sub_path});
+    const output_rel = try std.fmt.allocPrint(pa, "{s}/results/boris-output", .{fixture_rel});
+    const proof_rel = try std.fmt.allocPrint(pa, "{s}/_boris/proof", .{output_rel});
+    const cwd = Io.Dir.cwd();
+    try cwd.createDirPath(io, proof_rel);
+
+    const baseline = "<html><body><main>baseline</main></body></html>\n";
+    const output_file_rel = try std.fmt.allocPrint(pa, "{s}/index.html", .{output_rel});
+    try cwd.writeFile(io, .{ .sub_path = output_file_rel, .data = baseline });
+    const digest = manifest.sha256Hex(baseline);
+    const inventory = try std.fmt.allocPrint(
+        pa,
+        "{{\n  \"format\":\"boris-publication-artifacts\",\n  \"schema_version\":1,\n  \"target\":\"default\",\n  \"artifacts\":[{{\"path\":\"index.html\",\"kind\":\"html-page\",\"producer\":\"html-render\",\"required\":true,\"status\":\"committed\",\"bytes\":{d},\"sha256\":\"{s}\",\"format_version\":null}}]\n}}\n",
+        .{ baseline.len, &digest },
+    );
+    const inventory_rel = try std.fmt.allocPrint(pa, "{s}/artifacts.json", .{proof_rel});
+    try cwd.writeFile(io, .{ .sub_path = inventory_rel, .data = inventory });
+
+    const cwd_path = try std.process.currentPathAlloc(io, a);
+    defer a.free(cwd_path);
+    const fixture_abs = try std.fs.path.resolve(a, &.{ cwd_path, fixture_rel });
+    defer a.free(fixture_abs);
+    const assignments = [_]barbs.Assignment{
+        .{ .kind = .html_missing_local_route, .target = 0 },
+        .{ .kind = .html_missing_fragment, .target = 0 },
+        .{ .kind = .html_duplicate_id, .target = 0 },
+        .{ .kind = .html_unclosed_structure, .target = 0 },
+        .{ .kind = .artifact_missing, .target = 0 },
+        .{ .kind = .artifact_digest_mismatch, .target = 0 },
+        .{ .kind = .search_stale_title, .target = 0 },
+        .{ .kind = .deployment_owned_extra, .target = 0 },
+    };
+    var artifact_inventory = try readArtifactInventory(io, a, fixture_abs, &assignments);
+    defer artifact_inventory.deinit(a);
+    const baseline_tree = try hashTree(io, a, fixture_abs, "results/boris-output");
+    const snapshot = try writeOutputSnapshot(io, a, fixture_abs, "results/boris-output");
+    const evidence = RunEvidenceOptions{
+        .expected_code = 0,
+        .actual_code = 0,
+        .passed = true,
+        .binary_hash = manifest.sha256Hex("test-boris-binary"),
+        .baseline_tree = baseline_tree,
+        .artifact_inventory = artifact_inventory,
+        .output_tree = baseline_tree,
+        .output_snapshot = snapshot,
+        .canonical_inventory_unchanged = true,
+        .assignments = &assignments,
+        .stdout = "",
+        .stderr = "",
+    };
+    try writeRunEvidence(io, a, fixture_abs, evidence);
+
+    const run_path = try std.fs.path.join(a, &.{ fixture_abs, "results/run.json" });
+    defer a.free(run_path);
+    const first_run = try readFileAbsolute(io, a, run_path, 256 * 1024);
+    defer a.free(first_run);
+    const parsed = try std.json.parseFromSlice(std.json.Value, a, first_run, .{});
+    defer parsed.deinit();
+    const run = switch (parsed.value) {
+        .object => |object| object,
+        else => return error.InvalidFixture,
+    };
+    const schema = switch (run.get("schemaVersion") orelse return error.InvalidFixture) {
+        .string => |value| value,
+        else => return error.InvalidFixture,
+    };
+    try std.testing.expectEqualStrings(run_schema_version, schema);
+    try std.testing.expect(run.get("elapsedNs") == null);
+
+    const snapshot_object = switch (run.get("poisonedOutputSnapshot") orelse return error.InvalidFixture) {
+        .object => |object| object,
+        else => return error.InvalidFixture,
+    };
+    const snapshot_path = switch (snapshot_object.get("path") orelse return error.InvalidFixture) {
+        .string => |value| value,
+        else => return error.InvalidFixture,
+    };
+    try std.testing.expectEqualStrings("results/output-snapshot.jsonl", snapshot_path);
+    const resolved_snapshot_path = try std.fs.path.join(a, &.{ fixture_abs, snapshot_path });
+    defer a.free(resolved_snapshot_path);
+    try std.testing.expect(pathExists(io, resolved_snapshot_path));
+    const snapshot_bytes = try readFileAbsolute(io, a, resolved_snapshot_path, 256 * 1024);
+    defer a.free(snapshot_bytes);
+    const snapshot_hash = manifest.sha256Hex(snapshot_bytes);
+    const recorded_snapshot_hash = switch (snapshot_object.get("sha256") orelse return error.InvalidFixture) {
+        .string => |value| value,
+        else => return error.InvalidFixture,
+    };
+    try std.testing.expectEqualStrings(&snapshot_hash, recorded_snapshot_hash);
+    const recorded_snapshot_count = switch (snapshot_object.get("fileCount") orelse return error.InvalidFixture) {
+        .integer => |value| @as(usize, @intCast(value)),
+        else => return error.InvalidFixture,
+    };
+    var actual_snapshot_count: usize = 0;
+    var snapshot_lines = std.mem.splitScalar(u8, snapshot_bytes, '\n');
+    while (snapshot_lines.next()) |line| {
+        if (line.len > 0) actual_snapshot_count += 1;
+    }
+    try std.testing.expectEqual(snapshot.count, actual_snapshot_count);
+    try std.testing.expectEqual(actual_snapshot_count, recorded_snapshot_count);
+
+    const baseline_inventory = switch (run.get("baselineArtifactInventory") orelse return error.InvalidFixture) {
+        .object => |object| object,
+        else => return error.InvalidFixture,
+    };
+    const recorded_artifact_count = switch (baseline_inventory.get("artifactCount") orelse return error.InvalidFixture) {
+        .integer => |value| @as(usize, @intCast(value)),
+        else => return error.InvalidFixture,
+    };
+    try std.testing.expectEqual(artifact_inventory.count, recorded_artifact_count);
+
+    const applied = switch (run.get("appliedPostPublishMutations") orelse return error.InvalidFixture) {
+        .array => |array| array.items,
+        else => return error.InvalidFixture,
+    };
+    try std.testing.expectEqual(assignments.len, applied.len);
+    for (assignments, 0..) |assignment, index| {
+        const mutation = switch (applied[index]) {
+            .object => |object| object,
+            else => return error.InvalidFixture,
+        };
+        const name = switch (mutation.get("name") orelse return error.InvalidFixture) {
+            .string => |value| value,
+            else => return error.InvalidFixture,
+        };
+        try std.testing.expectEqualStrings(barbs.name(assignment.kind), name);
+    }
+    try std.testing.expectEqual(@as(usize, 8), applied.len);
+    try std.testing.expectEqual(@as(usize, 8), switch (run.get("postPublishBarbsApplied") orelse return error.InvalidFixture) {
+        .integer => |value| @as(usize, @intCast(value)),
+        else => return error.InvalidFixture,
+    });
+    try std.testing.expect(switch (run.get("canonicalArtifactInventoryUnchanged") orelse return error.InvalidFixture) {
+        .bool => |value| value,
+        else => false,
+    });
+
+    const repeated_snapshot = try writeOutputSnapshot(io, a, fixture_abs, "results/boris-output");
+    try std.testing.expectEqual(snapshot.count, repeated_snapshot.count);
+    try std.testing.expectEqual(snapshot.sha256, repeated_snapshot.sha256);
+    try writeRunEvidence(io, a, fixture_abs, evidence);
+    const second_run = try readFileAbsolute(io, a, run_path, 256 * 1024);
+    defer a.free(second_run);
+    try std.testing.expectEqualSlices(u8, first_run, second_run);
 }
