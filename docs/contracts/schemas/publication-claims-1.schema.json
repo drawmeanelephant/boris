@@ -16,15 +16,70 @@
       "prefixItems": [
         {
           "$ref": "#/$defs/claim",
-          "properties": { "id": { "const": "committed-artifacts-match-inventory" } }
+          "properties": {
+            "id": { "const": "committed-artifacts-match-inventory" },
+            "statement": { "const": "Every committed artifact record selected by the artifact-integrity check was inspected and matched its declared byte count and SHA-256 digest." },
+            "evidence": {
+              "properties": { "check_id": { "const": "artifact-integrity" } }
+            },
+            "limitation_ids": {
+              "prefixItems": [
+                { "const": "target-local-only" },
+                { "const": "no-deployment-verification" },
+                { "const": "no-accessibility-verification" },
+                { "const": "no-prose-quality-verification" },
+                { "const": "no-universal-reproducibility-claim" }
+              ],
+              "items": false,
+              "minItems": 5,
+              "maxItems": 5
+            }
+          }
         },
         {
           "$ref": "#/$defs/claim",
-          "properties": { "id": { "const": "rendered-html-passed-declared-audit" } }
+          "properties": {
+            "id": { "const": "rendered-html-passed-declared-audit" },
+            "statement": { "const": "Every committed HTML page selected by the rendered-html check completed the declared structural, route, fragment, and duplicate-ID audit within that check's scope." },
+            "evidence": {
+              "properties": { "check_id": { "const": "rendered-html" } }
+            },
+            "limitation_ids": {
+              "prefixItems": [
+                { "const": "target-local-only" },
+                { "const": "no-deployment-verification" },
+                { "const": "no-accessibility-verification" },
+                { "const": "no-prose-quality-verification" },
+                { "const": "no-universal-reproducibility-claim" }
+              ],
+              "items": false,
+              "minItems": 5,
+              "maxItems": 5
+            }
+          }
         },
         {
           "$ref": "#/$defs/claim",
-          "properties": { "id": { "const": "rendered-search-matches-selected-html" } }
+          "properties": {
+            "id": { "const": "rendered-search-matches-selected-html" },
+            "statement": { "const": "The single selected rendered-search artifact matched the committed HTML page set and derived rendered-search content inspected by the rendered-search check." },
+            "evidence": {
+              "properties": { "check_id": { "const": "rendered-search" } }
+            },
+            "limitation_ids": {
+              "prefixItems": [
+                { "const": "target-local-only" },
+                { "const": "no-deployment-verification" },
+                { "const": "no-accessibility-verification" },
+                { "const": "no-prose-quality-verification" },
+                { "const": "no-universal-reproducibility-claim" },
+                { "const": "omitted-projections-not-certified" }
+              ],
+              "items": false,
+              "minItems": 6,
+              "maxItems": 6
+            }
+          }
         }
       ],
       "items": false,
@@ -36,27 +91,109 @@
       "prefixItems": [
         {
           "$ref": "#/$defs/limitation",
-          "properties": { "id": { "const": "target-local-only" } }
+          "properties": {
+            "id": { "const": "target-local-only" },
+            "statement": { "const": "These claims describe one selected local HTML target after its commit and say nothing about any other target or environment." },
+            "source": { "const": "docs/contracts/publication-checks.md#authority-and-transaction-boundary" },
+            "applies_to_claims": {
+              "prefixItems": [
+                { "const": "committed-artifacts-match-inventory" },
+                { "const": "rendered-html-passed-declared-audit" },
+                { "const": "rendered-search-matches-selected-html" }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          }
         },
         {
           "$ref": "#/$defs/limitation",
-          "properties": { "id": { "const": "no-deployment-verification" } }
+          "properties": {
+            "id": { "const": "no-deployment-verification" },
+            "statement": { "const": "No deployment was performed or verified; local generation cannot verify deployed behavior." },
+            "source": { "const": "docs/contracts/publication-model.md#verification-vocabulary-and-claims" },
+            "applies_to_claims": {
+              "prefixItems": [
+                { "const": "committed-artifacts-match-inventory" },
+                { "const": "rendered-html-passed-declared-audit" },
+                { "const": "rendered-search-matches-selected-html" }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          }
         },
         {
           "$ref": "#/$defs/limitation",
-          "properties": { "id": { "const": "no-accessibility-verification" } }
+          "properties": {
+            "id": { "const": "no-accessibility-verification" },
+            "statement": { "const": "No accessibility audit was performed for any page or artifact in this target." },
+            "source": { "const": "docs/contracts/publication-model.md#projections" },
+            "applies_to_claims": {
+              "prefixItems": [
+                { "const": "committed-artifacts-match-inventory" },
+                { "const": "rendered-html-passed-declared-audit" },
+                { "const": "rendered-search-matches-selected-html" }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          }
         },
         {
           "$ref": "#/$defs/limitation",
-          "properties": { "id": { "const": "no-prose-quality-verification" } }
+          "properties": {
+            "id": { "const": "no-prose-quality-verification" },
+            "statement": { "const": "No prose, writing, or documentation-quality judgment was made." },
+            "source": { "const": "docs/contracts/publication-model.md#verification-vocabulary-and-claims" },
+            "applies_to_claims": {
+              "prefixItems": [
+                { "const": "committed-artifacts-match-inventory" },
+                { "const": "rendered-html-passed-declared-audit" },
+                { "const": "rendered-search-matches-selected-html" }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          }
         },
         {
           "$ref": "#/$defs/limitation",
-          "properties": { "id": { "const": "no-universal-reproducibility-claim" } }
+          "properties": {
+            "id": { "const": "no-universal-reproducibility-claim" },
+            "statement": { "const": "Deterministic bytes on one recorded environment are not universal reproducibility." },
+            "source": { "const": "docs/contracts/publication-model.md#verification-vocabulary-and-claims" },
+            "applies_to_claims": {
+              "prefixItems": [
+                { "const": "committed-artifacts-match-inventory" },
+                { "const": "rendered-html-passed-declared-audit" },
+                { "const": "rendered-search-matches-selected-html" }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          }
         },
         {
           "$ref": "#/$defs/limitation",
-          "properties": { "id": { "const": "omitted-projections-not-certified" } }
+          "properties": {
+            "id": { "const": "omitted-projections-not-certified" },
+            "statement": { "const": "An omitted or unselected projection remains explicitly unverified and is not certified by this report." },
+            "source": { "const": "docs/contracts/publication-model.md#the-conductor-rule" },
+            "applies_to_claims": {
+              "prefixItems": [
+                { "const": "rendered-search-matches-selected-html" }
+              ],
+              "items": false,
+              "minItems": 1,
+              "maxItems": 1
+            }
+          }
         }
       ],
       "items": false,

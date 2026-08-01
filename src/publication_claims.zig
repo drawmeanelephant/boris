@@ -117,6 +117,11 @@ pub const Options = struct {
     /// Test-only fault injection. Production callers leave both false.
     test_fail_execution: bool = false,
     test_fail_write: bool = false,
+    /// Test-only seam: invoked once after both evidence handles are opened
+    /// and before any byte is read. A test may replace files at this point;
+    /// the already-opened handles must be unaffected.
+    after_open: ?*const fn (?*anyopaque) void = null,
+    after_open_context: ?*anyopaque = null,
 };
 
 pub const Error = std.mem.Allocator.Error || error{
@@ -134,14 +139,14 @@ const FileBinding = struct {
 const Scope = struct {
     subject_statuses: []const []const u8,
     subject_kinds: []const []const u8,
-    subject_sha256: [64]u8,
     supporting_statuses: []const []const u8,
     supporting_kinds: []const []const u8,
-    supporting_sha256: [64]u8,
 };
 
 const ParsedCheck = struct {
     id: []const u8,
+    eligible: bool,
+    ran: bool,
     status: []const u8,
     coverage: []const u8,
     counts: struct {
@@ -363,10 +368,8 @@ fn parseScopeAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader) Error!
         .scope = Scope{
             .subject_statuses = subject_statuses,
             .subject_kinds = subject_kinds,
-            .subject_sha256 = subject_sha256,
             .supporting_statuses = supporting_statuses,
             .supporting_kinds = supporting_kinds,
-            .supporting_sha256 = supporting_sha256,
         },
         .subject_sha256 = subject_sha256,
         .supporting_sha256 = supporting_sha256,
@@ -391,10 +394,8 @@ fn parseCheckAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader) Error!
     check.scope = Scope{
         .subject_statuses = &.{},
         .subject_kinds = &.{},
-        .subject_sha256 = undefined,
         .supporting_statuses = &.{},
         .supporting_kinds = &.{},
-        .supporting_sha256 = undefined,
     };
     errdefer freeParsedCheck(gpa, check);
 
@@ -426,11 +427,11 @@ fn parseCheckAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader) Error!
             have_id = true;
         } else if (std.mem.eql(u8, key, "eligible")) {
             if (have_eligible) return error.InvalidChecksReport;
-            _ = try readJsonBool(reader);
+            check.eligible = try readJsonBool(reader);
             have_eligible = true;
         } else if (std.mem.eql(u8, key, "ran")) {
             if (have_ran) return error.InvalidChecksReport;
-            _ = try readJsonBool(reader);
+            check.ran = try readJsonBool(reader);
             have_ran = true;
         } else if (std.mem.eql(u8, key, "status")) {
             if (have_status) return error.InvalidChecksReport;
@@ -525,7 +526,11 @@ fn parseCheckAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader) Error!
     return check;
 }
 
-fn parseBindingAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader) Error!struct {
+fn parseBindingAfterBegin(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    expected_target: []const u8,
+) Error!struct {
     binding: FileBinding,
     artifact_count: usize,
 } {
@@ -579,7 +584,8 @@ fn parseBindingAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader) Erro
             if (have_target) return error.InvalidChecksReport;
             const value = try readJsonString(gpa, reader);
             defer gpa.free(value);
-            if (value.len == 0) return error.InvalidChecksReport;
+            if (value.len == 0 or !std.mem.eql(u8, value, expected_target))
+                return error.InvalidChecksReport;
             have_target = true;
         } else if (std.mem.eql(u8, key, "artifact_count")) {
             if (have_artifact_count) return error.InvalidChecksReport;
@@ -609,7 +615,9 @@ fn countArrayElements(reader: *std.json.Reader) Error!usize {
         const token = try nextJsonToken(reader);
         switch (token) {
             .array_begin => {
-                if (depth == 0) count += 1;
+                // A nested array is structural content of a finding object;
+                // a top-level array element is not a finding object.
+                if (depth == 0) return error.InvalidChecksReport;
                 depth += 1;
             },
             .object_begin => {
@@ -624,8 +632,58 @@ fn countArrayElements(reader: *std.json.Reader) Error!usize {
                 if (depth == 0) return error.InvalidChecksReport;
                 depth -= 1;
             },
-            else => {},
+            .end_of_document => return error.InvalidChecksReport,
+            else => {
+                // Every top-level element must be a finding object; scalars
+                // nested inside one are skipped structurally.
+                if (depth == 0) return error.InvalidChecksReport;
+            },
         }
+    }
+}
+
+/// Validate complete check-state consistency: every combination must be
+/// contract-coherent, and impossible or self-contradicting states are
+/// rejected as `InvalidChecksReport`.
+fn validateCheckState(checks: *const [3]ParsedCheck) Error!void {
+    for (checks) |check| {
+        if (check.counts.checked > check.counts.eligible) return error.InvalidChecksReport;
+        const coverage_agrees = if (std.mem.eql(u8, check.status, "passed") or
+            std.mem.eql(u8, check.status, "failed"))
+            std.mem.eql(u8, check.coverage, "complete")
+        else if (std.mem.eql(u8, check.status, "incomplete"))
+            std.mem.eql(u8, check.coverage, "incomplete")
+        else if (std.mem.eql(u8, check.status, "not-applicable"))
+            std.mem.eql(u8, check.coverage, "not-applicable")
+        else
+            false;
+        if (!coverage_agrees) return error.InvalidChecksReport;
+    }
+
+    // artifact-integrity and rendered-html are selected for every valid
+    // inventory; a not-applicable report for either is self-contradicting.
+    for (checks[0..2]) |check| {
+        if (!check.eligible or !check.ran) return error.InvalidChecksReport;
+        if (std.mem.eql(u8, check.status, "not-applicable") or
+            std.mem.eql(u8, check.coverage, "not-applicable"))
+            return error.InvalidChecksReport;
+    }
+
+    const search = checks[2];
+    if (search.eligible) {
+        if (!search.ran) return error.InvalidChecksReport;
+        if (std.mem.eql(u8, search.status, "not-applicable") or
+            std.mem.eql(u8, search.coverage, "not-applicable"))
+            return error.InvalidChecksReport;
+        if (search.counts.eligible != 1) return error.InvalidChecksReport;
+    } else {
+        if (search.ran) return error.InvalidChecksReport;
+        if (!std.mem.eql(u8, search.status, "not-applicable") or
+            !std.mem.eql(u8, search.coverage, "not-applicable"))
+            return error.InvalidChecksReport;
+        if (search.counts.eligible != 0 or search.counts.checked != 0 or
+            search.counts.findings != 0)
+            return error.InvalidChecksReport;
     }
 }
 
@@ -691,7 +749,7 @@ pub fn parseChecksStream(
                 .object_begin => {},
                 else => return error.InvalidChecksReport,
             }
-            const parsed = try parseBindingAfterBegin(gpa, &reader);
+            const parsed = try parseBindingAfterBegin(gpa, &reader, expected_target);
             binding = parsed.binding;
             artifact_count = parsed.artifact_count;
             have_artifact_inventory = true;
@@ -731,14 +789,24 @@ pub fn parseChecksStream(
     for (checks, 0..) |check, index| {
         if (!std.mem.eql(u8, check.id, check_ids[index])) return error.InvalidChecksReport;
     }
+    try validateCheckState(&checks);
     if (checks[0].finding_offset != 0) return error.InvalidChecksReport;
     for (checks[1..], 0..) |check, index| {
         const previous = checks[index];
-        const expected_offset = previous.finding_offset + previous.counts.findings;
+        const expected_offset = std.math.add(
+            usize,
+            previous.finding_offset,
+            previous.counts.findings,
+        ) catch return error.InvalidChecksReport;
         if (check.finding_offset != expected_offset) return error.InvalidChecksReport;
     }
     const last = checks[checks.len - 1];
-    if (last.finding_offset + last.counts.findings != findings_count) return error.InvalidChecksReport;
+    const last_end = std.math.add(
+        usize,
+        last.finding_offset,
+        last.counts.findings,
+    ) catch return error.InvalidChecksReport;
+    if (last_end != findings_count) return error.InvalidChecksReport;
 
     return .{
         .artifact_binding = binding,
@@ -748,34 +816,59 @@ pub fn parseChecksStream(
     };
 }
 
-fn parseInventoryFile(
-    io: Io,
-    root: Io.Dir,
-    gpa: std.mem.Allocator,
-    target: []const u8,
-) Error!artifact_inventory.Inventory {
-    var file = publication_checks.openFileNoFollow(io, root, artifact_inventory.output_path) catch
-        return error.InvalidArtifactsReport;
-    defer file.close(io);
-    var reader_buffer: [64 * 1024]u8 = undefined;
-    var file_reader = file.readerStreaming(io, &reader_buffer);
-    return artifact_inventory.parseStream(gpa, &file_reader.interface, target) catch |err| switch (err) {
-        error.OutOfMemory => error.OutOfMemory,
-        else => error.InvalidArtifactsReport,
-    };
-}
+/// One no-follow open per evidence input. The exact same opened regular-file
+/// handle is read twice: a first streaming pass counts and hashes every byte,
+/// then the handle is rewound and the exact same byte stream is handed to the
+/// streaming JSON parser. A path replaced after the open can never mix
+/// evidence versions, and the bytes counted and hashed are exactly the bytes
+/// parsed.
+const EvidenceInput = struct {
+    file: Io.File = undefined,
+    pass1_buffer: [64 * 1024]u8 = undefined,
+    pass1: Io.File.Reader = undefined,
+    digest: std.crypto.hash.sha2.Sha256 = std.crypto.hash.sha2.Sha256.init(.{}),
+    count: usize = 0,
+    pass2_buffer: [64 * 1024]u8 = undefined,
+    pass2: Io.File.Reader = undefined,
 
-fn streamBinding(
-    io: Io,
-    root: Io.Dir,
-    gpa: std.mem.Allocator,
-    path: []const u8,
-    missing_error: Error,
-) Error!FileBinding {
-    const streamed = publication_checks.streamFileNoFollow(io, root, gpa, path, false) catch
-        return missing_error;
-    return .{ .bytes = streamed.bytes, .sha256 = streamed.sha256 };
-}
+    fn open(self: *EvidenceInput, io: Io, root: Io.Dir, path: []const u8, missing_error: Error) Error!void {
+        self.* = .{};
+        self.file = publication_checks.openFileNoFollow(io, root, path) catch
+            return missing_error;
+        self.pass1 = self.file.readerStreaming(io, &self.pass1_buffer);
+    }
+
+    /// First streaming pass: reads the opened handle to EOF without buffering,
+    /// counting and hashing every byte.
+    fn hashPass(self: *EvidenceInput, fail_error: Error) Error!void {
+        var chunk: [64 * 1024]u8 = undefined;
+        while (true) {
+            const n = self.pass1.interface.readSliceShort(&chunk) catch
+                return fail_error;
+            if (n == 0) break;
+            self.digest.update(chunk[0..n]);
+            self.count = std.math.add(usize, self.count, n) catch return fail_error;
+        }
+    }
+
+    /// Rewinds the same handle to the beginning and prepares a fresh
+    /// streaming reader for the parse pass.
+    fn rewindForParse(self: *EvidenceInput, io: Io, fail_error: Error) Error!void {
+        io.vtable.fileSeekTo(io.userdata, self.file, 0) catch
+            return fail_error;
+        self.pass2 = self.file.readerStreaming(io, &self.pass2_buffer);
+    }
+
+    fn close(self: *EvidenceInput, io: Io) void {
+        self.file.close(io);
+    }
+
+    fn finish(self: *EvidenceInput) FileBinding {
+        var digest: [32]u8 = undefined;
+        self.digest.final(&digest);
+        return .{ .bytes = self.count, .sha256 = cache.hexDigest(digest) };
+    }
+};
 
 const Derivation = struct {
     status: ClaimStatus,
@@ -971,17 +1064,26 @@ pub fn writeAfterChecks(
     defer report_arena.deinit();
     const report_gpa = report_arena.allocator();
 
-    var inventory = try parseInventoryFile(io, root, report_gpa, target);
+    var artifacts_input: EvidenceInput = .{};
+    try artifacts_input.open(io, root, artifact_inventory.output_path, error.InvalidArtifactsReport);
+    defer artifacts_input.close(io);
+    try artifacts_input.hashPass(error.InvalidArtifactsReport);
+    try artifacts_input.rewindForParse(io, error.InvalidArtifactsReport);
+    var inventory = artifact_inventory.parseStream(report_gpa, &artifacts_input.pass2.interface, target) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidArtifactsReport,
+    };
     defer inventory.deinit();
-    const artifact_binding = try streamBinding(io, root, report_gpa, artifact_inventory.output_path, error.InvalidArtifactsReport);
+    const artifact_binding = artifacts_input.finish();
 
-    const checks_binding = try streamBinding(io, root, report_gpa, publication_checks.output_path, error.InvalidChecksReport);
-    var file = publication_checks.openFileNoFollow(io, root, publication_checks.output_path) catch
-        return error.InvalidChecksReport;
-    defer file.close(io);
-    var reader_buffer: [64 * 1024]u8 = undefined;
-    var file_reader = file.readerStreaming(io, &reader_buffer);
-    const parsed_checks = try parseChecksStream(report_gpa, &file_reader.interface, target);
+    var checks_input: EvidenceInput = .{};
+    try checks_input.open(io, root, publication_checks.output_path, error.InvalidChecksReport);
+    defer checks_input.close(io);
+    if (options.after_open) |hook| hook(options.after_open_context);
+    try checks_input.hashPass(error.InvalidChecksReport);
+    try checks_input.rewindForParse(io, error.InvalidChecksReport);
+    const parsed_checks = try parseChecksStream(report_gpa, &checks_input.pass2.interface, target);
+    const checks_binding = checks_input.finish();
 
     if (parsed_checks.artifact_binding.bytes != artifact_binding.bytes or
         !std.mem.eql(u8, &parsed_checks.artifact_binding.sha256, &artifact_binding.sha256))
@@ -1026,6 +1128,8 @@ test "derivation maps every check status to the mechanical claim vocabulary" {
     for (cases) |case| {
         const check = ParsedCheck{
             .id = "artifact-integrity",
+            .eligible = true,
+            .ran = true,
             .status = case.status,
             .coverage = "complete",
             .counts = .{ .eligible = 0, .checked = 0, .findings = 0 },
@@ -1033,10 +1137,8 @@ test "derivation maps every check status to the mechanical claim vocabulary" {
             .scope = Scope{
                 .subject_statuses = &.{},
                 .subject_kinds = &.{},
-                .subject_sha256 = undefined,
                 .supporting_statuses = &.{},
                 .supporting_kinds = &.{},
-                .supporting_sha256 = undefined,
             },
             .subject_sha256 = undefined,
             .supporting_sha256 = undefined,
@@ -1071,7 +1173,24 @@ test "publication claims runtime vocabulary matches its draft 2020-12 schema" {
     const claim_prefix = claims_schema.get("prefixItems").?.array.items;
     try std.testing.expectEqual(@as(usize, 3), claim_prefix.len);
     for (claim_prefix, claim_ids) |position, expected_id| {
-        try std.testing.expectEqualStrings(expected_id, position.object.get("properties").?.object.get("id").?.object.get("const").?.string);
+        const pinned = position.object.get("properties").?.object;
+        try std.testing.expectEqualStrings(expected_id, pinned.get("id").?.object.get("const").?.string);
+    }
+    // Every claim position pins its statement, its evidence check binding,
+    // and its exact ordered limitation id list with no extras.
+    for (claim_prefix, 0..) |position, index| {
+        const pinned = position.object.get("properties").?.object;
+        try std.testing.expectEqualStrings(claim_statements[index], pinned.get("statement").?.object.get("const").?.string);
+        try std.testing.expectEqualStrings(check_ids[index], pinned.get("evidence").?.object.get("properties").?.object.get("check_id").?.object.get("const").?.string);
+        const pinned_limitations = pinned.get("limitation_ids").?.object;
+        const pins = pinned_limitations.get("prefixItems").?.array.items;
+        try std.testing.expectEqual(claim_limitation_ids[index].len, pins.len);
+        try std.testing.expect(!pinned_limitations.get("items").?.bool);
+        try std.testing.expectEqual(@as(i64, @intCast(claim_limitation_ids[index].len)), pinned_limitations.get("minItems").?.integer);
+        try std.testing.expectEqual(@as(i64, @intCast(claim_limitation_ids[index].len)), pinned_limitations.get("maxItems").?.integer);
+        for (pins, claim_limitation_ids[index]) |pin, expected_id| {
+            try std.testing.expectEqualStrings(expected_id, pin.object.get("const").?.string);
+        }
     }
 
     const limitations_schema = root.get("properties").?.object.get("limitations").?.object;
@@ -1080,7 +1199,24 @@ test "publication claims runtime vocabulary matches its draft 2020-12 schema" {
     const limitation_prefix = limitations_schema.get("prefixItems").?.array.items;
     try std.testing.expectEqual(@as(usize, 6), limitation_prefix.len);
     for (limitation_prefix, limitation_ids) |position, expected_id| {
-        try std.testing.expectEqualStrings(expected_id, position.object.get("properties").?.object.get("id").?.object.get("const").?.string);
+        const pinned = position.object.get("properties").?.object;
+        try std.testing.expectEqualStrings(expected_id, pinned.get("id").?.object.get("const").?.string);
+    }
+    // Every limitation position pins its statement, its source, and its exact
+    // ordered claim applicability list with no extras.
+    for (limitation_prefix, 0..) |position, index| {
+        const pinned = position.object.get("properties").?.object;
+        try std.testing.expectEqualStrings(limitation_rows[index].statement, pinned.get("statement").?.object.get("const").?.string);
+        try std.testing.expectEqualStrings(limitation_rows[index].source, pinned.get("source").?.object.get("const").?.string);
+        const pinned_applies = pinned.get("applies_to_claims").?.object;
+        const pins = pinned_applies.get("prefixItems").?.array.items;
+        try std.testing.expectEqual(limitation_rows[index].applies_to_claims.len, pins.len);
+        try std.testing.expect(!pinned_applies.get("items").?.bool);
+        try std.testing.expectEqual(@as(i64, @intCast(limitation_rows[index].applies_to_claims.len)), pinned_applies.get("minItems").?.integer);
+        try std.testing.expectEqual(@as(i64, @intCast(limitation_rows[index].applies_to_claims.len)), pinned_applies.get("maxItems").?.integer);
+        for (pins, limitation_rows[index].applies_to_claims) |pin, expected_id| {
+            try std.testing.expectEqualStrings(expected_id, pin.object.get("const").?.string);
+        }
     }
 
     const defs = root.get("$defs").?.object;
@@ -1134,6 +1270,8 @@ const TestCheckSpec = struct {
     eligible: usize = 1,
     checked: usize = 1,
     findings: usize = 0,
+    report_eligible: bool = true,
+    report_ran: bool = true,
     subject_statuses: []const []const u8 = &.{"committed"},
     subject_kinds: []const []const u8 = &.{},
     supporting_statuses: []const []const u8 = &.{},
@@ -1171,6 +1309,57 @@ fn writePayload(io: Io, root: Io.Dir, path: []const u8, bytes: []const u8) !void
     if (std.fs.path.dirname(path)) |parent| try root.createDirPath(io, parent);
     try root.writeFile(io, .{ .sub_path = path, .data = bytes });
 }
+
+/// Hostile checks report with finding offsets and counts near `maxInt(usize)`:
+/// the second range addition overflows, and the report must be rejected with
+/// `InvalidChecksReport` instead of panicking.
+fn buildHostileChecksBytes(gpa: std.mem.Allocator, artifacts_bytes: []const u8) ![]u8 {
+    const digest = cache.hexDigest(cache.hashBytes(artifacts_bytes));
+    const max_minus_one = "18446744073709551614";
+    const max_value = "18446744073709551615";
+    const scope = "{\"subject_statuses\": [\"committed\"], \"subject_kinds\": [], \"subject_sha256\": \"" ++ test_digest ++ "\", \"supporting_statuses\": [\"committed\"], \"supporting_kinds\": [], \"supporting_sha256\": \"" ++ test_digest ++ "\"}";
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(gpa);
+    try out.appendSlice(gpa, "{\n  \"format\": \"boris-publication-checks\",\n  \"schema_version\": 1,\n  \"target\": \"default\",\n  \"artifact_inventory\": {\n    \"path\": \"_boris/proof/artifacts.json\",\n    \"bytes\": ");
+    try json_out.writeUsize(&out, gpa, artifacts_bytes.len);
+    try out.appendSlice(gpa, ",\n    \"sha256\": \"");
+    try out.appendSlice(gpa, &digest);
+    try out.appendSlice(gpa, "\",\n    \"format\": \"boris-publication-artifacts\",\n    \"schema_version\": 1,\n    \"target\": \"default\",\n    \"artifact_count\": 1\n  },\n  \"checks\": [\n    {\"id\": \"artifact-integrity\", \"eligible\": true, \"ran\": true, \"status\": \"passed\", \"coverage\": \"complete\", \"scope\": ");
+    try out.appendSlice(gpa, scope);
+    try out.appendSlice(gpa, ", \"counts\": {\"eligible\": 1, \"checked\": 1, \"findings\": ");
+    try out.appendSlice(gpa, max_minus_one);
+    try out.appendSlice(gpa, "}, \"finding_offset\": 0},\n    {\"id\": \"rendered-html\", \"eligible\": true, \"ran\": true, \"status\": \"passed\", \"coverage\": \"complete\", \"scope\": ");
+    try out.appendSlice(gpa, scope);
+    try out.appendSlice(gpa, ", \"counts\": {\"eligible\": 1, \"checked\": 1, \"findings\": ");
+    try out.appendSlice(gpa, max_minus_one);
+    try out.appendSlice(gpa, "}, \"finding_offset\": ");
+    try out.appendSlice(gpa, max_minus_one);
+    try out.appendSlice(gpa, "},\n    {\"id\": \"rendered-search\", \"eligible\": true, \"ran\": true, \"status\": \"passed\", \"coverage\": \"complete\", \"scope\": ");
+    try out.appendSlice(gpa, scope);
+    try out.appendSlice(gpa, ", \"counts\": {\"eligible\": 1, \"checked\": 1, \"findings\": 0}, \"finding_offset\": ");
+    try out.appendSlice(gpa, max_value);
+    try out.appendSlice(gpa, "}\n  ],\n  \"findings\": []\n}\n");
+    return out.toOwnedSlice(gpa);
+}
+
+/// Test helper for the path-replacement seam: replaces both evidence paths
+/// (unlink + fresh file, so the opened handles keep the original inodes)
+/// with garbage once the handles are opened.
+const PathReplacer = struct {
+    io: Io,
+    root: Io.Dir,
+
+    fn run(context: ?*anyopaque) void {
+        const self: *const PathReplacer = @ptrCast(@alignCast(context.?));
+        replace(self, "target/_boris/proof/artifacts.json");
+        replace(self, "target/_boris/proof/checks.json");
+    }
+
+    fn replace(self: *const PathReplacer, path: []const u8) void {
+        _ = self.root.deleteFile(self.io, path) catch {};
+        _ = self.root.writeFile(self.io, .{ .sub_path = path, .data = "not json" }) catch {};
+    }
+};
 
 fn expectJsonStrings(value: std.json.Value, expected: []const []const u8) !void {
     const items = value.array.items;
@@ -1226,7 +1415,11 @@ fn buildChecksBytes(gpa: std.mem.Allocator, artifacts_bytes: []const u8, spec: T
         if (index > 0) try out.appendSlice(gpa, ",\n");
         try out.appendSlice(gpa, "    {\n      \"id\": \"");
         try out.appendSlice(gpa, check_ids[index]);
-        try out.appendSlice(gpa, "\",\n      \"eligible\": true,\n      \"ran\": true,\n      \"status\": \"");
+        try out.appendSlice(gpa, "\",\n      \"eligible\": ");
+        try out.appendSlice(gpa, if (check.report_eligible) "true" else "false");
+        try out.appendSlice(gpa, ",\n      \"ran\": ");
+        try out.appendSlice(gpa, if (check.report_ran) "true" else "false");
+        try out.appendSlice(gpa, ",\n      \"status\": \"");
         try out.appendSlice(gpa, check.status);
         try out.appendSlice(gpa, "\",\n      \"coverage\": \"");
         try out.appendSlice(gpa, check.coverage);
@@ -1496,7 +1689,7 @@ test "not-applicable rendered-search maps only the search claim to not-verified"
         .checks = .{
             .{ .subject_kinds = &.{} },
             .{ .subject_kinds = &.{"html-page"} },
-            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"}, .status = "not-applicable", .coverage = "not-applicable", .eligible = 0, .checked = 0 },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"}, .status = "not-applicable", .coverage = "not-applicable", .eligible = 0, .checked = 0, .report_eligible = false, .report_ran = false },
         },
     };
     const checks = try prepareTarget(io, gpa, tmp.dir, "target", &records, spec);
@@ -1779,7 +1972,7 @@ test "write fault injection preserves the prior claims report byte-for-byte" {
     try std.testing.expectEqualSlices(u8, first, after);
 }
 
-test "an empty target produces a valid all-pass claims report" {
+test "an empty target produces a valid report with only the search claim not verified" {
     const io = std.testing.io;
     const gpa = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
@@ -1789,7 +1982,7 @@ test "an empty target produces a valid all-pass claims report" {
         .checks = .{
             .{ .subject_kinds = &.{}, .eligible = 0, .checked = 0 },
             .{ .subject_kinds = &.{"html-page"}, .eligible = 0, .checked = 0 },
-            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"}, .eligible = 0, .checked = 0 },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"}, .status = "not-applicable", .coverage = "not-applicable", .eligible = 0, .checked = 0, .report_eligible = false, .report_ran = false },
         },
     });
     defer gpa.free(checks);
@@ -1800,7 +1993,10 @@ test "an empty target produces a valid all-pass claims report" {
     defer parsed.deinit();
     const root = parsed.value.object;
     try std.testing.expectEqual(@as(i64, 0), root.get("artifact_inventory").?.object.get("artifact_count").?.integer);
-    try expectAllVerified(root);
+    try std.testing.expectEqualStrings("verified", claimStatus(root, 0));
+    try std.testing.expectEqualStrings("verified", claimStatus(root, 1));
+    try std.testing.expectEqualStrings("not-verified", claimStatus(root, 2));
+    try std.testing.expectEqualStrings("check-not-applicable", claimReason(root, 2).?);
 }
 
 test "claim evidence carries the exact checks report binding" {
@@ -1830,4 +2026,192 @@ test "claim evidence carries the exact checks report binding" {
     defer gpa.free(artifacts_on_disk);
     const artifacts_digest = cache.hexDigest(cache.hashBytes(artifacts_on_disk));
     try std.testing.expectEqualStrings(&artifacts_digest, artifact_binding.get("sha256").?.string);
+}
+
+test "evidence binding survives replacement of the opened evidence paths" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+    const checks = try prepareTarget(io, gpa, tmp.dir, "target", &records, .{});
+    defer gpa.free(checks);
+
+    const control = try runClaims(io, gpa, tmp.dir, "target", "default", .{});
+    defer gpa.free(control);
+
+    // Replace both evidence paths with garbage after the handles are opened.
+    // A path-based implementation would fail loudly on re-open; the single
+    // opened no-follow handle per input must be unaffected, so the claims
+    // report is byte-identical to the no-replacement run. The claims output
+    // path itself is never replaced.
+    const replacer = PathReplacer{ .io = io, .root = tmp.dir };
+    const claims = try runClaims(io, gpa, tmp.dir, "target", "default", .{ .after_open = PathReplacer.run, .after_open_context = @constCast(&replacer) });
+    defer gpa.free(claims);
+    try std.testing.expectEqualSlices(u8, control, claims);
+}
+
+test "impossible check states are rejected as InvalidChecksReport" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const cases = [_]struct {
+        name: []const u8,
+        checks: [3]TestCheckSpec,
+    }{
+        .{ .name = "checked exceeds eligible", .checks = .{
+            .{ .subject_kinds = &.{} },
+            .{ .subject_kinds = &.{"html-page"}, .eligible = 0, .checked = 1 },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"} },
+        } },
+        .{ .name = "passed with incomplete coverage", .checks = .{
+            .{ .subject_kinds = &.{}, .coverage = "incomplete" },
+            .{ .subject_kinds = &.{"html-page"} },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"} },
+        } },
+        .{ .name = "failed with incomplete coverage", .checks = .{
+            .{ .subject_kinds = &.{}, .status = "failed", .coverage = "incomplete" },
+            .{ .subject_kinds = &.{"html-page"} },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"} },
+        } },
+        .{ .name = "incomplete with complete coverage", .checks = .{
+            .{ .subject_kinds = &.{}, .status = "incomplete", .coverage = "complete", .checked = 0 },
+            .{ .subject_kinds = &.{"html-page"} },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"} },
+        } },
+        .{ .name = "not-applicable with complete coverage", .checks = .{
+            .{ .subject_kinds = &.{}, .status = "not-applicable", .coverage = "complete", .checked = 0 },
+            .{ .subject_kinds = &.{"html-page"} },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"} },
+        } },
+        .{ .name = "unknown status", .checks = .{
+            .{ .subject_kinds = &.{}, .status = "passedx" },
+            .{ .subject_kinds = &.{"html-page"} },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"} },
+        } },
+        .{ .name = "artifact-integrity not-applicable", .checks = .{
+            .{ .subject_kinds = &.{}, .status = "not-applicable", .coverage = "not-applicable", .eligible = 0, .checked = 0, .report_eligible = false, .report_ran = false },
+            .{ .subject_kinds = &.{"html-page"} },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"} },
+        } },
+        .{ .name = "rendered-html not-applicable", .checks = .{
+            .{ .subject_kinds = &.{} },
+            .{ .subject_kinds = &.{"html-page"}, .status = "not-applicable", .coverage = "not-applicable", .eligible = 0, .checked = 0, .report_eligible = false, .report_ran = false },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"} },
+        } },
+        .{ .name = "selected search did not run", .checks = .{
+            .{ .subject_kinds = &.{} },
+            .{ .subject_kinds = &.{"html-page"} },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"}, .report_ran = false },
+        } },
+        .{ .name = "selected search not-applicable", .checks = .{
+            .{ .subject_kinds = &.{} },
+            .{ .subject_kinds = &.{"html-page"} },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"}, .status = "not-applicable", .coverage = "not-applicable", .eligible = 0, .checked = 0 },
+        } },
+        .{ .name = "selected search with zero eligible records", .checks = .{
+            .{ .subject_kinds = &.{} },
+            .{ .subject_kinds = &.{"html-page"} },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"}, .eligible = 0, .checked = 0 },
+        } },
+        .{ .name = "unselected search still ran", .checks = .{
+            .{ .subject_kinds = &.{} },
+            .{ .subject_kinds = &.{"html-page"} },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"}, .status = "not-applicable", .coverage = "not-applicable", .eligible = 0, .checked = 0, .report_eligible = false },
+        } },
+        .{ .name = "unselected search reported passed", .checks = .{
+            .{ .subject_kinds = &.{} },
+            .{ .subject_kinds = &.{"html-page"} },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"}, .eligible = 0, .checked = 0, .report_eligible = false, .report_ran = false },
+        } },
+        .{ .name = "unselected search with nonzero counts", .checks = .{
+            .{ .subject_kinds = &.{} },
+            .{ .subject_kinds = &.{"html-page"} },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"}, .status = "not-applicable", .coverage = "not-applicable", .report_eligible = false, .report_ran = false },
+        } },
+    };
+    for (cases) |case| {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        const checks = try prepareTarget(io, gpa, tmp.dir, "target", &.{recordFor("index.html", .html_page, "<main></main>")}, .{ .checks = case.checks });
+        defer gpa.free(checks);
+        try std.testing.expectError(error.InvalidChecksReport, runClaims(io, gpa, tmp.dir, "target", "default", .{}));
+    }
+}
+
+test "a checks report whose embedded artifact_inventory target disagrees is rejected" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+    const checks = try prepareTarget(io, gpa, tmp.dir, "target", &records, .{});
+    defer gpa.free(checks);
+
+    const mutated = try std.mem.replaceOwned(
+        u8,
+        gpa,
+        checks,
+        "\n    \"target\": \"default\"",
+        "\n    \"target\": \"prod\"",
+    );
+    defer gpa.free(mutated);
+    try writePayload(io, tmp.dir, "target/_boris/proof/checks.json", mutated);
+
+    var dir = try openSubdir(io, tmp.dir, "target");
+    defer dir.close(io);
+    try std.testing.expectError(error.InvalidChecksReport, writeAfterChecks(io, gpa, dir, "default", .{}));
+}
+
+test "finding offset arithmetic near maxInt(usize) is rejected without overflow" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+    const artifacts = try buildArtifactsBytes(gpa, "default", &records);
+    defer gpa.free(artifacts);
+    try writePayload(io, tmp.dir, "target/_boris/proof/artifacts.json", artifacts);
+
+    const hostile = try buildHostileChecksBytes(gpa, artifacts);
+    defer gpa.free(hostile);
+    try writePayload(io, tmp.dir, "target/_boris/proof/checks.json", hostile);
+
+    var dir = try openSubdir(io, tmp.dir, "target");
+    defer dir.close(io);
+    try std.testing.expectError(error.InvalidChecksReport, writeAfterChecks(io, gpa, dir, "default", .{}));
+}
+
+test "non-object finding elements are rejected" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const poisoned = [_][]const u8{
+        "null",
+        "42",
+        "\"finding\"",
+        "true",
+        "[]",
+    };
+    for (poisoned) |element| {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+        const checks = try prepareTarget(io, gpa, tmp.dir, "target", &records, .{});
+        defer gpa.free(checks);
+
+        const replacement = try std.mem.concat(gpa, u8, &.{ "\"findings\": [", element, "]" });
+        defer gpa.free(replacement);
+        const mutated = try std.mem.replaceOwned(
+            u8,
+            gpa,
+            checks,
+            "\"findings\": []",
+            replacement,
+        );
+        defer gpa.free(mutated);
+        try writePayload(io, tmp.dir, "target/_boris/proof/checks.json", mutated);
+
+        var dir = try openSubdir(io, tmp.dir, "target");
+        defer dir.close(io);
+        try std.testing.expectError(error.InvalidChecksReport, writeAfterChecks(io, gpa, dir, "default", .{}));
+    }
 }

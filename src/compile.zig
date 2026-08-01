@@ -249,6 +249,10 @@ pub const CompileOptions = struct {
     test_fail_publication_claims: bool = false,
     /// Test-only atomic claims-report write failure.
     test_fail_publication_claims_write: bool = false,
+    /// Test-only capture: when set, the post-commit claims diagnostic is
+    /// written here instead of the process stderr, so tests can assert the
+    /// line is emitted even under `--quiet`.
+    publication_claims_failure_writer: ?*Io.Writer = null,
 };
 
 fn validateSitemapConfig(gpa: std.mem.Allocator, options: CompileOptions) !void {
@@ -2533,9 +2537,13 @@ fn compilePagesInner(
         .test_fail_execution = options.test_fail_publication_claims,
         .test_fail_write = options.test_fail_publication_claims_write,
     }) catch |err| {
-        const stderr = std.debug.lockStderr(&.{});
-        defer std.debug.unlockStderr();
-        writePublicationClaimsFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        if (options.publication_claims_failure_writer) |writer| {
+            writePublicationClaimsFailure(writer, options.target_name, err) catch {};
+        } else {
+            const stderr = std.debug.lockStderr(&.{});
+            defer std.debug.unlockStderr();
+            writePublicationClaimsFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        }
         return error.PublicationClaimsFailed;
     };
 
@@ -8026,6 +8034,61 @@ test "claims write failure preserves the prior claims report" {
     const after = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
     defer gpa.free(after);
     try std.testing.expectEqualStrings(old_claims, after);
+}
+
+test "quiet claims failure emits the captured diagnostic and preserves prior claims" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/publication-claims-captured-stderr", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nInitial body.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>initial</footer></body></html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const options: CompileOptions = .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .incremental = true, .quiet = true };
+    _ = try compileHtmlSite(io, gpa, options);
+
+    const old_claims = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(old_claims);
+    const old_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(old_inventory);
+    const old_checks = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(old_checks);
+
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nChanged source body.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>changed layout</footer></body></html>");
+
+    // The diagnostic is emitted even under --quiet; capture it instead of the
+    // process stderr and prove the exact committed-target wording.
+    var output: Io.Writer.Allocating = .init(gpa);
+    defer output.deinit();
+    var failure_options = options;
+    failure_options.test_fail_publication_claims = true;
+    failure_options.publication_claims_failure_writer = &output.writer;
+    try std.testing.expectError(error.PublicationClaimsFailed, compileHtmlSite(io, gpa, failure_options));
+    try std.testing.expectEqualStrings(
+        "error: publication committed for target 'default', but publication-claims evidence was not refreshed: InvalidChecksReport\n",
+        output.writer.buffered(),
+    );
+
+    const new_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(new_inventory);
+    const new_checks = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(new_checks);
+    const new_claims = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(new_claims);
+    try std.testing.expect(!std.mem.eql(u8, old_inventory, new_inventory));
+    try std.testing.expect(!std.mem.eql(u8, old_checks, new_checks));
+    try std.testing.expectEqualStrings(old_claims, new_claims);
 }
 
 test "multi-target publication derives claims per target" {
