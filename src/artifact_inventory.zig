@@ -10,6 +10,9 @@ const cache = @import("cache.zig");
 const json_out = @import("json_out.zig");
 
 pub const output_path = "_boris/proof/artifacts.json";
+/// Reserved evidence path. It is kept out of the inventory so the later
+/// checks report cannot become one of its own committed subjects.
+pub const checks_output_path = "_boris/proof/checks.json";
 pub const artifact_format = "boris-publication-artifacts";
 pub const schema_version: usize = 1;
 
@@ -45,6 +48,21 @@ pub const Kind = enum {
             .llms => "llms",
         };
     }
+
+    pub fn parse(value: []const u8) ?Kind {
+        inline for (.{
+            .{ "html-page", Kind.html_page },
+            .{ "theme-asset", Kind.theme_asset },
+            .{ "content-asset", Kind.content_asset },
+            .{ "rendered-search", Kind.rendered_search },
+            .{ "sitemap", Kind.sitemap },
+            .{ "rss", Kind.rss },
+            .{ "llms", Kind.llms },
+        }) |entry| {
+            if (std.mem.eql(u8, value, entry[0])) return entry[1];
+        }
+        return null;
+    }
 };
 
 pub const Status = enum {
@@ -58,6 +76,17 @@ pub const Status = enum {
             .omitted_by_plan => "omitted-by-plan",
             .not_applicable => "not-applicable",
         };
+    }
+
+    pub fn parse(value: []const u8) ?Status {
+        inline for (.{
+            .{ "committed", Status.committed },
+            .{ "omitted-by-plan", Status.omitted_by_plan },
+            .{ "not-applicable", Status.not_applicable },
+        }) |entry| {
+            if (std.mem.eql(u8, value, entry[0])) return entry[1];
+        }
+        return null;
     }
 };
 
@@ -88,8 +117,17 @@ pub const Inventory = struct {
     gpa: std.mem.Allocator,
     target: []const u8,
     records: []Record,
+    owns_strings: bool = false,
 
     pub fn deinit(self: *Inventory) void {
+        if (self.owns_strings) {
+            self.gpa.free(self.target);
+            for (self.records) |record| {
+                self.gpa.free(record.path);
+                self.gpa.free(record.producer);
+                if (record.format_version) |version| self.gpa.free(version);
+            }
+        }
         self.gpa.free(self.records);
         self.* = undefined;
     }
@@ -157,10 +195,187 @@ fn readOverlay(
     };
 }
 
-fn recordLess(_: void, left: Record, right: Record) bool {
+pub fn recordLess(_: void, left: Record, right: Record) bool {
     const path_order = std.mem.order(u8, left.path, right.path);
     if (path_order != .eq) return path_order == .lt;
     return std.mem.order(u8, left.kind.name(), right.kind.name()) == .lt;
+}
+
+pub const ParseError = std.mem.Allocator.Error || error{
+    InvalidInventory,
+    InvalidInventoryFormat,
+    UnsupportedInventoryVersion,
+    InventoryTargetMismatch,
+    InvalidInventoryPath,
+    DuplicateInventoryPath,
+    NonCanonicalInventoryOrder,
+};
+
+fn valueString(value: std.json.Value) ?[]const u8 {
+    return switch (value) {
+        .string => |string| string,
+        else => null,
+    };
+}
+
+fn valueInteger(value: std.json.Value) ?i64 {
+    return switch (value) {
+        .integer => |integer| integer,
+        else => null,
+    };
+}
+
+fn valueBool(value: std.json.Value) ?bool {
+    return switch (value) {
+        .bool => |boolean| boolean,
+        else => null,
+    };
+}
+
+fn hasExactFields(object: std.json.ObjectMap, fields: []const []const u8) bool {
+    if (object.count() != fields.len) return false;
+    for (fields) |field| if (object.get(field) == null) return false;
+    return true;
+}
+
+fn validDigest(value: []const u8) bool {
+    if (value.len != 64) return false;
+    for (value) |byte| {
+        if (!((byte >= '0' and byte <= '9') or (byte >= 'a' and byte <= 'f'))) return false;
+    }
+    return true;
+}
+
+fn parseRecord(
+    gpa: std.mem.Allocator,
+    value: std.json.Value,
+) ParseError!Record {
+    const object = switch (value) {
+        .object => |object| object,
+        else => return error.InvalidInventory,
+    };
+    if (!hasExactFields(object, &.{
+        "path",
+        "kind",
+        "producer",
+        "required",
+        "status",
+        "bytes",
+        "sha256",
+        "format_version",
+    })) return error.InvalidInventory;
+
+    const path = valueString(object.get("path").?) orelse return error.InvalidInventory;
+    if (!validateRelativePath(path) or
+        pathsOverlap(path, output_path) or
+        pathsOverlap(path, checks_output_path)) return error.InvalidInventoryPath;
+
+    const kind_name = valueString(object.get("kind").?) orelse return error.InvalidInventory;
+    const kind = Kind.parse(kind_name) orelse return error.InvalidInventory;
+
+    const producer = valueString(object.get("producer").?) orelse return error.InvalidInventory;
+    if (!std.mem.eql(u8, producer, kind.producerName())) return error.InvalidInventory;
+
+    const required = valueBool(object.get("required").?) orelse return error.InvalidInventory;
+    const status_name = valueString(object.get("status").?) orelse return error.InvalidInventory;
+    const status = Status.parse(status_name) orelse return error.InvalidInventory;
+
+    const bytes_integer = valueInteger(object.get("bytes").?) orelse return error.InvalidInventory;
+    if (bytes_integer < 0) return error.InvalidInventory;
+    const bytes_u64: u64 = @intCast(bytes_integer);
+    if (bytes_u64 > std.math.maxInt(usize)) return error.InvalidInventory;
+
+    const digest = valueString(object.get("sha256").?) orelse return error.InvalidInventory;
+    if (!validDigest(digest)) return error.InvalidInventory;
+
+    const format_version_value = object.get("format_version").?;
+    const format_version = switch (format_version_value) {
+        .null => null,
+        .string => |version| if (version.len == 0) return error.InvalidInventory else try gpa.dupe(u8, version),
+        else => return error.InvalidInventory,
+    };
+    errdefer if (format_version) |version| gpa.free(version);
+
+    const owned_path = try gpa.dupe(u8, path);
+    errdefer gpa.free(owned_path);
+    const owned_producer = try gpa.dupe(u8, producer);
+    errdefer gpa.free(owned_producer);
+    var owned_digest: [64]u8 = undefined;
+    @memcpy(&owned_digest, digest);
+    return .{
+        .path = owned_path,
+        .kind = kind,
+        .producer = owned_producer,
+        .required = required,
+        .status = status,
+        .bytes = @intCast(bytes_u64),
+        .sha256 = owned_digest,
+        .format_version = format_version,
+    };
+}
+
+/// Strictly parse the canonical target-local inventory used by publication
+/// checks. The returned strings are owned by the returned Inventory.
+pub fn parse(gpa: std.mem.Allocator, bytes: []const u8, expected_target: []const u8) ParseError!Inventory {
+    if (expected_target.len == 0) return error.InvalidInventory;
+
+    var parsed = std.json.parseFromSlice(std.json.Value, gpa, bytes, .{}) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidInventory,
+    };
+    defer parsed.deinit();
+
+    const root = switch (parsed.value) {
+        .object => |object| object,
+        else => return error.InvalidInventory,
+    };
+    if (!hasExactFields(root, &.{ "format", "schema_version", "target", "artifacts" })) {
+        return error.InvalidInventory;
+    }
+
+    const format = valueString(root.get("format").?) orelse return error.InvalidInventoryFormat;
+    if (!std.mem.eql(u8, format, artifact_format)) return error.InvalidInventoryFormat;
+    const version = valueInteger(root.get("schema_version").?) orelse return error.UnsupportedInventoryVersion;
+    if (version != schema_version) return error.UnsupportedInventoryVersion;
+    const target = valueString(root.get("target").?) orelse return error.InvalidInventory;
+    if (target.len == 0) return error.InvalidInventory;
+    if (!std.mem.eql(u8, target, expected_target)) return error.InventoryTargetMismatch;
+
+    const artifacts = switch (root.get("artifacts").?) {
+        .array => |array| array.items,
+        else => return error.InvalidInventory,
+    };
+
+    const owned_target = try gpa.dupe(u8, target);
+    errdefer gpa.free(owned_target);
+    const records = try gpa.alloc(Record, artifacts.len);
+    var filled: usize = 0;
+    errdefer {
+        for (records[0..filled]) |record| {
+            gpa.free(record.path);
+            gpa.free(record.producer);
+            if (record.format_version) |format_version| gpa.free(format_version);
+        }
+        gpa.free(records);
+    }
+
+    for (artifacts) |artifact| {
+        records[filled] = try parseRecord(gpa, artifact);
+        filled += 1;
+    }
+    for (records, 0..) |record, index| {
+        if (index == 0) continue;
+        const previous = records[index - 1];
+        if (std.mem.eql(u8, record.path, previous.path)) return error.DuplicateInventoryPath;
+        if (recordLess({}, record, previous)) return error.NonCanonicalInventoryOrder;
+    }
+
+    return .{
+        .gpa = gpa,
+        .target = owned_target,
+        .records = records,
+        .owns_strings = true,
+    };
 }
 
 fn expectStringArray(value: std.json.Value, expected: []const []const u8) !void {
@@ -187,7 +402,9 @@ pub fn collect(
 
     for (specs) |spec| {
         if (!validateRelativePath(spec.path)) return error.InvalidArtifactPath;
-        if (pathsOverlap(spec.path, output_path)) return error.InventoryPathCollision;
+        if (pathsOverlap(spec.path, output_path) or pathsOverlap(spec.path, checks_output_path)) {
+            return error.InventoryPathCollision;
+        }
         if (!std.mem.eql(u8, spec.producer, spec.kind.producerName())) return error.InvalidArtifactProducer;
         if (spec.format_version) |version| if (version.len == 0) return error.InvalidFormatVersion;
 
@@ -230,6 +447,9 @@ pub fn render(gpa: std.mem.Allocator, inventory: *const Inventory) ![]u8 {
     try out.appendSlice(gpa, ",\n  \"artifacts\": [");
 
     for (inventory.records, 0..) |record, index| {
+        if (!validateRelativePath(record.path) or
+            pathsOverlap(record.path, output_path) or
+            pathsOverlap(record.path, checks_output_path)) return error.InvalidInventoryPath;
         if (!std.mem.eql(u8, record.producer, record.kind.producerName())) return error.InvalidArtifactProducer;
         if (record.format_version) |version| if (version.len == 0) return error.InvalidFormatVersion;
         if (index == 0) {

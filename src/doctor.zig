@@ -12,6 +12,9 @@ const route_resolver = @import("route_resolver.zig");
 const search_index = @import("search_index.zig");
 
 pub const Code = enum {
+    ARTIFACT_MISSING,
+    ARTIFACT_SIZE_MISMATCH,
+    ARTIFACT_DIGEST_MISMATCH,
     HTML_PAGE_MISSING,
     HTML_MALFORMED,
     HTML_URL_MALFORMED,
@@ -136,7 +139,7 @@ pub const Error = std.mem.Allocator.Error || error{
     DuplicateSnapshotPath,
 };
 
-const FindingSpec = struct {
+pub const FindingSpec = struct {
     code: Code,
     owner: Owner,
     subject_kind: []const u8,
@@ -195,12 +198,29 @@ const Builder = struct {
     }
 };
 
+/// Append one finding using the canonical Doctor finding construction rules.
+/// Publication evidence uses this narrow seam for artifact-integrity findings
+/// so it cannot grow a second finding vocabulary or field model.
+pub fn appendFinding(
+    findings: *std.ArrayList(Finding),
+    allocator: std.mem.Allocator,
+    spec: FindingSpec,
+) !void {
+    var builder: Builder = .{ .allocator = allocator };
+    try builder.append(spec);
+    defer builder.findings.deinit(allocator);
+    try findings.append(allocator, builder.findings.items[0]);
+}
+
 fn lessString(_: void, left: []const u8, right: []const u8) bool {
     return std.mem.order(u8, left, right) == .lt;
 }
 
 fn domainFor(code: Code) Domain {
     return switch (code) {
+        .ARTIFACT_MISSING,
+        .ARTIFACT_SIZE_MISMATCH,
+        .ARTIFACT_DIGEST_MISMATCH,
         .SEARCH_MISSING,
         .SEARCH_MALFORMED,
         .SEARCH_DOCUMENT_MISSING,
@@ -220,6 +240,10 @@ fn severityFor(code: Code) Severity {
 
 fn fixabilityFor(code: Code, owner: Owner) Fixability {
     return switch (code) {
+        .ARTIFACT_MISSING,
+        .ARTIFACT_SIZE_MISMATCH,
+        .ARTIFACT_DIGEST_MISMATCH,
+        => .regenerate,
         .HTML_MALFORMED,
         .HTML_URL_MALFORMED,
         .HTML_LOCAL_ROUTE_MISSING,
@@ -243,6 +267,10 @@ fn fixabilityFor(code: Code, owner: Owner) Fixability {
 
 fn remediationFor(code: Code) []const u8 {
     return switch (code) {
+        .ARTIFACT_MISSING,
+        .ARTIFACT_SIZE_MISMATCH,
+        .ARTIFACT_DIGEST_MISMATCH,
+        => "Regenerate the selected publication target.",
         .HTML_PAGE_MISSING => "Regenerate the selected publication target.",
         .HTML_MALFORMED => "Correct the rendered source or layout structure, then regenerate.",
         .HTML_URL_MALFORMED => "Replace the malformed rendered URL with a valid local reference.",
@@ -1236,6 +1264,56 @@ fn appendLocation(
     try out.append(a, '}');
 }
 
+/// Write one finding with the exact field names and meanings used by the
+/// Doctor normalized representation. Publication checks deliberately reuse
+/// this serializer for their root finding array.
+pub fn writeFindingJson(
+    out: *std.ArrayList(u8),
+    a: std.mem.Allocator,
+    finding: Finding,
+) !void {
+    try out.appendSlice(a, "{\"code\":");
+    try appendJsonString(out, a, @tagName(finding.code));
+    try out.appendSlice(a, ",\"domain\":");
+    try appendJsonString(out, a, @tagName(finding.domain));
+    try out.appendSlice(a, ",\"severity\":");
+    try appendJsonString(out, a, @tagName(finding.severity));
+    try out.appendSlice(a, ",\"confidence\":");
+    try appendJsonString(out, a, @tagName(finding.confidence));
+    try out.appendSlice(a, ",\"owner\":");
+    try appendJsonString(out, a, @tagName(finding.owner));
+    try out.appendSlice(a, ",\"subject\":{\"kind\":");
+    try appendJsonString(out, a, finding.subject.kind);
+    try out.appendSlice(a, ",\"id\":");
+    try appendJsonString(out, a, finding.subject.id);
+    try out.appendSlice(a, ",\"target\":");
+    if (finding.subject.target) |target| {
+        try appendJsonString(out, a, target);
+    } else {
+        try out.appendSlice(a, "null");
+    }
+    try out.appendSlice(a, "},\"source_location\":");
+    try appendLocation(out, a, finding.source_location);
+    try out.appendSlice(a, ",\"output_location\":");
+    try appendLocation(out, a, finding.output_location);
+    try out.appendSlice(a, ",\"configuration_location\":");
+    try appendLocation(out, a, finding.configuration_location);
+    try out.appendSlice(a, ",\"evidence\":{\"observed\":");
+    try appendJsonString(out, a, finding.evidence.observed);
+    try out.appendSlice(a, ",\"expected\":");
+    try appendJsonString(out, a, finding.evidence.expected);
+    try out.appendSlice(a, ",\"related\":[");
+    for (finding.evidence.related, 0..) |related, related_i| {
+        if (related_i > 0) try out.append(a, ',');
+        try appendJsonString(out, a, related);
+    }
+    try out.appendSlice(a, "]},\"remediation\":");
+    try appendJsonString(out, a, finding.remediation);
+    try out.appendSlice(a, ",\"fixability\":");
+    try appendJsonString(out, a, @tagName(finding.fixability));
+    try out.append(a, '}');
+}
+
 /// Internal canonical serialization used by Slice 1 goldens and repeat-run
 /// tests. This is not the future public Doctor report renderer or schema.
 pub fn writeNormalizedJson(gpa: std.mem.Allocator, report: Report) ![]u8 {
@@ -1257,46 +1335,7 @@ pub fn writeNormalizedJson(gpa: std.mem.Allocator, report: Report) ![]u8 {
     try out.appendSlice(gpa, "],\"findings\":[");
     for (report.findings, 0..) |finding, i| {
         if (i > 0) try out.append(gpa, ',');
-        try out.appendSlice(gpa, "{\"code\":");
-        try appendJsonString(&out, gpa, @tagName(finding.code));
-        try out.appendSlice(gpa, ",\"domain\":");
-        try appendJsonString(&out, gpa, @tagName(finding.domain));
-        try out.appendSlice(gpa, ",\"severity\":");
-        try appendJsonString(&out, gpa, @tagName(finding.severity));
-        try out.appendSlice(gpa, ",\"confidence\":");
-        try appendJsonString(&out, gpa, @tagName(finding.confidence));
-        try out.appendSlice(gpa, ",\"owner\":");
-        try appendJsonString(&out, gpa, @tagName(finding.owner));
-        try out.appendSlice(gpa, ",\"subject\":{\"kind\":");
-        try appendJsonString(&out, gpa, finding.subject.kind);
-        try out.appendSlice(gpa, ",\"id\":");
-        try appendJsonString(&out, gpa, finding.subject.id);
-        try out.appendSlice(gpa, ",\"target\":");
-        if (finding.subject.target) |target| {
-            try appendJsonString(&out, gpa, target);
-        } else {
-            try out.appendSlice(gpa, "null");
-        }
-        try out.appendSlice(gpa, "},\"source_location\":");
-        try appendLocation(&out, gpa, finding.source_location);
-        try out.appendSlice(gpa, ",\"output_location\":");
-        try appendLocation(&out, gpa, finding.output_location);
-        try out.appendSlice(gpa, ",\"configuration_location\":");
-        try appendLocation(&out, gpa, finding.configuration_location);
-        try out.appendSlice(gpa, ",\"evidence\":{\"observed\":");
-        try appendJsonString(&out, gpa, finding.evidence.observed);
-        try out.appendSlice(gpa, ",\"expected\":");
-        try appendJsonString(&out, gpa, finding.evidence.expected);
-        try out.appendSlice(gpa, ",\"related\":[");
-        for (finding.evidence.related, 0..) |related, related_i| {
-            if (related_i > 0) try out.append(gpa, ',');
-            try appendJsonString(&out, gpa, related);
-        }
-        try out.appendSlice(gpa, "]},\"remediation\":");
-        try appendJsonString(&out, gpa, finding.remediation);
-        try out.appendSlice(gpa, ",\"fixability\":");
-        try appendJsonString(&out, gpa, @tagName(finding.fixability));
-        try out.append(gpa, '}');
+        try writeFindingJson(&out, gpa, finding);
     }
     try out.appendSlice(gpa, "]}\n");
     return out.toOwnedSlice(gpa);

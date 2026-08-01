@@ -36,6 +36,8 @@ their projection contracts remain independent.
 The inventory file does not inventory itself, nor any later proof-pack
 envelope, check, claim, limitation, or touch-map file. A later envelope may
 inventory evidence files as a separately versioned artifact.
+The target-local checks path, `_boris/proof/checks.json`, is reserved for the
+separate publication-checks report and is rejected as a producer-owned path.
 
 ## Format
 
