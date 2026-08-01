@@ -1,0 +1,49 @@
+{
+  "format": "boris-publication-profile",
+  "schema_version": 1,
+  "input": "docs",
+  "input_format": "textile",
+  "site": {
+    "url": "https://example.test/docs/",
+    "title": "Example Docs",
+    "description": "Example documentation"
+  },
+  "targets": [
+    {
+      "name": "zeta",
+      "output": "dist/zeta",
+      "layout": "layouts/zeta.html",
+      "layout_rules": [
+        { "selector": "role:satellite", "layout": "layouts/satellite.html" },
+        { "selector": "id:guides/install", "layout": "layouts/install.html" }
+      ]
+    },
+    {
+      "name": "public",
+      "output": "dist/public",
+      "public": true,
+      "theme": "themes/boris",
+      "layout_rules": [
+        { "selector": "role:trunk", "layout": "themes/boris/layouts/main.html" },
+        { "selector": "id:guides/start", "layout": "themes/boris/layouts/home.html" }
+      ],
+      "sitemap": { "path": "sitemap.xml" },
+      "rss": { "path": "feed.xml", "limit": 12 },
+      "llms": { "path": "llms.txt" }
+    }
+  ],
+  "editions": {
+    "ir": { "output": ".boris" },
+    "rag": {
+      "output": "rag",
+      "scope": "guides",
+      "split_size": 65536,
+      "bundles_only": true
+    },
+    "context": {
+      "output": "context",
+      "scope": "guides/reference",
+      "split_size": 32768
+    }
+  }
+}

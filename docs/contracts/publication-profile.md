@@ -1,10 +1,12 @@
 # Publication profile (schema v1, Slice 1)
 
-**Status:** normative parser and static-plan contract. Profile execution is not
-available in this slice: Boris does not yet accept or advertise `--profile`.
-The internal API parses and validates a selected local profile only; it does
-not discover content, create outputs, read environment variables, contact a
-network service, or invoke a publisher.
+**Status:** normative parser and static-plan contract. Boris accepts an
+explicit profile only through the stdout-only `boris plan --profile PATH`
+declaration command; profile execution is not available in this slice. The
+internal API and plan command parse and validate a selected local profile only;
+they do not discover content, create outputs, read environment variables,
+contact a network service, or invoke a publisher. See the
+[publication-plan contract](publication-plan.md) for the declaration format.
 
 ## Selected profile workspace
 
@@ -106,5 +108,7 @@ Profile parsing is local, deterministic, and offline. URLs are strings to
 validate, never endpoints to probe. There are no includes, aliases,
 expressions, environment substitution, network access, plugins, deployment
 settings, secrets, watch configuration, source-RAG, migration labs, or generic
-tasks in schema v1. Public CLI exposure remains deferred until a coordinator
-can execute every configured entry without silently ignoring any of them.
+tasks in schema v1. The plan CLI is intentionally a declaration surface rather
+than a publication coordinator. Full profile execution remains deferred until
+a coordinator can execute every configured entry without silently ignoring any
+of them.

@@ -143,6 +143,20 @@ pub fn build(b: *std.Build) void {
     const test_publication_profile_step = b.step("test-publication-profile", "Run publication profile parser and planner tests");
     test_publication_profile_step.dependOn(&run_publication_profile_tests.step);
 
+    // --- Publication plan declaration renderer -----------------------------
+    const publication_plan_mod = b.createModule(.{
+        .root_source_file = b.path("src/publication_plan.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkApex(publication_plan_mod, b, false);
+    publication_plan_mod.addOptions("build_options", apex_opts);
+    const publication_plan_tests = b.addTest(.{ .root_module = publication_plan_mod });
+    const run_publication_plan_tests = b.addRunArtifact(publication_plan_tests);
+    run_publication_plan_tests.setCwd(b.path("."));
+    const test_publication_plan_step = b.step("test-publication-plan", "Run publication plan renderer and schema tests");
+    test_publication_plan_step.dependOn(&run_publication_plan_tests.step);
+
     // --- Internal Boris Doctor rendered snapshot analyzer -----------------
     const doctor_mod = b.createModule(.{
         .root_source_file = b.path("src/doctor.zig"),
@@ -672,6 +686,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_textile_tests.step);
     test_step.dependOn(&run_pipeline_tests.step);
     test_step.dependOn(&run_publication_profile_tests.step);
+    test_step.dependOn(&run_publication_plan_tests.step);
     test_step.dependOn(&run_doctor_tests.step);
     test_step.dependOn(&run_graph_tests.step);
     test_step.dependOn(&run_aside_tests.step);

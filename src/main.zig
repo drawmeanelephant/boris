@@ -20,6 +20,8 @@ const target = @import("target.zig");
 const theme_mod = @import("theme.zig");
 const intelligence = @import("intelligence.zig");
 const json_out = @import("json_out.zig");
+const publication_profile = @import("publication_profile.zig");
+const publication_plan = @import("publication_plan.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const Options = cli.Options;
@@ -73,6 +75,7 @@ fn mapPathError(err: anyerror, quiet: bool) ?ExitCode {
 /// - usage errors are handled before this (exit 2)
 /// - I/O / system errors → 3
 pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    if (opts.command == .plan) return runPublicationPlan(io, gpa, opts);
     if (opts.command == .check or opts.command == .impact) return runIntelligence(io, gpa, opts);
     switch (opts.mode) {
         .rag => return runRag(io, gpa, opts),
@@ -115,6 +118,77 @@ pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     return switch (result.failure) {
         .io => .io_error,
         .content, .none => .content_error,
+    };
+}
+
+/// Read, normalize, validate, and declare one explicitly selected profile.
+/// This path intentionally stops before content discovery or any publisher.
+pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    const profile_path = opts.profile_path orelse return .usage;
+    const profile_bytes = Io.Dir.cwd().readFileAlloc(
+        io,
+        profile_path,
+        gpa,
+        .limited(publication_profile.max_profile_bytes + 1),
+    ) catch |err| switch (err) {
+        error.StreamTooLong => return reportPublicationPlanConfigError(opts.quiet, error.ProfileTooLarge),
+        else => {
+            if (!opts.quiet) std.debug.print("error: unable to read publication profile: {s}\n", .{@errorName(err)});
+            return .io_error;
+        },
+    };
+    defer gpa.free(profile_bytes);
+
+    const cwd_path = std.process.currentPathAlloc(io, gpa) catch |err| {
+        if (!opts.quiet) std.debug.print("error: unable to resolve publication profile workspace: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer gpa.free(cwd_path);
+
+    const workspace = publication_profile.profileWorkspace(gpa, cwd_path, profile_path) catch |err| {
+        return reportPublicationPlanConfigError(opts.quiet, err);
+    };
+    const profile_input_format: ?publication_profile.InputFormat = if (opts.profile_input_format_override) |format| switch (format) {
+        .markdown => .markdown,
+        .textile => .textile,
+    } else null;
+
+    var request = publication_profile.parseBytes(gpa, workspace, profile_bytes, .{
+        .input = opts.profile_input_override,
+        .input_format = profile_input_format,
+        .html_output = opts.profile_html_output_override,
+        .jobs = opts.jobs,
+        .incremental = opts.incremental,
+        .quiet = opts.quiet,
+    }) catch |err| {
+        return reportPublicationPlanConfigError(opts.quiet, err);
+    };
+    defer request.deinit(gpa);
+
+    const bytes = publication_plan.render(gpa, &request.plan) catch |err| {
+        if (!opts.quiet) std.debug.print("error: unable to render publication plan: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer gpa.free(bytes);
+
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+    stdout_writer.interface.writeAll(bytes) catch |err| {
+        if (!opts.quiet) std.debug.print("error: unable to write publication plan: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    stdout_writer.interface.flush() catch |err| {
+        if (!opts.quiet) std.debug.print("error: unable to flush publication plan: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    return .success;
+}
+
+fn reportPublicationPlanConfigError(quiet: bool, err: anyerror) ExitCode {
+    if (!quiet) std.debug.print("error: invalid publication profile: {s}\n", .{@errorName(err)});
+    return switch (err) {
+        error.OutOfMemory => .io_error,
+        else => .usage,
     };
 }
 
@@ -462,7 +536,9 @@ fn renderAnalysisJson(
         if (!exists) try source_names.append(gpa, edge.to.value);
     }
     std.mem.sort([]const u8, source_names.items, {}, struct {
-        fn less(_: void, a: []const u8, b: []const u8) bool { return std.mem.order(u8, a, b) == .lt; }
+        fn less(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.order(u8, a, b) == .lt;
+        }
     }.less);
     for (source_names.items, 0..) |source, i| {
         if (i > 0) try w.writeAll(",");
@@ -1108,7 +1184,6 @@ test "runPipeline: multi-target path collision and content overlap exit 2" {
         try std.testing.expectEqual(ExitCode.usage, runPipeline(io, gpa, opts));
     }
 }
-
 
 test "parseOptions: HTML mode defaults and exclusive dirs" {
     var o = try parseOptions(std.testing.allocator, &.{ "boris", "--html" });

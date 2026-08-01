@@ -35,6 +35,7 @@ pub const Command = enum {
     check,
     impact,
     watch,
+    plan,
 };
 
 pub const AnalysisFormat = enum {
@@ -48,6 +49,13 @@ pub const Options = struct {
     help: bool = false,
     quiet: bool = false,
     command: Command = .build,
+    /// Explicit profile selected by `plan --profile PATH`.
+    profile_path: ?[]const u8 = null,
+    /// Explicit profile-mode publication overrides. These remain argv views;
+    /// the profile parser owns the normalized plan values.
+    profile_input_override: ?[]const u8 = null,
+    profile_input_format_override: ?identity.InputFormat = null,
+    profile_html_output_override: ?[]const u8 = null,
     impact_id: ?[]const u8 = null,
     analysis_format: AnalysisFormat = .human,
     analysis_report: ?[]const u8 = null,
@@ -179,9 +187,11 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_textile = false;
     var saw_format = false;
     var saw_report = false;
+    var saw_profile = false;
     var jobs: usize = 1;
     var html_layout: []const u8 = default_html_layout;
     var theme_root: ?[]const u8 = null;
+    var profile_path: ?[]const u8 = null;
 
     var targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 };
     errdefer {
@@ -223,6 +233,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (i >= args.len or std.mem.startsWith(u8, args[i], "-")) return error.MissingValue;
         impact_id = args[i];
         i += 1;
+    } else if (i < args.len and std.mem.eql(u8, args[i], "plan")) {
+        command = .plan;
+        i += 1;
     }
     while (i < args.len) : (i += 1) {
         const a = args[i];
@@ -250,6 +263,13 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             if (saw_quiet) return error.DuplicateFlag;
             saw_quiet = true;
             quiet = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--profile") or std.mem.startsWith(u8, a, "--profile=")) {
+            if (saw_profile) return error.DuplicateFlag;
+            saw_profile = true;
+            profile_path = try takeValue(args, &i, a, "--profile");
             continue;
         }
 
@@ -404,7 +424,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         }
 
         if (std.mem.eql(u8, a, "--jobs") or std.mem.startsWith(u8, a, "--jobs=") or
-            std.mem.eql(u8, a, "-j") or std.mem.startsWith(u8, a, "-j=")) {
+            std.mem.eql(u8, a, "-j") or std.mem.startsWith(u8, a, "-j="))
+        {
             if (saw_jobs) return error.DuplicateFlag;
             saw_jobs = true;
             const val_str = if (std.mem.startsWith(u8, a, "-j"))
@@ -581,6 +602,38 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     const wants_rss = saw_rss or saw_rss_path;
     // Explicit IR: --out and/or --no-rag (bare CLI is HTML, not IR).
     const wants_ir = saw_out or saw_no_rag;
+
+    if (command == .plan) {
+        if (profile_path == null) return error.MissingValue;
+        // The plan command has one publication identity boundary: profile
+        // input, input format, and the single-target HTML output override.
+        // Other projection selectors would either execute or invent a second
+        // configuration source, so keep them as usage errors.
+        if (saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_layout_rules or wants_sitemap or
+            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_rss_title or saw_rss_description or saw_rss_limit or
+            saw_format or saw_report or saw_watch)
+        {
+            return error.ConflictingFlags;
+        }
+        return .{
+            .help = false,
+            .quiet = quiet,
+            .command = .plan,
+            .profile_path = profile_path,
+            .profile_input_override = if (saw_input) input_dir else null,
+            .profile_input_format_override = if (saw_textile) .textile else null,
+            .profile_html_output_override = if (saw_html_dir) html_dir else null,
+            .mode = .html,
+            .input_format = if (saw_textile) .textile else .markdown,
+            .input_dir = input_dir,
+            .html_dir = if (saw_html_dir) html_dir else null,
+            .incremental = saw_incremental,
+            .jobs = jobs,
+            .targets = targets,
+        };
+    }
+
+    if (saw_profile) return error.ConflictingFlags;
 
     if (command == .check or command == .impact) {
         if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or wants_sitemap or saw_site_url or saw_rss_title or saw_rss_description or saw_rss_limit or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
@@ -885,6 +938,7 @@ pub fn printUsage() void {
         \\  watch               Build HTML, then watch and rebuild on changes
         \\  check               Read-only graph health report (CI findings exit 1)
         \\  impact <ID>         Read-only transitive impact report for a page
+        \\  plan                Emit a normalized publication plan (no publication)
         \\  (no command)        Same as build
         \\  --html              Explicit HTML site mode → --html-dir (default dist)
         \\  --html-dir <DIR>    HTML site mode with output directory DIR
@@ -927,6 +981,7 @@ pub fn printUsage() void {
         \\  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
         \\  --format human|json  Analysis output format for check/impact (default human)
         \\  --report PATH        Write an analysis report instead of stdout
+        \\  --profile PATH       Selected publication profile for `plan`
         \\  -h, --help          Show this help and exit 0
         \\
         \\HTML artifacts (success; Apex + layout splice):
@@ -966,6 +1021,7 @@ pub fn printUsage() void {
         \\Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
         \\
         \\Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
+        \\      `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
         \\      --html / --html-dir / bare CLI map to a single target named "default".
         \\      Equivalent --target / --target-layout / --layout-rule permutations yield the
         \\      same config (targets sorted by name; rules canonicalized). No layout frontmatter.
@@ -1045,6 +1101,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             continue;
         }
         if (std.mem.eql(u8, a, "--input") or
+            std.mem.eql(u8, a, "--profile") or
             std.mem.eql(u8, a, "--out") or
             std.mem.eql(u8, a, "--rag-dir") or
             std.mem.eql(u8, a, "--html-dir") or
@@ -1059,6 +1116,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             return a;
         }
         if (std.mem.startsWith(u8, a, "--input=") or
+            std.mem.startsWith(u8, a, "--profile=") or
             std.mem.startsWith(u8, a, "--out=") or
             std.mem.startsWith(u8, a, "--rag-dir=") or
             std.mem.startsWith(u8, a, "--html-dir=") or
@@ -1119,7 +1177,7 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 const expectError = std.testing.expectError;
 
 test "parse: default is HTML mode" {
-    var o = try parseOptions(std.testing.allocator, &.{ "boris" });
+    var o = try parseOptions(std.testing.allocator, &.{"boris"});
     defer o.deinit(std.testing.allocator);
     try expect(!o.help);
     try expect(!o.quiet);
@@ -1185,6 +1243,33 @@ test "parse: explicit build and watch commands are stable aliases" {
     try expectEqualStrings("docs", watch.input_dir);
 
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "watch", "--format", "json" }));
+}
+
+test "parse: plan selects an explicit profile and preserves only supported overrides" {
+    var o = try parseOptions(std.testing.allocator, &.{
+        "boris",      "plan",    "--profile", "profiles/site.json", "--input",       "docs",    "--textile",
+        "--html-dir", "preview", "--jobs",    "4",                  "--incremental", "--quiet",
+    });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(Command.plan, o.command);
+    try expectEqual(Mode.html, o.mode);
+    try expectEqualStrings("profiles/site.json", o.profile_path.?);
+    try expectEqualStrings("docs", o.profile_input_override.?);
+    try expectEqual(identity.InputFormat.textile, o.profile_input_format_override.?);
+    try expectEqualStrings("preview", o.profile_html_output_override.?);
+    try expectEqual(@as(usize, 4), o.jobs);
+    try expect(o.incremental);
+    try expect(o.quiet);
+    try expectEqual(@as(usize, 0), o.targets.items.len);
+}
+
+test "parse: plan requires a profile and rejects execution or projection selectors" {
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "plan" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--profile", "site.json" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--profile", "b" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--out", "out" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--target", "public=dist" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--watch" }));
 }
 
 test "parse: --out selects IR mode" {
@@ -1681,10 +1766,14 @@ test "parse: --target flag parsing and conflict checks" {
     {
         var o = try parseOptions(std.testing.allocator, &.{
             "boris",
-            "--target", "prod=dist/prod",
-            "--target", "stage=dist/stage",
-            "--html-layout", "layouts/main.html",
-            "--target-layout", "stage=layouts/stage.html",
+            "--target",
+            "prod=dist/prod",
+            "--target",
+            "stage=dist/stage",
+            "--html-layout",
+            "layouts/main.html",
+            "--target-layout",
+            "stage=layouts/stage.html",
         });
         defer o.deinit(std.testing.allocator);
         try expectEqualStrings("layouts/main.html", o.html_layout);
@@ -1720,20 +1809,25 @@ test "parse: --theme sugar selects theme layouts/main.html" {
     }));
 }
 
-
 test "parse: equivalent --target order yields equivalent configuration" {
     var a = try parseOptions(std.testing.allocator, &.{
         "boris",
-        "--target", "stage=dist/stage",
-        "--target", "prod=dist/prod",
-        "--target-layout", "stage=layouts/stage.html",
+        "--target",
+        "stage=dist/stage",
+        "--target",
+        "prod=dist/prod",
+        "--target-layout",
+        "stage=layouts/stage.html",
     });
     defer a.deinit(std.testing.allocator);
     var b = try parseOptions(std.testing.allocator, &.{
         "boris",
-        "--target", "prod=dist/prod",
-        "--target", "stage=dist/stage",
-        "--target-layout", "stage=layouts/stage.html",
+        "--target",
+        "prod=dist/prod",
+        "--target",
+        "stage=dist/stage",
+        "--target-layout",
+        "stage=layouts/stage.html",
     });
     defer b.deinit(std.testing.allocator);
 
@@ -1754,16 +1848,22 @@ test "parse: equivalent --target order yields equivalent configuration" {
 test "parse: --target-layout order relative to --target is independent" {
     var before = try parseOptions(std.testing.allocator, &.{
         "boris",
-        "--target-layout", "prod=layouts/prod.html",
-        "--target", "prod=dist/prod",
-        "--target", "stage=dist/stage",
+        "--target-layout",
+        "prod=layouts/prod.html",
+        "--target",
+        "prod=dist/prod",
+        "--target",
+        "stage=dist/stage",
     });
     defer before.deinit(std.testing.allocator);
     var after = try parseOptions(std.testing.allocator, &.{
         "boris",
-        "--target", "stage=dist/stage",
-        "--target", "prod=dist/prod",
-        "--target-layout", "prod=layouts/prod.html",
+        "--target",
+        "stage=dist/stage",
+        "--target",
+        "prod=dist/prod",
+        "--target-layout",
+        "prod=layouts/prod.html",
     });
     defer after.deinit(std.testing.allocator);
 
@@ -1802,11 +1902,14 @@ test "parse: bare HTML and --html map to default target; --target-layout attache
 test "parse: --target with --watch and --incremental" {
     var o = try parseOptions(std.testing.allocator, &.{
         "boris",
-        "--target", "prod=dist/prod",
-        "--target", "stage=dist/stage",
+        "--target",
+        "prod=dist/prod",
+        "--target",
+        "stage=dist/stage",
         "--watch",
         "--incremental",
-        "--jobs", "2",
+        "--jobs",
+        "2",
     });
     defer o.deinit(std.testing.allocator);
     try expectEqual(Mode.html, o.mode);
@@ -1868,9 +1971,16 @@ test "runArgs: invalid target parse errors exit 2" {
 test "parse: --layout-rule attaches to default and named targets" {
     var o = try parseOptions(std.testing.allocator, &.{
         "boris",
-        "--theme", "experimental-theme",
-        "--layout-rule", "default", "id:index", "experimental-theme/layouts/home.html",
-        "--layout-rule", "default", "role:trunk", "experimental-theme/layouts/section.html",
+        "--theme",
+        "experimental-theme",
+        "--layout-rule",
+        "default",
+        "id:index",
+        "experimental-theme/layouts/home.html",
+        "--layout-rule",
+        "default",
+        "role:trunk",
+        "experimental-theme/layouts/section.html",
     });
     defer o.deinit(std.testing.allocator);
     try expectEqual(Mode.html, o.mode);
@@ -1886,16 +1996,30 @@ test "parse: --layout-rule attaches to default and named targets" {
 test "parse: --layout-rule order independent; unknown target and bad selector fail" {
     var a = try parseOptions(std.testing.allocator, &.{
         "boris",
-        "--layout-rule", "prod", "id:index", "layouts/home.html",
-        "--target", "prod=dist/prod",
-        "--layout-rule", "prod", "role:trunk", "layouts/section.html",
+        "--layout-rule",
+        "prod",
+        "id:index",
+        "layouts/home.html",
+        "--target",
+        "prod=dist/prod",
+        "--layout-rule",
+        "prod",
+        "role:trunk",
+        "layouts/section.html",
     });
     defer a.deinit(std.testing.allocator);
     var b = try parseOptions(std.testing.allocator, &.{
         "boris",
-        "--target", "prod=dist/prod",
-        "--layout-rule", "prod", "role:trunk", "layouts/section.html",
-        "--layout-rule", "prod", "id:index", "layouts/home.html",
+        "--target",
+        "prod=dist/prod",
+        "--layout-rule",
+        "prod",
+        "role:trunk",
+        "layouts/section.html",
+        "--layout-rule",
+        "prod",
+        "id:index",
+        "layouts/home.html",
     });
     defer b.deinit(std.testing.allocator);
     try expectEqual(@as(usize, 2), a.targets.items[0].layout_rules.len);
@@ -1913,8 +2037,14 @@ test "parse: --layout-rule order independent; unknown target and bad selector fa
     }));
     try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{
         "boris",
-        "--layout-rule", "default", "id:index", "layouts/a.html",
-        "--layout-rule", "default", "id:index", "layouts/b.html",
+        "--layout-rule",
+        "default",
+        "id:index",
+        "layouts/a.html",
+        "--layout-rule",
+        "default",
+        "id:index",
+        "layouts/b.html",
     }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{
         "boris", "--layout-rule", "default", "id:index", "layouts/a.html", "--out", ".boris",
@@ -1963,9 +2093,14 @@ test "parse: layout paths reject .. absolute and backslash escapes" {
     // Valid relative forms still parse.
     var ok = try parseOptions(gpa, &.{
         "boris",
-        "--html-layout", "layouts/main.html",
-        "--layout-rule", "default", "id:index", "themes/docs/layouts/home.html",
-        "--html-dir", "d",
+        "--html-layout",
+        "layouts/main.html",
+        "--layout-rule",
+        "default",
+        "id:index",
+        "themes/docs/layouts/home.html",
+        "--html-dir",
+        "d",
     });
     defer ok.deinit(gpa);
     try expectEqualStrings("layouts/main.html", ok.html_layout);

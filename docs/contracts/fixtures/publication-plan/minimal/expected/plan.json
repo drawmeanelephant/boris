@@ -1,0 +1,28 @@
+{
+  "format": "boris-publication-plan",
+  "schema_version": 1,
+  "input": "content",
+  "input_format": "markdown",
+  "site": null,
+  "targets": [
+    {
+      "name": "public",
+      "output": "dist",
+      "public": true,
+      "theme": "themes/boris",
+      "layout": null,
+      "layout_rules": [],
+      "projections": {
+        "html": true,
+        "sitemap": null,
+        "rss": null,
+        "llms": null
+      }
+    }
+  ],
+  "editions": {
+    "ir": null,
+    "rag": null,
+    "context": null
+  }
+}

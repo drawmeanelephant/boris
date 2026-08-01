@@ -147,6 +147,7 @@ const modules = [_]Module{
     .{ .name = "pathutil.zig", .class = .other },
     .{ .name = "pipeline.zig", .class = .other },
     .{ .name = "publication_profile.zig", .class = .other },
+    .{ .name = "publication_plan.zig", .class = .{ .emitter = .{ .encoder = .json_out, .note = "canonical normalized publication declaration" } }, .source = @embedFile("publication_plan.zig") },
     .{ .name = "rag_body.zig", .class = .other },
     .{
         .name = "rss.zig",

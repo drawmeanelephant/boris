@@ -32,6 +32,7 @@ is **not** proof that every surface is the default CLI product.
 | IR 0.2 dependency edges + reverse index | **Implemented (F8.1–F8.3 shipped)** — `--out` emits typed edges and `reverseIndex`; incremental HTML uses the same reverse-walk dirty-set (v0.3.1) |
 | Documentation Intelligence | **Implemented first slice** — `check` / `impact`; see [documentation-intelligence.md](documentation-intelligence.md) |
 | Textile compatibility | **Implemented, explicit opt-in** — bounded `.textile` body adapter via `--textile`; see [textile-compatibility.md](textile-compatibility.md) |
+| Publication plan declaration | **Implemented** — `plan --profile PATH` emits normalized declaration JSON without publication; see [publication-plan.md](publication-plan.md) |
 
 ## Canonical ownership (one document per topic)
 
@@ -98,7 +99,8 @@ per topic:
 | [semantic-relations.md](semantic-relations.md) | Bounded author relations and deliberate IR 0.3 schema plan |
 | [context-bundle.md](context-bundle.md) | Deterministic provenance-rich AI context export (`--context`) |
 | [documentation-intelligence.md](documentation-intelligence.md) | Read-only graph health and impact analysis (`check` / `impact`); schema twin under `schemas/` |
-| [publication-profile.md](publication-profile.md) | Strict internal schema-v1 publication-profile parser and static-plan boundary; execution is not yet exposed |
+| [publication-profile.md](publication-profile.md) | Strict schema-v1 publication-profile parser, normalization, and static validation boundary |
+| [publication-plan.md](publication-plan.md) | Deterministic schema-v1 normalized publication declaration (`plan --profile PATH`) |
 | [cli.md](cli.md) | Stable command routing, exit codes, and report-consumer boundary |
 | [textile-compatibility.md](textile-compatibility.md) | Explicit bounded `.textile`-to-Markdown input mode |
 | [rendered-search.md](rendered-search.md) | Deterministic v1 search JSON for rendered HTML pages; browser/compiler seams are explicit |
