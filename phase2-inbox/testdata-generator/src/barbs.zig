@@ -1,7 +1,7 @@
 //! Named, deterministic mutations applied after a valid fixture plan exists.
 //!
 //! A barb is deliberately narrower than a fuzz input. It names one precise
-//! mutation and its expected observable behavior, so benchmark consumers can
+//! mutation and its expected observable behavior, so fixture consumers can
 //! compare a compiler's response without reverse-engineering random bytes.
 
 const std = @import("std");
@@ -22,11 +22,29 @@ pub const Kind = enum {
     unsafe_markdown_link,
     invalid_utf8,
     invalid_theme,
+    html_missing_local_route,
+    html_missing_fragment,
+    html_duplicate_id,
+    html_unclosed_structure,
+    artifact_missing,
+    artifact_digest_mismatch,
+    search_stale_title,
+    deployment_owned_extra,
 };
 
 pub const Behavior = enum {
     compile_failure,
     preserved,
+    expected_finding,
+    no_finding,
+};
+
+pub const Phase = enum {
+    source,
+    theme,
+    rendered_html,
+    artifact_inventory,
+    rendered_search,
 };
 
 pub const Assignment = struct {
@@ -49,7 +67,85 @@ pub fn name(kind: Kind) []const u8 {
 pub fn behavior(kind: Kind) Behavior {
     return switch (kind) {
         .unsafe_markdown_link => .preserved,
+        .html_missing_local_route,
+        .html_missing_fragment,
+        .html_duplicate_id,
+        .html_unclosed_structure,
+        .artifact_missing,
+        .artifact_digest_mismatch,
+        .search_stale_title,
+        => .expected_finding,
+        .deployment_owned_extra => .no_finding,
         else => .compile_failure,
+    };
+}
+
+pub fn phase(kind: Kind) Phase {
+    return switch (kind) {
+        .invalid_theme => .theme,
+        .html_missing_local_route,
+        .html_missing_fragment,
+        .html_duplicate_id,
+        .html_unclosed_structure,
+        => .rendered_html,
+        .artifact_missing, .artifact_digest_mismatch, .deployment_owned_extra => .artifact_inventory,
+        .search_stale_title => .rendered_search,
+        else => .source,
+    };
+}
+
+pub fn expectedFindingCode(kind: Kind) ?[]const u8 {
+    return switch (kind) {
+        .html_missing_local_route => "HTML_LOCAL_ROUTE_MISSING",
+        .html_missing_fragment => "HTML_FRAGMENT_MISSING",
+        .html_duplicate_id => "HTML_DUPLICATE_ID",
+        .html_unclosed_structure => "HTML_MALFORMED",
+        .artifact_missing => "ARTIFACT_MISSING",
+        .artifact_digest_mismatch => "ARTIFACT_DIGEST_MISMATCH",
+        .search_stale_title => "SEARCH_CONTENT_MISMATCH",
+        else => null,
+    };
+}
+
+pub fn expectedCoverage(kind: Kind) []const u8 {
+    return switch (kind) {
+        .html_unclosed_structure, .artifact_missing => "incomplete",
+        .html_missing_local_route,
+        .html_missing_fragment,
+        .html_duplicate_id,
+        .artifact_digest_mismatch,
+        .search_stale_title,
+        .deployment_owned_extra,
+        => "checked",
+        else => "not-applicable",
+    };
+}
+
+pub fn repair(kind: Kind) []const u8 {
+    return switch (kind) {
+        .html_missing_local_route => "restore the local href or remove the broken link",
+        .html_missing_fragment => "restore the heading id or correct the fragment target",
+        .html_duplicate_id => "rename or remove the duplicate rendered id",
+        .html_unclosed_structure => "close the rendered element at the mutation site",
+        .artifact_missing => "republish or restore the inventoried artifact",
+        .artifact_digest_mismatch => "republish the artifact and its receipt",
+        .search_stale_title => "regenerate the rendered-search artifact",
+        .deployment_owned_extra => "none; leave deployment-owned files outside compiler ownership",
+        .unsafe_markdown_link => "none; preserve the literal author link",
+        .duplicate_id => "restore the original unique entity id",
+        .self_parent => "restore the immediate parent relationship",
+        .missing_parent => "restore the existing parent entity id",
+        .parent_cycle => "break the parent cycle",
+        .unknown_frontmatter => "remove the unsupported frontmatter key",
+        .legacy_parent_key => "rename the key to parent or remove it",
+        .malformed_frontmatter => "restore valid frontmatter syntax",
+        .duplicate_frontmatter_key => "remove the duplicate frontmatter key",
+        .broken_wikilink => "restore the target entity or remove the link",
+        .missing_include => "restore the include target or remove the include",
+        .include_cycle => "break the include cycle",
+        .missing_heading_fragment => "restore the heading fragment target",
+        .invalid_utf8 => "restore valid UTF-8 bytes",
+        .invalid_theme => "restore exactly one required content slot",
     };
 }
 
@@ -70,6 +166,14 @@ pub fn description(kind: Kind) []const u8 {
         .unsafe_markdown_link => "exercise a traversal link that must stay literal",
         .invalid_utf8 => "append an invalid UTF-8 byte to a page",
         .invalid_theme => "remove the required content slot from the theme",
+        .html_missing_local_route => "add one rendered local link to a missing route",
+        .html_missing_fragment => "add one rendered link to a missing heading fragment",
+        .html_duplicate_id => "emit the same rendered id twice on one page",
+        .html_unclosed_structure => "leave one bounded rendered HTML element unclosed",
+        .artifact_missing => "delete one published artifact after the baseline receipt",
+        .artifact_digest_mismatch => "change one published byte without updating its receipt",
+        .search_stale_title => "change one search title without regenerating the index",
+        .deployment_owned_extra => "add an unrecorded deployment-owned file",
     };
 }
 
@@ -77,6 +181,15 @@ pub fn expectedLabel(kind: Kind) []const u8 {
     return switch (behavior(kind)) {
         .compile_failure => "compile-failure",
         .preserved => "preserved",
+        .expected_finding => "expected-finding",
+        .no_finding => "no-finding",
+    };
+}
+
+pub fn isPostPublish(kind: Kind) bool {
+    return switch (phase(kind)) {
+        .rendered_html, .artifact_inventory, .rendered_search => true,
+        else => false,
     };
 }
 
@@ -156,6 +269,9 @@ test "barb names round-trip and preserved behavior is explicit" {
     try std.testing.expectEqual(Kind.duplicate_id, try parse("duplicate_id"));
     try std.testing.expectEqual(Behavior.preserved, behavior(.unsafe_markdown_link));
     try std.testing.expectEqual(Behavior.compile_failure, behavior(.invalid_utf8));
+    try std.testing.expectEqual(Phase.rendered_html, phase(.html_duplicate_id));
+    try std.testing.expectEqualStrings("HTML_FRAGMENT_MISSING", expectedFindingCode(.html_missing_fragment).?);
+    try std.testing.expect(isPostPublish(.artifact_digest_mismatch));
 }
 
 test "barb assignment keeps parent mutations off the root when possible" {

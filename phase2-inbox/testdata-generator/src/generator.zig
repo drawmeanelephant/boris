@@ -47,6 +47,16 @@ const nightmare_barbs = [_]barbs.Kind{
     .invalid_utf8,
 };
 const preserved_barbs = [_]barbs.Kind{.unsafe_markdown_link};
+const mild_barbs = [_]barbs.Kind{
+    .html_missing_local_route,
+    .html_missing_fragment,
+    .html_duplicate_id,
+    .html_unclosed_structure,
+    .artifact_missing,
+    .artifact_digest_mismatch,
+    .search_stale_title,
+    .deployment_owned_extra,
+};
 
 pub fn builtinProfile(name: []const u8) ?Profile {
     if (std.mem.eql(u8, name, "readme-realistic-v1")) return .{
@@ -69,6 +79,13 @@ pub fn builtinProfile(name: []const u8) ?Profile {
         .style = .compact,
         .include_assets = false,
         .default_barbs = &preserved_barbs,
+    };
+    if (std.mem.eql(u8, name, "mild-poison-v1")) return .{
+        .name = "mild-poison-v1",
+        .description = "Mostly valid published output with one precise late-pipeline wound per selected barb",
+        .style = .readme,
+        .include_assets = true,
+        .default_barbs = &mild_barbs,
     };
     return null;
 }
@@ -128,7 +145,7 @@ pub const GenerateOptions = struct {
     io: Io,
     allocator: std.mem.Allocator,
     output_path: []const u8,
-    pages: usize = 100,
+    pages: usize = 24,
     seed: u64 = 20260801,
     profile_selector: []const u8 = "readme-realistic-v1",
     barb_names: []const []const u8 = &.{},
@@ -156,6 +173,7 @@ pub fn generate(options: GenerateOptions) !GenerateSummary {
     }
     const assignments = try barbs.assign(options.allocator, kinds, options.pages, options.seed);
     errdefer options.allocator.free(assignments);
+    if (hasCompileFailure(assignments) and hasPostPublishBarb(assignments)) return error.IncompatibleBarbCombination;
 
     if (pathExists(options.io, options.output_path)) {
         if (!options.force) return error.OutputExists;
@@ -355,11 +373,11 @@ fn writeFrontmatter(
     } else if (parent) |value| {
         try writer.print("parent: {s}\n", .{value});
     }
-    try writer.writeAll("status: published\ntags: [generated, benchmark]\n");
+    try writer.writeAll("status: published\ntags: [generated, fixture]\n");
     if (hasBarbForPage(assignments, page.index, .unknown_frontmatter)) {
         try writer.writeAll("layout: hostile\n");
     }
-    try writer.print("summary: Generated page {d} for deterministic benchmark coverage\n", .{page.index});
+    try writer.print("summary: Generated page {d} for deterministic fixture coverage\n", .{page.index});
     if (hasBarbForPage(assignments, page.index, .duplicate_frontmatter_key)) {
         try writer.writeAll("title: Duplicate title\n");
     }
@@ -373,7 +391,7 @@ fn appendBodyBarbs(
     related_id: []const u8,
     assignments: []const barbs.Assignment,
 ) !void {
-    if (hasBarbForPage(assignments, page.index, .broken_wikilink)) try writer.writeAll("\n[[missing/benchmark-target]]\n");
+    if (hasBarbForPage(assignments, page.index, .broken_wikilink)) try writer.writeAll("\n[[missing/fixture-target]]\n");
     if (hasBarbForPage(assignments, page.index, .missing_heading_fragment)) try writer.print("\n[[{s}#does-not-exist]]\n", .{related_id});
     if (hasBarbForPage(assignments, page.index, .unsafe_markdown_link)) try writer.writeAll("\n[escape](../../../../outside.md)\n");
     if (hasBarbForPage(assignments, page.index, .invalid_utf8)) {
@@ -386,7 +404,7 @@ fn appendBodyBarbs(
 
 fn parentValue(allocator: std.mem.Allocator, plan: *const graph.GraphPlan, page: graph.PagePlan) !?[]const u8 {
     const parent_index = page.parent_index orelse return null;
-    if (parent_index >= plan.pages.len) return @as(?[]const u8, try allocator.dupe(u8, "missing/benchmark-parent"));
+    if (parent_index >= plan.pages.len) return @as(?[]const u8, try allocator.dupe(u8, "missing/fixture-parent"));
     var buffer: [192]u8 = undefined;
     return @as(?[]const u8, try allocator.dupe(u8, try graph.GraphPlan.id(plan.pages[parent_index], &buffer)));
 }
@@ -407,6 +425,20 @@ fn hasBarb(assignments: []const barbs.Assignment, kind: barbs.Kind) bool {
     return false;
 }
 
+fn hasCompileFailure(assignments: []const barbs.Assignment) bool {
+    for (assignments) |assignment| {
+        if (barbs.behavior(assignment.kind) == .compile_failure) return true;
+    }
+    return false;
+}
+
+fn hasPostPublishBarb(assignments: []const barbs.Assignment) bool {
+    for (assignments) |assignment| {
+        if (barbs.isPostPublish(assignment.kind)) return true;
+    }
+    return false;
+}
+
 fn hasBarbForPage(assignments: []const barbs.Assignment, page_index: usize, kind: barbs.Kind) bool {
     for (assignments) |assignment| {
         if (assignment.kind == kind and assignment.target == page_index) return true;
@@ -423,7 +455,7 @@ fn writeIncludes(
 ) !void {
     var common = std.Io.Writer.Allocating.init(allocator);
     defer common.deinit();
-    try common.writer.writeAll("Shared benchmark fragment.\n\n{{include includes/shared.md}}\n");
+    try common.writer.writeAll("Shared fixture fragment.\n\n{{include includes/shared.md}}\n");
     if (hasBarb(assignments, .missing_include)) try common.writer.writeAll("\n{{include includes/missing.md}}\n");
     try writeTracked(io, fixture, allocator, inventory, "content/includes/common.md", "include", common.writer.buffered(), null);
 
@@ -439,7 +471,7 @@ fn writeAssets(io: Io, fixture: Io.Dir, inventory: *manifest.Inventory, include_
     if (!include_assets) return;
     try fixture.createDirPath(io, "content/index.assets");
     try writeTracked(io, fixture, std.heap.page_allocator, inventory, "content/index.assets/diagram.svg", "asset", "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 4 4\"><path d=\"M0 0h4v4H0z\"/></svg>\n", null);
-    try writeTracked(io, fixture, std.heap.page_allocator, inventory, "optional-assets/shared/benchmark.svg", "asset", "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 8 8\"><circle cx=\"4\" cy=\"4\" r=\"3\"/></svg>\n", null);
+    try writeTracked(io, fixture, std.heap.page_allocator, inventory, "optional-assets/shared/fixture.svg", "asset", "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 8 8\"><circle cx=\"4\" cy=\"4\" r=\"3\"/></svg>\n", null);
 }
 
 fn writeTheme(
@@ -547,7 +579,9 @@ pub fn runFixture(options: RunOptions) !void {
     const theme_arg = try std.fmt.allocPrint(options.allocator, "{s}/optional-theme", .{base});
     defer options.allocator.free(theme_arg);
 
-    const expected_code = try readExpectedExit(options.io, options.allocator, fixture_abs);
+    var expected = try readExpectedFixture(options.io, options.allocator, fixture_abs);
+    defer expected.deinit(options.allocator);
+    const expected_code = expected.exit_code;
     const start = Io.Clock.awake.now(options.io);
     const result = try std.process.run(options.allocator, options.io, .{
         .argv = &.{ boris_abs, "--input", input_arg, "--theme", theme_arg, "--html-dir", html_arg, "--quiet" },
@@ -566,6 +600,14 @@ pub fn runFixture(options: RunOptions) !void {
     const binary = try readFileAbsolute(options.io, options.allocator, boris_abs, 256 * 1024 * 1024);
     defer options.allocator.free(binary);
     const binary_hash = manifest.sha256Hex(binary);
+    const baseline_tree = try hashTree(options.io, options.allocator, fixture_abs, "results/boris-output");
+    const publication = try writePublicationInventory(options.io, options.allocator, fixture_abs, "results/boris-output");
+
+    var plan = try graph.GraphPlan.init(options.allocator, expected.page_count, expected.seed);
+    defer plan.deinit(options.allocator);
+    if (actual_code == expected_code and expected_code == 0) {
+        try applyPostPublishBarbs(options.io, options.allocator, fixture_abs, &plan, expected.assignments);
+    }
     const output_tree = try hashTree(options.io, options.allocator, fixture_abs, "results/boris-output");
     const passed = actual_code == expected_code;
 
@@ -573,7 +615,7 @@ pub fn runFixture(options: RunOptions) !void {
     defer fixture.close(options.io);
     var output = std.ArrayList(u8).empty;
     defer output.deinit(options.allocator);
-    try output.appendSlice(options.allocator, "{\n  \"schemaVersion\":\"boris-testdata-run/1\",\n  \"expectedExitCode\":");
+    try output.appendSlice(options.allocator, "{\n  \"schemaVersion\":\"boris-testdata-run/2\",\n  \"expectedExitCode\":");
     try appendDecimal(&output, options.allocator, expected_code);
     try output.appendSlice(options.allocator, ",\n  \"actualExitCode\":");
     try appendDecimal(&output, options.allocator, actual_code);
@@ -583,6 +625,80 @@ pub fn runFixture(options: RunOptions) !void {
     try appendDecimal(&output, options.allocator, elapsed_ns);
     try output.appendSlice(options.allocator, ",\n  \"binarySha256\":");
     try manifest.appendJsonString(&output, options.allocator, &binary_hash);
+    try output.appendSlice(options.allocator, ",\n  \"baselineOutputTreeSha256\":");
+    try manifest.appendJsonString(&output, options.allocator, &baseline_tree.hash);
+    try output.appendSlice(options.allocator, ",\n  \"baselineOutputFileCount\":");
+    try appendDecimal(&output, options.allocator, baseline_tree.file_count);
+    try output.appendSlice(options.allocator, ",\n  \"outputTreeSha256\":");
+    try manifest.appendJsonString(&output, options.allocator, &output_tree.hash);
+    try output.appendSlice(options.allocator, ",\n  \"outputFileCount\":");
+    try appendDecimal(&output, options.allocator, output_tree.file_count);
+    try output.appendSlice(options.allocator, ",\n  \"publicationInventorySha256\":");
+    try manifest.appendJsonString(&output, options.allocator, &publication.sha256);
+    try output.appendSlice(options.allocator, ",\n  \"publicationInventoryFileCount\":");
+    try appendDecimal(&output, options.allocator, publication.count);
+    try output.appendSlice(options.allocator, ",\n  \"postPublishBarbsApplied\":");
+    try appendDecimal(&output, options.allocator, countPostPublishBarbs(expected.assignments));
+    try output.appendSlice(options.allocator, ",\n  \"stdout\":");
+    try manifest.appendJsonString(&output, options.allocator, result.stdout);
+    try output.appendSlice(options.allocator, ",\n  \"stderr\":");
+    try manifest.appendJsonString(&output, options.allocator, result.stderr);
+    try output.appendSlice(options.allocator, "\n}\n");
+    try fixture.writeFile(options.io, .{ .sub_path = "results/run.json", .data = output.items });
+
+    if (!passed) return error.BorisExpectationMismatch;
+}
+
+pub fn repairFixture(options: RunOptions) !void {
+    const cwd_path = try std.process.currentPathAlloc(options.io, options.allocator);
+    defer options.allocator.free(cwd_path);
+    const fixture_abs = try std.fs.path.resolve(options.allocator, &.{ cwd_path, options.fixture_path });
+    defer options.allocator.free(fixture_abs);
+    const parent = std.fs.path.dirname(fixture_abs) orelse return error.InvalidFixture;
+    const base = std.fs.path.basename(fixture_abs);
+    const boris_abs = try std.fs.path.resolve(options.allocator, &.{ cwd_path, options.boris_path });
+    defer options.allocator.free(boris_abs);
+
+    var expected = try readExpectedFixture(options.io, options.allocator, fixture_abs);
+    defer expected.deinit(options.allocator);
+    if (hasCompileFailure(expected.assignments)) return error.InvalidFixture;
+
+    const repaired_abs = try std.fs.path.join(options.allocator, &.{ fixture_abs, "results/repaired-output" });
+    defer options.allocator.free(repaired_abs);
+    if (pathExists(options.io, repaired_abs)) try deletePath(options.io, repaired_abs);
+
+    const input_arg = try std.fmt.allocPrint(options.allocator, "{s}/content", .{base});
+    defer options.allocator.free(input_arg);
+    const html_arg = try std.fmt.allocPrint(options.allocator, "{s}/results/repaired-output", .{base});
+    defer options.allocator.free(html_arg);
+    const theme_arg = try std.fmt.allocPrint(options.allocator, "{s}/optional-theme", .{base});
+    defer options.allocator.free(theme_arg);
+
+    const result = try std.process.run(options.allocator, options.io, .{
+        .argv = &.{ boris_abs, "--input", input_arg, "--theme", theme_arg, "--html-dir", html_arg, "--quiet" },
+        .cwd = .{ .path = parent },
+        .stdout_limit = .limited(2 * 1024 * 1024),
+        .stderr_limit = .limited(2 * 1024 * 1024),
+    });
+    defer options.allocator.free(result.stdout);
+    defer options.allocator.free(result.stderr);
+    const actual_code: u8 = switch (result.term) {
+        .exited => |code| code,
+        else => 255,
+    };
+    const output_tree = try hashTree(options.io, options.allocator, fixture_abs, "results/repaired-output");
+    const passed = actual_code == expected.exit_code;
+
+    var fixture = try Io.Dir.openDirAbsolute(options.io, fixture_abs, .{});
+    defer fixture.close(options.io);
+    var output = std.ArrayList(u8).empty;
+    defer output.deinit(options.allocator);
+    try output.appendSlice(options.allocator, "{\n  \"schemaVersion\":\"boris-testdata-repair/1\",\n  \"expectedExitCode\":");
+    try appendDecimal(&output, options.allocator, expected.exit_code);
+    try output.appendSlice(options.allocator, ",\n  \"actualExitCode\":");
+    try appendDecimal(&output, options.allocator, actual_code);
+    try output.appendSlice(options.allocator, ",\n  \"passed\":");
+    try output.appendSlice(options.allocator, if (passed) "true" else "false");
     try output.appendSlice(options.allocator, ",\n  \"outputTreeSha256\":");
     try manifest.appendJsonString(&output, options.allocator, &output_tree.hash);
     try output.appendSlice(options.allocator, ",\n  \"outputFileCount\":");
@@ -592,7 +708,7 @@ pub fn runFixture(options: RunOptions) !void {
     try output.appendSlice(options.allocator, ",\n  \"stderr\":");
     try manifest.appendJsonString(&output, options.allocator, result.stderr);
     try output.appendSlice(options.allocator, "\n}\n");
-    try fixture.writeFile(options.io, .{ .sub_path = "results/run.json", .data = output.items });
+    try fixture.writeFile(options.io, .{ .sub_path = "results/repair.json", .data = output.items });
 
     if (!passed) return error.BorisExpectationMismatch;
 }
@@ -661,7 +777,19 @@ fn collectFiles(io: Io, allocator: std.mem.Allocator, directory: Io.Dir, prefix:
     }
 }
 
-fn readExpectedExit(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u8) !u8 {
+const ExpectedFixture = struct {
+    exit_code: u8,
+    seed: u64,
+    page_count: usize,
+    assignments: []barbs.Assignment,
+
+    fn deinit(self: *ExpectedFixture, allocator: std.mem.Allocator) void {
+        allocator.free(self.assignments);
+        self.* = undefined;
+    }
+};
+
+fn readExpectedFixture(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u8) !ExpectedFixture {
     const expected_path = try std.fs.path.join(allocator, &.{ fixture_abs, "expected.json" });
     defer allocator.free(expected_path);
     const bytes = try readFileAbsolute(io, allocator, expected_path, 256 * 1024);
@@ -672,6 +800,15 @@ fn readExpectedExit(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u
         .object => |value| value,
         else => return error.InvalidFixture,
     };
+    const seed_value = switch (object.get("seed") orelse return error.InvalidFixture) {
+        .integer => |seed| seed,
+        else => return error.InvalidFixture,
+    };
+    const page_count_value = switch (object.get("pageCount") orelse return error.InvalidFixture) {
+        .integer => |count| count,
+        else => return error.InvalidFixture,
+    };
+    if (seed_value < 0 or page_count_value <= 0) return error.InvalidFixture;
     const run = switch (object.get("run") orelse return error.InvalidFixture) {
         .object => |value| value,
         else => return error.InvalidFixture,
@@ -681,7 +818,264 @@ fn readExpectedExit(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u
         else => return error.InvalidFixture,
     };
     if (value < 0 or value > 255) return error.InvalidFixture;
-    return @intCast(value);
+
+    const values = switch (object.get("barbs") orelse return error.InvalidFixture) {
+        .array => |array| array.items,
+        else => return error.InvalidFixture,
+    };
+    var assignments: std.ArrayList(barbs.Assignment) = .empty;
+    errdefer assignments.deinit(allocator);
+    for (values) |item| {
+        const barb_object = switch (item) {
+            .object => |barb_value| barb_value,
+            else => return error.InvalidFixture,
+        };
+        const name_value = switch (barb_object.get("name") orelse return error.InvalidFixture) {
+            .string => |name| name,
+            else => return error.InvalidFixture,
+        };
+        const target_value = switch (barb_object.get("targetIndex") orelse return error.InvalidFixture) {
+            .integer => |target| target,
+            else => return error.InvalidFixture,
+        };
+        if (target_value < 0) return error.InvalidFixture;
+        const secondary_value = switch (barb_object.get("secondaryIndex") orelse return error.InvalidFixture) {
+            .null => null,
+            .integer => |secondary| if (secondary < 0) return error.InvalidFixture else @as(?usize, @intCast(secondary)),
+            else => return error.InvalidFixture,
+        };
+        try assignments.append(allocator, .{
+            .kind = barbs.parse(name_value) catch return error.InvalidFixture,
+            .target = @intCast(target_value),
+            .secondary = secondary_value,
+        });
+    }
+    return .{
+        .exit_code = @intCast(value),
+        .seed = @intCast(seed_value),
+        .page_count = @intCast(page_count_value),
+        .assignments = try assignments.toOwnedSlice(allocator),
+    };
+}
+
+fn countPostPublishBarbs(assignments: []const barbs.Assignment) usize {
+    var count: usize = 0;
+    for (assignments) |assignment| {
+        if (barbs.isPostPublish(assignment.kind)) count += 1;
+    }
+    return count;
+}
+
+fn writePublicationInventory(
+    io: Io,
+    allocator: std.mem.Allocator,
+    fixture_abs: []const u8,
+    output_relative: []const u8,
+) !manifest.InventorySummary {
+    var fixture = try Io.Dir.openDirAbsolute(io, fixture_abs, .{ .iterate = true });
+    defer fixture.close(io);
+    var results = try fixture.openDir(io, "results", .{});
+    defer results.close(io);
+
+    var inventory = try manifest.Inventory.openNamed(io, results, "publication.jsonl");
+    var inventory_open = true;
+    defer {
+        if (inventory_open) _ = inventory.close();
+    }
+
+    var output = fixture.openDir(io, output_relative, .{ .iterate = true }) catch |err| switch (err) {
+        error.FileNotFound => {
+            const summary = inventory.close();
+            inventory_open = false;
+            try manifest.writePublicationSummary(io, results, allocator, output_relative, summary);
+            return summary;
+        },
+        else => return err,
+    };
+    defer output.close(io);
+
+    var files: std.ArrayList([]u8) = .empty;
+    defer {
+        for (files.items) |path| allocator.free(path);
+        files.deinit(allocator);
+    }
+    try collectFiles(io, allocator, output, "", &files);
+    std.sort.heap([]u8, files.items, {}, struct {
+        fn lessThan(_: void, left: []u8, right: []u8) bool {
+            return std.mem.lessThan(u8, left, right);
+        }
+    }.lessThan);
+
+    for (files.items) |path| {
+        var file = try output.openFile(io, path, .{});
+        defer file.close(io);
+        var reader = file.reader(io, &.{});
+        const bytes = try reader.interface.allocRemaining(allocator, .unlimited);
+        defer allocator.free(bytes);
+        try inventory.add(allocator, path, publicationKind(path), bytes, null, null, null);
+    }
+    const summary = inventory.close();
+    inventory_open = false;
+    try manifest.writePublicationSummary(io, results, allocator, output_relative, summary);
+    return summary;
+}
+
+fn publicationKind(path: []const u8) []const u8 {
+    if (std.mem.endsWith(u8, path, ".html")) return "html-page";
+    if (std.mem.startsWith(u8, path, "_boris/search/")) return "derived-search";
+    if (std.mem.startsWith(u8, path, "assets/") or std.mem.indexOf(u8, path, ".assets/") != null) return "asset";
+    return "published-artifact";
+}
+
+fn applyPostPublishBarbs(
+    io: Io,
+    allocator: std.mem.Allocator,
+    fixture_abs: []const u8,
+    plan: *const graph.GraphPlan,
+    assignments: []const barbs.Assignment,
+) !void {
+    var pass: usize = 0;
+    while (pass < 2) : (pass += 1) {
+        for (assignments) |assignment| {
+            if (!barbs.isPostPublish(assignment.kind)) continue;
+            if ((pass == 0 and assignment.kind == .artifact_missing) or
+                (pass == 1 and assignment.kind != .artifact_missing)) continue;
+            if (assignment.target >= plan.pages.len) return error.InvalidFixture;
+            switch (assignment.kind) {
+                .html_missing_local_route,
+                .html_missing_fragment,
+                .html_duplicate_id,
+                .html_unclosed_structure,
+                => try mutateHtmlOutput(io, allocator, fixture_abs, plan.pages[assignment.target], assignment.kind),
+                .artifact_missing => {
+                    const path = try artifactPath(io, allocator, fixture_abs);
+                    defer allocator.free(path);
+                    try deleteOutputPath(io, allocator, fixture_abs, path);
+                },
+                .artifact_digest_mismatch => {
+                    const path = try artifactPath(io, allocator, fixture_abs);
+                    defer allocator.free(path);
+                    try mutateDigestOutput(io, allocator, fixture_abs, path);
+                },
+                .search_stale_title => try mutateSearchTitle(io, allocator, fixture_abs),
+                .deployment_owned_extra => try writeDeploymentOwnedExtra(io, fixture_abs),
+                else => unreachable,
+            }
+        }
+    }
+}
+
+fn outputPagePath(allocator: std.mem.Allocator, page: graph.PagePlan) ![]u8 {
+    var id_buffer: [192]u8 = undefined;
+    return std.fmt.allocPrint(allocator, "{s}.html", .{try graph.GraphPlan.id(page, &id_buffer)});
+}
+
+fn artifactPath(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u8) ![]u8 {
+    const search = try std.fs.path.join(allocator, &.{ fixture_abs, "results/boris-output/_boris/search/search-index.json" });
+    defer allocator.free(search);
+    if (pathExists(io, search)) return allocator.dupe(u8, "_boris/search/search-index.json");
+    const preferred = try std.fs.path.join(allocator, &.{ fixture_abs, "results/boris-output/assets/css/docs.css" });
+    defer allocator.free(preferred);
+    if (pathExists(io, preferred)) return allocator.dupe(u8, "assets/css/docs.css");
+    return allocator.dupe(u8, "index.html");
+}
+
+fn readOutputPath(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u8, relative: []const u8) ![]u8 {
+    const absolute = try std.fs.path.join(allocator, &.{ fixture_abs, "results/boris-output", relative });
+    defer allocator.free(absolute);
+    return readFileAbsolute(io, allocator, absolute, 256 * 1024 * 1024);
+}
+
+fn writeOutputPath(io: Io, fixture_abs: []const u8, relative: []const u8, bytes: []const u8) !void {
+    var fixture = try Io.Dir.openDirAbsolute(io, fixture_abs, .{});
+    defer fixture.close(io);
+    var path_buffer: [512]u8 = undefined;
+    const path = try std.fmt.bufPrint(&path_buffer, "results/boris-output/{s}", .{relative});
+    try fixture.writeFile(io, .{ .sub_path = path, .data = bytes });
+}
+
+fn mutateHtmlOutput(
+    io: Io,
+    allocator: std.mem.Allocator,
+    fixture_abs: []const u8,
+    page: graph.PagePlan,
+    kind: barbs.Kind,
+) !void {
+    const path = try outputPagePath(allocator, page);
+    defer allocator.free(path);
+    const original = try readOutputPath(io, allocator, fixture_abs, path);
+    defer allocator.free(original);
+    const close = std.mem.indexOf(u8, original, "</main>") orelse std.mem.indexOf(u8, original, "</body>") orelse return error.InvalidFixture;
+
+    var insertion: std.ArrayList(u8) = .empty;
+    defer insertion.deinit(allocator);
+    switch (kind) {
+        .html_missing_local_route => try insertion.appendSlice(allocator, "<p><a href=\"missing/boris-testdata-route.html\">poisoned missing route</a></p>\n"),
+        .html_missing_fragment => {
+            try insertion.appendSlice(allocator, "<p><a href=\"");
+            const depth = std.mem.count(u8, path, "/");
+            var i: usize = 0;
+            while (i < depth) : (i += 1) try insertion.appendSlice(allocator, "../");
+            try insertion.appendSlice(allocator, "index.html#boris-testdata-missing-fragment\">poisoned missing fragment</a></p>\n");
+        },
+        .html_duplicate_id => try insertion.appendSlice(allocator, "<span id=\"boris-testdata-duplicate-id\"></span><span id=\"boris-testdata-duplicate-id\"></span>\n"),
+        .html_unclosed_structure => try insertion.appendSlice(allocator, "<script>poisoned unclosed structure\n"),
+        else => unreachable,
+    }
+
+    var mutated: std.ArrayList(u8) = .empty;
+    defer mutated.deinit(allocator);
+    try mutated.appendSlice(allocator, original[0..close]);
+    try mutated.appendSlice(allocator, insertion.items);
+    try mutated.appendSlice(allocator, original[close..]);
+    try writeOutputPath(io, fixture_abs, path, mutated.items);
+}
+
+fn mutateDigestOutput(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u8, path: []const u8) !void {
+    const original = try readOutputPath(io, allocator, fixture_abs, path);
+    defer allocator.free(original);
+    var mutated = try allocator.dupe(u8, original);
+    defer allocator.free(mutated);
+    if (std.mem.indexOf(u8, mutated, "Generated")) |marker| {
+        mutated[marker] = 'X';
+    } else {
+        var changed = false;
+        for (mutated, 0..) |byte, index| {
+            if (std.ascii.isAlphabetic(byte)) {
+                mutated[index] = if (byte == 'z') 'y' else byte + 1;
+                changed = true;
+                break;
+            }
+        }
+        if (!changed) return error.InvalidFixture;
+    }
+    try writeOutputPath(io, fixture_abs, path, mutated);
+}
+
+fn mutateSearchTitle(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u8) !void {
+    const path = "_boris/search/search-index.json";
+    const original = try readOutputPath(io, allocator, fixture_abs, path);
+    defer allocator.free(original);
+    const marker = "\"title\": \"";
+    const start = std.mem.indexOf(u8, original, marker) orelse return error.InvalidFixture;
+    const value_start = start + marker.len;
+    const value_end = std.mem.indexOfScalarPos(u8, original, value_start, '"') orelse return error.InvalidFixture;
+    var mutated: std.ArrayList(u8) = .empty;
+    defer mutated.deinit(allocator);
+    try mutated.appendSlice(allocator, original[0..value_start]);
+    try mutated.appendSlice(allocator, "stale title from old publication");
+    try mutated.appendSlice(allocator, original[value_end..]);
+    try writeOutputPath(io, fixture_abs, path, mutated.items);
+}
+
+fn writeDeploymentOwnedExtra(io: Io, fixture_abs: []const u8) !void {
+    try writeOutputPath(io, fixture_abs, "robots.txt", "User-agent: *\nDisallow:\n");
+}
+
+fn deleteOutputPath(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u8, relative: []const u8) !void {
+    const absolute = try std.fs.path.join(allocator, &.{ fixture_abs, "results/boris-output", relative });
+    defer allocator.free(absolute);
+    try deletePath(io, absolute);
 }
 
 fn jsonString(object: std.json.ObjectMap, key: []const u8) ![]const u8 {
@@ -759,4 +1153,5 @@ test "builtin profiles expose ideal, nightmare, and preserved cases" {
     try std.testing.expect(builtinProfile("readme-realistic-v1") != null);
     try std.testing.expect(builtinProfile("nightmare-v1").?.default_barbs.len > 5);
     try std.testing.expectEqual(@as(usize, 1), builtinProfile("preserved-edge-v1").?.default_barbs.len);
+    try std.testing.expectEqual(@as(usize, 8), builtinProfile("mild-poison-v1").?.default_barbs.len);
 }

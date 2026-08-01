@@ -3,7 +3,7 @@
 `boris-testdata` is a Zig companion binary that makes fixtures for Boris to
 consume. It is a fixture generator, not a second compiler and not a test
 runner framework. The useful output is a deterministic project tree that can
-feed many later tests, benchmarks, migration probes, and theme comparisons.
+feed many later tests, scale runs, migration probes, and theme comparisons.
 
 Build it from this directory with Zig 0.16:
 
@@ -16,14 +16,15 @@ Generate, inspect, validate, and run a fixture:
 
 ```bash
 zig build run -- generate \
-  --pages 10000 \
+  --pages 24 \
   --seed 20260801 \
   --profile readme-realistic-v1 \
-  --output /private/tmp/corpus
+  --output /private/tmp/boris-case
 
-zig build run -- validate --fixture /private/tmp/corpus
-zig build run -- inspect --input /private/tmp/corpus --format json
-zig build run -- run --fixture /private/tmp/corpus --boris /path/to/boris
+zig build run -- validate --fixture /private/tmp/boris-case
+zig build run -- inspect --input /private/tmp/boris-case --format json
+zig build run -- run --fixture /private/tmp/boris-case --boris /path/to/boris
+zig build run -- repair --fixture /private/tmp/boris-case --boris /path/to/boris
 ```
 
 `generate` refuses to overwrite an existing directory unless `--force` is
@@ -36,22 +37,33 @@ Every generated fixture has this shape:
 ```text
 fixture/
   content/                    # Markdown pages and includes/
-  optional-assets/            # sidecar assets for benchmark cases
+  optional-assets/            # sidecar assets for fixture cases
   optional-theme/             # copied or built-in Boris theme
   manifest.json               # boris-testdata/1
   files.jsonl                 # one deterministic inventory row per input file
   expected.json               # run expectation and barb assignments
-  results/                    # created by `run`; not part of input inventory
+  results/                    # Boris output, receipts, and run evidence
+    boris-output/             # baseline output, optionally poisoned after publish
+    publication.jsonl         # baseline published-output receipt
+    publication.json          # receipt summary and ownership declaration
+    run.json                  # subprocess and output evidence
+    repaired-output/          # clean re-publication from the same valid source
+    repair.json               # repaired-output evidence
 ```
 
 `manifest.json` key order is fixed. Its `files` entry records the JSONL count,
 byte total, and SHA-256. `expected.json` records the expected Boris exit code,
 the profile seed, and each barb's target page index. `files.jsonl` is emitted as
-pages are written; it is never built as a corpus-sized in-memory string.
+pages are written; it is never built as one corpus-sized in-memory string.
 
 The input-file inventory deliberately excludes `manifest.json`,
 `expected.json`, and `files.jsonl` themselves to avoid a circular hash. It
 includes pages, include fragments, content-local assets, and theme files.
+After a successful Boris run, `results/publication.jsonl` records the baseline
+published output before any post-publish barb is applied. That receipt is the
+stable comparison point for artifact poison. `repair` republishes the same
+valid source without applying post-publish mutations into
+`results/repaired-output`, giving reviewers a clean inverse fixture.
 
 ## Profiles, themes, and templates
 
@@ -62,6 +74,7 @@ Built-in profiles are:
 | `readme-realistic-v1` | README-shaped valid pages with Trunk/Satellite graph edges, links, includes, headings, tables, code fences, and an asset. |
 | `nightmare-v1` | The same valid grammar with named failure barbs applied at deterministic loci. |
 | `preserved-edge-v1` | Traversal-like Markdown links that Boris should preserve literally. |
+| `mild-poison-v1` | Mostly valid output with one precise post-publish barb per selected case. |
 
 Profiles are JSON references under `profiles/` and can also be supplied by
 path. The closed profile shape is:
@@ -104,9 +117,9 @@ timing separately because timing is intentionally not deterministic.
 The generator retains only a compact `PagePlan` array (`kind`, guide/article
 ordinals, parent index, and seed). It creates one page AST and one page byte
 buffer at a time, streams each inventory row immediately, and releases the
-page arena before continuing. No corpus-sized document or Markdown string
-array is retained, so 100K-page runs use plan memory plus one page's working
-set.
+page arena before continuing. `--pages` is an exact workload parameter; it is
+not part of a named workload identity. The safety ceiling is an operational
+guard, not a recommended corpus size.
 
 ## Barb taxonomy
 
@@ -121,9 +134,21 @@ once to override a profile's list.
 | `invalid_utf8` | Boris encoding failure |
 | `unsafe_markdown_link` | Preserved literal; expected successful build |
 | `invalid_theme` | Theme/layout failure |
+| `html_missing_local_route` | Post-publish `HTML_LOCAL_ROUTE_MISSING` finding |
+| `html_missing_fragment` | Post-publish `HTML_FRAGMENT_MISSING` finding |
+| `html_duplicate_id` | Post-publish `HTML_DUPLICATE_ID` finding |
+| `html_unclosed_structure` | Post-publish `HTML_MALFORMED` finding |
+| `artifact_missing` | Deletes one output artifact after the baseline receipt |
+| `artifact_digest_mismatch` | Changes one output byte without changing the receipt |
+| `search_stale_title` | Changes one search title without regenerating search |
+| `deployment_owned_extra` | Adds an unrecorded deployment file; expected no finding |
 
 These names are not random fuzz labels: they are the stable join key between
-the fixture, `expected.json`, and future result comparison tooling.
+the fixture, `expected.json`, the publication receipt, and future result
+comparison tooling. Each assignment also records its expected finding code,
+coverage state, and inverse repair. Post-publish barbs are applied by `run`
+only after Boris has successfully emitted the output tree, so they do not
+masquerade as source or compiler failures.
 
 ## Boris evidence
 
@@ -134,10 +159,5 @@ record at `results/run.json` includes:
 - expected and actual exit codes plus a pass/fail comparison;
 - elapsed nanoseconds;
 - the Boris binary SHA-256;
-- a deterministic output-tree SHA-256 over sorted relative paths and bytes;
+- deterministic baseline and poisoned output-tree SHA-256 values over sorted relative paths and bytes;
 - output file count, stdout, and stderr.
-
-The supplied `fixtures/large-markdown-corpus-benchmark.zip` is local study
-material from the design pass. The generator does not shell out to unzip or
-silently treat those README snapshots as Boris pages; use `--template` or
-`--theme` when a source template/theme should be part of a fixture case.

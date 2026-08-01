@@ -4,8 +4,8 @@ const std = @import("std");
 const barbs = @import("barbs.zig");
 const graph = @import("graph.zig");
 
-pub const schema_version = "boris-testdata/1";
-pub const generator_version = "boris-testdata/0.1.0";
+pub const schema_version = "boris-testdata/2";
+pub const generator_version = "boris-testdata/0.2.0";
 
 pub const HashText = [64]u8;
 
@@ -39,9 +39,13 @@ pub const Inventory = struct {
     total_bytes: u64 = 0,
 
     pub fn open(io: std.Io, directory: std.Io.Dir) !Inventory {
+        return openNamed(io, directory, "files.jsonl");
+    }
+
+    pub fn openNamed(io: std.Io, directory: std.Io.Dir, name: []const u8) !Inventory {
         return .{
             .io = io,
-            .file = try directory.createFile(io, "files.jsonl", .{}),
+            .file = try directory.createFile(io, name, .{}),
             .hasher = std.crypto.hash.sha2.Sha256.init(.{}),
         };
     }
@@ -100,6 +104,27 @@ pub const Inventory = struct {
     }
 };
 
+pub fn writePublicationSummary(
+    io: std.Io,
+    directory: std.Io.Dir,
+    allocator: std.mem.Allocator,
+    output_root: []const u8,
+    summary: InventorySummary,
+) !void {
+    var output: std.ArrayList(u8) = .empty;
+    defer output.deinit(allocator);
+    try output.appendSlice(allocator, "{\n  \"schemaVersion\":\"boris-testdata-publication/1\",\n  \"outputRoot\":");
+    try appendJsonString(&output, allocator, output_root);
+    try output.appendSlice(allocator, ",\n  \"receipt\":\"results/publication.jsonl\",\n  \"count\":");
+    try appendDecimal(&output, allocator, summary.count);
+    try output.appendSlice(allocator, ",\n  \"bytes\":");
+    try appendDecimal(&output, allocator, summary.total_bytes);
+    try output.appendSlice(allocator, ",\n  \"sha256\":");
+    try appendJsonString(&output, allocator, &summary.sha256);
+    try output.appendSlice(allocator, ",\n  \"ownership\":\"compiler-baseline\"\n}\n");
+    try directory.writeFile(io, .{ .sub_path = "publication.json", .data = output.items });
+}
+
 pub fn writeExpected(
     io: std.Io,
     directory: std.Io.Dir,
@@ -113,7 +138,7 @@ pub fn writeExpected(
     defer output.deinit(allocator);
 
     const compile_failure = hasCompileFailure(assignments);
-    try output.appendSlice(allocator, "{\n  \"schemaVersion\":\"boris-testdata-expected/1\",\n  \"profile\":");
+    try output.appendSlice(allocator, "{\n  \"schemaVersion\":\"boris-testdata-expected/2\",\n  \"profile\":");
     try appendJsonString(&output, allocator, profile_name);
     try output.appendSlice(allocator, ",\n  \"seed\":");
     try appendDecimal(&output, allocator, seed);
@@ -135,6 +160,18 @@ pub fn writeExpected(
         if (assignment.secondary) |secondary| try appendDecimal(&output, allocator, secondary) else try output.appendSlice(allocator, "null");
         try output.appendSlice(allocator, ",\"behavior\":");
         try appendJsonString(&output, allocator, barbs.expectedLabel(assignment.kind));
+        try output.appendSlice(allocator, ",\"phase\":");
+        try appendJsonString(&output, allocator, @tagName(barbs.phase(assignment.kind)));
+        try output.appendSlice(allocator, ",\"findingCode\":");
+        if (barbs.expectedFindingCode(assignment.kind)) |code| {
+            try appendJsonString(&output, allocator, code);
+        } else {
+            try output.appendSlice(allocator, "null");
+        }
+        try output.appendSlice(allocator, ",\"expectedCoverage\":");
+        try appendJsonString(&output, allocator, barbs.expectedCoverage(assignment.kind));
+        try output.appendSlice(allocator, ",\"repair\":");
+        try appendJsonString(&output, allocator, barbs.repair(assignment.kind));
         try output.appendSlice(allocator, ",\"description\":");
         try appendJsonString(&output, allocator, barbs.description(assignment.kind));
         try output.appendSlice(allocator, "}");

@@ -11,12 +11,12 @@ const ExitCode = enum(u8) {
     system_failure = 3,
 };
 
-const Command = enum { generate, validate, inspect, run };
+const Command = enum { generate, validate, inspect, run, repair };
 const Format = enum { human, json };
 
 const Options = struct {
     command: Command,
-    pages: usize = 100,
+    pages: usize = 24,
     seed: u64 = 20260801,
     profile: []const u8 = "readme-realistic-v1",
     output: []const u8 = "results/fixture",
@@ -110,6 +110,20 @@ pub fn main(init: std.process.Init) u8 {
             std.debug.print("ran Boris fixture: {s}\n", .{options.fixture});
             return @intFromEnum(ExitCode.success);
         },
+        .repair => {
+            if (options.fixture.len == 0) {
+                std.debug.print("boris-testdata: --fixture is required for repair\n", .{});
+                return @intFromEnum(ExitCode.usage);
+            }
+            generator.repairFixture(.{
+                .io = init.io,
+                .allocator = init.gpa,
+                .fixture_path = options.fixture,
+                .boris_path = options.boris,
+            }) catch |err| return reportError(err);
+            std.debug.print("repaired Boris fixture: {s}\n", .{options.fixture});
+            return @intFromEnum(ExitCode.success);
+        },
     }
 }
 
@@ -165,9 +179,10 @@ fn parseOptions(allocator: std.mem.Allocator, args: []const [:0]const u8) ParseE
             options.format = parseFormat(arg["--format=".len..]) orelse return error.InvalidFormat;
         } else if (std.mem.eql(u8, arg, "--format")) {
             options.format = parseFormat(try nextValue(args, &index)) orelse return error.InvalidFormat;
-        } else if (std.mem.startsWith(u8, arg, "--barb=")) {
-            try barbs.append(allocator, arg["--barb=".len..]);
-        } else if (std.mem.eql(u8, arg, "--barb")) {
+        } else if (std.mem.startsWith(u8, arg, "--barb=") or std.mem.startsWith(u8, arg, "--poison=")) {
+            const prefix_len = if (std.mem.startsWith(u8, arg, "--barb=")) "--barb=".len else "--poison=".len;
+            try barbs.append(allocator, arg[prefix_len..]);
+        } else if (std.mem.eql(u8, arg, "--barb") or std.mem.eql(u8, arg, "--poison")) {
             try barbs.append(allocator, try nextValue(args, &index));
         } else {
             return error.UnknownFlag;
@@ -175,7 +190,7 @@ fn parseOptions(allocator: std.mem.Allocator, args: []const [:0]const u8) ParseE
     }
     options.barb_names = try barbs.toOwnedSlice(allocator);
     if (options.command == .generate and options.output.len == 0) return error.MissingOutput;
-    if ((options.command == .validate or options.command == .inspect or options.command == .run) and options.fixture.len == 0 and options.output.len == 0) return error.MissingFixture;
+    if ((options.command == .validate or options.command == .inspect or options.command == .run or options.command == .repair) and options.fixture.len == 0 and options.output.len == 0) return error.MissingFixture;
     return options;
 }
 
@@ -190,6 +205,7 @@ fn parseCommand(value: []const u8) ?Command {
     if (std.mem.eql(u8, value, "validate")) return .validate;
     if (std.mem.eql(u8, value, "inspect")) return .inspect;
     if (std.mem.eql(u8, value, "run")) return .run;
+    if (std.mem.eql(u8, value, "repair")) return .repair;
     return null;
 }
 
@@ -214,18 +230,20 @@ fn printUsage() void {
         \\  boris-testdata validate --fixture DIR [--format human|json]
         \\  boris-testdata inspect --input DIR [--format human|json]
         \\  boris-testdata run --fixture DIR --boris PATH
+        \\  boris-testdata repair --fixture DIR --boris PATH
         \\
         \\Generate options:
-        \\  --pages N       Exact page count (default: 100; maximum: 1000000)
+        \\  --pages N       Exact page count (default: 24; safety maximum: 1000000)
         \\  --seed U64      Stable SplitMix-style seed (default: 20260801)
-        \\  --profile NAME  readme-realistic-v1, nightmare-v1, preserved-edge-v1, or JSON path
-        \\  --barb NAME     Repeat to override profile barbs
+        \\  --profile NAME  readme-realistic-v1, mild-poison-v1, nightmare-v1, preserved-edge-v1, or JSON path
+        \\  --barb NAME     Repeat to override profile barbs (alias: --poison)
         \\  --theme PATH    Copy an external Boris theme into optional-theme/
         \\  --template PATH Expand an external Markdown template into the page AST
         \\  --force         Replace the exact output directory if it exists
         \\
         \\The generator owns only the requested output directory. It never shells
-        \\out to create content, render Markdown, or inspect the corpus archive.
+        \\out to create content or render Markdown. Post-publish barbs are applied
+        \\by run after Boris writes results/boris-output.
         \\
     , .{});
 }
@@ -267,7 +285,7 @@ fn reportError(err: anyerror) u8 {
     return switch (err) {
         error.BorisExpectationMismatch => @intFromEnum(ExitCode.content_failure),
         error.InvalidFixture, error.OutputExists, error.ProfileNotFound, error.InvalidProfile => @intFromEnum(ExitCode.content_failure),
-        error.InvalidPageCount, error.InvalidSeed, error.InvalidOutputPath, error.UnknownBarb => @intFromEnum(ExitCode.usage),
+        error.InvalidPageCount, error.InvalidSeed, error.InvalidOutputPath, error.UnknownBarb, error.IncompatibleBarbCombination => @intFromEnum(ExitCode.usage),
         else => @intFromEnum(ExitCode.system_failure),
     };
 }

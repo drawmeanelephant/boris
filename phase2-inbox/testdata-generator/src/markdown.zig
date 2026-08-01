@@ -1,7 +1,7 @@
 //! A small Markdown document AST used by the generator.
 //!
 //! The generator creates typed blocks and inline nodes first, then renders
-//! them. That keeps the corpus grammar reviewable and makes each mutation a
+//! them. That keeps the fixture grammar reviewable and makes each mutation a
 //! deliberate change to a known page surface.
 
 const std = @import("std");
@@ -91,7 +91,7 @@ pub fn synthetic(allocator: std.mem.Allocator, context: Context, style: Style) !
     } });
 
     const intro = try allocator.alloc(Inline, 5);
-    intro[0] = .{ .text = "This page is a deterministic Boris benchmark document. It belongs to " };
+    intro[0] = .{ .text = "This page is a deterministic Boris fixture document. It belongs to " };
     intro[1] = .{ .wiki = context.related_id };
     intro[2] = .{ .text = " and carries a source link to " };
     intro[3] = .{ .link = .{ .label = "the related page", .destination = context.related_source } };
@@ -119,7 +119,7 @@ pub fn synthetic(allocator: std.mem.Allocator, context: Context, style: Style) !
     if (style != .compact) {
         try document.blocks.append(allocator, .{ .quote = try oneInline(
             allocator,
-            .{ .text = "A benchmark fixture is an explanation of its own shape." },
+            .{ .text = "A generated fixture is an explanation of its own shape." },
         ) });
         try document.blocks.append(allocator, .{ .code_fence = .{
             .language = "text",

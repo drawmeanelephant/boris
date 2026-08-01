@@ -1,7 +1,7 @@
 # Profiles
 
 Profile JSON is a small reference format, not a general configuration
-language. The executable also ships the three named profiles as built-ins so
+language. The executable also ships the four named profiles as built-ins so
 the documented short names work independently of the current working
 directory.
 

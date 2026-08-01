@@ -55,6 +55,9 @@ pub fn validate(io: Io, allocator: std.mem.Allocator, fixture_path: []const u8) 
         .object => |object| object,
         else => return invalidReport(report, "expected.json must be an object"),
     };
+    const expected_schema = stringField(expected_object, "schemaVersion") orelse return invalidReport(report, "expected schemaVersion is missing");
+    if (!std.mem.eql(u8, expected_schema, "boris-testdata-expected/2")) return invalidReport(report, "expected schemaVersion is unsupported");
+    if (!expectedBarbsValid(expected_object)) return invalidReport(report, "expected barb oracle is inconsistent");
     const schema_version = stringField(manifest_object, "schemaVersion") orelse return invalidReport(report, "manifest schemaVersion is missing");
     const profile = stringField(manifest_object, "profile") orelse return invalidReport(report, "manifest profile is missing");
     report.schema_version = try allocator.dupe(u8, schema_version);
@@ -136,7 +139,7 @@ pub fn validate(io: Io, allocator: std.mem.Allocator, fixture_path: []const u8) 
 
 pub fn inspect(io: Io, allocator: std.mem.Allocator, fixture_path: []const u8) !Report {
     // Inspection intentionally shares the validator's control-file parsing so
-    // a benchmark summary cannot describe a fixture whose hashes are stale.
+    // An inspection summary cannot describe a fixture whose hashes are stale.
     return validate(io, allocator, fixture_path);
 }
 
@@ -330,6 +333,41 @@ fn expectedHasGraphBarb(object: std.json.ObjectMap) bool {
             std.mem.eql(u8, name, barbs.name(.parent_cycle))) return true;
     }
     return false;
+}
+
+fn expectedBarbsValid(object: std.json.ObjectMap) bool {
+    const values = switch (object.get("barbs") orelse return false) {
+        .array => |value| value.items,
+        else => return false,
+    };
+    for (values) |value| {
+        const barb_object = switch (value) {
+            .object => |object_value| object_value,
+            else => return false,
+        };
+        const name_value = stringField(barb_object, "name") orelse return false;
+        const kind = barbs.parse(name_value) catch return false;
+        const behavior_value = stringField(barb_object, "behavior") orelse return false;
+        if (!std.mem.eql(u8, behavior_value, barbs.expectedLabel(kind))) return false;
+        const phase_value = stringField(barb_object, "phase") orelse return false;
+        if (!std.mem.eql(u8, phase_value, @tagName(barbs.phase(kind)))) return false;
+        const coverage_value = stringField(barb_object, "expectedCoverage") orelse return false;
+        if (!std.mem.eql(u8, coverage_value, barbs.expectedCoverage(kind))) return false;
+        const repair_value = stringField(barb_object, "repair") orelse return false;
+        if (!std.mem.eql(u8, repair_value, barbs.repair(kind))) return false;
+        const actual_finding = barb_object.get("findingCode") orelse return false;
+        if (barbs.expectedFindingCode(kind)) |expected_finding| {
+            const actual_text = switch (actual_finding) {
+                .string => |text| text,
+                else => return false,
+            };
+            if (!std.mem.eql(u8, actual_text, expected_finding)) return false;
+        } else switch (actual_finding) {
+            .null => {},
+            else => return false,
+        }
+    }
+    return true;
 }
 
 test "validator accepts a generated control-file shape after generation" {
