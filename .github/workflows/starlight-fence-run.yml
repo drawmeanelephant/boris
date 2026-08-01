@@ -30,7 +30,6 @@ jobs:
         run: |
           python3 - <<'PY'
           import subprocess
-          import textwrap
           from pathlib import Path
 
           source = Path('.github/workflows/starlight-fence-fix.yml').read_text()
@@ -46,7 +45,8 @@ jobs:
               end = source.find('\n      - name:', start)
               if end == -1:
                   end = len(source)
-              script = textwrap.dedent(source[start:end])
+              lines = source[start:end].splitlines()
+              script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
               subprocess.run(['bash', '-euxo', 'pipefail', '-c', script], check=True)
           PY
 
