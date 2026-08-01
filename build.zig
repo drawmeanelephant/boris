@@ -187,6 +187,44 @@ pub fn build(b: *std.Build) void {
     );
     test_doctor_step.dependOn(&run_doctor_tests.step);
 
+    // --- Target-local publication checks evidence --------------------------
+    const publication_checks_mod = b.createModule(.{
+        .root_source_file = b.path("src/publication_checks.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const publication_checks_tests = b.addTest(.{ .root_module = publication_checks_mod });
+    const run_publication_checks_tests = b.addRunArtifact(publication_checks_tests);
+    run_publication_checks_tests.setCwd(b.path("."));
+    const test_publication_checks_step = b.step(
+        "test-publication-checks",
+        "Run deterministic target-local publication checks evidence tests",
+    );
+    test_publication_checks_step.dependOn(&run_publication_checks_tests.step);
+
+    // Private seeded generator harness. It is opt-in because it launches the
+    // installed Boris binary against a deterministic poisoned fixture.
+    const testdata_generator_mod = b.createModule(.{
+        .root_source_file = b.path("tools/testdata-generator/src/generator.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const publication_fixture_mod = b.createModule(.{
+        .root_source_file = b.path("src/publication_checks_fixture_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "fixture_generator", .module = testdata_generator_mod }},
+    });
+    const publication_fixture_tests = b.addTest(.{ .root_module = publication_fixture_mod });
+    const run_publication_fixture_tests = b.addRunArtifact(publication_fixture_tests);
+    run_publication_fixture_tests.setCwd(b.path("."));
+    run_publication_fixture_tests.step.dependOn(b.getInstallStep());
+    const test_publication_fixture_step = b.step(
+        "test-publication-fixture",
+        "Run the private mild-poison publication-checks evidence harness",
+    );
+    test_publication_fixture_step.dependOn(&run_publication_fixture_tests.step);
+
     const graph_mod = b.createModule(.{
         .root_source_file = b.path("src/graph.zig"),
         .target = target,
@@ -718,6 +756,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_publication_profile_tests.step);
     test_step.dependOn(&run_publication_plan_tests.step);
     test_step.dependOn(&run_doctor_tests.step);
+    test_step.dependOn(&run_publication_checks_tests.step);
     test_step.dependOn(&run_graph_tests.step);
     test_step.dependOn(&run_aside_tests.step);
     test_step.dependOn(&run_rag_tests.step);

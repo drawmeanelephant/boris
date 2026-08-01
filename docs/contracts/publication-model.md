@@ -166,13 +166,13 @@ versioned, and separately specified.
 ### Analysis is not another publication
 
 Read-only analysis surfaces such as `check`, `impact`, generated-output link
-audits, and a future Doctor surface are checks or reports, not publication
+audits, publication checks, and Doctor are checks or reports, not publication
 projections. [`documentation-intelligence.md`](documentation-intelligence.md)
-owns the shipped graph-health and impact analysis contract; Doctor design notes
-remain non-normative until a dedicated contract exists. An analysis result may
-be evidence for a named claim within its scope, but it does not become HTML,
-IR, RAG, or deployment metadata and it cannot silently certify an omitted
-projection.
+owns the shipped graph-health and impact analysis contract, while
+[`publication-checks.md`](publication-checks.md) owns target-local publication
+evidence. An analysis result may be evidence for a named claim within its
+scope, but it does not become HTML, IR, RAG, or deployment metadata and it
+cannot silently certify an omitted projection.
 
 ## Verification vocabulary and claims
 

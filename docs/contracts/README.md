@@ -34,6 +34,7 @@ is **not** proof that every surface is the default CLI product.
 | Textile compatibility | **Implemented, explicit opt-in** — bounded `.textile` body adapter via `--textile`; see [textile-compatibility.md](textile-compatibility.md) |
 | Publication plan declaration | **Implemented** — `plan --profile PATH` emits normalized declaration JSON without publication; see [publication-plan.md](publication-plan.md) |
 | HTML publication artifact inventory | **Implemented first slice** — deterministic target-owned `artifacts.json` inventory for committed HTML payloads; see [publication-artifacts.md](publication-artifacts.md) |
+| HTML publication checks evidence | **Implemented first slice** — deterministic target-local `checks.json` bound to the committed inventory and exact payload bytes; see [publication-checks.md](publication-checks.md) |
 
 ## Canonical ownership (one document per topic)
 
@@ -70,6 +71,7 @@ per topic:
 | Textile compatibility adapter | [textile-compatibility.md](textile-compatibility.md) |
 | Rendered-site search artifacts | [rendered-search.md](rendered-search.md) |
 | HTML publication artifact inventory | [publication-artifacts.md](publication-artifacts.md) |
+| HTML publication checks evidence | [publication-checks.md](publication-checks.md) |
 | Astro plan-only migration intake | [astro-import-plan.md](astro-import-plan.md) |
 | Astro initial-create migration apply | [astro-import-apply.md](astro-import-apply.md) |
 

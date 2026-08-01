@@ -62,6 +62,7 @@ const site_url = @import("site_url.zig");
 const sitemap = @import("sitemap.zig");
 const link_audit = @import("link_audit.zig");
 const artifact_inventory = @import("artifact_inventory.zig");
+const publication_checks = @import("publication_checks.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -91,6 +92,17 @@ pub const FrozenSite = struct {
         return null;
     }
 };
+
+fn writePublicationChecksFailure(
+    writer: *Io.Writer,
+    target_name: []const u8,
+    err: anyerror,
+) !void {
+    try writer.print(
+        "error: publication committed for target '{s}', but publication-check evidence was not refreshed: {s}\n",
+        .{ target_name, @errorName(err) },
+    );
+}
 
 /// Build graph nodes from PageDb, validate, freeze, and buildNav.
 /// On graph errors returns `error.GraphValidationFailed` after printing diags
@@ -215,6 +227,11 @@ pub const CompileOptions = struct {
     test_fail_after_sitemap_stage: bool = false,
     /// Test-only failure before the artifact inventory writer runs.
     test_fail_before_inventory_write: bool = false,
+    /// Test-only post-commit checker execution failure. Production callers
+    /// leave both publication-check fault injections false.
+    test_fail_publication_checks: bool = false,
+    /// Test-only atomic checks-report write failure.
+    test_fail_publication_checks_write: bool = false,
 };
 
 fn validateSitemapConfig(gpa: std.mem.Allocator, options: CompileOptions) !void {
@@ -1780,6 +1797,7 @@ fn compilePagesInner(
         try inventory_owned_paths.append(gpa, search_index.output_path);
         if (options.sitemap_path) |sitemap_path| try inventory_owned_paths.append(gpa, sitemap_path);
         try artifact_inventory.rejectOutputCollision(artifact_inventory.output_path, inventory_owned_paths.items);
+        try artifact_inventory.rejectOutputCollision(publication_checks.output_path, inventory_owned_paths.items);
 
         if (options.sitemap_path) |sitemap_path| {
             var owned_paths: std.ArrayList([]const u8) = .empty;
@@ -2476,6 +2494,19 @@ fn compilePagesInner(
     // Drop staging tree (errdefer also cleans on earlier failure).
     cwd.deleteTree(io, stage_rel) catch {};
 
+    // The payload transaction, including artifacts.json as its deferred last
+    // file, is complete before checks read the target. Checks are a separate
+    // atomic report publication and never participate in that transaction.
+    publication_checks.writeAfterCommit(io, gpa, dist_dir, options.target_name, .{
+        .test_fail_execution = options.test_fail_publication_checks,
+        .test_fail_write = options.test_fail_publication_checks_write,
+    }) catch |err| {
+        const stderr = std.debug.lockStderr(&.{});
+        defer std.debug.unlockStderr();
+        writePublicationChecksFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        return error.PublicationChecksFailed;
+    };
+
     return stats;
 }
 
@@ -2604,6 +2635,29 @@ fn expectArtifactInventoryShape(
             try std.testing.expect(std.mem.order(u8, previous, current) != .gt);
         }
     }
+}
+
+fn expectPublicationChecksShape(
+    gpa: std.mem.Allocator,
+    bytes: []const u8,
+    target: []const u8,
+) !void {
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    try std.testing.expectEqualStrings(publication_checks.report_format, root.get("format").?.string);
+    try std.testing.expectEqual(@as(i64, publication_checks.schema_version), root.get("schema_version").?.integer);
+    try std.testing.expectEqualStrings(target, root.get("target").?.string);
+    const checks = root.get("checks").?.array.items;
+    try std.testing.expectEqual(@as(usize, 3), checks.len);
+    try std.testing.expectEqualStrings("artifact-integrity", checks[0].object.get("id").?.string);
+    try std.testing.expectEqualStrings("rendered-html", checks[1].object.get("id").?.string);
+    try std.testing.expectEqualStrings("rendered-search", checks[2].object.get("id").?.string);
+    for (checks) |check| {
+        try std.testing.expectEqualStrings("passed", check.object.get("status").?.string);
+        try std.testing.expectEqualStrings("complete", check.object.get("coverage").?.string);
+    }
+    try std.testing.expectEqual(@as(usize, 0), root.get("findings").?.array.items.len);
 }
 
 test "experimental flag is true (HTML path not default product)" {
@@ -4944,6 +4998,22 @@ test "HTML publication artifact inventory is complete, deterministic, isolated, 
     try std.testing.expect(std.mem.indexOf(u8, inventory_bytes, artifact_inventory.output_path) == null);
     try std.testing.expect(std.mem.indexOf(u8, inventory_bytes, work) == null);
 
+    var checks_bytes = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(checks_bytes);
+    try expectPublicationChecksShape(gpa, checks_bytes, "default");
+    const first_checks = try gpa.dupe(u8, checks_bytes);
+    defer gpa.free(first_checks);
+
+    var checks_failure_options = base_options;
+    checks_failure_options.test_fail_publication_checks = true;
+    try std.testing.expectError(
+        error.PublicationChecksFailed,
+        compileHtmlSite(io, gpa, checks_failure_options),
+    );
+    const after_checks_failure = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(after_checks_failure);
+    try std.testing.expectEqualStrings(first_checks, after_checks_failure);
+
     {
         var parsed = try std.json.parseFromSlice(std.json.Value, gpa, inventory_bytes, .{});
         defer parsed.deinit();
@@ -4973,6 +5043,9 @@ test "HTML publication artifact inventory is complete, deterministic, isolated, 
     const repeat_inventory = try readArtifactInventory(io, gpa, dist);
     defer gpa.free(repeat_inventory);
     try std.testing.expectEqualStrings(first_inventory, repeat_inventory);
+    gpa.free(checks_bytes);
+    checks_bytes = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    try std.testing.expectEqualStrings(first_checks, checks_bytes);
 
     var parallel_options = base_options;
     parallel_options.dist_dir = parallel_dist;
@@ -4981,6 +5054,9 @@ test "HTML publication artifact inventory is complete, deterministic, isolated, 
     const parallel_inventory = try readArtifactInventory(io, gpa, parallel_dist);
     defer gpa.free(parallel_inventory);
     try std.testing.expectEqualStrings(first_inventory, parallel_inventory);
+    const parallel_checks = try readTargetPayload(io, gpa, parallel_dist, publication_checks.output_path);
+    defer gpa.free(parallel_checks);
+    try std.testing.expectEqualStrings(first_checks, parallel_checks);
 
     var old_index_digest: [64]u8 = undefined;
     {
@@ -7647,4 +7723,108 @@ test "example reference-theme: layouts, components, page-local assets" {
     const local_bytes = try readFileAlloc(io, cwd, local_asset, gpa);
     defer gpa.free(local_bytes);
     try std.testing.expect(local_bytes.len > 0);
+}
+
+test "quiet publication-check failure diagnostic is captured with the committed-target wording" {
+    var output: Io.Writer.Allocating = .init(std.testing.allocator);
+    defer output.deinit();
+    try writePublicationChecksFailure(&output.writer, "public", error.CheckerExecutionFailed);
+    try std.testing.expectEqualStrings(
+        "error: publication committed for target 'public', but publication-check evidence was not refreshed: CheckerExecutionFailed\n",
+        output.writer.buffered(),
+    );
+}
+
+test "ordinary Doctor findings do not fail HTML publication" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ordinary-publication-finding", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nOrdinary content finding.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body><div id=duplicate></div><span id=duplicate></span>{{content}}</body></html>");
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    const stats = try compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .quiet = true });
+    try std.testing.expectEqual(@as(usize, 1), stats.pages_written);
+    const inventory_bytes = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(inventory_bytes);
+    const page = try readTargetPayload(io, gpa, dist, "index.html");
+    defer gpa.free(page);
+    var inventory = try std.json.parseFromSlice(std.json.Value, gpa, inventory_bytes, .{});
+    defer inventory.deinit();
+    try expectArtifactRecord(inventory.value, "index.html", "html-page", "html-render", page);
+
+    const checks_bytes = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(checks_bytes);
+    var checks = try std.json.parseFromSlice(std.json.Value, gpa, checks_bytes, .{});
+    defer checks.deinit();
+    const root = checks.value.object;
+    const check_list = root.get("checks").?.array.items;
+    try std.testing.expectEqualStrings("failed", check_list[1].object.get("status").?.string);
+    try std.testing.expectEqualStrings("complete", check_list[1].object.get("coverage").?.string);
+    var found_duplicate = false;
+    for (root.get("findings").?.array.items) |finding| {
+        if (std.mem.eql(u8, finding.object.get("code").?.string, "HTML_DUPLICATE_ID")) found_duplicate = true;
+    }
+    try std.testing.expect(found_duplicate);
+}
+
+test "post-commit checker failure preserves stale checks while exposing changed payload and inventory" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/stale-publication-checks", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nInitial body.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>initial</footer></body></html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const options: CompileOptions = .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .incremental = true, .quiet = true };
+    _ = try compileHtmlSite(io, gpa, options);
+
+    const old_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(old_inventory);
+    const old_checks = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(old_checks);
+    const old_page = try readTargetPayload(io, gpa, dist, "index.html");
+    defer gpa.free(old_page);
+
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nChanged source body.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>changed layout</footer></body></html>");
+    var failure_options = options;
+    failure_options.test_fail_publication_checks = true;
+    try std.testing.expectError(error.PublicationChecksFailed, compileHtmlSite(io, gpa, failure_options));
+
+    const new_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(new_inventory);
+    const new_checks = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(new_checks);
+    const new_page = try readTargetPayload(io, gpa, dist, "index.html");
+    defer gpa.free(new_page);
+    try std.testing.expectEqualStrings(old_checks, new_checks);
+    try std.testing.expect(!std.mem.eql(u8, old_inventory, new_inventory));
+    try std.testing.expect(!std.mem.eql(u8, old_page, new_page));
+    var old_report = try std.json.parseFromSlice(std.json.Value, gpa, old_checks, .{});
+    defer old_report.deinit();
+    const old_binding = old_report.value.object.get("artifact_inventory").?.object.get("sha256").?.string;
+    const new_digest = cache.hexDigest(cache.hashBytes(new_inventory));
+    try std.testing.expect(!std.mem.eql(u8, old_binding, &new_digest));
 }

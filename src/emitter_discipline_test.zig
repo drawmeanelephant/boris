@@ -87,6 +87,14 @@ const modules = [_]Module{
         .source = @embedFile("artifact_inventory.zig"),
     },
     .{
+        .name = "publication_checks.zig",
+        .class = .{ .emitter = .{
+            .encoder = .json_out,
+            .note = "target publication evidence; report fields and Doctor findings delegate to json_out",
+        } },
+        .source = @embedFile("publication_checks.zig"),
+    },
+    .{
         .name = "sitemap.zig",
         .class = .{ .emitter = .{
             .encoder = .sink,
@@ -156,6 +164,7 @@ const modules = [_]Module{
     .{ .name = "pipeline.zig", .class = .other },
     .{ .name = "publication_profile.zig", .class = .other },
     .{ .name = "publication_plan.zig", .class = .{ .emitter = .{ .encoder = .json_out, .note = "canonical normalized publication declaration" } }, .source = @embedFile("publication_plan.zig") },
+    .{ .name = "publication_checks_fixture_test.zig", .class = .other },
     .{ .name = "rag_body.zig", .class = .other },
     .{
         .name = "rss.zig",
