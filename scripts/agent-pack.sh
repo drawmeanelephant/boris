@@ -11,6 +11,10 @@ Usage: scripts/agent-pack.sh [options]
 
 Build and archive the Boris binaries for handoff to another agent.
 
+The root Boris build and every standalone tool with a tools/*/build.zig file
+are built and included automatically. The source-rag tool is part of the root
+build and is included as well.
+
 Options:
   --out DIR       Output directory (default: boris-agent-kit)
   --no-build      Use already-installed binaries; do not run Zig builds
@@ -67,31 +71,54 @@ short_commit=$(git rev-parse --short=12 HEAD)
 zig_version=$(zig version)
 platform=$(uname -s)-$(uname -m)
 
+declare -a tool_build_files=()
+while IFS= read -r build_file; do
+  tool_build_files+=("$build_file")
+done < <(find tools -mindepth 2 -maxdepth 2 -type f -name build.zig -print | LC_ALL=C sort)
+
 if (( do_build )); then
   echo "building root Boris binaries..."
   zig build
-  echo "building standalone developer tools..."
-  zig build --build-file tools/search-index/build.zig
-  zig build --build-file tools/migration-lab/build.zig
-  zig build --build-file tools/docs-maintenance/build.zig
+  for build_file in "${tool_build_files[@]}"; do
+    echo "building standalone tool: ${build_file#tools/}"
+    zig build --build-file "$build_file"
+  done
 fi
 
 declare -a names=(
   boris
   boris-package
   boris-source-rag
-  boris-search-index
-  boris-migration-lab
-  boris-docs-maintenance
 )
 declare -a sources=(
   zig-out/bin/boris
   zig-out/bin/boris-package
   zig-out/bin/boris-source-rag
-  tools/search-index/zig-out/bin/boris-search-index
-  tools/migration-lab/zig-out/bin/boris-migration-lab
-  tools/docs-maintenance/zig-out/bin/boris-docs-maintenance
 )
+
+for build_file in "${tool_build_files[@]}"; do
+  tool_dir=${build_file%/build.zig}
+  tool_bin_dir="$tool_dir/zig-out/bin"
+  found_tool_binary=0
+  while IFS= read -r source; do
+    found_tool_binary=1
+    source_name=${source##*/}
+    for existing_name in "${names[@]}"; do
+      if [[ "$existing_name" == "$source_name" ]]; then
+        echo "duplicate installed executable name: $source_name" >&2
+        echo "standalone tool outputs must have unique names" >&2
+        exit 1
+      fi
+    done
+    names+=("$source_name")
+    sources+=("$source")
+  done < <(find "$tool_bin_dir" -maxdepth 1 -type f -perm -111 -print 2>/dev/null | LC_ALL=C sort)
+  if (( ! found_tool_binary )); then
+    echo "no installed executable found for standalone tool: $build_file" >&2
+    echo "run without --no-build or install an executable from its build.zig" >&2
+    exit 1
+  fi
+done
 
 for source in "${sources[@]}"; do
   if [[ ! -f "$source" || ! -x "$source" ]]; then
