@@ -60,15 +60,22 @@ The input-file inventory deliberately excludes `manifest.json`,
 `expected.json`, and `files.jsonl` themselves to avoid a circular hash. It
 includes pages, include fragments, content-local assets, and theme files.
 After a successful Boris run, `_boris/proof/artifacts.json` is the authoritative
-Boris-owned artifact inventory. Artifact barbs select their path, kind, byte
-count, and SHA-256 from that inventory, then mutate the output while leaving the
-inventory unchanged. `results/output-snapshot.jsonl` is a full-tree harness
-snapshot of the resulting output; it is explicitly non-normative and does not
-declare ownership. `deployment_owned_extra` is therefore absent from
-`artifacts.json` while still appearing in the snapshot.
+Boris-owned artifact inventory. The runner reads and hashes that clean
+publication inventory before applying any post-publication barb, preflights each
+selected artifact's clean bytes, and retains the selected path, kind, byte count,
+and SHA-256 as baseline facts. Byte mutations run before artifact deletions, so
+barbs sharing a publication surface do not invalidate one another's clean
+baseline. The canonical inventory is never mutated or replaced.
+`results/output-snapshot.jsonl` is a full-tree harness snapshot of the resulting
+poisoned output; it is explicitly non-normative and does not declare ownership.
+`deployment_owned_extra` is therefore absent from `artifacts.json` while still
+appearing in the snapshot.
 
 `republish-clean` publishes the same valid source into a clean comparison tree.
-It does not edit or automatically repair the poisoned output tree.
+Each `run` starts by clearing only its owned `results/boris-output` tree, so a
+previous poisoned deployment extra cannot become the next clean baseline.
+`republish-clean` uses a separate `results/republish-clean-output` tree and does
+not edit or automatically repair the poisoned output tree.
 
 ## Profiles, themes, and templates
 
@@ -116,8 +123,8 @@ barbTarget = mix(seed, barbOrdinal + 1) mod pageCount
 
 Graph identity is derived from page index and topology, not from filesystem
 enumeration. Page paths, IDs, parent indices, JSON key order, inventory order,
-and hashes are stable for the same options and source bytes. `run` records
-timing separately because timing is intentionally not deterministic.
+and hashes are stable for the same options and source bytes. `run.json` contains
+structured evidence only; it does not add benchmark timing.
 
 The generator retains only a compact `PagePlan` array (`kind`, guide/article
 ordinals, parent index, and seed). It creates one page AST and one page byte
@@ -160,12 +167,13 @@ masquerade as source or compiler failures.
 
 `run` invokes the supplied Boris binary as a subprocess only because it is an
 evidence collector; it never uses a subprocess to generate Markdown. The
-`boris-testdata-run/3` record at `results/run.json` includes:
+`boris-testdata-run/4` record at `results/run.json` includes:
 
 - expected and actual exit codes plus a pass/fail comparison;
-- elapsed nanoseconds;
 - the Boris binary SHA-256;
 - deterministic baseline and poisoned output-tree SHA-256 values over sorted relative paths and bytes;
-- the canonical artifact-inventory SHA-256 and selected artifact path/kind/byte/digest facts;
-- the non-normative full-tree output-snapshot hash and file count;
+- the clean baseline artifact-inventory path, SHA-256, and `artifactCount` of committed records;
+- selected baseline artifact indexes and path/kind/byte/digest facts;
+- the ordered list of applied post-publication mutations and a canonical-inventory-unchanged assertion;
+- the non-normative full-tree poisoned output-snapshot path, hash, and file count;
 - output file count, stdout, and stderr.

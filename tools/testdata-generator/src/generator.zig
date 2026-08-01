@@ -10,6 +10,7 @@ const Io = std.Io;
 
 pub const max_profile_bytes: usize = 64 * 1024;
 pub const max_template_bytes: usize = 1 * 1024 * 1024;
+pub const run_schema_version = "boris-testdata-run/4";
 
 pub const Profile = struct {
     name: []const u8,
@@ -321,7 +322,7 @@ fn writePage(
         .related_id = related_id,
         .related_source = related_source,
         .seed = barbs.mix(seed, page.index),
-        .has_image = page.index == 0,
+        .has_image = profile.include_assets and page.index == 0,
     };
     if (template_bytes) |template| {
         var document = try markdown.parseTemplate(a, template, .{
@@ -577,11 +578,13 @@ pub fn runFixture(options: RunOptions) !void {
     defer options.allocator.free(html_arg);
     const theme_arg = try std.fmt.allocPrint(options.allocator, "{s}/optional-theme", .{base});
     defer options.allocator.free(theme_arg);
+    const output_abs = try std.fs.path.join(options.allocator, &.{ fixture_abs, "results/boris-output" });
+    defer options.allocator.free(output_abs);
+    if (pathExists(options.io, output_abs)) try deletePath(options.io, output_abs);
 
     var expected = try readExpectedFixture(options.io, options.allocator, fixture_abs);
     defer expected.deinit(options.allocator);
     const expected_code = expected.exit_code;
-    const start = Io.Clock.awake.now(options.io);
     const result = try std.process.run(options.allocator, options.io, .{
         .argv = &.{ boris_abs, "--input", input_arg, "--theme", theme_arg, "--html-dir", html_arg, "--quiet" },
         .cwd = .{ .path = parent },
@@ -590,7 +593,6 @@ pub fn runFixture(options: RunOptions) !void {
     });
     defer options.allocator.free(result.stdout);
     defer options.allocator.free(result.stderr);
-    const elapsed_ns = start.untilNow(options.io, .awake).nanoseconds;
     const actual_code: u8 = switch (result.term) {
         .exited => |code| code,
         else => 255,
@@ -613,59 +615,31 @@ pub fn runFixture(options: RunOptions) !void {
     }
     const output_tree = try hashTree(options.io, options.allocator, fixture_abs, "results/boris-output");
     const output_snapshot = try writeOutputSnapshot(options.io, options.allocator, fixture_abs, "results/boris-output");
-    const passed = actual_code == expected_code;
+    const canonical_inventory_unchanged: ?bool = if (artifact_inventory) |inventory| blk: {
+        const inventory_path = try std.fs.path.join(options.allocator, &.{
+            fixture_abs,
+            "results/boris-output/_boris/proof/artifacts.json",
+        });
+        defer options.allocator.free(inventory_path);
+        const after_hash = try hashFileAbsolute(options.io, inventory_path);
+        break :blk std.mem.eql(u8, &after_hash, &inventory.sha256);
+    } else null;
+    const passed = actual_code == expected_code and (canonical_inventory_unchanged orelse true);
 
-    var fixture = try Io.Dir.openDirAbsolute(options.io, fixture_abs, .{});
-    defer fixture.close(options.io);
-    var output = std.ArrayList(u8).empty;
-    defer output.deinit(options.allocator);
-    try output.appendSlice(options.allocator, "{\n  \"schemaVersion\":\"boris-testdata-run/3\",\n  \"expectedExitCode\":");
-    try appendDecimal(&output, options.allocator, expected_code);
-    try output.appendSlice(options.allocator, ",\n  \"actualExitCode\":");
-    try appendDecimal(&output, options.allocator, actual_code);
-    try output.appendSlice(options.allocator, ",\n  \"passed\":");
-    try output.appendSlice(options.allocator, if (passed) "true" else "false");
-    try output.appendSlice(options.allocator, ",\n  \"elapsedNs\":");
-    try appendDecimal(&output, options.allocator, elapsed_ns);
-    try output.appendSlice(options.allocator, ",\n  \"binarySha256\":");
-    try manifest.appendJsonString(&output, options.allocator, &binary_hash);
-    try output.appendSlice(options.allocator, ",\n  \"baselineOutputTreeSha256\":");
-    try manifest.appendJsonString(&output, options.allocator, &baseline_tree.hash);
-    try output.appendSlice(options.allocator, ",\n  \"baselineOutputFileCount\":");
-    try appendDecimal(&output, options.allocator, baseline_tree.file_count);
-    try output.appendSlice(options.allocator, ",\n  \"outputTreeSha256\":");
-    try manifest.appendJsonString(&output, options.allocator, &output_tree.hash);
-    try output.appendSlice(options.allocator, ",\n  \"outputFileCount\":");
-    try appendDecimal(&output, options.allocator, output_tree.file_count);
-    try output.appendSlice(options.allocator, ",\n  \"artifactInventorySha256\":");
-    if (artifact_inventory) |inventory| {
-        try manifest.appendJsonString(&output, options.allocator, &inventory.sha256);
-    } else {
-        try output.appendSlice(options.allocator, "null");
-    }
-    try output.appendSlice(options.allocator, ",\n  \"artifactInventoryFileCount\":");
-    if (artifact_inventory) |inventory| {
-        try appendDecimal(&output, options.allocator, inventory.count);
-    } else {
-        try output.appendSlice(options.allocator, "null");
-    }
-    try output.appendSlice(options.allocator, ",\n  \"outputSnapshotSha256\":");
-    try manifest.appendJsonString(&output, options.allocator, &output_snapshot.sha256);
-    try output.appendSlice(options.allocator, ",\n  \"outputSnapshotFileCount\":");
-    try appendDecimal(&output, options.allocator, output_snapshot.count);
-    try output.appendSlice(options.allocator, ",\n  \"artifactTargets\":[");
-    if (artifact_inventory) |inventory| {
-        try appendArtifactTargets(&output, options.allocator, expected.assignments, inventory);
-    }
-    try output.appendSlice(options.allocator, "]");
-    try output.appendSlice(options.allocator, ",\n  \"postPublishBarbsApplied\":");
-    try appendDecimal(&output, options.allocator, countPostPublishBarbs(expected.assignments));
-    try output.appendSlice(options.allocator, ",\n  \"stdout\":");
-    try manifest.appendJsonString(&output, options.allocator, result.stdout);
-    try output.appendSlice(options.allocator, ",\n  \"stderr\":");
-    try manifest.appendJsonString(&output, options.allocator, result.stderr);
-    try output.appendSlice(options.allocator, "\n}\n");
-    try fixture.writeFile(options.io, .{ .sub_path = "results/run.json", .data = output.items });
+    try writeRunEvidence(options.io, options.allocator, fixture_abs, .{
+        .expected_code = expected_code,
+        .actual_code = actual_code,
+        .passed = passed,
+        .binary_hash = binary_hash,
+        .baseline_tree = baseline_tree,
+        .artifact_inventory = artifact_inventory,
+        .output_tree = output_tree,
+        .output_snapshot = output_snapshot,
+        .canonical_inventory_unchanged = canonical_inventory_unchanged,
+        .assignments = expected.assignments,
+        .stdout = result.stdout,
+        .stderr = result.stderr,
+    });
 
     if (!passed) return error.BorisExpectationMismatch;
 }
@@ -735,6 +709,110 @@ pub fn republishCleanFixture(options: RunOptions) !void {
 }
 
 const TreeHash = struct { hash: manifest.HashText, file_count: usize };
+
+const RunEvidenceOptions = struct {
+    expected_code: u8,
+    actual_code: u8,
+    passed: bool,
+    binary_hash: manifest.HashText,
+    baseline_tree: TreeHash,
+    artifact_inventory: ?ArtifactInventory,
+    output_tree: TreeHash,
+    output_snapshot: manifest.InventorySummary,
+    canonical_inventory_unchanged: ?bool,
+    assignments: []const barbs.Assignment,
+    stdout: []const u8,
+    stderr: []const u8,
+};
+
+fn writeRunEvidence(
+    io: Io,
+    allocator: std.mem.Allocator,
+    fixture_abs: []const u8,
+    evidence: RunEvidenceOptions,
+) !void {
+    var fixture = try Io.Dir.openDirAbsolute(io, fixture_abs, .{});
+    defer fixture.close(io);
+    var output = std.ArrayList(u8).empty;
+    defer output.deinit(allocator);
+    try output.appendSlice(allocator, "{\n  \"schemaVersion\":");
+    try manifest.appendJsonString(&output, allocator, run_schema_version);
+    try output.appendSlice(allocator, ",\n  \"expectedExitCode\":");
+    try appendDecimal(&output, allocator, evidence.expected_code);
+    try output.appendSlice(allocator, ",\n  \"actualExitCode\":");
+    try appendDecimal(&output, allocator, evidence.actual_code);
+    try output.appendSlice(allocator, ",\n  \"passed\":");
+    try output.appendSlice(allocator, if (evidence.passed) "true" else "false");
+    try output.appendSlice(allocator, ",\n  \"binarySha256\":");
+    try manifest.appendJsonString(&output, allocator, &evidence.binary_hash);
+    try output.appendSlice(allocator, ",\n  \"baselineOutputTreeSha256\":");
+    try manifest.appendJsonString(&output, allocator, &evidence.baseline_tree.hash);
+    try output.appendSlice(allocator, ",\n  \"baselineOutputFileCount\":");
+    try appendDecimal(&output, allocator, evidence.baseline_tree.file_count);
+    try output.appendSlice(allocator, ",\n  \"baselineArtifactInventory\":");
+    if (evidence.artifact_inventory) |inventory| {
+        try output.appendSlice(allocator, "{\"path\":\"results/boris-output/_boris/proof/artifacts.json\",\"sha256\":");
+        try manifest.appendJsonString(&output, allocator, &inventory.sha256);
+        try output.appendSlice(allocator, ",\"artifactCount\":");
+        try appendDecimal(&output, allocator, inventory.count);
+        try output.append(allocator, '}');
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+    try output.appendSlice(allocator, ",\n  \"outputTreeSha256\":");
+    try manifest.appendJsonString(&output, allocator, &evidence.output_tree.hash);
+    try output.appendSlice(allocator, ",\n  \"outputFileCount\":");
+    try appendDecimal(&output, allocator, evidence.output_tree.file_count);
+    try output.appendSlice(allocator, ",\n  \"artifactInventorySha256\":");
+    if (evidence.artifact_inventory) |inventory| {
+        try manifest.appendJsonString(&output, allocator, &inventory.sha256);
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+    try output.appendSlice(allocator, ",\n  \"artifactInventoryFileCount\":");
+    if (evidence.artifact_inventory) |inventory| {
+        try appendDecimal(&output, allocator, inventory.count);
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+    try output.appendSlice(allocator, ",\n  \"outputSnapshotSha256\":");
+    try manifest.appendJsonString(&output, allocator, &evidence.output_snapshot.sha256);
+    try output.appendSlice(allocator, ",\n  \"outputSnapshotFileCount\":");
+    try appendDecimal(&output, allocator, evidence.output_snapshot.count);
+    try output.appendSlice(allocator, ",\n  \"artifactTargets\":[");
+    if (evidence.artifact_inventory) |inventory| {
+        try appendArtifactTargets(&output, allocator, evidence.assignments, inventory);
+    }
+    try output.appendSlice(allocator, "]");
+    try output.appendSlice(allocator, ",\n  \"appliedPostPublishMutations\":[");
+    if (evidence.artifact_inventory != null) {
+        try appendAppliedPostPublishMutations(&output, allocator, evidence.assignments);
+    }
+    try output.appendSlice(allocator, "]");
+    try output.appendSlice(allocator, ",\n  \"postPublishBarbsApplied\":");
+    try appendDecimal(
+        &output,
+        allocator,
+        if (evidence.artifact_inventory != null) countPostPublishBarbs(evidence.assignments) else 0,
+    );
+    try output.appendSlice(allocator, ",\n  \"canonicalArtifactInventoryUnchanged\":");
+    if (evidence.canonical_inventory_unchanged) |unchanged| {
+        try output.appendSlice(allocator, if (unchanged) "true" else "false");
+    } else {
+        try output.appendSlice(allocator, "null");
+    }
+    try output.appendSlice(allocator, ",\n  \"poisonedOutputSnapshot\":{\"path\":\"results/output-snapshot.jsonl\",\"sha256\":");
+    try manifest.appendJsonString(&output, allocator, &evidence.output_snapshot.sha256);
+    try output.appendSlice(allocator, ",\"fileCount\":");
+    try appendDecimal(&output, allocator, evidence.output_snapshot.count);
+    try output.append(allocator, '}');
+    try output.appendSlice(allocator, ",\n  \"stdout\":");
+    try manifest.appendJsonString(&output, allocator, evidence.stdout);
+    try output.appendSlice(allocator, ",\n  \"stderr\":");
+    try manifest.appendJsonString(&output, allocator, evidence.stderr);
+    try output.appendSlice(allocator, "\n}\n");
+    try fixture.writeFile(io, .{ .sub_path = "results/run.json", .data = output.items });
+}
 
 fn hashTree(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u8, relative: []const u8) !TreeHash {
     var root = try Io.Dir.openDirAbsolute(io, fixture_abs, .{ .iterate = true });
@@ -1017,12 +1095,34 @@ fn readArtifactInventory(
     if (wanted.items.len > 0) {
         const selected_count = try scanArtifactInventory(io, allocator, inventory_path, wanted.items, &targets);
         if (selected_count != count) return error.InvalidArtifactInventory;
+        for (wanted.items) |index| {
+            if (!hasTarget(targets.items, index)) return error.InvalidArtifactInventory;
+        }
+        try preflightArtifactTargets(io, allocator, fixture_abs, targets.items);
     }
     return .{
         .sha256 = inventory_hash,
         .count = count,
         .targets = try targets.toOwnedSlice(allocator),
     };
+}
+
+/// Validate every selected artifact against the clean publication before any
+/// post-publication mutation can change the bytes. Later mutations deliberately
+/// use these retained baseline facts without revalidating the poisoned tree.
+fn preflightArtifactTargets(
+    io: Io,
+    allocator: std.mem.Allocator,
+    fixture_abs: []const u8,
+    targets: []const ArtifactTarget,
+) !void {
+    for (targets) |target| {
+        const bytes = try readOutputPath(io, allocator, fixture_abs, target.path);
+        defer allocator.free(bytes);
+        if (@as(u64, bytes.len) != target.bytes) return error.InvalidArtifactInventory;
+        const actual = manifest.sha256Hex(bytes);
+        if (!std.mem.eql(u8, &actual, &target.sha256)) return error.InvalidArtifactInventory;
+    }
 }
 
 fn scanArtifactInventory(
@@ -1303,6 +1403,8 @@ fn appendArtifactTargets(
         first = false;
         try output.appendSlice(allocator, "{\"barb\":");
         try manifest.appendJsonString(output, allocator, barbs.name(assignment.kind));
+        try output.appendSlice(allocator, ",\"baselineIndex\":");
+        try appendDecimal(output, allocator, index);
         try output.appendSlice(allocator, ",\"path\":");
         try manifest.appendJsonString(output, allocator, target.path);
         try output.appendSlice(allocator, ",\"kind\":");
@@ -1315,6 +1417,30 @@ fn appendArtifactTargets(
     }
 }
 
+fn appendAppliedPostPublishMutations(
+    output: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    assignments: []const barbs.Assignment,
+) !void {
+    var first = true;
+    for (assignments) |assignment| {
+        if (!barbs.isPostPublish(assignment.kind)) continue;
+        if (!first) try output.append(allocator, ',');
+        first = false;
+        try output.appendSlice(allocator, "{\"name\":");
+        try manifest.appendJsonString(output, allocator, barbs.name(assignment.kind));
+        try output.appendSlice(allocator, ",\"targetIndex\":");
+        try appendDecimal(output, allocator, assignment.target);
+        try output.appendSlice(allocator, ",\"secondaryIndex\":");
+        if (assignment.secondary) |secondary| {
+            try appendDecimal(output, allocator, secondary);
+        } else {
+            try output.appendSlice(allocator, "null");
+        }
+        try output.append(allocator, '}');
+    }
+}
+
 fn applyPostPublishBarbs(
     io: Io,
     allocator: std.mem.Allocator,
@@ -1323,48 +1449,43 @@ fn applyPostPublishBarbs(
     assignments: []const barbs.Assignment,
     artifact_inventory: ArtifactInventory,
 ) !void {
-    var pass: usize = 0;
-    while (pass < 2) : (pass += 1) {
-        for (assignments) |assignment| {
-            if (!barbs.isPostPublish(assignment.kind)) continue;
-            if ((pass == 0 and assignment.kind == .artifact_missing) or
-                (pass == 1 and assignment.kind != .artifact_missing)) continue;
-            if (assignment.target >= plan.pages.len) return error.InvalidFixture;
-            switch (assignment.kind) {
-                .html_missing_local_route,
-                .html_missing_fragment,
-                .html_duplicate_id,
-                .html_unclosed_structure,
-                => try mutateHtmlOutput(io, allocator, fixture_abs, plan.pages[assignment.target], assignment.kind),
-                .artifact_missing => {
-                    const target = artifactTargetForAssignment(artifact_inventory, assignment) orelse return error.InvalidArtifactInventory;
-                    try verifyArtifactTarget(io, allocator, fixture_abs, target);
-                    try deleteOutputPath(io, allocator, fixture_abs, target.path);
-                },
-                .artifact_digest_mismatch => {
-                    const target = artifactTargetForAssignment(artifact_inventory, assignment) orelse return error.InvalidArtifactInventory;
-                    try verifyArtifactTarget(io, allocator, fixture_abs, target);
-                    try mutateDigestOutput(io, allocator, fixture_abs, target.path);
-                },
-                .search_stale_title => try mutateSearchTitle(io, allocator, fixture_abs),
-                .deployment_owned_extra => try writeDeploymentOwnedExtra(io, fixture_abs),
-                else => unreachable,
-            }
+    // Apply byte-preserving and byte-changing mutations first. Artifact
+    // deletion is intentionally last so a missing-artifact barb cannot remove
+    // the surface needed by another selected mutation. All artifact targets
+    // were preflighted from the clean publication before this function ran.
+    for (assignments) |assignment| {
+        if (!barbs.isPostPublish(assignment.kind) or assignment.kind == .artifact_missing) continue;
+        if (assignment.target >= plan.pages.len) return error.InvalidFixture;
+        switch (assignment.kind) {
+            .html_missing_local_route,
+            .html_missing_fragment,
+            .html_duplicate_id,
+            .html_unclosed_structure,
+            => try mutateHtmlOutput(io, allocator, fixture_abs, plan.pages[assignment.target], assignment.kind),
+            .artifact_digest_mismatch => {
+                const target = artifactTargetForAssignment(artifact_inventory, assignment) orelse return error.InvalidArtifactInventory;
+                try mutateDigestOutput(io, allocator, fixture_abs, target.path);
+            },
+            .search_stale_title => try mutateSearchTitle(io, allocator, fixture_abs),
+            .deployment_owned_extra => try writeDeploymentOwnedExtra(io, fixture_abs),
+            else => unreachable,
         }
+    }
+
+    // A missing artifact is a final-state mutation. If another mutation shares
+    // its path, both mutations are still recorded and the deletion wins in the
+    // poisoned tree without invalidating clean-baseline bookkeeping.
+    for (assignments) |assignment| {
+        if (assignment.kind != .artifact_missing) continue;
+        if (assignment.target >= plan.pages.len) return error.InvalidFixture;
+        const target = artifactTargetForAssignment(artifact_inventory, assignment) orelse return error.InvalidArtifactInventory;
+        try deleteOutputPath(io, allocator, fixture_abs, target.path);
     }
 }
 
 fn artifactTargetForAssignment(inventory: ArtifactInventory, assignment: barbs.Assignment) ?*const ArtifactTarget {
     if (inventory.count == 0) return null;
     return inventory.targetFor(assignment.target % inventory.count);
-}
-
-fn verifyArtifactTarget(io: Io, allocator: std.mem.Allocator, fixture_abs: []const u8, target: *const ArtifactTarget) !void {
-    const bytes = try readOutputPath(io, allocator, fixture_abs, target.path);
-    defer allocator.free(bytes);
-    if (@as(u64, bytes.len) != target.bytes) return error.InvalidArtifactInventory;
-    const actual = manifest.sha256Hex(bytes);
-    if (!std.mem.eql(u8, &actual, &target.sha256)) return error.InvalidArtifactInventory;
 }
 
 fn outputPagePath(allocator: std.mem.Allocator, page: graph.PagePlan) ![]u8 {
@@ -1546,4 +1667,267 @@ test "builtin profiles expose ideal, nightmare, and preserved cases" {
     try std.testing.expect(builtinProfile("nightmare-v1").?.default_barbs.len > 5);
     try std.testing.expectEqual(@as(usize, 1), builtinProfile("preserved-edge-v1").?.default_barbs.len);
     try std.testing.expectEqual(@as(usize, 8), builtinProfile("mild-poison-v1").?.default_barbs.len);
+}
+
+test "asset-excluded profiles do not emit dangling generated image references" {
+    const a = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const output_path = try std.fmt.allocPrint(a, ".zig-cache/tmp/{s}/preserved-edge", .{tmp.sub_path});
+    defer a.free(output_path);
+    var generated = try generate(.{
+        .io = io,
+        .allocator = a,
+        .output_path = output_path,
+        .pages = 24,
+        .seed = 20260801,
+        .profile_selector = "preserved-edge-v1",
+    });
+    defer {
+        a.free(generated.assignments);
+        generated.profile.deinit(a);
+    }
+
+    const index_path = try std.fmt.allocPrint(a, "{s}/content/index.md", .{output_path});
+    defer a.free(index_path);
+    const index_bytes = try readFilePath(io, a, index_path, 256 * 1024);
+    defer a.free(index_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, index_bytes, "![Generated diagram]") == null);
+
+    const assets_path = try std.fmt.allocPrint(a, "{s}/content/index.assets", .{output_path});
+    defer a.free(assets_path);
+    try std.testing.expect(!pathExists(io, assets_path));
+
+    var plan = try graph.GraphPlan.init(a, generated.page_count, 20260801);
+    defer plan.deinit(a);
+    const assignment = generated.assignments[0];
+    var source_buffer: [224]u8 = undefined;
+    const source_path = try graph.GraphPlan.sourcePath(plan.pages[assignment.target], &source_buffer);
+    const edge_path = try std.fmt.allocPrint(a, "{s}/content/{s}", .{ output_path, source_path });
+    defer a.free(edge_path);
+    const edge_bytes = try readFilePath(io, a, edge_path, 256 * 1024);
+    defer a.free(edge_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, edge_bytes, "[escape](../../../../outside.md)") != null);
+}
+
+test "artifact mutations use clean baseline targets across overlapping surfaces" {
+    const a = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_arena = std.heap.ArenaAllocator.init(a);
+    defer path_arena.deinit();
+    const pa = path_arena.allocator();
+
+    const fixture_rel = try std.fmt.allocPrint(pa, ".zig-cache/tmp/{s}/artifact-overlap", .{tmp.sub_path});
+    const output_rel = try std.fmt.allocPrint(pa, "{s}/results/boris-output", .{fixture_rel});
+    const proof_rel = try std.fmt.allocPrint(pa, "{s}/_boris/proof", .{output_rel});
+    const cwd = Io.Dir.cwd();
+    try cwd.createDirPath(io, proof_rel);
+
+    const baseline = "<html><body><main>baseline</main></body></html>\n";
+    const output_file_rel = try std.fmt.allocPrint(pa, "{s}/index.html", .{output_rel});
+    try cwd.writeFile(io, .{ .sub_path = output_file_rel, .data = baseline });
+    const digest = manifest.sha256Hex(baseline);
+    const inventory = try std.fmt.allocPrint(
+        pa,
+        "{{\n  \"format\":\"boris-publication-artifacts\",\n  \"schema_version\":1,\n  \"target\":\"default\",\n  \"artifacts\":[{{\"path\":\"index.html\",\"kind\":\"html-page\",\"producer\":\"html-render\",\"required\":true,\"status\":\"committed\",\"bytes\":{d},\"sha256\":\"{s}\",\"format_version\":null}}]\n}}\n",
+        .{ baseline.len, &digest },
+    );
+    const inventory_rel = try std.fmt.allocPrint(pa, "{s}/artifacts.json", .{proof_rel});
+    try cwd.writeFile(io, .{ .sub_path = inventory_rel, .data = inventory });
+
+    const cwd_path = try std.process.currentPathAlloc(io, a);
+    defer a.free(cwd_path);
+    const fixture_abs = try std.fs.path.resolve(a, &.{ cwd_path, fixture_rel });
+    defer a.free(fixture_abs);
+    const overlap_assignments = [_]barbs.Assignment{
+        .{ .kind = .html_duplicate_id, .target = 0 },
+        .{ .kind = .artifact_digest_mismatch, .target = 0 },
+    };
+    var selected = try readArtifactInventory(io, a, fixture_abs, &overlap_assignments);
+    defer selected.deinit(a);
+    try std.testing.expectEqual(@as(usize, 1), selected.targets.len);
+    try std.testing.expectEqualStrings("index.html", selected.targets[0].path);
+    try std.testing.expectEqual(@as(u64, baseline.len), selected.targets[0].bytes);
+    try std.testing.expectEqual(digest, selected.targets[0].sha256);
+
+    var plan = try graph.GraphPlan.init(a, 1, 20260801);
+    defer plan.deinit(a);
+    try applyPostPublishBarbs(io, a, fixture_abs, &plan, &overlap_assignments, selected);
+    const mutated_path = try std.fs.path.join(a, &.{ fixture_abs, "results/boris-output/index.html" });
+    defer a.free(mutated_path);
+    const mutated = try readFileAbsolute(io, a, mutated_path, 256 * 1024);
+    defer a.free(mutated);
+    try std.testing.expect(std.mem.indexOf(u8, mutated, "boris-testdata-duplicate-id") != null);
+    const mutated_digest = manifest.sha256Hex(mutated);
+    try std.testing.expect(!std.mem.eql(u8, &mutated_digest, &digest));
+    const inventory_path = try std.fs.path.join(a, &.{ fixture_abs, "results/boris-output/_boris/proof/artifacts.json" });
+    defer a.free(inventory_path);
+    const after_overlap_hash = try hashFileAbsolute(io, inventory_path);
+    try std.testing.expectEqual(selected.sha256, after_overlap_hash);
+
+    try cwd.writeFile(io, .{ .sub_path = output_file_rel, .data = baseline });
+    const missing_assignments = [_]barbs.Assignment{.{ .kind = .artifact_missing, .target = 0 }};
+    try applyPostPublishBarbs(io, a, fixture_abs, &plan, &missing_assignments, selected);
+    try std.testing.expect(!pathExists(io, mutated_path));
+    const after_missing_hash = try hashFileAbsolute(io, inventory_path);
+    try std.testing.expectEqual(selected.sha256, after_missing_hash);
+}
+
+test "successful run evidence is versioned, path-valid, and deterministic" {
+    const a = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_arena = std.heap.ArenaAllocator.init(a);
+    defer path_arena.deinit();
+    const pa = path_arena.allocator();
+
+    const fixture_rel = try std.fmt.allocPrint(pa, ".zig-cache/tmp/{s}/run-evidence", .{tmp.sub_path});
+    const output_rel = try std.fmt.allocPrint(pa, "{s}/results/boris-output", .{fixture_rel});
+    const proof_rel = try std.fmt.allocPrint(pa, "{s}/_boris/proof", .{output_rel});
+    const cwd = Io.Dir.cwd();
+    try cwd.createDirPath(io, proof_rel);
+
+    const baseline = "<html><body><main>baseline</main></body></html>\n";
+    const output_file_rel = try std.fmt.allocPrint(pa, "{s}/index.html", .{output_rel});
+    try cwd.writeFile(io, .{ .sub_path = output_file_rel, .data = baseline });
+    const digest = manifest.sha256Hex(baseline);
+    const inventory = try std.fmt.allocPrint(
+        pa,
+        "{{\n  \"format\":\"boris-publication-artifacts\",\n  \"schema_version\":1,\n  \"target\":\"default\",\n  \"artifacts\":[{{\"path\":\"index.html\",\"kind\":\"html-page\",\"producer\":\"html-render\",\"required\":true,\"status\":\"committed\",\"bytes\":{d},\"sha256\":\"{s}\",\"format_version\":null}}]\n}}\n",
+        .{ baseline.len, &digest },
+    );
+    const inventory_rel = try std.fmt.allocPrint(pa, "{s}/artifacts.json", .{proof_rel});
+    try cwd.writeFile(io, .{ .sub_path = inventory_rel, .data = inventory });
+
+    const cwd_path = try std.process.currentPathAlloc(io, a);
+    defer a.free(cwd_path);
+    const fixture_abs = try std.fs.path.resolve(a, &.{ cwd_path, fixture_rel });
+    defer a.free(fixture_abs);
+    const assignments = [_]barbs.Assignment{
+        .{ .kind = .html_missing_local_route, .target = 0 },
+        .{ .kind = .html_missing_fragment, .target = 0 },
+        .{ .kind = .html_duplicate_id, .target = 0 },
+        .{ .kind = .html_unclosed_structure, .target = 0 },
+        .{ .kind = .artifact_missing, .target = 0 },
+        .{ .kind = .artifact_digest_mismatch, .target = 0 },
+        .{ .kind = .search_stale_title, .target = 0 },
+        .{ .kind = .deployment_owned_extra, .target = 0 },
+    };
+    var artifact_inventory = try readArtifactInventory(io, a, fixture_abs, &assignments);
+    defer artifact_inventory.deinit(a);
+    const baseline_tree = try hashTree(io, a, fixture_abs, "results/boris-output");
+    const snapshot = try writeOutputSnapshot(io, a, fixture_abs, "results/boris-output");
+    const evidence = RunEvidenceOptions{
+        .expected_code = 0,
+        .actual_code = 0,
+        .passed = true,
+        .binary_hash = manifest.sha256Hex("test-boris-binary"),
+        .baseline_tree = baseline_tree,
+        .artifact_inventory = artifact_inventory,
+        .output_tree = baseline_tree,
+        .output_snapshot = snapshot,
+        .canonical_inventory_unchanged = true,
+        .assignments = &assignments,
+        .stdout = "",
+        .stderr = "",
+    };
+    try writeRunEvidence(io, a, fixture_abs, evidence);
+
+    const run_path = try std.fs.path.join(a, &.{ fixture_abs, "results/run.json" });
+    defer a.free(run_path);
+    const first_run = try readFileAbsolute(io, a, run_path, 256 * 1024);
+    defer a.free(first_run);
+    const parsed = try std.json.parseFromSlice(std.json.Value, a, first_run, .{});
+    defer parsed.deinit();
+    const run = switch (parsed.value) {
+        .object => |object| object,
+        else => return error.InvalidFixture,
+    };
+    const schema = switch (run.get("schemaVersion") orelse return error.InvalidFixture) {
+        .string => |value| value,
+        else => return error.InvalidFixture,
+    };
+    try std.testing.expectEqualStrings(run_schema_version, schema);
+    try std.testing.expect(run.get("elapsedNs") == null);
+
+    const snapshot_object = switch (run.get("poisonedOutputSnapshot") orelse return error.InvalidFixture) {
+        .object => |object| object,
+        else => return error.InvalidFixture,
+    };
+    const snapshot_path = switch (snapshot_object.get("path") orelse return error.InvalidFixture) {
+        .string => |value| value,
+        else => return error.InvalidFixture,
+    };
+    try std.testing.expectEqualStrings("results/output-snapshot.jsonl", snapshot_path);
+    const resolved_snapshot_path = try std.fs.path.join(a, &.{ fixture_abs, snapshot_path });
+    defer a.free(resolved_snapshot_path);
+    try std.testing.expect(pathExists(io, resolved_snapshot_path));
+    const snapshot_bytes = try readFileAbsolute(io, a, resolved_snapshot_path, 256 * 1024);
+    defer a.free(snapshot_bytes);
+    const snapshot_hash = manifest.sha256Hex(snapshot_bytes);
+    const recorded_snapshot_hash = switch (snapshot_object.get("sha256") orelse return error.InvalidFixture) {
+        .string => |value| value,
+        else => return error.InvalidFixture,
+    };
+    try std.testing.expectEqualStrings(&snapshot_hash, recorded_snapshot_hash);
+    const recorded_snapshot_count = switch (snapshot_object.get("fileCount") orelse return error.InvalidFixture) {
+        .integer => |value| @as(usize, @intCast(value)),
+        else => return error.InvalidFixture,
+    };
+    var actual_snapshot_count: usize = 0;
+    var snapshot_lines = std.mem.splitScalar(u8, snapshot_bytes, '\n');
+    while (snapshot_lines.next()) |line| {
+        if (line.len > 0) actual_snapshot_count += 1;
+    }
+    try std.testing.expectEqual(snapshot.count, actual_snapshot_count);
+    try std.testing.expectEqual(actual_snapshot_count, recorded_snapshot_count);
+
+    const baseline_inventory = switch (run.get("baselineArtifactInventory") orelse return error.InvalidFixture) {
+        .object => |object| object,
+        else => return error.InvalidFixture,
+    };
+    const recorded_artifact_count = switch (baseline_inventory.get("artifactCount") orelse return error.InvalidFixture) {
+        .integer => |value| @as(usize, @intCast(value)),
+        else => return error.InvalidFixture,
+    };
+    try std.testing.expectEqual(artifact_inventory.count, recorded_artifact_count);
+
+    const applied = switch (run.get("appliedPostPublishMutations") orelse return error.InvalidFixture) {
+        .array => |array| array.items,
+        else => return error.InvalidFixture,
+    };
+    try std.testing.expectEqual(assignments.len, applied.len);
+    for (assignments, 0..) |assignment, index| {
+        const mutation = switch (applied[index]) {
+            .object => |object| object,
+            else => return error.InvalidFixture,
+        };
+        const name = switch (mutation.get("name") orelse return error.InvalidFixture) {
+            .string => |value| value,
+            else => return error.InvalidFixture,
+        };
+        try std.testing.expectEqualStrings(barbs.name(assignment.kind), name);
+    }
+    try std.testing.expectEqual(@as(usize, 8), applied.len);
+    try std.testing.expectEqual(@as(usize, 8), switch (run.get("postPublishBarbsApplied") orelse return error.InvalidFixture) {
+        .integer => |value| @as(usize, @intCast(value)),
+        else => return error.InvalidFixture,
+    });
+    try std.testing.expect(switch (run.get("canonicalArtifactInventoryUnchanged") orelse return error.InvalidFixture) {
+        .bool => |value| value,
+        else => false,
+    });
+
+    const repeated_snapshot = try writeOutputSnapshot(io, a, fixture_abs, "results/boris-output");
+    try std.testing.expectEqual(snapshot.count, repeated_snapshot.count);
+    try std.testing.expectEqual(snapshot.sha256, repeated_snapshot.sha256);
+    try writeRunEvidence(io, a, fixture_abs, evidence);
+    const second_run = try readFileAbsolute(io, a, run_path, 256 * 1024);
+    defer a.free(second_run);
+    try std.testing.expectEqualSlices(u8, first_run, second_run);
 }
