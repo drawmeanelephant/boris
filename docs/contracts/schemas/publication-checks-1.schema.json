@@ -12,9 +12,23 @@
     "artifact_inventory": { "$ref": "#/$defs/inventory_binding" },
     "checks": {
       "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/check",
+          "properties": { "id": { "const": "artifact-integrity" } }
+        },
+        {
+          "$ref": "#/$defs/check",
+          "properties": { "id": { "const": "rendered-html" } }
+        },
+        {
+          "$ref": "#/$defs/check",
+          "properties": { "id": { "const": "rendered-search" } }
+        }
+      ],
+      "items": false,
       "minItems": 3,
-      "maxItems": 3,
-      "items": { "$ref": "#/$defs/check" }
+      "maxItems": 3
     },
     "findings": {
       "type": "array",

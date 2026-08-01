@@ -211,31 +211,265 @@ pub const ParseError = std.mem.Allocator.Error || error{
     NonCanonicalInventoryOrder,
 };
 
-fn valueString(value: std.json.Value) ?[]const u8 {
-    return switch (value) {
-        .string => |string| string,
+fn jsonTokenText(token: std.json.Token) ?[]const u8 {
+    return switch (token) {
+        .string => |value| value,
+        .allocated_string => |value| value,
+        .number => |value| value,
+        .allocated_number => |value| value,
         else => null,
     };
 }
 
-fn valueInteger(value: std.json.Value) ?i64 {
-    return switch (value) {
-        .integer => |integer| integer,
-        else => null,
+fn freeJsonToken(gpa: std.mem.Allocator, token: std.json.Token) void {
+    switch (token) {
+        .allocated_string => |value| gpa.free(value),
+        .allocated_number => |value| gpa.free(value),
+        else => {},
+    }
+}
+
+fn nextJsonToken(reader: *std.json.Reader) ParseError!std.json.Token {
+    return reader.next() catch |err| switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        else => error.InvalidInventory,
     };
 }
 
-fn valueBool(value: std.json.Value) ?bool {
-    return switch (value) {
-        .bool => |boolean| boolean,
-        else => null,
+fn nextJsonAllocToken(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    max_value_len: usize,
+) ParseError!std.json.Token {
+    return reader.nextAllocMax(gpa, .alloc_if_needed, max_value_len) catch |err| switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        else => error.InvalidInventory,
     };
 }
 
-fn hasExactFields(object: std.json.ObjectMap, fields: []const []const u8) bool {
-    if (object.count() != fields.len) return false;
-    for (fields) |field| if (object.get(field) == null) return false;
-    return true;
+fn readJsonString(gpa: std.mem.Allocator, reader: *std.json.Reader) ParseError![]u8 {
+    const token = reader.nextAllocMax(gpa, .alloc_always, 4 * 1024 * 1024) catch |err| {
+        return switch (err) {
+            error.OutOfMemory => error.OutOfMemory,
+            else => error.InvalidInventory,
+        };
+    };
+    switch (token) {
+        .allocated_string => |value| return value,
+        .string => |value| return gpa.dupe(u8, value),
+        else => {
+            freeJsonToken(gpa, token);
+            return error.InvalidInventory;
+        },
+    }
+}
+
+fn readJsonInteger(gpa: std.mem.Allocator, reader: *std.json.Reader) ParseError!u64 {
+    const token = try nextJsonAllocToken(gpa, reader, 64);
+    defer freeJsonToken(gpa, token);
+    const value = jsonTokenText(token) orelse return error.InvalidInventory;
+    return std.fmt.parseInt(u64, value, 10) catch return error.InvalidInventory;
+}
+
+fn readJsonBool(reader: *std.json.Reader) ParseError!bool {
+    return switch (try nextJsonToken(reader)) {
+        .true => true,
+        .false => false,
+        else => error.InvalidInventory,
+    };
+}
+
+fn freeRecord(gpa: std.mem.Allocator, record: Record) void {
+    gpa.free(record.path);
+    gpa.free(record.producer);
+    if (record.format_version) |version| gpa.free(version);
+}
+
+fn parseRecordStreamAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader) ParseError!Record {
+    var record: Record = undefined;
+    record.path = &.{};
+    record.producer = &.{};
+    record.format_version = null;
+    errdefer freeRecord(gpa, record);
+
+    var have_path = false;
+    var have_kind = false;
+    var have_producer = false;
+    var have_required = false;
+    var have_status = false;
+    var have_bytes = false;
+    var have_sha256 = false;
+    var have_format_version = false;
+
+    while (true) {
+        const key_token = try nextJsonAllocToken(gpa, reader, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, key_token);
+        const key = jsonTokenText(key_token) orelse return error.InvalidInventory;
+
+        if (std.mem.eql(u8, key, "path")) {
+            if (have_path) return error.InvalidInventory;
+            record.path = try readJsonString(gpa, reader);
+            have_path = true;
+        } else if (std.mem.eql(u8, key, "kind")) {
+            if (have_kind) return error.InvalidInventory;
+            const value = try readJsonString(gpa, reader);
+            defer gpa.free(value);
+            record.kind = Kind.parse(value) orelse return error.InvalidInventory;
+            have_kind = true;
+        } else if (std.mem.eql(u8, key, "producer")) {
+            if (have_producer) return error.InvalidInventory;
+            record.producer = try readJsonString(gpa, reader);
+            have_producer = true;
+        } else if (std.mem.eql(u8, key, "required")) {
+            if (have_required) return error.InvalidInventory;
+            record.required = try readJsonBool(reader);
+            have_required = true;
+        } else if (std.mem.eql(u8, key, "status")) {
+            if (have_status) return error.InvalidInventory;
+            const value = try readJsonString(gpa, reader);
+            defer gpa.free(value);
+            record.status = Status.parse(value) orelse return error.InvalidInventory;
+            have_status = true;
+        } else if (std.mem.eql(u8, key, "bytes")) {
+            if (have_bytes) return error.InvalidInventory;
+            const value = try readJsonInteger(gpa, reader);
+            if (value > std.math.maxInt(usize)) return error.InvalidInventory;
+            record.bytes = @intCast(value);
+            have_bytes = true;
+        } else if (std.mem.eql(u8, key, "sha256")) {
+            if (have_sha256) return error.InvalidInventory;
+            const value = try readJsonString(gpa, reader);
+            defer gpa.free(value);
+            if (!validDigest(value)) return error.InvalidInventory;
+            @memcpy(&record.sha256, value);
+            have_sha256 = true;
+        } else if (std.mem.eql(u8, key, "format_version")) {
+            if (have_format_version) return error.InvalidInventory;
+            const token = try nextJsonAllocToken(gpa, reader, 4096);
+            defer freeJsonToken(gpa, token);
+            switch (token) {
+                .null => record.format_version = null,
+                .string => |value| {
+                    if (value.len == 0) return error.InvalidInventory;
+                    record.format_version = try gpa.dupe(u8, value);
+                },
+                .allocated_string => |value| {
+                    if (value.len == 0) return error.InvalidInventory;
+                    record.format_version = try gpa.dupe(u8, value);
+                },
+                else => return error.InvalidInventory,
+            }
+            have_format_version = true;
+        } else {
+            return error.InvalidInventory;
+        }
+    }
+
+    if (!have_path) return error.InvalidInventory;
+    if (!validateRelativePath(record.path) or
+        pathsOverlap(record.path, output_path) or pathsOverlap(record.path, checks_output_path))
+        return error.InvalidInventoryPath;
+    if (!have_kind or !have_producer or !have_required or !have_status or !have_bytes or
+        !have_sha256 or !have_format_version) return error.InvalidInventory;
+    if (!std.mem.eql(u8, record.producer, record.kind.producerName())) return error.InvalidInventory;
+    return record;
+}
+
+/// Strictly parse an inventory from a streaming JSON reader. The parser keeps
+/// only canonical record metadata and never builds a generic JSON DOM.
+pub fn parseStream(
+    gpa: std.mem.Allocator,
+    input: *std.Io.Reader,
+    expected_target: []const u8,
+) ParseError!Inventory {
+    if (expected_target.len == 0) return error.InvalidInventory;
+    var reader = std.json.Reader.init(gpa, input);
+    defer reader.deinit();
+
+    switch (try nextJsonToken(&reader)) {
+        .object_begin => {},
+        else => return error.InvalidInventory,
+    }
+
+    var have_format = false;
+    var have_version = false;
+    var have_target = false;
+    var have_artifacts = false;
+    var target: []u8 = &.{};
+    errdefer if (target.len != 0) gpa.free(target);
+    var records: std.ArrayList(Record) = .empty;
+    errdefer {
+        for (records.items) |record| freeRecord(gpa, record);
+        records.deinit(gpa);
+    }
+
+    while (true) {
+        const key_token = try nextJsonAllocToken(gpa, &reader, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, key_token);
+        const key = jsonTokenText(key_token) orelse return error.InvalidInventory;
+
+        if (std.mem.eql(u8, key, "format")) {
+            if (have_format) return error.InvalidInventory;
+            const value = try readJsonString(gpa, &reader);
+            defer gpa.free(value);
+            if (!std.mem.eql(u8, value, artifact_format)) return error.InvalidInventoryFormat;
+            have_format = true;
+        } else if (std.mem.eql(u8, key, "schema_version")) {
+            if (have_version) return error.InvalidInventory;
+            if (try readJsonInteger(gpa, &reader) != schema_version) return error.UnsupportedInventoryVersion;
+            have_version = true;
+        } else if (std.mem.eql(u8, key, "target")) {
+            if (have_target) return error.InvalidInventory;
+            target = try readJsonString(gpa, &reader);
+            if (target.len == 0) return error.InvalidInventory;
+            if (!std.mem.eql(u8, target, expected_target)) return error.InventoryTargetMismatch;
+            have_target = true;
+        } else if (std.mem.eql(u8, key, "artifacts")) {
+            if (have_artifacts) return error.InvalidInventory;
+            have_artifacts = true;
+            switch (try nextJsonToken(&reader)) {
+                .array_begin => {},
+                else => return error.InvalidInventory,
+            }
+            while (true) {
+                switch (try nextJsonToken(&reader)) {
+                    .array_end => break,
+                    .object_begin => {
+                        const record = try parseRecordStreamAfterBegin(gpa, &reader);
+                        errdefer freeRecord(gpa, record);
+                        try records.append(gpa, record);
+                    },
+                    else => return error.InvalidInventory,
+                }
+            }
+        } else {
+            return error.InvalidInventory;
+        }
+    }
+
+    if (!have_format or !have_version or !have_target or !have_artifacts) return error.InvalidInventory;
+    if (try nextJsonToken(&reader) != .end_of_document) return error.InvalidInventory;
+    for (records.items, 0..) |record, index| {
+        if (index == 0) continue;
+        const previous = records.items[index - 1];
+        if (std.mem.eql(u8, record.path, previous.path)) return error.DuplicateInventoryPath;
+        if (recordLess({}, record, previous)) return error.NonCanonicalInventoryOrder;
+    }
+
+    return .{
+        .gpa = gpa,
+        .target = target,
+        .records = try records.toOwnedSlice(gpa),
+        .owns_strings = true,
+    };
 }
 
 fn validDigest(value: []const u8) bool {
@@ -246,136 +480,11 @@ fn validDigest(value: []const u8) bool {
     return true;
 }
 
-fn parseRecord(
-    gpa: std.mem.Allocator,
-    value: std.json.Value,
-) ParseError!Record {
-    const object = switch (value) {
-        .object => |object| object,
-        else => return error.InvalidInventory,
-    };
-    if (!hasExactFields(object, &.{
-        "path",
-        "kind",
-        "producer",
-        "required",
-        "status",
-        "bytes",
-        "sha256",
-        "format_version",
-    })) return error.InvalidInventory;
-
-    const path = valueString(object.get("path").?) orelse return error.InvalidInventory;
-    if (!validateRelativePath(path) or
-        pathsOverlap(path, output_path) or
-        pathsOverlap(path, checks_output_path)) return error.InvalidInventoryPath;
-
-    const kind_name = valueString(object.get("kind").?) orelse return error.InvalidInventory;
-    const kind = Kind.parse(kind_name) orelse return error.InvalidInventory;
-
-    const producer = valueString(object.get("producer").?) orelse return error.InvalidInventory;
-    if (!std.mem.eql(u8, producer, kind.producerName())) return error.InvalidInventory;
-
-    const required = valueBool(object.get("required").?) orelse return error.InvalidInventory;
-    const status_name = valueString(object.get("status").?) orelse return error.InvalidInventory;
-    const status = Status.parse(status_name) orelse return error.InvalidInventory;
-
-    const bytes_integer = valueInteger(object.get("bytes").?) orelse return error.InvalidInventory;
-    if (bytes_integer < 0) return error.InvalidInventory;
-    const bytes_u64: u64 = @intCast(bytes_integer);
-    if (bytes_u64 > std.math.maxInt(usize)) return error.InvalidInventory;
-
-    const digest = valueString(object.get("sha256").?) orelse return error.InvalidInventory;
-    if (!validDigest(digest)) return error.InvalidInventory;
-
-    const format_version_value = object.get("format_version").?;
-    const format_version = switch (format_version_value) {
-        .null => null,
-        .string => |version| if (version.len == 0) return error.InvalidInventory else try gpa.dupe(u8, version),
-        else => return error.InvalidInventory,
-    };
-    errdefer if (format_version) |version| gpa.free(version);
-
-    const owned_path = try gpa.dupe(u8, path);
-    errdefer gpa.free(owned_path);
-    const owned_producer = try gpa.dupe(u8, producer);
-    errdefer gpa.free(owned_producer);
-    var owned_digest: [64]u8 = undefined;
-    @memcpy(&owned_digest, digest);
-    return .{
-        .path = owned_path,
-        .kind = kind,
-        .producer = owned_producer,
-        .required = required,
-        .status = status,
-        .bytes = @intCast(bytes_u64),
-        .sha256 = owned_digest,
-        .format_version = format_version,
-    };
-}
-
 /// Strictly parse the canonical target-local inventory used by publication
 /// checks. The returned strings are owned by the returned Inventory.
 pub fn parse(gpa: std.mem.Allocator, bytes: []const u8, expected_target: []const u8) ParseError!Inventory {
-    if (expected_target.len == 0) return error.InvalidInventory;
-
-    var parsed = std.json.parseFromSlice(std.json.Value, gpa, bytes, .{}) catch |err| switch (err) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => return error.InvalidInventory,
-    };
-    defer parsed.deinit();
-
-    const root = switch (parsed.value) {
-        .object => |object| object,
-        else => return error.InvalidInventory,
-    };
-    if (!hasExactFields(root, &.{ "format", "schema_version", "target", "artifacts" })) {
-        return error.InvalidInventory;
-    }
-
-    const format = valueString(root.get("format").?) orelse return error.InvalidInventoryFormat;
-    if (!std.mem.eql(u8, format, artifact_format)) return error.InvalidInventoryFormat;
-    const version = valueInteger(root.get("schema_version").?) orelse return error.UnsupportedInventoryVersion;
-    if (version != schema_version) return error.UnsupportedInventoryVersion;
-    const target = valueString(root.get("target").?) orelse return error.InvalidInventory;
-    if (target.len == 0) return error.InvalidInventory;
-    if (!std.mem.eql(u8, target, expected_target)) return error.InventoryTargetMismatch;
-
-    const artifacts = switch (root.get("artifacts").?) {
-        .array => |array| array.items,
-        else => return error.InvalidInventory,
-    };
-
-    const owned_target = try gpa.dupe(u8, target);
-    errdefer gpa.free(owned_target);
-    const records = try gpa.alloc(Record, artifacts.len);
-    var filled: usize = 0;
-    errdefer {
-        for (records[0..filled]) |record| {
-            gpa.free(record.path);
-            gpa.free(record.producer);
-            if (record.format_version) |format_version| gpa.free(format_version);
-        }
-        gpa.free(records);
-    }
-
-    for (artifacts) |artifact| {
-        records[filled] = try parseRecord(gpa, artifact);
-        filled += 1;
-    }
-    for (records, 0..) |record, index| {
-        if (index == 0) continue;
-        const previous = records[index - 1];
-        if (std.mem.eql(u8, record.path, previous.path)) return error.DuplicateInventoryPath;
-        if (recordLess({}, record, previous)) return error.NonCanonicalInventoryOrder;
-    }
-
-    return .{
-        .gpa = gpa,
-        .target = owned_target,
-        .records = records,
-        .owns_strings = true,
-    };
+    var input = std.Io.Reader.fixed(bytes);
+    return parseStream(gpa, &input, expected_target);
 }
 
 fn expectStringArray(value: std.json.Value, expected: []const []const u8) !void {

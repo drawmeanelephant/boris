@@ -98,6 +98,21 @@ pub const Report = struct {
     }
 };
 
+pub const CoverageLookupError = error{ MissingCoverage, DuplicateCoverage };
+
+/// Look up coverage by its stable check identity. Callers must not rely on
+/// array position: duplicate or missing identities are checker-execution
+/// failures rather than an accidental interpretation of Doctor internals.
+pub fn coverageFor(report: *const Report, check: []const u8) CoverageLookupError!Coverage {
+    var found: ?Coverage = null;
+    for (report.coverage) |coverage| {
+        if (!std.mem.eql(u8, coverage.check, check)) continue;
+        if (found != null) return error.DuplicateCoverage;
+        found = coverage;
+    }
+    return found orelse error.MissingCoverage;
+}
+
 pub const PageInput = struct {
     path: []const u8,
     html: []const u8,
@@ -371,6 +386,8 @@ fn decodeEntities(a: std.mem.Allocator, text: []const u8) ![]u8 {
 const IdOccurrence = struct {
     value: []const u8,
     offset: usize,
+    line: u32 = 1,
+    column: u32 = 1,
     owner: Owner,
 };
 
@@ -378,6 +395,8 @@ const Reference = struct {
     target: []const u8,
     attribute: []const u8,
     offset: usize,
+    line: u32 = 1,
+    column: u32 = 1,
     owner: Owner,
 };
 
@@ -388,6 +407,8 @@ const PageState = struct {
     root: ?html_scan.Range = null,
     ids: std.ArrayList(IdOccurrence) = .empty,
     references: std.ArrayList(Reference) = .empty,
+    search_document: ?search_index.Document = null,
+    search_index_failed: bool = false,
 };
 
 fn uniqueSearchRoot(html: []const u8) ?html_scan.Range {
@@ -456,6 +477,8 @@ fn scanPage(a: std.mem.Allocator, state: *PageState) !void {
                     try state.ids.append(a, .{
                         .value = decoded,
                         .offset = start,
+                        .line = html_scan.lineColumn(html, start).line,
+                        .column = html_scan.lineColumn(html, start).column,
                         .owner = ownerAt(state.root, start),
                     });
                 }
@@ -466,6 +489,8 @@ fn scanPage(a: std.mem.Allocator, state: *PageState) !void {
                     .target = try a.dupe(u8, value),
                     .attribute = try a.dupe(u8, attribute.name),
                     .offset = start,
+                    .line = html_scan.lineColumn(html, start).line,
+                    .column = html_scan.lineColumn(html, start).column,
                     .owner = ownerAt(state.root, start),
                 });
             }
@@ -505,13 +530,12 @@ fn duplicateIdFindings(builder: *Builder, state: *PageState, target_name: []cons
             var related: std.ArrayList([]const u8) = .empty;
             for (state.ids.items[i..end]) |occurrence| {
                 if (occurrence.owner != owner) owner = .unknown;
-                const point = html_scan.lineColumn(state.page.html, occurrence.offset);
                 try related.append(
                     builder.allocator,
                     try std.fmt.allocPrint(
                         builder.allocator,
                         "{s}:{d}:{d}",
-                        .{ state.page.path, point.line, point.column },
+                        .{ state.page.path, occurrence.line, occurrence.column },
                     ),
                 );
             }
@@ -526,7 +550,7 @@ fn duplicateIdFindings(builder: *Builder, state: *PageState, target_name: []cons
                 .subject_kind = "page",
                 .subject_id = pageId(state.page.path),
                 .target = target_name,
-                .output_location = location(state.page.path, state.page.html, first.offset),
+                .output_location = .{ .path = state.page.path, .line = first.line, .column = first.column },
                 .observed = observed,
                 .expected = "one rendered element for each non-empty id",
                 .related = related.items,
@@ -570,7 +594,7 @@ fn appendUrlFinding(
         .subject_kind = "page",
         .subject_id = pageId(state.page.path),
         .target = target_name,
-        .output_location = location(state.page.path, state.page.html, reference.offset),
+        .output_location = .{ .path = state.page.path, .line = reference.line, .column = reference.column },
         .observed = observed,
         .expected = expected,
     });
@@ -932,6 +956,18 @@ fn auditSearch(
             status = .incomplete;
             continue;
         }
+        if (state.search_index_failed) {
+            try appendSearchFinding(
+                builder,
+                input.target_name,
+                .SEARCH_CONTENT_MISMATCH,
+                path,
+                "selected HTML could not be reduced to a rendered-search document",
+                "search content derived from exact final HTML bytes",
+            );
+            status = .incomplete;
+            continue;
+        }
         const actual_i = actual_index.get(path) orelse {
             try appendSearchFinding(
                 builder,
@@ -943,7 +979,7 @@ fn auditSearch(
             );
             continue;
         };
-        const expected = search_index.indexHtml(
+        const expected = if (state.search_document) |document| document else search_index.indexHtml(
             builder.allocator,
             path,
             state.page.html,
@@ -1044,6 +1080,186 @@ fn auditSearch(
     }
     return status;
 }
+
+fn dupePathList(a: std.mem.Allocator, paths: []const []const u8) ![]const []const u8 {
+    const result = try a.alloc([]const u8, paths.len);
+    for (paths, 0..) |path, index| result[index] = try a.dupe(u8, path);
+    return result;
+}
+
+/// Incremental Doctor seam used by publication checks. It retains canonical
+/// page state and derived search documents, but never retains the HTML payload
+/// passed to `addPage` after that call returns.
+pub const TargetAnalysisBuilder = struct {
+    arena: std.heap.ArenaAllocator,
+    target_name: []const u8,
+    expected_page_paths: []const []const u8,
+    intended_route_paths: []const []const u8,
+    search_page_paths: []const []const u8,
+    states: std.ArrayList(PageState) = .empty,
+    page_index: std.StringHashMapUnmanaged(usize) = .{},
+    intended: std.StringHashMapUnmanaged(void) = .{},
+    findings: std.ArrayList(Finding) = .empty,
+    html_status: CoverageStatus = .checked,
+    missing_expected_pages: usize = 0,
+    finished: bool = false,
+
+    pub fn init(gpa: std.mem.Allocator, input: TargetInput) Error!TargetAnalysisBuilder {
+        var arena = std.heap.ArenaAllocator.init(gpa);
+        errdefer arena.deinit();
+        const a = arena.allocator();
+        const target_name = try a.dupe(u8, input.target_name);
+        const expected_page_paths = try dupePathList(a, input.expected_page_paths);
+        const intended_route_paths = try dupePathList(a, input.intended_route_paths);
+        const search_page_paths = try dupePathList(a, input.search_page_paths);
+        var result = TargetAnalysisBuilder{
+            .arena = arena,
+            .target_name = target_name,
+            .expected_page_paths = expected_page_paths,
+            .intended_route_paths = intended_route_paths,
+            .search_page_paths = search_page_paths,
+            .findings = .empty,
+        };
+        const result_a = result.arena.allocator();
+        for (intended_route_paths) |path| {
+            try safeSnapshotPath(result_a, path);
+            const put = try result.intended.getOrPut(result_a, path);
+            put.value_ptr.* = {};
+        }
+        for (expected_page_paths) |path| {
+            try safeSnapshotPath(result_a, path);
+            const put = try result.intended.getOrPut(result_a, path);
+            put.value_ptr.* = {};
+        }
+        for (search_page_paths) |path| try safeSnapshotPath(result_a, path);
+        return result;
+    }
+
+    pub fn deinit(self: *TargetAnalysisBuilder) void {
+        if (!self.finished) self.arena.deinit();
+        self.* = undefined;
+    }
+
+    pub fn addPage(self: *TargetAnalysisBuilder, path: []const u8, html: []const u8) Error!void {
+        const a = self.arena.allocator();
+        try safeSnapshotPath(a, path);
+        if (!std.mem.endsWith(u8, path, ".html")) return error.UnsafeSnapshotPath;
+        const entry = try self.page_index.getOrPut(a, path);
+        if (entry.found_existing) return error.DuplicateSnapshotPath;
+        const index = self.states.items.len;
+        entry.value_ptr.* = index;
+        try self.states.append(a, .{
+            .page = .{ .path = try a.dupe(u8, path), .html = html },
+            .intended = self.intended.contains(path),
+        });
+        var state = &self.states.items[index];
+
+        if (html_scan.validate(html)) |malformed| {
+            state.valid = false;
+            const observed = try std.fmt.allocPrint(
+                a,
+                "{s} at byte offset {d}",
+                .{ @tagName(malformed.kind), malformed.offset },
+            );
+            var builder: Builder = .{ .allocator = a, .findings = self.findings };
+            try builder.append(.{
+                .code = .HTML_MALFORMED,
+                .owner = .unknown,
+                .subject_kind = "page",
+                .subject_id = pageId(path),
+                .target = self.target_name,
+                .output_location = location(path, html, malformed.offset),
+                .observed = observed,
+                .expected = "bounded rendered HTML structures",
+                .fixability = .not_actionable,
+            });
+            self.findings = builder.findings;
+            self.html_status = .incomplete;
+            state.page.html = &.{};
+            return;
+        }
+
+        try scanPage(a, state);
+        var builder: Builder = .{ .allocator = a, .findings = self.findings };
+        try duplicateIdFindings(&builder, state, self.target_name);
+        self.findings = builder.findings;
+        state.search_document = search_index.indexHtml(a, path, html, false) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => blk: {
+                state.search_index_failed = true;
+                self.html_status = .incomplete;
+                break :blk null;
+            },
+        };
+        // The caller owns the exact payload and may release it immediately.
+        state.page.html = &.{};
+    }
+
+    pub fn finish(self: *TargetAnalysisBuilder, search: SearchInput) Error!Report {
+        const a = self.arena.allocator();
+        var builder: Builder = .{ .allocator = a, .findings = self.findings };
+        for (self.expected_page_paths) |path| {
+            if (self.page_index.contains(path)) continue;
+            self.missing_expected_pages += 1;
+            try builder.append(.{
+                .code = .HTML_PAGE_MISSING,
+                .owner = .publication,
+                .subject_kind = "page",
+                .subject_id = pageId(path),
+                .target = self.target_name,
+                .observed = "expected rendered page is missing",
+                .expected = path,
+            });
+            self.html_status = .incomplete;
+        }
+
+        for (self.states.items) |*state| {
+            if (!state.valid) continue;
+            try auditReferences(
+                &builder,
+                self.states.items,
+                &self.page_index,
+                &self.intended,
+                state,
+                self.target_name,
+            );
+        }
+
+        const search_status = try auditSearch(&builder, .{
+            .target_name = self.target_name,
+            .pages = &.{},
+            .expected_page_paths = self.expected_page_paths,
+            .intended_route_paths = self.intended_route_paths,
+            .search_page_paths = self.search_page_paths,
+            .search = search,
+        }, self.states.items, &self.page_index);
+        self.findings = builder.findings;
+        std.mem.sort(Finding, self.findings.items, {}, findingLess);
+
+        const coverage = try a.alloc(Coverage, 2);
+        coverage[0] = .{
+            .check = try a.dupe(u8, "rendered_html"),
+            .domain = .rendered_html,
+            .status = self.html_status,
+            .subjects = self.states.items.len + self.missing_expected_pages,
+        };
+        coverage[1] = .{
+            .check = try a.dupe(u8, "artifact.search"),
+            .domain = .artifact,
+            .status = search_status,
+            .subjects = self.search_page_paths.len,
+        };
+
+        const arena = self.arena;
+        const report = Report{
+            .arena = arena,
+            .findings = try self.findings.toOwnedSlice(a),
+            .coverage = coverage,
+        };
+        self.finished = true;
+        return report;
+    }
+};
 
 pub fn analyzeTarget(gpa: std.mem.Allocator, input: TargetInput) Error!Report {
     var arena = std.heap.ArenaAllocator.init(gpa);
@@ -1347,6 +1563,40 @@ fn countCode(report: Report, code: Code) usize {
         count += 1;
     };
     return count;
+}
+
+test "coverage lookup is named and rejects missing or duplicate identities" {
+    var coverage = [_]Coverage{
+        .{ .check = "rendered_html", .domain = .rendered_html, .status = .checked, .subjects = 1 },
+        .{ .check = "artifact.search", .domain = .artifact, .status = .incomplete, .subjects = 1 },
+    };
+    const report: Report = .{ .arena = undefined, .findings = &.{}, .coverage = coverage[0..] };
+    const html = try coverageFor(&report, "rendered_html");
+    try std.testing.expectEqual(CoverageStatus.checked, html.status);
+    try std.testing.expectError(error.MissingCoverage, coverageFor(&report, "missing"));
+
+    var duplicate_coverage = [_]Coverage{
+        coverage[0],
+        coverage[0],
+    };
+    const duplicate_report: Report = .{ .arena = undefined, .findings = &.{}, .coverage = duplicate_coverage[0..] };
+    try std.testing.expectError(error.DuplicateCoverage, coverageFor(&duplicate_report, "rendered_html"));
+}
+
+test "incremental target analysis releases each HTML payload after deriving page state" {
+    const expected = [_][]const u8{"index.html"};
+    var builder = try TargetAnalysisBuilder.init(std.testing.allocator, .{
+        .target_name = "public",
+        .pages = &.{},
+        .expected_page_paths = &expected,
+        .intended_route_paths = &expected,
+    });
+    defer if (!builder.finished) builder.deinit();
+    try builder.addPage("index.html", "<main><h1 id=home>Home</h1><p>Body.</p></main>");
+    try std.testing.expectEqual(@as(usize, 0), builder.states.items[0].page.html.len);
+    var report = try builder.finish(.not_configured);
+    defer report.deinit();
+    try std.testing.expectEqualStrings("rendered_html", (try coverageFor(&report, "rendered_html")).check);
 }
 
 test "rendered analyzer checks routes fragments ids and ownership without judging extra HTML stale" {

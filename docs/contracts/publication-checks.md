@@ -105,8 +105,9 @@ supporting_kinds
 supporting_sha256
 ```
 
-An empty status or kind array means “all values” for that dimension. Scope
-digests select matching records from the canonical inventory order and hash
+When both selector arrays are empty, the selected scope is empty. Otherwise an
+empty individual dimension is a wildcard for that dimension. Scope digests
+select matching records from the canonical inventory order and hash
 these exact bytes for each selected record:
 
 ```text
@@ -147,9 +148,11 @@ Every target file not named by the inventory is ignored.
 
 This check is selected for every valid inventory, including a zero-page HTML
 target. Its subjects are committed records with `kind: html-page`. The exact
-HTML bytes already read by artifact integrity are passed directly to the
-existing Doctor rendered analyzer; the checker does not reread or re-render
-them. The intended route-membership set is every committed inventory path.
+HTML bytes read by artifact integrity are passed directly to Doctor’s
+incremental `TargetAnalysisBuilder` and released after each page. Doctor keeps
+only canonical page state and derived search-document information; the checker
+does not reread or re-render HTML. The intended route-membership set is every
+committed inventory path.
 
 It reuses these Doctor findings and ownership behavior:
 
@@ -183,7 +186,7 @@ coverage: not-applicable
 Search selection is not inferred from filesystem existence or the publication
 plan. Its supporting page set is every committed `html-page` record. The exact
 selected search bytes are read during integrity inspection and passed to the
-existing Doctor rendered-search analyzer. It reuses:
+incremental Doctor analysis. It reuses:
 
 ```text
 SEARCH_MISSING
@@ -219,6 +222,15 @@ sorted/deduplicated related evidence, lowercase SHA-256, UTF-8 JSON, and LF
 line endings. It emits no timestamp, duration, absolute path, CWD, staging
 path, worker count, host, environment, username, PID, Git revision, or
 filesystem traversal order.
+
+Artifact payloads are processed with a fixed-size read buffer, incremental
+SHA-256, and a byte counter. At most the current HTML payload and the selected
+rendered-search payload are transiently retained; non-HTML artifacts are never
+retained as complete payloads. The inventory is parsed with a strict streaming
+parser and only canonical inventory metadata is retained. This bounds working
+memory by canonical inventory metadata, Doctor’s compact derived state, the
+selected search artifact, and report construction rather than by the sum of all
+committed payload sizes.
 
 The report establishes only what these three named checks observed within the
 declared target-local scope. It does not establish deployment behavior,
