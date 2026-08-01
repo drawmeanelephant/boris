@@ -170,9 +170,11 @@ audits, publication checks, and Doctor are checks or reports, not publication
 projections. [`documentation-intelligence.md`](documentation-intelligence.md)
 owns the shipped graph-health and impact analysis contract, while
 [`publication-checks.md`](publication-checks.md) owns target-local publication
-evidence. An analysis result may be evidence for a named claim within its
-scope, but it does not become HTML, IR, RAG, or deployment metadata and it
-cannot silently certify an omitted projection.
+evidence and [`publication-claims.md`](publication-claims.md) owns the
+mechanical claims-and-limitations derivation over that evidence. An analysis
+result may be evidence for a named claim within its scope, but it does not
+become HTML, IR, RAG, or deployment metadata and it cannot silently certify an
+omitted projection.
 
 ## Verification vocabulary and claims
 

@@ -63,6 +63,7 @@ const sitemap = @import("sitemap.zig");
 const link_audit = @import("link_audit.zig");
 const artifact_inventory = @import("artifact_inventory.zig");
 const publication_checks = @import("publication_checks.zig");
+const publication_claims = @import("publication_claims.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -100,6 +101,17 @@ fn writePublicationChecksFailure(
 ) !void {
     try writer.print(
         "error: publication committed for target '{s}', but publication-check evidence was not refreshed: {s}\n",
+        .{ target_name, @errorName(err) },
+    );
+}
+
+fn writePublicationClaimsFailure(
+    writer: *Io.Writer,
+    target_name: []const u8,
+    err: anyerror,
+) !void {
+    try writer.print(
+        "error: publication committed for target '{s}', but publication-claims evidence was not refreshed: {s}\n",
         .{ target_name, @errorName(err) },
     );
 }
@@ -232,6 +244,15 @@ pub const CompileOptions = struct {
     test_fail_publication_checks: bool = false,
     /// Test-only atomic checks-report write failure.
     test_fail_publication_checks_write: bool = false,
+    /// Test-only post-checks claims derivation failure. Production callers
+    /// leave both publication-claims fault injections false.
+    test_fail_publication_claims: bool = false,
+    /// Test-only atomic claims-report write failure.
+    test_fail_publication_claims_write: bool = false,
+    /// Test-only capture: when set, the post-commit claims diagnostic is
+    /// written here instead of the process stderr, so tests can assert the
+    /// line is emitted even under `--quiet`.
+    publication_claims_failure_writer: ?*Io.Writer = null,
 };
 
 fn validateSitemapConfig(gpa: std.mem.Allocator, options: CompileOptions) !void {
@@ -1798,6 +1819,7 @@ fn compilePagesInner(
         if (options.sitemap_path) |sitemap_path| try inventory_owned_paths.append(gpa, sitemap_path);
         try artifact_inventory.rejectOutputCollision(artifact_inventory.output_path, inventory_owned_paths.items);
         try artifact_inventory.rejectOutputCollision(publication_checks.output_path, inventory_owned_paths.items);
+        try artifact_inventory.rejectOutputCollision(publication_claims.output_path, inventory_owned_paths.items);
 
         if (options.sitemap_path) |sitemap_path| {
             var owned_paths: std.ArrayList([]const u8) = .empty;
@@ -2505,6 +2527,24 @@ fn compilePagesInner(
         defer std.debug.unlockStderr();
         writePublicationChecksFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
         return error.PublicationChecksFailed;
+    };
+
+    // Claims are derived from the exact committed artifacts and checks bytes.
+    // A derivation, stale-binding, parser, I/O, or atomic-write failure keeps
+    // the committed target, inventory, and checks and leaves any prior claims
+    // report untouched; the diagnostic is emitted even under --quiet.
+    publication_claims.writeAfterChecks(io, gpa, dist_dir, options.target_name, .{
+        .test_fail_execution = options.test_fail_publication_claims,
+        .test_fail_write = options.test_fail_publication_claims_write,
+    }) catch |err| {
+        if (options.publication_claims_failure_writer) |writer| {
+            writePublicationClaimsFailure(writer, options.target_name, err) catch {};
+        } else {
+            const stderr = std.debug.lockStderr(&.{});
+            defer std.debug.unlockStderr();
+            writePublicationClaimsFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        }
+        return error.PublicationClaimsFailed;
     };
 
     return stats;
@@ -7827,4 +7867,274 @@ test "post-commit checker failure preserves stale checks while exposing changed 
     const old_binding = old_report.value.object.get("artifact_inventory").?.object.get("sha256").?.string;
     const new_digest = cache.hexDigest(cache.hashBytes(new_inventory));
     try std.testing.expect(!std.mem.eql(u8, old_binding, &new_digest));
+}
+
+// ---------------------------------------------------------------------------
+// Publication claims integration.
+// ---------------------------------------------------------------------------
+
+fn expectPublicationClaimsShape(
+    gpa: std.mem.Allocator,
+    bytes: []const u8,
+    target: []const u8,
+) !void {
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    try std.testing.expectEqualStrings(publication_claims.report_format, root.get("format").?.string);
+    try std.testing.expectEqual(@as(i64, publication_claims.schema_version), root.get("schema_version").?.integer);
+    try std.testing.expectEqualStrings(target, root.get("target").?.string);
+    try std.testing.expectEqualStrings(publication_claims.claim_ids[0], root.get("claims").?.array.items[0].object.get("id").?.string);
+    try std.testing.expectEqualStrings(publication_claims.claim_ids[1], root.get("claims").?.array.items[1].object.get("id").?.string);
+    try std.testing.expectEqualStrings(publication_claims.claim_ids[2], root.get("claims").?.array.items[2].object.get("id").?.string);
+    try std.testing.expectEqual(@as(usize, 6), root.get("limitations").?.array.items.len);
+    for (root.get("claims").?.array.items) |claim| {
+        try std.testing.expectEqualStrings("verified", claim.object.get("status").?.string);
+        const evidence = claim.object.get("evidence").?.object;
+        try std.testing.expectEqualStrings("passed", evidence.get("check_status").?.string);
+        try std.testing.expectEqualStrings("complete", evidence.get("coverage").?.string);
+        try std.testing.expectEqualStrings(
+            root.get("publication_checks").?.object.get("sha256").?.string,
+            evidence.get("checks_report_sha256").?.string,
+        );
+    }
+}
+
+test "claims evidence follows checks on every committed publication" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/publication-claims-fresh", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nBody.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const options: CompileOptions = .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .quiet = true };
+    _ = try compileHtmlSite(io, gpa, options);
+
+    const claims_bytes = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(claims_bytes);
+    try expectPublicationClaimsShape(gpa, claims_bytes, "default");
+
+    const checks_bytes = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(checks_bytes);
+    const checks_digest = cache.hexDigest(cache.hashBytes(checks_bytes));
+    var claims = try std.json.parseFromSlice(std.json.Value, gpa, claims_bytes, .{});
+    defer claims.deinit();
+    try std.testing.expectEqualStrings(
+        &checks_digest,
+        claims.value.object.get("publication_checks").?.object.get("sha256").?.string,
+    );
+    try std.testing.expectEqual(@as(i64, 3), claims.value.object.get("publication_checks").?.object.get("check_count").?.integer);
+
+    const artifacts_bytes = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(artifacts_bytes);
+    const artifacts_digest = cache.hexDigest(cache.hashBytes(artifacts_bytes));
+    try std.testing.expectEqualStrings(
+        &artifacts_digest,
+        claims.value.object.get("artifact_inventory").?.object.get("sha256").?.string,
+    );
+
+    _ = try compileHtmlSite(io, gpa, options);
+    const repeat_claims = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(repeat_claims);
+    try std.testing.expectEqualStrings(claims_bytes, repeat_claims);
+}
+
+test "claims failure preserves committed payloads, inventory, checks, and prior claims" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/publication-claims-failure", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nInitial body.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>initial</footer></body></html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const options: CompileOptions = .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .incremental = true, .quiet = true };
+    _ = try compileHtmlSite(io, gpa, options);
+
+    const old_claims = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(old_claims);
+    const old_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(old_inventory);
+    const old_checks = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(old_checks);
+    const old_page = try readTargetPayload(io, gpa, dist, "index.html");
+    defer gpa.free(old_page);
+
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nChanged source body.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>changed layout</footer></body></html>");
+    var failure_options = options;
+    failure_options.test_fail_publication_claims = true;
+    try std.testing.expectError(error.PublicationClaimsFailed, compileHtmlSite(io, gpa, failure_options));
+
+    const new_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(new_inventory);
+    const new_checks = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(new_checks);
+    const new_page = try readTargetPayload(io, gpa, dist, "index.html");
+    defer gpa.free(new_page);
+    const new_claims = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(new_claims);
+    try std.testing.expectEqualStrings(old_claims, new_claims);
+    try std.testing.expect(!std.mem.eql(u8, old_inventory, new_inventory));
+    try std.testing.expect(!std.mem.eql(u8, old_checks, new_checks));
+    try std.testing.expect(!std.mem.eql(u8, old_page, new_page));
+    var stale_claims = try std.json.parseFromSlice(std.json.Value, gpa, new_claims, .{});
+    defer stale_claims.deinit();
+    const stale_binding = stale_claims.value.object.get("publication_checks").?.object.get("sha256").?.string;
+    const fresh_checks_digest = cache.hexDigest(cache.hashBytes(new_checks));
+    try std.testing.expect(!std.mem.eql(u8, stale_binding, &fresh_checks_digest));
+}
+
+test "claims write failure preserves the prior claims report" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/publication-claims-write-failure", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nBody.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const options: CompileOptions = .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .quiet = true };
+    _ = try compileHtmlSite(io, gpa, options);
+
+    const old_claims = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(old_claims);
+    var failure_options = options;
+    failure_options.test_fail_publication_claims_write = true;
+    try std.testing.expectError(error.PublicationClaimsFailed, compileHtmlSite(io, gpa, failure_options));
+    const after = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(after);
+    try std.testing.expectEqualStrings(old_claims, after);
+}
+
+test "quiet claims failure emits the captured diagnostic and preserves prior claims" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/publication-claims-captured-stderr", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nInitial body.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>initial</footer></body></html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const options: CompileOptions = .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .incremental = true, .quiet = true };
+    _ = try compileHtmlSite(io, gpa, options);
+
+    const old_claims = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(old_claims);
+    const old_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(old_inventory);
+    const old_checks = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(old_checks);
+
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nChanged source body.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>changed layout</footer></body></html>");
+
+    // The diagnostic is emitted even under --quiet; capture it instead of the
+    // process stderr and prove the exact committed-target wording.
+    var output: Io.Writer.Allocating = .init(gpa);
+    defer output.deinit();
+    var failure_options = options;
+    failure_options.test_fail_publication_claims = true;
+    failure_options.publication_claims_failure_writer = &output.writer;
+    try std.testing.expectError(error.PublicationClaimsFailed, compileHtmlSite(io, gpa, failure_options));
+    try std.testing.expectEqualStrings(
+        "error: publication committed for target 'default', but publication-claims evidence was not refreshed: InvalidChecksReport\n",
+        output.writer.buffered(),
+    );
+
+    const new_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(new_inventory);
+    const new_checks = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(new_checks);
+    const new_claims = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(new_claims);
+    try std.testing.expect(!std.mem.eql(u8, old_inventory, new_inventory));
+    try std.testing.expect(!std.mem.eql(u8, old_checks, new_checks));
+    try std.testing.expectEqualStrings(old_claims, new_claims);
+}
+
+test "multi-target publication derives claims per target" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/publication-claims-multi", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nBody.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist_a = try std.fmt.allocPrint(gpa, "{s}/dist_a", .{work});
+    defer gpa.free(dist_a);
+    const dist_b = try std.fmt.allocPrint(gpa, "{s}/dist_b", .{work});
+    defer gpa.free(dist_b);
+
+    const targets = [_]target_mod.TargetSpec{
+        .{ .name = "alpha", .output_dir = dist_a },
+        .{ .name = "beta", .output_dir = dist_b },
+    };
+    try compileHtmlSiteMulti(io, gpa, &targets, .{
+        .content_root = content,
+        .layout_path = layout,
+        .quiet = true,
+    });
+
+    const claims_a = try readTargetPayload(io, gpa, dist_a, publication_claims.output_path);
+    defer gpa.free(claims_a);
+    const claims_b = try readTargetPayload(io, gpa, dist_b, publication_claims.output_path);
+    defer gpa.free(claims_b);
+    try expectPublicationClaimsShape(gpa, claims_a, "alpha");
+    try expectPublicationClaimsShape(gpa, claims_b, "beta");
+    var parsed_a = try std.json.parseFromSlice(std.json.Value, gpa, claims_a, .{});
+    defer parsed_a.deinit();
+    var parsed_b = try std.json.parseFromSlice(std.json.Value, gpa, claims_b, .{});
+    defer parsed_b.deinit();
+    try std.testing.expect(!std.mem.eql(
+        u8,
+        parsed_a.value.object.get("publication_checks").?.object.get("sha256").?.string,
+        parsed_b.value.object.get("publication_checks").?.object.get("sha256").?.string,
+    ));
 }

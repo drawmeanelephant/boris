@@ -140,7 +140,7 @@ fn scopeDigest(
     return cache.hexDigest(digest);
 }
 
-fn openFileNoFollow(
+pub fn openFileNoFollow(
     io: Io,
     root: Io.Dir,
     path: []const u8,
@@ -180,7 +180,11 @@ const StreamedFile = struct {
     payload: ?[]u8,
 };
 
-fn streamFileNoFollow(
+/// Stream a target-relative file with no-follow, resolve-beneath handles and
+/// bounded memory, returning its exact byte count, lowercase SHA-256, and
+/// optionally its complete payload. Shared by the checks and claims evidence
+/// layers so both read evidence files through identical handles.
+pub fn streamFileNoFollow(
     io: Io,
     root: Io.Dir,
     payload_gpa: std.mem.Allocator,
@@ -760,6 +764,9 @@ test "inventory parser rejects malformed, unsafe, duplicate, and reserved record
 
     const reserved = prefix ++ "{\"path\":\"_boris/proof/checks.json\",\"kind\":\"sitemap\",\"producer\":\"sitemap\",\"required\":true,\"status\":\"committed\",\"bytes\":0,\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"format_version\":null}" ++ suffix;
     try std.testing.expectError(error.InvalidInventoryPath, artifact_inventory.parse(gpa, reserved, "public"));
+
+    const reserved_claims = prefix ++ "{\"path\":\"_boris/proof/claims.json\",\"kind\":\"sitemap\",\"producer\":\"sitemap\",\"required\":true,\"status\":\"committed\",\"bytes\":0,\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"format_version\":null}" ++ suffix;
+    try std.testing.expectError(error.InvalidInventoryPath, artifact_inventory.parse(gpa, reserved_claims, "public"));
 
     const duplicate = prefix ++ record ++ "," ++ record ++ suffix;
     try std.testing.expectError(error.DuplicateInventoryPath, artifact_inventory.parse(gpa, duplicate, "public"));

@@ -13,6 +13,11 @@ pub const output_path = "_boris/proof/artifacts.json";
 /// Reserved evidence path. It is kept out of the inventory so the later
 /// checks report cannot become one of its own committed subjects.
 pub const checks_output_path = "_boris/proof/checks.json";
+/// Reserved evidence path for the claims-and-limitations report. It is kept
+/// out of the inventory so the claims report cannot become a committed
+/// subject, and out of the checks parser so checks never treat it as a
+/// Boris-owned payload.
+pub const claims_output_path = "_boris/proof/claims.json";
 pub const artifact_format = "boris-publication-artifacts";
 pub const schema_version: usize = 1;
 
@@ -371,7 +376,9 @@ fn parseRecordStreamAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader)
 
     if (!have_path) return error.InvalidInventory;
     if (!validateRelativePath(record.path) or
-        pathsOverlap(record.path, output_path) or pathsOverlap(record.path, checks_output_path))
+        pathsOverlap(record.path, output_path) or
+        pathsOverlap(record.path, checks_output_path) or
+        pathsOverlap(record.path, claims_output_path))
         return error.InvalidInventoryPath;
     if (!have_kind or !have_producer or !have_required or !have_status or !have_bytes or
         !have_sha256 or !have_format_version) return error.InvalidInventory;
@@ -511,7 +518,10 @@ pub fn collect(
 
     for (specs) |spec| {
         if (!validateRelativePath(spec.path)) return error.InvalidArtifactPath;
-        if (pathsOverlap(spec.path, output_path) or pathsOverlap(spec.path, checks_output_path)) {
+        if (pathsOverlap(spec.path, output_path) or
+            pathsOverlap(spec.path, checks_output_path) or
+            pathsOverlap(spec.path, claims_output_path))
+        {
             return error.InventoryPathCollision;
         }
         if (!std.mem.eql(u8, spec.producer, spec.kind.producerName())) return error.InvalidArtifactProducer;
@@ -558,7 +568,8 @@ pub fn render(gpa: std.mem.Allocator, inventory: *const Inventory) ![]u8 {
     for (inventory.records, 0..) |record, index| {
         if (!validateRelativePath(record.path) or
             pathsOverlap(record.path, output_path) or
-            pathsOverlap(record.path, checks_output_path)) return error.InvalidInventoryPath;
+            pathsOverlap(record.path, checks_output_path) or
+            pathsOverlap(record.path, claims_output_path)) return error.InvalidInventoryPath;
         if (!std.mem.eql(u8, record.producer, record.kind.producerName())) return error.InvalidArtifactProducer;
         if (record.format_version) |version| if (version.len == 0) return error.InvalidFormatVersion;
         if (index == 0) {
@@ -692,6 +703,9 @@ test "generated projections are staged-only and missing paths fail closed" {
     }));
     try std.testing.expectError(error.InventoryPathCollision, collect(io, gpa, stage, live, "public", &.{
         .{ .path = output_path, .kind = .rss, .producer = "rss" },
+    }));
+    try std.testing.expectError(error.InventoryPathCollision, collect(io, gpa, stage, live, "public", &.{
+        .{ .path = claims_output_path, .kind = .rss, .producer = "rss" },
     }));
 }
 
