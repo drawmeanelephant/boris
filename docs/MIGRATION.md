@@ -57,8 +57,9 @@ Static output dir → any static host                ← deployment (outside Bor
    see [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) and
    [`docs/dogfood/filed-parent-key-normalize.md`](dogfood/filed-parent-key-normalize.md).
    Do not expect product `boris` to accept the aliases.
-3. **One-level graph** — Satellites parent to **Trunks** only (no
-   satellite-of-satellite).
+3. **Explicit graph** — Every non-root page is a Satellite with one immediate
+   `parent`; the parent may be a Trunk or another Satellite. Parent chains may
+   be arbitrarily deep but must be finite and acyclic.
 4. **Entity ids** — path-derived (or `id:` override); case- and byte-exact for
    `parent` and `[[wiki-links]]`.
 5. **Includes** — `{{include path}}` relative to content root; prefer
@@ -226,8 +227,8 @@ preserve / drop / rewrite decision is intentional.
 
 - [ ] Only `id`, `title`, `parent`, `status`, `tags`, and deliberately reviewed
   `relations` remain in page frontmatter
-- [ ] Every Satellite `parent` names a Trunk entity id (byte-exact)
-- [ ] No satellite-of-satellite edges
+- [ ] Every Satellite `parent` names an existing immediate parent entity id
+      (byte-exact); nested parent chains are allowed
 - [ ] Includes live under content-root `includes/` when possible
 - [ ] Wiki targets use entity ids, not `.md` paths
 - [ ] Page-local media uses exact sibling `<stem>.assets/` (not a global media library)
@@ -608,8 +609,8 @@ Use after cutover when paths or titles change.
 | Exit / symptom | Fix |
 |----------------|-----|
 | `EFRONTMATTER` unknown key | Remove/rename key; use `parent` only |
-| Missing parent | Point `parent` at a Trunk entity id |
-| Satellite of satellite | Reparent to a Trunk |
+| Missing parent | Point `parent` at an existing entity id |
+| Parent cycle | Break the cycle so the chain terminates at a root Trunk |
 | `EREFERENCEMISSING` page | Fix entity id spelling/case |
 | `EREFERENCEMISSING` heading | Copy Apex `id` from rendered HTML/TOC |
 | `EINCLUDEMISSING` | Fix include path relative to content root |

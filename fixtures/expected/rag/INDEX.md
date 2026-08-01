@@ -30,7 +30,7 @@ directory tree to a chat LLM knowledge base.
 | `system/**` | Curated architecture seeds |
 | `content/pages/**` | Content page segments |
 | `graph/entity-catalog.md` | Entity table |
-| `graph/relations.md` | Trunk → Satellite edges |
+| `graph/relations.md` | Direct parent → child edges |
 
 ## Full catalog
 
@@ -43,7 +43,7 @@ directory tree to a chat LLM knowledge base.
 | `content/pages/nested/deep/page.md` | content | Nested Deep Page | `nested/deep/page` |
 | `content/pages/satellite-child.md` | content | Child Satellite | `satellite-child` |
 | `graph/entity-catalog.md` | graph | Entity catalog | — |
-| `graph/relations.md` | graph | Graph relations (Trunk → Satellite) | — |
+| `graph/relations.md` | graph | Graph relations (parent hierarchy) | — |
 | `system/00-overview.md` | system | Boris overview | — |
 | `system/01-architecture-pipeline.md` | system | Architecture and compile pipeline | — |
 | `system/02-data-model-page.md` | system | Data model: Page and Frontmatter | — |

@@ -38,7 +38,7 @@ release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 |---|---|
 | Default site build | **Done** — `boris` writes HTML to `dist/`. |
 | Markdown rendering | **Done** — in-process ApexMarkdown Unified, including tables and footnotes. |
-| Content graph | **Done** — closed frontmatter, validated Trunk/Satellite hierarchy, includes, wiki links, heading targets, and recursive validated parent chains. |
+| Content graph | **Done** — closed frontmatter, validated Trunk/Satellite hierarchy with arbitrary finite acyclic parent chains, includes, wiki links, and heading targets. |
 | HTML navigation and layouts | **Done** — graph-backed nav, breadcrumbs, TOC, closed layout slots, assets, layout rules, incremental/watch/jobs, isolated targets, and opt-in deterministic XML sitemap publication. |
 | Machine outputs | **Done** — IR 0.2, RAG, Context Bundles, `llms.txt`, and deterministic RSS 2.0; semantic relations retain their documented conditional IR 0.3 artifacts. |
 | Migration laboratories | **Done as bounded developer tools** — read-only review, conversion aids, relationship candidates, and theme materialization; they do not widen Boris author grammar. |
@@ -103,7 +103,7 @@ The release audit found these follow-ups:
 - All retained fragments have numeric names, a permitted category heading, and
   a deterministic 33-row [`fragment inventory`](changelog.d/INVENTORY.md).
   The release owner still decides whether and when to consume them.
-- The release gate now correctly accepts the validated nested hierarchy fixture.
+- The release gate now correctly accepts the validated four-level nested hierarchy fixture.
 
 ## Product boundaries that remain deliberate
 

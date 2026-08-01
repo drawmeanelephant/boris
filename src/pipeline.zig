@@ -1553,22 +1553,51 @@ test "fixtures/content/valid builds and orders by id" {
     });
     defer result.deinit();
     try std.testing.expect(result.ok);
-    // empty-no-fm, three-level hierarchy, nested/deep/page, satellite-child,
+    // empty-no-fm, four-level hierarchy, nested/deep/page, satellite-child,
     // trunk-root (id home)
-    try std.testing.expectEqual(@as(usize, 7), result.pages.items.len);
-    // Sorted by id: empty-no-fm, hierarchy leaf/mid/trunk, home, nested/deep/page,
-    // satellite-child.
+    try std.testing.expectEqual(@as(usize, 8), result.pages.items.len);
+    // Sorted by id: empty-no-fm, hierarchy great-grandchild/leaf/mid/trunk,
+    // home, nested/deep/page, satellite-child.
     try std.testing.expectEqualStrings("empty-no-fm", result.pages.items[0].id);
-    try std.testing.expectEqualStrings("hierarchy-leaf", result.pages.items[1].id);
+    try std.testing.expectEqualStrings("hierarchy-great-grandchild", result.pages.items[1].id);
     try std.testing.expect(result.pages.items[1].role == .satellite);
-    try std.testing.expectEqualStrings("hierarchy-mid", result.pages.items[2].id);
+    try std.testing.expectEqualStrings("hierarchy-leaf", result.pages.items[2].id);
     try std.testing.expect(result.pages.items[2].role == .satellite);
-    try std.testing.expectEqualStrings("hierarchy-trunk", result.pages.items[3].id);
-    try std.testing.expect(result.pages.items[3].role == .trunk);
-    try std.testing.expectEqualStrings("home", result.pages.items[4].id);
-    try std.testing.expectEqualStrings("nested/deep/page", result.pages.items[5].id);
-    try std.testing.expectEqualStrings("satellite-child", result.pages.items[6].id);
-    try std.testing.expect(result.pages.items[6].role == .satellite);
+    try std.testing.expectEqualStrings("hierarchy-mid", result.pages.items[3].id);
+    try std.testing.expect(result.pages.items[3].role == .satellite);
+    try std.testing.expectEqualStrings("hierarchy-trunk", result.pages.items[4].id);
+    try std.testing.expect(result.pages.items[4].role == .trunk);
+    try std.testing.expectEqualStrings("home", result.pages.items[5].id);
+    try std.testing.expectEqualStrings("nested/deep/page", result.pages.items[6].id);
+    try std.testing.expectEqualStrings("satellite-child", result.pages.items[7].id);
+    try std.testing.expect(result.pages.items[7].role == .satellite);
+
+    // Every parent_index is the immediate parent after the id-sorted freeze.
+    try std.testing.expectEqualStrings("hierarchy-leaf", result.pages.items[1].parent.?);
+    try std.testing.expectEqualStrings("hierarchy-mid", result.pages.items[2].parent.?);
+    try std.testing.expectEqualStrings("hierarchy-trunk", result.pages.items[3].parent.?);
+    try std.testing.expectEqual(@as(u32, 2), result.pages.items[1].parent_index.?);
+    try std.testing.expectEqual(@as(u32, 3), result.pages.items[2].parent_index.?);
+    try std.testing.expectEqual(@as(u32, 4), result.pages.items[3].parent_index.?);
+
+    const expected_parent_edges = [_]struct { from: []const u8, to: []const u8 }{
+        .{ .from = "hierarchy-great-grandchild", .to = "hierarchy-leaf" },
+        .{ .from = "hierarchy-leaf", .to = "hierarchy-mid" },
+        .{ .from = "hierarchy-mid", .to = "hierarchy-trunk" },
+    };
+    for (expected_parent_edges) |expected| {
+        var found = false;
+        for (result.edges.items) |edge| {
+            if (std.mem.eql(u8, edge.kind, "parent") and
+                std.mem.eql(u8, edge.from.value, expected.from) and
+                std.mem.eql(u8, edge.to.value, expected.to))
+            {
+                found = true;
+                break;
+            }
+        }
+        try std.testing.expect(found);
+    }
 }
 
 test "promoted metadata survives source buffer free (via PageDb unit + pipeline)" {

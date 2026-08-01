@@ -30,6 +30,8 @@ pub const Code = enum {
     EDUPLICATEID,
     EPARENTMISSING,
     EPARENTSELF,
+    /// Retired compatibility name for historical one-hop validation; current
+    /// graph validation never emits this code.
     EPARENTNOTTRUNK,
     EPARENTCYCLE,
     EFRONTMATTER,

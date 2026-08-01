@@ -28,10 +28,11 @@ Markdown + frontmatter
           └── RSS 2.0 feed       (--rss)
 ```
 
-The content model is deliberately understandable: **Trunks** are primary
-pages, **Satellites** belong to a Trunk, and in-page `Aside`/`Details` blocks
-stay in document order. Broken parents, wiki-links, headings, includes, and
-cycles fail with diagnostics instead of quietly producing a broken site.
+The content model is deliberately understandable: **Trunks** are root pages,
+**Satellites** are explicitly parented non-root pages (including nested parent
+chains), and in-page `Aside`/`Details` blocks stay in document order. Broken
+parents, wiki-links, headings, includes, and cycles fail with diagnostics
+instead of quietly producing a broken site.
 
 ## Features
 

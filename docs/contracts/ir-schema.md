@@ -135,6 +135,21 @@ Every page has exactly one role after resolution:
 | **trunk** | `parent` is null / omitted |
 | **satellite** | `parent` is a non-null string |
 
+### Relationship vocabulary and depth
+
+- A **Trunk** is a root page and has no parent.
+- A **Satellite** is any non-root page with one immediate `parent`; its
+  immediate parent may be either a Trunk or another Satellite.
+- The terminal ancestor of every valid parent chain is a root Trunk.
+- Parent chains may have arbitrary finite depth. Missing parents, self-parenting,
+  cycles, duplicate ids, and case-colliding ids remain invalid.
+- `children` contains only direct children that name the page as their immediate
+  parent. `siblings` contains only the other direct children of the same
+  immediate parent; root Trunks have no siblings.
+- `breadcrumb` contains the complete validated chain from root Trunk to the
+  current page, inclusive. These are navigation projections, not additional
+  graph roles: the only roles are `trunk` and `satellite`.
+
 ### Normative rules
 
 1. A **Trunk** has no `parent`.
@@ -152,10 +167,12 @@ Every page has exactly one role after resolution:
 | `parent` equals own `id` | [`EPARENTSELF`](diagnostics.md) |
 | Cycle in parent edges | [`EPARENTCYCLE`](diagnostics.md) |
 
-6. Multiple Satellites may share the same parent.
-7. Valid graphs are rooted forests: roots are Trunks and every Satellite edges
-   to exactly one page in the same forest.
-8. **Do not claim the structure is a DAG (or frozen forest) until validation
+6. Multiple Satellites may share the same immediate parent.
+7. A Satellite may parent other Satellites; every valid parent chain has
+   arbitrary finite depth and terminates at a root Trunk.
+8. Valid graphs are rooted forests: roots are Trunks and every Satellite edges
+   to exactly one immediate parent page in the same forest.
+9. **Do not claim the structure is a DAG (or frozen forest) until validation
    succeeds and freeze runs.** On failure, `frozen` is never true and
    `graph.json` is not published.
 
