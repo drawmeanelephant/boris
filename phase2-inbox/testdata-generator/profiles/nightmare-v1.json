@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "boris-testdata-profile/1",
+  "name": "nightmare-v1",
+  "description": "A valid baseline carrying one precise failure barb per named mutation locus",
+  "style": "reference",
+  "includeAssets": true,
+  "barbs": [
+    "duplicate_id",
+    "self_parent",
+    "missing_parent",
+    "parent_cycle",
+    "unknown_frontmatter",
+    "legacy_parent_key",
+    "malformed_frontmatter",
+    "duplicate_frontmatter_key",
+    "broken_wikilink",
+    "missing_include",
+    "include_cycle",
+    "missing_heading_fragment",
+    "invalid_utf8"
+  ]
+}
