@@ -12,7 +12,9 @@ From a clean checkout:
 
 The script builds the root binaries and standalone developer tools, then writes
 `boris-agent-kit/boris-agent-kit-<commit>.tar.gz` plus a sidecar SHA-256 file.
-The archive contains `MANIFEST.json`, `SHA256SUMS`, and these executables:
+The archive contains `MANIFEST.json`, `SHA256SUMS`, Boris's root executables,
+and every executable installed by a direct `tools/*/build.zig` file. The
+current tool list is:
 
 - `boris`
 - `boris-package`
@@ -20,6 +22,12 @@ The archive contains `MANIFEST.json`, `SHA256SUMS`, and these executables:
 - `boris-search-index`
 - `boris-migration-lab`
 - `boris-docs-maintenance`
+- `boris-scale-smoke`
+- `boris-testdata`
+
+`boris-source-rag` is built by the root build even though its source lives in
+`tools/source-rag/`. Adding another direct `tools/<name>/build.zig` package
+automatically builds and includes its installed executable(s) in future kits.
 
 The manifest records the repository commit, branch, dirty state, platform, Zig
 version, and digest for every executable. Archive inputs are sorted and have
