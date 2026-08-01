@@ -1,0 +1,6 @@
+# Pipe-separated values: name|depth|title|terminal marker|expected exit|expected HTML|expected stderr
+# Generated root: content/index.md, with the exact frontmatter below.
+# Generated level file: content/includes/level-%02d.md.
+# Generated include line: {{include includes/level-%02d.md}}\n.
+depth-32|32|10-depth-32|Depth boundary marker 10-depth-32.|0|cases/10-depth-32/expected/index.html|-
+depth-33|33|11-depth-33|Depth boundary marker 11-depth-33.|1|-|cases/11-depth-33/expected/stderr.txt

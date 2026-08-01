@@ -1,0 +1,97 @@
+error: missing value for --rss
+Boris — Zig content compiler (HTML site + IR + optional RAG)
+
+Usage: boris <command> [options]
+
+Modes:
+  build               Build the HTML site (default command)
+  watch               Build HTML, then watch and rebuild on changes
+  check               Read-only graph health report (CI findings exit 1)
+  impact <ID>         Read-only transitive impact report for a page
+  plan                Emit a normalized publication plan (no publication)
+  (no command)        Same as build
+  --html              Explicit HTML site mode → --html-dir (default dist)
+  --html-dir <DIR>    HTML site mode with output directory DIR
+  --target NAME=DIR   HTML multi-target mode (repeatable; order-independent); implies HTML
+  --out <DIR>         IR mode → write JSON under DIR (default .boris when --no-rag)
+  --no-rag            Explicit IR mode (JSON under --out, default .boris)
+  --rag               RAG-only mode → corpus under --rag-dir (default rag)
+  --rag-dir <DIR>     RAG-only mode with output directory DIR
+  --context           Context-only mode → bundle under --context-dir (default context)
+  --context-dir DIR   Context-only mode with output directory DIR
+  --scope VALUE       RAG/context entity id or collection prefix
+  --split-size BYTES  RAG/context deterministic bundle byte cap
+  --bundles-only      RAG upload parts only; omit per-page files
+  --llms              Deterministic llms.txt export → llms.txt
+  --llms-path PATH    llms.txt export path (implies --llms)
+  --rss               Deterministic RSS 2.0 export → rss.xml
+  --rss-path PATH     RSS output path (implies --rss)
+  --sitemap           Add deterministic sitemap.xml to the HTML target
+  --sitemap-path PATH Target-root-relative sitemap path (implies --sitemap)
+
+Options:
+  --input <DIR>       Content root (default: content)
+  --textile          Explicit .textile-only input adapter mode (no mixed trees)
+  --out <DIR>         IR output directory (selects IR mode; default: .boris)
+  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
+  --site-url URL      Required HTTP(S) deployment URL for RSS or sitemap
+  --rss-title TITLE   Required RSS channel title
+  --rss-description T Required RSS channel description
+  --rss-limit N       RSS item limit (1–500; default 20)
+  --html-dir <DIR>    HTML output directory (implies HTML; default: dist)
+  --html-layout PATH  Global layout template (default: themes/boris/layouts/main.html)
+  --theme ROOT        Theme root sugar → ROOT/layouts/main.html (+ managed assets/)
+  --target NAME=DIR   Named HTML output root (repeatable; exclusive with --html-dir)
+  --target-layout N=P Per-target layout (NAME=PATH; may precede or follow --target)
+  --layout-rule T S P HTML layout rule: TARGET SELECTOR LAYOUT_PATH (repeatable; max 256/target)
+                      Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
+  --incremental       Content-addressed incremental HTML rendering (HTML mode)
+  --watch             Compatibility flag; same as the watch command
+  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
+  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
+  --format human|json  Analysis output format for check/impact (default human)
+  --report PATH        Write an analysis report instead of stdout
+  --profile PATH       Selected publication profile for `plan`
+  -h, --help          Show this help and exit 0
+
+HTML artifacts (success; Apex + layout splice):
+  <html-dir>/**/*.html   or   <each-target-dir>/**/*.html
+  <target-dir>/sitemap.xml  (with --sitemap; path configurable)
+  <target-dir>/.boris-cache/manifest.json  (with --incremental / --watch)
+  Staging: <target-dir>.boris-stage (ephemeral; committed only on full target success)
+
+IR artifacts (success; --out or --no-rag):
+  <out>/manifest.json  <out>/graph.json  <out>/build-report.json
+
+RAG artifacts (success; same graph validation as IR):
+  INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json
+  system/**  content/pages/**  graph/entity-catalog.md  graph/relations.md
+  parts/part-N.md + part_manifest.json (with --split-size / --bundles-only)
+
+Context artifacts (success; same graph validation as IR/RAG):
+  bundle.md  manifest.json  graph.json  pages/<entity-id>.md
+  parts/part-N.md (with --split-size)
+
+Conflicts (exit 2):
+  --rag with --no-rag
+  --no-rag with --rag-dir
+  --context / --context-dir with --rag, --out, or HTML selectors
+  --rss / --rss-path with HTML, IR, RAG, Context, llms.txt, check, or impact
+  --sitemap / --sitemap-path without --site-url, with non-HTML modes,
+  or with multiple targets sharing one ambiguous public URL
+  explicit --out with --rag or --rag-dir
+  --html / --html-dir / --target / --target-layout / --layout-rule with --rag, --rag-dir, --context, or explicit --out
+  --target with --html-dir
+  --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG / context
+  Invalid target names, duplicate names, output collisions, workspace escape,
+  content/layout overlap, unknown --target-layout / --layout-rule target,
+  duplicate or invalid layout selectors, invalid layout paths (.. / absolute),
+  mixed theme roots, >256 rules/target
+
+Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
+
+Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
+      `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
+      --html / --html-dir / bare CLI map to a single target named "default".
+      Equivalent --target / --target-layout / --layout-rule permutations yield the
+      same config (targets sorted by name; rules canonicalized). No layout frontmatter.

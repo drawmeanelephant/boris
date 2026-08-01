@@ -1,0 +1,1 @@
+error: EINCLUDECYCLE: includes/c.md:1:1: include cycle involving "includes/a.md" [Break cycles or reduce nested/fan-out include expansion]

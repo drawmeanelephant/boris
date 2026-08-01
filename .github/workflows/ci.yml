@@ -86,6 +86,9 @@ jobs:
       - name: Test
         run: zig build test
 
+      - name: Publication conformance
+        run: zig build test-publication-conformance
+
       - name: Apex hostile ABI tests
         run: zig build test-apex-hostile
 

@@ -1,0 +1,5 @@
+boris: load  scanning docs/audits/publication-conformance/c08-parser-unicode/cases/malformed-unicode/content
+boris: roll  parsing 1 page(s)
+boris: ignite validating graph
+boris: content validation failed (1 error(s))
+error: EFRONTMATTER: bad.md:2:1: unsupported frontmatter key [Fix the frontmatter or encoding for this file]

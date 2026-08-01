@@ -648,6 +648,21 @@ pub fn build(b: *std.Build) void {
     test_sitemap_step.dependOn(&run_site_url_tests.step);
     test_sitemap_step.dependOn(&run_sitemap_tests.step);
 
+    // Retained publication evidence: generate only the bounded depth chains
+    // under the ignored verifier tree, then exercise the real installed CLI.
+    const publication_conformance_run = b.addSystemCommand(&.{
+        "bash",
+        "scripts/verify-publication-conformance.sh",
+    });
+    publication_conformance_run.setCwd(b.path("."));
+    publication_conformance_run.has_side_effects = true;
+    publication_conformance_run.step.dependOn(b.getInstallStep());
+    const test_publication_conformance_step = b.step(
+        "test-publication-conformance",
+        "Run retained C02/C03/C04/C08 black-box publication conformance",
+    );
+    test_publication_conformance_step.dependOn(&publication_conformance_run.step);
+
     const invariants_mod = b.createModule(.{
         .root_source_file = b.path("src/artifact_invariants.zig"),
         .target = target,
