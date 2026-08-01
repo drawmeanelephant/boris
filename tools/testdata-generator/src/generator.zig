@@ -10,7 +10,19 @@ const Io = std.Io;
 
 pub const max_profile_bytes: usize = 64 * 1024;
 pub const max_template_bytes: usize = 1 * 1024 * 1024;
-pub const run_schema_version = "boris-testdata-run/4";
+pub const run_schema_version = "boris-testdata-run/5";
+pub const republish_clean_schema_version = "boris-testdata-republish-clean/2";
+/// Boris CLI bounds for the requested parallel HTML workers.
+pub const min_jobs: usize = 1;
+pub const max_jobs: usize = 64;
+
+/// Validate a requested worker upper bound against the Boris CLI range.
+/// Invalid values return `error.InvalidJobs`. The CLI parser and both fixture
+/// operations share this single check so no evidence record can carry an
+/// out-of-range `execution.requestedJobs`.
+pub fn validateJobs(jobs: usize) error{InvalidJobs}!void {
+    if (jobs < min_jobs or jobs > max_jobs) return error.InvalidJobs;
+}
 
 pub const Profile = struct {
     name: []const u8,
@@ -555,14 +567,55 @@ fn copyTreeDir(io: Io, allocator: std.mem.Allocator, source: Io.Dir, destination
     }
 }
 
+/// The constructed Boris subprocess argument vector plus the owned decimal
+/// `--jobs` value it carries. `deinit` releases the vector and the jobs text.
+pub const BorisInvocation = struct {
+    argv: []const []const u8,
+    jobs_arg: []const u8,
+
+    pub fn deinit(self: *BorisInvocation, allocator: std.mem.Allocator) void {
+        allocator.free(self.argv);
+        allocator.free(self.jobs_arg);
+        self.* = undefined;
+    }
+};
+
+/// Build the Boris subprocess argument vector for a fixture publication. The
+/// requested worker upper bound is emitted as `--html-dir <path> --jobs
+/// <decimal requested value> --quiet`; both `runFixture` and
+/// `republishCleanFixture` use this single construction site so the exact
+/// vector can be asserted in tests.
+pub fn buildBorisInvocation(
+    allocator: std.mem.Allocator,
+    boris_abs: []const u8,
+    input_arg: []const u8,
+    theme_arg: []const u8,
+    html_arg: []const u8,
+    jobs: usize,
+) !BorisInvocation {
+    try validateJobs(jobs);
+    const jobs_arg = try std.fmt.allocPrint(allocator, "{d}", .{jobs});
+    errdefer allocator.free(jobs_arg);
+    const argv = try allocator.dupe([]const u8, &.{
+        boris_abs,    "--input", input_arg, "--theme", theme_arg,
+        "--html-dir", html_arg,  "--jobs",  jobs_arg,  "--quiet",
+    });
+    return .{ .argv = argv, .jobs_arg = jobs_arg };
+}
+
 pub const RunOptions = struct {
     io: Io,
     allocator: std.mem.Allocator,
     fixture_path: []const u8,
     boris_path: []const u8,
+    /// Requested upper bound for Boris parallel HTML workers. This is the
+    /// worker request passed to `--jobs N`; it is never inferred from the
+    /// page count and does not measure actual thread creation.
+    jobs: usize = 1,
 };
 
 pub fn runFixture(options: RunOptions) !void {
+    try validateJobs(options.jobs);
     const cwd_path = try std.process.currentPathAlloc(options.io, options.allocator);
     defer options.allocator.free(cwd_path);
     const fixture_abs = try std.fs.path.resolve(options.allocator, &.{ cwd_path, options.fixture_path });
@@ -585,8 +638,10 @@ pub fn runFixture(options: RunOptions) !void {
     var expected = try readExpectedFixture(options.io, options.allocator, fixture_abs);
     defer expected.deinit(options.allocator);
     const expected_code = expected.exit_code;
+    var invocation = try buildBorisInvocation(options.allocator, boris_abs, input_arg, theme_arg, html_arg, options.jobs);
+    defer invocation.deinit(options.allocator);
     const result = try std.process.run(options.allocator, options.io, .{
-        .argv = &.{ boris_abs, "--input", input_arg, "--theme", theme_arg, "--html-dir", html_arg, "--quiet" },
+        .argv = invocation.argv,
         .cwd = .{ .path = parent },
         .stdout_limit = .limited(2 * 1024 * 1024),
         .stderr_limit = .limited(2 * 1024 * 1024),
@@ -627,6 +682,7 @@ pub fn runFixture(options: RunOptions) !void {
     const passed = actual_code == expected_code and (canonical_inventory_unchanged orelse true);
 
     try writeRunEvidence(options.io, options.allocator, fixture_abs, .{
+        .requested_jobs = options.jobs,
         .expected_code = expected_code,
         .actual_code = actual_code,
         .passed = passed,
@@ -645,6 +701,7 @@ pub fn runFixture(options: RunOptions) !void {
 }
 
 pub fn republishCleanFixture(options: RunOptions) !void {
+    try validateJobs(options.jobs);
     const cwd_path = try std.process.currentPathAlloc(options.io, options.allocator);
     defer options.allocator.free(cwd_path);
     const fixture_abs = try std.fs.path.resolve(options.allocator, &.{ cwd_path, options.fixture_path });
@@ -669,8 +726,10 @@ pub fn republishCleanFixture(options: RunOptions) !void {
     const theme_arg = try std.fmt.allocPrint(options.allocator, "{s}/optional-theme", .{base});
     defer options.allocator.free(theme_arg);
 
+    var invocation = try buildBorisInvocation(options.allocator, boris_abs, input_arg, theme_arg, html_arg, options.jobs);
+    defer invocation.deinit(options.allocator);
     const result = try std.process.run(options.allocator, options.io, .{
-        .argv = &.{ boris_abs, "--input", input_arg, "--theme", theme_arg, "--html-dir", html_arg, "--quiet" },
+        .argv = invocation.argv,
         .cwd = .{ .path = parent },
         .stdout_limit = .limited(2 * 1024 * 1024),
         .stderr_limit = .limited(2 * 1024 * 1024),
@@ -688,7 +747,11 @@ pub fn republishCleanFixture(options: RunOptions) !void {
     defer fixture.close(options.io);
     var output = std.ArrayList(u8).empty;
     defer output.deinit(options.allocator);
-    try output.appendSlice(options.allocator, "{\n  \"schemaVersion\":\"boris-testdata-republish-clean/1\",\n  \"expectedExitCode\":");
+    try output.appendSlice(options.allocator, "{\n  \"schemaVersion\":");
+    try manifest.appendJsonString(&output, options.allocator, republish_clean_schema_version);
+    try output.appendSlice(options.allocator, ",\n  \"execution\":{\"requestedJobs\":");
+    try appendDecimal(&output, options.allocator, options.jobs);
+    try output.appendSlice(options.allocator, "},\n  \"expectedExitCode\":");
     try appendDecimal(&output, options.allocator, expected.exit_code);
     try output.appendSlice(options.allocator, ",\n  \"actualExitCode\":");
     try appendDecimal(&output, options.allocator, actual_code);
@@ -711,6 +774,7 @@ pub fn republishCleanFixture(options: RunOptions) !void {
 const TreeHash = struct { hash: manifest.HashText, file_count: usize };
 
 const RunEvidenceOptions = struct {
+    requested_jobs: usize,
     expected_code: u8,
     actual_code: u8,
     passed: bool,
@@ -737,7 +801,9 @@ fn writeRunEvidence(
     defer output.deinit(allocator);
     try output.appendSlice(allocator, "{\n  \"schemaVersion\":");
     try manifest.appendJsonString(&output, allocator, run_schema_version);
-    try output.appendSlice(allocator, ",\n  \"expectedExitCode\":");
+    try output.appendSlice(allocator, ",\n  \"execution\":{\"requestedJobs\":");
+    try appendDecimal(&output, allocator, evidence.requested_jobs);
+    try output.appendSlice(allocator, "},\n  \"expectedExitCode\":");
     try appendDecimal(&output, allocator, evidence.expected_code);
     try output.appendSlice(allocator, ",\n  \"actualExitCode\":");
     try appendDecimal(&output, allocator, evidence.actual_code);
@@ -763,22 +829,6 @@ fn writeRunEvidence(
     try manifest.appendJsonString(&output, allocator, &evidence.output_tree.hash);
     try output.appendSlice(allocator, ",\n  \"outputFileCount\":");
     try appendDecimal(&output, allocator, evidence.output_tree.file_count);
-    try output.appendSlice(allocator, ",\n  \"artifactInventorySha256\":");
-    if (evidence.artifact_inventory) |inventory| {
-        try manifest.appendJsonString(&output, allocator, &inventory.sha256);
-    } else {
-        try output.appendSlice(allocator, "null");
-    }
-    try output.appendSlice(allocator, ",\n  \"artifactInventoryFileCount\":");
-    if (evidence.artifact_inventory) |inventory| {
-        try appendDecimal(&output, allocator, inventory.count);
-    } else {
-        try output.appendSlice(allocator, "null");
-    }
-    try output.appendSlice(allocator, ",\n  \"outputSnapshotSha256\":");
-    try manifest.appendJsonString(&output, allocator, &evidence.output_snapshot.sha256);
-    try output.appendSlice(allocator, ",\n  \"outputSnapshotFileCount\":");
-    try appendDecimal(&output, allocator, evidence.output_snapshot.count);
     try output.appendSlice(allocator, ",\n  \"artifactTargets\":[");
     if (evidence.artifact_inventory) |inventory| {
         try appendArtifactTargets(&output, allocator, evidence.assignments, inventory);
@@ -1823,6 +1873,7 @@ test "successful run evidence is versioned, path-valid, and deterministic" {
     const baseline_tree = try hashTree(io, a, fixture_abs, "results/boris-output");
     const snapshot = try writeOutputSnapshot(io, a, fixture_abs, "results/boris-output");
     const evidence = RunEvidenceOptions{
+        .requested_jobs = 4,
         .expected_code = 0,
         .actual_code = 0,
         .passed = true,
@@ -1854,6 +1905,21 @@ test "successful run evidence is versioned, path-valid, and deterministic" {
     };
     try std.testing.expectEqualStrings(run_schema_version, schema);
     try std.testing.expect(run.get("elapsedNs") == null);
+    const execution_object = switch (run.get("execution") orelse return error.InvalidFixture) {
+        .object => |object| object,
+        else => return error.InvalidFixture,
+    };
+    const requested_jobs = switch (execution_object.get("requestedJobs") orelse return error.InvalidFixture) {
+        .integer => |value| value,
+        else => return error.InvalidFixture,
+    };
+    try std.testing.expectEqual(@as(i64, 4), requested_jobs);
+    // v5 records the worker request in the structured execution object; the
+    // legacy flat inventory and snapshot duplicates are not repeated.
+    try std.testing.expect(run.get("artifactInventorySha256") == null);
+    try std.testing.expect(run.get("artifactInventoryFileCount") == null);
+    try std.testing.expect(run.get("outputSnapshotSha256") == null);
+    try std.testing.expect(run.get("outputSnapshotFileCount") == null);
 
     const snapshot_object = switch (run.get("poisonedOutputSnapshot") orelse return error.InvalidFixture) {
         .object => |object| object,
@@ -1930,4 +1996,109 @@ test "successful run evidence is versioned, path-valid, and deterministic" {
     const second_run = try readFileAbsolute(io, a, run_path, 256 * 1024);
     defer a.free(second_run);
     try std.testing.expectEqualSlices(u8, first_run, second_run);
+
+    // The recorded worker request is exactly the decimal value placed in the
+    // Boris argument vector for the same requested bound (evidence == argv).
+    var tie_invocation = try buildBorisInvocation(a, "/bin/boris", "site/content", "site/optional-theme", "site/results/boris-output", 4);
+    defer tie_invocation.deinit(a);
+    try std.testing.expectEqualStrings("4", tie_invocation.argv[8]);
+    try std.testing.expectEqualStrings(tie_invocation.jobs_arg, tie_invocation.argv[8]);
+    const parsed_tie_jobs = try std.fmt.parseInt(i64, tie_invocation.argv[8], 10);
+    try std.testing.expectEqual(requested_jobs, parsed_tie_jobs);
+}
+
+test "Boris argument vector carries the exact html-dir jobs quiet sequence" {
+    const a = std.testing.allocator;
+    const jobs_values = [_]usize{ 1, 4, 64 };
+    for (jobs_values) |jobs| {
+        var invocation = try buildBorisInvocation(a, "/bin/boris", "site/content", "site/optional-theme", "site/results/boris-output", jobs);
+        defer invocation.deinit(a);
+        try std.testing.expectEqual(@as(usize, 10), invocation.argv.len);
+        try std.testing.expectEqualStrings("/bin/boris", invocation.argv[0]);
+        try std.testing.expectEqualStrings("--input", invocation.argv[1]);
+        try std.testing.expectEqualStrings("--theme", invocation.argv[3]);
+        try std.testing.expectEqualStrings("--html-dir", invocation.argv[5]);
+        try std.testing.expectEqualStrings("site/results/boris-output", invocation.argv[6]);
+        try std.testing.expectEqualStrings("--jobs", invocation.argv[7]);
+        const expected = try std.fmt.allocPrint(a, "{d}", .{jobs});
+        defer a.free(expected);
+        try std.testing.expectEqualStrings(expected, invocation.argv[8]);
+        try std.testing.expectEqualStrings("--quiet", invocation.argv[9]);
+        try std.testing.expectEqualStrings(invocation.jobs_arg, invocation.argv[8]);
+        const parsed = try std.fmt.parseInt(usize, invocation.argv[8], 10);
+        try std.testing.expectEqual(jobs, parsed);
+    }
+}
+
+test "fixture operations reject out-of-range jobs before any side effects" {
+    const a = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_arena = std.heap.ArenaAllocator.init(a);
+    defer path_arena.deinit();
+    const pa = path_arena.allocator();
+
+    const fixture_rel = try std.fmt.allocPrint(pa, ".zig-cache/tmp/{s}/jobs-boundary", .{tmp.sub_path});
+    const output_rel = try std.fmt.allocPrint(pa, "{s}/results/boris-output", .{fixture_rel});
+    const cwd = Io.Dir.cwd();
+    try cwd.createDirPath(io, output_rel);
+    const marker_rel = try std.fmt.allocPrint(pa, "{s}/index.html", .{output_rel});
+    const marker = "pre-existing-marker";
+    try cwd.writeFile(io, .{ .sub_path = marker_rel, .data = marker });
+    const run_rel = try std.fmt.allocPrint(pa, "{s}/results/run.json", .{fixture_rel});
+    const run_sentinel = "run-sentinel";
+    try cwd.writeFile(io, .{ .sub_path = run_rel, .data = run_sentinel });
+    const clean_rel = try std.fmt.allocPrint(pa, "{s}/results/republish-clean.json", .{fixture_rel});
+    const clean_sentinel = "clean-sentinel";
+    try cwd.writeFile(io, .{ .sub_path = clean_rel, .data = clean_sentinel });
+    const clean_output_rel = try std.fmt.allocPrint(pa, "{s}/results/republish-clean-output", .{fixture_rel});
+    try cwd.createDirPath(io, clean_output_rel);
+    const clean_marker_rel = try std.fmt.allocPrint(pa, "{s}/index.html", .{clean_output_rel});
+    const clean_marker = "pre-existing-clean-marker";
+    try cwd.writeFile(io, .{ .sub_path = clean_marker_rel, .data = clean_marker });
+
+    const invalid = [_]usize{ 0, 65 };
+    for (invalid) |jobs| {
+        try std.testing.expectError(error.InvalidJobs, runFixture(.{
+            .io = io,
+            .allocator = a,
+            .fixture_path = fixture_rel,
+            .boris_path = "./definitely-not-boris",
+            .jobs = jobs,
+        }));
+        try std.testing.expectError(error.InvalidJobs, republishCleanFixture(.{
+            .io = io,
+            .allocator = a,
+            .fixture_path = fixture_rel,
+            .boris_path = "./definitely-not-boris",
+            .jobs = jobs,
+        }));
+        // Pre-existing output trees must not be deleted by either operation.
+        const after_marker = try readFilePath(io, a, marker_rel, 1024);
+        defer a.free(after_marker);
+        try std.testing.expectEqualStrings(marker, after_marker);
+        const after_clean_marker = try readFilePath(io, a, clean_marker_rel, 1024);
+        defer a.free(after_clean_marker);
+        try std.testing.expectEqualStrings(clean_marker, after_clean_marker);
+        // Evidence must not be replaced.
+        const after_run = try readFilePath(io, a, run_rel, 1024);
+        defer a.free(after_run);
+        try std.testing.expectEqualStrings(run_sentinel, after_run);
+        const after_clean = try readFilePath(io, a, clean_rel, 1024);
+        defer a.free(after_clean);
+        try std.testing.expectEqualStrings(clean_sentinel, after_clean);
+    }
+
+    // A fixture without prior evidence must not gain a run.json either.
+    const absent_rel = try std.fmt.allocPrint(pa, ".zig-cache/tmp/{s}/jobs-absent", .{tmp.sub_path});
+    const absent_run = try std.fmt.allocPrint(pa, "{s}/results/run.json", .{absent_rel});
+    try std.testing.expectError(error.InvalidJobs, runFixture(.{
+        .io = io,
+        .allocator = a,
+        .fixture_path = absent_rel,
+        .boris_path = "./definitely-not-boris",
+        .jobs = 0,
+    }));
+    try std.testing.expect(!pathExists(io, absent_run));
 }

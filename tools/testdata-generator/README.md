@@ -25,7 +25,16 @@ zig build run -- validate --fixture /private/tmp/boris-case
 zig build run -- inspect --input /private/tmp/boris-case --format json
 zig build run -- run --fixture /private/tmp/boris-case --boris /path/to/boris
 zig build run -- republish-clean --fixture /private/tmp/boris-case --boris /path/to/boris
+zig build run -- run --fixture /private/tmp/boris-case --boris /path/to/boris --jobs 4
 ```
+
+`run` and `republish-clean` accept `--jobs N` (default `1`, valid range
+`1..64` matching Boris; both `--jobs N` and `--jobs=N` forms are accepted).
+`--jobs` is a requested upper bound passed to Boris as `--jobs N`; it is
+never inferred from the page count and does not measure actual thread
+creation. `generate`, `validate`, and `inspect` reject `--jobs` as a usage
+error. Zero, values above 64, empty values, malformed integers, duplicate
+flags, and missing values are all rejected deterministically.
 
 `generate` refuses to overwrite an existing directory unless `--force` is
 present. It only deletes the exact output directory named by the user.
@@ -167,8 +176,10 @@ masquerade as source or compiler failures.
 
 `run` invokes the supplied Boris binary as a subprocess only because it is an
 evidence collector; it never uses a subprocess to generate Markdown. The
-`boris-testdata-run/4` record at `results/run.json` includes:
+`boris-testdata-run/5` record at `results/run.json` includes:
 
+- the requested worker upper bound as `execution.requestedJobs` (the value
+  passed to Boris via `--jobs N`; never a measured thread count);
 - expected and actual exit codes plus a pass/fail comparison;
 - the Boris binary SHA-256;
 - deterministic baseline and poisoned output-tree SHA-256 values over sorted relative paths and bytes;
@@ -177,3 +188,14 @@ evidence collector; it never uses a subprocess to generate Markdown. The
 - the ordered list of applied post-publication mutations and a canonical-inventory-unchanged assertion;
 - the non-normative full-tree poisoned output-snapshot path, hash, and file count;
 - output file count, stdout, and stderr.
+
+Version 5 records the inventory and snapshot facts once in the structured
+`baselineArtifactInventory` and `poisonedOutputSnapshot` objects; the legacy
+flat `artifactInventorySha256`/`artifactInventoryFileCount` and
+`outputSnapshotSha256`/`outputSnapshotFileCount` fields of version 4 are not
+repeated. The emitted JSON above is the exact record shape.
+
+`republish-clean` writes the `boris-testdata-republish-clean/2` record at
+`results/republish-clean.json`, including `execution.requestedJobs` alongside
+the expected/actual exit codes, pass/fail comparison, clean output-tree hash
+and file count, stdout, and stderr.

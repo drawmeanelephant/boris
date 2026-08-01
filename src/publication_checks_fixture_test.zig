@@ -297,3 +297,443 @@ test "mild poison fixture exercises all publication-check evidence barbs" {
         try std.testing.expectEqualStrings("complete", check.object.get("coverage").?.string);
     }
 }
+
+// --- B03: requested worker passthrough determinism --------------------------
+// These tests run the installed Boris binary through generator.runFixture with
+// different `--jobs` values and prove the publication bytes and recorded
+// evidence are identical except for `execution.requestedJobs`.
+
+const JobEvidence = struct {
+    run_json: []u8,
+    checks_json: []u8,
+    snapshot_jsonl: []u8,
+    index_html: []u8,
+    search_json: ?[]u8,
+    artifacts_json: []u8,
+    output_abs: []u8,
+    jobs: usize,
+
+    fn deinit(self: *JobEvidence, allocator: std.mem.Allocator) void {
+        allocator.free(self.run_json);
+        allocator.free(self.checks_json);
+        allocator.free(self.snapshot_jsonl);
+        allocator.free(self.index_html);
+        if (self.search_json) |bytes| allocator.free(bytes);
+        allocator.free(self.artifacts_json);
+        allocator.free(self.output_abs);
+        self.* = undefined;
+    }
+};
+
+fn collectTreeFiles(io: Io, allocator: std.mem.Allocator, dir: Io.Dir, prefix: []const u8, files: *std.ArrayList([]u8)) !void {
+    var it = dir.iterate();
+    while (try it.next(io)) |entry| {
+        const rel = if (prefix.len == 0)
+            try allocator.dupe(u8, entry.name)
+        else
+            try std.fmt.allocPrint(allocator, "{s}/{s}", .{ prefix, entry.name });
+        if (entry.kind == .directory) {
+            var child = try dir.openDir(io, entry.name, .{ .iterate = true });
+            defer child.close(io);
+            try collectTreeFiles(io, allocator, child, rel, files);
+            allocator.free(rel);
+        } else if (entry.kind == .file) {
+            try files.append(allocator, rel);
+        } else {
+            allocator.free(rel);
+            return error.UnsafeTree;
+        }
+    }
+}
+
+fn treesByteEqual(io: Io, allocator: std.mem.Allocator, a: Io.Dir, b: Io.Dir) !bool {
+    var a_files: std.ArrayList([]u8) = .empty;
+    defer {
+        for (a_files.items) |f| allocator.free(f);
+        a_files.deinit(allocator);
+    }
+    try collectTreeFiles(io, allocator, a, "", &a_files);
+    std.sort.heap([]u8, a_files.items, {}, struct {
+        fn lt(_: void, x: []u8, y: []u8) bool {
+            return std.mem.lessThan(u8, x, y);
+        }
+    }.lt);
+
+    var b_files: std.ArrayList([]u8) = .empty;
+    defer {
+        for (b_files.items) |f| allocator.free(f);
+        b_files.deinit(allocator);
+    }
+    try collectTreeFiles(io, allocator, b, "", &b_files);
+    std.sort.heap([]u8, b_files.items, {}, struct {
+        fn lt(_: void, x: []u8, y: []u8) bool {
+            return std.mem.lessThan(u8, x, y);
+        }
+    }.lt);
+
+    if (a_files.items.len != b_files.items.len) return false;
+    for (a_files.items, b_files.items) |af, bf| {
+        if (!std.mem.eql(u8, af, bf)) return false;
+        const bytes_a = try readPayload(io, a, allocator, af);
+        defer allocator.free(bytes_a);
+        const bytes_b = try readPayload(io, b, allocator, bf);
+        defer allocator.free(bytes_b);
+        if (!std.mem.eql(u8, bytes_a, bytes_b)) return false;
+    }
+    return true;
+}
+
+/// Normalization helper: parse a `run.json`/`republish-clean.json` record and
+/// replace only `execution.requestedJobs` with a canonical value, then
+/// re-serialize deterministically so the remaining parsed evidence can be
+/// compared byte-for-byte.
+fn normalizedRunEvidence(allocator: std.mem.Allocator, bytes: []const u8) ![]u8 {
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, bytes, .{});
+    defer parsed.deinit();
+    const exec_val = parsed.value.object.getPtr("execution") orelse return error.InvalidRunEvidence;
+    const exec_map = switch (exec_val.*) {
+        .object => |*object| object,
+        else => return error.InvalidRunEvidence,
+    };
+    _ = try exec_map.put(allocator, "requestedJobs", .{ .integer = 1 });
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try std.json.Stringify.value(parsed.value, .{ .whitespace = .indent_2 }, &out.writer);
+    const buffered = out.writer.buffered();
+    const copy = try allocator.dupe(u8, buffered);
+    return copy;
+}
+
+fn captureJobsRun(
+    io: Io,
+    allocator: std.mem.Allocator,
+    fixture_rel: []const u8,
+    jobs: usize,
+) !JobEvidence {
+    try generator.runFixture(.{
+        .io = io,
+        .allocator = allocator,
+        .fixture_path = fixture_rel,
+        .boris_path = "./zig-out/bin/boris",
+        .jobs = jobs,
+    });
+    const fixture_abs = try fixtureAbsolute(io, allocator, fixture_rel);
+    defer allocator.free(fixture_abs);
+    const output_abs = try std.fs.path.join(allocator, &.{ fixture_abs, "results/boris-output" });
+    defer allocator.free(output_abs);
+    var output = try Io.Dir.openDirAbsolute(io, output_abs, .{ .iterate = true });
+    defer output.close(io);
+    try publication_checks.writeAfterCommit(io, allocator, output, "default", .{});
+
+    const index_html = try readPayload(io, output, allocator, "index.html");
+    const artifacts_json = try readPayload(io, output, allocator, "_boris/proof/artifacts.json");
+    const checks_json = try readPayload(io, output, allocator, publication_checks.output_path);
+    var search_json: ?[]u8 = null;
+    if (pathExists(io, output, "_boris/search/search-index.json")) {
+        search_json = try readPayload(io, output, allocator, "_boris/search/search-index.json");
+    }
+
+    var fixture = try Io.Dir.openDirAbsolute(io, fixture_abs, .{});
+    defer fixture.close(io);
+    const run_json = try readPayload(io, fixture, allocator, "results/run.json");
+    const snapshot_jsonl = try readPayload(io, fixture, allocator, "results/output-snapshot.jsonl");
+
+    // The recorded evidence value must equal the exact value placed in the
+    // Boris argument vector by generator.buildBorisInvocation for this run.
+    var recorded = try std.json.parseFromSlice(std.json.Value, allocator, run_json, .{});
+    defer recorded.deinit();
+    const execution = switch (recorded.value.object.get("execution") orelse return error.InvalidRunEvidence) {
+        .object => |object| object,
+        else => return error.InvalidRunEvidence,
+    };
+    const recorded_jobs = switch (execution.get("requestedJobs") orelse return error.InvalidRunEvidence) {
+        .integer => |value| value,
+        else => return error.InvalidRunEvidence,
+    };
+    try std.testing.expectEqual(@as(i64, @intCast(jobs)), recorded_jobs);
+
+    return .{
+        .run_json = run_json,
+        .checks_json = checks_json,
+        .snapshot_jsonl = snapshot_jsonl,
+        .index_html = index_html,
+        .search_json = search_json,
+        .artifacts_json = artifacts_json,
+        .output_abs = try allocator.dupe(u8, output_abs),
+        .jobs = jobs,
+    };
+}
+
+fn expectCrossJobsDeterministic(
+    io: Io,
+    allocator: std.mem.Allocator,
+    a: JobEvidence,
+    b: JobEvidence,
+) !void {
+    try std.testing.expect(a.jobs != b.jobs);
+    // The complete records may differ only where the requested worker value is
+    // recorded: raw bytes differ, normalized parsed evidence is identical.
+    try std.testing.expect(!std.mem.eql(u8, a.run_json, b.run_json));
+    const norm_a = try normalizedRunEvidence(allocator, a.run_json);
+    defer allocator.free(norm_a);
+    const norm_b = try normalizedRunEvidence(allocator, b.run_json);
+    defer allocator.free(norm_b);
+    try std.testing.expectEqualSlices(u8, norm_a, norm_b);
+
+    // Every Boris-owned payload byte is identical across worker counts.
+    var out_a = try Io.Dir.openDirAbsolute(io, a.output_abs, .{ .iterate = true });
+    defer out_a.close(io);
+    var out_b = try Io.Dir.openDirAbsolute(io, b.output_abs, .{ .iterate = true });
+    defer out_b.close(io);
+    try std.testing.expect(try treesByteEqual(io, allocator, out_a, out_b));
+
+    // checks.json is byte-identical. `snapshot_jsonl` is compared byte-for-byte
+    // only where a fixture emits it: runFixture writes
+    // `results/output-snapshot.jsonl`, while republish-clean emits no output
+    // snapshot, so its evidence carries an intentional empty placeholder and
+    // this assertion is a documented no-op for that path. Every output byte is
+    // independently proven identical by `treesByteEqual` above.
+    try std.testing.expectEqualSlices(u8, a.checks_json, b.checks_json);
+    try std.testing.expectEqualSlices(u8, a.snapshot_jsonl, b.snapshot_jsonl);
+
+    // Direct byte comparisons for representative payloads.
+    try std.testing.expectEqualSlices(u8, a.index_html, b.index_html);
+    try std.testing.expectEqualSlices(u8, a.artifacts_json, b.artifacts_json);
+    if (a.search_json) |a_search| {
+        try std.testing.expect(b.search_json != null);
+        try std.testing.expectEqualSlices(u8, a_search, b.search_json.?);
+    } else {
+        try std.testing.expect(b.search_json == null);
+    }
+}
+
+fn expectSameJobsIdentical(
+    io: Io,
+    allocator: std.mem.Allocator,
+    a: JobEvidence,
+    b: JobEvidence,
+) !void {
+    try std.testing.expectEqual(@as(usize, a.jobs), b.jobs);
+    // Repeated runs with the same requested jobs must be fully byte-identical,
+    // including the recorded worker value.
+    try std.testing.expectEqualSlices(u8, a.run_json, b.run_json);
+    var out_a = try Io.Dir.openDirAbsolute(io, a.output_abs, .{ .iterate = true });
+    defer out_a.close(io);
+    var out_b = try Io.Dir.openDirAbsolute(io, b.output_abs, .{ .iterate = true });
+    defer out_b.close(io);
+    try std.testing.expect(try treesByteEqual(io, allocator, out_a, out_b));
+    try std.testing.expectEqualSlices(u8, a.checks_json, b.checks_json);
+    try std.testing.expectEqualSlices(u8, a.snapshot_jsonl, b.snapshot_jsonl);
+}
+
+fn generateJobsFixture(
+    io: Io,
+    allocator: std.mem.Allocator,
+    fixture_rel: []const u8,
+    profile: []const u8,
+    pages: usize,
+) !void {
+    var generated = try generator.generate(.{
+        .io = io,
+        .allocator = allocator,
+        .output_path = fixture_rel,
+        .pages = pages,
+        .seed = 20260801,
+        .profile_selector = profile,
+    });
+    defer {
+        allocator.free(generated.assignments);
+        generated.profile.deinit(allocator);
+    }
+}
+
+test "mild-poison-v1 publication bytes are identical across requested jobs" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const fixture_rel = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/jobs-mild", .{tmp.sub_path});
+    defer allocator.free(fixture_rel);
+
+    var runs: [3]JobEvidence = undefined;
+    const jobs_values = [_]usize{ 1, 4, 8 };
+    for (jobs_values, 0..) |jobs, index| {
+        const run_fixture = try std.fmt.allocPrint(allocator, "{s}-{d}", .{ fixture_rel, jobs });
+        defer allocator.free(run_fixture);
+        try generateJobsFixture(io, allocator, run_fixture, "mild-poison-v1", 24);
+        runs[index] = try captureJobsRun(io, allocator, run_fixture, jobs);
+    }
+    defer for (&runs) |*run| run.deinit(allocator);
+
+    for (0..runs.len) |i| {
+        for (i + 1..runs.len) |j| {
+            try expectCrossJobsDeterministic(io, allocator, runs[i], runs[j]);
+        }
+    }
+
+    // All eight mild-poison barbs retain the same targets and expected findings
+    // across jobs: the applied mutations list is recorded identically.
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, runs[0].run_json, .{});
+    defer parsed.deinit();
+    const applied = switch (parsed.value.object.get("appliedPostPublishMutations") orelse return error.InvalidRunEvidence) {
+        .array => |array| array.items,
+        else => return error.InvalidRunEvidence,
+    };
+    try std.testing.expectEqual(@as(usize, 8), applied.len);
+    for (applied) |mutation| {
+        const object = switch (mutation) {
+            .object => |value| value,
+            else => return error.InvalidRunEvidence,
+        };
+        const name = switch (object.get("name") orelse return error.InvalidRunEvidence) {
+            .string => |value| value,
+            else => return error.InvalidRunEvidence,
+        };
+        try std.testing.expect(mutationIsMildPoison(name));
+    }
+}
+
+fn mutationIsMildPoison(name: []const u8) bool {
+    const mild = [_][]const u8{
+        "html_missing_local_route",
+        "html_missing_fragment",
+        "html_duplicate_id",
+        "html_unclosed_structure",
+        "artifact_missing",
+        "artifact_digest_mismatch",
+        "search_stale_title",
+        "deployment_owned_extra",
+    };
+    for (mild) |m| if (std.mem.eql(u8, m, name)) return true;
+    return false;
+}
+
+test "preserved-edge-v1 publication bytes are identical across requested jobs" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const fixture_rel = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/jobs-preserved", .{tmp.sub_path});
+    defer allocator.free(fixture_rel);
+
+    var runs: [2]JobEvidence = undefined;
+    const jobs_values = [_]usize{ 1, 4 };
+    for (jobs_values, 0..) |jobs, index| {
+        const run_fixture = try std.fmt.allocPrint(allocator, "{s}-{d}", .{ fixture_rel, jobs });
+        defer allocator.free(run_fixture);
+        try generateJobsFixture(io, allocator, run_fixture, "preserved-edge-v1", 24);
+        runs[index] = try captureJobsRun(io, allocator, run_fixture, jobs);
+    }
+    defer for (&runs) |*run| run.deinit(allocator);
+    try expectCrossJobsDeterministic(io, allocator, runs[0], runs[1]);
+}
+
+test "clean ideal-site publication bytes are identical across requested jobs including above page count" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const fixture_rel = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/jobs-clean", .{tmp.sub_path});
+    defer allocator.free(fixture_rel);
+
+    // A requested count greater than the 24-page fixture (64) must not change
+    // publication bytes; the value is only the requested upper bound.
+    var runs: [3]JobEvidence = undefined;
+    const jobs_values = [_]usize{ 1, 4, 64 };
+    for (jobs_values, 0..) |jobs, index| {
+        const run_fixture = try std.fmt.allocPrint(allocator, "{s}-{d}", .{ fixture_rel, jobs });
+        defer allocator.free(run_fixture);
+        try generateJobsFixture(io, allocator, run_fixture, "readme-realistic-v1", 24);
+        runs[index] = try captureJobsRun(io, allocator, run_fixture, jobs);
+    }
+    defer for (&runs) |*run| run.deinit(allocator);
+
+    for (0..runs.len) |i| {
+        for (i + 1..runs.len) |j| {
+            try expectCrossJobsDeterministic(io, allocator, runs[i], runs[j]);
+        }
+    }
+}
+
+test "republish-clean evidence is identical across requested jobs" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const fixture_rel = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/jobs-republish", .{tmp.sub_path});
+    defer allocator.free(fixture_rel);
+
+    var runs: [2]JobEvidence = undefined;
+    const jobs_values = [_]usize{ 1, 4 };
+    for (jobs_values, 0..) |jobs, index| {
+        const run_fixture = try std.fmt.allocPrint(allocator, "{s}-{d}", .{ fixture_rel, jobs });
+        defer allocator.free(run_fixture);
+        try generateJobsFixture(io, allocator, run_fixture, "readme-realistic-v1", 24);
+        try generator.republishCleanFixture(.{
+            .io = io,
+            .allocator = allocator,
+            .fixture_path = run_fixture,
+            .boris_path = "./zig-out/bin/boris",
+            .jobs = jobs,
+        });
+        const fixture_abs = try fixtureAbsolute(io, allocator, run_fixture);
+        defer allocator.free(fixture_abs);
+        const clean_abs = try std.fs.path.join(allocator, &.{ fixture_abs, "results/republish-clean-output" });
+        defer allocator.free(clean_abs);
+        var fixture = try Io.Dir.openDirAbsolute(io, fixture_abs, .{});
+        defer fixture.close(io);
+        const record = try readPayload(io, fixture, allocator, "results/republish-clean.json");
+        var clean = try Io.Dir.openDirAbsolute(io, clean_abs, .{ .iterate = true });
+        defer clean.close(io);
+        try publication_checks.writeAfterCommit(io, allocator, clean, "default", .{});
+        const clean_checks = try readPayload(io, clean, allocator, publication_checks.output_path);
+        const snapshot = try readPayload(io, clean, allocator, "index.html");
+        // republish-clean emits no `results/output-snapshot.jsonl` (that
+        // snapshot is a runFixture-only artifact), so `snapshot_jsonl` stays an
+        // intentional empty placeholder below. The clean output tree is a full
+        // Boris publication, so the artifact inventory and rendered search are
+        // read for real and compared byte-for-byte across jobs.
+        const clean_artifacts = try readPayload(io, clean, allocator, "_boris/proof/artifacts.json");
+        var clean_search: ?[]u8 = null;
+        if (pathExists(io, clean, "_boris/search/search-index.json")) {
+            clean_search = try readPayload(io, clean, allocator, "_boris/search/search-index.json");
+        }
+        runs[index] = .{
+            .run_json = record,
+            .checks_json = clean_checks,
+            .snapshot_jsonl = try allocator.dupe(u8, ""),
+            .index_html = snapshot,
+            .search_json = clean_search,
+            .artifacts_json = clean_artifacts,
+            .output_abs = try allocator.dupe(u8, clean_abs),
+            .jobs = jobs,
+        };
+    }
+    defer for (&runs) |*run| run.deinit(allocator);
+    try expectCrossJobsDeterministic(io, allocator, runs[0], runs[1]);
+}
+
+test "repeated runs with the same requested jobs are byte-identical" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const fixture_rel = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/jobs-repeat", .{tmp.sub_path});
+    defer allocator.free(fixture_rel);
+
+    var runs: [2]JobEvidence = undefined;
+    const jobs_values = [_]usize{ 4, 4 };
+    for (jobs_values, 0..) |jobs, index| {
+        const run_fixture = try std.fmt.allocPrint(allocator, "{s}-{d}", .{ fixture_rel, index });
+        defer allocator.free(run_fixture);
+        try generateJobsFixture(io, allocator, run_fixture, "mild-poison-v1", 24);
+        runs[index] = try captureJobsRun(io, allocator, run_fixture, jobs);
+    }
+    defer for (&runs) |*run| run.deinit(allocator);
+    try expectSameJobsIdentical(io, allocator, runs[0], runs[1]);
+}
