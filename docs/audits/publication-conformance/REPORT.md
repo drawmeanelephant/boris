@@ -1,393 +1,248 @@
 # Publication conformance evidence: C02, C03, C04, and C08
 
 Date: 2026-08-01
-Base: `afterparty` at `7cebfa80c325827a1e726aca630c31b013788257`
+Base: `afterparty` at `0ac7ace5df98dd9d370ce827862c2060642059df`
 Evidence branch: `codex/publication-conformance-fixtures`
+Pull request: #287
 
 ## Authority and scope
 
 This is an evidence-and-fixture pass for the requested publication-conformance
-areas. The normative authorities were, in order, the relevant contracts under
-`docs/contracts/`, the current executable implementation, the focused tests,
-and these retained black-box fixtures. No shared `CHANGELOG.md` section,
-publication-check harness, benchmark, worker-control code, or test-data
-generator was changed. The only product-tree code change is focused parser test
-coverage; no production implementation behavior was changed.
+areas. Normative authority was resolved in this order: the relevant contracts
+under `docs/contracts/`, current executable behavior, focused tests, and the
+retained black-box evidence. No `src/` production behavior changed. The
+source change in `src/parser.zig` is test-only; `build.zig`, CI, the verifier,
+fixtures, snapshots, and report are verification infrastructure.
 
-The material-observation labels below are deliberately limited to the required
-set: `Confirmed defect`, `Likely defect`, `Insufficient evidence`, `Documented
-limitation`, and `Non-issue / packet drift`.
+The material-observation labels below are limited to: `Confirmed defect`,
+`Likely defect`, `Insufficient evidence`, `Documented limitation`, and
+`Non-issue / packet drift`. The report does not turn the remaining gaps into
+confirmed defects.
 
-The C02/C03/C04/C08 source trees and expected outputs are retained under this
-directory. The referenced repository invalid-UTF-8 fixture remains in its
-existing `fixtures/` location. Fresh generated outputs and stream captures
-live under the ignored `.zig-cache/conformance/` tree and are not merge
-artifacts.
+## Executable verification
+
+The single entry point is:
+
+```text
+zig build test-publication-conformance
+```
+
+The build step installs the Boris binary, then runs
+`scripts/verify-publication-conformance.sh`. CI runs the same step after the
+ordinary test step. The verifier:
+
+- reads retained fixtures and `c02-includes-fragments/depth-cases.tsv`;
+- generates only the depth-32 and depth-33 source trees under the fixed,
+  ignored `.zig-cache/publication-conformance/` tree;
+- captures stdout and stderr separately and asserts every exit code;
+- compares successful HTML, sitemap, RSS, and IR artifacts with checked-in
+  goldens or repeat artifacts;
+- compares retained diagnostics byte-for-byte with checked-in snapshots;
+- verifies failed HTML targets have no final HTML artifacts, and failed IR
+  targets have no `graph.json` or `manifest.json` (the intentional
+  `build-report.json` remains);
+- runs repeat comparisons for successful HTML, sitemap, and RSS cases;
+- removes its temporary tree on exit, including failure.
+
+All verifier inputs and CLI paths are repository-relative. The script has no
+randomness, timestamps, absolute fixture paths, or environment-derived source
+bytes. It fails visibly on the first mismatch.
+
+The failed HTML compiler creates an empty requested output root before content
+validation; the verifier therefore checks the meaningful contract boundary:
+no final HTML artifact is present. Failed IR publication intentionally retains
+only its unsuccessful `build-report.json`; graph-dependent artifacts are
+absent. This is observed behavior, not a production change.
 
 ## Fixture index
 
-| Area | Retained fixture root | Primary evidence |
+| Area | Retained declaration or fixture | Verifier cases |
 |---|---|---|
-| C02 includes and fragments | [`c02-includes-fragments`](c02-includes-fragments) | HTML goldens, exact diagnostics, include-depth boundary |
-| C03 sitemap | [`c03-sitemap`](c03-sitemap) | `meta/discovery.xml`, nested paths, draft and asset exclusions |
-| C04 RSS 2.0 | [`c04-rss`](c04-rss) | limit 2/3/4 feeds, XML escaping, content/config failures |
-| C08 parser and Unicode | [`c08-parser-unicode`](c08-parser-unicode) | Unicode IR golden, BOM/malformed cases, parser boundary tests |
-
-## Method and stream handling
-
-Commands were run from the repository root of the isolated worktree. Success
-cases used `--quiet` where the output artifact was the assertion; their stdout
-and stderr were zero bytes. Non-quiet failure transcripts were captured as
-separate streams. Boris writes its progress and diagnostics to stderr; the
-checked-in failure snapshots preserve that exact stream, including the
-progress lines where present.
-
-The source-byte spot checks were:
-
-```text
-xxd -g 1 -l 24 docs/audits/publication-conformance/c08-parser-unicode/cases/bom/content/bom.md
-00000000: ef bb bf 2d 2d 2d 0a 74 69 74 6c 65 3a 20 42 4f  ...---.title: BO
-00000010: 4d 20 72 65 6a 65 63 74                          M reject
-
-xxd -g 1 fixtures/content/invalid/invalid-utf8.md
-...
-00000020: 0a 0a 62 61 64 3a 20 ff 20 6d 6f 72 65 0a        ..bad: . more.
-```
-
-The retained BOM bytes are `EF BB BF` at byte zero. The retained invalid-UTF-8
-fixture contains a literal `FF` byte at offset `0x27`; the new parser test also
-uses the truncated byte sequence `E2 82` so both invalid-byte shapes are
-covered.
+| C02 includes/fragments | `c02-includes-fragments/cases/` plus `depth-cases.tsv` | `c02-01`–`c02-09`, `c02-depth-32`, `c02-depth-33` |
+| C03 sitemap | `c03-sitemap/content/`, sitemap golden, CLI snapshots | `c03-trailing`, `c03-no-trailing`, `c03-invalid-*` |
+| C04 RSS | `c04-rss/content/`, feed and CLI snapshots | `c04-feed-2/3/4`, `c04-missing-*`, `c04-invalid-*` |
+| C08 parser/Unicode | `c08-parser-unicode/` plus repository invalid-UTF-8 corpus | `c08-valid`, `c08-invalid-*` |
 
 ## C02 — includes and heading fragments
 
-### Exact commands and results
+### Generated depth declaration
 
-The success commands below exited `0`; `--quiet` produced empty stdout and
-stderr. Each output was compared with its checked-in expected HTML using
-`cmp`.
+`c02-includes-fragments/depth-cases.tsv` retains the requested depth, title,
+terminal marker, expected exit, expected HTML golden or stderr snapshot. The
+generator uses exactly these byte-stable inputs:
 
-```text
-./zig-out/bin/boris --html --input docs/audits/publication-conformance/c02-includes-fragments/cases/01-include-success/content --html-dir .zig-cache/conformance/c02/01-include-success --html-layout docs/audits/publication-conformance/c02-includes-fragments/layout.html --quiet
-./zig-out/bin/boris --html --input docs/audits/publication-conformance/c02-includes-fragments/cases/05-valid-fragment/content --html-dir .zig-cache/conformance/c02/05-valid-fragment --html-layout docs/audits/publication-conformance/c02-includes-fragments/layout.html --quiet
-./zig-out/bin/boris --html --input docs/audits/publication-conformance/c02-includes-fragments/cases/07-fragment-after-include/content --html-dir .zig-cache/conformance/c02/07-fragment-after-include --html-layout docs/audits/publication-conformance/c02-includes-fragments/layout.html --quiet
-./zig-out/bin/boris --html --input docs/audits/publication-conformance/c02-includes-fragments/cases/08-duplicate-heading/content --html-dir .zig-cache/conformance/c02/08-duplicate-heading --html-layout docs/audits/publication-conformance/c02-includes-fragments/layout.html --quiet
-./zig-out/bin/boris --html --input docs/audits/publication-conformance/c02-includes-fragments/cases/09-nested-include-path/content --html-dir .zig-cache/conformance/c02/09-nested-include-path --html-layout docs/audits/publication-conformance/c02-includes-fragments/layout.html --quiet
-./zig-out/bin/boris --html --input docs/audits/publication-conformance/c02-includes-fragments/cases/10-depth-32/content --html-dir .zig-cache/conformance/c02/10-depth-32 --html-layout docs/audits/publication-conformance/c02-includes-fragments/layout.html --quiet
-```
+- root: `content/index.md`;
+- root frontmatter: `---\ntitle: <title>\n---\n`;
+- root include: `{{include includes/level-01.md}}\n`;
+- levels: `content/includes/level-%02d.md`;
+- each non-terminal include:
+  `{{include includes/level-%02d.md}}\n`;
+- terminal content: the declared marker followed by one newline.
 
-The checked-in HTML goldens matched byte-for-byte. The retained observations
-are:
+The retained declarations are `depth-32|32|...` and `depth-33|33|...`.
+The old mechanically identical `level-NN.md` forests are not committed.
 
-- `01-include-success`: included bytes render between the surrounding body
-  paragraphs.
-- `05-valid-fragment`: `target#ordinary-section` resolves to the target page
-  and rendered heading id.
-- `07-fragment-after-include`: a heading introduced by an include participates
-  in the same-page heading index and resolves from the later wiki-link.
-- `08-duplicate-heading`: both `id="duplicate"` headings remain in the target
-  output and the link uses the allowed exact-id set membership; no accidental
-  de-duplication was observed.
-- `09-nested-include-path`: nested relative include resolution preserves both
-  outer and inner bytes.
-- `10-depth-32`: the documented depth boundary succeeds and renders the
-  boundary marker.
+### Case map
 
-Representative successful target listing (`01-include-success`) was:
+| Retained input or declaration | Verifier case | Expected result and assertion |
+|---|---|---|
+| `cases/01-include-success` | `c02-01` | Exit 0; exact `expected/index.html`; repeated full HTML tree |
+| `cases/02-missing-include` | `c02-02` | Exit 1; exact `expected/stderr.txt`; no final HTML artifact |
+| `cases/03-direct-cycle` | `c02-03` | Exit 1; exact cycle diagnostic; no final HTML artifact |
+| `cases/04-long-cycle` | `c02-04` | Exit 1; exact cycle diagnostic; no final HTML artifact |
+| `cases/05-valid-fragment` | `c02-05` | Exit 0; exact HTML golden; repeated full HTML tree |
+| `cases/06-missing-fragment` | `c02-06` | Exit 1; exact `EREFERENCEMISSING`; no final HTML artifact |
+| `cases/07-fragment-after-include` | `c02-07` | Exit 0; exact HTML golden; repeated full HTML tree |
+| `cases/08-duplicate-heading` | `c02-08` | Exit 0; exact page and `target.html` goldens; repeated full HTML tree |
+| `cases/09-nested-include-path` | `c02-09` | Exit 0; exact HTML golden; repeated full HTML tree |
+| `depth-cases.tsv: depth-32` | `c02-depth-32` | Generated 32-level chain, exit 0; exact `cases/10-depth-32/expected/index.html` |
+| `depth-cases.tsv: depth-33` | `c02-depth-33` | Generated 33-level chain, exit 1; exact `cases/11-depth-33/expected/stderr.txt`; no final HTML artifact |
 
-```text
-.zig-cache/conformance/c02/01-include-success/_boris/proof/artifacts.json
-.zig-cache/conformance/c02/01-include-success/_boris/search/search-index.json
-.zig-cache/conformance/c02/01-include-success/index.html
-```
+The success observations cover include placement, nested relative resolution,
+heading lookup after an include, duplicate heading id membership, and the
+depth-32 marker. The exact depth-33 diagnostic remains checked in even though
+its source chain is generated.
 
-The negative commands exited `1`. Their stdout files were all zero bytes, and
-each stderr file matched the checked-in snapshot with `cmp`:
-
-```text
-./zig-out/bin/boris --html --input docs/audits/publication-conformance/c02-includes-fragments/cases/02-missing-include/content --html-dir .zig-cache/conformance/c02/02-missing-include-stream-output --html-layout docs/audits/publication-conformance/c02-includes-fragments/layout.html
-./zig-out/bin/boris --html --input docs/audits/publication-conformance/c02-includes-fragments/cases/03-direct-cycle/content --html-dir .zig-cache/conformance/c02/03-direct-cycle-stream-output --html-layout docs/audits/publication-conformance/c02-includes-fragments/layout.html
-./zig-out/bin/boris --html --input docs/audits/publication-conformance/c02-includes-fragments/cases/04-long-cycle/content --html-dir .zig-cache/conformance/c02/04-long-cycle-stream-output --html-layout docs/audits/publication-conformance/c02-includes-fragments/layout.html
-./zig-out/bin/boris --html --input docs/audits/publication-conformance/c02-includes-fragments/cases/06-missing-fragment/content --html-dir .zig-cache/conformance/c02/06-missing-fragment-stream-output --html-layout docs/audits/publication-conformance/c02-includes-fragments/layout.html
-./zig-out/bin/boris --html --input docs/audits/publication-conformance/c02-includes-fragments/cases/11-depth-33/content --html-dir .zig-cache/conformance/c02/11-depth-33-stream-output --html-layout docs/audits/publication-conformance/c02-includes-fragments/layout.html
-```
-
-Expected stderr, retained beside each case, was:
-
-```text
-EINCLUDEMISSING: index.md:4:1: include target "includes/missing.md" not found or unreadable
-EINCLUDECYCLE: includes/a.md:1:1: include cycle involving "includes/a.md"
-EINCLUDECYCLE: includes/c.md:1:1: include cycle involving "includes/a.md"
-EREFERENCEMISSING: index.md:4:5: wiki-link heading target "target#does-not-exist" not found on the page
-EINCLUDECYCLE: includes/level-32.md:1:1: include nesting depth exceeded
-```
-
-The bracketed remediation text and full structured lines are retained in the
-five `expected/stderr.txt` files. No failing case created a final HTML output
-root.
+Remaining gaps are explicit: included Markdown is covered, but arbitrary
+post-render HTML fragments are not; the existing `max_expanded_bytes` and
+`max_include_expansions` guards lack normative numeric ownership in the
+reviewed contract, so their large boundaries are not claimed here.
 
 ### C02 classification
 
-- `10-depth-32` success and `11-depth-33` rejection are a **Non-issue /
-  packet drift** if a contrary claim says the boundary is missing: the
-  executable behavior and exact diagnostics match the include contract.
-- The code also contains `max_expanded_bytes = 16 MiB` and
-  `max_include_expansions = 4096` in `src/include.zig`, but the reviewed
-  contract does not normatively own numeric values for those two budgets. That
-  is **Insufficient evidence**, not a product defect. The smallest follow-up
-  is to give those budgets an explicit contract owner and add one fixture per
-  boundary before claiming conformance.
-- Included Markdown is covered; arbitrary post-render HTML fragments are not
-  covered by this C02 pass. That is an explicit scope gap, not a failure.
+The depth-32 success and depth-33 rejection are **Non-issue / packet drift**
+where a contrary claim says the boundary is absent. The missing numeric
+ownership for include expansion budgets is **Insufficient evidence**, not a
+product defect.
 
 ## C03 — XML sitemap
 
-### Exact commands and results
+### Case map
 
-```text
-./zig-out/bin/boris --html --input docs/audits/publication-conformance/c03-sitemap/content --html-dir .zig-cache/conformance/c03/trailing --html-layout docs/audits/publication-conformance/c03-sitemap/layout.html --sitemap-path meta/discovery.xml --site-url 'https://docs.example/docs&guides/' --quiet
-./zig-out/bin/boris --html --input docs/audits/publication-conformance/c03-sitemap/content --html-dir .zig-cache/conformance/c03/no-trailing --html-layout docs/audits/publication-conformance/c03-sitemap/layout.html --sitemap-path meta/discovery.xml --site-url 'https://docs.example/docs&guides' --quiet
-```
+| Retained input | Verifier case | Expected result and assertion |
+|---|---|---|
+| `c03-sitemap/content`, trailing URL | `c03-trailing` | Exit 0; exact `expected/meta/discovery.xml`; full target tree |
+| Same content, no trailing slash | `c03-no-trailing` | Exit 0; same sitemap golden; tree equals trailing case |
+| Same content, trailing repeat | `c03-trailing-repeat` | Exit 0; full tree equals first trailing run |
+| Relative, `mailto:`, query, malformed authority URLs | `c03-invalid-relative`, `c03-invalid-mailto`, `c03-invalid-query`, `c03-invalid-malformed-authority` | Exit 2; exact `expected/invalid-site-url.stderr`; no output target |
 
-Both commands exited `0`, and the two sitemap files have identical SHA-256:
+The sitemap golden asserts four deterministic escaped absolute URLs, Unicode
+path percent-encoding, nested paths, draft exclusion, and exclusion of the
+copied asset. The repeat comparisons cover both slash normalization and
+artifact determinism. The invalid URL matrix covers relative, non-HTTP(S),
+query-bearing, and malformed-authority shapes.
 
-```text
-9d2e11edc5c200b8c17ed1e65d822fa3c064150040bf838805b7b9c0c06dc93f
-```
-
-The expected sitemap contains exactly four `<loc>` elements, in deterministic
-absolute-URL order:
-
-```xml
-<url><loc>https://docs.example/docs&amp;guides/caf%C3%A9.html</loc></url>
-<url><loc>https://docs.example/docs&amp;guides/guides.html</loc></url>
-<url><loc>https://docs.example/docs&amp;guides/guides/install.html</loc></url>
-<url><loc>https://docs.example/docs&amp;guides/index.html</loc></url>
-```
-
-The generated target listing also contained `draft.html` and the copied
-`guides.assets/notes.txt`; those are correctly absent from the sitemap. This
-demonstrates page eligibility is not a directory crawl and that a draft HTML
-page does not become a sitemap URL.
-
-The complete trailing-slash target listing was:
-
-```text
-.zig-cache/conformance/c03/trailing/.boris-cache/sitemap-output-path
-.zig-cache/conformance/c03/trailing/_boris/proof/artifacts.json
-.zig-cache/conformance/c03/trailing/_boris/search/search-index.json
-.zig-cache/conformance/c03/trailing/café.html
-.zig-cache/conformance/c03/trailing/draft.html
-.zig-cache/conformance/c03/trailing/guides.assets/notes.txt
-.zig-cache/conformance/c03/trailing/guides.html
-.zig-cache/conformance/c03/trailing/guides/install.html
-.zig-cache/conformance/c03/trailing/index.html
-.zig-cache/conformance/c03/trailing/meta/discovery.xml
-```
-
-The malformed-site-URL command exited `2`:
-
-```text
-./zig-out/bin/boris --html --input docs/audits/publication-conformance/c03-sitemap/content --html-dir .zig-cache/conformance/c03/invalid-relative --html-layout docs/audits/publication-conformance/c03-sitemap/layout.html --sitemap --site-url 'relative'
-```
-
-Its first diagnostic line was `error: invalid value for --input`, followed by
-the full CLI usage text. `mailto:` and other malformed URL shapes behaved the
-same way with exit `2`. The contract requires the usage exit class and rejects
-non-HTTP(S) site URLs; it does not promise exact bad-flag attribution. The
-misattribution is therefore a low-severity **Documented limitation** of the
-best-effort CLI diagnostic, not a sitemap conformance defect. A separate CLI
-diagnostics card could teach `findBadArg` about sitemap and RSS value flags.
+The 50,000-URL and 50 MiB limits remain covered by focused sitemap-module
+tests, not by this small CLI corpus. That is the explicit C03 integration gap.
 
 ### C03 classification
 
-No `Confirmed defect` or `Likely defect` was found in the tested sitemap
-surface. Trailing-slash normalization, percent-encoded Unicode paths, XML
-escaping, draft exclusion, nested output paths, and deterministic ordering all
-matched the contract and golden.
-
-The 50,000-URL and 50 MiB limits are covered by focused sitemap-module tests;
-this small CLI tree does not attempt to materialize either huge integration
-fixture.
+No **Confirmed defect** or **Likely defect** was found. The CLI returns the
+required exit-2 class for malformed sitemap URLs, but attributes the usage
+diagnostic to `--input`; the exact observed output is retained in the
+snapshot. That is the required **Documented limitation** for CLI bad-flag
+attribution, not a sitemap publication defect.
 
 ## C04 — RSS 2.0
 
-### Exact commands and results
+### Case map
 
-The three success commands all exited `0`, with quiet stdout/stderr and
-byte-for-byte feed comparisons:
+| Retained input | Verifier case | Expected result and assertion |
+|---|---|---|
+| `c04-rss/content`, limit 2 | `c04-feed-2` | Exit 0; exact `expected/feed-limit-2.xml` |
+| Same content, limit 3 | `c04-feed-3` | Exit 0; exact `expected/feed-limit-3.xml` |
+| Same content, limit 4 | `c04-feed-4` | Exit 0; exact `expected/feed-limit-4.xml` |
+| Same content, limit 3 repeat | `c04-feed-3-repeat` | Exit 0; byte-equal to `c04-feed-3` |
+| `cases/missing-summary` | `c04-missing-summary` | Exit 1; exact `expected/stderr.txt`; no feed file |
+| Limits 0 and 501 | `c04-invalid-limit-0`, `c04-invalid-limit-501` | Exit 2; exact `expected/invalid-value.stderr`; no feed |
+| Missing site/title/description | `c04-missing-site/title/description` | Exit 2; exact `expected/missing-value.stderr`; no feed |
 
-```text
-./zig-out/bin/boris --rss --input docs/audits/publication-conformance/c04-rss/content --rss-path .zig-cache/conformance/c04/feed-2.xml --site-url 'https://example.test/docs&guides/' --rss-title 'Docs & <Feed> "News"' --rss-description 'Recent & <updates> "quotes"' --rss-limit 2 --quiet
-./zig-out/bin/boris --rss --input docs/audits/publication-conformance/c04-rss/content --rss-path .zig-cache/conformance/c04/feed-3.xml --site-url 'https://example.test/docs&guides/' --rss-title 'Docs & <Feed> "News"' --rss-description 'Recent & <updates> "quotes"' --rss-limit 3 --quiet
-./zig-out/bin/boris --rss --input docs/audits/publication-conformance/c04-rss/content --rss-path .zig-cache/conformance/c04/feed-4.xml --site-url 'https://example.test/docs&guides/' --rss-title 'Docs & <Feed> "News"' --rss-description 'Recent & <updates> "quotes"' --rss-limit 4 --quiet
-```
-
-The feed item counts were exactly 2, 3, and 4. The complete eligible order was
-`posts/a`, `posts/b`, `posts/c`, `posts/d`: publication timestamp descending,
-then canonical id ascending for the `2026-02-01` tie. The draft and
-summary-only pages were excluded. The sensitive title, summary, site URL,
-feed metadata, Unicode title, tag token, and ampersand/angle-bracket content
-were XML escaped in the output. The deterministic feed hashes were:
-
-```text
-feed-2.xml  877457a21d508f248c1846e8a2ddda4a8d6ee07695717b8ef2bb57fd2a2fa7de
-feed-3.xml  4b5b5310c6b64030d1f536d8ad9389af34495fb492d2f0eaf76a770560c96763
-feed-4.xml  0ee59fa0b81ec56d6d003a44b7eaefd057927fade5b8792d815e9e832be0dfde
-```
-
-The RSS target listing was:
-
-```text
-.zig-cache/conformance/c04/feed-2.xml
-.zig-cache/conformance/c04/feed-3-repeat.xml
-.zig-cache/conformance/c04/feed-3.xml
-.zig-cache/conformance/c04/feed-4.xml
-```
-
-The repeatability command exited `0` and matched `feed-3.xml`:
-
-```text
-./zig-out/bin/boris --rss --input docs/audits/publication-conformance/c04-rss/content --rss-path .zig-cache/conformance/c04/feed-3-repeat.xml --site-url 'https://example.test/docs&guides/' --rss-title 'Docs & <Feed> "News"' --rss-description 'Recent & <updates> "quotes"' --rss-limit 3 --quiet
-```
-
-The content-validation failure command exited `1`:
-
-```text
-./zig-out/bin/boris --rss --input docs/audits/publication-conformance/c04-rss/cases/missing-summary/content --rss-path .zig-cache/conformance/c04/missing-summary-streams.xml --site-url 'https://example.test' --rss-title Docs --rss-description Updates
-```
-
-Its stdout was zero bytes. Its exact stderr, including the four progress lines,
-is retained at
-`c04-rss/cases/missing-summary/expected/stderr.txt`; no feed was written.
-The parser categorizes `published_at` without a non-empty `summary` as
-`EFRONTMATTER`, as required.
-
-Invalid limits `0` and `501` each exited `2`; omitting each required
-`--site-url`, `--rss-title`, and `--rss-description` also exited `2`. The CLI
-printed its full usage text after the parse diagnostic. These are configuration
-failures, not content failures.
+The feed cases cover N-1/N/N+1 limits, timestamp ordering and tie ordering,
+draft and summary-only exclusion, XML escaping, metadata, and repeatability.
+The retained content does not materialize the 500-item or RSS-size ceilings;
+those are explicit integration gaps.
 
 ### C04 classification
 
-No `Confirmed defect` or `Likely defect` was found in the tested RSS surface.
-The `N-1/N/N+1` limit matrix, tie ordering, eligibility, escaping, metadata,
-repeatability, and content/config exit classes all match the contract.
-
-The CLI's best-effort bad-flag attribution for malformed RSS values is the same
-`Documented limitation` described for C03; the required exit class is correct.
-The retained fixtures do not prove behavior at 500 eligible items or the RSS
-XML size ceiling; those are untested integration boundaries, not failures of
-this four-page corpus.
+No **Confirmed defect** or **Likely defect** was found. The CLI's same
+best-effort bad-flag attribution remains the **Documented limitation** recorded
+under C03; all tested usage cases return exit 2.
 
 ## C08 — parser limits and Unicode
 
-### Retained CLI cases
+### Retained CLI case map
 
-The successful Unicode graph command exited `0`, with zero stdout and this
-exact stderr transcript:
+| Retained input | Verifier case | Expected result and assertion |
+|---|---|---|
+| `c08-parser-unicode/content` | `c08-valid` | Exit 0; exact `expected/graph.json`; manifest/build report exist; repeat graph and manifest |
+| `cases/malformed-unicode` | `c08-malformed-unicode` | Exit 1; exact `expected/stderr.txt`; no graph/manifest |
+| `cases/bom` | `c08-bom` | Exit 1; exact `expected/stderr.txt`; no graph/manifest |
+| `fixtures/content/invalid` | `c08-invalid-utf8` | Exit 1; exact `expected/invalid-utf8.stderr`; no graph/manifest |
 
-```text
-./zig-out/bin/boris --no-rag --input docs/audits/publication-conformance/c08-parser-unicode/content --out .zig-cache/conformance/c08/valid-unicode-rerun
-boris: load  scanning docs/audits/publication-conformance/c08-parser-unicode/content
-boris: roll  parsing 3 page(s)
-boris: ignite validating graph
-boris: ignite emitting IR → .zig-cache/conformance/c08/valid-unicode-rerun
-boris: reset done (3 page(s))
-ok: wrote IR under .zig-cache/conformance/c08/valid-unicode-rerun (3 page(s))
+The valid graph preserves Unicode ids, title, summary, body, parent, and
+relation bytes. The successful `build-report.json` contains its output path,
+so the repeat check intentionally compares the deterministic graph and
+manifest rather than treating that path-bearing report as a byte-stable
+artifact. Failed IR runs retain only the intentional unsuccessful build
+report.
+
+### Focused parser assertions
+
+The retained `src/parser.zig` tests now:
+
+- free every allocated value/source or temporary list on each loop iteration;
+- assert exact `EFRONTMATTER` or `EINVALIDUTF8` categories;
+- assert accepted scalar, tag-token, source, and title lengths at the exact
+  boundary;
+- compare full Unicode strings and body bytes, preserving decomposed marks,
+  CJK, emoji, and truncated-byte classification;
+- avoid asserting diagnostic wording where the parser contract owns only a
+  category.
+
+The tested bounds are source 1 MiB, frontmatter 64 KiB, title 512, summary
+1,024, id/parent 255, tag token 64, tag count 32, and relation count 16, each
+with exact and +1 behavior where meaningful. The 32-field guard remains
+unreachable under the closed eight-key grammar: duplicate recognized keys fail
+before 32 and unknown keys fail immediately. That is **Insufficient evidence**,
+not a confirmed parser defect.
+
+## Findings and remaining gaps
+
+The three current follow-ups remain exactly classified:
+
+1. **Insufficient evidence — include expansion budgets lack normative numeric
+   ownership.** Assign contract ownership to the existing byte and expansion
+   count guards before claiming those numeric boundaries.
+2. **Insufficient evidence — the 32-field guard is unreachable under the closed
+   grammar.** Clarify whether it is future-proofing and add a parser-only
+   boundary test, or reframe/remove the guard.
+3. **Documented limitation — CLI bad-flag attribution.** Sitemap/RSS value
+   errors return the required usage exit but currently name `--input`;
+   improving `findBadArg` is separate from publication output conformance.
+
+No item above is inflated into a **Confirmed defect** or **Likely defect**.
+
+## Reproduction and validation record
+
+The complete verification set is run from the repository root with repository-
+relative paths. The final PR description records the exact command output for:
+
+```bash
+zig fmt --check build.zig src/*.zig
+zig build test-publication-conformance
+zig build test --summary all
+zig build --summary all
+./scripts/release-gate.sh
+git diff --check
 ```
 
-The generated `graph.json` matched
-`c08-parser-unicode/expected/graph.json`; its SHA-256 is
-`33f4a4c9f9cb306c01bafd47e8ce9e6ccffe7d19c941fd75e97a276f712b98e0`.
-The graph retains `docs/東京`, `Café 東京 🧪`, `café`, `東京 🧪`, the parent
-edge, and the `relates_to=target` relation.
+It also records the clean-checkout run, deliberate golden mutation failure,
+repeat run, changed-file count, absence of committed generated output, and
+the fact that no production behavior changed. The formatter command reports
+the same pre-existing unformatted files on the base worktree; touched
+`build.zig` and `src/parser.zig` are formatted and no formatter-only
+production changes are included.
 
-The successful IR target listing was:
-
-```text
-.zig-cache/conformance/c08/valid-unicode-rerun/build-report.json
-.zig-cache/conformance/c08/valid-unicode-rerun/graph.json
-.zig-cache/conformance/c08/valid-unicode-rerun/manifest.json
-```
-
-The malformed-key and BOM commands exited `1`, with zero stdout and exact
-stderr snapshots in their case directories:
-
-```text
-./zig-out/bin/boris --no-rag --input docs/audits/publication-conformance/c08-parser-unicode/cases/malformed-unicode/content --out .zig-cache/conformance/c08/malformed-streams
-boris: load  scanning docs/audits/publication-conformance/c08-parser-unicode/cases/malformed-unicode/content
-boris: roll  parsing 1 page(s)
-boris: ignite validating graph
-boris: content validation failed (1 error(s))
-error: EFRONTMATTER: bad.md:2:1: unsupported frontmatter key [Fix the frontmatter or encoding for this file]
-
-./zig-out/bin/boris --no-rag --input docs/audits/publication-conformance/c08-parser-unicode/cases/bom/content --out .zig-cache/conformance/c08/bom-streams
-boris: load  scanning docs/audits/publication-conformance/c08-parser-unicode/cases/bom/content
-boris: roll  parsing 1 page(s)
-boris: ignite validating graph
-boris: content validation failed (1 error(s))
-error: EINVALIDUTF8: bom.md:1:1: UTF-8 BOM is not allowed [Fix the frontmatter or encoding for this file]
-```
-
-Neither invalid case wrote a manifest or graph.
-
-### Automated boundary coverage
-
-The focused `src/parser.zig` additions exercise exact and `+1` behavior for
-the following established limits, with successful values also checked at
-`limit - 1`:
-
-| Contract bound | Value | Focused result |
-|---|---:|---|
-| Source bytes | 1 MiB | `-1` and exact accepted; `+1` `EFRONTMATTER` |
-| Frontmatter bytes inside fences | 64 KiB | `-1` and exact accepted; `+1` `EFRONTMATTER` |
-| Title bytes | 512 | `-1` and exact accepted; `+1` `EFRONTMATTER` |
-| Summary bytes | 1,024 | `-1` and exact accepted; `+1` `EFRONTMATTER` |
-| Entity id / parent bytes | 255 | both fields tested at `-1`, exact, `+1` |
-| Tag token bytes | 64 | `-1` and exact accepted; `+1` `EFRONTMATTER` |
-| Tag count | 32 | `31` and `32` accepted; `33` `EFRONTMATTER` |
-| Relation count | 16 | `15` and `16` accepted; `17` `EFRONTMATTER` |
-
-The same focused test preserves a decomposed combining mark without
-normalization, retains CJK and emoji bytes, rejects a Unicode key as the
-closed-grammar `EFRONTMATTER` category, and rejects truncated `E2 82` as
-`EINVALIDUTF8`. Existing parser and `unicode_policy.zig` tests cover CRLF,
-leading BOM, invalid `FF`, noncharacters, bidi controls, interior BOM, and
-legitimate emoji/Indic/CJK zero-width sequences.
-
-The contract also states a 32-field bound. Under the current closed grammar
-there are only eight recognized unique keys; duplicate recognized keys fail
-before 32 and an unknown key fails immediately. A valid input cannot currently
-reach that numeric threshold. This is **Insufficient evidence**, not a
-confirmed parser defect. The smallest follow-up is to clarify whether the
-field-count bound is defense-in-depth for future keys (and add a synthetic
-parser-only test if so) or remove/reframe it as an unreachable implementation
-guard.
-
-### C08 classification
-
-No `Confirmed defect` or `Likely defect` was found in the exercised parser or
-Unicode behavior. The only material gap is the unreachable field-count
-boundary above. Full invalid-UTF-8 bytes and the BOM are retained, and the
-CLI/IR outputs show no truncation, panic, or partial manifest publication.
-
-## Overall disposition
-
-The retained C02, C03, C04, and C08 evidence supports the current contracts in
-the tested surface. There is no product fix in this branch. Findings requiring
-follow-up are limited to:
-
-1. **Insufficient evidence — include expansion budgets:** assign normative
-   numeric ownership to the existing byte and expansion-count guards, then add
-   boundary fixtures.
-2. **Insufficient evidence — frontmatter field count:** reconcile the 32-field
-   contract bound with the closed eight-key grammar and make the boundary
-   executable or explicitly defensive.
-3. **Documented limitation — CLI bad-flag attribution:** optionally extend
-   `findBadArg` for sitemap/RSS value flags; this is separate from publication
-   output conformance because all tested usage cases returned exit `2`.
-
-The release-gate and aggregate test results are recorded in the agent
-completion report accompanying this evidence branch. Generated site, feed,
-IR, stream, and Zig-cache outputs remain ignored and uncommitted.
+PR #286 merged as `0ac7ace5df98dd9d370ce827862c2060642059df` while this
+revision was in progress. The existing branch is being rebased onto that
+latest `afterparty` tip before the final validation record and push.

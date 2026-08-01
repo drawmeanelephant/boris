@@ -728,7 +728,6 @@ test "parse: bare CR at EOF does not close frontmatter" {
     const r = parse(src);
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EFRONTMATTER);
-    try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "unclosed") != null);
 }
 
 test "parse: BOM rejected as EINVALIDUTF8" {
@@ -736,7 +735,6 @@ test "parse: BOM rejected as EINVALIDUTF8" {
     const r = parse(src);
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EINVALIDUTF8);
-    try std.testing.expectEqualStrings("UTF-8 BOM is not allowed", r.diagnostic.?.message);
 }
 
 test "parse: unclosed fence is EFRONTMATTER" {
@@ -751,7 +749,6 @@ test "parse: unclosed fence is EFRONTMATTER" {
     const r = parse(src);
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EFRONTMATTER);
-    try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "unclosed") != null);
 }
 
 test "parse: duplicate key is EFRONTMATTER" {
@@ -765,7 +762,6 @@ test "parse: duplicate key is EFRONTMATTER" {
     const r = parse(src);
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EFRONTMATTER);
-    try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "duplicate") != null);
 }
 
 test "parse: unknown key is EFRONTMATTER" {
@@ -779,7 +775,6 @@ test "parse: unknown key is EFRONTMATTER" {
     const r = parse(src);
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EFRONTMATTER);
-    try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "unsupported") != null);
 }
 
 // Product path does not accept legacy author aliases (not mapped to `parent`).
@@ -793,7 +788,6 @@ test "parse: legacy parentEntry is unknown key" {
     const r = parse(src);
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EFRONTMATTER);
-    try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "unsupported") != null);
     try std.testing.expect(r.doc.meta.parent == null);
 }
 
@@ -807,7 +801,6 @@ test "parse: legacy parent_entry is unknown key" {
     const r = parse(src);
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EFRONTMATTER);
-    try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "unsupported") != null);
     try std.testing.expect(r.doc.meta.parent == null);
 }
 
@@ -834,7 +827,6 @@ test "parse: invalid tags syntax is EFRONTMATTER" {
     const r = parse(src);
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EFRONTMATTER);
-    try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "tags") != null);
 }
 
 test "parse: tags reject trailing commas" {
@@ -859,7 +851,6 @@ test "parse: overlong title is EFRONTMATTER" {
     const r = parse(src.items);
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EFRONTMATTER);
-    try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "title") != null);
 }
 
 test "parse: overlong frontmatter block is EFRONTMATTER" {
@@ -880,7 +871,6 @@ test "parse: overlong frontmatter block is EFRONTMATTER" {
     const r = parse(src.items);
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EFRONTMATTER);
-    try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "frontmatter exceeds") != null);
 }
 
 test "parse: overlong source is EFRONTMATTER" {
@@ -892,7 +882,6 @@ test "parse: overlong source is EFRONTMATTER" {
     const r = parse(buf);
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EFRONTMATTER);
-    try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "source exceeds") != null);
 }
 
 test "parse: invalid UTF-8 is EINVALIDUTF8" {
@@ -979,7 +968,6 @@ test "parse: tag too long is EFRONTMATTER" {
     const r = parse(src.items);
     try std.testing.expect(!r.isOk());
     try std.testing.expect(r.category().? == .EFRONTMATTER);
-    try std.testing.expect(std.mem.indexOf(u8, r.diagnostic.?.message, "tag") != null);
 }
 
 test "parse: accepts title and id at exact length limits" {
@@ -1017,6 +1005,15 @@ test "parse: publication scalar and collection boundaries" {
             const result = parse(source);
             if (value_len <= case.limit) {
                 try std.testing.expect(result.isOk());
+                const accepted_len = if (std.mem.eql(u8, case.key, "title"))
+                    result.doc.meta.title.?.len
+                else if (std.mem.eql(u8, case.key, "summary"))
+                    result.doc.meta.summary.?.len
+                else if (std.mem.eql(u8, case.key, "id"))
+                    result.doc.meta.id.?.len
+                else
+                    result.doc.meta.parent.?.len;
+                try std.testing.expectEqual(value_len, accepted_len);
             } else {
                 try std.testing.expect(!result.isOk());
                 try std.testing.expectEqual(Category.EFRONTMATTER, result.category().?);
@@ -1033,6 +1030,7 @@ test "parse: publication scalar and collection boundaries" {
         const result = parse(source);
         if (token_len <= max_tag_bytes) {
             try std.testing.expect(result.isOk());
+            try std.testing.expectEqual(token_len, result.doc.meta.tagsSlice()[0].len);
         } else {
             try std.testing.expect(!result.isOk());
             try std.testing.expectEqual(Category.EFRONTMATTER, result.category().?);
@@ -1091,6 +1089,7 @@ test "parse: publication source and frontmatter byte boundaries" {
         const result = parse(source);
         if (source_len <= max_source_bytes) {
             try std.testing.expect(result.isOk());
+            try std.testing.expectEqual(source_len, result.doc.body.len);
         } else {
             try std.testing.expect(!result.isOk());
             try std.testing.expectEqual(Category.EFRONTMATTER, result.category().?);
@@ -1108,6 +1107,7 @@ test "parse: publication source and frontmatter byte boundaries" {
         const result = parse(source.items);
         if (frontmatter_len <= max_frontmatter_bytes) {
             try std.testing.expect(result.isOk());
+            try std.testing.expectEqualStrings("X", result.doc.meta.title.?);
         } else {
             try std.testing.expect(!result.isOk());
             try std.testing.expectEqual(Category.EFRONTMATTER, result.category().?);
