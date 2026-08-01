@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "0.3.0",
+  "frozen": true,
+  "nodes": [
+    {
+      "index": 0,
+      "id": "docs",
+      "sourcePath": "docs.md",
+      "role": "trunk",
+      "parent": null,
+      "parentIndex": null,
+      "title": "Unicode root",
+      "status": null,
+      "tags": [],
+      "bodyOffset": 28
+    },
+    {
+      "index": 1,
+      "id": "docs/東京",
+      "sourcePath": "unicode.md",
+      "role": "satellite",
+      "parent": "docs",
+      "parentIndex": 0,
+      "title": "Café 東京 🧪",
+      "status": "published",
+      "tags": ["café", "東京 🧪"],
+      "bodyOffset": 174
+    },
+    {
+      "index": 2,
+      "id": "target",
+      "sourcePath": "target.md",
+      "role": "trunk",
+      "parent": null,
+      "parentIndex": null,
+      "title": "Relation target",
+      "status": null,
+      "tags": [],
+      "bodyOffset": 31
+    }
+  ],
+  "edges": [
+    {
+      "from": {
+        "type": "page",
+        "value": "docs/東京"
+      },
+      "to": {
+        "type": "page",
+        "value": "docs"
+      },
+      "kind": "parent"
+    }
+  ],
+  "reverseIndex": [
+    {
+      "target": {
+        "type": "page",
+        "value": "docs"
+      },
+      "incomingEdges": [0]
+    }
+  ],
+  "nav": [
+    {
+      "index": 0,
+      "id": "docs",
+      "breadcrumb": [0],
+      "children": [1],
+      "siblings": []
+    },
+    {
+      "index": 1,
+      "id": "docs/東京",
+      "breadcrumb": [0, 1],
+      "children": [],
+      "siblings": []
+    },
+    {
+      "index": 2,
+      "id": "target",
+      "breadcrumb": [2],
+      "children": [],
+      "siblings": []
+    }
+  ],
+  "relations": [
+    {
+      "from": {
+        "type": "page",
+        "value": "docs/東京"
+      },
+      "to": {
+        "type": "page",
+        "value": "target"
+      },
+      "kind": "relates_to"
+    }
+  ]
+}

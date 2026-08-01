@@ -997,6 +997,143 @@ test "parse: accepts title and id at exact length limits" {
     try std.testing.expectEqual(@as(usize, max_entity_id_bytes), r.doc.meta.id.?.len);
 }
 
+test "parse: publication scalar and collection boundaries" {
+    const gpa = std.testing.allocator;
+
+    const scalar_cases = [_]struct { key: []const u8, limit: usize }{
+        .{ .key = "title", .limit = max_title_bytes },
+        .{ .key = "summary", .limit = max_summary_bytes },
+        .{ .key = "id", .limit = max_entity_id_bytes },
+        .{ .key = "parent", .limit = max_entity_id_bytes },
+    };
+    for (scalar_cases) |case| {
+        for ([_]usize{ case.limit - 1, case.limit, case.limit + 1 }) |value_len| {
+            const value = try gpa.alloc(u8, value_len);
+            defer gpa.free(value);
+            @memset(value, 'x');
+
+            const source = try std.fmt.allocPrint(gpa, "---\n{s}: {s}\n---\n", .{ case.key, value });
+            defer gpa.free(source);
+            const result = parse(source);
+            if (value_len <= case.limit) {
+                try std.testing.expect(result.isOk());
+            } else {
+                try std.testing.expect(!result.isOk());
+                try std.testing.expectEqual(Category.EFRONTMATTER, result.category().?);
+            }
+        }
+    }
+
+    for ([_]usize{ max_tag_bytes - 1, max_tag_bytes, max_tag_bytes + 1 }) |token_len| {
+        const token = try gpa.alloc(u8, token_len);
+        defer gpa.free(token);
+        @memset(token, 't');
+        const source = try std.fmt.allocPrint(gpa, "---\ntags: [{s}]\n---\n", .{token});
+        defer gpa.free(source);
+        const result = parse(source);
+        if (token_len <= max_tag_bytes) {
+            try std.testing.expect(result.isOk());
+        } else {
+            try std.testing.expect(!result.isOk());
+            try std.testing.expectEqual(Category.EFRONTMATTER, result.category().?);
+        }
+    }
+
+    for ([_]usize{ max_tag_count - 1, max_tag_count, max_tag_count + 1 }) |count| {
+        var source: std.ArrayList(u8) = .empty;
+        defer source.deinit(gpa);
+        try source.appendSlice(gpa, "---\ntags: [");
+        for (0..count) |i| {
+            if (i != 0) try source.appendSlice(gpa, ", ");
+            try source.appendSlice(gpa, "tag");
+        }
+        try source.appendSlice(gpa, "]\n---\n");
+        const result = parse(source.items);
+        if (count <= max_tag_count) {
+            try std.testing.expect(result.isOk());
+            try std.testing.expectEqual(count, result.doc.meta.tag_count);
+        } else {
+            try std.testing.expect(!result.isOk());
+            try std.testing.expectEqual(Category.EFRONTMATTER, result.category().?);
+        }
+    }
+
+    for ([_]usize{ page_mod.max_relation_count - 1, page_mod.max_relation_count, page_mod.max_relation_count + 1 }) |count| {
+        var source: std.ArrayList(u8) = .empty;
+        defer source.deinit(gpa);
+        try source.appendSlice(gpa, "---\nrelations: [");
+        for (0..count) |i| {
+            if (i != 0) try source.appendSlice(gpa, ", ");
+            const target = try std.fmt.allocPrint(gpa, "rel-target-{d}", .{i});
+            defer gpa.free(target);
+            try source.appendSlice(gpa, "relates_to=");
+            try source.appendSlice(gpa, target);
+        }
+        try source.appendSlice(gpa, "]\n---\n");
+        const result = parse(source.items);
+        if (count <= page_mod.max_relation_count) {
+            try std.testing.expect(result.isOk());
+            try std.testing.expectEqual(count, result.doc.meta.relation_count);
+        } else {
+            try std.testing.expect(!result.isOk());
+            try std.testing.expectEqual(Category.EFRONTMATTER, result.category().?);
+        }
+    }
+}
+
+test "parse: publication source and frontmatter byte boundaries" {
+    const gpa = std.testing.allocator;
+
+    for ([_]usize{ max_source_bytes - 1, max_source_bytes, max_source_bytes + 1 }) |source_len| {
+        const source = try gpa.alloc(u8, source_len);
+        defer gpa.free(source);
+        @memset(source, 'a');
+        const result = parse(source);
+        if (source_len <= max_source_bytes) {
+            try std.testing.expect(result.isOk());
+        } else {
+            try std.testing.expect(!result.isOk());
+            try std.testing.expectEqual(Category.EFRONTMATTER, result.category().?);
+        }
+    }
+
+    const title_line = "title: X\n";
+    for ([_]usize{ max_frontmatter_bytes - 1, max_frontmatter_bytes, max_frontmatter_bytes + 1 }) |frontmatter_len| {
+        var source: std.ArrayList(u8) = .empty;
+        defer source.deinit(gpa);
+        try source.appendSlice(gpa, "---\n");
+        try source.appendSlice(gpa, title_line);
+        try source.appendNTimes(gpa, '\n', frontmatter_len - title_line.len);
+        try source.appendSlice(gpa, "---\n");
+        const result = parse(source.items);
+        if (frontmatter_len <= max_frontmatter_bytes) {
+            try std.testing.expect(result.isOk());
+        } else {
+            try std.testing.expect(!result.isOk());
+            try std.testing.expectEqual(Category.EFRONTMATTER, result.category().?);
+        }
+    }
+}
+
+test "parse: publication Unicode bytes and malformed UTF-8 remain classified" {
+    const valid = parse(
+        "---\nid: docs/東京\ntitle: Café 東京 🧪\nparent: docs\nsummary: Cafe\u{301}\n---\nNFC café, CJK 東京, and emoji 🧪 remain verbatim.\n",
+    );
+    try std.testing.expect(valid.isOk());
+    try std.testing.expectEqualStrings("docs/東京", valid.doc.meta.id.?);
+    try std.testing.expectEqualStrings("Café 東京 🧪", valid.doc.meta.title.?);
+    try std.testing.expectEqualStrings("Cafe\u{301}", valid.doc.meta.summary.?);
+    try std.testing.expectEqualStrings("NFC café, CJK 東京, and emoji 🧪 remain verbatim.\n", valid.doc.body);
+
+    const unsupported_key = parse("---\ncafé: значение\n---\n");
+    try std.testing.expect(!unsupported_key.isOk());
+    try std.testing.expectEqual(Category.EFRONTMATTER, unsupported_key.category().?);
+
+    const truncated = parse("---\ntitle: X\n---\ntruncated: \xE2\x82");
+    try std.testing.expect(!truncated.isOk());
+    try std.testing.expectEqual(Category.EINVALIDUTF8, truncated.category().?);
+}
+
 // ---------------------------------------------------------------------------
 // Fixture-driven tests (fixtures/ corpus)
 // ---------------------------------------------------------------------------

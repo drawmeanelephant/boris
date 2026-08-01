@@ -1,0 +1,1 @@
+error: EREFERENCEMISSING: index.md:4:5: wiki-link heading target "target#does-not-exist" not found on the page [Point the wiki-link at an existing page entity id, and if using #heading-id match a rendered heading id on that page]

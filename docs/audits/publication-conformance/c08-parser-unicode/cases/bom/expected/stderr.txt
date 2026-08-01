@@ -1,0 +1,5 @@
+boris: load  scanning docs/audits/publication-conformance/c08-parser-unicode/cases/bom/content
+boris: roll  parsing 1 page(s)
+boris: ignite validating graph
+boris: content validation failed (1 error(s))
+error: EINVALIDUTF8: bom.md:1:1: UTF-8 BOM is not allowed [Fix the frontmatter or encoding for this file]

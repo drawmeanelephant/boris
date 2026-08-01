@@ -1,0 +1,7 @@
+---
+title: B
+published_at: 2026-02-01T00:00:00Z
+summary: Post B summary.
+tags: [release]
+---
+Post B.
