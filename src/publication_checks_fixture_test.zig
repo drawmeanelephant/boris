@@ -487,7 +487,12 @@ fn expectCrossJobsDeterministic(
     defer out_b.close(io);
     try std.testing.expect(try treesByteEqual(io, allocator, out_a, out_b));
 
-    // checks.json and the full-tree snapshot are byte-identical.
+    // checks.json is byte-identical. `snapshot_jsonl` is compared byte-for-byte
+    // only where a fixture emits it: runFixture writes
+    // `results/output-snapshot.jsonl`, while republish-clean emits no output
+    // snapshot, so its evidence carries an intentional empty placeholder and
+    // this assertion is a documented no-op for that path. Every output byte is
+    // independently proven identical by `treesByteEqual` above.
     try std.testing.expectEqualSlices(u8, a.checks_json, b.checks_json);
     try std.testing.expectEqualSlices(u8, a.snapshot_jsonl, b.snapshot_jsonl);
 
@@ -687,13 +692,23 @@ test "republish-clean evidence is identical across requested jobs" {
         try publication_checks.writeAfterCommit(io, allocator, clean, "default", .{});
         const clean_checks = try readPayload(io, clean, allocator, publication_checks.output_path);
         const snapshot = try readPayload(io, clean, allocator, "index.html");
+        // republish-clean emits no `results/output-snapshot.jsonl` (that
+        // snapshot is a runFixture-only artifact), so `snapshot_jsonl` stays an
+        // intentional empty placeholder below. The clean output tree is a full
+        // Boris publication, so the artifact inventory and rendered search are
+        // read for real and compared byte-for-byte across jobs.
+        const clean_artifacts = try readPayload(io, clean, allocator, "_boris/proof/artifacts.json");
+        var clean_search: ?[]u8 = null;
+        if (pathExists(io, clean, "_boris/search/search-index.json")) {
+            clean_search = try readPayload(io, clean, allocator, "_boris/search/search-index.json");
+        }
         runs[index] = .{
             .run_json = record,
             .checks_json = clean_checks,
             .snapshot_jsonl = try allocator.dupe(u8, ""),
             .index_html = snapshot,
-            .search_json = null,
-            .artifacts_json = try allocator.dupe(u8, ""),
+            .search_json = clean_search,
+            .artifacts_json = clean_artifacts,
             .output_abs = try allocator.dupe(u8, clean_abs),
             .jobs = jobs,
         };
