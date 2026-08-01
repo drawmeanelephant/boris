@@ -202,6 +202,21 @@ pub fn build(b: *std.Build) void {
     );
     test_publication_checks_step.dependOn(&run_publication_checks_tests.step);
 
+    // --- Claims-and-limitations evidence derived from checks -----------------
+    const publication_claims_mod = b.createModule(.{
+        .root_source_file = b.path("src/publication_claims.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const publication_claims_tests = b.addTest(.{ .root_module = publication_claims_mod });
+    const run_publication_claims_tests = b.addRunArtifact(publication_claims_tests);
+    run_publication_claims_tests.setCwd(b.path("."));
+    const test_publication_claims_step = b.step(
+        "test-publication-claims",
+        "Run deterministic claims-and-limitations evidence derivation tests",
+    );
+    test_publication_claims_step.dependOn(&run_publication_claims_tests.step);
+
     // Private seeded generator harness. It is opt-in because it launches the
     // installed Boris binary against a deterministic poisoned fixture.
     const testdata_generator_mod = b.createModule(.{
@@ -224,6 +239,24 @@ pub fn build(b: *std.Build) void {
         "Run the private mild-poison publication-checks evidence harness",
     );
     test_publication_fixture_step.dependOn(&run_publication_fixture_tests.step);
+
+    // Claims evidence harness. Same seeded poisoned fixture, one stage deeper:
+    // checks.json is derived first, then claims.json must track it.
+    const publication_claims_fixture_mod = b.createModule(.{
+        .root_source_file = b.path("src/publication_claims_fixture_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "fixture_generator", .module = testdata_generator_mod }},
+    });
+    const publication_claims_fixture_tests = b.addTest(.{ .root_module = publication_claims_fixture_mod });
+    const run_publication_claims_fixture_tests = b.addRunArtifact(publication_claims_fixture_tests);
+    run_publication_claims_fixture_tests.setCwd(b.path("."));
+    run_publication_claims_fixture_tests.step.dependOn(b.getInstallStep());
+    const test_publication_claims_fixture_step = b.step(
+        "test-publication-claims-fixture",
+        "Run the private mild-poison publication-claims evidence harness",
+    );
+    test_publication_claims_fixture_step.dependOn(&run_publication_claims_fixture_tests.step);
 
     const graph_mod = b.createModule(.{
         .root_source_file = b.path("src/graph.zig"),
@@ -757,6 +790,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_publication_plan_tests.step);
     test_step.dependOn(&run_doctor_tests.step);
     test_step.dependOn(&run_publication_checks_tests.step);
+    test_step.dependOn(&run_publication_claims_tests.step);
     test_step.dependOn(&run_graph_tests.step);
     test_step.dependOn(&run_aside_tests.step);
     test_step.dependOn(&run_rag_tests.step);

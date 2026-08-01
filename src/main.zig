@@ -832,6 +832,10 @@ fn mapHtmlError(
         // The target commit is already visible when publication checks fail;
         // compile.zig emits the explicit "publication committed" diagnostic.
         error.PublicationChecksFailed => return .io_error,
+        // The target, inventory, and checks report are already committed when
+        // claims derivation fails; compile.zig emits the explicit "publication
+        // committed" diagnostic for this evidence layer as well.
+        error.PublicationClaimsFailed => return .io_error,
         error.ParseFailed,
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
@@ -958,6 +962,10 @@ test "mapHtmlError: multi-target I/O failure exits 3" {
 
 test "mapHtmlError: committed publication with stale checks evidence exits 3" {
     try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationChecksFailed, true, &.{}, default_layout));
+}
+
+test "mapHtmlError: committed publication with stale claims evidence exits 3" {
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationClaimsFailed, true, &.{}, default_layout));
 }
 
 test "mapHtmlError: target configuration failures exit 2" {

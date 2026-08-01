@@ -95,6 +95,14 @@ const modules = [_]Module{
         .source = @embedFile("publication_checks.zig"),
     },
     .{
+        .name = "publication_claims.zig",
+        .class = .{ .emitter = .{
+            .encoder = .json_out,
+            .note = "target claims-and-limitations evidence; report fields and fixed registry text delegate to json_out",
+        } },
+        .source = @embedFile("publication_claims.zig"),
+    },
+    .{
         .name = "sitemap.zig",
         .class = .{ .emitter = .{
             .encoder = .sink,
@@ -165,6 +173,7 @@ const modules = [_]Module{
     .{ .name = "publication_profile.zig", .class = .other },
     .{ .name = "publication_plan.zig", .class = .{ .emitter = .{ .encoder = .json_out, .note = "canonical normalized publication declaration" } }, .source = @embedFile("publication_plan.zig") },
     .{ .name = "publication_checks_fixture_test.zig", .class = .other },
+    .{ .name = "publication_claims_fixture_test.zig", .class = .other },
     .{ .name = "rag_body.zig", .class = .other },
     .{
         .name = "rss.zig",
