@@ -1,0 +1,247 @@
+name: Stage Starlight fence fix
+
+on:
+  push:
+    branches: [codex/starlight-code-fence-shield]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/starlight-code-fence-shield
+          fetch-depth: 0
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake
+
+      - name: Apply focused fence-aware fix and regression test
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          astro = Path('tools/migration-lab/astro_import_plan.zig')
+          text = astro.read_text()
+          old = 'const MarkdownMask = struct {'
+          assert text.count(old) == 1
+          text = text.replace(old, 'pub const MarkdownMask = struct {', 1)
+          old = 'fn maskMarkdownLiterals(a: std.mem.Allocator, body: []const u8) !MarkdownMask {'
+          assert text.count(old) == 1
+          text = text.replace(old, 'pub fn maskMarkdownLiterals(a: std.mem.Allocator, body: []const u8) !MarkdownMask {', 1)
+          astro.write_text(text)
+
+          starlight = Path('tools/migration-lab/starlight.zig')
+          text = starlight.read_text()
+
+          old = 'const Io = std.Io;\n'
+          assert text.count(old) == 1
+          text = text.replace(old, old + 'const astro_import_plan = @import("astro_import_plan.zig");\n', 1)
+
+          old = '''    var asset_events: std.ArrayList(LinkEvent) = .empty;
+    var pos: usize = 0;
+    var line_no: u32 = 1;
+    while (pos < body.len) {
+        const end = std.mem.indexOfScalarPos(u8, body, pos, '\\n') orelse body.len;
+        const line = body[pos..end];
+        const has_newline = end < body.len;
+        if (isImportLine(line)) {
+            if (extractImportPath(line)) |p| {
+'''
+          new = '''    var asset_events: std.ArrayList(LinkEvent) = .empty;
+    const literal_mask = try astro_import_plan.maskMarkdownLiterals(a, body);
+    defer a.free(literal_mask.bytes);
+    var pos: usize = 0;
+    var line_no: u32 = 1;
+    while (pos < body.len) {
+        const end = std.mem.indexOfScalarPos(u8, body, pos, '\\n') orelse body.len;
+        const line = body[pos..end];
+        const visible_line = literal_mask.bytes[pos..end];
+        const has_newline = end < body.len;
+        if (isImportLine(visible_line)) {
+            if (extractImportPath(line)) |p| {
+'''
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
+
+          old = '''            } else {
+                try imports.append(a, try a.dupe(u8, trim(line)));
+            }
+        } else {
+            var dynamic_line: std.ArrayList(u8) = .empty;
+'''
+          new = '''            } else {
+                try imports.append(a, try a.dupe(u8, trim(line)));
+            }
+        } else if (std.mem.trim(u8, visible_line, " \\t\\r").len == 0) {
+            try out.appendSlice(a, line);
+            if (has_newline) try out.append(a, '\\n');
+        } else {
+            var dynamic_line: std.ArrayList(u8) = .empty;
+'''
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
+
+          old = '''            const source_line = if (dynamic_count > 0) dynamic_line.items else line;
+            if (dynamic_count > 0) {
+'''
+          new = '''            const source_line = if (dynamic_count > 0) dynamic_line.items else line;
+            // The shared Markdown mask preserves byte positions. When no prior
+            // rewrite changed line length, use it to discover and neutralize
+            // only visible MDX syntax while copying original literal bytes.
+            const scan_line = if (dynamic_count > 0) source_line else visible_line;
+            if (dynamic_count > 0) {
+'''
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
+
+          old = '            try scanComponentTags(a, source_line, &components);\n'
+          assert text.count(old) == 1
+          text = text.replace(old, '            try scanComponentTags(a, scan_line, &components);\n', 1)
+
+          replacements = {
+              "if (source_line[li] == '<' and li + 1 < source_line.len) {": "if (scan_line[li] == '<' and li + 1 < scan_line.len) {",
+              'const c1 = source_line[li + 1];': 'const c1 = scan_line[li + 1];',
+              "while (k < source_line.len and source_line[k] != '>') : (k += 1) {}": "while (k < scan_line.len and scan_line[k] != '>') : (k += 1) {}",
+              'if (k < source_line.len) k += 1;': 'if (k < scan_line.len) k += 1;',
+              'const tag_content = source_line[li + 2 .. k - 1];': 'const tag_content = scan_line[li + 2 .. k - 1];',
+              'const tag_content = source_line[li + 1 .. k - 1];': 'const tag_content = scan_line[li + 1 .. k - 1];',
+          }
+          for old, new in replacements.items():
+              count = text.count(old)
+              assert count >= 1, (old, count)
+              text = text.replace(old, new)
+
+          anchor = 'test "starlight: sanitizeMdxBody preserves attributed Aside and Details" {'
+          assert text.count(anchor) == 1
+          test = r'''test "starlight: sanitizeMdxBody ignores Markdown literal regions" {
+    const a = std.testing.allocator;
+    const body =
+        \\```mdx
+        \\<Broside fenced="backtick" />
+        \\```
+        \\```html
+        \\<Limerick fenced="html" />
+        \\```
+        \\~~~mdx
+        \\<CollectionRegister fenced="tilde" />
+        \\~~~
+        \\````mdx
+        \\<UnknownWidget fenced="long" />
+        \\```
+        \\<Broside fenced="still-long" />
+        \\````
+        \\    <IndentedWidget />
+        \\Inline `<InlineWidget />` and <RealWidget />
+        \\Escaped \\<EscapedWidget />
+        \\<Broside real="yes" />
+        \\<Limerick real="yes" />
+        \\<CollectionRegister real="yes" />
+        \\<UnknownWidget real="yes" />
+    ;
+
+    const res = try sanitizeMdxBody(a, body);
+    defer {
+        a.free(res.body);
+        for (res.imports) |imp| a.free(imp);
+        a.free(res.imports);
+        for (res.components) |cmp| a.free(cmp);
+        a.free(res.components);
+        for (res.asset_events) |event| a.free(event.target);
+        a.free(res.asset_events);
+    }
+
+    const expected = [_][]const u8{ "Broside", "CollectionRegister", "Limerick", "RealWidget", "UnknownWidget" };
+    try std.testing.expectEqual(expected.len, res.components.len);
+    for (expected, res.components) |want, got| try std.testing.expectEqualStrings(want, got);
+
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "<Broside fenced=\\\"backtick\\\" />") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "<Limerick fenced=\\\"html\\\" />") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "<CollectionRegister fenced=\\\"tilde\\\" />") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "<UnknownWidget fenced=\\\"long\\\" />") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "<Broside fenced=\\\"still-long\\\" />") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "<IndentedWidget />") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "`<InlineWidget />`") != null);
+    try std.testing.expect(std.mem.indexOf(u8, res.body, "\\\\<EscapedWidget />") != null);
+    try std.testing.expectEqual(@as(usize, 5), std.mem.count(u8, res.body, "<!-- unsupported-mdx-component -->"));
+}
+
+'''
+          text = text.replace(anchor, test + anchor, 1)
+          starlight.write_text(text)
+          PY
+
+          zig fmt tools/migration-lab/astro_import_plan.zig tools/migration-lab/starlight.zig
+          git diff --check
+
+      - name: Build and full tests
+        run: |
+          zig build
+          zig build test
+          zig build --build-file tools/migration-lab/build.zig test
+
+      - name: Focused black-box Starlight proof
+        run: |
+          rm -rf /tmp/boris-sl-source /tmp/boris-sl-a /tmp/boris-sl-b
+          mkdir -p /tmp/boris-sl-source/src/content/docs
+          cat > /tmp/boris-sl-source/src/content/docs/index.mdx <<'EOF'
+          ---
+          title: Fence proof
+          ---
+          ```mdx
+          <Broside fenced="backtick" />
+          ```
+          ~~~html
+          <Limerick fenced="tilde" />
+          ~~~
+          ````mdx
+          <CollectionRegister fenced="long" />
+          ```
+          <UnknownWidget fenced="still-long" />
+          ````
+              <IndentedWidget />
+          Inline `<InlineWidget />` and <RealWidget />
+          Escaped \<EscapedWidget />
+          <Broside real="yes" />
+          <Limerick real="yes" />
+          <CollectionRegister real="yes" />
+          <UnknownWidget real="yes" />
+          EOF
+          ./zig-out/bin/boris-migration-lab --mode=starlight --root=/tmp/boris-sl-source --out=/tmp/boris-sl-a --max-pages=10 --quiet --boris=./zig-out/bin/boris
+          ./zig-out/bin/boris-migration-lab --mode=starlight --root=/tmp/boris-sl-source --out=/tmp/boris-sl-b --max-pages=10 --quiet --boris=./zig-out/bin/boris
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          for root in (Path('/tmp/boris-sl-a'), Path('/tmp/boris-sl-b')):
+              for path in root.glob('*.json'):
+                  json.loads(path.read_text())
+          data = json.loads(Path('/tmp/boris-sl-a/unsupported_manifest.json').read_text())
+          rows = data['mdx']
+          assert len(rows) == 1, rows
+          assert rows[0]['components'] == ['Broside', 'CollectionRegister', 'Limerick', 'RealWidget', 'UnknownWidget'], rows
+          page = Path('/tmp/boris-sl-a/content/index.md').read_text()
+          for literal in ('<Broside fenced="backtick" />', '<Limerick fenced="tilde" />', '<CollectionRegister fenced="long" />', '<UnknownWidget fenced="still-long" />', '<IndentedWidget />', '`<InlineWidget />`', '\\<EscapedWidget />'):
+              assert literal in page, literal
+          assert page.count('<!-- unsupported-mdx-component -->') == 5
+          PY
+          diff -ru /tmp/boris-sl-a /tmp/boris-sl-b
+          git diff --check
+
+      - name: Commit focused change and remove staging workflow
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/starlight-fence-fix.yml
+          git add tools/migration-lab/astro_import_plan.zig tools/migration-lab/starlight.zig
+          git commit -m "fix(migration-lab): ignore MDX tags in code literals"
+          git push origin HEAD:codex/starlight-code-fence-shield
