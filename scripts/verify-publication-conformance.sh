@@ -146,22 +146,11 @@ assert_contains() {
 assert_page_equal() {
     local left="$1"
     local right="$2"
-    local diff_path="$OUT/logs/page-diff.txt"
+    local diff_path="$OUT/logs/page-diff-$(basename "$left")-$(basename "$right").txt"
     if ! diff -ru "$left" "$right" --exclude=.boris-cache >"$diff_path"; then
         cat "$diff_path" >&2
         fail "published payload mismatch: ${left} vs ${right}"
     fi
-}
-
-wait_for_file() {
-    local path="$1"
-    local tries="${2:-100}"
-    local i
-    for i in $(seq 1 "$tries"); do
-        [[ -e "$path" ]] && return 0
-        sleep 0.2
-    done
-    return 1
 }
 
 wait_for_grep() {
