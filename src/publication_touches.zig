@@ -1899,6 +1899,23 @@ fn findingOwningCheck(
     return null;
 }
 
+/// Free every node ID in the slice, skipping the static "target" literal,
+/// without freeing the backing slice itself.
+fn freeNodes(gpa: std.mem.Allocator, nodes: []const Node) void {
+    for (nodes) |node| {
+        if (!std.mem.eql(u8, node.id, "target")) gpa.free(@constCast(node.id));
+    }
+}
+
+/// Free every edge endpoint string in the slice, skipping the static
+/// "target" literal on `from`, without freeing the backing slice itself.
+fn freeEdges(gpa: std.mem.Allocator, edges: []const Edge) void {
+    for (edges) |edge| {
+        if (!std.mem.eql(u8, edge.from, "target")) gpa.free(@constCast(edge.from));
+        gpa.free(@constCast(edge.to));
+    }
+}
+
 fn buildNodesAndEdges(
     gpa: std.mem.Allocator,
     inventory: *const artifact_inventory.Inventory,
@@ -1913,21 +1930,24 @@ fn buildNodesAndEdges(
     // Node count: 1 target + artifacts + 3 checks + findings + 3 claims + 6 limitations.
     const node_count = 1 + inventory.records.len + 3 + findings.len + 3 + 6;
     var nodes: std.ArrayList(Node) = .empty;
-    errdefer nodes.deinit(gpa);
+    // If any later node allocation fails, free every ID already owned by the
+    // node list before deinitializing its backing storage.
+    errdefer {
+        freeNodes(gpa, nodes.items);
+        nodes.deinit(gpa);
+    }
     try nodes.ensureTotalCapacity(gpa, node_count);
 
     nodes.appendAssumeCapacity(.{ .kind = .target, .id = "target" });
-    for (inventory.records, 0..) |record, index| {
+    for (inventory.records) |record| {
         const id = try concatId(gpa, "artifact:", record.path);
         errdefer gpa.free(id);
         nodes.appendAssumeCapacity(.{ .kind = .artifact, .id = id });
-        _ = index;
     }
-    for (checks, 0..) |check, index| {
+    for (checks) |check| {
         const id = try concatId(gpa, "check:", check.id);
         errdefer gpa.free(id);
         nodes.appendAssumeCapacity(.{ .kind = .check, .id = id });
-        _ = index;
     }
     for (findings, 0..) |_, finding_index| {
         const check_index = findingOwningCheck(checks, finding_index) orelse
@@ -1938,31 +1958,33 @@ fn buildNodesAndEdges(
         errdefer gpa.free(id);
         nodes.appendAssumeCapacity(.{ .kind = .finding, .id = id });
     }
-    for (claims, 0..) |claim, index| {
+    for (claims) |claim| {
         const id = try concatId(gpa, "claim:", claim.id);
         errdefer gpa.free(id);
         nodes.appendAssumeCapacity(.{ .kind = .claim, .id = id });
-        _ = index;
     }
-    for (limitations, 0..) |limitation, index| {
+    for (limitations) |limitation| {
         const id = try concatId(gpa, "limitation:", limitation.id);
         errdefer gpa.free(id);
         nodes.appendAssumeCapacity(.{ .kind = .limitation, .id = id });
-        _ = index;
     }
     if (nodes.items.len != node_count) return error.InvalidChecksReport;
 
     // Edges in canonical kind order.
     var edges: std.ArrayList(Edge) = .empty;
-    errdefer edges.deinit(gpa);
+    // If any later edge fails, release every owned from/to string already
+    // appended before deinitializing the edge list.
+    errdefer {
+        freeEdges(gpa, edges.items);
+        edges.deinit(gpa);
+    }
 
-    // 1. target-owns-artifact, one edge per inventory record in inventory order.
+    // 1. target-owns-artifact, one edge per inventory record in inventory
+    // order. `from` is the static "target" literal and must not be freed.
     for (inventory.records) |record| {
-        try edges.append(gpa, .{
-            .kind = .target_owns_artifact,
-            .from = "target",
-            .to = try concatId(gpa, "artifact:", record.path),
-        });
+        const to = try concatId(gpa, "artifact:", record.path);
+        errdefer gpa.free(to);
+        try edges.append(gpa, .{ .kind = .target_owns_artifact, .from = "target", .to = to });
     }
 
     // 2. artifact-subject-of-check: all subject edges first, artifact index
@@ -1970,11 +1992,11 @@ fn buildNodesAndEdges(
     for (inventory.records) |record| {
         for (checks) |check| {
             if (selected(record, check.scope.subject_statuses, check.scope.subject_kinds)) {
-                try edges.append(gpa, .{
-                    .kind = .artifact_subject_of_check,
-                    .from = try concatId(gpa, "artifact:", record.path),
-                    .to = try concatId(gpa, "check:", check.id),
-                });
+                const from = try concatId(gpa, "artifact:", record.path);
+                errdefer gpa.free(from);
+                const to = try concatId(gpa, "check:", check.id);
+                errdefer gpa.free(to);
+                try edges.append(gpa, .{ .kind = .artifact_subject_of_check, .from = from, .to = to });
             }
         }
     }
@@ -1984,11 +2006,11 @@ fn buildNodesAndEdges(
     for (inventory.records) |record| {
         for (checks) |check| {
             if (selected(record, check.scope.supporting_statuses, check.scope.supporting_kinds)) {
-                try edges.append(gpa, .{
-                    .kind = .artifact_supports_check,
-                    .from = try concatId(gpa, "artifact:", record.path),
-                    .to = try concatId(gpa, "check:", check.id),
-                });
+                const from = try concatId(gpa, "artifact:", record.path);
+                errdefer gpa.free(from);
+                const to = try concatId(gpa, "check:", check.id);
+                errdefer gpa.free(to);
+                try edges.append(gpa, .{ .kind = .artifact_supports_check, .from = from, .to = to });
             }
         }
     }
@@ -2000,40 +2022,48 @@ fn buildNodesAndEdges(
             return error.InvalidChecksReport;
         const check_id = checks[check_index].id;
         const ordinal = finding_index - checks[check_index].finding_offset;
-        try edges.append(gpa, .{
-            .kind = .check_reported_finding,
-            .from = try concatId(gpa, "check:", check_id),
-            .to = try findingNodeId(gpa, check_id, ordinal),
-        });
+        const from = try concatId(gpa, "check:", check_id);
+        errdefer gpa.free(from);
+        const to = try findingNodeId(gpa, check_id, ordinal);
+        errdefer gpa.free(to);
+        try edges.append(gpa, .{ .kind = .check_reported_finding, .from = from, .to = to });
     }
 
     // 5. check-supports-claim, one edge per fixed claim binding.
-    for (claims, 0..) |claim, claim_index| {
-        try edges.append(gpa, .{
-            .kind = .check_supports_claim,
-            .from = try concatId(gpa, "check:", claim.evidence.check_id),
-            .to = try concatId(gpa, "claim:", claim.id),
-        });
-        _ = claim_index;
+    for (claims) |claim| {
+        const from = try concatId(gpa, "check:", claim.evidence.check_id);
+        errdefer gpa.free(from);
+        const to = try concatId(gpa, "claim:", claim.id);
+        errdefer gpa.free(to);
+        try edges.append(gpa, .{ .kind = .check_supports_claim, .from = from, .to = to });
     }
 
     // 6. claim-limited-by, claim order first, then each claim's ordered
     // limitation list.
-    for (claims, 0..) |claim, claim_index| {
+    for (claims) |claim| {
         for (claim.limitation_ids) |limitation_id| {
-            try edges.append(gpa, .{
-                .kind = .claim_limited_by,
-                .from = try concatId(gpa, "claim:", claim.id),
-                .to = try concatId(gpa, "limitation:", limitation_id),
-            });
+            const from = try concatId(gpa, "claim:", claim.id);
+            errdefer gpa.free(from);
+            const to = try concatId(gpa, "limitation:", limitation_id);
+            errdefer gpa.free(to);
+            try edges.append(gpa, .{ .kind = .claim_limited_by, .from = from, .to = to });
         }
-        _ = claim_index;
     }
 
-    return .{
-        .nodes = try nodes.toOwnedSlice(gpa),
-        .edges = try edges.toOwnedSlice(gpa),
-    };
+    // Transfer ownership of both completed lists. Each transfer is recorded
+    // immediately so a failure on the second transfer releases the first
+    // slice; on success the caller owns both.
+    const owned_nodes = try nodes.toOwnedSlice(gpa);
+    errdefer {
+        freeNodes(gpa, owned_nodes);
+        gpa.free(owned_nodes);
+    }
+    const owned_edges = try edges.toOwnedSlice(gpa);
+    errdefer {
+        freeEdges(gpa, owned_edges);
+        gpa.free(owned_edges);
+    }
+    return .{ .nodes = owned_nodes, .edges = owned_edges };
 }
 
 fn nodeKindOf(id: []const u8) ?NodeKind {
@@ -2067,22 +2097,54 @@ fn expectedNodeIds(
     parsed_claims: *const ParsedClaims,
 ) Error![][]const u8 {
     var ids: std.ArrayList([]const u8) = .empty;
-    errdefer ids.deinit(gpa);
-    // Every entry must be an owned allocation: validateGraph frees each id
-    // with gpa, so the literal "target" must be duplicated, not borrowed.
-    try ids.append(gpa, try gpa.dupe(u8, "target"));
-    for (inventory.records) |record| try ids.append(gpa, try concatId(gpa, "artifact:", record.path));
-    for (parsed_checks.checks) |check| try ids.append(gpa, try concatId(gpa, "check:", check.id));
+    // Every entry is an owned allocation: validateGraph frees each id with
+    // gpa, so the literal "target" must be duplicated, not borrowed. If any
+    // later append fails, release every string already stored before
+    // deinitializing the backing storage.
+    errdefer {
+        for (ids.items) |id| gpa.free(id);
+        ids.deinit(gpa);
+    }
+    {
+        const target_id = try gpa.dupe(u8, "target");
+        errdefer gpa.free(target_id);
+        try ids.append(gpa, target_id);
+    }
+    for (inventory.records) |record| {
+        const id = try concatId(gpa, "artifact:", record.path);
+        errdefer gpa.free(id);
+        try ids.append(gpa, id);
+    }
+    for (parsed_checks.checks) |check| {
+        const id = try concatId(gpa, "check:", check.id);
+        errdefer gpa.free(id);
+        try ids.append(gpa, id);
+    }
     for (parsed_checks.findings, 0..) |_, finding_index| {
         const check_index = findingOwningCheck(&parsed_checks.checks, finding_index) orelse
             return error.InvalidChecksReport;
         const check_id = parsed_checks.checks[check_index].id;
         const ordinal = finding_index - parsed_checks.checks[check_index].finding_offset;
-        try ids.append(gpa, try findingNodeId(gpa, check_id, ordinal));
+        const id = try findingNodeId(gpa, check_id, ordinal);
+        errdefer gpa.free(id);
+        try ids.append(gpa, id);
     }
-    for (parsed_claims.claims) |claim| try ids.append(gpa, try concatId(gpa, "claim:", claim.id));
-    for (parsed_claims.limitations) |limitation| try ids.append(gpa, try concatId(gpa, "limitation:", limitation.id));
-    return ids.toOwnedSlice(gpa);
+    for (parsed_claims.claims) |claim| {
+        const id = try concatId(gpa, "claim:", claim.id);
+        errdefer gpa.free(id);
+        try ids.append(gpa, id);
+    }
+    for (parsed_claims.limitations) |limitation| {
+        const id = try concatId(gpa, "limitation:", limitation.id);
+        errdefer gpa.free(id);
+        try ids.append(gpa, id);
+    }
+    const owned = try ids.toOwnedSlice(gpa);
+    errdefer {
+        for (owned) |id| gpa.free(id);
+        gpa.free(owned);
+    }
+    return owned;
 }
 
 /// Expected canonical edge sequence for the parsed evidence, in edge-kind-major
@@ -2094,30 +2156,39 @@ fn expectedEdges(
     parsed_claims: *const ParsedClaims,
 ) Error![]Edge {
     var edges: std.ArrayList(Edge) = .empty;
-    errdefer edges.deinit(gpa);
+    // Same ownership rules as the builder: every from/to is owned except the
+    // static "target" literal, and a failure at any later append releases
+    // every endpoint string already stored before the backing storage is
+    // deinitialized.
+    errdefer {
+        freeEdges(gpa, edges.items);
+        edges.deinit(gpa);
+    }
 
     for (inventory.records) |record| {
-        try edges.append(gpa, .{ .kind = .target_owns_artifact, .from = "target", .to = try concatId(gpa, "artifact:", record.path) });
+        const to = try concatId(gpa, "artifact:", record.path);
+        errdefer gpa.free(to);
+        try edges.append(gpa, .{ .kind = .target_owns_artifact, .from = "target", .to = to });
     }
     for (inventory.records) |record| {
         for (parsed_checks.checks) |check| {
             if (selected(record, check.scope.subject_statuses, check.scope.subject_kinds)) {
-                try edges.append(gpa, .{
-                    .kind = .artifact_subject_of_check,
-                    .from = try concatId(gpa, "artifact:", record.path),
-                    .to = try concatId(gpa, "check:", check.id),
-                });
+                const from = try concatId(gpa, "artifact:", record.path);
+                errdefer gpa.free(from);
+                const to = try concatId(gpa, "check:", check.id);
+                errdefer gpa.free(to);
+                try edges.append(gpa, .{ .kind = .artifact_subject_of_check, .from = from, .to = to });
             }
         }
     }
     for (inventory.records) |record| {
         for (parsed_checks.checks) |check| {
             if (selected(record, check.scope.supporting_statuses, check.scope.supporting_kinds)) {
-                try edges.append(gpa, .{
-                    .kind = .artifact_supports_check,
-                    .from = try concatId(gpa, "artifact:", record.path),
-                    .to = try concatId(gpa, "check:", check.id),
-                });
+                const from = try concatId(gpa, "artifact:", record.path);
+                errdefer gpa.free(from);
+                const to = try concatId(gpa, "check:", check.id);
+                errdefer gpa.free(to);
+                try edges.append(gpa, .{ .kind = .artifact_supports_check, .from = from, .to = to });
             }
         }
     }
@@ -2126,29 +2197,34 @@ fn expectedEdges(
             return error.InvalidChecksReport;
         const check_id = parsed_checks.checks[check_index].id;
         const ordinal = finding_index - parsed_checks.checks[check_index].finding_offset;
-        try edges.append(gpa, .{
-            .kind = .check_reported_finding,
-            .from = try concatId(gpa, "check:", check_id),
-            .to = try findingNodeId(gpa, check_id, ordinal),
-        });
+        const from = try concatId(gpa, "check:", check_id);
+        errdefer gpa.free(from);
+        const to = try findingNodeId(gpa, check_id, ordinal);
+        errdefer gpa.free(to);
+        try edges.append(gpa, .{ .kind = .check_reported_finding, .from = from, .to = to });
     }
     for (parsed_claims.claims) |claim| {
-        try edges.append(gpa, .{
-            .kind = .check_supports_claim,
-            .from = try concatId(gpa, "check:", claim.evidence.check_id),
-            .to = try concatId(gpa, "claim:", claim.id),
-        });
+        const from = try concatId(gpa, "check:", claim.evidence.check_id);
+        errdefer gpa.free(from);
+        const to = try concatId(gpa, "claim:", claim.id);
+        errdefer gpa.free(to);
+        try edges.append(gpa, .{ .kind = .check_supports_claim, .from = from, .to = to });
     }
     for (parsed_claims.claims) |claim| {
         for (claim.limitation_ids) |limitation_id| {
-            try edges.append(gpa, .{
-                .kind = .claim_limited_by,
-                .from = try concatId(gpa, "claim:", claim.id),
-                .to = try concatId(gpa, "limitation:", limitation_id),
-            });
+            const from = try concatId(gpa, "claim:", claim.id);
+            errdefer gpa.free(from);
+            const to = try concatId(gpa, "limitation:", limitation_id);
+            errdefer gpa.free(to);
+            try edges.append(gpa, .{ .kind = .claim_limited_by, .from = from, .to = to });
         }
     }
-    return edges.toOwnedSlice(gpa);
+    const owned = try edges.toOwnedSlice(gpa);
+    errdefer {
+        freeEdges(gpa, owned);
+        gpa.free(owned);
+    }
+    return owned;
 }
 
 /// Runtime graph invariants that JSON Schema cannot express. Takes the caller
@@ -4097,14 +4173,9 @@ test "wrong edge direction is rejected" {
 /// allocator: every node id, every edge endpoint string, and the two backing
 /// arrays. The literal "target" id is not allocated and must not be freed.
 fn freeNodesAndEdges(gpa: std.mem.Allocator, nodes: []Node, edges: []Edge) void {
-    for (nodes) |node| {
-        if (!std.mem.eql(u8, node.id, "target")) gpa.free(@constCast(node.id));
-    }
+    freeNodes(gpa, nodes);
     gpa.free(nodes);
-    for (edges) |edge| {
-        if (!std.mem.eql(u8, edge.from, "target")) gpa.free(@constCast(edge.from));
-        gpa.free(@constCast(edge.to));
-    }
+    freeEdges(gpa, edges);
     gpa.free(edges);
 }
 
@@ -4570,4 +4641,226 @@ test "checks and claims parsers are leak-free under std.testing.allocator" {
         var reader = std.Io.Reader.fixed(checks[0..cut]);
         try std.testing.expectError(error.InvalidChecksReport, parseChecksStream(gpa, &reader, "default"));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Graph construction ownership under a failing allocator.
+//
+// `buildNodesAndEdges` and the expected-graph helpers must release every
+// completed allocation when a later allocation fails, under a
+// general-purpose allocator. Each test below injects an OutOfMemory at one
+// exact allocation index (deterministic for the fixed fixtures) and requires
+// the error to surface with zero leaks and zero double frees; the
+// `std.testing.allocator` teardown check fails the test otherwise.
+// ---------------------------------------------------------------------------
+
+const unselected_search_spec = TestCheckSpec{
+    .subject_statuses = &.{},
+    .subject_kinds = &.{},
+    .supporting_statuses = &.{"committed"},
+    .supporting_kinds = &.{"html-page"},
+    .status = "not-applicable",
+    .coverage = "not-applicable",
+    .eligible = 0,
+    .checked = 0,
+    .report_eligible = false,
+    .report_ran = false,
+};
+
+const finding_spec = TestFixtureSpec{ .checks = .{
+    .{ .subject_kinds = &.{}, .status = "failed", .coverage = "complete", .findings = &.{
+        .{ .code = "ARTIFACT_DIGEST_MISMATCH", .subject_id = "index.html" },
+    } },
+    .{ .subject_kinds = &.{"html-page"} },
+    unselected_search_spec,
+} };
+
+/// Run `buildNodesAndEdges` under a failing allocator that fails at exactly
+/// the given allocation index and require OutOfMemory with no leaks.
+fn expectGraphAllocFailure(
+    io: Io,
+    gpa: std.mem.Allocator,
+    records: []const artifact_inventory.Record,
+    spec: TestFixtureSpec,
+    fail_index: usize,
+) !void {
+    var ctx = try makeGraphContext(io, gpa, records, spec);
+    defer ctx.deinit();
+    var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = fail_index });
+    try std.testing.expectError(
+        error.OutOfMemory,
+        buildNodesAndEdges(failing.allocator(), &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims),
+    );
+}
+
+/// Sweep every allocation index from 0 upward: each induced failure must be
+/// OutOfMemory and leak-free, and the first successful build must free
+/// cleanly. Returns the total allocation count a successful build performs.
+fn sweepGraphAllocations(
+    io: Io,
+    gpa: std.mem.Allocator,
+    records: []const artifact_inventory.Record,
+    spec: TestFixtureSpec,
+) !usize {
+    var ctx = try makeGraphContext(io, gpa, records, spec);
+    defer ctx.deinit();
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = fail_index });
+        const graph = buildNodesAndEdges(failing.allocator(), &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims) catch |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            continue;
+        };
+        freeNodesAndEdges(gpa, graph.nodes, graph.edges);
+        return fail_index;
+    }
+}
+
+/// Sweep every allocation index for the expected-graph helpers and for
+/// `validateGraph`; each induced failure must be OutOfMemory and leak-free.
+/// Returns the total allocation count a fully successful call performs.
+fn sweepExpectedGraphHelpers(io: Io, gpa: std.mem.Allocator, records: []const artifact_inventory.Record) !usize {
+    var ctx = try makeGraphContext(io, gpa, records, .{});
+    defer ctx.deinit();
+    const total_ids = blk: {
+        var fail_index: usize = 0;
+        while (true) : (fail_index += 1) {
+            var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = fail_index });
+            const ids = expectedNodeIds(failing.allocator(), &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims) catch |err| {
+                try std.testing.expectEqual(error.OutOfMemory, err);
+                continue;
+            };
+            for (ids) |id| gpa.free(id);
+            gpa.free(ids);
+            break :blk fail_index;
+        }
+    };
+    const total_edges = blk: {
+        var fail_index: usize = 0;
+        while (true) : (fail_index += 1) {
+            var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = fail_index });
+            const edges = expectedEdges(failing.allocator(), &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims) catch |err| {
+                try std.testing.expectEqual(error.OutOfMemory, err);
+                continue;
+            };
+            freeEdges(gpa, edges);
+            gpa.free(edges);
+            break :blk fail_index;
+        }
+    };
+    const total_validate = blk: {
+        const graph = try buildNodesAndEdges(gpa, &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims);
+        defer freeNodesAndEdges(gpa, graph.nodes, graph.edges);
+        var fail_index: usize = 0;
+        while (true) : (fail_index += 1) {
+            var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = fail_index });
+            _ = validateGraph(failing.allocator(), &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims, graph.nodes, graph.edges) catch |err| {
+                try std.testing.expectEqual(error.OutOfMemory, err);
+                continue;
+            };
+            break :blk fail_index;
+        }
+    };
+    return total_ids + total_edges + total_validate;
+}
+
+test "graph construction is OOM-clean when an artifact node ID allocation fails" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+    // Allocation index 1 is the first artifact node ID (`artifact:` concat);
+    // index 0 is the node-list backing storage.
+    try expectGraphAllocFailure(io, gpa, &records, .{}, 1);
+}
+
+test "graph construction is OOM-clean when a finding node ID allocation fails" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+    // Finding node IDs follow target, artifact, and the three check IDs:
+    // indices 0 (backing), 1 (artifact), 2-4 (checks), 5 (finding).
+    try expectGraphAllocFailure(io, gpa, &records, finding_spec, 5);
+}
+
+test "graph construction is OOM-clean when a node allocation fails after completed nodes" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+    // Index 2 is the first check ID: target and the artifact node are already
+    // completed, so the failure must free those completed IDs too.
+    try expectGraphAllocFailure(io, gpa, &records, .{}, 2);
+}
+
+test "graph construction is OOM-clean when an edge `to` allocation fails" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+    // Index 14 is the first edge's `to` (target-owns-artifact). The `from`
+    // literal "target" is static and must not be freed.
+    try expectGraphAllocFailure(io, gpa, &records, .{}, 14);
+}
+
+test "graph construction is OOM-clean when an edge `from` allocation fails" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+    // Index 16 is the first owned edge `from` (first artifact-subject-of-check
+    // edge), after the completed target-owns edge at index 14/15.
+    try expectGraphAllocFailure(io, gpa, &records, .{}, 16);
+}
+
+test "graph construction is OOM-clean when an edge allocation fails after completed edges" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+    // Index 18 is the second subject edge's `from`; by then the target-owns
+    // and first subject edge are fully appended, so all owned endpoint
+    // strings already stored must be released before the list is
+    // deinitialized.
+    try expectGraphAllocFailure(io, gpa, &records, .{}, 18);
+}
+
+test "graph construction, expected helpers, and validation succeed leak-free under std.testing.allocator" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+    var ctx = try makeGraphContext(io, gpa, &records, .{});
+    defer ctx.deinit();
+    const graph = try buildNodesAndEdges(gpa, &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims);
+    defer freeNodesAndEdges(gpa, graph.nodes, graph.edges);
+    try validateGraph(gpa, &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims, graph.nodes, graph.edges);
+    const ids = try expectedNodeIds(gpa, &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims);
+    defer {
+        for (ids) |id| gpa.free(id);
+        gpa.free(ids);
+    }
+    const edges = try expectedEdges(gpa, &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims);
+    defer {
+        freeEdges(gpa, edges);
+        gpa.free(edges);
+    }
+}
+
+test "graph construction is OOM-clean at every allocation point" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+    try std.testing.expectEqual(@as(usize, 65), try sweepGraphAllocations(io, gpa, &records, .{}));
+}
+
+test "graph construction with findings is OOM-clean at every allocation point" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+    try std.testing.expectEqual(@as(usize, 68), try sweepGraphAllocations(io, gpa, &records, finding_spec));
+}
+
+test "expected graph helpers and validateGraph are OOM-clean at every allocation point" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+    const total = try sweepExpectedGraphHelpers(io, gpa, &records);
+    // Every helper must complete at least a full node/edge vocabulary's worth
+    // of allocations; the exact sum pins determinism for the fixed fixture.
+    try std.testing.expect(total >= 30);
 }
