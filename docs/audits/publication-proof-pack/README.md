@@ -131,12 +131,14 @@ python3 docs/audits/publication-proof-pack/check-parity.py
 ```
 
 The script is the HTML-to-JSON parity check. For each paired model and page it
-compares at least: target, overall presentation status, embedded model digest,
-summary totals, artifact paths/statuses/bytes/digests (including
-non-committed records), check status/coverage/counts, finding
-IDs/codes/severities/subjects, claim IDs/statements/statuses, limitation
-IDs/statements/sources, relationship node IDs, and relationship edge tuples.
-A tag-balance or anchor check alone is insufficient; the script exits 0 only
+compares at least: target, format, schema version, overall presentation
+status, embedded model digest, summary totals, artifact
+paths/statuses/bytes/digests (including non-committed records), check
+status/coverage/counts, finding IDs/codes/severities/subjects, claim
+IDs/statements/statuses, limitation IDs/statements/sources, relationship node
+IDs, and relationship edge tuples. It also rejects any rendered relationship
+group heading the model does not declare, so a page cannot invent a group. A
+tag-balance or anchor check alone is insufficient; the script exits 0 only
 when every displayed fact matches the model. The embedded
 `proof-pack-sha256` meta value in each page is checked against the exact
 SHA-256 of the paired JSON bytes.

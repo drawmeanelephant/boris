@@ -147,11 +147,16 @@ def fail(msg):
 def check(pair_name, model, ex):
     ok = True
 
-    # Target (rendered in the meta paragraph)
-    if not re.search(r"target\s+public", ex.meta_text):
-        ok = fail(f"target 'public' not in meta text: {ex.meta_text!r}")
-    if ex.meta_text and "boris-publication-proof-pack" not in ex.meta_text:
-        ok = fail("format const not in meta text")
+    # Identity: target, format, and schema version, bound to the model
+    expected_target = model["target"]
+    expected_format = model["format"]
+    expected_schema = str(model["schema_version"])
+    if not re.search(rf"target\s+{re.escape(expected_target)}", ex.meta_text):
+        ok = fail(f"target {expected_target!r} not in meta text: {ex.meta_text!r}")
+    if f"format: {expected_format}" not in ex.meta_text:
+        ok = fail(f"format {expected_format!r} not in meta text: {ex.meta_text!r}")
+    if f"schema_version: {expected_schema}" not in ex.meta_text:
+        ok = fail(f"schema_version {expected_schema!r} not in meta text: {ex.meta_text!r}")
 
     # Overall status (banner) == JSON summary + presentation
     expected = model["summary"]["overall_presentation_status"]
@@ -409,6 +414,14 @@ def check(pair_name, model, ex):
     rel = model["relationships"]
     if rel_nodes != rel["node_ids"]:
         ok = fail(f"relationship node_ids mismatch ({len(rel_nodes)} vs {len(rel['node_ids'])})")
+    # Reject extra relationship groups: every rendered heading must be the
+    # node list or one of the model's edge-kind groups (same kind and count).
+    expected_heads = {f"Nodes ({len(rel['node_ids'])})"}
+    for g in rel["groups"]:
+        expected_heads.add(f"{g['edge_kind']} ({len(g['edges'])})")
+    for head in rel_heads:
+        if head not in expected_heads:
+            ok = fail(f"unexpected relationship heading rendered: {head!r}")
     got_edges = []
     for g in rel["groups"]:
         head = f"{g['edge_kind']} ({len(g['edges'])})"

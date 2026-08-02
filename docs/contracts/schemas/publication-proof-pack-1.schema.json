@@ -126,8 +126,14 @@
       ]
     },
     "node_id": {
-      "type": "string",
-      "minLength": 1
+      "anyOf": [
+        { "const": "target" },
+        { "$ref": "#/$defs/artifact_node_id" },
+        { "$ref": "#/$defs/check_node_id" },
+        { "$ref": "#/$defs/finding_node_id" },
+        { "$ref": "#/$defs/claim_node_id" },
+        { "$ref": "#/$defs/limitation_node_id" }
+      ]
     },
     "artifact_node_id": {
       "type": "string",

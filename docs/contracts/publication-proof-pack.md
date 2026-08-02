@@ -428,6 +428,13 @@ groups
   `check-supports-claim`, `claim-limited-by`). Each group has the edge kind
   and its edges as `{ "from": node-id, "to": node-id }` pairs.
 
+Node IDs are the closed Touch Atlas stable-ID vocabulary: `target`,
+`artifact:<artifact path>`, `check:<check id>`,
+`finding:<owning check id>:<ordinal>`, `claim:<claim id>`, and
+`limitation:<limitation id>`. The schema constrains every `node_ids` entry
+and every edge `from`/`to` endpoint to those patterns; an arbitrary string
+fails validation.
+
 Every relationship must bind to an exact existing Touch Atlas edge — the same
 `(kind, from, to)` tuple must appear in `touches.json`. No relationship may be
 added because it seems intuitive. Groups may be empty, but every edge in
@@ -482,7 +489,9 @@ Required behavior:
   Pack presentation was not refreshed;
 - diagnostic appears under `--quiet`; and
 - on a handled synchronous failure, the prior `proof-pack.json` and
-  `index.html` pair is preserved (restored or never touched).
+  `index.html` pair is preserved (restored or never touched) when
+  restoration succeeds; when restoration itself fails, the run makes no
+  prior-pair-preservation claim (see the first-slice transaction below).
 
 ### First-slice generation transaction
 
@@ -505,10 +514,18 @@ visibility. The implementable transaction is:
    commit point.
 7. On success, delete the `.prev` files.
 8. On a synchronous failure at any step, restore the prior pair by renaming
-   the `.prev` files back over any partial new files; if restoration
-   succeeds, the prior pair remains, the run returns exit 3, and the
-   diagnostic (visible under `--quiet`) states that publication and prior
-   evidence committed but Proof Pack presentation was not refreshed.
+   the `.prev` files back over any partial new files. Restoration can
+   itself fail; define that case explicitly:
+   - if restoration succeeds, the prior pair remains, the run returns exit
+     3, and the diagnostic (visible under `--quiet`) states that
+     publication and prior evidence committed but Proof Pack presentation
+     was not refreshed;
+   - if restoration fails, the run still returns exit 3 and the diagnostic
+     (visible under `--quiet`) states that presentation recovery failed and
+     the current pair may be split or absent. Preserve the `.prev` files
+     wherever possible; the next generation performs recovery or replaces
+     both files. Do not claim prior-pair preservation when restoration
+     failed.
 9. A successful return guarantees that both current files match: the
    committed `proof-pack.json` bytes are exactly the bytes the committed
    `index.html` was derived from.
