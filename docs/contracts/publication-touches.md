@@ -370,8 +370,7 @@ This slice makes no claim about, and does not attempt:
 - accessibility or prose-quality inference;
 - proof-pack presentation or packaging; and
 - repair actions (the atlas never rewrites a payload, report, or claim).
-9. Atomic-write fault injection — verify a failed replacement preserves the
-   previous `touches.json` and leaves earlier evidence committed.
 
-The status remains **contract drafted, implementation not yet shipped** until
-that map is implemented and verified in a later change.
+The status is **implemented first slice**: the normative runtime requirements
+above are enforced by `zig build test-publication-touches` and the fixture
+suite, and the atlas never rereads payloads or source bytes.

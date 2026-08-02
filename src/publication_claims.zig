@@ -28,7 +28,9 @@ pub const claim_ids = [_][]const u8{
 
 const check_ids = [_][]const u8{ "artifact-integrity", "rendered-html", "rendered-search" };
 
-const claim_statements = [_][]const u8{
+/// Exact canonical claim statements, indexed by `claim_ids`. The touches layer
+/// validates that a claims report's statements match these bytes exactly.
+pub const claim_statements = [_][]const u8{
     "Every committed artifact record selected by the artifact-integrity check was inspected and matched its declared byte count and SHA-256 digest.",
     "Every committed HTML page selected by the rendered-html check completed the declared structural, route, fragment, and duplicate-ID audit within that check's scope.",
     "The single selected rendered-search artifact matched the committed HTML page set and derived rendered-search content inspected by the rendered-search check.",
@@ -65,7 +67,10 @@ const generic_limitation_ids = limitation_ids[0..5];
 /// claim, which is the only projection-bound first-slice claim.
 const search_claim_id = claim_ids[2..3];
 
-const LimitationRow = struct {
+/// One canonical limitation row: exact statement, authoritative source
+/// location, and the ordered claims it applies to. The touches layer emits
+/// `source` into the atlas, so it validates rows against these exact values.
+pub const LimitationRow = struct {
     statement: []const u8,
     source: []const u8,
     applies_to_claims: []const []const u8,
@@ -73,7 +78,8 @@ const LimitationRow = struct {
 
 const all_claim_ids = &claim_ids;
 
-const limitation_rows = [_]LimitationRow{
+/// Exact canonical limitation rows, indexed by `limitation_ids`.
+pub const limitation_rows = [_]LimitationRow{
     .{
         .statement = "These claims describe one selected local HTML target after its commit and say nothing about any other target or environment.",
         .source = "docs/contracts/publication-checks.md#authority-and-transaction-boundary",
@@ -883,6 +889,22 @@ fn derive(check: ParsedCheck) Derivation {
     if (std.mem.eql(u8, check.status, "not-applicable"))
         return .{ .status = .not_verified, .reason = "check-not-applicable" };
     unreachable;
+}
+
+/// Narrow public mapping the touches layer uses to validate that a claims
+/// report's status and reason follow the publication-claims contract exactly:
+/// `passed -> verified` with no reason; `failed -> failed / check-failed`;
+/// `incomplete -> not-verified / check-incomplete`; and `not-applicable ->
+/// not-verified / check-not-applicable`. Returns null for an unknown check
+/// status so callers can reject it.
+pub fn deriveStatus(check_status: []const u8) ?struct { status: []const u8, reason: ?[]const u8 } {
+    if (std.mem.eql(u8, check_status, "passed")) return .{ .status = "verified", .reason = null };
+    if (std.mem.eql(u8, check_status, "failed")) return .{ .status = "failed", .reason = "check-failed" };
+    if (std.mem.eql(u8, check_status, "incomplete"))
+        return .{ .status = "not-verified", .reason = "check-incomplete" };
+    if (std.mem.eql(u8, check_status, "not-applicable"))
+        return .{ .status = "not-verified", .reason = "check-not-applicable" };
+    return null;
 }
 
 fn writeStringArray(
