@@ -423,3 +423,46 @@ test "no payload reread: rewriting payload bytes leaves prior touches untouched"
     defer allocator.free(second);
     try std.testing.expectEqualSlices(u8, first, second);
 }
+
+/// The exact committed bytes of the poisoned fixture's `touches.json` emitted
+/// by PR #294 (first Touch Atlas implementation). This change is a pure
+/// ownership cleanup and must not alter a single emitted byte; the golden
+/// captures the full report (36834 bytes) and pins its SHA-256.
+const touches_golden_sha256 = "4157bdae08766e2f084bb4cdfe2b19f5a459eb61dddb3acfa4d75d6c77fa5400";
+const touches_golden_len = 36834;
+
+test "touches emission remains byte-identical to the PR #294 golden" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const fixture_path = try std.fmt.allocPrint(allocator, ".zig-cache/tmp/{s}/capture-touches", .{tmp.sub_path});
+    defer allocator.free(fixture_path);
+    const barbs = [_][]const u8{ "html_missing_local_route", "artifact_digest_mismatch", "deployment_owned_extra" };
+    var generated = try generator.generate(.{
+        .io = io,
+        .allocator = allocator,
+        .output_path = fixture_path,
+        .pages = 24,
+        .seed = 20260801,
+        .profile_selector = "mild-poison-v1",
+        .barb_names = &barbs,
+    });
+    defer {
+        allocator.free(generated.assignments);
+        generated.profile.deinit(allocator);
+    }
+    try generator.runFixture(.{
+        .io = io,
+        .allocator = allocator,
+        .fixture_path = fixture_path,
+        .boris_path = "./zig-out/bin/boris",
+    });
+    const touches = try deriveTouches(io, allocator, fixture_path, "results/boris-output");
+    defer allocator.free(touches);
+    try std.testing.expectEqual(touches_golden_len, touches.len);
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(touches, &digest, .{});
+    const hex = std.fmt.bytesToHex(digest, .lower);
+    try std.testing.expectEqualStrings(touches_golden_sha256, &hex);
+}
