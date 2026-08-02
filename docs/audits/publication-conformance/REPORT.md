@@ -1,26 +1,26 @@
 # Publication conformance evidence: C01, C02, C03, C04, C05, C06, C07, C08
 
-Date: 2026-08-01
-Base: `afterparty` at `2c9d8a1`
-Evidence branch: `codex/publication-conformance-round-2`
-Pull request: draft (round 2)
+Date: 2026-08-02
+Base: `afterparty` at `8c0e0d1` (PR #291)
+Evidence branch: `codex/conformance-w1-s1-remediation`
+Pull request: draft (W1/S1 remediation)
 
-This round extends the executable evidence suite with C01 (Textile HTML), C05
-(layout precedence), C06 (cache/watch failure paths), and C07 (asset
-collisions and SVG policy). The C02/C03/C04/C08 evidence from the first round
-is unchanged and still passes.
+This branch is the W1/S1 remediation of the round-2 publication-conformance
+suite: it repairs the two confirmed defects retained by PR #291 (watcher exit
+on failed include rebuild; active-SVG rejection exit class) and re-runs the
+full C01–C08 evidence. The C02/C03/C04/C08 evidence and the C01/C05/C06/C07
+non-defect cases are unchanged and still pass.
 
 ## Authority and scope
 
-This is an evidence-and-fixture pass for the requested publication-conformance
-areas. Normative authority was resolved in this order: the relevant contracts
-under `docs/contracts/`, current executable behavior, focused tests, and the
-retained black-box evidence. No `src/` production behavior changed; this
-branch touches only `scripts/verify-publication-conformance.sh`, the retained
-fixture trees under `docs/audits/publication-conformance/`, this report, and a
-changelog fragment. No production code was repaired — confirmed defects are
-recorded with remediation cards only.
-
+This is a repair-and-evidence branch for the two confirmed defects retained by
+the round-2 publication-conformance suite. Normative authority was resolved in
+this order: the relevant contracts under `docs/contracts/`, current executable
+behavior, focused tests, and the retained black-box evidence. Production
+changes are limited to the W1 and S1 repair boundaries in `src/watch.zig`,
+`src/main.zig`, and `src/compile.zig`; the rest of the branch touches
+`scripts/verify-publication-conformance.sh`, the retained fixture trees under
+`docs/audits/publication-conformance/`, this report, and a changelog fragment.
 The material-observation labels below are limited to: `Confirmed defect`,
 `Likely defect`, `Insufficient evidence`, `Documented limitation`, and
 `Non-issue / packet drift`. The report does not turn the remaining gaps into
@@ -76,8 +76,8 @@ absent. This is observed behavior, not a production change.
 | C03 sitemap | `c03-sitemap/content/`, sitemap golden, CLI snapshots | `c03-trailing`, `c03-no-trailing`, `c03-invalid-*` |
 | C04 RSS | `c04-rss/content/`, feed and CLI snapshots | `c04-feed-2/3/4`, `c04-missing-*`, `c04-invalid-*` |
 | C05 layout precedence | `c05-layout-precedence/content/`, marker layouts, managed theme, failure snapshots | `c05-explicit`, `c05-rule-id`, `c05-rule-glob`, `c05-rule-role`, `c05-theme`, `c05-multi`, `c05-missing-layout`, `c05-missing-marker`, `c05-duplicate-marker`, `c05-ambiguous-glob`, `c05-incr-base/win/lose` (one reused target) |
-| C06 cache/watch | `c06-cache-watch/content/`, `theme/`, `layout.html`, `dup.html`, failure snapshots | `c06-noop`, `c06-source-edit`, `c06-source-delete`, `c06-include-edit`, `c06-include-missing`, `c06-parse-failed`, `c06-layout-dup`, `c06-theme`, `c06-content-asset`, `c06-sitemap`, `c06-search`, `c06-watch`, `c06-watch-fail`, `c06-watch-recover` |
-| C07 assets/SVG | `c07-asset-collisions/content/`, `layout.html`, 13 snapshots | `c07-svg-*` (9 constructs), `c07-valid`, `c07-valid-jobs4`, `c07-valid-incr`, `c07-theme-page`, `c07-symlink`, `c07-traversal`, `c07-sitemap` |
+| C06 cache/watch | `c06-cache-watch/content/`, `theme/`, `layout.html`, `dup.html`, failure snapshots | `c06-noop`, `c06-source-edit`, `c06-source-delete`, `c06-include-edit`, `c06-include-missing`, `c06-parse-failed`, `c06-layout-dup`, `c06-theme`, `c06-content-asset`, `c06-sitemap`, `c06-search`, `c06-watch`, `c06-watch-fail` (same-session recovery), `c06-watch-svg` (unsafe-SVG same-session recovery) |
+| C07 assets/SVG | `c07-asset-collisions/content/`, `layout.html`, 13 snapshots | `c07-svg-*` (9 constructs), `c07-svg-multi`, `c07-valid`, `c07-valid-jobs4`, `c07-valid-incr`, `c07-theme-page`, `c07-symlink`, `c07-traversal`, `c07-sitemap` |
 | C08 parser/Unicode | `c08-parser-unicode/` plus repository invalid-UTF-8 corpus | `c08-valid`, `c08-invalid-*` |
 
 ## C02 — includes and heading fragments
@@ -311,18 +311,30 @@ Contract owner: `docs/contracts/watch-mode.md` §5 (content validation failures 
 | `c06-sitemap` | xml-sitemap | `status: draft` on `g1.md` | `--incremental` baseline, then `--incremental` rebuild into same target | 0 | sitemap replaced; draft page absent | — | Non-issue / packet drift | — |
 | `c06-search` | rendered-search | body edit on `index.md` | `--incremental` baseline, then `--incremental` rebuild into same target | 0 | `_boris/search/search-index.json` changes | — | Non-issue / packet drift | — |
 | `c06-watch` | watch-mode | `watch --html …` | start, edit source, SIGTERM | 0 | initial build; observed rebuild; clean exit 0 | — | Non-issue / packet drift | — |
-| `c06-watch-fail` | watch-mode §5 | delete include while watching | watch, then delete | 1 (unrecoverable) | `error: rebuild failed with unrecoverable I/O error: IncludeFailed`; watcher exits | — | **Confirmed defect** (see card) | — |
-| `c06-watch-recover` | watch-mode | restore include, watch again | watch | 0 | corrected rebuild visible; clean SIGTERM exit 0 | — | Non-issue / packet drift | — |
+| `c06-watch-fail` | watch-mode §5 | delete include while watching, restore in the same session | watch, delete, restore, SIGTERM | 0 | `error: rebuild failed: IncludeFailed. Waiting for correction...`; watcher stays alive; prior `site/index.html` byte-identical; corrected `Fragment v2` published by the same process; clean SIGTERM exit 0 | — | Resolved (W1) | — |
+| `c06-watch-svg` | watch-mode §5 + content-local-assets | replace inert `content/index.assets/logo.svg` with an active `<script>` SVG while watching, restore a different inert SVG in the same session | watch, replace, restore, SIGTERM | 0 | EASSET diagnostic plus `Waiting for correction`; watcher stays alive; prior `site/index.html` and `site/index.assets/logo.svg` byte-identical; corrected SVG published by the same process; clean SIGTERM exit 0 | — | Resolved (W1/S1) | — |
 
 ### C06 classification
 
 All cache, stale-removal, sitemap, search, and clean watch behaviors match
-contract text on the exercised paths. One **Confirmed defect**: a failed
-include rebuild kills the watcher instead of keeping it alive for author
-recovery (see remediation card W1). The watch tests are bounded (20 s
-worst-case waits), terminate via SIGTERM through the existing watcher
-shutdown path, and the exit trap now waits on every retained watcher PID so
-no background Boris process survives an assertion failure.
+contract text on the exercised paths. The previously confirmed defect — a
+failed include rebuild killing the watcher — is **resolved** by this branch:  `error.IncludeFailed` is now in the watch recoverable-error set
+(`isRecoverableBuildError` in `src/watch.zig`), so the same-session case
+(`c06-watch-fail`) proves the watcher survives the failed rebuild, keeps the
+prior valid output byte-identical, and publishes the corrected content from
+the same process (then SIGTERM exits 0). Unsafe-SVG content errors recover
+consistently in watch mode too: `error.AssetUnsafeSvg` is in the same
+recoverable set, and the `c06-watch-svg` case proves one uninterrupted
+watcher process survives an author replacing an inert SVG with an active
+`<script>` construct, keeps both the prior published HTML and SVG
+byte-identical, and publishes a corrected inert SVG from the same session.
+The CLI synthesizes a "default" target from `--html-dir`, so watch rebuilds
+normally route through the multi-target aggregate; the raw single-target path
+(empty target list) is covered by the in-process `src/watch.zig` regression.
+The watch tests are bounded (20 s worst-case waits), terminate via SIGTERM
+through the existing watcher shutdown path, and the exit trap now waits on
+every retained watcher PID so no background Boris process survives an
+assertion failure.
 
 The executable cases distinguish **clean rebuild behavior**, **incremental
 mode first publication** (the `-base` run: renders every page and writes
@@ -342,15 +354,16 @@ Contract owner: `docs/contracts/content-local-assets.md` §5 (EASSET content cla
 
 | Case ID | Contract owner | Fixture / declaration | Command | Expected exit | Expected artifact / diagnostic | Repeat | Classification | Remaining gap |
 |---|---|---|---|---|---|---|---|---|
-| `c07-svg-script` | SVG policy | generated `guides/intro.assets/t.svg` `<script>` | `--html …` | 3 | exact `expected/svg-script.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
-| `c07-svg-event-handler` | SVG policy | `onload` attribute | `--html …` | 3 | exact `expected/svg-event-handler.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
-| `c07-svg-javascript-url` | SVG policy | `javascript:` href | `--html …` | 3 | exact `expected/svg-javascript-url.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
-| `c07-svg-foreignobject` | SVG policy | `<foreignObject>` | `--html …` | 3 | exact `expected/svg-foreignobject.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
-| `c07-svg-iframe` | SVG policy | `<iframe>` | `--html …` | 3 | exact `expected/svg-iframe.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
-| `c07-svg-object` | SVG policy | `<object>` | `--html …` | 3 | exact `expected/svg-object.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
-| `c07-svg-doctype` | SVG policy | `<!DOCTYPE …>` | `--html …` | 3 | exact `expected/svg-doctype.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
-| `c07-svg-style-import` | SVG policy | `<style>@import url(…)</style>` | `--html …` | 3 | exact `expected/svg-style-import.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
-| `c07-svg-animate-onload` | SVG policy | `animate attributeName="onload"` | `--html …` | 3 | exact `expected/svg-animate-onload.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
+| `c07-svg-script` | SVG policy | generated `guides/intro.assets/t.svg` `<script>` | `--html …` | 1 | exact `expected/svg-script.stderr`; no target; no inventory | — | Resolved (S1) | — |
+| `c07-svg-event-handler` | SVG policy | `onload` attribute | `--html …` | 1 | exact `expected/svg-event-handler.stderr`; no target; no inventory | — | Resolved (S1) | — |
+| `c07-svg-javascript-url` | SVG policy | `javascript:` href | `--html …` | 1 | exact `expected/svg-javascript-url.stderr`; no target; no inventory | — | Resolved (S1) | — |
+| `c07-svg-foreignobject` | SVG policy | `<foreignObject>` | `--html …` | 1 | exact `expected/svg-foreignobject.stderr`; no target; no inventory | — | Resolved (S1) | — |
+| `c07-svg-iframe` | SVG policy | `<iframe>` | `--html …` | 1 | exact `expected/svg-iframe.stderr`; no target; no inventory | — | Resolved (S1) | — |
+| `c07-svg-object` | SVG policy | `<object>` | `--html …` | 1 | exact `expected/svg-object.stderr`; no target; no inventory | — | Resolved (S1) | — |
+| `c07-svg-doctype` | SVG policy | `<!DOCTYPE …>` | `--html …` | 1 | exact `expected/svg-doctype.stderr`; no target; no inventory | — | Resolved (S1) | — |
+| `c07-svg-style-import` | SVG policy | `<style>@import url(…)</style>` | `--html …` | 1 | exact `expected/svg-style-import.stderr`; no target; no inventory | — | Resolved (S1) | — |
+| `c07-svg-animate-onload` | SVG policy | `animate attributeName="onload"` | `--html …` | 1 | exact `expected/svg-animate-onload.stderr`; no target; no inventory | — | Resolved (S1) | — |
+| `c07-svg-multi` | SVG policy | same `<script>` SVG, two targets (shared content root, so every target encounters it) | `--html … --target alpha=… --target beta=…` | 1 | EASSET diagnostic; no I/O summary; no final targets; no inventory | — | Resolved (S1) | — |
 | `c07-valid` | SVG policy | inert Unicode/entity SVG | `--html … --quiet` | 0 | byte-identical copy; present in `_boris/proof/artifacts.json` | jobs 1 == 4; clean == incremental | Non-issue / packet drift | — |
 | `c07-theme-page` | theme.zig AssetCollision | page `assets/index.md` + theme `assets/index.html` | `--theme …` | 1 | exact `expected/theme-page-collision.stderr`; no target | — | Non-issue / packet drift | — |
 | `c07-symlink` | content-local-assets | symlinked `link.svg` | `--html …` | 1 | exact `expected/symlink-asset.stderr`; no target | — | Non-issue / packet drift | skipped if host cannot `ln -s` |
@@ -362,9 +375,13 @@ Contract owner: `docs/contracts/content-local-assets.md` §5 (EASSET content cla
 Collision ownership (page vs theme asset, sitemap vs page, symlink,
 traversal) matches contract text and fails closed with no misleading
 inventory. Accepted inert SVGs are copied byte-identically, inventoried, and
-jobs/incremental-equal. One **Confirmed defect**: `EASSET`/`AssetUnsafeSvg`
-rejections exit 3 (I/O class) instead of the content-class exit 1 required by
-`content-local-assets.md` §5 and `cli.md` (see remediation card S1). The SVG
+jobs/incremental-equal. The previously confirmed defect —
+`EASSET`/`AssetUnsafeSvg` rejections exiting 3 (I/O class) instead of the
+content-class exit 1 required by `content-local-assets.md` §5 and `cli.md` —
+is **resolved** by this branch: `AssetUnsafeSvg` is now in the content-error
+arm of `mapHtmlError` (`src/main.zig`) and in `isContentCompileFailure`
+(`src/compile.zig`), so single-target and multi-target runs both exit 1 with
+the exact EASSET diagnostic and **no** generic I/O summary line. The SVG
 policy is recorded as the bounded construct list; no browser-security
 certification is claimed. Structurally unreachable collisions (two theme
 assets to one path, content asset vs page output, `_boris/` reserved paths)
@@ -372,69 +389,11 @@ are **Documented limitation** of the exact-equality model, not defects.
 
 ## Findings and remaining gaps
 
-The two new confirmed defects in this round are W1 (C06) and S1 (C07),
-followed by their remediation cards. The first-round follow-ups remain
-classified as before.
-
-### Remediation card W1 — watcher exits on failed include rebuild
-
-- **Title:** `--watch` terminates on a failed include rebuild instead of
-  keeping the watcher alive for author recovery.
-- **Smallest reproduction:** `boris watch --html --input <content with
-  {{include includes/frag.md}}> …`; wait for the initial build; delete
-  `content/includes/frag.md`; the watcher prints `error: rebuild failed with
-  unrecoverable I/O error: IncludeFailed` and exits (rc 1). Retained as
-  verifier case `c06-watch-fail`.
-- **Contract expectation:** `docs/contracts/watch-mode.md` §5 requires content
-  validation failures (including unresolved includes) to keep the watcher
-  running so the author can fix the source and observe the corrected rebuild.
-- **Observed behavior:** `IncludeFailed` is not in the recoverable-error set
-  (`isRecoverableBuildError` in `src/watch.zig`), so the watch loop treats it
-  as an unrecoverable I/O error and terminates the process.
-- **Affected files / subsystem:** `src/watch.zig` (recoverable-error
-  classification); watch-mode CLI path in `src/main.zig`.
-- **Smallest plausible fix boundary:** add `IncludeFailed` (and the sibling
-  content-validation failures already recoverable in build mode, if the
-  contract owns them) to the watch-mode recoverable set, keep watching, and
-  log the failed rebuild so the corrected-rebuild path (`c06-watch-recover`)
-  is reachable without a process restart.
-- **Required regression:** `c06-watch-fail` must change from "exits rc 1" to
-  "keeps watching and emits a rebuild-failure diagnostic", and
-  `c06-watch-recover` must work in the same watcher session.
-- **Explicit exclusions:** this card does not claim whole-tree rollback,
-  cross-volume atomicity, or concurrent-reader atomicity. It covers only the
-  watcher-lifetime contract.
-
-### Remediation card S1 — active-SVG rejection exits 3 instead of 1
-
-- **Title:** `EASSET`/`AssetUnsafeSvg` content failures exit 3 (I/O class)
-  instead of the content-class exit 1.
-- **Smallest reproduction:** publish any content-local SVG in the bounded
-  policy's rejected set (e.g. `<script>`, `onload`, `javascript:` URL,
-  `<foreignObject>`, `<iframe>`, `<object>`, DOCTYPE, `@import`, or
-  `animate attributeName="on*"`); the run exits 3 with
-  `one or more HTML targets failed due to I/O or a system error`. Retained as
-  verifier cases `c07-svg-*`.
-- **Contract expectation:** `docs/contracts/content-local-assets.md` §5 and
-  `docs/contracts/cli.md` classify `EASSET` as a content validation failure
-  (exit 1), and rejected SVG must never be emitted or inventoried.
-- **Observed behavior:** `AssetUnsafeSvg` is missing from the content-error
-  switch in `mapHtmlError` (`src/main.zig`), so the active-SVG diagnostic
-  exits 3 and adds a misleading "I/O or system error" line to stderr.
-- **Affected files / subsystem:** `src/main.zig` (`mapHtmlError`); exit-class
-  mapping shared with other `EASSET` content errors.
-- **Smallest plausible fix boundary:** add `AssetUnsafeSvg` to the
-  content-error arm of `mapHtmlError` so `EASSET` content failures exit 1
-  without the I/O-class summary line; diagnostics and rejection behavior stay
-  unchanged.
-- **Required regression:** every `c07-svg-*` case must exit 1 with the exact
-  retained diagnostic (dropping only the I/O summary line), and rejected SVG
-  must remain absent from output and inventory.
-- **Explicit exclusions:** the bounded SVG policy itself is not under review;
-  this card changes only the exit class and diagnostic wrapper, not the set of
-  accepted or rejected constructs, and makes no browser-security claim.
-
-The first-round follow-ups remain exactly classified:
+The two confirmed defects retained by the round-2 suite (W1 from C06 and S1
+from C07) are **resolved by this branch**; their historical reproduction and
+repair boundary are retained in the resolved-defects section below. The
+active confirmed-defect list for this branch is **empty**. The first-round
+follow-ups remain exactly classified:
 
 1. **Insufficient evidence — include expansion budgets lack normative numeric
    ownership.** Assign contract ownership to the existing byte and expansion
@@ -446,34 +405,112 @@ The first-round follow-ups remain exactly classified:
    errors return the required usage exit but currently name `--input`;
    improving `findBadArg` is separate from publication output conformance.
 
-No first-round item is inflated into a **Confirmed defect** or **Likely
-defect**; the two confirmed defects this round are W1 and S1 above, with
-remediation cards and no implementation in this branch.
+### Follow-up observations (not expanded in this branch)
+
+The watch recovery set remains closed on errors clearly owned by the watch
+contract: `error.IncludeFailed` and `error.AssetUnsafeSvg` are recoverable
+(author-correctable content validation failures), while hard filesystem and
+system failures are not. Neighboring author-correctable content failures that
+are still treated as unrecoverable by `isRecoverableBuildError` are recorded
+as observations, not widened here: `error.ReferenceFailed` (missing wiki-link
+target) and `error.AssetFailed` / `error.AssetMissing` (missing content-local
+assets), plus the layout-loading content failures that `mapHtmlError` already
+classifies as exit 1. The watch contract (§5) lists content validation
+failures generically, so these are candidates for a future, separately scoped
+repair; this branch does not silently broaden the recovery set.
+
+## Resolved defects
+
+Both defects retained by the round-2 suite are resolved by this branch. The
+historical reproduction and the smallest repair boundary are retained here
+for audit continuity; the executable evidence now asserts the corrected
+behavior.
+
+### W1 — watcher exits on failed include rebuild (resolved)
+
+- **Historical reproduction:** `boris watch --html --input <content with
+  {{include includes/frag.md}}> …`; wait for the initial build; delete
+  `content/includes/frag.md`; the watcher previously printed `error: rebuild
+  failed with unrecoverable I/O error: IncludeFailed` and exited (rc 1).
+- **Contract expectation:** `docs/contracts/watch-mode.md` §5 requires content
+  validation failures (including unresolved includes) to keep the watcher
+  running so the author can fix the source and observe the corrected rebuild.
+- **Repair:** `error.IncludeFailed` added to the recoverable-error set
+  (`isRecoverableBuildError` in `src/watch.zig`). Real filesystem/system
+  failures (missing content roots, access errors, watcher backend errors) are
+  deliberately not recoverable and still terminate the process.
+- **Same-session evidence:** the rewritten `c06-watch-fail` case starts one
+  watcher, waits for the initial successful build, snapshots the valid
+  `site/index.html`, deletes the include, observes the recoverable
+  `IncludeFailed` diagnostic while the process stays alive, proves the prior
+  published HTML is byte-identical, restores the include with changed content,
+  waits for the same process to publish the corrected output, and then
+  requires a clean SIGTERM exit 0. The case fails if Boris exits after the
+  missing include or if recovery requires restarting the process.
+- **Repair boundary:** only the watcher-lifetime contract. This repair does
+  not claim whole-tree rollback, cross-volume atomicity, or
+  concurrent-reader atomicity.
+
+### S1 — active-SVG rejection exits 3 instead of 1 (resolved)
+
+- **Historical reproduction:** publishing any content-local SVG in the bounded
+  policy's rejected set (e.g. `<script>`, `onload`, `javascript:` URL,
+  `<foreignObject>`, `<iframe>`, `<object>`, DOCTYPE, `@import`, or
+  `animate attributeName="on*"`) previously exited 3 with
+  `one or more HTML targets failed due to I/O or a system error`.
+- **Contract expectation:** `docs/contracts/content-local-assets.md` §5 and
+  `docs/contracts/cli.md` classify `EASSET` as a content validation failure
+  (exit 1), and rejected SVG must never be emitted or inventoried.
+- **Repair:** `error.AssetUnsafeSvg` added to the content-error arm of
+  `mapHtmlError` (`src/main.zig`) whose structured diagnostic is already
+  emitted, and to `isContentCompileFailure` (`src/compile.zig`) so the
+  multi-target aggregate also stays content-class. No second generic
+  content-error line is printed. For watch mode, `error.AssetUnsafeSvg` is
+  also in the recoverable-error set (`isRecoverableBuildError` in
+  `src/watch.zig`), so the same author-correctable content failure keeps the
+  watcher alive in both the raw single-target and multi-target rebuild paths
+  and recovers in the same process session.
+- **Content exit 1 evidence:** every retained `c07-svg-*` case now requires
+  exit 1, the exact EASSET diagnostic, no I/O summary line, no final HTML
+  target, and no artifacts.json entry. `c07-svg-multi` proves the same for a
+  multi-target run where a target encounters the unsafe SVG.
+- **Repair boundary:** the SVG scanner, rejected construct list, accepted SVG
+  behavior, diagnostic code/wording, asset copy semantics, and inventory
+  ownership are unchanged.
 
 ## Reproduction and validation record
 
 The complete verification set was run from the repository root with
-repository-relative paths on the round-2 branch. Final results:
+repository-relative paths on the `codex/conformance-w1-s1-remediation` branch.
+Final results:
 
 | Command | Result |
 |---|---|
-| `zig build test-publication-conformance` | Pass; every C01–C08 case, including the round-2 C01/C05/C06/C07 matrix and watch lifecycle, passed. |
+| `zig fmt --check src/main.zig src/watch.zig src/compile.zig` | Exit 0; formatting clean. |
+| `zig build test-publication-conformance` | Pass; every C01–C08 case, including the resolved W1 same-session watch lifecycle, the `c06-watch-svg` unsafe-SVG same-session recovery, and the resolved S1 SVG exit-1 matrix, passed. |
 | `zig build test-publication-artifacts --summary all` | Pass. |
 | `zig build test-publication-checks --summary all` | Pass. |
+| `zig build test-publication-claims --summary all` | Pass. |
 | `zig build test --summary all` | Pass; full unit suite. |
 | `zig build --summary all` | Pass. |
 | `./scripts/release-gate.sh` | Pass; `RELEASE GATE PASSED`. |
 | `git diff --check` | Exit 0; no whitespace errors. |
 
+Negative controls (each reverted before commit):
+
+- Temporarily removing `error.IncludeFailed` from the recoverable set made the
+  same-session `c06-watch-fail` case fail (the watcher exited after the failed
+  include rebuild); restoring it returned the case to passing.
+- Temporarily removing `error.AssetUnsafeSvg` from the recoverable set made the
+  in-process single-target watch regression fail (the unsafe-SVG rebuild
+  propagated as an unrecoverable error instead of recovering); restoring it
+  returned the case to passing.
+- Temporarily reverting the SVG exit mapping made `c07-svg-script` fail (exit 3
+  with the I/O summary line instead of exit 1); restoring it returned the
+  case to passing.
+
 Additional required checks passed:
 
-- A deliberately modified golden (C01 `expected/index.html`) made the verifier
-  fail at the `c01-valid` golden comparison; restoring the golden returned it
-  to passing.
-- Deliberately tampered C05/C06 assertions fail the verifier: editing a C05
-  layout marker expectation and a C06 manifest-existence assertion both
-  stopped the run at the first mismatch; restoring them returned it to
-  passing.
 - Every claimed incremental sequence visibly reuses one output directory:
   each C06 scenario asserts the prior `.boris-cache/manifest.json` exists in
   the same `--html-dir` before each rebuild, and the C05 sequence rebuilds
@@ -491,9 +528,9 @@ Additional required checks passed:
   removes on exit (including failure), and the watch SIGTERM path shuts down
   cleanly.
 - The verifier ran successfully from a clean detached checkout of the branch.
-- No production behavior changed; no `src/` files were touched. The branch
-  changes only `scripts/verify-publication-conformance.sh`, the
+- Production behavior changes are confined to the W1 and S1 repair boundaries
+  in `src/watch.zig`, `src/main.zig`, and `src/compile.zig`; no production
+  behavior outside W1/S1 changed. The rest of the branch changes only
+  `scripts/verify-publication-conformance.sh`, the retained
   `docs/audits/publication-conformance/{c01,c05,c06,c07}-*/` fixture trees,
-  this report, and the round-2 changelog fragment.
-- The two confirmed defects (W1, S1) are recorded above with remediation
-  cards and were deliberately **not** repaired in this branch.
+  this report, and the remediation changelog fragment.

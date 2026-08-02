@@ -815,6 +815,9 @@ fn mapHtmlError(
         error.SitemapDuplicateUrl,
         error.SitemapUrlLimitExceeded,
         error.SitemapSizeLimitExceeded,
+        // The content-asset path already emitted the structured EASSET diagnostic
+        // for rejected active SVGs; re-printing only doubles noise.
+        error.AssetUnsafeSvg,
         // Multi-target wrap can mix content and I/O; prefer content for graph/include
         // failures already printed, but treat pure layout load I/O as exit 3 via FileNotFound etc.
         error.MultiTargetCompilationFailed,
@@ -958,6 +961,14 @@ test "ExitCode contract surface" {
 
 test "mapHtmlError: multi-target I/O failure exits 3" {
     try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.MultiTargetIoFailed, true, &.{}, default_layout));
+}
+
+test "mapHtmlError: unsafe SVG content failure exits 1 without a generic wrapper" {
+    // AssetUnsafeSvg already emitted the structured EASSET diagnostic from the
+    // content-asset path; mapHtmlError must classify it as a content error
+    // (exit 1) and must not print either generic wrapper line.
+    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.AssetUnsafeSvg, true, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.AssetUnsafeSvg, false, &.{}, default_layout));
 }
 
 test "mapHtmlError: committed publication with stale checks evidence exits 3" {

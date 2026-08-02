@@ -87,13 +87,13 @@ pub const FakeWatcher = struct {
     const VTABLE = Watcher.VTable{
         .deinit = struct {
             fn deinit(ptr: *anyopaque) void {
-                const self: *FakeWatcher = @alignCast(@ptrCast(ptr));
+                const self: *FakeWatcher = @ptrCast(@alignCast(ptr));
                 self.deinit();
             }
         }.deinit,
         .poll = struct {
             fn poll(ptr: *anyopaque, events: *std.ArrayList(Event)) anyerror!void {
-                const self: *FakeWatcher = @alignCast(@ptrCast(ptr));
+                const self: *FakeWatcher = @ptrCast(@alignCast(ptr));
                 for (self.queued_events.items) |e| {
                     const dup = try self.allocator.dupe(u8, e.path);
                     try events.append(self.allocator, .{ .path = dup, .kind = e.kind });
@@ -152,13 +152,13 @@ pub const PollingWatcher = struct {
     const VTABLE = Watcher.VTable{
         .deinit = struct {
             fn deinit(ptr: *anyopaque) void {
-                const self: *PollingWatcher = @alignCast(@ptrCast(ptr));
+                const self: *PollingWatcher = @ptrCast(@alignCast(ptr));
                 self.deinit();
             }
         }.deinit,
         .poll = struct {
             fn poll(ptr: *anyopaque, events: *std.ArrayList(Event)) anyerror!void {
-                const self: *PollingWatcher = @alignCast(@ptrCast(ptr));
+                const self: *PollingWatcher = @ptrCast(@alignCast(ptr));
 
                 var new_map = std.StringHashMap(FileStamp).init(self.allocator);
                 errdefer {
@@ -502,12 +502,19 @@ fn handleSigInt(sig: std.posix.SIG) callconv(.c) void {
 }
 
 /// Content/layout failures that keep the watcher running for author recovery.
+/// The set is closed on errors clearly owned by the watch contract
+/// (docs/contracts/watch-mode.md §5): author-correctable content, frontmatter,
+/// component, include, asset-validation, and layout-marker failures. Hard
+/// filesystem/system failures (missing content roots, access errors, watcher
+/// backend errors) are deliberately not listed and terminate the process.
 fn isRecoverableBuildError(err: anyerror) bool {
     return switch (err) {
         error.ParseFailed,
         error.ComponentFailed,
         error.TextileFailed,
         error.InputFormatMismatch,
+        error.IncludeFailed,
+        error.AssetUnsafeSvg,
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
         error.SitemapDuplicateUrl,
@@ -1321,6 +1328,109 @@ test "isRecoverableBuildError classification stays content-only" {
     try std.testing.expect(isRecoverableBuildError(error.LayoutMissingMarker));
     try std.testing.expect(isRecoverableBuildError(error.LayoutDuplicateMarker));
     try std.testing.expect(isRecoverableBuildError(error.SitemapUrlLimitExceeded));
+    // Missing include is an author-correctable content failure: recoverable.
+    try std.testing.expect(isRecoverableBuildError(error.IncludeFailed));
+    // Unsafe SVG is an author-correctable content-validation failure: recoverable
+    // in both single-target and multi-target watch paths (same session, no restart).
+    try std.testing.expect(isRecoverableBuildError(error.AssetUnsafeSvg));
+    // Hard filesystem/system failures must still terminate the watcher.
     try std.testing.expect(!isRecoverableBuildError(error.FileNotFound));
     try std.testing.expect(!isRecoverableBuildError(error.AccessDenied));
+}
+
+test "single-target watch: unsafe SVG rebuild recovers in-session without restart" {
+    // Drives the raw single-target watch rebuild path (empty targets →
+    // compileHtmlSite): an author replacing an inert SVG with an active
+    // construct must fail recoverably (EASSET content class, not I/O), keep
+    // this coordinator session alive, preserve the prior published HTML and
+    // SVG byte-for-byte, and publish the corrected asset after the author
+    // restores a different inert SVG — all without restarting the watcher.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/watch-svg-recover", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeWatchTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\![logo](index.assets/logo.svg)
+        \\
+    );
+    try writeWatchTreeFile(io, work, "content/index.assets/logo.svg", "<svg id=\"v1\"/>");
+    try writeWatchTreeFile(io, work, "layouts/main.html", "<html>{{content}}</html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var fake = FakeWatcher.init(gpa);
+    defer fake.deinit();
+    var coord = try WatchCoordinator.init(gpa, io, .{
+        .mode = .html,
+        .input_dir = content,
+        .html_dir = dist,
+        .html_layout = layout,
+        .quiet = true,
+        .watch = true,
+        // targets left empty: raw single-target rebuild path (compileHtmlSite)
+    }, fake.watcher());
+    defer coord.deinit();
+
+    // Initial build with the valid inert SVG publishes the page and asset.
+    try coord.triggerRebuild();
+    const html_v1 = try readWatchTreeFile(io, gpa, dist, "index.html");
+    defer gpa.free(html_v1);
+    const svg_v1 = try readWatchTreeFile(io, gpa, dist, "index.assets/logo.svg");
+    defer gpa.free(svg_v1);
+
+    // Author replaces the inert SVG with an active construct. The rebuild must
+    // fail recoverably: triggerRebuild must not propagate the error, the prior
+    // valid output must stay byte-identical, and the same coordinator session
+    // must publish the corrected asset after the author restores a different
+    // inert SVG (no restart).
+    try writeWatchTreeFile(io, work, "content/index.assets/logo.svg", "<svg><script>alert(1)</script></svg>");
+    try coord.triggerRebuild();
+
+    const html_v2 = try readWatchTreeFile(io, gpa, dist, "index.html");
+    defer gpa.free(html_v2);
+    try std.testing.expectEqualStrings(html_v1, html_v2);
+    const svg_v2 = try readWatchTreeFile(io, gpa, dist, "index.assets/logo.svg");
+    defer gpa.free(svg_v2);
+    try std.testing.expectEqualStrings(svg_v1, svg_v2);
+
+    // Restore a different inert SVG; the same session publishes it.
+    try writeWatchTreeFile(io, work, "content/index.assets/logo.svg", "<svg id=\"v2\"/>");
+    try coord.triggerRebuild();
+    const svg_v3 = try readWatchTreeFile(io, gpa, dist, "index.assets/logo.svg");
+    defer gpa.free(svg_v3);
+    try std.testing.expectEqualStrings("<svg id=\"v2\"/>", svg_v3);
+}
+
+fn writeWatchTreeFile(io: Io, root_rel: []const u8, rel: []const u8, data: []const u8) !void {
+    const cwd = Io.Dir.cwd();
+    const full = try std.fmt.allocPrint(std.testing.allocator, "{s}/{s}", .{ root_rel, rel });
+    defer std.testing.allocator.free(full);
+    if (std.fs.path.dirname(full)) |parent| {
+        try cwd.createDirPath(io, parent);
+    }
+    try cwd.writeFile(io, .{ .sub_path = full, .data = data });
+}
+
+fn readWatchTreeFile(io: Io, gpa: std.mem.Allocator, root_rel: []const u8, rel: []const u8) ![]u8 {
+    const cwd = Io.Dir.cwd();
+    const full = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ root_rel, rel });
+    defer gpa.free(full);
+    var file = try cwd.openFile(io, full, .{});
+    defer file.close(io);
+    var reader = file.reader(io, &.{});
+    return try reader.interface.allocRemaining(gpa, .unlimited);
 }
