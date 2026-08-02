@@ -1,0 +1,2 @@
+error: target 'default' layout selection failed for 'reference/config': AmbiguousGlob
+error: invalid target configuration: AmbiguousGlob
