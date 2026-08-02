@@ -670,32 +670,28 @@ fi
 rm -rf "$c06_watch_ws/site"
 start_watch c06-watch-fail
 wait_for_grep "$OUT/logs/c06-watch-fail.log" "initial build succeeded" 100 || fail "c06-watch-fail: initial build missing"
-rm "$c06_watch_ws/content/includes/frag.md"
+assert_contains "Fragment v1" "$c06_watch_ws/site/index.html"
+# Save the exact bytes of the currently valid published HTML.
+cp "$c06_watch_ws/site/index.html" "$OUT/logs/c06-watch-fail-index-v1.html"
 pid=$(cat "$OUT/logs/c06-watch-fail.pid")
-wait_pid_exit "$pid" 100 || fail "c06-watch-fail: watcher did not exit after failed rebuild"
-if wait "$pid"; then
-    fail "c06-watch-fail: watcher exited 0 after failed include rebuild (expected unrecoverable exit 1)"
-else
-    rc=$?
-    if [[ "$rc" -ne 1 ]]; then
-        fail "c06-watch-fail: expected exit 1, got ${rc}"
-    fi
-    assert_contains "rebuild failed with unrecoverable I/O error: IncludeFailed" "$OUT/logs/c06-watch-fail.log"
-    pass "c06-watch-fail: failed include rebuild exits watcher rc 1 (unrecoverable I/O)"
-fi
-
-rm -rf "$c06_watch_ws/site"
-printf 'Fragment v3\n' >"$c06_watch_ws/content/includes/frag.md"
-start_watch c06-watch-recover
-wait_for_grep "$OUT/logs/c06-watch-recover.log" "initial build succeeded" 100 || fail "c06-watch-recover: initial build missing"
-assert_contains "Fragment v3" "$c06_watch_ws/site/index.html"
-pid=$(cat "$OUT/logs/c06-watch-recover.pid")
+# Delete the referenced include; the rebuild must fail recoverably and the
+# watcher must keep running so the author can correct the source.
+rm "$c06_watch_ws/content/includes/frag.md"
+wait_for_grep "$OUT/logs/c06-watch-fail.log" "error: rebuild failed: IncludeFailed. Waiting for correction" 100 || fail "c06-watch-fail: recoverable rebuild-failure diagnostic missing"
+# Prove the same watcher process is still alive after the failed rebuild.
+kill -0 "$pid" 2>/dev/null || fail "c06-watch-fail: watcher exited after recoverable failed include rebuild"
+# Prove the previously valid published HTML remains byte-identical.
+cmp -s "$OUT/logs/c06-watch-fail-index-v1.html" "$c06_watch_ws/site/index.html" || fail "c06-watch-fail: prior valid output changed during failed rebuild"
+# Restore the include with visibly changed content; the same watcher session
+# must publish the corrected output (no process restart).
+printf 'Fragment v2\n' >"$c06_watch_ws/content/includes/frag.md"
+wait_for_grep "$c06_watch_ws/site/index.html" "Fragment v2" 100 || fail "c06-watch-fail: same-session corrected rebuild missing"
 kill -TERM "$pid" 2>/dev/null || true
 if wait "$pid"; then
-    pass "c06-watch-recover: corrected rebuild after failure, clean SIGTERM exit 0"
+    pass "c06-watch-fail: failed include rebuild keeps watcher alive, preserves output, recovers in-session, clean SIGTERM exit 0"
 else
     rc=$?
-    fail "c06-watch-recover: SIGTERM exit ${rc}, expected 0"
+    fail "c06-watch-fail: SIGTERM exit ${rc}, expected 0"
 fi
 
 note "C07 asset collisions and SVG policy"
@@ -721,12 +717,43 @@ for spec in \
     c07_mk "$gen"
     printf '%s\n' "$body" >"$gen/content/guides/intro.assets/t.svg"
     out="$OUT/outputs/c07-${name}"
-    run_capture "c07-${name}" 3 "$BORIS" --html --input "$gen/content" --html-dir "$out" --html-layout "$C07/layout.html"
+    run_capture "c07-${name}" 1 "$BORIS" --html --input "$gen/content" --html-dir "$out" --html-layout "$C07/layout.html"
     assert_empty "$OUT/logs/c07-${name}.stdout"
+    # The retained snapshot includes the per-target attribution line
+    # (`target 'default' compilation failed: AssetUnsafeSvg`) that
+    # compileHtmlSiteMulti prints for errors outside its suppression list;
+    # keep the two lines coupled deliberately.
     assert_diag "$C07/expected/${name}.stderr" "$OUT/logs/c07-${name}.stderr"
+    # Active-SVG rejection is a content failure: the generic I/O summary line
+    # must never appear on the content-class exit path.
+    if grep -F "I/O or a system error" "$OUT/logs/c07-${name}.stderr" >/dev/null; then
+        fail "c07-${name}: I/O summary line present for a content-class EASSET failure"
+    fi
     assert_no_html_target "$out"
-    pass "c07-${name}: exit 3, exact diagnostic, rejected SVG never emitted or inventoried"
+    # Rejected SVG must not be copied or inventoried.
+    assert_absent "$out/_boris/proof/artifacts.json"
+    pass "c07-${name}: exit 1, exact EASSET diagnostic, no I/O summary, rejected SVG never emitted or inventoried"
 done
+
+# Multi-target: content with an unsafe SVG fails every target that encounters
+# it; the aggregate must remain content class (exit 1) and must never be
+# misclassified into the multi-target I/O summary line.
+gen="$OUT/generated/c07-svg-multi"
+c07_mk "$gen"
+printf '%s\n' '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' >"$gen/content/guides/intro.assets/t.svg"
+out_a="$OUT/outputs/c07-svg-multi-a"
+out_b="$OUT/outputs/c07-svg-multi-b"
+run_capture c07-svg-multi 1 "$BORIS" --html --input "$gen/content" --target alpha="$out_a" --target beta="$out_b" --html-layout "$C07/layout.html"
+assert_empty "$OUT/logs/c07-svg-multi.stdout"
+assert_contains "content-local SVG contains active content: active SVG <script> element" "$OUT/logs/c07-svg-multi.stderr"
+if grep -F "one or more HTML targets failed due to I/O or a system error" "$OUT/logs/c07-svg-multi.stderr" >/dev/null; then
+    fail "c07-svg-multi: unsafe SVG misclassified as system I/O"
+fi
+assert_no_html_target "$out_a"
+assert_no_html_target "$out_b"
+assert_absent "$out_a/_boris/proof/artifacts.json"
+assert_absent "$out_b/_boris/proof/artifacts.json"
+pass "c07-svg-multi: multi-target unsafe SVG exits content 1 with no I/O summary"
 
 gen="$OUT/generated/c07-valid"
 c07_mk "$gen"
@@ -783,4 +810,4 @@ assert_diag "$C07/expected/sitemap-content-collision.stderr" "$OUT/logs/c07-site
 assert_no_html_target "$OUT/outputs/c07-sitemap"
 pass "c07-sitemap: sitemap path vs page output collision fails closed"
 
-note "Publication conformance evidence verified; confirmed defects retained: W1, S1"
+note "Publication conformance evidence verified; confirmed defects retained: none"

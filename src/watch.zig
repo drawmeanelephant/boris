@@ -87,13 +87,13 @@ pub const FakeWatcher = struct {
     const VTABLE = Watcher.VTable{
         .deinit = struct {
             fn deinit(ptr: *anyopaque) void {
-                const self: *FakeWatcher = @alignCast(@ptrCast(ptr));
+                const self: *FakeWatcher = @ptrCast(@alignCast(ptr));
                 self.deinit();
             }
         }.deinit,
         .poll = struct {
             fn poll(ptr: *anyopaque, events: *std.ArrayList(Event)) anyerror!void {
-                const self: *FakeWatcher = @alignCast(@ptrCast(ptr));
+                const self: *FakeWatcher = @ptrCast(@alignCast(ptr));
                 for (self.queued_events.items) |e| {
                     const dup = try self.allocator.dupe(u8, e.path);
                     try events.append(self.allocator, .{ .path = dup, .kind = e.kind });
@@ -152,13 +152,13 @@ pub const PollingWatcher = struct {
     const VTABLE = Watcher.VTable{
         .deinit = struct {
             fn deinit(ptr: *anyopaque) void {
-                const self: *PollingWatcher = @alignCast(@ptrCast(ptr));
+                const self: *PollingWatcher = @ptrCast(@alignCast(ptr));
                 self.deinit();
             }
         }.deinit,
         .poll = struct {
             fn poll(ptr: *anyopaque, events: *std.ArrayList(Event)) anyerror!void {
-                const self: *PollingWatcher = @alignCast(@ptrCast(ptr));
+                const self: *PollingWatcher = @ptrCast(@alignCast(ptr));
 
                 var new_map = std.StringHashMap(FileStamp).init(self.allocator);
                 errdefer {
@@ -502,12 +502,18 @@ fn handleSigInt(sig: std.posix.SIG) callconv(.c) void {
 }
 
 /// Content/layout failures that keep the watcher running for author recovery.
+/// The set is closed on errors clearly owned by the watch contract
+/// (docs/contracts/watch-mode.md §5): author-correctable content, frontmatter,
+/// component, include, and layout-marker failures. Hard filesystem/system
+/// failures (missing content roots, access errors, watcher backend errors) are
+/// deliberately not listed and terminate the process.
 fn isRecoverableBuildError(err: anyerror) bool {
     return switch (err) {
         error.ParseFailed,
         error.ComponentFailed,
         error.TextileFailed,
         error.InputFormatMismatch,
+        error.IncludeFailed,
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
         error.SitemapDuplicateUrl,
@@ -1321,6 +1327,9 @@ test "isRecoverableBuildError classification stays content-only" {
     try std.testing.expect(isRecoverableBuildError(error.LayoutMissingMarker));
     try std.testing.expect(isRecoverableBuildError(error.LayoutDuplicateMarker));
     try std.testing.expect(isRecoverableBuildError(error.SitemapUrlLimitExceeded));
+    // Missing include is an author-correctable content failure: recoverable.
+    try std.testing.expect(isRecoverableBuildError(error.IncludeFailed));
+    // Hard filesystem/system failures must still terminate the watcher.
     try std.testing.expect(!isRecoverableBuildError(error.FileNotFound));
     try std.testing.expect(!isRecoverableBuildError(error.AccessDenied));
 }
