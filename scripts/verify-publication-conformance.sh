@@ -694,6 +694,44 @@ else
     fail "c06-watch-fail: SIGTERM exit ${rc}, expected 0"
 fi
 
+# Same-session unsafe-SVG watch recovery: replacing an inert content SVG with
+# an active construct must fail as a recoverable content error (EASSET), keep
+# the same watcher process alive, preserve the prior published HTML and SVG
+# byte-for-byte, and publish the corrected asset after the author restores a
+# different inert SVG — all in one uninterrupted watcher session. (The CLI
+# synthesizes the "default" target from --html-dir, so the rebuild runs through
+# the multi-target content aggregation, which classifies AssetUnsafeSvg as
+# recoverable; the raw single-target path is covered by the in-process
+# regression in src/watch.zig.)
+rm -rf "$c06_watch_ws/site"
+start_watch c06-watch-svg
+wait_for_grep "$OUT/logs/c06-watch-svg.log" "initial build succeeded" 100 || fail "c06-watch-svg: initial build missing"
+assert_file "$c06_watch_ws/site/index.assets/logo.svg"
+cp "$c06_watch_ws/site/index.html" "$OUT/logs/c06-watch-svg-index-v1.html"
+cp "$c06_watch_ws/site/index.assets/logo.svg" "$OUT/logs/c06-watch-svg-logo-v1.svg"
+pid=$(cat "$OUT/logs/c06-watch-svg.pid")
+# Replace the source SVG with an active <script> construct; the rebuild must
+# emit the EASSET diagnostic and recover recoverably (same watcher session).
+printf '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>\n' >"$c06_watch_ws/content/index.assets/logo.svg"
+wait_for_grep "$OUT/logs/c06-watch-svg.log" "content-local SVG contains active content" 100 || fail "c06-watch-svg: EASSET diagnostic missing"
+wait_for_grep "$OUT/logs/c06-watch-svg.log" "Waiting for correction" 100 || fail "c06-watch-svg: recoverable rebuild-failure diagnostic missing"
+# Prove the same watcher process is still alive after the failed rebuild.
+kill -0 "$pid" 2>/dev/null || fail "c06-watch-svg: watcher exited after recoverable unsafe-SVG rebuild"
+# Prove the previously valid published HTML and SVG remain byte-identical.
+cmp -s "$OUT/logs/c06-watch-svg-index-v1.html" "$c06_watch_ws/site/index.html" || fail "c06-watch-svg: prior valid HTML changed during failed rebuild"
+cmp -s "$OUT/logs/c06-watch-svg-logo-v1.svg" "$c06_watch_ws/site/index.assets/logo.svg" || fail "c06-watch-svg: prior valid SVG changed during failed rebuild"
+# Restore a different inert SVG; the same watcher session must publish the
+# corrected asset (no process restart).
+printf '<svg xmlns="http://www.w3.org/2000/svg"><text>fixed-v2</text></svg>\n' >"$c06_watch_ws/content/index.assets/logo.svg"
+wait_for_grep "$c06_watch_ws/site/index.assets/logo.svg" "fixed-v2" 100 || fail "c06-watch-svg: same-session corrected SVG publish missing"
+kill -TERM "$pid" 2>/dev/null || true
+if wait "$pid"; then
+    pass "c06-watch-svg: unsafe-SVG rebuild keeps watcher alive, preserves HTML+SVG bytes, recovers in-session, clean SIGTERM exit 0"
+else
+    rc=$?
+    fail "c06-watch-svg: SIGTERM exit ${rc}, expected 0"
+fi
+
 note "C07 asset collisions and SVG policy"
 c07_mk() {
     local gen="$1"
