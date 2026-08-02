@@ -36,7 +36,7 @@ is **not** proof that every surface is the default CLI product.
 | HTML publication artifact inventory | **Implemented first slice** — deterministic target-owned `artifacts.json` inventory for committed HTML payloads; see [publication-artifacts.md](publication-artifacts.md) |
 | HTML publication checks evidence | **Implemented first slice** — deterministic target-local `checks.json` bound to the committed inventory and exact payload bytes; see [publication-checks.md](publication-checks.md) |
 | HTML publication claims evidence | **Implemented first slice** — deterministic target-local `claims.json` derived from committed inventory and checks bytes, with fixed claims and limitations; see [publication-claims.md](publication-claims.md) |
-| Publication Touch Atlas | **Contract drafted, implementation not yet shipped** — future `touches.json` relationship index over the three existing evidence reports; see [publication-touches.md](publication-touches.md) |
+| Publication Touch Atlas | **Implemented first slice** — deterministic `touches.json` relationship index derived exclusively from the three existing evidence reports; see [publication-touches.md](publication-touches.md) |
 
 ## Canonical ownership (one document per topic)
 

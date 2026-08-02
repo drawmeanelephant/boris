@@ -64,6 +64,7 @@ const link_audit = @import("link_audit.zig");
 const artifact_inventory = @import("artifact_inventory.zig");
 const publication_checks = @import("publication_checks.zig");
 const publication_claims = @import("publication_claims.zig");
+const publication_touches = @import("publication_touches.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -112,6 +113,17 @@ fn writePublicationClaimsFailure(
 ) !void {
     try writer.print(
         "error: publication committed for target '{s}', but publication-claims evidence was not refreshed: {s}\n",
+        .{ target_name, @errorName(err) },
+    );
+}
+
+fn writePublicationTouchesFailure(
+    writer: *Io.Writer,
+    target_name: []const u8,
+    err: anyerror,
+) !void {
+    try writer.print(
+        "error: publication committed for target '{s}', but the Touch Atlas was not refreshed: {s}\n",
         .{ target_name, @errorName(err) },
     );
 }
@@ -253,6 +265,15 @@ pub const CompileOptions = struct {
     /// written here instead of the process stderr, so tests can assert the
     /// line is emitted even under `--quiet`.
     publication_claims_failure_writer: ?*Io.Writer = null,
+    /// Test-only post-claims Touch Atlas derivation failure. Production
+    /// callers leave both publication-touches fault injections false.
+    test_fail_publication_touches: bool = false,
+    /// Test-only atomic touches-report write failure.
+    test_fail_publication_touches_write: bool = false,
+    /// Test-only capture: when set, the post-commit Touch Atlas diagnostic
+    /// is written here instead of the process stderr, so tests can assert the
+    /// line is emitted even under `--quiet`.
+    publication_touches_failure_writer: ?*Io.Writer = null,
 };
 
 fn validateSitemapConfig(gpa: std.mem.Allocator, options: CompileOptions) !void {
@@ -1822,6 +1843,7 @@ fn compilePagesInner(
         try artifact_inventory.rejectOutputCollision(artifact_inventory.output_path, inventory_owned_paths.items);
         try artifact_inventory.rejectOutputCollision(publication_checks.output_path, inventory_owned_paths.items);
         try artifact_inventory.rejectOutputCollision(publication_claims.output_path, inventory_owned_paths.items);
+        try artifact_inventory.rejectOutputCollision(publication_touches.output_path, inventory_owned_paths.items);
 
         if (options.sitemap_path) |sitemap_path| {
             var owned_paths: std.ArrayList([]const u8) = .empty;
@@ -2547,6 +2569,25 @@ fn compilePagesInner(
             writePublicationClaimsFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
         }
         return error.PublicationClaimsFailed;
+    };
+
+    // The Touch Atlas is derived from the exact committed artifacts, checks,
+    // and claims bytes. A derivation, stale-binding, parser, I/O, or
+    // atomic-write failure keeps the committed target, inventory, checks, and
+    // claims and leaves any prior touches report untouched; the diagnostic is
+    // emitted even under --quiet.
+    publication_touches.writeAfterClaims(io, gpa, dist_dir, options.target_name, .{
+        .test_fail_execution = options.test_fail_publication_touches,
+        .test_fail_write = options.test_fail_publication_touches_write,
+    }) catch |err| {
+        if (options.publication_touches_failure_writer) |writer| {
+            writePublicationTouchesFailure(writer, options.target_name, err) catch {};
+        } else {
+            const stderr = std.debug.lockStderr(&.{});
+            defer std.debug.unlockStderr();
+            writePublicationTouchesFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        }
+        return error.PublicationTouchesFailed;
     };
 
     return stats;
@@ -8139,4 +8180,192 @@ test "multi-target publication derives claims per target" {
         parsed_a.value.object.get("publication_checks").?.object.get("sha256").?.string,
         parsed_b.value.object.get("publication_checks").?.object.get("sha256").?.string,
     ));
+}
+
+test "touches evidence follows claims on every committed publication" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/publication-touches-fresh", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nBody.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const options: CompileOptions = .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .quiet = true };
+    _ = try compileHtmlSite(io, gpa, options);
+
+    const touches_bytes = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
+    defer gpa.free(touches_bytes);
+    var touches = try std.json.parseFromSlice(std.json.Value, gpa, touches_bytes, .{});
+    defer touches.deinit();
+    try std.testing.expectEqualStrings(publication_touches.report_format, touches.value.object.get("format").?.string);
+    try std.testing.expectEqual(@as(i64, publication_touches.schema_version), touches.value.object.get("schema_version").?.integer);
+    try std.testing.expectEqualStrings("default", touches.value.object.get("target").?.string);
+    // The clean single-page site still carries the fixed registries: 1 target
+    // + artifacts + 3 checks + 3 claims + 6 limitations.
+    const node_count = touches.value.object.get("nodes").?.array.items.len;
+    try std.testing.expect(node_count >= 1 + 3 + 3 + 6);
+
+    const checks_bytes = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(checks_bytes);
+    const checks_digest = cache.hexDigest(cache.hashBytes(checks_bytes));
+    try std.testing.expectEqualStrings(
+        &checks_digest,
+        touches.value.object.get("inputs").?.object.get("checks").?.object.get("sha256").?.string,
+    );
+
+    const artifacts_bytes = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(artifacts_bytes);
+    const artifacts_digest = cache.hexDigest(cache.hashBytes(artifacts_bytes));
+    try std.testing.expectEqualStrings(
+        &artifacts_digest,
+        touches.value.object.get("inputs").?.object.get("artifacts").?.object.get("sha256").?.string,
+    );
+
+    _ = try compileHtmlSite(io, gpa, options);
+    const repeat_touches = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
+    defer gpa.free(repeat_touches);
+    try std.testing.expectEqualStrings(touches_bytes, repeat_touches);
+}
+
+test "touches failure preserves committed payloads, inventory, checks, claims, and prior touches" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/publication-touches-failure", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nInitial body.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>initial</footer></body></html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const options: CompileOptions = .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .incremental = true, .quiet = true };
+    _ = try compileHtmlSite(io, gpa, options);
+
+    const old_touches = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
+    defer gpa.free(old_touches);
+    const old_claims = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(old_claims);
+    const old_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(old_inventory);
+    const old_checks = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(old_checks);
+    const old_page = try readTargetPayload(io, gpa, dist, "index.html");
+    defer gpa.free(old_page);
+
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nChanged source body.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>changed layout</footer></body></html>");
+    var failure_options = options;
+    failure_options.test_fail_publication_touches = true;
+    try std.testing.expectError(error.PublicationTouchesFailed, compileHtmlSite(io, gpa, failure_options));
+
+    const new_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(new_inventory);
+    const new_checks = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(new_checks);
+    const new_page = try readTargetPayload(io, gpa, dist, "index.html");
+    defer gpa.free(new_page);
+    const new_claims = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(new_claims);
+    const new_touches = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
+    defer gpa.free(new_touches);
+    // Payloads, inventory, checks, and claims all advanced; the prior touches
+    // report is preserved byte-for-byte.
+    try std.testing.expect(!std.mem.eql(u8, old_inventory, new_inventory));
+    try std.testing.expect(!std.mem.eql(u8, old_checks, new_checks));
+    try std.testing.expect(!std.mem.eql(u8, old_page, new_page));
+    try std.testing.expect(!std.mem.eql(u8, old_claims, new_claims));
+    try std.testing.expectEqualStrings(old_touches, new_touches);
+}
+
+test "touches write failure preserves the prior touches report" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/publication-touches-write-failure", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nBody.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const options: CompileOptions = .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .quiet = true };
+    _ = try compileHtmlSite(io, gpa, options);
+
+    const old_touches = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
+    defer gpa.free(old_touches);
+    var failure_options = options;
+    failure_options.test_fail_publication_touches_write = true;
+    try std.testing.expectError(error.PublicationTouchesFailed, compileHtmlSite(io, gpa, failure_options));
+    const after = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
+    defer gpa.free(after);
+    try std.testing.expectEqualStrings(old_touches, after);
+}
+
+test "quiet touches failure emits the captured diagnostic and preserves prior touches" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/publication-touches-captured-stderr", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nInitial body.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>initial</footer></body></html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const options: CompileOptions = .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .incremental = true, .quiet = true };
+    _ = try compileHtmlSite(io, gpa, options);
+
+    const old_touches = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
+    defer gpa.free(old_touches);
+
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nChanged source body.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>changed layout</footer></body></html>");
+
+    // The diagnostic is emitted even under --quiet; capture it instead of the
+    // process stderr and prove the exact committed-target wording.
+    var output: Io.Writer.Allocating = .init(gpa);
+    defer output.deinit();
+    var failure_options = options;
+    failure_options.test_fail_publication_touches = true;
+    failure_options.publication_touches_failure_writer = &output.writer;
+    try std.testing.expectError(error.PublicationTouchesFailed, compileHtmlSite(io, gpa, failure_options));
+    try std.testing.expectEqualStrings(
+        "error: publication committed for target 'default', but the Touch Atlas was not refreshed: InvalidClaimsReport\n",
+        output.writer.buffered(),
+    );
+
+    const new_touches = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
+    defer gpa.free(new_touches);
+    try std.testing.expectEqualStrings(old_touches, new_touches);
 }

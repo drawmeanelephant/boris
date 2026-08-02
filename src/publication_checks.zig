@@ -113,7 +113,13 @@ fn selected(
         (kinds.len == 0 or containsString(kinds, record.kind.name()));
 }
 
-fn scopeDigest(
+/// Recompute the deterministic scope digest for the given selector pair over
+/// the canonical inventory. This is the exact record encoding the checks
+/// report commits: for every selected record in inventory order, update
+/// `path`, NUL, kind name, NUL, decimal byte count, NUL, hex sha256, LF.
+/// The touches layer reuses this narrow helper so recomputed digests can never
+/// drift from what the checks contract recorded.
+pub fn scopeDigest(
     gpa: std.mem.Allocator,
     inventory: *const artifact_inventory.Inventory,
     statuses: []const []const u8,

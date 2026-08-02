@@ -1,8 +1,8 @@
 # Publication Touch Atlas (schema v1)
 
-**Status:** contract drafted, implementation not yet shipped
+**Status:** implemented first slice
 
-The Touch Atlas is a future target-local evidence index for the first
+The Touch Atlas is a target-local evidence index for the first
 publication-evidence chain. It answers structural questions by connecting
 records that already exist in the artifact inventory, publication checks, and
 publication claims reports:
@@ -13,13 +13,14 @@ publication claims reports:
 - which check supports each claim; and
 - which limitations constrain each claim.
 
-It does not create a new observation, check, claim, or limitation. This Phase
-6A contract is documentation, schema, examples, and implementation planning
-only. The current Boris compiler does not emit `touches.json`.
+It does not create a new observation, check, claim, or limitation. The first
+implemented slice derives `touches.json` exclusively from the exact committed
+bytes of the three evidence reports; the non-claims listed at the end of this
+document remain out of scope.
 
-## Future artifact and exclusive inputs
+## Artifact and exclusive inputs
 
-The future target-local artifact is:
+The target-local artifact is:
 
 ```text
 {target}/_boris/proof/touches.json
@@ -299,7 +300,7 @@ transaction.
 
 ## Determinism and limits
 
-For identical committed input bytes, a future implementation must produce
+For identical committed input bytes, the implementation must produce
 byte-identical output and require:
 
 - exact-byte input bindings;
@@ -336,30 +337,40 @@ all node references. Atomic replacement, prior-report preservation, exit code
 `3`, and quiet diagnostic capture are also runtime behavior rather than schema
 claims.
 
-## Implementation map (future card)
+## Implementation status
 
-The following map is intentionally not implemented in this PR:
+The first slice ships:
 
 1. `src/publication_touches.zig` — strict streaming parsers for the three
    reports, cross-report validation, canonical node/edge derivation, and
-   deterministic serialization.
-2. `src/compile.zig` integration — derive the atlas only from the exact
+   deterministic serialization, plus schema/runtime parity tests.
+2. `src/compile.zig` integration — derives the atlas only from the exact
    committed evidence bytes after claims replacement, with no payload rereads.
-3. `src/main.zig` exit mapping — preserve the existing committed-target
-   diagnostic and map Touch Atlas failure to exit `3`, including `--quiet`.
-4. Artifact-inventory reserved-path guards — reserve and reject
+3. `src/main.zig` exit mapping — preserves the existing committed-target
+   diagnostic and maps Touch Atlas failure to exit `3`, including `--quiet`.
+4. Artifact-inventory reserved-path guards — reserves and rejects
    `_boris/proof/touches.json` without inventorying it.
-5. Schema/runtime parity tests — assert the schema's closed vocabulary and
-   the runtime validator's matching rules.
-6. Fixture tests — cover clean, failed/incomplete, not-applicable search,
-   stale bindings, selector wildcards, duplicate identities, and dangling
-   edges.
-7. Build steps — add the focused test/build targets without changing the
-   product build architecture.
-8. Quiet diagnostic capture — test that the committed-target diagnostic is
-   retained under `--quiet`.
-9. Atomic-write fault injection — verify a failed replacement preserves the
-   previous `touches.json` and leaves earlier evidence committed.
+5. Fixture tests — cover clean, failed/incomplete, not-applicable search,
+   stale bindings, selector wildcards, duplicate identities, dangling edges,
+   byte determinism across sequential and concurrent runs, and reserved-path
+   collision guards.
+6. Build steps — focused `test-publication-touches` and
+   `test-publication-touches-fixture` targets wired into the root test suite,
+   without changing the product build architecture.
+7. Quiet diagnostic capture — the committed-target diagnostic is retained
+   under `--quiet` and is captured by an injectable writer seam.
 
-The status remains **contract drafted, implementation not yet shipped** until
-that map is implemented and verified in a later change.
+## Non-claims (explicitly out of scope)
+
+This slice makes no claim about, and does not attempt:
+
+- source-to-artifact provenance (no source files are read);
+- runtime transformation traces (no compiler phase or call tracing);
+- a deployment graph (no deployment resources are read or verified);
+- accessibility or prose-quality inference;
+- proof-pack presentation or packaging; and
+- repair actions (the atlas never rewrites a payload, report, or claim).
+
+The status is **implemented first slice**: the normative runtime requirements
+above are enforced by `zig build test-publication-touches` and the fixture
+suite, and the atlas never rereads payloads or source bytes.

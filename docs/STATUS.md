@@ -48,7 +48,7 @@ frontmatter or claim a unified publication executor.
 | Rendered-site search | **Done on `afterparty`** — deterministic staged compiler publication, standalone CLI, browser UI, zero-results state, and no-JavaScript navigation fallback. |
 | Relationship review inventory | **Done on `afterparty`** — schema-v2 exact target inventory preserves provenance, duplicate keys, slug states, draft exclusion, unsupported-file rows, and deterministic JSON/Markdown reports. |
 | Relationship candidate classification | **Done on `afterparty`** — exact eligible-key review output reports `inventoried`, `ambiguous`, `absent`, and `invalid`; no automatic selection or relation emission. |
-| Publication Touch Atlas | **Contract drafted, implementation not yet shipped** — schema, examples, and implementation map define a future target-local relationship index over `artifacts.json`, `checks.json`, and `claims.json`; Boris does not emit `touches.json`. |
+| Publication Touch Atlas | **Implemented first slice** — deterministic target-local `touches.json` relationship index derived exclusively from the committed bytes of `artifacts.json`, `checks.json`, and `claims.json`; runs after claims replacement with no payload rereads. |
 | Migration-guide executable pass | **Evidence complete** — the 69-page Starlight dogfood converted, compiled to HTML/IR/RAG, and produced a deployable static tree; human review remains required for 109 preserved, 1 stripped, and 79 manual-review findings plus four link-audit misses. |
 | Source-RAG ergonomics measurement | **Measured** — flat, no-bundle, bundles-only, core/docs profiles, and per-tool packs were timed and sized; no behavior change is justified by this snapshot. |
 | Archive-layout evidence | **Done mechanically** — deterministic fixture, black-box audit, and link audit pass; browser viewport and keyboard review remain explicitly unverified. |
@@ -84,7 +84,7 @@ zig build test-layout-hostile
 |---:|---|---|---|
 | 1 | Release-state decision | **Decided — pending release context** | Preserve the erroneous v0.8.0 tag and use the new v0.8.1 identifier; do not tag or publish until release context is complete. Then run [`release-gate.sh`](../scripts/release-gate.sh). |
 | 2 | Relationship candidate classification | **Done on `afterparty`** | Exact eligible-key review evidence is complete; `selected` remains reserved for a future explicit rule. |
-| 3 | Publication Touch Atlas | **Contract drafted, implementation not yet shipped** | Implement the reserved target-local relationship index only after the contract/examples land; no `touches.json` is emitted in this phase. |
+| 3 | Publication Touch Atlas | **Implemented first slice** | Derives and atomically replaces `touches.json` after claims commit; the contract's non-claims (source provenance, runtime traces, deployment graph, accessibility/prose inference, proof-pack, repairs) remain out of scope. |
 | 4 | Archive browser review | **Next evidence pass** | Inspect the retained fixture at 375px, 768px, and 1440px plus keyboard traversal; record actual evidence before changing layout behavior. |
 | 5 | Archive presentation fixes | **Evidence-gated** | Small, framework-free HTML/CSS or layout fixes only after the browser review finds a reproducible issue. |
 | 6 | Migration-guide executable pass | **Evidence complete — review findings remain** | 69-page Starlight dogfood converted and compiled successfully; review the retained MDX/frontmatter/link/asset findings and four generated-site missing routes before claiming a clean migration. |
