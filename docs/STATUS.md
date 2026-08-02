@@ -49,6 +49,7 @@ frontmatter or claim a unified publication executor.
 | Relationship review inventory | **Done on `afterparty`** — schema-v2 exact target inventory preserves provenance, duplicate keys, slug states, draft exclusion, unsupported-file rows, and deterministic JSON/Markdown reports. |
 | Relationship candidate classification | **Done on `afterparty`** — exact eligible-key review output reports `inventoried`, `ambiguous`, `absent`, and `invalid`; no automatic selection or relation emission. |
 | Publication Touch Atlas | **Implemented first slice** — deterministic target-local `touches.json` relationship index derived exclusively from the committed bytes of `artifacts.json`, `checks.json`, and `claims.json`; runs after claims replacement with no payload rereads. |
+| Publication Proof Pack | **Contract drafted, implementation not yet shipped** — deterministic two-file presentation model (`proof-pack.json` + `index.html`) over committed artifact, checks, claims, and Touch Atlas evidence; Boris does not currently emit either output. |
 | Migration-guide executable pass | **Evidence complete** — the 69-page Starlight dogfood converted, compiled to HTML/IR/RAG, and produced a deployable static tree; human review remains required for 109 preserved, 1 stripped, and 79 manual-review findings plus four link-audit misses. |
 | Source-RAG ergonomics measurement | **Measured** — flat, no-bundle, bundles-only, core/docs profiles, and per-tool packs were timed and sized; no behavior change is justified by this snapshot. |
 | Archive-layout evidence | **Done mechanically** — deterministic fixture, black-box audit, and link audit pass; browser viewport and keyboard review remain explicitly unverified. |
@@ -91,6 +92,7 @@ zig build test-layout-hostile
 | 7 | Source-RAG ergonomics measurement | **Measured — no behavior change** | Default flat export: 988 source files, 16,012 KiB on disk, 1.48s. `--no-bundles`: 9,468 KiB, 1.13s. Bundles-only at 256 KiB: 7,084 KiB, 28 parts, 1.14s. Core/docs bundles-only: 1,668/3,448 KiB. Tools per-pack: 6 packs, 2,224 KiB, 0.61s. Keep product RAG distinct. |
 | 8 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
 | 9 | Build optimization | **Measured — no change** | Throughput audit: `zig build test` graph is fully sibling-parallel (42 flat test-run deps); scaling `-j1`→`-j8` ≈3x; warm default ≈16–20s. Residual floor is structural ≈8.8× shared-suite duplication across four co-dominant roots (`main`, `compile`, `hardening_test`, `layout_select_hostile_test`); no single root dominates. See [test-throughput-audit.md](audits/test-throughput-audit.md). |
+| 10 | Publication Proof Pack (Phase 7A) | **Contract drafted — implementation not yet shipped** | Deterministic `proof-pack.json` presentation model and static `index.html` defined over committed evidence; no emission, no compiler change, no runtime yet. |
 
 ## Release bookkeeping
 

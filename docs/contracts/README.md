@@ -37,6 +37,7 @@ is **not** proof that every surface is the default CLI product.
 | HTML publication checks evidence | **Implemented first slice** — deterministic target-local `checks.json` bound to the committed inventory and exact payload bytes; see [publication-checks.md](publication-checks.md) |
 | HTML publication claims evidence | **Implemented first slice** — deterministic target-local `claims.json` derived from committed inventory and checks bytes, with fixed claims and limitations; see [publication-claims.md](publication-claims.md) |
 | Publication Touch Atlas | **Implemented first slice** — deterministic `touches.json` relationship index derived exclusively from the three existing evidence reports; see [publication-touches.md](publication-touches.md) |
+| Publication Proof Pack | **Contract drafted, implementation not yet shipped** — deterministic two-file presentation model (`proof-pack.json` + `index.html`) over committed evidence; see [publication-proof-pack.md](publication-proof-pack.md) |
 
 ## Canonical ownership (one document per topic)
 
@@ -76,6 +77,7 @@ per topic:
 | HTML publication checks evidence | [publication-checks.md](publication-checks.md) |
 | HTML publication claims evidence | [publication-claims.md](publication-claims.md) |
 | Publication Touch Atlas | [publication-touches.md](publication-touches.md) |
+| Publication Proof Pack | [publication-proof-pack.md](publication-proof-pack.md) |
 | Astro plan-only migration intake | [astro-import-plan.md](astro-import-plan.md) |
 | Astro initial-create migration apply | [astro-import-apply.md](astro-import-apply.md) |
 
@@ -112,7 +114,8 @@ per topic:
 | [publication-artifacts.md](publication-artifacts.md) | Deterministic schema-v1 inventory of committed Boris-owned HTML-target payload bytes |
 | [publication-checks.md](publication-checks.md) | Deterministic schema-v1 publication-checks evidence over committed inventory and exact payload bytes |
 | [publication-claims.md](publication-claims.md) | Deterministic schema-v1 claims-and-limitations derivation over committed inventory and checks evidence |
-| [publication-touches.md](publication-touches.md) | Deterministic schema-v1 relationship index over committed artifact, checks, and claims evidence; contract drafted, implementation not yet shipped |
+| [publication-touches.md](publication-touches.md) | Deterministic schema-v1 relationship index over committed artifact, checks, and claims evidence; implemented first slice |
+| [publication-proof-pack.md](publication-proof-pack.md) | Deterministic schema-v1 two-file presentation model and static HTML over committed artifact, checks, claims, and Touch Atlas evidence; contract drafted, implementation not yet shipped |
 | [cli.md](cli.md) | Stable command routing, exit codes, and report-consumer boundary |
 | [textile-compatibility.md](textile-compatibility.md) | Explicit bounded `.textile`-to-Markdown input mode |
 | [rendered-search.md](rendered-search.md) | Deterministic v1 search JSON for rendered HTML pages; browser/compiler seams are explicit |
