@@ -122,11 +122,30 @@ selector-derived edge membership, finding offsets, the mechanical
 overall-status derivation, or summary totals; those are future runtime
 checks.
 
-Validate the two HTML examples with repository-compatible tooling that is
-already available and requires no new runtime dependency. The repo's system
-`tidy` is an HTML4 parser that does not recognize HTML5 elements, so prefer a
-well-formedness check that accepts HTML5, for example the Python standard
-library `html.parser` (balance, resolved `#` anchors, and a scan for
-`<script>` and remote `src`/`href`/`@import`) or `xmllint --html --noout`
-plus a UTF-8 check. The HTML must remain fully static, no-JavaScript,
-anchor-navigable, printable, and free of remote resources.
+Check the two HTML examples with the repository-compatible
+[`check-parity.py`](check-parity.py) script (Python standard library only,
+no new runtime dependency):
+
+```bash
+python3 docs/audits/publication-proof-pack/check-parity.py
+```
+
+The script is the HTML-to-JSON parity check. For each paired model and page it
+compares at least: target, overall presentation status, embedded model digest,
+summary totals, artifact paths/statuses/bytes/digests (including
+non-committed records), check status/coverage/counts, finding
+IDs/codes/severities/subjects, claim IDs/statements/statuses, limitation
+IDs/statements/sources, relationship node IDs, and relationship edge tuples.
+A tag-balance or anchor check alone is insufficient; the script exits 0 only
+when every displayed fact matches the model. The embedded
+`proof-pack-sha256` meta value in each page is checked against the exact
+SHA-256 of the paired JSON bytes.
+
+Separately, the same stdlib parser proves structural tag balance, resolved
+`#` anchors, UTF-8, and the absence of `<script>` and remote
+`src`/`href`/`@import`. This is a structural and resource check, not an HTML5
+conformance validation: it does not assert HTML5-conformant markup beyond
+well-formedness. (The repo's system `tidy` is an HTML4 parser that does not
+recognize HTML5 elements, so it is not a suitable HTML5 validator here.) The
+HTML must remain fully static, no-JavaScript, anchor-navigable, printable,
+and free of remote resources.

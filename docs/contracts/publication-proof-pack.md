@@ -108,6 +108,7 @@ inputs
 summary
 artifacts
 checks
+findings
 claims
 limitations
 relationships
@@ -121,8 +122,12 @@ format: boris-publication-proof-pack
 schema_version: 1
 ```
 
-The root object has exactly these keys, in this order. The machine-readable
-schema is [`schemas/publication-proof-pack-1.schema.json`](schemas/publication-proof-pack-1.schema.json).
+The root object has exactly these keys. Canonical member ordering is assigned
+to the runtime serializer, exact-byte golden tests, and HTML/JSON parity
+tests; the schema enforces the exact key set and structural vocabulary, not
+object property order (JSON Schema Draft 2020-12 does not enforce member
+order). The machine-readable schema is
+[`schemas/publication-proof-pack-1.schema.json`](schemas/publication-proof-pack-1.schema.json).
 
 ## Input bindings
 
@@ -333,6 +338,7 @@ verbatim; no rendering success may upgrade them.
 
 ## Finding presentation rows
 
+The root `findings` array appears immediately after `checks`, before `claims`.
 For each finding:
 
 ```text
@@ -348,6 +354,24 @@ subject
 `subject` is the closed subject object copied from the finding. Do not infer
 a finding-to-artifact relationship from path resemblance; v1 deliberately
 creates no finding-to-artifact edge.
+
+The ordered array must correspond exactly to root finding order in
+`checks.json`. The runtime must prove all of the following before the model
+is valid:
+
+- `findings.length` equals the `checks` input binding's `finding_count`;
+- every check's `finding_ids` exactly selects its contiguous
+  `finding_offset`/`counts.findings` range, with no overlap or omission
+  across the root array;
+- every finding row's node ID exists in the Touch Atlas `nodes`, and the
+  owning check's `check-reported-finding` edge exists in the Touch Atlas
+  `edges`; and
+- no finding row is invented (from path resemblance or any other guess) and
+  no committed finding is omitted.
+
+The check rows and the root `findings` array must agree with each other and
+with the checks evidence: root finding order is authoritative, and each
+check's `finding_ids` is a range selector, not an independent list.
 
 ## Claim presentation rows
 
@@ -432,6 +456,9 @@ relationship section is a compact readable index, not a canvas or JS graph.
 The HTML is derived exclusively from `proof-pack.json`. It must render the
 same summary banner, artifact/check/finding/claim/limitation rows, and
 relationship groups; it must not add, remove, reword, or upgrade any fact.
+It must also embed the lowercase SHA-256 of the exact `proof-pack.json`
+bytes it represents (for example in a meta element or comment) so a reader
+can detect a stale partner without needing the JSON open beside it.
 
 ## Transaction
 
@@ -450,39 +477,55 @@ payloads
 Required behavior:
 
 - Proof Pack failure does not roll back earlier publication or evidence;
-- prior `proof-pack.json` and `index.html` remain together or are replaced
-  together;
-- never commit one new file with one stale file;
 - failure returns exit 3;
 - diagnostic states that publication and prior evidence committed but Proof
   Pack presentation was not refreshed;
 - diagnostic appears under `--quiet`; and
-- output replacement is atomic as one logical presentation generation.
+- on a handled synchronous failure, the prior `proof-pack.json` and
+  `index.html` pair is preserved (restored or never touched).
 
-### Split-generation mechanism
+### First-slice generation transaction
 
-Because two files cannot be renamed by one filesystem primitive, the
-implementation must use a staged pair-swap:
+Two files cannot be renamed by one filesystem primitive, so the first slice
+must not claim that sequential renames give concurrent readers atomic pair
+visibility. The implementable transaction is:
 
-1. Render `proof-pack.json` and `index.html` completely in memory from the
-   same committed input bytes.
-2. Write both to temporary sibling files in the same directory
-   (`_boris/proof/proof-pack.json.tmp` and `_boris/proof/index.html.tmp`),
-   fsync both, and verify the written bytes.
-3. Swap the pair with two renames issued back-to-back: rename
-   `proof-pack.json.tmp → proof-pack.json`, then
-   `index.html.tmp → index.html`. A failure between the two renames triggers
-   an immediate rollback that restores both prior files from backup, so a
-   reader never observes one new file beside one stale file.
-4. Only after both renames succeed is the generation considered committed.
-   Any failure before the first rename leaves the prior pair untouched.
+1. Build both outputs completely from the same in-memory model, so the pair
+   is one logical generation before any disk write.
+2. Write and verify both temporary files (`proof-pack.json.tmp` and
+   `index.html.tmp`) in the same directory; fsync and byte-verify both.
+3. Embed in `index.html` the lowercase SHA-256 of the exact
+   `proof-pack.json` bytes it represents (for example in a meta element or
+   comment), so a reader can detect a stale partner.
+4. Move the current pair aside (rename `index.html` → `index.html.prev` and
+   `proof-pack.json` → `proof-pack.json.prev`) so that restoration has a
+   defined source.
+5. Rename the new `index.html` into place first.
+6. Rename the new authoritative `proof-pack.json` last, as the logical
+   commit point.
+7. On success, delete the `.prev` files.
+8. On a synchronous failure at any step, restore the prior pair by renaming
+   the `.prev` files back over any partial new files; if restoration
+   succeeds, the prior pair remains, the run returns exit 3, and the
+   diagnostic (visible under `--quiet`) states that publication and prior
+   evidence committed but Proof Pack presentation was not refreshed.
+9. A successful return guarantees that both current files match: the
+   committed `proof-pack.json` bytes are exactly the bytes the committed
+   `index.html` was derived from.
+10. A reader that observes a mismatch between the HTML's embedded model
+    digest and the on-disk `proof-pack.json` digest can detect a split pair
+    and must not treat it as a committed generation.
+11. A crash or a concurrent reader may observe an intermediate state between
+    the two renames. The first slice makes no multi-file atomic-visibility
+    claim; genuinely atomic pair visibility would require future single-entry
+    indirection (for example a generation directory or a commit marker that
+    readers consult before reading either file), which is out of scope for
+    v1.
 
-The backup of the prior pair is taken immediately before the first rename.
-Rollback restores both prior files; if rollback itself fails, the diagnostic
-must say the pair is split and the next generation attempt replaces both
-files. This two-file staged swap is the mechanism that avoids a
-split-generation pair; it does not claim whole-tree atomicity beyond the two
-files.
+The embedded model digest is the first-slice mechanism that avoids a
+committed split-generation pair: it is deterministic, cheap to verify, and
+requires no multi-file atomic primitive. This transaction does not claim
+whole-tree atomicity beyond the two files.
 
 ## Determinism
 
@@ -510,18 +553,24 @@ Require:
 ## Schema boundary and runtime boundary
 
 [`schemas/publication-proof-pack-1.schema.json`](schemas/publication-proof-pack-1.schema.json)
-enforces the structural boundary: exact root keys, constants, closed input
-bindings, closed row shapes, enum vocabularies, digest syntax, stable node ID
-patterns, fixed registry counts, and the overall-status vocabulary.
+enforces the exact key set and structural vocabulary: required root keys,
+constants, closed input bindings, closed row shapes, enum vocabularies,
+digest syntax, stable node ID patterns, fixed registry counts, and the
+overall-status vocabulary. JSON Schema Draft 2020-12 does not enforce object
+property order, so the schema constrains key membership and array positions
+where `prefixItems` applies, never member ordering. Canonical member ordering
+is assigned to the runtime serializer, exact-byte golden tests, and HTML/JSON
+parity tests.
 
 JSON Schema does not prove cross-report facts. Runtime validation remains
 responsible for exact input-byte digests, target equality, the Touch Atlas
-three-binding agreement, canonical ordering, derived counts, selector-derived
-edge membership, finding offset ranges, the mechanical overall-status
-derivation, summary totals, HTML/JSON parity, the split-generation swap, exit
-code `3`, quiet diagnostic capture, and reserved-path guards. Atomic
-replacement and prior-pair preservation are runtime behavior, not schema
-claims.
+three-binding agreement, canonical member ordering, derived counts,
+selector-derived edge membership, finding offset ranges and contiguity, the
+mechanical overall-status derivation, summary totals, HTML/JSON parity, the
+first-slice generation transaction (including the embedded model digest and
+split-pair detection), exit code `3`, quiet diagnostic capture, and
+reserved-path guards. Atomic replacement and prior-pair preservation are
+runtime behavior, not schema claims.
 
 ## Implementation map (future card, not implemented here)
 
@@ -531,10 +580,11 @@ A future implementation card would cover:
 src/publication_proof_pack.zig
 strict four-report parsing and binding
 Touch Atlas edge validation
+finding-row derivation, contiguity, and Touch Atlas binding
 summary derivation
 deterministic JSON renderer
 deterministic HTML renderer
-two-file atomic generation strategy
+first-slice generation transaction with embedded model digest
 reserved-path collision guards
 compile integration
 exit mapping
@@ -542,6 +592,7 @@ quiet diagnostic capture
 schema/runtime parity tests
 fixture tests
 HTML snapshot tests
+HTML/JSON parity tests
 failure injection
 ```
 

@@ -255,6 +255,44 @@
       ]
     }
   ],
+  "findings": [
+    {
+      "finding_index": 0,
+      "finding_id": "finding:artifact-integrity:0",
+      "check_id": "artifact-integrity",
+      "code": "ARTIFACT_DIGEST_MISMATCH",
+      "severity": "error",
+      "subject": {
+        "kind": "artifact",
+        "id": "broken.html",
+        "target": "public"
+      }
+    },
+    {
+      "finding_index": 1,
+      "finding_id": "finding:rendered-html:0",
+      "check_id": "rendered-html",
+      "code": "HTML_FRAGMENT_MISSING",
+      "severity": "error",
+      "subject": {
+        "kind": "html-page",
+        "id": "index.html",
+        "target": "public"
+      }
+    },
+    {
+      "finding_index": 2,
+      "finding_id": "finding:rendered-search:0",
+      "check_id": "rendered-search",
+      "code": "SEARCH_CONTENT_MISMATCH",
+      "severity": "error",
+      "subject": {
+        "kind": "rendered-search",
+        "id": "_boris/search/search-index.json",
+        "target": "public"
+      }
+    }
+  ],
   "claims": [
     {
       "claim_index": 0,

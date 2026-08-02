@@ -4,7 +4,7 @@
   "description": "Deterministic target-local presentation model and static HTML source derived exclusively from the committed artifact, checks, claims, and Touch Atlas evidence reports.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["format", "schema_version", "target", "inputs", "summary", "artifacts", "checks", "claims", "limitations", "relationships", "presentation"],
+  "required": ["format", "schema_version", "target", "inputs", "summary", "artifacts", "checks", "findings", "claims", "limitations", "relationships", "presentation"],
   "properties": {
     "format": { "const": "boris-publication-proof-pack" },
     "schema_version": { "const": 1 },
@@ -15,20 +15,24 @@
     "checks": {
       "type": "array",
       "prefixItems": [
-        { "$ref": "#/$defs/check_row", "properties": { "check_id": { "const": "artifact-integrity" } } },
-        { "$ref": "#/$defs/check_row", "properties": { "check_id": { "const": "rendered-html" } } },
-        { "$ref": "#/$defs/check_row", "properties": { "check_id": { "const": "rendered-search" } } }
+        { "$ref": "#/$defs/check_row", "type": "object", "properties": { "check_id": { "const": "artifact-integrity" } } },
+        { "$ref": "#/$defs/check_row", "type": "object", "properties": { "check_id": { "const": "rendered-html" } } },
+        { "$ref": "#/$defs/check_row", "type": "object", "properties": { "check_id": { "const": "rendered-search" } } }
       ],
       "items": false,
       "minItems": 3,
       "maxItems": 3
     },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/finding_row" }
+    },
     "claims": {
       "type": "array",
       "prefixItems": [
-        { "$ref": "#/$defs/claim_row", "properties": { "claim_id": { "const": "committed-artifacts-match-inventory" } } },
-        { "$ref": "#/$defs/claim_row", "properties": { "claim_id": { "const": "rendered-html-passed-declared-audit" } } },
-        { "$ref": "#/$defs/claim_row", "properties": { "claim_id": { "const": "rendered-search-matches-selected-html" } } }
+        { "$ref": "#/$defs/claim_row", "type": "object", "properties": { "claim_id": { "const": "committed-artifacts-match-inventory" } } },
+        { "$ref": "#/$defs/claim_row", "type": "object", "properties": { "claim_id": { "const": "rendered-html-passed-declared-audit" } } },
+        { "$ref": "#/$defs/claim_row", "type": "object", "properties": { "claim_id": { "const": "rendered-search-matches-selected-html" } } }
       ],
       "items": false,
       "minItems": 3,
@@ -37,12 +41,12 @@
     "limitations": {
       "type": "array",
       "prefixItems": [
-        { "$ref": "#/$defs/limitation_row", "properties": { "limitation_id": { "const": "target-local-only" } } },
-        { "$ref": "#/$defs/limitation_row", "properties": { "limitation_id": { "const": "no-deployment-verification" } } },
-        { "$ref": "#/$defs/limitation_row", "properties": { "limitation_id": { "const": "no-accessibility-verification" } } },
-        { "$ref": "#/$defs/limitation_row", "properties": { "limitation_id": { "const": "no-prose-quality-verification" } } },
-        { "$ref": "#/$defs/limitation_row", "properties": { "limitation_id": { "const": "no-universal-reproducibility-claim" } } },
-        { "$ref": "#/$defs/limitation_row", "properties": { "limitation_id": { "const": "omitted-projections-not-certified" } } }
+        { "$ref": "#/$defs/limitation_row", "type": "object", "properties": { "limitation_id": { "const": "target-local-only" } } },
+        { "$ref": "#/$defs/limitation_row", "type": "object", "properties": { "limitation_id": { "const": "no-deployment-verification" } } },
+        { "$ref": "#/$defs/limitation_row", "type": "object", "properties": { "limitation_id": { "const": "no-accessibility-verification" } } },
+        { "$ref": "#/$defs/limitation_row", "type": "object", "properties": { "limitation_id": { "const": "no-prose-quality-verification" } } },
+        { "$ref": "#/$defs/limitation_row", "type": "object", "properties": { "limitation_id": { "const": "no-universal-reproducibility-claim" } } },
+        { "$ref": "#/$defs/limitation_row", "type": "object", "properties": { "limitation_id": { "const": "omitted-projections-not-certified" } } }
       ],
       "items": false,
       "minItems": 6,
@@ -170,6 +174,7 @@
           }
         }
       ],
+      "type": "object",
       "unevaluatedProperties": false
     },
     "checks_input": {
@@ -186,6 +191,7 @@
           }
         }
       ],
+      "type": "object",
       "unevaluatedProperties": false
     },
     "claims_input": {
@@ -202,6 +208,7 @@
           }
         }
       ],
+      "type": "object",
       "unevaluatedProperties": false
     },
     "touches_input": {
@@ -218,6 +225,7 @@
           }
         }
       ],
+      "type": "object",
       "unevaluatedProperties": false
     },
     "inputs": {
