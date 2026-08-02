@@ -105,8 +105,18 @@ report bytes, not of parsed or reserialized JSON.
 }
 ```
 
-The counts are copied report metadata. They do not replace validation of the
-actual arrays and bindings.
+The counts are mechanically derived from the parsed input reports and then
+validated against the embedded bindings:
+
+```text
+artifact_count   = artifacts.json artifacts array length
+check_count      = checks.json checks array length
+finding_count    = checks.json findings array length
+claim_count      = claims.json claims array length
+limitation_count = claims.json limitations array length
+```
+
+They do not replace validation of the actual arrays and bindings.
 
 ## Nodes
 
@@ -207,14 +217,21 @@ Supporting edges use `scope.supporting_statuses` and
 `scope.supporting_kinds`. The scope SHA-256 values are evidence digests, not
 additional selectors.
 
-Edges use the edge-kind order listed above. Within one edge kind, source
-evidence order comes first and destination evidence order comes second:
+Edges are compared by this tuple, in order:
 
-- inventory order for artifact sources;
-- fixed check order for check sources;
-- root finding order for findings;
-- fixed claim order for claims; and
-- the claim's ordered limitation list for limitation destinations.
+1. edge kind order;
+2. source evidence index; then
+3. destination evidence index.
+
+For `target-owns-artifact`, the source is the single target node and the
+destination uses artifact inventory order. For artifact-to-check edges, the
+source evidence index is the artifact inventory index and the destination
+evidence index is the fixed check index. For `check-reported-finding`, the
+source is the fixed check index and the destination is the root finding order.
+For `check-supports-claim`, the source is the fixed check index and the
+destination is the fixed claim index. For `claim-limited-by`, claim order is
+first and each claim's ordered limitation list is second; limitations are not
+sorted by a separate global scan.
 
 Runtime validation must reject duplicate `(kind, from, to)` tuples and every
 dangling node reference. V1 deliberately does not create a
@@ -231,6 +248,12 @@ all of the following hold:
 - `checks.json` binds the exact current `artifacts.json` bytes;
 - `claims.json` binds the exact current `artifacts.json` and `checks.json`
   bytes;
+- derived `artifact_count` must agree with
+  `checks.artifact_inventory.artifact_count` and
+  `claims.artifact_inventory.artifact_count`;
+- derived `check_count` and `finding_count` must agree with
+  `claims.publication_checks.check_count` and
+  `claims.publication_checks.finding_count`;
 - the fixed check, claim, and limitation registries are valid and in
   canonical order;
 - finding offsets and totals are coherent and cover the root findings without
@@ -242,9 +265,10 @@ all of the following hold:
 - node identities are unique; and
 - edge tuples are unique.
 
-The implementation must validate copied metadata against its source report,
-including inventory indices, check/finding indices, statuses, coverage, codes,
-claim statuses, and limitation sources. It must preserve any prior
+The implementation must validate derived counts and copied metadata against
+their source reports, including inventory indices, check/finding indices,
+statuses, coverage, codes, claim statuses, and limitation sources. It must
+preserve any prior
 `touches.json` when validation or writing fails.
 
 ## Future publication transaction

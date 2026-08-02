@@ -193,13 +193,13 @@
     },
     {
       "kind": "artifact-subject-of-check",
-      "from": "artifact:_boris/search/search-index.json",
-      "to": "check:artifact-integrity"
+      "from": "artifact:index.html",
+      "to": "check:rendered-html"
     },
     {
       "kind": "artifact-subject-of-check",
-      "from": "artifact:index.html",
-      "to": "check:rendered-html"
+      "from": "artifact:_boris/search/search-index.json",
+      "to": "check:artifact-integrity"
     },
     {
       "kind": "artifact-subject-of-check",

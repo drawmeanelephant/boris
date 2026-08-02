@@ -193,13 +193,13 @@
     },
     {
       "kind": "artifact-subject-of-check",
-      "from": "artifact:assets/site.css",
-      "to": "check:artifact-integrity"
+      "from": "artifact:index.html",
+      "to": "check:rendered-html"
     },
     {
       "kind": "artifact-subject-of-check",
-      "from": "artifact:index.html",
-      "to": "check:rendered-html"
+      "from": "artifact:assets/site.css",
+      "to": "check:artifact-integrity"
     },
     {
       "kind": "artifact-supports-check",
