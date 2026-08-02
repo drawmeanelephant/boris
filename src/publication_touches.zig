@@ -2059,10 +2059,6 @@ fn buildNodesAndEdges(
         gpa.free(owned_nodes);
     }
     const owned_edges = try edges.toOwnedSlice(gpa);
-    errdefer {
-        freeEdges(gpa, owned_edges);
-        gpa.free(owned_edges);
-    }
     return .{ .nodes = owned_nodes, .edges = owned_edges };
 }
 
@@ -2139,12 +2135,7 @@ fn expectedNodeIds(
         errdefer gpa.free(id);
         try ids.append(gpa, id);
     }
-    const owned = try ids.toOwnedSlice(gpa);
-    errdefer {
-        for (owned) |id| gpa.free(id);
-        gpa.free(owned);
-    }
-    return owned;
+    return try ids.toOwnedSlice(gpa);
 }
 
 /// Expected canonical edge sequence for the parsed evidence, in edge-kind-major
@@ -2219,12 +2210,7 @@ fn expectedEdges(
             try edges.append(gpa, .{ .kind = .claim_limited_by, .from = from, .to = to });
         }
     }
-    const owned = try edges.toOwnedSlice(gpa);
-    errdefer {
-        freeEdges(gpa, owned);
-        gpa.free(owned);
-    }
-    return owned;
+    return try edges.toOwnedSlice(gpa);
 }
 
 /// Runtime graph invariants that JSON Schema cannot express. Takes the caller
@@ -4707,31 +4693,48 @@ fn sweepGraphAllocations(
     var fail_index: usize = 0;
     while (true) : (fail_index += 1) {
         var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = fail_index });
-        const graph = buildNodesAndEdges(failing.allocator(), &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims) catch |err| {
+        // Retain the exact allocator value so the successful result is freed
+        // through the same wrapper that constructed it.
+        const allocator = failing.allocator();
+        const graph = buildNodesAndEdges(allocator, &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims) catch |err| {
             try std.testing.expectEqual(error.OutOfMemory, err);
             continue;
         };
-        freeNodesAndEdges(gpa, graph.nodes, graph.edges);
+        freeNodesAndEdges(allocator, graph.nodes, graph.edges);
         return fail_index;
     }
 }
 
+/// Independent failing-allocator sweep totals for each expected-graph
+/// helper. Pinning every count separately (instead of a combined sum) keeps
+/// allocation movement between helpers visible: a helper that silently grows
+/// while another shrinks would leave a combined total unchanged.
+const SweepHelperCounts = struct {
+    expected_node_ids: usize,
+    expected_edges: usize,
+    validate_graph: usize,
+};
+
 /// Sweep every allocation index for the expected-graph helpers and for
 /// `validateGraph`; each induced failure must be OutOfMemory and leak-free.
-/// Returns the total allocation count a fully successful call performs.
-fn sweepExpectedGraphHelpers(io: Io, gpa: std.mem.Allocator, records: []const artifact_inventory.Record) !usize {
+/// Returns the exact allocation count of a fully successful call for each
+/// helper. `validateGraph` returns no owned allocations, so its ordinary
+/// internal cleanup remains sufficient; the two slice-returning helpers free
+/// every successful result through the exact wrapper allocator that built it.
+fn sweepExpectedGraphHelpers(io: Io, gpa: std.mem.Allocator, records: []const artifact_inventory.Record) !SweepHelperCounts {
     var ctx = try makeGraphContext(io, gpa, records, .{});
     defer ctx.deinit();
     const total_ids = blk: {
         var fail_index: usize = 0;
         while (true) : (fail_index += 1) {
             var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = fail_index });
-            const ids = expectedNodeIds(failing.allocator(), &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims) catch |err| {
+            const allocator = failing.allocator();
+            const ids = expectedNodeIds(allocator, &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims) catch |err| {
                 try std.testing.expectEqual(error.OutOfMemory, err);
                 continue;
             };
-            for (ids) |id| gpa.free(id);
-            gpa.free(ids);
+            for (ids) |id| allocator.free(id);
+            allocator.free(ids);
             break :blk fail_index;
         }
     };
@@ -4739,12 +4742,13 @@ fn sweepExpectedGraphHelpers(io: Io, gpa: std.mem.Allocator, records: []const ar
         var fail_index: usize = 0;
         while (true) : (fail_index += 1) {
             var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = fail_index });
-            const edges = expectedEdges(failing.allocator(), &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims) catch |err| {
+            const allocator = failing.allocator();
+            const edges = expectedEdges(allocator, &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims) catch |err| {
                 try std.testing.expectEqual(error.OutOfMemory, err);
                 continue;
             };
-            freeEdges(gpa, edges);
-            gpa.free(edges);
+            freeEdges(allocator, edges);
+            allocator.free(edges);
             break :blk fail_index;
         }
     };
@@ -4761,7 +4765,11 @@ fn sweepExpectedGraphHelpers(io: Io, gpa: std.mem.Allocator, records: []const ar
             break :blk fail_index;
         }
     };
-    return total_ids + total_edges + total_validate;
+    return .{
+        .expected_node_ids = total_ids,
+        .expected_edges = total_edges,
+        .validate_graph = total_validate,
+    };
 }
 
 test "graph construction is OOM-clean when an artifact node ID allocation fails" {
@@ -4859,8 +4867,42 @@ test "expected graph helpers and validateGraph are OOM-clean at every allocation
     const io = std.testing.io;
     const gpa = std.testing.allocator;
     const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
-    const total = try sweepExpectedGraphHelpers(io, gpa, &records);
-    // Every helper must complete at least a full node/edge vocabulary's worth
-    // of allocations; the exact sum pins determinism for the fixed fixture.
-    try std.testing.expect(total >= 30);
+    const counts = try sweepExpectedGraphHelpers(io, gpa, &records);
+    // Allocation-count determinism: each helper's exact count is pinned for
+    // the fixed fixture, so growth or shrinkage in any single helper fails
+    // the build even when another helper moves the other way. OOM sweep
+    // coverage and ownership correctness are proven by the sweep loop itself
+    // (every induced failure is OutOfMemory and leak-free under
+    // std.testing.allocator); these counts are allocator behavior, not
+    // output semantics.
+    try std.testing.expectEqual(@as(usize, 17), counts.expected_node_ids);
+    try std.testing.expectEqual(@as(usize, 50), counts.expected_edges);
+    try std.testing.expectEqual(@as(usize, 77), counts.validate_graph);
+}
+
+test "successful sweep results free through the exact wrapper allocator" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const records = [_]artifact_inventory.Record{recordFor("index.html", .html_page, "<main></main>")};
+    var ctx = try makeGraphContext(io, gpa, &records, .{});
+    defer ctx.deinit();
+    // Stand-in for the sweep loop's successful iteration: a FailingAllocator
+    // whose fail_index is never reached still reports every allocation
+    // through the wrapper. Successful results must be destroyed through that
+    // same wrapper (never the backing gpa); the std.testing.allocator
+    // teardown check fails on any leak or double free.
+    var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = std.math.maxInt(usize) });
+    const allocator = failing.allocator();
+    const graph = try buildNodesAndEdges(allocator, &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims);
+    defer freeNodesAndEdges(allocator, graph.nodes, graph.edges);
+    const ids = try expectedNodeIds(allocator, &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims);
+    defer {
+        for (ids) |id| allocator.free(id);
+        allocator.free(ids);
+    }
+    const edges = try expectedEdges(allocator, &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims);
+    defer {
+        freeEdges(allocator, edges);
+        allocator.free(edges);
+    }
 }
