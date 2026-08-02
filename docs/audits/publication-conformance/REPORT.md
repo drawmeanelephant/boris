@@ -40,10 +40,13 @@ ordinary test step. The verifier:
 
 - reads retained fixtures and the pipe-separated
   `c02-includes-fragments/depth-cases.psv` declaration;
-- generates the depth-32/depth-33 include chains, C05 incremental layout
-  copies, C06 cache/watch workspaces (including a bounded watch-lifecycle
-  harness that terminates via SIGTERM), and C07 SVG/collision trees under the
-  fixed, ignored `.zig-cache/publication-conformance/` tree;
+- generates the depth-32/depth-33 include chains, the C05 incremental
+  workspace and C06 cache/watch workspaces (each scenario reuses one dedicated
+  output directory: an `--incremental` first publication, then `--incremental`
+  rebuilds into that same target), a bounded watch-lifecycle harness that
+  terminates via SIGTERM and is reaped in the exit trap, and C07
+  SVG/collision trees under the fixed, ignored
+  `.zig-cache/publication-conformance/` tree;
 - captures stdout and stderr separately and asserts every exit code;
 - compares successful HTML, sitemap, RSS, and IR artifacts with checked-in
   goldens or repeat artifacts;
@@ -72,8 +75,8 @@ absent. This is observed behavior, not a production change.
 | C02 includes/fragments | `c02-includes-fragments/cases/` plus pipe-separated `depth-cases.psv` | `c02-01`–`c02-09`, `c02-depth-32`, `c02-depth-33` |
 | C03 sitemap | `c03-sitemap/content/`, sitemap golden, CLI snapshots | `c03-trailing`, `c03-no-trailing`, `c03-invalid-*` |
 | C04 RSS | `c04-rss/content/`, feed and CLI snapshots | `c04-feed-2/3/4`, `c04-missing-*`, `c04-invalid-*` |
-| C05 layout precedence | `c05-layout-precedence/content/`, marker layouts, managed theme, failure snapshots | `c05-explicit`, `c05-rule-id`, `c05-rule-glob`, `c05-rule-role`, `c05-theme`, `c05-multi`, `c05-missing-layout`, `c05-missing-marker`, `c05-duplicate-marker`, `c05-ambiguous-glob`, `c05-incr-a/b/c` |
-| C06 cache/watch | `c06-cache-watch/content/`, `theme/`, `layout.html`, `dup.html`, failure snapshots | `c06-clean`, `c06-noop`, `c06-source-edit`, `c06-source-delete`, `c06-include-edit`, `c06-include-missing`, `c06-parse-failed`, `c06-layout-dup`, `c06-theme-a/b`, `c06-ca-a/b`, `c06-smap-a/b`, `c06-search-a/b`, `c06-watch`, `c06-watch-fail`, `c06-watch-recover` |
+| C05 layout precedence | `c05-layout-precedence/content/`, marker layouts, managed theme, failure snapshots | `c05-explicit`, `c05-rule-id`, `c05-rule-glob`, `c05-rule-role`, `c05-theme`, `c05-multi`, `c05-missing-layout`, `c05-missing-marker`, `c05-duplicate-marker`, `c05-ambiguous-glob`, `c05-incr-base/win/lose` (one reused target) |
+| C06 cache/watch | `c06-cache-watch/content/`, `theme/`, `layout.html`, `dup.html`, failure snapshots | `c06-noop`, `c06-source-edit`, `c06-source-delete`, `c06-include-edit`, `c06-include-missing`, `c06-parse-failed`, `c06-layout-dup`, `c06-theme`, `c06-content-asset`, `c06-sitemap`, `c06-search`, `c06-watch`, `c06-watch-fail`, `c06-watch-recover` |
 | C07 assets/SVG | `c07-asset-collisions/content/`, `layout.html`, 13 snapshots | `c07-svg-*` (9 constructs), `c07-valid`, `c07-valid-jobs4`, `c07-valid-incr`, `c07-theme-page`, `c07-symlink`, `c07-traversal`, `c07-sitemap` |
 | C08 parser/Unicode | `c08-parser-unicode/` plus repository invalid-UTF-8 corpus | `c08-valid`, `c08-invalid-*` |
 
@@ -278,7 +281,9 @@ Contract owner: `docs/contracts/templating-and-themes.md` §4.2 (exact id > most
 | `c05-missing-marker` | templating-and-themes | `layouts/nomarker.html` | `… --html-layout nomarker.html` | 1 | exact `expected/missing-marker.stderr`; no target | — | Non-issue / packet drift | — |
 | `c05-duplicate-marker` | templating-and-themes | `layouts/dupmarker.html` | `… --html-layout dupmarker.html` | 1 | exact `expected/duplicate-marker.stderr`; no target | — | Non-issue / packet drift | — |
 | `c05-ambiguous-glob` | templating-and-themes §4.2 | two equal-specificity globs | `… --html-layout global.html --layout-rule default glob:reference/* glob.html --layout-rule default glob:*/config target.html` | 2 | exact `expected/ambiguous-glob.stderr` (first 2 lines) | — | Non-issue / packet drift | output-path line trimmed from snapshot |
-| `c05-incr-a/b/c` | templating-and-themes | generated layout copies | edit winning `target.html`; then losing `deep.html` | 0 | winning change propagates (`C05-TARGET-V2`); losing change leaves config byte-identical | a==b for index | Non-issue / packet drift | — |
+| `c05-incr-base` | templating-and-themes | generated `layouts/{global,target,glob}.html` | `--incremental` first publication into one reused target; `id:reference/config` exact beats `glob:reference/*` | 0 | `reference/config.html` `C05-TARGET`; `index.html` `C05-GLOBAL`; `.boris-cache/manifest.json` present | — | Non-issue / packet drift | — |
+| `c05-incr-win` | templating-and-themes | edit winning `target.html` in place (same path) | `--incremental` rebuild into the same target | 0 | `reference/config.html` `C05-TARGET-V2`; `index.html` byte-identical to baseline | winning rebuild vs baseline index | Non-issue / packet drift | — |
+| `c05-incr-lose` | templating-and-themes | edit only losing `glob.html` in place (same path) | `--incremental` rebuild into the same target | 0 | `reference/config.html` still `C05-TARGET-V2`, byte-identical to `c05-incr-win`; `index.html` unchanged | winning vs losing rebuild config | Non-issue / packet drift | — |
 
 ### C05 classification
 
@@ -294,18 +299,17 @@ Contract owner: `docs/contracts/watch-mode.md` §5 (content validation failures 
 
 | Case ID | Contract owner | Fixture / declaration | Command | Expected exit | Expected artifact / diagnostic | Repeat | Classification | Remaining gap |
 |---|---|---|---|---|---|---|---|---|
-| `c06-clean` | html-output | `c06-cache-watch/content` | `--html … --quiet` | 0 | `index.html` contains `Fragment v1` | — | Non-issue / packet drift | — |
-| `c06-noop` | html-output | same content, `--incremental` | `--html … --incremental --quiet` | 0 | tree equals `c06-clean`; `.boris-cache/manifest.json` present | byte-identical | Non-issue / packet drift | — |
-| `c06-source-edit` | html-output | edit `guides/g1.md` | rebuild | 0 | `g1.html` contains new body | — | Non-issue / packet drift | — |
-| `c06-source-delete` | html-output | delete `guides/g1.md` | rebuild | 0 | stale `guides/g1.html` removed | — | Non-issue / packet drift | — |
-| `c06-include-edit` | html-output | edit `includes/frag.md` | rebuild | 0 | `index.html` contains `Fragment v2` | — | Non-issue / packet drift | — |
-| `c06-include-missing` | diagnostics | delete `includes/frag.md` | `--html …` | 1 | exact `expected/include-missing.stderr`; no target | — | Non-issue / packet drift | — |
-| `c06-parse-failed` | diagnostics | add `bad.md` with unknown key | `--html …` | 1 | exact `expected/parse-failed.stderr`; no target | — | Non-issue / packet drift | — |
-| `c06-layout-dup` | templating-and-themes | `dup.html` | `--html … --html-layout dup.html` | 1 | exact `expected/layout-dup-marker.stderr`; no target | — | Non-issue / packet drift | — |
-| `c06-theme-a/b` | content-local-assets | edit `theme/assets/theme.css` | `--theme … --quiet` | 0 | output `assets/theme.css` changes | — | Non-issue / packet drift | — |
-| `c06-ca-a/b` | content-local-assets | edit `content/index.assets/style.css` | `--html … --quiet` | 0 | output `index.assets/style.css` changes | — | Non-issue / packet drift | — |
-| `c06-smap-a/b` | xml-sitemap | `status: draft` on `g1.md` | `--sitemap-path sitemap.xml --site-url …` | 0 | draft page absent from sitemap | — | Non-issue / packet drift | — |
-| `c06-search-a/b` | rendered-search | body edit on `index.md` | `--html … --quiet` | 0 | `_boris/search/search-index.json` changes | — | Non-issue / packet drift | — |
+| `c06-noop` | html-output | `c06-cache-watch/content` | `--incremental` first publication, then two unchanged `--incremental` rebuilds into the same target | 0 | payload byte-identical to baseline snapshot; manifest present; two rebuild manifests byte-identical | payload + manifest | Non-issue / packet drift | — |
+| `c06-source-edit` | html-output | edit `guides/g1.md` | `--incremental` baseline, then `--incremental` rebuild into same target | 0 | `g1.html` contains new body; `index.html` sibling byte-identical | sibling page | Non-issue / packet drift | — |
+| `c06-source-delete` | html-output | delete `guides/g1.md` | `--incremental` baseline, then `--incremental` rebuild into same target | 0 | stale `guides/g1.html` removed | — | Non-issue / packet drift | stale prune needs prior manifest (see below) |
+| `c06-include-edit` | html-output | edit `includes/frag.md` | `--incremental` baseline, then `--incremental` rebuild into same target | 0 | `index.html` contains `Fragment v2` | — | Non-issue / packet drift | — |
+| `c06-include-missing` | diagnostics | delete `includes/frag.md` | fresh isolated target | 1 | exact `expected/include-missing.stderr`; no target | — | Non-issue / packet drift | isolated failure, not cache evidence |
+| `c06-parse-failed` | diagnostics | add `bad.md` with unknown key | fresh isolated target | 1 | exact `expected/parse-failed.stderr`; no target | — | Non-issue / packet drift | isolated failure, not cache evidence |
+| `c06-layout-dup` | templating-and-themes | `dup.html` | fresh isolated target | 1 | exact `expected/layout-dup-marker.stderr`; no target | — | Non-issue / packet drift | isolated failure, not cache evidence |
+| `c06-theme` | content-local-assets | edit `theme/assets/theme.css` | `--incremental` baseline with `--theme`, then `--incremental` rebuild into same target | 0 | output `assets/theme.css` changes | — | Non-issue / packet drift | — |
+| `c06-content-asset` | content-local-assets | edit `content/index.assets/style.css` | `--incremental` baseline, then `--incremental` rebuild into same target | 0 | output `index.assets/style.css` changes | — | Non-issue / packet drift | — |
+| `c06-sitemap` | xml-sitemap | `status: draft` on `g1.md` | `--incremental` baseline, then `--incremental` rebuild into same target | 0 | sitemap replaced; draft page absent | — | Non-issue / packet drift | — |
+| `c06-search` | rendered-search | body edit on `index.md` | `--incremental` baseline, then `--incremental` rebuild into same target | 0 | `_boris/search/search-index.json` changes | — | Non-issue / packet drift | — |
 | `c06-watch` | watch-mode | `watch --html …` | start, edit source, SIGTERM | 0 | initial build; observed rebuild; clean exit 0 | — | Non-issue / packet drift | — |
 | `c06-watch-fail` | watch-mode §5 | delete include while watching | watch, then delete | 1 (unrecoverable) | `error: rebuild failed with unrecoverable I/O error: IncludeFailed`; watcher exits | — | **Confirmed defect** (see card) | — |
 | `c06-watch-recover` | watch-mode | restore include, watch again | watch | 0 | corrected rebuild visible; clean SIGTERM exit 0 | — | Non-issue / packet drift | — |
@@ -313,11 +317,24 @@ Contract owner: `docs/contracts/watch-mode.md` §5 (content validation failures 
 ### C06 classification
 
 All cache, stale-removal, sitemap, search, and clean watch behaviors match
-contract text. One **Confirmed defect**: a failed include rebuild kills the
-watcher instead of keeping it alive for author recovery (see remediation
-card W1). The watch tests are bounded (20 s worst-case waits) and terminate
-via SIGTERM through the existing watcher shutdown path; no endless watcher
-is started.
+contract text on the exercised paths. One **Confirmed defect**: a failed
+include rebuild kills the watcher instead of keeping it alive for author
+recovery (see remediation card W1). The watch tests are bounded (20 s
+worst-case waits), terminate via SIGTERM through the existing watcher
+shutdown path, and the exit trap now waits on every retained watcher PID so
+no background Boris process survives an assertion failure.
+
+The executable cases distinguish **clean rebuild behavior**, **incremental
+mode first publication** (the `-base` run: renders every page and writes
+`.boris-cache/manifest.json`), **incremental rebuild using the prior
+target/cache** (the `-reb` run into the same directory, asserted by the
+prior-manifest check inside the rebuild helper), and **watch behavior**. The
+source-delete case is deliberately an incremental baseline followed by an
+incremental rebuild: stale HTML pruning operates on the prior manifest, so
+a first incremental publication without a prior manifest would not prune
+(observed; **Documented limitation**, not claimed as evidence). Failure-only
+cases (missing include, bad frontmatter, duplicate layout marker) run on
+fresh isolated targets and are not cited as cache-invalidation evidence.
 
 ## C07 — asset collisions and SVG policy
 
@@ -453,9 +470,22 @@ Additional required checks passed:
 - A deliberately modified golden (C01 `expected/index.html`) made the verifier
   fail at the `c01-valid` golden comparison; restoring the golden returned it
   to passing.
+- Deliberately tampered C05/C06 assertions fail the verifier: editing a C05
+  layout marker expectation and a C06 manifest-existence assertion both
+  stopped the run at the first mismatch; restoring them returned it to
+  passing.
+- Every claimed incremental sequence visibly reuses one output directory:
+  each C06 scenario asserts the prior `.boris-cache/manifest.json` exists in
+  the same `--html-dir` before each rebuild, and the C05 sequence rebuilds
+  `c05-incr` three times with no fresh directory.
+- No watcher process remains after a forced verifier failure: the exit trap
+  sends SIGTERM and then `wait`s on every retained watcher PID before
+  removing the workspace (verified with a forced mid-watch assertion).
 - Two consecutive accepted runs of the whole verifier exited 0 and produced
-  byte-identical outputs under `cmp` (the watch tests are the only timing-
-  sensitive section and are bounded to 20 s worst case with SIGTERM shutdown).
+  byte-identical captured run output under `cmp` (the watch tests are the only
+  timing-sensitive section and are bounded to 20 s worst case with SIGTERM
+  shutdown; the generated tree is removed by the exit trap, so determinism is
+  proven on the captured stdout/stderr, which embeds no timestamps or paths).
 - No generated output tree is tracked: every generated fixture lives under the
   fixed ignored `.zig-cache/publication-conformance/` tree, which the verifier
   removes on exit (including failure), and the watch SIGTERM path shuts down

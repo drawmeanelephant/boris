@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Executable black-box conformance verification for the retained C02/C03/C04/C08
-# publication evidence. Run from the repository root, or through:
+# Executable black-box conformance verification for the retained C01–C08
+# publication evidence (Textile, includes/fragments, sitemap, RSS, layout
+# precedence, cache/watch, asset collisions/SVG, parser/Unicode). Run from the
+# repository root, or through:
 #
 #   zig build test-publication-conformance
 #
@@ -36,11 +38,16 @@ fail() { printf '    FAIL %s\n' "$*" >&2; exit 1; }
 # the cleanup so a future edit cannot accidentally widen the deletion scope.
 [[ "$OUT" == ".zig-cache/publication-conformance" ]] || fail "unsafe verifier output path"
 rm -rf "$OUT"
-mkdir -p "$OUT/logs" "$OUT/outputs" "$OUT/generated"
+mkdir -p "$OUT/logs" "$OUT/outputs" "$OUT/generated" "$OUT/snapshots"
 WATCH_PIDS=()
 cleanup() {
     for pid in "${WATCH_PIDS[@]:-}"; do
         kill -TERM "$pid" 2>/dev/null || true
+    done
+    # Reap every retained watcher (errors suppressed) before removing the
+    # workspace so no background Boris process survives an assertion failure.
+    for pid in "${WATCH_PIDS[@]:-}"; do
+        wait "$pid" 2>/dev/null || true
     done
     rm -rf "$OUT"
 }
@@ -417,7 +424,6 @@ assert_no_html_target "$out"
 pass "c01-mode-textile-noflag: exit 1, exact diagnostic, no final HTML target"
 
 note "C05 layout precedence"
-C05_WIN="$OUT/generated/c05-win"
 run_capture c05-explicit 0 "$BORIS" --html --input "$C05/content" --html-dir "$OUT/outputs/c05-explicit" --html-layout "$C05/layouts/exact.html" --quiet
 assert_contains "C05-EXACT" "$OUT/outputs/c05-explicit/index.html"
 run_capture c05-rule-id 0 "$BORIS" --html --input "$C05/content" --html-dir "$OUT/outputs/c05-rule-id" --html-layout "$C05/layouts/global.html" --layout-rule default "id:reference/config" "$C05/layouts/target.html" --quiet
@@ -456,23 +462,50 @@ assert_diag "$C05/expected/ambiguous-glob.stderr" "$OUT/logs/c05-ambiguous-glob.
 assert_no_html_target "$OUT/outputs/c05-ambiguous-glob"
 pass "c05-failures: missing layout 3, marker failures 1, ambiguous glob 2"
 
-mkdir -p "$C05_WIN/layouts"
-cp "$C05/layouts/global.html" "$C05_WIN/layouts/global.html"
-cp "$C05/layouts/target.html" "$C05_WIN/layouts/target.html"
-run_capture c05-incr-a 0 "$BORIS" --html --input "$C05/content" --html-dir "$OUT/outputs/c05-incr-a" --html-layout "$C05_WIN/layouts/global.html" --layout-rule default "id:reference/config" "$C05_WIN/layouts/target.html" --quiet
-assert_contains "C05-TARGET" "$OUT/outputs/c05-incr-a/reference/config.html"
-cp "$C05_WIN/layouts/target.html" "$C05_WIN/layouts/target-v2.html"
-sed 's/C05-TARGET/C05-TARGET-V2/' "$C05_WIN/layouts/target-v2.html" >"$C05_WIN/layouts/target-v2b.html"
-mv "$C05_WIN/layouts/target-v2b.html" "$C05_WIN/layouts/target-v2.html"
-run_capture c05-incr-b 0 "$BORIS" --html --input "$C05/content" --html-dir "$OUT/outputs/c05-incr-b" --html-layout "$C05_WIN/layouts/global.html" --layout-rule default "id:reference/config" "$C05_WIN/layouts/target-v2.html" --quiet
-assert_contains "C05-TARGET-V2" "$OUT/outputs/c05-incr-b/reference/config.html"
-assert_cmp "$OUT/outputs/c05-incr-a/index.html" "$OUT/outputs/c05-incr-b/index.html"
-cp "$C05/layouts/deep.html" "$C05_WIN/layouts/deep.html"
-sed 's/C05-DEEP/C05-DEEP-V3/' "$C05_WIN/layouts/deep.html" >"$C05_WIN/layouts/deep-v3.html"
-mv "$C05_WIN/layouts/deep-v3.html" "$C05_WIN/layouts/deep.html"
-run_capture c05-incr-c 0 "$BORIS" --html --input "$C05/content" --html-dir "$OUT/outputs/c05-incr-c" --html-layout "$C05_WIN/layouts/global.html" --layout-rule default "id:reference/config" "$C05_WIN/layouts/target-v2.html" --layout-rule default "id:reference/deep/d" "$C05_WIN/layouts/deep.html" --quiet
-assert_cmp "$OUT/outputs/c05-incr-b/reference/config.html" "$OUT/outputs/c05-incr-c/reference/config.html"
-pass "c05-incr: winning layout change propagates; losing layout change no effect"
+# C05 incremental: one reused output target with --incremental, using a real
+# competing-rule relationship (exact-id winner over a matching glob) so a
+# losing-layout edit is a genuine precedence case, not an unrelated page.
+C05_INC="$OUT/generated/c05-inc"
+rm -rf "$C05_INC"
+mkdir -p "$C05_INC/layouts"
+cp "$C05/layouts/global.html" "$C05_INC/layouts/global.html"
+cp "$C05/layouts/target.html" "$C05_INC/layouts/target.html"
+cp "$C05/layouts/glob.html" "$C05_INC/layouts/glob.html"
+C05_INC_OUT="$OUT/outputs/c05-inc"
+C05_INC_ARGS=(--html --input "$C05/content" --html-dir "$C05_INC_OUT" --html-layout "$C05_INC/layouts/global.html" --layout-rule default "id:reference/config" "$C05_INC/layouts/target.html" --layout-rule default "glob:reference/*" "$C05_INC/layouts/glob.html" --quiet --incremental)
+# Step 1: clean baseline — incremental first publication into one target.
+run_capture c05-incr-base 0 "$BORIS" "${C05_INC_ARGS[@]}"
+assert_empty "$OUT/logs/c05-incr-base.stdout"
+assert_empty "$OUT/logs/c05-incr-base.stderr"
+assert_contains "C05-TARGET" "$C05_INC_OUT/reference/config.html"
+assert_contains "C05-GLOBAL" "$C05_INC_OUT/index.html"
+assert_file "$C05_INC_OUT/.boris-cache/manifest.json"
+# Steps 2–4: modify the WINNING layout at the same configured path, rebuild the
+# same target incrementally; the affected page changes, an unaffected page
+# stays byte-identical.
+cp "$C05_INC_OUT/index.html" "$OUT/logs/c05-incr-index-v1.html"
+sed 's/C05-TARGET/C05-TARGET-V2/' "$C05_INC/layouts/target.html" >"$C05_INC/layouts/target.next"
+mv "$C05_INC/layouts/target.next" "$C05_INC/layouts/target.html"
+# Rebuild reuses the prior target/cache: the baseline manifest must still exist.
+assert_file "$C05_INC_OUT/.boris-cache/manifest.json"
+run_capture c05-incr-win 0 "$BORIS" "${C05_INC_ARGS[@]}"
+assert_empty "$OUT/logs/c05-incr-win.stdout"
+assert_empty "$OUT/logs/c05-incr-win.stderr"
+assert_contains "C05-TARGET-V2" "$C05_INC_OUT/reference/config.html"
+assert_cmp "$OUT/logs/c05-incr-index-v1.html" "$C05_INC_OUT/index.html"
+cp "$C05_INC_OUT/reference/config.html" "$OUT/logs/c05-incr-config-v2.html"
+# Steps 5–8: modify only the LOSING layout (glob) at the same configured path;
+# the higher-precedence exact-id winner's page stays byte-identical.
+sed 's/C05-GLOB/C05-GLOB-V3/' "$C05_INC/layouts/glob.html" >"$C05_INC/layouts/glob.next"
+mv "$C05_INC/layouts/glob.next" "$C05_INC/layouts/glob.html"
+# Same reused target: the winning-rebuild manifest must still exist.
+assert_file "$C05_INC_OUT/.boris-cache/manifest.json"
+run_capture c05-incr-lose 0 "$BORIS" "${C05_INC_ARGS[@]}"
+assert_empty "$OUT/logs/c05-incr-lose.stdout"
+assert_empty "$OUT/logs/c05-incr-lose.stderr"
+assert_cmp "$OUT/logs/c05-incr-config-v2.html" "$C05_INC_OUT/reference/config.html"
+assert_cmp "$OUT/logs/c05-incr-index-v1.html" "$C05_INC_OUT/index.html"
+pass "c05-incr: same target; winning layout edit propagates, losing layout edit has no effect"
 
 note "C06 cache and watch failure paths"
 C06_WS="$OUT/generated/c06-ws"
@@ -482,49 +515,121 @@ c06_reset() {
     cp -r "$C06/content" "$C06_WS/content"
     cp -r "$C06/theme" "$C06_WS/theme"
 }
-c06_build() {
+# Incremental scenarios reuse ONE dedicated output directory: the first run is
+# an incremental first publication (renders everything, writes the manifest),
+# and every edit is an --incremental rebuild into that same directory.
+c06_incr() {
     local name="$1"
     shift
-    run_capture "c06-${name}" 0 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-${name}" --html-layout "$C06/layout.html" --quiet "$@"
-    assert_empty "$OUT/logs/c06-${name}.stdout"
-    assert_empty "$OUT/logs/c06-${name}.stderr"
+    run_capture "c06-${name}-base" 0 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-${name}" --quiet --incremental "$@"
+    assert_empty "$OUT/logs/c06-${name}-base.stdout"
+    assert_empty "$OUT/logs/c06-${name}-base.stderr"
 }
+c06_incr_rebuild() {
+    local name="$1"
+    shift
+    # Rebuild must reuse the prior target/cache: the manifest written by the
+    # incremental baseline must still exist in the same output directory.
+    assert_file "$OUT/outputs/c06-${name}/.boris-cache/manifest.json"
+    run_capture "c06-${name}-reb" 0 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-${name}" --quiet --incremental "$@"
+    assert_empty "$OUT/logs/c06-${name}-reb.stdout"
+    assert_empty "$OUT/logs/c06-${name}-reb.stderr"
+}
+
+# No-op reuse: baseline, snapshot payload, two unchanged incremental rebuilds.
 c06_reset
-c06_build clean
-assert_contains "Fragment v1" "$OUT/outputs/c06-clean/index.html"
-c06_build noop --incremental
-assert_page_equal "$OUT/outputs/c06-clean" "$OUT/outputs/c06-noop"
+c06_incr noop --html-layout "$C06/layout.html"
+assert_contains "Fragment v1" "$OUT/outputs/c06-noop/index.html"
 assert_file "$OUT/outputs/c06-noop/.boris-cache/manifest.json"
-pass "c06-clean: clean publication and no-change incremental equality"
+cp -R "$OUT/outputs/c06-noop" "$OUT/snapshots/c06-noop-base"
+c06_incr_rebuild noop --html-layout "$C06/layout.html"
+assert_page_equal "$OUT/snapshots/c06-noop-base" "$OUT/outputs/c06-noop"
+cp "$OUT/outputs/c06-noop/.boris-cache/manifest.json" "$OUT/logs/c06-noop-manifest-1.json"
+c06_incr_rebuild noop --html-layout "$C06/layout.html"
+cp "$OUT/outputs/c06-noop/.boris-cache/manifest.json" "$OUT/logs/c06-noop-manifest-2.json"
+assert_cmp "$OUT/logs/c06-noop-manifest-1.json" "$OUT/logs/c06-noop-manifest-2.json"
+assert_page_equal "$OUT/snapshots/c06-noop-base" "$OUT/outputs/c06-noop"
+pass "c06-noop: one reused target; unchanged incremental rebuilds keep payload and manifest byte-identical"
 
+# Source edit: affected page changes, unaffected sibling byte-identical.
 c06_reset
-c06_build source-edit-baseline
+c06_incr source-edit --html-layout "$C06/layout.html"
+cp "$OUT/outputs/c06-source-edit/index.html" "$OUT/logs/c06-source-edit-index-v1.html"
 printf -- '---\ntitle: Guide\nparent: index\n---\nGuide body v2\n' >"$C06_WS/content/guides/g1.md"
-c06_build source-edit
+c06_incr_rebuild source-edit --html-layout "$C06/layout.html"
 assert_contains "Guide body v2" "$OUT/outputs/c06-source-edit/guides/g1.html"
-c06_reset
-c06_build source-delete-baseline
-rm "$C06_WS/content/guides/g1.md"
-c06_build source-delete
-assert_absent "$OUT/outputs/c06-source-delete/guides/g1.html"
-pass "c06-source: edit propagates; delete removes stale output"
+assert_cmp "$OUT/logs/c06-source-edit-index-v1.html" "$OUT/outputs/c06-source-edit/index.html"
+pass "c06-source-edit: one reused target; edited page changes, sibling byte-identical"
 
+# Source deletion: incremental baseline leaves the manifest, so the rebuild
+# prunes the stale HTML (prior-manifest path).
 c06_reset
-c06_build include-edit-baseline
+c06_incr source-delete --html-layout "$C06/layout.html"
+assert_file "$OUT/outputs/c06-source-delete/guides/g1.html"
+rm "$C06_WS/content/guides/g1.md"
+c06_incr_rebuild source-delete --html-layout "$C06/layout.html"
+assert_absent "$OUT/outputs/c06-source-delete/guides/g1.html"
+pass "c06-source-delete: one reused target; deleted page's stale HTML removed"
+
+# Include edit: dependent page changes.
+c06_reset
+c06_incr include-edit --html-layout "$C06/layout.html"
+assert_contains "Fragment v1" "$OUT/outputs/c06-include-edit/index.html"
 printf 'Fragment v2\n' >"$C06_WS/content/includes/frag.md"
-c06_build include-edit
+c06_incr_rebuild include-edit --html-layout "$C06/layout.html"
 assert_contains "Fragment v2" "$OUT/outputs/c06-include-edit/index.html"
+pass "c06-include-edit: one reused target; fragment edit propagates to dependent page"
+
+# Theme asset edit: published asset changes.
 c06_reset
-c06_build include-delete-baseline
+c06_incr theme --theme "$C06_WS/theme"
+cp "$OUT/outputs/c06-theme/assets/theme.css" "$OUT/logs/c06-theme-v1.css"
+printf 'body{color:red}\n' >>"$C06_WS/theme/assets/theme.css"
+c06_incr_rebuild theme --theme "$C06_WS/theme"
+cmp -s "$OUT/logs/c06-theme-v1.css" "$OUT/outputs/c06-theme/assets/theme.css" && fail "c06-theme: theme asset edit did not change output"
+pass "c06-theme: one reused target; theme asset edit propagates"
+
+# Content-local asset edit: published asset changes.
+c06_reset
+c06_incr content-asset --html-layout "$C06/layout.html"
+cp "$OUT/outputs/c06-content-asset/index.assets/style.css" "$OUT/logs/c06-content-asset-v1.css"
+printf 'body{color:green}\n' >>"$C06_WS/content/index.assets/style.css"
+c06_incr_rebuild content-asset --html-layout "$C06/layout.html"
+cmp -s "$OUT/logs/c06-content-asset-v1.css" "$OUT/outputs/c06-content-asset/index.assets/style.css" && fail "c06-content-asset: asset edit did not change output"
+pass "c06-content-asset: one reused target; content-local asset edit propagates"
+
+# Sitemap invalidation: draft edit replaces the sitemap without the page.
+c06_reset
+c06_incr sitemap --html-layout "$C06/layout.html" --sitemap-path sitemap.xml --site-url https://example.test
+assert_contains "guides/g1.html" "$OUT/outputs/c06-sitemap/sitemap.xml"
+printf -- '---\ntitle: Guide\nparent: index\nstatus: draft\n---\nGuide body\n' >"$C06_WS/content/guides/g1.md"
+c06_incr_rebuild sitemap --html-layout "$C06/layout.html" --sitemap-path sitemap.xml --site-url https://example.test
+if grep -F "guides/g1.html" "$OUT/outputs/c06-sitemap/sitemap.xml" >/dev/null; then
+    fail "c06-sitemap: draft page still present in sitemap"
+fi
+assert_file "$OUT/outputs/c06-sitemap/sitemap.xml"
+pass "c06-sitemap: one reused target; draft edit replaces sitemap without the page"
+
+# Rendered-search invalidation: body edit changes the search artifact.
+c06_reset
+c06_incr search --html-layout "$C06/layout.html"
+cp "$OUT/outputs/c06-search/_boris/search/search-index.json" "$OUT/logs/c06-search-before.json"
+printf -- '---\ntitle: Index\n---\nIntro v2 {{include includes/frag.md}}\n' >"$C06_WS/content/index.md"
+c06_incr_rebuild search --html-layout "$C06/layout.html"
+cmp -s "$OUT/logs/c06-search-before.json" "$OUT/outputs/c06-search/_boris/search/search-index.json" && fail "c06-search: body edit did not change search index"
+pass "c06-search: one reused target; body edit invalidates rendered-search artifact"
+
+# Failure-only cases stay on isolated fresh targets (not cache-invalidation
+# evidence): missing include, failed parse, duplicate layout marker.
+c06_reset
+c06_incr include-missing-base --html-layout "$C06/layout.html"
 rm "$C06_WS/content/includes/frag.md"
 run_capture c06-include-missing 1 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-include-missing" --html-layout "$C06/layout.html"
 assert_empty "$OUT/logs/c06-include-missing.stdout"
 assert_diag "$C06/expected/include-missing.stderr" "$OUT/logs/c06-include-missing.stderr"
 assert_no_html_target "$OUT/outputs/c06-include-missing"
-pass "c06-include: edit propagates; missing include fails closed"
-
 c06_reset
-c06_build parse-failed-baseline
+c06_incr parse-failed-base --html-layout "$C06/layout.html"
 printf -- '---\ntitle: Bad\nbadkey: x\n---\nBody\n' >"$C06_WS/content/bad.md"
 run_capture c06-parse-failed 1 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-parse-failed" --html-layout "$C06/layout.html"
 assert_empty "$OUT/logs/c06-parse-failed.stdout"
@@ -534,35 +639,7 @@ run_capture c06-layout-dup 1 "$BORIS" --html --input "$C06/content" --html-dir "
 assert_empty "$OUT/logs/c06-layout-dup.stdout"
 assert_diag "$C06/expected/layout-dup-marker.stderr" "$OUT/logs/c06-layout-dup.stderr"
 assert_no_html_target "$OUT/outputs/c06-layout-dup"
-pass "c06-failures: failed parse and failed layout validation fail closed"
-
-c06_reset
-run_capture c06-theme-a 0 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-theme-a" --theme "$C06_WS/theme" --quiet
-printf 'body{color:red}\n' >>"$C06_WS/theme/assets/theme.css"
-run_capture c06-theme-b 0 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-theme-b" --theme "$C06_WS/theme" --quiet
-cmp -s "$OUT/outputs/c06-theme-a/assets/theme.css" "$OUT/outputs/c06-theme-b/assets/theme.css" && fail "c06-theme: theme asset edit did not change output"
-c06_reset
-run_capture c06-ca-a 0 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-ca-a" --html-layout "$C06/layout.html" --quiet
-printf 'body{color:green}\n' >>"$C06_WS/content/index.assets/style.css"
-run_capture c06-ca-b 0 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-ca-b" --html-layout "$C06/layout.html" --quiet
-cmp -s "$OUT/outputs/c06-ca-a/index.assets/style.css" "$OUT/outputs/c06-ca-b/index.assets/style.css" && fail "c06-content-asset: asset edit did not change output"
-pass "c06-assets: theme and content-local asset edits propagate"
-
-c06_reset
-run_capture c06-smap-a 0 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-smap-a" --html-layout "$C06/layout.html" --sitemap-path sitemap.xml --site-url https://example.test --quiet
-assert_contains "guides/g1.html" "$OUT/outputs/c06-smap-a/sitemap.xml"
-printf -- '---\ntitle: Guide\nparent: index\nstatus: draft\n---\nGuide body\n' >"$C06_WS/content/guides/g1.md"
-run_capture c06-smap-b 0 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-smap-b" --html-layout "$C06/layout.html" --sitemap-path sitemap.xml --site-url https://example.test --quiet
-if grep -F "guides/g1.html" "$OUT/outputs/c06-smap-b/sitemap.xml" >/dev/null; then
-    fail "c06-smap: draft page still present in sitemap"
-fi
-c06_reset
-run_capture c06-search-a 0 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-search-a" --html-layout "$C06/layout.html" --quiet
-cp "$OUT/outputs/c06-search-a/_boris/search/search-index.json" "$OUT/logs/c06-search-before.json"
-printf -- '---\ntitle: Index\n---\nIntro v2 {{include includes/frag.md}}\n' >"$C06_WS/content/index.md"
-run_capture c06-search-b 0 "$BORIS" --html --input "$C06_WS/content" --html-dir "$OUT/outputs/c06-search-b" --html-layout "$C06/layout.html" --quiet
-cmp -s "$OUT/logs/c06-search-before.json" "$OUT/outputs/c06-search-b/_boris/search/search-index.json" && fail "c06-search: body edit did not change search index"
-pass "c06-sitemap-search: draft metadata and body edits propagate"
+pass "c06-failures: missing include, failed parse, duplicate layout marker fail closed on isolated targets"
 
 c06_watch_ws="$C06_WS-watch"
 rm -rf "$c06_watch_ws"
@@ -597,11 +674,14 @@ rm "$c06_watch_ws/content/includes/frag.md"
 pid=$(cat "$OUT/logs/c06-watch-fail.pid")
 wait_pid_exit "$pid" 100 || fail "c06-watch-fail: watcher did not exit after failed rebuild"
 if wait "$pid"; then
-    fail "c06-watch-fail: watcher exited 0 after failed include rebuild (expected unrecoverable exit)"
+    fail "c06-watch-fail: watcher exited 0 after failed include rebuild (expected unrecoverable exit 1)"
 else
     rc=$?
+    if [[ "$rc" -ne 1 ]]; then
+        fail "c06-watch-fail: expected exit 1, got ${rc}"
+    fi
     assert_contains "rebuild failed with unrecoverable I/O error: IncludeFailed" "$OUT/logs/c06-watch-fail.log"
-    pass "c06-watch-fail: failed include rebuild exits watcher (unrecoverable I/O, exit ${rc})"
+    pass "c06-watch-fail: failed include rebuild exits watcher rc 1 (unrecoverable I/O)"
 fi
 
 rm -rf "$c06_watch_ws/site"
@@ -703,4 +783,4 @@ assert_diag "$C07/expected/sitemap-content-collision.stderr" "$OUT/logs/c07-site
 assert_no_html_target "$OUT/outputs/c07-sitemap"
 pass "c07-sitemap: sitemap path vs page output collision fails closed"
 
-note "Publication conformance verification passed"
+note "Publication conformance evidence verified; confirmed defects retained: W1, S1"
