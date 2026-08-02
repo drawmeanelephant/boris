@@ -176,12 +176,20 @@ result may be evidence for a named claim within its scope, but it does not
 become HTML, IR, RAG, or deployment metadata and it cannot silently certify an
 omitted projection.
 
-The future [Publication Touch Atlas](publication-touches.md) is downstream
-evidence indexing, not another publication or verification layer. It may link
-only records already declared by `artifacts.json`, `checks.json`, and
+The [Publication Touch Atlas](publication-touches.md) is downstream evidence
+indexing, not another publication or verification layer. It may link only
+records already declared by `artifacts.json`, `checks.json`, and
 `claims.json`; it must not invent source, phase, runtime, deployment, or
-transformation relationships. Its contract is drafted, implementation is not
-yet shipped, and no `touches.json` is currently emitted.
+transformation relationships. Its first slice is implemented and derives
+`touches.json` exclusively from those committed evidence bytes.
+
+The future [Publication Proof Pack](publication-proof-pack.md) is downstream
+evidence presentation, not another publication or verification layer. It may
+present only records already declared by `artifacts.json`, `checks.json`,
+`claims.json`, and `touches.json`; it must not rerun checks, reread payloads,
+or upgrade evidence status. Its contract is drafted, implementation is not
+yet shipped, and neither `proof-pack.json` nor `index.html` is currently
+emitted.
 
 ## Verification vocabulary and claims
 

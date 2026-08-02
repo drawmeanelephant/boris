@@ -1,0 +1,396 @@
+{
+  "format": "boris-publication-proof-pack",
+  "schema_version": 1,
+  "target": "public",
+  "inputs": {
+    "artifacts": {
+      "path": "_boris/proof/artifacts.json",
+      "bytes": 420,
+      "sha256": "d0d8632af6caf84f050a7702713aa65ee4d69c9350f0c6baad6d2042998160d6",
+      "format": "boris-publication-artifacts",
+      "schema_version": 1,
+      "target": "public",
+      "artifact_count": 2
+    },
+    "checks": {
+      "path": "_boris/proof/checks.json",
+      "bytes": 976,
+      "sha256": "14ce6014f9e0799ffbaae4bbad2aad348defafe68dedb75a3da8358a654cf26c",
+      "format": "boris-publication-checks",
+      "schema_version": 1,
+      "target": "public",
+      "check_count": 3,
+      "finding_count": 0
+    },
+    "claims": {
+      "path": "_boris/proof/claims.json",
+      "bytes": 1298,
+      "sha256": "cf8d7234ea3d45c494ece8cfc0a938a1862077a6f895fa2541ff6aa98db12252",
+      "format": "boris-publication-claims",
+      "schema_version": 1,
+      "target": "public",
+      "claim_count": 3,
+      "limitation_count": 6
+    },
+    "touches": {
+      "path": "_boris/proof/touches.json",
+      "bytes": 8629,
+      "sha256": "cdfb3be94c049980697e7adc9e763d24864f7e4ba738cedb7db140044d3db38f",
+      "format": "boris-publication-touches",
+      "schema_version": 1,
+      "target": "public",
+      "node_count": 15,
+      "edge_count": 25
+    }
+  },
+  "summary": {
+    "artifacts": {
+      "total": 2,
+      "by_status": {
+        "committed": 2,
+        "omitted-by-plan": 0,
+        "not-applicable": 0
+      },
+      "by_kind": {
+        "html-page": 1,
+        "theme-asset": 1,
+        "content-asset": 0,
+        "rendered-search": 0,
+        "sitemap": 0,
+        "rss": 0,
+        "llms": 0
+      }
+    },
+    "checks": {
+      "total": 3,
+      "by_status": {
+        "passed": 2,
+        "failed": 0,
+        "incomplete": 0,
+        "not-applicable": 1
+      },
+      "by_coverage": {
+        "complete": 2,
+        "incomplete": 0,
+        "not-applicable": 1
+      }
+    },
+    "findings": {
+      "total": 0,
+      "by_severity": {
+        "error": 0,
+        "warning": 0,
+        "info": 0
+      }
+    },
+    "claims": {
+      "total": 3,
+      "by_status": {
+        "verified": 2,
+        "failed": 0,
+        "not-verified": 1
+      }
+    },
+    "limitation_count": 6,
+    "relationship_node_count": 15,
+    "relationship_edge_count": 25,
+    "overall_presentation_status": "attention-required"
+  },
+  "artifacts": [
+    {
+      "inventory_index": 0,
+      "path": "index.html",
+      "kind": "html-page",
+      "status": "committed",
+      "required": true,
+      "bytes": 4501,
+      "sha256": "69d5b0e4624ef1d2dc40830e48b5be5f83304ea4a992d837442b3699b6a98b1d",
+      "related_check_ids": [
+        "artifact-integrity",
+        "rendered-html",
+        "rendered-search"
+      ],
+      "related_claim_ids": [
+        "committed-artifacts-match-inventory",
+        "rendered-html-passed-declared-audit",
+        "rendered-search-matches-selected-html"
+      ]
+    },
+    {
+      "inventory_index": 1,
+      "path": "assets/site.css",
+      "kind": "theme-asset",
+      "status": "committed",
+      "required": true,
+      "bytes": 5120,
+      "sha256": "5631af46383b4f28912402d44dd1e95223eca7e94302665aafd25511cbdb2813",
+      "related_check_ids": [
+        "artifact-integrity"
+      ],
+      "related_claim_ids": [
+        "committed-artifacts-match-inventory"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "check_index": 0,
+      "check_id": "artifact-integrity",
+      "status": "passed",
+      "coverage": "complete",
+      "eligible": true,
+      "ran": true,
+      "counts": {
+        "eligible": 2,
+        "checked": 2,
+        "findings": 0
+      },
+      "finding_ids": [],
+      "subject_artifact_ids": [
+        "artifact:index.html",
+        "artifact:assets/site.css"
+      ],
+      "supporting_artifact_ids": [],
+      "supported_claim_ids": [
+        "claim:committed-artifacts-match-inventory"
+      ]
+    },
+    {
+      "check_index": 1,
+      "check_id": "rendered-html",
+      "status": "passed",
+      "coverage": "complete",
+      "eligible": true,
+      "ran": true,
+      "counts": {
+        "eligible": 1,
+        "checked": 1,
+        "findings": 0
+      },
+      "finding_ids": [],
+      "subject_artifact_ids": [
+        "artifact:index.html"
+      ],
+      "supporting_artifact_ids": [],
+      "supported_claim_ids": [
+        "claim:rendered-html-passed-declared-audit"
+      ]
+    },
+    {
+      "check_index": 2,
+      "check_id": "rendered-search",
+      "status": "not-applicable",
+      "coverage": "not-applicable",
+      "eligible": false,
+      "ran": false,
+      "counts": {
+        "eligible": 0,
+        "checked": 0,
+        "findings": 0
+      },
+      "finding_ids": [],
+      "subject_artifact_ids": [],
+      "supporting_artifact_ids": [
+        "artifact:index.html"
+      ],
+      "supported_claim_ids": [
+        "claim:rendered-search-matches-selected-html"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "claim_index": 0,
+      "claim_id": "committed-artifacts-match-inventory",
+      "statement": "Every committed artifact record selected by the artifact-integrity check was inspected and matched its declared byte count and SHA-256 digest.",
+      "status": "verified",
+      "evidence_check_id": "artifact-integrity",
+      "limitation_ids": [
+        "target-local-only",
+        "no-deployment-verification",
+        "no-accessibility-verification",
+        "no-prose-quality-verification",
+        "no-universal-reproducibility-claim"
+      ]
+    },
+    {
+      "claim_index": 1,
+      "claim_id": "rendered-html-passed-declared-audit",
+      "statement": "Every committed HTML page selected by the rendered-html check completed the declared structural, route, fragment, and duplicate-ID audit within that check's scope.",
+      "status": "verified",
+      "evidence_check_id": "rendered-html",
+      "limitation_ids": [
+        "target-local-only",
+        "no-deployment-verification",
+        "no-accessibility-verification",
+        "no-prose-quality-verification",
+        "no-universal-reproducibility-claim"
+      ]
+    },
+    {
+      "claim_index": 2,
+      "claim_id": "rendered-search-matches-selected-html",
+      "statement": "The single selected rendered-search artifact matched the committed HTML page set and derived rendered-search content inspected by the rendered-search check.",
+      "status": "not-verified",
+      "evidence_check_id": "rendered-search",
+      "limitation_ids": [
+        "target-local-only",
+        "no-deployment-verification",
+        "no-accessibility-verification",
+        "no-prose-quality-verification",
+        "no-universal-reproducibility-claim",
+        "omitted-projections-not-certified"
+      ]
+    }
+  ],
+  "limitations": [
+    {
+      "limitation_index": 0,
+      "limitation_id": "target-local-only",
+      "statement": "These claims describe one selected local HTML target after its commit and say nothing about any other target or environment.",
+      "source": "docs/contracts/publication-checks.md#authority-and-transaction-boundary",
+      "applies_to_claim_ids": [
+        "committed-artifacts-match-inventory",
+        "rendered-html-passed-declared-audit",
+        "rendered-search-matches-selected-html"
+      ]
+    },
+    {
+      "limitation_index": 1,
+      "limitation_id": "no-deployment-verification",
+      "statement": "No deployment was performed or verified; local generation cannot verify deployed behavior.",
+      "source": "docs/contracts/publication-model.md#verification-vocabulary-and-claims",
+      "applies_to_claim_ids": [
+        "committed-artifacts-match-inventory",
+        "rendered-html-passed-declared-audit",
+        "rendered-search-matches-selected-html"
+      ]
+    },
+    {
+      "limitation_index": 2,
+      "limitation_id": "no-accessibility-verification",
+      "statement": "No accessibility audit was performed for any page or artifact in this target.",
+      "source": "docs/contracts/publication-model.md#projections",
+      "applies_to_claim_ids": [
+        "committed-artifacts-match-inventory",
+        "rendered-html-passed-declared-audit",
+        "rendered-search-matches-selected-html"
+      ]
+    },
+    {
+      "limitation_index": 3,
+      "limitation_id": "no-prose-quality-verification",
+      "statement": "No prose, writing, or documentation-quality judgment was made.",
+      "source": "docs/contracts/publication-model.md#verification-vocabulary-and-claims",
+      "applies_to_claim_ids": [
+        "committed-artifacts-match-inventory",
+        "rendered-html-passed-declared-audit",
+        "rendered-search-matches-selected-html"
+      ]
+    },
+    {
+      "limitation_index": 4,
+      "limitation_id": "no-universal-reproducibility-claim",
+      "statement": "Deterministic bytes on one recorded environment are not universal reproducibility.",
+      "source": "docs/contracts/publication-model.md#verification-vocabulary-and-claims",
+      "applies_to_claim_ids": [
+        "committed-artifacts-match-inventory",
+        "rendered-html-passed-declared-audit",
+        "rendered-search-matches-selected-html"
+      ]
+    },
+    {
+      "limitation_index": 5,
+      "limitation_id": "omitted-projections-not-certified",
+      "statement": "An omitted or unselected projection remains explicitly unverified and is not certified by this report.",
+      "source": "docs/contracts/publication-model.md#the-conductor-rule",
+      "applies_to_claim_ids": [
+        "rendered-search-matches-selected-html"
+      ]
+    }
+  ],
+  "relationships": {
+    "node_ids": [
+      "target",
+      "artifact:index.html",
+      "artifact:assets/site.css",
+      "check:artifact-integrity",
+      "check:rendered-html",
+      "check:rendered-search",
+      "claim:committed-artifacts-match-inventory",
+      "claim:rendered-html-passed-declared-audit",
+      "claim:rendered-search-matches-selected-html",
+      "limitation:target-local-only",
+      "limitation:no-deployment-verification",
+      "limitation:no-accessibility-verification",
+      "limitation:no-prose-quality-verification",
+      "limitation:no-universal-reproducibility-claim",
+      "limitation:omitted-projections-not-certified"
+    ],
+    "groups": [
+      {
+        "edge_kind": "target-owns-artifact",
+        "edges": [
+          { "from": "target", "to": "artifact:index.html" },
+          { "from": "target", "to": "artifact:assets/site.css" }
+        ]
+      },
+      {
+        "edge_kind": "artifact-subject-of-check",
+        "edges": [
+          { "from": "artifact:index.html", "to": "check:artifact-integrity" },
+          { "from": "artifact:index.html", "to": "check:rendered-html" },
+          { "from": "artifact:assets/site.css", "to": "check:artifact-integrity" }
+        ]
+      },
+      {
+        "edge_kind": "artifact-supports-check",
+        "edges": [
+          { "from": "artifact:index.html", "to": "check:rendered-search" }
+        ]
+      },
+      {
+        "edge_kind": "check-reported-finding",
+        "edges": []
+      },
+      {
+        "edge_kind": "check-supports-claim",
+        "edges": [
+          { "from": "check:artifact-integrity", "to": "claim:committed-artifacts-match-inventory" },
+          { "from": "check:rendered-html", "to": "claim:rendered-html-passed-declared-audit" },
+          { "from": "check:rendered-search", "to": "claim:rendered-search-matches-selected-html" }
+        ]
+      },
+      {
+        "edge_kind": "claim-limited-by",
+        "edges": [
+          { "from": "claim:committed-artifacts-match-inventory", "to": "limitation:target-local-only" },
+          { "from": "claim:committed-artifacts-match-inventory", "to": "limitation:no-deployment-verification" },
+          { "from": "claim:committed-artifacts-match-inventory", "to": "limitation:no-accessibility-verification" },
+          { "from": "claim:committed-artifacts-match-inventory", "to": "limitation:no-prose-quality-verification" },
+          { "from": "claim:committed-artifacts-match-inventory", "to": "limitation:no-universal-reproducibility-claim" },
+          { "from": "claim:rendered-html-passed-declared-audit", "to": "limitation:target-local-only" },
+          { "from": "claim:rendered-html-passed-declared-audit", "to": "limitation:no-deployment-verification" },
+          { "from": "claim:rendered-html-passed-declared-audit", "to": "limitation:no-accessibility-verification" },
+          { "from": "claim:rendered-html-passed-declared-audit", "to": "limitation:no-prose-quality-verification" },
+          { "from": "claim:rendered-html-passed-declared-audit", "to": "limitation:no-universal-reproducibility-claim" },
+          { "from": "claim:rendered-search-matches-selected-html", "to": "limitation:target-local-only" },
+          { "from": "claim:rendered-search-matches-selected-html", "to": "limitation:no-deployment-verification" },
+          { "from": "claim:rendered-search-matches-selected-html", "to": "limitation:no-accessibility-verification" },
+          { "from": "claim:rendered-search-matches-selected-html", "to": "limitation:no-prose-quality-verification" },
+          { "from": "claim:rendered-search-matches-selected-html", "to": "limitation:no-universal-reproducibility-claim" },
+          { "from": "claim:rendered-search-matches-selected-html", "to": "limitation:omitted-projections-not-certified" }
+        ]
+      }
+    ]
+  },
+  "presentation": {
+    "overall_status": "attention-required",
+    "status_vocabulary": [
+      "verified",
+      "attention-required",
+      "incomplete",
+      "not-applicable"
+    ]
+  }
+}

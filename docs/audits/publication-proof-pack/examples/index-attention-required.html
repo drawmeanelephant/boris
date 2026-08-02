@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Publication Proof Pack — public (attention required)</title>
+<style>
+  /* Embedded bounded CSS. No external fonts, scripts, images, or stylesheets. */
+  :root {
+    color-scheme: light;
+    --ink: #1a1a1a;
+    --muted: #555;
+    --line: #ccc;
+    --bg: #ffffff;
+    --pass-bg: #eaf6ec;
+    --pass-ink: #1f6b2f;
+    --warn-bg: #fdf3e3;
+    --warn-ink: #8a5a00;
+    --bad-bg: #fdecea;
+    --bad-ink: #a3261e;
+    --na-bg: #eef0f2;
+    --na-ink: #444;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0 auto;
+    max-width: 960px;
+    padding: 1.5rem 1.25rem 3rem;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    color: var(--ink);
+    background: var(--bg);
+  }
+  header h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
+  .meta { color: var(--muted); font-size: 0.85rem; }
+  .banner {
+    margin: 1rem 0 1.5rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-weight: 600;
+  }
+  .banner.verified { background: var(--pass-bg); color: var(--pass-ink); }
+  .banner.attention { background: var(--bad-bg); color: var(--bad-ink); }
+  .banner.incomplete { background: var(--warn-bg); color: var(--warn-ink); }
+  .banner.na { background: var(--na-bg); color: var(--na-ink); }
+  nav { margin: 0 0 1.5rem; }
+  nav ul { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; }
+  nav a { color: #0b5cad; text-decoration: none; }
+  nav a:hover { text-decoration: underline; }
+  h2 {
+    font-size: 1.2rem;
+    margin: 2rem 0 0.5rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid var(--line);
+  }
+  table { width: 100%; border-collapse: collapse; margin: 0.5rem 0 1rem; }
+  th, td { text-align: left; padding: 0.4rem 0.5rem; border: 1px solid var(--line); vertical-align: top; }
+  th { background: #f4f4f4; font-weight: 600; }
+  code, .mono { font-family: var(--mono); font-size: 0.85em; word-break: break-all; }
+  .status-passed, .status-verified { color: var(--pass-ink); font-weight: 600; }
+  .status-failed, .status-attention { color: var(--bad-ink); font-weight: 600; }
+  .status-incomplete { color: var(--warn-ink); font-weight: 600; }
+  .status-na { color: var(--na-ink); font-weight: 600; }
+  .empty { color: var(--muted); font-style: italic; margin: 0.25rem 0 1rem; }
+  ul.plain { margin: 0.25rem 0 1rem; padding-left: 1.25rem; }
+  footer { margin-top: 2.5rem; padding-top: 0.75rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.8rem; }
+  @media print {
+    nav { display: none; }
+    body { max-width: none; padding: 0.5rem; }
+    a { color: inherit; text-decoration: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Publication Proof Pack</h1>
+  <p class="meta">
+    <code>format: boris-publication-proof-pack</code> ·
+    <code>schema_version: 1</code> ·
+    target <code>public</code>
+  </p>
+  <div class="banner attention" id="banner">Overall presentation status: attention-required</div>
+  <p>At least one check failed and at least one claim is not supported. Review the findings below before relying on this publication's evidence.</p>
+</header>
+
+<nav aria-label="Contents">
+  <ul>
+    <li><a href="#summary">Summary</a></li>
+    <li><a href="#artifacts">Artifacts</a></li>
+    <li><a href="#checks">Checks</a></li>
+    <li><a href="#findings">Findings</a></li>
+    <li><a href="#claims">Claims</a></li>
+    <li><a href="#limitations">Limitations</a></li>
+    <li><a href="#relationships">Relationships</a></li>
+  </ul>
+</nav>
+
+<main>
+  <section id="summary">
+    <h2>Summary</h2>
+    <table>
+      <tbody>
+        <tr><th>Artifacts</th><td>5 total — committed 4, omitted-by-plan 1, not-applicable 0 (html-page 2, theme-asset 2, rendered-search 1)</td></tr>
+        <tr><th>Checks</th><td>3 total — passed 0, failed 3, incomplete 0, not-applicable 0 (coverage complete 3)</td></tr>
+        <tr><th>Findings</th><td>3 total — error 3, warning 0, info 0</td></tr>
+        <tr><th>Claims</th><td>3 total — verified 0, failed 3, not-verified 0</td></tr>
+        <tr><th>Limitations</th><td>6</td></tr>
+        <tr><th>Relationship graph</th><td>21 nodes, 36 edges</td></tr>
+        <tr><th>Overall presentation status</th><td class="status-attention">attention-required</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="artifacts">
+    <h2>Artifacts</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>Path</th><th>Kind</th><th>Status</th><th>Required</th><th>Bytes</th><th>SHA-256</th><th>Related checks</th><th>Related claims</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>0</td>
+          <td><code>index.html</code></td>
+          <td>html-page</td>
+          <td>committed</td>
+          <td>yes</td>
+          <td>4501</td>
+          <td class="mono">5d41402abc4b2a76b9719d911017c592d5d41402abc4b2a76b9719d911017c592</td>
+          <td>artifact-integrity, rendered-html, rendered-search</td>
+          <td>committed-artifacts-match-inventory, rendered-html-passed-declared-audit, rendered-search-matches-selected-html</td>
+        </tr>
+        <tr>
+          <td>1</td>
+          <td><code>broken.html</code></td>
+          <td>html-page</td>
+          <td>committed</td>
+          <td>yes</td>
+          <td>1380</td>
+          <td class="mono">d1f0a2b3c4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9</td>
+          <td>artifact-integrity, rendered-html, rendered-search</td>
+          <td>committed-artifacts-match-inventory, rendered-html-passed-declared-audit, rendered-search-matches-selected-html</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td><code>_boris/search/search-index.json</code></td>
+          <td>rendered-search</td>
+          <td>committed</td>
+          <td>yes</td>
+          <td>7890</td>
+          <td class="mono">e2f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d</td>
+          <td>artifact-integrity, rendered-search</td>
+          <td>committed-artifacts-match-inventory, rendered-search-matches-selected-html</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td><code>assets/site.css</code></td>
+          <td>theme-asset</td>
+          <td>committed</td>
+          <td>yes</td>
+          <td>5120</td>
+          <td class="mono">f3a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9f3a4b5c6d7e8f90a1b</td>
+          <td>artifact-integrity</td>
+          <td>committed-artifacts-match-inventory</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td><code>assets/legacy.css</code></td>
+          <td>theme-asset</td>
+          <td class="status-na">omitted-by-plan</td>
+          <td>no</td>
+          <td colspan="2" class="empty">no committed bytes — omitted from this target</td>
+          <td>—</td>
+          <td>—</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>Records that are not committed carry no committed-byte properties; no zero values are invented for them.</p>
+  </section>
+
+  <section id="checks">
+    <h2>Checks</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>Check</th><th>Status</th><th>Coverage</th><th>Eligible</th><th>Ran</th><th>Counts (eligible / checked / findings)</th><th>Subject artifacts</th><th>Supporting artifacts</th><th>Supported claims</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>0</td>
+          <td><code>artifact-integrity</code></td>
+          <td class="status-failed">failed</td>
+          <td>complete</td>
+          <td>yes</td>
+          <td>yes</td>
+          <td>4 / 4 / 1</td>
+          <td>artifact:index.html, artifact:broken.html, artifact:_boris/search/search-index.json, artifact:assets/site.css</td>
+          <td>—</td>
+          <td>claim:committed-artifacts-match-inventory</td>
+        </tr>
+        <tr>
+          <td>1</td>
+          <td><code>rendered-html</code></td>
+          <td class="status-failed">failed</td>
+          <td>complete</td>
+          <td>yes</td>
+          <td>yes</td>
+          <td>2 / 2 / 1</td>
+          <td>artifact:index.html, artifact:broken.html</td>
+          <td>—</td>
+          <td>claim:rendered-html-passed-declared-audit</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td><code>rendered-search</code></td>
+          <td class="status-failed">failed</td>
+          <td>complete</td>
+          <td>yes</td>
+          <td>yes</td>
+          <td>1 / 1 / 1</td>
+          <td>artifact:_boris/search/search-index.json</td>
+          <td>artifact:index.html, artifact:broken.html</td>
+          <td>claim:rendered-search-matches-selected-html</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="findings">
+    <h2>Findings</h2>
+    <table>
+      <thead>
+        <tr><th>#</th><th>Finding</th><th>Check</th><th>Code</th><th>Severity</th><th>Subject</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>0</td>
+          <td class="mono">finding:artifact-integrity:0</td>
+          <td><code>artifact-integrity</code></td>
+          <td><code>ARTIFACT_DIGEST_MISMATCH</code></td>
+          <td class="status-failed">error</td>
+          <td>artifact <code>broken.html</code> (target public)</td>
+        </tr>
+        <tr>
+          <td>1</td>
+          <td class="mono">finding:rendered-html:0</td>
+          <td><code>rendered-html</code></td>
+          <td><code>HTML_FRAGMENT_MISSING</code></td>
+          <td class="status-failed">error</td>
+          <td>html-page <code>index.html</code> (target public)</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td class="mono">finding:rendered-search:0</td>
+          <td><code>rendered-search</code></td>
+          <td><code>SEARCH_CONTENT_MISMATCH</code></td>
+          <td class="status-failed">error</td>
+          <td>rendered-search <code>_boris/search/search-index.json</code> (target public)</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>No finding-to-artifact relationship is inferred from path resemblance; the subjects above are copied verbatim from the checks evidence.</p>
+  </section>
+
+  <section id="claims">
+    <h2>Claims</h2>
+    <table>
+      <thead>
+        <tr><th>#</th><th>Claim</th><th>Status</th><th>Evidence check</th><th>Statement</th><th>Limitations</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>0</td>
+          <td><code>committed-artifacts-match-inventory</code></td>
+          <td class="status-failed">failed</td>
+          <td><code>artifact-integrity</code></td>
+          <td>Every committed artifact record selected by the artifact-integrity check was inspected and matched its declared byte count and SHA-256 digest.</td>
+          <td>5</td>
+        </tr>
+        <tr>
+          <td>1</td>
+          <td><code>rendered-html-passed-declared-audit</code></td>
+          <td class="status-failed">failed</td>
+          <td><code>rendered-html</code></td>
+          <td>Every committed HTML page selected by the rendered-html check completed the declared structural, route, fragment, and duplicate-ID audit within that check's scope.</td>
+          <td>5</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td><code>rendered-search-matches-selected-html</code></td>
+          <td class="status-failed">failed</td>
+          <td><code>rendered-search</code></td>
+          <td>The single selected rendered-search artifact matched the committed HTML page set and derived rendered-search content inspected by the rendered-search check.</td>
+          <td>6</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="limitations">
+    <h2>Limitations</h2>
+    <p>The failed claims are still bounded by their limitations. A failed or unverified claim inherits the same scope limits as any other claim.</p>
+    <ul class="plain">
+      <li><strong><code>target-local-only</code></strong> — These claims describe one selected local HTML target after its commit and say nothing about any other target or environment.</li>
+      <li><strong><code>no-deployment-verification</code></strong> — No deployment was performed or verified; local generation cannot verify deployed behavior.</li>
+      <li><strong><code>no-accessibility-verification</code></strong> — No accessibility audit was performed for any page or artifact in this target.</li>
+      <li><strong><code>no-prose-quality-verification</code></strong> — No prose, writing, or documentation-quality judgment was made.</li>
+      <li><strong><code>no-universal-reproducibility-claim</code></strong> — Deterministic bytes on one recorded environment are not universal reproducibility.</li>
+      <li><strong><code>omitted-projections-not-certified</code></strong> — An omitted or unselected projection remains explicitly unverified and is not certified by this report.</li>
+    </ul>
+  </section>
+
+  <section id="relationships">
+    <h2>Relationships</h2>
+    <p>21 nodes and 36 edges, grouped by Touch Atlas edge kind. Every edge below is an exact Touch Atlas edge; nothing is inferred.</p>
+    <h3>target-owns-artifact (5)</h3>
+    <ul class="plain">
+      <li>target → artifact:index.html</li>
+      <li>target → artifact:broken.html</li>
+      <li>target → artifact:_boris/search/search-index.json</li>
+      <li>target → artifact:assets/site.css</li>
+      <li>target → artifact:assets/legacy.css</li>
+    </ul>
+    <h3>artifact-subject-of-check (7)</h3>
+    <ul class="plain">
+      <li>artifact:index.html → check:artifact-integrity</li>
+      <li>artifact:index.html → check:rendered-html</li>
+      <li>artifact:broken.html → check:artifact-integrity</li>
+      <li>artifact:broken.html → check:rendered-html</li>
+      <li>artifact:_boris/search/search-index.json → check:artifact-integrity</li>
+      <li>artifact:_boris/search/search-index.json → check:rendered-search</li>
+      <li>artifact:assets/site.css → check:artifact-integrity</li>
+    </ul>
+    <h3>artifact-supports-check (2)</h3>
+    <ul class="plain">
+      <li>artifact:index.html → check:rendered-search</li>
+      <li>artifact:broken.html → check:rendered-search</li>
+    </ul>
+    <h3>check-reported-finding (3)</h3>
+    <ul class="plain">
+      <li>check:artifact-integrity → finding:artifact-integrity:0</li>
+      <li>check:rendered-html → finding:rendered-html:0</li>
+      <li>check:rendered-search → finding:rendered-search:0</li>
+    </ul>
+    <h3>check-supports-claim (3)</h3>
+    <ul class="plain">
+      <li>check:artifact-integrity → claim:committed-artifacts-match-inventory</li>
+      <li>check:rendered-html → claim:rendered-html-passed-declared-audit</li>
+      <li>check:rendered-search → claim:rendered-search-matches-selected-html</li>
+    </ul>
+    <h3>claim-limited-by (16)</h3>
+    <ul class="plain">
+      <li>claim:committed-artifacts-match-inventory → limitation:target-local-only</li>
+      <li>claim:committed-artifacts-match-inventory → limitation:no-deployment-verification</li>
+      <li>claim:committed-artifacts-match-inventory → limitation:no-accessibility-verification</li>
+      <li>claim:committed-artifacts-match-inventory → limitation:no-prose-quality-verification</li>
+      <li>claim:committed-artifacts-match-inventory → limitation:no-universal-reproducibility-claim</li>
+      <li>claim:rendered-html-passed-declared-audit → limitation:target-local-only</li>
+      <li>claim:rendered-html-passed-declared-audit → limitation:no-deployment-verification</li>
+      <li>claim:rendered-html-passed-declared-audit → limitation:no-accessibility-verification</li>
+      <li>claim:rendered-html-passed-declared-audit → limitation:no-prose-quality-verification</li>
+      <li>claim:rendered-html-passed-declared-audit → limitation:no-universal-reproducibility-claim</li>
+      <li>claim:rendered-search-matches-selected-html → limitation:target-local-only</li>
+      <li>claim:rendered-search-matches-selected-html → limitation:no-deployment-verification</li>
+      <li>claim:rendered-search-matches-selected-html → limitation:no-accessibility-verification</li>
+      <li>claim:rendered-search-matches-selected-html → limitation:no-prose-quality-verification</li>
+      <li>claim:rendered-search-matches-selected-html → limitation:no-universal-reproducibility-claim</li>
+      <li>claim:rendered-search-matches-selected-html → limitation:omitted-projections-not-certified</li>
+    </ul>
+  </section>
+</main>
+
+<footer>
+  <p>
+    This page is a deterministic static rendering of <code>_boris/proof/proof-pack.json</code>
+    (target <code>public</code>). It requires no JavaScript, loads no remote resources,
+    and is printable. A rendered page is not a new verification claim; failed and
+    unverified evidence is shown as-is.
+  </p>
+</footer>
+</body>
+</html>
