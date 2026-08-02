@@ -65,6 +65,25 @@ fn pageTitle(page: graph.Node) []const u8 {
     return page.title orelse page.id;
 }
 
+/// Contract maximum for a summary excerpt, in bytes (`docs/contracts/llms-txt.md`).
+const summary_max_bytes: usize = 240;
+
+/// Returns the length of the longest valid UTF-8 prefix of `bytes` that is no
+/// longer than `max_bytes`, without ever splitting a multibyte scalar.
+///
+/// When `bytes` is already within the limit, returns `bytes.len` unchanged.
+/// When the limit falls inside a multibyte scalar, the prefix is shortened to
+/// the nearest preceding scalar boundary, so the output is always valid UTF-8.
+fn utf8TruncateLen(bytes: []const u8, max_bytes: usize) usize {
+    if (bytes.len <= max_bytes) return bytes.len;
+    var end = max_bytes;
+    // The first excluded byte is a continuation byte when the scalar it belongs
+    // to began before `end`; step back to that scalar's lead byte so the prefix
+    // ends on a valid boundary.
+    while (end > 0 and (bytes[end] & 0xC0) == 0x80) end -= 1;
+    return end;
+}
+
 fn summary(gpa: std.mem.Allocator, source: []const u8, fallback: []const u8) ![]u8 {
     const body = if (std.mem.startsWith(u8, source, "---\n"))
         if (std.mem.indexOfPos(u8, source, 4, "---\n")) |end| source[end + 4 ..] else source
@@ -88,10 +107,11 @@ fn summary(gpa: std.mem.Allocator, source: []const u8, fallback: []const u8) ![]
         if (saw_text) try paragraph.append(gpa, ' ');
         try paragraph.appendSlice(gpa, trimmed);
         saw_text = true;
-        if (paragraph.items.len >= 240) break;
+        if (paragraph.items.len >= summary_max_bytes) break;
     }
     if (!saw_text) return try gpa.dupe(u8, fallback);
-    if (paragraph.items.len > 240) paragraph.shrinkRetainingCapacity(240);
+    const keep = utf8TruncateLen(paragraph.items, summary_max_bytes);
+    if (keep < paragraph.items.len) paragraph.shrinkRetainingCapacity(keep);
     return try paragraph.toOwnedSlice(gpa);
 }
 
@@ -200,6 +220,87 @@ test "summary uses first body paragraph and falls back to title" {
     const fallback = try summary(gpa, "---\nid: x\n---\n\n# Heading\n", "Fallback");
     defer gpa.free(fallback);
     try std.testing.expectEqualStrings("Fallback", fallback);
+}
+
+test "summary truncates to the 240-byte contract on a UTF-8 scalar boundary" {
+    const gpa = std.testing.allocator;
+    const a237 = "a" ** 237;
+    const a238 = "a" ** 238;
+    const em_dash = [_]u8{ 0xE2, 0x80, 0x94 }; // U+2014 EM DASH, 3 bytes
+    const emoji = [_]u8{ 0xF0, 0x9F, 0x98, 0x80 }; // U+1F600 GRINNING FACE, 4 bytes
+
+    // 237 ASCII bytes + em dash = exactly 240 bytes: keep everything.
+    {
+        const source = a237 ++ em_dash;
+        const got = try summary(gpa, source, "Fallback");
+        defer gpa.free(got);
+        try std.testing.expectEqual(@as(usize, 240), got.len);
+        try std.testing.expectEqualSlices(u8, source, got);
+        try std.testing.expect(std.unicode.utf8ValidateSlice(got));
+    }
+
+    // 238 ASCII bytes + em dash = 241 bytes: truncate to the 238 ASCII bytes.
+    {
+        const source = a238 ++ em_dash;
+        const got = try summary(gpa, source, "Fallback");
+        defer gpa.free(got);
+        try std.testing.expectEqual(@as(usize, 238), got.len);
+        try std.testing.expectEqualSlices(u8, a238, got);
+        try std.testing.expect(std.unicode.utf8ValidateSlice(got));
+    }
+
+    // 237 ASCII bytes + 4-byte emoji = 241 bytes: truncate to the 237 ASCII bytes.
+    {
+        const source = a237 ++ emoji;
+        const got = try summary(gpa, source, "Fallback");
+        defer gpa.free(got);
+        try std.testing.expectEqual(@as(usize, 237), got.len);
+        try std.testing.expectEqualSlices(u8, a237, got);
+        try std.testing.expect(std.unicode.utf8ValidateSlice(got));
+    }
+
+    // A paragraph already below the limit is preserved byte-for-byte.
+    {
+        const source = "A short paragraph that fits under the byte budget.";
+        const got = try summary(gpa, source, "Fallback");
+        defer gpa.free(got);
+        try std.testing.expectEqualStrings(source, got);
+        try std.testing.expect(std.unicode.utf8ValidateSlice(got));
+    }
+}
+
+test "two llms runs over identical input emit byte-identical output" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "content");
+    const em_dash = [_]u8{ 0xE2, 0x80, 0x94 };
+    const body = ("a" ** 238) ++ em_dash; // paragraph crosses byte 240 inside a scalar
+    const page = "---\nid: utf8-check\ntitle: Utf8 Check\nstatus: published\n---\n\n# Utf8 Check\n\n" ++ body ++ "\n";
+    try tmp.dir.writeFile(io, .{ .sub_path = "content/utf8-check.md", .data = page });
+
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/content", .{tmp.sub_path});
+    defer gpa.free(root);
+    const out_a = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/llms-a.txt", .{tmp.sub_path});
+    defer gpa.free(out_a);
+    const out_b = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/llms-b.txt", .{tmp.sub_path});
+    defer gpa.free(out_b);
+
+    var result_a = try run(io, gpa, .{ .content_root = root, .out_path = out_a, .quiet = true });
+    defer result_a.deinit();
+    try std.testing.expect(result_a.ok());
+    var result_b = try run(io, gpa, .{ .content_root = root, .out_path = out_b, .quiet = true });
+    defer result_b.deinit();
+    try std.testing.expect(result_b.ok());
+
+    const bytes_a = try readFileAlloc(io, Io.Dir.cwd(), out_a, gpa);
+    defer gpa.free(bytes_a);
+    const bytes_b = try readFileAlloc(io, Io.Dir.cwd(), out_b, gpa);
+    defer gpa.free(bytes_b);
+    try std.testing.expectEqualSlices(u8, bytes_a, bytes_b);
+    try std.testing.expect(std.unicode.utf8ValidateSlice(bytes_a));
 }
 
 test "llms export renders arbitrary-depth hierarchy recursively" {
