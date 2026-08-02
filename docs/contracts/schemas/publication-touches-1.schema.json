@@ -117,7 +117,6 @@
     },
     "input_common": {
       "type": "object",
-      "additionalProperties": false,
       "required": ["path", "bytes", "sha256", "format", "schema_version", "target"],
       "properties": {
         "path": { "type": "string", "minLength": 1 },
@@ -129,48 +128,51 @@
       }
     },
     "artifacts_input": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["path", "bytes", "sha256", "format", "schema_version", "target", "artifact_count"],
-      "properties": {
-        "path": { "const": "_boris/proof/artifacts.json" },
-        "bytes": { "type": "integer", "minimum": 0 },
-        "sha256": { "$ref": "#/$defs/sha256" },
-        "format": { "const": "boris-publication-artifacts" },
-        "schema_version": { "const": 1 },
-        "target": { "type": "string", "minLength": 1 },
-        "artifact_count": { "type": "integer", "minimum": 0 }
-      }
+      "allOf": [
+        { "$ref": "#/$defs/input_common" },
+        {
+          "type": "object",
+          "required": ["artifact_count"],
+          "properties": {
+            "path": { "const": "_boris/proof/artifacts.json" },
+            "format": { "const": "boris-publication-artifacts" },
+            "artifact_count": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
     },
     "checks_input": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["path", "bytes", "sha256", "format", "schema_version", "target", "check_count", "finding_count"],
-      "properties": {
-        "path": { "const": "_boris/proof/checks.json" },
-        "bytes": { "type": "integer", "minimum": 0 },
-        "sha256": { "$ref": "#/$defs/sha256" },
-        "format": { "const": "boris-publication-checks" },
-        "schema_version": { "const": 1 },
-        "target": { "type": "string", "minLength": 1 },
-        "check_count": { "const": 3 },
-        "finding_count": { "type": "integer", "minimum": 0 }
-      }
+      "allOf": [
+        { "$ref": "#/$defs/input_common" },
+        {
+          "type": "object",
+          "required": ["check_count", "finding_count"],
+          "properties": {
+            "path": { "const": "_boris/proof/checks.json" },
+            "format": { "const": "boris-publication-checks" },
+            "check_count": { "const": 3 },
+            "finding_count": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
     },
     "claims_input": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["path", "bytes", "sha256", "format", "schema_version", "target", "claim_count", "limitation_count"],
-      "properties": {
-        "path": { "const": "_boris/proof/claims.json" },
-        "bytes": { "type": "integer", "minimum": 0 },
-        "sha256": { "$ref": "#/$defs/sha256" },
-        "format": { "const": "boris-publication-claims" },
-        "schema_version": { "const": 1 },
-        "target": { "type": "string", "minLength": 1 },
-        "claim_count": { "const": 3 },
-        "limitation_count": { "const": 6 }
-      }
+      "allOf": [
+        { "$ref": "#/$defs/input_common" },
+        {
+          "type": "object",
+          "required": ["claim_count", "limitation_count"],
+          "properties": {
+            "path": { "const": "_boris/proof/claims.json" },
+            "format": { "const": "boris-publication-claims" },
+            "claim_count": { "const": 3 },
+            "limitation_count": { "const": 6 }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
     },
     "inputs": {
       "type": "object",
