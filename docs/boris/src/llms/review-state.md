@@ -54,7 +54,7 @@ The following observations do not constitute confirmed defects. They are surface
 
 - **Integration test for `run`:** The module has no end-to-end test against a fixture content tree. A minimal fixture (2–3 pages, one trunk/satellite pair) would cover the pipeline-to-publish path and serve as a regression baseline.
 - **`appendInline` unit test:** The escaping function handles five special characters and three control characters; none are independently tested. A table-driven test would close this gap.
-- **`summary` edge cases:** No test for documents without frontmatter delimiters, multi-line paragraphs, or exactly-240-character input.
+- **`summary` edge cases:** No test for documents without frontmatter delimiters or multi-line paragraphs; exactly-240-byte input and UTF-8-boundary truncation are now covered by inline tests.
 - **File size cap in `readFileAlloc`:** The `.unlimited` cap in `allocRemaining` means a pathologically large source file will allocate proportionally. A configurable or hard cap would make memory usage predictable.
 - **`publish` atomicity caveat:** The rename-based staging sequence is not atomic on all platforms (e.g., Windows prior to NTFS transaction support). A documented `// POSIX only` comment or a platform check would make this explicit.
 - **`renderPage` recursion depth:** v0.1 enforces max depth 2 at graph validation time, but `renderPage` does not independently enforce this. A future graph role that relaxes the depth constraint would silently allow deeper recursion without a corresponding guard here.

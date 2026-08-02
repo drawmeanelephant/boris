@@ -24,7 +24,7 @@ test "summary uses first body paragraph and falls back to title" {
 
 **Exercised:** Two cases of `summary`. No other function is tested here.
 
-**Evidence strength:** Directly demonstrated for the two specified inputs. Does not test paragraph truncation at 240 characters, multi-line paragraph joining, documents without frontmatter, or documents with only blank lines after the heading.
+**Evidence strength:** Directly demonstrated for the two specified inputs plus the 240-byte UTF-8-boundary truncation cases and the byte-identical repeated-generation run. Does not test multi-line paragraph joining, documents without frontmatter, or documents with only blank lines after the heading.
 
 ***
 

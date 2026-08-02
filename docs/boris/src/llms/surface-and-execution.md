@@ -101,18 +101,18 @@ Returns `page.title` if non-null, otherwise falls back to `page.id`. This is the
 fn summary(gpa: std.mem.Allocator, source: []const u8, fallback: []const u8) ![]u8
 ```
 
-Extracts a plain-text summary of up to 240 characters from a raw Markdown source string. The algorithm:
+Extracts a plain-text summary of up to 240 bytes from a raw Markdown source string. The algorithm:
 
 1. Strips the frontmatter block if the source begins with `---\n` — finds the closing `---\n` and uses only the text after it. If no closing delimiter is found, uses the entire source.
 2. Scans lines sequentially; skips blank lines before text is seen, and stops at the first blank line after text has been seen (paragraph boundary).
 3. Skips lines beginning with `#` (ATX headings).
 4. Accumulates non-blank, non-heading lines into a buffer, joining them with spaces.
-5. Truncates at 240 characters if exceeded.
+5. Truncates at 240 bytes if exceeded, stopping only at a valid UTF-8 scalar boundary so a multibyte character is never split.
 6. If no text was found, returns a `gpa.dupe` of `fallback`.
 
 The function allocates its output on `gpa`. Callers are responsible for freeing it (`defer gpa.free(text)` is used in `renderPage`). The frontmatter strip is a simple `std.mem.indexOfPos` scan — it does not validate YAML structure, interpret the frontmatter, or handle edge cases such as `---\r\n` line endings.
 
-**Test coverage (directly demonstrated):** One inline test exercises this function against two cases: a document with frontmatter + heading + paragraph (expected: paragraph text), and a document with frontmatter + heading only (expected: fallback string). These are the only test cases in the file.
+**Test coverage (directly demonstrated):** Inline tests exercise this function against: a document with frontmatter + heading + paragraph (expected: paragraph text), a document with frontmatter + heading only (expected: fallback string), exact 240-byte and 241-byte paragraphs that end or cross a UTF-8 scalar boundary (an em dash and a four-byte emoji), and a paragraph already below the limit preserved byte-for-byte. `utf8TruncateLen` returns the longest valid UTF-8 prefix no longer than the requested byte limit.
 
 ### `appendUrl`
 
