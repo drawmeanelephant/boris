@@ -176,6 +176,13 @@ result may be evidence for a named claim within its scope, but it does not
 become HTML, IR, RAG, or deployment metadata and it cannot silently certify an
 omitted projection.
 
+The future [Publication Touch Atlas](publication-touches.md) is downstream
+evidence indexing, not another publication or verification layer. It may link
+only records already declared by `artifacts.json`, `checks.json`, and
+`claims.json`; it must not invent source, phase, runtime, deployment, or
+transformation relationships. Its contract is drafted, implementation is not
+yet shipped, and no `touches.json` is currently emitted.
+
 ## Verification vocabulary and claims
 
 The following terms describe evidence. They are vocabulary, not a proof-pack
@@ -236,6 +243,7 @@ artifact or grammar detail.
 | Dropped/preserved metadata, assets, and reviewer decision | Migration-lab report/manifest/sidecar | Reviewed decision | No | Yes | No | Record the disposition; do not infer success from omission. |
 | Deployment environment and post-deploy behavior | External host/deployment owner | Observed externally | Yes | No | No | Local generation cannot verify it. |
 | Check result and claim status | The check’s artifact contract plus this vocabulary | Derived evidence | No | No | No | Name the check, scope, result, and limitation. |
+| Touch Atlas relationships | [`publication-touches.md`](publication-touches.md) | Derived index over existing evidence | No | No | No | Links existing evidence only; it does not create a new verification claim. |
 
 ## Placement examples
 

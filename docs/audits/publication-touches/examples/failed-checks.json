@@ -1,0 +1,441 @@
+{
+  "format": "boris-publication-touches",
+  "schema_version": 1,
+  "target": "public",
+  "inputs": {
+    "artifacts": {
+      "path": "_boris/proof/artifacts.json",
+      "bytes": 612,
+      "sha256": "28da562460ab639814da0a7274e8c064bae0628420b86ba89bfe386c972eaee6",
+      "format": "boris-publication-artifacts",
+      "schema_version": 1,
+      "target": "public",
+      "artifact_count": 5
+    },
+    "checks": {
+      "path": "_boris/proof/checks.json",
+      "bytes": 1420,
+      "sha256": "5a9b3253d31b29171413a84effb0c3259e0f662a1705b4bb3e64aa494c43880b",
+      "format": "boris-publication-checks",
+      "schema_version": 1,
+      "target": "public",
+      "check_count": 3,
+      "finding_count": 3
+    },
+    "claims": {
+      "path": "_boris/proof/claims.json",
+      "bytes": 1788,
+      "sha256": "575347ca9f8a47e84e744ed4480e375a71b4e0628941db4f2a26c392194d8f5c",
+      "format": "boris-publication-claims",
+      "schema_version": 1,
+      "target": "public",
+      "claim_count": 3,
+      "limitation_count": 6
+    }
+  },
+  "nodes": [
+    {
+      "kind": "target",
+      "id": "target",
+      "metadata": {
+        "target": "public"
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:index.html",
+      "metadata": {
+        "inventory_index": 0,
+        "path": "index.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:broken.html",
+      "metadata": {
+        "inventory_index": 1,
+        "path": "broken.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:_boris/search/search-index.json",
+      "metadata": {
+        "inventory_index": 2,
+        "path": "_boris/search/search-index.json",
+        "kind": "rendered-search",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:assets/site.css",
+      "metadata": {
+        "inventory_index": 3,
+        "path": "assets/site.css",
+        "kind": "theme-asset",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:assets/legacy.css",
+      "metadata": {
+        "inventory_index": 4,
+        "path": "assets/legacy.css",
+        "kind": "theme-asset",
+        "status": "omitted-by-plan",
+        "required": false
+      }
+    },
+    {
+      "kind": "check",
+      "id": "check:artifact-integrity",
+      "metadata": {
+        "check_index": 0,
+        "check_id": "artifact-integrity",
+        "status": "failed",
+        "coverage": "complete"
+      }
+    },
+    {
+      "kind": "check",
+      "id": "check:rendered-html",
+      "metadata": {
+        "check_index": 1,
+        "check_id": "rendered-html",
+        "status": "failed",
+        "coverage": "complete"
+      }
+    },
+    {
+      "kind": "check",
+      "id": "check:rendered-search",
+      "metadata": {
+        "check_index": 2,
+        "check_id": "rendered-search",
+        "status": "failed",
+        "coverage": "complete"
+      }
+    },
+    {
+      "kind": "finding",
+      "id": "finding:artifact-integrity:0",
+      "metadata": {
+        "finding_index": 0,
+        "check_id": "artifact-integrity",
+        "check_finding_index": 0,
+        "code": "ARTIFACT_DIGEST_MISMATCH",
+        "severity": "error",
+        "subject": {
+          "kind": "artifact",
+          "id": "broken.html",
+          "target": "public"
+        }
+      }
+    },
+    {
+      "kind": "finding",
+      "id": "finding:rendered-html:0",
+      "metadata": {
+        "finding_index": 1,
+        "check_id": "rendered-html",
+        "check_finding_index": 0,
+        "code": "HTML_FRAGMENT_MISSING",
+        "severity": "error",
+        "subject": {
+          "kind": "html-page",
+          "id": "index.html",
+          "target": "public"
+        }
+      }
+    },
+    {
+      "kind": "finding",
+      "id": "finding:rendered-search:0",
+      "metadata": {
+        "finding_index": 2,
+        "check_id": "rendered-search",
+        "check_finding_index": 0,
+        "code": "SEARCH_CONTENT_MISMATCH",
+        "severity": "error",
+        "subject": {
+          "kind": "rendered-search",
+          "id": "_boris/search/search-index.json",
+          "target": "public"
+        }
+      }
+    },
+    {
+      "kind": "claim",
+      "id": "claim:committed-artifacts-match-inventory",
+      "metadata": {
+        "claim_index": 0,
+        "claim_id": "committed-artifacts-match-inventory",
+        "status": "failed"
+      }
+    },
+    {
+      "kind": "claim",
+      "id": "claim:rendered-html-passed-declared-audit",
+      "metadata": {
+        "claim_index": 1,
+        "claim_id": "rendered-html-passed-declared-audit",
+        "status": "failed"
+      }
+    },
+    {
+      "kind": "claim",
+      "id": "claim:rendered-search-matches-selected-html",
+      "metadata": {
+        "claim_index": 2,
+        "claim_id": "rendered-search-matches-selected-html",
+        "status": "failed"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:target-local-only",
+      "metadata": {
+        "limitation_index": 0,
+        "limitation_id": "target-local-only",
+        "source": "docs/contracts/publication-checks.md#authority-and-transaction-boundary"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:no-deployment-verification",
+      "metadata": {
+        "limitation_index": 1,
+        "limitation_id": "no-deployment-verification",
+        "source": "docs/contracts/publication-model.md#verification-vocabulary-and-claims"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:no-accessibility-verification",
+      "metadata": {
+        "limitation_index": 2,
+        "limitation_id": "no-accessibility-verification",
+        "source": "docs/contracts/publication-model.md#projections"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:no-prose-quality-verification",
+      "metadata": {
+        "limitation_index": 3,
+        "limitation_id": "no-prose-quality-verification",
+        "source": "docs/contracts/publication-model.md#verification-vocabulary-and-claims"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:no-universal-reproducibility-claim",
+      "metadata": {
+        "limitation_index": 4,
+        "limitation_id": "no-universal-reproducibility-claim",
+        "source": "docs/contracts/publication-model.md#verification-vocabulary-and-claims"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:omitted-projections-not-certified",
+      "metadata": {
+        "limitation_index": 5,
+        "limitation_id": "omitted-projections-not-certified",
+        "source": "docs/contracts/publication-model.md#the-conductor-rule"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:index.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:broken.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:_boris/search/search-index.json"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:assets/site.css"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:assets/legacy.css"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:index.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:broken.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:_boris/search/search-index.json",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:assets/site.css",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:index.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:broken.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:_boris/search/search-index.json",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:index.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:broken.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "check-reported-finding",
+      "from": "check:artifact-integrity",
+      "to": "finding:artifact-integrity:0"
+    },
+    {
+      "kind": "check-reported-finding",
+      "from": "check:rendered-html",
+      "to": "finding:rendered-html:0"
+    },
+    {
+      "kind": "check-reported-finding",
+      "from": "check:rendered-search",
+      "to": "finding:rendered-search:0"
+    },
+    {
+      "kind": "check-supports-claim",
+      "from": "check:artifact-integrity",
+      "to": "claim:committed-artifacts-match-inventory"
+    },
+    {
+      "kind": "check-supports-claim",
+      "from": "check:rendered-html",
+      "to": "claim:rendered-html-passed-declared-audit"
+    },
+    {
+      "kind": "check-supports-claim",
+      "from": "check:rendered-search",
+      "to": "claim:rendered-search-matches-selected-html"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:target-local-only"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:no-deployment-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:no-accessibility-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:no-prose-quality-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:no-universal-reproducibility-claim"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:target-local-only"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:no-deployment-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:no-accessibility-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:no-prose-quality-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:no-universal-reproducibility-claim"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:target-local-only"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:no-deployment-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:no-accessibility-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:no-prose-quality-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:no-universal-reproducibility-claim"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:omitted-projections-not-certified"
+    }
+  ]
+}
