@@ -31,6 +31,3 @@ zig-out/
 
 # Takeout migration lab: real exports stay local and uncommitted.
 /tools/migration-lab/fixtures/takeout-intake/raw-local/
-
-# Freebuff desktop app database: local editor state, never tracked.
-/.freebuff/
