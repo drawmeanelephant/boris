@@ -1,0 +1,12 @@
+---
+title: A Satellite
+parent: index
+status: published
+---
+h2. Satellite
+
+p. This satellite page uses only the supported paragraph subset.
+
+h3. Subsection
+
+A second paragraph with a "link":https://example.test/docs and @code@.

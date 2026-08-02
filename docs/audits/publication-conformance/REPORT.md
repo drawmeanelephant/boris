@@ -1,18 +1,25 @@
-# Publication conformance evidence: C02, C03, C04, and C08
+# Publication conformance evidence: C01, C02, C03, C04, C05, C06, C07, C08
 
 Date: 2026-08-01
-Base: `afterparty` at `0ac7ace5df98dd9d370ce827862c2060642059df`
-Evidence branch: `codex/publication-conformance-fixtures`
-Pull request: #287
+Base: `afterparty` at `2c9d8a1`
+Evidence branch: `codex/publication-conformance-round-2`
+Pull request: draft (round 2)
+
+This round extends the executable evidence suite with C01 (Textile HTML), C05
+(layout precedence), C06 (cache/watch failure paths), and C07 (asset
+collisions and SVG policy). The C02/C03/C04/C08 evidence from the first round
+is unchanged and still passes.
 
 ## Authority and scope
 
 This is an evidence-and-fixture pass for the requested publication-conformance
 areas. Normative authority was resolved in this order: the relevant contracts
 under `docs/contracts/`, current executable behavior, focused tests, and the
-retained black-box evidence. No `src/` production behavior changed. The
-source change in `src/parser.zig` is test-only; `build.zig`, CI, the verifier,
-fixtures, snapshots, and report are verification infrastructure.
+retained black-box evidence. No `src/` production behavior changed; this
+branch touches only `scripts/verify-publication-conformance.sh`, the retained
+fixture trees under `docs/audits/publication-conformance/`, this report, and a
+changelog fragment. No production code was repaired — confirmed defects are
+recorded with remediation cards only.
 
 The material-observation labels below are limited to: `Confirmed defect`,
 `Likely defect`, `Insufficient evidence`, `Documented limitation`, and
@@ -33,8 +40,13 @@ ordinary test step. The verifier:
 
 - reads retained fixtures and the pipe-separated
   `c02-includes-fragments/depth-cases.psv` declaration;
-- generates only the depth-32 and depth-33 source trees under the fixed,
-  ignored `.zig-cache/publication-conformance/` tree;
+- generates the depth-32/depth-33 include chains, the C05 incremental
+  workspace and C06 cache/watch workspaces (each scenario reuses one dedicated
+  output directory: an `--incremental` first publication, then `--incremental`
+  rebuilds into that same target), a bounded watch-lifecycle harness that
+  terminates via SIGTERM and is reaped in the exit trap, and C07
+  SVG/collision trees under the fixed, ignored
+  `.zig-cache/publication-conformance/` tree;
 - captures stdout and stderr separately and asserts every exit code;
 - compares successful HTML, sitemap, RSS, and IR artifacts with checked-in
   goldens or repeat artifacts;
@@ -59,9 +71,13 @@ absent. This is observed behavior, not a production change.
 
 | Area | Retained declaration or fixture | Verifier cases |
 |---|---|---|
+| C01 Textile HTML | `c01-textile/content/`, `c01-textile/layout.html`, page goldens, 12 case dirs with `expected/stderr.txt` | `c01-valid`, `c01-valid-jobs4`, `c01-valid-incr`, `c01-valid-incr-jobs4`, `c01-*` failure matrix |
 | C02 includes/fragments | `c02-includes-fragments/cases/` plus pipe-separated `depth-cases.psv` | `c02-01`–`c02-09`, `c02-depth-32`, `c02-depth-33` |
 | C03 sitemap | `c03-sitemap/content/`, sitemap golden, CLI snapshots | `c03-trailing`, `c03-no-trailing`, `c03-invalid-*` |
 | C04 RSS | `c04-rss/content/`, feed and CLI snapshots | `c04-feed-2/3/4`, `c04-missing-*`, `c04-invalid-*` |
+| C05 layout precedence | `c05-layout-precedence/content/`, marker layouts, managed theme, failure snapshots | `c05-explicit`, `c05-rule-id`, `c05-rule-glob`, `c05-rule-role`, `c05-theme`, `c05-multi`, `c05-missing-layout`, `c05-missing-marker`, `c05-duplicate-marker`, `c05-ambiguous-glob`, `c05-incr-base/win/lose` (one reused target) |
+| C06 cache/watch | `c06-cache-watch/content/`, `theme/`, `layout.html`, `dup.html`, failure snapshots | `c06-noop`, `c06-source-edit`, `c06-source-delete`, `c06-include-edit`, `c06-include-missing`, `c06-parse-failed`, `c06-layout-dup`, `c06-theme`, `c06-content-asset`, `c06-sitemap`, `c06-search`, `c06-watch`, `c06-watch-fail`, `c06-watch-recover` |
+| C07 assets/SVG | `c07-asset-collisions/content/`, `layout.html`, 13 snapshots | `c07-svg-*` (9 constructs), `c07-valid`, `c07-valid-jobs4`, `c07-valid-incr`, `c07-theme-page`, `c07-symlink`, `c07-traversal`, `c07-sitemap` |
 | C08 parser/Unicode | `c08-parser-unicode/` plus repository invalid-UTF-8 corpus | `c08-valid`, `c08-invalid-*` |
 
 ## C02 — includes and heading fragments
@@ -209,9 +225,216 @@ unreachable under the closed eight-key grammar: duplicate recognized keys fail
 before 32 and unknown keys fail immediately. That is **Insufficient evidence**,
 not a confirmed parser defect.
 
+## C01 — valid Textile HTML
+
+Contract owner: `docs/contracts/textile-compatibility.md` (the bounded
+compatibility subset only; no complete-Textile claim). Frontmatter stays
+Boris-owned, and `--textile` is an explicit opt-in mode.
+
+| Case ID | Contract owner | Fixture / declaration | Command | Expected exit | Expected artifact / diagnostic | Repeat | Classification | Remaining gap |
+|---|---|---|---|---|---|---|---|---|
+| `c01-valid` | textile-compatibility | `c01-textile/content` | `--textile --html … --quiet` | 0 | `expected/index.html` + `expected/guides-satellite.html` goldens | jobs 1 == 4; clean == incremental | Non-issue / packet drift | — |
+| `c01-valid-jobs4` | textile-compatibility | same | `--textile --html … --jobs 4 --quiet` | 0 | tree equal to `c01-valid` | byte-identical | Non-issue / packet drift | — |
+| `c01-valid-incr` | textile-compatibility | same | `--textile --html … --incremental --quiet` | 0 | tree equal to `c01-valid` (minus `.boris-cache`) | byte-identical | Non-issue / packet drift | — |
+| `c01-frontmatter` | textile-compatibility + frontmatter | `cases/frontmatter/content` | `--textile --html …` | 1 | exact `EFRONTMATTER` snapshot; no target | — | Non-issue / packet drift | — |
+| `c01-malformed-delimiter` | textile-compatibility | `cases/malformed-delimiter/content` | `--textile --html …` | 1 | exact `ETEXTILE` snapshot; no target | — | Non-issue / packet drift | — |
+| `c01-malformed-incomplete-link` | textile-compatibility | `cases/malformed-incomplete-link/content` | `--textile --html …` | 1 | exact `ETEXTILE` snapshot; no target | — | Non-issue / packet drift | — |
+| `c01-unsafe-link` | textile-compatibility | `cases/unsafe-link/content` | `--textile --html …` | 1 | exact `ETEXTILE` snapshot; no target | — | Non-issue / packet drift | — |
+| `c01-unsupported-attributes` | textile-compatibility | `cases/unsupported-attributes/content` | `--textile --html …` | 1 | exact `ETEXTILE` snapshot; no target | — | Non-issue / packet drift | — |
+| `c01-unsupported-blockcode` | textile-compatibility | `cases/unsupported-blockcode/content` | `--textile --html …` | 1 | exact `ETEXTILE` snapshot; no target | — | Non-issue / packet drift | — |
+| `c01-unsupported-notextile` | textile-compatibility | `cases/unsupported-notextile/content` | `--textile --html …` | 1 | exact `ETEXTILE` snapshot; no target | — | Non-issue / packet drift | — |
+| `c01-unsupported-table` | textile-compatibility | `cases/unsupported-table/content` | `--textile --html …` | 1 | exact `ETEXTILE` snapshot; no target | — | Non-issue / packet drift | — |
+| `c01-include-in-textile` | textile-compatibility | `cases/include-in-textile/content` | `--textile --html …` | 1 | exact `ETEXTILE` snapshot; no target | — | Non-issue / packet drift | — |
+| `c01-mixed` | textile-compatibility | `cases/mixed/content` (`a.textile` + `b.md`) | `--textile --html …` | 1 | exact mix-mode snapshot; no target | — | Non-issue / packet drift | — |
+| `c01-mode-markdown-flag` | textile-compatibility | `cases/mode-markdown-flag/content` (`.md` + `--textile`) | `--textile --html …` | 1 | exact mix-mode snapshot; no target | — | Non-issue / packet drift | — |
+| `c01-mode-textile-noflag` | textile-compatibility | `cases/mode-textile-noflag/content` (`.textile` without flag) | `--html …` | 1 | exact mix-mode snapshot; no target | — | Non-issue / packet drift | — |
+
+The success tree covers headings, paragraphs, emphasis (`*`, `_`, `+`, `-`),
+inline code, links (https, mailto, fragment, in-tree `./` destination),
+Unicode, HTML escaping, blockquote, ul/ol, and satellite (parent) pages.
+Proven: `--textile` does not change Markdown mode output, does not widen the
+accepted frontmatter grammar (unknown key still `EFRONTMATTER`), rejects Boris
+macros in Textile mode, and the bounded subset rejects tables, blockcode,
+notextile, heading attributes, malformed delimiters, and unsafe/incomplete
+link destinations. Jobs 1 vs 4 and clean vs incremental byte equality hold.
+
+### C01 classification
+
+No **Confirmed defect** or **Likely defect**. Unsupported Textile constructs
+fail with exit 1 (content class) and exact diagnostics. Remaining gap: the
+Textile subset is bounded; constructs outside it are rejected, and full
+Textile-language compatibility is explicitly not claimed.
+
+## C05 — layout precedence
+
+Contract owner: `docs/contracts/templating-and-themes.md` §4.2 (exact id > most-specific glob > role > fallback; equal-specificity globs are ambiguous), `docs/contracts/cli.md` (layout flags, exit classes), `docs/contracts/multi-target-isolated-output.md` (per-target isolation).
+
+| Case ID | Contract owner | Fixture / declaration | Command | Expected exit | Expected artifact / diagnostic | Repeat | Classification | Remaining gap |
+|---|---|---|---|---|---|---|---|---|
+| `c05-explicit` | templating-and-themes | `layouts/exact.html` | `--html … --html-layout exact.html --quiet` | 0 | every page carries `C05-EXACT` marker | — | Non-issue / packet drift | — |
+| `c05-rule-id` | templating-and-themes | `layouts/global.html` + `target.html` | `… --html-layout global.html --layout-rule default id:reference/config target.html --quiet` | 0 | `reference/config.html` `C05-TARGET`; `index.html` `C05-GLOBAL` | — | Non-issue / packet drift | — |
+| `c05-rule-glob` | templating-and-themes | `glob.html`, `deep.html` | `… --layout-rule default glob:guides/* glob.html --layout-rule default glob:reference/deep/* deep.html --quiet` | 0 | g1 `C05-GLOB`, deep `C05-DEEP`, config `C05-GLOBAL` | — | Non-issue / packet drift | — |
+| `c05-rule-role` | templating-and-themes | `role.html` | `… --layout-rule default role:trunk role.html --quiet` | 0 | `index.html` `C05-ROLE`; satellite `C05-GLOBAL` | — | Non-issue / packet drift | — |
+| `c05-theme` | templating-and-themes | `theme/layouts/main.html` | `… --theme c05-layout-precedence/theme --quiet` | 0 | every page `C05-THEME` | — | Non-issue / packet drift | — |
+| `c05-multi` | multi-target-isolated-output | two targets | `… --target one=… --target two=… --target-layout one=exact.html --target-layout two=global.html --quiet` | 0 | `one/index.html` `C05-EXACT`; `two/index.html` `C05-GLOBAL` | — | Non-issue / packet drift | — |
+| `c05-missing-layout` | cli.md (exit 3) | `layouts/nope.html` absent | `… --html-layout nope.html` | 3 | exact `expected/missing-layout.stderr`; no target | — | Non-issue / packet drift | — |
+| `c05-missing-marker` | templating-and-themes | `layouts/nomarker.html` | `… --html-layout nomarker.html` | 1 | exact `expected/missing-marker.stderr`; no target | — | Non-issue / packet drift | — |
+| `c05-duplicate-marker` | templating-and-themes | `layouts/dupmarker.html` | `… --html-layout dupmarker.html` | 1 | exact `expected/duplicate-marker.stderr`; no target | — | Non-issue / packet drift | — |
+| `c05-ambiguous-glob` | templating-and-themes §4.2 | two equal-specificity globs | `… --html-layout global.html --layout-rule default glob:reference/* glob.html --layout-rule default glob:*/config target.html` | 2 | exact `expected/ambiguous-glob.stderr` (first 2 lines) | — | Non-issue / packet drift | output-path line trimmed from snapshot |
+| `c05-incr-base` | templating-and-themes | generated `layouts/{global,target,glob}.html` | `--incremental` first publication into one reused target; `id:reference/config` exact beats `glob:reference/*` | 0 | `reference/config.html` `C05-TARGET`; `index.html` `C05-GLOBAL`; `.boris-cache/manifest.json` present | — | Non-issue / packet drift | — |
+| `c05-incr-win` | templating-and-themes | edit winning `target.html` in place (same path) | `--incremental` rebuild into the same target | 0 | `reference/config.html` `C05-TARGET-V2`; `index.html` byte-identical to baseline | winning rebuild vs baseline index | Non-issue / packet drift | — |
+| `c05-incr-lose` | templating-and-themes | edit only losing `glob.html` in place (same path) | `--incremental` rebuild into the same target | 0 | `reference/config.html` still `C05-TARGET-V2`, byte-identical to `c05-incr-win`; `index.html` unchanged | winning vs losing rebuild config | Non-issue / packet drift | — |
+
+### C05 classification
+
+No **Confirmed defect** or **Likely defect**. Precedence, ambiguity, marker
+validation, theme sugar, and multi-target isolation all match contract text.
+The `ambiguous-glob` snapshot deliberately retains only the first two lines;
+the discarded `configured targets` block embeds the run's output directory, so
+it is **Documented limitation** (unstable path) rather than evidence loss.
+
+## C06 — cache and watch failure paths
+
+Contract owner: `docs/contracts/watch-mode.md` §5 (content validation failures keep the watcher alive for author recovery), `docs/contracts/cli.md` (exit classes), `docs/contracts/diagnostics.md`, `docs/contracts/html-output.md`, `docs/contracts/content-local-assets.md`, `docs/contracts/xml-sitemap.md`, `docs/contracts/rendered-search.md`.
+
+| Case ID | Contract owner | Fixture / declaration | Command | Expected exit | Expected artifact / diagnostic | Repeat | Classification | Remaining gap |
+|---|---|---|---|---|---|---|---|---|
+| `c06-noop` | html-output | `c06-cache-watch/content` | `--incremental` first publication, then two unchanged `--incremental` rebuilds into the same target | 0 | payload byte-identical to baseline snapshot; manifest present; two rebuild manifests byte-identical | payload + manifest | Non-issue / packet drift | — |
+| `c06-source-edit` | html-output | edit `guides/g1.md` | `--incremental` baseline, then `--incremental` rebuild into same target | 0 | `g1.html` contains new body; `index.html` sibling byte-identical | sibling page | Non-issue / packet drift | — |
+| `c06-source-delete` | html-output | delete `guides/g1.md` | `--incremental` baseline, then `--incremental` rebuild into same target | 0 | stale `guides/g1.html` removed | — | Non-issue / packet drift | stale prune needs prior manifest (see below) |
+| `c06-include-edit` | html-output | edit `includes/frag.md` | `--incremental` baseline, then `--incremental` rebuild into same target | 0 | `index.html` contains `Fragment v2` | — | Non-issue / packet drift | — |
+| `c06-include-missing` | diagnostics | delete `includes/frag.md` | fresh isolated target | 1 | exact `expected/include-missing.stderr`; no target | — | Non-issue / packet drift | isolated failure, not cache evidence |
+| `c06-parse-failed` | diagnostics | add `bad.md` with unknown key | fresh isolated target | 1 | exact `expected/parse-failed.stderr`; no target | — | Non-issue / packet drift | isolated failure, not cache evidence |
+| `c06-layout-dup` | templating-and-themes | `dup.html` | fresh isolated target | 1 | exact `expected/layout-dup-marker.stderr`; no target | — | Non-issue / packet drift | isolated failure, not cache evidence |
+| `c06-theme` | content-local-assets | edit `theme/assets/theme.css` | `--incremental` baseline with `--theme`, then `--incremental` rebuild into same target | 0 | output `assets/theme.css` changes | — | Non-issue / packet drift | — |
+| `c06-content-asset` | content-local-assets | edit `content/index.assets/style.css` | `--incremental` baseline, then `--incremental` rebuild into same target | 0 | output `index.assets/style.css` changes | — | Non-issue / packet drift | — |
+| `c06-sitemap` | xml-sitemap | `status: draft` on `g1.md` | `--incremental` baseline, then `--incremental` rebuild into same target | 0 | sitemap replaced; draft page absent | — | Non-issue / packet drift | — |
+| `c06-search` | rendered-search | body edit on `index.md` | `--incremental` baseline, then `--incremental` rebuild into same target | 0 | `_boris/search/search-index.json` changes | — | Non-issue / packet drift | — |
+| `c06-watch` | watch-mode | `watch --html …` | start, edit source, SIGTERM | 0 | initial build; observed rebuild; clean exit 0 | — | Non-issue / packet drift | — |
+| `c06-watch-fail` | watch-mode §5 | delete include while watching | watch, then delete | 1 (unrecoverable) | `error: rebuild failed with unrecoverable I/O error: IncludeFailed`; watcher exits | — | **Confirmed defect** (see card) | — |
+| `c06-watch-recover` | watch-mode | restore include, watch again | watch | 0 | corrected rebuild visible; clean SIGTERM exit 0 | — | Non-issue / packet drift | — |
+
+### C06 classification
+
+All cache, stale-removal, sitemap, search, and clean watch behaviors match
+contract text on the exercised paths. One **Confirmed defect**: a failed
+include rebuild kills the watcher instead of keeping it alive for author
+recovery (see remediation card W1). The watch tests are bounded (20 s
+worst-case waits), terminate via SIGTERM through the existing watcher
+shutdown path, and the exit trap now waits on every retained watcher PID so
+no background Boris process survives an assertion failure.
+
+The executable cases distinguish **clean rebuild behavior**, **incremental
+mode first publication** (the `-base` run: renders every page and writes
+`.boris-cache/manifest.json`), **incremental rebuild using the prior
+target/cache** (the `-reb` run into the same directory, asserted by the
+prior-manifest check inside the rebuild helper), and **watch behavior**. The
+source-delete case is deliberately an incremental baseline followed by an
+incremental rebuild: stale HTML pruning operates on the prior manifest, so
+a first incremental publication without a prior manifest would not prune
+(observed; **Documented limitation**, not claimed as evidence). Failure-only
+cases (missing include, bad frontmatter, duplicate layout marker) run on
+fresh isolated targets and are not cited as cache-invalidation evidence.
+
+## C07 — asset collisions and SVG policy
+
+Contract owner: `docs/contracts/content-local-assets.md` §5 (EASSET content class; rejected SVG never emitted/inventoried; symlink and traversal prohibition), `docs/contracts/html-output.md`, theme asset inventory (theme.zig), `docs/contracts/xml-sitemap.md`, `docs/contracts/rendered-search.md`, and the SVG policy in `docs/changelog.d/262-active-svg-assets.md` (bounded construct list — no browser-security certification claim).
+
+| Case ID | Contract owner | Fixture / declaration | Command | Expected exit | Expected artifact / diagnostic | Repeat | Classification | Remaining gap |
+|---|---|---|---|---|---|---|---|---|
+| `c07-svg-script` | SVG policy | generated `guides/intro.assets/t.svg` `<script>` | `--html …` | 3 | exact `expected/svg-script.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
+| `c07-svg-event-handler` | SVG policy | `onload` attribute | `--html …` | 3 | exact `expected/svg-event-handler.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
+| `c07-svg-javascript-url` | SVG policy | `javascript:` href | `--html …` | 3 | exact `expected/svg-javascript-url.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
+| `c07-svg-foreignobject` | SVG policy | `<foreignObject>` | `--html …` | 3 | exact `expected/svg-foreignobject.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
+| `c07-svg-iframe` | SVG policy | `<iframe>` | `--html …` | 3 | exact `expected/svg-iframe.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
+| `c07-svg-object` | SVG policy | `<object>` | `--html …` | 3 | exact `expected/svg-object.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
+| `c07-svg-doctype` | SVG policy | `<!DOCTYPE …>` | `--html …` | 3 | exact `expected/svg-doctype.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
+| `c07-svg-style-import` | SVG policy | `<style>@import url(…)</style>` | `--html …` | 3 | exact `expected/svg-style-import.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
+| `c07-svg-animate-onload` | SVG policy | `animate attributeName="onload"` | `--html …` | 3 | exact `expected/svg-animate-onload.stderr`; no target | — | **Confirmed defect** (see card S1) | — |
+| `c07-valid` | SVG policy | inert Unicode/entity SVG | `--html … --quiet` | 0 | byte-identical copy; present in `_boris/proof/artifacts.json` | jobs 1 == 4; clean == incremental | Non-issue / packet drift | — |
+| `c07-theme-page` | theme.zig AssetCollision | page `assets/index.md` + theme `assets/index.html` | `--theme …` | 1 | exact `expected/theme-page-collision.stderr`; no target | — | Non-issue / packet drift | — |
+| `c07-symlink` | content-local-assets | symlinked `link.svg` | `--html …` | 1 | exact `expected/symlink-asset.stderr`; no target | — | Non-issue / packet drift | skipped if host cannot `ln -s` |
+| `c07-traversal` | content-local-assets | `![alt](../secret.png)` | `--html …` | 1 | exact `expected/traversal-image.stderr`; no target | — | Non-issue / packet drift | — |
+| `c07-sitemap` | xml-sitemap | `--sitemap-path guides/intro.html` | `--sitemap-path guides/intro.html --site-url …` | 2 | exact `expected/sitemap-content-collision.stderr` (first 2 lines) | — | Non-issue / packet drift | output-path line trimmed from snapshot |
+
+### C07 classification
+
+Collision ownership (page vs theme asset, sitemap vs page, symlink,
+traversal) matches contract text and fails closed with no misleading
+inventory. Accepted inert SVGs are copied byte-identically, inventoried, and
+jobs/incremental-equal. One **Confirmed defect**: `EASSET`/`AssetUnsafeSvg`
+rejections exit 3 (I/O class) instead of the content-class exit 1 required by
+`content-local-assets.md` §5 and `cli.md` (see remediation card S1). The SVG
+policy is recorded as the bounded construct list; no browser-security
+certification is claimed. Structurally unreachable collisions (two theme
+assets to one path, content asset vs page output, `_boris/` reserved paths)
+are **Documented limitation** of the exact-equality model, not defects.
+
 ## Findings and remaining gaps
 
-The three current follow-ups remain exactly classified:
+The two new confirmed defects in this round are W1 (C06) and S1 (C07),
+followed by their remediation cards. The first-round follow-ups remain
+classified as before.
+
+### Remediation card W1 — watcher exits on failed include rebuild
+
+- **Title:** `--watch` terminates on a failed include rebuild instead of
+  keeping the watcher alive for author recovery.
+- **Smallest reproduction:** `boris watch --html --input <content with
+  {{include includes/frag.md}}> …`; wait for the initial build; delete
+  `content/includes/frag.md`; the watcher prints `error: rebuild failed with
+  unrecoverable I/O error: IncludeFailed` and exits (rc 1). Retained as
+  verifier case `c06-watch-fail`.
+- **Contract expectation:** `docs/contracts/watch-mode.md` §5 requires content
+  validation failures (including unresolved includes) to keep the watcher
+  running so the author can fix the source and observe the corrected rebuild.
+- **Observed behavior:** `IncludeFailed` is not in the recoverable-error set
+  (`isRecoverableBuildError` in `src/watch.zig`), so the watch loop treats it
+  as an unrecoverable I/O error and terminates the process.
+- **Affected files / subsystem:** `src/watch.zig` (recoverable-error
+  classification); watch-mode CLI path in `src/main.zig`.
+- **Smallest plausible fix boundary:** add `IncludeFailed` (and the sibling
+  content-validation failures already recoverable in build mode, if the
+  contract owns them) to the watch-mode recoverable set, keep watching, and
+  log the failed rebuild so the corrected-rebuild path (`c06-watch-recover`)
+  is reachable without a process restart.
+- **Required regression:** `c06-watch-fail` must change from "exits rc 1" to
+  "keeps watching and emits a rebuild-failure diagnostic", and
+  `c06-watch-recover` must work in the same watcher session.
+- **Explicit exclusions:** this card does not claim whole-tree rollback,
+  cross-volume atomicity, or concurrent-reader atomicity. It covers only the
+  watcher-lifetime contract.
+
+### Remediation card S1 — active-SVG rejection exits 3 instead of 1
+
+- **Title:** `EASSET`/`AssetUnsafeSvg` content failures exit 3 (I/O class)
+  instead of the content-class exit 1.
+- **Smallest reproduction:** publish any content-local SVG in the bounded
+  policy's rejected set (e.g. `<script>`, `onload`, `javascript:` URL,
+  `<foreignObject>`, `<iframe>`, `<object>`, DOCTYPE, `@import`, or
+  `animate attributeName="on*"`); the run exits 3 with
+  `one or more HTML targets failed due to I/O or a system error`. Retained as
+  verifier cases `c07-svg-*`.
+- **Contract expectation:** `docs/contracts/content-local-assets.md` §5 and
+  `docs/contracts/cli.md` classify `EASSET` as a content validation failure
+  (exit 1), and rejected SVG must never be emitted or inventoried.
+- **Observed behavior:** `AssetUnsafeSvg` is missing from the content-error
+  switch in `mapHtmlError` (`src/main.zig`), so the active-SVG diagnostic
+  exits 3 and adds a misleading "I/O or system error" line to stderr.
+- **Affected files / subsystem:** `src/main.zig` (`mapHtmlError`); exit-class
+  mapping shared with other `EASSET` content errors.
+- **Smallest plausible fix boundary:** add `AssetUnsafeSvg` to the
+  content-error arm of `mapHtmlError` so `EASSET` content failures exit 1
+  without the I/O-class summary line; diagnostics and rejection behavior stay
+  unchanged.
+- **Required regression:** every `c07-svg-*` case must exit 1 with the exact
+  retained diagnostic (dropping only the I/O summary line), and rejected SVG
+  must remain absent from output and inventory.
+- **Explicit exclusions:** the bounded SVG policy itself is not under review;
+  this card changes only the exit class and diagnostic wrapper, not the set of
+  accepted or rejected constructs, and makes no browser-security claim.
+
+The first-round follow-ups remain exactly classified:
 
 1. **Insufficient evidence — include expansion budgets lack normative numeric
    ownership.** Assign contract ownership to the existing byte and expansion
@@ -223,41 +446,54 @@ The three current follow-ups remain exactly classified:
    errors return the required usage exit but currently name `--input`;
    improving `findBadArg` is separate from publication output conformance.
 
-No item above is inflated into a **Confirmed defect** or **Likely defect**.
+No first-round item is inflated into a **Confirmed defect** or **Likely
+defect**; the two confirmed defects this round are W1 and S1 above, with
+remediation cards and no implementation in this branch.
 
 ## Reproduction and validation record
 
 The complete verification set was run from the repository root with
-repository-relative paths. Final results:
+repository-relative paths on the round-2 branch. Final results:
 
 | Command | Result |
 |---|---|
-| `zig fmt --check build.zig src/*.zig` | Exit 1 because the same pre-existing files are unformatted on the base worktree: `src/apex.zig`, `src/artifact_invariants.zig`, `src/hardening_test.zig`, `src/harness.zig`, `src/layout_select_hostile_test.zig`, `src/page.zig`, `src/pipeline.zig`, `src/rss_date.zig`, `src/svg_policy.zig`, `src/target.zig`, `src/unicode_policy.zig`, `src/watch.zig`; touched `build.zig` and `src/parser.zig` pass. |
-| `zig build test-publication-conformance` | Pass; every C02/C03/C04/C08 case and repeat assertion passed. |
-| `zig build test --summary all` | Pass; 80/80 steps, 5,452/5,452 tests. |
-| `zig build --summary all` | Pass; 9/9 steps. |
+| `zig build test-publication-conformance` | Pass; every C01–C08 case, including the round-2 C01/C05/C06/C07 matrix and watch lifecycle, passed. |
+| `zig build test-publication-artifacts --summary all` | Pass. |
+| `zig build test-publication-checks --summary all` | Pass. |
+| `zig build test --summary all` | Pass; full unit suite. |
+| `zig build --summary all` | Pass. |
 | `./scripts/release-gate.sh` | Pass; `RELEASE GATE PASSED`. |
-| `git diff --check` | Exit 0; no whitespace errors (this worktree also printed a local fsmonitor IPC warning). |
+| `git diff --check` | Exit 0; no whitespace errors. |
 
 Additional required checks passed:
 
-- `zig test src/parser.zig`: 75/75 tests passed, including the diagnostic-detail
-  coverage added for this review.
-- A deliberately changed C02 golden made the verifier fail at `c02-01` with
-  `artifact mismatch`; restoring it made the verifier pass again.
-- Two standalone verifier runs both exited 0 and their complete outputs were
-  byte-identical under `cmp`.
-- A clean detached worktree at the committed revision passed
-  `zig build test-publication-conformance`.
-- `git diff --name-only origin/afterparty...HEAD` reports 76 changed files,
-  below the 100-file review limit. No generated output tree is tracked, and
-  the verifier and release-gate temporary trees are cleaned after validation.
-- No production behavior changed; the only `src/` changes are parser tests.
-
-The formatter command reports the same pre-existing unformatted files on the
-base worktree; touched `build.zig` and `src/parser.zig` are formatted and no
-formatter-only production changes are included.
-
-PR #286 merged as `0ac7ace5df98dd9d370ce827862c2060642059df`. This existing
-branch was rebased onto that exact `afterparty` tip before the final validation
-and push.
+- A deliberately modified golden (C01 `expected/index.html`) made the verifier
+  fail at the `c01-valid` golden comparison; restoring the golden returned it
+  to passing.
+- Deliberately tampered C05/C06 assertions fail the verifier: editing a C05
+  layout marker expectation and a C06 manifest-existence assertion both
+  stopped the run at the first mismatch; restoring them returned it to
+  passing.
+- Every claimed incremental sequence visibly reuses one output directory:
+  each C06 scenario asserts the prior `.boris-cache/manifest.json` exists in
+  the same `--html-dir` before each rebuild, and the C05 sequence rebuilds
+  `c05-incr` three times with no fresh directory.
+- No watcher process remains after a forced verifier failure: the exit trap
+  sends SIGTERM and then `wait`s on every retained watcher PID before
+  removing the workspace (verified with a forced mid-watch assertion).
+- Two consecutive accepted runs of the whole verifier exited 0 and produced
+  byte-identical captured run output under `cmp` (the watch tests are the only
+  timing-sensitive section and are bounded to 20 s worst case with SIGTERM
+  shutdown; the generated tree is removed by the exit trap, so determinism is
+  proven on the captured stdout/stderr, which embeds no timestamps or paths).
+- No generated output tree is tracked: every generated fixture lives under the
+  fixed ignored `.zig-cache/publication-conformance/` tree, which the verifier
+  removes on exit (including failure), and the watch SIGTERM path shuts down
+  cleanly.
+- The verifier ran successfully from a clean detached checkout of the branch.
+- No production behavior changed; no `src/` files were touched. The branch
+  changes only `scripts/verify-publication-conformance.sh`, the
+  `docs/audits/publication-conformance/{c01,c05,c06,c07}-*/` fixture trees,
+  this report, and the round-2 changelog fragment.
+- The two confirmed defects (W1, S1) are recorded above with remediation
+  cards and were deliberately **not** repaired in this branch.

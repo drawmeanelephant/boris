@@ -1,0 +1,1 @@
+error: ETEXTILE: content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode [Use Markdown-only input by default, or pass --textile for a .textile-only tree]

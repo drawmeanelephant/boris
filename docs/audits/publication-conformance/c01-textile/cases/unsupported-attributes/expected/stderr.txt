@@ -1,0 +1,1 @@
+error: ETEXTILE: t.textile:1:1: malformed heading or unsupported Textile heading attributes/CSS [Use only the bounded Textile compatibility subset]

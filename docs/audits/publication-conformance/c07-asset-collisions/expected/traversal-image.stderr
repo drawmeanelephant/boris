@@ -1,0 +1,2 @@
+error: EASSET: guides/intro.md:4:1: invalid or out-of-tree content-local image path: ../secret.png [Use a relative path under this page's <stem>.assets/ tree; no absolute paths, .., or backslashes]
+error: target 'default' compilation failed: AssetFailed

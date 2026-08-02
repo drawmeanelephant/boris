@@ -1,0 +1,1 @@
+error: ETEXTILE: t.textile:1:3: unclosed Textile phrase modifier [Use only the bounded Textile compatibility subset]

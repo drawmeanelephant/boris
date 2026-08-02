@@ -1,0 +1,7 @@
+---
+title: Inc
+---
+
+h1. Includes
+
+{{include includes/frag.md}}

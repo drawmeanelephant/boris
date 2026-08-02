@@ -1,0 +1,3 @@
+error: EASSET: guides/intro.assets/t.svg:1:1: content-local SVG contains active content: SVG javascript: URL [Remove the named active construct or publish an inert SVG; Boris does not sanitize assets]
+error: target 'default' compilation failed: AssetUnsafeSvg
+error: one or more HTML targets failed due to I/O or a system error

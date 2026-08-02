@@ -1,0 +1,1 @@
+error: ETEXTILE: index.textile:7:1: Boris macros, wiki links, and components are unsupported in Textile mode [Use only the bounded Textile compatibility subset]

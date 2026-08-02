@@ -1,0 +1,1 @@
+error: ETEXTILE: t.textile:1:5: Textile link destination is missing or unsafe [Use only the bounded Textile compatibility subset]
