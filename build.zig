@@ -232,6 +232,21 @@ pub fn build(b: *std.Build) void {
     );
     test_publication_touches_step.dependOn(&run_publication_touches_tests.step);
 
+    // --- Proof Pack presentation derived from the committed evidence chain ---
+    const publication_proof_pack_mod = b.createModule(.{
+        .root_source_file = b.path("src/publication_proof_pack.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const publication_proof_pack_tests = b.addTest(.{ .root_module = publication_proof_pack_mod });
+    const run_publication_proof_pack_tests = b.addRunArtifact(publication_proof_pack_tests);
+    run_publication_proof_pack_tests.setCwd(b.path("."));
+    const test_publication_proof_pack_step = b.step(
+        "test-publication-proof-pack",
+        "Run deterministic Proof Pack parser, renderer, and transaction tests",
+    );
+    test_publication_proof_pack_step.dependOn(&run_publication_proof_pack_tests.step);
+
     // Private seeded generator harness. It is opt-in because it launches the
     // installed Boris binary against a deterministic poisoned fixture.
     const testdata_generator_mod = b.createModule(.{
@@ -291,6 +306,26 @@ pub fn build(b: *std.Build) void {
         "Run the private mild-poison publication Touch Atlas evidence harness",
     );
     test_publication_touches_fixture_step.dependOn(&run_publication_touches_fixture_tests.step);
+
+    // Proof Pack presentation harness. Same seeded poisoned fixture, one
+    // stage deeper: checks, claims, and touches are derived first, then the
+    // Proof Pack pair must track all four evidence reports without rereading
+    // any payload.
+    const publication_proof_pack_fixture_mod = b.createModule(.{
+        .root_source_file = b.path("src/publication_proof_pack_fixture_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "fixture_generator", .module = testdata_generator_mod }},
+    });
+    const publication_proof_pack_fixture_tests = b.addTest(.{ .root_module = publication_proof_pack_fixture_mod });
+    const run_publication_proof_pack_fixture_tests = b.addRunArtifact(publication_proof_pack_fixture_tests);
+    run_publication_proof_pack_fixture_tests.setCwd(b.path("."));
+    run_publication_proof_pack_fixture_tests.step.dependOn(b.getInstallStep());
+    const test_publication_proof_pack_fixture_step = b.step(
+        "test-publication-proof-pack-fixture",
+        "Run the private mild-poison publication Proof Pack presentation harness",
+    );
+    test_publication_proof_pack_fixture_step.dependOn(&run_publication_proof_pack_fixture_tests.step);
 
     const graph_mod = b.createModule(.{
         .root_source_file = b.path("src/graph.zig"),

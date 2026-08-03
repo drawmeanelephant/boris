@@ -77,13 +77,14 @@ pub const Error = std.mem.Allocator.Error || error{
     InvalidArtifactsReport,
     InvalidChecksReport,
     InvalidClaimsReport,
+    InvalidTouchesReport,
     StaleArtifactsBinding,
     StaleChecksBinding,
     StaleClaimsBinding,
     TouchesWriteFailed,
 };
 
-const FileBinding = struct {
+pub const FileBinding = struct {
     bytes: usize,
     sha256: [64]u8,
 };
@@ -91,7 +92,7 @@ const FileBinding = struct {
 /// Selector pair plus the committed evidence digest the checks report recorded
 /// for that pair. The digests are validated by recomputation over the
 /// canonical inventory, never trusted from the report bytes alone.
-const Scope = struct {
+pub const Scope = struct {
     subject_statuses: []const []const u8,
     subject_kinds: []const []const u8,
     subject_sha256: [64]u8,
@@ -100,7 +101,7 @@ const Scope = struct {
     supporting_sha256: [64]u8,
 };
 
-const ParsedCheck = struct {
+pub const ParsedCheck = struct {
     id: []const u8,
     eligible: bool,
     ran: bool,
@@ -113,32 +114,32 @@ const ParsedCheck = struct {
     finding_offset: usize,
 };
 
-const ParsedSubject = struct {
+pub const ParsedSubject = struct {
     kind: []const u8,
     id: []const u8,
     target: ?[]const u8,
 };
 
-const ParsedFinding = struct {
+pub const ParsedFinding = struct {
     code: []const u8,
     severity: []const u8,
     subject: ParsedSubject,
 };
 
-const ParsedChecks = struct {
+pub const ParsedChecks = struct {
     artifact_binding: FileBinding,
     artifact_count: usize,
     checks: [3]ParsedCheck,
     findings: []ParsedFinding,
 };
 
-const ParsedEvidenceCounts = struct {
+pub const ParsedEvidenceCounts = struct {
     eligible: usize,
     checked: usize,
     findings: usize,
 };
 
-const ParsedClaimEvidence = struct {
+pub const ParsedClaimEvidence = struct {
     check_id: []const u8,
     check_status: []const u8,
     coverage: []const u8,
@@ -149,7 +150,7 @@ const ParsedClaimEvidence = struct {
     reason: ?[]const u8,
 };
 
-const ParsedClaim = struct {
+pub const ParsedClaim = struct {
     id: []const u8,
     statement: []const u8,
     status: []const u8,
@@ -160,21 +161,21 @@ const ParsedClaim = struct {
 
 /// The claims report's per-claim scope is the bound check's selector arrays
 /// without digests; equality with the parsed check scope is validated.
-const SelectorScope = struct {
+pub const SelectorScope = struct {
     subject_statuses: []const []const u8,
     subject_kinds: []const []const u8,
     supporting_statuses: []const []const u8,
     supporting_kinds: []const []const u8,
 };
 
-const ParsedLimitation = struct {
+pub const ParsedLimitation = struct {
     id: []const u8,
     statement: []const u8,
     applies_to_claims: []const []const u8,
     source: []const u8,
 };
 
-const ParsedClaims = struct {
+pub const ParsedClaims = struct {
     artifact_binding: FileBinding,
     artifact_count: usize,
     checks_binding: FileBinding,
@@ -761,7 +762,7 @@ fn scopesEqual(a: Scope, b: SelectorScope) bool {
 /// scope digests equal the bound check, `checks_report_sha256` equal to the
 /// exact current checks input digest, claim scope arrays equal the bound check
 /// scope arrays, and claim status/reason follow the publication-claims mapping.
-fn validateClaimsAgainstChecks(
+pub fn validateClaimsAgainstChecks(
     parsed_checks: *const ParsedChecks,
     checks_binding: FileBinding,
     parsed_claims: *const ParsedClaims,
@@ -798,7 +799,7 @@ fn validateClaimsAgainstChecks(
 /// recompute both scope digests with the publication-check record encoding,
 /// and require `counts.eligible` to equal the selected subject count. Uses
 /// inventory metadata only; never rereads payloads.
-fn validateChecksAgainstInventory(
+pub fn validateChecksAgainstInventory(
     gpa: std.mem.Allocator,
     inventory: *const artifact_inventory.Inventory,
     checks: *const [3]ParsedCheck,
@@ -927,6 +928,7 @@ fn parseChecksBindingAfterBegin(
     gpa: std.mem.Allocator,
     reader: *std.json.Reader,
     expected_target: []const u8,
+    fail_error: Error,
 ) Error!struct { binding: FileBinding, check_count: usize, finding_count: usize } {
     var have_path = false;
     var have_bytes = false;
@@ -947,62 +949,62 @@ fn parseChecksBindingAfterBegin(
             else => {},
         }
         defer freeJsonToken(gpa, key_token);
-        const key = jsonTokenText(key_token) orelse return error.InvalidClaimsReport;
+        const key = jsonTokenText(key_token) orelse return fail_error;
 
         if (std.mem.eql(u8, key, "path")) {
-            if (have_path) return error.InvalidClaimsReport;
+            if (have_path) return fail_error;
             const value = try readJsonString(gpa, reader);
             defer gpa.free(value);
-            if (!std.mem.eql(u8, value, publication_checks.output_path)) return error.InvalidClaimsReport;
+            if (!std.mem.eql(u8, value, publication_checks.output_path)) return fail_error;
             have_path = true;
         } else if (std.mem.eql(u8, key, "bytes")) {
-            if (have_bytes) return error.InvalidClaimsReport;
+            if (have_bytes) return fail_error;
             const value = try readJsonInteger(gpa, reader);
-            if (value > std.math.maxInt(usize)) return error.InvalidClaimsReport;
+            if (value > std.math.maxInt(usize)) return fail_error;
             binding.bytes = @intCast(value);
             have_bytes = true;
         } else if (std.mem.eql(u8, key, "sha256")) {
-            if (have_sha256) return error.InvalidClaimsReport;
+            if (have_sha256) return fail_error;
             binding.sha256 = try readJsonDigest(gpa, reader);
             have_sha256 = true;
         } else if (std.mem.eql(u8, key, "format")) {
-            if (have_format) return error.InvalidClaimsReport;
+            if (have_format) return fail_error;
             const value = try readJsonString(gpa, reader);
             defer gpa.free(value);
-            if (!std.mem.eql(u8, value, publication_checks.report_format)) return error.InvalidClaimsReport;
+            if (!std.mem.eql(u8, value, publication_checks.report_format)) return fail_error;
             have_format = true;
         } else if (std.mem.eql(u8, key, "schema_version")) {
-            if (have_version) return error.InvalidClaimsReport;
+            if (have_version) return fail_error;
             if (try readJsonInteger(gpa, reader) != publication_checks.schema_version)
-                return error.InvalidClaimsReport;
+                return fail_error;
             have_version = true;
         } else if (std.mem.eql(u8, key, "target")) {
-            if (have_target) return error.InvalidClaimsReport;
+            if (have_target) return fail_error;
             const value = try readJsonString(gpa, reader);
             defer gpa.free(value);
             if (value.len == 0 or !std.mem.eql(u8, value, expected_target))
-                return error.InvalidClaimsReport;
+                return fail_error;
             have_target = true;
         } else if (std.mem.eql(u8, key, "check_count")) {
-            if (have_check_count) return error.InvalidClaimsReport;
+            if (have_check_count) return fail_error;
             const value = try readJsonInteger(gpa, reader);
-            if (value > std.math.maxInt(usize)) return error.InvalidClaimsReport;
+            if (value > std.math.maxInt(usize)) return fail_error;
             check_count = @intCast(value);
             have_check_count = true;
         } else if (std.mem.eql(u8, key, "finding_count")) {
-            if (have_finding_count) return error.InvalidClaimsReport;
+            if (have_finding_count) return fail_error;
             const value = try readJsonInteger(gpa, reader);
-            if (value > std.math.maxInt(usize)) return error.InvalidClaimsReport;
+            if (value > std.math.maxInt(usize)) return fail_error;
             finding_count = @intCast(value);
             have_finding_count = true;
         } else {
-            return error.InvalidClaimsReport;
+            return fail_error;
         }
     }
 
     if (!have_path or !have_bytes or !have_sha256 or !have_format or
         !have_version or !have_target or !have_check_count or !have_finding_count)
-        return error.InvalidClaimsReport;
+        return fail_error;
     return .{ .binding = binding, .check_count = check_count, .finding_count = finding_count };
 }
 
@@ -1618,7 +1620,7 @@ pub fn parseClaimsStream(
                 .object_begin => {},
                 else => return error.InvalidClaimsReport,
             }
-            const parsed = try parseChecksBindingAfterBegin(gpa, &reader, expected_target);
+            const parsed = try parseChecksBindingAfterBegin(gpa, &reader, expected_target, error.InvalidClaimsReport);
             checks_binding = parsed.binding;
             check_count = parsed.check_count;
             finding_count = parsed.finding_count;
@@ -1747,6 +1749,871 @@ fn freeParsedClaim(gpa: std.mem.Allocator, claim: ParsedClaim) void {
     gpa.free(claim.limitation_ids);
 }
 
+/// Strictly parse the committed Touch Atlas report. The three embedded
+/// evidence bindings, the node list, and the edge list are retained. Every
+/// node's closed, kind-specific `metadata` object is validated field by field
+/// against the directly parsed inventory, checks, claims, and findings,
+/// never skipped: non-object metadata, missing/unknown/duplicate fields,
+/// wrong types, wrong indices, and wrong member values are all rejected as
+/// `InvalidTouchesReport`. Node IDs are validated against the declared
+/// registries and edge endpoints are validated against declared node kinds,
+/// not string prefixes alone.
+pub fn parseTouchesStream(
+    gpa: std.mem.Allocator,
+    input: *std.Io.Reader,
+    expected_target: []const u8,
+    inventory: *const artifact_inventory.Inventory,
+    parsed_checks: *const ParsedChecks,
+    parsed_claims: *const ParsedClaims,
+) Error!ParsedTouches {
+    return parseTouchesStreamInner(gpa, input, expected_target, inventory, parsed_checks, parsed_claims) catch |err| switch (err) {
+        error.InvalidClaimsReport => error.InvalidTouchesReport,
+        else => err,
+    };
+}
+
+pub const ParsedTouches = struct {
+    artifacts_binding: FileBinding,
+    artifact_count: usize,
+    checks_binding: FileBinding,
+    check_count: usize,
+    finding_count: usize,
+    claims_binding: FileBinding,
+    claim_count: usize,
+    limitation_count: usize,
+    nodes: []Node,
+    edges: []Edge,
+};
+
+fn parseTouchesStreamInner(
+    gpa: std.mem.Allocator,
+    input: *std.Io.Reader,
+    expected_target: []const u8,
+    inventory: *const artifact_inventory.Inventory,
+    parsed_checks: *const ParsedChecks,
+    parsed_claims: *const ParsedClaims,
+) Error!ParsedTouches {
+    if (expected_target.len == 0) return error.InvalidTouchesReport;
+    var reader = std.json.Reader.init(gpa, input);
+    defer reader.deinit();
+
+    switch (try nextJsonToken(&reader)) {
+        .object_begin => {},
+        else => return error.InvalidTouchesReport,
+    }
+
+    var have_format = false;
+    var have_version = false;
+    var have_target = false;
+    var have_artifact_inventory = false;
+    var have_publication_checks = false;
+    var have_publication_claims = false;
+    var have_nodes = false;
+    var have_edges = false;
+    var artifacts_binding: FileBinding = undefined;
+    var artifact_count: usize = 0;
+    var checks_binding: FileBinding = undefined;
+    var check_count: usize = 0;
+    var finding_count: usize = 0;
+    var claims_binding: FileBinding = undefined;
+    var claim_count: usize = 0;
+    var limitation_count: usize = 0;
+    var nodes: std.ArrayList(Node) = .empty;
+    errdefer {
+        for (nodes.items) |node| gpa.free(node.id);
+        nodes.deinit(gpa);
+    }
+    var edges: std.ArrayList(Edge) = .empty;
+    errdefer {
+        for (edges.items) |edge| {
+            gpa.free(edge.from);
+            gpa.free(edge.to);
+        }
+        edges.deinit(gpa);
+    }
+
+    while (true) {
+        const key_token = try nextJsonAllocToken(gpa, &reader, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, key_token);
+        const key = jsonTokenText(key_token) orelse return error.InvalidTouchesReport;
+
+        if (std.mem.eql(u8, key, "format")) {
+            if (have_format) return error.InvalidTouchesReport;
+            const value = try readJsonString(gpa, &reader);
+            defer gpa.free(value);
+            if (!std.mem.eql(u8, value, report_format)) return error.InvalidTouchesReport;
+            have_format = true;
+        } else if (std.mem.eql(u8, key, "schema_version")) {
+            if (have_version) return error.InvalidTouchesReport;
+            if (try readJsonInteger(gpa, &reader) != schema_version)
+                return error.InvalidTouchesReport;
+            have_version = true;
+        } else if (std.mem.eql(u8, key, "target")) {
+            if (have_target) return error.InvalidTouchesReport;
+            const value = try readJsonString(gpa, &reader);
+            defer gpa.free(value);
+            if (value.len == 0 or !std.mem.eql(u8, value, expected_target)) return error.InvalidTouchesReport;
+            have_target = true;
+        } else if (std.mem.eql(u8, key, "inputs")) {
+            if (have_artifact_inventory or have_publication_checks or have_publication_claims)
+                return error.InvalidTouchesReport;
+            switch (try nextJsonToken(&reader)) {
+                .object_begin => {},
+                else => return error.InvalidTouchesReport,
+            }
+            var have_inputs_artifacts = false;
+            var have_inputs_checks = false;
+            var have_inputs_claims = false;
+            while (true) {
+                const input_key_token = try nextJsonAllocToken(gpa, &reader, 4096);
+                switch (input_key_token) {
+                    .object_end => break,
+                    else => {},
+                }
+                defer freeJsonToken(gpa, input_key_token);
+                const input_key = jsonTokenText(input_key_token) orelse return error.InvalidTouchesReport;
+                if (std.mem.eql(u8, input_key, "artifacts")) {
+                    if (have_inputs_artifacts) return error.InvalidTouchesReport;
+                    switch (try nextJsonToken(&reader)) {
+                        .object_begin => {},
+                        else => return error.InvalidTouchesReport,
+                    }
+                    const parsed = try parseArtifactsBindingAfterBegin(gpa, &reader, expected_target, error.InvalidTouchesReport);
+                    artifacts_binding = parsed.binding;
+                    artifact_count = parsed.artifact_count;
+                    have_inputs_artifacts = true;
+                } else if (std.mem.eql(u8, input_key, "checks")) {
+                    if (have_inputs_checks) return error.InvalidTouchesReport;
+                    switch (try nextJsonToken(&reader)) {
+                        .object_begin => {},
+                        else => return error.InvalidTouchesReport,
+                    }
+                    const parsed = try parseChecksBindingAfterBegin(gpa, &reader, expected_target, error.InvalidTouchesReport);
+                    checks_binding = parsed.binding;
+                    check_count = parsed.check_count;
+                    finding_count = parsed.finding_count;
+                    have_inputs_checks = true;
+                } else if (std.mem.eql(u8, input_key, "claims")) {
+                    if (have_inputs_claims) return error.InvalidTouchesReport;
+                    switch (try nextJsonToken(&reader)) {
+                        .object_begin => {},
+                        else => return error.InvalidTouchesReport,
+                    }
+                    const parsed = try parseClaimsBindingAfterBegin(gpa, &reader, expected_target, error.InvalidTouchesReport);
+                    claims_binding = parsed.binding;
+                    claim_count = parsed.claim_count;
+                    limitation_count = parsed.limitation_count;
+                    have_inputs_claims = true;
+                } else {
+                    return error.InvalidTouchesReport;
+                }
+            }
+            if (!have_inputs_artifacts or !have_inputs_checks or !have_inputs_claims)
+                return error.InvalidTouchesReport;
+            have_artifact_inventory = true;
+            have_publication_checks = true;
+            have_publication_claims = true;
+        } else if (std.mem.eql(u8, key, "nodes")) {
+            if (have_nodes) return error.InvalidTouchesReport;
+            switch (try nextJsonToken(&reader)) {
+                .array_begin => {},
+                else => return error.InvalidTouchesReport,
+            }
+            while (true) {
+                switch (try nextJsonToken(&reader)) {
+                    .array_end => break,
+                    .object_begin => {
+                        const node = try parseTouchesNodeAfterBegin(gpa, &reader, expected_target, inventory, parsed_checks, parsed_claims);
+                        try nodes.append(gpa, node);
+                    },
+                    else => return error.InvalidTouchesReport,
+                }
+            }
+            have_nodes = true;
+        } else if (std.mem.eql(u8, key, "edges")) {
+            if (have_edges) return error.InvalidTouchesReport;
+            switch (try nextJsonToken(&reader)) {
+                .array_begin => {},
+                else => return error.InvalidTouchesReport,
+            }
+            while (true) {
+                switch (try nextJsonToken(&reader)) {
+                    .array_end => break,
+                    .object_begin => {
+                        const edge = try parseTouchesEdgeAfterBegin(gpa, &reader);
+                        try edges.append(gpa, edge);
+                    },
+                    else => return error.InvalidTouchesReport,
+                }
+            }
+            have_edges = true;
+        } else {
+            return error.InvalidTouchesReport;
+        }
+    }
+
+    if (!have_format or !have_version or !have_target or !have_artifact_inventory or
+        !have_publication_checks or !have_publication_claims or !have_nodes or !have_edges)
+        return error.InvalidTouchesReport;
+    if (try nextJsonToken(&reader) != .end_of_document) return error.InvalidTouchesReport;
+
+    if (nodes.items.len == 0) return error.InvalidTouchesReport;
+    if (nodes.items[0].kind != .target or !std.mem.eql(u8, nodes.items[0].id, "target"))
+        return error.InvalidTouchesReport;
+    if (edges.items.len == 0) return error.InvalidTouchesReport;
+
+    // Validate node ID grammar against the declared registries and edge
+    // endpoints against declared node kinds, not string prefixes alone.
+    var seen_ids: std.StringHashMapUnmanaged(NodeKind) = .empty;
+    defer seen_ids.deinit(gpa);
+    for (nodes.items) |node| {
+        if (seen_ids.contains(node.id)) return error.InvalidTouchesReport;
+        if (!validNodeId(gpa, node, expected_target)) return error.InvalidTouchesReport;
+        try seen_ids.put(gpa, node.id, node.kind);
+    }
+    for (edges.items) |edge| {
+        const from_kind = seen_ids.get(edge.from) orelse return error.InvalidTouchesReport;
+        const to_kind = seen_ids.get(edge.to) orelse return error.InvalidTouchesReport;
+        if (!edgePermits(edge, from_kind, to_kind)) return error.InvalidTouchesReport;
+    }
+
+    return .{
+        .artifacts_binding = artifacts_binding,
+        .artifact_count = artifact_count,
+        .checks_binding = checks_binding,
+        .check_count = check_count,
+        .finding_count = finding_count,
+        .claims_binding = claims_binding,
+        .claim_count = claim_count,
+        .limitation_count = limitation_count,
+        .nodes = try nodes.toOwnedSlice(gpa),
+        .edges = try edges.toOwnedSlice(gpa),
+    };
+}
+
+/// Validate a Touch Atlas node ID against the declared registries for its
+/// declared kind. The target literal is validated directly; every other id is
+/// checked against the fixed check/claim/limitation registries or the
+/// finding/artifact grammar without trusting string prefixes alone.
+fn validNodeId(gpa: std.mem.Allocator, node: Node, expected_target: []const u8) bool {
+    return switch (node.kind) {
+        .target => std.mem.eql(u8, node.id, "target"),
+        .check => checkIndexOf(node.id) != null,
+        .claim => claimIndexOf(node.id) != null,
+        .limitation => limitationIndexOf(node.id) != null,
+        .finding => {
+            _ = gpa;
+            return findingNodeIdGrammar(node.id);
+        },
+        .artifact => {
+            _ = gpa;
+            _ = expected_target;
+            return std.mem.startsWith(u8, node.id, "artifact:") and node.id.len > "artifact:".len;
+        },
+    };
+}
+
+fn findingNodeIdGrammar(id: []const u8) bool {
+    const prefix = "finding:";
+    if (!std.mem.startsWith(u8, id, prefix)) return false;
+    const rest = id[prefix.len..];
+    const last_colon = std.mem.lastIndexOfScalar(u8, rest, ':') orelse return false;
+    const check_id = rest[0..last_colon];
+    const ordinal_text = rest[last_colon + 1 ..];
+    if (checkIndexOfNode(check_id) == null) return false;
+    if (ordinal_text.len == 0) return false;
+    for (ordinal_text) |byte| {
+        if (byte < '0' or byte > '9') return false;
+    }
+    return true;
+}
+
+fn checkIndexOfNode(check_id: []const u8) ?usize {
+    for (check_ids, 0..) |known, index| {
+        if (std.mem.eql(u8, known, check_id)) return index;
+    }
+    return null;
+}
+
+fn parseTouchesNodeAfterBegin(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    expected_target: []const u8,
+    inventory: *const artifact_inventory.Inventory,
+    parsed_checks: *const ParsedChecks,
+    parsed_claims: *const ParsedClaims,
+) Error!Node {
+    var node = Node{ .kind = undefined, .id = &.{} };
+    var have_kind = false;
+    var have_id = false;
+    var have_metadata = false;
+    // `node.id` is allocated once `id` is read; if metadata validation fails
+    // before this node is appended to the caller's list, the id must still be
+    // freed here. On success the caller owns it.
+    errdefer if (have_id) gpa.free(node.id);
+
+    while (true) {
+        const key_token = try nextJsonAllocToken(gpa, reader, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, key_token);
+        const key = jsonTokenText(key_token) orelse return error.InvalidTouchesReport;
+
+        if (std.mem.eql(u8, key, "kind")) {
+            if (have_kind) return error.InvalidTouchesReport;
+            const value = try readJsonString(gpa, reader);
+            defer gpa.free(value);
+            node.kind = parseNodeKind(value) orelse return error.InvalidTouchesReport;
+            have_kind = true;
+        } else if (std.mem.eql(u8, key, "id")) {
+            if (have_id) return error.InvalidTouchesReport;
+            node.id = try readJsonString(gpa, reader);
+            if (node.id.len == 0) return error.InvalidTouchesReport;
+            have_id = true;
+        } else if (std.mem.eql(u8, key, "metadata")) {
+            if (have_metadata) return error.InvalidTouchesReport;
+            // Kind and id must already be known: the metadata shape and every
+            // cross-checked value are kind-specific. The canonical writer emits
+            // kind, id, metadata in that order.
+            if (!have_kind or !have_id) return error.InvalidTouchesReport;
+            switch (try nextJsonToken(reader)) {
+                .object_begin => {},
+                else => return error.InvalidTouchesReport,
+            }
+            try parseNodeMetadata(gpa, reader, node, expected_target, inventory, parsed_checks, parsed_claims);
+            have_metadata = true;
+        } else {
+            return error.InvalidTouchesReport;
+        }
+    }
+
+    if (!have_kind or !have_id or !have_metadata) return error.InvalidTouchesReport;
+    return node;
+}
+
+/// Strictly validate one node's `metadata` object against the exact committed
+/// evidence. The metadata member set is closed per kind; every field is
+/// compared against the directly parsed inventory record, check, finding,
+/// claim, or limitation row, and every vocabulary value must equal the
+/// committed one (indices included). A non-object metadata value is rejected
+/// by the caller's `object_begin` requirement before this runs.
+fn parseNodeMetadata(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    node: Node,
+    expected_target: []const u8,
+    inventory: *const artifact_inventory.Inventory,
+    parsed_checks: *const ParsedChecks,
+    parsed_claims: *const ParsedClaims,
+) Error!void {
+    switch (node.kind) {
+        .target => try parseTargetMetadata(gpa, reader, expected_target),
+        .artifact => try parseArtifactMetadata(gpa, reader, inventory, node),
+        .check => try parseCheckMetadata(gpa, reader, parsed_checks, node),
+        .finding => try parseFindingMetadata(gpa, reader, parsed_checks, node),
+        .claim => try parseClaimMetadata(gpa, reader, parsed_claims, node),
+        .limitation => try parseLimitationMetadata(gpa, reader, parsed_claims, node),
+    }
+}
+
+/// Read one string member whose value must exactly equal `expected`. The
+/// value is allocated and freed here; a type mismatch or a value mismatch is
+/// an `InvalidTouchesReport`.
+fn expectStringMember(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    expected: []const u8,
+) Error!void {
+    const value = try readJsonString(gpa, reader);
+    defer gpa.free(value);
+    if (!std.mem.eql(u8, value, expected)) return error.InvalidTouchesReport;
+}
+
+fn expectIntegerMember(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    expected: usize,
+) Error!void {
+    const value = try readJsonInteger(gpa, reader);
+    if (value > std.math.maxInt(usize) or value != expected) return error.InvalidTouchesReport;
+}
+
+fn expectBoolMember(reader: *std.json.Reader, expected: bool) Error!void {
+    if (try readJsonBool(reader) != expected) return error.InvalidTouchesReport;
+}
+
+/// Read one member whose key must be `member` and consume exactly the
+/// expected value, then return whether the member was already seen (a
+/// duplicate). Used by every closed metadata parser below.
+const MetadataSeen = struct {
+    key: []const u8,
+    seen: bool = false,
+};
+
+/// The `target` node metadata is exactly `{ "target": <report target> }`.
+fn parseTargetMetadata(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    expected_target: []const u8,
+) Error!void {
+    var have_target = MetadataSeen{ .key = "target" };
+    while (true) {
+        const key_token = try nextJsonAllocToken(gpa, reader, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, key_token);
+        const key = jsonTokenText(key_token) orelse return error.InvalidTouchesReport;
+        if (std.mem.eql(u8, key, have_target.key)) {
+            if (have_target.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, expected_target);
+            have_target.seen = true;
+        } else {
+            return error.InvalidTouchesReport;
+        }
+    }
+    if (!have_target.seen) return error.InvalidTouchesReport;
+}
+
+/// The `artifact` node metadata is exactly `{ inventory_index, path, kind,
+/// status, required }` and every field must equal the committed inventory
+/// record at `inventory_index` (path, kind, status, and required included).
+fn parseArtifactMetadata(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    inventory: *const artifact_inventory.Inventory,
+    node: Node,
+) Error!void {
+    const artifact_index = artifactIndexOf(inventory, node.id) orelse return error.InvalidTouchesReport;
+    const record = inventory.records[artifact_index];
+    var have_index = MetadataSeen{ .key = "inventory_index" };
+    var have_path = MetadataSeen{ .key = "path" };
+    var have_kind = MetadataSeen{ .key = "kind" };
+    var have_status = MetadataSeen{ .key = "status" };
+    var have_required = MetadataSeen{ .key = "required" };
+    while (true) {
+        const key_token = try nextJsonAllocToken(gpa, reader, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, key_token);
+        const key = jsonTokenText(key_token) orelse return error.InvalidTouchesReport;
+        if (std.mem.eql(u8, key, have_index.key)) {
+            if (have_index.seen) return error.InvalidTouchesReport;
+            try expectIntegerMember(gpa, reader, artifact_index);
+            have_index.seen = true;
+        } else if (std.mem.eql(u8, key, have_path.key)) {
+            if (have_path.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, record.path);
+            have_path.seen = true;
+        } else if (std.mem.eql(u8, key, have_kind.key)) {
+            if (have_kind.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, record.kind.name());
+            have_kind.seen = true;
+        } else if (std.mem.eql(u8, key, have_status.key)) {
+            if (have_status.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, record.status.name());
+            have_status.seen = true;
+        } else if (std.mem.eql(u8, key, have_required.key)) {
+            if (have_required.seen) return error.InvalidTouchesReport;
+            try expectBoolMember(reader, record.required);
+            have_required.seen = true;
+        } else {
+            return error.InvalidTouchesReport;
+        }
+    }
+    if (!have_index.seen or !have_path.seen or !have_kind.seen or !have_status.seen or !have_required.seen)
+        return error.InvalidTouchesReport;
+}
+
+/// The `check` node metadata is exactly `{ check_index, check_id, status,
+/// coverage }` and every field must equal the committed check row.
+fn parseCheckMetadata(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    parsed_checks: *const ParsedChecks,
+    node: Node,
+) Error!void {
+    const check_index = checkIndexOf(node.id) orelse return error.InvalidTouchesReport;
+    const check = parsed_checks.checks[check_index];
+    var have_index = MetadataSeen{ .key = "check_index" };
+    var have_id = MetadataSeen{ .key = "check_id" };
+    var have_status = MetadataSeen{ .key = "status" };
+    var have_coverage = MetadataSeen{ .key = "coverage" };
+    while (true) {
+        const key_token = try nextJsonAllocToken(gpa, reader, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, key_token);
+        const key = jsonTokenText(key_token) orelse return error.InvalidTouchesReport;
+        if (std.mem.eql(u8, key, have_index.key)) {
+            if (have_index.seen) return error.InvalidTouchesReport;
+            try expectIntegerMember(gpa, reader, check_index);
+            have_index.seen = true;
+        } else if (std.mem.eql(u8, key, have_id.key)) {
+            if (have_id.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, check.id);
+            have_id.seen = true;
+        } else if (std.mem.eql(u8, key, have_status.key)) {
+            if (have_status.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, check.status);
+            have_status.seen = true;
+        } else if (std.mem.eql(u8, key, have_coverage.key)) {
+            if (have_coverage.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, check.coverage);
+            have_coverage.seen = true;
+        } else {
+            return error.InvalidTouchesReport;
+        }
+    }
+    if (!have_index.seen or !have_id.seen or !have_status.seen or !have_coverage.seen)
+        return error.InvalidTouchesReport;
+}
+
+/// The `finding` node metadata is exactly `{ finding_index, check_id,
+/// check_finding_index, code, severity, subject }` and every field must equal
+/// the committed finding row (owning check id, local ordinal, code, severity,
+/// and the exact subject object).
+fn parseFindingMetadata(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    parsed_checks: *const ParsedChecks,
+    node: Node,
+) Error!void {
+    const finding_index = findingIndexOf(&parsed_checks.checks, node.id) orelse return error.InvalidTouchesReport;
+    const finding = parsed_checks.findings[finding_index];
+    const check_index = findingOwningCheck(&parsed_checks.checks, finding_index) orelse
+        return error.InvalidTouchesReport;
+    const check_id = parsed_checks.checks[check_index].id;
+    const ordinal = finding_index - parsed_checks.checks[check_index].finding_offset;
+    var have_index = MetadataSeen{ .key = "finding_index" };
+    var have_check_id = MetadataSeen{ .key = "check_id" };
+    var have_local = MetadataSeen{ .key = "check_finding_index" };
+    var have_code = MetadataSeen{ .key = "code" };
+    var have_severity = MetadataSeen{ .key = "severity" };
+    var have_subject = MetadataSeen{ .key = "subject" };
+    while (true) {
+        const key_token = try nextJsonAllocToken(gpa, reader, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, key_token);
+        const key = jsonTokenText(key_token) orelse return error.InvalidTouchesReport;
+        if (std.mem.eql(u8, key, have_index.key)) {
+            if (have_index.seen) return error.InvalidTouchesReport;
+            try expectIntegerMember(gpa, reader, finding_index);
+            have_index.seen = true;
+        } else if (std.mem.eql(u8, key, have_check_id.key)) {
+            if (have_check_id.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, check_id);
+            have_check_id.seen = true;
+        } else if (std.mem.eql(u8, key, have_local.key)) {
+            if (have_local.seen) return error.InvalidTouchesReport;
+            try expectIntegerMember(gpa, reader, ordinal);
+            have_local.seen = true;
+        } else if (std.mem.eql(u8, key, have_code.key)) {
+            if (have_code.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, finding.code);
+            have_code.seen = true;
+        } else if (std.mem.eql(u8, key, have_severity.key)) {
+            if (have_severity.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, finding.severity);
+            have_severity.seen = true;
+        } else if (std.mem.eql(u8, key, have_subject.key)) {
+            if (have_subject.seen) return error.InvalidTouchesReport;
+            switch (try nextJsonToken(reader)) {
+                .object_begin => {},
+                else => return error.InvalidTouchesReport,
+            }
+            try parseFindingSubject(gpa, reader, finding.subject);
+            have_subject.seen = true;
+        } else {
+            return error.InvalidTouchesReport;
+        }
+    }
+    if (!have_index.seen or !have_check_id.seen or !have_local.seen or
+        !have_code.seen or !have_severity.seen or !have_subject.seen)
+        return error.InvalidTouchesReport;
+}
+
+/// The finding `subject` is the exact committed subject object: `{ kind, id,
+/// target }` with the target literal equal to the committed subject target.
+fn parseFindingSubject(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    expected: ParsedSubject,
+) Error!void {
+    var have_kind = MetadataSeen{ .key = "kind" };
+    var have_id = MetadataSeen{ .key = "id" };
+    var have_target = MetadataSeen{ .key = "target" };
+    while (true) {
+        const key_token = try nextJsonAllocToken(gpa, reader, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, key_token);
+        const key = jsonTokenText(key_token) orelse return error.InvalidTouchesReport;
+        if (std.mem.eql(u8, key, have_kind.key)) {
+            if (have_kind.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, expected.kind);
+            have_kind.seen = true;
+        } else if (std.mem.eql(u8, key, have_id.key)) {
+            if (have_id.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, expected.id);
+            have_id.seen = true;
+        } else if (std.mem.eql(u8, key, have_target.key)) {
+            if (have_target.seen) return error.InvalidTouchesReport;
+            if (expected.target) |expected_target| {
+                try expectStringMember(gpa, reader, expected_target);
+            } else {
+                // A committed subject with no target renders `"target": null`.
+                switch (try nextJsonToken(reader)) {
+                    .null => {},
+                    else => return error.InvalidTouchesReport,
+                }
+            }
+            have_target.seen = true;
+        } else {
+            return error.InvalidTouchesReport;
+        }
+    }
+    if (!have_kind.seen or !have_id.seen or !have_target.seen) return error.InvalidTouchesReport;
+}
+
+/// The `claim` node metadata is exactly `{ claim_index, claim_id, status }`
+/// and every field must equal the committed claim row.
+fn parseClaimMetadata(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    parsed_claims: *const ParsedClaims,
+    node: Node,
+) Error!void {
+    const claim_index = claimIndexOf(node.id) orelse return error.InvalidTouchesReport;
+    const claim = parsed_claims.claims[claim_index];
+    var have_index = MetadataSeen{ .key = "claim_index" };
+    var have_id = MetadataSeen{ .key = "claim_id" };
+    var have_status = MetadataSeen{ .key = "status" };
+    while (true) {
+        const key_token = try nextJsonAllocToken(gpa, reader, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, key_token);
+        const key = jsonTokenText(key_token) orelse return error.InvalidTouchesReport;
+        if (std.mem.eql(u8, key, have_index.key)) {
+            if (have_index.seen) return error.InvalidTouchesReport;
+            try expectIntegerMember(gpa, reader, claim_index);
+            have_index.seen = true;
+        } else if (std.mem.eql(u8, key, have_id.key)) {
+            if (have_id.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, claim.id);
+            have_id.seen = true;
+        } else if (std.mem.eql(u8, key, have_status.key)) {
+            if (have_status.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, claim.status);
+            have_status.seen = true;
+        } else {
+            return error.InvalidTouchesReport;
+        }
+    }
+    if (!have_index.seen or !have_id.seen or !have_status.seen) return error.InvalidTouchesReport;
+}
+
+/// The `limitation` node metadata is exactly `{ limitation_index,
+/// limitation_id, source }` and every field must equal the committed
+/// limitation row.
+fn parseLimitationMetadata(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    parsed_claims: *const ParsedClaims,
+    node: Node,
+) Error!void {
+    const limitation_index = limitationIndexOf(node.id) orelse return error.InvalidTouchesReport;
+    const limitation = parsed_claims.limitations[limitation_index];
+    var have_index = MetadataSeen{ .key = "limitation_index" };
+    var have_id = MetadataSeen{ .key = "limitation_id" };
+    var have_source = MetadataSeen{ .key = "source" };
+    while (true) {
+        const key_token = try nextJsonAllocToken(gpa, reader, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, key_token);
+        const key = jsonTokenText(key_token) orelse return error.InvalidTouchesReport;
+        if (std.mem.eql(u8, key, have_index.key)) {
+            if (have_index.seen) return error.InvalidTouchesReport;
+            try expectIntegerMember(gpa, reader, limitation_index);
+            have_index.seen = true;
+        } else if (std.mem.eql(u8, key, have_id.key)) {
+            if (have_id.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, limitation.id);
+            have_id.seen = true;
+        } else if (std.mem.eql(u8, key, have_source.key)) {
+            if (have_source.seen) return error.InvalidTouchesReport;
+            try expectStringMember(gpa, reader, limitation.source);
+            have_source.seen = true;
+        } else {
+            return error.InvalidTouchesReport;
+        }
+    }
+    if (!have_index.seen or !have_id.seen or !have_source.seen) return error.InvalidTouchesReport;
+}
+
+fn parseNodeKind(value: []const u8) ?NodeKind {
+    inline for (std.meta.tags(NodeKind)) |kind| {
+        if (std.mem.eql(u8, kind.name(), value)) return kind;
+    }
+    return null;
+}
+
+fn parseTouchesEdgeAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader) Error!Edge {
+    var edge = Edge{ .kind = undefined, .from = &.{}, .to = &.{} };
+    var have_kind = false;
+    var have_from = false;
+    var have_to = false;
+
+    while (true) {
+        const key_token = try nextJsonAllocToken(gpa, reader, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, key_token);
+        const key = jsonTokenText(key_token) orelse return error.InvalidTouchesReport;
+
+        if (std.mem.eql(u8, key, "kind")) {
+            if (have_kind) return error.InvalidTouchesReport;
+            const value = try readJsonString(gpa, reader);
+            defer gpa.free(value);
+            edge.kind = parseEdgeKind(value) orelse return error.InvalidTouchesReport;
+            have_kind = true;
+        } else if (std.mem.eql(u8, key, "from")) {
+            if (have_from) return error.InvalidTouchesReport;
+            edge.from = try readJsonString(gpa, reader);
+            if (edge.from.len == 0) return error.InvalidTouchesReport;
+            have_from = true;
+        } else if (std.mem.eql(u8, key, "to")) {
+            if (have_to) return error.InvalidTouchesReport;
+            edge.to = try readJsonString(gpa, reader);
+            if (edge.to.len == 0) return error.InvalidTouchesReport;
+            have_to = true;
+        } else {
+            return error.InvalidTouchesReport;
+        }
+    }
+
+    if (!have_kind or !have_from or !have_to) return error.InvalidTouchesReport;
+    return edge;
+}
+
+fn parseEdgeKind(value: []const u8) ?EdgeKind {
+    inline for (std.meta.tags(EdgeKind)) |kind| {
+        if (std.mem.eql(u8, kind.name(), value)) return kind;
+    }
+    return null;
+}
+
+/// Claims binding parser with a caller-supplied failure error, mirroring the
+/// checks binding parser so the touches stream can surface a malformed claims
+/// binding as `InvalidTouchesReport`.
+fn parseClaimsBindingAfterBegin(
+    gpa: std.mem.Allocator,
+    reader: *std.json.Reader,
+    expected_target: []const u8,
+    fail_error: Error,
+) Error!struct { binding: FileBinding, claim_count: usize, limitation_count: usize } {
+    var have_path = false;
+    var have_bytes = false;
+    var have_sha256 = false;
+    var have_format = false;
+    var have_version = false;
+    var have_target = false;
+    var have_claim_count = false;
+    var have_limitation_count = false;
+    var binding: FileBinding = undefined;
+    var claim_count: usize = 0;
+    var limitation_count: usize = 0;
+
+    while (true) {
+        const key_token = try nextJsonAllocToken(gpa, reader, 4096);
+        switch (key_token) {
+            .object_end => break,
+            else => {},
+        }
+        defer freeJsonToken(gpa, key_token);
+        const key = jsonTokenText(key_token) orelse return fail_error;
+
+        if (std.mem.eql(u8, key, "path")) {
+            if (have_path) return fail_error;
+            const value = try readJsonString(gpa, reader);
+            defer gpa.free(value);
+            if (!std.mem.eql(u8, value, publication_claims.output_path)) return fail_error;
+            have_path = true;
+        } else if (std.mem.eql(u8, key, "bytes")) {
+            if (have_bytes) return fail_error;
+            const value = try readJsonInteger(gpa, reader);
+            if (value > std.math.maxInt(usize)) return fail_error;
+            binding.bytes = @intCast(value);
+            have_bytes = true;
+        } else if (std.mem.eql(u8, key, "sha256")) {
+            if (have_sha256) return fail_error;
+            binding.sha256 = try readJsonDigest(gpa, reader);
+            have_sha256 = true;
+        } else if (std.mem.eql(u8, key, "format")) {
+            if (have_format) return fail_error;
+            const value = try readJsonString(gpa, reader);
+            defer gpa.free(value);
+            if (!std.mem.eql(u8, value, publication_claims.report_format)) return fail_error;
+            have_format = true;
+        } else if (std.mem.eql(u8, key, "schema_version")) {
+            if (have_version) return fail_error;
+            if (try readJsonInteger(gpa, reader) != publication_claims.schema_version)
+                return fail_error;
+            have_version = true;
+        } else if (std.mem.eql(u8, key, "target")) {
+            if (have_target) return fail_error;
+            const value = try readJsonString(gpa, reader);
+            defer gpa.free(value);
+            if (value.len == 0 or !std.mem.eql(u8, value, expected_target))
+                return fail_error;
+            have_target = true;
+        } else if (std.mem.eql(u8, key, "claim_count")) {
+            if (have_claim_count) return fail_error;
+            const value = try readJsonInteger(gpa, reader);
+            if (value > std.math.maxInt(usize)) return fail_error;
+            claim_count = @intCast(value);
+            have_claim_count = true;
+        } else if (std.mem.eql(u8, key, "limitation_count")) {
+            if (have_limitation_count) return fail_error;
+            const value = try readJsonInteger(gpa, reader);
+            if (value > std.math.maxInt(usize)) return fail_error;
+            limitation_count = @intCast(value);
+            have_limitation_count = true;
+        } else {
+            return fail_error;
+        }
+    }
+
+    if (!have_path or !have_bytes or !have_sha256 or !have_format or
+        !have_version or !have_target or !have_claim_count or !have_limitation_count)
+        return fail_error;
+    return .{ .binding = binding, .claim_count = claim_count, .limitation_count = limitation_count };
+}
+
 fn freeParsedLimitation(gpa: std.mem.Allocator, limitation: ParsedLimitation) void {
     gpa.free(limitation.id);
     gpa.free(limitation.statement);
@@ -1812,7 +2679,7 @@ const EvidenceInput = struct {
     }
 };
 
-const NodeKind = enum {
+pub const NodeKind = enum {
     target,
     artifact,
     check,
@@ -1820,7 +2687,7 @@ const NodeKind = enum {
     claim,
     limitation,
 
-    fn name(self: NodeKind) []const u8 {
+    pub fn name(self: NodeKind) []const u8 {
         return switch (self) {
             .target => "target",
             .artifact => "artifact",
@@ -1832,7 +2699,7 @@ const NodeKind = enum {
     }
 };
 
-const EdgeKind = enum {
+pub const EdgeKind = enum {
     target_owns_artifact,
     artifact_subject_of_check,
     artifact_supports_check,
@@ -1840,7 +2707,7 @@ const EdgeKind = enum {
     check_supports_claim,
     claim_limited_by,
 
-    fn name(self: EdgeKind) []const u8 {
+    pub fn name(self: EdgeKind) []const u8 {
         return switch (self) {
             .target_owns_artifact => "target-owns-artifact",
             .artifact_subject_of_check => "artifact-subject-of-check",
@@ -1852,12 +2719,12 @@ const EdgeKind = enum {
     }
 };
 
-const Node = struct {
+pub const Node = struct {
     kind: NodeKind,
     id: []const u8,
 };
 
-const Edge = struct {
+pub const Edge = struct {
     kind: EdgeKind,
     from: []const u8,
     to: []const u8,
@@ -1916,7 +2783,7 @@ fn freeEdges(gpa: std.mem.Allocator, edges: []const Edge) void {
     }
 }
 
-fn buildNodesAndEdges(
+pub fn buildNodesAndEdges(
     gpa: std.mem.Allocator,
     inventory: *const artifact_inventory.Inventory,
     parsed_checks: *const ParsedChecks,
@@ -2220,7 +3087,7 @@ fn expectedEdges(
 /// directions using the declared kinds; unique `(kind, from, to)` tuples;
 /// node order and edge order matching the contract; and node/edge
 /// cardinalities agreeing with the parsed evidence and derived selections.
-fn validateGraph(
+pub fn validateGraph(
     gpa: std.mem.Allocator,
     inventory: *const artifact_inventory.Inventory,
     parsed_checks: *const ParsedChecks,
@@ -2651,7 +3518,7 @@ pub fn writeAfterClaims(
 
 const test_digest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
-const TestFindingSpec = struct {
+pub const TestFindingSpec = struct {
     code: []const u8,
     severity: []const u8 = "error",
     subject_kind: []const u8 = "artifact",
@@ -2659,7 +3526,7 @@ const TestFindingSpec = struct {
     subject_target: ?[]const u8 = "default",
 };
 
-const TestCheckSpec = struct {
+pub const TestCheckSpec = struct {
     status: []const u8 = "passed",
     coverage: []const u8 = "complete",
     /// `null` derives the eligible/checked counts from the inventory selectors
@@ -2681,7 +3548,7 @@ const TestCheckSpec = struct {
     findings: []const TestFindingSpec = &.{},
 };
 
-const TestFixtureSpec = struct {
+pub const TestFixtureSpec = struct {
     target: []const u8 = "default",
     artifact_count: usize = 1,
     checks: [3]TestCheckSpec = .{
@@ -2706,7 +3573,7 @@ const TestFixtureSpec = struct {
     },
 };
 
-fn recordFor(
+pub fn recordFor(
     path: []const u8,
     kind: artifact_inventory.Kind,
     bytes: []const u8,
@@ -2714,7 +3581,7 @@ fn recordFor(
     return recordForStatus(path, kind, bytes, .committed);
 }
 
-fn recordForStatus(
+pub fn recordForStatus(
     path: []const u8,
     kind: artifact_inventory.Kind,
     bytes: []const u8,
@@ -2732,12 +3599,12 @@ fn recordForStatus(
     };
 }
 
-fn writePayload(io: Io, root: Io.Dir, path: []const u8, bytes: []const u8) !void {
+pub fn writePayload(io: Io, root: Io.Dir, path: []const u8, bytes: []const u8) !void {
     if (std.fs.path.dirname(path)) |parent| try root.createDirPath(io, parent);
     try root.writeFile(io, .{ .sub_path = path, .data = bytes });
 }
 
-fn readPayload(io: Io, root: Io.Dir, gpa: std.mem.Allocator, path: []const u8) ![]u8 {
+pub fn readPayload(io: Io, root: Io.Dir, gpa: std.mem.Allocator, path: []const u8) ![]u8 {
     var file = try root.openFile(io, path, .{});
     defer file.close(io);
     var output: std.ArrayList(u8) = .empty;
@@ -2753,7 +3620,7 @@ fn readPayload(io: Io, root: Io.Dir, gpa: std.mem.Allocator, path: []const u8) !
     return output.toOwnedSlice(gpa);
 }
 
-fn buildArtifactsBytes(
+pub fn buildArtifactsBytes(
     gpa: std.mem.Allocator,
     target: []const u8,
     records: []const artifact_inventory.Record,
@@ -2770,14 +3637,18 @@ fn writeFindingJson(
     gpa: std.mem.Allocator,
     finding: TestFindingSpec,
 ) !void {
+    // Every user-influenced string field is JSON-escaped so hostile bytes in
+    // a fixture path or subject id cannot corrupt the report the parser must
+    // re-read. escapeAppend passes ordinary bytes through unchanged, so all
+    // existing ASCII fixtures emit identical bytes.
     try out.appendSlice(gpa, "{\"code\": \"");
-    try out.appendSlice(gpa, finding.code);
+    try json_out.escapeAppend(out, gpa, finding.code);
     try out.appendSlice(gpa, "\", \"domain\": \"artifact\", \"severity\": \"");
-    try out.appendSlice(gpa, finding.severity);
+    try json_out.escapeAppend(out, gpa, finding.severity);
     try out.appendSlice(gpa, "\", \"confidence\": \"certain\", \"owner\": \"publication\", \"subject\": {\"kind\": \"");
-    try out.appendSlice(gpa, finding.subject_kind);
+    try json_out.escapeAppend(out, gpa, finding.subject_kind);
     try out.appendSlice(gpa, "\", \"id\": \"");
-    try out.appendSlice(gpa, finding.subject_id);
+    try json_out.escapeAppend(out, gpa, finding.subject_id);
     try out.appendSlice(gpa, "\", \"target\": ");
     if (finding.subject_target) |value| {
         try json_out.writeString(out, gpa, value);
@@ -2855,7 +3726,7 @@ fn writeTestStringArray(
     try out.append(gpa, ']');
 }
 
-fn buildChecksBytes(
+pub fn buildChecksBytes(
     gpa: std.mem.Allocator,
     artifacts_bytes: []const u8,
     spec: TestFixtureSpec,
@@ -2944,7 +3815,7 @@ fn claimStatusFor(check: TestCheckSpec) []const u8 {
     return "not-verified";
 }
 
-fn buildClaimsBytes(
+pub fn buildClaimsBytes(
     gpa: std.mem.Allocator,
     artifacts_bytes: []const u8,
     checks_bytes: []const u8,
@@ -3047,7 +3918,7 @@ fn buildClaimsBytes(
     return out.toOwnedSlice(gpa);
 }
 
-fn prepareTarget(
+pub fn prepareTarget(
     io: Io,
     gpa: std.mem.Allocator,
     root: Io.Dir,
@@ -3074,13 +3945,13 @@ fn prepareTarget(
     try writePayload(io, root, claims_path, claims);
 }
 
-fn openSubdir(io: Io, root: Io.Dir, prefix: []const u8) !Io.Dir {
+pub fn openSubdir(io: Io, root: Io.Dir, prefix: []const u8) !Io.Dir {
     var dir = try root.openDir(io, prefix, .{});
     errdefer dir.close(io);
     return dir;
 }
 
-fn runTouches(
+pub fn runTouches(
     io: Io,
     gpa: std.mem.Allocator,
     root: Io.Dir,
@@ -3094,22 +3965,22 @@ fn runTouches(
     return readPayload(io, dir, gpa, output_path);
 }
 
-fn nodeCount(touches_root: std.json.ObjectMap) usize {
+pub fn nodeCount(touches_root: std.json.ObjectMap) usize {
     return touches_root.get("nodes").?.array.items.len;
 }
 
-fn edgeCount(touches_root: std.json.ObjectMap) usize {
+pub fn edgeCount(touches_root: std.json.ObjectMap) usize {
     return touches_root.get("edges").?.array.items.len;
 }
 
-fn findNode(touches_root: std.json.ObjectMap, id: []const u8) ?std.json.Value {
+pub fn findNode(touches_root: std.json.ObjectMap, id: []const u8) ?std.json.Value {
     for (touches_root.get("nodes").?.array.items) |node| {
         if (std.mem.eql(u8, node.object.get("id").?.string, id)) return node;
     }
     return null;
 }
 
-fn hasEdge(touches_root: std.json.ObjectMap, kind: []const u8, from: []const u8, to: []const u8) bool {
+pub fn hasEdge(touches_root: std.json.ObjectMap, kind: []const u8, from: []const u8, to: []const u8) bool {
     for (touches_root.get("edges").?.array.items) |edge| {
         if (std.mem.eql(u8, edge.object.get("kind").?.string, kind) and
             std.mem.eql(u8, edge.object.get("from").?.string, from) and
@@ -3891,6 +4762,141 @@ test "no trailing JSON is tolerated after any report" {
     defer gpa.free(claims_trailing);
     try writePayload(io, dir, publication_claims.output_path, claims_trailing);
     try std.testing.expectError(error.InvalidClaimsReport, writeAfterClaims(io, gpa, dir, "default", .{}));
+}
+
+/// One byte-level mutation of the committed touches report: replace every
+/// occurrence of `find` with `replace` and re-parse. The mutation must change
+/// the bytes (a drifted anchor fails loudly) and the parser must reject the
+/// result as `InvalidTouchesReport`.
+const MetadataMutation = struct {
+    name: []const u8,
+    find: []const u8,
+    replace: []const u8,
+};
+
+fn expectMetadataMutationRejected(
+    gpa: std.mem.Allocator,
+    report: []const u8,
+    inventory: *const artifact_inventory.Inventory,
+    parsed_checks: *const ParsedChecks,
+    parsed_claims: *const ParsedClaims,
+    case: MetadataMutation,
+) !void {
+    try std.testing.expect(std.mem.indexOf(u8, report, case.find) != null);
+    const mutated = try std.mem.replaceOwned(u8, gpa, report, case.find, case.replace);
+    defer gpa.free(mutated);
+    try std.testing.expect(!std.mem.eql(u8, mutated, report));
+    var reader = std.Io.Reader.fixed(mutated);
+    try std.testing.expectError(
+        error.InvalidTouchesReport,
+        parseTouchesStream(gpa, &reader, "default", inventory, parsed_checks, parsed_claims),
+    );
+}
+
+// Strict node-metadata validation: every handled mutation of ONLY a metadata
+// field (node ids, edges, and embedded upstream bindings stay valid) must be
+// rejected as InvalidTouchesReport. The committed metadata is the ground
+// truth; any deviation in field, type, index, or member value fails.
+test "strict node metadata validation rejects every metadata mutation" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const records = [_]artifact_inventory.Record{
+        recordFor("index.html", .html_page, "<main></main>"),
+        recordFor("broken.html", .html_page, "<main"),
+        recordFor("_boris/search/search-index.json", .rendered_search, "{}"),
+    };
+    const spec = TestFixtureSpec{
+        .artifact_count = 3,
+        .checks = .{
+            .{ .subject_kinds = &.{}, .status = "failed", .findings = &.{
+                .{ .code = "ARTIFACT_DIGEST_MISMATCH", .severity = "error", .subject_kind = "artifact", .subject_id = "broken.html" },
+            } },
+            .{ .subject_kinds = &.{"html-page"}, .status = "failed", .findings = &.{
+                .{ .code = "HTML_FRAGMENT_MISSING", .severity = "error", .subject_kind = "html-page", .subject_id = "index.html" },
+            } },
+            .{ .subject_kinds = &.{"rendered-search"}, .supporting_kinds = &.{"html-page"}, .status = "failed", .findings = &.{
+                .{ .code = "SEARCH_CONTENT_MISMATCH", .severity = "error", .subject_kind = "rendered-search", .subject_id = "_boris/search/search-index.json" },
+            } },
+        },
+    };
+
+    var ctx = try makeGraphContext(io, gpa, &records, spec);
+    defer ctx.deinit();
+    var dir = try openSubdir(io, ctx.tmp.dir, "target");
+    defer dir.close(io);
+    try writeAfterClaims(io, gpa, dir, "default", .{});
+    const report = try readPayload(io, dir, gpa, output_path);
+    defer gpa.free(report);
+
+    // Positive control: the pristine committed report parses under the strict
+    // metadata validation. Every parsed node id and edge endpoint is an owned
+    // allocation (including the target literal, which is re-read from the
+    // report), so all are freed here.
+    {
+        var reader = std.Io.Reader.fixed(report);
+        const parsed = try parseTouchesStream(gpa, &reader, "default", &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims);
+        for (parsed.nodes) |node| gpa.free(node.id);
+        gpa.free(parsed.nodes);
+        for (parsed.edges) |edge| {
+            gpa.free(edge.from);
+            gpa.free(edge.to);
+        }
+        gpa.free(parsed.edges);
+    }
+
+    const cases = [_]MetadataMutation{
+        // target node metadata: closed {target}, equal to the report target.
+        .{ .name = "target metadata not an object", .find = "\"metadata\": {\n        \"target\": \"default\"\n      }", .replace = "\"metadata\": \"wrong\"" },
+        .{ .name = "target wrong member value", .find = "\"metadata\": {\n        \"target\": \"default\"", .replace = "\"metadata\": {\n        \"target\": \"other\"" },
+        .{ .name = "target missing member", .find = "\"metadata\": {\n        \"target\": \"default\"\n      }", .replace = "\"metadata\": {\n      }" },
+        .{ .name = "target unknown member", .find = "\"metadata\": {\n        \"target\": \"default\"\n      }", .replace = "\"metadata\": {\n        \"target\": \"default\",\n        \"extra\": 1\n      }" },
+        .{ .name = "target duplicate member", .find = "\"metadata\": {\n        \"target\": \"default\"\n      }", .replace = "\"metadata\": {\n        \"target\": \"default\",\n        \"target\": \"default\"\n      }" },
+        .{ .name = "target wrong member type", .find = "\"metadata\": {\n        \"target\": \"default\"\n      }", .replace = "\"metadata\": {\n        \"target\": 7\n      }" },
+        // artifact node metadata: closed {inventory_index, path, kind, status, required}.
+        .{ .name = "artifact wrong inventory_index", .find = "\"inventory_index\": 2,\n        \"path\": \"index.html\"", .replace = "\"inventory_index\": 1,\n        \"path\": \"index.html\"" },
+        .{ .name = "artifact wrong path", .find = "\"path\": \"index.html\",\n        \"kind\": \"html-page\"", .replace = "\"path\": \"other.html\",\n        \"kind\": \"html-page\"" },
+        .{ .name = "artifact wrong kind", .find = "\"kind\": \"html-page\",\n        \"status\": \"committed\"", .replace = "\"kind\": \"content-asset\",\n        \"status\": \"committed\"" },
+        .{ .name = "artifact wrong status", .find = "\"kind\": \"html-page\",\n        \"status\": \"committed\"", .replace = "\"kind\": \"html-page\",\n        \"status\": \"not-applicable\"" },
+        .{ .name = "artifact wrong required type", .find = "\"status\": \"committed\",\n        \"required\": true", .replace = "\"status\": \"committed\",\n        \"required\": \"yes\"" },
+        .{ .name = "artifact missing required", .find = "\"status\": \"committed\",\n        \"required\": true\n      }", .replace = "\"status\": \"committed\"\n      }" },
+        .{ .name = "artifact unknown member", .find = "\"required\": true\n      }", .replace = "\"required\": true,\n        \"extra\": 1\n      }" },
+        .{ .name = "artifact duplicate inventory_index", .find = "\"inventory_index\": 2,\n        \"path\": \"index.html\"", .replace = "\"inventory_index\": 2,\n        \"inventory_index\": 2,\n        \"path\": \"index.html\"" },
+        // check node metadata: closed {check_index, check_id, status, coverage}.
+        .{ .name = "check wrong check_index", .find = "\"check_index\": 0,\n        \"check_id\": \"artifact-integrity\"", .replace = "\"check_index\": 1,\n        \"check_id\": \"artifact-integrity\"" },
+        .{ .name = "check wrong check_id", .find = "\"check_id\": \"artifact-integrity\",\n        \"status\": \"failed\"", .replace = "\"check_id\": \"rendered-html\",\n        \"status\": \"failed\"" },
+        .{ .name = "check wrong status", .find = "\"check_id\": \"artifact-integrity\",\n        \"status\": \"failed\"", .replace = "\"check_id\": \"artifact-integrity\",\n        \"status\": \"passed\"" },
+        .{ .name = "check wrong coverage", .find = "\"check_id\": \"artifact-integrity\",\n        \"status\": \"failed\",\n        \"coverage\": \"complete\"", .replace = "\"check_id\": \"artifact-integrity\",\n        \"status\": \"failed\",\n        \"coverage\": \"incomplete\"" },
+        .{ .name = "check missing coverage", .find = "\"status\": \"failed\",\n        \"coverage\": \"complete\"\n      }", .replace = "\"status\": \"failed\"\n      }" },
+        .{ .name = "check unknown member", .find = "\"coverage\": \"complete\"\n      }", .replace = "\"coverage\": \"complete\",\n        \"extra\": 1\n      }" },
+        .{ .name = "check duplicate check_id", .find = "\"check_id\": \"artifact-integrity\",\n        \"status\": \"failed\"", .replace = "\"check_id\": \"artifact-integrity\",\n        \"check_id\": \"artifact-integrity\",\n        \"status\": \"failed\"" },
+        // finding node metadata: closed {finding_index, check_id,
+        // check_finding_index, code, severity, subject}.
+        .{ .name = "finding wrong finding_index", .find = "\"finding_index\": 0,\n        \"check_id\": \"artifact-integrity\",\n        \"check_finding_index\": 0", .replace = "\"finding_index\": 1,\n        \"check_id\": \"artifact-integrity\",\n        \"check_finding_index\": 0" },
+        .{ .name = "finding wrong check_id", .find = "\"finding_index\": 0,\n        \"check_id\": \"artifact-integrity\"", .replace = "\"finding_index\": 0,\n        \"check_id\": \"rendered-html\"" },
+        .{ .name = "finding wrong check_finding_index", .find = "\"check_finding_index\": 0,\n        \"code\": \"ARTIFACT_DIGEST_MISMATCH\"", .replace = "\"check_finding_index\": 1,\n        \"code\": \"ARTIFACT_DIGEST_MISMATCH\"" },
+        .{ .name = "finding wrong code", .find = "\"code\": \"ARTIFACT_DIGEST_MISMATCH\",\n        \"severity\": \"error\"", .replace = "\"code\": \"SEARCH_MISSING\",\n        \"severity\": \"error\"" },
+        .{ .name = "finding wrong severity", .find = "\"severity\": \"error\",\n        \"subject\"", .replace = "\"severity\": \"warning\",\n        \"subject\"" },
+        .{ .name = "finding wrong subject kind", .find = "\"subject\": {\n          \"kind\": \"artifact\",\n          \"id\": \"broken.html\"", .replace = "\"subject\": {\n          \"kind\": \"html-page\",\n          \"id\": \"broken.html\"" },
+        .{ .name = "finding wrong subject id", .find = "\"kind\": \"artifact\",\n          \"id\": \"broken.html\"", .replace = "\"kind\": \"artifact\",\n          \"id\": \"other.html\"" },
+        .{ .name = "finding wrong subject target", .find = "\"id\": \"broken.html\",\n          \"target\": \"default\"", .replace = "\"id\": \"broken.html\",\n          \"target\": \"other\"" },
+        .{ .name = "finding missing subject", .find = "\"subject\": {\n          \"kind\": \"artifact\",\n          \"id\": \"broken.html\",\n          \"target\": \"default\"\n        }", .replace = "\"subject\": {\n          \"kind\": \"artifact\",\n          \"id\": \"broken.html\"\n        }" },
+        .{ .name = "finding subject not an object", .find = "\"subject\": {\n          \"kind\": \"artifact\",\n          \"id\": \"broken.html\",\n          \"target\": \"default\"\n        }", .replace = "\"subject\": \"wrong\"" },
+        // claim node metadata: closed {claim_index, claim_id, status}.
+        .{ .name = "claim wrong claim_index", .find = "\"claim_index\": 0,\n        \"claim_id\": \"committed-artifacts-match-inventory\"", .replace = "\"claim_index\": 1,\n        \"claim_id\": \"committed-artifacts-match-inventory\"" },
+        .{ .name = "claim wrong claim_id", .find = "\"claim_id\": \"committed-artifacts-match-inventory\",\n        \"status\": \"failed\"", .replace = "\"claim_id\": \"rendered-html-passed-declared-audit\",\n        \"status\": \"failed\"" },
+        .{ .name = "claim wrong status", .find = "\"claim_id\": \"committed-artifacts-match-inventory\",\n        \"status\": \"failed\"", .replace = "\"claim_id\": \"committed-artifacts-match-inventory\",\n        \"status\": \"verified\"" },
+        .{ .name = "claim missing status", .find = "\"claim_id\": \"committed-artifacts-match-inventory\",\n        \"status\": \"failed\"\n      }", .replace = "\"claim_id\": \"committed-artifacts-match-inventory\"\n      }" },
+        .{ .name = "claim unknown member", .find = "\"status\": \"failed\"\n      }", .replace = "\"status\": \"failed\",\n        \"extra\": true\n      }" },
+        // limitation node metadata: closed {limitation_index, limitation_id, source}.
+        .{ .name = "limitation wrong limitation_index", .find = "\"limitation_index\": 0,\n        \"limitation_id\": \"target-local-only\"", .replace = "\"limitation_index\": 1,\n        \"limitation_id\": \"target-local-only\"" },
+        .{ .name = "limitation wrong limitation_id", .find = "\"limitation_id\": \"target-local-only\",\n        \"source\": \"docs/contracts/publication-checks.md#authority-and-transaction-boundary\"", .replace = "\"limitation_id\": \"no-deployment-verification\",\n        \"source\": \"docs/contracts/publication-checks.md#authority-and-transaction-boundary\"" },
+        .{ .name = "limitation wrong source", .find = "\"source\": \"docs/contracts/publication-checks.md#authority-and-transaction-boundary\"", .replace = "\"source\": \"wrong-source\"" },
+        .{ .name = "limitation missing source", .find = "\"source\": \"docs/contracts/publication-checks.md#authority-and-transaction-boundary\"\n      }", .replace = "\"limitation_id\": \"target-local-only\"\n      }" },
+        .{ .name = "limitation unknown member", .find = "\"source\": \"docs/contracts/publication-checks.md#authority-and-transaction-boundary\"\n      }", .replace = "\"source\": \"docs/contracts/publication-checks.md#authority-and-transaction-boundary\",\n        \"extra\": 1\n      }" },
+    };
+    for (cases) |case| {
+        try expectMetadataMutationRejected(gpa, report, &ctx.inventory, &ctx.parsed_checks, &ctx.parsed_claims, case);
+    }
 }
 
 fn expectJsonStrings(value: std.json.Value, expected: []const []const u8) !void {

@@ -1,16 +1,16 @@
 # Publication Proof Pack (schema v1)
 
-**Status:** contract drafted, implementation not yet shipped
+**Status:** implemented and shipped (first slice)
 
 The Proof Pack is the presentation and packaging layer over Boris's committed
 publication evidence. The Touch Atlas connects the evidence; the Proof Pack
 makes that evidence understandable and portable without creating new
 verification.
 
-This is a documentation, schema, example, and implementation-planning
-contract only. Boris does not currently emit `_boris/proof/proof-pack.json`
-or `_boris/proof/index.html`, and this PR does not implement the map at the
-end of this document.
+Boris emits the deterministic pair `_boris/proof/proof-pack.json` and
+`_boris/proof/index.html` as the final presentation layer after the Touch
+Atlas commits. The runtime requirements below are enforced by compiler and
+fixture tests; see the implementation map at the end of this document.
 
 ## Purpose
 
@@ -589,9 +589,9 @@ split-pair detection), exit code `3`, quiet diagnostic capture, and
 reserved-path guards. Atomic replacement and prior-pair preservation are
 runtime behavior, not schema claims.
 
-## Implementation map (future card, not implemented here)
+## Implementation map
 
-A future implementation card would cover:
+The shipped first slice covers:
 
 ```text
 src/publication_proof_pack.zig
@@ -613,8 +613,6 @@ HTML/JSON parity tests
 failure injection
 ```
 
-Do not implement the map in this PR.
-
 ## Non-claims (explicitly out of scope)
 
 This slice makes no claim about, and does not attempt:
@@ -623,9 +621,11 @@ This slice makes no claim about, and does not attempt:
 - deployment, accessibility, prose-quality, or reproducibility claims;
 - source-to-artifact provenance inference;
 - repair actions or evidence-status upgrades; and
-- emitting either proposed output.
+- any multi-file atomic pair-visibility primitive (the first-slice
+transaction makes no such claim; the embedded model digest is the
+split-pair detection mechanism).
 
-The status is **contract drafted, implementation not yet shipped**: the
-normative runtime requirements above are not enforced by any compiler test
-yet, and Boris does not currently emit `_boris/proof/proof-pack.json` or
-`_boris/proof/index.html`.
+The presentation layer is implemented and shipped: Boris now emits
+`_boris/proof/proof-pack.json` and `_boris/proof/index.html` after the
+Touch Atlas commits, and the normative runtime requirements above are
+enforced by the compiler, module, and fixture tests in this PR.

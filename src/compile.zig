@@ -65,6 +65,7 @@ const artifact_inventory = @import("artifact_inventory.zig");
 const publication_checks = @import("publication_checks.zig");
 const publication_claims = @import("publication_claims.zig");
 const publication_touches = @import("publication_touches.zig");
+const publication_proof_pack = @import("publication_proof_pack.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -126,6 +127,32 @@ fn writePublicationTouchesFailure(
         "error: publication committed for target '{s}', but the Touch Atlas was not refreshed: {s}\n",
         .{ target_name, @errorName(err) },
     );
+}
+
+fn writePublicationProofPackFailure(
+    writer: *Io.Writer,
+    target_name: []const u8,
+    err: anyerror,
+) !void {
+    // A rollback that fails either to restore a preserved file or to remove a
+    // newly installed file leaves the current pair possibly split or absent,
+    // so both restore and remove errors classify as recovery failed.
+    const name = @errorName(err);
+    const recovery_failed = std.mem.eql(u8, name, "RestoreHtmlFailed") or
+        std.mem.eql(u8, name, "RestoreJsonFailed") or
+        std.mem.eql(u8, name, "RemoveHtmlFailed") or
+        std.mem.eql(u8, name, "RemoveJsonFailed");
+    if (recovery_failed) {
+        try writer.print(
+            "error: publication committed for target '{s}', but Proof Pack presentation recovery failed; the current pair may be split or absent: {s}\n",
+            .{ target_name, @errorName(err) },
+        );
+    } else {
+        try writer.print(
+            "error: publication committed for target '{s}', but Proof Pack presentation was not refreshed: {s}\n",
+            .{ target_name, @errorName(err) },
+        );
+    }
 }
 
 /// Build graph nodes from PageDb, validate, freeze, and buildNav.
@@ -274,6 +301,27 @@ pub const CompileOptions = struct {
     /// is written here instead of the process stderr, so tests can assert the
     /// line is emitted even under `--quiet`.
     publication_touches_failure_writer: ?*Io.Writer = null,
+    /// Test-only post-touches Proof Pack derivation failure. Production
+    /// callers leave every publication-proof-pack fault injection false.
+    test_fail_publication_proof_pack: bool = false,
+    /// Test-only Proof Pack JSON temporary write failure.
+    test_fail_proof_pack_json_tmp_write: bool = false,
+    /// Test-only Proof Pack HTML temporary write failure.
+    test_fail_proof_pack_html_tmp_write: bool = false,
+    /// Test-only Proof Pack prior-pair preservation failure.
+    test_fail_proof_pack_preserve_prior: bool = false,
+    /// Test-only Proof Pack HTML install failure.
+    test_fail_proof_pack_install_html: bool = false,
+    /// Test-only Proof Pack JSON install failure.
+    test_fail_proof_pack_install_json: bool = false,
+    /// Test-only Proof Pack HTML restore failure.
+    test_fail_proof_pack_restore_html: bool = false,
+    /// Test-only Proof Pack JSON restore failure.
+    test_fail_proof_pack_restore_json: bool = false,
+    /// Test-only capture: when set, the post-commit Proof Pack diagnostic
+    /// is written here instead of the process stderr, so tests can assert the
+    /// line is emitted even under `--quiet`.
+    publication_proof_pack_failure_writer: ?*Io.Writer = null,
 };
 
 fn validateSitemapConfig(gpa: std.mem.Allocator, options: CompileOptions) !void {
@@ -2519,6 +2567,11 @@ fn compilePagesInner(
                 if (theme_html_assets.contains(entry.path)) continue;
                 if (content_html_assets.contains(entry.path)) continue;
                 if (content_asset.isContentLocalOutputPath(entry.path)) continue;
+                // The Proof Pack presentation pair is a committed generation,
+                // not a stale page output: the pair transaction snapshots the
+                // exact prior state and restores it on failure, so the walker
+                // must never delete `index.html` out from under it.
+                if (std.mem.eql(u8, entry.path, artifact_inventory.proof_index_output_path)) continue;
                 if (!live_paths.contains(entry.path)) {
                     dist_dir.deleteFile(io, entry.path) catch {};
                 }
@@ -2588,6 +2641,32 @@ fn compilePagesInner(
             writePublicationTouchesFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
         }
         return error.PublicationTouchesFailed;
+    };
+
+    // The Proof Pack is the final presentation layer, derived exclusively
+    // from the exact committed artifacts, checks, claims, and touches bytes.
+    // A derivation, stale-binding, parser, render, I/O, or transaction
+    // failure keeps the committed target and all four evidence reports and
+    // restores (or explicitly reports) the prior presentation pair; the
+    // diagnostic is emitted even under --quiet.
+    publication_proof_pack.writeAfterTouches(io, gpa, dist_dir, options.target_name, .{
+        .test_fail_execution = options.test_fail_publication_proof_pack,
+        .test_fail_json_tmp_write = options.test_fail_proof_pack_json_tmp_write,
+        .test_fail_html_tmp_write = options.test_fail_proof_pack_html_tmp_write,
+        .test_fail_preserve_prior = options.test_fail_proof_pack_preserve_prior,
+        .test_fail_install_html = options.test_fail_proof_pack_install_html,
+        .test_fail_install_json = options.test_fail_proof_pack_install_json,
+        .test_fail_restore_html = options.test_fail_proof_pack_restore_html,
+        .test_fail_restore_json = options.test_fail_proof_pack_restore_json,
+    }) catch |err| {
+        if (options.publication_proof_pack_failure_writer) |writer| {
+            writePublicationProofPackFailure(writer, options.target_name, err) catch {};
+        } else {
+            const stderr = std.debug.lockStderr(&.{});
+            defer std.debug.unlockStderr();
+            writePublicationProofPackFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        }
+        return error.PublicationProofPackFailed;
     };
 
     return stats;
@@ -8365,6 +8444,137 @@ test "quiet touches failure emits the captured diagnostic and preserves prior to
         output.writer.buffered(),
     );
 
+    const new_touches = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
+    defer gpa.free(new_touches);
+    try std.testing.expectEqualStrings(old_touches, new_touches);
+}
+
+test "quiet proof-pack failure emits the captured not-refreshed diagnostic and preserves all four evidence reports" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/publication-proof-pack-captured-stderr", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nBody.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const options: CompileOptions = .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .quiet = true };
+    _ = try compileHtmlSite(io, gpa, options);
+
+    const old_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(old_inventory);
+    const old_checks = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(old_checks);
+    const old_claims = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(old_claims);
+    const old_touches = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
+    defer gpa.free(old_touches);
+    const old_json = try readTargetPayload(io, gpa, dist, publication_proof_pack.output_path);
+    defer gpa.free(old_json);
+    const old_html = try readTargetPayload(io, gpa, dist, publication_proof_pack.index_output_path);
+    defer gpa.free(old_html);
+
+    // The diagnostic is emitted even under --quiet; capture it instead of the
+    // process stderr and prove the exact committed-target wording. main.zig's
+    // mapHtmlError maps PublicationProofPackFailed to exit 3 (io_error).
+    var output: Io.Writer.Allocating = .init(gpa);
+    defer output.deinit();
+    var failure_options = options;
+    failure_options.test_fail_publication_proof_pack = true;
+    failure_options.publication_proof_pack_failure_writer = &output.writer;
+    try std.testing.expectError(error.PublicationProofPackFailed, compileHtmlSite(io, gpa, failure_options));
+    try std.testing.expectEqualStrings(
+        "error: publication committed for target 'default', but Proof Pack presentation was not refreshed: InvalidTouchesReport\n",
+        output.writer.buffered(),
+    );
+
+    // The execution fault fires before any presentation write, so all four
+    // evidence reports and the prior pair are byte-unchanged.
+    const new_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(new_inventory);
+    try std.testing.expectEqualStrings(old_inventory, new_inventory);
+    const new_checks = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(new_checks);
+    try std.testing.expectEqualStrings(old_checks, new_checks);
+    const new_claims = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(new_claims);
+    try std.testing.expectEqualStrings(old_claims, new_claims);
+    const new_touches = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
+    defer gpa.free(new_touches);
+    try std.testing.expectEqualStrings(old_touches, new_touches);
+    const new_json = try readTargetPayload(io, gpa, dist, publication_proof_pack.output_path);
+    defer gpa.free(new_json);
+    try std.testing.expectEqualStrings(old_json, new_json);
+    const new_html = try readTargetPayload(io, gpa, dist, publication_proof_pack.index_output_path);
+    defer gpa.free(new_html);
+    try std.testing.expectEqualStrings(old_html, new_html);
+}
+
+test "proof-pack restore failure surfaces the recovery-failed diagnostic and preserves all four evidence reports" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/publication-proof-pack-restore-stderr", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nInitial body.\n");
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}<footer>initial</footer></body></html>");
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const options: CompileOptions = .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .quiet = true };
+    _ = try compileHtmlSite(io, gpa, options);
+
+    const old_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(old_inventory);
+    const old_checks = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(old_checks);
+    const old_claims = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(old_claims);
+    const old_touches = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
+    defer gpa.free(old_touches);
+
+    // Install HTML first, then fail its restoration: the rollback cannot
+    // restore the preserved HTML, so RestoreHtmlFailed propagates and the
+    // contract's recovery-failed diagnostic is emitted (even under --quiet).
+    var output: Io.Writer.Allocating = .init(gpa);
+    defer output.deinit();
+    var failure_options = options;
+    failure_options.test_fail_proof_pack_install_html = true;
+    failure_options.test_fail_proof_pack_restore_html = true;
+    failure_options.publication_proof_pack_failure_writer = &output.writer;
+    try std.testing.expectError(error.PublicationProofPackFailed, compileHtmlSite(io, gpa, failure_options));
+    try std.testing.expectEqualStrings(
+        "error: publication committed for target 'default', but Proof Pack presentation recovery failed; the current pair may be split or absent: RestoreHtmlFailed\n",
+        output.writer.buffered(),
+    );
+
+    // Even when rollback itself fails, the four evidence reports committed
+    // before the presentation transaction are byte-unchanged.
+    const new_inventory = try readArtifactInventory(io, gpa, dist);
+    defer gpa.free(new_inventory);
+    try std.testing.expectEqualStrings(old_inventory, new_inventory);
+    const new_checks = try readTargetPayload(io, gpa, dist, publication_checks.output_path);
+    defer gpa.free(new_checks);
+    try std.testing.expectEqualStrings(old_checks, new_checks);
+    const new_claims = try readTargetPayload(io, gpa, dist, publication_claims.output_path);
+    defer gpa.free(new_claims);
+    try std.testing.expectEqualStrings(old_claims, new_claims);
     const new_touches = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
     defer gpa.free(new_touches);
     try std.testing.expectEqualStrings(old_touches, new_touches);

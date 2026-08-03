@@ -840,6 +840,10 @@ fn mapHtmlError(
         // committed" diagnostic for this evidence layer as well.
         error.PublicationClaimsFailed => return .io_error,
         error.PublicationTouchesFailed => return .io_error,
+        // The target and all four evidence reports are already committed when
+        // Proof Pack generation fails; compile.zig emits the explicit
+        // "publication committed" diagnostic for this presentation layer.
+        error.PublicationProofPackFailed => return .io_error,
         error.ParseFailed,
         error.LayoutMissingMarker,
         error.LayoutDuplicateMarker,
@@ -982,6 +986,7 @@ test "mapHtmlError: committed publication with stale claims evidence exits 3" {
 
 test "mapHtmlError: committed publication with unrefreshed Touch Atlas exits 3" {
     try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationTouchesFailed, true, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationProofPackFailed, true, &.{}, default_layout));
 }
 
 test "mapHtmlError: target configuration failures exit 2" {
