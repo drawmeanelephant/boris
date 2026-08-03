@@ -111,6 +111,15 @@ const modules = [_]Module{
         .source = @embedFile("publication_touches.zig"),
     },
     .{
+        .name = "publication_proof_pack.zig",
+        .class = .{ .emitter = .{
+            .encoder = .json_out,
+            .note = "target Proof Pack presentation; model and HTML escaping delegate to json_out plus the local HTML escaper",
+        } },
+        .source = @embedFile("publication_proof_pack.zig"),
+        .raw_trusted_allowed = 0,
+    },
+    .{
         .name = "sitemap.zig",
         .class = .{ .emitter = .{
             .encoder = .sink,
@@ -183,6 +192,7 @@ const modules = [_]Module{
     .{ .name = "publication_checks_fixture_test.zig", .class = .other },
     .{ .name = "publication_claims_fixture_test.zig", .class = .other },
     .{ .name = "publication_touches_fixture_test.zig", .class = .other },
+    .{ .name = "publication_proof_pack_fixture_test.zig", .class = .other },
     .{ .name = "rag_body.zig", .class = .other },
     .{
         .name = "rss.zig",

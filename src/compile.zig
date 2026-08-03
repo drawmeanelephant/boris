@@ -65,6 +65,7 @@ const artifact_inventory = @import("artifact_inventory.zig");
 const publication_checks = @import("publication_checks.zig");
 const publication_claims = @import("publication_claims.zig");
 const publication_touches = @import("publication_touches.zig");
+const publication_proof_pack = @import("publication_proof_pack.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -126,6 +127,26 @@ fn writePublicationTouchesFailure(
         "error: publication committed for target '{s}', but the Touch Atlas was not refreshed: {s}\n",
         .{ target_name, @errorName(err) },
     );
+}
+
+fn writePublicationProofPackFailure(
+    writer: *Io.Writer,
+    target_name: []const u8,
+    err: anyerror,
+) !void {
+    const restored = !std.mem.eql(u8, @errorName(err), "RestoreHtmlFailed") and
+        !std.mem.eql(u8, @errorName(err), "RestoreJsonFailed");
+    if (restored) {
+        try writer.print(
+            "error: publication committed for target '{s}', but Proof Pack presentation was not refreshed: {s}\n",
+            .{ target_name, @errorName(err) },
+        );
+    } else {
+        try writer.print(
+            "error: publication committed for target '{s}', but Proof Pack presentation recovery failed; the current pair may be split or absent: {s}\n",
+            .{ target_name, @errorName(err) },
+        );
+    }
 }
 
 /// Build graph nodes from PageDb, validate, freeze, and buildNav.
@@ -274,6 +295,27 @@ pub const CompileOptions = struct {
     /// is written here instead of the process stderr, so tests can assert the
     /// line is emitted even under `--quiet`.
     publication_touches_failure_writer: ?*Io.Writer = null,
+    /// Test-only post-touches Proof Pack derivation failure. Production
+    /// callers leave every publication-proof-pack fault injection false.
+    test_fail_publication_proof_pack: bool = false,
+    /// Test-only Proof Pack JSON temporary write failure.
+    test_fail_proof_pack_json_tmp_write: bool = false,
+    /// Test-only Proof Pack HTML temporary write failure.
+    test_fail_proof_pack_html_tmp_write: bool = false,
+    /// Test-only Proof Pack prior-pair preservation failure.
+    test_fail_proof_pack_preserve_prior: bool = false,
+    /// Test-only Proof Pack HTML install failure.
+    test_fail_proof_pack_install_html: bool = false,
+    /// Test-only Proof Pack JSON install failure.
+    test_fail_proof_pack_install_json: bool = false,
+    /// Test-only Proof Pack HTML restore failure.
+    test_fail_proof_pack_restore_html: bool = false,
+    /// Test-only Proof Pack JSON restore failure.
+    test_fail_proof_pack_restore_json: bool = false,
+    /// Test-only capture: when set, the post-commit Proof Pack diagnostic
+    /// is written here instead of the process stderr, so tests can assert the
+    /// line is emitted even under `--quiet`.
+    publication_proof_pack_failure_writer: ?*Io.Writer = null,
 };
 
 fn validateSitemapConfig(gpa: std.mem.Allocator, options: CompileOptions) !void {
@@ -2588,6 +2630,32 @@ fn compilePagesInner(
             writePublicationTouchesFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
         }
         return error.PublicationTouchesFailed;
+    };
+
+    // The Proof Pack is the final presentation layer, derived exclusively
+    // from the exact committed artifacts, checks, claims, and touches bytes.
+    // A derivation, stale-binding, parser, render, I/O, or transaction
+    // failure keeps the committed target and all four evidence reports and
+    // restores (or explicitly reports) the prior presentation pair; the
+    // diagnostic is emitted even under --quiet.
+    publication_proof_pack.writeAfterTouches(io, gpa, dist_dir, options.target_name, .{
+        .test_fail_execution = options.test_fail_publication_proof_pack,
+        .test_fail_json_tmp_write = options.test_fail_proof_pack_json_tmp_write,
+        .test_fail_html_tmp_write = options.test_fail_proof_pack_html_tmp_write,
+        .test_fail_preserve_prior = options.test_fail_proof_pack_preserve_prior,
+        .test_fail_install_html = options.test_fail_proof_pack_install_html,
+        .test_fail_install_json = options.test_fail_proof_pack_install_json,
+        .test_fail_restore_html = options.test_fail_proof_pack_restore_html,
+        .test_fail_restore_json = options.test_fail_proof_pack_restore_json,
+    }) catch |err| {
+        if (options.publication_proof_pack_failure_writer) |writer| {
+            writePublicationProofPackFailure(writer, options.target_name, err) catch {};
+        } else {
+            const stderr = std.debug.lockStderr(&.{});
+            defer std.debug.unlockStderr();
+            writePublicationProofPackFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
+        }
+        return error.PublicationProofPackFailed;
     };
 
     return stats;

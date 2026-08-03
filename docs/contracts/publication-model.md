@@ -183,13 +183,13 @@ records already declared by `artifacts.json`, `checks.json`, and
 transformation relationships. Its first slice is implemented and derives
 `touches.json` exclusively from those committed evidence bytes.
 
-The future [Publication Proof Pack](publication-proof-pack.md) is downstream
+The [Publication Proof Pack](publication-proof-pack.md) is downstream
 evidence presentation, not another publication or verification layer. It may
 present only records already declared by `artifacts.json`, `checks.json`,
 `claims.json`, and `touches.json`; it must not rerun checks, reread payloads,
-or upgrade evidence status. Its contract is drafted, implementation is not
-yet shipped, and neither `proof-pack.json` nor `index.html` is currently
-emitted.
+or upgrade evidence status. Its first slice is implemented and emits the
+deterministic pair `proof-pack.json` and `index.html` after the Touch Atlas
+commits.
 
 ## Verification vocabulary and claims
 

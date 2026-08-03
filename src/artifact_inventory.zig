@@ -23,6 +23,22 @@ pub const claims_output_path = "_boris/proof/claims.json";
 /// out of the checks/claims parsers so they never treat it as a Boris-owned
 /// payload.
 pub const touches_output_path = "_boris/proof/touches.json";
+/// Reserved downstream presentation path for the Proof Pack model. It is kept
+/// out of the inventory so the model cannot become a committed subject, and
+/// out of the checks/claims/touches parsers so they never treat it as a
+/// Boris-owned payload.
+pub const proof_pack_output_path = "_boris/proof/proof-pack.json";
+/// Reserved downstream presentation path for the Proof Pack static page. It is
+/// kept out of the inventory so the page cannot become a committed subject or
+/// masquerade as a Boris-owned payload.
+pub const proof_index_output_path = "_boris/proof/index.html";
+/// Reserved temporary paths used by the first-slice Proof Pack generation
+/// transaction. A user-produced artifact must never overwrite or masquerade as
+/// Proof Pack output, its temporary siblings, or its recovery files.
+pub const proof_pack_tmp_path = "_boris/proof/proof-pack.json.tmp";
+pub const proof_index_tmp_path = "_boris/proof/index.html.tmp";
+pub const proof_pack_prev_path = "_boris/proof/proof-pack.json.prev";
+pub const proof_index_prev_path = "_boris/proof/index.html.prev";
 pub const artifact_format = "boris-publication-artifacts";
 pub const schema_version: usize = 1;
 
@@ -150,6 +166,30 @@ fn pathPrefix(path: []const u8, prefix: []const u8) bool {
 
 fn pathsOverlap(left: []const u8, right: []const u8) bool {
     return pathPrefix(left, right) or pathPrefix(right, left);
+}
+
+/// Every producer-reserved target-relative path: evidence reports plus the
+/// Proof Pack presentation pair and its temporary/recovery siblings. A
+/// user-produced artifact colliding with any of these is rejected by the
+/// inventory parser, the collector, and the renderer.
+pub const reserved_paths = [_][]const u8{
+    output_path,
+    checks_output_path,
+    claims_output_path,
+    touches_output_path,
+    proof_pack_output_path,
+    proof_index_output_path,
+    proof_pack_tmp_path,
+    proof_index_tmp_path,
+    proof_pack_prev_path,
+    proof_index_prev_path,
+};
+
+fn isReservedPath(path: []const u8) bool {
+    for (reserved_paths) |reserved| {
+        if (pathsOverlap(path, reserved)) return true;
+    }
+    return false;
 }
 
 /// Validate a target-relative payload path without consulting the filesystem.
@@ -380,11 +420,7 @@ fn parseRecordStreamAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader)
     }
 
     if (!have_path) return error.InvalidInventory;
-    if (!validateRelativePath(record.path) or
-        pathsOverlap(record.path, output_path) or
-        pathsOverlap(record.path, checks_output_path) or
-        pathsOverlap(record.path, claims_output_path) or
-        pathsOverlap(record.path, touches_output_path))
+    if (!validateRelativePath(record.path) or isReservedPath(record.path))
         return error.InvalidInventoryPath;
     if (!have_kind or !have_producer or !have_required or !have_status or !have_bytes or
         !have_sha256 or !have_format_version) return error.InvalidInventory;
@@ -524,11 +560,7 @@ pub fn collect(
 
     for (specs) |spec| {
         if (!validateRelativePath(spec.path)) return error.InvalidArtifactPath;
-        if (pathsOverlap(spec.path, output_path) or
-            pathsOverlap(spec.path, checks_output_path) or
-            pathsOverlap(spec.path, claims_output_path) or
-            pathsOverlap(spec.path, touches_output_path))
-        {
+        if (isReservedPath(spec.path)) {
             return error.InventoryPathCollision;
         }
         if (!std.mem.eql(u8, spec.producer, spec.kind.producerName())) return error.InvalidArtifactProducer;
@@ -573,11 +605,7 @@ pub fn render(gpa: std.mem.Allocator, inventory: *const Inventory) ![]u8 {
     try out.appendSlice(gpa, ",\n  \"artifacts\": [");
 
     for (inventory.records, 0..) |record, index| {
-        if (!validateRelativePath(record.path) or
-            pathsOverlap(record.path, output_path) or
-            pathsOverlap(record.path, checks_output_path) or
-            pathsOverlap(record.path, claims_output_path) or
-            pathsOverlap(record.path, touches_output_path)) return error.InvalidInventoryPath;
+        if (!validateRelativePath(record.path) or isReservedPath(record.path)) return error.InvalidInventoryPath;
         if (!std.mem.eql(u8, record.producer, record.kind.producerName())) return error.InvalidArtifactProducer;
         if (record.format_version) |version| if (version.len == 0) return error.InvalidFormatVersion;
         if (index == 0) {
