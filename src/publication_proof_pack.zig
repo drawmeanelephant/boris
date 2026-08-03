@@ -2680,6 +2680,212 @@ test "stale and malformed evidence is rejected without replacing the prior pair"
     try std.testing.expectEqualSlices(u8, prior.json, json2);
 }
 
+// ---------------------------------------------------------------------------
+// Permanent semantic-rejection negative controls at the Proof Pack layer.
+// The touches-layer suite pins the shared parsers and graph validator; these
+// pin the same rejections through `writeAfterTouches`, which re-opens and
+// re-validates all four committed evidence reports before deriving the pair.
+// Every case keeps the tampered file well-formed (or repairs the downstream
+// embedded bindings) so the rejection must come from semantic validation,
+// never merely from the first digest mismatch, and the prior pair must
+// survive byte-for-byte.
+// ---------------------------------------------------------------------------
+
+/// Replace every occurrence of `find` in one committed evidence report with
+/// `replace` and write the result back under the same path. The needle must
+/// exist, so a fixture-format drift fails the test loudly instead of silently
+/// weakening the control.
+fn replaceEvidenceBytes(
+    io: Io,
+    gpa: std.mem.Allocator,
+    dir: Io.Dir,
+    path: []const u8,
+    find: []const u8,
+    replace: []const u8,
+) !void {
+    const original = try publication_touches.readPayload(io, dir, gpa, path);
+    defer gpa.free(original);
+    try std.testing.expect(std.mem.indexOf(u8, original, find) != null);
+    const mutated = try std.mem.replaceOwned(u8, gpa, original, find, replace);
+    defer gpa.free(mutated);
+    try publication_touches.writePayload(io, dir, path, mutated);
+}
+
+/// Derive a healthy target with its prior pair, apply one byte-level tamper
+/// to the committed evidence, and prove `writeAfterTouches` rejects with
+/// exactly `expected` while the prior pair stays byte-identical.
+fn expectEvidenceTamperRejected(
+    io: Io,
+    gpa: std.mem.Allocator,
+    records: []const artifact_inventory.Record,
+    spec: publication_touches.TestFixtureSpec,
+    tamper: anytype,
+    expected: anyerror,
+) !void {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var prior = try runProofPack(io, gpa, tmp.dir, "target", "default", records, spec, .{});
+    defer prior.deinit(gpa);
+    var dir = try publication_touches.openSubdir(io, tmp.dir, "target");
+    defer dir.close(io);
+    try tamper.run(io, gpa, dir);
+    try std.testing.expectError(expected, writeAfterTouches(io, gpa, dir, "default", .{}));
+    const json = try readFileAlloc(io, dir, gpa, output_path);
+    defer gpa.free(json);
+    const html = try readFileAlloc(io, dir, gpa, index_output_path);
+    defer gpa.free(html);
+    try std.testing.expectEqualSlices(u8, prior.json, json);
+    try std.testing.expectEqualSlices(u8, prior.html, html);
+}
+
+test "proof pack layer rejects artifact, check, and claim semantic tampering" {
+    const tio = std.testing.io;
+    const tgpa = std.testing.allocator;
+    const clean = cleanRecords();
+    const clean_spec = cleanSpec();
+    const failed = failedRecords();
+    const failed_spec = failedSpec();
+
+    // 1. artifacts.json content changed while the outer JSON stays valid: the
+    // direct artifact binding no longer agrees with the embedded bindings.
+    {
+        try expectEvidenceTamperRejected(tio, tgpa, &clean, clean_spec, struct {
+            fn run(io: Io, gpa: std.mem.Allocator, dir: Io.Dir) anyerror!void {
+                const original = try publication_touches.readPayload(io, dir, gpa, artifact_inventory.output_path);
+                defer gpa.free(original);
+                const mutated = try std.mem.concat(gpa, u8, &.{ original, "\n" });
+                defer gpa.free(mutated);
+                try publication_touches.writePayload(io, dir, artifact_inventory.output_path, mutated);
+            }
+        }, error.StaleArtifactsBinding);
+    }
+
+    // 2. checks.json status changed, with every downstream embedded checks
+    // binding repaired so the digest checks pass: the semantic node-metadata
+    // cross-check must reject, not a stale-binding check.
+    {
+        try expectEvidenceTamperRejected(tio, tgpa, &clean, clean_spec, struct {
+            fn run(io: Io, gpa: std.mem.Allocator, dir: Io.Dir) anyerror!void {
+                const checks_path = publication_checks.output_path;
+                const claims_path = publication_claims.output_path;
+                const touches_path = publication_touches.output_path;
+                const checks = try publication_touches.readPayload(io, dir, gpa, checks_path);
+                defer gpa.free(checks);
+                const old_checks_digest = cache.hexDigest(cache.hashBytes(checks));
+                const mutated_checks = try std.mem.replaceOwned(u8, gpa, checks, "\"status\": \"passed\"", "\"status\": \"failed\"");
+                defer gpa.free(mutated_checks);
+                try publication_touches.writePayload(io, dir, checks_path, mutated_checks);
+                const new_checks_digest = cache.hexDigest(cache.hashBytes(mutated_checks));
+
+                // Repair the checks binding inside claims.json.
+                const claims = try publication_touches.readPayload(io, dir, gpa, claims_path);
+                defer gpa.free(claims);
+                const old_claims_digest = cache.hexDigest(cache.hashBytes(claims));
+                const repaired_claims = try std.mem.replaceOwned(u8, gpa, claims, &old_checks_digest, &new_checks_digest);
+                defer gpa.free(repaired_claims);
+                try publication_touches.writePayload(io, dir, claims_path, repaired_claims);
+                const new_claims_digest = cache.hexDigest(cache.hashBytes(repaired_claims));
+
+                // Repair both the checks and claims bindings inside touches.json.
+                const touches = try publication_touches.readPayload(io, dir, gpa, touches_path);
+                defer gpa.free(touches);
+                const repaired_checks = try std.mem.replaceOwned(u8, gpa, touches, &old_checks_digest, &new_checks_digest);
+                defer gpa.free(repaired_checks);
+                const repaired_touches = try std.mem.replaceOwned(u8, gpa, repaired_checks, &old_claims_digest, &new_claims_digest);
+                defer gpa.free(repaired_touches);
+                try publication_touches.writePayload(io, dir, touches_path, repaired_touches);
+            }
+        }, error.InvalidTouchesReport);
+    }
+
+    // 3. checks.json finding ranges overlap: the contiguous-range chain check
+    // must reject, not a stale-binding check.
+    {
+        try expectEvidenceTamperRejected(tio, tgpa, &failed, failed_spec, struct {
+            fn run(io: Io, gpa: std.mem.Allocator, dir: Io.Dir) anyerror!void {
+                try replaceEvidenceBytes(io, gpa, dir, publication_checks.output_path, "\"finding_offset\": 1", "\"finding_offset\": 0");
+            }
+        }, error.InvalidChecksReport);
+    }
+
+    // 4. claims.json claim-to-check binding rewired to another check: the
+    // positional evidence cross-check must reject.
+    {
+        try expectEvidenceTamperRejected(tio, tgpa, &clean, clean_spec, struct {
+            fn run(io: Io, gpa: std.mem.Allocator, dir: Io.Dir) anyerror!void {
+                try replaceEvidenceBytes(io, gpa, dir, publication_claims.output_path, "\"check_id\": \"artifact-integrity\"", "\"check_id\": \"rendered-html\"");
+            }
+        }, error.InvalidClaimsReport);
+    }
+
+    // 5. claims.json limitation source changed: the fixed limitation registry
+    // must reject.
+    {
+        try expectEvidenceTamperRejected(tio, tgpa, &clean, clean_spec, struct {
+            fn run(io: Io, gpa: std.mem.Allocator, dir: Io.Dir) anyerror!void {
+                try replaceEvidenceBytes(io, gpa, dir, publication_claims.output_path, "\"source\": \"docs/contracts/publication-checks.md#authority-and-transaction-boundary\"", "\"source\": \"wrong\"");
+            }
+        }, error.InvalidClaimsReport);
+    }
+}
+
+test "proof pack layer rejects Touch Atlas graph and node semantic tampering" {
+    const tio = std.testing.io;
+    const tgpa = std.testing.allocator;
+    const clean = cleanRecords();
+    const clean_spec = cleanSpec();
+
+    // 6. touches.json artifact node metadata changed without changing the
+    // node ID: the strict metadata cross-check against the inventory rejects.
+    {
+        try expectEvidenceTamperRejected(tio, tgpa, &clean, clean_spec, struct {
+            fn run(io: Io, gpa: std.mem.Allocator, dir: Io.Dir) anyerror!void {
+                try replaceEvidenceBytes(io, gpa, dir, publication_touches.output_path, "\"status\": \"committed\",\n        \"required\": true", "\"status\": \"not-applicable\",\n        \"required\": true");
+            }
+        }, error.InvalidTouchesReport);
+    }
+
+    // 7. touches.json missing one edge: the canonical graph comparison rejects.
+    {
+        try expectEvidenceTamperRejected(tio, tgpa, &clean, clean_spec, struct {
+            fn run(io: Io, gpa: std.mem.Allocator, dir: Io.Dir) anyerror!void {
+                try replaceEvidenceBytes(io, gpa, dir, publication_touches.output_path, "    {\n      \"kind\": \"target-owns-artifact\",\n      \"from\": \"target\",\n      \"to\": \"artifact:_boris/search/search-index.json\"\n    },\n", "");
+            }
+        }, error.InvalidChecksReport);
+    }
+
+    // 8. touches.json extra edge (duplicate tuple): the graph validator
+    // rejects duplicates and cardinality drift.
+    {
+        try expectEvidenceTamperRejected(tio, tgpa, &clean, clean_spec, struct {
+            fn run(io: Io, gpa: std.mem.Allocator, dir: Io.Dir) anyerror!void {
+                const find = "    {\n      \"kind\": \"target-owns-artifact\",\n      \"from\": \"target\",\n      \"to\": \"artifact:_boris/search/search-index.json\"\n    }";
+                try replaceEvidenceBytes(io, gpa, dir, publication_touches.output_path, find, find ++ ",\n" ++ find);
+            }
+        }, error.InvalidChecksReport);
+    }
+
+    // 9. touches.json edge endpoints swapped: the edge-kind permit check
+    // rejects the reversed direction.
+    {
+        try expectEvidenceTamperRejected(tio, tgpa, &clean, clean_spec, struct {
+            fn run(io: Io, gpa: std.mem.Allocator, dir: Io.Dir) anyerror!void {
+                try replaceEvidenceBytes(io, gpa, dir, publication_touches.output_path, "\"kind\": \"target-owns-artifact\",\n      \"from\": \"target\",\n      \"to\": \"artifact:_boris/search/search-index.json\"", "\"kind\": \"target-owns-artifact\",\n      \"from\": \"artifact:_boris/search/search-index.json\",\n      \"to\": \"target\"");
+            }
+        }, error.InvalidTouchesReport);
+    }
+
+    // 10. touches.json node whose declared kind does not match its id: the
+    // closed registry and metadata-shape validation rejects.
+    {
+        try expectEvidenceTamperRejected(tio, tgpa, &clean, clean_spec, struct {
+            fn run(io: Io, gpa: std.mem.Allocator, dir: Io.Dir) anyerror!void {
+                try replaceEvidenceBytes(io, gpa, dir, publication_touches.output_path, "\"kind\": \"claim\",\n      \"id\": \"claim:committed-artifacts-match-inventory\"", "\"kind\": \"check\",\n      \"id\": \"claim:committed-artifacts-match-inventory\"");
+            }
+        }, error.InvalidTouchesReport);
+    }
+}
+
 fn proofPackAllocationCase(allocator: std.mem.Allocator) !void {
     const io = std.testing.io;
     const gpa = allocator;
