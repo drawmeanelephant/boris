@@ -1,6 +1,6 @@
 # Project status — Boris
 
-**As of:** 2026-08-02
+**As of:** 2026-08-04
 
 **Integration line:** `afterparty` during the Build Week judging window; `main` is frozen.
 
@@ -24,12 +24,18 @@ frontmatter or claim a unified publication executor.
   context is complete. The historical `v0.8.0` tag remains preserved as
   erroneous evidence: it resolves to a commit carrying 0.7.0 metadata and is
   not an ancestor of `afterparty`.
-- The current afterparty merge set is PRs **#228–#246**: generated-output
+- The current afterparty merge set runs through PR **#305**: generated-output
   hygiene, docs-maintenance hardening, default-site layout polish, rendered
-  search foundation, CLI hardening, browser UI, and staged publication,
-  standalone-tool CI, nested hierarchy, human-first documentation IA, and the
-  status, release-packet, fragment-normalization, relationship-inventory,
-  theme-dogfood, and archive-review work in PRs #238–#244.
+  search foundation, CLI hardening, browser UI, staged publication,
+  standalone-tool CI, nested hierarchy, human-first documentation IA, the
+  release-state packet and fragment normalization, relationship inventory and
+  candidate classification, theme-dogfood and archive review, migration-lab
+  publication safety, RSS 2.0 and sitemap exports, the publication profile /
+  plan / artifact-inventory / checks / claims evidence chain, the Touch Atlas
+  (contract and first slice), testdata-generator and jobs passthrough, the
+  test-throughput audit, and the Proof Pack (contract, first slice, semantic
+  rejection probes, HTML presentation, and print-disclosure robustness) in
+  PRs #275–#305.
 - Rendered-site search is **shipped on `afterparty`**: the compiler produces the
   search artifact from its staged live-page overlay and the default layout has
   a small browser UI with a no-JavaScript navigation fallback. Its normative
@@ -48,8 +54,8 @@ frontmatter or claim a unified publication executor.
 | Rendered-site search | **Done on `afterparty`** — deterministic staged compiler publication, standalone CLI, browser UI, zero-results state, and no-JavaScript navigation fallback. |
 | Relationship review inventory | **Done on `afterparty`** — schema-v2 exact target inventory preserves provenance, duplicate keys, slug states, draft exclusion, unsupported-file rows, and deterministic JSON/Markdown reports. |
 | Relationship candidate classification | **Done on `afterparty`** — exact eligible-key review output reports `inventoried`, `ambiguous`, `absent`, and `invalid`; no automatic selection or relation emission. |
-| Publication Touch Atlas | **Implemented first slice** — deterministic target-local `touches.json` relationship index derived exclusively from the committed bytes of `artifacts.json`, `checks.json`, and `claims.json`; runs after claims replacement with no payload rereads. |
-| Publication Proof Pack | **Implemented first slice** — deterministic two-file presentation model (`proof-pack.json` + `index.html`) over committed artifact, checks, claims, and Touch Atlas evidence; emitted after the Touch Atlas commits with a staged transaction and embedded model digest. |
+| Publication Touch Atlas | **Implemented first slice** — deterministic target-local `touches.json` relationship index derived exclusively from the committed bytes of `artifacts.json`, `checks.json`, and `claims.json`; runs after claims replacement with no payload rereads; OOM-safe construction. |
+| Publication Proof Pack | **Done (Step 2C closed)** — deterministic two-file presentation model (`proof-pack.json` + `index.html`) over committed artifact, checks, claims, and Touch Atlas evidence; emitted after the Touch Atlas commits with a staged transaction, embedded model digest, semantic-rejection probes, improved HTML presentation, and print-disclosure robustness. |
 | Migration-guide executable pass | **Evidence complete** — the 69-page Starlight dogfood converted, compiled to HTML/IR/RAG, and produced a deployable static tree; human review remains required for 109 preserved, 1 stripped, and 79 manual-review findings plus four link-audit misses. |
 | Source-RAG ergonomics measurement | **Measured** — flat, no-bundle, bundles-only, core/docs profiles, and per-tool packs were timed and sized; no behavior change is justified by this snapshot. |
 | Archive-layout evidence | **Done mechanically** — deterministic fixture, black-box audit, and link audit pass; browser viewport and keyboard review remain explicitly unverified. |
@@ -92,7 +98,7 @@ zig build test-layout-hostile
 | 7 | Source-RAG ergonomics measurement | **Measured — no behavior change** | Default flat export: 988 source files, 16,012 KiB on disk, 1.48s. `--no-bundles`: 9,468 KiB, 1.13s. Bundles-only at 256 KiB: 7,084 KiB, 28 parts, 1.14s. Core/docs bundles-only: 1,668/3,448 KiB. Tools per-pack: 6 packs, 2,224 KiB, 0.61s. Keep product RAG distinct. |
 | 8 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
 | 9 | Build optimization | **Measured — no change** | Throughput audit: `zig build test` graph is fully sibling-parallel (42 flat test-run deps); scaling `-j1`→`-j8` ≈3x; warm default ≈16–20s. Residual floor is structural ≈8.8× shared-suite duplication across four co-dominant roots (`main`, `compile`, `hardening_test`, `layout_select_hostile_test`); no single root dominates. See [test-throughput-audit.md](audits/test-throughput-audit.md). |
-| 10 | Publication Proof Pack (Phase 7A) | **Implemented first slice** | Deterministic `proof-pack.json` presentation model and static `index.html` emitted after the Touch Atlas commits; strict four-report binding, canonical JSON/HTML rendering, first-slice staged transaction with embedded model digest, exit-3 mapping, and quiet diagnostic capture. |
+| 10 | Publication Proof Pack (Phase 7A) | **Done — Step 2C closed** | Deterministic `proof-pack.json` presentation model and static `index.html` emitted after the Touch Atlas commits; strict four-report binding, canonical JSON/HTML rendering, first-slice staged transaction with embedded model digest, exit-3 mapping, quiet diagnostic capture, semantic-rejection probes, HTML presentation cleanup, and print-disclosure robustness. |
 
 ## Release bookkeeping
 
@@ -107,9 +113,11 @@ The release audit found these follow-ups:
 - Preserve the historical `v0.8.0` tag as erroneous evidence; the next
   candidate is `v0.8.1`, which remains untagged until release context is
   complete.
-- All retained fragments have numeric names, a permitted category heading, and
-  a deterministic 33-row [`fragment inventory`](changelog.d/INVENTORY.md).
-  The release owner still decides whether and when to consume them.
+- Retained fragments have a permitted category heading and are tracked in a
+  deterministic 91-row [`fragment inventory`](changelog.d/INVENTORY.md); one
+  unnumbered fragment (`twentytwenty-theme-materialization-dogfood.md`) is
+  retained as found and awaits release-owner placement. The release owner
+  still decides whether and when to consume them.
 - The release gate now correctly accepts the validated four-level nested hierarchy fixture.
 
 ## Product boundaries that remain deliberate

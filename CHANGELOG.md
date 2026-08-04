@@ -3,10 +3,12 @@
 All notable changes to Boris are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
-Versioning: the current product cut is **v0.8.0** with base IR
-`schemaVersion` **`0.2.0`** and compiler id **`boris/0.8.0`**. Breaking IR
+Versioning: the current product cut is **v0.8.1 candidate** with base IR
+`schemaVersion` **`0.2.0`** and compiler id **`boris/0.8.1`**. Breaking IR
 changes must bump `schemaVersion` and update `docs/contracts/`. Product version
 bumps may update `compiler_id` / `boris_version` without changing IR schema.
+The historical `v0.8.0` tag is preserved as erroneous evidence; see
+[`docs/STATUS.md`](docs/STATUS.md).
 
 How to use going forward:
 
@@ -24,7 +26,9 @@ How to use going forward:
 
 ## [Unreleased]
 
-_No changes yet._
+Queued release inputs remain under
+[`docs/changelog.d/`](docs/changelog.d/README.md) and will be assembled into
+this section by the release owner at release cut.
 
 ## [0.8.0] — 2026-07-21
 
