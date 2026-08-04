@@ -49,9 +49,9 @@ presents; it never re-observes. A rendered page cannot make a failed or
 incomplete check look successful, and a pretty summary is not a new
 verification claim.
 
-## Proposed outputs
+## Outputs
 
-Define two future target-local outputs:
+Define two target-local outputs:
 
 ```text
 _boris/proof/proof-pack.json
@@ -442,7 +442,7 @@ added because it seems intuitive. Groups may be empty, but every edge in
 
 ## HTML requirements
 
-The future `_boris/proof/index.html` must be:
+The `_boris/proof/index.html` must be:
 
 - fully static;
 - valid UTF-8;
@@ -469,7 +469,7 @@ can detect a stale partner without needing the JSON open beside it.
 
 ## Transaction
 
-Define the future order:
+Define the order:
 
 ```text
 payloads
