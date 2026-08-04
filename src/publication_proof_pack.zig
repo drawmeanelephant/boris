@@ -1147,6 +1147,7 @@ const embedded_css =
     \\       full content is always in the document and needs no JavaScript. */
     \\    details,
     \\    details > summary { display: block; }
+    \\    details::details-content { content-visibility: visible !important; display: block !important; }
     \\    details > :not(summary) { display: block !important; }
     \\    .table-wrap { overflow: visible; }
     \\    h2, h3 { break-after: avoid; }
@@ -2616,6 +2617,11 @@ test "print rules expose the content of closed details elements" {
     // The print block must force every non-summary direct child of a details
     // element to display so collapsed content prints. A bare
     // `details { display: block }` rule alone would not expose the interior.
+    // The `details::details-content` pseudo-element must also be explicitly
+    // forced to visible because some browsers' UA stylesheets hide the
+    // disclosure content container via `content-visibility: hidden`.
+    try std.testing.expect(std.mem.indexOf(u8, print_css, "details::details-content") != null);
+    try std.testing.expect(std.mem.indexOf(u8, print_css, "content-visibility: visible !important") != null);
     try std.testing.expect(std.mem.indexOf(u8, print_css, "details > :not(summary)") != null);
     try std.testing.expect(std.mem.indexOf(u8, print_css, "display: block !important") != null);
     try std.testing.expect(std.mem.indexOf(u8, print_css, "nav { display: none; }") != null);

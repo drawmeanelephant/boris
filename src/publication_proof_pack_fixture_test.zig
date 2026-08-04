@@ -611,6 +611,8 @@ test "poisoned fixture HTML presentation follows reading order with details, pri
     const css = html_bytes[style_start .. style_end + "</style>".len];
     const print_at = std.mem.indexOf(u8, css, "@media print") orelse return error.MissingPrintRule;
     const print_css = css[print_at..];
+    try std.testing.expect(std.mem.indexOf(u8, print_css, "details::details-content") != null);
+    try std.testing.expect(std.mem.indexOf(u8, print_css, "content-visibility: visible !important") != null);
     try std.testing.expect(std.mem.indexOf(u8, print_css, "details > :not(summary)") != null);
     try std.testing.expect(std.mem.indexOf(u8, print_css, "display: block !important") != null);
     try std.testing.expect(std.mem.indexOf(u8, print_css, ".table-wrap { overflow: visible; }") != null);
