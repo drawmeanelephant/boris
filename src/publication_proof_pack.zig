@@ -1055,6 +1055,8 @@ const embedded_css =
     \\    --muted: #555;
     \\    --line: #ccc;
     \\    --bg: #ffffff;
+    \\    --panel: #fafafa;
+    \\    --accent: #0b5cad;
     \\    --pass-bg: #eaf6ec;
     \\    --pass-ink: #1f6b2f;
     \\    --warn-bg: #fdf3e3;
@@ -1068,11 +1070,11 @@ const embedded_css =
     \\  * { box-sizing: border-box; }
     \\  body {
     \\    margin: 0 auto;
-    \\    max-width: 960px;
+    \\    max-width: 1000px;
     \\    padding: 1.5rem 1.25rem 3rem;
     \\    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     \\    font-size: 0.95rem;
-    \\    line-height: 1.5;
+    \\    line-height: 1.55;
     \\    color: var(--ink);
     \\    background: var(--bg);
     \\  }
@@ -1091,18 +1093,32 @@ const embedded_css =
     \\  .banner.na { background: var(--na-bg); color: var(--na-ink); }
     \\  nav { margin: 0 0 1.5rem; }
     \\  nav ul { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; }
-    \\  nav a { color: #0b5cad; text-decoration: none; }
+    \\  nav a { color: var(--accent); text-decoration: none; }
     \\  nav a:hover { text-decoration: underline; }
     \\  h2 {
-    \\    font-size: 1.2rem;
-    \\    margin: 2rem 0 0.5rem;
-    \\    padding-bottom: 0.25rem;
+    \\    font-size: 1.25rem;
+    \\    margin: 2.25rem 0 0.6rem;
+    \\    padding-bottom: 0.3rem;
     \\    border-bottom: 1px solid var(--line);
     \\  }
-    \\  table { width: 100%; border-collapse: collapse; margin: 0.5rem 0 1rem; }
-    \\  th, td { text-align: left; padding: 0.4rem 0.5rem; border: 1px solid var(--line); vertical-align: top; }
+    \\  h3 { font-size: 1.05rem; margin: 1.25rem 0 0.4rem; }
+    \\  .table-wrap { overflow-x: auto; margin: 0.5rem 0 1rem; }
+    \\  table { width: 100%; border-collapse: collapse; }
+    \\  th, td {
+    \\    text-align: left;
+    \\    padding: 0.45rem 0.5rem;
+    \\    border: 1px solid var(--line);
+    \\    vertical-align: top;
+    \\    overflow-wrap: anywhere;
+    \\    word-break: break-word;
+    \\  }
     \\  th { background: #f4f4f4; font-weight: 600; }
-    \\  code, .mono { font-family: var(--mono); font-size: 0.85em; word-break: break-all; }
+    \\  code, .mono {
+    \\    font-family: var(--mono);
+    \\    font-size: 0.85em;
+    \\    overflow-wrap: anywhere;
+    \\    word-break: break-word;
+    \\  }
     \\  .status-passed, .status-verified { color: var(--pass-ink); font-weight: 600; }
     \\  .status-failed, .status-attention { color: var(--bad-ink); font-weight: 600; }
     \\  .status-incomplete { color: var(--warn-ink); font-weight: 600; }
@@ -1110,11 +1126,31 @@ const embedded_css =
     \\  .empty { color: var(--muted); font-style: italic; margin: 0.25rem 0 1rem; }
     \\  ul.plain { margin: 0.25rem 0 1rem; padding-left: 1.25rem; }
     \\  .src { color: var(--muted); font-size: 0.8rem; }
+    \\  details { margin: 0.75rem 0 1rem; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+    \\  details > summary {
+    \\    cursor: pointer;
+    \\    padding: 0.55rem 0.75rem;
+    \\    font-weight: 600;
+    \\  }
+    \\  details[open] > summary { border-bottom: 1px solid var(--line); }
+    \\  details > summary:hover { background: #f0f0f0; }
+    \\  .edge-explain { color: var(--muted); font-size: 0.9rem; margin: 0 0.75rem 0.5rem; }
     \\  footer { margin-top: 2.5rem; padding-top: 0.75rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.8rem; }
     \\  @media print {
     \\    nav { display: none; }
     \\    body { max-width: none; padding: 0.5rem; }
     \\    a { color: inherit; text-decoration: none; }
+    \\    /* Print disclosure: closed <details> content must appear on paper.
+    \\       Forcing only the <details> box to display does not expose the
+    \\       collapsed interior, so every direct child other than the summary
+    \\       is explicitly forced to display. This is presentation-only: the
+    \\       full content is always in the document and needs no JavaScript. */
+    \\    details,
+    \\    details > summary { display: block; }
+    \\    details > :not(summary) { display: block !important; }
+    \\    .table-wrap { overflow: visible; }
+    \\    h2, h3 { break-after: avoid; }
+    \\    tr, li { break-inside: avoid; }
     \\  }
 ;
 
@@ -1159,23 +1195,23 @@ fn renderHtml(
     }
     try out.appendSlice(gpa, "</header>\n\n<nav aria-label=\"Contents\">\n  <ul>\n");
     try out.appendSlice(gpa, "    <li><a href=\"#summary\">Summary</a></li>\n");
-    try out.appendSlice(gpa, "    <li><a href=\"#inputs\">Inputs</a></li>\n");
-    try out.appendSlice(gpa, "    <li><a href=\"#artifacts\">Artifacts</a></li>\n");
-    try out.appendSlice(gpa, "    <li><a href=\"#checks\">Checks</a></li>\n");
-    try out.appendSlice(gpa, "    <li><a href=\"#findings\">Findings</a></li>\n");
     try out.appendSlice(gpa, "    <li><a href=\"#claims\">Claims</a></li>\n");
     try out.appendSlice(gpa, "    <li><a href=\"#limitations\">Limitations</a></li>\n");
+    try out.appendSlice(gpa, "    <li><a href=\"#findings\">Findings</a></li>\n");
+    try out.appendSlice(gpa, "    <li><a href=\"#checks\">Checks</a></li>\n");
+    try out.appendSlice(gpa, "    <li><a href=\"#artifacts\">Artifacts</a></li>\n");
     try out.appendSlice(gpa, "    <li><a href=\"#relationships\">Relationships</a></li>\n");
+    try out.appendSlice(gpa, "    <li><a href=\"#inputs\">Inputs</a></li>\n");
     try out.appendSlice(gpa, "  </ul>\n</nav>\n\n<main>\n");
 
     try renderHtmlSummary(&out, gpa, model);
-    try renderHtmlInputs(&out, gpa, model);
-    try renderHtmlArtifacts(&out, gpa, model);
-    try renderHtmlChecks(&out, gpa, model);
-    try renderHtmlFindings(&out, gpa, model);
     try renderHtmlClaims(&out, gpa, model);
     try renderHtmlLimitations(&out, gpa, model);
+    try renderHtmlFindings(&out, gpa, model);
+    try renderHtmlChecks(&out, gpa, model);
+    try renderHtmlArtifacts(&out, gpa, model);
     try renderHtmlRelationships(&out, gpa, model);
+    try renderHtmlInputs(&out, gpa, model);
 
     try out.appendSlice(gpa, "</main>\n\n<footer>\n  <p>\n");
     try out.appendSlice(gpa, "    This page is a deterministic static rendering of <code>_boris/proof/proof-pack.json</code>\n");
@@ -1234,7 +1270,7 @@ fn renderHtmlSummary(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *co
         if (std.mem.eql(u8, claim.status, "not-verified")) not_verified_claims += 1;
     }
 
-    try out.appendSlice(gpa, "  <section id=\"summary\">\n    <h2>Summary</h2>\n    <table>\n      <tbody>\n");
+    try out.appendSlice(gpa, "  <section id=\"summary\">\n    <h2>Summary</h2>\n    <div class=\"table-wrap\">\n    <table>\n      <tbody>\n");
     try out.appendSlice(gpa, "        <tr><th>Artifacts</th><td>");
     try writeHtmlNumber(out, gpa, artifacts_total);
     try out.appendSlice(gpa, " total — committed ");
@@ -1306,11 +1342,11 @@ fn renderHtmlSummary(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *co
     try out.appendSlice(gpa, "\">");
     try writeHtmlEscaped(out, gpa, model.overall_status);
     try out.appendSlice(gpa, "</td></tr>\n");
-    try out.appendSlice(gpa, "      </tbody>\n    </table>\n  </section>\n\n");
+    try out.appendSlice(gpa, "      </tbody>\n    </table>\n    </div>\n  </section>\n\n");
 }
 
 fn renderHtmlInputs(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *const Model) !void {
-    try out.appendSlice(gpa, "  <section id=\"inputs\">\n    <h2>Inputs</h2>\n    <p>The Proof Pack is derived exclusively from the exact committed bytes of the four evidence reports below; nothing is reread or re-derived from source, payload, or deployment state.</p>\n    <table>\n      <thead>\n        <tr><th>input</th><th>path</th><th>bytes</th><th>sha256</th><th>format</th><th>schema</th><th>target</th></tr>\n      </thead>\n      <tbody>\n");
+    try out.appendSlice(gpa, "  <section id=\"inputs\">\n    <h2>Inputs</h2>\n    <p>The Proof Pack is derived exclusively from the exact committed bytes of the four evidence reports below; nothing is reread or re-derived from source, payload, or deployment state.</p>\n    <div class=\"table-wrap\">\n    <table>\n      <thead>\n        <tr><th>input</th><th>path</th><th>bytes</th><th>sha256</th><th>format</th><th>schema</th><th>target</th></tr>\n      </thead>\n      <tbody>\n");
     const rows = [_]struct {
         label: []const u8,
         path: []const u8,
@@ -1341,11 +1377,13 @@ fn renderHtmlInputs(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *con
         try writeHtmlEscaped(out, gpa, row.target);
         try out.appendSlice(gpa, "</code></td></tr>\n");
     }
-    try out.appendSlice(gpa, "      </tbody>\n    </table>\n  </section>\n\n");
+    try out.appendSlice(gpa, "      </tbody>\n    </table>\n    </div>\n  </section>\n\n");
 }
 
 fn renderHtmlArtifacts(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *const Model) !void {
-    try out.appendSlice(gpa, "  <section id=\"artifacts\">\n    <h2>Artifacts</h2>\n    <table>\n      <thead>\n        <tr>\n          <th>#</th><th>Path</th><th>Kind</th><th>Status</th><th>Required</th><th>Bytes</th><th>SHA-256</th><th>Related checks</th><th>Related claims</th>\n        </tr>\n      </thead>\n      <tbody>\n");
+    try out.appendSlice(gpa, "  <section id=\"artifacts\">\n    <h2>Artifacts</h2>\n    <details>\n      <summary>Artifact inventory (");
+    try writeHtmlNumber(out, gpa, model.inventory.records.len);
+    try out.appendSlice(gpa, " records)</summary>\n    <div class=\"table-wrap\">\n    <table>\n      <thead>\n        <tr>\n          <th>#</th><th>Path</th><th>Kind</th><th>Status</th><th>Required</th><th>Bytes</th><th>SHA-256</th><th>Related checks</th><th>Related claims</th>\n        </tr>\n      </thead>\n      <tbody>\n");
     for (model.inventory.records, 0..) |record, index| {
         const artifact_id = try std.mem.concat(gpa, u8, &.{ "artifact:", record.path });
         defer gpa.free(artifact_id);
@@ -1387,11 +1425,11 @@ fn renderHtmlArtifacts(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *
         try joinHtmlList(out, gpa, related_claims, "—");
         try out.appendSlice(gpa, "</td>\n        </tr>\n");
     }
-    try out.appendSlice(gpa, "      </tbody>\n    </table>\n    <p>Records that are not committed carry no committed-byte properties; no zero values are invented for them.</p>\n  </section>\n\n");
+    try out.appendSlice(gpa, "      </tbody>\n    </table>\n    </div>\n    <p>Records that are not committed carry no committed-byte properties; no zero values are invented for them.</p>\n    </details>\n  </section>\n\n");
 }
 
 fn renderHtmlChecks(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *const Model) !void {
-    try out.appendSlice(gpa, "  <section id=\"checks\">\n    <h2>Checks</h2>\n    <table>\n      <thead>\n        <tr>\n          <th>#</th><th>Check</th><th>Status</th><th>Coverage</th><th>Eligible</th><th>Ran</th><th>Counts (eligible / checked / findings)</th><th>Subject artifacts</th><th>Supporting artifacts</th><th>Supported claims</th>\n        </tr>\n      </thead>\n      <tbody>\n");
+    try out.appendSlice(gpa, "  <section id=\"checks\">\n    <h2>Checks</h2>\n    <div class=\"table-wrap\">\n    <table>\n      <thead>\n        <tr>\n          <th>#</th><th>Check</th><th>Status</th><th>Coverage</th><th>Eligible</th><th>Ran</th><th>Counts (eligible / checked / findings)</th><th>Subject artifacts</th><th>Supporting artifacts</th><th>Supported claims</th>\n        </tr>\n      </thead>\n      <tbody>\n");
     for (model.parsed_checks.checks, 0..) |check, check_index| {
         const check_id = try std.mem.concat(gpa, u8, &.{ "check:", check.id });
         defer gpa.free(check_id);
@@ -1442,7 +1480,7 @@ fn renderHtmlChecks(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *con
         try joinHtmlList(out, gpa, supported_claims.items, "—");
         try out.appendSlice(gpa, "</td>\n        </tr>\n");
     }
-    try out.appendSlice(gpa, "      </tbody>\n    </table>\n  </section>\n\n");
+    try out.appendSlice(gpa, "      </tbody>\n    </table>\n    </div>\n  </section>\n\n");
 }
 
 fn renderHtmlFindings(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *const Model) !void {
@@ -1451,7 +1489,7 @@ fn renderHtmlFindings(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *c
         try out.appendSlice(gpa, "    <p class=\"empty\">No findings were recorded for this target. This section is intentionally empty; the absence of findings is not a claim of excellence.</p>\n  </section>\n\n");
         return;
     }
-    try out.appendSlice(gpa, "    <table>\n      <thead>\n        <tr><th>#</th><th>Finding</th><th>Check</th><th>Code</th><th>Severity</th><th>Subject</th></tr>\n      </thead>\n      <tbody>\n");
+    try out.appendSlice(gpa, "    <div class=\"table-wrap\">\n    <table>\n      <thead>\n        <tr><th>#</th><th>Finding</th><th>Check</th><th>Code</th><th>Severity</th><th>Subject</th></tr>\n      </thead>\n      <tbody>\n");
     for (model.parsed_checks.findings, 0..) |finding, index| {
         const owning = owningCheck(model.parsed_checks, index) orelse
             return error.InvalidChecksReport;
@@ -1482,11 +1520,11 @@ fn renderHtmlFindings(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *c
         }
         try out.appendSlice(gpa, ")</td>\n        </tr>\n");
     }
-    try out.appendSlice(gpa, "      </tbody>\n    </table>\n    <p>No finding-to-artifact relationship is inferred from path resemblance; the subjects above are copied verbatim from the checks evidence.</p>\n  </section>\n\n");
+    try out.appendSlice(gpa, "      </tbody>\n    </table>\n    </div>\n    <p>No finding-to-artifact relationship is inferred from path resemblance; the subjects above are copied verbatim from the checks evidence.</p>\n  </section>\n\n");
 }
 
 fn renderHtmlClaims(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *const Model) !void {
-    try out.appendSlice(gpa, "  <section id=\"claims\">\n    <h2>Claims</h2>\n    <table>\n      <thead>\n        <tr><th>#</th><th>Claim</th><th>Status</th><th>Evidence check</th><th>Statement</th><th>Limitations</th></tr>\n      </thead>\n      <tbody>\n");
+    try out.appendSlice(gpa, "  <section id=\"claims\">\n    <h2>Claims</h2>\n    <div class=\"table-wrap\">\n    <table>\n      <thead>\n        <tr><th>#</th><th>Claim</th><th>Status</th><th>Evidence check</th><th>Statement</th><th>Limitations</th></tr>\n      </thead>\n      <tbody>\n");
     for (model.parsed_claims.claims, 0..) |claim, index| {
         try out.appendSlice(gpa, "        <tr>\n          <td>");
         try writeHtmlNumber(out, gpa, index);
@@ -1504,7 +1542,7 @@ fn renderHtmlClaims(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *con
         try writeHtmlNumber(out, gpa, claim.limitation_ids.len);
         try out.appendSlice(gpa, "</td>\n        </tr>\n");
     }
-    try out.appendSlice(gpa, "      </tbody>\n    </table>\n  </section>\n\n");
+    try out.appendSlice(gpa, "      </tbody>\n    </table>\n    </div>\n  </section>\n\n");
 }
 
 fn renderHtmlLimitations(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *const Model) !void {
@@ -1527,6 +1565,18 @@ fn renderHtmlLimitations(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model:
     try out.appendSlice(gpa, "    </ul>\n  </section>\n\n");
 }
 
+/// One brief human explanation per edge kind, shown beside each group. The
+/// explanations never rename the exact kind strings and never infer a new
+/// relationship: they only restate what the closed v1 edge vocabulary means.
+const edge_kind_explanations = [_][]const u8{
+    "The target includes this artifact inventory record.",
+    "The artifact is part of the check's declared subject scope.",
+    "The artifact is supporting evidence used by the check.",
+    "The finding was reported by this check.",
+    "The claim is bound to evidence from this check. This does not imply the check passed.",
+    "The limitation restricts the scope of this claim.",
+};
+
 fn renderHtmlRelationships(out: *std.ArrayList(u8), gpa: std.mem.Allocator, model: *const Model) !void {
     try out.appendSlice(gpa, "  <section id=\"relationships\">\n    <h2>Relationships</h2>\n    <p>");
     try writeHtmlNumber(out, gpa, model.parsed_touches.nodes.len);
@@ -1534,15 +1584,18 @@ fn renderHtmlRelationships(out: *std.ArrayList(u8), gpa: std.mem.Allocator, mode
     try writeHtmlNumber(out, gpa, model.parsed_touches.edges.len);
     try out.appendSlice(gpa, " edges");
     try out.appendSlice(gpa, ", grouped by Touch Atlas edge kind. Every edge below is an exact Touch Atlas edge; nothing is inferred.</p>\n");
-    try out.appendSlice(gpa, "    <h3>Nodes (");
+
+    // The node inventory is a genuinely large area; collapse it behind native
+    // <details> with the exact count in the summary label.
+    try out.appendSlice(gpa, "    <details>\n      <summary>Relationship nodes (");
     try writeHtmlNumber(out, gpa, model.parsed_touches.nodes.len);
-    try out.appendSlice(gpa, ")</h3>\n    <ul class=\"plain\">\n");
+    try out.appendSlice(gpa, ")</summary>\n      <ul class=\"plain\">\n");
     for (model.parsed_touches.nodes) |node| {
-        try out.appendSlice(gpa, "      <li>");
+        try out.appendSlice(gpa, "        <li>");
         try writeHtmlEscaped(out, gpa, node.id);
         try out.appendSlice(gpa, "</li>\n");
     }
-    try out.appendSlice(gpa, "    </ul>\n");
+    try out.appendSlice(gpa, "      </ul>\n    </details>\n");
 
     const group_kinds = [_]EdgeKind{
         .target_owns_artifact,
@@ -1552,30 +1605,36 @@ fn renderHtmlRelationships(out: *std.ArrayList(u8), gpa: std.mem.Allocator, mode
         .check_supports_claim,
         .claim_limited_by,
     };
-    for (group_kinds) |kind| {
+    for (group_kinds, edge_kind_explanations) |kind, explanation| {
         var count: usize = 0;
         for (model.parsed_touches.edges) |edge| {
             if (edge.kind == kind) count += 1;
         }
-        try out.appendSlice(gpa, "    <h3>");
+        // Each edge group is a potentially large area; collapse it behind
+        // native <details> with the exact edge count in the summary label.
+        try out.appendSlice(gpa, "    <details>\n      <summary>");
         try writeHtmlEscaped(out, gpa, kind.name());
         try out.appendSlice(gpa, " (");
         try writeHtmlNumber(out, gpa, count);
-        try out.appendSlice(gpa, ")</h3>\n");
+        try out.appendSlice(gpa, " edges)</summary>\n");
+        try out.appendSlice(gpa, "      <p class=\"edge-explain\">");
+        try writeHtmlEscaped(out, gpa, explanation);
+        try out.appendSlice(gpa, "</p>\n");
         if (count == 0) {
-            try out.appendSlice(gpa, "    <p class=\"empty\">No edges are present in this relationship group.</p>\n");
+            try out.appendSlice(gpa, "      <p class=\"empty\">No edges are present in this relationship group.</p>\n");
+            try out.appendSlice(gpa, "    </details>\n");
             continue;
         }
-        try out.appendSlice(gpa, "    <ul class=\"plain\">\n");
+        try out.appendSlice(gpa, "      <ul class=\"plain\">\n");
         for (model.parsed_touches.edges) |edge| {
             if (edge.kind != kind) continue;
-            try out.appendSlice(gpa, "      <li>");
+            try out.appendSlice(gpa, "        <li>");
             try writeHtmlEscaped(out, gpa, edge.from);
             try out.appendSlice(gpa, " → ");
             try writeHtmlEscaped(out, gpa, edge.to);
             try out.appendSlice(gpa, "</li>\n");
         }
-        try out.appendSlice(gpa, "    </ul>\n");
+        try out.appendSlice(gpa, "      </ul>\n    </details>\n");
     }
     try out.appendSlice(gpa, "  </section>\n\n");
 }
@@ -2219,6 +2278,349 @@ test "HTML explanation paragraphs are derived from evidence and never invent sta
             try std.testing.expect(std.mem.indexOf(u8, out.html, needle) == null);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// HTML presentation regression tests: stable anchors, reading order, details
+// usage, edge-kind explanations, print disclosure, and self-contained output.
+// The JSON model bytes are pinned separately by the fixture golden; these
+// tests pin the presentation layer over identical models.
+// ---------------------------------------------------------------------------
+
+fn countOccurrences(haystack: []const u8, needle: []const u8) usize {
+    var count: usize = 0;
+    var pos: usize = 0;
+    while (std.mem.indexOfPos(u8, haystack, pos, needle)) |at| {
+        count += 1;
+        pos = at + needle.len;
+    }
+    return count;
+}
+
+/// The canonical HTML section/navigation reading order.
+const html_reading_order = [_][]const u8{
+    "summary", "claims", "limitations", "findings", "checks", "artifacts", "relationships", "inputs",
+};
+
+/// Slice one `<section id="X">` block (up to the next `<section id=`), or
+/// the whole document when X is the last section.
+fn htmlSectionSlice(html: []const u8, anchor: []const u8) ![]const u8 {
+    var marker_buf: [64]u8 = undefined;
+    const marker = try std.fmt.bufPrint(&marker_buf, "<section id=\"{s}\">", .{anchor});
+    const start = std.mem.indexOf(u8, html, marker) orelse return error.MissingSection;
+    const content_start = start + marker.len;
+    const next = std.mem.indexOf(u8, html[content_start..], "<section id=\"") orelse
+        return html[content_start..];
+    return html[content_start .. content_start + next];
+}
+
+/// Assert `needle` appears in `html` after the same escaping the renderer
+/// applies to text (so apostrophes, quotes, and angle brackets match the
+/// emitted bytes, not the raw value).
+fn expectHtmlContains(gpa: std.mem.Allocator, html: []const u8, needle: []const u8) !void {
+    var escaped: std.ArrayList(u8) = .empty;
+    defer escaped.deinit(gpa);
+    try escapeHtml(&escaped, gpa, needle);
+    try std.testing.expect(std.mem.indexOf(u8, html, escaped.items) != null);
+}
+
+test "HTML keeps every stable anchor and navigation links match the reading order" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const records = cleanRecords();
+    var out = try runProofPack(io, gpa, tmp.dir, "target", "default", &records, cleanSpec(), .{});
+    defer out.deinit(gpa);
+
+    // Every stable anchor appears exactly once as a <section id="...">.
+    for (html_reading_order) |anchor| {
+        var marker_buf: [64]u8 = undefined;
+        const marker = try std.fmt.bufPrint(&marker_buf, "<section id=\"{s}\">", .{anchor});
+        try std.testing.expectEqual(@as(usize, 1), countOccurrences(out.html, marker));
+    }
+
+    // The navigation block lists every anchor href in reading order.
+    const nav_start = std.mem.indexOf(u8, out.html, "<nav") orelse return error.MissingNav;
+    const nav_end = std.mem.indexOfPos(u8, out.html, nav_start, "</nav>") orelse return error.MissingNavEnd;
+    const nav = out.html[nav_start..nav_end];
+    var nav_pos: usize = 0;
+    for (html_reading_order) |anchor| {
+        var href_buf: [64]u8 = undefined;
+        const href = try std.fmt.bufPrint(&href_buf, "href=\"#{s}\"", .{anchor});
+        const at = std.mem.indexOfPos(u8, nav, nav_pos, href) orelse return error.MissingNavLink;
+        try std.testing.expect(at >= nav_pos);
+        nav_pos = at + href.len;
+    }
+
+    // Section order inside <main> matches the reading order.
+    const main_start = std.mem.indexOf(u8, out.html, "<main>") orelse return error.MissingMain;
+    var section_pos: usize = main_start;
+    for (html_reading_order) |anchor| {
+        var marker_buf: [64]u8 = undefined;
+        const marker = try std.fmt.bufPrint(&marker_buf, "<section id=\"{s}\">", .{anchor});
+        const at = std.mem.indexOfPos(u8, out.html, section_pos, marker) orelse return error.MissingSection;
+        try std.testing.expect(at >= section_pos);
+        section_pos = at + marker.len;
+    }
+}
+
+test "claims, limitations, findings, checks, summary, and inputs stay visible; artifacts and relationships use details only as intended" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const records = cleanRecords();
+    var out = try runProofPack(io, gpa, tmp.dir, "target", "default", &records, cleanSpec(), .{});
+    defer out.deinit(gpa);
+
+    // Sections that must never be wrapped in <details>.
+    const always_visible = [_][]const u8{ "summary", "claims", "limitations", "findings", "checks", "inputs" };
+    for (always_visible) |anchor| {
+        const section = try htmlSectionSlice(out.html, anchor);
+        try std.testing.expect(std.mem.indexOf(u8, section, "<details") == null);
+    }
+
+    // Artifacts: exactly one <details> (the inventory) with an exact-count
+    // summary label.
+    const artifacts = try htmlSectionSlice(out.html, "artifacts");
+    try std.testing.expectEqual(@as(usize, 1), countOccurrences(artifacts, "<details>"));
+    var artifact_buf: [64]u8 = undefined;
+    const artifact_summary = try std.fmt.bufPrint(&artifact_buf, "Artifact inventory ({d} records)", .{records.len});
+    try std.testing.expect(std.mem.indexOf(u8, artifacts, artifact_summary) != null);
+
+    // Relationships: one nodes <details> plus six edge-group <details>.
+    const relationships = try htmlSectionSlice(out.html, "relationships");
+    try std.testing.expectEqual(@as(usize, 7), countOccurrences(relationships, "<details>"));
+    var nodes_buf: [64]u8 = undefined;
+    const nodes_summary = try std.fmt.bufPrint(
+        &nodes_buf,
+        "Relationship nodes ({d})",
+        .{1 + records.len + 3 + 0 + 3 + 6},
+    );
+    try std.testing.expect(std.mem.indexOf(u8, relationships, nodes_summary) != null);
+}
+
+test "all six exact edge-kind strings and their explanations remain present" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const records = cleanRecords();
+    var out = try runProofPack(io, gpa, tmp.dir, "target", "default", &records, cleanSpec(), .{});
+    defer out.deinit(gpa);
+
+    const kinds = [_][]const u8{
+        "target-owns-artifact",
+        "artifact-subject-of-check",
+        "artifact-supports-check",
+        "check-reported-finding",
+        "check-supports-claim",
+        "claim-limited-by",
+    };
+    const explanations = [_][]const u8{
+        "The target includes this artifact inventory record.",
+        "The artifact is part of the check's declared subject scope.",
+        "The artifact is supporting evidence used by the check.",
+        "The finding was reported by this check.",
+        "The claim is bound to evidence from this check. This does not imply the check passed.",
+        "The limitation restricts the scope of this claim.",
+    };
+    for (kinds) |kind| {
+        try std.testing.expect(std.mem.indexOf(u8, out.html, kind) != null);
+    }
+    for (explanations) |explanation| {
+        try expectHtmlContains(gpa, out.html, explanation);
+    }
+}
+
+test "every node, edge, and artifact renders exactly once" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const records = cleanRecords();
+    var out = try runProofPack(io, gpa, tmp.dir, "target", "default", &records, cleanSpec(), .{});
+    defer out.deinit(gpa);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, out.json, .{});
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    const rel = root.get("relationships").?.object;
+    const node_ids = rel.get("node_ids").?.array.items;
+    const groups = rel.get("groups").?.array.items;
+    const rel_section = try htmlSectionSlice(out.html, "relationships");
+
+    // Nodes: every node id renders exactly once inside the nodes list.
+    const nodes_block_start = std.mem.indexOf(u8, rel_section, "<summary>Relationship nodes (") orelse
+        return error.MissingNodesBlock;
+    const nodes_block = rel_section[nodes_block_start..];
+    const nodes_end = std.mem.indexOf(u8, nodes_block, "</details>") orelse return error.MissingNodesEnd;
+    const nodes_list = nodes_block[0..nodes_end];
+    for (node_ids) |node| {
+        var buf: [256]u8 = undefined;
+        const needle = try std.fmt.bufPrint(&buf, "<li>{s}</li>", .{node.string});
+        try std.testing.expectEqual(@as(usize, 1), countOccurrences(nodes_list, needle));
+    }
+
+    // Edges: every edge tuple renders exactly once inside its group, and the
+    // summary label carries the exact edge count.
+    for (groups) |group| {
+        const kind = group.object.get("edge_kind").?.string;
+        const edges = group.object.get("edges").?.array.items;
+        var summary_buf: [96]u8 = undefined;
+        const summary = try std.fmt.bufPrint(&summary_buf, "<summary>{s} ({d} edges)</summary>", .{ kind, edges.len });
+        const group_start = std.mem.indexOf(u8, rel_section, summary) orelse return error.MissingGroup;
+        const group_block = rel_section[group_start..];
+        const group_end = std.mem.indexOf(u8, group_block, "</details>") orelse return error.MissingGroupEnd;
+        const group_slice = group_block[0..group_end];
+        try std.testing.expectEqual(edges.len, countOccurrences(group_slice, "<li>"));
+        for (edges) |edge| {
+            const from = edge.object.get("from").?.string;
+            const to = edge.object.get("to").?.string;
+            var buf: [512]u8 = undefined;
+            const needle = try std.fmt.bufPrint(&buf, "<li>{s} → {s}</li>", .{ from, to });
+            try std.testing.expectEqual(@as(usize, 1), countOccurrences(group_slice, needle));
+        }
+    }
+
+    // Artifacts: every artifact path renders exactly once in the inventory.
+    const artifacts_section = try htmlSectionSlice(out.html, "artifacts");
+    for (root.get("artifacts").?.array.items) |row| {
+        const path = row.object.get("path").?.string;
+        var buf: [512]u8 = undefined;
+        const needle = try std.fmt.bufPrint(&buf, "<code>{s}</code>", .{path});
+        try std.testing.expectEqual(@as(usize, 1), countOccurrences(artifacts_section, needle));
+    }
+}
+
+test "claim, limitation, finding, check, artifact, node, and edge totals are unchanged and mirrored in HTML" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const records = cleanRecords();
+    var out = try runProofPack(io, gpa, tmp.dir, "target", "default", &records, cleanSpec(), .{});
+    defer out.deinit(gpa);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, out.json, .{});
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    const rel = root.get("relationships").?.object;
+
+    // JSON totals stay fixed for the clean fixture.
+    try std.testing.expectEqual(@as(usize, 2), root.get("artifacts").?.array.items.len);
+    try std.testing.expectEqual(@as(usize, 3), root.get("checks").?.array.items.len);
+    try std.testing.expectEqual(@as(usize, 0), root.get("findings").?.array.items.len);
+    try std.testing.expectEqual(@as(usize, 3), root.get("claims").?.array.items.len);
+    try std.testing.expectEqual(@as(usize, 6), root.get("limitations").?.array.items.len);
+    try std.testing.expectEqual(@as(usize, 1 + 2 + 3 + 0 + 3 + 6), rel.get("node_ids").?.array.items.len);
+
+    // The summary section mirrors the same totals in HTML.
+    const summary_section = try htmlSectionSlice(out.html, "summary");
+    try std.testing.expect(std.mem.indexOf(u8, summary_section, "Checks</th><td>3 total") != null);
+    try std.testing.expect(std.mem.indexOf(u8, summary_section, "Claims</th><td>3 total") != null);
+}
+
+test "exact claim statements, statuses, evidence bindings, and claim-to-limitation relationships are unchanged" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const records = cleanRecords();
+    var out = try runProofPack(io, gpa, tmp.dir, "target", "default", &records, cleanSpec(), .{});
+    defer out.deinit(gpa);
+
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, out.json, .{});
+    defer parsed.deinit();
+    const root = parsed.value.object;
+
+    const claims = root.get("claims").?.array.items;
+    const claims_section = try htmlSectionSlice(out.html, "claims");
+    for (claims, 0..) |claim, index| {
+        // Exact statements and statuses remain unchanged and render verbatim.
+        const statement = claim.object.get("statement").?.string;
+        try std.testing.expectEqualStrings(publication_claims.claim_statements[index], statement);
+        try expectHtmlContains(gpa, claims_section, statement);
+        const status = claim.object.get("status").?.string;
+        try std.testing.expectEqualStrings("verified", status);
+        try expectHtmlContains(gpa, claims_section, status);
+        // Evidence binding unchanged and rendered.
+        const evidence_check = claim.object.get("evidence_check_id").?.string;
+        try std.testing.expectEqualStrings(publication_touches.check_ids[index], evidence_check);
+        try std.testing.expect(std.mem.indexOf(u8, claims_section, evidence_check) != null);
+        // Claim-to-limitation relationships unchanged (canonical row shape).
+        const limitation_ids = claim.object.get("limitation_ids").?.array.items;
+        const expected = if (index == 2)
+            publication_claims.limitation_ids[0..]
+        else
+            publication_claims.limitation_ids[0..5];
+        try std.testing.expectEqual(expected.len, limitation_ids.len);
+        for (limitation_ids, expected) |actual, want| {
+            try std.testing.expectEqualStrings(want, actual.string);
+        }
+    }
+
+    // Input evidence bindings render their exact paths and digests.
+    const inputs_section = try htmlSectionSlice(out.html, "inputs");
+    const inputs = root.get("inputs").?.object;
+    var input_iterator = inputs.iterator();
+    while (input_iterator.next()) |entry| {
+        const path = entry.value_ptr.object.get("path").?.string;
+        try std.testing.expect(std.mem.indexOf(u8, inputs_section, path) != null);
+        const sha = entry.value_ptr.object.get("sha256").?.string;
+        try std.testing.expect(std.mem.indexOf(u8, inputs_section, sha) != null);
+    }
+}
+
+test "HTML contains no scripts or remote resources and is valid UTF-8" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const records = cleanRecords();
+    var out = try runProofPack(io, gpa, tmp.dir, "target", "default", &records, cleanSpec(), .{});
+    defer out.deinit(gpa);
+
+    const forbidden = [_][]const u8{
+        "<script",
+        "http://",
+        "https://",
+        "@import",
+        "url(",
+        "<img",
+        "src=",
+        "onerror",
+        "onload",
+    };
+    for (forbidden) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, out.html, needle) == null);
+    }
+    try std.testing.expect(std.unicode.utf8ValidateSlice(out.html));
+}
+
+test "print rules expose the content of closed details elements" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const records = cleanRecords();
+    var out = try runProofPack(io, gpa, tmp.dir, "target", "default", &records, cleanSpec(), .{});
+    defer out.deinit(gpa);
+
+    const style_start = std.mem.indexOf(u8, out.html, "<style>") orelse return error.MissingStyle;
+    const style_end = std.mem.indexOf(u8, out.html, "</style>") orelse return error.MissingStyleEnd;
+    const css = out.html[style_start .. style_end + "</style>".len];
+    const print_at = std.mem.indexOf(u8, css, "@media print") orelse return error.MissingPrintRule;
+    const print_css = css[print_at..];
+    // The print block must force every non-summary direct child of a details
+    // element to display so collapsed content prints. A bare
+    // `details { display: block }` rule alone would not expose the interior.
+    try std.testing.expect(std.mem.indexOf(u8, print_css, "details > :not(summary)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, print_css, "display: block !important") != null);
+    try std.testing.expect(std.mem.indexOf(u8, print_css, "nav { display: none; }") != null);
+    // Wide tables scroll on screen but must not clip in print.
+    try std.testing.expect(std.mem.indexOf(u8, print_css, ".table-wrap { overflow: visible; }") != null);
 }
 
 test "hostile values are escaped in HTML text and attributes" {
