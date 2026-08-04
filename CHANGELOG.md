@@ -26,11 +26,9 @@ How to use going forward:
 
 ## [Unreleased]
 
-_No changes yet._
-
-Queued release inputs live as fragments under
-[`docs/changelog.d/`](docs/changelog.d/README.md); the release owner assembles
-them here in the documented deterministic order at release cut.
+Queued release inputs remain under
+[`docs/changelog.d/`](docs/changelog.d/README.md) and will be assembled into
+this section by the release owner at release cut.
 
 ## [0.8.0] — 2026-07-21
 
