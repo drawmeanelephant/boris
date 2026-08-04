@@ -446,3 +446,172 @@ test "proof pack golden emission is byte-stable against the committed golden" {
     const hex = std.fmt.bytesToHex(digest, .lower);
     try std.testing.expectEqualStrings(poisoned_golden_sha256, &hex);
 }
+
+fn countHtmlNeedle(haystack: []const u8, needle: []const u8) usize {
+    var count: usize = 0;
+    var pos: usize = 0;
+    while (std.mem.indexOfPos(u8, haystack, pos, needle)) |at| {
+        count += 1;
+        pos = at + needle.len;
+    }
+    return count;
+}
+
+fn htmlFixtureSection(allocator: std.mem.Allocator, html: []const u8, anchor: []const u8) ?[]const u8 {
+    const start_marker = std.fmt.allocPrint(allocator, "<section id=\"{s}\">", .{anchor}) catch return null;
+    defer allocator.free(start_marker);
+    const start = std.mem.indexOf(u8, html, start_marker) orelse return null;
+    const content_start = start + start_marker.len;
+    const next = std.mem.indexOf(u8, html[content_start..], "<section id=\"") orelse
+        return html[content_start..];
+    return html[content_start .. content_start + next];
+}
+
+// The generated poisoned fixture's HTML must follow the reading order, keep
+// every stable anchor and nav link, use <details> only for the artifact
+// inventory and relationship areas, keep the six edge kinds with their
+// explanations, expose closed <details> content in print, and stay free of
+// scripts and remote resources. The JSON bytes are pinned separately by the
+// golden test above.
+test "poisoned fixture HTML presentation follows reading order with details, print disclosure, and no scripts" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const fixture_path = try std.fmt.allocPrint(
+        allocator,
+        ".zig-cache/tmp/{s}/publication-proof-pack-html-presentation",
+        .{tmp.sub_path},
+    );
+    defer allocator.free(fixture_path);
+    const barbs = [_][]const u8{ "html_missing_local_route", "artifact_digest_mismatch", "deployment_owned_extra" };
+    var generated = try generator.generate(.{
+        .io = io,
+        .allocator = allocator,
+        .output_path = fixture_path,
+        .pages = 24,
+        .seed = 20260801,
+        .profile_selector = "mild-poison-v1",
+        .barb_names = &barbs,
+    });
+    defer {
+        allocator.free(generated.assignments);
+        generated.profile.deinit(allocator);
+    }
+    try generator.runFixture(.{
+        .io = io,
+        .allocator = allocator,
+        .fixture_path = fixture_path,
+        .boris_path = "./zig-out/bin/boris",
+    });
+
+    const absolute = try fixtureAbsolute(io, allocator, fixture_path);
+    defer allocator.free(absolute);
+    const output_absolute = try std.fs.path.join(allocator, &.{ absolute, "results/boris-output" });
+    defer allocator.free(output_absolute);
+    var output = try Io.Dir.openDirAbsolute(io, output_absolute, .{});
+    defer output.close(io);
+    try publication_checks.writeAfterCommit(io, allocator, output, "default", .{});
+    try publication_claims.writeAfterChecks(io, allocator, output, "default", .{});
+    try publication_touches.writeAfterClaims(io, allocator, output, "default", .{});
+    try publication_proof_pack.writeAfterTouches(io, allocator, output, "default", .{});
+
+    const json_bytes = try readPayload(io, output, allocator, publication_proof_pack.output_path);
+    defer allocator.free(json_bytes);
+    const html_bytes = try readPayload(io, output, allocator, publication_proof_pack.index_output_path);
+    defer allocator.free(html_bytes);
+
+    // The JSON presentation model bytes stay exactly unchanged (the golden
+    // test pins the same digest); the HTML is a pure presentation layer.
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(json_bytes, &digest, .{});
+    const hex = std.fmt.bytesToHex(digest, .lower);
+    try std.testing.expectEqualStrings(poisoned_golden_sha256, &hex);
+
+    // Every stable anchor and nav link, in the required reading order.
+    const order = [_][]const u8{
+        "summary", "claims", "limitations", "findings", "checks", "artifacts", "relationships", "inputs",
+    };
+    for (order) |anchor| {
+        const section_marker = try std.fmt.allocPrint(allocator, "<section id=\"{s}\">", .{anchor});
+        defer allocator.free(section_marker);
+        try std.testing.expectEqual(@as(usize, 1), countHtmlNeedle(html_bytes, section_marker));
+        const href = try std.fmt.allocPrint(allocator, "href=\"#{s}\"", .{anchor});
+        defer allocator.free(href);
+        try std.testing.expect(std.mem.indexOf(u8, html_bytes, href) != null);
+    }
+    // Section order inside <main> matches the reading order.
+    const main_start = std.mem.indexOf(u8, html_bytes, "<main>") orelse return error.MissingMain;
+    var section_pos: usize = main_start;
+    for (order) |anchor| {
+        const section_marker = try std.fmt.allocPrint(allocator, "<section id=\"{s}\">", .{anchor});
+        defer allocator.free(section_marker);
+        const at = std.mem.indexOfPos(u8, html_bytes, section_pos, section_marker) orelse
+            return error.MissingSection;
+        try std.testing.expect(at >= section_pos);
+        section_pos = at + section_marker.len;
+    }
+
+    // Claims, limitations, findings, checks, summary, and inputs stay fully
+    // visible; only artifacts and relationships collapse behind <details>.
+    const always_visible = [_][]const u8{ "summary", "claims", "limitations", "findings", "checks", "inputs" };
+    for (always_visible) |anchor| {
+        const section = htmlFixtureSection(allocator, html_bytes, anchor) orelse return error.MissingSection;
+        try std.testing.expect(std.mem.indexOf(u8, section, "<details") == null);
+    }
+    const artifacts = htmlFixtureSection(allocator, html_bytes, "artifacts") orelse return error.MissingSection;
+    try std.testing.expectEqual(@as(usize, 1), countHtmlNeedle(artifacts, "<details>"));
+    const relationships = htmlFixtureSection(allocator, html_bytes, "relationships") orelse return error.MissingSection;
+    try std.testing.expectEqual(@as(usize, 7), countHtmlNeedle(relationships, "<details>"));
+
+    // The six exact edge-kind strings and their explanations remain present.
+    const kinds = [_][]const u8{
+        "target-owns-artifact",
+        "artifact-subject-of-check",
+        "artifact-supports-check",
+        "check-reported-finding",
+        "check-supports-claim",
+        "claim-limited-by",
+    };
+    const explanations = [_][]const u8{
+        "The target includes this artifact inventory record.",
+        "The artifact is part of the check's declared subject scope.",
+        "The artifact is supporting evidence used by the check.",
+        "The finding was reported by this check.",
+        "The claim is bound to evidence from this check. This does not imply the check passed.",
+        "The limitation restricts the scope of this claim.",
+    };
+    for (kinds) |kind| {
+        try std.testing.expect(std.mem.indexOf(u8, html_bytes, kind) != null);
+    }
+    for (explanations) |explanation| {
+        var escaped: std.ArrayList(u8) = .empty;
+        defer escaped.deinit(allocator);
+        for (explanation) |byte| switch (byte) {
+            '&' => try escaped.appendSlice(allocator, "&amp;"),
+            '<' => try escaped.appendSlice(allocator, "&lt;"),
+            '>' => try escaped.appendSlice(allocator, "&gt;"),
+            '"' => try escaped.appendSlice(allocator, "&quot;"),
+            '\'' => try escaped.appendSlice(allocator, "&#39;"),
+            else => try escaped.append(allocator, byte),
+        };
+        try std.testing.expect(std.mem.indexOf(u8, html_bytes, escaped.items) != null);
+    }
+
+    // No scripts and no remote resources.
+    const forbidden = [_][]const u8{ "<script", "http://", "https://", "@import", "url(", "<img", "src=", "onerror", "onload" };
+    for (forbidden) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, html_bytes, needle) == null);
+    }
+
+    // Print rules explicitly expose the content of closed <details> elements.
+    const style_start = std.mem.indexOf(u8, html_bytes, "<style>") orelse return error.MissingStyle;
+    const style_end = std.mem.indexOf(u8, html_bytes, "</style>") orelse return error.MissingStyleEnd;
+    const css = html_bytes[style_start .. style_end + "</style>".len];
+    const print_at = std.mem.indexOf(u8, css, "@media print") orelse return error.MissingPrintRule;
+    const print_css = css[print_at..];
+    try std.testing.expect(std.mem.indexOf(u8, print_css, "details > :not(summary)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, print_css, "display: block !important") != null);
+    try std.testing.expect(std.mem.indexOf(u8, print_css, ".table-wrap { overflow: visible; }") != null);
+}
