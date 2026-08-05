@@ -848,6 +848,39 @@ pub fn build(b: *std.Build) void {
     test_emitter_step.dependOn(&run_emitter_hostile_tests.step);
     test_emitter_step.dependOn(&emitter_registry.step);
 
+    // --- Standalone content audit tool (not product pipeline) -------------
+    // `boris-content-audit` is a separate binary under its own build.zig.
+    // It is deliberately NOT part of `zig build test`; these are the explicit
+    // root-level aggregate commands for building and testing it.
+    const content_audit_build = b.addSystemCommand(&.{
+        "zig",
+        "build",
+        "--build-file",
+        "tools/content-audit/build.zig",
+    });
+    content_audit_build.setCwd(b.path("."));
+    content_audit_build.has_side_effects = true;
+    const content_audit_step = b.step(
+        "content-audit",
+        "Build the standalone boris-content-audit tool",
+    );
+    content_audit_step.dependOn(&content_audit_build.step);
+
+    const content_audit_test = b.addSystemCommand(&.{
+        "zig",
+        "build",
+        "--build-file",
+        "tools/content-audit/build.zig",
+        "test",
+    });
+    content_audit_test.setCwd(b.path("."));
+    content_audit_test.has_side_effects = true;
+    const test_content_audit_step = b.step(
+        "test-content-audit",
+        "Run boris-content-audit unit + fixture tests",
+    );
+    test_content_audit_step.dependOn(&content_audit_test.step);
+
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_fixtures_tests.step);

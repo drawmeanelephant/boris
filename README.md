@@ -244,6 +244,7 @@ reviewed or uploaded to an LLM when useful.
 - [`docs/RELEASE-GATE.md`](docs/RELEASE-GATE.md) — release checks
 - [`tools/migration-lab/`](tools/migration-lab/) — standalone migration tools
 - [`tools/source-rag/`](tools/source-rag/) — source-code RAG exporter
+- [`tools/content-audit/`](tools/content-audit/) — standalone deterministic source-content audit tool
 - [`examples/`](examples/) — themes and dogfood fixtures
 - [`CHANGELOG.md`](CHANGELOG.md) — release history
 
