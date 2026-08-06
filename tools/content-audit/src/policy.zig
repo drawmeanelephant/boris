@@ -23,6 +23,12 @@
 //! }
 //! ```
 //!
+//! `eligible_collections` and `poetry_collections` are **required** top-level
+//! fields: they define the audit population. A policy missing either field,
+//! or carrying either as null or a non-object, is rejected (exit 4). An
+//! explicitly empty object remains valid so an intentional zero-population
+//! audit is distinguishable from a truncated policy.
+//!
 //! A policy is malformed (exit 4) when it is not valid JSON, uses an
 //! unsupported schema_version, or violates the structural rules below.
 
@@ -110,18 +116,11 @@ pub const PolicyError = error{
     InvalidJson,
     MissingSchemaVersion,
     UnsupportedSchemaVersion,
+    MissingEligibleCollections,
+    MissingPoetryCollections,
     InvalidShape,
     OutOfMemory,
 };
-
-fn getString(v: std.json.Value, key: []const u8) ?[]const u8 {
-    if (v != .object) return null;
-    const f = v.object.get(key) orelse return null;
-    return switch (f) {
-        .string => |s| s,
-        else => null,
-    };
-}
 
 fn getBool(v: std.json.Value, key: []const u8) ?bool {
     if (v != .object) return null;
@@ -161,8 +160,13 @@ pub fn parse(gpa: std.mem.Allocator, json_bytes: []const u8) PolicyError!Policy 
     if (sv != .integer or sv.integer != supported_schema_version) return error.UnsupportedSchemaVersion;
     policy.schema_version = @intCast(sv.integer);
 
-    if (root.object.get("eligible_collections")) |ec| {
-        if (ec != .object) return error.InvalidShape;
+    // Population fields are required: they define the audit population and
+    // must be present and be objects. Missing (or null / wrong-type) fields
+    // are rejected so a truncated policy cannot silently audit an empty
+    // population; explicitly empty objects remain valid.
+    const ec = root.object.get("eligible_collections") orelse return error.MissingEligibleCollections;
+    if (ec != .object) return error.InvalidShape;
+    {
         var it = ec.object.iterator();
         while (it.next()) |entry| {
             const types = try collectStrings(gpa, entry.value_ptr.*);
@@ -170,11 +174,12 @@ pub fn parse(gpa: std.mem.Allocator, json_bytes: []const u8) PolicyError!Policy 
         }
     }
 
-    if (root.object.get("poetry_collections")) |pc| {
-        if (pc != .object) return error.InvalidShape;
+    const pc = root.object.get("poetry_collections") orelse return error.MissingPoetryCollections;
+    if (pc != .object) return error.InvalidShape;
+    {
         var it = pc.object.iterator();
         while (it.next()) |entry| {
-            const t = getString(entry.value_ptr.*, "") orelse blk: {
+            const t = blk: {
                 // poetry_collections values are plain strings, not objects
                 if (entry.value_ptr.* == .string and entry.value_ptr.*.string.len > 0) {
                     break :blk entry.value_ptr.*.string;
@@ -331,10 +336,83 @@ test "invalid json rejected" {
     try std.testing.expectError(error.InvalidJson, parse(a, "not json"));
 }
 
-test "density bands must be ascending" {
+test "density bands must be ascending and positive" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const json = "{\"schema_version\":1,\"density_bands\":{\"haiku\":[3,1]}}";
+    // Descending pair: rejected.
+    const json = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":{\"haikus\":\"haiku\"},\"density_bands\":{\"haiku\":[3,1]}}";
     try std.testing.expectError(error.InvalidShape, parse(a, json));
+    // Zero band: rejected.
+    const json0 = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":{\"haikus\":\"haiku\"},\"density_bands\":{\"haiku\":[0]}}";
+    try std.testing.expectError(error.InvalidShape, parse(a, json0));
+    // Equal adjacent values: rejected (strictly ascending required).
+    const jsoneq = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":{\"haikus\":\"haiku\"},\"density_bands\":{\"haiku\":[2,2]}}";
+    try std.testing.expectError(error.InvalidShape, parse(a, jsoneq));
+}
+
+test "density bands need not have exactly three entries" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // One-entry band is valid.
+    const json1 = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":{\"haikus\":\"haiku\"},\"density_bands\":{\"haiku\":[1]}}";
+    var p1 = try parse(a, json1);
+    try std.testing.expectEqual(@as(usize, 1), p1.density_bands.get("haiku").?.len);
+    // Two-entry band is valid.
+    const json2 = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":{\"haikus\":\"haiku\"},\"density_bands\":{\"haiku\":[1,5]}}";
+    var p2 = try parse(a, json2);
+    try std.testing.expectEqual(@as(usize, 2), p2.density_bands.get("haiku").?.len);
+    // Four-entry band is valid.
+    const json4 = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":{\"haikus\":\"haiku\"},\"density_bands\":{\"haiku\":[1,3,5,7]}}";
+    var p4 = try parse(a, json4);
+    try std.testing.expectEqual(@as(usize, 4), p4.density_bands.get("haiku").?.len);
+}
+
+test "missing eligible_collections is rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const json = "{\"schema_version\":1,\"poetry_collections\":{\"haikus\":\"haiku\"}}";
+    try std.testing.expectError(error.MissingEligibleCollections, parse(a, json));
+}
+
+test "missing poetry_collections is rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const json = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]}}";
+    try std.testing.expectError(error.MissingPoetryCollections, parse(a, json));
+}
+
+test "null population fields are rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const j1 = "{\"schema_version\":1,\"eligible_collections\":null,\"poetry_collections\":{\"haikus\":\"haiku\"}}";
+    try std.testing.expectError(error.InvalidShape, parse(a, j1));
+    const j2 = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":null}";
+    try std.testing.expectError(error.InvalidShape, parse(a, j2));
+}
+
+test "wrong-type population fields are rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // eligible_collections as an array.
+    const j1 = "{\"schema_version\":1,\"eligible_collections\":[\"lorelog\"],\"poetry_collections\":{\"haikus\":\"haiku\"}}";
+    try std.testing.expectError(error.InvalidShape, parse(a, j1));
+    // poetry_collections as a string.
+    const j2 = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":\"haiku\"}";
+    try std.testing.expectError(error.InvalidShape, parse(a, j2));
+}
+
+test "explicit empty population objects are valid" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const json = "{\"schema_version\":1,\"eligible_collections\":{},\"poetry_collections\":{}}";
+    var policy = try parse(a, json);
+    try std.testing.expectEqual(@as(usize, 0), policy.eligible_collections.count());
+    try std.testing.expectEqual(@as(usize, 0), policy.poetry_collections.count());
 }
