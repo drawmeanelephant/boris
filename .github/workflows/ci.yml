@@ -178,10 +178,39 @@ jobs:
       - name: Bounded companion tests
         run: zig build --build-file tools/testdata-generator/build.zig test
 
+  # Dedicated content-audit lane covering tools/content-audit/** and the root
+  # build.zig content-audit wiring. Unlike the path-gated tool lanes above,
+  # this one runs unconditionally on both OSes: the audit parser is a
+  # standalone conformance surface of its own and its lane must never degrade
+  # into an unobserved skip (see the strict `ci` aggregate check below, which
+  # requires this lane to succeed rather than merely not-fail).
+  content-audit-test:
+    name: content-audit-test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Content-audit build
+        run: zig build --build-file tools/content-audit/build.zig
+
+      - name: Content-audit tests
+        run: zig build --build-file tools/content-audit/build.zig test
+
   # Single required status check for branch protection / rulesets.
   ci:
     name: ci
-    needs: [build-and-test, migration-lab-test, standalone_tools_test, testdata_generator_test]
+    needs: [build-and-test, migration-lab-test, standalone_tools_test, testdata_generator_test, content-audit-test]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -191,11 +220,15 @@ jobs:
           migration_lab_test="${{ needs.migration-lab-test.result }}"
           standalone_tools_test="${{ needs.standalone_tools_test.result }}"
           testdata_generator_test="${{ needs.testdata_generator_test.result }}"
+          content_audit_test="${{ needs.content-audit-test.result }}"
           echo "build-and-test result: ${build_and_test}"
           echo "migration-lab-test result: ${migration_lab_test}"
           echo "standalone-tools-test result: ${standalone_tools_test}"
           echo "testdata-generator-test result: ${testdata_generator_test}"
+          echo "content-audit-test result: ${content_audit_test}"
           test "${build_and_test}" = "success"
           test "${migration_lab_test}" = "success" || test "${migration_lab_test}" = "skipped"
           test "${standalone_tools_test}" = "success" || test "${standalone_tools_test}" = "skipped"
           test "${testdata_generator_test}" = "success" || test "${testdata_generator_test}" = "skipped"
+          # Content-audit must actually succeed: no skipped/unobserved escape.
+          test "${content_audit_test}" = "success"
