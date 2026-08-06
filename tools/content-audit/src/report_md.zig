@@ -43,12 +43,14 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     if (audit.source_revision) |r| try b.print(gpa, "- Source revision: `{s}`\n", .{r});
     try b.print(gpa, "- Policy digest: `{s}`\n", .{audit.policy_digest});
     if (opts.collections.len > 0) {
-        try b.appendSlice(gpa, "- Collection filter: ");
+        try b.appendSlice(gpa, "- Collection filter (scoped): ");
         for (opts.collections, 0..) |c, i| {
             if (i > 0) try b.appendSlice(gpa, ", ");
             try b.appendSlice(gpa, c);
         }
-        try b.appendSlice(gpa, "\n");
+        try b.appendSlice(gpa, "\n- **Scope:** every total, verse total, coverage row, density figure, alignment count, exception, delta change, and per-record row in this report is restricted to the physical collections listed above. No global figure appears beside filtered rows.\n");
+    } else {
+        try b.appendSlice(gpa, "- Scope: `all` (whole tree; no collection filter).\n");
     }
     try b.appendSlice(gpa, "- This is **operational telemetry**. It is not publication output, does not\n  alter Boris graph semantics, never writes to the source content tree, and a\n  missing poem is not a compiler error.\n\n");
 
@@ -57,12 +59,13 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     var verse_units: usize = 0;
     var malformed_records: usize = 0;
     for (audit.records) |rec| {
+        if (!audit_mod.recordInScope(audit, &rec, opts.collections)) continue;
         switch (rec.kind) {
             .source => source_count += 1,
             .poetry => poetry_count += 1,
             .other => {},
         }
-        if (rec.malformed_reason != null) malformed_records += 1;
+        if (rec.malformed_reason != null or rec.unsupported_shape) malformed_records += 1;
         if (rec.verse) |v| verse_units += v.complete_count;
     }
     try b.appendSlice(gpa, "## 1. Executive summary\n\n");
@@ -120,17 +123,21 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     try b.print(gpa, "| Missing | {d} | {d:.1}% |\n\n", .{ missing, mp });
     try b.appendSlice(gpa, "A placeholder-shaped poem is never reported as substantive verse.\n\n");
 
-    // 4. Totals by poetry type
+    // 4. Totals by poetry type (scoped to the collection filter)
+    const scoped_stats = try audit_mod.typeStatsScoped(audit, gpa, opts.collections);
+    defer gpa.free(scoped_stats);
     try b.appendSlice(gpa, "## 4. Totals by poetry type\n\n");
     try b.appendSlice(gpa, "| Type | Records | Verse units | Placeholder units | Substantive units | Malformed units |\n|---|---:|---:|---:|---:|---:|\n");
-    for (audit.type_stats) |st| {
+    for (scoped_stats) |st| {
         try b.print(gpa, "| {s} | {d} | {d} | {d} | {d} | {d} |\n", .{ st.type_name, st.records, st.verse_units, st.placeholder_units, st.substantive_units, st.malformed_units });
     }
     try b.appendSlice(gpa, "\n");
 
-    // 5. Density distribution
+    // 5. Density distribution (scoped to the collection filter)
+    const scoped_density = try audit_mod.typeDensitiesScoped(audit, gpa, scoped_stats, opts.collections);
+    defer gpa.free(scoped_density);
     try b.appendSlice(gpa, "## 5. Density distribution\n\n");
-    for (audit.type_densities) |td| {
+    for (scoped_density) |td| {
         try b.print(gpa, "### {s}\n\n", .{td.type_name});
         if (audit.policy.density_bands.get(td.type_name)) |bands| {
             try b.appendSlice(gpa, "Policy exact-count bands: `");
@@ -151,7 +158,7 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
 
     // 6. Lowest/highest density records
     try b.appendSlice(gpa, "## 6. Lowest-density and highest-density records\n\n");
-    for (audit.type_densities) |td| {
+    for (scoped_density) |td| {
         if (td.lowest.len == 0) continue;
         try b.print(gpa, "### {s}\n\n", .{td.type_name});
         try b.print(gpa, "Lowest ({d} units): ", .{td.lowest_count});
@@ -167,7 +174,7 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     var ph_found = false;
     for (audit.records) |*rec| {
         if (rec.kind != .poetry) continue;
-        if (!isSelected(opts, rec.collection)) continue;
+        if (!audit_mod.recordInScope(audit, rec, opts.collections)) continue;
         const v = rec.verse orelse continue;
         if (v.complete_count > 0 and v.substantive_count == 0) {
             ph_found = true;
@@ -182,7 +189,7 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     var orph_found = false;
     for (audit.records) |*rec| {
         if (rec.kind != .poetry) continue;
-        if (!isSelected(opts, rec.collection)) continue;
+        if (!audit_mod.recordInScope(audit, rec, opts.collections)) continue;
         if (rec.alignment == .orphan) {
             orph_found = true;
             try b.print(gpa, "- `{s}` ({s})\n", .{ rec.id orelse rec.source_path, rec.poetry_type.? });
@@ -196,7 +203,7 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     var amb_found = false;
     for (audit.records) |*rec| {
         if (rec.kind != .poetry) continue;
-        if (!isSelected(opts, rec.collection)) continue;
+        if (!audit_mod.recordInScope(audit, rec, opts.collections)) continue;
         if (rec.alignment == .ambiguous or rec.alignment == .duplicate_mapping or rec.alignment == .mapping_disagreement) {
             amb_found = true;
             try b.print(gpa, "- `{s}`: {s}", .{ rec.id orelse rec.source_path, rec.alignment.?.jsonName() });
@@ -219,7 +226,7 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     var miss_found = false;
     for (audit.records) |*rec| {
         if (rec.kind != .source) continue;
-        if (!isSelected(opts, rec.collection)) continue;
+        if (!audit_mod.recordInScope(audit, rec, opts.collections)) continue;
         for (rec.coverage_types, rec.coverage_classes) |t, cls| {
             if (cls == .missing) {
                 miss_found = true;

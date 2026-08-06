@@ -108,6 +108,7 @@ pub const Policy = struct {
 
 pub const PolicyError = error{
     InvalidJson,
+    MissingSchemaVersion,
     UnsupportedSchemaVersion,
     InvalidShape,
     OutOfMemory,
@@ -154,11 +155,11 @@ pub fn parse(gpa: std.mem.Allocator, json_bytes: []const u8) PolicyError!Policy 
     var policy: Policy = .{};
     errdefer policy.deinit(gpa);
 
-    if (root.object.get("schema_version")) |sv| {
-        if (sv != .integer) return error.InvalidShape;
-        policy.schema_version = @intCast(sv.integer);
-    }
-    if (policy.schema_version > supported_schema_version) return error.UnsupportedSchemaVersion;
+    // schema_version must equal 1 exactly: omitted or zero versions are never
+    // accepted as schema 1.
+    const sv = root.object.get("schema_version") orelse return error.MissingSchemaVersion;
+    if (sv != .integer or sv.integer != supported_schema_version) return error.UnsupportedSchemaVersion;
+    policy.schema_version = @intCast(sv.integer);
 
     if (root.object.get("eligible_collections")) |ec| {
         if (ec != .object) return error.InvalidShape;
@@ -296,6 +297,30 @@ test "unsupported schema version rejected" {
     defer arena.deinit();
     const a = arena.allocator();
     const json = "{\"schema_version\": 99}";
+    try std.testing.expectError(error.UnsupportedSchemaVersion, parse(a, json));
+}
+
+test "schema version omitted is rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const json = "{\"eligible_collections\": {}}";
+    try std.testing.expectError(error.MissingSchemaVersion, parse(a, json));
+}
+
+test "schema version zero is rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const json = "{\"schema_version\": 0}";
+    try std.testing.expectError(error.UnsupportedSchemaVersion, parse(a, json));
+}
+
+test "schema version two is rejected" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const json = "{\"schema_version\": 2}";
     try std.testing.expectError(error.UnsupportedSchemaVersion, parse(a, json));
 }
 

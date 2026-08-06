@@ -17,6 +17,7 @@ const util = @import("util.zig");
 const cli = @import("cli.zig");
 const policy_mod = @import("policy.zig");
 const audit_mod = @import("audit.zig");
+const frontmatter_mod = @import("frontmatter.zig");
 const output = @import("output.zig");
 const report_json = @import("report_json.zig");
 const report_md = @import("report_md.zig");
@@ -208,7 +209,7 @@ fn runTool(io: std.Io, gpa: std.mem.Allocator, args: []const []const u8) u8 {
             return @intFromEnum(ExitCode.contract);
         };
         defer parsed.deinit();
-        audit_mod.compareDelta(&audit, gpa, parsed.value) catch |err| {
+        audit_mod.compareDelta(&audit, gpa, parsed.value, options.collections) catch |err| {
             diag("boris-content-audit: previous report incompatible: {s}\n", .{@errorName(err)});
             return @intFromEnum(ExitCode.contract);
         };
@@ -236,8 +237,8 @@ fn runTool(io: std.Io, gpa: std.mem.Allocator, args: []const []const u8) u8 {
     };
     defer stage_dir.close(io);
 
-    // Ownership marker first.
-    output.writeBytes(io, stage_dir, util.output_owner_marker, "format=boris-content-audit\nschema_version=1\n") catch |err| {
+    // Ownership marker first (exact content validated on later runs).
+    output.writeBytes(io, stage_dir, util.output_owner_marker, util.output_owner_marker_content) catch |err| {
         diag("boris-content-audit: marker write failed: {s}\n", .{@errorName(err)});
         output.cleanupPath(io, stage_path);
         return @intFromEnum(ExitCode.io_error);
@@ -295,7 +296,13 @@ fn runTool(io: std.Io, gpa: std.mem.Allocator, args: []const []const u8) u8 {
     }
 
     output.publishOwnedStage(io, final_path, stage_path, backup_path) catch |err| {
-        diag("boris-content-audit: publish failed: {s}\n", .{@errorName(err)});
+        if (err == error.BackupRestoreFailed) {
+            diag("boris-content-audit: publish failed: {s} — the previous report was not restored; it remains recoverable at {s}{s} (do not delete it by hand)\n", .{ @errorName(err), out_dir, util.backup_suffix });
+        } else if (err == error.RefuseUnownedBackup) {
+            diag("boris-content-audit: publish refused: the backup path {s}{s} is not a boris-content-audit backup (no valid ownership marker); it was left untouched\n", .{ out_dir, util.backup_suffix });
+        } else {
+            diag("boris-content-audit: publish failed: {s}\n", .{@errorName(err)});
+        }
         output.cleanupPath(io, stage_path);
         return @intFromEnum(ExitCode.io_error);
     };
@@ -344,8 +351,12 @@ const Findings = struct {
 
 fn countFindings(audit: *const audit_mod.Audit, collections: []const []const u8) Findings {
     var f: Findings = .{ .structural = 0, .policy = 0, .source_count = 0, .poetry_count = 0 };
+    // Structural findings follow the same collection scope as every other
+    // section of a filtered report.
     for (audit.exceptions) |e| {
-        if (e.severity == .structural) f.structural += 1;
+        if (e.severity != .structural) continue;
+        if (!audit_mod.recordIdInScope(audit, e.record_id, collections)) continue;
+        f.structural += 1;
     }
     var missing_pairs: usize = 0;
     var placeholder_records: usize = 0;
@@ -440,10 +451,61 @@ const full_policy =
 ;
 
 fn writeFixturePolicy(io: std.Io, a: std.mem.Allocator, dir: []const u8) ![]const u8 {
+    return writePolicyJson(io, a, dir, full_policy);
+}
+
+fn writePolicyJson(io: std.Io, a: std.mem.Allocator, dir: []const u8, json: []const u8) ![]const u8 {
     const p = try std.fmt.allocPrint(a, "{s}/policy.json", .{dir});
-    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = p, .data = full_policy });
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = p, .data = json });
     return p;
 }
+
+/// Policy whose exact_mappings cover only records present in the small
+/// runAudit trees (lorelog/LLG-100 with haiku+limerick+aphorism expected).
+/// Stale mapping keys are structural findings, so fixture policies must not
+/// name records that are absent from the fixture tree.
+const pair_policy =
+    \\{
+    \\  "schema_version": 1,
+    \\  "eligible_collections": { "lorelog": ["haiku", "limerick", "aphorism"] },
+    \\  "poetry_collections": { "haikus": "haiku", "limericks": "limerick", "aphorisms": "aphorism" },
+    \\  "excluded_statuses": ["draft"],
+    \\  "placeholder": { "exact_lines": ["Awaiting context"], "title_prefixes": ["Stub:"], "case_sensitive": false },
+    \\  "density_bands": { "haiku": [1], "limerick": [1], "aphorism": [1] },
+    \\  "exact_mappings": {
+    \\    "haikus/HAI-100": "lorelog/LLG-100",
+    \\    "limericks/LIM-100": "lorelog/LLG-100"
+    \\  }
+    \\}
+;
+
+/// Same shape but only the haiku mapping (for trees without a limerick).
+const one_policy =
+    \\{
+    \\  "schema_version": 1,
+    \\  "eligible_collections": { "lorelog": ["haiku", "limerick", "aphorism"] },
+    \\  "poetry_collections": { "haikus": "haiku", "limericks": "limerick", "aphorisms": "aphorism" },
+    \\  "excluded_statuses": ["draft"],
+    \\  "placeholder": { "exact_lines": ["Awaiting context"], "title_prefixes": ["Stub:"], "case_sensitive": false },
+    \\  "density_bands": { "haiku": [1], "limerick": [1], "aphorism": [1] },
+    \\  "exact_mappings": {
+    \\    "haikus/HAI-100": "lorelog/LLG-100"
+    \\  }
+    \\}
+;
+
+/// No exact mappings at all (trees that contain no poetry to map).
+const bare_policy =
+    \\{
+    \\  "schema_version": 1,
+    \\  "eligible_collections": { "lorelog": ["haiku", "limerick", "aphorism"] },
+    \\  "poetry_collections": { "haikus": "haiku", "limericks": "limerick", "aphorisms": "aphorism" },
+    \\  "excluded_statuses": ["draft"],
+    \\  "placeholder": { "exact_lines": ["Awaiting context"], "title_prefixes": ["Stub:"], "case_sensitive": false },
+    \\  "density_bands": { "haiku": [1], "limerick": [1], "aphorism": [1] },
+    \\  "exact_mappings": {}
+    \\}
+;
 
 test "full fixture: coverage classes, mapping, placeholder, empty, orphan, missing target" {
     const io = std.testing.io;
@@ -574,7 +636,7 @@ test "byte-identical second run" {
         .{ .path = "haikus/hai-100.md", .data = "---\nid: haikus/HAI-100\nparent: haikus\ntitle: For 100\n---\n# For 100\n\none\ntwo\nthree\n" },
         .{ .path = "limericks/lim-100.md", .data = "---\nid: limericks/LIM-100\nparent: limericks\ntitle: L\n---\n# L\n\na\na\nb\na\na\n" },
     });
-    const policy_path = try writeFixturePolicy(io, a, root);
+    const policy_path = try writePolicyJson(io, a, root, pair_policy);
     const out1 = try std.fmt.allocPrint(a, "{s}/out1", .{root});
     const out2 = try std.fmt.allocPrint(a, "{s}/out2", .{root});
 
@@ -611,7 +673,7 @@ test "source tree unchanged after success and after failure" {
         .{ .path = "haikus/hai-100.md", .data = "---\nid: haikus/HAI-100\nparent: haikus\ntitle: For 100\n---\n# For 100\n\none\ntwo\nthree\n" },
         .{ .path = "limericks/lim-100.md", .data = "---\nid: limericks/LIM-100\nparent: limericks\ntitle: L\n---\n# L\n\na\na\nb\na\na\n" },
     });
-    const policy_path = try writeFixturePolicy(io, a, root);
+    const policy_path = try writePolicyJson(io, a, root, pair_policy);
     const before = try hashTree(io, a, root, &src_files);
 
     const out_ok = try std.fmt.allocPrint(a, "{s}/out-ok", .{root});
@@ -648,7 +710,7 @@ test "symlink refusal and unmarked output refusal" {
     // An in-tree symlink directory is never followed: discovery skips it and
     // the audit completes without reading the external target.
     try std.Io.Dir.cwd().symLink(io, "../external", try std.fmt.allocPrint(a, "{s}/lorelog", .{content}), .{ .is_directory = true });
-    const policy_path = try writeFixturePolicy(io, a, root);
+    const policy_path = try writePolicyJson(io, a, root, bare_policy);
     const out_dir = try std.fmt.allocPrint(a, "{s}/out", .{root});
     const code = try runAudit(io, a, root, policy_path, out_dir, null, &.{});
     try std.testing.expectEqual(@as(u8, 0), code);
@@ -662,7 +724,7 @@ test "symlink refusal and unmarked output refusal" {
     try makeTree(io, a, real_content, &.{.{ .path = "lorelog/llg.md", .data = "---\nid: lorelog/LLG\nparent: lorelog\nstatus: published\n---\n" }});
     try std.Io.Dir.cwd().createDirPath(io, root2);
     try std.Io.Dir.cwd().symLink(io, "real", try std.fmt.allocPrint(a, "{s}/content", .{root2}), .{ .is_directory = true });
-    const policy2 = try writeFixturePolicy(io, a, root2);
+    const policy2 = try writePolicyJson(io, a, root2, bare_policy);
     const out2 = try std.fmt.allocPrint(a, "{s}/out", .{root2});
     const code_sym = try runAudit(io, a, root2, policy2, out2, null, &.{});
     try std.testing.expectEqual(@as(u8, 3), code_sym);
@@ -672,7 +734,7 @@ test "symlink refusal and unmarked output refusal" {
     const root3 = try tmpPath(a, tmp, "unmarked-root");
     const content3 = try std.fmt.allocPrint(a, "{s}/content", .{root3});
     try makeTree(io, a, content3, &.{.{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n" }});
-    const policy3 = try writeFixturePolicy(io, a, root3);
+    const policy3 = try writePolicyJson(io, a, root3, bare_policy);
     const out3 = try std.fmt.allocPrint(a, "{s}/out", .{root3});
     try std.Io.Dir.cwd().createDirPath(io, out3);
     try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/precious.txt", .{out3}), .data = "mine" });
@@ -698,7 +760,7 @@ test "delta mode reports changes with policy identity check" {
         .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
         .{ .path = "haikus/hai-100.md", .data = "---\nid: haikus/HAI-100\nparent: haikus\ntitle: For 100\n---\n# For 100\n\nAwaiting context\nAwaiting context\nAwaiting context\n" },
     });
-    const policy_path = try writeFixturePolicy(io, a, root);
+    const policy_path = try writePolicyJson(io, a, root, one_policy);
     const out1 = try std.fmt.allocPrint(a, "{s}/out1", .{root});
     const out2 = try std.fmt.allocPrint(a, "{s}/out2", .{root});
 
@@ -755,7 +817,7 @@ test "fail-on exit codes" {
         .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
         .{ .path = "lorelog/bad.md", .data = "---\nid: lorelog/BAD\nparent: lorelog\nstatus: published\n" }, // unclosed
     });
-    const policy_path = try writeFixturePolicy(io, a, root);
+    const policy_path = try writePolicyJson(io, a, root, bare_policy);
     const out1 = try std.fmt.allocPrint(a, "{s}/o1", .{root});
     const c1 = try runAudit(io, a, root, policy_path, out1, null, &.{"--fail-on=structural"});
     try std.testing.expectEqual(@as(u8, 1), c1);
@@ -786,13 +848,49 @@ test "no-id poetry, fence-at-eof, and trailing-slash out are safe" {
         // body_offset clamp must keep the body slice in bounds.
         .{ .path = "haikus/hai-eof.md", .data = "---\nid: haikus/HAI-EOF\nparent: haikus\n---" },
     });
-    const policy_path = try writeFixturePolicy(io, a, root);
+    const policy_path = try writePolicyJson(io, a, root, bare_policy);
     const out_dir = try std.fmt.allocPrint(a, "{s}/out/", .{root}); // trailing slash
     const code = try runAudit(io, a, root, policy_path, out_dir, null, &.{});
     try std.testing.expectEqual(@as(u8, 1), code); // missing_id record -> structural
     // The report tree must exist despite the trailing-slash --out.
     const json_bytes = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}report.json", .{out_dir}), a);
     try std.testing.expect(std.mem.indexOf(u8, json_bytes, "malformed_records") != null);
+}
+
+test "oversized source file is classified oversized and not analyzed" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const root = try tmpPath(a, tmp, "oversize-root");
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try makeTree(io, a, content, &.{
+        .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
+        .{ .path = "haikus/hai-huge.md", .data = "" },
+    });
+    // Replace the haiku with a file larger than max_source_bytes (1 MiB + 1).
+    const big = try a.alloc(u8, frontmatter_mod.max_source_bytes + 1);
+    @memset(big, 'x');
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/haikus/hai-huge.md", .{content}), .data = big });
+    const policy_path = try writePolicyJson(io, a, root, bare_policy);
+    const out_dir = try std.fmt.allocPrint(a, "{s}/out", .{root});
+    // The oversized record is malformed (structural), never parsed as verse.
+    const code = try runAudit(io, a, root, policy_path, out_dir, null, &.{});
+    try std.testing.expectEqual(@as(u8, 1), code);
+    const json_bytes = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/report.json", .{out_dir}), a);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, json_bytes, .{});
+    const malformed = parsed.value.object.get("totals").?.object.get("malformed_records").?.integer;
+    try std.testing.expectEqual(@as(i64, 1), malformed);
+    const vt = parsed.value.object.get("verse_totals").?.array.items;
+    for (vt) |row| {
+        try std.testing.expectEqual(@as(i64, 0), row.object.get("verse_units").?.integer);
+    }
 }
 
 test "usage errors exit 2" {
@@ -802,4 +900,319 @@ test "usage errors exit 2" {
     const a = arena.allocator();
     const c = runTool(io, a, &.{ "boris-content-audit", "--mode=poetry", "--root=.", "--content-root=content" });
     try std.testing.expectEqual(@as(u8, 2), c); // missing --out
+}
+
+fn scanExceptions(io: std.Io, a: std.mem.Allocator, out_dir: []const u8, kind: []const u8) !usize {
+    const json_bytes = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/report.json", .{out_dir}), a);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, json_bytes, .{});
+    const exceptions = parsed.value.object.get("exceptions").?.array.items;
+    var count: usize = 0;
+    for (exceptions) |e| {
+        if (util.eql(e.object.get("kind").?.string, kind)) count += 1;
+    }
+    return count;
+}
+
+test "stale mapping key and non-source mapping target are structural" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const root = try tmpPath(a, tmp, "stale-root");
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try makeTree(io, a, content, &.{
+        .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
+        .{ .path = "haikus/hai-100.md", .data = "---\nid: haikus/HAI-100\nparent: lorelog/LLG-100\ntitle: A\n---\n# A\n\none\ntwo\nthree\n" },
+        .{ .path = "haikus/hai-200.md", .data = "---\nid: haikus/HAI-200\nparent: lorelog/LLG-100\ntitle: B\n---\n# B\n\na\nb\nc\n" },
+    });
+    // GHOST key does not exist (stale); HAI-200 maps to HAI-100 which exists
+    // but is a poetry record, not a source (impossible mapping).
+    const policy =
+        \\{"schema_version": 1, "eligible_collections": {"lorelog": ["haiku"]}, "poetry_collections": {"haikus": "haiku"}, "exact_mappings": {"haikus/HAI-100": "lorelog/LLG-100", "haikus/GHOST": "lorelog/LLG-100", "haikus/HAI-200": "haikus/HAI-100"}}
+    ;
+    const policy_path = try writePolicyJson(io, a, root, policy);
+    const out_dir = try std.fmt.allocPrint(a, "{s}/out", .{root});
+    const code = try runAudit(io, a, root, policy_path, out_dir, null, &.{});
+    try std.testing.expectEqual(@as(u8, 1), code); // structural gate fails
+    try std.testing.expectEqual(@as(usize, 1), try scanExceptions(io, a, out_dir, "stale_exact_mapping_key"));
+    try std.testing.expectEqual(@as(usize, 1), try scanExceptions(io, a, out_dir, "mapping_target_not_source"));
+    // Valid evidence still resolves the owner: HAI-100 stays mapped.
+    const json_bytes = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/report.json", .{out_dir}), a);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, json_bytes, .{});
+    const records = parsed.value.object.get("records").?.array.items;
+    var hai100_alignment: []const u8 = "";
+    for (records) |rv| {
+        const id = rv.object.get("id").?.string;
+        if (util.eql(id, "haikus/HAI-100")) hai100_alignment = rv.object.get("alignment").?.string;
+    }
+    try std.testing.expectEqualStrings("mapped", hai100_alignment);
+}
+
+test "valid evidence plus one dead evidence target resolves owner and fails the structural gate" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const root = try tmpPath(a, tmp, "dead-root");
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try makeTree(io, a, content, &.{
+        .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
+        .{ .path = "haikus/hai-100.md", .data = "---\nid: haikus/HAI-100\nparent: lorelog/LLG-100\ntitle: A\nrelations: [relates_to=lorelog/LLG-999]\n---\n# A\n\none\ntwo\nthree\n" },
+    });
+    const policy_path = try writePolicyJson(io, a, root, one_policy);
+    const out_dir = try std.fmt.allocPrint(a, "{s}/out", .{root});
+    const code = try runAudit(io, a, root, policy_path, out_dir, null, &.{});
+    // The dead relation is a structural finding even though the parent edge
+    // resolves the owner: the run fails its structural gate.
+    try std.testing.expectEqual(@as(u8, 1), code);
+    try std.testing.expectEqual(@as(usize, 1), try scanExceptions(io, a, out_dir, "missing_target"));
+    const json_bytes = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/report.json", .{out_dir}), a);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, json_bytes, .{});
+    const alignment_records = parsed.value.object.get("alignment").?.object.get("records").?.array.items;
+    var hai100_status: []const u8 = "";
+    for (alignment_records) |rv| {
+        if (util.eql(rv.object.get("id").?.string, "haikus/HAI-100")) hai100_status = rv.object.get("status").?.string;
+    }
+    try std.testing.expectEqualStrings("mapped", hai100_status);
+    // Coverage still resolved from the valid evidence. one_policy declares
+    // three eligible types, so find the haiku row by type name.
+    const cov = parsed.value.object.get("coverage_by_collection").?.array.items;
+    var haiku_substantive: i64 = -1;
+    for (cov) |row| {
+        if (util.eql(row.object.get("type").?.string, "haiku")) haiku_substantive = row.object.get("present_substantive").?.integer;
+    }
+    try std.testing.expectEqual(@as(i64, 1), haiku_substantive);
+}
+
+test "duplicate source/type poetry companions are ambiguous and structural" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const root = try tmpPath(a, tmp, "dup-root");
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try makeTree(io, a, content, &.{
+        .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
+        .{ .path = "haikus/hai-100.md", .data = "---\nid: haikus/HAI-100\nparent: lorelog/LLG-100\ntitle: A\n---\n# A\n\none\ntwo\nthree\n" },
+        .{ .path = "haikus/hai-100b.md", .data = "---\nid: haikus/HAI-100B\nparent: lorelog/LLG-100\ntitle: B\n---\n# B\n\na\nb\nc\n" },
+    });
+    // Both haiku records claim lorelog/LLG-100 via their parent edge: the
+    // source/type coverage must be ambiguous, never the first record.
+    const policy =
+        \\{"schema_version": 1, "eligible_collections": {"lorelog": ["haiku"]}, "poetry_collections": {"haikus": "haiku"}, "exact_mappings": {}}
+    ;
+    const policy_path = try writePolicyJson(io, a, root, policy);
+    const out_dir = try std.fmt.allocPrint(a, "{s}/out", .{root});
+    const code = try runAudit(io, a, root, policy_path, out_dir, null, &.{});
+    try std.testing.expectEqual(@as(u8, 1), code); // duplicate_coverage is structural
+    try std.testing.expectEqual(@as(usize, 1), try scanExceptions(io, a, out_dir, "duplicate_coverage"));
+    const json_bytes = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/report.json", .{out_dir}), a);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, json_bytes, .{});
+    const rows = parsed.value.object.get("coverage_by_collection").?.array.items;
+    try std.testing.expectEqual(@as(i64, 1), rows[0].object.get("ambiguous_mapping").?.integer);
+    try std.testing.expectEqual(@as(i64, 0), rows[0].object.get("present_substantive").?.integer);
+}
+
+test "unsupported poetry type is not counted and is structural" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const root = try tmpPath(a, tmp, "sonnet-root");
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try makeTree(io, a, content, &.{
+        .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
+        .{ .path = "sonnets/son-100.md", .data = "---\nid: sonnets/SON-100\nparent: lorelog/LLG-100\ntitle: A\n---\n# A\n\nline one\nline two\nline three\n" },
+    });
+    const policy =
+        \\{"schema_version": 1, "eligible_collections": {"lorelog": ["sonnet"]}, "poetry_collections": {"sonnets": "sonnet"}, "exact_mappings": {}}
+    ;
+    const policy_path = try writePolicyJson(io, a, root, policy);
+    const out_dir = try std.fmt.allocPrint(a, "{s}/out", .{root});
+    const code = try runAudit(io, a, root, policy_path, out_dir, null, &.{});
+    // Unsupported shape is structural; the poem-like lines are never counted
+    // as paragraph units and never grant substantive coverage.
+    try std.testing.expectEqual(@as(u8, 1), code);
+    try std.testing.expectEqual(@as(usize, 1), try scanExceptions(io, a, out_dir, "unregistered_poetry_shape"));
+    const json_bytes = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/report.json", .{out_dir}), a);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, json_bytes, .{});
+    const vt = parsed.value.object.get("verse_totals").?.array.items;
+    try std.testing.expectEqual(@as(i64, 1), vt[0].object.get("records").?.integer);
+    try std.testing.expectEqual(@as(i64, 0), vt[0].object.get("verse_units").?.integer);
+    try std.testing.expectEqual(@as(i64, 0), vt[0].object.get("substantive_units").?.integer);
+    try std.testing.expectEqual(@as(i64, 1), vt[0].object.get("malformed_units").?.integer);
+    const rows = parsed.value.object.get("coverage_by_collection").?.array.items;
+    try std.testing.expectEqual(@as(i64, 1), rows[0].object.get("malformed").?.integer);
+}
+
+const ReportOverrides = struct {
+    format_id: ?[]const u8 = null,
+    schema_version: ?i64 = null,
+    mode: ?[]const u8 = null,
+    source_root_label: ?[]const u8 = null,
+    remove_policy_digest: bool = false,
+    collection_filter: ?[]const []const u8 = null,
+};
+
+fn writeMutatedReport(io: std.Io, a: std.mem.Allocator, src: []const u8, out: []const u8, overrides: ReportOverrides) !void {
+    const bytes = try output.readFileAlloc(io, std.Io.Dir.cwd(), src, a);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, bytes, .{});
+    if (overrides.format_id) |v| try parsed.value.object.put(a, "format_id", .{ .string = v });
+    if (overrides.schema_version) |v| try parsed.value.object.put(a, "schema_version", .{ .integer = v });
+    if (overrides.mode) |v| try parsed.value.object.put(a, "mode", .{ .string = v });
+    if (overrides.source_root_label) |v| try parsed.value.object.put(a, "source_root_label", .{ .string = v });
+    if (overrides.remove_policy_digest) _ = parsed.value.object.orderedRemove("policy_digest");
+    if (overrides.collection_filter) |cols| {
+        var items = std.json.Array.init(a);
+        for (cols) |c| try items.append(.{ .string = c });
+        try parsed.value.object.put(a, "collection_filter", .{ .array = items });
+    }
+    const out_bytes = try std.json.Stringify.valueAlloc(a, parsed.value, .{});
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = out, .data = out_bytes });
+}
+
+test "delta compatibility is strict across format, schema, mode, root, digest, filter" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const root = try tmpPath(a, tmp, "strict-root");
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try makeTree(io, a, content, &.{
+        .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
+        .{ .path = "haikus/hai-100.md", .data = "---\nid: haikus/HAI-100\nparent: lorelog/LLG-100\ntitle: A\n---\n# A\n\none\ntwo\nthree\n" },
+    });
+    const policy_path = try writePolicyJson(io, a, root, one_policy);
+    const out_base = try std.fmt.allocPrint(a, "{s}/out-base", .{root});
+    const code_base = try runAudit(io, a, root, policy_path, out_base, null, &.{});
+    try std.testing.expectEqual(@as(u8, 0), code_base);
+    const prev = try std.fmt.allocPrint(a, "{s}/report.json", .{out_base});
+
+    // Unmutated previous report still compares (sanity).
+    const out_ok = try std.fmt.allocPrint(a, "{s}/out-ok", .{root});
+    try std.testing.expectEqual(@as(u8, 0), try runAudit(io, a, root, policy_path, out_ok, prev, &.{}));
+
+    var case: usize = 0;
+    const cases = [_]ReportOverrides{
+        .{ .format_id = "not-boris-content-audit" },
+        .{ .schema_version = 2 },
+        .{ .mode = "filed" },
+        .{ .source_root_label = "src" },
+        .{ .remove_policy_digest = true },
+        .{ .collection_filter = &.{"lorelog"} },
+    };
+    for (cases) |overrides| {
+        const mut = try std.fmt.allocPrint(a, "{s}/mut-{d}.json", .{ root, case });
+        const out_mut = try std.fmt.allocPrint(a, "{s}/out-mut-{d}", .{ root, case });
+        case += 1;
+        try writeMutatedReport(io, a, prev, mut, overrides);
+        try std.testing.expectEqual(@as(u8, 4), try runAudit(io, a, root, policy_path, out_mut, mut, &.{}));
+    }
+}
+
+test "mixed collection filtering is scoped consistently" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const root = try tmpPath(a, tmp, "scope-root");
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try makeTree(io, a, content, &.{
+        .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
+        .{ .path = "mascots/msc-100.md", .data = "---\nid: mascots/MSC-100\nparent: mascots\nstatus: published\n---\n# M\n" },
+        .{ .path = "haikus/hai-100.md", .data = "---\nid: haikus/HAI-100\nparent: lorelog/LLG-100\ntitle: A\n---\n# A\n\none\ntwo\nthree\n" },
+        .{ .path = "haikus/hai-200.md", .data = "---\nid: haikus/HAI-200\nparent: mascots/MSC-100\ntitle: B\n---\n# B\n\na\nb\nc\n" },
+        .{ .path = "limericks/lim-100.md", .data = "---\nid: limericks/LIM-100\nparent: lorelog/LLG-100\ntitle: L\n---\n# L\n\na\na\nb\na\na\n" },
+        .{ .path = "limericks/lim-200.md", .data = "---\nid: limericks/LIM-200\nparent: mascots/MSC-100\ntitle: L2\n---\n# L2\n\n1\n2\n3\n4\n5\n" },
+    });
+    const policy =
+        \\{"schema_version": 1, "eligible_collections": {"lorelog": ["haiku", "limerick"], "mascots": ["haiku", "limerick"]}, "poetry_collections": {"haikus": "haiku", "limericks": "limerick"}, "exact_mappings": {}}
+    ;
+    const policy_path = try writePolicyJson(io, a, root, policy);
+    const out_scoped = try std.fmt.allocPrint(a, "{s}/out-scoped", .{root});
+    const code = try runAudit(io, a, root, policy_path, out_scoped, null, &.{"--collection=lorelog"});
+    try std.testing.expectEqual(@as(u8, 0), code);
+
+    const json_bytes = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/report.json", .{out_scoped}), a);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, json_bytes, .{});
+    const totals = parsed.value.object.get("totals").?.object;
+    try std.testing.expectEqual(@as(i64, 3), totals.get("records_discovered").?.integer); // LLG-100 + HAI-100 + LIM-100
+    try std.testing.expectEqual(@as(i64, 1), totals.get("source_records").?.integer);
+    try std.testing.expectEqual(@as(i64, 2), totals.get("poetry_records").?.integer);
+    try std.testing.expectEqual(@as(i64, 0), totals.get("excluded_records").?.integer); // scoped, not global
+    // Verse totals are scoped: one haiku and one limerick record.
+    const vt = parsed.value.object.get("verse_totals").?.array.items;
+    try std.testing.expectEqual(@as(i64, 1), vt[0].object.get("records").?.integer);
+    try std.testing.expectEqual(@as(i64, 1), vt[1].object.get("records").?.integer);
+    // Coverage rows only for lorelog.
+    const rows = parsed.value.object.get("coverage_by_collection").?.array.items;
+    for (rows) |row| try std.testing.expectEqualStrings("lorelog", row.object.get("collection").?.string);
+    // Alignment records only for the two mapped lorelog poems.
+    const align_records = parsed.value.object.get("alignment").?.object.get("records").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), align_records.len);
+    try std.testing.expectEqual(@as(i64, 2), parsed.value.object.get("alignment").?.object.get("counts").?.object.get("mapped").?.integer);
+    // Per-record output is scoped too.
+    const records = parsed.value.object.get("records").?.array.items;
+    try std.testing.expectEqual(@as(usize, 3), records.len);
+    // Scope is labeled explicitly.
+    const scope = parsed.value.object.get("scope").?.object;
+    try std.testing.expectEqualStrings("source_collection_and_mapped_poetry", scope.get("type").?.string);
+    try std.testing.expectEqualStrings("scoped", scope.get("totals").?.string);
+
+    // A delta against an unfiltered previous report must be rejected: the two
+    // runs are not the same population.
+    const out_all = try std.fmt.allocPrint(a, "{s}/out-all", .{root});
+    const code_all = try runAudit(io, a, root, policy_path, out_all, null, &.{});
+    try std.testing.expectEqual(@as(u8, 0), code_all);
+    const prev_all = try std.fmt.allocPrint(a, "{s}/report.json", .{out_all});
+    const out_mixed = try std.fmt.allocPrint(a, "{s}/out-mixed", .{root});
+    try std.testing.expectEqual(@as(u8, 4), try runAudit(io, a, root, policy_path, out_mixed, prev_all, &.{"--collection=lorelog"}));
+
+    // Collection-filter semantics are a set: argument order must not change
+    // the population. A previous report filtered with the same names in a
+    // different order still compares.
+    const out_both_ab = try std.fmt.allocPrint(a, "{s}/out-both-ab", .{root});
+    try std.testing.expectEqual(@as(u8, 0), try runAudit(io, a, root, policy_path, out_both_ab, null, &.{ "--collection=lorelog", "--collection=mascots" }));
+    const prev_ab = try std.fmt.allocPrint(a, "{s}/report.json", .{out_both_ab});
+    const out_both_ba = try std.fmt.allocPrint(a, "{s}/out-both-ba", .{root});
+    try std.testing.expectEqual(@as(u8, 0), try runAudit(io, a, root, policy_path, out_both_ba, prev_ab, &.{ "--collection=mascots", "--collection=lorelog" }));
+    // A genuinely different set still mismatches.
+    const out_both_lonly = try std.fmt.allocPrint(a, "{s}/out-both-lonly", .{root});
+    try std.testing.expectEqual(@as(u8, 4), try runAudit(io, a, root, policy_path, out_both_lonly, prev_ab, &.{"--collection=lorelog"}));
 }

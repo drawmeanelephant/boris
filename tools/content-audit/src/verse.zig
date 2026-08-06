@@ -8,10 +8,19 @@
 //!   - paragraph shape (aphorism): a unit is a blank-line-separated paragraph
 //!     of one or more lines.
 //!
-//! Ignored: frontmatter (caller passes the body), fenced code blocks,
-//! ATX headings (which only label a page or collection), and blank lines.
-//! Lines are preserved byte-for-byte (Unicode exactly); only trailing `\r`
-//! line-ending artifacts are removed for counting. Nothing is executed.
+//! Unsupported shapes (types not registered in the shape table) are never
+//! analyzed as paragraph units: `analyze` returns a zero result and the audit
+//! reports them via an `unregistered_poetry_shape` structural exception.
+//!
+//! Ignored: frontmatter (caller passes the body), fenced code blocks, ATX
+//! headings (which only label a page or collection), and blank lines. Fences
+//! follow Markdown semantics: the opening fence character (backtick or tilde)
+//! is remembered, the closing fence must use the same character with a length
+//! at least the opening length, info strings are allowed on opening fences,
+//! and unclosed fences are handled deterministically (their lines are never
+//! counted). Lines are preserved byte-for-byte (Unicode exactly); only
+//! trailing `\r` line-ending artifacts are removed for counting. Nothing is
+//! executed.
 
 const std = @import("std");
 const util = @import("util.zig");
@@ -22,6 +31,8 @@ pub const Shape = struct {
     name: []const u8,
     /// Canonical line count for lined shapes; null means paragraph mode.
     line_count: ?usize,
+    /// True only for registered shapes; unsupported shapes are never counted.
+    supported: bool,
 };
 
 pub const Unit = struct {
@@ -45,13 +56,14 @@ pub const Result = struct {
 };
 
 /// Built-in shape table for the documented poetry types. A policy may name
-/// other types; they fall back to paragraph mode with an informational
-/// exception emitted by the audit (never silently treated as a known shape).
+/// other types; they are **not** analyzed as paragraph units: the audit emits
+/// an `unregistered_poetry_shape` structural exception and `analyze` returns
+/// a zero result for them.
 pub fn shapeForType(name: []const u8) Shape {
-    if (util.eql(name, "haiku")) return .{ .name = name, .line_count = 3 };
-    if (util.eql(name, "limerick")) return .{ .name = name, .line_count = 5 };
-    if (util.eql(name, "aphorism")) return .{ .name = name, .line_count = null };
-    return .{ .name = name, .line_count = null };
+    if (util.eql(name, "haiku")) return .{ .name = name, .line_count = 3, .supported = true };
+    if (util.eql(name, "limerick")) return .{ .name = name, .line_count = 5, .supported = true };
+    if (util.eql(name, "aphorism")) return .{ .name = name, .line_count = null, .supported = true };
+    return .{ .name = name, .line_count = null, .supported = false };
 }
 
 pub fn isRegisteredShape(name: []const u8) bool {
@@ -76,10 +88,23 @@ fn isHeading(line: []const u8) bool {
     return i < line.len and line[i] == '#';
 }
 
-fn isFenceLine(line: []const u8) bool {
+const Fence = struct {
+    char: u8,
+    len: usize,
+};
+
+/// Detect a fence line: at least three consecutive backticks or tildes after
+/// optional leading spaces, with an allowed info string after the run.
+fn fenceOf(line: []const u8) ?Fence {
     var i: usize = 0;
     while (i < line.len and (line[i] == ' ' or line[i] == '\t')) : (i += 1) {}
-    return line.len >= i + 3 and util.eql(line[i .. i + 3], "```");
+    if (i >= line.len) return null;
+    const c = line[i];
+    if (c != '`' and c != '~') return null;
+    var len: usize = 0;
+    while (i + len < line.len and line[i + len] == c) : (len += 1) {}
+    if (len < 3) return null;
+    return .{ .char = c, .len = len };
 }
 
 fn titleIsPlaceholder(policy_placeholder: policy_mod.PlaceholderPolicy, title: ?[]const u8) bool {
@@ -108,7 +133,19 @@ fn lineIsExactPlaceholder(policy_placeholder: policy_mod.PlaceholderPolicy, line
 }
 
 /// Analyze a record body. `title` is used only for placeholder title prefixes.
+/// Unsupported shapes return a zero result: their verse is never counted as
+/// paragraph units.
 pub fn analyze(gpa: std.mem.Allocator, body: []const u8, shape: Shape, policy_placeholder: policy_mod.PlaceholderPolicy, title: ?[]const u8) !Result {
+    if (!shape.supported) {
+        return .{
+            .units = &.{},
+            .malformed_units = &.{},
+            .complete_count = 0,
+            .placeholder_count = 0,
+            .substantive_count = 0,
+            .malformed_count = 0,
+        };
+    }
     var units: std.ArrayList(Unit) = .empty;
     errdefer units.deinit(gpa);
     var malformed: std.ArrayList(MalformedUnit) = .empty;
@@ -119,17 +156,34 @@ pub fn analyze(gpa: std.mem.Allocator, body: []const u8, shape: Shape, policy_pl
     var block: std.ArrayList([]const u8) = .empty;
     defer block.deinit(gpa);
     var in_fence = false;
+    var fence_char: u8 = 0;
+    var fence_len: usize = 0;
 
     var lines = std.mem.splitScalar(u8, body, '\n');
     while (lines.next()) |raw_line| {
         const line = stripCr(raw_line);
-        if (isFenceLine(line)) {
-            in_fence = !in_fence;
-            // A fence immediately ends any open block (a block cannot contain fences).
-            if (block.items.len > 0) try flushBlock(gpa, &block, &units, &malformed, shape, title_stub, policy_placeholder);
+        if (!in_fence) {
+            if (fenceOf(line)) |f| {
+                // Opening fence: remember the character and length; an info
+                // string may follow the run. A fence immediately ends any
+                // open block (a block cannot contain fences).
+                in_fence = true;
+                fence_char = f.char;
+                fence_len = f.len;
+                if (block.items.len > 0) try flushBlock(gpa, &block, &units, &malformed, shape, title_stub, policy_placeholder);
+                continue;
+            }
+        } else {
+            // Closing fence: same character, length at least the opening
+            // length; info strings are tolerated. Unclosed fences simply
+            // consume the rest of the body deterministically (never counted).
+            if (fenceOf(line)) |f| {
+                if (f.char == fence_char and f.len >= fence_len) {
+                    in_fence = false;
+                }
+            }
             continue;
         }
-        if (in_fence) continue;
         if (isHeading(line)) {
             if (block.items.len > 0) try flushBlock(gpa, &block, &units, &malformed, shape, title_stub, policy_placeholder);
             continue;
@@ -183,9 +237,14 @@ fn flushBlock(
     }
     var placeholder = title_stub;
     if (!placeholder) {
+        // A unit is placeholder only when every non-empty line matches one of
+        // the configured exact signatures; a single matching line inside an
+        // otherwise substantive unit must not mark the whole unit placeholder.
+        placeholder = true;
         for (lines) |l| {
-            if (lineIsExactPlaceholder(policy_placeholder, l)) {
-                placeholder = true;
+            if (isBlank(l)) continue;
+            if (!lineIsExactPlaceholder(policy_placeholder, l)) {
+                placeholder = false;
                 break;
             }
         }
@@ -337,4 +396,158 @@ test "title prefix marks all units placeholder" {
     const body = "some real line\nsome real line\nsome real line\n";
     const r = try analyze(a, body, shapeForType("haiku"), ph_stub, "Stub: Draft Poem");
     try std.testing.expectEqual(r.placeholder_count, 1);
+}
+
+test "one placeholder line inside substantive verse is not placeholder" {
+    var arena = ta();
+    defer arena.deinit();
+    const a = arena.allocator();
+    // Only the first line matches the exact signature; the unit is substantive.
+    const body = "Awaiting context\nreal line two\nreal line three\n";
+    const r = try analyze(a, body, shapeForType("haiku"), ph_awaiting, "T");
+    try std.testing.expectEqual(r.complete_count, 1);
+    try std.testing.expectEqual(r.placeholder_count, 0);
+    try std.testing.expectEqual(r.substantive_count, 1);
+}
+
+test "all lines must match for placeholder" {
+    var arena = ta();
+    defer arena.deinit();
+    const a = arena.allocator();
+    const body = "Awaiting context\nAwaiting context\nAwaiting context\n";
+    const r = try analyze(a, body, shapeForType("haiku"), ph_awaiting, "T");
+    try std.testing.expectEqual(r.placeholder_count, 1);
+    try std.testing.expectEqual(r.substantive_count, 0);
+}
+
+test "tilde fenced code is not counted" {
+    var arena = ta();
+    defer arena.deinit();
+    const a = arena.allocator();
+    const body =
+        \\~~~
+        \\line one
+        \\line two
+        \\line three
+        \\~~~
+        \\real one
+        \\real two
+        \\real three
+        \\
+    ;
+    const r = try analyze(a, body, shapeForType("haiku"), ph_default, "T");
+    try std.testing.expectEqual(r.complete_count, 1);
+    try std.testing.expectEqualStrings("real one", r.units[0].lines[0]);
+}
+
+test "longer backtick close closes a short opening fence" {
+    var arena = ta();
+    defer arena.deinit();
+    const a = arena.allocator();
+    const body =
+        \\```
+        \\line one
+        \\line two
+        \\line three
+        \\````
+        \\real one
+        \\real two
+        \\real three
+        \\
+    ;
+    const r = try analyze(a, body, shapeForType("haiku"), ph_default, "T");
+    try std.testing.expectEqual(r.complete_count, 1);
+}
+
+test "shorter backtick close does not close" {
+    var arena = ta();
+    defer arena.deinit();
+    const a = arena.allocator();
+    const body =
+        \\````
+        \\line one
+        \\line two
+        \\line three
+        \\```
+        \\still fenced
+        \\still fenced
+        \\still fenced
+        \\
+    ;
+    // The 3-tick line cannot close a 4-tick fence: everything stays fenced.
+    const r = try analyze(a, body, shapeForType("haiku"), ph_default, "T");
+    try std.testing.expectEqual(r.complete_count, 0);
+}
+
+test "mismatched fence character does not close" {
+    var arena = ta();
+    defer arena.deinit();
+    const a = arena.allocator();
+    const body =
+        \\```
+        \\line one
+        \\line two
+        \\line three
+        \\~~~
+        \\line four
+        \\line five
+        \\line six
+        \\
+    ;
+    // A tilde fence cannot close a backtick fence: everything stays fenced.
+    const r = try analyze(a, body, shapeForType("haiku"), ph_default, "T");
+    try std.testing.expectEqual(r.complete_count, 0);
+}
+
+test "unclosed fence is deterministic and uncounted" {
+    var arena = ta();
+    defer arena.deinit();
+    const a = arena.allocator();
+    const body =
+        \\real one
+        \\real two
+        \\real three
+        \\
+        \\```
+        \\line one
+        \\line two
+        \\line three
+        \\never closed
+        \\
+    ;
+    const r = try analyze(a, body, shapeForType("haiku"), ph_default, "T");
+    try std.testing.expectEqual(r.complete_count, 1);
+    try std.testing.expectEqualStrings("real one", r.units[0].lines[0]);
+}
+
+test "info strings allowed on opening fences" {
+    var arena = ta();
+    defer arena.deinit();
+    const a = arena.allocator();
+    const body =
+        \\```poetry
+        \\line one
+        \\line two
+        \\line three
+        \\```
+        \\real one
+        \\real two
+        \\real three
+        \\
+    ;
+    const r = try analyze(a, body, shapeForType("haiku"), ph_default, "T");
+    try std.testing.expectEqual(r.complete_count, 1);
+}
+
+test "unsupported poetry shape is not counted as paragraph units" {
+    var arena = ta();
+    defer arena.deinit();
+    const a = arena.allocator();
+    const shape = shapeForType("sonnet");
+    try std.testing.expect(!shape.supported);
+    const body = "one\ntwo\nthree\n";
+    const r = try analyze(a, body, shape, ph_default, "T");
+    try std.testing.expectEqual(r.complete_count, 0);
+    try std.testing.expectEqual(r.substantive_count, 0);
+    try std.testing.expectEqual(r.units.len, 0);
 }

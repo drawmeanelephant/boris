@@ -184,8 +184,23 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
         }
         try buf.appendSlice(gpa, "]");
     }
+    // Explicit scope labeling: a filtered report never mixes filtered rows
+    // beside global totals. Every section below is scoped to the selected
+    // physical collections.
+    try buf.appendSlice(gpa, ",\n  \"scope\": ");
+    if (opts.collections.len == 0) {
+        try buf.appendSlice(gpa, "{\"type\": \"all\", \"totals\": \"global\"}");
+    } else {
+        try buf.append(gpa, '{');
+        try buf.appendSlice(gpa, "\"type\": \"source_collection_and_mapped_poetry\", \"collections\": [");
+        for (opts.collections, 0..) |c, i| {
+            if (i > 0) try buf.appendSlice(gpa, ", ");
+            try util.appendJsonString(&buf, gpa, c);
+        }
+        try buf.appendSlice(gpa, "], \"totals\": \"scoped\", \"note\": \"every total, verse total, coverage row, density figure, alignment count, exception, delta change, and per-record row in this report is restricted to the selected source collections and their mapped poetry\"}");
+    }
 
-    // Totals
+    // Totals (every counter is scoped to the collection filter)
     var source_count: usize = 0;
     var poetry_count: usize = 0;
     var other_count: usize = 0;
@@ -194,7 +209,12 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     var ambiguous_count: usize = 0;
     var malformed_records: usize = 0;
     var dead_refs: usize = 0;
+    var discovered_count: usize = 0;
+    var scoped_excluded: usize = 0;
     for (audit.records) |rec| {
+        if (!audit_mod.recordInScope(audit, &rec, opts.collections)) continue;
+        discovered_count += 1;
+        if (rec.excluded) scoped_excluded += 1;
         switch (rec.kind) {
             .source => source_count += 1,
             .poetry => poetry_count += 1,
@@ -208,13 +228,13 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
                 .missing_target => {},
                 .malformed_record => malformed_records += 1,
             }
-        } else if (rec.malformed_reason != null) {
+        } else if (rec.malformed_reason != null or rec.unsupported_shape) {
             malformed_records += 1;
         }
         if (rec.has_dead_reference) dead_refs += 1;
     }
     try buf.appendSlice(gpa, ",\n  \"totals\": {\n    \"records_discovered\": ");
-    try util.appendJsonNumber(&buf, gpa, audit.records.len);
+    try util.appendJsonNumber(&buf, gpa, discovered_count);
     try buf.appendSlice(gpa, ",\n    \"source_records\": ");
     try util.appendJsonNumber(&buf, gpa, source_count);
     try buf.appendSlice(gpa, ",\n    \"poetry_records\": ");
@@ -222,7 +242,7 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     try buf.appendSlice(gpa, ",\n    \"other_records\": ");
     try util.appendJsonNumber(&buf, gpa, other_count);
     try buf.appendSlice(gpa, ",\n    \"excluded_records\": ");
-    try util.appendJsonNumber(&buf, gpa, audit.excluded_count);
+    try util.appendJsonNumber(&buf, gpa, scoped_excluded);
     try buf.appendSlice(gpa, ",\n    \"mapped_poetry\": ");
     try util.appendJsonNumber(&buf, gpa, mapped_count);
     try buf.appendSlice(gpa, ",\n    \"orphan_poetry\": ");
@@ -235,9 +255,11 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     try util.appendJsonNumber(&buf, gpa, dead_refs);
     try buf.appendSlice(gpa, "\n  }");
 
-    // Verse totals by type
+    // Verse totals by type (scoped to the collection filter)
+    const scoped_stats = try audit_mod.typeStatsScoped(audit, gpa, opts.collections);
+    defer gpa.free(scoped_stats);
     try buf.appendSlice(gpa, ",\n  \"verse_totals\": [");
-    for (audit.type_stats, 0..) |st, i| {
+    for (scoped_stats, 0..) |st, i| {
         if (i > 0) try buf.appendSlice(gpa, ",");
         try buf.appendSlice(gpa, "\n    {\"type\": ");
         try util.appendJsonString(&buf, gpa, st.type_name);
@@ -308,9 +330,11 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     }
     try buf.appendSlice(gpa, "\n  ]");
 
-    // Density
+    // Density (scoped to the collection filter)
+    const scoped_density = try audit_mod.typeDensitiesScoped(audit, gpa, scoped_stats, opts.collections);
+    defer gpa.free(scoped_density);
     try buf.appendSlice(gpa, ",\n  \"density\": [");
-    for (audit.type_densities, 0..) |td, i| {
+    for (scoped_density, 0..) |td, i| {
         if (i > 0) try buf.appendSlice(gpa, ",");
         try buf.appendSlice(gpa, "\n    {\"type\": ");
         try util.appendJsonString(&buf, gpa, td.type_name);
@@ -338,6 +362,7 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     // Alignment counts
     var am: [8]usize = .{ 0, 0, 0, 0, 0, 0, 0, 0 };
     for (audit.records) |rec| {
+        if (!audit_mod.recordInScope(audit, &rec, opts.collections)) continue;
         if (rec.alignment) |a| {
             const idx: usize = switch (a) {
                 .mapped => 0,
@@ -364,7 +389,7 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     var a_first = true;
     for (audit.records) |*rec| {
         if (rec.kind != .poetry) continue;
-        if (!isSelected(opts, rec.collection)) continue;
+        if (!audit_mod.recordInScope(audit, rec, opts.collections)) continue;
         const a = rec.alignment orelse continue;
         if (!a_first) try buf.appendSlice(gpa, ",");
         a_first = false;
@@ -382,10 +407,13 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     }
     try buf.appendSlice(gpa, "\n    ]}");
 
-    // Exceptions
+    // Exceptions (scoped to the collection filter)
     try buf.appendSlice(gpa, ",\n  \"exceptions\": [");
-    for (audit.exceptions, 0..) |e, i| {
-        if (i > 0) try buf.appendSlice(gpa, ",");
+    var e_first = true;
+    for (audit.exceptions) |e| {
+        if (!audit_mod.recordIdInScope(audit, e.record_id, opts.collections)) continue;
+        if (!e_first) try buf.appendSlice(gpa, ",");
+        e_first = false;
         try buf.appendSlice(gpa, "\n    {\"kind\": ");
         try util.appendJsonString(&buf, gpa, e.kind);
         try buf.appendSlice(gpa, ", \"severity\": ");
@@ -402,7 +430,7 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     try buf.appendSlice(gpa, ",\n  \"records\": [");
     var r_first = true;
     for (audit.records) |*rec| {
-        if (!isSelected(opts, rec.collection)) continue;
+        if (!audit_mod.recordInScope(audit, rec, opts.collections)) continue;
         if (!r_first) try buf.appendSlice(gpa, ",");
         r_first = false;
         try buf.appendSlice(gpa, "\n    ");

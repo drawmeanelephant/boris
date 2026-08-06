@@ -64,7 +64,7 @@ boris-content-audit --mode=poetry --root=DIR --content-root=content --out=DIR [o
 | `--out=DIR` | Output directory (required). Tool-owned, atomic, never inside the content root. |
 | `--policy=FILE` | Optional versioned JSON policy defining editorial expectations. |
 | `--previous-report=FILE` | Optional earlier `report.json` for delta comparison. |
-| `--collection=NAME` | Repeatable filter restricting coverage/records. |
+| `--collection=NAME` | Repeatable scope: eligible **source collections** plus their mapped poetry (see “Collection scoping” below). |
 | `--format=json\|markdown\|html\|all` | Report formats to emit (default `all`). |
 | `--quiet` | Suppress the summary line. |
 | `--fail-on=none\|structural\|policy` | Failure class that makes exit code 1 (default `structural`). |
@@ -223,12 +223,38 @@ requests, accessible tables, links between pages, works from `file://` and
 GitHub Pages. The report site is operational telemetry, not Boris content and
 not archive canon.
 
+## Collection scoping
+
+`--collection=NAME` selects **eligible source collections and their mapped
+poetry** — not a physical-directory filter. A source record is in scope when
+its physical collection is selected; a poetry record is in scope when any of
+its resolved owner claims point to a source record in a selected collection
+(this is what keeps a mapped poem visible in its source's report). Unmapped
+poetry falls back to physical-collection membership. Every section of a
+filtered report uses exactly this rule, so totals, verse totals, coverage,
+density, alignment counts and records, exceptions, deltas, per-record output,
+and exit-code findings always describe the same population. The report's
+`scope` field labels the selection explicitly (`all`/global or
+`source_collection_and_mapped_poetry` + the selected names), and a filtered
+report is never presented beside unscoped global totals without that label. Comparing a
+filtered report against an unfiltered previous report is rejected as an
+incompatible population (see Delta mode).
+
 ## Delta mode
 
 With `--previous-report`, the audit verifies schema and policy identity, then
 reports: coverage-state changes, added/removed records, newly orphaned or
 newly resolved poetry, verse-count changes, and placeholder-to-substantive
 transitions. Reordered source files are not treated as changes.
+
+Delta compatibility is strict and rejects missing fields rather than
+defaulting them: the previous report must carry `format_id ==
+boris-content-audit`, the exact supported `schema_version`, `mode == poetry`,
+a compatible `source_root_label`, an identical `policy_digest`, and an
+identical `collection_filter` (empty ↔ empty). A filtered run can only be
+delted against a previous report produced with the same filter, and vice
+versa — filtered and unfiltered populations are never compared as though they
+were the same data.
 
 ## Safety and output ownership
 

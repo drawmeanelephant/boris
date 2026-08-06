@@ -47,6 +47,7 @@ pub const RecordKind = enum {
 
 pub const MalformedReason = enum {
     invalid_utf8,
+    bom_rejected,
     oversized,
     unclosed_frontmatter,
     malformed_field,
@@ -57,6 +58,7 @@ pub const MalformedReason = enum {
     pub fn jsonName(self: MalformedReason) []const u8 {
         return switch (self) {
             .invalid_utf8 => "invalid_utf8",
+            .bom_rejected => "bom_rejected",
             .oversized => "oversized",
             .unclosed_frontmatter => "unclosed_frontmatter",
             .malformed_field => "malformed_field",
@@ -177,6 +179,9 @@ pub const Record = struct {
     coverage_classes: []CoverageClass = &.{},
     /// Source record has at least one dead relation target.
     has_dead_reference: bool = false,
+    /// Poetry record whose type has no registered verse shape: never analyzed
+    /// as paragraph units, never granted substantive coverage.
+    unsupported_shape: bool = false,
 };
 
 pub const TypeStats = struct {
@@ -380,6 +385,30 @@ fn readFileAlloc(io: std.Io, dir: std.Io.Dir, path: []const u8, allocator: std.m
     return try reader.interface.allocRemaining(allocator, .unlimited);
 }
 
+/// Read a source file with a bounded `max_source_bytes + 1` allocation: an
+/// arbitrarily large file is never loaded into memory before it is classified
+/// as oversized. Mirrors the product reader (src/source_io.zig).
+fn readFileBounded(
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    allocator: std.mem.Allocator,
+) !struct { bytes: []u8, oversized: bool } {
+    var file = try dir.openFile(io, path, .{});
+    defer file.close(io);
+    const stat = try file.stat(io);
+    const size = std.math.cast(usize, stat.size) orelse return error.SourceTooLarge;
+    var reader = file.reader(io, &.{});
+    if (size <= frontmatter.max_source_bytes) {
+        const bytes = try reader.interface.readAlloc(allocator, size);
+        return .{ .bytes = bytes, .oversized = false };
+    }
+    const prefix = try allocator.alloc(u8, frontmatter.max_source_bytes + 1);
+    errdefer allocator.free(prefix);
+    try reader.interface.readSliceAll(prefix);
+    return .{ .bytes = prefix, .oversized = true };
+}
+
 fn collectionOfPath(rel: []const u8) []const u8 {
     if (std.mem.indexOfScalar(u8, rel, '/')) |slash| return rel[0..slash];
     return rel;
@@ -442,7 +471,7 @@ pub fn run(
 
     for (files) |rel| {
         const file_path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ options.content_root, rel });
-        const bytes = readFileAlloc(io, root_dir_handle, file_path, gpa) catch |e| {
+        const read = readFileBounded(io, root_dir_handle, file_path, gpa) catch |e| {
             if (e == error.OutOfMemory) return error.OutOfMemory;
             try addException(&audit, gpa, .{
                 .kind = "unreadable_file",
@@ -452,7 +481,7 @@ pub fn run(
             });
             continue;
         };
-        try appendRecord(io, gpa, &audit, &records, rel, bytes);
+        try appendRecord(io, gpa, &audit, &records, rel, read.bytes, read.oversized);
     }
 
     audit.records = try records.toOwnedSlice(gpa);
@@ -467,6 +496,7 @@ fn appendRecord(
     records: *std.ArrayList(Record),
     rel: []const u8,
     bytes: []const u8,
+    oversized: bool,
 ) !void {
     _ = io;
     const collection = collectionOfPath(rel);
@@ -475,7 +505,7 @@ fn appendRecord(
         .source_path = rel,
     };
 
-    if (bytes.len > frontmatter.max_source_bytes) {
+    if (oversized) {
         rec.malformed_reason = .oversized;
     }
 
@@ -492,25 +522,27 @@ fn appendRecord(
             if (rec.id == null) {
                 rec.malformed_reason = .missing_id;
             }
-            if (p.status) |st| {
-                if (!util.eql(st, "draft") and !util.eql(st, "published") and !util.eql(st, "archived")) {
-                    if (rec.malformed_reason == null) rec.malformed_reason = .invalid_status;
-                }
-            }
             // Verse analysis for poetry-collection records.
             if (audit.policy.poetryTypeOfCollection(collection)) |ptype| {
                 rec.kind = .poetry;
                 rec.poetry_type = ptype;
                 if (rec.malformed_reason == null) {
-                    const shape = verse.shapeForType(ptype);
-                    rec.verse = verse.analyze(gpa, bytes[p.body_offset..], shape, audit.policy.placeholder, p.title) catch null;
                     if (!verse.isRegisteredShape(ptype)) {
+                        // Unsupported shape policy (docs/poetry-shapes.md): an
+                        // unregistered type is never analyzed as paragraph
+                        // units, never grants substantive coverage, and is
+                        // classified as an unsupported/malformed shape.
+                        rec.unsupported_shape = true;
+                        rec.verse = null;
                         try addException(audit, gpa, .{
                             .kind = "unregistered_poetry_shape",
-                            .severity = .info,
+                            .severity = .structural,
                             .record_id = rel,
-                            .detail = try std.fmt.allocPrint(gpa, "poetry type '{s}' has no registered shape; counted as paragraph units", .{ptype}),
+                            .detail = try std.fmt.allocPrint(gpa, "poetry type '{s}' has no registered shape; its verse is not analyzed and it is classified as an unsupported shape", .{ptype}),
                         });
+                    } else {
+                        const shape = verse.shapeForType(ptype);
+                        rec.verse = verse.analyze(gpa, bytes[p.body_offset..], shape, audit.policy.placeholder, p.title) catch null;
                     }
                 }
             } else if (audit.policy.isEligibleSourceCollection(collection)) {
@@ -529,10 +561,14 @@ fn appendRecord(
         .err => |issue| {
             rec.malformed_reason = switch (issue) {
                 .invalid_utf8 => .invalid_utf8,
+                .bom_rejected => .bom_rejected,
                 .oversized => .oversized,
+                .frontmatter_too_large => .oversized,
                 .unclosed_frontmatter => .unclosed_frontmatter,
                 .malformed_field => .malformed_field,
                 .duplicate_key => .duplicate_key,
+                .invalid_status => .invalid_status,
+                .too_many_fields, .too_many_tags, .tag_too_long, .summary_too_long, .invalid_entity_id, .unsupported_form => .malformed_field,
             };
             rec.id = null;
         },
@@ -641,7 +677,79 @@ fn sortExceptions(audit: *Audit, gpa: std.mem.Allocator) !void {
 // Mapping resolution
 // ---------------------------------------------------------------------------
 
+/// Validate the complete policy mapping table, key side and owner side:
+///   - the poetry-id key must exist and be a poetry record (else stale key),
+///   - the owner must exist (else missing target),
+///   - the owner must be a source record (else impossible mapping),
+///   - the owner must be in an eligible source collection.
+/// Every violation is a structural finding, never a silent orphan.
+fn validatePolicyMappingTable(audit: *Audit, gpa: std.mem.Allocator) !void {
+    var it = audit.policy.exact_mappings.iterator();
+    while (it.next()) |e| {
+        const poetry_key = e.key_ptr.*;
+        const owner = e.value_ptr.*;
+        const key_hits = audit.index.get(poetry_key);
+        if (key_hits == null) {
+            try addException(audit, gpa, .{
+                .kind = "stale_exact_mapping_key",
+                .severity = .structural,
+                .record_id = poetry_key,
+                .detail = "policy exact_mappings key names a poetry id that does not exist in the canonical index",
+            });
+        } else {
+            var is_poetry = false;
+            for (key_hits.?) |i| {
+                if (audit.records[i].kind == .poetry) is_poetry = true;
+            }
+            if (!is_poetry) {
+                try addException(audit, gpa, .{
+                    .kind = "mapping_key_not_poetry",
+                    .severity = .structural,
+                    .record_id = poetry_key,
+                    .detail = "policy exact_mappings key does not resolve to a poetry record",
+                });
+            }
+        }
+        const owner_hits = audit.index.get(owner);
+        if (owner_hits == null) {
+            try addException(audit, gpa, .{
+                .kind = "missing_policy_target",
+                .severity = .structural,
+                .record_id = poetry_key,
+                .detail = try std.fmt.allocPrint(gpa, "policy exact_mappings target '{s}' does not exist in the canonical index", .{owner}),
+            });
+        } else {
+            var source_hits: usize = 0;
+            var first_source: ?usize = null;
+            for (owner_hits.?) |i| {
+                if (audit.records[i].kind == .source) {
+                    source_hits += 1;
+                    if (first_source == null) first_source = i;
+                }
+            }
+            if (source_hits == 0) {
+                try addException(audit, gpa, .{
+                    .kind = "mapping_target_not_source",
+                    .severity = .structural,
+                    .record_id = poetry_key,
+                    .detail = try std.fmt.allocPrint(gpa, "policy exact_mappings target '{s}' exists but is not a source record", .{owner}),
+                });
+            } else if (!audit.policy.isEligibleSourceCollection(audit.records[first_source.?].collection)) {
+                try addException(audit, gpa, .{
+                    .kind = "mapping_target_ineligible",
+                    .severity = .structural,
+                    .record_id = poetry_key,
+                    .detail = try std.fmt.allocPrint(gpa, "policy exact_mappings target '{s}' is a source record but its collection is not an eligible source collection", .{owner}),
+                });
+            }
+        }
+    }
+}
+
 fn resolveMappings(audit: *Audit, gpa: std.mem.Allocator) !void {
+    // 0. Validate the complete policy mapping table.
+    try validatePolicyMappingTable(audit, gpa);
+
     // 1. Reverse relation map: target id -> source record indexes claiming it.
     //    Built from eligible source records' relations only (mapping kinds).
     var rel_claims: std.StringHashMapUnmanaged([]usize) = .{};
@@ -669,7 +777,9 @@ fn resolveMappings(audit: *Audit, gpa: std.mem.Allocator) !void {
         }
     }
 
-    // 2. For each poetry record: collect claims from parent, relations, policy.
+    // 2. For each poetry record: collect ALL evidence independently. A dead
+    //    or impossible evidence target records a structural exception but must
+    //    not erase valid parent/relation/policy evidence.
     for (audit.records) |*rec| {
         if (rec.kind != .poetry) continue;
         if (rec.excluded) continue;
@@ -677,10 +787,15 @@ fn resolveMappings(audit: *Audit, gpa: std.mem.Allocator) !void {
             rec.alignment = .malformed_record;
             continue;
         }
+        // Unsupported-shape records still collect claims so coverage can
+        // attribute the record to its source as malformed; their verse is
+        // never counted and their alignment stays malformed_record.
+        const unsupported = rec.unsupported_shape;
         const id = rec.id.?;
 
         var claims: std.ArrayList(Claim) = .empty;
         errdefer claims.deinit(gpa);
+        var dead_evidence = false;
 
         // Evidence 1: parent edge to a source record. A parent naming the
         // record's own poetry collection is a collection grouping (e.g.
@@ -689,7 +804,7 @@ fn resolveMappings(audit: *Audit, gpa: std.mem.Allocator) !void {
             if (!util.eql(parent_id, rec.collection)) {
                 const hits = audit.index.get(parent_id);
                 if (hits == null) {
-                    rec.alignment = .missing_target;
+                    dead_evidence = true;
                     try addException(audit, gpa, .{
                         .kind = "missing_target",
                         .severity = .structural,
@@ -708,12 +823,22 @@ fn resolveMappings(audit: *Audit, gpa: std.mem.Allocator) !void {
                     if (source_hits == 1) {
                         try claims.append(gpa, .{ .owner_id = audit.records[source_idx].id.?, .evidence = .parent });
                     } else if (source_hits > 1) {
-                        rec.alignment = .ambiguous;
+                        dead_evidence = true;
                         try addException(audit, gpa, .{
                             .kind = "duplicate_id",
                             .severity = .structural,
                             .record_id = id,
                             .detail = "parent resolves to multiple source records with the same canonical id",
+                        });
+                    } else {
+                        // Existing target that is not a source record: an
+                        // impossible mapping, structural, never a silent orphan.
+                        dead_evidence = true;
+                        try addException(audit, gpa, .{
+                            .kind = "mapping_target_not_source",
+                            .severity = .structural,
+                            .record_id = id,
+                            .detail = try std.fmt.allocPrint(gpa, "parent '{s}' exists but is not a source record", .{parent_id}),
                         });
                     }
                 }
@@ -725,7 +850,7 @@ fn resolveMappings(audit: *Audit, gpa: std.mem.Allocator) !void {
             if (!audit.policy.relationKindCounts(rel.kind)) continue;
             const hits = audit.index.get(rel.target);
             if (hits == null) {
-                rec.alignment = .missing_target;
+                dead_evidence = true;
                 try addException(audit, gpa, .{
                     .kind = "missing_target",
                     .severity = .structural,
@@ -734,10 +859,21 @@ fn resolveMappings(audit: *Audit, gpa: std.mem.Allocator) !void {
                 });
                 continue;
             }
+            var found_source = false;
             for (hits.?) |i| {
                 if (audit.records[i].kind == .source) {
                     try claims.append(gpa, .{ .owner_id = audit.records[i].id.?, .evidence = .relation });
+                    found_source = true;
                 }
+            }
+            if (!found_source) {
+                dead_evidence = true;
+                try addException(audit, gpa, .{
+                    .kind = "mapping_target_not_source",
+                    .severity = .structural,
+                    .record_id = id,
+                    .detail = try std.fmt.allocPrint(gpa, "relation '{s}={s}' target exists but is not a source record", .{ rel.kind, rel.target }),
+                });
             }
         }
 
@@ -748,16 +884,16 @@ fn resolveMappings(audit: *Audit, gpa: std.mem.Allocator) !void {
             }
         }
 
-        // Evidence 3: policy exact mapping.
+        // Evidence 3: policy exact mapping for this poetry id. Violations of
+        // the policy table (stale key, missing target, non-source target) are
+        // already reported once by validatePolicyMappingTable against the
+        // poetry key; here we only consume the mapping for claims. A target
+        // that is missing or not a source still marks the evidence dead so the
+        // record cannot resolve from it, but no duplicate exception is emitted.
         if (audit.policy.exactMappingOwner(id)) |owner| {
             const hits = audit.index.get(owner);
             if (hits == null) {
-                try addException(audit, gpa, .{
-                    .kind = "missing_policy_target",
-                    .severity = .structural,
-                    .record_id = id,
-                    .detail = try std.fmt.allocPrint(gpa, "policy exact_mappings target '{s}' does not exist in the canonical index", .{owner}),
-                });
+                dead_evidence = true;
             } else {
                 var found = false;
                 for (hits.?) |i| {
@@ -766,21 +902,21 @@ fn resolveMappings(audit: *Audit, gpa: std.mem.Allocator) !void {
                         found = true;
                     }
                 }
-                if (!found) {
-                    try addException(audit, gpa, .{
-                        .kind = "missing_policy_target",
-                        .severity = .structural,
-                        .record_id = id,
-                        .detail = "policy exact_mappings target is not a source record",
-                    });
-                }
+                if (!found) dead_evidence = true;
             }
         }
 
-        // Collapse claims to distinct owners with evidence-kind sets.
-        if (rec.alignment == null and claims.items.len == 0) {
-            rec.alignment = .orphan;
-        } else if (rec.alignment == null) {
+        if (unsupported) {
+            rec.alignment = .malformed_record;
+            rec.claims = try gpa.dupe(Claim, claims.items);
+            continue;
+        }
+
+        // Resolution: valid evidence decides the alignment; dead evidence is
+        // a structural exception that still fails the structural gate.
+        if (claims.items.len == 0) {
+            rec.alignment = if (dead_evidence) .missing_target else .orphan;
+        } else {
             try resolveOwner(audit, gpa, rec, claims.items);
         }
     }
@@ -815,7 +951,10 @@ fn resolveOwner(audit: *Audit, gpa: std.mem.Allocator, rec: *Record, claims: []c
         return;
     }
 
-    // Contested: flavor by evidence-kind spread.
+    // Contested: the machine-readable flavor is set on the record itself
+    // (duplicate_mapping when the same evidence kind names several owners,
+    // mapping_disagreement when different evidence kinds disagree), so the
+    // alignment counts and the per-record output always agree.
     var distinct_kinds: usize = 0;
     var kinds_seen: [3]bool = .{ false, false, false };
     for (owner_kinds.items) |k| {
@@ -829,8 +968,8 @@ fn resolveOwner(audit: *Audit, gpa: std.mem.Allocator, rec: *Record, claims: []c
             distinct_kinds += 1;
         }
     }
-    rec.alignment = .ambiguous;
     const flavor: AlignmentStatus = if (distinct_kinds == 1) .duplicate_mapping else .mapping_disagreement;
+    rec.alignment = flavor;
     rec.claims = try gpa.dupe(Claim, claims);
     var detail: std.ArrayList(u8) = .empty;
     for (owners.items, 0..) |o, oi| {
@@ -838,7 +977,7 @@ fn resolveOwner(audit: *Audit, gpa: std.mem.Allocator, rec: *Record, claims: []c
         try detail.appendSlice(gpa, o);
     }
     try addException(audit, gpa, .{
-        .kind = if (flavor == .duplicate_mapping) "duplicate_mapping" else "mapping_disagreement",
+        .kind = flavor.jsonName(),
         .severity = .structural,
         .record_id = rec.id.?,
         .detail = try std.fmt.allocPrint(gpa, "poetry record is claimed by multiple source records: {s}", .{try detail.toOwnedSlice(gpa)}),
@@ -876,7 +1015,9 @@ fn computeCoverage(audit: *Audit, gpa: std.mem.Allocator) !void {
             try types.append(gpa, t);
             // Candidates: poetry records of type t claiming this source.
             var best: ?usize = null;
+            var mapped_candidates: usize = 0;
             var contested = false;
+            var unsupported_claim = false;
             if (poetry_by_type.get(t)) |list| {
                 for (list.items) |pi| {
                     const p = audit.records[pi];
@@ -890,20 +1031,34 @@ fn computeCoverage(audit: *Audit, gpa: std.mem.Allocator) !void {
                     }
                     if (!claims_this) continue;
                     if (p.alignment == .mapped) {
-                        if (best != null) {
-                            contested = true;
-                        } else {
-                            best = pi;
-                        }
+                        mapped_candidates += 1;
+                        if (best == null) best = pi;
+                    } else if (p.unsupported_shape) {
+                        // An unsupported-shape record claiming this source:
+                        // coverage is malformed, never substantive.
+                        unsupported_claim = true;
                     } else {
                         contested = true;
                     }
                 }
             }
-            if (best) |pi| {
+            if (mapped_candidates > 1) {
+                // Multiple poetry records of the same type mapped to the same
+                // source record: a structural duplicate-coverage finding. The
+                // first record is never selected as the answer.
+                try addException(audit, gpa, .{
+                    .kind = "duplicate_coverage",
+                    .severity = .structural,
+                    .record_id = id,
+                    .detail = try std.fmt.allocPrint(gpa, "multiple {s} poetry records are mapped to this source record", .{t}),
+                });
+                try classes.append(gpa, .ambiguous_mapping);
+            } else if (best) |pi| {
                 const p = audit.records[pi];
                 const cls = coverageClassForRecord(&p);
                 try classes.append(gpa, cls);
+            } else if (unsupported_claim) {
+                try classes.append(gpa, .malformed);
             } else if (contested) {
                 try classes.append(gpa, .ambiguous_mapping);
             } else {
@@ -984,6 +1139,15 @@ pub fn coverageSummary(gpa: std.mem.Allocator, rec: *const Record) ![]const u8 {
 // ---------------------------------------------------------------------------
 
 fn computeTypeStats(audit: *Audit, gpa: std.mem.Allocator) !void {
+    audit.type_stats = try buildTypeStats(audit, gpa, &.{});
+}
+
+/// Type totals within a collection scope. `filter` empty means the whole tree.
+pub fn typeStatsScoped(audit: *const Audit, gpa: std.mem.Allocator, filter: []const []const u8) ![]TypeStats {
+    return buildTypeStats(audit, gpa, filter);
+}
+
+fn buildTypeStats(audit: *const Audit, gpa: std.mem.Allocator, filter: []const []const u8) ![]TypeStats {
     // Distinct types across poetry records and coverage expectations.
     var names: std.StringHashMapUnmanaged(void) = .{};
     defer names.deinit(gpa);
@@ -1003,9 +1167,16 @@ fn computeTypeStats(audit: *Audit, gpa: std.mem.Allocator) !void {
         var s: TypeStats = .{ .type_name = t };
         for (audit.records) |rec| {
             if (rec.kind != .poetry or rec.excluded) continue;
+            if (!recordInScope(audit, &rec, filter)) continue;
             if (rec.malformed_reason != null) continue; // no verse analyzed
             if (!util.eql(rec.poetry_type.?, t)) continue;
             s.records += 1;
+            if (rec.unsupported_shape) {
+                // Unsupported shapes never grant units; each such record is
+                // reported as one malformed/unsupported unit.
+                s.malformed_units += 1;
+                continue;
+            }
             if (rec.verse) |v| {
                 s.verse_units += v.complete_count;
                 s.placeholder_units += v.placeholder_count;
@@ -1015,20 +1186,30 @@ fn computeTypeStats(audit: *Audit, gpa: std.mem.Allocator) !void {
         }
         try stats.append(gpa, s);
     }
-    audit.type_stats = try stats.toOwnedSlice(gpa);
+    return try stats.toOwnedSlice(gpa);
 }
 
 fn computeDensity(audit: *Audit, gpa: std.mem.Allocator) !void {
+    audit.type_densities = try buildDensity(audit, gpa, audit.type_stats, &.{});
+}
+
+/// Density within a collection scope. `filter` empty means the whole tree.
+pub fn typeDensitiesScoped(audit: *const Audit, gpa: std.mem.Allocator, type_stats: []const TypeStats, filter: []const []const u8) ![]TypeDensity {
+    return buildDensity(audit, gpa, type_stats, filter);
+}
+
+fn buildDensity(audit: *const Audit, gpa: std.mem.Allocator, type_stats: []const TypeStats, filter: []const []const u8) ![]TypeDensity {
     const DensityRec = struct { id: []const u8, count: usize };
     var densities: std.ArrayList(TypeDensity) = .empty;
-    for (audit.type_stats) |st| {
+    for (type_stats) |st| {
         var td: TypeDensity = .{ .type_name = st.type_name };
         // Records of this type with their unit counts.
         var counts: std.ArrayList(DensityRec) = .empty;
         defer counts.deinit(gpa);
         for (audit.records) |rec| {
             if (rec.kind != .poetry or rec.excluded) continue;
-            if (rec.malformed_reason != null) continue; // no id/verse; reported as structural
+            if (!recordInScope(audit, &rec, filter)) continue;
+            if (rec.malformed_reason != null or rec.unsupported_shape) continue; // no id/verse; reported as structural
             if (!util.eql(rec.poetry_type.?, st.type_name)) continue;
             const n = if (rec.verse) |v| v.complete_count else 0;
             try counts.append(gpa, .{ .id = rec.id.?, .count = n });
@@ -1083,22 +1264,120 @@ fn computeDensity(audit: *Audit, gpa: std.mem.Allocator) !void {
         }
         try densities.append(gpa, td);
     }
-    audit.type_densities = try densities.toOwnedSlice(gpa);
+    return try densities.toOwnedSlice(gpa);
+}
+
+// ---------------------------------------------------------------------------
+// Collection scope
+// ---------------------------------------------------------------------------
+
+/// Physical-collection membership: an empty filter selects everything, and a
+/// non-empty filter selects records whose own physical collection (the first
+/// path component under the content root) is listed.
+fn physicalInScope(collection: []const u8, filter: []const []const u8) bool {
+    if (filter.len == 0) return true;
+    for (filter) |c| {
+        if (util.eql(c, collection)) return true;
+    }
+    return false;
+}
+
+/// True when the record belongs to the selected scope. `--collection` names
+/// **eligible source collections**: a source record is in scope when its
+/// physical collection is selected; a poetry record is in scope when any of
+/// its resolved owner claims resolve to a source record in a selected
+/// collection (this is what keeps a mapped poem visible in its source's
+/// report). Unmapped poetry falls back to physical-collection membership.
+/// Every section of a filtered report uses exactly this rule, so totals,
+/// verse totals, coverage, density, alignment, exceptions, deltas, per-record
+/// output, and exit-code findings always describe the same population.
+pub fn recordInScope(audit: *const Audit, rec: *const Record, filter: []const []const u8) bool {
+    if (filter.len == 0) return true;
+    if (rec.kind == .poetry) {
+        for (rec.claims) |c| {
+            if (audit.index.get(c.owner_id)) |hits| {
+                for (hits) |i| {
+                    if (audit.records[i].kind == .source and physicalInScope(audit.records[i].collection, filter)) return true;
+                }
+            }
+        }
+    }
+    return physicalInScope(rec.collection, filter);
+}
+
+/// Map an exception's `record_id` (a canonical id or a content-root-relative
+/// path) back to its record so exceptions can be scoped by the same rule.
+pub fn recordIdInScope(audit: *const Audit, record_id: []const u8, filter: []const []const u8) bool {
+    if (filter.len == 0) return true;
+    if (audit.index.get(record_id)) |hits| {
+        if (hits.len > 0 and recordInScope(audit, &audit.records[hits[0]], filter)) return true;
+    }
+    return physicalInScope(collectionOfPath(record_id), filter);
 }
 
 // ---------------------------------------------------------------------------
 // Delta mode
 // ---------------------------------------------------------------------------
 
-pub fn compareDelta(audit: *Audit, gpa: std.mem.Allocator, previous: std.json.Value) !void {
+pub const DeltaError = error{
+    MalformedPreviousReport,
+    UnsupportedFormatId,
+    UnsupportedSchemaVersion,
+    ModeMismatch,
+    SourceRootMismatch,
+    MissingPolicyDigest,
+    PolicyIdentityMismatch,
+    CollectionFilterMismatch,
+    OutOfMemory,
+};
+
+/// Strict delta compatibility: a previous report is only comparable when it
+/// carries the exact format id, the exact supported schema version, the same
+/// mode, the same source-root label, an identical policy digest, and the same
+/// collection-filter semantics. Missing compatibility fields are rejected,
+/// never treated as optional; filtered and unfiltered populations are never
+/// compared as though they were the same.
+pub fn compareDelta(audit: *Audit, gpa: std.mem.Allocator, previous: std.json.Value, current_filter: []const []const u8) DeltaError!void {
     if (previous != .object) return error.MalformedPreviousReport;
-    if (previous.object.get("schema_version")) |sv| {
-        if (sv == .integer) audit.previous_report_schema = @intCast(sv.integer);
+
+    const format_id = jsonGetString(previous, "format_id") orelse return error.MalformedPreviousReport;
+    if (!util.eql(format_id, util.format_id)) return error.UnsupportedFormatId;
+
+    const schema = previous.object.get("schema_version") orelse return error.MalformedPreviousReport;
+    if (schema != .integer or schema.integer != util.report_schema_version) return error.UnsupportedSchemaVersion;
+    audit.previous_report_schema = @intCast(schema.integer);
+
+    const mode = jsonGetString(previous, "mode") orelse return error.MalformedPreviousReport;
+    if (!util.eql(mode, "poetry")) return error.ModeMismatch;
+
+    const prev_root = jsonGetString(previous, "source_root_label") orelse return error.MalformedPreviousReport;
+    if (!util.eql(prev_root, audit.source_root_label)) return error.SourceRootMismatch;
+
+    const prev_digest = jsonGetString(previous, "policy_digest") orelse return error.MissingPolicyDigest;
+    if (!util.eql(prev_digest, audit.policy_digest)) return error.PolicyIdentityMismatch;
+    audit.previous_policy_digest = prev_digest;
+
+    const prev_filter = previous.object.get("collection_filter") orelse return error.MalformedPreviousReport;
+    if (prev_filter != .array) return error.MalformedPreviousReport;
+    if (prev_filter.array.items.len != current_filter.len) return error.CollectionFilterMismatch;
+    // Compare as sets: the collection_filter is a selection semantics, not an
+    // ordered argument list, so `--collection=a --collection=b` and
+    // `--collection=b --collection=a` are the same population.
+    var prev_names: std.ArrayList([]const u8) = .empty;
+    defer prev_names.deinit(gpa);
+    for (prev_filter.array.items) |item| {
+        if (item != .string) return error.MalformedPreviousReport;
+        try prev_names.append(gpa, item.string);
     }
-    audit.previous_policy_digest = jsonGetString(previous, "policy_digest");
-    if (audit.previous_policy_digest) |d| {
-        if (!util.eql(d, audit.policy_digest)) return error.PolicyIdentityMismatch;
+    util.sortStrings(gpa, prev_names.items);
+    var cur_names: std.ArrayList([]const u8) = .empty;
+    defer cur_names.deinit(gpa);
+    for (current_filter) |c| try cur_names.append(gpa, c);
+    util.sortStrings(gpa, cur_names.items);
+    for (prev_names.items, 0..) |p, i| {
+        if (!util.eql(p, cur_names.items[i])) return error.CollectionFilterMismatch;
     }
+
     const prev_records = if (previous.object.get("records")) |r| switch (r) {
         .array => |a| a.items,
         else => return error.MalformedPreviousReport,
@@ -1120,7 +1399,11 @@ pub fn compareDelta(audit: *Audit, gpa: std.mem.Allocator, previous: std.json.Va
     var prev_seen: std.StringHashMapUnmanaged(void) = .{};
     defer prev_seen.deinit(gpa);
 
+    // Only the filtered population is compared; the previous report is from
+    // the same filtered population by construction (filter identity enforced
+    // above), so out-of-scope current records are never misread as added.
     for (audit.records) |rec| {
+        if (!recordInScope(audit, &rec, current_filter)) continue;
         const id = rec.id orelse continue;
         if (prev_map.get(id)) |p| {
             try prev_seen.put(gpa, id, {});

@@ -10,8 +10,17 @@ occurrences of obsolete MDX component names such as `<Limerick>` or
 
 1. **Frontmatter is ignored.** The `---\n...\n---` block is excluded before
    counting.
-2. **Fenced code is ignored.** Lines inside triple-backtick fences
-   (` ``` `) are never counted, even if they look like verse.
+2. **Fenced code is ignored.** Lines inside fenced-code blocks are never
+   counted, even if they look like verse. Fences follow Markdown semantics:
+   - the opening fence is at least three consecutive backticks (`` ` ``) or
+     tildes (`~`);
+   - the opening fence character is remembered;
+   - the closing fence must use the **same character** with a **length at
+     least** the opening length;
+   - an info string is allowed on the opening fence (e.g. `` ```text ``);
+   - an unclosed fence is handled deterministically: every line after the
+     opening fence is ignored until end of file, and the ignored content is
+     never counted.
 3. **Collection-label headings are ignored.** A heading that only labels a
    collection (e.g. `# Haiku`, `## Limericks`) is not a verse unit and does
    not start one. This is determined by the collection-name heading heuristics
@@ -27,13 +36,20 @@ occurrences of obsolete MDX component names such as `<Limerick>` or
    opaque text; if they appear where verse content belongs they are simply
    line content. Only the placeholder signature check (below) treats text
    specially, and it does not execute anything.
+8. **Unregistered shapes are never analyzed.** A poetry type without a
+   registered shape is reported with an `unregistered_poetry_shape` structural
+   exception, its verse shape is classified malformed/unsupported, and its
+   lines are **never** counted as paragraph units and never grant substantive
+   coverage (see “Unsupported shapes” below).
 
 ## Shape inventory
 
 The registered shapes are defined in `src/verse.zig` and are keyed by poetry
 type from the policy's `poetry_collections`. Types without a registered shape
-are still analyzed as paragraph units and reported with an
-`unregistered_poetry_shape` info exception — they are never guessed.
+are **never analyzed as paragraph units**: they emit an
+`unregistered_poetry_shape` structural exception, their verse shape is
+malformed/unsupported, and they contribute no verse units and no substantive
+coverage (see “Unsupported shapes” below).
 
 ### Shape: haiku — 3-line blocks
 
@@ -221,11 +237,31 @@ ignored and do not form a unit.
 | `limerick` | 5-line blocks | exactly 5 non-empty lines per unit |
 | `aphorism` | paragraph units | one or more non-empty non-heading lines between blanks |
 
-Any other poetry type named in a policy is reported via
-`unregistered_poetry_shape` and analyzed as paragraph units; it is never
-silently promoted to a registered shape.
+## Unsupported shapes (single policy)
+
+**A poetry type without a registered shape is never analyzed.** For every such
+record the audit emits exactly one `unregistered_poetry_shape` structural
+exception, classifies the record's verse shape as malformed/unsupported, does
+not count any paragraph units, and grants no substantive coverage. There is no
+fallback paragraph analysis for unknown types: the audit would rather fail the
+structural gate than guess a shape.
+
+Concretely, for an unregistered type:
+
+- `exceptions` gains `{"kind": "unregistered_poetry_shape", "severity":
+  "structural"}` for the record;
+- the record's alignment is `malformed_record`;
+- `verse_totals` counts the record (1 record) with `verse_units = 0`,
+  `placeholder_units = 0`, `substantive_units = 0`, `malformed_units = 1`;
+- coverage for the owning source's expected type is `malformed`, never
+  `present_substantive`;
+- the record is **not** a paragraph unit source, so it cannot silently pass a
+  `--fail-on=policy` gate by masquerading as substantive prose.
+
+This is the only unsupported-shape policy: there is no separate “analyze as
+paragraphs” fallback and no partial counting.
 
 ## Out of scope
 
 Unsupported shapes are **not guessed**. A shape not listed above is reported
-as malformed or as an unregistered shape, never silently counted.
+as `unregistered_poetry_shape` / malformed, never silently counted.

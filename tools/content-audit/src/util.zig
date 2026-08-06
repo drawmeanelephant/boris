@@ -12,6 +12,15 @@ pub const output_owner_marker = ".boris-content-audit-output";
 pub const stage_suffix = ".boris-content-audit-stage";
 pub const backup_suffix = ".boris-content-audit-backup";
 
+/// Exact ownership marker content. A directory is only treated as tool-owned
+/// when this file exists **and** its bytes match this string exactly; a marker
+/// with the right name but the wrong content is refused.
+pub const output_owner_marker_content = "format=boris-content-audit\nschema_version=1\n";
+
+/// Hard bound on the marker file we are willing to read during ownership
+/// validation (markers are tiny; anything larger is not ours).
+pub const max_marker_bytes: usize = 1024;
+
 pub fn eql(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
 }

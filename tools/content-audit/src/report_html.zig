@@ -118,36 +118,45 @@ fn emitIndex(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const
     if (audit.source_revision) |r| try b.print(gpa, "<tr><th scope=\"row\">Source revision</th><td><code>{s}</code></td></tr>", .{r});
     try b.print(gpa, "<tr><th scope=\"row\">Policy digest</th><td><code>{s}</code></td></tr>", .{audit.policy_digest});
     if (opts.collections.len > 0) {
-        try b.appendSlice(gpa, "<tr><th scope=\"row\">Collection filter</th><td>");
+        try b.appendSlice(gpa, "<tr><th scope=\"row\">Collection filter (scoped)</th><td>");
         for (opts.collections, 0..) |c, i| {
             if (i > 0) try b.appendSlice(gpa, ", ");
             try util.appendHtmlEscaped(&b, gpa, c);
         }
-        try b.appendSlice(gpa, "</td></tr>");
+        try b.appendSlice(gpa, " — every total, verse total, coverage row, density figure, alignment count, exception, delta change, and per-record row on this site is restricted to these physical collections</td></tr>");
+    } else {
+        try b.appendSlice(gpa, "<tr><th scope=\"row\">Scope</th><td>all (whole tree)</td></tr>");
     }
     try b.appendSlice(gpa, "</tbody></table></section>");
 
-    // Totals
+    // Totals (scoped to the collection filter)
     var source_count: usize = 0;
     var poetry_count: usize = 0;
     var verse_units: usize = 0;
     var malformed_records: usize = 0;
+    var scoped_exceptions: usize = 0;
+    var scoped_records: usize = 0;
     for (audit.records) |rec| {
+        if (!audit_mod.recordInScope(audit, &rec, opts.collections)) continue;
+        scoped_records += 1;
         switch (rec.kind) {
             .source => source_count += 1,
             .poetry => poetry_count += 1,
             .other => {},
         }
-        if (rec.malformed_reason != null) malformed_records += 1;
+        if (rec.malformed_reason != null or rec.unsupported_shape) malformed_records += 1;
         if (rec.verse) |v| verse_units += v.complete_count;
     }
+    for (audit.exceptions) |e| {
+        if (audit_mod.recordIdInScope(audit, e.record_id, opts.collections)) scoped_exceptions += 1;
+    }
     try b.appendSlice(gpa, "<section><table><caption>Totals</caption><thead><tr><th scope=\"col\">Metric</th><th scope=\"col\">Value</th></tr></thead><tbody>");
-    try b.print(gpa, "<tr><th scope=\"row\">Records discovered</th><td>{d}</td></tr>", .{audit.records.len});
+    try b.print(gpa, "<tr><th scope=\"row\">Records discovered</th><td>{d}</td></tr>", .{scoped_records});
     try b.print(gpa, "<tr><th scope=\"row\">Source records</th><td>{d}</td></tr>", .{source_count});
     try b.print(gpa, "<tr><th scope=\"row\">Poetry records</th><td>{d}</td></tr>", .{poetry_count});
     try b.print(gpa, "<tr><th scope=\"row\">Verse units (complete)</th><td>{d}</td></tr>", .{verse_units});
     try b.print(gpa, "<tr><th scope=\"row\">Malformed records</th><td>{d}</td></tr>", .{malformed_records});
-    try b.print(gpa, "<tr><th scope=\"row\">Exceptions</th><td>{d}</td></tr>", .{audit.exceptions.len});
+    try b.print(gpa, "<tr><th scope=\"row\">Exceptions</th><td>{d}</td></tr>", .{scoped_exceptions});
     if (audit.delta) |changes| try b.print(gpa, "<tr><th scope=\"row\">Delta changes</th><td>{d}</td></tr>", .{changes.len});
     try b.appendSlice(gpa, "</tbody></table></section>");
 
@@ -196,12 +205,15 @@ fn emitCoverage(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *co
 }
 
 fn emitDensity(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const EmitOptions) ![]u8 {
-    _ = opts;
+    const scoped_stats = try audit_mod.typeStatsScoped(audit, gpa, opts.collections);
+    defer gpa.free(scoped_stats);
+    const scoped_density = try audit_mod.typeDensitiesScoped(audit, gpa, scoped_stats, opts.collections);
+    defer gpa.free(scoped_density);
     var b: std.ArrayList(u8) = .empty;
     errdefer b.deinit(gpa);
     try pageHeader(&b, gpa, "density.html", "Density");
 
-    for (audit.type_densities) |td| {
+    for (scoped_density) |td| {
         try b.print(gpa, "<section><h3>{s}</h3>", .{td.type_name});
         if (audit.policy.density_bands.get(td.type_name)) |bands| {
             try b.appendSlice(gpa, "<p>Exact-count bands: ");
@@ -242,6 +254,7 @@ fn emitAlignment(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *c
 
     var am: [8]usize = .{ 0, 0, 0, 0, 0, 0, 0, 0 };
     for (audit.records) |rec| {
+        if (!audit_mod.recordInScope(audit, &rec, opts.collections)) continue;
         if (rec.alignment) |a| {
             const idx: usize = switch (a) {
                 .mapped => 0,
@@ -266,7 +279,7 @@ fn emitAlignment(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *c
     try b.appendSlice(gpa, "<section><table><caption>Poetry records by status</caption><thead><tr><th scope=\"col\">Id</th><th scope=\"col\">Type</th><th scope=\"col\">Status</th><th scope=\"col\">Owner</th></tr></thead><tbody>");
     for (audit.records) |*rec| {
         if (rec.kind != .poetry) continue;
-        if (!isSelected(opts, rec.collection)) continue;
+        if (!audit_mod.recordInScope(audit, rec, opts.collections)) continue;
         const a = rec.alignment orelse continue;
         try b.appendSlice(gpa, "<tr><td><code>");
         try util.appendHtmlEscaped(&b, gpa, rec.id orelse rec.source_path);
@@ -288,13 +301,13 @@ fn emitAlignment(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *c
 }
 
 fn emitExceptions(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const EmitOptions) ![]u8 {
-    _ = opts;
     var b: std.ArrayList(u8) = .empty;
     errdefer b.deinit(gpa);
     try pageHeader(&b, gpa, "exceptions.html", "Exceptions");
 
     try b.appendSlice(gpa, "<section><table><caption>Exceptions</caption><thead><tr><th scope=\"col\">Kind</th><th scope=\"col\">Severity</th><th scope=\"col\">Record</th><th scope=\"col\">Detail</th></tr></thead><tbody>");
     for (audit.exceptions) |e| {
+        if (!audit_mod.recordIdInScope(audit, e.record_id, opts.collections)) continue;
         try b.appendSlice(gpa, "<tr><td><code>");
         try util.appendHtmlEscaped(&b, gpa, e.kind);
         try b.appendSlice(gpa, "</code></td><td>");
