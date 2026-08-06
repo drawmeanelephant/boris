@@ -309,8 +309,10 @@ fn walkDir(ctx: *const walk_ctx, dir: std.Io.Dir, rel: []const u8, out: *std.Arr
         if (ctx.out_rel) |out_rel| {
             if (util.eql(out_rel, child_rel)) continue;
         }
-        // Directories open successfully; files do not.
-        var child = dir.openDir(ctx.io, name, .{}) catch {
+        // Directories open successfully; files do not. `.iterate = true` is
+        // required on Linux: without it, iterating the child later fails with
+        // EBADF (macOS tolerates the missing flag; the CI lane caught this).
+        var child = dir.openDir(ctx.io, name, .{ .iterate = true }) catch {
             if (std.mem.endsWith(u8, name, ".md")) {
                 try out.append(ctx.gpa, child_rel);
             }
@@ -334,7 +336,9 @@ pub fn discoverFiles(
     out_abs: ?[]const u8,
 ) DiscoveryError![][]const u8 {
     if (util.hasSymlinkComponent(io, root_dir, content_root)) return error.ContentRootSymlink;
-    var content_dir = root_dir.openDir(io, content_root, .{}) catch return error.ContentRootMissing;
+    // `.iterate = true` is required on Linux for the walk below to list the
+    // content root (macOS tolerates the missing flag; the CI lane caught this).
+    var content_dir = root_dir.openDir(io, content_root, .{ .iterate = true }) catch return error.ContentRootMissing;
     defer content_dir.close(io);
 
     // Content-root-relative output path, when the output lives under content.

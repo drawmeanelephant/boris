@@ -41,15 +41,18 @@ fn validateOwnershipMarker(io: std.Io, dir: std.Io.Dir) bool {
 
 /// Validate the final output path: refuse non-empty directories that do not
 /// carry the validated ownership marker. Also clears any leftover owned stage.
+/// Every directory checked here is opened with `.iterate = true` because
+/// `dirIsEmpty` iterates it (required on Linux; macOS tolerates the missing
+/// flag, and the CI lane caught the difference).
 pub fn prepareOwnedStage(io: std.Io, final_path: []const u8, stage_path: []const u8) !void {
     const cwd = std.Io.Dir.cwd();
-    if (cwd.openDir(io, final_path, .{})) |final_dir| {
+    if (cwd.openDir(io, final_path, .{ .iterate = true })) |final_dir| {
         defer final_dir.close(io);
         if (!dirIsEmpty(io, final_dir) and !validateOwnershipMarker(io, final_dir)) {
             return error.RefuseUnownedOutput;
         }
     } else |_| {}
-    if (cwd.openDir(io, stage_path, .{})) |stage_dir| {
+    if (cwd.openDir(io, stage_path, .{ .iterate = true })) |stage_dir| {
         defer stage_dir.close(io);
         if (!dirIsEmpty(io, stage_dir) and !validateOwnershipMarker(io, stage_dir)) {
             return error.RefuseUnownedStage;
@@ -78,7 +81,7 @@ pub fn publishOwnedStage(io: std.Io, final_path: []const u8, stage_path: []const
     if (cwd.statFile(io, backup_path, .{})) |st| {
         if (st.kind != .directory) return error.RefuseUnownedBackup;
     } else |_| {}
-    if (cwd.openDir(io, backup_path, .{})) |backup_dir| {
+    if (cwd.openDir(io, backup_path, .{ .iterate = true })) |backup_dir| {
         defer backup_dir.close(io);
         if (!dirIsEmpty(io, backup_dir) and !validateOwnershipMarker(io, backup_dir)) {
             return error.RefuseUnownedBackup;
