@@ -330,30 +330,34 @@ fn runTool(io: std.Io, gpa: std.mem.Allocator, args: []const []const u8) u8 {
 fn buildRepro(gpa: std.mem.Allocator, options: *const cli.Options) ![]u8 {
     // The reproduction command never echoes absolute host paths: --root,
     // --policy, and --out render as stable placeholders so the report tree is
-    // byte-identical across hosts and output dirs. The explicit revision and
-    // semantic options (collection filter, format, fail-on) are preserved.
+    // byte-identical across hosts and output dirs. Every caller-controlled
+    // value that survives (content root, explicit revision, collection
+    // filters, format, fail-on) is emitted through util.appendShellQuoted so
+    // it keeps its exact argument boundary under a POSIX shell even when it
+    // contains spaces, quotes, or shell metacharacters; plain values stay
+    // byte-identical.
     var repro: std.ArrayList(u8) = .empty;
     errdefer repro.deinit(gpa);
     try repro.appendSlice(gpa, "boris-content-audit --mode=poetry --root=<project-root>");
     try repro.appendSlice(gpa, " --content-root=");
-    try repro.appendSlice(gpa, options.content_root);
+    try util.appendShellQuoted(&repro, gpa, options.content_root);
     if (options.policy_path != null) try repro.appendSlice(gpa, " --policy=<policy-file>");
     try repro.appendSlice(gpa, " --out=<output-dir>");
     if (options.source_revision) |r| {
         try repro.appendSlice(gpa, " --revision=");
-        try repro.appendSlice(gpa, r);
+        try util.appendShellQuoted(&repro, gpa, r);
     }
     for (options.collections) |c| {
         try repro.appendSlice(gpa, " --collection=");
-        try repro.appendSlice(gpa, c);
+        try util.appendShellQuoted(&repro, gpa, c);
     }
     if (options.format != .all) {
         try repro.appendSlice(gpa, " --format=");
-        try repro.appendSlice(gpa, options.format.cliName());
+        try util.appendShellQuoted(&repro, gpa, options.format.cliName());
     }
     if (options.fail_on != .structural) {
         try repro.appendSlice(gpa, " --fail-on=");
-        try repro.appendSlice(gpa, options.fail_on.cliName());
+        try util.appendShellQuoted(&repro, gpa, options.fail_on.cliName());
     }
     return try repro.toOwnedSlice(gpa);
 }
@@ -1327,6 +1331,177 @@ test "reproduction command never echoes absolute host paths" {
     try std.testing.expect(std.mem.indexOf(u8, index_html, cwd_abs) == null);
     const exc_html = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/site/exceptions.html", .{out_abs}), a);
     try std.testing.expect(std.mem.indexOf(u8, exc_html, cwd_abs) == null);
+}
+
+test "oversized density band values are a malformed policy (exit 4)" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const root = try tmpPath(a, tmp, "overband-root");
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try makeTree(io, a, content, &.{
+        .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
+    });
+    // 4294967296 is one above the u32 range: the policy is malformed and the
+    // run must fail with exit 4 (never trap, truncate, or silently accept).
+    const bad_policy = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":{\"haikus\":\"haiku\"},\"density_bands\":{\"haiku\":[4294967296]}}";
+    const policy_path = try writePolicyJson(io, a, root, bad_policy);
+    const out_dir = try std.fmt.allocPrint(a, "{s}/out", .{root});
+    const code = try runAudit(io, a, root, policy_path, out_dir, null, &.{});
+    try std.testing.expectEqual(@as(u8, 4), code);
+}
+
+test "reproduction command values survive as exactly one shell argument" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // Adversarial caller-controlled values: spaces, single quotes, dollar
+    // signs, backticks, and shell metacharacters — plus one plain value that
+    // must stay raw and byte-identical.
+    var options: cli.Options = .{};
+    options.content_root = "content dir";
+    options.source_revision = "rev '$tag' $dollar `tick`;|&(x)*?[]{}";
+    options.collections = &.{ "zeta", "a b c", "o'brien", "d$ir" };
+    options.format = .json;
+    options.fail_on = .policy;
+    options.policy_path = "policy.json";
+
+    const cmd = try buildRepro(a, &options);
+    defer a.free(cmd);
+
+    // Plain values stay raw (no quoting), exactly as before this change.
+    try std.testing.expect(std.mem.indexOf(u8, cmd, "--collection=zeta") != null);
+
+    // The `<...>` placeholders are redirection operators to a POSIX shell, so
+    // for the round-trip parse they are substituted with plain tokens — the
+    // same step a human performs when reproducing the command. The
+    // substitution cannot collide with the values under test: any caller
+    // value containing '<' or '>' is single-quoted and never matches the raw
+    // placeholder text.
+    var script: std.ArrayList(u8) = .empty;
+    defer script.deinit(a);
+    try script.appendSlice(a, "set -- ");
+    try script.appendSlice(a, cmd);
+    try script.appendSlice(a, "\nfor arg in \"$@\"; do printf '%s\\0' \"$arg\"; done\n");
+    const script_text = try shellSubPlaceholders(a, script.items);
+    defer a.free(script_text);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const script_path = try std.fmt.allocPrint(a, ".zig-cache/tmp/{s}/repro-args.sh", .{tmp.sub_path});
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = script_path, .data = script_text });
+
+    const result = try std.process.run(a, io, .{
+        .argv = &.{ "/bin/sh", script_path },
+        .stdout_limit = .limited64(1 << 20),
+        .stderr_limit = .limited64(1 << 20),
+    });
+    defer a.free(result.stdout);
+    defer a.free(result.stderr);
+    try std.testing.expectEqual(@as(u8, 0), switch (result.term) {
+        .exited => |code| code,
+        else => 255,
+    });
+
+    // The shell must have run cleanly (no diagnostics, no redirection errors).
+    try std.testing.expectEqual(@as(usize, 0), result.stderr.len);
+
+    const args = try splitNulArgs(a, result.stdout);
+    defer a.free(args);
+
+    // Exactly 13 arguments: program, --mode, --root, --content-root,
+    // --policy, --out, --revision, 4x --collection, --format, --fail-on.
+    // A count check proves no word — placeholder or value — ever split into
+    // two arguments.
+    try std.testing.expectEqual(@as(usize, 13), args.len);
+
+    // Every caller-controlled option value must survive as exactly one shell
+    // argument with its exact bytes.
+    try std.testing.expect(hasArg(args, "--content-root=content dir"));
+    try std.testing.expect(hasArg(args, "--revision=rev '$tag' $dollar `tick`;|&(x)*?[]{}"));
+    try std.testing.expect(hasArg(args, "--collection=zeta"));
+    try std.testing.expect(hasArg(args, "--collection=a b c"));
+    try std.testing.expect(hasArg(args, "--collection=o'brien"));
+    try std.testing.expect(hasArg(args, "--collection=d$ir"));
+    // Format and fail-on modes are preserved as single arguments.
+    try std.testing.expect(hasArg(args, "--format=json"));
+    try std.testing.expect(hasArg(args, "--fail-on=policy"));
+    // No value leaked across an argument boundary.
+    try std.testing.expect(!hasArg(args, "--content-root=content"));
+    try std.testing.expect(!hasArg(args, "dir"));
+}
+
+/// Replace every occurrence of `from` with `to` (used only by tests).
+fn replaceAll(a: std.mem.Allocator, s: []const u8, from: []const u8, to: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(a);
+    var rest = s;
+    while (std.mem.indexOf(u8, rest, from)) |idx| {
+        try out.appendSlice(a, rest[0..idx]);
+        try out.appendSlice(a, to);
+        rest = rest[idx + from.len ..];
+    }
+    try out.appendSlice(a, rest);
+    return try out.toOwnedSlice(a);
+}
+
+/// Substitute the three stable placeholders with plain tokens so the emitted
+/// reproduction command can be handed to a real POSIX shell for argument
+/// parsing (the raw `<...>` placeholders would be read as redirections).
+fn shellSubPlaceholders(a: std.mem.Allocator, cmd: []const u8) ![]u8 {
+    const project_root_replaced = try replaceAll(a, cmd, "<project-root>", "PROJECT_ROOT");
+    defer a.free(project_root_replaced);
+    const policy_file_replaced = try replaceAll(a, project_root_replaced, "<policy-file>", "POLICY_FILE");
+    defer a.free(policy_file_replaced);
+    return replaceAll(a, policy_file_replaced, "<output-dir>", "OUTPUT_DIR");
+}
+
+/// Split NUL-separated bytes into a slice of arguments (used only by tests).
+fn splitNulArgs(a: std.mem.Allocator, out: []const u8) ![][]const u8 {
+    var args: std.ArrayList([]const u8) = .empty;
+    errdefer args.deinit(a);
+    var it = std.mem.splitScalar(u8, out, 0);
+    while (it.next()) |piece| {
+        if (piece.len > 0) try args.append(a, piece);
+    }
+    return try args.toOwnedSlice(a);
+}
+
+fn hasArg(args: [][]const u8, want: []const u8) bool {
+    for (args) |arg| {
+        if (util.eql(arg, want)) return true;
+    }
+    return false;
+}
+
+test "placeholder substitution frees every intermediate buffer" {
+    // The testing allocator has an effective free and detects both leaks and
+    // double frees, so this regression test fails if shellSubPlaceholders ever
+    // regresses to freeing through a reassigned local (the arena allocator
+    // used elsewhere masks that ownership error).
+    const a = std.testing.allocator;
+    const cmd = "boris-content-audit --root=<project-root> --policy=<policy-file> --out=<output-dir>";
+    const out = try shellSubPlaceholders(a, cmd);
+    defer a.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "<project-root>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "<policy-file>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "<output-dir>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "--root=PROJECT_ROOT") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "--policy=POLICY_FILE") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "--out=OUTPUT_DIR") != null);
 }
 
 test "reversed collection filter order produces byte-identical output" {

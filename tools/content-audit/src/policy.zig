@@ -219,9 +219,13 @@ pub fn parse(gpa: std.mem.Allocator, json_bytes: []const u8) PolicyError!Policy 
             errdefer counts.deinit(gpa);
             var prev: ?u32 = null;
             for (entry.value_ptr.*.array.items) |item| {
-                if (item != .integer or item.integer < 0) return error.InvalidShape;
+                // Reject non-integers, non-positive values, and values that
+                // cannot fit u32 *before* any narrowing cast. An oversized
+                // JSON integer (above 4294967295) must be a malformed policy
+                // (exit 4): it must never trap in Debug/ReleaseSafe or
+                // truncate in unchecked builds.
+                if (item != .integer or item.integer <= 0 or item.integer > std.math.maxInt(u32)) return error.InvalidShape;
                 const n: u32 = @intCast(item.integer);
-                if (n == 0) return error.InvalidShape;
                 if (prev) |p| {
                     if (n <= p) return error.InvalidShape; // must be strictly ascending
                 }
@@ -349,6 +353,33 @@ test "density bands must be ascending and positive" {
     // Equal adjacent values: rejected (strictly ascending required).
     const jsoneq = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":{\"haikus\":\"haiku\"},\"density_bands\":{\"haiku\":[2,2]}}";
     try std.testing.expectError(error.InvalidShape, parse(a, jsoneq));
+}
+
+test "density band values must fit u32 and stay positive" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // 4294967295 (std.math.maxInt(u32)) is accepted and preserved exactly.
+    const ok = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":{\"haikus\":\"haiku\"},\"density_bands\":{\"haiku\":[4294967295]}}";
+    var p = try parse(a, ok);
+    try std.testing.expectEqual(@as(u32, 4294967295), p.density_bands.get("haiku").?[0]);
+    // One above max u32 is rejected as malformed (must not trap or truncate).
+    const over = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":{\"haikus\":\"haiku\"},\"density_bands\":{\"haiku\":[4294967296]}}";
+    try std.testing.expectError(error.InvalidShape, parse(a, over));
+    // A value far beyond i64 range is rejected too (InvalidJson is fine: it
+    // still lands on the malformed-policy exit-4 path).
+    const far = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":{\"haikus\":\"haiku\"},\"density_bands\":{\"haiku\":[99999999999999999999999]}}";
+    if (parse(a, far)) |_| {
+        return error.TestUnexpectedResult;
+    } else |err| {
+        try std.testing.expect(err == error.InvalidShape or err == error.InvalidJson);
+    }
+    // Negative values are rejected.
+    const neg = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":{\"haikus\":\"haiku\"},\"density_bands\":{\"haiku\":[-3]}}";
+    try std.testing.expectError(error.InvalidShape, parse(a, neg));
+    // Mixed valid + oversized entry is still rejected.
+    const mix = "{\"schema_version\":1,\"eligible_collections\":{\"lorelog\":[\"haiku\"]},\"poetry_collections\":{\"haikus\":\"haiku\"},\"density_bands\":{\"haiku\":[1, 4294967296]}}";
+    try std.testing.expectError(error.InvalidShape, parse(a, mix));
 }
 
 test "density bands need not have exactly three entries" {
