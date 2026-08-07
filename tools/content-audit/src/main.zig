@@ -145,8 +145,11 @@ fn runTool(io: std.Io, gpa: std.mem.Allocator, args: []const []const u8) u8 {
         diag("boris-content-audit: refused: output dir overlaps the content root\n", .{});
         return @intFromEnum(ExitCode.io_error);
     }
-    // Safety: refuse symlink traversal on the output path.
-    if (util.hasSymlinkComponent(io, std.Io.Dir.cwd(), out_dir)) {
+    // Safety: refuse symlink traversal on the output path. The check runs on
+    // the canonical absolute output path, so absolute and relative `--out`
+    // (and `--root`) forms are inspected identically: every existing path
+    // component is probed for symlinks starting at the filesystem root.
+    if (util.hasSymlinkComponentAbs(io, out_abs)) {
         diag("boris-content-audit: refused: output path contains a symlink component\n", .{});
         return @intFromEnum(ExitCode.io_error);
     }
@@ -245,7 +248,7 @@ fn runTool(io: std.Io, gpa: std.mem.Allocator, args: []const []const u8) u8 {
     };
 
     // Reproduction command.
-    const repro = buildRepro(gpa, &options, final_path) catch |err| {
+    const repro = buildRepro(gpa, &options) catch |err| {
         diag("boris-content-audit: repro build failed: {s}\n", .{@errorName(err)});
         return @intFromEnum(ExitCode.io_error);
     };
@@ -318,27 +321,40 @@ fn runTool(io: std.Io, gpa: std.mem.Allocator, args: []const []const u8) u8 {
     if (!options.quiet) {
         diag(
             "boris-content-audit: wrote {s}/report.json, {s}/REPORT.md, {s}/site/ · {d} source records, {d} poetry records, {d} exceptions, exit {d}\n",
-            .{ final_path, final_path, final_path, findings.source_count, findings.poetry_count, audit.exceptions.len, @intFromEnum(exit_code) },
+            .{ final_path, final_path, final_path, findings.source_count, findings.poetry_count, findings.exceptions, @intFromEnum(exit_code) },
         );
     }
     return @intFromEnum(exit_code);
 }
 
-fn buildRepro(gpa: std.mem.Allocator, options: *const cli.Options, final_path: []const u8) ![]u8 {
-    _ = final_path;
-    // The reproduction command is intentionally stable across output dirs so
-    // the report tree is byte-identical between runs; --out is caller-chosen.
+fn buildRepro(gpa: std.mem.Allocator, options: *const cli.Options) ![]u8 {
+    // The reproduction command never echoes absolute host paths: --root,
+    // --policy, and --out render as stable placeholders so the report tree is
+    // byte-identical across hosts and output dirs. The explicit revision and
+    // semantic options (collection filter, format, fail-on) are preserved.
     var repro: std.ArrayList(u8) = .empty;
     errdefer repro.deinit(gpa);
-    try repro.appendSlice(gpa, "boris-content-audit --mode=poetry --root=");
-    try repro.appendSlice(gpa, options.root_dir);
+    try repro.appendSlice(gpa, "boris-content-audit --mode=poetry --root=<project-root>");
     try repro.appendSlice(gpa, " --content-root=");
     try repro.appendSlice(gpa, options.content_root);
-    if (options.policy_path) |p| {
-        try repro.appendSlice(gpa, " --policy=");
-        try repro.appendSlice(gpa, p);
-    }
+    if (options.policy_path != null) try repro.appendSlice(gpa, " --policy=<policy-file>");
     try repro.appendSlice(gpa, " --out=<output-dir>");
+    if (options.source_revision) |r| {
+        try repro.appendSlice(gpa, " --revision=");
+        try repro.appendSlice(gpa, r);
+    }
+    for (options.collections) |c| {
+        try repro.appendSlice(gpa, " --collection=");
+        try repro.appendSlice(gpa, c);
+    }
+    if (options.format != .all) {
+        try repro.appendSlice(gpa, " --format=");
+        try repro.appendSlice(gpa, options.format.cliName());
+    }
+    if (options.fail_on != .structural) {
+        try repro.appendSlice(gpa, " --fail-on=");
+        try repro.appendSlice(gpa, options.fail_on.cliName());
+    }
     return try repro.toOwnedSlice(gpa);
 }
 
@@ -347,28 +363,25 @@ const Findings = struct {
     policy: usize,
     source_count: usize,
     poetry_count: usize,
+    exceptions: usize,
 };
 
 fn countFindings(audit: *const audit_mod.Audit, collections: []const []const u8) Findings {
-    var f: Findings = .{ .structural = 0, .policy = 0, .source_count = 0, .poetry_count = 0 };
-    // Structural findings follow the same collection scope as every other
-    // section of a filtered report.
+    var f: Findings = .{ .structural = 0, .policy = 0, .source_count = 0, .poetry_count = 0, .exceptions = 0 };
+    // Every counter follows the same collection scope as report.json: the
+    // selected source collections plus their mapped poetry (never a physical
+    // poetry-collection filter).
     for (audit.exceptions) |e| {
-        if (e.severity != .structural) continue;
         if (!audit_mod.recordIdInScope(audit, e.record_id, collections)) continue;
+        f.exceptions += 1;
+        if (e.severity != .structural) continue;
         f.structural += 1;
     }
     var missing_pairs: usize = 0;
     var placeholder_records: usize = 0;
     var orphan_records: usize = 0;
     for (audit.records) |*rec| {
-        if (collections.len > 0) {
-            var sel = false;
-            for (collections) |c| {
-                if (util.eql(c, rec.collection)) sel = true;
-            }
-            if (!sel) continue;
-        }
+        if (!audit_mod.recordInScope(audit, rec, collections)) continue;
         switch (rec.kind) {
             .source => {
                 f.source_count += 1;
@@ -1215,4 +1228,314 @@ test "mixed collection filtering is scoped consistently" {
     // A genuinely different set still mismatches.
     const out_both_lonly = try std.fmt.allocPrint(a, "{s}/out-both-lonly", .{root});
     try std.testing.expectEqual(@as(u8, 4), try runAudit(io, a, root, policy_path, out_both_lonly, prev_ab, &.{"--collection=lorelog"}));
+}
+
+test "output symlink refusal is consistent across absolute/relative root and out" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const root = try tmpPath(a, tmp, "symout-root");
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try makeTree(io, a, content, &.{
+        .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
+    });
+    // External directory with a precious file; root/link -> external is a
+    // symlink that the output path must never traverse.
+    const external = try std.fmt.allocPrint(a, "{s}/external", .{root});
+    try makeTree(io, a, external, &.{.{ .path = "precious.txt", .data = "keep me" }});
+    try std.Io.Dir.cwd().symLink(io, "external", try std.fmt.allocPrint(a, "{s}/link", .{root}), .{ .is_directory = true });
+    const policy_path = try writePolicyJson(io, a, root, bare_policy);
+
+    const cwd_abs = try getCwdAlloc(io, a);
+    const root_abs = try std.fmt.allocPrint(a, "{s}/{s}", .{ cwd_abs, root });
+    const policy_abs = try std.fmt.allocPrint(a, "{s}/{s}", .{ cwd_abs, policy_path });
+
+    // The same symlinked output target expressed four ways: absolute/relative
+    // root crossed with absolute/relative out.
+    const out_rel = try std.fmt.allocPrint(a, "{s}/link/out", .{root});
+    const out_abs = try std.fmt.allocPrint(a, "{s}/link/out", .{root_abs});
+    const cases = [_][2][]const u8{
+        .{ root, out_rel }, // relative root + relative out
+        .{ root, out_abs }, // relative root + absolute out
+        .{ root_abs, out_rel }, // absolute root + relative out
+        .{ root_abs, out_abs }, // absolute root + absolute out
+    };
+    for (cases) |c| {
+        const code = try runAudit(io, a, c[0], policy_abs, c[1], null, &.{});
+        try std.testing.expectEqual(@as(u8, 3), code);
+        // Every unrelated file survives: the external precious file is intact.
+        const precious = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/precious.txt", .{external}), a);
+        try std.testing.expectEqualStrings("keep me", precious);
+    }
+    // Nothing was ever written through the symlink: external has no report.
+    const leaked = std.Io.Dir.cwd().statFile(io, try std.fmt.allocPrint(a, "{s}/report.json", .{external}), .{});
+    try std.testing.expectError(error.FileNotFound, leaked);
+}
+
+test "reproduction command never echoes absolute host paths" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const root = try tmpPath(a, tmp, "repro-root");
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try makeTree(io, a, content, &.{
+        .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
+        .{ .path = "haikus/hai-100.md", .data = "---\nid: haikus/HAI-100\nparent: haikus\ntitle: A\n---\n# A\n\none\ntwo\nthree\n" },
+    });
+    const policy_path = try writePolicyJson(io, a, root, one_policy);
+    const cwd_abs = try getCwdAlloc(io, a);
+    const root_abs = try std.fmt.allocPrint(a, "{s}/{s}", .{ cwd_abs, root });
+    const policy_abs = try std.fmt.allocPrint(a, "{s}/{s}", .{ cwd_abs, policy_path });
+    const out_abs = try std.fmt.allocPrint(a, "{s}/out", .{root_abs});
+
+    const code = try runAudit(io, a, root_abs, policy_abs, out_abs, null, &.{"--revision=rev-abc"});
+    try std.testing.expectEqual(@as(u8, 0), code);
+
+    const md = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/REPORT.md", .{out_abs}), a);
+    // Stable placeholders, never the caller's absolute host paths.
+    try std.testing.expect(std.mem.indexOf(u8, md, "--root=<project-root>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, md, "--policy=<policy-file>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, md, "--out=<output-dir>") != null);
+    // Explicit revision and semantic options are preserved.
+    try std.testing.expect(std.mem.indexOf(u8, md, "--revision=rev-abc") != null);
+    // No absolute fixture, home, temporary, or policy path anywhere.
+    try std.testing.expect(std.mem.indexOf(u8, md, cwd_abs) == null);
+    try std.testing.expect(std.mem.indexOf(u8, md, root_abs) == null);
+    try std.testing.expect(std.mem.indexOf(u8, md, policy_abs) == null);
+
+    const json = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/report.json", .{out_abs}), a);
+    try std.testing.expect(std.mem.indexOf(u8, json, cwd_abs) == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, policy_abs) == null);
+
+    const index_html = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/site/index.html", .{out_abs}), a);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, cwd_abs) == null);
+    const exc_html = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/site/exceptions.html", .{out_abs}), a);
+    try std.testing.expect(std.mem.indexOf(u8, exc_html, cwd_abs) == null);
+}
+
+test "reversed collection filter order produces byte-identical output" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const root = try tmpPath(a, tmp, "canon-root");
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try makeTree(io, a, content, &.{
+        .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
+        .{ .path = "mascots/msc-100.md", .data = "---\nid: mascots/MSC-100\nparent: mascots\nstatus: published\n---\n# M\n" },
+        .{ .path = "haikus/hai-100.md", .data = "---\nid: haikus/HAI-100\nparent: lorelog/LLG-100\ntitle: A\n---\n# A\n\none\ntwo\nthree\n" },
+        .{ .path = "haikus/hai-200.md", .data = "---\nid: haikus/HAI-200\nparent: mascots/MSC-100\ntitle: B\n---\n# B\n\na\nb\nc\n" },
+        .{ .path = "limericks/lim-100.md", .data = "---\nid: limericks/LIM-100\nparent: lorelog/LLG-100\ntitle: L\n---\n# L\n\na\na\nb\na\na\n" },
+        .{ .path = "limericks/lim-200.md", .data = "---\nid: limericks/LIM-200\nparent: mascots/MSC-100\ntitle: L2\n---\n# L2\n\n1\n2\n3\n4\n5\n" },
+    });
+    const policy =
+        \\{"schema_version": 1, "eligible_collections": {"lorelog": ["haiku", "limerick"], "mascots": ["haiku", "limerick"]}, "poetry_collections": {"haikus": "haiku", "limericks": "limerick"}, "exact_mappings": {}}
+    ;
+    const policy_path = try writePolicyJson(io, a, root, policy);
+    const out_ab = try std.fmt.allocPrint(a, "{s}/out-ab", .{root});
+    const out_ba = try std.fmt.allocPrint(a, "{s}/out-ba", .{root});
+    const out_dup = try std.fmt.allocPrint(a, "{s}/out-dup", .{root});
+
+    try std.testing.expectEqual(@as(u8, 0), try runAudit(io, a, root, policy_path, out_ab, null, &.{ "--collection=lorelog", "--collection=mascots" }));
+    try std.testing.expectEqual(@as(u8, 0), try runAudit(io, a, root, policy_path, out_ba, null, &.{ "--collection=mascots", "--collection=lorelog" }));
+    // Duplicated values deduplicate to the same canonical filter.
+    try std.testing.expectEqual(@as(u8, 0), try runAudit(io, a, root, policy_path, out_dup, null, &.{ "--collection=lorelog", "--collection=mascots", "--collection=lorelog" }));
+
+    const rels = [_][]const u8{ "report.json", "REPORT.md", "site/index.html", "site/coverage.html", "site/density.html", "site/alignment.html", "site/exceptions.html", "site/changes.html" };
+    for (rels) |rel| {
+        const b_ab = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/{s}", .{ out_ab, rel }), a);
+        const b_ba = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/{s}", .{ out_ba, rel }), a);
+        const b_dup = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/{s}", .{ out_dup, rel }), a);
+        try std.testing.expectEqualStrings(b_ab, b_ba);
+        try std.testing.expectEqualStrings(b_ab, b_dup);
+    }
+    // The emitted filter is the canonical, sorted list.
+    const json_bytes = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/report.json", .{out_ab}), a);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, json_bytes, .{});
+    const filter = parsed.value.object.get("collection_filter").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), filter.len);
+    try std.testing.expectEqualStrings("lorelog", filter[0].string);
+    try std.testing.expectEqualStrings("mascots", filter[1].string);
+}
+
+test "filtered terminal summary counts match report.json scoped totals" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const root = try tmpPath(a, tmp, "sum-root");
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try makeTree(io, a, content, &.{
+        .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
+        .{ .path = "mascots/msc-100.md", .data = "---\nid: mascots/MSC-100\nparent: mascots\nstatus: published\n---\n# M\n" },
+        // A source collection with no mapped poetry at all (empty scoped
+        // poetry population).
+        .{ .path = "notes/nte-100.md", .data = "---\nid: notes/NTE-100\nparent: notes\nstatus: published\n---\n# N\n" },
+        // Poetry physically in haikus but mapped to a lorelog source: with
+        // source_collection_and_mapped_poetry scoping it must be counted in
+        // the lorelog filter (never physically excluded).
+        .{ .path = "haikus/hai-100.md", .data = "---\nid: haikus/HAI-100\nparent: lorelog/LLG-100\ntitle: A\n---\n# A\n\none\ntwo\nthree\n" },
+        .{ .path = "haikus/hai-200.md", .data = "---\nid: haikus/HAI-200\nparent: mascots/MSC-100\ntitle: B\n---\n# B\n\na\nb\nc\n" },
+        .{ .path = "limericks/lim-100.md", .data = "---\nid: limericks/LIM-100\nparent: lorelog/LLG-100\ntitle: L\n---\n# L\n\na\na\nb\na\na\n" },
+    });
+    const policy =
+        \\{"schema_version": 1, "eligible_collections": {"lorelog": ["haiku", "limerick"], "mascots": ["haiku"], "notes": ["haiku"]}, "poetry_collections": {"haikus": "haiku", "limericks": "limerick"}, "exact_mappings": {}}
+    ;
+    const policy_path = try writePolicyJson(io, a, root, policy);
+    const out_dir = try std.fmt.allocPrint(a, "{s}/out", .{root});
+    const code = try runAudit(io, a, root, policy_path, out_dir, null, &.{"--collection=lorelog"});
+    try std.testing.expectEqual(@as(u8, 0), code);
+
+    const json_bytes = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/report.json", .{out_dir}), a);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, json_bytes, .{});
+    const totals = parsed.value.object.get("totals").?.object;
+    const expected_source = totals.get("source_records").?.integer;
+    const expected_poetry = totals.get("poetry_records").?.integer;
+    const expected_exceptions = parsed.value.object.get("exceptions").?.array.items.len;
+    // report.json says: lorelog source + the two poems mapped to it (HAI-100,
+    // LIM-100) even though they live in haikus/limericks physically.
+    try std.testing.expectEqual(@as(i64, 1), expected_source);
+    try std.testing.expectEqual(@as(i64, 2), expected_poetry);
+
+    // countFindings is exactly what the terminal summary prints; it must use
+    // the same scoped population as report.json.
+    var root_dir = try std.Io.Dir.cwd().openDir(io, root, .{});
+    defer root_dir.close(io);
+    var policy_obj = try policy_mod.parse(a, policy);
+    const audit = try audit_mod.run(io, a, root_dir, .{
+        .root_dir = root,
+        .content_root = "content",
+        .out_dir = out_dir,
+        .content_root_abs = try std.fmt.allocPrint(a, "{s}/content", .{root}),
+        .out_abs = out_dir,
+        .policy = policy_obj,
+        .policy_digest = try util.sha256Hex(a, policy),
+    });
+    const f = countFindings(&audit, &.{"lorelog"});
+    try std.testing.expectEqual(@as(usize, @intCast(expected_source)), f.source_count);
+    try std.testing.expectEqual(@as(usize, @intCast(expected_poetry)), f.poetry_count);
+    try std.testing.expectEqual(expected_exceptions, f.exceptions);
+    _ = &policy_obj;
+
+    // Empty scoped poetry population: the notes source collection has no
+    // mapped poetry, so both the summary and report.json report zero poetry
+    // records for it.
+    const out_empty = try std.fmt.allocPrint(a, "{s}/out-empty", .{root});
+    const code_empty = try runAudit(io, a, root, policy_path, out_empty, null, &.{"--collection=notes"});
+    try std.testing.expectEqual(@as(u8, 0), code_empty);
+    const json_empty = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/report.json", .{out_empty}), a);
+    var parsed_empty = try std.json.parseFromSlice(std.json.Value, a, json_empty, .{});
+    const totals_empty = parsed_empty.value.object.get("totals").?.object;
+    try std.testing.expectEqual(@as(i64, 1), totals_empty.get("source_records").?.integer);
+    try std.testing.expectEqual(@as(i64, 0), totals_empty.get("poetry_records").?.integer);
+    const f_empty = countFindings(&audit, &.{"notes"});
+    try std.testing.expectEqual(@as(usize, 1), f_empty.source_count);
+    try std.testing.expectEqual(@as(usize, 0), f_empty.poetry_count);
+}
+
+test "unsupported-shape accounting is consistent across every report surface" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const root = try tmpPath(a, tmp, "cons-root");
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try makeTree(io, a, content, &.{
+        .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
+        .{ .path = "sonnets/son-100.md", .data = "---\nid: sonnets/SON-100\nparent: lorelog/LLG-100\ntitle: A\n---\n# A\n\nline one\nline two\nline three\n" },
+    });
+    const policy =
+        \\{"schema_version": 1, "eligible_collections": {"lorelog": ["sonnet"]}, "poetry_collections": {"sonnets": "sonnet"}, "exact_mappings": {}}
+    ;
+    const policy_path = try writePolicyJson(io, a, root, policy);
+    const out_dir = try std.fmt.allocPrint(a, "{s}/out", .{root});
+    const code = try runAudit(io, a, root, policy_path, out_dir, null, &.{});
+    try std.testing.expectEqual(@as(u8, 1), code); // unregistered shape is structural
+
+    const json_bytes = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/report.json", .{out_dir}), a);
+    var parsed = try std.json.parseFromSlice(std.json.Value, a, json_bytes, .{});
+
+    // Recalculate aggregates from per-record rows: malformed_units sums and
+    // alignment counts must agree with verse_totals, totals, and alignment.
+    const records = parsed.value.object.get("records").?.array.items;
+    var sum_malformed: i64 = 0;
+    var sum_verse: i64 = 0;
+    var malformed_alignment: i64 = 0;
+    var son_units: i64 = -1;
+    for (records) |rv| {
+        sum_malformed += rv.object.get("malformed_units").?.integer;
+        sum_verse += rv.object.get("verse_units").?.integer;
+        if (util.eql(rv.object.get("id").?.string, "sonnets/SON-100")) {
+            son_units = rv.object.get("malformed_units").?.integer;
+            try std.testing.expectEqualStrings("malformed_record", rv.object.get("alignment").?.string);
+        }
+        if (rv.object.get("alignment")) |av| {
+            if (av == .string and util.eql(av.string, "malformed_record")) malformed_alignment += 1;
+        }
+    }
+    try std.testing.expectEqual(@as(i64, 1), sum_malformed); // one malformed/unsupported record
+    try std.testing.expectEqual(@as(i64, 0), sum_verse); // zero complete verse units
+    try std.testing.expectEqual(@as(i64, 1), son_units); // per-record malformed_units = 1
+    // Aggregate verse_totals agrees with the per-record sum.
+    const vt = parsed.value.object.get("verse_totals").?.array.items;
+    try std.testing.expectEqual(@as(i64, 1), vt[0].object.get("records").?.integer);
+    try std.testing.expectEqual(sum_malformed, vt[0].object.get("malformed_units").?.integer);
+    try std.testing.expectEqual(sum_verse, vt[0].object.get("verse_units").?.integer);
+    // Alignment classification agrees with totals and the exception.
+    try std.testing.expectEqual(@as(i64, 1), malformed_alignment);
+    try std.testing.expectEqual(malformed_alignment, parsed.value.object.get("alignment").?.object.get("counts").?.object.get("malformed_record").?.integer);
+    try std.testing.expectEqual(malformed_alignment, parsed.value.object.get("totals").?.object.get("malformed_records").?.integer);
+    try std.testing.expectEqual(@as(usize, 1), try scanExceptions(io, a, out_dir, "unregistered_poetry_shape"));
+    // Coverage is malformed, never substantive.
+    const rows = parsed.value.object.get("coverage_by_collection").?.array.items;
+    try std.testing.expectEqual(@as(i64, 1), rows[0].object.get("malformed").?.integer);
+
+    // Markdown report: type totals row shows one record, zero verse, one
+    // malformed unit; exec summary agrees with report.json totals.
+    const md = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/REPORT.md", .{out_dir}), a);
+    try std.testing.expect(std.mem.indexOf(u8, md, "| sonnet | 1 | 0 | 0 | 0 | 1 |") != null);
+    try std.testing.expect(std.mem.indexOf(u8, md, "| Malformed records | 1 |") != null);
+    try std.testing.expect(std.mem.indexOf(u8, md, "| Records discovered | 2 |") != null);
+
+    // HTML report: exceptions page and alignment page agree.
+    const exc_html = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/site/exceptions.html", .{out_dir}), a);
+    try std.testing.expect(std.mem.indexOf(u8, exc_html, "unregistered_poetry_shape") != null);
+    const align_html = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/site/alignment.html", .{out_dir}), a);
+    try std.testing.expect(std.mem.indexOf(u8, align_html, ">malformed_record</th><td>1</td>") != null);
+    // The per-status table lists SON-100 as malformed_record.
+    try std.testing.expect(std.mem.indexOf(u8, align_html, "sonnets/SON-100") != null);
 }

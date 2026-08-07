@@ -58,8 +58,10 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
     var poetry_count: usize = 0;
     var verse_units: usize = 0;
     var malformed_records: usize = 0;
+    var scoped_records: usize = 0;
     for (audit.records) |rec| {
         if (!audit_mod.recordInScope(audit, &rec, opts.collections)) continue;
+        scoped_records += 1;
         switch (rec.kind) {
             .source => source_count += 1,
             .poetry => poetry_count += 1,
@@ -68,14 +70,18 @@ pub fn emit(gpa: std.mem.Allocator, audit: *const audit_mod.Audit, opts: *const 
         if (rec.malformed_reason != null or rec.unsupported_shape) malformed_records += 1;
         if (rec.verse) |v| verse_units += v.complete_count;
     }
+    var scoped_exceptions: usize = 0;
+    for (audit.exceptions) |e| {
+        if (audit_mod.recordIdInScope(audit, e.record_id, opts.collections)) scoped_exceptions += 1;
+    }
     try b.appendSlice(gpa, "## 1. Executive summary\n\n");
     try b.print(gpa, "| Metric | Value |\n|---|---:|\n", .{});
-    try b.print(gpa, "| Records discovered | {d} |\n", .{audit.records.len});
+    try b.print(gpa, "| Records discovered | {d} |\n", .{scoped_records});
     try b.print(gpa, "| Source records | {d} |\n", .{source_count});
     try b.print(gpa, "| Poetry records | {d} |\n", .{poetry_count});
     try b.print(gpa, "| Verse units (complete) | {d} |\n", .{verse_units});
     try b.print(gpa, "| Malformed records | {d} |\n", .{malformed_records});
-    try b.print(gpa, "| Exceptions | {d} |\n", .{audit.exceptions.len});
+    try b.print(gpa, "| Exceptions | {d} |\n", .{scoped_exceptions});
     if (audit.delta) |changes| {
         try b.print(gpa, "| Delta changes vs previous report | {d} |\n", .{changes.len});
     }

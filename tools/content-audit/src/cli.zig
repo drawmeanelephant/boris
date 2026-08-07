@@ -44,6 +44,15 @@ pub const Format = enum {
     pub fn includeHtml(self: Format) bool {
         return self == .html or self == .all;
     }
+
+    pub fn cliName(self: Format) []const u8 {
+        return switch (self) {
+            .json => "json",
+            .markdown => "markdown",
+            .html => "html",
+            .all => "all",
+        };
+    }
 };
 
 pub const FailOn = enum {
@@ -56,6 +65,14 @@ pub const FailOn = enum {
         if (util.eql(s, "structural")) return .structural;
         if (util.eql(s, "policy")) return .policy;
         return null;
+    }
+
+    pub fn cliName(self: FailOn) []const u8 {
+        return switch (self) {
+            .none => "none",
+            .structural => "structural",
+            .policy => "policy",
+        };
     }
 };
 
@@ -179,6 +196,22 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         } else {
             return error.UnknownFlag;
         }
+    }
+    // Canonicalize the collection filter: deduplicate and sort by unsigned
+    // byte order so reversed argument order produces byte-identical reports
+    // and filter identity is independent of argument order everywhere the
+    // list is compared or rendered.
+    if (options.collections.len > 1) {
+        const sorted = try gpa.dupe([]const u8, options.collections);
+        util.sortStrings(gpa, sorted);
+        var out: std.ArrayList([]const u8) = .empty;
+        errdefer out.deinit(gpa);
+        for (sorted) |c| {
+            if (out.items.len == 0 or !util.eql(out.items[out.items.len - 1], c)) {
+                try out.append(gpa, c);
+            }
+        }
+        options.collections = try out.toOwnedSlice(gpa);
     }
     return options;
 }

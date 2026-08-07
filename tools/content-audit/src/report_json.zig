@@ -128,7 +128,9 @@ fn appendRecordObject(
     try buf.appendSlice(gpa, ", \"substantive_units\": ");
     try util.appendJsonNumber(buf, gpa, if (rec.verse) |v| v.substantive_count else 0);
     try buf.appendSlice(gpa, ", \"malformed_units\": ");
-    try util.appendJsonNumber(buf, gpa, if (rec.verse) |v| v.malformed_count else 0);
+    // Unsupported shapes report exactly one malformed/unsupported unit so the
+    // per-record figure always agrees with the aggregate verse_totals row.
+    try util.appendJsonNumber(buf, gpa, if (rec.unsupported_shape) 1 else (if (rec.verse) |v| v.malformed_count else 0));
     try buf.appendSlice(gpa, ", \"density_in_band\": ");
     try util.appendJsonBool(buf, gpa, recDensityInBand(audit, rec));
     try buf.appendSlice(gpa, ", \"coverage\": ");
