@@ -214,7 +214,10 @@ pub fn parse(gpa: std.mem.Allocator, json_bytes: []const u8) PolicyError!Policy 
             errdefer counts.deinit(gpa);
             var prev: ?u32 = null;
             for (entry.value_ptr.*.array.items) |item| {
-                if (item != .integer or item.integer < 0) return error.InvalidShape;
+                // Reject anything outside the u32 range up front: @intCast
+                // would trap in Debug/ReleaseSafe builds or silently truncate
+                // in unchecked builds, instead of surfacing exit 4.
+                if (item != .integer or item.integer < 0 or item.integer > std.math.maxInt(u32)) return error.InvalidShape;
                 const n: u32 = @intCast(item.integer);
                 if (n == 0) return error.InvalidShape;
                 if (prev) |p| {
@@ -337,4 +340,16 @@ test "density bands must be ascending" {
     const a = arena.allocator();
     const json = "{\"schema_version\":1,\"density_bands\":{\"haiku\":[3,1]}}";
     try std.testing.expectError(error.InvalidShape, parse(a, json));
+    // Oversized band value (above u32 max): rejected, must not trap or truncate.
+    const jsonbig = "{\"schema_version\":1,\"density_bands\":{\"haiku\":[4294967296]}}";
+    try std.testing.expectError(error.InvalidShape, parse(a, jsonbig));
+}
+
+test "density band at u32 max boundary is accepted" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const json = "{\"schema_version\":1,\"density_bands\":{\"haiku\":[4294967295]}}";
+    var p = try parse(a, json);
+    try std.testing.expectEqual(@as(u32, std.math.maxInt(u32)), p.density_bands.get("haiku").?[0]);
 }

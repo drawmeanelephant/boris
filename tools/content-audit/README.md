@@ -131,8 +131,10 @@ Field semantics:
   this schema is a documented example. The policy is the only place such
   signatures live.
 - `density_bands` — optional exact-count bands per type (replacing the old
-  hardcoded "Cromulent Seven" presentation). The policy may label a band, but
-  the engine stays generic.
+  hardcoded "Cromulent Seven" presentation). Values must be positive,
+  strictly ascending, and fit in an unsigned 32-bit count (≤ 4294967295); a
+  band value outside that range is rejected as a malformed policy (exit 4).
+  The policy may label a band, but the engine stays generic.
 - `exact_mappings` — policy-supplied exact mapping table keyed by canonical
   IDs (poetry id → source id).
 
