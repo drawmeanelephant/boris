@@ -151,35 +151,6 @@ pub fn hasSymlinkComponent(io: std.Io, root: std.Io.Dir, rel: []const u8) bool {
     return false;
 }
 
-/// Refuse any existing path component of an **absolute** path that is a
-/// symlink. Walks from the filesystem root so relative and absolute caller
-/// values are inspected identically: the caller canonicalizes the value to a
-/// lexical absolute path first, and this walker checks every component of
-/// that path as it exists on disk. Components that do not exist yet cannot
-/// be symlinks, so the walk stops at the first missing component.
-pub fn hasSymlinkComponentAbs(io: std.Io, abs: []const u8) bool {
-    var dir = std.Io.Dir.cwd().openDir(io, "/", .{}) catch return true;
-    var parts = std.mem.splitScalar(u8, abs, '/');
-    while (parts.next()) |part| {
-        if (part.len == 0 or eql(part, ".")) continue;
-        var target: [std.fs.max_path_bytes]u8 = undefined;
-        // readLink succeeds only when the component is a symlink; not-a-link
-        // and missing components are errors and mean "keep walking".
-        if (dir.readLink(io, part, &target)) |_| {
-            dir.close(io);
-            return true;
-        } else |_| {}
-        const next = dir.openDir(io, part, .{}) catch {
-            dir.close(io);
-            return false; // first missing component: nothing below can be a symlink
-        };
-        dir.close(io);
-        dir = next;
-    }
-    dir.close(io);
-    return false;
-}
-
 /// Resolve a relative path under a root into its canonical absolute path.
 /// Refuses `..` escaping and symlink components (used for overlap checks).
 pub fn canonicalPath(io: std.Io, gpa: std.mem.Allocator, root: std.Io.Dir, rel: []const u8) ![]u8 {

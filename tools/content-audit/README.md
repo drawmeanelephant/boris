@@ -120,12 +120,6 @@ A policy defines editorial expectations. The schema is versioned:
 }
 ```
 
-**`eligible_collections` and `poetry_collections` are required.** They define
-the audit population. A policy missing either field, or carrying either as
-null or a non-object, is rejected (exit 4); an explicitly empty object is
-valid, so an intentional zero-population audit is distinguishable from a
-truncated policy.
-
 Field semantics:
 
 - `eligible_collections` — source collections that must have poetry, and the
@@ -137,10 +131,8 @@ Field semantics:
   this schema is a documented example. The policy is the only place such
   signatures live.
 - `density_bands` — optional exact-count bands per type (replacing the old
-  hardcoded "Cromulent Seven" presentation). Values must be positive and
-  strictly ascending; the band list may have any length (one, two, or more
-  entries are all valid). The policy may label a band, but the engine stays
-  generic.
+  hardcoded "Cromulent Seven" presentation). The policy may label a band, but
+  the engine stays generic.
 - `exact_mappings` — policy-supplied exact mapping table keyed by canonical
   IDs (poetry id → source id).
 
@@ -222,12 +214,9 @@ coverage, verse-unit totals, density statistics, every mapping with its
 evidence, every exception, deterministic per-record results, and optional
 comparison with a previous report.
 
-Never emitted: absolute filesystem paths (the `REPORT.md` reproduction
-command renders `--root=<project-root>`, `--policy=<policy-file>`, and
-`--out=<output-dir>` placeholders instead of echoing caller paths; the
-explicit `--revision` and semantic options are preserved), host usernames,
-current timestamps, nondeterministic map ordering, random IDs. A source
-revision string is permitted only when supplied via `--revision`.
+Never emitted: absolute filesystem paths, host usernames, current timestamps,
+nondeterministic map ordering, random IDs. A source revision string is
+permitted only when supplied via `--revision`.
 
 The HTML site is static — no JavaScript, no remote assets, no network
 requests, accessible tables, links between pages, works from `file://` and
@@ -237,21 +226,14 @@ not archive canon.
 ## Collection scoping
 
 `--collection=NAME` selects **eligible source collections and their mapped
-poetry** — not a physical-directory filter. Repeated `--collection` values are
-canonicalized before analysis: deduplicated and sorted by unsigned byte order,
-so reversed argument order (and duplicated flags) produce byte-identical
-reports and filter identity is independent of argument order everywhere the
-list is compared (delta compatibility) or rendered (`collection_filter`,
-`scope.collections`, the reproduction command, and the terminal summary). A source record is in scope when
+poetry** — not a physical-directory filter. A source record is in scope when
 its physical collection is selected; a poetry record is in scope when any of
 its resolved owner claims point to a source record in a selected collection
 (this is what keeps a mapped poem visible in its source's report). Unmapped
 poetry falls back to physical-collection membership. Every section of a
 filtered report uses exactly this rule, so totals, verse totals, coverage,
 density, alignment counts and records, exceptions, deltas, per-record output,
-and exit-code findings always describe the same population — including the
-terminal summary line, which prints the same scoped source/poetry counts and
-scoped exception count as `report.json`. The report's
+and exit-code findings always describe the same population. The report's
 `scope` field labels the selection explicitly (`all`/global or
 `source_collection_and_mapped_poetry` + the selected names), and a filtered
 report is never presented beside unscoped global totals without that label. Comparing a
@@ -280,11 +262,7 @@ The tool:
 
 - refuses source/output overlap;
 - refuses output paths inside the content root;
-- refuses symlink traversal (in discovery, for the content root, and for the
-  output path); the output-path check canonicalizes `--out` to an absolute
-  lexical path and inspects every existing component from the filesystem
-  root, so absolute and relative `--root`/`--out` combinations are refused
-  identically;
+- refuses symlink traversal (both in discovery and for the content root);
 - refuses replacing a non-empty unmarked output directory;
 - stages output in a sibling temporary directory and publishes only an output
   containing the exact ownership marker;

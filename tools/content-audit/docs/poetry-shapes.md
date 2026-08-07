@@ -15,13 +15,9 @@ occurrences of obsolete MDX component names such as `<Limerick>` or
    - the opening fence is at least three consecutive backticks (`` ` ``) or
      tildes (`~`);
    - the opening fence character is remembered;
-   - an info string is allowed on the **opening** fence (e.g. `` ```text ``);
    - the closing fence must use the **same character** with a **length at
-     least** the opening length, and may contain **only ASCII spaces or tabs
-     after the fence run** — a line like `` ```not-a-close `` is never a
-     closing fence, so a block only closes on a clean `` ``` `` (or
-     `` ~~~ ``) line; a clean closer with trailing spaces does close;
-   - backtick and tilde fences follow identical rules;
+     least** the opening length;
+   - an info string is allowed on the opening fence (e.g. `` ```text ``);
    - an unclosed fence is handled deterministically: every line after the
      opening fence is ignored until end of file, and the ignored content is
      never counted.
@@ -252,18 +248,11 @@ structural gate than guess a shape.
 
 Concretely, for an unregistered type:
 
-- `exceptions` gains exactly one `{"kind": "unregistered_poetry_shape",
-  "severity": "structural"}` for the record;
+- `exceptions` gains `{"kind": "unregistered_poetry_shape", "severity":
+  "structural"}` for the record;
 - the record's alignment is `malformed_record`;
-- the record reports **zero complete verse units** and **one
-  malformed/unsupported record**;
-- per-record `malformed_units` is `1` and the aggregate `verse_totals` row
-  counts the record (1 record) with `verse_units = 0`, `placeholder_units =
-  0`, `substantive_units = 0`, `malformed_units = 1` — the per-record figure
-  always sums to the aggregate;
-- the alignment classification, the `totals.malformed_records` counter, the
-  Markdown report, and the HTML report all agree on this single
-  malformed/unsupported record;
+- `verse_totals` counts the record (1 record) with `verse_units = 0`,
+  `placeholder_units = 0`, `substantive_units = 0`, `malformed_units = 1`;
 - coverage for the owning source's expected type is `malformed`, never
   `present_substantive`;
 - the record is **not** a paragraph unit source, so it cannot silently pass a
