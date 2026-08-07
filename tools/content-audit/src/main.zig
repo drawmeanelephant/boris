@@ -1462,11 +1462,11 @@ fn replaceAll(a: std.mem.Allocator, s: []const u8, from: []const u8, to: []const
 /// reproduction command can be handed to a real POSIX shell for argument
 /// parsing (the raw `<...>` placeholders would be read as redirections).
 fn shellSubPlaceholders(a: std.mem.Allocator, cmd: []const u8) ![]u8 {
-    var s = try replaceAll(a, cmd, "<project-root>", "PROJECT_ROOT");
-    defer a.free(s);
-    s = try replaceAll(a, s, "<policy-file>", "POLICY_FILE");
-    defer a.free(s);
-    return replaceAll(a, s, "<output-dir>", "OUTPUT_DIR");
+    const project_root_replaced = try replaceAll(a, cmd, "<project-root>", "PROJECT_ROOT");
+    defer a.free(project_root_replaced);
+    const policy_file_replaced = try replaceAll(a, project_root_replaced, "<policy-file>", "POLICY_FILE");
+    defer a.free(policy_file_replaced);
+    return replaceAll(a, policy_file_replaced, "<output-dir>", "OUTPUT_DIR");
 }
 
 /// Split NUL-separated bytes into a slice of arguments (used only by tests).
@@ -1485,6 +1485,23 @@ fn hasArg(args: [][]const u8, want: []const u8) bool {
         if (util.eql(arg, want)) return true;
     }
     return false;
+}
+
+test "placeholder substitution frees every intermediate buffer" {
+    // The testing allocator has an effective free and detects both leaks and
+    // double frees, so this regression test fails if shellSubPlaceholders ever
+    // regresses to freeing through a reassigned local (the arena allocator
+    // used elsewhere masks that ownership error).
+    const a = std.testing.allocator;
+    const cmd = "boris-content-audit --root=<project-root> --policy=<policy-file> --out=<output-dir>";
+    const out = try shellSubPlaceholders(a, cmd);
+    defer a.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "<project-root>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "<policy-file>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "<output-dir>") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "--root=PROJECT_ROOT") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "--policy=POLICY_FILE") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "--out=OUTPUT_DIR") != null);
 }
 
 test "reversed collection filter order produces byte-identical output" {
