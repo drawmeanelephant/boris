@@ -75,6 +75,46 @@ pub fn appendJsonNumber(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, n: usiz
     try buf.print(gpa, "{d}", .{n});
 }
 
+/// Append `s` as exactly one argument of a POSIX-shell command line.
+///
+/// This is the single documented escaping path for every caller-controlled
+/// value that survives into the emitted reproduction command (`--content-root`,
+/// `--revision`, `--collection`, and the format/fail-on names). Values made
+/// only of "plain" characters (ASCII alphanumerics plus `._-/`) are emitted
+/// raw so stable values such as `rev-abc` stay byte-identical; anything else
+/// is wrapped in single quotes with the standard `'\''` idiom, which keeps the
+/// exact argument boundary under any POSIX shell (spaces, single quotes,
+/// dollar signs, backticks, and shell metacharacters all survive literally).
+pub fn appendShellQuoted(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
+    if (isPlainShellWord(s)) {
+        try buf.appendSlice(gpa, s);
+        return;
+    }
+    try buf.append(gpa, '\'');
+    for (s) |c| {
+        if (c == '\'') {
+            // Close the quote, emit an escaped quote, reopen the quote.
+            try buf.appendSlice(gpa, "'\\''");
+        } else {
+            try buf.append(gpa, c);
+        }
+    }
+    try buf.append(gpa, '\'');
+}
+
+/// True when `s` is non-empty and needs no quoting under a POSIX shell.
+/// Anything outside the plain set (whitespace, quotes, `$`, backticks,
+/// glob/metacharacters, control bytes, ...) forces single-quote wrapping.
+fn isPlainShellWord(s: []const u8) bool {
+    if (s.len == 0) return false;
+    for (s) |c| {
+        const plain = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or
+            c == '.' or c == '_' or c == '-' or c == '/';
+        if (!plain) return false;
+    }
+    return true;
+}
+
 /// HTML-escape untrusted text for static report pages.
 pub fn appendHtmlEscaped(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
     for (s) |c| switch (c) {

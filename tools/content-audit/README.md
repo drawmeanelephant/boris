@@ -137,10 +137,11 @@ Field semantics:
   this schema is a documented example. The policy is the only place such
   signatures live.
 - `density_bands` — optional exact-count bands per type (replacing the old
-  hardcoded "Cromulent Seven" presentation). Values must be positive and
-  strictly ascending; the band list may have any length (one, two, or more
-  entries are all valid). The policy may label a band, but the engine stays
-  generic.
+  hardcoded "Cromulent Seven" presentation). Values must be positive integers
+  that fit `u32` (`1` through `4294967295`) and strictly ascending; anything
+  outside that range is a malformed policy (exit 4). The band list may have
+  any length (one, two, or more entries are all valid). The policy may label
+  a band, but the engine stays generic.
 - `exact_mappings` — policy-supplied exact mapping table keyed by canonical
   IDs (poetry id → source id).
 
@@ -227,7 +228,13 @@ command renders `--root=<project-root>`, `--policy=<policy-file>`, and
 `--out=<output-dir>` placeholders instead of echoing caller paths; the
 explicit `--revision` and semantic options are preserved), host usernames,
 current timestamps, nondeterministic map ordering, random IDs. A source
-revision string is permitted only when supplied via `--revision`.
+revision string is permitted only when supplied via `--revision`. Every
+caller-controlled value that survives into the reproduction command
+(`--content-root`, `--revision`, `--collection`, format, fail-on) is emitted
+with shell-safe argument boundaries — values containing spaces, quotes, or
+shell metacharacters are single-quoted so each value remains exactly one
+argument when the command is pasted into a POSIX shell; plain values are
+emitted byte-identical.
 
 The HTML site is static — no JavaScript, no remote assets, no network
 requests, accessible tables, links between pages, works from `file://` and
