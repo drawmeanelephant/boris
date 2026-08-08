@@ -198,6 +198,64 @@ pub fn validate(
     try validateTopology(list_gpa, retain, nodes, diags);
 }
 
+/// Validate bounded authored semantic relations against the same provisional
+/// page set used by graph validation. This is a source-validity phase: every
+/// compiler projection that accepts semantic relations must call this after
+/// identity/topology validation and before graph freeze.
+pub fn validateSemanticRelations(
+    list_gpa: std.mem.Allocator,
+    retain: std.mem.Allocator,
+    nodes: []const Node,
+    diagnostics: *std.ArrayList(diag.Diagnostic),
+) !void {
+    for (nodes) |node| {
+        for (node.semantic_relations, 0..) |relation, relation_index| {
+            if (std.mem.eql(u8, node.id, relation.target)) {
+                try diagnostics.append(list_gpa, .{
+                    .severity = .error_,
+                    .code = .ERELATIONSELF,
+                    .message = try std.fmt.allocPrint(retain, "semantic relation {s} targets its source page", .{relation.kind.name()}),
+                    .remediation = try retain.dupe(u8, "Choose a different target page"),
+                    .source_path = node.source_path,
+                    .line = 1,
+                    .column = 1,
+                    .id = node.id,
+                });
+                continue;
+            }
+            if (findIndexById(nodes, relation.target) == null) {
+                try diagnostics.append(list_gpa, .{
+                    .severity = .error_,
+                    .code = .ERELATIONMISSING,
+                    .message = try std.fmt.allocPrint(retain, "semantic relation {s} targets missing page \"{s}\"", .{ relation.kind.name(), relation.target }),
+                    .remediation = try retain.dupe(u8, "Create the target page or remove the relation"),
+                    .source_path = node.source_path,
+                    .line = 1,
+                    .column = 1,
+                    .id = node.id,
+                });
+            }
+            var prior: usize = 0;
+            while (prior < relation_index) : (prior += 1) {
+                const earlier = node.semantic_relations[prior];
+                if (earlier.kind == relation.kind and std.mem.eql(u8, earlier.target, relation.target)) {
+                    try diagnostics.append(list_gpa, .{
+                        .severity = .error_,
+                        .code = .ERELATIONDUPLICATE,
+                        .message = try std.fmt.allocPrint(retain, "duplicate semantic relation {s} -> \"{s}\"", .{ relation.kind.name(), relation.target }),
+                        .remediation = try retain.dupe(u8, "Keep each semantic relation tuple only once"),
+                        .source_path = node.source_path,
+                        .line = 1,
+                        .column = 1,
+                        .id = node.id,
+                    });
+                    break;
+                }
+            }
+        }
+    }
+}
+
 /// Parent resolution, role classification, and cycle detection.
 ///
 /// Prefer `validate` at product call sites so duplicate ids are never skipped.

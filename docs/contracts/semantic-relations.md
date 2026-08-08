@@ -60,10 +60,12 @@ before IR freeze/publication:
 - relation failures prevent graph freeze and publish no partial IR.
 
 All diagnostics carry the originating page source path and frontmatter line.
-HTML, RAG, and Documentation Intelligence must either consume the same
-validated relation set or explicitly document that they do not expose semantic
-relations; they must not invent a second parser or silently ignore invalid
-relations.
+The IR pipeline and HTML graph freeze, including `boris validate`, invoke the
+same graph-owned semantic-relation validator. HTML does not expose relation
+metadata merely by validating it. RAG and Documentation Intelligence must
+either consume the same validated relation set or explicitly document that they
+do not expose semantic relations; no projection may invent a second parser or
+silently ignore invalid relations.
 
 ## IR 0.3 shape
 
@@ -101,7 +103,8 @@ semantic lookup can build one without confusing it with build invalidation.
 - IR 0.2 consumers must reject the 0.3 artifact by schema version rather than
   silently dropping `relations`.
 - `--no-rag` / `--out` remains the explicit IR path; the bare HTML path does
-  not change its output solely because relations exist.
+  not change its output solely because relations exist. HTML build and
+  no-publication validation still reject an invalid relation set before render.
 - RAG may later export semantic relations as metadata, but that is a separate
   RAG contract amendment and must preserve the existing `boris-rag` schema.
 - Documentation Intelligence may report semantic relations only after its own

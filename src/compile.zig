@@ -177,6 +177,7 @@ pub fn freezeSiteFromPageDb(
             .status = if (p.status) |s| s.name() else null,
             .tags = p.tags,
             .body_offset = p.body_offset,
+            .semantic_relations = p.relations,
         };
     }
 
@@ -186,6 +187,10 @@ pub fn freezeSiteFromPageDb(
     var diag_arena = std.heap.ArenaAllocator.init(gpa);
     defer diag_arena.deinit();
     try graph_mod.validate(gpa, diag_arena.allocator(), nodes, &diags);
+    if (diag.countErrors(diags.items) == 0) {
+        try graph_mod.validateSemanticRelations(gpa, diag_arena.allocator(), nodes, &diags);
+    }
+    diag.sortDiagnostics(diags.items);
     if (diag.countErrors(diags.items) > 0) {
         if (!quiet) {
             for (diags.items) |d| {
@@ -255,6 +260,10 @@ pub const CompileOptions = struct {
     /// Target-owned layout rules (`--layout-rule`). Empty → one layout for all pages.
     layout_rules: []const layout_select.LayoutRule = &.{},
     quiet: bool = true,
+    /// Run the canonical HTML prepublication phases and return before creating
+    /// an output/staging tree. Product callers should use
+    /// `validateHtmlSiteMulti` rather than setting this directly.
+    validation_only: bool = false,
     /// When set, force a render failure after promoting page `N` (0-based)
     /// without publishing — used to prove error-path Whiteboard reset + no
     /// final file. Production callers leave this `null`.
@@ -480,7 +489,9 @@ pub const RenderOptions = struct {
     page_assets: ?*const content_asset.PageAssetBundle = null,
 };
 
-/// Render one page body through Apex into the Whiteboard and publish HTML.
+/// Render one page through the canonical prepublication body and layout-slot
+/// preparation path. Returned slices live on `doc_arena`; callers must keep
+/// the arena alive until they either publish or deliberately discard them.
 ///
 /// **Caller owns Whiteboard lifecycle:** must `reset(.free_all)` only after
 /// this function returns (success or error). This function never resets the
@@ -490,21 +501,18 @@ pub const RenderOptions = struct {
 /// function re-reads source for the body only — parse views stay on the
 /// Whiteboard until return.
 ///
-/// When `render_opts.site` is non-null and the layout has graph chrome slots,
-/// those fragments are rendered from the frozen graph on the Whiteboard.
 /// `{{toc}}` is built from rendered body HTML (page-local; no graph required).
-pub fn renderAndPublishPage(
+fn renderPageSlots(
     io: Io,
     gpa: std.mem.Allocator,
     content_dir: Io.Dir,
-    dist_dir: Io.Dir,
     page: *const DurablePage,
     layout: assemble.Layout,
     doc_arena: *std.heap.ArenaAllocator,
     options: CompileOptions,
     page_index: usize,
     render_opts: RenderOptions,
-) !void {
+) !assemble.SlotValues {
     const arena = doc_arena.allocator();
 
     const source = try source_io.readPageAlloc(io, content_dir, page.source_path, arena);
@@ -558,6 +566,38 @@ pub fn renderAndPublishPage(
         // Layout requests graph chrome but no frozen site — treat as internal error.
         return error.GraphValidationFailed;
     }
+
+    return slots;
+}
+
+/// Render one page body through Apex into the Whiteboard and publish HTML.
+///
+/// Publication is deliberately a thin wrapper over `renderPageSlots` so the
+/// no-publication validator and normal HTML compiler cannot drift on source,
+/// component, link, graph-chrome, TOC, metadata, footer, or asset-url rules.
+pub fn renderAndPublishPage(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    dist_dir: Io.Dir,
+    page: *const DurablePage,
+    layout: assemble.Layout,
+    doc_arena: *std.heap.ArenaAllocator,
+    options: CompileOptions,
+    page_index: usize,
+    render_opts: RenderOptions,
+) !void {
+    const slots = try renderPageSlots(
+        io,
+        gpa,
+        content_dir,
+        page,
+        layout,
+        doc_arena,
+        options,
+        page_index,
+        render_opts,
+    );
 
     const fail_publish = if (options.test_fail_publish_at) |idx| idx == page_index else false;
     try assemble.writePageWithSlotsOpts(io, dist_dir, page.output_path, layout, slots, .{
@@ -1052,6 +1092,23 @@ pub fn compileHtmlSiteMulti(
         if (any_io_failed) return error.MultiTargetIoFailed;
         return error.MultiTargetCompilationFailed;
     }
+}
+
+/// Run the canonical HTML source/target prepublication phases without writing
+/// a site, stage tree, cache, structured projection, or publication evidence.
+/// Target path isolation still observes the selected output paths so a later
+/// build cannot disagree about configuration safety.
+pub fn validateHtmlSiteMulti(
+    io: Io,
+    gpa: std.mem.Allocator,
+    targets: []const target_mod.TargetSpec,
+    base_options: CompileOptions,
+) !void {
+    var validation_options = base_options;
+    validation_options.validation_only = true;
+    validation_options.incremental = false;
+    validation_options.jobs = 1;
+    return compileHtmlSiteMulti(io, gpa, targets, validation_options);
 }
 
 test "multi-target failure classification keeps I/O distinct from content" {
@@ -1714,6 +1771,91 @@ fn publishStageTree(
     }
 }
 
+/// Complete the source/compiler validity work for one selected HTML target
+/// without creating or mutating its output tree.
+///
+/// Every operation here is also an existing normal-compile operation: heading
+/// harvest and page rendering use the same body/Apex path, while layout slots,
+/// graph chrome, theme assets, content-local assets, and sitemap bytes use the
+/// same typed helpers as publication. Rendered bytes are deliberately
+/// discarded; search, output link audit, inventories, checks, claims, Touch
+/// Atlas, and Proof Pack remain publication phases.
+fn validatePrepublicationTarget(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    db: *PageDb,
+    page_layouts: []const assemble.Layout,
+    options: CompileOptions,
+    shared: *const SharedCompileState,
+    site: *const FrozenSite,
+    theme_bundle: *const theme_mod.ThemeBundle,
+    content_assets: *const content_asset.SiteAssetInventory,
+) !CompileStats {
+    const heading_built = try buildSiteHeadingIndex(
+        io,
+        gpa,
+        content_dir,
+        db,
+        site,
+        shared,
+        options.quiet,
+        options.input_format,
+        null,
+    );
+    var heading_index = heading_built[0];
+    defer heading_index.deinit(gpa);
+    var heading_snapshot = heading_built[1];
+    defer heading_snapshot.deinit();
+
+    var stats: CompileStats = .{};
+    var doc_arena = std.heap.ArenaAllocator.init(gpa);
+    defer doc_arena.deinit();
+
+    for (db.items(), 0..) |*page, page_index| {
+        defer {
+            _ = doc_arena.reset(.free_all);
+            stats.last_reset_capacity = doc_arena.queryCapacity();
+        }
+
+        _ = try renderPageSlots(
+            io,
+            gpa,
+            content_dir,
+            page,
+            page_layouts[page_index],
+            &doc_arena,
+            options,
+            page_index,
+            .{
+                .site = site,
+                .heading_index = &heading_index,
+                .theme = theme_bundle,
+                .page_assets = &content_assets.pages[page_index],
+            },
+        );
+        stats.pages_attempted += 1;
+        const cap = doc_arena.queryCapacity();
+        if (cap > stats.peak_whiteboard_capacity) stats.peak_whiteboard_capacity = cap;
+    }
+
+    // Sitemap configuration is source/target validity, but sitemap publication
+    // is not. Render its deterministic bytes in memory to exercise the exact
+    // URL, duplicate, count, and size rules, then discard them.
+    if (options.sitemap_path != null) {
+        var page_paths: std.ArrayList([]const u8) = .empty;
+        defer page_paths.deinit(gpa);
+        for (db.items()) |page| {
+            if (page.status == .draft) continue;
+            try page_paths.append(gpa, page.output_path);
+        }
+        const sitemap_bytes = try sitemap.render(gpa, options.site_url.?, page_paths.items);
+        gpa.free(sitemap_bytes);
+    }
+
+    return stats;
+}
+
 fn compilePagesInner(
     io: Io,
     gpa: std.mem.Allocator,
@@ -1728,29 +1870,6 @@ fn compilePagesInner(
 
     var content_dir = try cwd.openDir(io, options.content_root, .{});
     defer content_dir.close(io);
-
-    try cwd.createDirPath(io, options.dist_dir);
-    // Re-check for symlink swap after validation (TOCTOU shrink — issue #11).
-    try target_mod.rejectSymlinkAlongPath(io, cwd, gpa, options.dist_dir);
-    var dist_dir = try cwd.openDir(io, options.dist_dir, .{ .iterate = true });
-    defer dist_dir.close(io);
-
-    var prior_sitemap = try readPriorSitemapOwnership(io, gpa, dist_dir);
-    defer prior_sitemap.deinit(gpa);
-
-    // Best-effort: remove orphan createFileAtomic temps left by interrupted runs.
-    assemble.scrubStaleAtomicTemps(io, dist_dir, gpa);
-
-    // Sibling staging: render dirty pages here; commit only after full target success.
-    const stage_rel = try stageRelForDist(gpa, options.dist_dir);
-    defer gpa.free(stage_rel);
-    cwd.deleteTree(io, stage_rel) catch {};
-    try cwd.createDirPath(io, stage_rel);
-    errdefer cwd.deleteTree(io, stage_rel) catch {};
-    try target_mod.rejectSymlinkAlongPath(io, cwd, gpa, stage_rel);
-
-    var stage_dir = try cwd.openDir(io, stage_rel, .{ .iterate = true });
-    defer stage_dir.close(io);
 
     // Layout selection: load every declared layout (fallback + rules), select per page.
     try layout_select.validateLayoutPath(options.layout_path);
@@ -1909,10 +2028,6 @@ fn compilePagesInner(
         }
     }
 
-    // Assets are target-owned members of the same staging transaction.
-    try theme_mod.copyAssetsToOutput(io, stage_dir, theme_bundle.assets);
-    try content_asset.copyAssetsToOutput(io, stage_dir, &content_assets);
-
     // Per-layout theme fingerprint material (footer + that layout's asset-url refs).
     {
         var it = layouts_by_path.iterator();
@@ -1938,6 +2053,50 @@ fn compilePagesInner(
         local_shared = try SharedCompileState.init(io, gpa, db, options.content_root, options.quiet, options.input_format);
         break :blk &(local_shared.?);
     };
+
+    if (options.validation_only) {
+        return validatePrepublicationTarget(
+            io,
+            gpa,
+            content_dir,
+            db,
+            page_layouts,
+            options,
+            shared,
+            site,
+            &theme_bundle,
+            &content_assets,
+        );
+    }
+
+    // Publication begins here. No code above this boundary creates, removes,
+    // or mutates the selected target or sibling staging tree.
+    try cwd.createDirPath(io, options.dist_dir);
+    // Re-check for symlink swap after validation (TOCTOU shrink — issue #11).
+    try target_mod.rejectSymlinkAlongPath(io, cwd, gpa, options.dist_dir);
+    var dist_dir = try cwd.openDir(io, options.dist_dir, .{ .iterate = true });
+    defer dist_dir.close(io);
+
+    var prior_sitemap = try readPriorSitemapOwnership(io, gpa, dist_dir);
+    defer prior_sitemap.deinit(gpa);
+
+    // Best-effort: remove orphan createFileAtomic temps left by interrupted runs.
+    assemble.scrubStaleAtomicTemps(io, dist_dir, gpa);
+
+    // Sibling staging: render dirty pages here; commit only after full target success.
+    const stage_rel = try stageRelForDist(gpa, options.dist_dir);
+    defer gpa.free(stage_rel);
+    cwd.deleteTree(io, stage_rel) catch {};
+    try cwd.createDirPath(io, stage_rel);
+    errdefer cwd.deleteTree(io, stage_rel) catch {};
+    try target_mod.rejectSymlinkAlongPath(io, cwd, gpa, stage_rel);
+
+    var stage_dir = try cwd.openDir(io, stage_rel, .{ .iterate = true });
+    defer stage_dir.close(io);
+
+    // Assets are target-owned members of the same staging transaction.
+    try theme_mod.copyAssetsToOutput(io, stage_dir, theme_bundle.assets);
+    try content_asset.copyAssetsToOutput(io, stage_dir, &content_assets);
 
     // Load and parse prior manifest if in incremental mode (from final dist).
     var manifest_bytes: ?[]u8 = null;
@@ -4934,6 +5093,85 @@ test "compilePages: parallel Unified constructs stable under jobs (D4)" {
     }
 }
 
+test "validateHtmlSiteMulti shares prepublication semantics without output" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-validate-no-output-test", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\status: published
+        \\---
+        \\# Home
+        \\
+        \\{{include includes/blurb.md}}
+        \\
+        \\See [[guides/note#details]].
+        \\
+        \\<Aside kind="tip" id="validation-tip">
+        \\Shared component validation.
+        \\</Aside>
+        \\
+    );
+    try writeTreeFile(io, work, "content/guides/note.md",
+        \\---
+        \\title: Note
+        \\parent: index
+        \\status: published
+        \\---
+        \\# Note
+        \\
+        \\## Details
+        \\
+    );
+    try writeTreeFile(io, work, "content/includes/blurb.md", "Included through the canonical dependency resolver.\n");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const stage = try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{dist});
+    defer gpa.free(stage);
+    const index_path = try std.fmt.allocPrint(gpa, "{s}/index.html", .{dist});
+    defer gpa.free(index_path);
+    const sitemap_path = try std.fmt.allocPrint(gpa, "{s}/sitemap.xml", .{dist});
+    defer gpa.free(sitemap_path);
+
+    const targets = [_]target_mod.TargetSpec{
+        .{ .name = "default", .output_dir = dist },
+    };
+    const options: CompileOptions = .{
+        .content_root = content_path,
+        .layout_path = layout_path,
+        .sitemap_path = "sitemap.xml",
+        .site_url = "https://example.test/docs/",
+        .quiet = true,
+    };
+
+    // Repeated validation exercises the full shared render preflight while
+    // leaving neither the final target nor its sibling stage behind.
+    try validateHtmlSiteMulti(io, gpa, &targets, options);
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, dist, .{}));
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, stage, .{}));
+    try validateHtmlSiteMulti(io, gpa, &targets, options);
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, dist, .{}));
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, stage, .{}));
+
+    // Passing validation does not alter normal publication semantics.
+    try compileHtmlSiteMulti(io, gpa, &targets, options);
+    try cwd.access(io, index_path, .{});
+    try cwd.access(io, sitemap_path, .{});
+}
+
 test "compileHtmlSiteMulti - success, validation, and isolation" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -7443,10 +7681,10 @@ test "content-local assets: active SVG fails before HTML publish" {
         .layout_path = layout,
         .quiet = true,
     }));
-    var dist_dir = try cwd.openDir(io, dist, .{});
-    defer dist_dir.close(io);
-    try std.testing.expectError(error.FileNotFound, dist_dir.access(io, "index.html", .{}));
-    try std.testing.expectError(error.FileNotFound, dist_dir.access(io, "index.assets/logo.svg", .{}));
+    const stage = try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{dist});
+    defer gpa.free(stage);
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, dist, .{}));
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, stage, .{}));
 }
 
 test "content-local assets: byte change does not re-render HTML" {

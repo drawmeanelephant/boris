@@ -2,14 +2,16 @@
 
 **Status:** normative command-routing contract for the v0.8 afterparty line.
 
-Boris exposes four stable top-level commands. A missing command is equivalent to
+Boris exposes six stable top-level commands. A missing command is equivalent to
 `build` for backwards compatibility.
 
 ```text
 boris build [build options]
+boris validate [HTML source and target options]
 boris check [--input DIR] [--format human|json] [--report PATH]
 boris impact ID [--input DIR] [--format human|json] [--report PATH]
 boris watch [build options]
+boris plan --profile PATH [plan overrides]
 ```
 
 ## Commands
@@ -17,23 +19,34 @@ boris watch [build options]
 | Command | Purpose | Writes by default |
 |---------|---------|-------------------|
 | `build` | Compile the configured site or explicitly selected export | HTML `dist/`, or the selected `--out`, `--rag-dir`, `--context-dir`, `--llms`, or `--rss` path |
+| `validate` | Run the selected HTML input/configuration through the canonical prepublication compiler phases | Nothing |
 | `check` | Validate the frozen graph and emit a deterministic health report | Nothing unless `--report` is supplied |
 | `impact ID` | Emit the transitive dependents of a page or source endpoint | Nothing unless `--report` is supplied |
 | `watch` | Run an HTML build, then rebuild after debounced source/layout changes | HTML output selected by build options |
+| `plan` | Parse and normalize one publication profile without executing it | Nothing; normalized declaration JSON is written to stdout |
 
 `watch` is the command spelling for local development. The existing
 `build --watch` / bare `--watch` form remains accepted as a compatibility alias
 and has identical behavior. Watch is HTML-only and implies incremental mode.
 
-`check` and `impact` are read-only analysis commands. They do not create HTML,
-IR, RAG, context, RSS, or cache artifacts. They require a valid frozen graph before
-analysis runs.
+`validate`, `check`, and `impact` are read-only, but they are not aliases.
+`validate` covers the selected HTML source/configuration through the shared
+prepublication render boundary. `check` and `impact` operate on a valid frozen
+graph and add Documentation Intelligence analysis rather than layout/theme/HTML
+preflight. See the normative [validation contract](validation.md).
+
+`validate` does not create HTML, IR, RAG, context, RSS, cache, search, or
+publication-evidence artifacts. It accepts applicable existing HTML options,
+including target/layout/theme and sitemap configuration, and rejects export
+selectors, `--incremental`, `--watch`, `--jobs`, `--format`, and `--report`.
+`check` and `impact` likewise create no product artifacts; only their explicit
+`--report` path may be written.
 
 ## Exit codes
 
 | Code | Meaning |
 |-----:|---------|
-| `0` | Successful build, watch shutdown, valid impact query, or check with no policy findings |
+| `0` | Successful build, validation, plan, watch shutdown, valid impact query, or check with no policy findings |
 | `1` | Content/graph failure, or a `check` policy finding such as an unreferenced page |
 | `2` | Usage error: unknown command/flag, missing value, invalid ID, or conflicting mode |
 | `3` | I/O or system failure |
@@ -65,21 +78,29 @@ locations; `graph.json` is authoritative for frozen nodes and edges. Nova and
 other editor integrations must consume these published contracts rather than
 reimplementing frontmatter or graph resolution.
 
+`validate` has no report artifact. It reuses canonical compiler diagnostics in
+their normal deterministic stderr form and exit classes; `--quiet` suppresses
+that text. `--format` and `--report` remain analysis-only flags and must not be
+accepted as an invitation to invent a second validation schema.
+
 ## RSS mode
 
 `--rss` and `--rss-path PATH` select the deterministic RSS-only projection.
 It requires `--site-url`, `--rss-title`, and `--rss-description`; `--rss-limit`
 is 1–500 (default 20). RSS is incompatible with every other build projection,
-`check`, and `impact`. See the normative [RSS 2.0 contract](rss-2.0.md).
+`validate`, `check`, and `impact`. See the normative
+[RSS 2.0 contract](rss-2.0.md).
 
 ## HTML sitemap flags
 
 `--sitemap` adds `sitemap.xml` to a single HTML target.
 `--sitemap-path PATH` implies sitemap publication and selects another
 target-root-relative file. Both require the reusable `--site-url` HTTP(S) base.
-Sitemap flags are invalid with non-HTML projections, `check`, `impact`, or an
-ambiguous multi-target configuration. `--site-url` without RSS or sitemap
-selection is also a usage error. See the normative
+Sitemap flags are valid for `build` and `validate` on one selected HTML target.
+They are invalid with non-HTML projections, `check`, `impact`, or an ambiguous
+multi-target configuration. `--site-url` without RSS or sitemap selection is
+also a usage error. Validation renders sitemap bytes in memory and discards
+them; only `build` publishes the file. See the normative
 [XML sitemap contract](xml-sitemap.md).
 
 ## Compatibility rule

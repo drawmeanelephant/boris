@@ -788,6 +788,20 @@ pub fn build(b: *std.Build) void {
     test_sitemap_step.dependOn(&run_site_url_tests.step);
     test_sitemap_step.dependOn(&run_sitemap_tests.step);
 
+    // Authoritative no-publication validation CLI contract.
+    const validation_contract_run = b.addSystemCommand(&.{
+        "bash",
+        "test/validate-contract.sh",
+    });
+    validation_contract_run.setCwd(b.path("."));
+    validation_contract_run.has_side_effects = true;
+    validation_contract_run.step.dependOn(b.getInstallStep());
+    const test_validation_step = b.step(
+        "test-validation",
+        "Run authoritative no-publication validation contract tests",
+    );
+    test_validation_step.dependOn(&validation_contract_run.step);
+
     // Retained publication evidence: generate only the bounded depth chains
     // under the ignored verifier tree, then exercise the real installed CLI.
     const publication_conformance_run = b.addSystemCommand(&.{

@@ -3,7 +3,8 @@
 **Status:** normative contract — core implemented; Feature 8 extends existing
 include/reference categories to IR dependency resolution without adding codes
 **Emitted by:** `src/diag.zig` (codes), `src/parser.zig` (parse categories),
-`src/graph.zig` (graph codes), `src/pipeline.zig` (aggregation + stderr)
+`src/graph.zig` (graph codes), `src/pipeline.zig` / `src/compile.zig`
+(aggregation + stderr)
 
 ---
 
@@ -31,7 +32,9 @@ required by acceptance fixtures unless noted later.
 
 ## Diagnostic object
 
-Used on stderr (text form) and in `build-report.json` (JSON form). Diagnostics
+Used on stderr (text form) and in `build-report.json` (JSON form) when the
+selected IR projection emits that report. `boris validate` uses the same text
+form, ordering, and exit classes but writes no report or artifact. Diagnostics
 are **not** embedded on `manifest.json` in v0.2.
 
 ### JSON fields (key order)
@@ -115,9 +118,9 @@ site cannot serve.
 | `EINCLUDECYCLE` | error | Transclusion cycle among includes (or depth exceeded) | `include` → HTML / IR dependency resolution |
 | `EREFERENCESYNTAX` | error | Malformed `[[…]]` wiki-link (including empty or illegal `#` fragment) | `wikilink` → HTML / IR dependency resolution |
 | `EREFERENCEMISSING` | error | Wiki-link target entity id not in the page graph, **or** `#fragment` not among that page’s rendered heading ids | `wikilink` → HTML / IR dependency resolution |
-| `ERELATIONMISSING` | error | Semantic relation target entity id is not in the page graph | semantic relation validation → IR |
-| `ERELATIONSELF` | error | Semantic relation targets its source page | semantic relation validation → IR |
-| `ERELATIONDUPLICATE` | error | Same semantic `(kind,target)` tuple appears more than once | semantic relation validation / parser → IR |
+| `ERELATIONMISSING` | error | Semantic relation target entity id is not in the page graph | shared semantic relation validation before graph freeze |
+| `ERELATIONSELF` | error | Semantic relation targets its source page | shared semantic relation validation before graph freeze |
+| `ERELATIONDUPLICATE` | error | Same semantic `(kind,target)` tuple appears more than once | parser / shared semantic relation validation before graph freeze |
 | `EASSET` | error | Content-local page asset path invalid, outside the owning page’s sibling tree, missing, symlink, not a regular file, contains active SVG content, or collides at publication | `content_asset` → HTML |
 | `EROUTEMISSING` | error | Published local `href`/`src` resolves to no output this build intends to keep | `link_audit` → HTML commit |
 | `EROUTEESCAPE` | error | Published local `href`/`src` climbs above the output root and can never be served | `link_audit` → HTML commit |
@@ -183,14 +186,16 @@ If a precise column is unknown, use column `1`.
 
 | Code | Meaning |
 |-----:|---------|
-| `0` | Success: validation passed; IR written with `ok: true`; zero `error` diagnostics |
+| `0` | Success: selected operation passed with zero `error` diagnostics; requested artifacts are complete, or no artifacts were requested by `validate` |
 | `1` | Content / validation failed: one or more content `error` diagnostics |
 | `2` | Usage / CLI error (`EUSAGE`) |
 | `3` | I/O or system failure (`EIO`) |
 
 Rules:
 
-1. Exit `0` only if the IR path completed with `ok: true`.
+1. An artifact-producing path exits `0` only when its contracted output is
+   complete. `validate` exits `0` only when every applicable prepublication
+   phase passed and still writes no artifact.
 2. Warnings alone do not force non-zero exit.
 3. Do not exit `0` if any `error` was emitted, even if some files parsed.
 4. `--help` / `-h` exit `0` without scanning content or writing artifacts.
@@ -201,7 +206,8 @@ Rules:
    code `0`.
 7. `--quiet` suppresses **progress** logging and **diagnostic text on stderr**.
    Exit codes, IR/RAG artifacts, and `build-report.json` diagnostics are
-   unchanged.
+   unchanged when those artifacts were selected; validation remains
+   artifact-free.
 
 ---
 

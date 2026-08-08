@@ -40,6 +40,7 @@ instead of quietly producing a broken site.
 - Deterministic HTML output with trusted static layouts and copied assets.
 - Validated Trunk/Satellite navigation and graph-aware breadcrumbs/children.
 - Closed, explicit frontmatter rather than unrestricted YAML or executable MDX.
+- Authoritative `boris validate` preflight with no generated output or evidence.
 - Incremental builds, watch mode, isolated targets, and bounded page workers.
 - JSON IR with typed dependency edges and reverse indexes.
 - Deterministic RAG, Context Bundle, `llms.txt`, and RSS 2.0 exports from the same tree.
@@ -88,6 +89,7 @@ Useful first commands:
 ./zig-out/bin/boris --llms --quiet             # llms.txt
 ./zig-out/bin/boris --rss --site-url https://docs.example/ --rss-title "Example Docs" --rss-description "Recent updates" --quiet
 ./zig-out/bin/boris --sitemap --site-url https://docs.example/ --quiet
+./zig-out/bin/boris validate --quiet             # HTML source/config preflight; no output
 ./zig-out/bin/boris check                      # graph-health report
 ./zig-out/bin/boris impact getting-started    # dependency impact report
 zig build test
@@ -143,6 +145,7 @@ the manifests as the record of exactly what an LLM received.
 | Command | Output | Best for |
 | --- | --- | --- |
 | `boris` | HTML under `dist/` | Publishing a static site |
+| `boris validate` | None | Compiler-authoritative HTML source/configuration preflight |
 | `boris --sitemap --site-url URL` | HTML plus `sitemap.xml` | Crawler URL discovery |
 | `boris --out .boris` | JSON IR | Build tools and inspection |
 | `boris --rag` | RAG corpus | LLM retrieval and audits |
@@ -156,6 +159,12 @@ shown explicitly above: it is an HTML-build flag, not a separate content project
 `--sitemap-path PATH` changes its target-relative path and implies
 `--sitemap`. A sitemap is a discovery hint, not a guarantee that a search
 engine will crawl or index a page.
+
+`boris validate` follows the normal HTML compiler through its bounded
+prepublication render phases, then stops before creating a target or stage.
+It is distinct from `check`, which adds graph-health policy, and from normal
+build publication/evidence. See the
+[validation contract](docs/contracts/validation.md) for the exact boundary.
 
 The canonical [publication model](docs/contracts/publication-model.md) defines
 which values are document facts, publication facts, migration provenance, or

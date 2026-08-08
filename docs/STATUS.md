@@ -1,6 +1,6 @@
 # Project status — Boris
 
-**As of:** 2026-08-04
+**As of:** 2026-08-08
 
 **Integration line:** `afterparty` during the Build Week judging window; `main` is frozen.
 
@@ -24,7 +24,7 @@ frontmatter or claim a unified publication executor.
   context is complete. The historical `v0.8.0` tag remains preserved as
   erroneous evidence: it resolves to a commit carrying 0.7.0 metadata and is
   not an ancestor of `afterparty`.
-- The current afterparty merge set runs through PR **#305**: generated-output
+- The current afterparty merge set runs through PR **#311**: generated-output
   hygiene, docs-maintenance hardening, default-site layout polish, rendered
   search foundation, CLI hardening, browser UI, staged publication,
   standalone-tool CI, nested hierarchy, human-first documentation IA, the
@@ -34,8 +34,9 @@ frontmatter or claim a unified publication executor.
   plan / artifact-inventory / checks / claims evidence chain, the Touch Atlas
   (contract and first slice), testdata-generator and jobs passthrough, the
   test-throughput audit, and the Proof Pack (contract, first slice, semantic
-  rejection probes, HTML presentation, and print-disclosure robustness) in
-  PRs #275–#305.
+  rejection probes, HTML presentation, and print-disclosure robustness),
+  release bookkeeping, the standalone content audit, and parser-authority
+  cleanup in PRs #275–#311.
 - Rendered-site search is **shipped on `afterparty`**: the compiler produces the
   search artifact from its staged live-page overlay and the default layout has
   a small browser UI with a no-JavaScript navigation fallback. Its normative
@@ -48,6 +49,7 @@ frontmatter or claim a unified publication executor.
 | Default site build | **Done** — `boris` writes HTML to `dist/`. |
 | Markdown rendering | **Done** — in-process ApexMarkdown Unified, including tables and footnotes. |
 | Content graph | **Done** — closed frontmatter, validated Trunk/Satellite hierarchy with arbitrary finite acyclic parent chains, includes, wiki links, and heading targets. |
+| No-publication validation | **Done on `afterparty`** — `boris validate` reuses the canonical HTML prepublication compiler path for source, graph, dependency, component, layout, theme, asset, and sitemap validity without creating target, cache, search, or evidence artifacts. |
 | HTML navigation and layouts | **Done** — graph-backed nav, breadcrumbs, TOC, closed layout slots, assets, layout rules, incremental/watch/jobs, isolated targets, and opt-in deterministic XML sitemap publication. |
 | Machine outputs | **Done** — IR 0.2, RAG, Context Bundles, `llms.txt`, and deterministic RSS 2.0; semantic relations retain their documented conditional IR 0.3 artifacts. |
 | Migration laboratories | **Done as bounded developer tools** — read-only review, conversion aids, relationship candidates, and theme materialization; they do not widen Boris author grammar. |
@@ -69,6 +71,7 @@ zig build test
 ./scripts/release-gate.sh
 
 ./zig-out/bin/boris --quiet                         # HTML → dist/
+./zig-out/bin/boris validate --quiet                # prepublication validation; no output
 ./zig-out/bin/boris --out .boris --quiet            # IR only
 ./zig-out/bin/boris --rag --quiet                   # RAG → rag/
 ./zig-out/bin/boris --context --quiet               # Context Bundle

@@ -32,6 +32,7 @@ pub const Mode = enum {
 
 pub const Command = enum {
     build,
+    validate,
     check,
     impact,
     watch,
@@ -219,6 +220,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var i: usize = if (args.len > 0) 1 else 0;
     if (i < args.len and std.mem.eql(u8, args[i], "build")) {
         command = .build;
+        i += 1;
+    } else if (i < args.len and std.mem.eql(u8, args[i], "validate")) {
+        command = .validate;
         i += 1;
     } else if (i < args.len and std.mem.eql(u8, args[i], "watch")) {
         command = .watch;
@@ -635,7 +639,19 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
 
     if (saw_profile) return error.ConflictingFlags;
 
-    if (command == .check or command == .impact) {
+    if (command == .validate) {
+        // Validation is the no-publication form of the selected HTML source /
+        // target compiler path. Export selectors, output-bearing analysis,
+        // watch/cache behavior, and rendering worker controls would either
+        // select another projection or imply filesystem state.
+        if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or
+            saw_rss_title or saw_rss_description or saw_rss_limit or saw_scope or
+            saw_split_size or saw_bundles_only or saw_incremental or saw_watch or
+            saw_jobs or saw_format or saw_report)
+        {
+            return error.ConflictingFlags;
+        }
+    } else if (command == .check or command == .impact) {
         if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or wants_sitemap or saw_site_url or saw_rss_title or saw_rss_description or saw_rss_limit or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
             return error.ConflictingFlags;
         }
@@ -935,6 +951,7 @@ pub fn printUsage() void {
         \\
         \\Modes:
         \\  build               Build the HTML site (default command)
+        \\  validate            Validate selected HTML source/config without publication
         \\  watch               Build HTML, then watch and rebuild on changes
         \\  check               Read-only graph health report (CI findings exit 1)
         \\  impact <ID>         Read-only transitive impact report for a page
@@ -1006,13 +1023,14 @@ pub fn printUsage() void {
         \\  --rag with --no-rag
         \\  --no-rag with --rag-dir
         \\  --context / --context-dir with --rag, --out, or HTML selectors
-        \\  --rss / --rss-path with HTML, IR, RAG, Context, llms.txt, check, or impact
+        \\  --rss / --rss-path with HTML, IR, RAG, Context, llms.txt, validate, check, or impact
         \\  --sitemap / --sitemap-path without --site-url, with non-HTML modes,
         \\  or with multiple targets sharing one ambiguous public URL
         \\  explicit --out with --rag or --rag-dir
         \\  --html / --html-dir / --target / --target-layout / --layout-rule with --rag, --rag-dir, --context, or explicit --out
         \\  --target with --html-dir
         \\  --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG / context
+        \\  validate with non-HTML exports, --incremental, --watch, --jobs, --format, or --report
         \\  Invalid target names, duplicate names, output collisions, workspace escape,
         \\  content/layout overlap, unknown --target-layout / --layout-rule target,
         \\  duplicate or invalid layout selectors, invalid layout paths (.. / absolute),
@@ -1021,6 +1039,7 @@ pub fn printUsage() void {
         \\Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
         \\
         \\Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
+        \\      `boris validate` observes the selected HTML target configuration but writes no artifacts.
         \\      `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
         \\      --html / --html-dir / bare CLI map to a single target named "default".
         \\      Equivalent --target / --target-layout / --layout-rule permutations yield the
@@ -1224,6 +1243,35 @@ test "parse: documentation intelligence commands" {
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "impact" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--out", ".boris" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--format", "json" }));
+}
+
+test "parse: validate selects HTML configuration without publication controls" {
+    var validate = try parseOptions(std.testing.allocator, &.{
+        "boris",          "validate",
+        "--input",        "docs",
+        "--html-dir",     "preview",
+        "--html-layout",  "test/fixtures/layouts/ok.html",
+        "--sitemap-path", "meta/sitemap.xml",
+        "--site-url",     "https://example.test/docs/",
+        "--quiet",
+    });
+    defer validate.deinit(std.testing.allocator);
+    try expectEqual(Command.validate, validate.command);
+    try expectEqual(Mode.html, validate.mode);
+    try expectEqualStrings("docs", validate.input_dir);
+    try expectEqualStrings("preview", validate.html_dir.?);
+    try expectEqual(@as(usize, 1), validate.targets.items.len);
+    try expectEqualStrings("preview", validate.targets.items[0].output_dir);
+    try expect(validate.quiet);
+    try expect(!validate.incremental);
+    try expect(!validate.watch);
+
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--out", ".boris" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--incremental" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--jobs", "2" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--format", "json" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--report", "validation.json" }));
 }
 
 test "parse: explicit build and watch commands are stable aliases" {

@@ -87,6 +87,14 @@ else
   fail "CLI process contract failed"
 fi
 
+# --- 2b. Authoritative no-publication validation --------------------------
+note "2b. authoritative no-publication validation"
+if test/validate-contract.sh "${BORIS}"; then
+  pass "validation contract succeeded"
+else
+  fail "validation contract failed"
+fi
+
 # --- 3. RAG dual export determinism --------------------------------------
 note "3. RAG generation twice + byte-for-byte comparison"
 rm -rf "${RAG_A}" "${RAG_B}"

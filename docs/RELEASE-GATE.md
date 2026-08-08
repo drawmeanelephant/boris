@@ -9,6 +9,7 @@ Run locally:
 ```bash
 zig build
 zig build test
+zig build test-validation
 zig build test-apex-hostile
 zig build test-apex-sanitize   # optional; record PASS or an explicit host/tool skip
 zig build run -- --input fixtures/content/valid --out .tmp/boris-ir
@@ -63,6 +64,11 @@ verified. Do not check an item because a design doc exists.
 - [x] **Graph tests** — Trunk / Satellite parent validation (missing parent,
       cycles, duplicates, role rules) covered by tests (`src/graph.zig` +
       pipeline integration fixtures)
+- [x] **Authoritative no-publication validation** — `boris validate` reuses the
+      HTML compiler's source/graph/dependency/render preflight, preserves
+      canonical diagnostics, and leaves new and existing targets untouched
+      (`zig build test-validation`; contract
+      [`validation.md`](contracts/validation.md))
 - [x] **Deterministic IR test** — JSON IR emit is byte-stable across dual runs
       on the same host (pipeline dual-export diff of `manifest.json` /
       `graph.json`); the F8 fixture pins typed parent/include/reference edges
