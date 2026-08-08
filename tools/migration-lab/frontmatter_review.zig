@@ -10,7 +10,7 @@
 //!   frontmatter_review.json   machine-readable, schema_version 1
 //!   FRONTMATTER_REVIEW.md     deterministic human-readable summary
 //!
-//! Boris core (src/frontmatter.zig) is intentionally NOT imported here.
+//! Boris core (src/parser.zig) is intentionally NOT imported here.
 //! No source file is ever modified.
 
 const std = @import("std");

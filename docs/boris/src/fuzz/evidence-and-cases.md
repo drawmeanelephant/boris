@@ -26,9 +26,9 @@ fuzz_mod.addOptions("build_options", apex_opts);  // hostile_apex = false
 
 The `fuzz_tests` artifact depends on `ensure_apex.step` (the `bash scripts/build-apex-markdown.sh` system command) via the `apex_needing` array, so the CMake static libraries are built before link. The hostile double (`apex_hostile.c`) is never compiled into this module.
 
-The `fuzz.zig` module imports four production modules directly via `@import`:
+The `fuzz.zig` module imports five production modules directly via `@import`:
 
-- `frontmatter.zig` — used in `runFrontmatterFuzz`
+- `parser.zig` — used in `runFrontmatterFuzz`
 - `aside.zig` — used in `runComponentFuzz`
 - `apex.zig` — used in `runApexFuzz`
 - `graph.zig` — used in `runGraphTopologyFuzz` and `referenceCheck`
@@ -42,18 +42,18 @@ The production binary cannot accidentally link the fuzz module: `fuzz_mod` is on
 
 | Declaration or test | Kind | Purpose | Inputs or setup | Expected result | Contract exercised |
 | :-- | :-- | :-- | :-- | :-- | :-- |
-| `runFrontmatterFuzz(seed, iters)` | Public fn | No-panic property over arbitrary byte payloads for frontmatter parser | PRNG seeded with `seed ^ 0` (no XOR); `max_input_bytes=512`; structured templates every 5th iteration | Only `error.OutOfMemory` may propagate; `diags.len < 10_000` per iteration | Parser must never panic on any byte content |
+| `runFrontmatterFuzz(seed, iters)` | Public fn | No-panic property over arbitrary byte payloads for the product frontmatter parser | PRNG seeded with `seed ^ 0` (no XOR); `max_input_bytes=512`; structured templates every 5th iteration | `parser.parse` returns without panicking; successful results preserve the body offset/slice invariant | Product parser must never panic on any byte content |
 | `runComponentFuzz(seed, iters)` | Public fn | No-panic on valid UTF-8; clean error on invalid UTF-8 for component tokenizer | PRNG seeded `seed ^ 0xC0C0`; valid UTF-8 filled via `fillValidUtf8`; structured templates every 4th iteration; explicit `[0xFF, 0xFE, ...]` test after loop | No panic, no `error.InvalidUtf8` on valid UTF-8 paths; `error.InvalidUtf8` on explicit invalid sequence | `aside.tokenizeBody` must reject invalid UTF-8 cleanly |
 | `runApexFuzz(seed, iters)` | Public fn | Pointer/length contract invariants and no-crash for Apex wrapper | PRNG seeded `seed ^ 0xA9E5`; empty input test; three direct `mapRenderResult` calls; 128 iterations of `apex.render` | Non-null sentinel on empty; `mapRenderResult` errors on dirty/invalid; `render` does not panic | `prepareMdForC` and `mapRenderResult` ABI contracts |
 | `runGraphTopologyFuzz(seed, iters)` | Public fn | Category-level agreement between production `graph.validate` and independent reference checker | PRNG seeded `seed ^ 0x6BA9`; 200 random topologies of 1–12 nodes; 6 topology modes including dup, star, chain, cycle, self-parent, missing | `expectEqual` assertions on five flag pairs; clean graphs produce zero diagnostics | `graph.validate` must agree with independent oracle on all five error categories |
 | `referenceCheck(nodes)` | Public fn | Independent O(n²) reference oracle for graph topology | `[]const graph_mod.Node` slice | Returns `RefProblems` struct with five boolean flags | No dependency on `graph.zig` internals; uses only `mem.eql` string comparisons |
-| `test "fuzz: frontmatter parser bounded (deterministic seed)"` | Test | Invokes `runFrontmatterFuzz` at `default_seed` and `frontmatter_iters=256` | Fixed constants | Must not error (other than OOM) | Same as `runFrontmatterFuzz` |
+| `test "fuzz: frontmatter parser bounded (deterministic seed)"` | Test | Invokes `runFrontmatterFuzz` at `default_seed` and `frontmatter_iters=256` | Fixed constants | Must not error | Same as `runFrontmatterFuzz` |
 | `test "fuzz: component tokenizer bounded (deterministic seed)"` | Test | Invokes `runComponentFuzz` at `default_seed` and `component_iters=256` | Fixed constants | Must not error | Same as `runComponentFuzz` |
 | `test "fuzz: apex bounded no-crash + pointer contracts (deterministic seed)"` | Test | Invokes `runApexFuzz` at `default_seed` and `apex_iters=128` | Fixed constants | Must not error | Same as `runApexFuzz` |
 | `test "fuzz: random graph topology agrees with reference checker"` | Test | Invokes `runGraphTopologyFuzz` at `default_seed` and `graph_iters=200` | Fixed constants | Must not error | Same as `runGraphTopologyFuzz` |
 | `test "fuzz: reference checker known cases"` | Test | Validates `referenceCheck` against six hand-constructed named cases | Hardcoded node arrays for: valid trunk+satellite, self-parent, missing parent, two-node cycle, satellite-of-satellite, duplicate ids | Each case asserts exactly the expected flag(s) are set | Reference oracle correctness |
 | `test "fuzz: seeds are stable documented constants"` | Test | Asserts bound constants are within documented safe limits | Inline literal checks | `default_seed == 0xB0B15_F027`, `frontmatter_iters > 0`, `max_input_bytes <= 4096`, `max_graph_nodes <= 32` | Documentation contract on iteration and size bounds |
-| `structuredFrontmatter(random, buf)` | Private fn | Produces semi-valid or deliberately corrupted YAML fence payloads | 9 templates; random byte flips | Returns a `[]const u8` slice into `buf` | Input diversity for frontmatter fuzzer |
+| `structuredFrontmatter(random, buf)` | Private fn | Produces semi-valid or deliberately corrupted frontmatter fence payloads | 9 templates; random byte flips | Returns a `[]const u8` slice into `buf` | Input diversity for frontmatter fuzzer |
 | `fillValidUtf8(random, buf)` | Private fn | Fills a byte slice with syntactically valid UTF-8 | ASCII + 2-byte + 3-byte sequences | No invalid multi-byte sequences; no truncated sequences at end | Valid UTF-8 contract for tokenizer fuzzer |
 | `structuredComponent(random, buf)` | Private fn | Produces realistic `&lt;Aside>` component markup variants | 9 templates including unterminated, nested, mid-line closing, unknown kind; occasional ASCII-range byte corruption | Returns a `[]const u8` slice into `buf` | Input diversity for component tokenizer fuzzer |
 | `generateRandomGraph(random, id_pool, nodes, path_buf, gpa)` | Private fn | Populates a `[]graph_mod.Node` slice with one of 6 topology modes | Pool of 12 static string ids (`"n0"`–`"n11"`); `mode` selected randomly; optional `force_dup` | Nodes have `source_path` allocated from `gpa` (freed per-iteration by caller) | Topology diversity for graph fuzzer |
@@ -260,25 +260,25 @@ Only one invalid sequence is tested. Other forms of invalid UTF-8 (truncated mul
 
 ***
 
-### Frontmatter diagnostic count bound
+### Frontmatter parser no-panic and body-boundary invariant
 
 **Injected behavior:**
-All frontmatter fuzz iterations, including the most corrupted templates (e.g., unclosed fences + random byte flips), are run through `frontmatter.parse`.
+All frontmatter fuzz iterations, including the most corrupted templates (e.g., unclosed fences + random byte flips), are run through the product `parser.parse`.
 
 **Wrapper boundary exercised:**
-The diagnostic accumulator contract: after parsing any input, the parser must not emit an unbounded number of diagnostics.
+The parser contract: arbitrary bounded bytes must return a result or diagnostic without panicking, and a successful result's body slice must begin at its reported offset.
 
 **Expected response:**
-`diags.items.len < 10_000` after each call. The threshold is a sentinel, not a specification of correct diagnostic counts.
+For a successful parse, `result.doc.body` equals `payload[result.doc.body_offset..]` and `body_offset <= payload.len`.
 
 **Forbidden unsafe response:**
-Allocating unbounded memory via the `gpa`-backed `diags.ArrayList` for a single input; OOM kill of the test process.
+Returning a body slice outside the source buffer or panicking on malformed bytes.
 
 **Evidence strength:**
-Structurally checked — the assertion fires on every iteration including structured templates. The 10,000 threshold is not documented as a formal grammar bound, only as a practical guard.
+Structurally checked — the parser is called on every iteration and the boundary assertion fires on every successful parse, including structured templates.
 
 **Residual gap:**
-The test does not assert a specific maximum number of diagnostics per input or that the diagnostic count is proportional to input length. A parser bug that emits 9,999 diagnostics per byte would pass.
+The test does not assert a specific diagnostic category for each generated input or cover sources above the 512-byte fuzz payload bound; focused parser tests cover normative categories and limits.
 
 ## Control flow
 
@@ -287,14 +287,12 @@ The test does not assert a specific maximum number of diagnostics per input or t
 ```text
 test "fuzz: frontmatter parser bounded"
     → runFrontmatterFuzz(default_seed, 256)
-        → arena.reset(.free_all)          [per iteration]
-        → diags.clearRetainingCapacity()  [per iteration]
         → structuredFrontmatter(random, &buf)  [every 5th iter]
           OR random.bytes(buf[0..n])           [otherwise]
-        → frontmatter.parse(payload, "fuzz.md", retain, gpa, &diags)
-            → [parser: no panic contract]
-            → returns Result or error.OutOfMemory
-        → std.testing.expect(diags.items.len < 10_000)
+        → parser.parse(payload)
+            → [product parser: no panic contract]
+            → returns ParseResult
+        → successful result: expect body_offset/body slice agreement
 ```
 
 
