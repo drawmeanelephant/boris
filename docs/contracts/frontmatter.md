@@ -167,7 +167,7 @@ If content uses `parentEntry` or `parent_entry`, the compiler treats them as
 | **Product parse path** (`src/parser.zig`) | Shared by IR, RAG **input**, and experimental HTML. `parentEntry` / `parent_entry` are **not** aliases: they fail as unknown keys → [`EFRONTMATTER`](diagnostics.md). No silent map to `parent`. |
 | **IR JSON** | Field name is always `parent` (never `parentEntry`). |
 | **RAG export** | Catalog column and exported page metadata may use the name **`parent_entry`** for the same parent entity-id string (or `""`). That is **export packaging only**, not author grammar. See [rag-export.md](rag-export.md). |
-| **Non-product helpers** | `frontmatter.zig` (fuzz) and historical `harness.zig` must not reintroduce a second accepted author dialect. Prefer `parent` only. |
+| **Non-product tools** | Standalone review and migration tools may inspect source for reporting, but they are not author-grammar authorities and must not accept a dialect that the product parser would reject. Prefer `parent` only. |
 
 Historical notes and older code sometimes described a second dialect that accepted `parentEntry` on HTML/RAG helpers. **Active product source input does not.** Accepting those keys as aliases would not change Trunk/Satellite semantics (same foreign-key id string), but would create a dual grammar that can diverge — which this contract forbids.
 

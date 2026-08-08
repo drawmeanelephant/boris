@@ -121,8 +121,8 @@ Below are the **Top 5 Limitations** identified, structured as actionable Remedia
     ]
     ```
 *   **Impact**: Boris only accepts standard normative frontmatter keys (`title`, `parent`, `status`, `tags`) and fails with `EFRONTMATTER` if any other keys exist. To compile successfully, the migration lab had to strip these 66 custom fields, saving them in `provenance_manifest.json` for review but discarding them from the compiled page metadata.
-*   **Remediate**: Extend Boris's frontmatter schema definition in `src/frontmatter.zig` to support a dedicated custom metadata dictionary key (e.g. `meta: Map(String, String)`) or explicitly allowlist custom fields.
-*   **Verify Command**: `zig build test` (running unit tests in `frontmatter.zig`).
+*   **Remediate**: Extend Boris's frontmatter schema definition in `src/parser.zig` to support a dedicated custom metadata dictionary key (e.g. `meta: Map(String, String)`) or explicitly allowlist custom fields.
+*   **Verify Command**: `zig build test` (running the authoritative parser and compiler tests).
 
 ### Card 2: Interactive MDX/JSX Components Strip
 *   **Severity**: High

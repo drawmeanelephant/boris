@@ -12,14 +12,14 @@ tags: [boris, zig, source-reference, surface, fuzz]
 
 ### Frontmatter parser — no-panic on arbitrary bytes
 
-The frontmatter parser (`frontmatter.parse`) receives caller-supplied byte slices that in production are file contents read from disk, which can be arbitrarily malformed. Threat categories exercised:
+The product frontmatter parser (`parser.parse`) receives caller-supplied byte slices that in production are file contents read from disk, which can be arbitrarily malformed. Threat categories exercised:
 
 - **Binary garbage inputs** (random bytes 0–255): verifies that the parser never panics or enters an infinite loop regardless of byte content.
-- **Structured-but-corrupt templates**: nine semi-valid YAML fence patterns (unclosed fences, invalid status values, malformed tag lists, parent pointing to `..`) are selected randomly and then a random number of bytes (1–4) are flipped to arbitrary values. This forces the parser through realistic near-miss paths.
+- **Structured-but-corrupt templates**: nine semi-valid frontmatter fence patterns (unclosed fences, invalid status values, malformed tag lists, parent pointing to `..`) are selected randomly and then a random number of bytes (1–4) are flipped to arbitrary values. This forces the parser through realistic near-miss paths.
 - **Empty input**: empty slices are a normal boundary case for files without frontmatter.
-- **Diagnostic explosion**: asserts `diags.items.len < 10_000` after each iteration, preventing a pathological grammar from generating an unbounded number of error records.
+- **Successful body boundary**: asserts that successful results report a body offset within the source and return the exact suffix from that offset.
 
-Category **not** exercised: assertion that specific diagnostics are emitted for specific inputs; correctness of the returned parse result.
+Category **not** exercised: assertion that specific diagnostics are emitted for specific inputs; focused tests in `src/parser.zig` cover those normative cases.
 
 ### Component tokenizer — no-panic on valid UTF-8; clean error on invalid UTF-8
 

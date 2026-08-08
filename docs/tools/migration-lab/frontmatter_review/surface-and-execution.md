@@ -261,7 +261,7 @@ All diagnostic messages to the user are plain stderr strings via `std.log.err` i
 | `tools/migration-lab/build.zig` | Build integration; compiles this file as part of `boris-migration-lab` | `build.zig` → `main.zig` → `frontmatterreview.zig` | `build.zig` defines the executable |
 | `tools/migration-lab/fixtures/fm-review-no-unknown/` | Test fixture; read-only content tree with only Boris keys | `run` reads | Fixture is test input evidence |
 | `tools/migration-lab/fixtures/fm-review-mixed/` | Test fixture; content tree with mixed Boris and unknown keys | `run` reads | Fixture is test input evidence |
-| `src/frontmatter.zig` (Boris product) | **Not imported**; module comment explicitly states this | None | No relationship |
+| `src/parser.zig` (Boris product) | **Not imported**; the tool reports key occurrences without defining product parse behavior | None | Product parser remains authoritative |
 | `docs/contracts/frontmatter.md` | Boris closed author grammar reference | Informational (not imported) | Normative for the Boris product; mirrored as local constant here |
 | `tools/migration-lab/obsidian.zig`, `wordpress.zig`, etc. | Sibling mode modules in the same binary | Parallel | No direct relationship |
 

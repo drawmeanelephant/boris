@@ -31,7 +31,7 @@
 //! No concurrency. Resource use is O(iters × max_input_bytes).
 
 const std = @import("std");
-const frontmatter = @import("frontmatter.zig");
+const parser = @import("parser.zig");
 const aside = @import("aside.zig");
 const apex = @import("apex.zig");
 const graph_mod = @import("graph.zig");
@@ -52,25 +52,15 @@ pub const max_graph_nodes: usize = 12;
 // Frontmatter fuzz
 // ---------------------------------------------------------------------------
 
-/// Bounded frontmatter fuzz: never panics; allocator errors may surface as OOM.
+/// Bounded frontmatter fuzz: never panics on arbitrary bounded bytes.
 pub fn runFrontmatterFuzz(seed: u64, iterations: usize) !void {
-    const gpa = std.testing.allocator;
     var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
-
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-    var diags: std.ArrayList(diag.Diagnostic) = .empty;
-    defer diags.deinit(gpa);
 
     var buf: [max_input_bytes]u8 = undefined;
 
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
-        _ = arena.reset(.free_all);
-        diags.clearRetainingCapacity();
-        const retain = arena.allocator();
-
         const n = random.intRangeAtMost(usize, 0, max_input_bytes);
         random.bytes(buf[0..n]);
         // Mix structured inputs every few iterations for higher signal.
@@ -79,12 +69,14 @@ pub fn runFrontmatterFuzz(seed: u64, iterations: usize) !void {
         else
             buf[0..n];
 
-        // Content errors become diagnostics; only OOM should error out.
-        _ = frontmatter.parse(payload, "fuzz.md", retain, gpa, &diags) catch |err| switch (err) {
-            error.OutOfMemory => return error.OutOfMemory,
-        };
-        // Diagnostics must be finite (bounded by grammar).
-        try std.testing.expect(diags.items.len < 10_000);
+        // Exercise the product parser directly. It is allocation-free, so the
+        // fuzz property is the same one the compiler depends on: arbitrary
+        // bounded bytes must produce a result or diagnostic without panicking.
+        const result = parser.parse(payload);
+        if (result.diagnostic == null) {
+            try std.testing.expect(result.doc.body_offset <= payload.len);
+            try std.testing.expectEqualStrings(payload[result.doc.body_offset..], result.doc.body);
+        }
     }
 }
 
