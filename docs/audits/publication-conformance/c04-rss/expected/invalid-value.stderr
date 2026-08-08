@@ -5,6 +5,7 @@ Usage: boris <command> [options]
 
 Modes:
   build               Build the HTML site (default command)
+  validate            Validate selected HTML source/config without publication
   watch               Build HTML, then watch and rebuild on changes
   check               Read-only graph health report (CI findings exit 1)
   impact <ID>         Read-only transitive impact report for a page
@@ -76,13 +77,14 @@ Conflicts (exit 2):
   --rag with --no-rag
   --no-rag with --rag-dir
   --context / --context-dir with --rag, --out, or HTML selectors
-  --rss / --rss-path with HTML, IR, RAG, Context, llms.txt, check, or impact
+  --rss / --rss-path with HTML, IR, RAG, Context, llms.txt, validate, check, or impact
   --sitemap / --sitemap-path without --site-url, with non-HTML modes,
   or with multiple targets sharing one ambiguous public URL
   explicit --out with --rag or --rag-dir
   --html / --html-dir / --target / --target-layout / --layout-rule with --rag, --rag-dir, --context, or explicit --out
   --target with --html-dir
   --watch, --incremental, or --jobs with IR (--out / --no-rag) or RAG / context
+  validate with non-HTML exports, --incremental, --watch, --jobs, --format, or --report
   Invalid target names, duplicate names, output collisions, workspace escape,
   content/layout overlap, unknown --target-layout / --layout-rule target,
   duplicate or invalid layout selectors, invalid layout paths (.. / absolute),
@@ -91,6 +93,7 @@ Conflicts (exit 2):
 Exit codes: 0 success, 1 content validation, 2 usage, 3 I/O/system
 
 Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
+      `boris validate` observes the selected HTML target configuration but writes no artifacts.
       `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
       --html / --html-dir / bare CLI map to a single target named "default".
       Equivalent --target / --target-layout / --layout-rule permutations yield the
