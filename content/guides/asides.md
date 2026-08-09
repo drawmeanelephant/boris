@@ -21,6 +21,21 @@ This is a note. It appears inline with the content.
 
 The `kind` attribute determines the visual style and semantic meaning.
 
+`kind` defaults to `note`. An Aside may also have a safe in-page `id`, or use
+the legacy `type` spelling as an alias for `kind`:
+
+```markdown
+<Aside kind="warning" id="before-you-publish">
+
+Check the graph before publishing.
+
+</Aside>
+```
+
+All attribute values are double-quoted. Aside ids use letters, digits, `_`,
+and `-`, starting with a letter or digit. Unknown or duplicate attributes are
+errors.
+
 ## Available kinds
 
 | Kind | Use for | Example Syntax |
@@ -31,6 +46,26 @@ The `kind` attribute determines the visual style and semantic meaning.
 | `warning` | Breaking changes, compatibility issues, potential problems | `&lt;Aside kind="warning"&gt;...&lt;/Aside&gt;` |
 | `danger` | High-risk actions that could cause data loss or security issues | `&lt;Aside kind="danger"&gt;...&lt;/Aside&gt;` |
 
+## Disclosure details
+
+Use <code>&lt;Details&gt;</code> when a reader may want extra explanation without leaving the
+page. `summary` is required plain text; `id` is optional; `open="true"` opens
+the disclosure by default.
+
+```markdown
+<Details summary="Why does this matter?" id="why-details">
+
+The body is ordinary Markdown.
+
+</Details>
+```
+
+<Details summary="Why does this matter?" id="why-details">
+
+The body is ordinary Markdown, and the disclosure is not a graph node.
+
+</Details>
+
 ## Live Examples
 
 Here are copy-pasteable snippets and live rendered examples for all 5 Aside kinds:
@@ -40,14 +75,14 @@ Here are copy-pasteable snippets and live rendered examples for all 5 Aside kind
 ```markdown
 <Aside kind="note">
 
-**Note:** Boris uses closed frontmatter. Only `title`, `parent`, `status`, `id`, and `tags` are accepted.
+**Note:** Boris uses closed frontmatter. The accepted keys are `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, and `summary`.
 
 </Aside>
 ```
 
 <Aside kind="note">
 
-**Note:** Boris uses closed frontmatter. Only `title`, `parent`, `status`, `id`, and `tags` are accepted.
+**Note:** Boris uses closed frontmatter. The accepted keys are `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, and `summary`.
 
 </Aside>
 
@@ -56,14 +91,14 @@ Here are copy-pasteable snippets and live rendered examples for all 5 Aside kind
 ```markdown
 <Aside kind="tip">
 
-**Tip:** Use `boris check` in CI to validate content graph relationships before rendering.
+**Tip:** Use `boris validate` before a build; use `boris check` when you want a graph-health report after the graph is valid.
 
 </Aside>
 ```
 
 <Aside kind="tip">
 
-**Tip:** Use `boris check` in CI to validate content graph relationships before rendering.
+**Tip:** Use `boris validate` before a build; use `boris check` when you want a graph-health report after the graph is valid.
 
 </Aside>
 
@@ -146,11 +181,11 @@ Asides support full Markdown formatting inside their body, including bold text, 
 - The opening tag <code>&lt;Aside kind="..."&gt;</code> and closing tag <code>&lt;/Aside&gt;</code> must each be on their own line.
 - Always include blank lines between the tags and the Markdown body content.
 - Asides are **in-document** components — they stay in document order and do not produce separate pages or navigation nodes.
-- Only the `kind` attribute is accepted (`note`, `tip`, `info`, `warning`, `danger`). Unknown attributes or unrecognized tags produce a component error.
+- Aside accepts `kind` (default `note`), optional `id`, and legacy `type` as a `kind` alias. Kinds are `note`, `tip`, `info`, `warning`, and `danger`. Unknown attributes or unrecognized PascalCase tags produce a component error.
+- Boris also supports a constrained <code>&lt;Details summary="..."&gt;</code> disclosure component. It accepts the required `summary`, optional `id`, and `open="true"`; the body is ordinary Markdown and components cannot nest.
 - Asides appear in RAG and IR export packaging using `:::kind` syntax — this is an export-only representation. Do not use `:::kind` syntax in your `content/` source files.
 
 ## Next steps
 
 - [[guides/building-pages|Building Pages]] — other page authoring features
 - [[guides/apex-markdown|Apex Markdown Reference]] — the full set of Markdown extensions Boris supports
-

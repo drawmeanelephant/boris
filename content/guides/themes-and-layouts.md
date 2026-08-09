@@ -56,10 +56,12 @@ Boris splices content into your layout by replacing **marker tokens**. All marke
 | Marker | What it inserts |
 |---|---|
 | `{{content}}` | **Required.** The rendered HTML body of the current page |
-| `{{title}}` | The page title from frontmatter |
+| `{{title}}` | The page title, or entity id when title is absent |
 | `{{nav}}` | Full site navigation tree as nested `<ul>` lists |
 | `{{breadcrumb}}` | Breadcrumb trail from root to current page |
 | `{{toc}}` | In-page table of contents from `h1`–`h3` headings |
+| `{{children}}` | Direct children of the current page |
+| `{{metadata}}` | Escaped Boris metadata for the current page |
 | `{{footer}}` | Optional layout footer fragment loaded from the theme's `footer.html` file |
 | `{{asset-url PATH}}` | Path to a theme asset, adjusted for the current page depth |
 
@@ -93,7 +95,15 @@ This is the minimum layout Boris requires:
 </html>
 ```
 
-The search root attribute on `<main>` is important if you plan to use the search indexer — it tells Boris's search extractor to index the content inside this element and exclude navigation.
+The search root attribute on `<main>` tells Boris's compiler-owned search
+producer to index the content inside this element and exclude navigation. The
+default theme also includes the small browser consumer; a custom theme can
+ship its own consumer or provide a no-JavaScript fallback.
+
+`footer.html` is optional theme-owned static HTML inserted by `{{footer}}`.
+`{{metadata}}` emits the page's closed Boris metadata with escaped values.
+Neither marker turns a layout into a template language: layouts have no loops,
+conditionals, expressions, or component runtime.
 
 ## Per-page layout rules
 

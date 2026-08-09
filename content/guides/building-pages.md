@@ -7,18 +7,25 @@ tags: [guides, authoring, search]
 
 # Building Pages
 
-Pages are Markdown files under `content/`. This guide covers everything you need to create, link, organize, and publish documentation pages.
+Pages are Markdown files under `content/`. Their paths, frontmatter, parent
+chains, and supported references determine both the published URL and the
+navigation tree.
 
-## Create a Markdown file
+## Create a page
 
-Use a lowercase `.md` path. The file path (relative to `content/`, without the extension) becomes the page's **entity id** and its output URL. For example:
+Use a lowercase `.md` or `.mdx` path. The path relative to `content/`, without
+its extension, becomes the entity id and HTML output path by default:
 
-- `content/guides/deploying.md` → entity id `guides/deploying` → output `guides/deploying.html`
-- `content/index.md` → entity id `index` → output `index.html`
+- `content/guides/deploying.md` → `guides/deploying` →
+  `guides/deploying.html`
+- `content/index.md` → `index` → `index.html`
 
-## Write frontmatter
+## Add frontmatter
 
-Every page starts with Boris frontmatter — a YAML block that declares the page's identity and position in the graph:
+Frontmatter is optional and deliberately closed. The accepted author-facing
+keys are `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`,
+and `summary`. `title` is optional; if it is absent, the compiler keeps it
+unset rather than inventing one from the filename.
 
 ```markdown
 ---
@@ -33,103 +40,83 @@ tags: [deployment, html]
 Content goes here.
 ```
 
-The accepted frontmatter keys are:
+Use the [[reference/frontmatter|frontmatter reference]] for exact value
+grammar. Unknown keys, including `parentEntry` and `parent_entry`, are
+`EFRONTMATTER` errors.
 
-| Key | Required | Description |
-|---|---|---|
-| `title` | Yes | Displayed in the browser tab, navigation sidebar, and TOC |
-| `parent` | No | Entity id of the parent page. Omit for Trunk (root) pages |
-| `status` | No | `published` (default) or `draft`. Draft pages are excluded from outputs |
-| `id` | No | Override the default entity id derived from the file path |
-| `tags` | No | Array of strings for categorization |
+## Set hierarchy
 
-<Aside kind="warning">
-
-Unknown frontmatter keys are rejected with `EFRONTMATTER`. Boris uses a closed grammar — only the five keys above are accepted.
-
-</Aside>
-
-## Set a parent {#set-parent}
-
-A page with `parent` is a Satellite — it appears as a child in the navigation sidebar under its parent. The parent must be the **entity id** of another page that actually exists:
+Omit `parent` for a Trunk. Set one direct parent entity id for a Satellite:
 
 ```markdown
 ---
+title: Deployment details
 parent: guides/overview
 ---
 ```
 
-A page without `parent` is a Trunk — it appears as a top-level navigation item.
+The parent must exist, and the complete chain must be finite and acyclic.
+Nested Satellites are supported. [[guides/trunk-satellite|Trunk & Satellite]]
+explains the resulting navigation and breadcrumb hierarchy.
 
-Boris validates every `parent` reference before publishing. If the referenced page does not exist, the build fails with a diagnostic error.
+## Link to pages
 
-## Link to other pages {#wiki-links}
-
-Use wiki-links to reference other pages by entity id:
-
-```markdown
-See [[reference/frontmatter|the frontmatter reference]] for key definitions.
-```
-
-Wiki-links accept three forms:
+Use entity ids rather than guessing `.html` paths:
 
 ```markdown
-[[entity-id]]                     # uses the page title as link text
-[[entity-id|Custom link text]]    # explicit link text
-[[entity-id#heading-id|text]]     # link to a specific heading
+See [[reference/frontmatter|the frontmatter reference]].
+See [[reference/commands#exit-codes|the exit-code table]].
 ```
 
-Boris validates all wiki-link targets before publishing. Broken wiki-links fail the build.
+The HTML compiler validates the page target and, for the HTML path, the
+rendered heading fragment. Broken supported wiki-links fail the publication
+with a diagnostic.
 
-## Include shared snippets {#snippet-includes}
+Ordinary Markdown links to a local `.md` or `.mdx` page can also be rewritten to
+the canonical HTML route when they match a discovered source path. External
+links and arbitrary HTML links remain outside that graph guarantee.
 
-Store reusable fragments under `content/includes/`. These files are **not** published as pages — they are snippet-only:
+## Reuse a fragment
+
+Put short reusable source fragments under `content/includes/`:
 
 ```markdown
-{{include includes/shared-warning.md}}
+{{include includes/shared-tip.md}}
 ```
 
-Includes are expanded before Markdown rendering. They work inside regular text but remain literal inside fenced code blocks.
+Includes are expanded before Markdown rendering, are not standalone pages, and
+remain literal inside fenced code. Missing fragments and include cycles fail
+the build.
 
-## Draft pages
+## Status and publication metadata
 
-Mark a page as draft to exclude it from all outputs:
+`status` may be `draft`, `published`, or `archived`. Draft pages are excluded
+from publication and from graph targets used by published output; archived
+pages remain part of the supported published graph. `relations` records one of
+the bounded semantic kinds described in [[reference/relationships|Relationships]];
+it is not a parent edge or a build dependency.
 
-```markdown
----
-status: draft
----
-```
+`published_at` and `summary` provide metadata for projections such as RSS.
+When `published_at` is present, `summary` is required. RSS eligibility also
+requires both fields and a non-draft status.
 
-Draft pages are not published to HTML, IR, RAG, or `llms.txt`. Wiki-links to draft pages are treated as broken references.
-
-## Build and view the site
+## Build and inspect
 
 ```bash
-./zig-out/bin/boris
+./zig-out/bin/boris validate --quiet
+./zig-out/bin/boris build --quiet
 ```
 
-Open `dist/index.html` or serve `dist/` with any static file server. Navigation, breadcrumbs, and the table of contents are generated automatically from the validated graph.
+Use `validate` for the authoritative no-publication HTML preflight. Use
+`check` for graph-health analysis and `impact ID` for dependency impact; neither
+is a substitute for `validate`.
 
-To rebuild automatically while authoring:
-
-```bash
-./zig-out/bin/boris --watch --quiet
-```
-
-## Add search to your site
-
-Run the search indexer after building HTML:
-
-```bash
-zig build --build-file tools/search-index/build.zig run -- \
-  --root=./dist --out=./dist/_boris/search
-```
-
-The indexer reads the rendered HTML (not Markdown) and writes `dist/_boris/search/search-index.json`. If your layout includes the Boris search UI, it loads this file automatically. See [[guides/search-and-ui|Search & Browser UI]] for layout integration details.
+The normal build writes `dist/`, including the compiler-owned rendered-search
+index and target-local publication evidence. Serve `dist/` with any static
+host if you want the browser search UI to fetch its index.
 
 ## Next steps
 
-- [[guides/trunk-satellite|Trunk & Satellite]] — deeper explanation of the hierarchy rules
-- [[guides/themes-and-layouts|Themes & Layouts]] — customize the site appearance
-- [[reference/frontmatter|Frontmatter Reference]] — complete key specifications
+- [[guides/themes-and-layouts|Themes & Layouts]] — customize HTML output.
+- [[guides/search-and-ui|Search & Browser UI]] — understand rendered search.
+- [[reference/commands|Command Reference]] — exact flags and exit codes.

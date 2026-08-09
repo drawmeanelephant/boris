@@ -11,9 +11,11 @@ Boris renders page bodies with **ApexMarkdown Unified** (vendored pin v1.1.13)
 through an in-process C ABI host adapter — not a toy stub and not a subprocess.
 This page is a living gallery of constructs that matter on documentation sites.
 
-Product callouts with document-order guarantees use the registered
-[[guides/asides|Aside]] component. Apex also supports `> [!NOTE]`-style callouts;
-see [Apex callouts](#apex-callouts) for the difference.
+Product callouts with document-order guarantees use the constrained
+[[guides/asides|Aside]] component. Boris also supports constrained
+`&lt;Details&gt;`
+disclosures. Apex independently supports `> [!NOTE]`-style callouts; see
+[Apex callouts](#apex-callouts) for the difference.
 
 ### Pending / product-off samples
 
@@ -39,7 +41,7 @@ Constructs are categorized into 5 explicit support tiers:
 
 | Construct | Classification | Support Tier | Jump |
 | :--- | :--- | :---: | :--- |
-| Callout `&lt;Aside&gt;` components | **Product Core** | Supported | [[guides/asides|Asides]] |
+| Callout `&lt;Aside&gt;` and `&lt;Details&gt;` components | **Product Core** | Supported | [[guides/asides|Asides]] |
 | Wiki-links (`[[entity-id]]`) | **Product Core** | Supported | [Wiki-links](#wiki-links) |
 | Transclusion includes (`{{include path}}`) | **Product Core** | Supported | [Includes](#transclusion-includes) |
 | Closed frontmatter & Graph rules | **Product Core** | Supported | [[guides/overview|Overview]] |
@@ -51,7 +53,8 @@ Constructs are categorized into 5 explicit support tiers:
 | Heading & Paragraph IAL (`{#id .class}`) | **Engine Feature** | Supported | [Headings](#headings-and-attributes) |
 | Critic Markup (`{++add++}`, `{--del--}`) | **Engine Feature** | Supported | [Critic Markup](#critic-markup) |
 | Math syntax (`$a^2 + b^2 = c^2$`) | **Theme-Dependent** | Requires Math CSS/JS | [Math](#math) |
-| Client Search Indexing | **Theme-Dependent** | Requires Search Tool | [[guides/search-and-ui|Search Guide]] |
+| Rendered search artifact | **Product Core** | Emitted by HTML build | [[guides/search-and-ui|Search Guide]] |
+| Browser search UI | **Theme-Dependent** | Default theme consumer; custom themes provide their own | [[guides/search-and-ui|Search Guide]] |
 | Python-Markdown `!!!` callouts | **Pending / Off** | Disabled (Product Off) | [Callouts](#apex-callouts) |
 | Grid tables | **Pending / Off** | Engine Flag Off | [Pending](#pending-apex-samples) |
 | External syntax highlighters | **Pending / Off** | Disabled (Product Off) | [Code](#fenced-code) |
@@ -305,7 +308,7 @@ GFM pipe tables with column alignment:
 | :--- | :---: | ---: |
 | ApexMarkdown Unified | Yes | left / center / right |
 | Graph validation | Yes | Trunk / Satellite |
-| Nested Asides | No | Contract forbids |
+| Nested Aside / Details components | No | Contract forbids |
 | Site nav + TOC | Yes | Layout markers |
 | Includes + wiki-links | Yes | Before Apex; fences stay raw |
 ```
@@ -316,7 +319,7 @@ GFM pipe tables with column alignment:
 | :--- | :---: | ---: |
 | ApexMarkdown Unified | Yes | left / center / right |
 | Graph validation | Yes | Trunk / Satellite |
-| Nested Asides | No | Contract forbids |
+| Nested Aside / Details components | No | Contract forbids |
 | Site nav + TOC | Yes | Layout markers |
 | Includes + wiki-links | Yes | Before Apex; fences stay raw |
 
@@ -465,7 +468,8 @@ Example (shown fenced so surrounding sections stay clean in the showcase):
 ```
 
 Do **not** treat this as a green light for unrestricted MDX or executable
-components. PascalCase tags other than Aside still fail component tokenization.
+components. PascalCase tags other than Aside and Details still fail component
+tokenization.
 Lowercase HTML such as `p`, `div`, and `span` may pass through to Apex when used
 sparingly in real pages.
 
@@ -479,10 +483,10 @@ These are **not** Apex features; they run (or apply) around the engine:
 | Trunk / Satellite graph | Fail-loud parents — [[guides/trunk-satellite]] |
 | Include directives | Zig expand before Apex (HTML path) |
 | Wiki-links by entity id | Zig rewrite before Apex (HTML path) |
-| Aside components | Tokenize around Apex markdown segments |
+| Aside / Details components | Tokenize around Apex markdown segments |
 | Layout nav / toc markers | After body HTML is produced |
 
-### Transclusion Includes (`{{include path}}`)
+### Transclusion Includes (`{{include path}}`) {#transclusion-includes}
 
 Include directives expand reusable Markdown fragments stored under `content/includes/` into a page body before Apex runs.
 
@@ -504,8 +508,8 @@ behavior). Live forms also appear on [[getting-started]] and [[guides/overview]]
 | Apex file includes | Off; Boris owns includes |
 | External highlighters / plugins | No subprocess markdown tools |
 | Full YAML frontmatter | Closed keys only |
-| Unrestricted MDX / JS expressions | Aside registry only |
-| Nested Asides | Contract forbids |
+| Unrestricted MDX / JS expressions | Aside / Details registry only |
+| Nested Aside / Details components | Contract forbids |
 
 ## Bracketed spans and paragraph IAL
 
@@ -614,9 +618,9 @@ TextIndex form: term\{^} and \[display]\{^}.
 ### Apex-native wiki-links and section targets
 
 ```text
-# APEX-PENDING: apex-wiki-section | Boris Feature 7 uses entity ids, not Apex wiki
-# Boris resolves [[entity-id]] pre-Apex. Apex [[Page#Section]] / space rules differ.
-# Section fragments [[id#heading]] are not MVP (see includes-and-wiki-links contract).
+# APEX-PENDING: apex-wiki-section | Boris resolves its links before Apex
+# Boris resolves [[entity-id#heading]] pre-Apex and verifies the rendered
+# heading fragment. Apex-native wiki syntax is not a second authoring dialect.
 
 \[[Some Page]]
 \[[Some Page|label]]

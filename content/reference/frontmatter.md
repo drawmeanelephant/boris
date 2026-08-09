@@ -7,106 +7,157 @@ tags: [reference, frontmatter]
 
 # Frontmatter Reference
 
-Boris uses a **closed frontmatter grammar**. Only the five keys listed here are accepted. Unknown keys produce an `EFRONTMATTER` diagnostic and fail the build.
+Boris frontmatter is a small, closed, line-oriented grammar. It is not general
+YAML: unknown keys, nested mappings, multiline values, comments, and unsupported
+list forms fail with `EFRONTMATTER`.
+
+Frontmatter is optional. It is recognized only when `---` is the complete first
+line at byte zero and ends at a matching line. A file without frontmatter is
+still a page; its entity id comes from its path.
 
 ## Accepted keys
 
-| Key | Type | Required | Default | Description |
-|---|---|---|---|---|
-| `title` | string | Yes | — | The page title. Used in the browser tab, navigation sidebar, breadcrumbs, `llms.txt`, and IR |
-| `parent` | string | No | — | Entity id of the parent page. Omit for Trunk pages |
-| `status` | string | No | `published` | `published` or `draft`. Draft pages are excluded from all outputs |
-| `id` | string | No | derived from path | Override the entity id. Must be unique across the site |
-| `tags` | string array | No | `[]` | Categorization tags. Available in IR and RAG outputs |
+Exactly these eight author-facing keys are accepted:
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `id` | string | path-derived id | Override the entity id; it must be unique and path-safe |
+| `title` | string | unset | Display title; layouts fall back to the entity id when needed |
+| `parent` | string | unset | Direct parent entity id; omission makes a Trunk |
+| `status` | enum | unset | `draft`, `published`, or `archived` |
+| `tags` | list | `[]` | Bounded list of plain or double-quoted tag strings |
+| `relations` | list | `[]` | Typed semantic relations such as `relates_to=target` |
+| `published_at` | UTC timestamp | unset | Exact `YYYY-MM-DDTHH:MM:SSZ`; requires `summary` |
+| `summary` | string | unset | One-line summary, 1–1,024 bytes |
+
+There are no aliases. In particular, `parentEntry` and `parent_entry` are
+unknown author keys and fail with `EFRONTMATTER`.
+
+## Examples
+
+Minimal Trunk:
+
+```markdown
+---
+title: Getting Started
+status: published
+tags: [setup, cli]
+---
+
+# Getting Started
+```
+
+Satellite with publication metadata and a semantic relation:
+
+```markdown
+---
+id: guides/release-notes
+title: Release Notes
+parent: guides/overview
+status: published
+tags: [release]
+relations: [supersedes=guides/old-release]
+published_at: 2026-08-09T12:00:00Z
+summary: Changes in the current documentation release.
+---
+```
+
+`published_at` is an exact UTC value, not a free-form date. `summary` may be
+provided without `published_at`; the pair is required for an RSS item.
+
+## `id`
+
+Without an explicit id, Boris derives one from the page path:
+
+```text
+content/guides/building-pages.md → guides/building-pages
+```
+
+Entity ids use `/`-separated non-empty segments. They cannot be absolute, use
+backslashes, contain `.` or `..` segments, or include a fragment/query suffix.
+The output route is the entity id with `.html` appended; there is no directory
+index mapping.
 
 ## `title`
 
-```yaml
-title: Getting Started with Boris
-```
+Titles are optional. When present, a title is a one-line string (at most 512
+UTF-8 bytes) used by navigation, breadcrumbs, HTML `<title>`, IR, and machine
+projections. A page with no title remains valid; the layout's `{{title}}`
+marker uses its entity id as the display fallback.
 
-Required on every page. The title is the authoritative display name for the page. It appears:
-- In the HTML `<title>` element
-- In the navigation sidebar
-- In breadcrumb trails
-- In `llms.txt` page listings
-- In the IR `manifest.json`
-
-## `parent`
+## `parent` and page roles
 
 ```yaml
 parent: guides/overview
 ```
 
-The entity id of the parent page. This determines where the page appears in the navigation hierarchy and breadcrumb trail.
-
-- The `parent` must resolve to an existing page. Broken parent references fail the build with `EPARENTMISSING`.
-- Setting `parent` makes this page a **Satellite**. Omitting it makes it a **Trunk**.
-- There is no default parent — Trunks have no parent.
-- The value is an entity id, not a file path or a display title.
+`parent` names the exact direct parent entity id, not a filename, title, or
+directory label. Omitting it makes the page a **Trunk**. Supplying it makes the
+page a **Satellite**. Satellites may have Satellites, so nested finite acyclic
+chains are valid. Missing parents, self-parents, duplicate ids, and cycles fail
+before publication.
 
 ## `status`
 
-```yaml
-status: published   # visible in all outputs
-status: draft       # excluded from all outputs
-```
-
-Draft pages are completely excluded from HTML, IR, RAG, Context Bundle, and `llms.txt` outputs. Wiki-links to draft pages are treated as broken references and fail the build.
-
-The default value when `status` is omitted is `published`.
-
-## `id`
+The only values are:
 
 ```yaml
-id: my-custom-id
-```
-
-By default, Boris derives the entity id from the file path: `content/guides/building-pages.md` → `guides/building-pages`. Use `id` to override this if you need a different identifier — for example, when the file path conflicts with a reserved name or you are migrating from another system.
-
-The entity id must be unique across the entire site. Duplicate ids fail the build.
-
-## `tags`
-
-```yaml
-tags: [setup, quickstart, cli]
-```
-
-An array of strings for categorization. Tags are available in the IR and RAG corpus for filtering and organization. They do not affect navigation or rendering.
-
-## Complete example
-
-```markdown
----
-id: getting-started
-title: Getting Started with Boris
-parent: index
+status: draft
 status: published
-tags: [setup, quickstart, cli]
----
-
-# Getting Started with Boris
-
-Page content starts here.
+status: archived
 ```
 
-## Diagnostic Troubleshooting & Common Errors
+Draft pages are excluded from published projections. `published`, `archived`,
+and an omitted status remain eligible for normal compiler projections; RSS also
+requires `published_at` and `summary`.
 
-Boris enforces strict, closed frontmatter syntax. Any key outside `title`, `parent`, `status`, `id`, and `tags` produces an immediate `EFRONTMATTER` diagnostic and halts the build.
+## `tags` and `relations`
 
-### Diagnostic Matrix
+Tags use the bounded bracket form:
 
-| Error Diagnostic | Root Cause | Exact Resolution |
-|---|---|---|
-| `EFRONTMATTER: unknown key 'sidebar_position'` | Unrecognized key in YAML frontmatter header | Remove the unsupported key or move metadata to body content |
-| `EFRONTMATTER: unknown key 'parent_entry'` | Used legacy `parent_entry` or `parentEntry` key name | Rename the key to `parent:` (Boris only accepts `parent`) |
-| `EFRONTMATTER: missing required key 'title'` | Page header omitted the required `title` key | Add a string `title: "Page Title"` to the frontmatter block |
-| `EFRONTMATTER: invalid status value` | Value of `status:` is not `published` or `draft` | Set `status: published` or `status: draft` |
-| `EPARENTMISSING: parent 'guides/intro' not found` | `parent:` ID does not match any published entity | Verify target page exists and has `status: published` |
-| `EDUPLICATEID: duplicate entity id 'getting-started'` | Two Markdown files derive or set the same ID | Use an explicit `id:` override or rename one of the files |
+```yaml
+tags: [setup, "quick start", cli]
+```
 
-### Step-by-Step Frontmatter Audit
+Semantic relations use `kind=target` entries:
 
-1. **Verify Closed Grammar**: Ensure frontmatter contains *only* `title`, `parent`, `status`, `id`, or `tags`.
-2. **Check Parent Key Name**: Confirm parent key is written as `parent:` — not `parent_entry`, `parentEntry`, or `parent_id`.
-3. **Confirm Parent Target**: Run `boris check` to verify every `parent:` value maps to a valid published Trunk or Satellite entity ID.
+```yaml
+relations: [relates_to=guides/overview, implements=reference/commands]
+```
+
+The supported relation kinds are `relates_to`, `implements`, `depends_on`, and
+`supersedes`. Relations are not parent edges, navigation edges, wiki-links, or
+dependency edges for `check` and `impact`.
+
+## Grammar boundaries
+
+Accepted values are one-line plain or double-quoted scalars, plus the named
+`tags` and `relations` lists. These forms are rejected:
+
+- single-quoted values, YAML comments, anchors, aliases, and block scalars;
+- indented/nested fields, sequence items, and multiline values;
+- arbitrary keys such as `author`, `layout`, or `sidebar_position`;
+- legacy parent names `parentEntry` and `parent_entry`.
+
+Values are byte-bounded, and duplicate keys are errors. The parser accepts LF
+and CRLF line endings but requires valid UTF-8 and rejects a leading BOM.
+
+## Troubleshooting
+
+```text
+error: EFRONTMATTER: content/page.md:4:1: unknown key "sidebar_position"
+```
+
+1. Run `boris validate --input content` to exercise the HTML compiler path
+   without writing output.
+2. Remove unknown keys or rewrite them using the eight-key grammar above.
+3. Run `boris build` once the preflight is clean.
+
+Use `boris check` for graph-health analysis after compiler validation; it is not
+an alias for `validate`.
+
+## Related pages
+
+- [[guides/building-pages|Building Pages]] — authoring workflow
+- [[reference/relationships|Relationships]] — parent, wiki, include, and semantic edges
+- [[reference/diagnostics|Diagnostics & Troubleshooting]] — stable error codes

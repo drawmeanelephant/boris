@@ -7,19 +7,23 @@ tags: [guides, graph, hierarchy]
 
 # Trunk & Satellite — Content Hierarchy
 
-Boris organizes every page into one of two roles based on whether it has a `parent` key in its frontmatter. This determines where the page appears in navigation and how Boris validates the site structure.
+The `parent` field gives Boris an explicit site hierarchy. It is a graph edge,
+not a display label or a directory convention.
 
 ## The two roles
 
-Trunk Role
-: A root page without a `parent` key. Forms the top-level anchor of a site section. A site can have multiple Trunks (e.g. `index`, `getting-started`, `reference`).
+Trunk
+: A page with no `parent`. It is a root of the validated hierarchy.
 
-Satellite Role
-: A page with a `parent` key. Nests directly under its parent in navigation and breadcrumbs.
+Satellite
+: A page with one direct `parent` entity id. Its parent may be a Trunk or
+  another Satellite.
 
-## Declaring a parent
+For example, `content/guides/building-pages.md` normally has entity id
+`guides/building-pages`, while `content/getting-started.md` has entity id
+`getting-started`.
 
-Set `parent` to the entity id of the parent page:
+## Declare a parent
 
 ```markdown
 ---
@@ -29,61 +33,46 @@ status: published
 ---
 ```
 
-The entity id is the file path relative to `content/`, without the `.md` extension. So:
-
-- `content/getting-started.md` has entity id `getting-started`
-- `content/guides/building-pages.md` has entity id `guides/building-pages`
-
-## Validation rules
-
-Boris enforces these rules before publishing:
-
-1. **Every `parent` must resolve.** The parent's entity id must be a page that exists. If it does not exist, Boris exits with an `EPARENTMISSING` diagnostic.
-
-2. **No cycles.** A page cannot be its own ancestor. Boris checks for cycles and rejects them.
-
-3. **Satellites must have exactly one parent.** A page cannot declare multiple parents.
-
-4. **Includes and wiki-links must also resolve.** Broken supported internal references (wiki-links and `{{include}}` targets) fail the build. External URLs and arbitrary raw HTML links are outside this guarantee.
-
-<Aside kind="tip">
-
-Run `boris check` to validate the graph without publishing. This is useful in CI pipelines where you want to verify content structure without writing any output files.
-
-</Aside>
-
-## Navigation output
-
-When your HTML layout includes the `{{nav}}` marker, Boris generates a sidebar from the validated graph:
-
-- Trunk pages appear as top-level items
-- Satellite pages appear indented under their parent
-- The current page is marked as active
-- Ancestors of the current page are marked as ancestors
-
-The `{{breadcrumb}}` marker generates a breadcrumb trail from the current page back to its root Trunk.
-
-## Deep hierarchies
-
-There is no depth limit on nesting. A Satellite can itself be the parent of other Satellites:
+Boris checks that the parent exists, rejects self-parenting and cycles, and
+freezes the complete finite chain before output publication. There is no
+one-level nesting limit.
 
 ```text
 index (Trunk)
-  getting-started (Satellite of index)
-  guides (Satellite of index)
-    guides/overview (Satellite of guides)
-    guides/building-pages (Satellite of guides)
-      guides/building-pages/examples (Satellite of guides/building-pages)
+  guides (Satellite)
+    guides/overview (Satellite)
+      guides/building-pages (Satellite)
 ```
 
-Boris validates the full chain at graph freeze time, not page-by-page.
+The default HTML layout uses the graph for its navigation tree and breadcrumbs.
+Asides and Details stay in page order; they are not graph nodes.
 
-## Impact analysis
+## Validation and analysis are different
 
-Use `boris impact` to see which pages depend on a given page:
+Use the compiler's no-publication HTML preflight when you need an authoritative
+validity answer:
 
 ```bash
+./zig-out/bin/boris validate --quiet
+```
+
+Use Documentation Intelligence when you want graph-health facts or impact:
+
+```bash
+./zig-out/bin/boris check --format json --report health.json
 ./zig-out/bin/boris impact guides/overview
 ```
 
-This shows all pages that have `guides/overview` in their ancestor chain, plus any pages that wiki-link or include it. Useful when you are about to rename or restructure a page.
+`check` and `impact` consume a valid frozen graph and analyze parent/include/
+reference dependencies. They do not validate layouts, themes, assets, or the
+complete HTML render path, and semantic `relations` are a separate metadata
+surface.
+
+## Repairing hierarchy changes
+
+When moving a page, update the `parent` value and any wiki-links that should
+follow it, then run `validate` and a normal build. `impact ID` is useful before a
+large rename because it lists transitive dependents without rewriting source.
+
+See [[reference/relationships|Relationships]] for parent edges, wiki-links,
+includes, and semantic relations as separate concepts.

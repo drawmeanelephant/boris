@@ -5,127 +5,100 @@ status: published
 tags: [guides, architecture, pipeline]
 ---
 
-# Plain English Mental Model & Pipeline
+# Content Model & Pipeline
 
-Boris treats your documentation as a **validated directed graph**, not an arbitrary pile of Markdown files. Understanding this mental model clarifies how Boris operates and why parent relationships and supported internal references fail loudly before publish.
+Boris treats documentation as a validated graph rather than an unrelated pile
+of Markdown files. You declare page identity and hierarchy in frontmatter;
+Boris resolves that structure before it publishes HTML or a machine projection.
 
 <Aside kind="info">
 
-**The Mental Model in Plain English:**  
-Think of Boris as a compiler for your site's structure. Every `.md` file is a node in a tree. You explicitly state each page's parent node using `parent: <id>`. Before generating any HTML or machine packages, Boris freezes the whole tree, verifies that every parent exists and that supported Boris internal references (wiki-links, includes, and related graph edges) resolve. External URLs, arbitrary raw HTML links, and every possible page reference are outside that guarantee. If a validated relationship is missing or cyclic, Boris stops and points at the exact error. Once validation passes, it renders the requested output cleanly and predictably.
+The useful mental model is: **source pages become a frozen graph, then a
+selected output is produced from that graph**. `validate`, `check`, `build`,
+and the export modes share the compiler's authorities but answer different
+questions. See the [[reference/commands|command reference]] for the exact
+routing.
 
 </Aside>
 
----
+## Pages, Trunks, and Satellites
 
-## Nodes in the Graph: Trunk & Satellite
+Every discovered `.md` or `.mdx` page gets an entity id from its
+content-root-relative path unless frontmatter supplies an `id`. A page without `parent` is
+a **Trunk**. A page with `parent: <entity-id>` is a **Satellite** of that direct
+parent.
 
-Every Markdown file under `content/` becomes a graph node identified by its path relative to `content/` (without the `.md` extension).
-
-Trunk Node
-: A root page with no `parent` declared. Serves as a top-level anchor of a navigation section (e.g., `index`, `getting-started`, `reference`).
-
-Satellite Node
-: A page with a `parent` key declaring its direct parent's Entity ID. Nests under its parent in navigation.
-
-Entity ID
-: Canonical node identifier derived from file path relative to `content/` without extension (`content/guides/overview.md` → `guides/overview`).
-
-Graph Freeze
-: The moment during the Roll phase when frontmatter and links are validated and frozen in memory before any file is written to disk.
+Satellites may have their own Satellites, so a hierarchy can be arbitrarily
+deep as long as every parent exists and the complete graph is acyclic.
 
 ```markdown
 ---
-title: Content Model & Pipeline
-parent: guides
+title: A nested guide
+parent: guides/overview
 status: published
+tags: [guides]
 ---
 ```
 
-<Aside kind="warning">
+The HTML layout derives navigation and breadcrumbs from this frozen hierarchy.
+The graph rules and dependency edge vocabulary are normative in the
+[[reference/relationships|relationships reference]] and the repository's
+[IR contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/ir-schema.md).
 
-**Frontmatter Rule:** The parent field **must be named `parent`**. Legacy names such as `parent_entry` or `parentEntry` are rejected as invalid frontmatter keys with error code `EFRONTMATTER`.
+## References and reusable fragments
 
-</Aside>
-
----
-
-## The Four Pipeline Stages: Load → Roll → Ignite → Reset
-
-Every Boris execution follows a strict 4-stage pipeline, regardless of output mode:
-
-```
-[ 1. LOAD ]   Discover all content/ files and includes/
-     │
-     ▼
-[ 2. ROLL ]   Parse YAML frontmatter, resolve parent links, validate graph
-     │
-     ├────────► [ VALIDATION ERROR? ] ──► Fail loudly (exit code 1), write nothing
-     ▼
-[ 3. IGNITE ] Route validated graph to requested target (HTML, IR, RAG, Context, llms.txt)
-     │
-     ▼
-[ 4. RESET ]  Free per-page arena scratch after each page publish
-```
-
-### 1. Load (Discovery)
-Boris recursively scans `content/` for `.md` files. Files stored inside `content/includes/` are identified as reusable code/text snippets and excluded from being generated as standalone pages.
-
-### 2. Roll (Graph Resolution & Validation)
-Boris parses frontmatter for every page, validates the closed 5-key frontmatter contract (`id`, `title`, `parent`, `status`, `tags`), verifies parent-child hierarchy, builds the site tree, and validates all wiki-links and include statements.  
-**Critical Guarantee:** Validation completes *before* any output files are written. If a parent link is missing or cyclic, Boris halts with exit code `1` and outputs a diagnostic error.
-
-### 3. Ignite (Rendering & Emission)
-The validated, frozen graph is passed to the requested target emitter:
-- **HTML Emitter (default):** Expands includes, rewrites wiki-links to relative `.html` links, invokes in-process ApexMarkdown to convert Markdown to HTML, and splices content into your layout template.
-- **IR Emitter (`--out`):** Produces machine-readable JSON manifests, graphs, and page entities under `.boris/`.
-- **RAG Emitter (`--rag`):** Produces clean Markdown corpus and catalogs under `rag/` optimized for vector indexing.
-- **Context Emitter (`--context`):** Produces a single aggregated context document under `context/`.
-- **LLMS Emitter (`--llms`):** Produces `llms.txt` listing all published pages.
-
-### 4. Reset (Scratch Cleanup)
-Boris frees the per-page arena allocator scratch after publishing each page. Durable metadata (titles, parents, paths) lives in a long-lived `PageDb` for the rest of the run. Boris does **not** claim flat process RSS across large builds; the supported guarantee is that per-page scratch is reset after each page.
-
----
-
-## Wiki-Links and Snippet Includes
-
-Boris processes two content directives during the pipeline before Markdown parsing:
-
-### Wiki-Links
-Link directly to any page by its entity ID:
+Use a Boris wiki-link when you want a graph-checked link to another page:
 
 ```markdown
-See [[guides/building-pages|Building Pages]] for details on page construction.
+See [[guides/building-pages|Building Pages]] for authoring details.
 ```
 
-If `guides/building-pages` does not exist as a page in `content/`, Boris catches it during the **Roll** phase and stops the build with `EREFERENCEMISSING`.
+The HTML path also accepts heading fragments such as
+`[[reference/commands#exit-codes|exit codes]]`; the fragment must match an id
+from the target page's rendered headings. Ordinary external Markdown links are
+left as links and are not a complete site-wide checker.
 
-### Snippet Includes
-Transclude shared content snippets from `content/includes/`:
+Reusable source fragments live under `content/includes/`:
 
 ```markdown
 {{include includes/shared-tip.md}}
 ```
 
-Files under `content/includes/` are transcluded in-place into the host page before rendering. They do not produce standalone pages in the output directory.
+The include expands in place before Markdown rendering. The `includes/` tree is
+not discovered as a page tree; missing targets and cycles fail loudly. Syntax
+inside fenced code remains literal.
 
----
+## What the compiler does
 
-## Single-Source Multi-Output Alignment
+The shared authority sequence is easier to understand as four responsibilities:
 
-HTML, JSON IR, RAG packages, AI Context Bundles, and `llms.txt` all start from the same validated content graph **when generated from the same source revision**. They are separate invocations, so alignment requires running the desired exporters against that shared revision:
-- The sidebar navigation in HTML matches the graph in JSON IR from the same revision.
-- The RAG corpus contains the same published pages as the HTML site from the same revision.
-- The `llms.txt` file reflects the published hierarchy from the same revision.
+1. **Discover and parse.** Find the selected input family, parse the closed
+   frontmatter grammar, and promote page metadata.
+2. **Validate and freeze.** Resolve ids, parent chains, semantic relations,
+   components, and include/wiki dependencies into a valid graph.
+3. **Prepare the selected output.** For HTML, load layouts and assets, harvest
+   headings, render with ApexMarkdown Unified, and prepare navigation/chrome.
+   Other commands select IR, RAG, Context, `llms.txt`, RSS, or sitemap rules.
+4. **Act on the command.** `validate` discards prepared bytes; `build` stages
+   and commits its publication; analysis commands report graph facts; export
+   commands stage their own projection.
 
-Rendered-site search is a separate standalone tool that indexes the HTML output after it is built.
+This is why a successful `validate` proves source/configuration prepublication
+validity but does not prove a later output write, deployment, accessibility, or
+prose-quality result. The exact boundary is in the
+[validation contract](https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/validation.md).
 
----
+## Same source, separate projections
 
-## Next Steps
+HTML, JSON IR, RAG, Context, `llms.txt`, RSS, and HTML sitemap output are not one
+opaque multi-writer artifact. Run the desired commands against the same source
+revision when you need aligned outputs. [[guides/rag-export|AI & Machine Outputs]]
+covers the machine projections; [[guides/search-and-ui|Search & Browser UI]]
+covers the compiler-owned rendered-search artifact.
 
-- [[guides/trunk-satellite|Trunk & Satellite Graph Rules]] — Detailed rules for graph structure and parent links.
-- [[guides/search-and-ui|Search & Layout UI]] — How layouts, theme markers, and search indices operate.
-- [[guides/rag-export|RAG & Machine Export]] — Generating outputs for AI agents and LLM tools.
-- [[reference/diagnostics|Diagnostics Reference]] — Diagnostic codes (`EFRONTMATTER`, `EPARENTMISSING`, `EREFERENCEMISSING`, `EINCLUDEMISSING`) and troubleshooting.
+## Next steps
+
+- [[guides/building-pages|Building Pages]] — create and link pages.
+- [[guides/trunk-satellite|Trunk & Satellite]] — inspect hierarchy rules.
+- [[guides/themes-and-layouts|Themes & Layouts]] — select layouts and assets.
+- [[reference/diagnostics|Diagnostics]] — understand failure categories.

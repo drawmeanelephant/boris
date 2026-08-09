@@ -62,6 +62,10 @@ include another fragment, but cycles and missing files fail with a diagnostic.
 tree or make a page rebuild when the related page changes. Keep it for a
 meaningful conceptual assertion, not as another way to make a sidebar.
 
+Relation-bearing IR is versioned separately from the relation-free `0.2.0`
+shape. The author key is still `relations`; an export may use its own field
+names for packaging.
+
 ---
 
 ## Diagnostic Troubleshooting for Graph Relationships
@@ -76,11 +80,18 @@ meaningful conceptual assertion, not as another way to make a sidebar.
 
 ### Graph Health Audit Commands
 
-1. **Run Full Graph Check**:
+1. **Preflight the compiler path**:
+   ```bash
+   ./zig-out/bin/boris validate --input content
+   ```
+2. **Run Documentation Intelligence**:
    ```bash
    ./zig-out/bin/boris check
    ```
-2. **Inspect Page Impact**:
+   `check` is a health report after the graph is valid. Its first slice may
+   report an unreferenced page (including a valid root Trunk) and return exit
+   `1`; that is a policy finding, not a parent-graph failure.
+3. **Inspect Page Impact**:
    ```bash
    ./zig-out/bin/boris impact guides/overview
    ```

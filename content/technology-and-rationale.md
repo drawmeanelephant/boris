@@ -18,15 +18,20 @@ In-Process Apex C ABI
 : Markdown rendering is invoked via direct memory pointer calls into vendored ApexMarkdown, eliminating subprocess IPC overhead.[^cabi]
 
 Fail-Loud Graph Freeze
-: Parent relationships, supported wiki-links, and transclusion includes are validated before any output file is written to disk.
+: Parent relationships, supported wiki-links, and transclusion includes are validated before a new publication is committed.
 
 ## Why Zig?
 
 Boris is written in Zig 0.16. Zig was chosen for three properties that matter directly to a documentation compiler:
 
-**Deterministic per-page scratch.** Zig has no garbage collector and no hidden allocations. Boris controls rendering scratch with a per-page arena that is reset after each page is published. Narrow durable metadata (title, parent, paths) is promoted into a long-lived `PageDb` for the rest of the run. That is deliberate retained state — not "no heap between pages" — and Boris does not claim flat process RSS across large builds.
+**Deterministic per-page scratch.** Zig has no garbage collector, and Boris
+controls its rendering scratch with a per-page arena that is reset after each
+page is published. Narrow durable metadata (title, parent, paths) is promoted
+into a long-lived `PageDb` for the rest of the run. That is deliberate retained
+state — not "no heap between pages" — and Boris does not claim flat process RSS
+across large builds.
 
-**Single static binary.** `zig build` produces one self-contained binary with no runtime dependencies. Users do not need to manage a Node package tree, a Python virtualenv, or a Ruby gem set. The binary runs on macOS and Linux without installation.
+**Single static binary.** `zig build` produces one self-contained binary with no Node package tree, Python virtualenv, or Ruby gem set to manage. The supported host platforms and release packaging remain deployment concerns; Boris does not promise one binary for every operating system.
 
 **Direct C interop.** Zig calls C code without a binding layer or a separate process. This is critical for ApexMarkdown — see below.
 
@@ -42,7 +47,7 @@ ApexMarkdown is an extended Markdown variant (based on cmark-gfm) that adds tabl
 
 Most static site generators treat content as a flat file tree — they render each file independently and produce a navigation sidebar by directory enumeration. Boris treats your content as a **directed graph**.
 
-Each page has an optional `parent` key in its frontmatter. Boris builds the full Trunk/Satellite hierarchy from these declarations, validates that every parent reference resolves to a real page, checks for cycles, and verifies that wiki-links and includes point at pages that exist. This validation runs **before any output file is written**.
+Each page has an optional `parent` key in its frontmatter. Boris builds the full Trunk/Satellite hierarchy from these declarations, validates that every parent reference resolves to a real page, checks for cycles, and verifies that supported wiki-links and includes point at pages that exist. The HTML build performs these checks before publishing new output.
 
 The practical consequence: you cannot accidentally publish a site with a broken parent chain or supported internal wiki-link/include. External URLs and arbitrary raw HTML links are not universally validated. When a validated relationship fails, Boris exits with code `1` and a human-readable diagnostic pointing at the specific page and problem. No partial output is committed.
 
@@ -54,7 +59,7 @@ This also means the `{{nav}}` sidebar in your HTML layout is produced from the *
 
 ## Why a closed frontmatter grammar?
 
-Boris accepts exactly five author-facing frontmatter keys: `id`, `title`, `parent`, `status`, and `tags`. Unknown keys are rejected with `EFRONTMATTER`. This is intentional.
+Boris accepts exactly eight author-facing frontmatter keys: `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, and `summary`. Unknown keys are rejected with `EFRONTMATTER`. This is intentional.
 
 An open frontmatter grammar (full arbitrary YAML) creates ambiguity about which keys are meaningful, accumulates legacy keys silently, and makes it impossible to give confident diagnostics. A closed grammar means every key has a documented meaning, every rejected key gives a clear error, and the frontmatter contract can be versioned and evolved deliberately.
 
@@ -62,7 +67,11 @@ An open frontmatter grammar (full arbitrary YAML) creates ambiguity about which 
 
 Boris outputs plain HTML and CSS. There is no required JavaScript bundle, no hydration step, and no client-side rendering. The output works without JavaScript enabled.
 
-The one optional JavaScript feature is the search UI — a small inline script that fetches `search-index.json` and renders results. It is opt-in (you include it in your layout), degrades gracefully (the navigation still works without it), and requires no build tool or bundler.
+The one optional JavaScript feature is the search UI — a small script that
+fetches the compiler-owned `search-index.json` and renders results. It is a
+theme concern: the default layout includes it, while a custom layout must
+provide its own consumer. The static index and no-JavaScript fallback do not
+require a build tool or bundler.
 
 ## Why a single-source multi-output model?
 
