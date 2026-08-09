@@ -1,7 +1,7 @@
 # Graph-backed Markdown documentation links
 
 **Status:** normative HTML first slice — pre-Apex, afterparty
-**Modules:** [`src/doclink.zig`](../../src/doclink.zig), [`src/html_body.zig`](../../src/html_body.zig)
+**Modules:** [`src/doclink.zig`](../../src/doclink.zig), [`src/html_body.zig`](../../src/html_body.zig), [`src/link_audit.zig`](../../src/link_audit.zig)
 **Related:** [html-output.md](html-output.md), [identity-and-paths.md](identity-and-paths.md), [frontmatter.md](frontmatter.md)
 
 ## Purpose
@@ -59,7 +59,9 @@ The following remain byte-for-byte unchanged:
 - image links, raw HTML tags/attributes, code spans, and fenced code;
 - fragment-only/query-only destinations;
 - non-Markdown files and uppercase/noncanonical extensions;
-- missing graph targets;
+- missing graph targets remain literal during the pre-Apex rewrite; the
+  published-output link audit still rejects a local destination that does not
+  resolve to an intended output route;
 - lexical or percent-encoded traversal, backslashes, malformed escapes, and
   paths that leave the content root;
 - reference-style links and other forms outside the first inline-link parser.
@@ -79,4 +81,5 @@ graph.
 
 Focused unit and HTML integration tests cover nested and root-relative links,
 query/fragment preservation, titles and angle destinations, escaping,
-exclusions, code/fence/raw-HTML boundaries, missing targets, and traversal.
+exclusions, code/fence/raw-HTML boundaries, missing targets (including literal
+`.md` / `.mdx` routes at publication), and traversal.

@@ -530,10 +530,20 @@ set +e
 "${BORIS}" check --input="${DI_CONTENT}" --format=json --report="${DI_CHECK_JSON}" --quiet
 DI_CHECK_EC=$?
 set -e
-if [[ "${DI_CHECK_EC}" -eq 1 ]] && diff -u "${DI_EXPECTED}/check.json" "${DI_CHECK_JSON}" >/dev/null; then
-  pass "check JSON golden + CI finding exit 1"
+if [[ "${DI_CHECK_EC}" -eq 0 ]] && diff -u "${DI_EXPECTED}/check.json" "${DI_CHECK_JSON}" >/dev/null; then
+  pass "check JSON golden + informational finding exit 0"
 else
   fail "check JSON golden or exit code mismatch (got ${DI_CHECK_EC})"
+fi
+DI_STRICT_CHECK_JSON="${DI_PROBE}/di-check-strict.json"
+set +e
+"${BORIS}" check --input="${DI_CONTENT}" --format=json --report="${DI_STRICT_CHECK_JSON}" --fail-on-unreferenced --quiet
+DI_STRICT_CHECK_JSON_EC=$?
+set -e
+if [[ "${DI_STRICT_CHECK_JSON_EC}" -eq 1 ]] && diff -u "${DI_CHECK_JSON}" "${DI_STRICT_CHECK_JSON}" >/dev/null; then
+  pass "check JSON strict unreferenced policy returns exit 1 with identical report"
+else
+  fail "check JSON strict unreferenced policy mismatch (got ${DI_STRICT_CHECK_JSON_EC})"
 fi
 
 # Explicit command spellings are part of the public CLI contract.  Keep the
@@ -559,10 +569,20 @@ set +e
 "${BORIS}" check --input="${DI_CONTENT}" --format=human --report="${DI_CHECK_HUMAN}" --quiet
 DI_HUMAN_EC=$?
 set -e
-if [[ "${DI_HUMAN_EC}" -eq 1 ]] && diff -u "${DI_EXPECTED}/check.txt" "${DI_CHECK_HUMAN}" >/dev/null; then
+if [[ "${DI_HUMAN_EC}" -eq 0 ]] && diff -u "${DI_EXPECTED}/check.txt" "${DI_CHECK_HUMAN}" >/dev/null; then
   pass "check human golden"
 else
   fail "check human golden or exit code mismatch (got ${DI_HUMAN_EC})"
+fi
+DI_STRICT_CHECK_HUMAN="${DI_PROBE}/di-check-strict.txt"
+set +e
+"${BORIS}" check --input="${DI_CONTENT}" --format=human --report="${DI_STRICT_CHECK_HUMAN}" --fail-on-unreferenced --quiet
+DI_STRICT_HUMAN_EC=$?
+set -e
+if [[ "${DI_STRICT_HUMAN_EC}" -eq 1 ]] && diff -u "${DI_CHECK_HUMAN}" "${DI_STRICT_CHECK_HUMAN}" >/dev/null; then
+  pass "check strict unreferenced policy returns exit 1 with identical report"
+else
+  fail "check strict unreferenced policy mismatch (got ${DI_STRICT_HUMAN_EC})"
 fi
 if "${BORIS}" impact guides/reference --input="${DI_CONTENT}" --format=human --report="${DI_IMPACT_HUMAN}" --quiet \
   && diff -u "${DI_EXPECTED}/impact.txt" "${DI_IMPACT_HUMAN}" >/dev/null; then
@@ -629,10 +649,20 @@ set +e
 "${BORIS}" check --input="docs/contracts/fixtures/documentation-intelligence/edge-cases/single/content" --format=json --report="${DI_SINGLE_REPORT}" --quiet
 DI_SINGLE_EC=$?
 set -e
-if [[ "${DI_SINGLE_EC}" -eq 1 && -f "${DI_SINGLE_REPORT}" ]] && grep -q '"pages": 1' "${DI_SINGLE_REPORT}"; then
-  pass "single-page analysis tree reports its page and CI finding"
+if [[ "${DI_SINGLE_EC}" -eq 0 && -f "${DI_SINGLE_REPORT}" ]] && grep -q '"pages": 1' "${DI_SINGLE_REPORT}"; then
+  pass "single-page analysis tree reports its page without failing by default"
 else
   fail "single-page analysis tree behavior mismatch (got ${DI_SINGLE_EC})"
+fi
+DI_SINGLE_STRICT_REPORT="${DI_PROBE}/single-strict.json"
+set +e
+"${BORIS}" check --input="docs/contracts/fixtures/documentation-intelligence/edge-cases/single/content" --format=json --report="${DI_SINGLE_STRICT_REPORT}" --fail-on-unreferenced --quiet
+DI_SINGLE_STRICT_EC=$?
+set -e
+if [[ "${DI_SINGLE_STRICT_EC}" -eq 1 ]] && diff -u "${DI_SINGLE_REPORT}" "${DI_SINGLE_STRICT_REPORT}" >/dev/null; then
+  pass "single-page strict policy returns exit 1 with identical report"
+else
+  fail "single-page strict policy mismatch (got ${DI_SINGLE_STRICT_EC})"
 fi
 if [[ ! -d "${GATE_DIR}/di-probe/dist" && ! -d "${GATE_DIR}/di-probe/rag" && ! -d "${GATE_DIR}/di-probe/.boris-cache" ]]; then
   pass "analysis produced no HTML, RAG, or cache artifacts"

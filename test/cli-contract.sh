@@ -42,15 +42,18 @@ done
 # Explicit watch routes through the command parser without starting a session.
 "${BORIS}" watch --help >/dev/null 2>&1
 
-# Check and impact preserve their documented exit behavior and JSON goldens.
-expect_exit 1 "${BORIS}" check --input="${FIXTURE}" --format=json --report="${TMP}/check.json" --quiet
+# Check and impact preserve their documented reports. Ordinary unreferenced
+# findings are informational unless the explicit CI policy flag is selected.
+expect_exit 0 "${BORIS}" check --input="${FIXTURE}" --format=json --report="${TMP}/check.json" --quiet
 cmp "${EXPECTED}/check.json" "${TMP}/check.json"
+expect_exit 1 "${BORIS}" check --input="${FIXTURE}" --format=json --report="${TMP}/check-strict.json" --fail-on-unreferenced --quiet
+cmp "${TMP}/check.json" "${TMP}/check-strict.json"
 "${BORIS}" impact guides/reference --input="${FIXTURE}" --format=json --report="${TMP}/impact.json" --quiet
 cmp "${EXPECTED}/impact.json" "${TMP}/impact.json"
 
 # Repeated output is byte-identical, including the graph/source-location
 # projection consumed by editor integrations.
-expect_exit 1 "${BORIS}" check --input="${FIXTURE}" --format=json --report="${TMP}/check-repeat.json" --quiet
+expect_exit 0 "${BORIS}" check --input="${FIXTURE}" --format=json --report="${TMP}/check-repeat.json" --quiet
 cmp "${TMP}/check.json" "${TMP}/check-repeat.json"
 grep -q '"sourceLocations"' "${TMP}/check.json"
 grep -q '"diagnostics": \[\]' "${TMP}/check.json"
@@ -59,9 +62,30 @@ grep -q '"diagnostics": \[\]' "${TMP}/check.json"
 # report when no valid frozen graph exists.
 expect_exit 1 "${BORIS}" check --input="${INVALID}" --format=json --report="${TMP}/invalid.json" --quiet
 test ! -e "${TMP}/invalid.json"
+expect_exit 1 "${BORIS}" check --input="${INVALID}" --format=json --report="${TMP}/invalid-strict.json" --fail-on-unreferenced --quiet
+test ! -e "${TMP}/invalid-strict.json"
 expect_exit 2 "${BORIS}" impact does/not-exist --input="${FIXTURE}" --format=json --report="${TMP}/missing.json" --quiet
 test ! -e "${TMP}/missing.json"
 expect_exit 3 "${BORIS}" check --input="${MISSING}" --format=json --report="${TMP}/io.json" --quiet
 test ! -e "${TMP}/io.json"
+
+# The rendered-output audit catches literal source links as well as .html
+# routes, and classifies the invalid publication as content (exit 1).
+LINK_FIXTURE="test/fixtures/doc-links-missing/content"
+LINK_OUT="${TMP#${ROOT}/}/missing-link-site"
+LINK_LOG="${TMP}/missing-link.log"
+set +e
+"${BORIS}" build --input="${LINK_FIXTURE}" --html-dir="${LINK_OUT}" >"${LINK_LOG}" 2>&1
+LINK_EC=$?
+set -e
+if [[ "${LINK_EC}" -eq 1 ]] && grep -q 'EROUTEMISSING.*missing.md' "${LINK_LOG}" \
+  && grep -q 'EROUTEMISSING.*missing.html' "${LINK_LOG}" \
+  && test ! -e "${LINK_OUT}/index.html"; then
+  :
+else
+  printf 'missing-link audit mismatch (got exit %s)\n' "${LINK_EC}" >&2
+  cat "${LINK_LOG}" >&2
+  exit 1
+fi
 
 printf 'CLI contract process tests: PASS\n'

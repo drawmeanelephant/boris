@@ -14,4 +14,4 @@ status: published
 [Reference](../reference.md)
 ```
 
-<a href="../reference.md?raw=true#anchor">Raw reference</a>
+<a href="../reference.html?raw=true#anchor">Raw reference</a>

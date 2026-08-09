@@ -8,7 +8,7 @@ Boris exposes six stable top-level commands. A missing command is equivalent to
 ```text
 boris build [build options]
 boris validate [HTML source and target options]
-boris check [--input DIR] [--format human|json] [--report PATH]
+boris check [--input DIR] [--format human|json] [--report PATH] [--fail-on-unreferenced]
 boris impact ID [--input DIR] [--format human|json] [--report PATH]
 boris watch [build options]
 boris plan --profile PATH [plan overrides]
@@ -46,8 +46,8 @@ selectors, `--incremental`, `--watch`, `--jobs`, `--format`, and `--report`.
 
 | Code | Meaning |
 |-----:|---------|
-| `0` | Successful build, validation, plan, watch shutdown, valid impact query, or check with no policy findings |
-| `1` | Content/graph failure, or a `check` policy finding such as an unreferenced page |
+| `0` | Successful build, validation, plan, watch shutdown, valid impact query, or check with no enabled policy failure |
+| `1` | Content/graph failure, or an opted-in `check` policy finding such as an unreferenced page |
 | `2` | Usage error: unknown command/flag, missing value, invalid ID, or conflicting mode |
 | `3` | I/O or system failure |
 
@@ -63,6 +63,11 @@ Consumers should invoke:
 boris check --input CONTENT --format json --report REPORT.json
 boris impact ID --input CONTENT --format json --report REPORT.json
 ```
+
+`boris check` reports `unreferenced_page` findings without failing by default.
+CI that treats those findings as fatal may add `--fail-on-unreferenced`; the
+flag is rejected for other commands and does not change the report schema or
+bytes.
 
 These reports use the versioned `boris-documentation-intelligence` schema
 defined in [`documentation-intelligence.md`](documentation-intelligence.md).

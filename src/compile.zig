@@ -912,6 +912,7 @@ fn isContentCompileFailure(err: anyerror) bool {
         error.AssetMissing,
         error.AssetNotFile,
         error.AssetUnsafeSvg,
+        error.LinkAuditFailed,
         error.ThemeRootMissing,
         error.InvalidThemePath,
         error.ThemeSymlink,
@@ -1115,6 +1116,7 @@ test "multi-target failure classification keeps I/O distinct from content" {
     try std.testing.expect(isContentCompileFailure(error.ParseFailed));
     try std.testing.expect(isContentCompileFailure(error.LayoutMissingMarker));
     try std.testing.expect(isContentCompileFailure(error.AssetUnsafeSvg));
+    try std.testing.expect(isContentCompileFailure(error.LinkAuditFailed));
     try std.testing.expect(!isContentCompileFailure(error.AccessDenied));
     try std.testing.expect(!isContentCompileFailure(error.OutOfMemory));
 }
