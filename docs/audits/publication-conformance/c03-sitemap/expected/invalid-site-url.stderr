@@ -52,6 +52,7 @@ Options:
   --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
   --format human|json  Analysis output format for check/impact (default human)
   --report PATH        Write an analysis report instead of stdout
+  --fail-on-unreferenced Make check fail when it reports unreferenced pages
   --profile PATH       Selected publication profile for `plan`
   -h, --help          Show this help and exit 0
 
