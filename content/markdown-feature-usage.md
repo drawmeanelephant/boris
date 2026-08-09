@@ -7,44 +7,55 @@ tags: [reference, markdown, editorial, audit]
 
 # Markdown Feature Usage Register
 
-This document tracks every Markdown feature used across the Boris documentation site, its editorial rationale, support tier, rendering caveats, and plain page justifications.
+This page records the Markdown and Boris-native constructs intentionally used
+in the public documentation. It is an editorial register, not a second product
+contract; [[guides/apex-markdown|Apex Markdown Showcase]] and the linked
+contracts own syntax details.
 
----
+## Feature matrix
 
-## 1. Feature Usage Matrix
+| Feature | Why the site uses it | Boundary |
+|---|---|---|
+| `&lt;Aside&gt;` callouts | Short, semantic warnings and tips | Constrained kinds; no nesting |
+| `&lt;Details&gt;` disclosures | Optional detail without leaving the page | Required plain `summary`; no nesting |
+| Wiki-links | Stable cross-page graph references | Entity ids and optional rendered heading fragments |
+| Include directives | Shared source prose | Fragments under `content/includes/`; fences stay literal |
+| Tables | Compact comparisons and reference data | ApexMarkdown rendering; theme supplies presentation |
+| Footnotes | Method notes without interrupting the main argument | ApexMarkdown output |
+| Task lists | Setup/checklist communication | Static HTML checkboxes |
+| Heading IAL | Stable custom anchors and classes | Apex heading syntax; TOC reads rendered ids |
+| Critic markup | Migration examples | Apex rendering only |
+| Math | Technical notation | Theme-dependent CSS/JS; not required by the compiler |
+| Rendered search index | Searchable output for the default site | Compiler-owned JSON artifact; browser consumer is theme-owned |
 
-| Feature | Pages Using It | Editorial Rationale | Support Tier | Rendering / Export Caveats |
-| :--- | :--- | :--- | :--- | :--- |
-| **Callout `&lt;Aside&gt;` Components** | `index.md`, `getting-started.md`, `comparison.md`, `overview.md`, `building-pages.md`, `asides.md` | Provide structured, non-disruptive warnings, tips, and layer summaries | **Product Core** | Converted to `:::kind` format in RAG export; rejected if nested |
-| **Wiki-Links (`&#91;&#91;id&#93;&#93;`)** | `index.md`, `getting-started.md`, `comparison.md`, `overview.md`, `building-pages.md`, `rag-export.md` | Demonstrate fail-loud graph-aware cross-referencing | **Product Core** | Verified during Roll phase before rendering; dead links exit 1 |
-| **Transclusion Includes (`&#123;&#123;include path&#125;&#125;`)** | `getting-started.md`, `apex-markdown.md` | Single-source shared authoring tips across pages | **Product Core** | Expanded in memory before Apex; literal inside code fences |
-| **Definition Lists** | `index.md`, `overview.md`, `trunk-satellite.md`, `technology-and-rationale.md` | Define core terminology cleanly without verbose headers | **Engine Feature** | Rendered as HTML `<dl><dt><dd>`; flattened to prose paragraphs in text exports |
-| **Task Lists** | `index.md`, `getting-started.md`, `apex-markdown.md` | Provide visual progress checklists | **Engine Feature** | Rendered as HTML checkboxes `<input type="checkbox">` |
-| **Footnotes (`[^label]`, `^[inline]`)** | `comparison.md`, `technology-and-rationale.md`, `apex-markdown.md` | Keep methodology and memory allocation details from cluttering prose | **Engine Feature** | Definitions hoisted to page bottom with back-links in HTML |
-| **Advanced Tables (rowspan/colspan/caption)** | `comparison.md`, `apex-markdown.md` | Structure complex multi-dimensional architectural comparisons cleanly | **Engine Feature** | Requires CSS styling in theme layout for alignment and borders |
-| **Critic Markup (`{++add++}`, `{--del--}`)** | `migration.md`, `apex-markdown.md` | Show visual revision diffs during SSG migration | **Engine Feature** | Rendered as `<ins>` and `<del>` HTML tags |
-| **Stable Heading IDs (`{#id}`)** | `building-pages.md`, `commands.md`, `apex-markdown.md` | Ensure stable deep-link anchors across releases | **Engine Feature** | Embedded as `id="id"` on heading HTML tags |
+## Product boundaries
 
----
+- Boris frontmatter is closed: `id`, `title`, `parent`, `status`, `tags`,
+  `relations`, `published_at`, and `summary`.
+- `&lt;Aside&gt;` and `&lt;Details&gt;` are the only registered PascalCase components.
+- `[[entity-id]]`, include directives, and component tokens are handled in the
+  compiler pipeline around Apex; they are not arbitrary MDX.
+- Fenced examples keep component-looking and link-looking syntax literal.
+- RAG `:::kind` and `:::details` blocks are export representations, not source
+  authoring syntax.
 
-## 2. Intentionally Plain Pages & Editorial Rationale
+## Editorial rules
 
-The following pages are kept intentionally plain (using standard headings, concise prose, and clean code blocks without decorative Markdown features):
+1. Use a feature when it improves comprehension, comparison, setup, or a
+   concrete product example.
+2. Keep reference pages scannable; do not turn every fact into a callout.
+3. Put unsupported or product-off Apex syntax in inert fenced examples and
+   label the boundary explicitly.
+4. Run the real compiler after edits so heading fragments, includes, graph
+   edges, and rendered search inventory remain honest.
 
-| Page Path | Primary Purpose | Editorial Rationale for Plain Presentation |
-| :--- | :--- | :--- |
-| `content/reference/commands.md` | Complete CLI Command & Flag Reference | Technical reference tool. Authors and agents need uncluttered flag tables and rapid scanning without visual distraction. |
-| `content/reference/diagnostics.md` | Error Code & Diagnostic Reference | Emergency troubleshooting guide. Needs raw, un-adorned diagnostic matrices and copy-pasteable fix steps. |
-| `content/reference/frontmatter.md` | Closed Frontmatter Grammar Spec | Specification contract. Enforces closed grammar rules; requires high visual clarity and zero decorative overhead. |
-| `content/reference/outputs.md` | Build Artifact & Schema Specification | Programmatic schema documentation. Needs dense tables and code blocks showing JSON IR / RAG schemas. |
-| `content/reference/relationships.md` | Content Topology & Relationship Rules | Graph relationship spec. Plain tabular presentation prevents ambiguity in parent chain and wiki-link rules. |
+## Intentionally plain references
 
----
+These pages favor tables, short paragraphs, and copy-pasteable examples over
+decorative syntax:
 
-## 3. Rejection & Quality Audit
-
-Every Markdown feature used on this site satisfies the following quality criteria:
-
-1. **No Gratuitous Clutter:** Every callout, table, footnote, and definition list serves a specific editorial purpose (comprehension, comparison, setup, or proof).
-2. **Source Maintainability:** Raw Markdown source files remain clean, readable, and easy to update.
-3. **Machine Export Integrity:** All features render cleanly into RAG corpus Markdown, JSON IR graph nodes, and single-pass Context bundles without corrupting agent parsing.
+- [[reference/commands|Command Reference]]
+- [[reference/diagnostics|Diagnostics & Troubleshooting]]
+- [[reference/frontmatter|Frontmatter Reference]]
+- [[reference/outputs|Outputs & Artifacts]]
+- [[reference/relationships|Relationships]]

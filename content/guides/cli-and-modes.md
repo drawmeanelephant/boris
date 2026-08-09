@@ -7,61 +7,116 @@ tags: [cli, guides]
 
 # CLI & Output Modes
 
-Boris provides a clean, single-binary CLI surface. This guide covers output modes, parallel execution, watch mode, and CLI exit codes.
+Boris has one native CLI with explicit command and projection boundaries. Use
+this page to choose a command; use the [[reference/commands|Command Reference]]
+for every flag and conflict rule.
 
 <Aside kind="info">
 
-**Layer 1 Summary:** Running `./zig-out/bin/boris` without flags emits static HTML to `dist/`. Passing `--out`, `--rag`, `--context`, or `--llms` selects a specific machine export mode. Modes are mutually exclusive.
+Bare `boris` and `boris build` both publish the default HTML target under
+`dist/`. `boris validate` is the no-publication compiler preflight. `boris
+check` is graph-health analysis, not an alias for validation.
 
 </Aside>
 
----
+## Commands at a glance
 
-## Output Modes Summary
+| Command | Answers | Writes by default |
+|---|---|---|
+| `boris build` (or bare `boris`) | Can Boris publish the selected output? | HTML target and its selected publication artifacts |
+| `boris validate` | Would the selected HTML source/configuration survive prepublication compilation? | Nothing |
+| `boris watch` | Build HTML, then rebuild after debounced changes | HTML target and cache |
+| `boris check` | What graph/dependency health facts and policy findings exist? | Nothing, unless `--report` is supplied |
+| `boris impact ID` | Which pages or source endpoints depend on this id? | Nothing, unless `--report` is supplied |
+| `boris plan --profile PATH` | What normalized publication declaration does this profile describe? | JSON declaration on stdout |
 
-| Desired Output | Command Line | Primary Flag | Default Location |
-|---|---|---|---|
-| **Static HTML Site** | `./zig-out/bin/boris` | Default | `dist/` |
-| **Custom Theme HTML** | `./zig-out/bin/boris --theme examples/prototype-corporate` | `--theme` | `dist/` |
-| **JSON IR Graph** | `./zig-out/bin/boris --out .boris` | `--out` | `.boris/` |
-| **RAG Corpus** | `./zig-out/bin/boris --rag --rag-dir dist/rag` | `--rag` | `rag/` |
-| **AI Context Bundle** | `./zig-out/bin/boris --context --context-dir dist/context` | `--context` | `context/` |
-| **`llms.txt` Index** | `./zig-out/bin/boris --llms --llms-path dist/llms.txt` | `--llms` | `llms.txt` |
-| **Check Graph Only** | `./zig-out/bin/boris check` | `check` subcommand | None (Memory only) |
+`watch` is HTML-only. The compatibility flag `--watch` and `build --watch`
+remain accepted. `check` and `impact` operate only after the graph is valid;
+their first policy slice can return exit `1` for findings such as an
+unreferenced page.
 
----
-
-## HTML Build Flags
+## The normal HTML path
 
 ```bash
-# Render with custom output folder
-./zig-out/bin/boris --html-dir public
-
-# Render with parallel workers (up to 64 jobs)
-./zig-out/bin/boris --jobs 4 --quiet
-
-# Watch mode for authoring (automatically re-renders changed pages)
-./zig-out/bin/boris --watch --quiet
-
-# Incremental build mode (skips unchanged pages based on hash)
-./zig-out/bin/boris --incremental --quiet
+./zig-out/bin/boris build --quiet
+./zig-out/bin/boris validate --quiet
+./zig-out/bin/boris --html-dir public --quiet
+./zig-out/bin/boris watch --html-dir public --quiet
 ```
 
----
+The default managed layout is
+`themes/boris/layouts/main.html`. Use `--html-layout PATH` for one layout or
+`--theme ROOT` for a theme root containing `layouts/main.html` and managed
+assets. `--incremental` reuses content-addressed HTML work; `--jobs N` bounds
+parallel HTML page workers from 1 through 64.
 
-## Conflict Rules & Exit Codes
+## Machine projections
 
-Output modes cannot be combined in a single invocation. Attempting to pass conflicting mode flags (e.g. `--out` and `--rag` together) exits immediately with code `2` (usage error).
+Each projection is a separate invocation over the same content tree:
 
-### Standard Exit Codes:
-- `0` — Success. All pages parsed, validated, and rendered cleanly.
-- `1` — Content or Graph Error (`EFRONTMATTER`, `EPARENTMISSING`, `EREFERENCEMISSING`, `EINCLUDEMISSING`, …). Validation failed; no files written.
-- `2` — CLI Usage Error. Invalid flag combination or bad argument.
-- `3` — I/O or System Error. Cannot read `content/` directory or write output.
+```bash
+./zig-out/bin/boris --out .boris --quiet       # JSON IR
+./zig-out/bin/boris --rag --quiet              # RAG corpus under rag/
+./zig-out/bin/boris --context --quiet          # Context Bundle under context/
+./zig-out/bin/boris --llms --quiet             # llms.txt
+```
 
----
+RAG and Context support `--scope`, `--split-size`, and the RAG-only
+`--bundles-only` option. `--out` selects IR; it is not a request to add IR to a
+normal HTML build.
 
-## Next Steps
+## RSS and sitemap
 
-- [[getting-started|Getting Started]] — 5-minute quickstart guide.
-- [[reference/commands|CLI Reference]] — Complete flag dictionary and options.
+RSS is a standalone projection and requires its public metadata:
+
+```bash
+./zig-out/bin/boris --rss \
+  --site-url https://docs.example/ \
+  --rss-title "Example Docs" \
+  --rss-description "Recent updates" \
+  --quiet
+```
+
+An HTML sitemap is selected on the HTML path and uses the same deployment base:
+
+```bash
+./zig-out/bin/boris --sitemap \
+  --site-url https://docs.example/ \
+  --quiet
+```
+
+RSS and sitemap are different projections. RSS flags cannot be combined with
+HTML, IR, RAG, Context, `llms.txt`, `check`, or `impact`; sitemap is an HTML
+target option and requires exactly one unambiguous target.
+
+## Multiple HTML targets and layouts
+
+Use repeatable `--target NAME=DIR` options when the same content needs isolated
+HTML outputs:
+
+```bash
+./zig-out/bin/boris \
+  --target docs=dist/docs \
+  --target api=dist/api \
+  --target-layout docs=themes/docs/layouts/main.html \
+  --target-layout api=themes/api/layouts/main.html
+```
+
+`--target` is exclusive with `--html-dir`. Page-specific `--layout-rule`
+selectors can choose layouts by entity id, glob, or resolved role. Each target
+owns its layout, assets, cache, search artifact, and publication evidence.
+
+## Exit codes
+
+| Code | Meaning |
+|---:|---|
+| `0` | Command succeeded; `check` had no failing first-slice policy finding |
+| `1` | Content/graph failure, or a failing `check` policy finding |
+| `2` | Usage error: unknown flag, missing value, invalid id, or conflicting mode |
+| `3` | I/O, allocation, or unexpected system failure |
+
+## Next steps
+
+- [[reference/commands|Command Reference]] — complete CLI surface.
+- [[guides/search-and-ui|Search & Browser UI]] — compiler-owned rendered search.
+- [[reference/diagnostics|Diagnostics]] — error categories and recovery.

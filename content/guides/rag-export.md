@@ -11,20 +11,22 @@ Boris is built from the ground up for both human readers and AI agents. From a s
 
 <Aside kind="info">
 
-**Layer 1 & 3 Summary:** Machine exports share the same frozen, validated Trunk/Satellite graph model as HTML output. HTML, IR, RAG, Context, and `llms.txt` are separate invocations — generate them from the same source revision when you need aligned editions.
+Machine exports share the same frozen, validated Trunk/Satellite graph model as
+HTML. They are separate invocations, so generate the editions from the same
+source revision when you need them aligned.
 
 </Aside>
 
 ---
 
-## 4 Native Machine Export Modes
+## Native Machine Export Modes
 
 | Export Mode | Command Flag | Output Location | Target Consumer |
 |---|---|---|---|
-| **JSON IR** | `--out <dir>` | `dist/.boris/` | Programmatic tools, graph analyzers, documentation linters |
-| **RAG Corpus** | `--rag --rag-dir <dir>` | `dist/rag/` | Vector database indexers, AI retrieval pipelines |
-| **AI Context Bundle** | `--context --context-dir <dir>` | `dist/context/` | Single-pass prompt context windows for LLMs |
-| **`llms.txt` Index** | `--llms --llms-path <path>` | `dist/llms.txt` | AI web crawlers and standardized agent navigation |
+| **JSON IR** | `--out <dir>` | chosen `--out` directory | Programmatic tools, graph analyzers, documentation linters |
+| **RAG Corpus** | `--rag --rag-dir <dir>` | chosen `--rag-dir` directory | Retrieval pipelines and vector database indexers |
+| **AI Context Bundle** | `--context --context-dir <dir>` | chosen `--context-dir` directory | Single-pass prompt context windows |
+| **`llms.txt` Index** | `--llms --llms-path <path>` | chosen `--llms-path` | Lightweight machine discovery |
 
 ---
 
@@ -38,10 +40,11 @@ Here is how a source page is represented across the 4 native machine export form
 title: Asides & Admonitions
 parent: guides/overview
 status: published
+summary: Short source summaries are optional unless published_at is set.
 ---
 <Aside kind="tip">
 
-Use `boris check` in CI pipelines.
+Use `boris validate` before publishing.
 
 </Aside>
 ```
@@ -64,13 +67,13 @@ Use `boris check` in CI pipelines.
 ### 4. RAG Body Representation (`dist/rag/content/pages/guides/asides.md`)
 ```markdown
 :::tip
-Use `boris check` in CI pipelines.
+Use `boris validate` before publishing.
 :::
 ```
 
 ### 5. `llms.txt` Entry (`dist/llms.txt`)
 ```text
-  - [Asides & Admonitions](/guides/asides/): Semantic callout blocks in Boris
+  - [Asides & Admonitions](/guides/asides.html): Semantic callout blocks in Boris
 ```
 
 ---
@@ -139,17 +142,14 @@ Generates a hierarchical Markdown index conforming to the `llms.txt` standard fo
 To generate HTML and all 4 machine formats cleanly in one scripted workflow against one source revision:
 
 ```bash
-# 1. HTML Site
-./zig-out/bin/boris --theme examples/prototype-corporate --html-dir dist --quiet
+# HTML site; the compiler emits the rendered search artifact for this build.
+./zig-out/bin/boris build --theme examples/prototype-corporate --html-dir dist --quiet
 
-# 2. Client-Side Search Index
-zig build --build-file tools/search-index/build.zig run -- --root=./dist --out=./dist/_boris/search
-
-# 3. Machine Artifacts
-./zig-out/bin/boris --rag --rag-dir dist/rag --quiet
-./zig-out/bin/boris --out dist/.boris --quiet
-./zig-out/bin/boris --llms --llms-path dist/llms.txt --quiet
-./zig-out/bin/boris --context --context-dir dist/context --quiet
+# Machine artifacts, each from the same source revision.
+./zig-out/bin/boris build --rag --rag-dir dist/rag --quiet
+./zig-out/bin/boris build --out dist/.boris --quiet
+./zig-out/bin/boris build --llms --llms-path dist/llms.txt --quiet
+./zig-out/bin/boris build --context --context-dir dist/context --quiet
 ```
 
 ---

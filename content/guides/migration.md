@@ -63,7 +63,8 @@ Mode reports identify candidate structure, frontmatter, and conversion issues fo
 Start with a small representative section of your site. For each page:
 
 1. Create the file under `content/` with a Boris-compatible path.
-2. Rewrite frontmatter to use only the five Boris keys (`id`, `title`, `parent`, `status`, `tags`).
+2. Rewrite frontmatter to use only Boris's eight keys: `id`, `title`, `parent`,
+   `status`, `tags`, `relations`, `published_at`, and `summary`.
 3. Replace SSG-specific shortcodes with Boris `&lt;Aside&gt;` callouts and [[guides/apex-markdown#wiki-links|wiki-links]].
 4. Remove MDX `import` statements and executable component usage.
 
@@ -104,17 +105,24 @@ Use caching headers on static assets.
 </Aside>
 ```
 
-## Step 4: Validate before expanding
+## Step 4: Preflight before expanding
 
 ```bash
-./zig-out/bin/boris check
+./zig-out/bin/boris validate --input content --quiet
+./zig-out/bin/boris check --input content
 ```
 
-Validate the graph before adding more pages. Fix any `EPARENTMISSING`, `EREFERENCEMISSING`, or `EFRONTMATTER` errors before continuing.
+`validate` runs the authoritative HTML prepublication compiler path without
+writing HTML or other outputs. `check` is a separate documentation-intelligence
+report over the already valid graph; it can return exit `1` for a policy finding
+such as an unreferenced page. Fix any `EPARENTMISSING`, `EREFERENCEMISSING`, or
+`EFRONTMATTER` errors before continuing.
 
 ## Step 5: Expand and iterate
 
-Once a section validates cleanly, add the next section and repeat. Boris's validation model means you cannot accidentally publish a broken state — broken references fail loudly.
+Once a section preflights cleanly, add the next section and repeat. A normal
+`boris build` freezes the graph before publishing HTML, so broken supported
+relationships fail loudly rather than becoming partial navigation.
 
 ## What Boris does not support
 
