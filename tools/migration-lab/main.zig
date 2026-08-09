@@ -386,7 +386,8 @@ fn printUsage() void {
         \\
         \\Frontmatter review (read-only unsupported-key audit):
         \\  --mode=frontmatter-review  Scan a content tree for keys outside the Boris
-        \\                     closed grammar {id, title, parent, status, tags}
+        \\                     closed grammar {id, title, parent, status, tags,
+        \\                     relations, published_at, summary}
         \\  --content=DIR      Content tree root (required; never modified)
         \\  Writes: frontmatter_review.json, FRONTMATTER_REVIEW.md
         \\  Aliases: fm-review | fmreview

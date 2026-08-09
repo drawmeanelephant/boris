@@ -20,8 +20,11 @@ Standalone **migration laboratory** for bringing existing sites into Boris.
 | **link-audit** | Generated static HTML tree | Missing local routes/fragments report; external links are left out of scope |
 
 All modes are **read-only on inputs**: originals are never rewritten. There is
-**no network access**, no zip extraction, no scraping, and **no product compiler
-coupling**. All code and fixtures live under `tools/migration-lab/`.
+**no network access**, no zip extraction, and no scraping. Analysis modes do not
+depend on the product compiler; reviewed `astro-import-apply` intentionally
+imports the Boris parser only as a final gate for generated candidate Markdown
+before it is written. Migration logic and fixtures live under
+`tools/migration-lab/`.
 
 | | |
 |--|--|
