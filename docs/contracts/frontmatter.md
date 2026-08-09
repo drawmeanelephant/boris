@@ -138,7 +138,7 @@ Exactly these eight keys are accepted. **No aliases.**
 | `parent` | no | plain/dquoted entity id | Foreign key to a direct parent page; ≤255 bytes |
 | `status` | no | `draft` \| `published` \| `archived` | Exact spellings only |
 | `tags` | no | `[a, b, "c"]` only | Bracket list; plain or double-quoted items |
-| `relations` | no | `[kind=target, …]` only | Bounded semantic relations; closed kinds and validation in [semantic-relations.md](semantic-relations.md) |
+| `relations` | no | `[kind=target, …]` only | ≤128 bounded semantic relations; token grammar and validation in [semantic-relations.md](semantic-relations.md) |
 | `published_at` | no | `YYYY-MM-DDTHH:MM:SSZ` | Explicit UTC calendar time only; requires `summary` when present |
 | `summary` | no | plain/dquoted string | One line, 1–1,024 UTF-8 bytes; may occur without `published_at` |
 

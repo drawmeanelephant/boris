@@ -84,7 +84,7 @@ The key set is closed. Any key not in the following list triggers `EFRONTMATTER`
 | `parent` | plain or double-quoted scalar | ≤ `max_entity_id_bytes`; must pass `identity.validateEntityId` (else `EFRONTMATTER` for parent, not `EINVALIDPATH`) |
 | `status` | plain scalar | exactly `draft`, `published`, or `archived` |
 | `tags` | flow-sequence form `[a, b, "c"]` | each token ≤ `max_tag_bytes`; ≤ `max_tag_count` items; no trailing comma |
-| `relations` | flow-sequence form `[kind=target, …]` | ≤ `max_relation_count`; each target must pass `validateEntityId` (else `EINVALIDPATH`); valid `RelationKind` |
+| `relations` | flow-sequence form `[kind=target, …]` | ≤ `max_relation_count` (128); each target must pass `validateEntityId` (else `EINVALIDPATH`); kind matches the bounded open `RelationKind` token grammar |
 
 All keys are de-duplicated; a second occurrence of any key is `EFRONTMATTER` (`"duplicate frontmatter key \"{key}\""`).
 

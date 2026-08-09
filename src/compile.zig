@@ -46,6 +46,7 @@ const target_mod = @import("target.zig");
 const graph_mod = @import("graph.zig");
 const diag = @import("diag.zig");
 const html_nav = @import("html_nav.zig");
+const html_relations = @import("html_relations.zig");
 const html_toc = @import("html_toc.zig");
 const html_body = @import("html_body.zig");
 const include_mod = @import("include.zig");
@@ -172,6 +173,7 @@ pub fn freezeSiteFromPageDb(
         nodes[i] = .{
             .id = p.entity_id,
             .source_path = p.source_path,
+            .output_path = p.output_path,
             .title = p.title,
             .parent = p.parent,
             .status = if (p.status) |s| s.name() else null,
@@ -562,7 +564,13 @@ fn renderPageSlots(
         if (layout.has_children) {
             slots.children = try html_nav.renderChildren(arena, s.nodes, s.nav, gi, page.output_path);
         }
-    } else if (layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children) {
+        if (layout.has_relations) {
+            slots.relations = try html_relations.renderRelations(arena, s.nodes, gi, page.output_path);
+        }
+        if (layout.has_backlinks) {
+            slots.backlinks = try html_relations.renderBacklinks(arena, s.nodes, gi, page.output_path);
+        }
+    } else if (layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks) {
         // Layout requests graph chrome but no frozen site — treat as internal error.
         return error.GraphValidationFailed;
     }
@@ -737,7 +745,7 @@ pub fn compileHtmlSite(
 
     // 3. Graph validate + freeze (shared rules with IR/RAG; Feature 6 nav).
     // Rules may select graph chrome even when the fallback layout has none.
-    var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or options.layout_rules.len != 0);
+    var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0);
     defer site.deinit();
 
     return try compilePagesWithSite(io, gpa, &db, layout, options, &site);
@@ -1224,7 +1232,7 @@ pub fn compilePages(
     // Content-only layouts can compile without graph chrome; still freeze so
     // invalid parents fail loud on the HTML path.
     // Rules may select graph chrome even when the fallback layout has none.
-    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or options.layout_rules.len != 0);
+    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0);
     defer site.deinit();
     return compilePagesWithSite(io, gpa, db, layout, options, &site);
 }
@@ -1254,7 +1262,7 @@ pub fn compilePagesWithShared(
     layout_bytes: []const u8,
 ) !CompileStats {
     // Rules may select graph chrome even when the fallback layout has none.
-    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or options.layout_rules.len != 0);
+    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0);
     defer site.deinit();
     return compilePagesInner(io, gpa, db, layout, options, shared, layout_bytes, &site);
 }
@@ -2197,6 +2205,18 @@ fn compilePagesInner(
         // add/remove/rename/title changes correct across incremental runs.
         const needs_site_material = page_layout.has_nav or page_layout.has_breadcrumb or page_layout.has_title or page_layout.has_children;
         const nav_material: []const u8 = if (needs_site_material) site.site_nav_material else "";
+        var relation_material: []u8 = &.{};
+        if (page_layout.has_relations or page_layout.has_backlinks) {
+            const relation_index = site.indexOf(page.entity_id) orelse return error.GraphValidationFailed;
+            relation_material = try html_relations.relationMaterial(
+                gpa,
+                site.nodes,
+                relation_index,
+                page_layout.has_relations,
+                page_layout.has_backlinks,
+            );
+        }
+        defer if (relation_material.len > 0) gpa.free(relation_material);
         // Wiki reference material from page body + transitive include fragment bodies
         // so title/path renames dirty parents that only wiki-link via includes.
         const body_for_wiki = include_mod.bodyOfSource(shared.source_bytes[page_idx]);
@@ -2253,11 +2273,19 @@ fn compilePagesInner(
             if (rewritten.ptr != body_for_wiki.ptr) gpa.free(rewritten);
         }
 
-        var inc_with_ref = try gpa.alloc([]const u8, inc_views.len + if (ref_material.len > 0) @as(usize, 1) else 0);
+        var inc_with_ref = try gpa.alloc([]const u8,
+            inc_views.len +
+                (if (ref_material.len > 0) @as(usize, 1) else 0) +
+                (if (relation_material.len > 0) @as(usize, 1) else 0));
         defer gpa.free(inc_with_ref);
         @memcpy(inc_with_ref[0..inc_views.len], inc_views);
+        var inc_with_ref_count = inc_views.len;
         if (ref_material.len > 0) {
-            inc_with_ref[inc_views.len] = ref_material;
+            inc_with_ref[inc_with_ref_count] = ref_material;
+            inc_with_ref_count += 1;
+        }
+        if (relation_material.len > 0) {
+            inc_with_ref[inc_with_ref_count] = relation_material;
         }
 
         // Fingerprint uses the effective selected layout identity and bytes.
@@ -3634,6 +3662,110 @@ test "HTML path emits deterministic escaped direct children with selected layout
     const updated_parent = try readAllFile(io, dist_dir, "index.html", gpa);
     defer gpa.free(updated_parent);
     try std.testing.expect(std.mem.indexOf(u8, updated_parent, "Alpha Updated") != null);
+}
+
+test "HTML semantic relation and backlink slots use canonical nested hrefs" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-semantic-html", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "theme/layouts/main.html", "<main>{{content}}</main>");
+    try writeTreeFile(io, work, "theme/layouts/relations.html",
+        "<main>{{relations}}{{backlinks}}{{content}}</main>");
+    try writeTreeFile(io, work, "content/guides/source.md",
+        "---\ntitle: Source\nrelations: [supersedes=reference/spec, verified_by=reference/spec]\n---\n\n# Source\n");
+    try writeTreeFile(io, work, "content/reference/spec.md", "---\ntitle: Specification\n---\n\n# Spec\n");
+    try writeTreeFile(io, work, "content/control.md", "---\ntitle: Control\n---\n\n# Control\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/theme/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const relation_layout_path = try std.fmt.allocPrint(gpa, "{s}/theme/layouts/relations.html", .{work});
+    defer gpa.free(relation_layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const rules = [_]layout_select.LayoutRule{
+        .{ .kind = .id, .value = "guides/source", .layout_path = relation_layout_path },
+        .{ .kind = .id, .value = "reference/spec", .layout_path = relation_layout_path },
+    };
+
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .layout_rules = &rules,
+        .incremental = true,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 3), stats.pages_written);
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const source = try readAllFile(io, dist_dir, "guides/source.html", gpa);
+    defer gpa.free(source);
+    const spec = try readAllFile(io, dist_dir, "reference/spec.html", gpa);
+    defer gpa.free(spec);
+    const control = try readAllFile(io, dist_dir, "control.html", gpa);
+    defer gpa.free(control);
+    try std.testing.expect(std.mem.indexOf(u8, source, "semantic-relations") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "data-relation-kind=\"supersedes\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "href=\"../reference/spec.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, spec, "semantic-backlinks") != null);
+    try std.testing.expect(std.mem.indexOf(u8, spec, "data-relation-kind=\"verified_by\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, spec, "href=\"../guides/source.html\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, control, "semantic-relations") == null);
+    try std.testing.expect(std.mem.indexOf(u8, control, "semantic-backlinks") == null);
+}
+
+test "incremental semantic backlink material dirties only affected relation pages" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-semantic-fp", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "theme/layouts/main.html", "<main>{{content}}</main>");
+    try writeTreeFile(io, work, "theme/layouts/relations.html", "<main>{{relations}}{{backlinks}}{{content}}</main>");
+    try writeTreeFile(io, work, "content/guides/source.md",
+        "---\ntitle: Source\nrelations: [verified_by=reference/spec]\n---\n\n# Source\n");
+    try writeTreeFile(io, work, "content/reference/spec.md", "---\ntitle: Specification\n---\n\n# Spec\n");
+    try writeTreeFile(io, work, "content/control.md", "---\ntitle: Control\n---\n\n# Control\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/theme/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const relation_layout_path = try std.fmt.allocPrint(gpa, "{s}/theme/layouts/relations.html", .{work});
+    defer gpa.free(relation_layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const rules = [_]layout_select.LayoutRule{
+        .{ .kind = .id, .value = "guides/source", .layout_path = relation_layout_path },
+        .{ .kind = .id, .value = "reference/spec", .layout_path = relation_layout_path },
+    };
+    const options: CompileOptions = .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .layout_rules = &rules,
+        .incremental = true,
+        .quiet = true,
+    };
+
+    try std.testing.expectEqual(@as(usize, 3), (try compileHtmlSite(io, gpa, options)).pages_written);
+    try std.testing.expectEqual(@as(usize, 0), (try compileHtmlSite(io, gpa, options)).pages_written);
+    try writeTreeFile(io, work, "content/guides/source.md",
+        "---\ntitle: Source\nrelations: [validated_by=reference/spec]\n---\n\n# Source\n");
+    try std.testing.expectEqual(@as(usize, 2), (try compileHtmlSite(io, gpa, options)).pages_written);
 }
 
 test "HTML path emits page toc from body headings" {

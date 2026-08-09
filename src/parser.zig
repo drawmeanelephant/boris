@@ -242,7 +242,7 @@ fn parseRelationsList(raw: []const u8, out: *[page_mod.max_relation_count]page_m
         if (!identity.validateEntityId(target)) return error.InvalidTarget;
         if (count >= page_mod.max_relation_count) return error.TooManyRelations;
         for (out[0..count]) |existing| {
-            if (existing.kind == kind and std.mem.eql(u8, existing.target, target)) return error.DuplicateRelation;
+            if (existing.kind.eql(kind) and std.mem.eql(u8, existing.target, target)) return error.DuplicateRelation;
         }
         out[count] = .{ .kind = kind, .target = target };
         count += 1;
@@ -677,15 +677,16 @@ test "parse: bounded semantic relations" {
     const r = parse(src);
     try std.testing.expect(r.isOk());
     try std.testing.expectEqual(@as(usize, 2), r.doc.meta.relation_count);
-    try std.testing.expect(r.doc.meta.relationsSlice()[0].kind == .supersedes);
+    try std.testing.expectEqualStrings("supersedes", r.doc.meta.relationsSlice()[0].kind.name());
     try std.testing.expectEqualStrings("guides/cache-v1", r.doc.meta.relationsSlice()[0].target);
-    try std.testing.expect(r.doc.meta.relationsSlice()[1].kind == .depends_on);
+    try std.testing.expectEqualStrings("depends_on", r.doc.meta.relationsSlice()[1].kind.name());
 }
 
 test "parse: semantic relation malformed, unknown, duplicate, and invalid target" {
     const cases = [_][]const u8{
         "---\nrelations: [supersedes]\n---\n",
-        "---\nrelations: [unknown=guides/old]\n---\n",
+        "---\nrelations: [Unknown=guides/old]\n---\n",
+        "---\nrelations: [unknown-kind=guides/old]\n---\n",
         "---\nrelations: [supersedes=guides/old, supersedes=guides/old]\n---\n",
         "---\nrelations: [supersedes=../old]\n---\n",
         "---\nrelations: [supersedes=guides/old,]\n---\n",
@@ -694,8 +695,15 @@ test "parse: semantic relation malformed, unknown, duplicate, and invalid target
     for (cases, 0..) |source, i| {
         const r = parse(source);
         try std.testing.expect(!r.isOk());
-        try std.testing.expectEqual(if (i == 3) Category.EINVALIDPATH else Category.EFRONTMATTER, r.category().?);
+        try std.testing.expectEqual(if (i == 4) Category.EINVALIDPATH else Category.EFRONTMATTER, r.category().?);
     }
+}
+
+test "parse: constrained open relation kinds round-trip" {
+    const r = parse("---\nrelations: [verified_by=guides/old, references_v2=guides/new]\n---\n");
+    try std.testing.expect(r.isOk());
+    try std.testing.expectEqualStrings("verified_by", r.doc.meta.relationsSlice()[0].kind.name());
+    try std.testing.expectEqualStrings("references_v2", r.doc.meta.relationsSlice()[1].kind.name());
 }
 
 // Canonical author-facing parent key on the product IR/RAG parse path.
