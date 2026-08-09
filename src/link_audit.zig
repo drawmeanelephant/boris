@@ -61,19 +61,6 @@ fn isIgnoredTarget(target: []const u8) bool {
     return route_resolver.isExternalOrEmpty(target) or target[0] == '#';
 }
 
-/// True for a Markdown destination the link rewriter deliberately left alone.
-///
-/// `docs/contracts/documentation-links.md` lists "missing graph targets" under
-/// **Unchanged inputs**: a `.md`/`.mdx` link whose target is not a graph node
-/// stays byte-for-byte literal by design, and a golden fixture pins that. This
-/// audit therefore does not judge those references. Whether a literal `.md`
-/// href should remain publishable at all is a question for that contract, not
-/// something to decide by making the build fail here.
-fn isUnrewrittenMarkdownTarget(target: []const u8) bool {
-    const path = route_resolver.stripQuery(route_resolver.stripFragment(target));
-    return std.mem.endsWith(u8, path, ".md") or std.mem.endsWith(u8, path, ".mdx");
-}
-
 pub const Resolution = route_resolver.Resolution;
 pub const resolveWithinRoot = route_resolver.resolveWithinRoot;
 
@@ -153,7 +140,6 @@ pub fn auditDocument(
         for (url_attributes) |attribute| {
             const target = html_scan.attrValue(slice, attribute) orelse continue;
             if (isIgnoredTarget(target)) continue;
-            if (isUnrewrittenMarkdownTarget(target)) continue;
             const resolution = try resolveWithinRoot(gpa, source_path, target);
             switch (resolution) {
                 .escapes_root => try appendFinding(gpa, findings, .EROUTEESCAPE, source_path, target, lineNumber(html, i), attribute),
@@ -324,7 +310,7 @@ test "published references are audited across quoting and attribute variants" {
     try std.testing.expectEqual(diag.Code.EROUTEESCAPE, findings.items[3].code);
 }
 
-test "a deliberately unrewritten Markdown destination is left to its own contract" {
+test "a local Markdown destination without a published route is rejected" {
     const gpa = std.testing.allocator;
     var intended: std.StringHashMapUnmanaged(void) = .{};
     defer intended.deinit(gpa);
@@ -333,13 +319,15 @@ test "a deliberately unrewritten Markdown destination is left to its own contrac
     var findings: std.ArrayList(Finding) = .empty;
     defer freeFindings(gpa, &findings);
 
-    // documentation-links.md keeps a missing `.md` target literal on purpose,
-    // and a golden fixture pins it. This audit must not overrule that.
+    // The pre-Apex rewriter may leave a missing `.md` target literal, but the
+    // publication audit still rejects the route the output site cannot serve.
     try auditDocument(gpa, &intended, "guides/start.html", "<a href=\"../reference.md?raw=true#anchor\">x</a>", &findings);
-    try std.testing.expectEqual(@as(usize, 0), findings.items.len);
-    // A missing `.html` sibling is still caught.
-    try auditDocument(gpa, &intended, "guides/start.html", "<a href=\"../reference.html\">x</a>", &findings);
     try std.testing.expectEqual(@as(usize, 1), findings.items.len);
+    try std.testing.expectEqual(diag.Code.EROUTEMISSING, findings.items[0].code);
+    // A missing `.html` sibling is caught by the same manifest check.
+    try auditDocument(gpa, &intended, "guides/start.html", "<a href=\"../reference.html\">x</a>", &findings);
+    try std.testing.expectEqual(@as(usize, 2), findings.items.len);
+    try std.testing.expectEqual(diag.Code.EROUTEMISSING, findings.items[1].code);
 }
 
 test "a file present in the live tree but not intended to survive is not a valid target" {

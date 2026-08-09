@@ -60,6 +60,8 @@ pub const Options = struct {
     impact_id: ?[]const u8 = null,
     analysis_format: AnalysisFormat = .human,
     analysis_report: ?[]const u8 = null,
+    /// Make ordinary unreferenced-page analysis findings fatal for `check`.
+    fail_on_unreferenced: bool = false,
     mode: Mode = .html,
     /// Explicit whole-tree authoring format (Markdown remains the default).
     input_format: identity.InputFormat = .markdown,
@@ -188,6 +190,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_textile = false;
     var saw_format = false;
     var saw_report = false;
+    var saw_fail_on_unreferenced = false;
     var saw_profile = false;
     var jobs: usize = 1;
     var html_layout: []const u8 = default_html_layout;
@@ -216,6 +219,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var impact_id: ?[]const u8 = null;
     var analysis_format: AnalysisFormat = .human;
     var analysis_report: ?[]const u8 = null;
+    var fail_on_unreferenced = false;
 
     var i: usize = if (args.len > 0) 1 else 0;
     if (i < args.len and std.mem.eql(u8, args[i], "build")) {
@@ -356,6 +360,13 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             if (saw_report) return error.DuplicateFlag;
             saw_report = true;
             analysis_report = try takeValue(args, &i, a, "--report");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--fail-on-unreferenced")) {
+            if (saw_fail_on_unreferenced) return error.DuplicateFlag;
+            saw_fail_on_unreferenced = true;
+            fail_on_unreferenced = true;
             continue;
         }
 
@@ -638,6 +649,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     }
 
     if (saw_profile) return error.ConflictingFlags;
+    if (saw_fail_on_unreferenced and command != .check) return error.ConflictingFlags;
 
     if (command == .validate) {
         // Validation is the no-publication form of the selected HTML source /
@@ -916,6 +928,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .impact_id = impact_id,
             .analysis_format = analysis_format,
             .analysis_report = analysis_report,
+            .fail_on_unreferenced = fail_on_unreferenced,
             .input_format = if (saw_textile) .textile else .markdown,
         },
     };
@@ -953,7 +966,7 @@ pub fn printUsage() void {
         \\  build               Build the HTML site (default command)
         \\  validate            Validate selected HTML source/config without publication
         \\  watch               Build HTML, then watch and rebuild on changes
-        \\  check               Read-only graph health report (CI findings exit 1)
+        \\  check               Read-only graph health report (findings do not fail by default)
         \\  impact <ID>         Read-only transitive impact report for a page
         \\  plan                Emit a normalized publication plan (no publication)
         \\  (no command)        Same as build
@@ -998,6 +1011,7 @@ pub fn printUsage() void {
         \\  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
         \\  --format human|json  Analysis output format for check/impact (default human)
         \\  --report PATH        Write an analysis report instead of stdout
+        \\  --fail-on-unreferenced Make check fail when it reports unreferenced pages
         \\  --profile PATH       Selected publication profile for `plan`
         \\  -h, --help          Show this help and exit 0
         \\
@@ -1115,7 +1129,8 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.eql(u8, a, "--html") or
             std.mem.eql(u8, a, "--textile") or
             std.mem.eql(u8, a, "--incremental") or
-            std.mem.eql(u8, a, "--watch"))
+            std.mem.eql(u8, a, "--watch") or
+            std.mem.eql(u8, a, "--fail-on-unreferenced"))
         {
             continue;
         }
@@ -1233,12 +1248,21 @@ test "parse: documentation intelligence commands" {
     try expectEqual(AnalysisFormat.json, check.analysis_format);
     try expectEqualStrings("docs", check.input_dir);
     try expectEqualStrings("report.json", check.analysis_report.?);
+    try expect(!check.fail_on_unreferenced);
+
+    var strict = try parseOptions(std.testing.allocator, &.{ "boris", "check", "--fail-on-unreferenced" });
+    defer strict.deinit(std.testing.allocator);
+    try expect(strict.fail_on_unreferenced);
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "check", "--fail-on-unreferenced", "--fail-on-unreferenced" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--fail-on-unreferenced", "--out", ".boris" }));
 
     var impact = try parseOptions(std.testing.allocator, &.{ "boris", "impact", "guides/cache", "--quiet" });
     defer impact.deinit(std.testing.allocator);
     try expectEqual(Command.impact, impact.command);
     try expectEqualStrings("guides/cache", impact.impact_id.?);
     try expect(impact.quiet);
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "impact", "guides/cache", "--fail-on-unreferenced" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--fail-on-unreferenced" }));
 
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "impact" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--out", ".boris" }));

@@ -7,7 +7,7 @@ Modes:
   build               Build the HTML site (default command)
   validate            Validate selected HTML source/config without publication
   watch               Build HTML, then watch and rebuild on changes
-  check               Read-only graph health report (CI findings exit 1)
+  check               Read-only graph health report (findings do not fail by default)
   impact <ID>         Read-only transitive impact report for a page
   plan                Emit a normalized publication plan (no publication)
   (no command)        Same as build
@@ -52,6 +52,7 @@ Options:
   --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
   --format human|json  Analysis output format for check/impact (default human)
   --report PATH        Write an analysis report instead of stdout
+  --fail-on-unreferenced Make check fail when it reports unreferenced pages
   --profile PATH       Selected publication profile for `plan`
   -h, --help          Show this help and exit 0
 

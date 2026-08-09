@@ -8,7 +8,8 @@ rewriting through the real HTML compiler path.
 - a nested Markdown link to `reference.md`, rewritten relative to the output;
 - a page-local SVG image copied from `start.assets/`;
 - a fenced Markdown example whose `.md` link remains literal; and
-- a raw HTML anchor whose `.md` destination remains unchanged.
+- a raw HTML anchor whose `.html` destination remains unchanged by the
+  Markdown rewriter and passes the published-route audit.
 
 The golden HTML and copied asset under `expected/` are the contract. The
 compile test also renders the fixture twice and compares every expected output

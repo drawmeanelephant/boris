@@ -10,7 +10,7 @@ h2. A heading
 
 A paragraph with *strong*, _emphasis_, +inserted+, -deleted-, and @inline code@.
 
-"Official docs":https://textile-lang.com/ and "mail":mailto:dean@example.test and a "fragment":#note and the "satellite":./guides/satellite.md.
+"Official docs":https://textile-lang.com/ and "mail":mailto:dean@example.test and a "fragment":#note and the "satellite":./guides/satellite.html.
 
 Literal comparison: 5 < 7 & 8 > 3 with Unicode café 東京 and emoji 🦫.
 

@@ -98,7 +98,7 @@ Rules:
 The eventual CLI surface is:
 
 ```text
-boris check [--input DIR] [--format human|json] [--report PATH]
+boris check [--input DIR] [--format human|json] [--report PATH] [--fail-on-unreferenced]
 boris impact ID [--input DIR] [--format human|json] [--report PATH]
 ```
 
@@ -111,11 +111,12 @@ The option spelling is implemented as shown above. Behavior:
 - malformed command or ID: usage exit `2`;
 - filesystem/system failure: existing I/O exit `3`.
 
-The shipped first slice chooses CI-failing behavior for `check`: any
-`unreferenced_page` finding returns exit `1`. `impact` returns exit `0` when the
-requested page or source endpoint exists and the graph is valid. This policy is
-deliberately limited to the first finding class; future thresholds require an
-amended contract.
+The shipped first slice reports `unreferenced_page` findings without failing by
+default. `check --fail-on-unreferenced` opts into exit `1` when one or more
+such findings are present. The flag is check-only; `impact` returns exit `0`
+when the requested page or source endpoint exists and the graph is valid.
+Parse, graph, and I/O failures retain their existing exit classes. The report
+schema and bytes do not depend on this policy.
 
 ## Acceptance fixtures
 

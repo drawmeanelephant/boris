@@ -408,7 +408,11 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     }
 
     // `check` is CI-useful by default: unreferenced pages are findings.
-    if (opts.command == .check and report.summary.unreferenced_pages > 0) return .content_error;
+    // Unreferenced pages are ordinary findings by default; the check-only flag
+    // opts into treating them as a content failure.
+    if (opts.command == .check and opts.fail_on_unreferenced and report.summary.unreferenced_pages > 0) {
+        return .content_error;
+    }
     return .success;
 }
 
@@ -843,6 +847,9 @@ fn mapHtmlError(
         // The content-asset path already emitted the structured EASSET diagnostic
         // for rejected active SVGs; re-printing only doubles noise.
         error.AssetUnsafeSvg,
+        // The output link audit already emitted structured route diagnostics;
+        // classify the invalid publication as a content failure.
+        error.LinkAuditFailed,
         // Multi-target wrap can mix content and I/O; prefer content for graph/include
         // failures already printed, but treat pure layout load I/O as exit 3 via FileNotFound etc.
         error.MultiTargetCompilationFailed,
@@ -1006,6 +1013,10 @@ test "mapHtmlError: unsafe SVG content failure exits 1 without a generic wrapper
     try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.AssetUnsafeSvg, false, &.{}, default_layout));
 }
 
+test "mapHtmlError: link-audit content failure exits 1" {
+    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.LinkAuditFailed, true, &.{}, default_layout));
+}
+
 test "mapHtmlError: committed publication with stale checks evidence exits 3" {
     try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationChecksFailed, true, &.{}, default_layout));
 }
@@ -1048,6 +1059,38 @@ test "runPipeline: valid fixture exits 0" {
         .quiet = true,
     });
     try std.testing.expectEqual(ExitCode.success, code);
+}
+
+test "runPipeline: unreferenced check findings are report-only unless opted in" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const default_report = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/di-default.json", .{tmp.sub_path});
+    defer gpa.free(default_report);
+    const strict_report = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/di-strict.json", .{tmp.sub_path});
+    defer gpa.free(strict_report);
+
+    const base = Options{
+        .command = .check,
+        .input_dir = "docs/contracts/fixtures/documentation-intelligence/content",
+        .analysis_format = .json,
+        .analysis_report = default_report,
+        .quiet = true,
+    };
+    try std.testing.expectEqual(ExitCode.success, runPipeline(io, gpa, base));
+
+    var strict = base;
+    strict.analysis_report = strict_report;
+    strict.fail_on_unreferenced = true;
+    try std.testing.expectEqual(ExitCode.content_error, runPipeline(io, gpa, strict));
+
+    const cwd = Io.Dir.cwd();
+    const default_bytes = try cwd.readFileAlloc(io, default_report, gpa, .unlimited);
+    defer gpa.free(default_bytes);
+    const strict_bytes = try cwd.readFileAlloc(io, strict_report, gpa, .unlimited);
+    defer gpa.free(strict_bytes);
+    try std.testing.expectEqualStrings(default_bytes, strict_bytes);
 }
 
 test "runPipeline: duplicate-id exits 1" {
