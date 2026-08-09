@@ -56,7 +56,8 @@ one content graph and one static theme asset inventory.
 
 The design must:
 
-- preserve the closed five-key frontmatter grammar;
+- preserve the closed frontmatter grammar defined by
+  [`frontmatter.md`](../contracts/frontmatter.md);
 - make the same content and CLI configuration choose the same layout on every
   run, independent of argument and filesystem enumeration order;
 - fail before an affected target publishes when selection is invalid or
