@@ -19,6 +19,7 @@ is **not** proof that every surface is the default CLI product.
 | Aside component tokenizer | **Implemented** (`components.md`) |
 | Apex C ABI + Zig wrapper | **Implemented** (ApexMarkdown Unified host adapter; U1–U17 tested) |
 | HTML path (default CLI) | **Implemented** — bare `boris` → `dist/`; also `--html` / `--html-dir` / `--target` |
+| Authoritative no-publication validation | **Implemented** — `boris validate` reuses HTML prepublication compiler semantics and writes no product artifacts; see `validation.md` |
 | P2 dependency indexes / incremental HTML | **Implemented** (`--incremental`; fingerprints + affected set) |
 | Parallel HTML workers / watch | **Implemented** (`--jobs`, `--watch`; see contracts below) |
 | Multi-target isolated outputs | **Implemented** — CLI, isolation, stage commit, selective watch (P3.3) |
@@ -55,6 +56,7 @@ per topic:
 | Parent / graph validation (Trunk / Satellite) | [ir-schema.md](ir-schema.md) (graph section); `parent` field shape in [frontmatter.md](frontmatter.md) |
 | JSON IR (manifest, graph, build-report) | [ir-schema.md](ir-schema.md) |
 | Diagnostics | [diagnostics.md](diagnostics.md) |
+| Authoritative no-publication validation | [validation.md](validation.md) |
 | RAG export | [rag-export.md](rag-export.md) |
 | `llms.txt` export | [llms-txt.md](llms-txt.md) |
 | Aside / components | [components.md](components.md) |
@@ -92,6 +94,7 @@ per topic:
 | [identity-and-paths.md](identity-and-paths.md) | Source paths, entity ids, `/` separators, `.md`/`.mdx` case rules |
 | [scanner.md](scanner.md) | Deterministic discovery walk, sort key, symlink policy (m4) |
 | [diagnostics.md](diagnostics.md) | Stable categories (`EDUPLICATEID`, …), severity, exit codes |
+| [validation.md](validation.md) | Canonical HTML prepublication validity boundary, no-write guarantee, and adjacent-command distinctions |
 | [ir-schema.md](ir-schema.md) | Trunk/Satellite graph, typed dependency edges, reverse index, deterministic JSON under `.boris/` |
 | [rag-export.md](rag-export.md) | Optional RAG export; schema versioning; `:::kind` export-only |
 | [llms-txt.md](llms-txt.md) | Deterministic crawler/LLM discovery projection; URL and deployment limits |

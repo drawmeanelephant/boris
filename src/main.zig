@@ -76,6 +76,7 @@ fn mapPathError(err: anyerror, quiet: bool) ?ExitCode {
 /// - I/O / system errors → 3
 pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     if (opts.command == .plan) return runPublicationPlan(io, gpa, opts);
+    if (opts.command == .validate) return runValidate(io, gpa, opts);
     if (opts.command == .check or opts.command == .impact) return runIntelligence(io, gpa, opts);
     switch (opts.mode) {
         .rag => return runRag(io, gpa, opts),
@@ -408,6 +409,30 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 
     // `check` is CI-useful by default: unreferenced pages are findings.
     if (opts.command == .check and report.summary.unreferenced_pages > 0) return .content_error;
+    return .success;
+}
+
+/// Authoritative no-publication HTML source/target validation.
+///
+/// This enters the same in-process compiler coordinator as a normal HTML build
+/// and returns at its explicit prepublication boundary. It never invokes a
+/// build in a temporary directory and never emits an authority/report file.
+pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    const layout_path = opts.html_layout;
+    compile.validateHtmlSiteMulti(io, gpa, opts.targets.items, .{
+        .content_root = opts.input_dir,
+        .layout_path = layout_path,
+        .quiet = opts.quiet,
+        .input_format = opts.input_format,
+        .sitemap_path = opts.sitemap_path,
+        .site_url = opts.site_url,
+    }) catch |err| {
+        return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
+    };
+
+    if (!opts.quiet) {
+        std.debug.print("ok: validation passed for {d} target(s)\n", .{opts.targets.items.len});
+    }
     return .success;
 }
 
@@ -854,10 +879,15 @@ fn mapHtmlError(
         error.AssetCollision,
         error.AssetSymlink,
         error.AssetPathEscape,
+        error.AssetFailed,
+        error.AssetPath,
+        error.AssetMissing,
+        error.AssetNotFile,
         error.ThemeRootMissing,
         error.InvalidThemePath,
         error.ThemeSymlink,
         error.FooterSymlink,
+        error.FooterInvalidUtf8,
         => {
             if (!quiet) {
                 std.debug.print("error: content or layout failure: {s}\n", .{@errorName(err)});

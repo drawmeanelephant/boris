@@ -147,60 +147,6 @@ fn findPage(nodes: []const PageEntry, id: []const u8) bool {
     return false;
 }
 
-fn validateSemanticRelations(
-    list_gpa: std.mem.Allocator,
-    retain: std.mem.Allocator,
-    nodes: []const PageEntry,
-    diagnostics: *std.ArrayList(diag.Diagnostic),
-) !void {
-    for (nodes) |node| {
-        for (node.semantic_relations, 0..) |relation, relation_index| {
-            if (std.mem.eql(u8, node.id, relation.target)) {
-                try diagnostics.append(list_gpa, .{
-                    .severity = .error_,
-                    .code = .ERELATIONSELF,
-                    .message = try std.fmt.allocPrint(retain, "semantic relation {s} targets its source page", .{relation.kind.name()}),
-                    .remediation = try retain.dupe(u8, "Choose a different target page"),
-                    .source_path = node.source_path,
-                    .line = 1,
-                    .column = 1,
-                    .id = node.id,
-                });
-                continue;
-            }
-            if (!findPage(nodes, relation.target)) {
-                try diagnostics.append(list_gpa, .{
-                    .severity = .error_,
-                    .code = .ERELATIONMISSING,
-                    .message = try std.fmt.allocPrint(retain, "semantic relation {s} targets missing page \"{s}\"", .{ relation.kind.name(), relation.target }),
-                    .remediation = try retain.dupe(u8, "Create the target page or remove the relation"),
-                    .source_path = node.source_path,
-                    .line = 1,
-                    .column = 1,
-                    .id = node.id,
-                });
-            }
-            var prior: usize = 0;
-            while (prior < relation_index) : (prior += 1) {
-                const earlier = node.semantic_relations[prior];
-                if (earlier.kind == relation.kind and std.mem.eql(u8, earlier.target, relation.target)) {
-                    try diagnostics.append(list_gpa, .{
-                        .severity = .error_,
-                        .code = .ERELATIONDUPLICATE,
-                        .message = try std.fmt.allocPrint(retain, "duplicate semantic relation {s} -> \"{s}\"", .{ relation.kind.name(), relation.target }),
-                        .remediation = try retain.dupe(u8, "Keep each semantic relation tuple only once"),
-                        .source_path = node.source_path,
-                        .line = 1,
-                        .column = 1,
-                        .id = node.id,
-                    });
-                    break;
-                }
-            }
-        }
-    }
-}
-
 const DependencyResolver = struct {
     io: Io,
     gpa: std.mem.Allocator,
@@ -961,7 +907,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
 
     var err_count = diag.countErrors(result.diagnostics.items);
     if (err_count == 0) {
-        try validateSemanticRelations(gpa, retain, result.pages.items, &result.diagnostics);
+        try graph_mod.validateSemanticRelations(gpa, retain, result.pages.items, &result.diagnostics);
         diag.sortDiagnostics(result.diagnostics.items);
         err_count = diag.countErrors(result.diagnostics.items);
     }

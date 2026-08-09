@@ -12,6 +12,7 @@ search engine.
 ```text
 boris --sitemap --site-url https://docs.example/
 boris --sitemap-path meta/sitemap.xml --site-url https://docs.example/
+boris validate --sitemap --site-url https://docs.example/
 ```
 
 - `--sitemap` enables `sitemap.xml` relative to the HTML target root.
@@ -34,6 +35,13 @@ deployment URLs only. It rejects relative and non-HTTP(S) URLs, empty or
 malformed authorities, userinfo, invalid ports, query strings, fragments,
 unescaped/non-ASCII authority bytes, and malformed path percent escapes.
 Trailing base slashes are normalized away.
+
+Under `boris validate`, the same configuration validator and deterministic XML
+renderer receive the selected non-draft PageDb output paths. The bytes are
+bounded, rendered in memory, and discarded. Validation creates no sitemap,
+ownership marker, target, or stage and does not claim to test staged/live
+overlay integrity; those are publication behaviors owned by `build`. See the
+[validation contract](validation.md).
 
 ## XML shape
 
