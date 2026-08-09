@@ -269,7 +269,7 @@ if [[ -f "${CONTEXT_A}/bundle.md" && -f "${CONTEXT_A}/graph.json" \
   && grep -q '"format": "boris-context"' "${CONTEXT_A}/manifest.json" \
   && grep -q 'source_sha256' "${CONTEXT_A}/pages/guides/cache-v2.md" \
   && grep -q '^````markdown$' "${CONTEXT_A}/pages/guides/cache-v2.md" \
-  && grep -q '"relation_count": 4' "${CONTEXT_A}/manifest.json"; then
+  && grep -q '"relation_count": 5' "${CONTEXT_A}/manifest.json"; then
   pass "context bundle has manifest, graph, page provenance, and relation count"
 else
   fail "context bundle provenance artifacts missing"

@@ -51,7 +51,15 @@ pub const max_frontmatter_bytes: usize = 64 * 1024;
 pub const max_frontmatter_fields: usize = 32;
 
 /// Maximum semantic relations on one page in the IR 0.3 grammar.
-pub const max_relation_count: usize = 16;
+///
+/// This is deliberately a compile-time bound rather than a project setting:
+/// it leaves relation storage predictable while accommodating real evidence
+/// pages with substantially more than a handful of typed links.
+pub const max_relation_count: usize = 128;
+
+/// Maximum bytes for a semantic relation kind token. Kinds are ASCII tokens
+/// today; the bound keeps parsing and durable storage predictable.
+pub const max_relation_kind_bytes: usize = 64;
 
 /// Closed `status` vocabulary (exact spellings only).
 pub const Status = enum {
@@ -71,22 +79,30 @@ pub const Status = enum {
     }
 };
 
-pub const RelationKind = enum {
-    relates_to,
-    implements,
-    depends_on,
-    supersedes,
+/// Constrained open semantic relation kind. The token grammar is
+/// `[a-z][a-z0-9_]{0,63}`; Boris preserves the token but does not assign it
+/// domain meaning. The original four names are therefore still valid without
+/// being a closed registry.
+pub const RelationKind = struct {
+    value: []const u8,
 
     pub fn parse(s: []const u8) ?RelationKind {
-        if (std.mem.eql(u8, s, "relates_to")) return .relates_to;
-        if (std.mem.eql(u8, s, "implements")) return .implements;
-        if (std.mem.eql(u8, s, "depends_on")) return .depends_on;
-        if (std.mem.eql(u8, s, "supersedes")) return .supersedes;
-        return null;
+        if (s.len == 0 or s.len > max_relation_kind_bytes) return null;
+        if (s[0] < 'a' or s[0] > 'z') return null;
+        for (s[1..]) |c| {
+            const ok = (c >= 'a' and c <= 'z') or
+                (c >= '0' and c <= '9') or c == '_';
+            if (!ok) return null;
+        }
+        return .{ .value = s };
     }
 
     pub fn name(self: RelationKind) []const u8 {
-        return @tagName(self);
+        return self.value;
+    }
+
+    pub fn eql(a: RelationKind, b: RelationKind) bool {
+        return std.mem.eql(u8, a.value, b.value);
     }
 };
 
@@ -319,7 +335,10 @@ pub const PageDb = struct {
         if (relations_src.len > 0) {
             const buf = try self.retain.alloc(SemanticRelation, relations_src.len);
             for (relations_src, 0..) |relation, i| {
-                buf[i] = .{ .kind = relation.kind, .target = try self.retain.dupe(u8, relation.target) };
+                buf[i] = .{
+                    .kind = .{ .value = try self.retain.dupe(u8, relation.kind.name()) },
+                    .target = try self.retain.dupe(u8, relation.target),
+                };
             }
             relations_owned = buf;
         }
@@ -382,6 +401,17 @@ test "Status.parse closed vocabulary" {
     try std.testing.expect(Status.parse("archived").? == .archived);
     try std.testing.expect(Status.parse("Draft") == null);
     try std.testing.expect(Status.parse("") == null);
+}
+
+test "RelationKind accepts bounded lowercase domain tokens" {
+    try std.testing.expectEqualStrings("relates_to", RelationKind.parse("relates_to").?.name());
+    try std.testing.expectEqualStrings("verified_by2", RelationKind.parse("verified_by2").?.name());
+    try std.testing.expect(RelationKind.parse("Unknown") == null);
+    try std.testing.expect(RelationKind.parse("unknown-kind") == null);
+    try std.testing.expect(RelationKind.parse("1kind") == null);
+    var too_long: [max_relation_kind_bytes + 1]u8 = undefined;
+    @memset(&too_long, 'a');
+    try std.testing.expect(RelationKind.parse(&too_long) == null);
 }
 
 test "PageDb.promote owns strings after source buffer free" {

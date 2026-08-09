@@ -83,6 +83,8 @@ page. Every known marker may occur at most once.
 | `{{toc}}` | no | Page-local h1–h3 outline from Apex-emitted heading ids; generated HTML as in `html-output.md`. |
 | `{{children}}` | no | Deterministic direct-child list from the frozen graph; title-or-id labels and links are escaped, and childless pages emit empty. No recursive graph semantics or query language is introduced. |
 | `{{metadata}}` | no | Boris-generated page metadata fragment. Only current closed frontmatter fields are represented; text and attribute values are escaped. |
+| `{{relations}}` | no | Current page's outgoing validated semantic relations with canonical links and stable kind attributes/classes; empty when none. |
+| `{{backlinks}}` | no | Incoming relations derived from the validated semantic relation set with canonical links and stable kind attributes/classes; empty when none. |
 | `{{footer}}` | no | Contents of the theme's optional `footer.html`, or the empty string. This is theme-owned trusted static HTML, not page-authored executable content. |
 
 `{{content}}` must occur exactly once. Missing or duplicate markers, unknown
@@ -363,6 +365,10 @@ For the first implementation:
   once asset publication is independently tracked.
 - A `nav` layout retains the current global nav-material behavior: a relevant
   graph title/parent/role change dirties every page using that layout.
+- A layout using `{{relations}}` or `{{backlinks}}` includes page-local semantic
+  relation material in its fingerprint. A changed relation dirties the source
+  and affected backlink pages; a page whose layout has neither slot does not
+  include unrelated relation material.
 - Page-specific dependency records are target-keyed. No cache entry from one
   target can satisfy another target merely because the page id matches.
 

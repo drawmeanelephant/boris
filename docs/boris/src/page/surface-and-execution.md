@@ -33,7 +33,7 @@ A closed Zig enum with three variants: `draft`, `published`, `archived`. The `pa
 
 ### `RelationKind`
 
-A closed enum: `relates_to`, `implements`, `depends_on`, `supersedes`. The same exact-match `parse` pattern applies. Used in `SemanticRelation` structs stored on `DurablePage.relations` in IR 0.3 output.
+A constrained open token matching `[a-z][a-z0-9_]{0,63}`. The original names `relates_to`, `implements`, `depends_on`, and `supersedes` remain valid; the parser preserves other valid domain tokens without assigning them meaning. Used in `SemanticRelation` structs stored on `DurablePage.relations` in IR 0.3 output.
 
 ### `SemanticRelation`
 

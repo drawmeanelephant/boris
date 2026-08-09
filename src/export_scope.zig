@@ -135,8 +135,8 @@ pub fn partitionMarkdown(allocator: std.mem.Allocator, body: []const u8, max_bod
 }
 
 test "scope selects collection and closes parents plus semantic neighbors" {
-    const relation = @import("page.zig").SemanticRelation{ .kind = .relates_to, .target = "other" };
-    const transitive_relation = @import("page.zig").SemanticRelation{ .kind = .relates_to, .target = "transitive" };
+    const relation = @import("page.zig").SemanticRelation{ .kind = .{ .value = "relates_to" }, .target = "other" };
+    const transitive_relation = @import("page.zig").SemanticRelation{ .kind = .{ .value = "relates_to" }, .target = "transitive" };
     const pages = [_]graph.Node{
         .{ .id = "mascots", .source_path = "mascots.md", .role = .trunk },
         .{ .id = "mascots/child", .source_path = "child.md", .parent = "mascots", .role = .satellite, .semantic_relations = &.{relation} },

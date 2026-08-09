@@ -6,6 +6,17 @@
       },
       "to": {
         "type": "page",
+        "value": "guides/cache-v2"
+      },
+      "kind": "verified_by"
+    },
+    {
+      "from": {
+        "type": "page",
+        "value": "guides/cache-v1"
+      },
+      "to": {
+        "type": "page",
         "value": "reference/cache-manifest"
       },
       "kind": "relates_to"

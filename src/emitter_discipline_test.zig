@@ -169,6 +169,7 @@ const modules = [_]Module{
     .{ .name = "hardening_test.zig", .class = .other },
     .{ .name = "html_body.zig", .class = .other },
     .{ .name = "html_nav.zig", .class = .other },
+    .{ .name = "html_relations.zig", .class = .other },
     .{ .name = "html_scan.zig", .class = .other },
     .{ .name = "html_toc.zig", .class = .other },
     .{ .name = "identity.zig", .class = .other },

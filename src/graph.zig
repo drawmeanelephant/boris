@@ -22,6 +22,9 @@ pub const Node = struct {
     index: u32 = 0,
     id: []const u8,
     source_path: []const u8,
+    /// Canonical HTML output path. Empty in graph-only unit fixtures, where
+    /// consumers may derive the legacy `{id}.html` path.
+    output_path: []const u8 = "",
     title: ?[]const u8 = null,
     parent: ?[]const u8 = null,
     parent_index: ?u32 = null,
@@ -238,7 +241,7 @@ pub fn validateSemanticRelations(
             var prior: usize = 0;
             while (prior < relation_index) : (prior += 1) {
                 const earlier = node.semantic_relations[prior];
-                if (earlier.kind == relation.kind and std.mem.eql(u8, earlier.target, relation.target)) {
+                if (earlier.kind.eql(relation.kind) and std.mem.eql(u8, earlier.target, relation.target)) {
                     try diagnostics.append(list_gpa, .{
                         .severity = .error_,
                         .code = .ERELATIONDUPLICATE,

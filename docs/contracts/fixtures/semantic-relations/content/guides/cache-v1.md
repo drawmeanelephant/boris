@@ -1,6 +1,6 @@
 ---
 title: Cache v1
-relations: [relates_to=reference/cache-manifest]
+relations: [relates_to=reference/cache-manifest, verified_by=guides/cache-v2]
 ---
 
 # Cache v1
