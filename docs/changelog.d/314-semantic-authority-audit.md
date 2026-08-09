@@ -1,6 +1,7 @@
 ### Changed
 
-- Corrected the templating-and-themes contract to defer frontmatter authority
+- Corrected the [templating-and-themes contract](/docs/contracts/templating-and-themes.md)
+  to defer frontmatter authority
   to the canonical eight-key frontmatter contract instead of the obsolete
   five-key summary.
 - Updated the accepted layout RFC and migration-lab guidance to reference the
