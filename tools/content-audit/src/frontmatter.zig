@@ -35,7 +35,10 @@ pub const max_summary_bytes: usize = 1024;
 pub const max_entity_id_bytes: usize = 255;
 pub const max_tag_count: usize = 32;
 pub const max_tag_bytes: usize = 64;
-pub const max_relation_count: usize = 16;
+/// Must stay aligned with the product frontmatter contract's semantic
+/// relation bound; this parser is a standalone audit projection, not a
+/// separate authoring limit.
+pub const max_relation_count: usize = 128;
 
 pub const valid_statuses = [_][]const u8{ "draft", "published", "archived" };
 
@@ -641,6 +644,37 @@ test "conformance matrix: list limits" {
         const big = "x" ** (max_frontmatter_bytes + 1);
         const src = try std.fmt.allocPrint(a, "---\nlegacyfield: {s}\n---\n", .{big});
         try expectIssue(a, src, .frontmatter_too_large);
+    }
+}
+
+test "semantic relation limit matches the product contract" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    for ([_]struct { count: usize, accepted: bool }{
+        .{ .count = max_relation_count, .accepted = true },
+        .{ .count = max_relation_count + 1, .accepted = false },
+    }) |case| {
+        var src: std.ArrayList(u8) = .empty;
+        defer src.deinit(a);
+        try src.appendSlice(a, "---\nrelations: [");
+        for (0..case.count) |i| {
+            if (i > 0) try src.appendSlice(a, ", ");
+            try src.print(a, "relates_to=poetry/{d}", .{i});
+        }
+        try src.appendSlice(a, "]\n---\n");
+
+        switch (try parse(a, src.items)) {
+            .ok => |parsed| {
+                try std.testing.expect(case.accepted);
+                try std.testing.expectEqual(case.count, parsed.relations.len);
+            },
+            .err => |issue| {
+                try std.testing.expect(!case.accepted);
+                try std.testing.expectEqual(ParseIssue.malformed_field, std.meta.activeTag(issue));
+            },
+        }
     }
 }
 
