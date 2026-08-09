@@ -137,9 +137,11 @@ are not rewritten by Boris.
 
 ## 4. Layout selection
 
-Frontmatter remains the closed five-key grammar. In particular, Boris must not
-add a `layout` or `template` frontmatter key. Layout choice is build
-configuration (`--layout-rule`), not page-authored executable metadata.
+Frontmatter remains the closed grammar defined by
+[`frontmatter.md`](frontmatter.md): `id`, `title`, `parent`, `status`, `tags`,
+`relations`, `published_at`, and `summary`. In particular, Boris must not add a
+`layout` or `template` frontmatter key. Layout choice is build configuration
+(`--layout-rule`), not page-authored executable metadata.
 Unknown keys such as `layout:` continue to produce `EFRONTMATTER`.
 
 ### 4.1 CLI grammar
