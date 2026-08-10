@@ -94,19 +94,25 @@ discarded; prior `rag/` is left untouched).
 | `--rag` | Working-context packs; default output dir `rag` |
 | `--rag-dir DIR` | RAG output dir `DIR` (implies RAG-only) |
 | `--complete` | Complete-corpus export (requires `--rag` / `--rag-dir`) |
-| `--scope VALUE` | Entity id or collection-prefix projection after full graph validation |
+| `--scope VALUE` | Entity id or collection-prefix projection after full graph validation (working/context modes only) |
 | `--split-size BYTES` | Working-pack target (default `262144`); context-bundle byte cap |
 | `--bundles-only` | Accepted for compatibility with the pre-v2 scoped-bundle workflow; working packs are bundle-style by design, so it is a no-op |
 | `--out` with `--rag` / `--rag-dir` | **Invalid** (usage exit 2) |
+| `--complete` with `--scope` | **Invalid** (usage exit 2): complete means the entire validated corpus |
 | `--complete` with `--split-size` / `--bundles-only` | **Invalid** (usage exit 2) |
 
 Default system-seed root: `docs/rag/system`. If missing, the seed segment is
-skipped (no hard error).
+skipped (no hard error). Seeds appear **only** in complete-corpus exports;
+default working packs contain site documents, never the Boris system corpus.
 
-`--complete` is the explicit full-corpus export: system seeds, path-mirrored
-content pages, graph docs, INDEX/UPLOAD-GUIDE, and the machine catalog. Working
-packs are the default because they are the ergonomic normal path; completeness
-remains available but explicit.
+`--complete` is the explicit export of the **entire validated corpus**: system
+seeds, path-mirrored content pages, graph docs, INDEX/UPLOAD-GUIDE, and the
+machine catalog. It deliberately rejects `--scope` — a command described as
+"complete" must not silently emit only part of the corpus. Working packs are
+the default because they are the ergonomic normal path; completeness remains
+available but explicit. Scoped exports stay available on the working surface
+(`--rag --scope …`), which is also the compatibility path for pre-v2
+scoped-bundle workflows.
 
 ---
 
@@ -119,13 +125,17 @@ Output root: `rag/` (override with `--rag-dir=DIR`).
   working-1.md            # model-facing upload files (bounded packs)
   working-2.md            # ...
   manifest.json           # sidecar — NOT normally uploaded
-  catalog_meta.json       # machine format meta (not a catalog row)
 ```
+
+Working mode emits exactly these files: the model-facing packs and the
+`manifest.json` sidecar. `catalog_meta.json` is not emitted in working mode
+(its format/schema/version fields are already recorded in the manifest); it
+belongs to the complete-corpus catalog surface.
 
 ### Pack files
 
 Each `working-N.md` file is a bounded, deterministic pack containing complete
-source documents delimited by envelope marker lines:
+site source documents delimited by envelope marker lines:
 
 ```text
 <!-- boris-rag-doc: id="content/guides/intro" source="guides/intro.md" category="content" -->
@@ -142,7 +152,14 @@ A split document's marker additionally carries `part="k/n"`:
   own frontmatter; nothing else is repeated.
 - **Documents are verbatim**: each document's bytes are the source file
   (frontmatter + body). No H1 stripping or demotion, no `:::kind` directive
-  replacement. `<Aside>` / `<Details>` remain authoring syntax.
+  replacement. `<Aside>` / `<Details>` remain authoring syntax. For Textile
+  input, the body is the deterministically adapted Boris-authorable Markdown
+  (see [Authoring fidelity](#authoring-fidelity-both-modes)).
+- **Boundaries are unambiguous by construction**: a source line that begins
+  (after leading whitespace) with the marker prefix `<!-- boris-rag-doc:`
+  would be indistinguishable from a real envelope during marker-free
+  reassembly, so the export rejects such a document with `SeparatorCollision`
+  instead of emitting an ambiguous pack.
 - **Reassembly**: concatenating the marker-free document bytes in pack order
   reproduces the source documents; for split documents, concatenating the parts
   in `part` order reproduces the document. Reassembly metadata is `part` /
@@ -151,10 +168,9 @@ A split document's marker additionally carries `part="k/n"`:
 
 ### Packing rules
 
-- Documents pack greedily in deterministic order: system seeds first (sorted
-  by normalized relative path), then content pages in entity-id order (freeze
-  order). A pack is closed when adding the next document instance would exceed
-  the pack target.
+- Documents pack greedily in deterministic order: content pages in entity-id
+  order (freeze order). A pack is closed when adding the next document instance
+  would exceed the pack target.
 - The pack target (default `262144` bytes, `--split-size` to override) caps the
   **sum of rendered document instances** (envelope + body + separators) per
   pack; the small fixed pack header is not counted against the target.
@@ -196,11 +212,15 @@ pack_target, approximate_tokens, upload_files, documents, sidecar_files
   per part): `rag_id`, `source`, `category`, `entity_id`, `pack`, `part`,
   `part_count`, `continuation` (`single` / `continues` / `continued`), `bytes`
   (document body bytes), and `source_sha256` (SHA-256 of the original source
-  file). `source` is content-root-relative for content documents and
-  seed-root-relative for system documents.
-- `sidecar_files` — `["manifest.json", "catalog_meta.json"]`.
+  file). `source` is content-root-relative; working mode contains site
+  documents only, so no `system/**` document ever appears in this list.
+- `sidecar_files` — `["manifest.json"]`.
 
-### `catalog_meta.json`
+### `catalog_meta.json` (complete mode only)
+
+`catalog_meta.json` is **not** emitted by working mode; `manifest.json` already
+records `format`, `schema_version`, and `boris_version`. Complete-corpus
+exports carry the compact machine meta:
 
 ```json
 {"format":"boris-rag","schema_version":2,"boris_version":"0.8.1"}
@@ -230,13 +250,20 @@ and still model-usable:
 ```
 
 Same authoring-fidelity rules as the working packs: content pages and system
-seeds are verbatim source documents. `INDEX.md` and `UPLOAD-GUIDE.md` describe
+seeds are verbatim source documents (Markdown) or deterministically adapted
+Boris-authorable Markdown (Textile). `INDEX.md` and `UPLOAD-GUIDE.md` describe
 the tree and recommend the working packs for normal site-writing work. There is
 no per-file RAG frontmatter envelope and no `:::kind` export representation.
 
-`--scope` narrows the complete tree the same way it narrows the working set
-(subtree + parents + one-hop neighbors). System seeds are not narrowed by
-`--scope`, matching the working packs.
+`--complete` rejects `--scope`: the complete export is the entire validated
+corpus, never a projection. (Scoped, tree-shaped exports remain available on
+the working surface via `--rag --scope`, which also covers the pre-v2
+scoped-bundle workflow; that surface is deliberately not named `--complete`.)
+
+**Catalog self-consistency:** `INDEX.md` is itself a catalog row. Its row is
+appended before sorting and counting, so INDEX's catalog count, INDEX's
+full-catalog table, and `catalog.jsonl` all describe the same row set, INDEX
+included.
 
 Schema-versioned machine surfaces (`catalog_meta.json`, `catalog.jsonl`,
 `INDEX.md` table) are shared with the schema v1 family; see
@@ -267,7 +294,8 @@ Schema-versioned machine surfaces (`catalog_meta.json`, `catalog.jsonl`,
 
 ## Schema versioning
 
-Emitted on **every successful** RAG export as `catalog_meta.json`:
+Emitted on **every successful complete-corpus export** as `catalog_meta.json`
+(working mode records the same three fields inside `manifest.json`):
 
 ```json
 {"format":"boris-rag","schema_version":2,"boris_version":"0.8.1"}
@@ -314,12 +342,12 @@ Identical inputs on the **same host** → **byte-identical** corpus trees.
 
 | Set | Sort key (ascending, byte-wise) |
 |-----|----------------------------------|
-| Working packs / manifest documents | seeds by normalized seed-relative path, then content pages by entity id (freeze order) |
-| System seed documents | normalized relative path under system docs dir (`/` separators) |
+| Working packs / manifest documents | content pages by entity id (freeze order); no system seeds in working mode |
+| System seed documents (complete mode) | normalized relative path under system docs dir (`/` separators) |
 | Content pages (complete mode) | entity id (freeze order) |
 | Graph hubs / satellite lists | entity id |
 | Graph edge list | source id then target id |
-| `catalog.jsonl` rows / INDEX table | `rag_path` |
+| `catalog.jsonl` rows / INDEX table | `rag_path` (INDEX included) |
 
 Catalog paths are relative and normalized with `/` (no `\`, no leading `/`).
 
@@ -356,9 +384,16 @@ documented in `INDEX.md` but are **not** catalog rows.
 
 ## Authoring fidelity (both modes)
 
-- **H1s are never rewritten.** The source document's heading structure is
-  preserved byte-for-byte. There is no metadata-owned H1 rule and no demotion
-  pass in the v2 contract.
+- **Markdown input is verbatim.** The source document's bytes — frontmatter,
+  H1 structure, and `<Aside>` / `<Details>` authoring syntax — are preserved
+  byte-for-byte. There is no metadata-owned H1 rule, no demotion pass, and no
+  `:::kind` directive replacement in the v2 contract.
+- **Textile input is deterministically adapted.** The Textile adapter
+  (`src/textile.zig`) converts the contracted Textile body subset to
+  Boris-authorable Markdown (per [textile-compatibility.md](textile-compatibility.md));
+  the exported document is the adapted Markdown, not the original Textile
+  bytes. Textile exports are therefore deterministic, faithful *adaptations* —
+  not byte-for-byte originals. Markdown exports remain verbatim.
 - **`<Aside>` / `<Details>` remain authoring syntax.** The v1 `:::kind`
   export representation is gone; component tags survive as the author wrote
   them. Unknown PascalCase tags still fail compile with `ECOMPONENT` on the
@@ -375,6 +410,12 @@ documented in `INDEX.md` but are **not** catalog rows.
 projects selected pages, transitive structural parents, and one-hop semantic
 relation neighbors. Related pages receive their own parent closure; ordinary
 Markdown links are not semantic edges. Unscoped exports include every page.
+
+Role precedence for the reported counts is **requested → structural ancestor →
+semantic-only neighbor**: a page that is both an ancestor of the projection and
+the target of a semantic relation counts as structural context, never as a
+semantic-only neighbor. `--scope` is a working/context-surface flag; it is
+rejected with `--complete`.
 
 The working-context path is scope-first: ask for "this part of the site and the
 context needed to understand it" with `--scope`, and unrelated content stays
@@ -398,25 +439,32 @@ relations plus required structural closure is the conservative baseline.
 
 1. Export twice into two distinct directories from identical inputs; byte-compare
    every file (working and complete modes).
-2. `catalog_meta.json` exists, parses as JSON, and matches the fixed shape/order
-   above with `schema_version: 2`.
-3. Working packs: every content document is present verbatim (H1 and
+2. Working mode emits exactly the model-facing packs plus `manifest.json` — no
+   `catalog_meta.json`, no `system/**` seeds.
+3. Complete mode's `catalog_meta.json` exists, parses as JSON, and matches the
+   fixed shape/order above with `schema_version: 2`.
+4. Working packs: every content document is present verbatim (Markdown; H1 and
    `<Aside>` / `<Details>` preserved, no `:::kind`, no hashes); documents are
    delimited by `<!-- boris-rag-doc -->` markers; repeated exports are
-   byte-identical.
-4. `manifest.json` exists, parses as JSON, lists every document instance with
+   byte-identical. A source line beginning with the marker prefix fails the
+   export (`SeparatorCollision`).
+5. `manifest.json` exists, parses as JSON, lists every document instance with
    `part` / `part_count` / `continuation`, and carries per-document
-   `source_sha256`; `sidecar_files` is present.
-5. A document larger than the pack target is split at safe Markdown boundaries
+   `source_sha256`; `sidecar_files` is `["manifest.json"]`.
+6. A document larger than the pack target is split at safe Markdown boundaries
    (fences intact) with minimal `part="k/n"` reassembly metadata; an
    indivisible oversized block fails explicitly without publishing a partial
    corpus.
-6. Scoped exports include the requested subtree, one-hop semantic neighbors,
-   and the required transitive parent chain; unrelated pages are excluded.
-7. Complete mode publishes INDEX/UPLOAD-GUIDE/catalog/system/content/graph with
+7. Scoped exports include the requested subtree, one-hop semantic neighbors,
+   and the required transitive parent chain; unrelated pages are excluded; a
+   requested page's own parent counts as structural context, not as a semantic
+   neighbor.
+8. Complete mode publishes INDEX/UPLOAD-GUIDE/catalog/system/content/graph with
    verbatim content pages; `catalog.jsonl` rows parse with the required keys in
-   order.
-8. Graph validation failures abort export (no partial success claim); IR and
+   order; INDEX's catalog count and full-catalog table equal the `catalog.jsonl`
+   row count, INDEX's own row included.
+9. `--complete` combined with `--scope` is a usage error (exit 2).
+10. Graph validation failures abort export (no partial success claim); IR and
    RAG report the same diagnostic categories for the same invalid fixture.
-9. `zig build test` passes; `zig build run -- --input fixtures/content/valid
+11. `zig build test` passes; `zig build run -- --input fixtures/content/valid
    --rag-dir /tmp/boris-rag` and `--rag --complete` succeed.

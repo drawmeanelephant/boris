@@ -73,11 +73,10 @@ pub fn formatTags(allocator: std.mem.Allocator, tags: []const []const u8) ![]con
 /// with `part_count == 1`; oversized documents appear once per split part.
 pub const WorkingDoc = struct {
     rag_id: []const u8,
-    /// Corpus-relative source path: content-root-relative for content pages,
-    /// seed-root-relative for system documents.
+    /// Content-root-relative source path of the site document.
     source: []const u8,
     category: []const u8,
-    /// Empty for system documents.
+    /// Entity id of the site document (never empty in working mode).
     entity_id: []const u8 = "",
     part_number: usize = 1,
     part_count: usize = 1,
@@ -88,6 +87,23 @@ pub const WorkingDoc = struct {
 fn appendWorkingBody(sink: *Sink, body: []const u8) !void {
     try sink.rawTrusted(body_is_raw_by_design, body);
     if (body.len == 0 or body[body.len - 1] != '\n') try sink.lit("\n");
+}
+
+/// Line prefix of the pack document envelope. Bodies are emitted verbatim, so
+/// a source line beginning with this prefix would be indistinguishable from a
+/// real boundary during marker-free reassembly.
+pub const doc_marker_prefix = "<!-- boris-rag-doc:";
+
+/// True when any body line (after leading whitespace) starts with the document
+/// marker prefix. The export rejects such documents rather than emitting an
+/// ambiguous pack.
+pub fn containsDocMarkerCollision(body: []const u8) bool {
+    var it = std.mem.splitScalar(u8, body, '\n');
+    while (it.next()) |raw| {
+        const line = std.mem.trimStart(u8, raw, " \t");
+        if (std.mem.startsWith(u8, line, doc_marker_prefix)) return true;
+    }
+    return false;
 }
 
 /// Render one bounded model-facing pack file. Documents are delimited by
@@ -228,7 +244,7 @@ pub fn renderWorkingManifest(gpa: std.mem.Allocator, m: WorkingManifest) ![]u8 {
         try doc.jsonString(d.source_sha256);
         try doc.lit("}");
     }
-    try doc.lit("],\n  \"sidecar_files\":[\"manifest.json\",\"catalog_meta.json\"]\n}\n");
+    try doc.lit("],\n  \"sidecar_files\":[\"manifest.json\"]\n}\n");
     return try doc.toOwnedSlice();
 }
 

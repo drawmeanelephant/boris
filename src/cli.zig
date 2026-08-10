@@ -692,7 +692,10 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     if (bundles_only and !wants_rag) return error.ConflictingFlags;
     // Complete-corpus RAG is RAG-only and owns the tree shape; the working
     // pack target and bundle-style flags belong to the default working mode.
+    // A complete export is the entire validated corpus, so a scope projection
+    // is a usage error rather than a silent partial export.
     if (saw_complete and !wants_rag) return error.ConflictingFlags;
+    if (saw_complete and saw_scope) return error.ConflictingFlags;
     if (saw_complete and (saw_split_size or saw_bundles_only)) return error.ConflictingFlags;
     if (wants_llms and (wants_rag or wants_ir or wants_context or wants_rss or explicit_html)) return error.ConflictingFlags;
     if (wants_rss and (wants_rag or wants_ir or wants_context or explicit_html)) return error.ConflictingFlags;
@@ -993,7 +996,7 @@ pub fn printUsage() void {
         \\  --no-rag            Explicit IR mode (JSON under --out, default .boris)
         \\  --rag               RAG-only mode → working-context packs under --rag-dir (default rag)
         \\  --rag-dir <DIR>     RAG-only mode with output directory DIR
-        \\  --complete          Complete-corpus RAG export (with --rag): system + per-page + graph + catalog
+        \\  --complete          Complete-corpus RAG export (with --rag): the entire validated corpus — system + per-page + graph + catalog
         \\  --context           Context-only mode → bundle under --context-dir (default context)
         \\  --context-dir DIR   Context-only mode with output directory DIR
         \\  --scope VALUE       RAG/context entity id or collection prefix
@@ -1042,10 +1045,9 @@ pub fn printUsage() void {
         \\  <out>/manifest.json  <out>/graph.json  <out>/build-report.json
         \\
         \\RAG artifacts (success; same graph validation as IR):
-        \\  working-N.md          model-facing working packs (complete verbatim documents)
+        \\  working-N.md          model-facing working packs (site documents only)
         \\  manifest.json         sidecar manifest — NOT normally uploaded (scope, counts, hashes)
-        \\  catalog_meta.json     machine format meta
-        \\  (with --complete) INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  system/**
+        \\  (with --complete) INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json  system/**
         \\                      content/pages/**  graph/entity-catalog.md  graph/relations.md
         \\
         \\Context artifacts (success; same graph validation as IR/RAG):
@@ -1056,7 +1058,7 @@ pub fn printUsage() void {
         \\  --rag with --no-rag
         \\  --no-rag with --rag-dir
         \\  --complete without --rag / --rag-dir
-        \\  --complete with --split-size or --bundles-only
+        \\  --complete with --scope, --split-size, or --bundles-only
         \\  --context / --context-dir with --rag, --out, or HTML selectors
         \\  --rss / --rss-path with HTML, IR, RAG, Context, llms.txt, validate, check, or impact
         \\  --sitemap / --sitemap-path without --site-url, with non-HTML modes,
@@ -1642,6 +1644,10 @@ test "parse: conflicts and missing values table" {
         .{ .args = &.{ "boris", "--html-dir", "d", "--out", "x" }, .err = error.ConflictingFlags },
         .{ .args = &.{ "boris", "--out=x", "--html" }, .err = error.ConflictingFlags },
         .{ .args = &.{ "boris", "--rag-dir=r", "--html-dir=d" }, .err = error.ConflictingFlags },
+        // Complete-corpus RAG owns the whole tree: scope, pack target, and
+        // bundle-style flags are working-mode surfaces.
+        .{ .args = &.{ "boris", "--rag", "--complete", "--scope", "mascots" }, .err = error.ConflictingFlags },
+        .{ .args = &.{ "boris", "--complete", "--scope=mascots", "--rag-dir", "r" }, .err = error.ConflictingFlags },
         // Rule 8: empty values
         .{ .args = &.{ "boris", "--input", "" }, .err = error.EmptyValue },
         .{ .args = &.{ "boris", "--out", "" }, .err = error.EmptyValue },

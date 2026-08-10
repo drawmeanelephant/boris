@@ -29,11 +29,13 @@ pub fn selectPages(
     var selected_seed = try allocator.alloc(bool, pages.len);
     defer allocator.free(selected_seed);
     @memset(selected_seed, false);
-    // Pages pulled in only by the one-hop semantic relation pass. Used to
-    // separate semantic neighbors from structural parents in the counts.
-    var relation_entered = try allocator.alloc(bool, pages.len);
-    defer allocator.free(relation_entered);
-    @memset(relation_entered, false);
+    // Pages pulled in by the transitive structural closure as a parent of an
+    // included page. Role precedence for reporting is requested → structural
+    // ancestor → semantic-only neighbor, so a page that is both an ancestor
+    // and a semantic target always counts as structural context.
+    var structural_member = try allocator.alloc(bool, pages.len);
+    defer allocator.free(structural_member);
+    @memset(structural_member, false);
 
     if (scope) |wanted| {
         if (wanted.len == 0 or wanted[0] == '/' or std.mem.indexOf(u8, wanted, "..") != null or std.mem.indexOfScalar(u8, wanted, '\\') != null)
@@ -58,7 +60,6 @@ pub fn selectPages(
                 for (pages, 0..) |candidate, j| {
                     if (std.mem.eql(u8, candidate.id, relation.target)) {
                         included[j] = true;
-                        relation_entered[j] = true;
                     }
                 }
             }
@@ -66,7 +67,10 @@ pub fn selectPages(
     }
 
     // Structural closure is transitive and deliberately runs after relation
-    // projection, so a related satellite also carries its trunk chain.
+    // projection, so a related satellite also carries its trunk chain. Every
+    // parent of an included page is structural context — even when it was
+    // already included as a semantic target — so the counts can never report
+    // an ancestor as a semantic-only neighbor.
     var changed = true;
     while (changed) {
         changed = false;
@@ -74,9 +78,12 @@ pub fn selectPages(
             if (!included[i]) continue;
             if (page.parent) |parent| {
                 for (pages, 0..) |candidate, j| {
-                    if (!included[j] and std.mem.eql(u8, candidate.id, parent)) {
-                        included[j] = true;
-                        changed = true;
+                    if (std.mem.eql(u8, candidate.id, parent)) {
+                        if (!included[j]) {
+                            included[j] = true;
+                            changed = true;
+                        }
+                        structural_member[j] = true;
                     }
                 }
             }
@@ -95,16 +102,15 @@ pub fn selectPages(
             }
 
             // Everything the projection added beyond the requested pages is
-            // either a one-hop semantic neighbor or a transitive structural
-            // parent. The structural closure runs over every included page,
-            // so a neighbor's own parent chain also lands in the projection;
-            // classify those parents as structural context, not as semantic
-            // neighbors.
+            // either a transitive structural ancestor or a semantic-only
+            // neighbor. A page that entered through the relation pass but is
+            // also an ancestor (structural_member) counts as structural per
+            // the requested → ancestor → neighbor precedence.
             var structural: usize = 0;
             var neighbors: usize = 0;
             for (pages, 0..) |_, i| {
                 if (!included[i] or selected_seed[i]) continue;
-                if (relation_entered[i]) neighbors += 1 else structural += 1;
+                if (structural_member[i]) structural += 1 else neighbors += 1;
             }
             out.* = .{
                 .requested = requested,
@@ -246,6 +252,25 @@ test "scope counts a neighbor's parent chain as structural, not semantic" {
     try std.testing.expectEqual(@as(usize, 1), counts.requested);
     try std.testing.expectEqual(@as(usize, 1), counts.structural_parents);
     try std.testing.expectEqual(@as(usize, 1), counts.semantic_neighbors);
+}
+
+test "scope counts a requested child's own parent as structural, not semantic" {
+    // Regression: a requested page may relate semantically to its own
+    // parent/ancestor. Role precedence is requested → structural ancestor →
+    // semantic-only neighbor, so that parent must be structural context even
+    // though it is also the target of a relation from the requested page.
+    const relation = @import("page.zig").SemanticRelation{ .kind = .{ .value = "relates_to" }, .target = "root" };
+    const pages = [_]graph.Node{
+        .{ .id = "root", .source_path = "root.md", .role = .trunk },
+        .{ .id = "root/child", .source_path = "child.md", .role = .satellite, .parent = "root", .semantic_relations = &.{relation} },
+    };
+    var counts: SelectionCounts = .{};
+    const selected = try selectPages(std.testing.allocator, &pages, "root/child", &counts);
+    defer std.testing.allocator.free(selected);
+    try std.testing.expectEqual(@as(usize, 2), selected.len);
+    try std.testing.expectEqual(@as(usize, 1), counts.requested);
+    try std.testing.expectEqual(@as(usize, 1), counts.structural_parents);
+    try std.testing.expectEqual(@as(usize, 0), counts.semantic_neighbors);
 }
 
 test "scope rejects empty and traversal selectors" {

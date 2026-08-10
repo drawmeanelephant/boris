@@ -19,7 +19,7 @@ verbatim authoring documents (frontmatter, H1s, and `<Aside>` /
 | system | 11 |
 | content pages | 8 |
 | graph | 2 |
-| catalog entries | 22 |
+| catalog entries | 23 |
 
 ## Generated artifacts
 
@@ -38,6 +38,7 @@ verbatim authoring documents (frontmatter, H1s, and `<Aside>` /
 
 | rag_path | category | title | entity_id |
 |----------|----------|-------|-----------|
+| `INDEX.md` | meta | Boris RAG corpus — INDEX | — |
 | `UPLOAD-GUIDE.md` | meta | Upload guide — Grok, Gemini, and similar chat LLMs | — |
 | `content/pages/empty-no-fm.md` | content | empty-no-fm | `empty-no-fm` |
 | `content/pages/hierarchy-great-grandchild.md` | content | Hierarchy Great-Grandchild | `hierarchy-great-grandchild` |

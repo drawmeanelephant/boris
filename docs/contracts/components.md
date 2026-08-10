@@ -139,16 +139,19 @@ No raw registered-component tags in published HTML.
 
 ## RAG export representation
 
-Product RAG (schema v2) exports **verbatim authoring documents**: parsed
-`<Aside>` / `<Details>` tags stay exactly as the author wrote them in the
-retrieval payload (working packs and complete-corpus pages). There is no
-`:::kind` directive projection — that v1 export representation was removed
-because it is not round-trippable Boris input and broke authoring fidelity.
+Product RAG (schema v2) exports **verbatim authoring documents** for Markdown
+input: parsed `<Aside>` / `<Details>` tags stay exactly as the author wrote
+them in the retrieval payload (working packs and complete-corpus pages).
+Textile input is deterministically adapted to Boris-authorable Markdown by the
+Textile adapter, which does not carry component syntax. There is no `:::kind`
+directive projection — that v1 export representation was removed because it is
+not round-trippable Boris input and broke authoring fidelity.
 
 Properties:
 
-- **Authoring fidelity** — the retrieval payload is the actual source document;
-  a model can hand generated Markdown straight to Boris validation.
+- **Authoring fidelity** — for Markdown input, the retrieval payload is the
+  actual source document; a model can hand generated Markdown straight to
+  Boris validation. Textile exports are the adapted Markdown, not raw Textile.
 - **No `rag/content/asides/` tree** and no one-document-per-aside rule.
 - Raw registered-component tags are still rejected at compile time
   (`ECOMPONENT`) before any export; the graph must validate first.

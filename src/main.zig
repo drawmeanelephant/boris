@@ -641,7 +641,7 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             if (!opts.quiet) std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
             return .usage;
         },
-        error.InvalidScope, error.OversizedBlock => {
+        error.InvalidScope, error.OversizedBlock, error.SeparatorCollision => {
             if (!opts.quiet) std.debug.print("error: export projection failed: {s}\n", .{@errorName(err)});
             return .content_error;
         },
@@ -670,10 +670,7 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
                     \\  Selected pages: {d} / {d}
                     \\  Structural context: {d} parent page(s), {d} semantic neighbor(s)
                     \\  System context: {d} seed(s)
-                    \\  Upload files: {d}
-                    \\  Approximate upload bytes: {d}
-                    \\  Approximate tokens: {d}
-                    \\  Sidecar files: {d} (not normally uploaded)
+                    \\  Upload files ({d}):
                     \\
                 , .{
                     rag_dir,
@@ -683,6 +680,17 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
                     result.stats.semantic_neighbor_count,
                     result.stats.system_docs,
                     result.stats.pack_count,
+                });
+                for (result.stats.pack_paths) |pack_path| {
+                    std.debug.print("    {s}\n", .{pack_path});
+                }
+                std.debug.print(
+                    \\  Approximate upload bytes: {d}
+                    \\  Approximate tokens: {d}
+                    \\  Non-upload sidecar: manifest.json ({d} file)
+                    \\
+                    \\
+                , .{
                     result.stats.approximate_bytes,
                     result.stats.approximate_tokens,
                     result.stats.sidecar_count,

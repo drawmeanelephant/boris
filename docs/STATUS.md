@@ -42,9 +42,10 @@ frontmatter or claim a unified publication executor.
   a small browser UI with a no-JavaScript navigation fallback. Its normative
   artifact surface is [`rendered-search.md`](contracts/rendered-search.md).
 - Product RAG is now a **working-context projection**: default `--rag` emits
-  bounded `working-N.md` upload packs of verbatim authoring documents plus a
-  `manifest.json` sidecar (schema v2), and `--rag --complete` is the explicit
-  full-corpus export. Normative surface:
+  bounded `working-N.md` upload packs of verbatim site documents (never the
+  `docs/rag/system` corpus) plus a `manifest.json` sidecar (schema v2), and
+  `--rag --complete` is the explicit full-corpus export that rejects `--scope`.
+  Normative surface:
   [`rag-export.md`](contracts/rag-export.md).
 
 ## What works

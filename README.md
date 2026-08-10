@@ -120,10 +120,11 @@ and `parent_entry` are intentionally rejected; see the
 ### Working-context RAG packs
 
 The default `--rag` export is a **working context**: a small number of bounded
-upload files containing complete, verbatim source documents (frontmatter, H1s,
-`<Aside>` / `<Details>` authoring syntax preserved), plus a `manifest.json`
-sidecar that is **not meant to be uploaded**. Attachment count and context size
-are first-class constraints; integrity records live in the sidecar, not in the
+upload files containing the selected site documents (frontmatter, H1s,
+`<Aside>` / `<Details>` authoring syntax preserved) and the required site graph
+closure — never the `docs/rag/system` corpus — plus a `manifest.json` sidecar
+that is **not meant to be uploaded**. Attachment count and context size are
+first-class constraints; integrity records live in the sidecar, not in the
 model-facing files.
 
 ```bash
@@ -142,8 +143,11 @@ model-facing files.
 ```
 
 After a working export Boris prints what you actually need to know: selected
-pages, structural parents and semantic neighbors pulled in, upload file count,
-approximate bytes and tokens, and how many sidecar files exist.
+pages, structural parents and semantic neighbors pulled in, the exact upload
+file paths, approximate bytes and tokens, and the `manifest.json` sidecar
+identified separately as a non-upload file. `--complete` is the explicit
+full-corpus export (system + per-page + graph + catalog) and rejects `--scope`:
+complete means the entire validated corpus.
 
 `--split-size` is the working-pack target in bytes (default 262144), not a
 model token estimate — and whole documents are never split merely to meet it;

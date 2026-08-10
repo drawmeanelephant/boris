@@ -1,3 +1,4 @@
+{"rag_id":"meta/index","rag_path":"INDEX.md","category":"meta","title":"Boris RAG corpus — INDEX","entity_id":"","role":"","parent_entry":"","tags":"[index, catalog, retrieval-map]"}
 {"rag_id":"meta/upload-guide","rag_path":"UPLOAD-GUIDE.md","category":"meta","title":"Upload guide — Grok, Gemini, and similar chat LLMs","entity_id":"","role":"","parent_entry":"","tags":"[upload, grok, gemini, llm, rag]"}
 {"rag_id":"content/empty-no-fm","rag_path":"content/pages/empty-no-fm.md","category":"content","title":"empty-no-fm","entity_id":"empty-no-fm","role":"trunk","parent_entry":"","tags":"[]"}
 {"rag_id":"content/hierarchy-great-grandchild","rag_path":"content/pages/hierarchy-great-grandchild.md","category":"content","title":"Hierarchy Great-Grandchild","entity_id":"hierarchy-great-grandchild","role":"satellite","parent_entry":"hierarchy-leaf","tags":"[]"}
@@ -20,4 +21,3 @@
 {"rag_id":"system/build-cli-and-layout","rag_path":"system/08-build-cli-and-layout.md","category":"system","title":"Build system, CLI, and layout contract","entity_id":"","role":"","parent_entry":"","tags":"[cli, build, layout, flags, zig]"}
 {"rag_id":"system/rag-export","rag_path":"system/09-rag-export.md","category":"system","title":"RAG export system","entity_id":"","role":"","parent_entry":"","tags":"[rag, llm, grok, gemini, corpus, upload, deterministic, working-context]"}
 {"rag_id":"system/name-and-metaphor","rag_path":"system/10-name-and-metaphor.md","category":"system","title":"Name and metaphor","entity_id":"","role":"","parent_entry":"","tags":"[boris, name, metaphor, load, roll, ignite, reset, identity]"}
-{"rag_id":"meta/index","rag_path":"INDEX.md","category":"meta","title":"Boris RAG corpus — INDEX","entity_id":"","role":"","parent_entry":"","tags":"[index, catalog, retrieval-map]"}

@@ -5,24 +5,28 @@
 //!
 //! * **Working context (default `--rag`)** — a small set of bounded
 //!   model-facing pack files (`working-N.md`) containing complete, verbatim
-//!   authoring documents, plus a `manifest.json` sidecar that is not intended
-//!   for model upload. Attachment count and context size are first-class
-//!   product constraints.
-//! * **Complete corpus (`--rag --complete`)** — the explicit full export:
-//!   system seeds, path-mirrored content pages, graph docs, catalog, and
-//!   meta files, all preserving authoring fidelity.
+//!   site documents (the selected subtree plus required site graph closure
+//!   only — never the `docs/rag/system` corpus), plus a `manifest.json`
+//!   sidecar that is not intended for model upload. Attachment count and
+//!   context size are first-class product constraints.
+//! * **Complete corpus (`--rag --complete`)** — the explicit full export of
+//!   the entire validated corpus: system seeds, path-mirrored content pages,
+//!   graph docs, catalog, and meta files, all preserving authoring fidelity.
+//!   It rejects `--scope`: complete means complete.
 //!
-//! Both surfaces preserve complete authoring documents verbatim: frontmatter,
-//! H1 structure, and `<Aside>` / `<Details>` authoring syntax are not
-//! rewritten. Verification metadata (per-document sha256, byte counts, pack
-//! membership) lives in the sidecar manifest, not in model-facing bytes.
+//! Both surfaces preserve complete authoring documents: Markdown input is
+//! verbatim (frontmatter, H1 structure, and `<Aside>` / `<Details>` authoring
+//! syntax are not rewritten); Textile input is deterministically adapted to
+//! Boris-authorable Markdown. Verification metadata (per-document sha256,
+//! byte counts, pack membership) lives in the sidecar manifest, not in
+//! model-facing bytes.
 //!
 //! Normative contract: `docs/contracts/rag-export.md`.
 //!
 //! Determinism: no timestamps, absolute paths, hostnames, random values, or
 //! hash-map / filesystem walk order in emitted bytes. Stable sorts:
-//!   system seeds  → normalized relative rag path
 //!   content pages → entity id (freeze order)
+//!   system seeds  → normalized relative rag path (complete mode)
 //!   graph edges   → source id then target id
 //!   catalog rows  → rag_path
 
@@ -39,14 +43,16 @@ const rag_emit = @import("rag_emit.zig");
 const textile = @import("textile.zig");
 const export_scope = @import("export_scope.zig");
 
-/// Machine format id written into `catalog_meta.json`.
+/// Machine format id (`format` in `manifest.json` and complete-mode
+/// `catalog_meta.json`).
 pub const catalog_format = "boris-rag";
 
 /// Integer schema version for the RAG machine interface. Bumped to 2 by the
 /// working-context rework: the default `--rag` tree changed shape.
 pub const catalog_schema_version: u32 = 2;
 
-/// Product version stamped into `catalog_meta.json`.
+/// Product version stamped into `manifest.json` and complete-mode
+/// `catalog_meta.json`.
 pub const boris_version = pipeline.boris_version;
 
 /// Default working pack target (bytes) when `--split-size` is not given.
@@ -93,13 +99,16 @@ pub const RagStats = struct {
     complete: bool = false,
     /// Working mode: number of model-facing upload files.
     pack_count: usize = 0,
+    /// Working mode: exact model-facing upload file paths (arena-owned),
+    /// e.g. `working-1.md`, `working-2.md`.
+    pack_paths: []const []const u8 = &.{},
     /// Working mode: document instances (split documents count per part).
     document_count: usize = 0,
     /// Working mode: total model-facing pack bytes.
     approximate_bytes: usize = 0,
     /// Working mode: deterministic approximate token count (bytes / 4).
     approximate_tokens: usize = 0,
-    /// Working mode: sidecar files (manifest.json + catalog_meta.json).
+    /// Working mode: non-upload sidecar files (manifest.json only).
     sidecar_count: usize = 0,
 };
 
@@ -439,6 +448,13 @@ fn buildWorkingInstances(
     cap: usize,
     items: []const WorkingItem,
 ) ![]WorkingInstance {
+    // Boundary collision guard: a source line that begins with the document
+    // marker prefix would be indistinguishable from a real envelope during
+    // marker-free reassembly, so such documents are rejected outright instead
+    // of silently producing an ambiguous pack.
+    for (items) |item| {
+        if (rag_emit.containsDocMarkerCollision(item.body)) return error.SeparatorCollision;
+    }
     var instances: std.ArrayList(WorkingInstance) = .empty;
     errdefer instances.deinit(gpa);
     for (items, 0..) |item, item_index| {
@@ -514,22 +530,12 @@ fn gatherWorkingItems(
     opts: RagOptions,
     selected_pages: []const graph_mod.Node,
 ) ![]WorkingItem {
+    // Working mode carries the selected site documents and the required site
+    // graph closure only. The `docs/rag/system` corpus belongs to the explicit
+    // complete-corpus export (`--rag --complete`), never to default working
+    // packs; unscoped working mode is the site, not the Boris system corpus.
     var items: std.ArrayList(WorkingItem) = .empty;
     errdefer items.deinit(gpa);
-
-    const seeds = try collectSystemDocs(io, gpa, arena, opts);
-    defer gpa.free(seeds);
-    for (seeds) |seed| {
-        try items.append(gpa, .{
-            .rag_id = seed.rag_id,
-            .source = seed.rel,
-            .category = "system",
-            .entity_id = "",
-            .body = seed.source,
-            .source_sha256 = cache.hexDigest(cache.hashBytes(seed.source)),
-            .source_size = seed.source.len,
-        });
-    }
 
     const cwd = Io.Dir.cwd();
     var content_dir = try cwd.openDir(io, opts.content_root, .{});
@@ -582,9 +588,12 @@ fn exportWorking(
     defer pack_docs.deinit(gpa);
 
     var total_upload_bytes: usize = 0;
+    var pack_paths: std.ArrayList([]const u8) = .empty;
+    defer pack_paths.deinit(arena);
     for (plans, 0..) |plan, plan_index| {
         const pack_number = plan_index + 1;
         const pack_path = try std.fmt.allocPrint(arena, "working-{d}.md", .{pack_number});
+        try pack_paths.append(arena, pack_path);
 
         pack_docs.clearRetainingCapacity();
         for (instances[plan.first_instance .. plan.first_instance + plan.count]) |inst| {
@@ -646,16 +655,18 @@ fn exportWorking(
     defer gpa.free(manifest);
     try writeBytes(io, out_dir, "manifest.json", manifest);
 
+    // Working mode carries site documents only; the system corpus is complete-
+    // mode territory, so the seed count is always zero here.
     stats.system_docs = 0;
-    for (items) |item| {
-        if (std.mem.eql(u8, item.category, "system")) stats.system_docs += 1;
-    }
     stats.content_pages = selected_pages.len;
     stats.pack_count = plans.len;
+    stats.pack_paths = try pack_paths.toOwnedSlice(arena);
     stats.document_count = manifest_docs.items.len;
     stats.approximate_bytes = total_upload_bytes;
     stats.approximate_tokens = total_upload_bytes / 4;
-    stats.sidecar_count = 2;
+    // manifest.json is the single non-upload sidecar; catalog_meta.json belongs
+    // to the complete-corpus catalog surface only.
+    stats.sidecar_count = 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -772,6 +783,16 @@ fn exportComplete(
         .tags = "[upload, grok, gemini, llm, rag]",
     });
 
+    // INDEX is itself a catalog row. Append its row before sorting and
+    // counting so INDEX's counts table, INDEX's full-catalog table, and
+    // catalog.jsonl all describe the same row set (INDEX included).
+    try appendCatalog(catalog, gpa, arena, .{
+        .rag_id = "meta/index",
+        .rag_path = "INDEX.md",
+        .category = "meta",
+        .title = "Boris RAG corpus — INDEX",
+        .tags = "[index, catalog, retrieval-map]",
+    });
     rag_emit.sortCatalogByRagPath(catalog.items);
     stats.catalog_entries = catalog.items.len;
 
@@ -783,13 +804,6 @@ fn exportComplete(
     }, boris_version);
     defer gpa.free(index);
     try writeBytes(io, out_dir, "INDEX.md", index);
-    try appendCatalog(catalog, gpa, arena, .{
-        .rag_id = "meta/index",
-        .rag_path = "INDEX.md",
-        .category = "meta",
-        .title = "Boris RAG corpus — INDEX",
-        .tags = "[index, catalog, retrieval-map]",
-    });
 
     const jsonl = try rag_emit.renderCatalogJsonl(gpa, catalog.items);
     defer gpa.free(jsonl);
@@ -1024,10 +1038,13 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
 
         if (opts.complete) {
             try exportComplete(io, gpa, retain, stage_dir, opts, selected_pages, &catalog, &stats);
+            // catalog_meta.json is part of the complete-corpus catalog surface
+            // only; working mode records format/schema/version in manifest.json
+            // and does not emit a redundant sidecar.
+            try exportCatalogMeta(io, gpa, stage_dir);
         } else {
             try exportWorking(io, gpa, retain, stage_dir, opts, selected_pages, &stats);
         }
-        try exportCatalogMeta(io, gpa, stage_dir);
     }
 
     // Publish only after the full stage tree is written and handles closed.
@@ -1345,16 +1362,20 @@ test "working export: authoring fidelity, packing, attachment ergonomics, no has
     defer res.deinit();
     try std.testing.expect(res.ok());
     try std.testing.expectEqual(@as(usize, 5), res.stats.content_pages);
-    try std.testing.expectEqual(@as(usize, 2), res.stats.system_docs);
-    // 7 documents (5 pages + 2 seeds) fit one bounded pack.
+    // Working mode is the selected site only — the system corpus never seeds
+    // default working packs.
+    try std.testing.expectEqual(@as(usize, 0), res.stats.system_docs);
+    // 5 site documents fit one bounded pack.
     try std.testing.expectEqual(@as(usize, 1), res.stats.pack_count);
-    try std.testing.expectEqual(@as(usize, 7), res.stats.document_count);
-    try std.testing.expectEqual(@as(usize, 2), res.stats.sidecar_count);
+    try std.testing.expectEqual(@as(usize, 5), res.stats.document_count);
+    try std.testing.expectEqual(@as(usize, 1), res.stats.sidecar_count);
 
     const pack = try readRel(io, gpa, paths.out_a, "working-1.md");
     defer gpa.free(pack);
     // One pack file holds every document: boundaries are unambiguous markers.
-    try std.testing.expectEqual(@as(usize, 7), countMarkers(pack));
+    try std.testing.expectEqual(@as(usize, 5), countMarkers(pack));
+    // No system seed documents leak into model-facing packs.
+    try std.testing.expect(std.mem.indexOf(u8, pack, "system/") == null);
     // Model-facing bytes carry no integrity hashes.
     try std.testing.expect(std.mem.indexOf(u8, pack, "sha256") == null);
 
@@ -1372,9 +1393,9 @@ test "working export: authoring fidelity, packing, attachment ergonomics, no has
     defer parsed.deinit();
     try std.testing.expectEqualStrings("working", parsed.value.object.get("mode").?.string);
     try std.testing.expectEqual(@as(i64, 2), parsed.value.object.get("schema_version").?.integer);
-    try std.testing.expectEqual(@as(usize, 7), parsed.value.object.get("documents").?.array.items.len);
+    try std.testing.expectEqual(@as(usize, 5), parsed.value.object.get("documents").?.array.items.len);
     const doc0 = parsed.value.object.get("documents").?.array.items[0];
-    try std.testing.expectEqualStrings("system", doc0.object.get("category").?.string);
+    try std.testing.expectEqualStrings("content", doc0.object.get("category").?.string);
     try std.testing.expectEqual(@as(usize, 64), doc0.object.get("source_sha256").?.string.len);
     // Per-document digests must be content-sensitive (regression: a loop-local
     // pointer previously made every manifest entry share one stack-slot hash).
@@ -1383,15 +1404,18 @@ test "working export: authoring fidelity, packing, attachment ergonomics, no has
     const h1 = docs_arr[1].object.get("source_sha256").?.string;
     try std.testing.expect(!std.mem.eql(u8, h0, h1));
     const sidecars = parsed.value.object.get("sidecar_files").?.array.items;
-    try std.testing.expectEqual(@as(usize, 2), sidecars.len);
+    try std.testing.expectEqual(@as(usize, 1), sidecars.len);
     try std.testing.expectEqualStrings("manifest.json", sidecars[0].string);
 
-    // catalog_meta also present.
-    const meta = try readRel(io, gpa, paths.out_a, "catalog_meta.json");
-    defer gpa.free(meta);
-    var meta_j = try std.json.parseFromSlice(std.json.Value, gpa, meta, .{});
-    defer meta_j.deinit();
-    try std.testing.expectEqualStrings("boris-rag", meta_j.value.object.get("format").?.string);
+    // catalog_meta.json is complete-mode surface only; working mode does not
+    // emit a redundant sidecar.
+    {
+        var out = try Io.Dir.cwd().openDir(io, paths.out_a, .{});
+        defer out.close(io);
+        if (out.statFile(io, "catalog_meta.json", .{})) |_| {
+            return error.TestUnexpectedResult;
+        } else |_| {}
+    }
 }
 
 test "working export: scoped set includes subtree, parents, neighbors; excludes unrelated" {
@@ -1434,8 +1458,9 @@ test "working export: scoped set includes subtree, parents, neighbors; excludes 
     try std.testing.expect(std.mem.indexOf(u8, pack, "content/a-first") != null);
     try std.testing.expect(std.mem.indexOf(u8, pack, "content/z-last") == null);
     try std.testing.expect(std.mem.indexOf(u8, pack, "content/guides/nested") == null);
-    // Seeds remain included as structural context.
-    try std.testing.expect(std.mem.indexOf(u8, pack, "system/a-first") != null);
+    // System seeds never enter working packs, scoped or unscoped.
+    try std.testing.expect(std.mem.indexOf(u8, pack, "system/a-first") == null);
+    try std.testing.expectEqual(@as(usize, 0), res.stats.system_docs);
 }
 
 test "working export: oversized document splits deterministically at safe boundaries" {
@@ -1518,6 +1543,43 @@ test "working export: oversized document splits deterministically at safe bounda
     }
 }
 
+test "working export: a source line that collides with the document marker fails loudly" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var paths = try ragTestPaths(gpa, tmp.sub_path[0..]);
+    defer paths.deinit(gpa);
+    try writeRagFixtures(io, gpa, paths.content, paths.system);
+    {
+        var content = try Io.Dir.cwd().openDir(io, paths.content, .{});
+        defer content.close(io);
+        try content.writeFile(io, .{
+            .sub_path = "collision.md",
+            .data =
+            \\---
+            \\title: Collision
+            \\---
+            \\
+            \\# Collision
+            \\
+            \\<!-- boris-rag-doc: id="evil" -->
+            \\
+            ,
+        });
+    }
+    // The marker-prefix line would be indistinguishable from a real envelope
+    // during marker-free reassembly, so the export rejects it instead of
+    // emitting an ambiguous pack, and a prior export stays untouched.
+    try std.testing.expectError(error.SeparatorCollision, run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_a,
+        .system_docs_dir = paths.system,
+        .quiet = true,
+    }));
+}
+
 test "working export: bundles_only is a byte-identical compat no-op" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -1551,35 +1613,9 @@ test "working export: bundles_only is a byte-identical compat no-op" {
     try expectDirsByteIdentical(io, gpa, paths.out_a, paths.out_b);
 }
 
-test "complete export: scope narrows the corpus deterministically" {
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    var paths = try ragTestPaths(gpa, tmp.sub_path[0..]);
-    defer paths.deinit(gpa);
-    try writeRagFixtures(io, gpa, paths.content, paths.system);
-
-    var res = try run(io, gpa, .{
-        .content_root = paths.content,
-        .out_dir = paths.out_a,
-        .system_docs_dir = paths.system,
-        .scope = "m-mid",
-        .complete = true,
-        .quiet = true,
-    });
-    defer res.deinit();
-    try std.testing.expect(res.ok());
-    try std.testing.expectEqual(@as(usize, 2), res.stats.selected_pages);
-    try std.testing.expectEqual(@as(usize, 1), res.stats.structural_parent_count);
-
-    const jsonl = try readRel(io, gpa, paths.out_a, "catalog.jsonl");
-    defer gpa.free(jsonl);
-    try std.testing.expect(std.mem.indexOf(u8, jsonl, "\"entity_id\":\"m-mid\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, jsonl, "\"entity_id\":\"a-first\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, jsonl, "\"entity_id\":\"z-last\"") == null);
-}
+// Complete mode is the entire validated corpus: `--complete` combined with
+// `--scope` is rejected as a CLI usage error (see cli.zig conflict matrix), so
+// there is deliberately no scoped complete-mode projection to test here.
 
 test "working export: repeated exports are byte-identical" {
     const gpa = std.testing.allocator;
@@ -1701,6 +1737,27 @@ test "complete export: full tree, authoring fidelity, catalog, determinism" {
     defer gpa.free(jsonl);
     try std.testing.expect(std.mem.indexOf(u8, jsonl, "\"entity_id\":\"m-mid\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, jsonl, "\"title\":\"M Mid\"") != null);
+
+    // Catalog self-consistency: INDEX's catalog count and full-catalog table
+    // agree with catalog.jsonl, and INDEX is itself a catalog row.
+    const jsonl_lines = blk: {
+        var count: usize = 0;
+        for (jsonl) |c| {
+            if (c == '\n') count += 1;
+        }
+        break :blk count;
+    };
+    // 5 content + 2 system + 2 graph + UPLOAD-GUIDE + INDEX.
+    try std.testing.expectEqual(@as(usize, 11), res_a.stats.catalog_entries);
+    try std.testing.expectEqual(res_a.stats.catalog_entries, jsonl_lines);
+    const index = try readRel(io, gpa, paths.out_a, "INDEX.md");
+    defer gpa.free(index);
+    const count_line = try std.fmt.allocPrint(gpa, "| catalog entries | {d} |", .{res_a.stats.catalog_entries});
+    defer gpa.free(count_line);
+    try std.testing.expect(std.mem.indexOf(u8, index, count_line) != null);
+    // INDEX's own row appears in its full-catalog table and in catalog.jsonl.
+    try std.testing.expect(std.mem.indexOf(u8, index, "| `INDEX.md` | meta | Boris RAG corpus — INDEX | — |") != null);
+    try std.testing.expect(std.mem.indexOf(u8, jsonl, "\"rag_path\":\"INDEX.md\"") != null);
 
     var res_b = try run(io, gpa, .{
         .content_root = paths.content,
