@@ -757,93 +757,6 @@ pub fn renderDetailsHtml(d: Details, doc_arena: *std.heap.ArenaAllocator) ![]con
 }
 
 // ---------------------------------------------------------------------------
-// RAG export representation (non-round-trippable)
-// ---------------------------------------------------------------------------
-
-/// Format one Aside as an export-only `:::kind` block.
-///
-/// Kind and id are already allowlist/grammar-validated at tokenize time.
-/// Body is written verbatim (export representation for retrieval, not HTML).
-pub fn formatRagDirective(a: Aside, allocator: std.mem.Allocator) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    try out.appendSlice(allocator, ":::");
-    try out.appendSlice(allocator, a.kind);
-    if (a.id.len > 0) {
-        try out.appendSlice(allocator, "{id=\"");
-        try out.appendSlice(allocator, a.id);
-        try out.appendSlice(allocator, "\"}");
-    }
-    try out.append(allocator, '\n');
-    // Trim a single leading newline from inner body for cleaner export.
-    var body = a.body;
-    if (body.len > 0 and body[0] == '\n') body = body[1..];
-    if (body.len > 0 and body[body.len - 1] == '\r') body = body[0 .. body.len - 1];
-    try out.appendSlice(allocator, body);
-    if (body.len == 0 or body[body.len - 1] != '\n') try out.append(allocator, '\n');
-    try out.appendSlice(allocator, ":::\n");
-    return try out.toOwnedSlice(allocator);
-}
-
-/// Format Details as an inline, export-only RAG directive. The body remains
-/// source Markdown; the summary is escaped for the directive attribute sink.
-pub fn formatDetailsRagDirective(d: Details, allocator: std.mem.Allocator) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    try out.appendSlice(allocator, ":::details{summary=\"");
-    try appendEscapedAttr(&out, allocator, d.summary);
-    try out.appendSlice(allocator, "\"");
-    if (d.id.len > 0) {
-        try out.appendSlice(allocator, " id=\"");
-        try appendEscapedAttr(&out, allocator, d.id);
-        try out.appendSlice(allocator, "\"");
-    }
-    if (d.open) try out.appendSlice(allocator, " open=\"true\"");
-    try out.appendSlice(allocator, "}\n");
-    var body = d.body;
-    if (body.len > 0 and body[0] == '\n') body = body[1..];
-    if (body.len > 0 and body[body.len - 1] == '\r') body = body[0 .. body.len - 1];
-    try out.appendSlice(allocator, body);
-    if (body.len == 0 or body[body.len - 1] != '\n') try out.append(allocator, '\n');
-    try out.appendSlice(allocator, ":::\n");
-    return try out.toOwnedSlice(allocator);
-}
-
-/// Rebuild a body for RAG: markdown segments H1-normalized by caller pieces,
-/// asides as `:::kind` blocks, document order preserved.
-pub fn exportBodyWithDirectives(
-    segments: []const Segment,
-    prepare_md: *const fn ([]const u8, std.mem.Allocator) anyerror![]const u8,
-    allocator: std.mem.Allocator,
-) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(allocator);
-    for (segments) |seg| {
-        switch (seg) {
-            .markdown => |md| {
-                if (std.mem.trim(u8, md, " \t\r\n").len == 0) {
-                    try out.appendSlice(allocator, md);
-                    continue;
-                }
-                const prepared = try prepare_md(md, allocator);
-                try out.appendSlice(allocator, prepared);
-            },
-            .aside => |a| {
-                const block = try formatRagDirective(a, allocator);
-                defer allocator.free(block);
-                try out.appendSlice(allocator, block);
-            },
-            .details => |d| {
-                const block = try formatDetailsRagDirective(d, allocator);
-                defer allocator.free(block);
-                try out.appendSlice(allocator, block);
-            },
-        }
-    }
-    return try out.toOwnedSlice(allocator);
-}
-
-// ---------------------------------------------------------------------------
 // Diagnostic → pipeline code mapping
 // ---------------------------------------------------------------------------
 
@@ -916,7 +829,7 @@ test "renderDetailsHtml uses native semantics and escapes text sinks" {
     try std.testing.expect(std.mem.indexOf(u8, html, "<strong>body</strong>") != null);
 }
 
-test "tokenize: valid Details attributes and RAG projection" {
+test "tokenize: valid Details attributes" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -928,9 +841,7 @@ test "tokenize: valid Details attributes and RAG projection" {
     try std.testing.expect(!r.hasErrors());
     try std.testing.expectEqual(@as(usize, 1), r.details.len);
     try std.testing.expect(r.details[0].open);
-    const rag = try formatDetailsRagDirective(r.details[0], gpa);
-    defer gpa.free(rag);
-    try std.testing.expect(std.mem.indexOf(u8, rag, ":::details{summary=\"Read &lt;this&gt; &amp; that\" id=\"more-1\" open=\"true\"}") != null);
+    try std.testing.expectEqualStrings("Read <this> & that", r.details[0].summary);
 }
 
 test "tokenize: Details rejects closed grammar and cross nesting" {
@@ -1166,17 +1077,6 @@ test "tokenize: invalid id grammar" {
     const r = try tokenizeBody(body, arena.allocator());
     try std.testing.expect(r.hasErrors());
     try std.testing.expect(r.diagnostics[0].kind == .invalid_id);
-}
-
-test "formatRagDirective export representation" {
-    const gpa = std.testing.allocator;
-    const block = try formatRagDirective(.{
-        .kind = "tip",
-        .id = "z1",
-        .body = "Tip body.\n",
-    }, gpa);
-    defer gpa.free(block);
-    try std.testing.expectEqualStrings(":::tip{id=\"z1\"}\nTip body.\n:::\n", block);
 }
 
 test "isValidAsideId grammar" {

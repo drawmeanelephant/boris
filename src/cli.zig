@@ -71,6 +71,8 @@ pub const Options = struct {
     out_dir: ?[]const u8 = null,
     /// RAG corpus directory. Set for RAG mode only (default `rag`).
     rag_dir: ?[]const u8 = null,
+    /// Complete-corpus RAG export (working packs are the default).
+    complete: bool = false,
     /// Context bundle directory. Set for context mode only (default `context`).
     context_dir: ?[]const u8 = null,
     /// Optional entity or collection-prefix projection for RAG/context.
@@ -158,6 +160,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var scope: ?[]const u8 = null;
     var split_size: ?usize = null;
     var bundles_only = false;
+    var complete = false;
 
     var saw_quiet = false;
     var saw_input = false;
@@ -170,6 +173,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_scope = false;
     var saw_split_size = false;
     var saw_bundles_only = false;
+    var saw_complete = false;
     var saw_llms = false;
     var saw_llms_path = false;
     var saw_rss = false;
@@ -303,6 +307,13 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             if (saw_bundles_only) return error.DuplicateFlag;
             saw_bundles_only = true;
             bundles_only = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--complete")) {
+            if (saw_complete) return error.DuplicateFlag;
+            saw_complete = true;
+            complete = true;
             continue;
         }
 
@@ -679,6 +690,10 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     if (wants_context and (wants_rag or wants_ir)) return error.ConflictingFlags;
     if ((saw_scope or saw_split_size) and !(wants_rag or wants_context)) return error.ConflictingFlags;
     if (bundles_only and !wants_rag) return error.ConflictingFlags;
+    // Complete-corpus RAG is RAG-only and owns the tree shape; the working
+    // pack target and bundle-style flags belong to the default working mode.
+    if (saw_complete and !wants_rag) return error.ConflictingFlags;
+    if (saw_complete and (saw_split_size or saw_bundles_only)) return error.ConflictingFlags;
     if (wants_llms and (wants_rag or wants_ir or wants_context or wants_rss or explicit_html)) return error.ConflictingFlags;
     if (wants_rss and (wants_rag or wants_ir or wants_context or explicit_html)) return error.ConflictingFlags;
     if ((saw_rss_title or saw_rss_description or saw_rss_limit) and !wants_rss) return error.ConflictingFlags;
@@ -834,6 +849,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .scope = scope,
             .split_size = split_size,
             .bundles_only = bundles_only,
+            .complete = complete,
             .llms_path = null,
             .html_dir = null,
             .targets = targets,
@@ -975,13 +991,14 @@ pub fn printUsage() void {
         \\  --target NAME=DIR   HTML multi-target mode (repeatable; order-independent); implies HTML
         \\  --out <DIR>         IR mode → write JSON under DIR (default .boris when --no-rag)
         \\  --no-rag            Explicit IR mode (JSON under --out, default .boris)
-        \\  --rag               RAG-only mode → corpus under --rag-dir (default rag)
+        \\  --rag               RAG-only mode → working-context packs under --rag-dir (default rag)
         \\  --rag-dir <DIR>     RAG-only mode with output directory DIR
+        \\  --complete          Complete-corpus RAG export (with --rag): system + per-page + graph + catalog
         \\  --context           Context-only mode → bundle under --context-dir (default context)
         \\  --context-dir DIR   Context-only mode with output directory DIR
         \\  --scope VALUE       RAG/context entity id or collection prefix
-        \\  --split-size BYTES  RAG/context deterministic bundle byte cap
-        \\  --bundles-only      RAG upload parts only; omit per-page files
+        \\  --split-size BYTES  Working-RAG pack target (default 262144); context bundle byte cap
+        \\  --bundles-only      Accepted for RAG compatibility; working packs are bundle-style by design
         \\  --llms              Deterministic llms.txt export → llms.txt
         \\  --llms-path PATH    llms.txt export path (implies --llms)
         \\  --rss               Deterministic RSS 2.0 export → rss.xml
@@ -1025,9 +1042,11 @@ pub fn printUsage() void {
         \\  <out>/manifest.json  <out>/graph.json  <out>/build-report.json
         \\
         \\RAG artifacts (success; same graph validation as IR):
-        \\  INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json
-        \\  system/**  content/pages/**  graph/entity-catalog.md  graph/relations.md
-        \\  parts/part-N.md + part_manifest.json (with --split-size / --bundles-only)
+        \\  working-N.md          model-facing working packs (complete verbatim documents)
+        \\  manifest.json         sidecar manifest — NOT normally uploaded (scope, counts, hashes)
+        \\  catalog_meta.json     machine format meta
+        \\  (with --complete) INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  system/**
+        \\                      content/pages/**  graph/entity-catalog.md  graph/relations.md
         \\
         \\Context artifacts (success; same graph validation as IR/RAG):
         \\  bundle.md  manifest.json  graph.json  pages/<entity-id>.md
@@ -1036,6 +1055,8 @@ pub fn printUsage() void {
         \\Conflicts (exit 2):
         \\  --rag with --no-rag
         \\  --no-rag with --rag-dir
+        \\  --complete without --rag / --rag-dir
+        \\  --complete with --split-size or --bundles-only
         \\  --context / --context-dir with --rag, --out, or HTML selectors
         \\  --rss / --rss-path with HTML, IR, RAG, Context, llms.txt, validate, check, or impact
         \\  --sitemap / --sitemap-path without --site-url, with non-HTML modes,

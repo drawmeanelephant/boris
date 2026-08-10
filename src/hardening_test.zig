@@ -402,7 +402,7 @@ test "hardening: invalid component fails IR with ECOMPONENT" {
     try std.testing.expect(saw);
 }
 
-test "hardening: valid Aside passes IR and RAG :::kind export" {
+test "hardening: valid Aside passes IR and RAG with authoring fidelity" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     var work = try WorkDir.create(gpa, io, "aside-ok");
@@ -434,16 +434,17 @@ test "hardening: valid Aside passes IR and RAG :::kind export" {
         try std.testing.expect(r.ok);
     }
     {
-        var r = try rag.run(io, gpa, .{ .content_root = content, .out_dir = rag_out, .quiet = true });
+        var r = try rag.run(io, gpa, .{ .content_root = content, .out_dir = rag_out, .complete = true, .quiet = true });
         defer r.deinit();
         try std.testing.expect(r.compile.ok);
     }
 
+    // Complete-corpus content pages preserve the authoring representation.
     const page = try work.readFile("rag/content/pages/index.md", gpa);
     defer gpa.free(page);
-    try std.testing.expect(std.mem.indexOf(u8, page, ":::tip{id=\"t1\"}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, page, "<Aside kind=\"tip\" id=\"t1\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, page, "Drink water.") != null);
-    try std.testing.expect(std.mem.indexOf(u8, page, "<Aside") == null);
+    try std.testing.expect(std.mem.indexOf(u8, page, ":::") == null);
 }
 
 test "hardening: Details include preserves IR and projects to HTML and RAG" {
@@ -497,7 +498,7 @@ test "hardening: Details include preserves IR and projects to HTML and RAG" {
         defer gpa.free(artifact);
         try std.testing.expect(std.mem.indexOf(u8, artifact, "Details") == null);
     }
-    var rr = try rag.run(io, gpa, .{ .content_root = content, .out_dir = rag_out, .quiet = true });
+    var rr = try rag.run(io, gpa, .{ .content_root = content, .out_dir = rag_out, .complete = true, .quiet = true });
     defer rr.deinit();
     try std.testing.expect(rr.compile.ok);
     _ = try compile.compileHtmlSite(io, gpa, .{ .content_root = content, .dist_dir = dist, .layout_path = layout, .quiet = true });
@@ -511,10 +512,11 @@ test "hardening: Details include preserves IR and projects to HTML and RAG" {
     try std.testing.expect(std.mem.indexOf(u8, html, "<summary>Read &lt;this&gt; &amp; that</summary>") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "<strong>details</strong>") != null);
 
+    // Complete-corpus content pages keep the authoring representation.
     const rag_page = try work.readFile("rag/content/pages/index.md", gpa);
     defer gpa.free(rag_page);
-    try std.testing.expect(std.mem.indexOf(u8, rag_page, ":::details{summary=\"RAG details\" id=\"rag-1\"}") != null);
-    try std.testing.expect(std.mem.indexOf(u8, rag_page, "<Details") == null);
+    try std.testing.expect(std.mem.indexOf(u8, rag_page, "<Details summary=\"RAG details\" id=\"rag-1\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rag_page, ":::") == null);
 }
 
 test "hardening: Details HTML is stable across jobs and incremental builds" {

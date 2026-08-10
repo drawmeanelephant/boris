@@ -1,28 +1,30 @@
-//! Optional deterministic RAG export (milestone 7).
+//! Optional deterministic RAG export.
 //!
-//! Reuses the shared compile path: `pipeline.compile` → scanner → parser →
-//! PageDb-derived graph nodes → `graph.validate` → freeze. Does **not** invent
-//! a second parser or graph validator. No Apex / HTML rendering.
+//! Two surfaces share `pipeline.compile` (scan → parse → PageDb → graph
+//! validate → freeze) and never invent a second parser or graph validator:
+//!
+//! * **Working context (default `--rag`)** — a small set of bounded
+//!   model-facing pack files (`working-N.md`) containing complete, verbatim
+//!   authoring documents, plus a `manifest.json` sidecar that is not intended
+//!   for model upload. Attachment count and context size are first-class
+//!   product constraints.
+//! * **Complete corpus (`--rag --complete`)** — the explicit full export:
+//!   system seeds, path-mirrored content pages, graph docs, catalog, and
+//!   meta files, all preserving authoring fidelity.
+//!
+//! Both surfaces preserve complete authoring documents verbatim: frontmatter,
+//! H1 structure, and `<Aside>` / `<Details>` authoring syntax are not
+//! rewritten. Verification metadata (per-document sha256, byte counts, pack
+//! membership) lives in the sidecar manifest, not in model-facing bytes.
 //!
 //! Normative contract: `docs/contracts/rag-export.md`.
-//!
-//! Output tree (default `rag/`):
-//!   INDEX.md, UPLOAD-GUIDE.md, catalog.jsonl, catalog_meta.json
-//!   system/**          — seeds from system_docs_dir when present
-//!   content/pages/**   — path-mirrored page segments
-//!   graph/entity-catalog.md, graph/relations.md
 //!
 //! Determinism: no timestamps, absolute paths, hostnames, random values, or
 //! hash-map / filesystem walk order in emitted bytes. Stable sorts:
 //!   system seeds  → normalized relative rag path
-//!   content pages → entity id
+//!   content pages → entity id (freeze order)
 //!   graph edges   → source id then target id
 //!   catalog rows  → rag_path
-//!
-//! Aside / `:::kind`: authoring is constrained `<Aside>`. On export, parsed
-//! asides become `:::kind` / `:::kind{id="…"}` blocks (export representation
-//! only — not round-trippable authoring syntax). See
-//! `docs/contracts/components.md` and `docs/contracts/rag-export.md`.
 
 const std = @import("std");
 const Io = std.Io;
@@ -32,22 +34,23 @@ const graph_mod = @import("graph.zig");
 const identity = @import("identity.zig");
 const target_mod = @import("target.zig");
 const source_io = @import("source_io.zig");
-const parser = @import("parser.zig");
-const aside = @import("aside.zig");
 const pipeline = @import("pipeline.zig");
 const rag_emit = @import("rag_emit.zig");
 const textile = @import("textile.zig");
 const export_scope = @import("export_scope.zig");
-const json_out = @import("json_out.zig");
 
 /// Machine format id written into `catalog_meta.json`.
 pub const catalog_format = "boris-rag";
 
-/// Integer schema version for the RAG catalog machine interface.
-pub const catalog_schema_version: u32 = 1;
+/// Integer schema version for the RAG machine interface. Bumped to 2 by the
+/// working-context rework: the default `--rag` tree changed shape.
+pub const catalog_schema_version: u32 = 2;
 
 /// Product version stamped into `catalog_meta.json`.
 pub const boris_version = pipeline.boris_version;
+
+/// Default working pack target (bytes) when `--split-size` is not given.
+pub const default_pack_target: usize = 262144;
 
 fn relationCountForPages(pages: []const graph_mod.Node) usize {
     var count: usize = 0;
@@ -60,27 +63,18 @@ pub const RagOptions = struct {
     content_root: []const u8 = "content",
     /// Final RAG corpus directory (default `rag`).
     out_dir: []const u8 = "rag",
-    /// Curated system-seed root; missing → skip system segment (no error).
+    /// Curated system-seed root; missing → skip seeds (no error).
     system_docs_dir: []const u8 = "docs/rag/system",
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
     scope: ?[]const u8 = null,
+    /// Working-mode pack target (bytes); complete mode rejects this.
     split_size: ?usize = null,
+    /// Complete-corpus export (system + per-page + graph + catalog tree).
+    complete: bool = false,
+    /// Accepted for compatibility with the pre-v2 scoped-bundle workflow;
+    /// working packs are bundle-style by construction, so this is a no-op.
     bundles_only: bool = false,
-};
-
-const BundleChunk = struct {
-    page: graph_mod.Node,
-    doc: []const u8,
-    number: usize,
-    count: usize,
-    source_sha256: [64]u8,
-};
-
-const BundlePart = struct {
-    doc: []const u8,
-    first_chunk: usize,
-    last_chunk: usize,
 };
 
 pub const RagStats = struct {
@@ -92,11 +86,21 @@ pub const RagStats = struct {
     published: bool = false,
     graph_pages: usize = 0,
     selected_pages: usize = 0,
+    structural_parent_count: usize = 0,
+    semantic_neighbor_count: usize = 0,
     graph_relation_count: usize = 0,
     relation_count: usize = 0,
-    bundles_only: bool = false,
-    part_count: usize = 0,
-    chunk_count: usize = 0,
+    complete: bool = false,
+    /// Working mode: number of model-facing upload files.
+    pack_count: usize = 0,
+    /// Working mode: document instances (split documents count per part).
+    document_count: usize = 0,
+    /// Working mode: total model-facing pack bytes.
+    approximate_bytes: usize = 0,
+    /// Working mode: deterministic approximate token count (bytes / 4).
+    approximate_tokens: usize = 0,
+    /// Working mode: sidecar files (manifest.json + catalog_meta.json).
+    sidecar_count: usize = 0,
 };
 
 pub const RagResult = struct {
@@ -119,7 +123,7 @@ pub const RagResult = struct {
     }
 };
 
-/// Machine catalog row (`catalog.jsonl`). Field order is fixed and normative.
+/// Machine catalog row (`catalog.jsonl`, complete mode). Field order fixed.
 const CatalogEntry = rag_emit.CatalogEntry;
 
 fn log(opts: RagOptions, comptime fmt: []const u8, args: anytype) void {
@@ -196,127 +200,23 @@ fn appendCatalog(
 }
 
 // ---------------------------------------------------------------------------
-// H1 ownership (metadata-owned title)
+// System seeds
 // ---------------------------------------------------------------------------
 
-/// True when `left_trimmed` is an ATX level-1 heading (`#` not `##`).
-fn isAtxH1Line(left_trimmed: []const u8) bool {
-    if (left_trimmed.len == 0) return false;
-    if (left_trimmed[0] != '#') return false;
-    if (left_trimmed.len >= 2 and left_trimmed[1] == '#') return false;
-    if (left_trimmed.len == 1) return true;
-    return left_trimmed[1] == ' ' or left_trimmed[1] == '\t';
-}
+const SeedDoc = struct {
+    rag_id: []const u8,
+    /// Normalized relative path under the seed root.
+    rel: []const u8,
+    /// Full seed file bytes (verbatim).
+    source: []const u8,
+    title: []const u8,
+    tags: []const []const u8,
+};
 
-/// Drop a leading ATX H1 (and blank lines before it).
-fn stripLeadingAtxH1(body: []const u8) []const u8 {
-    var i: usize = 0;
-    while (i < body.len) {
-        var line_end = i;
-        while (line_end < body.len and body[line_end] != '\n') : (line_end += 1) {}
-        var line = body[i..line_end];
-        if (line.len > 0 and line[line.len - 1] == '\r') line = line[0 .. line.len - 1];
-        const trimmed = std.mem.trim(u8, line, " \t");
-        if (trimmed.len == 0) {
-            i = if (line_end < body.len) line_end + 1 else body.len;
-            continue;
-        }
-        if (isAtxH1Line(trimmed)) {
-            if (line_end < body.len and body[line_end] == '\n') return body[line_end + 1 ..];
-            return body[line_end..];
-        }
-        return body;
-    }
-    return body;
-}
-
-/// Demote remaining ATX H1 lines to H2.
-fn demoteAtxH1ToH2(body: []const u8, arena: std.mem.Allocator) ![]const u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(arena);
-    var i: usize = 0;
-    while (i < body.len) {
-        var line_end = i;
-        while (line_end < body.len and body[line_end] != '\n') : (line_end += 1) {}
-        var line = body[i..line_end];
-        var had_cr = false;
-        if (line.len > 0 and line[line.len - 1] == '\r') {
-            line = line[0 .. line.len - 1];
-            had_cr = true;
-        }
-        const left = std.mem.trimStart(u8, line, " \t");
-        const indent_len = line.len - left.len;
-        if (isAtxH1Line(left)) {
-            try out.appendSlice(arena, line[0..indent_len]);
-            try out.append(arena, '#'); // # Title → ## Title
-            try out.appendSlice(arena, left);
-        } else {
-            try out.appendSlice(arena, line);
-        }
-        if (had_cr) try out.append(arena, '\r');
-        if (line_end < body.len) {
-            try out.append(arena, '\n');
-            i = line_end + 1;
-        } else {
-            i = line_end;
-        }
-    }
-    return try out.toOwnedSlice(arena);
-}
-
-fn prepareContentBody(body: []const u8, arena: std.mem.Allocator) ![]const u8 {
-    return demoteAtxH1ToH2(stripLeadingAtxH1(body), arena);
-}
-
-/// Export body: H1-normalize markdown segments; emit asides as `:::kind` blocks.
-fn exportBodyForRag(segments: []const aside.Segment, arena: std.mem.Allocator) ![]const u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(arena);
-    for (segments) |seg| {
-        switch (seg) {
-            .markdown => |md| {
-                if (std.mem.trim(u8, md, " \t\r\n").len == 0) {
-                    try out.appendSlice(arena, md);
-                    continue;
-                }
-                const prepared = try prepareContentBody(md, arena);
-                try out.appendSlice(arena, prepared);
-            },
-            .aside => |a| {
-                const block = try aside.formatRagDirective(a, arena);
-                try out.appendSlice(arena, block);
-            },
-            .details => |d| {
-                const block = try aside.formatDetailsRagDirective(d, arena);
-                try out.appendSlice(arena, block);
-            },
-        }
-    }
-    return try out.toOwnedSlice(arena);
-}
-
-fn countAtxH1(text: []const u8) usize {
-    var n: usize = 0;
-    var i: usize = 0;
-    while (i < text.len) {
-        var line_end = i;
-        while (line_end < text.len and text[line_end] != '\n') : (line_end += 1) {}
-        var line = text[i..line_end];
-        if (line.len > 0 and line[line.len - 1] == '\r') line = line[0 .. line.len - 1];
-        const trimmed = std.mem.trim(u8, line, " \t");
-        if (isAtxH1Line(trimmed)) n += 1;
-        i = if (line_end < text.len) line_end + 1 else text.len;
-    }
-    return n;
-}
-
-// ---------------------------------------------------------------------------
-// Tags / titles helpers
-// ---------------------------------------------------------------------------
-
-fn pageTitle(p: graph_mod.Node) []const u8 {
-    if (p.title) |t| return t;
-    return p.id;
+fn titleFromFilename(path: []const u8) []const u8 {
+    const base = std.fs.path.basename(path);
+    if (std.mem.endsWith(u8, base, ".md")) return base[0 .. base.len - 3];
+    return base;
 }
 
 fn firstHeadingOrFallback(body: []const u8, fallback: []const u8) []const u8 {
@@ -340,12 +240,6 @@ fn firstHeadingOrFallback(body: []const u8, fallback: []const u8) []const u8 {
         break;
     }
     return fallback;
-}
-
-fn titleFromFilename(path: []const u8) []const u8 {
-    const base = std.fs.path.basename(path);
-    if (std.mem.endsWith(u8, base, ".md")) return base[0 .. base.len - 3];
-    return base;
 }
 
 fn stripFrontmatter(source: []const u8) []const u8 {
@@ -394,9 +288,6 @@ fn extractTagsLine(source: []const u8) []const u8 {
     return "";
 }
 
-/// Split a system-doc `tags:` line into its items so the emitter can encode each
-/// one. Returns an empty slice when the line is absent or is not a flow
-/// sequence; the caller supplies the default in that case.
 fn extractTagTokens(arena: std.mem.Allocator, source: []const u8) ![]const []const u8 {
     const line = extractTagsLine(source);
     if (line.len < 2 or line[0] != '[' or line[line.len - 1] != ']') return &.{};
@@ -440,24 +331,16 @@ fn extractRagId(source: []const u8, fallback: []const u8) []const u8 {
     return fallback;
 }
 
-// ---------------------------------------------------------------------------
-// System seeds
-// ---------------------------------------------------------------------------
-
-fn exportSystemDocs(
+/// Read and sort system seeds (missing seed root → empty list, no error).
+fn collectSystemDocs(
     io: Io,
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
-    out_dir: Io.Dir,
     opts: RagOptions,
-    catalog: *std.ArrayList(CatalogEntry),
-) !usize {
+) ![]SeedDoc {
     const cwd = Io.Dir.cwd();
     var sys_dir = cwd.openDir(io, opts.system_docs_dir, .{ .iterate = true }) catch |err| switch (err) {
-        error.FileNotFound => {
-            log(opts, "  rag system  (seed dir missing; skipped)\n", .{});
-            return 0;
-        },
+        error.FileNotFound => return &.{},
         else => return err,
     };
     defer sys_dir.close(io);
@@ -480,223 +363,303 @@ fn exportSystemDocs(
         }
     }.less);
 
-    var count: usize = 0;
+    var docs: std.ArrayList(SeedDoc) = .empty;
+    errdefer docs.deinit(gpa);
     for (rels.items) |rel| {
         const source = try readFileAlloc(io, sys_dir, rel, arena);
         const body = stripFrontmatter(source);
         const title = firstHeadingOrFallback(body, titleFromFilename(rel));
-        const rag_path = try std.fmt.allocPrint(arena, "system/{s}", .{rel});
         const fallback_id = try std.fmt.allocPrint(arena, "system/{s}", .{titleFromFilename(rel)});
         const rag_id = extractRagId(source, fallback_id);
         const parsed_tags = try extractTagTokens(arena, source);
-        const default_tags = [_][]const u8{ "boris", "system" };
-        const tags_out: []const []const u8 = if (parsed_tags.len > 0) parsed_tags else &default_tags;
-
-        const doc = try rag_emit.renderSystemDocument(gpa, rag_id, rag_path, tags_out, body);
-        defer gpa.free(doc);
-        try writeBytes(io, out_dir, rag_path, doc);
-        try appendCatalog(catalog, gpa, arena, .{
+        try docs.append(gpa, .{
             .rag_id = rag_id,
-            .rag_path = rag_path,
-            .category = "system",
+            .rel = rel,
+            .source = source,
             .title = title,
-            .tags = try rag_emit.formatTags(arena, tags_out),
+            .tags = parsed_tags,
         });
-        count += 1;
-        log(opts, "  rag system  {s}\n", .{rag_path});
     }
-    return count;
+    return try docs.toOwnedSlice(gpa);
 }
 
 // ---------------------------------------------------------------------------
-// Content pages
+// Working-context packs
 // ---------------------------------------------------------------------------
 
-fn exportContentPages(
+const WorkingItem = struct {
+    rag_id: []const u8,
+    source: []const u8,
+    category: []const u8,
+    entity_id: []const u8,
+    /// Verbatim document bytes (markdown source, or frontmatter + adapted
+    /// markdown for textile input).
+    body: []const u8,
+    source_sha256: [64]u8,
+    /// Original source file bytes (for the sidecar integrity record).
+    source_size: usize,
+};
+
+const WorkingInstance = struct {
+    item_index: usize,
+    part_number: usize,
+    part_count: usize,
+    body: []const u8,
+    /// Exact rendered byte length of this instance (envelope + body + separators).
+    len: usize,
+};
+
+fn digitCount(n: usize) usize {
+    var v = n;
+    var count: usize = 1;
+    while (v >= 10) : (v /= 10) count += 1;
+    return count;
+}
+
+/// Byte length of one `<!-- boris-rag-doc: ... -->` marker (without the
+/// surrounding newlines). Values are validated single-line strings, so the
+/// rendered length equals the arithmetic length.
+fn envelopeLen(rag_id: []const u8, source: []const u8, category: []const u8, part_number: usize, part_count: usize) usize {
+    var len: usize = 24 + rag_id.len + 10 + source.len + 12 + category.len + 5;
+    if (part_count > 1) len += 8 + digitCount(part_number) + 1 + digitCount(part_count);
+    return len;
+}
+
+fn instanceLen(item: WorkingItem, part_number: usize, part_count: usize, body: []const u8) usize {
+    var len = envelopeLen(item.rag_id, item.source, item.category, part_number, part_count) + body.len + 3;
+    if (body.len == 0 or body[body.len - 1] != '\n') len += 1;
+    return len;
+}
+
+/// Expand items into packable instances. Whole documents under the target stay
+/// whole; only a single document larger than the target is split at safe
+/// Markdown boundaries (reusing `export_scope.partitionMarkdown`).
+fn buildWorkingInstances(
+    gpa: std.mem.Allocator,
+    cap: usize,
+    items: []const WorkingItem,
+) ![]WorkingInstance {
+    var instances: std.ArrayList(WorkingInstance) = .empty;
+    errdefer instances.deinit(gpa);
+    for (items, 0..) |item, item_index| {
+        if (item.body.len <= cap) {
+            try instances.append(gpa, .{
+                .item_index = item_index,
+                .part_number = 1,
+                .part_count = 1,
+                .body = item.body,
+                .len = instanceLen(item, 1, 1, item.body),
+            });
+            continue;
+        }
+        // Oversized single document. Budget leaves room for the envelope and
+        // separators; `partitionMarkdown` splits at blank-line / heading
+        // boundaries outside fenced code and fails on an indivisible block.
+        const base = envelopeLen(item.rag_id, item.source, item.category, 1, 1);
+        if (base + 24 >= cap) return error.OversizedBlock;
+        const budget = cap - base - 24;
+        const parts = try export_scope.partitionMarkdown(gpa, item.body, budget);
+        defer gpa.free(parts);
+        for (parts, 0..) |part, i| {
+            const number = i + 1;
+            try instances.append(gpa, .{
+                .item_index = item_index,
+                .part_number = number,
+                .part_count = parts.len,
+                .body = part,
+                .len = instanceLen(item, number, parts.len, part),
+            });
+        }
+    }
+    return try instances.toOwnedSlice(gpa);
+}
+
+const PackPlan = struct {
+    first_instance: usize,
+    count: usize,
+};
+
+/// Greedy deterministic packing: fill a pack until the next instance would
+/// exceed the target, then start a new pack. The small fixed pack header is
+/// not counted against the target; a whole document that cannot fit alongside
+/// anything else gets its own pack even if envelope overhead pushes the total
+/// slightly over (whole documents are never split merely to meet a cap).
+fn packWorkingInstances(
+    gpa: std.mem.Allocator,
+    cap: usize,
+    instances: []const WorkingInstance,
+) ![]PackPlan {
+    var plans: std.ArrayList(PackPlan) = .empty;
+    errdefer plans.deinit(gpa);
+    var current_bytes: usize = 0;
+    var first: usize = 0;
+    for (instances, 0..) |inst, i| {
+        if (i > first and current_bytes + inst.len > cap) {
+            try plans.append(gpa, .{ .first_instance = first, .count = i - first });
+            first = i;
+            current_bytes = 0;
+        }
+        current_bytes += inst.len;
+    }
+    if (first < instances.len) {
+        try plans.append(gpa, .{ .first_instance = first, .count = instances.len - first });
+    }
+    return try plans.toOwnedSlice(gpa);
+}
+
+fn gatherWorkingItems(
+    io: Io,
+    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    opts: RagOptions,
+    selected_pages: []const graph_mod.Node,
+) ![]WorkingItem {
+    var items: std.ArrayList(WorkingItem) = .empty;
+    errdefer items.deinit(gpa);
+
+    const seeds = try collectSystemDocs(io, gpa, arena, opts);
+    defer gpa.free(seeds);
+    for (seeds) |seed| {
+        try items.append(gpa, .{
+            .rag_id = seed.rag_id,
+            .source = seed.rel,
+            .category = "system",
+            .entity_id = "",
+            .body = seed.source,
+            .source_sha256 = cache.hexDigest(cache.hashBytes(seed.source)),
+            .source_size = seed.source.len,
+        });
+    }
+
+    const cwd = Io.Dir.cwd();
+    var content_dir = try cwd.openDir(io, opts.content_root, .{});
+    defer content_dir.close(io);
+    for (selected_pages) |p| {
+        const source = try source_io.readPageAlloc(io, content_dir, p.source_path, arena);
+        const doc = if (opts.input_format == .textile) blk: {
+            const adapted = try textile.toMarkdown(source[p.body_offset..], arena);
+            if (!adapted.isOk()) return error.UnexpectedParseFailure;
+            break :blk try std.mem.concat(arena, u8, &.{ source[0..p.body_offset], adapted.markdown });
+        } else source;
+        const rag_id = try std.fmt.allocPrint(arena, "content/{s}", .{p.id});
+        try items.append(gpa, .{
+            .rag_id = rag_id,
+            .source = p.source_path,
+            .category = "content",
+            .entity_id = p.id,
+            .body = doc,
+            .source_sha256 = cache.hexDigest(cache.hashBytes(source)),
+            .source_size = source.len,
+        });
+    }
+    return try items.toOwnedSlice(gpa);
+}
+
+fn exportWorking(
     io: Io,
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
     out_dir: Io.Dir,
-    pages: []const graph_mod.Node,
-    content_root: []const u8,
     opts: RagOptions,
-    catalog: *std.ArrayList(CatalogEntry),
-    chunks: *std.ArrayList(BundleChunk),
-) !usize {
-    const cwd = Io.Dir.cwd();
-    var content_dir = try cwd.openDir(io, content_root, .{});
-    defer content_dir.close(io);
+    selected_pages: []const graph_mod.Node,
+    stats: *RagStats,
+) !void {
+    const cap = opts.split_size orelse default_pack_target;
+    const items = try gatherWorkingItems(io, gpa, arena, opts, selected_pages);
+    defer gpa.free(items);
 
-    var doc_arena = std.heap.ArenaAllocator.init(gpa);
-    defer doc_arena.deinit();
+    const instances = try buildWorkingInstances(gpa, cap, items);
+    defer gpa.free(instances);
+    const plans = try packWorkingInstances(gpa, cap, instances);
+    defer gpa.free(plans);
 
-    var n: usize = 0;
-    // pages already sorted by entity id after freeze
-    for (pages) |p| {
-        _ = doc_arena.reset(.free_all);
-        const scratch = doc_arena.allocator();
+    var manifest_docs: std.ArrayList(rag_emit.ManifestDoc) = .empty;
+    defer manifest_docs.deinit(gpa);
+    var pack_infos: std.ArrayList(rag_emit.WorkingPackInfo) = .empty;
+    defer pack_infos.deinit(gpa);
 
-        const source = try source_io.readPageAlloc(io, content_dir, p.source_path, scratch);
-        const parsed = parser.parse(source);
-        if (parsed.diagnostic != null) {
-            // Should not happen after successful compile; treat as I/O-class abort.
-            return error.UnexpectedParseFailure;
-        }
-        // Component scan already hard-failed compile when invalid; re-tokenize
-        // for export representation (:::kind blocks, non-round-trippable).
-        const body = if (opts.input_format == .textile) blk: {
-            const adapted = try textile.toMarkdown(parsed.doc.body, scratch);
-            if (!adapted.isOk()) return error.UnexpectedParseFailure;
-            break :blk adapted.markdown;
-        } else parsed.doc.body;
-        const tok = aside.tokenizeBody(body, scratch) catch return error.UnexpectedParseFailure;
-        if (tok.hasErrors()) return error.UnexpectedParseFailure;
-        const rag_path = try identity.ragPagePath(arena, p.id);
-        const rag_id = try std.fmt.allocPrint(arena, "content/{s}", .{p.id});
-        const rendered_body = try rag_emit.renderRagBody(tok.segments, scratch);
-        const doc = try rag_emit.renderContentDocumentBody(gpa, p, rag_id, rag_path, rendered_body, pages);
-        defer gpa.free(doc);
-        try writeBytes(io, out_dir, rag_path, doc);
-        if (!opts.bundles_only) {
-            try appendCatalog(catalog, gpa, arena, try rag_emit.contentCatalogEntry(arena, p, rag_id, rag_path));
-        }
-        if (opts.split_size != null or opts.bundles_only) {
-            const cap = opts.split_size orelse 524288;
-            const source_hash = cache.hexDigest(cache.hashBytes(source));
-            const max_number = rendered_body.len + 1;
-            const probe = try rag_emit.renderContentDocumentChunk(gpa, p, rag_id, rag_path, "", pages, &source_hash, max_number, max_number);
-            defer gpa.free(probe);
-            if (probe.len > cap) return error.OversizedBlock;
-            const body_budget = cap - probe.len;
-            const pieces = try export_scope.partitionMarkdown(gpa, rendered_body, body_budget);
-            defer gpa.free(pieces);
-            for (pieces, 0..) |piece, i| {
-                const chunk_doc = try rag_emit.renderContentDocumentChunkWithOptions(gpa, p, rag_id, rag_path, piece, pages, &source_hash, i + 1, pieces.len, !opts.bundles_only);
-                if (chunk_doc.len > cap) {
-                    gpa.free(chunk_doc);
-                    return error.OversizedBlock;
-                }
-                try chunks.append(gpa, .{ .page = p, .doc = chunk_doc, .number = i + 1, .count = pieces.len, .source_sha256 = source_hash });
-            }
-        }
-        n += 1;
-        log(opts, "  rag page    {s}\n", .{rag_path});
-    }
-    return n;
-}
+    var pack_docs: std.ArrayList(rag_emit.WorkingDoc) = .empty;
+    defer pack_docs.deinit(gpa);
 
-fn appendJsonQuoted(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, value: []const u8) !void {
-    try buf.append(gpa, '"');
-    try json_out.escapeAppend(buf, gpa, value);
-    try buf.append(gpa, '"');
-}
+    var total_upload_bytes: usize = 0;
+    for (plans, 0..) |plan, plan_index| {
+        const pack_number = plan_index + 1;
+        const pack_path = try std.fmt.allocPrint(arena, "working-{d}.md", .{pack_number});
 
-fn rewriteBundleChunkPath(gpa: std.mem.Allocator, doc: []const u8, part_number: usize) ![]u8 {
-    const key = "rag_path: ";
-    const start = std.mem.indexOf(u8, doc, key) orelse return try gpa.dupe(u8, doc);
-    const value_start = start + key.len;
-    const value_end = std.mem.indexOfScalarPos(u8, doc, value_start, '\n') orelse doc.len;
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(gpa);
-    try out.appendSlice(gpa, doc[0..value_start]);
-    try out.print(gpa, "parts/part-{d}.md", .{part_number});
-    try out.appendSlice(gpa, doc[value_end..]);
-    return try out.toOwnedSlice(gpa);
-}
+        pack_docs.clearRetainingCapacity();
+        for (instances[plan.first_instance .. plan.first_instance + plan.count]) |inst| {
+            const item = items[inst.item_index];
+            try pack_docs.append(gpa, .{
+                .rag_id = item.rag_id,
+                .source = item.source,
+                .category = item.category,
+                .entity_id = item.entity_id,
+                .part_number = inst.part_number,
+                .part_count = inst.part_count,
+                .body = inst.body,
+            });
+        }
+        const pack_bytes = try rag_emit.renderWorkingPack(gpa, pack_number, plans.len, pack_docs.items);
+        defer gpa.free(pack_bytes);
+        try writeBytes(io, out_dir, pack_path, pack_bytes);
+        total_upload_bytes += pack_bytes.len;
 
-fn exportBundleParts(
-    io: Io,
-    gpa: std.mem.Allocator,
-    out_dir: Io.Dir,
-    chunks: []const BundleChunk,
-    opts: RagOptions,
-    graph_page_count: usize,
-    selected_page_count: usize,
-    graph_relation_count: usize,
-    relation_count: usize,
-) ![]const BundlePart {
-    if (opts.split_size == null and !opts.bundles_only) return try gpa.alloc(BundlePart, 0);
-    const cap = opts.split_size orelse 524288;
-    const prefix = "# Boris RAG bundle\n\n";
-    var parts: std.ArrayList(BundlePart) = .empty;
-    errdefer {
-        for (parts.items) |part| gpa.free(part.doc);
-        parts.deinit(gpa);
-    }
-    var current: std.ArrayList(u8) = .empty;
-    defer current.deinit(gpa);
-    try current.appendSlice(gpa, prefix);
-    var first_chunk: usize = 0;
-    for (chunks, 0..) |chunk, i| {
-        var chunk_doc = chunk.doc;
-        var owned_chunk_doc = false;
-        if (opts.bundles_only) {
-            chunk_doc = try rewriteBundleChunkPath(gpa, chunk.doc, parts.items.len + 1);
-            owned_chunk_doc = true;
+        try pack_infos.append(gpa, .{
+            .path = pack_path,
+            .bytes = pack_bytes.len,
+            .documents = plan.count,
+        });
+        for (pack_docs.items, 0..) |_, j| {
+            const inst = instances[plan.first_instance + j];
+            const item_index = inst.item_index;
+            const item = &items[item_index];
+            try manifest_docs.append(gpa, .{
+                .rag_id = item.rag_id,
+                .source = item.source,
+                .category = item.category,
+                .entity_id = item.entity_id,
+                .pack = pack_path,
+                .part = inst.part_number,
+                .part_count = inst.part_count,
+                .continuation = if (inst.part_count == 1) "single" else if (inst.part_number == inst.part_count) "continued" else "continues",
+                .bytes = inst.body.len,
+                .source_sha256 = &items[item_index].source_sha256,
+            });
         }
-        if (prefix.len + chunk_doc.len > cap) {
-            if (owned_chunk_doc) gpa.free(chunk_doc);
-            return error.OversizedBlock;
-        }
-        if (current.items.len > prefix.len and current.items.len + chunk_doc.len > cap) {
-            if (owned_chunk_doc) gpa.free(chunk_doc);
-            try parts.append(gpa, .{ .doc = try current.toOwnedSlice(gpa), .first_chunk = first_chunk, .last_chunk = i });
-            current = .empty;
-            try current.appendSlice(gpa, prefix);
-            first_chunk = i;
-            if (opts.bundles_only) {
-                chunk_doc = try rewriteBundleChunkPath(gpa, chunk.doc, parts.items.len + 1);
-                owned_chunk_doc = true;
-                if (prefix.len + chunk_doc.len > cap) {
-                    gpa.free(chunk_doc);
-                    return error.OversizedBlock;
-                }
-            }
-        }
-        try current.appendSlice(gpa, chunk_doc);
-        if (owned_chunk_doc) gpa.free(chunk_doc);
-    }
-    if (current.items.len > prefix.len) {
-        try parts.append(gpa, .{ .doc = try current.toOwnedSlice(gpa), .first_chunk = first_chunk, .last_chunk = chunks.len });
+        log(opts, "  rag pack    {s} ({d} bytes, {d} document(s))\n", .{ pack_path, pack_bytes.len, plan.count });
     }
 
-    if (parts.items.len > 0) try out_dir.createDirPath(io, "parts");
-    for (parts.items, 0..) |part, i| {
-        const path = try std.fmt.allocPrint(gpa, "parts/part-{d}.md", .{i + 1});
-        defer gpa.free(path);
-        try writeBytes(io, out_dir, path, part.doc);
-    }
-    if (opts.bundles_only) try out_dir.deleteTree(io, "content");
+    const manifest = try rag_emit.renderWorkingManifest(gpa, .{
+        .version = boris_version,
+        .scope = opts.scope orelse "",
+        .graph_page_count = stats.graph_pages,
+        .selected_page_count = stats.selected_pages,
+        .structural_parent_count = stats.structural_parent_count,
+        .semantic_neighbor_count = stats.semantic_neighbor_count,
+        .graph_relation_count = stats.graph_relation_count,
+        .selected_relation_count = stats.relation_count,
+        .pack_target = cap,
+        .approximate_tokens = total_upload_bytes / 4,
+        .packs = pack_infos.items,
+        .docs = manifest_docs.items,
+    });
+    defer gpa.free(manifest);
+    try writeBytes(io, out_dir, "manifest.json", manifest);
 
-    var manifest: std.ArrayList(u8) = .empty;
-    defer manifest.deinit(gpa);
-    try manifest.print(gpa, "{{\n  \"format\":\"boris-rag-parts\",\n  \"schema_version\":1,\n  \"scope\":", .{});
-    try appendJsonQuoted(&manifest, gpa, opts.scope orelse "");
-    try manifest.print(gpa, ",\n  \"scope_closure\":\"parents+semantic-relations\",\n  \"graph_page_count\":{d},\n  \"selected_page_count\":{d},\n  \"graph_relation_count\":{d},\n  \"selected_relation_count\":{d},\n  \"relation_count\":{d},\n  \"split_size\":{d},\n  \"part_count\":{d},\n  \"chunk_count\":{d},\n  \"parts\":[", .{ graph_page_count, selected_page_count, graph_relation_count, relation_count, relation_count, cap, parts.items.len, chunks.len });
-    for (parts.items, 0..) |part, i| {
-        if (i > 0) try manifest.append(gpa, ',');
-        try manifest.print(gpa, "{{\"path\":\"parts/part-{d}.md\",\"bytes\":{d},\"chunks\":[", .{ i + 1, part.doc.len });
-        for (chunks[part.first_chunk..part.last_chunk], 0..) |chunk, j| {
-            if (j > 0) try manifest.append(gpa, ',');
-            try manifest.appendSlice(gpa, "{\"entity_id\":");
-            try appendJsonQuoted(&manifest, gpa, chunk.page.id);
-            try manifest.appendSlice(gpa, ",\"source_path\":");
-            try appendJsonQuoted(&manifest, gpa, chunk.page.source_path);
-            try manifest.appendSlice(gpa, ",\"source_sha256\":");
-            try appendJsonQuoted(&manifest, gpa, &chunk.source_sha256);
-            try manifest.print(gpa, ",\"part\":{d},\"part_count\":{d},\"continuation\":", .{ chunk.number, chunk.count });
-            try appendJsonQuoted(&manifest, gpa, if (chunk.count == 1) "single" else if (chunk.number == 1) "continues" else if (chunk.number == chunk.count) "continued" else "continues");
-            try manifest.append(gpa, '}');
-        }
-        try manifest.appendSlice(gpa, "]}");
+    stats.system_docs = 0;
+    for (items) |item| {
+        if (std.mem.eql(u8, item.category, "system")) stats.system_docs += 1;
     }
-    try manifest.appendSlice(gpa, "]\n}\n");
-    try writeBytes(io, out_dir, "part_manifest.json", manifest.items);
-    return try parts.toOwnedSlice(gpa);
+    stats.content_pages = selected_pages.len;
+    stats.pack_count = plans.len;
+    stats.document_count = manifest_docs.items.len;
+    stats.approximate_bytes = total_upload_bytes;
+    stats.approximate_tokens = total_upload_bytes / 4;
+    stats.sidecar_count = 2;
 }
 
 // ---------------------------------------------------------------------------
-// Graph docs
+// Complete-corpus export (`--rag --complete`)
 // ---------------------------------------------------------------------------
 
 fn exportGraphDocs(
@@ -710,154 +673,34 @@ fn exportGraphDocs(
 ) !usize {
     var n: usize = 0;
 
-    // entity-catalog.md
-    {
-        var doc: std.ArrayList(u8) = .empty;
-        defer doc.deinit(gpa);
-        try doc.appendSlice(gpa,
-            \\---
-            \\rag_id: graph/entity-catalog
-            \\rag_path: graph/entity-catalog.md
-            \\category: graph
-            \\tags: [graph, catalog, entities]
-            \\related:
-            \\  - graph/relations.md
-            \\---
-            \\
-            \\# Entity catalog
-            \\
-            \\Content entities after shared scan / parse / graph validation.
-            \\Pages are the only first-class graph nodes; asides are not nodes.
-            \\
-            \\| entity_id | title | role | source | RAG path |
-            \\|-----------|-------|------|--------|----------|
-            \\
-        );
-        for (pages) |p| {
-            try doc.appendSlice(gpa, "| `");
-            try doc.appendSlice(gpa, p.id);
-            try doc.appendSlice(gpa, "` | ");
-            try doc.appendSlice(gpa, pageTitle(p));
-            try doc.appendSlice(gpa, " | ");
-            try doc.appendSlice(gpa, p.role.name());
-            try doc.appendSlice(gpa, " | `");
-            try doc.appendSlice(gpa, p.source_path);
-            try doc.appendSlice(gpa, "` | `content/pages/");
-            try doc.appendSlice(gpa, p.id);
-            try doc.appendSlice(gpa, ".md` |\n");
-        }
-        const emitted = try rag_emit.renderEntityCatalog(gpa, pages, !opts.bundles_only);
-        defer gpa.free(emitted);
-        try writeBytes(io, out_dir, "graph/entity-catalog.md", emitted);
-        try appendCatalog(catalog, gpa, arena, .{
-            .rag_id = "graph/entity-catalog",
-            .rag_path = "graph/entity-catalog.md",
-            .category = "graph",
-            .title = "Entity catalog",
-            .tags = "[graph, catalog, entities]",
-        });
-        n += 1;
-        log(opts, "  rag graph   graph/entity-catalog.md\n", .{});
-    }
+    const entity_catalog = try rag_emit.renderEntityCatalog(gpa, pages);
+    defer gpa.free(entity_catalog);
+    try writeBytes(io, out_dir, "graph/entity-catalog.md", entity_catalog);
+    try appendCatalog(catalog, gpa, arena, .{
+        .rag_id = "graph/entity-catalog",
+        .rag_path = "graph/entity-catalog.md",
+        .category = "graph",
+        .title = "Entity catalog",
+        .tags = "[graph, catalog, entities]",
+    });
+    n += 1;
+    log(opts, "  rag graph   graph/entity-catalog.md\n", .{});
 
-    // relations.md — edges sorted by source id then target id
-    {
-        var doc: std.ArrayList(u8) = .empty;
-        defer doc.deinit(gpa);
-        try doc.appendSlice(gpa,
-            \\---
-            \\rag_id: graph/relations
-            \\rag_path: graph/relations.md
-            \\category: graph
-            \\tags: [graph, relations, hierarchy, trunk, satellite]
-            \\related:
-            \\  - graph/entity-catalog.md
-            \\---
-            \\
-            \\# Graph relations (parent hierarchy)
-            \\
-            \\Edges come from page frontmatter `parent: <entity-id>`. Hubs and
-            \\direct child lists are ordered by `entity_id`; parent chains may be
-            \\nested but must remain acyclic. Invalid graphs never publish this
-            \\file (shared `graph.validate` must pass first).
-            \\
-            \\## Hierarchy hubs
-            \\
-            \\
-        );
-
-        for (pages) |p| {
-            const kind = if (p.role == .trunk) "Root RAG" else "Parent RAG";
-            try doc.print(gpa, "### `{s}` — {s}\n\n- {s}: `content/pages/{s}.md`\n- Children:\n", .{ p.id, pageTitle(p), kind, p.id });
-            var any = false;
-            for (pages) |child| {
-                if (child.role != .satellite) continue;
-                const par = child.parent orelse continue;
-                if (!std.mem.eql(u8, par, p.id)) continue;
-                any = true;
-                try doc.appendSlice(gpa, "  - `");
-                try doc.appendSlice(gpa, child.id);
-                try doc.appendSlice(gpa, "` (");
-                try doc.appendSlice(gpa, pageTitle(child));
-                try doc.appendSlice(gpa, ") → `content/pages/");
-                try doc.appendSlice(gpa, child.id);
-                try doc.appendSlice(gpa, ".md`\n");
-            }
-            if (!any) try doc.appendSlice(gpa, "  - *(none)*\n");
-            try doc.append(gpa, '\n');
-        }
-
-        try doc.appendSlice(gpa,
-            \\## Edge list (machine-friendly)
-            \\
-            \\```
-            \\
-        );
-
-        // Build (source_id, target_id) pairs and sort.
-        const EdgePair = struct { src: []const u8, tgt: []const u8 };
-        var pairs: std.ArrayList(EdgePair) = .empty;
-        defer pairs.deinit(gpa);
-        for (pages) |p| {
-            const par = p.parent orelse continue;
-            try pairs.append(gpa, .{ .src = p.id, .tgt = par });
-        }
-        std.mem.sort(EdgePair, pairs.items, {}, struct {
-            fn less(_: void, a: EdgePair, b: EdgePair) bool {
-                const o = std.mem.order(u8, a.src, b.src);
-                if (o != .eq) return o == .lt;
-                return std.mem.order(u8, a.tgt, b.tgt) == .lt;
-            }
-        }.less);
-        for (pairs.items) |e| {
-            try doc.appendSlice(gpa, "parent\t");
-            try doc.appendSlice(gpa, e.src);
-            try doc.appendSlice(gpa, "\t->\t");
-            try doc.appendSlice(gpa, e.tgt);
-            try doc.append(gpa, '\n');
-        }
-        try doc.appendSlice(gpa, "```\n");
-
-        const emitted = try rag_emit.renderRelations(gpa, pages, !opts.bundles_only);
-        defer gpa.free(emitted);
-        try writeBytes(io, out_dir, "graph/relations.md", emitted);
-        try appendCatalog(catalog, gpa, arena, .{
-            .rag_id = "graph/relations",
-            .rag_path = "graph/relations.md",
-            .category = "graph",
-            .title = "Graph relations (parent hierarchy)",
-            .tags = "[graph, relations, hierarchy, trunk, satellite]",
-        });
-        n += 1;
-        log(opts, "  rag graph   graph/relations.md\n", .{});
-    }
+    const relations = try rag_emit.renderRelations(gpa, pages);
+    defer gpa.free(relations);
+    try writeBytes(io, out_dir, "graph/relations.md", relations);
+    try appendCatalog(catalog, gpa, arena, .{
+        .rag_id = "graph/relations",
+        .rag_path = "graph/relations.md",
+        .category = "graph",
+        .title = "Graph relations (parent hierarchy)",
+        .tags = "[graph, relations, hierarchy, trunk, satellite]",
+    });
+    n += 1;
+    log(opts, "  rag graph   graph/relations.md\n", .{});
 
     return n;
 }
-
-// ---------------------------------------------------------------------------
-// Catalog / INDEX / UPLOAD-GUIDE
-// ---------------------------------------------------------------------------
 
 fn exportCatalogMeta(io: Io, gpa: std.mem.Allocator, out_dir: Io.Dir) !void {
     const text = try rag_emit.renderCatalogMeta(gpa, catalog_format, catalog_schema_version, boris_version);
@@ -865,178 +708,92 @@ fn exportCatalogMeta(io: Io, gpa: std.mem.Allocator, out_dir: Io.Dir) !void {
     try writeBytes(io, out_dir, "catalog_meta.json", text);
 }
 
-fn exportProjectionManifest(
+fn exportComplete(
     io: Io,
     gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
     out_dir: Io.Dir,
     opts: RagOptions,
-    stats: RagStats,
-    chunks: []const BundleChunk,
-    parts: []const BundlePart,
+    selected_pages: []const graph_mod.Node,
+    catalog: *std.ArrayList(CatalogEntry),
+    stats: *RagStats,
 ) !void {
-    var doc: std.ArrayList(u8) = .empty;
-    defer doc.deinit(gpa);
-    try doc.print(gpa, "{{\n  \"format\":\"{s}\",\n  \"schema_version\":1,\n  \"compiler\":\"{s}\",\n  \"scope\":", .{ catalog_format, boris_version });
-    try appendJsonQuoted(&doc, gpa, opts.scope orelse "");
-    try doc.print(gpa, ",\n  \"scope_closure\":\"parents+semantic-relations\",\n  \"graph_page_count\":{d},\n  \"selected_page_count\":{d},\n  \"graph_relation_count\":{d},\n  \"selected_relation_count\":{d},\n  \"relation_count\":{d},\n  \"split_size\":", .{ stats.graph_pages, stats.selected_pages, stats.graph_relation_count, stats.relation_count, stats.relation_count });
-    if (opts.split_size) |size| try doc.print(gpa, "{d}", .{size}) else try doc.appendSlice(gpa, "null");
-    try doc.print(gpa, ",\n  \"part_count\":{d},\n  \"chunk_count\":{d},\n  \"bundles_only\":{s},\n  \"parts\":[", .{ stats.part_count, stats.chunk_count, if (opts.bundles_only) "true" else "false" });
-    for (parts, 0..) |part, i| {
-        if (i > 0) try doc.append(gpa, ',');
-        try doc.print(gpa, "{{\"path\":\"parts/part-{d}.md\",\"bytes\":{d},\"chunks\":[", .{ i + 1, part.doc.len });
-        for (chunks[part.first_chunk..part.last_chunk], 0..) |chunk, j| {
-            if (j > 0) try doc.append(gpa, ',');
-            try doc.appendSlice(gpa, "{\"entity_id\":");
-            try appendJsonQuoted(&doc, gpa, chunk.page.id);
-            try doc.appendSlice(gpa, ",\"source_path\":");
-            try appendJsonQuoted(&doc, gpa, chunk.page.source_path);
-            try doc.appendSlice(gpa, ",\"source_sha256\":");
-            try appendJsonQuoted(&doc, gpa, &chunk.source_sha256);
-            try doc.print(gpa, ",\"part\":{d},\"part_count\":{d},\"continuation\":", .{ chunk.number, chunk.count });
-            try appendJsonQuoted(&doc, gpa, if (chunk.count == 1) "single" else if (chunk.number == 1) "continues" else if (chunk.number == chunk.count) "continued" else "continues");
-            try doc.append(gpa, '}');
-        }
-        try doc.appendSlice(gpa, "]}");
+    const cwd = Io.Dir.cwd();
+
+    // system/** — verbatim seeds
+    const seeds = try collectSystemDocs(io, gpa, arena, opts);
+    defer gpa.free(seeds);
+    const default_tags = [_][]const u8{ "boris", "system" };
+    for (seeds) |seed| {
+        const rag_path = try std.fmt.allocPrint(arena, "system/{s}", .{seed.rel});
+        try writeBytes(io, out_dir, rag_path, seed.source);
+        const tags_out: []const []const u8 = if (seed.tags.len > 0) seed.tags else &default_tags;
+        try appendCatalog(catalog, gpa, arena, .{
+            .rag_id = seed.rag_id,
+            .rag_path = rag_path,
+            .category = "system",
+            .title = seed.title,
+            .tags = try rag_emit.formatTags(arena, tags_out),
+        });
+        log(opts, "  rag system  {s}\n", .{rag_path});
     }
-    try doc.appendSlice(gpa, "]\n}\n");
-    try writeBytes(io, out_dir, "manifest.json", doc.items);
-}
+    stats.system_docs = seeds.len;
 
-/// Fixed field order: rag_id, rag_path, category, title, entity_id, role, parent_entry, tags.
-fn exportCatalogJsonl(
-    io: Io,
-    gpa: std.mem.Allocator,
-    out_dir: Io.Dir,
-    catalog: []const CatalogEntry,
-) !void {
-    const doc = try rag_emit.renderCatalogJsonl(gpa, catalog);
-    defer gpa.free(doc);
-    try writeBytes(io, out_dir, "catalog.jsonl", doc);
-}
+    // content/pages/** — verbatim authoring documents
+    var content_dir = try cwd.openDir(io, opts.content_root, .{});
+    defer content_dir.close(io);
+    for (selected_pages) |p| {
+        const source = try source_io.readPageAlloc(io, content_dir, p.source_path, arena);
+        const doc = if (opts.input_format == .textile) blk: {
+            const adapted = try textile.toMarkdown(source[p.body_offset..], arena);
+            if (!adapted.isOk()) return error.UnexpectedParseFailure;
+            break :blk try std.mem.concat(arena, u8, &.{ source[0..p.body_offset], adapted.markdown });
+        } else source;
+        const rag_path = try identity.ragPagePath(arena, p.id);
+        const rag_id = try std.fmt.allocPrint(arena, "content/{s}", .{p.id});
+        try writeBytes(io, out_dir, rag_path, doc);
+        try appendCatalog(catalog, gpa, arena, try rag_emit.contentCatalogEntry(arena, p, rag_id, rag_path));
+        log(opts, "  rag page    {s}\n", .{rag_path});
+    }
+    stats.content_pages = selected_pages.len;
 
-fn exportIndex(
-    io: Io,
-    gpa: std.mem.Allocator,
-    out_dir: Io.Dir,
-    catalog: []const CatalogEntry,
-    stats: RagStats,
-) !void {
-    var doc: std.ArrayList(u8) = .empty;
-    defer doc.deinit(gpa);
+    // graph/**
+    stats.graph_docs = try exportGraphDocs(io, gpa, arena, out_dir, selected_pages, catalog, opts);
 
-    try doc.appendSlice(gpa,
-        \\---
-        \\rag_id: meta/index
-        \\rag_path: INDEX.md
-        \\category: meta
-        \\tags: [index, catalog, retrieval-map]
-        \\---
-        \\
-        \\# Boris RAG corpus — INDEX
-        \\
-        \\Master retrieval map for the Boris product RAG pack. Upload this
-        \\directory tree to a chat LLM knowledge base.
-        \\
-        \\## Counts
-        \\
-        \\
-    );
-    try doc.print(gpa,
-        \\| Segment | Count |
-        \\|---------|------:|
-        \\| system | {d} |
-        \\| content pages | {d} |
-        \\| graph | {d} |
-        \\| catalog entries | {d} |
-        \\
-        \\
-    , .{
-        stats.system_docs,
-        stats.content_pages,
-        stats.graph_docs,
-        stats.catalog_entries,
+    // meta + machine catalog
+    const guide = try rag_emit.renderUploadGuide(gpa);
+    defer gpa.free(guide);
+    try writeBytes(io, out_dir, "UPLOAD-GUIDE.md", guide);
+    try appendCatalog(catalog, gpa, arena, .{
+        .rag_id = "meta/upload-guide",
+        .rag_path = "UPLOAD-GUIDE.md",
+        .category = "meta",
+        .title = "Upload guide — Grok, Gemini, and similar chat LLMs",
+        .tags = "[upload, grok, gemini, llm, rag]",
     });
 
-    try doc.appendSlice(gpa,
-        \\## Generated artifacts
-        \\
-        \\| Path | Role |
-        \\|------|------|
-        \\| `INDEX.md` | This retrieval map (catalog row) |
-        \\| `UPLOAD-GUIDE.md` | Upload notes (catalog row) |
-        \\| `catalog.jsonl` | Machine catalog — **not** a catalog row |
-        \\| `catalog_meta.json` | Format + versions — **not** a catalog row |
-        \\| `system/**` | Curated architecture seeds |
-        \\| `content/pages/**` | Content page segments |
-        \\| `graph/entity-catalog.md` | Entity table |
-        \\| `graph/relations.md` | Parent hierarchy edges |
-        \\
-        \\## Full catalog
-        \\
-        \\| rag_path | category | title | entity_id |
-        \\|----------|----------|-------|-----------|
-        \\
-    );
+    rag_emit.sortCatalogByRagPath(catalog.items);
+    stats.catalog_entries = catalog.items.len;
 
-    for (catalog) |e| {
-        try doc.appendSlice(gpa, "| `");
-        try doc.appendSlice(gpa, e.rag_path);
-        try doc.appendSlice(gpa, "` | ");
-        try doc.appendSlice(gpa, e.category);
-        try doc.appendSlice(gpa, " | ");
-        try doc.appendSlice(gpa, e.title);
-        try doc.appendSlice(gpa, " | ");
-        if (e.entity_id.len > 0) {
-            try doc.appendSlice(gpa, "`");
-            try doc.appendSlice(gpa, e.entity_id);
-            try doc.appendSlice(gpa, "`");
-        } else {
-            try doc.appendSlice(gpa, "—");
-        }
-        try doc.appendSlice(gpa, " |\n");
-    }
-
-    try doc.appendSlice(gpa,
-        \\
-        \\## Catalog schema (stable field order)
-        \\
-        \\```text
-        \\rag_id, rag_path, category, title, entity_id, role, parent_entry, tags
-        \\```
-        \\
-        \\Rows sorted by `rag_path`. No timestamps, absolute paths, hostnames,
-        \\or random ids. Content title H1 is metadata-owned (frontmatter `title`
-        \\else entity id). Source leading H1 stripped; remaining ATX H1s demoted
-        \\to H2. Parsed `<Aside>` callouts are emitted as `:::kind` blocks
-        \\(export representation only — not round-trippable authoring syntax).
-        \\
-        \\### catalog_meta.json
-        \\
-        \\```json
-        \\{"format":"boris-rag","schema_version":1,"boris_version":"
-    );
-    try doc.appendSlice(gpa, boris_version);
-    try doc.appendSlice(gpa,
-        \\"}
-        \\```
-        \\
-    );
-
-    const emitted = try rag_emit.renderIndex(gpa, catalog, .{
+    const index = try rag_emit.renderIndex(gpa, catalog.items, .{
         .system_docs = stats.system_docs,
         .content_pages = stats.content_pages,
         .graph_docs = stats.graph_docs,
         .catalog_entries = stats.catalog_entries,
-        .bundles_only = stats.bundles_only,
     }, boris_version);
-    defer gpa.free(emitted);
-    try writeBytes(io, out_dir, "INDEX.md", emitted);
-}
+    defer gpa.free(index);
+    try writeBytes(io, out_dir, "INDEX.md", index);
+    try appendCatalog(catalog, gpa, arena, .{
+        .rag_id = "meta/index",
+        .rag_path = "INDEX.md",
+        .category = "meta",
+        .title = "Boris RAG corpus — INDEX",
+        .tags = "[index, catalog, retrieval-map]",
+    });
 
-fn exportUploadGuide(io: Io, gpa: std.mem.Allocator, out_dir: Io.Dir, bundles_only: bool) !void {
-    const guide = try rag_emit.renderUploadGuide(gpa, bundles_only);
-    defer gpa.free(guide);
-    try writeBytes(io, out_dir, "UPLOAD-GUIDE.md", guide);
+    const jsonl = try rag_emit.renderCatalogJsonl(gpa, catalog.items);
+    defer gpa.free(jsonl);
+    try writeBytes(io, out_dir, "catalog.jsonl", jsonl);
 }
 
 // ---------------------------------------------------------------------------
@@ -1233,7 +990,8 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
         return result;
     }
 
-    const selected_pages = try export_scope.selectPages(result.arena.allocator(), result.compile.pages.items, opts.scope);
+    var counts: export_scope.SelectionCounts = .{};
+    const selected_pages = try export_scope.selectPages(result.arena.allocator(), result.compile.pages.items, opts.scope, &counts);
     defer result.arena.allocator().free(selected_pages);
 
     const retain = result.arena.allocator();
@@ -1247,14 +1005,15 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
 
     var catalog: std.ArrayList(CatalogEntry) = .empty;
     defer catalog.deinit(gpa);
-    var chunks: std.ArrayList(BundleChunk) = .empty;
-    defer chunks.deinit(gpa);
-    defer {
-        for (chunks.items) |chunk| gpa.free(chunk.doc);
-    }
 
     var stats: RagStats = .{};
-    stats.bundles_only = opts.bundles_only;
+    stats.complete = opts.complete;
+    stats.graph_pages = result.compile.pages.items.len;
+    stats.selected_pages = selected_pages.len;
+    stats.graph_relation_count = relationCountForPages(result.compile.pages.items);
+    for (selected_pages) |page| stats.relation_count += page.semantic_relations.len;
+    stats.structural_parent_count = counts.structural_parents;
+    stats.semantic_neighbor_count = counts.semantic_neighbors;
 
     log(opts, "\nExporting RAG corpus → {s}/\n", .{opts.out_dir});
 
@@ -1263,69 +1022,12 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
         var stage_dir = try cwd.openDir(io, stage_rel, .{});
         defer stage_dir.close(io);
 
-        try stage_dir.createDirPath(io, "system");
-        try stage_dir.createDirPath(io, "content/pages");
-        try stage_dir.createDirPath(io, "graph");
-
-        stats.graph_pages = result.compile.pages.items.len;
-        stats.selected_pages = selected_pages.len;
-        stats.graph_relation_count = relationCountForPages(result.compile.pages.items);
-        for (selected_pages) |page| stats.relation_count += page.semantic_relations.len;
-        stats.system_docs = try exportSystemDocs(io, gpa, retain, stage_dir, opts, &catalog);
-        stats.content_pages = try exportContentPages(
-            io,
-            gpa,
-            retain,
-            stage_dir,
-            selected_pages,
-            opts.content_root,
-            opts,
-            &catalog,
-            &chunks,
-        );
-        stats.graph_docs = try exportGraphDocs(
-            io,
-            gpa,
-            retain,
-            stage_dir,
-            selected_pages,
-            &catalog,
-            opts,
-        );
-
-        const parts = try exportBundleParts(io, gpa, stage_dir, chunks.items, opts, stats.graph_pages, stats.selected_pages, stats.graph_relation_count, stats.relation_count);
-        defer {
-            for (parts) |part| gpa.free(part.doc);
-            gpa.free(parts);
+        if (opts.complete) {
+            try exportComplete(io, gpa, retain, stage_dir, opts, selected_pages, &catalog, &stats);
+        } else {
+            try exportWorking(io, gpa, retain, stage_dir, opts, selected_pages, &stats);
         }
-        stats.part_count = parts.len;
-        stats.chunk_count = chunks.items.len;
-
-        try exportUploadGuide(io, gpa, stage_dir, opts.bundles_only);
-        try appendCatalog(&catalog, gpa, retain, .{
-            .rag_id = "meta/upload-guide",
-            .rag_path = "UPLOAD-GUIDE.md",
-            .category = "meta",
-            .title = "Upload guide — Grok, Gemini, and similar chat LLMs",
-            .tags = "[upload, grok, gemini, llm, rag]",
-        });
-        try appendCatalog(&catalog, gpa, retain, .{
-            .rag_id = "meta/index",
-            .rag_path = "INDEX.md",
-            .category = "meta",
-            .title = "Boris RAG corpus — INDEX",
-            .tags = "[index, catalog, retrieval-map]",
-        });
-
-        rag_emit.sortCatalogByRagPath(catalog.items);
-        stats.catalog_entries = catalog.items.len;
-
-        try exportIndex(io, gpa, stage_dir, catalog.items, stats);
-        try exportCatalogJsonl(io, gpa, stage_dir, catalog.items);
         try exportCatalogMeta(io, gpa, stage_dir);
-        if (opts.scope != null or opts.split_size != null or opts.bundles_only) {
-            try exportProjectionManifest(io, gpa, stage_dir, opts, stats, chunks.items, parts);
-        }
     }
 
     // Publish only after the full stage tree is written and handles closed.
@@ -1333,16 +1035,32 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
     stats.published = true;
     result.stats = stats;
 
-    log(opts,
-        \\RAG export complete.
-        \\  system={d}  pages={d}  graph={d}  catalog={d}
-        \\
-    , .{
-        stats.system_docs,
-        stats.content_pages,
-        stats.graph_docs,
-        stats.catalog_entries,
-    });
+    if (opts.complete) {
+        log(opts,
+            \\RAG complete-corpus export done.
+            \\  system={d}  pages={d}  graph={d}  catalog={d}
+            \\
+        , .{
+            stats.system_docs,
+            stats.content_pages,
+            stats.graph_docs,
+            stats.catalog_entries,
+        });
+    } else {
+        log(opts,
+            \\RAG working-context export done.
+            \\  seeds={d}  selected={d}/{d}  parents={d}  neighbors={d}  packs={d}  tokens≈{d}
+            \\
+        , .{
+            stats.system_docs,
+            stats.selected_pages,
+            stats.graph_pages,
+            stats.structural_parent_count,
+            stats.semantic_neighbor_count,
+            stats.pack_count,
+            stats.approximate_tokens,
+        });
+    }
 
     return result;
 }
@@ -1351,22 +1069,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
 // Tests
 // ---------------------------------------------------------------------------
 
-test "prepareContentBody strips leading H1 and demotes extras" {
-    const gpa = std.testing.allocator;
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-    const a = arena.allocator();
-
-    const one = try prepareContentBody("# Title\n\nBody.\n", a);
-    try std.testing.expectEqualStrings("\nBody.\n", one);
-    try std.testing.expectEqual(@as(usize, 0), countAtxH1(one));
-
-    const multi = try prepareContentBody("# Keep meta\n\nPara.\n# Second\n", a);
-    try std.testing.expectEqual(@as(usize, 0), countAtxH1(multi));
-    try std.testing.expect(std.mem.indexOf(u8, multi, "## Second") != null);
-}
-
-test "catalog_meta.json shape is fixed and compact" {
+test "catalog_meta.json shape is fixed and compact (schema v2)" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
@@ -1391,64 +1094,10 @@ test "catalog_meta.json shape is fixed and compact" {
     defer gpa.free(expected);
     try std.testing.expectEqualStrings(expected, bytes);
 
-    const fmt_i = std.mem.indexOf(u8, bytes, "\"format\"").?;
-    const sch_i = std.mem.indexOf(u8, bytes, "\"schema_version\"").?;
-    const bor_i = std.mem.indexOf(u8, bytes, "\"boris_version\"").?;
-    try std.testing.expect(fmt_i < sch_i);
-    try std.testing.expect(sch_i < bor_i);
-
     var parsed = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
     defer parsed.deinit();
     try std.testing.expectEqualStrings("boris-rag", parsed.value.object.get("format").?.string);
-    try std.testing.expectEqual(@as(i64, 1), parsed.value.object.get("schema_version").?.integer);
-}
-
-test "catalog.jsonl field order and string escaping" {
-    const gpa = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    const out_rel = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/jsonl-only", .{tmp.sub_path});
-    defer gpa.free(out_rel);
-    try Io.Dir.cwd().createDirPath(io, out_rel);
-    var out_dir = try Io.Dir.cwd().openDir(io, out_rel, .{});
-    defer out_dir.close(io);
-
-    const entries = [_]CatalogEntry{.{
-        .rag_id = "content/quote",
-        .rag_path = "content/pages/quote.md",
-        .category = "content",
-        .title = "Say \"hi\"\nthere",
-        .entity_id = "quote",
-        .role = "trunk",
-        .parent_entry = "",
-        .tags = "[content, trunk]",
-    }};
-    try exportCatalogJsonl(io, gpa, out_dir, &entries);
-
-    const bytes = try readFileAlloc(io, out_dir, "catalog.jsonl", gpa);
-    defer gpa.free(bytes);
-
-    try std.testing.expect(std.mem.endsWith(u8, bytes, "\n"));
-    const line = bytes[0 .. bytes.len - 1];
-    const expected =
-        \\{"rag_id":"content/quote","rag_path":"content/pages/quote.md","category":"content","title":"Say \"hi\"\nthere","entity_id":"quote","role":"trunk","parent_entry":"","tags":"[content, trunk]"}
-    ;
-    try std.testing.expectEqualStrings(expected, line);
-
-    const keys = [_][]const u8{ "rag_id", "rag_path", "category", "title", "entity_id", "role", "parent_entry", "tags" };
-    var prev: usize = 0;
-    for (keys) |k| {
-        const needle = try std.fmt.allocPrint(gpa, "\"{s}\":", .{k});
-        defer gpa.free(needle);
-        const pos = std.mem.indexOfPos(u8, line, prev, needle) orelse return error.TestExpectedEqual;
-        prev = pos + needle.len;
-    }
-
-    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, line, .{});
-    defer parsed.deinit();
-    try std.testing.expectEqualStrings("content/quote", parsed.value.object.get("rag_id").?.string);
+    try std.testing.expectEqual(@as(i64, 2), parsed.value.object.get("schema_version").?.integer);
 }
 
 const RagTestPaths = struct {
@@ -1509,6 +1158,10 @@ fn writeRagFixtures(io: Io, gpa: std.mem.Allocator, content_rel: []const u8, sys
             \\<Aside kind="tip" id="z1">
             \\Tip body.
             \\</Aside>
+            \\
+            \\<Details summary="More">
+            \\Extra details body.
+            \\</Details>
             \\
             ,
         });
@@ -1655,23 +1308,25 @@ fn expectDirsByteIdentical(io: Io, gpa: std.mem.Allocator, a_rel: []const u8, b_
     }
 }
 
-fn requiredRagFilesPresent(io: Io, out_rel: []const u8) !void {
-    const names = [_][]const u8{
-        "INDEX.md",
-        "UPLOAD-GUIDE.md",
-        "catalog.jsonl",
-        "catalog_meta.json",
-        "graph/entity-catalog.md",
-        "graph/relations.md",
-    };
-    var out = try Io.Dir.cwd().openDir(io, out_rel, .{});
-    defer out.close(io);
-    for (names) |name| {
-        _ = out.statFile(io, name, .{}) catch return error.MissingRequiredRagFile;
-    }
+fn readRel(io: Io, gpa: std.mem.Allocator, root_rel: []const u8, rel: []const u8) ![]u8 {
+    var dir = try Io.Dir.cwd().openDir(io, root_rel, .{});
+    defer dir.close(io);
+    return readFileAlloc(io, dir, rel, gpa);
 }
 
-test "rag export: valid corpus, dual-run determinism, catalog, H1, system order" {
+/// Count real document markers (line-leading). The pack preamble mentions the
+/// marker syntax inline; only `\n<!-- boris-rag-doc:` lines delimit documents.
+fn countMarkers(bytes: []const u8) usize {
+    var count: usize = 0;
+    var pos: usize = 0;
+    while (std.mem.indexOfPos(u8, bytes, pos, "\n<!-- boris-rag-doc:")) |found| {
+        count += 1;
+        pos = found + 1;
+    }
+    return count;
+}
+
+test "working export: authoring fidelity, packing, attachment ergonomics, no hashes in packs" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
@@ -1681,128 +1336,65 @@ test "rag export: valid corpus, dual-run determinism, catalog, H1, system order"
     defer paths.deinit(gpa);
     try writeRagFixtures(io, gpa, paths.content, paths.system);
 
-    var res_a = try run(io, gpa, .{
+    var res = try run(io, gpa, .{
         .content_root = paths.content,
         .out_dir = paths.out_a,
         .system_docs_dir = paths.system,
         .quiet = true,
     });
-    defer res_a.deinit();
-    try std.testing.expect(res_a.ok());
-    try std.testing.expectEqual(@as(usize, 5), res_a.stats.content_pages);
-    try std.testing.expectEqual(@as(usize, 2), res_a.stats.system_docs);
-    try requiredRagFilesPresent(io, paths.out_a);
+    defer res.deinit();
+    try std.testing.expect(res.ok());
+    try std.testing.expectEqual(@as(usize, 5), res.stats.content_pages);
+    try std.testing.expectEqual(@as(usize, 2), res.stats.system_docs);
+    // 7 documents (5 pages + 2 seeds) fit one bounded pack.
+    try std.testing.expectEqual(@as(usize, 1), res.stats.pack_count);
+    try std.testing.expectEqual(@as(usize, 7), res.stats.document_count);
+    try std.testing.expectEqual(@as(usize, 2), res.stats.sidecar_count);
 
-    var res_b = try run(io, gpa, .{
-        .content_root = paths.content,
-        .out_dir = paths.out_b,
-        .system_docs_dir = paths.system,
-        .quiet = true,
-    });
-    defer res_b.deinit();
-    try std.testing.expect(res_b.ok());
-    try expectDirsByteIdentical(io, gpa, paths.out_a, paths.out_b);
+    const pack = try readRel(io, gpa, paths.out_a, "working-1.md");
+    defer gpa.free(pack);
+    // One pack file holds every document: boundaries are unambiguous markers.
+    try std.testing.expectEqual(@as(usize, 7), countMarkers(pack));
+    // Model-facing bytes carry no integrity hashes.
+    try std.testing.expect(std.mem.indexOf(u8, pack, "sha256") == null);
 
-    var out = try Io.Dir.cwd().openDir(io, paths.out_a, .{});
-    defer out.close(io);
+    // Fidelity: H1s and authoring components survive verbatim; no ::: form.
+    try std.testing.expect(std.mem.indexOf(u8, pack, "# Source H1 Should Vanish") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pack, "## Nested H1 Becomes H2") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pack, "<Aside kind=\"tip\" id=\"z1\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pack, "<Details summary=\"More\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pack, ":::") == null);
 
-    // catalog_meta
-    const meta = try readFileAlloc(io, out, "catalog_meta.json", gpa);
+    // Sidecar manifest: machine files are separate and carry integrity records.
+    const manifest = try readRel(io, gpa, paths.out_a, "manifest.json");
+    defer gpa.free(manifest);
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, manifest, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("working", parsed.value.object.get("mode").?.string);
+    try std.testing.expectEqual(@as(i64, 2), parsed.value.object.get("schema_version").?.integer);
+    try std.testing.expectEqual(@as(usize, 7), parsed.value.object.get("documents").?.array.items.len);
+    const doc0 = parsed.value.object.get("documents").?.array.items[0];
+    try std.testing.expectEqualStrings("system", doc0.object.get("category").?.string);
+    try std.testing.expectEqual(@as(usize, 64), doc0.object.get("source_sha256").?.string.len);
+    // Per-document digests must be content-sensitive (regression: a loop-local
+    // pointer previously made every manifest entry share one stack-slot hash).
+    const docs_arr = parsed.value.object.get("documents").?.array.items;
+    const h0 = docs_arr[0].object.get("source_sha256").?.string;
+    const h1 = docs_arr[1].object.get("source_sha256").?.string;
+    try std.testing.expect(!std.mem.eql(u8, h0, h1));
+    const sidecars = parsed.value.object.get("sidecar_files").?.array.items;
+    try std.testing.expectEqual(@as(usize, 2), sidecars.len);
+    try std.testing.expectEqualStrings("manifest.json", sidecars[0].string);
+
+    // catalog_meta also present.
+    const meta = try readRel(io, gpa, paths.out_a, "catalog_meta.json");
     defer gpa.free(meta);
     var meta_j = try std.json.parseFromSlice(std.json.Value, gpa, meta, .{});
     defer meta_j.deinit();
     try std.testing.expectEqualStrings("boris-rag", meta_j.value.object.get("format").?.string);
-
-    // catalog.jsonl: each line independent JSON; stable field order; sorted paths; relative `/`
-    const jsonl = try readFileAlloc(io, out, "catalog.jsonl", gpa);
-    defer gpa.free(jsonl);
-    var path_arena = std.heap.ArenaAllocator.init(gpa);
-    defer path_arena.deinit();
-    const path_retain = path_arena.allocator();
-    var line_start: usize = 0;
-    var prev_path: []const u8 = "";
-    var line_count: usize = 0;
-    while (line_start < jsonl.len) {
-        var line_end = line_start;
-        while (line_end < jsonl.len and jsonl[line_end] != '\n') : (line_end += 1) {}
-        const line = jsonl[line_start..line_end];
-        if (line.len > 0) {
-            line_count += 1;
-            try std.testing.expect(std.mem.startsWith(u8, line, "{\"rag_id\":\""));
-            const keys = [_][]const u8{ "rag_id", "rag_path", "category", "title", "entity_id", "role", "parent_entry", "tags" };
-            var prev: usize = 0;
-            for (keys) |k| {
-                const needle = try std.fmt.allocPrint(gpa, "\"{s}\":", .{k});
-                defer gpa.free(needle);
-                const pos = std.mem.indexOfPos(u8, line, prev, needle) orelse return error.TestExpectedEqual;
-                prev = pos + needle.len;
-            }
-            var row = try std.json.parseFromSlice(std.json.Value, gpa, line, .{});
-            defer row.deinit();
-            const rp = row.value.object.get("rag_path").?.string;
-            try std.testing.expect(std.mem.indexOf(u8, rp, "\\") == null);
-            try std.testing.expect(rp.len == 0 or rp[0] != '/');
-            if (prev_path.len > 0) {
-                try std.testing.expect(std.mem.order(u8, prev_path, rp) == .lt);
-            }
-            prev_path = try path_retain.dupe(u8, rp);
-        }
-        line_start = if (line_end < jsonl.len) line_end + 1 else jsonl.len;
-    }
-    try std.testing.expect(line_count >= 8);
-
-    // system seed order
-    const a_sys = std.mem.indexOf(u8, jsonl, "system/a-first.md").?;
-    const b_sys = std.mem.indexOf(u8, jsonl, "system/b-second.md").?;
-    try std.testing.expect(a_sys < b_sys);
-
-    // content order by entity id in catalog paths
-    const a_c = std.mem.indexOf(u8, jsonl, "content/pages/a-first.md").?;
-    const d_c = std.mem.indexOf(u8, jsonl, "content/pages/guides/deep.md").?;
-    const g_c = std.mem.indexOf(u8, jsonl, "content/pages/guides/nested.md").?;
-    const m_c = std.mem.indexOf(u8, jsonl, "content/pages/m-mid.md").?;
-    const z_c = std.mem.indexOf(u8, jsonl, "content/pages/z-last.md").?;
-    try std.testing.expect(a_c < d_c and d_c < g_c and g_c < m_c and m_c < z_c);
-
-    // exactly one H1 per content page
-    const page_paths = [_][]const u8{
-        "content/pages/a-first.md",
-        "content/pages/m-mid.md",
-        "content/pages/z-last.md",
-        "content/pages/guides/deep.md",
-        "content/pages/guides/nested.md",
-    };
-    for (page_paths) |pp| {
-        const body = try readFileAlloc(io, out, pp, gpa);
-        defer gpa.free(body);
-        try std.testing.expectEqual(@as(usize, 1), countAtxH1(body));
-    }
-    const mid = try readFileAlloc(io, out, "content/pages/m-mid.md", gpa);
-    defer gpa.free(mid);
-    try std.testing.expect(std.mem.indexOf(u8, mid, "# M Mid\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, mid, "Source H1 Should Vanish") == null);
-    try std.testing.expect(std.mem.indexOf(u8, mid, "## Nested H1 Becomes H2") != null);
-
-    const relations = try readFileAlloc(io, out, "graph/relations.md", gpa);
-    defer gpa.free(relations);
-    try std.testing.expect(std.mem.indexOf(u8, relations, "m-mid") != null);
-    try std.testing.expect(std.mem.indexOf(u8, relations, "guides/deep") != null);
-
-    // Asides export as :::kind (non-round-trippable); raw <Aside> must not remain.
-    const zpage = try readFileAlloc(io, out, "content/pages/z-last.md", gpa);
-    defer gpa.free(zpage);
-    try std.testing.expect(std.mem.indexOf(u8, zpage, ":::tip{id=\"z1\"}") != null);
-    try std.testing.expect(std.mem.indexOf(u8, zpage, "Tip body.") != null);
-    try std.testing.expect(std.mem.indexOf(u8, zpage, "<Aside") == null);
-
-    // INDEX uses sorted catalog
-    const index = try readFileAlloc(io, out, "INDEX.md", gpa);
-    defer gpa.free(index);
-    try std.testing.expect(std.mem.indexOf(u8, index, "catalog_meta.json") != null);
-    try std.testing.expect(std.mem.indexOf(u8, index, "content/pages/a-first.md") != null);
 }
 
-test "rag export: scoped bundles are capped, graph-closed, and deterministic" {
+test "working export: scoped set includes subtree, parents, neighbors; excludes unrelated" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
@@ -1812,103 +1404,41 @@ test "rag export: scoped bundles are capped, graph-closed, and deterministic" {
     defer paths.deinit(gpa);
     try writeRagFixtures(io, gpa, paths.content, paths.system);
 
-    var scoped = try run(io, gpa, .{
+    var res = try run(io, gpa, .{
         .content_root = paths.content,
         .out_dir = paths.out_a,
         .system_docs_dir = paths.system,
         .scope = "m-mid",
-        .split_size = 700,
-        .bundles_only = true,
         .quiet = true,
     });
-    defer scoped.deinit();
-    try std.testing.expect(scoped.ok());
-    try std.testing.expectEqual(@as(usize, 5), scoped.stats.graph_pages);
-    try std.testing.expectEqual(@as(usize, 2), scoped.stats.selected_pages);
-    try std.testing.expectEqual(@as(usize, 2), scoped.stats.chunk_count);
+    defer res.deinit();
+    try std.testing.expect(res.ok());
+    try std.testing.expectEqual(@as(usize, 5), res.stats.graph_pages);
+    try std.testing.expectEqual(@as(usize, 2), res.stats.selected_pages);
+    try std.testing.expectEqual(@as(usize, 1), res.stats.structural_parent_count);
+    try std.testing.expectEqual(@as(usize, 0), res.stats.semantic_neighbor_count);
 
-    var out = try Io.Dir.cwd().openDir(io, paths.out_a, .{});
-    defer out.close(io);
-    try std.testing.expectError(error.FileNotFound, out.statFile(io, "content", .{}));
-    const manifest = try readFileAlloc(io, out, "manifest.json", gpa);
+    const manifest = try readRel(io, gpa, paths.out_a, "manifest.json");
     defer gpa.free(manifest);
     var parsed = try std.json.parseFromSlice(std.json.Value, gpa, manifest, .{});
     defer parsed.deinit();
     try std.testing.expectEqualStrings("m-mid", parsed.value.object.get("scope").?.string);
     try std.testing.expectEqual(@as(i64, 2), parsed.value.object.get("selected_page_count").?.integer);
-    try std.testing.expectEqual(@as(i64, 0), parsed.value.object.get("graph_relation_count").?.integer);
-    try std.testing.expectEqual(@as(i64, 0), parsed.value.object.get("selected_relation_count").?.integer);
-    try std.testing.expectEqual(@as(i64, 2), parsed.value.object.get("part_count").?.integer);
-    const parts = parsed.value.object.get("parts").?.array.items;
-    for (parts) |part| try std.testing.expect(part.object.get("bytes").?.integer <= 700);
-    const part_manifest = try readFileAlloc(io, out, "part_manifest.json", gpa);
-    defer gpa.free(part_manifest);
-    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"entity_id\":\"a-first\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"entity_id\":\"m-mid\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, part_manifest, "\"source_path\":\"a-first.md\"") != null);
+    try std.testing.expectEqual(@as(i64, 1), parsed.value.object.get("structural_parent_count").?.integer);
 
-    const index = try readFileAlloc(io, out, "INDEX.md", gpa);
-    defer gpa.free(index);
-    try std.testing.expect(std.mem.indexOf(u8, index, "parts/**") != null);
-    try std.testing.expect(std.mem.indexOf(u8, index, "content/pages/**") == null);
-    try std.testing.expect(std.mem.indexOf(u8, index, "content/pages/") == null);
-    const upload = try readFileAlloc(io, out, "UPLOAD-GUIDE.md", gpa);
-    defer gpa.free(upload);
-    try std.testing.expect(std.mem.indexOf(u8, upload, "parts/") != null);
-    try std.testing.expect(std.mem.indexOf(u8, upload, "All of `content/`") == null);
-    const catalog = try readFileAlloc(io, out, "catalog.jsonl", gpa);
-    defer gpa.free(catalog);
-    try std.testing.expect(std.mem.indexOf(u8, catalog, "\"category\":\"content\"") == null);
-    try std.testing.expect(std.mem.indexOf(u8, catalog, "content/pages/") == null);
-    const entity_catalog = try readFileAlloc(io, out, "graph/entity-catalog.md", gpa);
-    defer gpa.free(entity_catalog);
-    try std.testing.expect(std.mem.indexOf(u8, entity_catalog, "content/pages/") == null);
-    const relations = try readFileAlloc(io, out, "graph/relations.md", gpa);
-    defer gpa.free(relations);
-    try std.testing.expect(std.mem.indexOf(u8, relations, "content/pages/") == null);
-
-    const before_failed_scope = try readFileAlloc(io, out, "manifest.json", gpa);
-    defer gpa.free(before_failed_scope);
-    try std.testing.expectError(error.InvalidScope, run(io, gpa, .{
-        .content_root = paths.content,
-        .out_dir = paths.out_a,
-        .system_docs_dir = paths.system,
-        .scope = "missing",
-        .split_size = 700,
-        .bundles_only = true,
-        .quiet = true,
-    }));
-    const after_failed_scope = try readFileAlloc(io, out, "manifest.json", gpa);
-    defer gpa.free(after_failed_scope);
-    try std.testing.expectEqualStrings(before_failed_scope, after_failed_scope);
-    try std.testing.expectError(error.OversizedBlock, run(io, gpa, .{
-        .content_root = paths.content,
-        .out_dir = paths.out_a,
-        .system_docs_dir = paths.system,
-        .scope = "m-mid",
-        .split_size = 100,
-        .bundles_only = true,
-        .quiet = true,
-    }));
-    const after_oversized = try readFileAlloc(io, out, "manifest.json", gpa);
-    defer gpa.free(after_oversized);
-    try std.testing.expectEqualStrings(before_failed_scope, after_oversized);
-
-    var repeated = try run(io, gpa, .{
-        .content_root = paths.content,
-        .out_dir = paths.out_b,
-        .system_docs_dir = paths.system,
-        .scope = "m-mid",
-        .split_size = 700,
-        .bundles_only = true,
-        .quiet = true,
-    });
-    defer repeated.deinit();
-    try std.testing.expect(repeated.ok());
-    try expectDirsByteIdentical(io, gpa, paths.out_a, paths.out_b);
+    // The selected content documents are m-mid and its parent a-first; the
+    // unrelated pages (z-last, guides/nested) stay out of the packs.
+    const pack = try readRel(io, gpa, paths.out_a, "working-1.md");
+    defer gpa.free(pack);
+    try std.testing.expect(std.mem.indexOf(u8, pack, "content/m-mid") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pack, "content/a-first") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pack, "content/z-last") == null);
+    try std.testing.expect(std.mem.indexOf(u8, pack, "content/guides/nested") == null);
+    // Seeds remain included as structural context.
+    try std.testing.expect(std.mem.indexOf(u8, pack, "system/a-first") != null);
 }
 
-test "rag manifest: continuation is emitted for single and split chunks" {
+test "working export: oversized document splits deterministically at safe boundaries" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
@@ -1918,6 +1448,7 @@ test "rag manifest: continuation is emitted for single and split chunks" {
     defer paths.deinit(gpa);
     try writeRagFixtures(io, gpa, paths.content, paths.system);
 
+    // Expand m-mid into a document larger than the pack target.
     var content = try Io.Dir.cwd().openDir(io, paths.content, .{});
     defer content.close(io);
     var expanded: std.ArrayList(u8) = .empty;
@@ -1931,74 +1462,256 @@ test "rag manifest: continuation is emitted for single and split chunks" {
         \\# M Mid
         \\
     );
-    for (0..16) |i| {
-        try expanded.print(gpa, "Paragraph {d} supplies a stable boundary for manifest continuation coverage.\n\n", .{i});
+    for (0..40) |i| {
+        try expanded.print(gpa, "Paragraph {d} supplies a stable boundary for oversized packing coverage.\n\n", .{i});
     }
     try content.writeFile(io, .{ .sub_path = "m-mid.md", .data = expanded.items });
 
-    var split = try run(io, gpa, .{
+    var res = try run(io, gpa, .{
         .content_root = paths.content,
         .out_dir = paths.out_a,
         .system_docs_dir = paths.system,
-        .scope = "m-mid",
-        .split_size = 700,
-        .bundles_only = true,
+        .split_size = 512,
         .quiet = true,
     });
-    defer split.deinit();
-    try std.testing.expect(split.ok());
+    defer res.deinit();
+    try std.testing.expect(res.ok());
+    // The oversized m-mid was split into parts; other docs stay whole.
+    try std.testing.expect(res.stats.pack_count >= 3);
+    try std.testing.expect(res.stats.document_count > res.stats.pack_count);
 
-    var split_out = try Io.Dir.cwd().openDir(io, paths.out_a, .{});
-    defer split_out.close(io);
-    const split_manifest = try readFileAlloc(io, split_out, "manifest.json", gpa);
-    defer gpa.free(split_manifest);
-    var split_json = try std.json.parseFromSlice(std.json.Value, gpa, split_manifest, .{});
-    defer split_json.deinit();
-    var saw_single = false;
-    var saw_split = false;
-    var split_chunks: usize = 0;
-    for (split_json.value.object.get("parts").?.array.items) |part| {
-        for (part.object.get("chunks").?.array.items) |chunk| {
-            split_chunks += 1;
-            const part_count = chunk.object.get("part_count").?.integer;
-            const continuation = chunk.object.get("continuation").?.string;
-            if (part_count == 1) {
-                saw_single = true;
-                try std.testing.expectEqualStrings("single", continuation);
-            } else {
-                saw_split = true;
-                const part_number = chunk.object.get("part").?.integer;
-                const expected = if (part_number == 1) "continues" else if (part_number == part_count) "continued" else "continues";
-                try std.testing.expectEqualStrings(expected, continuation);
-            }
+    const manifest = try readRel(io, gpa, paths.out_a, "manifest.json");
+    defer gpa.free(manifest);
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, manifest, .{});
+    defer parsed.deinit();
+    var split_doc: ?std.json.Value = null;
+    var part_count: usize = 0;
+    for (parsed.value.object.get("documents").?.array.items) |d| {
+        if (std.mem.eql(u8, d.object.get("entity_id").?.string, "m-mid")) {
+            if (split_doc == null) split_doc = d;
+            part_count += 1;
         }
     }
-    try std.testing.expect(saw_single);
-    try std.testing.expect(saw_split);
-    try std.testing.expect(split_chunks > 2);
+    try std.testing.expect(split_doc != null);
+    try std.testing.expect(part_count > 1);
+    const first_part = split_doc.?;
+    try std.testing.expect(first_part.object.get("part_count").?.integer > 1);
+    try std.testing.expectEqualStrings("continues", first_part.object.get("continuation").?.string);
 
-    var unsplit = try run(io, gpa, .{
+    // Split parts stay in document order across packs, so the whole source
+    // body is recoverable by concatenating the part instances in order.
+    var all_packs: std.ArrayList(u8) = .empty;
+    defer all_packs.deinit(gpa);
+    for (1..res.stats.pack_count + 1) |pack_number| {
+        const pack_path = try std.fmt.allocPrint(gpa, "working-{d}.md", .{pack_number});
+        defer gpa.free(pack_path);
+        const pack_bytes = try readRel(io, gpa, paths.out_a, pack_path);
+        defer gpa.free(pack_bytes);
+        try all_packs.appendSlice(gpa, pack_bytes);
+    }
+    var prior: usize = 0;
+    for (0..40) |i| {
+        const needle = try std.fmt.allocPrint(gpa, "Paragraph {d} supplies", .{i});
+        defer gpa.free(needle);
+        const found = std.mem.indexOfPos(u8, all_packs.items, prior, needle) orelse return error.TestUnexpectedResult;
+        prior = found + needle.len;
+    }
+}
+
+test "working export: bundles_only is a byte-identical compat no-op" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var paths = try ragTestPaths(gpa, tmp.sub_path[0..]);
+    defer paths.deinit(gpa);
+    try writeRagFixtures(io, gpa, paths.content, paths.system);
+
+    var plain = try run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_a,
+        .system_docs_dir = paths.system,
+        .quiet = true,
+    });
+    defer plain.deinit();
+    try std.testing.expect(plain.ok());
+
+    // Pre-v2 scoped-bundle workflows passed --bundles-only; it is documented
+    // as a no-op for working packs, which are bundle-style by construction.
+    var compat = try run(io, gpa, .{
         .content_root = paths.content,
         .out_dir = paths.out_b,
         .system_docs_dir = paths.system,
         .bundles_only = true,
         .quiet = true,
     });
-    defer unsplit.deinit();
-    try std.testing.expect(unsplit.ok());
+    defer compat.deinit();
+    try std.testing.expect(compat.ok());
+    try expectDirsByteIdentical(io, gpa, paths.out_a, paths.out_b);
+}
 
-    var unsplit_out = try Io.Dir.cwd().openDir(io, paths.out_b, .{});
-    defer unsplit_out.close(io);
-    const unsplit_manifest = try readFileAlloc(io, unsplit_out, "manifest.json", gpa);
-    defer gpa.free(unsplit_manifest);
-    var unsplit_json = try std.json.parseFromSlice(std.json.Value, gpa, unsplit_manifest, .{});
-    defer unsplit_json.deinit();
-    for (unsplit_json.value.object.get("parts").?.array.items) |part| {
-        for (part.object.get("chunks").?.array.items) |chunk| {
-            try std.testing.expectEqual(@as(i64, 1), chunk.object.get("part_count").?.integer);
-            try std.testing.expectEqualStrings("single", chunk.object.get("continuation").?.string);
-        }
+test "complete export: scope narrows the corpus deterministically" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var paths = try ragTestPaths(gpa, tmp.sub_path[0..]);
+    defer paths.deinit(gpa);
+    try writeRagFixtures(io, gpa, paths.content, paths.system);
+
+    var res = try run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_a,
+        .system_docs_dir = paths.system,
+        .scope = "m-mid",
+        .complete = true,
+        .quiet = true,
+    });
+    defer res.deinit();
+    try std.testing.expect(res.ok());
+    try std.testing.expectEqual(@as(usize, 2), res.stats.selected_pages);
+    try std.testing.expectEqual(@as(usize, 1), res.stats.structural_parent_count);
+
+    const jsonl = try readRel(io, gpa, paths.out_a, "catalog.jsonl");
+    defer gpa.free(jsonl);
+    try std.testing.expect(std.mem.indexOf(u8, jsonl, "\"entity_id\":\"m-mid\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, jsonl, "\"entity_id\":\"a-first\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, jsonl, "\"entity_id\":\"z-last\"") == null);
+}
+
+test "working export: repeated exports are byte-identical" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var paths = try ragTestPaths(gpa, tmp.sub_path[0..]);
+    defer paths.deinit(gpa);
+    try writeRagFixtures(io, gpa, paths.content, paths.system);
+
+    var res_a = try run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_a,
+        .system_docs_dir = paths.system,
+        .scope = "m-mid",
+        .split_size = 700,
+        .quiet = true,
+    });
+    defer res_a.deinit();
+    try std.testing.expect(res_a.ok());
+
+    var res_b = try run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_b,
+        .system_docs_dir = paths.system,
+        .scope = "m-mid",
+        .split_size = 700,
+        .quiet = true,
+    });
+    defer res_b.deinit();
+    try std.testing.expect(res_b.ok());
+    try expectDirsByteIdentical(io, gpa, paths.out_a, paths.out_b);
+}
+
+test "working export: invalid scope fails without replacing prior export" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var paths = try ragTestPaths(gpa, tmp.sub_path[0..]);
+    defer paths.deinit(gpa);
+    try writeRagFixtures(io, gpa, paths.content, paths.system);
+
+    var ok = try run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_a,
+        .system_docs_dir = paths.system,
+        .quiet = true,
+    });
+    defer ok.deinit();
+    try std.testing.expect(ok.ok());
+    const before = try readRel(io, gpa, paths.out_a, "manifest.json");
+    defer gpa.free(before);
+
+    try std.testing.expectError(error.InvalidScope, run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_a,
+        .system_docs_dir = paths.system,
+        .scope = "missing",
+        .quiet = true,
+    }));
+    const after = try readRel(io, gpa, paths.out_a, "manifest.json");
+    defer gpa.free(after);
+    try std.testing.expectEqualStrings(before, after);
+}
+
+test "complete export: full tree, authoring fidelity, catalog, determinism" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var paths = try ragTestPaths(gpa, tmp.sub_path[0..]);
+    defer paths.deinit(gpa);
+    try writeRagFixtures(io, gpa, paths.content, paths.system);
+
+    var res_a = try run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_a,
+        .system_docs_dir = paths.system,
+        .complete = true,
+        .quiet = true,
+    });
+    defer res_a.deinit();
+    try std.testing.expect(res_a.ok());
+    try std.testing.expectEqual(@as(usize, 5), res_a.stats.content_pages);
+    try std.testing.expectEqual(@as(usize, 2), res_a.stats.system_docs);
+    try std.testing.expectEqual(@as(usize, 2), res_a.stats.graph_docs);
+
+    // Verbatim content page: H1s and authoring components preserved.
+    const mpage = try readRel(io, gpa, paths.out_a, "content/pages/m-mid.md");
+    defer gpa.free(mpage);
+    try std.testing.expect(std.mem.indexOf(u8, mpage, "# Source H1 Should Vanish") != null);
+    try std.testing.expect(std.mem.indexOf(u8, mpage, "## Nested H1 Becomes H2") == null);
+    const zpage = try readRel(io, gpa, paths.out_a, "content/pages/z-last.md");
+    defer gpa.free(zpage);
+    try std.testing.expect(std.mem.indexOf(u8, zpage, "<Aside kind=\"tip\" id=\"z1\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, zpage, "<Details summary=\"More\">") != null);
+    try std.testing.expect(std.mem.indexOf(u8, zpage, ":::") == null);
+
+    // Required complete-tree files.
+    for ([_][]const u8{
+        "INDEX.md",
+        "UPLOAD-GUIDE.md",
+        "catalog.jsonl",
+        "catalog_meta.json",
+        "graph/entity-catalog.md",
+        "graph/relations.md",
+        "system/a-first.md",
+    }) |name| {
+        const bytes = try readRel(io, gpa, paths.out_a, name);
+        defer gpa.free(bytes);
     }
+
+    // catalog.jsonl: content rows carry the author page title.
+    const jsonl = try readRel(io, gpa, paths.out_a, "catalog.jsonl");
+    defer gpa.free(jsonl);
+    try std.testing.expect(std.mem.indexOf(u8, jsonl, "\"entity_id\":\"m-mid\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, jsonl, "\"title\":\"M Mid\"") != null);
+
+    var res_b = try run(io, gpa, .{
+        .content_root = paths.content,
+        .out_dir = paths.out_b,
+        .system_docs_dir = paths.system,
+        .complete = true,
+        .quiet = true,
+    });
+    defer res_b.deinit();
+    try std.testing.expect(res_b.ok());
+    try expectDirsByteIdentical(io, gpa, paths.out_a, paths.out_b);
 }
 
 test "rag vs IR: identical diagnostic categories; no graph RAG on failure" {
@@ -2042,7 +1755,6 @@ test "rag vs IR: identical diagnostic categories; no graph RAG on failure" {
     try std.testing.expect(!rag.compile.ok);
     try std.testing.expect(!rag.stats.published);
 
-    // Same diagnostic codes (categories) present in both modes.
     for (ir.diagnostics.items) |d| {
         var found = false;
         for (rag.diagnostics()) |rd| {
@@ -2059,8 +1771,6 @@ test "rag vs IR: identical diagnostic categories; no graph RAG on failure" {
         diag.countErrors(rag.diagnostics()),
     );
 
-    // Graph-dependent RAG files must not be published as a fresh corpus.
-    // Prior out dir is left alone (no staging rename on failure).
     var out = try Io.Dir.cwd().openDir(io, rag_out, .{});
     defer out.close(io);
     _ = out.statFile(io, "stale-marker.txt", .{}) catch return error.TestUnexpectedResult;
@@ -2069,14 +1779,14 @@ test "rag vs IR: identical diagnostic categories; no graph RAG on failure" {
         break :blk true;
     };
     try std.testing.expect(!has_catalog);
-    const has_relations = blk: {
-        _ = out.statFile(io, "graph/relations.md", .{}) catch break :blk false;
+    const has_pack = blk: {
+        _ = out.statFile(io, "working-1.md", .{}) catch break :blk false;
         break :blk true;
     };
-    try std.testing.expect(!has_relations);
+    try std.testing.expect(!has_pack);
 }
 
-test "rag export against fixtures/content/valid" {
+test "rag export against fixtures/content/valid (working + complete)" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
@@ -2093,72 +1803,43 @@ test "rag export against fixtures/content/valid" {
     });
     defer res.deinit();
     try std.testing.expect(res.ok());
-    try requiredRagFilesPresent(io, out);
     try std.testing.expectEqual(@as(usize, 8), res.stats.content_pages);
-
-    // The four-level fixture publishes only direct parent edges while keeping
-    // each nested relation discoverable in the deterministic relation file.
     {
-        var first_out = try Io.Dir.cwd().openDir(io, out, .{});
-        defer first_out.close(io);
-        const relations = try readFileAlloc(io, first_out, "graph/relations.md", gpa);
-        defer gpa.free(relations);
-        const edges = [_][]const u8{
-            "parent\thierarchy-great-grandchild\t->\thierarchy-leaf",
-            "parent\thierarchy-leaf\t->\thierarchy-mid",
-            "parent\thierarchy-mid\t->\thierarchy-trunk",
-        };
-        var prior: usize = 0;
-        for (edges) |edge| {
-            const found = std.mem.indexOfPos(u8, relations, prior, edge) orelse return error.TestExpectedEqual;
-            prior = found + edge.len;
-        }
+        const pack = try readRel(io, gpa, out, "working-1.md");
+        defer gpa.free(pack);
+        try std.testing.expect(std.mem.indexOf(u8, pack, "# Boris working context pack 1/") != null);
+    }
+    {
+        const manifest = try readRel(io, gpa, out, "manifest.json");
+        defer gpa.free(manifest);
+        var parsed = try std.json.parseFromSlice(std.json.Value, gpa, manifest, .{});
+        defer parsed.deinit();
+        try std.testing.expectEqual(@as(i64, 8), parsed.value.object.get("selected_page_count").?.integer);
     }
 
-    // Second publish must replace via move-aside, not delete-before-install.
-    var res2 = try run(io, gpa, .{
+    // Complete mode preserves the four-level hierarchy in relations.
+    const complete_out = try std.fmt.allocPrint(gpa, "{s}/complete", .{out});
+    defer gpa.free(complete_out);
+    var comp = try run(io, gpa, .{
         .content_root = "fixtures/content/valid",
-        .out_dir = out,
+        .out_dir = complete_out,
         .system_docs_dir = "docs/rag/system",
+        .complete = true,
         .quiet = true,
     });
-    defer res2.deinit();
-    try std.testing.expect(res2.ok());
-    try requiredRagFilesPresent(io, out);
-    // Leftover swap dirs must not linger after a successful second publish.
-    const cwd = Io.Dir.cwd();
-    const prev = try std.fmt.allocPrint(gpa, "{s}.boris-rag-prev", .{out});
-    defer gpa.free(prev);
-    const next = try std.fmt.allocPrint(gpa, "{s}.boris-rag-next", .{out});
-    defer gpa.free(next);
-    if (cwd.openDir(io, prev, .{})) |*d| {
-        d.close(io);
-        return error.TestUnexpectedResult;
-    } else |_| {}
-    if (cwd.openDir(io, next, .{})) |*d| {
-        d.close(io);
-        return error.TestUnexpectedResult;
-    } else |_| {}
+    defer comp.deinit();
+    try std.testing.expect(comp.ok());
 
-    // Parse catalog_meta + each JSONL line
-    var dir = try Io.Dir.cwd().openDir(io, out, .{});
-    defer dir.close(io);
-    const meta = try readFileAlloc(io, dir, "catalog_meta.json", gpa);
-    defer gpa.free(meta);
-    var mj = try std.json.parseFromSlice(std.json.Value, gpa, meta, .{});
-    defer mj.deinit();
-
-    const jsonl = try readFileAlloc(io, dir, "catalog.jsonl", gpa);
-    defer gpa.free(jsonl);
-    var ls: usize = 0;
-    while (ls < jsonl.len) {
-        var le = ls;
-        while (le < jsonl.len and jsonl[le] != '\n') : (le += 1) {}
-        const line = jsonl[ls..le];
-        if (line.len > 0) {
-            var row = try std.json.parseFromSlice(std.json.Value, gpa, line, .{});
-            defer row.deinit();
-        }
-        ls = if (le < jsonl.len) le + 1 else jsonl.len;
+    const relations = try readRel(io, gpa, complete_out, "graph/relations.md");
+    defer gpa.free(relations);
+    const edges = [_][]const u8{
+        "parent\thierarchy-great-grandchild\t->\thierarchy-leaf",
+        "parent\thierarchy-leaf\t->\thierarchy-mid",
+        "parent\thierarchy-mid\t->\thierarchy-trunk",
+    };
+    var prior: usize = 0;
+    for (edges) |edge| {
+        const found = std.mem.indexOfPos(u8, relations, prior, edge) orelse return error.TestExpectedEqual;
+        prior = found + edge.len;
     }
 }

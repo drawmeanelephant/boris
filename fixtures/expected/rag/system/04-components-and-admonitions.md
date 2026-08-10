@@ -3,8 +3,12 @@ rag_id: system/components-and-admonitions
 rag_path: system/04-components-and-admonitions.md
 category: system
 tags: [components, asides, admonitions, directives, registry]
+related:
+  - system/02-data-model-page.md
+  - system/03-trunk-and-satellite.md
+  - system/06-apex-native-engine.md
+  - system/10-name-and-metaphor.md
 ---
-
 
 # Components and admonitions
 

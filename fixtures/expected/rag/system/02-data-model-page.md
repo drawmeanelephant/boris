@@ -3,8 +3,11 @@ rag_id: system/data-model-page
 rag_path: system/02-data-model-page.md
 category: system
 tags: [page, data-model, frontmatter, entity-id]
+related:
+  - system/03-trunk-and-satellite.md
+  - system/04-components-and-admonitions.md
+  - system/01-architecture-pipeline.md
 ---
-
 
 # Data model: Page and Frontmatter
 
@@ -52,7 +55,10 @@ tags: [guide, intro]
 ---
 ```
 
-Keys: `id`, `title`, `parent`, `status`, `tags`. Unknown keys error.
+Keys: `id`, `title`, `parent`, `status`, `tags`, and bounded `relations`.
+Unknown keys error. Relations use the closed vocabulary and validation in
+[`semantic-relations.md`](../../contracts/semantic-relations.md); they are not
+build dependencies.
 Legacy `parentEntry` is **rejected** (`EFRONTMATTER`). There is **no** general
 YAML support.
 

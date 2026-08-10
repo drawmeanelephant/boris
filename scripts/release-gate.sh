@@ -12,6 +12,7 @@ VALID_EXPECTED="docs/contracts/fixtures/valid/expected"
 IR_OUT="${GATE_DIR}/ir-valid"
 RAG_A="${GATE_DIR}/rag-a"
 RAG_B="${GATE_DIR}/rag-b"
+RAG_COMPLETE="${GATE_DIR}/rag-complete"
 FAIL=0
 
 note() { printf '==> %s\n' "$*"; }
@@ -119,14 +120,13 @@ else
 fi
 
 # --- 6. catalog_meta.json + catalog.jsonl schema -------------------------
-note "6. catalog_meta.json and catalog.jsonl schema checks"
+note "6. catalog_meta.json, catalog.jsonl, and working-pack checks"
 META="${RAG_A}/catalog_meta.json"
-JSONL="${RAG_A}/catalog.jsonl"
 if [[ ! -f "${META}" ]]; then
   fail "missing catalog_meta.json"
 else
-  # Fixed compact shape (schema v1)
-  EXPECT_META="{\"format\":\"boris-rag\",\"schema_version\":1,\"boris_version\":\"${PRODUCT_VERSION}\"}"
+  # Fixed compact shape (schema v2)
+  EXPECT_META="{\"format\":\"boris-rag\",\"schema_version\":2,\"boris_version\":\"${PRODUCT_VERSION}\"}"
   GOT_META="$(tr -d '\n' < "${META}" | sed 's/[[:space:]]//g')"
   # Allow trailing newline already stripped; tolerate pretty vs compact by
   # requiring keys and values rather than exact whitespace.
@@ -140,8 +140,30 @@ else
     pass "catalog_meta.json exact compact form"
   fi
 fi
+# Working packs: bounded upload files + sidecar manifest, no hashes in packs.
+if compgen -G "${RAG_A}/working-*.md" >/dev/null; then
+  pass "working pack files present"
+else
+  fail "missing working-*.md packs"
+fi
+if [[ -f "${RAG_A}/manifest.json" ]] && grep -q '"mode":"working"' "${RAG_A}/manifest.json" && grep -q '"sidecar_files"' "${RAG_A}/manifest.json"; then
+  pass "manifest.json sidecar present with mode + sidecar_files"
+else
+  fail "manifest.json sidecar missing or malformed"
+fi
+# Document bodies are verbatim and may legitimately discuss hashes in prose;
+# the contract violation would be an integrity record inside an envelope.
+if grep -rE 'boris-rag-doc:.*(sha256|hash|bytes)' "${RAG_A}"/working-*.md; then
+  fail "working pack envelopes must not carry integrity fields (sidecar only)"
+else
+  pass "working pack envelopes carry no per-document integrity fields"
+fi
+# Complete-corpus tree carries catalog.jsonl.
+rm -rf "${RAG_COMPLETE}"
+"${BORIS}" --rag --complete --rag-dir="${RAG_COMPLETE}" --input="${RAG_INPUT}" --quiet
+JSONL="${RAG_COMPLETE}/catalog.jsonl"
 if [[ ! -f "${JSONL}" ]]; then
-  fail "missing catalog.jsonl"
+  fail "missing catalog.jsonl (complete corpus)"
 else
   # First object keys must start with pinned order
   FIRST="$(head -1 "${JSONL}")"
@@ -702,7 +724,7 @@ else
   fail "Textile HTML is missing contracted rendered forms"
 fi
 
-"${BORIS}" --textile --rag --input="${TEXTILE_ROOT}/content" --rag-dir="${TEXTILE_RAG}" --quiet
+"${BORIS}" --textile --rag --complete --input="${TEXTILE_ROOT}/content" --rag-dir="${TEXTILE_RAG}" --quiet
 if grep -q '^# Textile Tribute' "${TEXTILE_RAG}/content/pages/index.md" \
   && ! grep -q '^h1\. Textile Tribute' "${TEXTILE_RAG}/content/pages/index.md"; then
   pass "Textile RAG page contains adapted Markdown rather than raw Textile"

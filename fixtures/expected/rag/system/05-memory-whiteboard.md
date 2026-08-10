@@ -3,8 +3,12 @@ rag_id: system/memory-whiteboard
 rag_path: system/05-memory-whiteboard.md
 category: system
 tags: [memory, arena, whiteboard, performance]
+related:
+  - system/01-architecture-pipeline.md
+  - system/06-apex-native-engine.md
+  - system/07-zero-copy-assembly.md
+  - system/10-name-and-metaphor.md
 ---
-
 
 # Memory: the Whiteboard strategy
 

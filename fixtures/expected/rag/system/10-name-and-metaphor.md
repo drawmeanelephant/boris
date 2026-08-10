@@ -3,8 +3,13 @@ rag_id: system/name-and-metaphor
 rag_path: system/10-name-and-metaphor.md
 category: system
 tags: [boris, name, metaphor, load, roll, ignite, reset, identity]
+related:
+  - system/00-overview.md
+  - system/01-architecture-pipeline.md
+  - system/03-trunk-and-satellite.md
+  - system/05-memory-whiteboard.md
+  - system/07-zero-copy-assembly.md
 ---
-
 
 # Name and metaphor
 

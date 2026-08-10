@@ -15,7 +15,7 @@ is **not** proof that every surface is the default CLI product.
 | Normative docs under `docs/contracts/` | **In force** |
 | Fixture corpus under `fixtures/` | **Inventory + IR/RAG goldens + tests** |
 | Compiler IR on CLI (`--out` / `--no-rag`) | **Implemented** (opt-in; not bare default) |
-| Optional product RAG (`--rag`) | **Implemented** (includes `:::kind` export) |
+| Optional product RAG (`--rag`) | **Implemented** (working-context packs; verbatim authoring docs) |
 | Aside component tokenizer | **Implemented** (`components.md`) |
 | Apex C ABI + Zig wrapper | **Implemented** (ApexMarkdown Unified host adapter; U1–U17 tested) |
 | HTML path (default CLI) | **Implemented** — bare `boris` → `dist/`; also `--html` / `--html-dir` / `--target` |
@@ -96,7 +96,7 @@ per topic:
 | [diagnostics.md](diagnostics.md) | Stable categories (`EDUPLICATEID`, …), severity, exit codes |
 | [validation.md](validation.md) | Canonical HTML prepublication validity boundary, no-write guarantee, and adjacent-command distinctions |
 | [ir-schema.md](ir-schema.md) | Trunk/Satellite graph, typed dependency edges, reverse index, deterministic JSON under `.boris/` |
-| [rag-export.md](rag-export.md) | Optional RAG export; schema versioning; `:::kind` export-only |
+| [rag-export.md](rag-export.md) | Optional RAG export; working-context packs + complete corpus; authoring fidelity |
 | [llms-txt.md](llms-txt.md) | Deterministic crawler/LLM discovery projection; URL and deployment limits |
 | [components.md](components.md) | Constrained `<Aside>` tokenizer, kinds, id grammar, nested policy (m10) |
 | [apex-abi.md](apex-abi.md) | In-process Apex C ABI, allocator lifetime, Zig error rules (m8) |

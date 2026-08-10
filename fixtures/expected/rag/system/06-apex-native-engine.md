@@ -3,8 +3,11 @@ rag_id: system/apex-native-engine
 rag_path: system/06-apex-native-engine.md
 category: system
 tags: [apex, c-abi, markdown, performance, cImport]
+related:
+  - system/01-architecture-pipeline.md
+  - system/05-memory-whiteboard.md
+  - system/07-zero-copy-assembly.md
 ---
-
 
 # Apex: native C-ABI markdown engine
 

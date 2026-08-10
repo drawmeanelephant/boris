@@ -1,6 +1,7 @@
 .boris-*/
 .boris/
 .DS_Store
+.freebuff
 .release-gate/
 .zig-cache/
 .zig-global-cache/

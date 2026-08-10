@@ -192,7 +192,6 @@ const modules = [_]Module{
     .{ .name = "publication_claims_fixture_test.zig", .class = .other },
     .{ .name = "publication_touches_fixture_test.zig", .class = .other },
     .{ .name = "publication_proof_pack_fixture_test.zig", .class = .other },
-    .{ .name = "rag_body.zig", .class = .other },
     .{
         .name = "rss.zig",
         .class = .{ .emitter = .{

@@ -41,6 +41,11 @@ frontmatter or claim a unified publication executor.
   search artifact from its staged live-page overlay and the default layout has
   a small browser UI with a no-JavaScript navigation fallback. Its normative
   artifact surface is [`rendered-search.md`](contracts/rendered-search.md).
+- Product RAG is now a **working-context projection**: default `--rag` emits
+  bounded `working-N.md` upload packs of verbatim authoring documents plus a
+  `manifest.json` sidecar (schema v2), and `--rag --complete` is the explicit
+  full-corpus export. Normative surface:
+  [`rag-export.md`](contracts/rag-export.md).
 
 ## What works
 
@@ -51,7 +56,7 @@ frontmatter or claim a unified publication executor.
 | Content graph | **Done** — closed frontmatter, validated Trunk/Satellite hierarchy with arbitrary finite acyclic parent chains, includes, wiki links, and heading targets. |
 | No-publication validation | **Done on `afterparty`** — `boris validate` reuses the canonical HTML prepublication compiler path for source, graph, dependency, component, layout, theme, asset, and sitemap validity without creating target, cache, search, or evidence artifacts. |
 | HTML navigation and layouts | **Done** — graph-backed nav, breadcrumbs, TOC, closed layout slots, assets, layout rules, incremental/watch/jobs, isolated targets, and opt-in deterministic XML sitemap publication. |
-| Machine outputs | **Done** — IR 0.2, RAG, Context Bundles, `llms.txt`, and deterministic RSS 2.0; semantic relations retain their documented conditional IR 0.3 artifacts. |
+| Machine outputs | **Done** — IR 0.2, RAG (working-context packs + `--complete` corpus, schema 2), Context Bundles, `llms.txt`, and deterministic RSS 2.0; semantic relations retain their documented conditional IR 0.3 artifacts. |
 | Migration laboratories | **Done as bounded developer tools** — read-only review, conversion aids, relationship candidates, and theme materialization; they do not widen Boris author grammar. |
 | Rendered-site search | **Done on `afterparty`** — deterministic staged compiler publication, standalone CLI, browser UI, zero-results state, and no-JavaScript navigation fallback. |
 | Relationship review inventory | **Done on `afterparty`** — schema-v2 exact target inventory preserves provenance, duplicate keys, slug states, draft exclusion, unsupported-file rows, and deterministic JSON/Markdown reports. |
@@ -73,7 +78,8 @@ zig build test
 ./zig-out/bin/boris --quiet                         # HTML → dist/
 ./zig-out/bin/boris validate --quiet                # prepublication validation; no output
 ./zig-out/bin/boris --out .boris --quiet            # IR only
-./zig-out/bin/boris --rag --quiet                   # RAG → rag/
+./zig-out/bin/boris --rag --quiet                   # RAG working packs → rag/
+./zig-out/bin/boris --rag --complete --quiet        # complete-corpus RAG → rag/
 ./zig-out/bin/boris --context --quiet               # Context Bundle
 ./zig-out/bin/boris --llms --quiet                  # llms.txt
 ./zig-out/bin/boris --rss --site-url https://docs.example/ --rss-title "Example Docs" --rss-description "Recent updates" --quiet
