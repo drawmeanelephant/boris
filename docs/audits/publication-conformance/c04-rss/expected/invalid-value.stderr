@@ -16,13 +16,14 @@ Modes:
   --target NAME=DIR   HTML multi-target mode (repeatable; order-independent); implies HTML
   --out <DIR>         IR mode → write JSON under DIR (default .boris when --no-rag)
   --no-rag            Explicit IR mode (JSON under --out, default .boris)
-  --rag               RAG-only mode → corpus under --rag-dir (default rag)
+  --rag               RAG-only mode → working-context packs under --rag-dir (default rag)
   --rag-dir <DIR>     RAG-only mode with output directory DIR
+  --complete          Complete-corpus RAG export (with --rag): system + per-page + graph + catalog
   --context           Context-only mode → bundle under --context-dir (default context)
   --context-dir DIR   Context-only mode with output directory DIR
   --scope VALUE       RAG/context entity id or collection prefix
-  --split-size BYTES  RAG/context deterministic bundle byte cap
-  --bundles-only      RAG upload parts only; omit per-page files
+  --split-size BYTES  Working-RAG pack target (default 262144); context bundle byte cap
+  --bundles-only      Accepted for RAG compatibility; working packs are bundle-style by design
   --llms              Deterministic llms.txt export → llms.txt
   --llms-path PATH    llms.txt export path (implies --llms)
   --rss               Deterministic RSS 2.0 export → rss.xml
@@ -66,9 +67,11 @@ IR artifacts (success; --out or --no-rag):
   <out>/manifest.json  <out>/graph.json  <out>/build-report.json
 
 RAG artifacts (success; same graph validation as IR):
-  INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  catalog_meta.json
-  system/**  content/pages/**  graph/entity-catalog.md  graph/relations.md
-  parts/part-N.md + part_manifest.json (with --split-size / --bundles-only)
+  working-N.md          model-facing working packs (complete verbatim documents)
+  manifest.json         sidecar manifest — NOT normally uploaded (scope, counts, hashes)
+  catalog_meta.json     machine format meta
+  (with --complete) INDEX.md  UPLOAD-GUIDE.md  catalog.jsonl  system/**
+                      content/pages/**  graph/entity-catalog.md  graph/relations.md
 
 Context artifacts (success; same graph validation as IR/RAG):
   bundle.md  manifest.json  graph.json  pages/<entity-id>.md
@@ -77,6 +80,8 @@ Context artifacts (success; same graph validation as IR/RAG):
 Conflicts (exit 2):
   --rag with --no-rag
   --no-rag with --rag-dir
+  --complete without --rag / --rag-dir
+  --complete with --split-size or --bundles-only
   --context / --context-dir with --rag, --out, or HTML selectors
   --rss / --rss-path with HTML, IR, RAG, Context, llms.txt, validate, check, or impact
   --sitemap / --sitemap-path without --site-url, with non-HTML modes,
