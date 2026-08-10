@@ -2,7 +2,7 @@
 
 **Status:** normative for optional product RAG export
 **Format id:** `boris-rag`
-**Schema version:** `2` (integer in `catalog_meta.json`)
+**Schema version:** `2` (integer in `manifest.json` / `catalog_meta.json` as applicable)
 **Product version field:** `boris_version` (package version string, currently `0.8.1`)
 **Milestone:** 7 implements this contract via `src/rag.zig` + CLI `--rag` /
 `--rag-dir` / `--complete`.
