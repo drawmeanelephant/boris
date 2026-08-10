@@ -29,6 +29,11 @@ pub fn selectPages(
     var selected_seed = try allocator.alloc(bool, pages.len);
     defer allocator.free(selected_seed);
     @memset(selected_seed, false);
+    // Pages pulled in only by the one-hop semantic relation pass. Used to
+    // separate semantic neighbors from structural parents in the counts.
+    var relation_entered = try allocator.alloc(bool, pages.len);
+    defer allocator.free(relation_entered);
+    @memset(relation_entered, false);
 
     if (scope) |wanted| {
         if (wanted.len == 0 or wanted[0] == '/' or std.mem.indexOf(u8, wanted, "..") != null or std.mem.indexOfScalar(u8, wanted, '\\') != null)
@@ -51,7 +56,10 @@ pub fn selectPages(
             if (!selected_seed[i]) continue;
             for (page.semantic_relations) |relation| {
                 for (pages, 0..) |candidate, j| {
-                    if (std.mem.eql(u8, candidate.id, relation.target)) included[j] = true;
+                    if (std.mem.eql(u8, candidate.id, relation.target)) {
+                        included[j] = true;
+                        relation_entered[j] = true;
+                    }
                 }
             }
         }
@@ -86,34 +94,17 @@ pub fn selectPages(
                 if (seed) requested += 1;
             }
 
-            // Ancestors of the requested pages: every parent chain hop that
-            // landed in the projection counts as structural context, not as a
-            // semantic neighbor.
-            var ancestors = try allocator.alloc(bool, pages.len);
-            defer allocator.free(ancestors);
-            @memset(ancestors, false);
-            for (pages, 0..) |page, i| {
-                if (!selected_seed[i]) continue;
-                var parent = page.parent;
-                while (parent) |pid| {
-                    var found = false;
-                    for (pages, 0..) |candidate, j| {
-                        if (std.mem.eql(u8, candidate.id, pid)) {
-                            ancestors[j] = true;
-                            parent = candidate.parent;
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) break;
-                }
-            }
-
+            // Everything the projection added beyond the requested pages is
+            // either a one-hop semantic neighbor or a transitive structural
+            // parent. The structural closure runs over every included page,
+            // so a neighbor's own parent chain also lands in the projection;
+            // classify those parents as structural context, not as semantic
+            // neighbors.
             var structural: usize = 0;
             var neighbors: usize = 0;
             for (pages, 0..) |_, i| {
                 if (!included[i] or selected_seed[i]) continue;
-                if (ancestors[i]) structural += 1 else neighbors += 1;
+                if (relation_entered[i]) neighbors += 1 else structural += 1;
             }
             out.* = .{
                 .requested = requested,
@@ -233,6 +224,27 @@ test "scope counts separate parents from neighbors" {
     try std.testing.expectEqual(@as(usize, 4), selected.len);
     try std.testing.expectEqual(@as(usize, 1), counts.requested);
     try std.testing.expectEqual(@as(usize, 2), counts.structural_parents);
+    try std.testing.expectEqual(@as(usize, 1), counts.semantic_neighbors);
+}
+
+test "scope counts a neighbor's parent chain as structural, not semantic" {
+    // Regression: the structural closure pulls in the parent chain of a
+    // semantic neighbor too; those parents must be reported as structural
+    // context, not as semantic neighbors.
+    const relation = @import("page.zig").SemanticRelation{ .kind = .{ .value = "relates_to" }, .target = "n-sib" };
+    const pages = [_]graph.Node{
+        .{ .id = "m-mid", .source_path = "m-mid.md", .role = .trunk, .semantic_relations = &.{relation} },
+        .{ .id = "n-sib", .source_path = "n-sib.md", .role = .satellite, .parent = "n-root" },
+        .{ .id = "n-root", .source_path = "n-root.md", .role = .trunk },
+        .{ .id = "unrelated", .source_path = "unrelated.md", .role = .trunk },
+    };
+    var counts: SelectionCounts = .{};
+    const selected = try selectPages(std.testing.allocator, &pages, "m-mid", &counts);
+    defer std.testing.allocator.free(selected);
+    // m-mid + neighbor n-sib + n-sib's structural parent n-root; unrelated stays out.
+    try std.testing.expectEqual(@as(usize, 3), selected.len);
+    try std.testing.expectEqual(@as(usize, 1), counts.requested);
+    try std.testing.expectEqual(@as(usize, 1), counts.structural_parents);
     try std.testing.expectEqual(@as(usize, 1), counts.semantic_neighbors);
 }
 
