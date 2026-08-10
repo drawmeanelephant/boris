@@ -3,8 +3,13 @@ rag_id: system/build-cli-and-layout
 rag_path: system/08-build-cli-and-layout.md
 category: system
 tags: [cli, build, layout, flags, zig]
+related:
+  - system/00-overview.md
+  - system/01-architecture-pipeline.md
+  - system/04-components-and-admonitions.md
+  - system/07-zero-copy-assembly.md
+  - system/09-rag-export.md
 ---
-
 
 # Build system, CLI, and layout contract
 

@@ -32,7 +32,10 @@ fn scratchDir(gpa: std.mem.Allocator, io: Io, label: []const u8) ![]u8 {
     return rel;
 }
 
-/// Walk everything under `root` and collect invariant violations.
+/// Walk everything under `root` and collect invariant violations. Verbatim
+/// document subtrees (`content/`, `system/`, working pack bodies) are raw
+/// author content by design and are skipped: the fidelity contract, not the
+/// emitter-containment invariant, governs them.
 fn auditTree(gpa: std.mem.Allocator, io: Io, root: []const u8, allowed_keys: []const []const u8, out: *std.ArrayList(invariants.Violation), paths: *std.ArrayList([]u8)) !void {
     var dir = try Io.Dir.cwd().openDir(io, root, .{ .iterate = true });
     defer dir.close(io);
@@ -40,6 +43,11 @@ fn auditTree(gpa: std.mem.Allocator, io: Io, root: []const u8, allowed_keys: []c
     defer walker.deinit();
     while (try walker.next(io)) |entry| {
         if (entry.kind != .file) continue;
+        if (std.mem.startsWith(u8, entry.path, "content/") or std.mem.startsWith(u8, entry.path, "system/")) continue;
+        // Working packs are complete verbatim authoring documents; only the
+        // emitter-generated machine files are audited in working mode.
+        if (!std.mem.endsWith(u8, entry.path, ".md") and !std.mem.endsWith(u8, entry.path, ".jsonl") and !std.mem.endsWith(u8, entry.path, ".json")) continue;
+        if (std.mem.startsWith(u8, entry.path, "working-") and !std.mem.endsWith(u8, entry.path, ".json")) continue;
         const owned_path = try gpa.dupe(u8, entry.path);
         try paths.append(gpa, owned_path);
 
@@ -135,11 +143,25 @@ test "hostile content cannot break the shape of any published artifact" {
         defer gpa.free(rag_out);
         defer Io.Dir.cwd().deleteTree(io, rag_out) catch {};
         {
-            var r = try rag.run(io, gpa, .{ .content_root = content, .out_dir = rag_out, .quiet = true });
+            // Complete-corpus emitter files (INDEX, UPLOAD-GUIDE, graph docs,
+            // catalog) are emitter-generated containers; verbatim content and
+            // system subtrees are excluded by the audit filter above.
+            var r = try rag.run(io, gpa, .{ .content_root = content, .out_dir = rag_out, .complete = true, .quiet = true });
             defer r.deinit();
             try std.testing.expect(r.compile.ok);
         }
         try expectNoViolations(gpa, io, tree, rag_out, &invariants.rag_frontmatter_keys);
+
+        // Working mode: the machine sidecar files must still be intact JSON.
+        const work_out = try scratchDir(gpa, io, tree);
+        defer gpa.free(work_out);
+        defer Io.Dir.cwd().deleteTree(io, work_out) catch {};
+        {
+            var r = try rag.run(io, gpa, .{ .content_root = content, .out_dir = work_out, .quiet = true });
+            defer r.deinit();
+            try std.testing.expect(r.compile.ok);
+        }
+        try expectNoViolations(gpa, io, tree, work_out, &invariants.rag_frontmatter_keys);
 
         const ctx_out = try scratchDir(gpa, io, tree);
         defer gpa.free(ctx_out);
@@ -167,6 +189,7 @@ test "legitimate punctuation survives the emitters unmangled" {
         var r = try rag.run(io, gpa, .{
             .content_root = fixture_root ++ "/legitimate-punctuation/content",
             .out_dir = out,
+            .complete = true,
             .quiet = true,
         });
         defer r.deinit();
@@ -175,10 +198,12 @@ test "legitimate punctuation survives the emitters unmangled" {
 
     var dir = try Io.Dir.cwd().openDir(io, out, .{});
     defer dir.close(io);
+    // Complete-corpus pages are verbatim authoring documents, so the needles
+    // are the author's own frontmatter lines.
     const expectations = [_]struct { path: []const u8, needle: []const u8 }{
         .{ .path = "content/pages/international.md", .needle = "title: 日本語のドキュメント — مرحبا — Release 🎉" },
         .{ .path = "content/pages/prose.md", .needle = "title: Pipes | tables | and other punctuation in a real title" },
-        .{ .path = "content/pages/prose.md", .needle = "tags: [docs, release 2026]" },
+        .{ .path = "content/pages/prose.md", .needle = "tags: [docs, \"release 2026\"]" },
     };
     for (expectations) |want| {
         var file = try dir.openFile(io, want.path, .{});

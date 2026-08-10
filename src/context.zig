@@ -458,7 +458,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: ContextOptions) !ContextResult 
     defer {
         for (chunks.items) |chunk| gpa.free(chunk.doc);
     }
-    const selected = try export_scope.selectPages(gpa, result.compile.pages.items, opts.scope);
+    const selected = try export_scope.selectPages(gpa, result.compile.pages.items, opts.scope, null);
     defer gpa.free(selected);
     result.graph_pages = result.compile.pages.items.len;
     result.selected_pages = selected.len;

@@ -24,16 +24,20 @@ Minimum useful set if you must subset:
 Optional for scripts: `catalog.jsonl` and `catalog_meta.json` (machine
 files; not catalog rows).
 
+For normal site-writing work, the **working-context packs** (`--rag`
+without `--complete`) are the recommended upload: a small number of
+bounded files plus a `manifest.json` sidecar that is not meant for upload.
+
 ## Regenerating this corpus
 
 ```bash
-zig build run -- --input content --rag
-zig build run -- --input content --rag-dir ./uploads/boris-rag
+zig build run -- --input content --rag --complete
+zig build run -- --input content --rag --complete --rag-dir ./uploads/boris-rag
 ```
 
 ## Integrity notes
 
 - Paths inside documents are logical RAG paths (not OS-absolute).
-- Content segments mirror `entity_id` (`guides/intro` → `content/pages/guides/intro.md`).
 - Graph-dependent files are published only after shared `graph.validate` succeeds.
-- Parsed `<Aside>` callouts appear as `:::kind` export blocks (not authoring syntax).
+- Content pages are verbatim authoring documents; `<Aside>` / `<Details>`
+  remain authoring syntax (no `:::kind` export representation).

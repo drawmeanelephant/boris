@@ -12,6 +12,7 @@ VALID_EXPECTED="docs/contracts/fixtures/valid/expected"
 IR_OUT="${GATE_DIR}/ir-valid"
 RAG_A="${GATE_DIR}/rag-a"
 RAG_B="${GATE_DIR}/rag-b"
+RAG_COMPLETE="${GATE_DIR}/rag-complete"
 FAIL=0
 
 note() { printf '==> %s\n' "$*"; }
@@ -119,14 +120,45 @@ else
 fi
 
 # --- 6. catalog_meta.json + catalog.jsonl schema -------------------------
-note "6. catalog_meta.json and catalog.jsonl schema checks"
-META="${RAG_A}/catalog_meta.json"
-JSONL="${RAG_A}/catalog.jsonl"
-if [[ ! -f "${META}" ]]; then
-  fail "missing catalog_meta.json"
+note "6. catalog_meta.json, catalog.jsonl, and working-pack checks"
+# Working mode: bounded upload files + manifest sidecar only — no
+# catalog_meta.json, no system seeds, no hashes in pack envelopes.
+if compgen -G "${RAG_A}/working-*.md" >/dev/null; then
+  pass "working pack files present"
 else
-  # Fixed compact shape (schema v1)
-  EXPECT_META="{\"format\":\"boris-rag\",\"schema_version\":1,\"boris_version\":\"${PRODUCT_VERSION}\"}"
+  fail "missing working-*.md packs"
+fi
+if [[ -f "${RAG_A}/manifest.json" ]] && grep -q '"mode":"working"' "${RAG_A}/manifest.json" && grep -q '"sidecar_files"' "${RAG_A}/manifest.json"; then
+  pass "manifest.json sidecar present with mode + sidecar_files"
+else
+  fail "manifest.json sidecar missing or malformed"
+fi
+if [[ -f "${RAG_A}/catalog_meta.json" ]]; then
+  fail "working mode must not emit catalog_meta.json (manifest.json records format/schema/version)"
+else
+  pass "working mode emits no catalog_meta.json"
+fi
+if [[ -d "${RAG_A}/system" ]] || compgen -G "${RAG_A}/system/**" >/dev/null 2>&1; then
+  fail "working mode must not seed system/** documents"
+else
+  pass "working mode contains no system seeds"
+fi
+# Document bodies are verbatim and may legitimately discuss hashes in prose;
+# the contract violation would be an integrity record inside an envelope.
+if grep -rE 'boris-rag-doc:.*(sha256|hash|bytes)' "${RAG_A}"/working-*.md; then
+  fail "working pack envelopes must not carry integrity fields (sidecar only)"
+else
+  pass "working pack envelopes carry no per-document integrity fields"
+fi
+# Complete-corpus tree carries catalog.jsonl + catalog_meta.json.
+rm -rf "${RAG_COMPLETE}"
+"${BORIS}" --rag --complete --rag-dir="${RAG_COMPLETE}" --input="${RAG_INPUT}" --quiet
+META="${RAG_COMPLETE}/catalog_meta.json"
+if [[ ! -f "${META}" ]]; then
+  fail "missing catalog_meta.json (complete corpus)"
+else
+  # Fixed compact shape (schema v2)
+  EXPECT_META="{\"format\":\"boris-rag\",\"schema_version\":2,\"boris_version\":\"${PRODUCT_VERSION}\"}"
   GOT_META="$(tr -d '\n' < "${META}" | sed 's/[[:space:]]//g')"
   # Allow trailing newline already stripped; tolerate pretty vs compact by
   # requiring keys and values rather than exact whitespace.
@@ -140,8 +172,19 @@ else
     pass "catalog_meta.json exact compact form"
   fi
 fi
+# Complete mode rejects --scope: complete means the entire validated corpus.
+set +e
+COMPLETE_SCOPE_ERR="$("${BORIS}" --rag --complete --scope=home --rag-dir="${GATE_DIR}/rag-complete-scope" --input="${RAG_INPUT}" 2>&1)"
+COMPLETE_SCOPE_EC=$?
+set -e
+if [[ "${COMPLETE_SCOPE_EC}" -eq 2 ]] && [[ ! -d "${GATE_DIR}/rag-complete-scope" ]]; then
+  pass "--complete with --scope is a usage error (exit 2, no export)"
+else
+  fail "--complete with --scope expected exit 2 with no export (got ${COMPLETE_SCOPE_EC})"
+fi
+JSONL="${RAG_COMPLETE}/catalog.jsonl"
 if [[ ! -f "${JSONL}" ]]; then
-  fail "missing catalog.jsonl"
+  fail "missing catalog.jsonl (complete corpus)"
 else
   # First object keys must start with pinned order
   FIRST="$(head -1 "${JSONL}")"
@@ -319,8 +362,8 @@ else
 fi
 # IR remains opt-in via --out (already exercised above)
 pass "IR: explicit --out path remains contract surface"
-# RAG artifacts already produced in step 3
-pass "RAG: catalog_meta + catalog.jsonl present from step 3"
+# RAG artifacts already produced in steps 3/6
+pass "RAG: working packs + manifest sidecar (step 3) and complete-corpus catalog (step 6)"
 
 # --- 4c. Feature 9 heading-fragment wiki (HTML) --------------------------
 note "4c. Feature 9 heading-fragment wiki links (HTML)"
@@ -702,7 +745,7 @@ else
   fail "Textile HTML is missing contracted rendered forms"
 fi
 
-"${BORIS}" --textile --rag --input="${TEXTILE_ROOT}/content" --rag-dir="${TEXTILE_RAG}" --quiet
+"${BORIS}" --textile --rag --complete --input="${TEXTILE_ROOT}/content" --rag-dir="${TEXTILE_RAG}" --quiet
 if grep -q '^# Textile Tribute' "${TEXTILE_RAG}/content/pages/index.md" \
   && ! grep -q '^h1\. Textile Tribute' "${TEXTILE_RAG}/content/pages/index.md"; then
   pass "Textile RAG page contains adapted Markdown rather than raw Textile"

@@ -82,9 +82,10 @@ Useful first commands:
 ```bash
 ./zig-out/bin/boris --help
 ./zig-out/bin/boris --out .boris --quiet       # JSON IR
-./zig-out/bin/boris --rag --quiet              # RAG corpus
+./zig-out/bin/boris --rag --quiet              # RAG working-context packs
+./zig-out/bin/boris --rag --complete --quiet    # complete-corpus RAG export
 ./zig-out/bin/boris --context --quiet          # AI Context Bundle
-./zig-out/bin/boris --rag-dir ./uploads/rag --scope mascots --split-size 262144 --bundles-only
+./zig-out/bin/boris --rag-dir ./uploads/rag --scope mascots --split-size 262144
 ./zig-out/bin/boris --context-dir ./uploads/context --scope mascots/genny --split-size 131072
 ./zig-out/bin/boris --llms --quiet             # llms.txt
 ./zig-out/bin/boris --rss --site-url https://docs.example/ --rss-title "Example Docs" --rss-description "Recent updates" --quiet
@@ -116,29 +117,44 @@ The author-facing parent key is `parent`. Legacy names such as `parentEntry`
 and `parent_entry` are intentionally rejected; see the
 [frontmatter contract](docs/contracts/frontmatter.md).
 
-### Scoped upload bundles
+### Working-context RAG packs
 
-RAG and Context exports validate the complete graph before projecting a scope.
-An entity collection includes its structural parents and one-hop semantic
-neighbors; ordinary Markdown links do not expand the scope.
+The default `--rag` export is a **working context**: a small number of bounded
+upload files containing the selected site documents (frontmatter, H1s,
+`<Aside>` / `<Details>` authoring syntax preserved) and the required site graph
+closure — never the `docs/rag/system` corpus — plus a `manifest.json` sidecar
+that is **not meant to be uploaded**. Attachment count and context size are
+first-class constraints; integrity records live in the sidecar, not in the
+model-facing files.
 
 ```bash
-# Whole-site RAG (the historical default)
+# Working context for the whole site (bounded packs + sidecar)
 ./zig-out/bin/boris --rag --rag-dir ./uploads/rag
 
-# Folder-scoped RAG, capped for upload, with only parts and manifests
-./zig-out/bin/boris --rag-dir ./uploads/rag/mascots \
-  --scope mascots --split-size 262144 --bundles-only
+# Scoped working context: the subtree, its parents, and one-hop neighbors
+./zig-out/bin/boris --rag-dir ./uploads/rag/mascots --scope mascots
+
+# Explicit complete-corpus export (system + per-page + graph + catalog)
+./zig-out/bin/boris --rag --complete --rag-dir ./uploads/rag-complete
 
 # Single-record Context Bundle with complete pages plus upload parts
 ./zig-out/bin/boris --context-dir ./uploads/context/genny \
   --scope mascots/028.genny-compileheart --split-size 131072
 ```
 
-`--split-size` is a byte cap, not a token estimate. Parts split only at safe
-Markdown paragraph or heading boundaries outside fenced code; an indivisible
-block larger than the cap fails without replacing an existing export. Treat
-the manifests as the record of exactly what an LLM received.
+After a working export Boris prints what you actually need to know: selected
+pages, structural parents and semantic neighbors pulled in, the exact upload
+file paths, approximate bytes and tokens, and the `manifest.json` sidecar
+identified separately as a non-upload file. `--complete` is the explicit
+full-corpus export (system + per-page + graph + catalog) and rejects `--scope`:
+complete means the entire validated corpus.
+
+`--split-size` is the working-pack target in bytes (default 262144), not a
+model token estimate — and whole documents are never split merely to meet it;
+only a single document larger than the target is split, at safe Markdown
+paragraph or heading boundaries outside fenced code. An indivisible block
+larger than the target fails without replacing an existing export. See the
+[RAG export contract](docs/contracts/rag-export.md).
 
 ## Outputs from one content tree
 
@@ -148,7 +164,8 @@ the manifests as the record of exactly what an LLM received.
 | `boris validate` | None | Compiler-authoritative HTML source/configuration preflight |
 | `boris --sitemap --site-url URL` | HTML plus `sitemap.xml` | Crawler URL discovery |
 | `boris --out .boris` | JSON IR | Build tools and inspection |
-| `boris --rag` | RAG corpus | LLM retrieval and audits |
+| `boris --rag` | Working-context packs | LLM site authoring (bounded uploads) |
+| `boris --rag --complete` | Complete RAG corpus | Full-tree LLM retrieval and audits |
 | `boris --context` | Context Bundle | Provenance-rich agent context |
 | `boris --llms` | `llms.txt` | Lightweight machine discovery |
 | `boris --rss` | RSS 2.0 XML | Recent documentation updates |

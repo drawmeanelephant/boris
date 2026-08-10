@@ -13,20 +13,18 @@
 //! formatting call. That check is the reason a future emitter cannot quietly
 //! reintroduce the YAML/table breakouts this module used to have.
 const std = @import("std");
-const aside = @import("aside.zig");
 const graph_mod = @import("graph.zig");
-const rag_body = @import("rag_body.zig");
 const structured_out = @import("structured_out.zig");
 
 const Sink = structured_out.Sink;
 const Cell = structured_out.Cell;
 
-/// Body markdown is page content rendered back to markdown. It is emitted
-/// verbatim on purpose — escaping it would destroy the document. Structural
-/// containment comes from the frontmatter fence and the H1 normalization above
-/// it, not from encoding the body.
+/// Complete source documents are emitted verbatim — escaping them would destroy
+/// the authoring fidelity the working packs exist to preserve. Structural
+/// containment comes from the delimiters between documents, not from encoding
+/// the payload.
 const body_is_raw_by_design =
-    "page body markdown is the document payload and is emitted verbatim by design";
+    "complete source document payload is emitted verbatim for authoring fidelity";
 
 pub const CatalogEntry = struct {
     rag_id: []const u8,
@@ -39,21 +37,11 @@ pub const CatalogEntry = struct {
     tags: []const u8 = "",
 };
 
-/// Provenance carried by an upload chunk. Full page documents intentionally
-/// keep their historical frontmatter shape; only segmented upload documents
-/// add these fields.
-pub const ChunkInfo = struct {
-    number: usize,
-    count: usize,
-    source_sha256: []const u8,
-};
-
 pub const Stats = struct {
     system_docs: usize,
     content_pages: usize,
     graph_docs: usize,
     catalog_entries: usize,
-    bundles_only: bool = false,
 };
 
 pub fn sortCatalogByRagPath(entries: []CatalogEntry) void {
@@ -62,10 +50,6 @@ pub fn sortCatalogByRagPath(entries: []CatalogEntry) void {
             return std.mem.order(u8, a.rag_path, b.rag_path) == .lt;
         }
     }.less);
-}
-
-pub fn renderRagBody(segments: []const aside.Segment, allocator: std.mem.Allocator) ![]const u8 {
-    return rag_body.render(segments, allocator);
 }
 
 fn pageTitle(page: graph_mod.Node) []const u8 {
@@ -81,165 +65,192 @@ pub fn formatTags(allocator: std.mem.Allocator, tags: []const []const u8) ![]con
     return try sink.toOwnedSlice();
 }
 
-fn appendBody(sink: *Sink, body: []const u8) !void {
+// ---------------------------------------------------------------------------
+// Working-context packs (default `--rag`)
+// ---------------------------------------------------------------------------
+
+/// One document instance inside a working pack. Unsplit documents appear once
+/// with `part_count == 1`; oversized documents appear once per split part.
+pub const WorkingDoc = struct {
+    rag_id: []const u8,
+    /// Content-root-relative source path of the site document.
+    source: []const u8,
+    category: []const u8,
+    /// Entity id of the site document (never empty in working mode).
+    entity_id: []const u8 = "",
+    part_number: usize = 1,
+    part_count: usize = 1,
+    /// Complete source document bytes (verbatim; for split parts, one slice).
+    body: []const u8,
+};
+
+fn appendWorkingBody(sink: *Sink, body: []const u8) !void {
     try sink.rawTrusted(body_is_raw_by_design, body);
     if (body.len == 0 or body[body.len - 1] != '\n') try sink.lit("\n");
 }
 
-pub fn renderSystemDocument(
+/// Line prefix of the pack document envelope. Bodies are emitted verbatim, so
+/// a source line beginning with this prefix would be indistinguishable from a
+/// real boundary during marker-free reassembly.
+pub const doc_marker_prefix = "<!-- boris-rag-doc:";
+
+/// True when any body line (after leading whitespace) starts with the document
+/// marker prefix. The export rejects such documents rather than emitting an
+/// ambiguous pack.
+pub fn containsDocMarkerCollision(body: []const u8) bool {
+    var it = std.mem.splitScalar(u8, body, '\n');
+    while (it.next()) |raw| {
+        const line = std.mem.trimStart(u8, raw, " \t");
+        if (std.mem.startsWith(u8, line, doc_marker_prefix)) return true;
+    }
+    return false;
+}
+
+/// Render one bounded model-facing pack file. Documents are delimited by
+/// `<!-- boris-rag-doc: ... -->` markers; reassembly is the marker-free
+/// concatenation of each document's bytes (in order).
+pub fn renderWorkingPack(
     gpa: std.mem.Allocator,
-    rag_id: []const u8,
-    rag_path: []const u8,
-    tags: []const []const u8,
-    body: []const u8,
+    pack_index: usize,
+    pack_count: usize,
+    docs: []const WorkingDoc,
 ) ![]u8 {
     var doc = Sink.init(gpa);
     errdefer doc.deinit();
-    try doc.lit("---\n");
-    try doc.yamlField("rag_id", rag_id);
-    try doc.yamlField("rag_path", rag_path);
-    try doc.lit("category: system\n");
-    try doc.yamlFlowSeq("tags", tags);
-    try doc.lit("---\n\n");
-    try appendBody(&doc, body);
-    return try doc.toOwnedSlice();
-}
-
-pub fn renderContentDocument(
-    gpa: std.mem.Allocator,
-    scratch: std.mem.Allocator,
-    page: graph_mod.Node,
-    pages: []const graph_mod.Node,
-    rag_id: []const u8,
-    rag_path: []const u8,
-    segments: []const aside.Segment,
-) ![]u8 {
-    const body = try rag_body.render(segments, scratch);
-    return renderContentDocumentBody(gpa, page, rag_id, rag_path, body, pages);
-}
-
-fn appendRelated(
-    doc: *Sink,
-    page: graph_mod.Node,
-    pages: []const graph_mod.Node,
-    parent: []const u8,
-    content_paths_present: bool,
-) !void {
-    try doc.lit("related:\n");
-    if (parent.len > 0) {
-        try appendRelatedEntry(doc, parent, content_paths_present);
-    }
-    for (pages) |other| {
-        if (other.role != .satellite) continue;
-        const other_parent = other.parent orelse continue;
-        if (std.mem.eql(u8, other_parent, page.id)) {
-            try appendRelatedEntry(doc, other.id, content_paths_present);
+    try doc.lit("# Boris working context pack ");
+    try doc.num(pack_index);
+    try doc.lit("/");
+    try doc.num(pack_count);
+    try doc.lit(
+        "\n\nEach document below is a complete Boris source file. To reuse one, copy\n" ++
+            "everything after its `<!-- boris-rag-doc: ... -->` marker through the next\n" ++
+            "marker (or the end of the file).\n\n"
+    );
+    for (docs) |d| {
+        try doc.lit("\n<!-- boris-rag-doc: id=\"");
+        try doc.field(.md_block_text, d.rag_id);
+        try doc.lit("\" source=\"");
+        try doc.field(.md_block_text, d.source);
+        try doc.lit("\" category=\"");
+        try doc.field(.md_block_text, d.category);
+        if (d.part_count > 1) {
+            try doc.lit("\" part=\"");
+            try doc.num(d.part_number);
+            try doc.lit("/");
+            try doc.num(d.part_count);
         }
-    }
-}
-
-fn appendRelatedEntry(doc: *Sink, entity_id: []const u8, content_paths_present: bool) !void {
-    try doc.lit("  - ");
-    if (content_paths_present) {
-        try doc.fieldJoined(.yaml_scalar, &.{ "content/pages/", entity_id, ".md" });
-    } else {
-        try doc.lit("parts/ (see part_manifest.json)");
-    }
-    try doc.lit("\n");
-}
-
-fn renderContentDocumentWithChunk(
-    gpa: std.mem.Allocator,
-    page: graph_mod.Node,
-    rag_id: []const u8,
-    rag_path: []const u8,
-    body: []const u8,
-    pages: []const graph_mod.Node,
-    chunk: ?ChunkInfo,
-    content_paths_present: bool,
-) ![]u8 {
-    const title = pageTitle(page);
-    const parent = page.parent orelse "";
-
-    var doc = Sink.init(gpa);
-    errdefer doc.deinit();
-    try doc.lit("---\n");
-    try doc.yamlField("rag_id", rag_id);
-    try doc.yamlField("rag_path", rag_path);
-    try doc.lit("category: content\n");
-    try doc.yamlField("entity_id", page.id);
-    try doc.yamlField("source_path", page.source_path);
-    try doc.yamlField("role", page.role.name());
-    if (parent.len > 0) try doc.yamlField("parent_entry", parent);
-    try doc.yamlField("title", title);
-    try doc.yamlFlowSeq("tags", page.tags);
-    if (chunk) |info| {
-        try doc.yamlField("source_sha256", info.source_sha256);
-        try doc.lit("part: ");
-        try doc.num(info.number);
-        try doc.lit("\npart_count: ");
-        try doc.num(info.count);
-        try doc.lit("\ncontinuation: ");
-        if (info.count == 1) {
-            try doc.lit("single");
-        } else if (info.number == info.count) {
-            try doc.lit("continued");
-        } else {
-            try doc.lit("continues");
-        }
+        try doc.lit("\" -->\n");
+        try appendWorkingBody(&doc, d.body);
         try doc.lit("\n");
     }
-    try appendRelated(&doc, page, pages, parent, content_paths_present);
-    try doc.lit("---\n\n# ");
-    try doc.field(.md_heading, title);
-    try doc.lit("\n\n");
-    try appendBody(&doc, body);
     return try doc.toOwnedSlice();
 }
 
-pub fn renderContentDocumentBody(
-    gpa: std.mem.Allocator,
-    page: graph_mod.Node,
+pub const WorkingPackInfo = struct {
+    path: []const u8,
+    bytes: usize,
+    documents: usize,
+};
+
+pub const ManifestDoc = struct {
     rag_id: []const u8,
-    rag_path: []const u8,
-    body: []const u8,
-    pages: []const graph_mod.Node,
-) ![]u8 {
-    return renderContentDocumentWithChunk(gpa, page, rag_id, rag_path, body, pages, null, true);
+    source: []const u8,
+    category: []const u8,
+    entity_id: []const u8,
+    /// Pack file containing this document instance (e.g. `working-1.md`).
+    pack: []const u8,
+    part: usize,
+    part_count: usize,
+    continuation: []const u8,
+    /// Bytes of this document instance (source file size for unsplit docs).
+    bytes: usize,
+    source_sha256: []const u8,
+};
+
+pub const WorkingManifest = struct {
+    version: []const u8,
+    scope: []const u8,
+    graph_page_count: usize,
+    selected_page_count: usize,
+    structural_parent_count: usize,
+    semantic_neighbor_count: usize,
+    graph_relation_count: usize,
+    selected_relation_count: usize,
+    pack_target: usize,
+    approximate_tokens: usize,
+    packs: []const WorkingPackInfo,
+    docs: []const ManifestDoc,
+};
+
+/// Sidecar manifest for the working-context export. Deliberately not intended
+/// for model upload: it carries scope, counts, pack membership, and integrity
+/// records (per-document sha256 and byte sizes) that model-facing packs omit.
+pub fn renderWorkingManifest(gpa: std.mem.Allocator, m: WorkingManifest) ![]u8 {
+    var doc = Sink.init(gpa);
+    errdefer doc.deinit();
+    try doc.lit("{\n  \"format\":\"boris-rag\",\n  \"schema_version\":2,\n  \"boris_version\":");
+    try doc.jsonString(m.version);
+    try doc.lit(",\n  \"mode\":\"working\",\n  \"scope\":");
+    try doc.jsonString(m.scope);
+    try doc.lit(",\n  \"scope_closure\":\"parents+semantic-relations\",\n  \"graph_page_count\":");
+    try doc.num(m.graph_page_count);
+    try doc.lit(",\n  \"selected_page_count\":");
+    try doc.num(m.selected_page_count);
+    try doc.lit(",\n  \"structural_parent_count\":");
+    try doc.num(m.structural_parent_count);
+    try doc.lit(",\n  \"semantic_neighbor_count\":");
+    try doc.num(m.semantic_neighbor_count);
+    try doc.lit(",\n  \"graph_relation_count\":");
+    try doc.num(m.graph_relation_count);
+    try doc.lit(",\n  \"selected_relation_count\":");
+    try doc.num(m.selected_relation_count);
+    try doc.lit(",\n  \"pack_target\":");
+    try doc.num(m.pack_target);
+    try doc.lit(",\n  \"approximate_tokens\":");
+    try doc.num(m.approximate_tokens);
+    try doc.lit(",\n  \"upload_files\":[");
+    for (m.packs, 0..) |pack, i| {
+        if (i > 0) try doc.lit(",");
+        try doc.lit("{\"path\":");
+        try doc.jsonString(pack.path);
+        try doc.lit(",\"bytes\":");
+        try doc.num(pack.bytes);
+        try doc.lit(",\"documents\":");
+        try doc.num(pack.documents);
+        try doc.lit("}");
+    }
+    try doc.lit("],\n  \"documents\":[");
+    for (m.docs, 0..) |d, i| {
+        if (i > 0) try doc.lit(",");
+        try doc.lit("{\"rag_id\":");
+        try doc.jsonString(d.rag_id);
+        try doc.lit(",\"source\":");
+        try doc.jsonString(d.source);
+        try doc.lit(",\"category\":");
+        try doc.jsonString(d.category);
+        try doc.lit(",\"entity_id\":");
+        try doc.jsonString(d.entity_id);
+        try doc.lit(",\"pack\":");
+        try doc.jsonString(d.pack);
+        try doc.lit(",\"part\":");
+        try doc.num(d.part);
+        try doc.lit(",\"part_count\":");
+        try doc.num(d.part_count);
+        try doc.lit(",\"continuation\":");
+        try doc.jsonString(d.continuation);
+        try doc.lit(",\"bytes\":");
+        try doc.num(d.bytes);
+        try doc.lit(",\"source_sha256\":");
+        try doc.jsonString(d.source_sha256);
+        try doc.lit("}");
+    }
+    try doc.lit("],\n  \"sidecar_files\":[\"manifest.json\"]\n}\n");
+    return try doc.toOwnedSlice();
 }
 
-pub fn renderContentDocumentChunk(
-    gpa: std.mem.Allocator,
-    page: graph_mod.Node,
-    rag_id: []const u8,
-    rag_path: []const u8,
-    body: []const u8,
-    pages: []const graph_mod.Node,
-    source_sha256: []const u8,
-    number: usize,
-    count: usize,
-) ![]u8 {
-    return renderContentDocumentChunkWithOptions(gpa, page, rag_id, rag_path, body, pages, source_sha256, number, count, true);
-}
-
-pub fn renderContentDocumentChunkWithOptions(
-    gpa: std.mem.Allocator,
-    page: graph_mod.Node,
-    rag_id: []const u8,
-    rag_path: []const u8,
-    body: []const u8,
-    pages: []const graph_mod.Node,
-    source_sha256: []const u8,
-    number: usize,
-    count: usize,
-    content_paths_present: bool,
-) ![]u8 {
-    return renderContentDocumentWithChunk(gpa, page, rag_id, rag_path, body, pages, .{
-        .number = number,
-        .count = count,
-        .source_sha256 = source_sha256,
-    }, content_paths_present);
-}
+// ---------------------------------------------------------------------------
+// Complete-corpus export (`--rag --complete`)
+// ---------------------------------------------------------------------------
 
 pub fn contentCatalogEntry(
     allocator: std.mem.Allocator,
@@ -259,7 +270,7 @@ pub fn contentCatalogEntry(
     };
 }
 
-pub fn renderEntityCatalog(gpa: std.mem.Allocator, pages: []const graph_mod.Node, content_paths_present: bool) ![]u8 {
+pub fn renderEntityCatalog(gpa: std.mem.Allocator, pages: []const graph_mod.Node) ![]u8 {
     var doc = Sink.init(gpa);
     errdefer doc.deinit();
     try doc.lit(
@@ -282,22 +293,18 @@ pub fn renderEntityCatalog(gpa: std.mem.Allocator, pages: []const graph_mod.Node
         \\
     );
     for (pages) |page| {
-        const path_cell: Cell = if (content_paths_present)
-            .{ .code_parts = &.{ "content/pages/", page.id, ".md" } }
-        else
-            .{ .text = "*(in parts; see part_manifest.json)*" };
         try doc.tableRow(&.{
             .{ .code = page.id },
             .{ .text = pageTitle(page) },
             .{ .text = page.role.name() },
             .{ .code = page.source_path },
-            path_cell,
+            .{ .code_parts = &.{ "content/pages/", page.id, ".md" } },
         });
     }
     return try doc.toOwnedSlice();
 }
 
-pub fn renderRelations(gpa: std.mem.Allocator, pages: []const graph_mod.Node, content_paths_present: bool) ![]u8 {
+pub fn renderRelations(gpa: std.mem.Allocator, pages: []const graph_mod.Node) ![]u8 {
     var doc = Sink.init(gpa);
     errdefer doc.deinit();
     try doc.lit(
@@ -329,11 +336,7 @@ pub fn renderRelations(gpa: std.mem.Allocator, pages: []const graph_mod.Node, co
         try doc.lit("\n\n- ");
         if (page.role == .trunk) try doc.lit("Root RAG") else try doc.lit("Parent RAG");
         try doc.lit(": ");
-        if (content_paths_present) {
-            try doc.inlineCodeJoined(&.{ "content/pages/", page.id, ".md" });
-        } else {
-            try doc.lit("*(in parts; see part_manifest.json)*");
-        }
+        try doc.inlineCodeJoined(&.{ "content/pages/", page.id, ".md" });
         try doc.lit("\n- Children:\n");
         var any = false;
         for (pages) |child| {
@@ -346,11 +349,7 @@ pub fn renderRelations(gpa: std.mem.Allocator, pages: []const graph_mod.Node, co
             try doc.lit(" (");
             try doc.field(.md_block_text, pageTitle(child));
             try doc.lit(") → ");
-            if (content_paths_present) {
-                try doc.inlineCodeJoined(&.{ "content/pages/", child.id, ".md" });
-            } else {
-                try doc.lit("*(in parts; see part_manifest.json)*");
-            }
+            try doc.inlineCodeJoined(&.{ "content/pages/", child.id, ".md" });
             try doc.lit("\n");
         }
         if (!any) try doc.lit("  - *(none)*\n");
@@ -429,8 +428,10 @@ pub fn renderIndex(gpa: std.mem.Allocator, catalog: []const CatalogEntry, stats:
         \\
         \\# Boris RAG corpus — INDEX
         \\
-        \\Master retrieval map for the Boris product RAG pack. Upload this
-        \\directory tree to a chat LLM knowledge base.
+        \\Master retrieval map for the Boris complete-corpus RAG export. Upload
+        \\this directory tree to a chat LLM knowledge base. Content pages are
+        \\verbatim authoring documents (frontmatter, H1s, and `<Aside>` /
+        \\`<Details>` syntax preserved).
         \\
         \\## Counts
         \\
@@ -439,13 +440,7 @@ pub fn renderIndex(gpa: std.mem.Allocator, catalog: []const CatalogEntry, stats:
     );
     try doc.lit("\n| system | ");
     try doc.num(stats.system_docs);
-    try doc.lit(" |\n| ");
-    if (stats.bundles_only) {
-        try doc.lit("content pages represented in parts");
-    } else {
-        try doc.lit("content pages");
-    }
-    try doc.lit(" | ");
+    try doc.lit(" |\n| content pages | ");
     try doc.num(stats.content_pages);
     try doc.lit(" |\n| graph | ");
     try doc.num(stats.graph_docs);
@@ -463,14 +458,7 @@ pub fn renderIndex(gpa: std.mem.Allocator, catalog: []const CatalogEntry, stats:
         \\| `catalog.jsonl` | Machine catalog — **not** a catalog row |
         \\| `catalog_meta.json` | Format + versions — **not** a catalog row |
         \\| `system/**` | Curated architecture seeds |
-        \\
-    );
-    if (stats.bundles_only) {
-        try doc.lit("| `parts/**` | Uploadable content bundles |\n| `part_manifest.json` | Ordered chunk provenance |\n");
-    } else {
-        try doc.lit("| `content/pages/**` | Content page segments |\n");
-    }
-    try doc.lit(
+        \\| `content/pages/**` | Verbatim content page sources |
         \\| `graph/entity-catalog.md` | Entity table |
         \\| `graph/relations.md` | Parent hierarchy edges |
         \\
@@ -501,22 +489,21 @@ pub fn renderIndex(gpa: std.mem.Allocator, catalog: []const CatalogEntry, stats:
         \\```
         \\
         \\Rows sorted by `rag_path`. No timestamps, absolute paths, hostnames,
-        \\or random ids. Content title H1 is metadata-owned (frontmatter `title`
-        \\else entity id). Source leading H1 stripped; remaining ATX H1s demoted
-        \\to H2. Parsed `<Aside>` callouts are emitted as `:::kind` blocks
-        \\(export representation only — not round-trippable authoring syntax).
+        \\or random ids. Content documents are complete authoring sources:
+        \\frontmatter and H1s are preserved, and `<Aside>` / `<Details>`
+        \\remain authoring syntax (no `:::kind` export representation).
         \\
         \\### catalog_meta.json
         \\
         \\```json
-        \\{"format":"boris-rag","schema_version":1,"boris_version":"
+        \\{"format":"boris-rag","schema_version":2,"boris_version":"
     );
     try doc.field(.md_block_text, version);
-    try doc.lit("\"}\n```\n\n");
+    try doc.lit("\"}\n```\n");
     return try doc.toOwnedSlice();
 }
 
-pub fn renderUploadGuide(gpa: std.mem.Allocator, bundles_only: bool) ![]u8 {
+pub fn renderUploadGuide(gpa: std.mem.Allocator) ![]u8 {
     var doc = Sink.init(gpa);
     errdefer doc.deinit();
     try doc.lit(
@@ -540,36 +527,31 @@ pub fn renderUploadGuide(gpa: std.mem.Allocator, bundles_only: bool) ![]u8 {
         \\
         \\1. `INDEX.md` (always)
         \\2. All of `system/` (Boris behavior)
-        \\
-    );
-    if (bundles_only) {
-        try doc.lit("3. All of `parts/` and `part_manifest.json` (site knowledge bundles)\n");
-    } else {
-        try doc.lit("3. All of `content/` (site knowledge)\n");
-    }
-    try doc.lit(
+        \\3. All of `content/` (site knowledge)
         \\4. All of `graph/` (relations)
         \\
         \\Optional for scripts: `catalog.jsonl` and `catalog_meta.json` (machine
         \\files; not catalog rows).
         \\
+        \\For normal site-writing work, the **working-context packs** (`--rag`
+        \\without `--complete`) are the recommended upload: a small number of
+        \\bounded files plus a `manifest.json` sidecar that is not meant for upload.
+        \\
         \\## Regenerating this corpus
         \\
         \\```bash
-        \\zig build run -- --input content --rag
-        \\zig build run -- --input content --rag-dir ./uploads/boris-rag
+        \\zig build run -- --input content --rag --complete
+        \\zig build run -- --input content --rag --complete --rag-dir ./uploads/boris-rag
         \\```
         \\
         \\## Integrity notes
         \\
         \\- Paths inside documents are logical RAG paths (not OS-absolute).
         \\- Graph-dependent files are published only after shared `graph.validate` succeeds.
-        \\- Parsed `<Aside>` callouts appear as `:::kind` export blocks (not authoring syntax).
+        \\- Content pages are verbatim authoring documents; `<Aside>` / `<Details>`
+        \\  remain authoring syntax (no `:::kind` export representation).
         \\
     );
-    if (bundles_only) {
-        try doc.lit("- `content/pages/**` is intentionally omitted; the ordered `parts/` documents are the content payload.\n");
-    }
     return try doc.toOwnedSlice();
 }
 
@@ -577,4 +559,63 @@ test "catalog JSONL field order and escaping are stable" {
     const bytes = try renderCatalogJsonl(std.testing.allocator, &.{.{ .rag_id = "content/quote", .rag_path = "content/pages/quote.md", .category = "content", .title = "Say \"hi\"\nthere", .entity_id = "quote", .role = "trunk", .tags = "[content, trunk]" }});
     defer std.testing.allocator.free(bytes);
     try std.testing.expectEqualStrings("{\"rag_id\":\"content/quote\",\"rag_path\":\"content/pages/quote.md\",\"category\":\"content\",\"title\":\"Say \\\"hi\\\"\\nthere\",\"entity_id\":\"quote\",\"role\":\"trunk\",\"parent_entry\":\"\",\"tags\":\"[content, trunk]\"}\n", bytes);
+}
+
+test "working pack delimiters and verbatim bodies" {
+    const gpa = std.testing.allocator;
+    const body =
+        \\---
+        \\title: Intro
+        \\---
+        \\
+        \\# Intro
+        \\
+        \\Body with <Aside kind="tip">kept</Aside>.
+        \\
+    ;
+    const pack = try renderWorkingPack(gpa, 1, 2, &.{
+        .{ .rag_id = "content/intro", .source = "intro.md", .category = "content", .entity_id = "intro", .body = body },
+        .{ .rag_id = "system/00-overview", .source = "00-overview.md", .category = "system", .body = "seed body\n" },
+    });
+    defer gpa.free(pack);
+    try std.testing.expect(std.mem.indexOf(u8, pack, "# Boris working context pack 1/2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pack, "<!-- boris-rag-doc: id=\"content/intro\" source=\"intro.md\" category=\"content\" -->") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pack, "<Aside kind=\"tip\">kept</Aside>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, pack, "<!-- boris-rag-doc: id=\"system/00-overview\" source=\"00-overview.md\" category=\"system\" -->") != null);
+    // No ::: directive representation anywhere.
+    try std.testing.expect(std.mem.indexOf(u8, pack, ":::") == null);
+    // Split document carries part metadata in the marker only.
+    const split = try renderWorkingPack(gpa, 2, 2, &.{
+        .{ .rag_id = "content/big", .source = "big.md", .category = "content", .entity_id = "big", .part_number = 2, .part_count = 3, .body = "second slice\n" },
+    });
+    defer gpa.free(split);
+    try std.testing.expect(std.mem.indexOf(u8, split, "part=\"2/3\"") != null);
+}
+
+test "working manifest field order is stable and complete" {
+    const gpa = std.testing.allocator;
+    const bytes = try renderWorkingManifest(gpa, .{
+        .version = "0.8.1",
+        .scope = "mascots",
+        .graph_page_count = 12,
+        .selected_page_count = 4,
+        .structural_parent_count = 1,
+        .semantic_neighbor_count = 2,
+        .graph_relation_count = 3,
+        .selected_relation_count = 1,
+        .pack_target = 262144,
+        .approximate_tokens = 512,
+        .packs = &.{ .{ .path = "working-1.md", .bytes = 2048, .documents = 2 } },
+        .docs = &.{.{ .rag_id = "content/mascots/foo", .source = "mascots/foo.md", .category = "content", .entity_id = "mascots/foo", .pack = "working-1.md", .part = 1, .part_count = 1, .continuation = "single", .bytes = 1000, .source_sha256 = "abc" }},
+    });
+    defer gpa.free(bytes);
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("working", parsed.value.object.get("mode").?.string);
+    try std.testing.expectEqual(@as(i64, 2), parsed.value.object.get("schema_version").?.integer);
+    try std.testing.expectEqual(@as(i64, 1), parsed.value.object.get("structural_parent_count").?.integer);
+    try std.testing.expectEqual(@as(i64, 2), parsed.value.object.get("semantic_neighbor_count").?.integer);
+    const upload_files = parsed.value.object.get("upload_files").?.array.items;
+    try std.testing.expectEqual(@as(usize, 1), upload_files.len);
+    try std.testing.expectEqualStrings("working-1.md", upload_files[0].object.get("path").?.string);
 }

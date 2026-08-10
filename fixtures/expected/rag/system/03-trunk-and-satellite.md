@@ -96,4 +96,4 @@ When answering questions about a guide:
 1. Load the root or requested page segment under `rag/content/pages/...`.
 2. Follow direct child rows whose `parent_entry` equals that page’s
    `entity_id`; recurse when the hierarchy is nested (see `graph/relations.md`).
-3. Read inlined asides from those page bodies (`:::kind` blocks) — not a separate tree
+3. Read inlined asides from those page bodies (`:::kind` blocks) — not a separate tree.

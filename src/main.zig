@@ -631,6 +631,7 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .scope = opts.scope,
         .split_size = opts.split_size,
         .bundles_only = opts.bundles_only,
+        .complete = opts.complete,
     }) catch |err| switch (err) {
         error.EmptyTargetDirectory,
         error.TargetOutputCollision,
@@ -640,7 +641,7 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             if (!opts.quiet) std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
             return .usage;
         },
-        error.InvalidScope, error.OversizedBlock => {
+        error.InvalidScope, error.OversizedBlock, error.SeparatorCollision => {
             if (!opts.quiet) std.debug.print("error: export projection failed: {s}\n", .{@errorName(err)});
             return .content_error;
         },
@@ -661,7 +662,40 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 
     if (result.ok()) {
         if (!opts.quiet) {
-            std.debug.print("ok: wrote RAG under {s} ({d} page(s))\n", .{ rag_dir, result.stats.content_pages });
+            if (result.stats.complete) {
+                std.debug.print("ok: wrote complete RAG corpus under {s} ({d} page(s), {d} catalog entries)\n", .{ rag_dir, result.stats.content_pages, result.stats.catalog_entries });
+            } else {
+                std.debug.print(
+                    \\ok: wrote RAG working context under {s}
+                    \\  Selected pages: {d} / {d}
+                    \\  Structural context: {d} parent page(s), {d} semantic neighbor(s)
+                    \\  System context: {d} seed(s)
+                    \\  Upload files ({d}):
+                    \\
+                , .{
+                    rag_dir,
+                    result.stats.selected_pages,
+                    result.stats.graph_pages,
+                    result.stats.structural_parent_count,
+                    result.stats.semantic_neighbor_count,
+                    result.stats.system_docs,
+                    result.stats.pack_count,
+                });
+                for (result.stats.pack_paths) |pack_path| {
+                    std.debug.print("    {s}\n", .{pack_path});
+                }
+                std.debug.print(
+                    \\  Approximate upload bytes: {d}
+                    \\  Approximate tokens: {d}
+                    \\  Non-upload sidecar: manifest.json ({d} file)
+                    \\
+                    \\
+                , .{
+                    result.stats.approximate_bytes,
+                    result.stats.approximate_tokens,
+                    result.stats.sidecar_count,
+                });
+            }
         }
         return .success;
     }

@@ -3,8 +3,13 @@ rag_id: system/overview
 rag_path: system/00-overview.md
 category: system
 tags: [boris, overview, content-compiler, zig]
+related:
+  - system/01-architecture-pipeline.md
+  - system/02-data-model-page.md
+  - system/03-trunk-and-satellite.md
+  - system/04-components-and-admonitions.md
+  - system/10-name-and-metaphor.md
 ---
-
 
 # Boris overview
 
@@ -32,7 +37,7 @@ tobacco or rolling-paper brand.
 
 Discover content → closed frontmatter → graph validate → emit HTML, IR, or RAG.
 Normative detail: `docs/contracts/`. Living phase: `docs/STATUS.md`. Historical
-campaign notes may live under `archive/` and are not required reading.
+historical campaign notes were removed from the tree and are not required reading.
 
 Narrative seeds must not overclaim untested guarantees (see STATUS and
 RELEASE-GATE).

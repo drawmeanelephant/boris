@@ -7,17 +7,19 @@ tags: [index, catalog, retrieval-map]
 
 # Boris RAG corpus — INDEX
 
-Master retrieval map for the Boris product RAG pack. Upload this
-directory tree to a chat LLM knowledge base.
+Master retrieval map for the Boris complete-corpus RAG export. Upload
+this directory tree to a chat LLM knowledge base. Content pages are
+verbatim authoring documents (frontmatter, H1s, and `<Aside>` /
+`<Details>` syntax preserved).
 
 ## Counts
 
 | Segment | Count |
 |---------|------:|
 | system | 11 |
-| content pages | 4 |
+| content pages | 8 |
 | graph | 2 |
-| catalog entries | 19 |
+| catalog entries | 23 |
 
 ## Generated artifacts
 
@@ -28,9 +30,9 @@ directory tree to a chat LLM knowledge base.
 | `catalog.jsonl` | Machine catalog — **not** a catalog row |
 | `catalog_meta.json` | Format + versions — **not** a catalog row |
 | `system/**` | Curated architecture seeds |
-| `content/pages/**` | Content page segments |
+| `content/pages/**` | Verbatim content page sources |
 | `graph/entity-catalog.md` | Entity table |
-| `graph/relations.md` | Direct parent → child edges |
+| `graph/relations.md` | Parent hierarchy edges |
 
 ## Full catalog
 
@@ -39,6 +41,10 @@ directory tree to a chat LLM knowledge base.
 | `INDEX.md` | meta | Boris RAG corpus — INDEX | — |
 | `UPLOAD-GUIDE.md` | meta | Upload guide — Grok, Gemini, and similar chat LLMs | — |
 | `content/pages/empty-no-fm.md` | content | empty-no-fm | `empty-no-fm` |
+| `content/pages/hierarchy-great-grandchild.md` | content | Hierarchy Great-Grandchild | `hierarchy-great-grandchild` |
+| `content/pages/hierarchy-leaf.md` | content | Hierarchy Leaf | `hierarchy-leaf` |
+| `content/pages/hierarchy-mid.md` | content | Hierarchy Mid | `hierarchy-mid` |
+| `content/pages/hierarchy-trunk.md` | content | Hierarchy Trunk | `hierarchy-trunk` |
 | `content/pages/home.md` | content | Home Trunk | `home` |
 | `content/pages/nested/deep/page.md` | content | Nested Deep Page | `nested/deep/page` |
 | `content/pages/satellite-child.md` | content | Child Satellite | `satellite-child` |
@@ -63,13 +69,12 @@ rag_id, rag_path, category, title, entity_id, role, parent_entry, tags
 ```
 
 Rows sorted by `rag_path`. No timestamps, absolute paths, hostnames,
-or random ids. Content title H1 is metadata-owned (frontmatter `title`
-else entity id). Source leading H1 stripped; remaining ATX H1s demoted
-to H2. Parsed `<Aside>` callouts are emitted as `:::kind` blocks
-(export representation only — not round-trippable authoring syntax).
+or random ids. Content documents are complete authoring sources:
+frontmatter and H1s are preserved, and `<Aside>` / `<Details>`
+remain authoring syntax (no `:::kind` export representation).
 
 ### catalog_meta.json
 
 ```json
-{"format":"boris-rag","schema_version":1,"boris_version":"0.3.1"}
+{"format":"boris-rag","schema_version":2,"boris_version":"0.8.1"}
 ```
