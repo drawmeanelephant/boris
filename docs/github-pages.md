@@ -21,10 +21,10 @@ The workflow references immutable action commits with the released major
 version in a comment. The Zig setup action is likewise pinned to the reviewed
 `v2.2.1` commit.
 
-It grants `contents: read` to the build, `pages: write` to the Pages artifact
-and deployment jobs, and `id-token: write` only to the deployment job. Build
-and deployment concurrency is serialized so an older run cannot cancel a
-newer deployment halfway through.
+It grants `contents: read` and `pages: read` to the build job. The deployment
+job alone receives `pages: write` and `id-token: write`. Build and deployment
+concurrency is serialized so an older run cannot cancel a newer deployment
+halfway through.
 
 ## Location model
 
