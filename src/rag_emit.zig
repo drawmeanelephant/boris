@@ -304,10 +304,18 @@ pub fn renderEntityCatalog(gpa: std.mem.Allocator, pages: []const graph_mod.Node
     return try doc.toOwnedSlice();
 }
 
-/// Render relations from the id-sorted, frozen graph node list. The frozen
-/// `parent_index` values make the reverse adjacency construction linear and
-/// preserve the node/child order used by the graph contract.
+/// Render relations from an id-sorted page slice. Scoped exports compact the
+/// frozen graph into a new slice, so parent lookup must be rebuilt locally
+/// from entity ids rather than reusing full-graph `parent_index` values.
 pub fn renderRelations(gpa: std.mem.Allocator, pages: []const graph_mod.Node) ![]u8 {
+    var page_indices: std.StringHashMapUnmanaged(usize) = .empty;
+    defer page_indices.deinit(gpa);
+    try page_indices.ensureTotalCapacity(gpa, @intCast(pages.len));
+    for (pages, 0..) |page, page_index| {
+        const gop = try page_indices.getOrPut(gpa, page.id);
+        if (!gop.found_existing) gop.value_ptr.* = page_index;
+    }
+
     var children_by_parent = try gpa.alloc(std.ArrayList(u32), pages.len);
     defer {
         for (children_by_parent) |*children| children.deinit(gpa);
@@ -317,7 +325,8 @@ pub fn renderRelations(gpa: std.mem.Allocator, pages: []const graph_mod.Node) ![
 
     for (pages, 0..) |child, child_index| {
         if (child.role != .satellite) continue;
-        const parent_index = child.parent_index orelse continue;
+        const parent = child.parent orelse continue;
+        const parent_index = page_indices.get(parent) orelse continue;
         try children_by_parent[parent_index].append(gpa, @intCast(child_index));
     }
 
