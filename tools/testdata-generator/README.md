@@ -36,6 +36,10 @@ zig run tools/testdata-generator/main.zig -- --pages 5000 --out .tmp/corpus-5k
 zig run tools/testdata-generator/main.zig -- --help
 ```
 
+`--out` is an owned path: it must be relative to the current working
+directory, contain no `.` or `..` segment, and have no trailing separator.
+The generator rejects unsafe paths before deleting anything.
+
 ## Tests
 
 ```bash
@@ -59,4 +63,6 @@ BORIS_BENCHMARK_UPDATE_BASELINE=1 zig build benchmark
 ```
 
 Then commit the rewritten `baseline/benchmark-1k.json`. Never refresh from an
-unexplained slowdown — that is exactly what the gate exists to catch.
+unexplained slowdown — that is exactly what the gate exists to catch. The
+checked-in baseline is a conservative cross-platform floor: compare supported
+host classes and retain the slower verified value for each phase.
