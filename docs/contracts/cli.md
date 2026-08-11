@@ -88,6 +88,49 @@ their normal deterministic stderr form and exit classes; `--quiet` suppresses
 that text. `--format` and `--report` remain analysis-only flags and must not be
 accepted as an invitation to invent a second validation schema.
 
+## Timing report (`--timings`)
+
+`--timings` is an opt-in, observation-only flag accepted alongside any command
+or mode that runs a compiler phase. When present, Boris appends one
+machine-readable JSON report to **stdout** after the run — including failed
+runs, where the report shows the phases that completed. It never changes
+stderr diagnostics, exit codes, published artifacts, or `--quiet` semantics:
+the option is off unless requested, and the report is never a source of truth
+for correctness.
+
+The report uses the versioned `boris-timings` schema:
+
+```json
+{
+  "format": "boris-timings",
+  "schemaVersion": "1",
+  "mode": "html",
+  "phases": {
+    "scan": 123456,
+    "render": 654321
+  },
+  "counters": {
+    "page_reads": 4,
+    "include_reads": 0,
+    "hash_bytes": 39064,
+    "link_resolutions": 7,
+    "fast_path_hits": 0
+  },
+  "totalNs": 44142167
+}
+```
+
+`phases` contains only phases that ran, in canonical order: `scan`, `parse`,
+`graph_validate`, `dependency_resolve`, `fingerprint`, `render`,
+`heading_harvest`, `search`, `link_audit`, `inventory`, `checks`, `claims`,
+`touches`, `proof_pack`. IR, RAG, context, llms, and RSS modes stop at the
+compiler-core phases; the HTML publication phases are recorded on the HTML
+path. Durations and `totalNs` are integer nanoseconds from the monotonic
+clock, so the shape and key order are deterministic even though wall times
+vary between runs. `counters` always appears with every key in canonical
+order: `page_reads`, `include_reads`, `hash_bytes`, `link_resolutions`,
+`fast_path_hits`.
+
 ## RSS mode
 
 `--rss` and `--rss-path PATH` select the deterministic RSS-only projection.
