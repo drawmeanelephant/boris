@@ -99,6 +99,10 @@ pub const Options = struct {
     site_url: ?[]const u8 = null,
     /// Normalized GitHub Pages publication identity for URL-bearing output.
     publication_location: ?github_pages.Location = null,
+    /// Accept literal `.md`/`.mdx` hrefs in the output link audit, which the
+    /// pre-Apex rewriter deliberately leaves in place. Suppresses only
+    /// EROUTEMISSING for those extensions, never EROUTEESCAPE.
+    allow_markdown_links: bool = false,
     rss_title: ?[]const u8 = null,
     rss_description: ?[]const u8 = null,
     rss_limit: usize = 20,
@@ -230,6 +234,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         targets.deinit(gpa);
     }
     var publication_location: ?github_pages.Location = null;
+    var allow_markdown_links: bool = false;
     errdefer if (publication_location) |*location| location.deinit(gpa);
     // Pending --target-layout NAME=PATH applied after targets are known.
     var target_layouts: std.ArrayListUnmanaged(struct { name: []const u8, path: []const u8 }) = .{ .items = &.{}, .capacity = 0 };
@@ -365,6 +370,10 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        if (std.mem.eql(u8, a, "--allow-markdown-links")) {
+            allow_markdown_links = true;
+            continue;
+        }
         if (std.mem.eql(u8, a, "--no-rag")) {
             if (saw_no_rag) return error.DuplicateFlag;
             saw_no_rag = true;
@@ -968,6 +977,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .bundles_only = false,
             .llms_path = llms_path,
             .publication_location = publication_location,
+            .allow_markdown_links = allow_markdown_links,
             .targets = targets,
             .command = command,
             .impact_id = impact_id,
@@ -991,6 +1001,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .rss_path = rss_path,
             .site_url = site_url,
             .publication_location = publication_location,
+            .allow_markdown_links = allow_markdown_links,
             .rss_title = rss_title,
             .rss_description = rss_description,
             .rss_limit = rss_limit,
@@ -1018,6 +1029,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .sitemap_path = if (wants_sitemap) sitemap_path else null,
             .site_url = site_url,
             .publication_location = publication_location,
+            .allow_markdown_links = allow_markdown_links,
             .html_dir = if (has_explicit_targets) null else html_dir,
             .html_layout = html_layout,
             .owned_html_layout = owned_html_layout,

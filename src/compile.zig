@@ -296,6 +296,11 @@ pub const CompileOptions = struct {
     /// Normalized publication identity used to audit Pages base paths and
     /// public metadata. The caller owns the pointed-to location.
     publication_location: ?*const publication_location.Location = null,
+    /// Allow the output link audit to accept literal `.md`/`.mdx` hrefs that the
+    /// pre-Apex rewriter deliberately leaves in place (see
+    /// docs/contracts/documentation-links.md). Off by default; suppresses only
+    /// EROUTEMISSING for those extensions, never EROUTEESCAPE.
+    allow_markdown_literals: bool = false,
     /// Test-only failure after sitemap staging and before target commit.
     test_fail_after_sitemap_stage: bool = false,
     /// Test-only failure before the artifact inventory writer runs.
@@ -2657,6 +2662,7 @@ fn compilePagesInner(
         defer link_audit.freeFindings(gpa, &findings);
         var link_audit_opts = link_audit.Options{
             .publication_location = options.publication_location,
+            .allow_markdown_literals = options.allow_markdown_literals,
         };
         if (options.timings) |t| link_audit_opts.resolution_counter = t.counterPtr(.link_resolutions);
         if (options.timings) |t| t.start(.link_audit);
