@@ -37,8 +37,9 @@ zig run tools/testdata-generator/main.zig -- --help
 ```
 
 `--out` is an owned path: it must be relative to the current working
-directory, contain no `.` or `..` segment, and have no trailing separator.
-The generator rejects unsafe paths before deleting anything.
+directory, contain no `.` or `..` segment, have no trailing separator, and
+pass through no existing symlink component. The generator rejects unsafe paths
+before deleting anything.
 
 ## Tests
 

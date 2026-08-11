@@ -21,6 +21,7 @@
 
 const std = @import("std");
 const Io = std.Io;
+const builtin = @import("builtin");
 
 const default_out = ".generated";
 const default_page_count: usize = 1000;
@@ -80,9 +81,10 @@ fn parsePageCount(value: []const u8) ParseError!usize {
 }
 
 /// The tool owns and deletes its `--out` directory, so the path must stay
-/// inside the current working tree: reject absolute paths and any `..`
-/// segment (or bare `.`/`..`) before anything is removed.
-fn validateOutDir(out_dir: []const u8) ParseError!void {
+/// inside the current working tree: reject absolute paths, any `..` segment
+/// (or bare `.`/`..`), and existing symlink components before anything is
+/// removed.
+fn validateOutDir(io: Io, cwd: Io.Dir, out_dir: []const u8) ParseError!void {
     if (out_dir.len == 0) return error.InvalidOutDir;
     if (out_dir[0] == '/') return error.InvalidOutDir;
     if (std.mem.indexOfScalar(u8, out_dir, '\\') != null) return error.InvalidOutDir;
@@ -90,6 +92,24 @@ fn validateOutDir(out_dir: []const u8) ParseError!void {
     while (segments.next()) |seg| {
         if (seg.len == 0) return error.InvalidOutDir; // empty or trailing slash
         if (std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, "..")) return error.InvalidOutDir;
+    }
+
+    // `deleteTree` follows an intermediate symlink when given a path such as
+    // `work/corpus`. Check every existing progressive path component without
+    // following symlinks, so cleanup cannot be redirected outside the tree.
+    var start: usize = 0;
+    while (start < out_dir.len) {
+        const slash = std.mem.indexOfScalarPos(u8, out_dir, start, '/') orelse out_dir.len;
+        const progressive = out_dir[0..slash];
+        const maybe_stat = cwd.statFile(io, progressive, .{ .follow_symlinks = false }) catch |err| switch (err) {
+            error.FileNotFound => null,
+            else => return error.InvalidOutDir,
+        };
+        if (maybe_stat) |stat| {
+            if (stat.kind == .sym_link) return error.InvalidOutDir;
+        }
+        if (slash >= out_dir.len) break;
+        start = slash + 1;
     }
 }
 
@@ -106,7 +126,8 @@ fn printUsage() void {
         \\  -h, --help       Show this help and exit
         \\
         \\The harness owns and removes only its --out directory, so --out must be
-        \\a relative path with no . or .. segments and no trailing slash.
+        \\a relative path with no . or .. segments, no trailing slash, and no
+        \\existing symlink components.
         \\
     , .{});
 }
@@ -236,15 +257,24 @@ fn writeSatellite(io: Io, root: []const u8, page: usize, section: usize) !void {
     try writeFile(io, path, body);
 }
 
+fn deleteSiteIfSafe(io: Io, cwd: Io.Dir, root: []const u8) void {
+    // If a path component changes to a symlink while generation is running,
+    // leave the partial tree in place rather than risking an external delete.
+    validateOutDir(io, cwd, root) catch return;
+    cwd.deleteTree(io, root) catch {};
+}
+
 /// Generate exactly `page_count` pages below `root`. Returns the number of
 /// content pages written (always equals `page_count`).
 fn generateSite(io: Io, root: []const u8, page_count: usize) !usize {
     const cwd = Io.Dir.cwd();
+    try validateOutDir(io, cwd, root);
     // A failed pre-cleanup must be visible to the caller. The path has already
-    // been lexically constrained, and hiding this error could leave a partial
-    // tree while reporting only a later, less useful create/write failure.
+    // been constrained against traversal and symlink components, and hiding
+    // this error could leave a partial tree while reporting only a later, less
+    // useful create/write failure.
     try cwd.deleteTree(io, root);
-    errdefer cwd.deleteTree(io, root) catch {};
+    errdefer deleteSiteIfSafe(io, cwd, root);
 
     const pa = std.heap.page_allocator;
     const includes_dir = try std.fmt.allocPrint(pa, "{s}/content/includes", .{root});
@@ -308,7 +338,7 @@ pub fn main(init: std.process.Init) u8 {
         printUsage();
         return @intFromEnum(ExitCode.success);
     }
-    validateOutDir(options.out_dir) catch |err| {
+    validateOutDir(init.io, Io.Dir.cwd(), options.out_dir) catch |err| {
         std.debug.print("testdata-generator: unsafe --out path \"{s}\": {s}\n", .{ options.out_dir, @errorName(err) });
         printUsage();
         return @intFromEnum(ExitCode.usage);
@@ -377,8 +407,10 @@ test "parse options accepts large page counts and custom out dir" {
 }
 
 test "out dir must stay inside the working tree" {
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
     const safe = [_][]const u8{ ".generated", ".tmp/corpus", "a/b/c" };
-    for (safe) |p| try validateOutDir(p);
+    for (safe) |p| try validateOutDir(io, cwd, p);
 
     const unsafe = [_][]const u8{
         "/tmp/abs",
@@ -390,7 +422,28 @@ test "out dir must stay inside the working tree" {
         "a\\b",
         "",
     };
-    for (unsafe) |p| try std.testing.expectError(error.InvalidOutDir, validateOutDir(p));
+    for (unsafe) |p| try std.testing.expectError(error.InvalidOutDir, validateOutDir(io, cwd, p));
+}
+
+test "out dir rejects intermediate symlinks before cleanup" {
+    if (builtin.os.tag == .windows) return;
+
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "outside");
+    try tmp.dir.writeFile(io, .{ .sub_path = "outside/keep.txt", .data = "must survive\n" });
+    tmp.dir.symLink(io, "outside", "work", .{ .is_directory = true }) catch |err| switch (err) {
+        error.AccessDenied, error.PermissionDenied => return,
+        else => return err,
+    };
+
+    try std.testing.expectError(error.InvalidOutDir, validateOutDir(io, tmp.dir, "work/corpus"));
+    const keep = try readFileAlloc(io, tmp.dir, "outside/keep.txt", gpa);
+    defer gpa.free(keep);
+    try std.testing.expectEqualStrings("must survive\n", keep);
 }
 
 test "generation produces the exact requested page count" {
