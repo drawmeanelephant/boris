@@ -66,6 +66,9 @@ pub const Code = enum {
     EROUTEMISSING,
     /// Published local `href`/`src` climbs above the output root.
     EROUTEESCAPE,
+    /// A rendered publication URL does not belong to the declared public
+    /// origin/base-path, or a project-site root-relative route omits it.
+    EPUBLICATIONLOCATION,
     /// Reserved: published reference resolves but its `#fragment` is not an id
     /// on the target page. Not yet emitted; see `link_audit.zig`.
     EFRAGMENTMISSING,
@@ -206,6 +209,7 @@ test "Code names match contract strings" {
     try std.testing.expectEqualStrings("EREFERENCEMISSING", Code.EREFERENCEMISSING.name());
     try std.testing.expectEqualStrings("EUSAGE", Code.EUSAGE.name());
     try std.testing.expectEqualStrings("EIO", Code.EIO.name());
+    try std.testing.expectEqualStrings("EPUBLICATIONLOCATION", Code.EPUBLICATIONLOCATION.name());
 }
 
 test "parser categories map to shared diagnostic codes" {

@@ -1,6 +1,8 @@
 //! Deterministic XML Sitemap Protocol projection for published Boris HTML.
 
 const std = @import("std");
+const github_pages = @import("github_pages.zig");
+const publication_location = @import("publication_location.zig");
 const site_url = @import("site_url.zig");
 const structured_out = @import("structured_out.zig");
 
@@ -131,6 +133,22 @@ pub fn render(
     return renderWithLimits(allocator, raw_site_url, page_paths, max_urls, max_uncompressed_bytes);
 }
 
+/// Render a sitemap from the normalized publication identity. Each generated
+/// `<loc>` is checked as a public URL before the XML is returned, so a future
+/// emitter change cannot silently drop a project-site base path.
+pub fn renderForLocation(
+    allocator: std.mem.Allocator,
+    location: *const github_pages.Location,
+    page_paths: []const []const u8,
+) ![]u8 {
+    for (page_paths) |path| {
+        const url = try absoluteUrl(allocator, location.base_url, path);
+        defer allocator.free(url);
+        try publication_location.validatePublicUrl(allocator, location, url);
+    }
+    return render(allocator, location.base_url, page_paths);
+}
+
 fn overlayContains(
     io: std.Io,
     staged_dir: std.Io.Dir,
@@ -247,4 +265,19 @@ test "sitemap path validation rejects empty absolute escaping and owned paths" {
         "meta/discovery.xml",
         &.{"meta/discovery.xml/index.html"},
     ));
+}
+
+test "sitemap publication locations retain project-site prefixes" {
+    const pages_location_mod = @import("github_pages.zig");
+    var location = try pages_location_mod.parse(
+        std.testing.allocator,
+        "https://owner.github.io/boris/",
+        "https://owner.github.io",
+        "/boris/",
+    );
+    defer location.deinit(std.testing.allocator);
+    const rendered = try renderForLocation(std.testing.allocator, &location, &.{ "index.html", "guides/start.html" });
+    defer std.testing.allocator.free(rendered);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "https://owner.github.io/boris/index.html") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "https://owner.github.io/boris/guides/start.html") != null);
 }

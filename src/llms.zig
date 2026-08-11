@@ -5,8 +5,10 @@
 
 const std = @import("std");
 const Io = std.Io;
+const github_pages = @import("github_pages.zig");
 const identity = @import("identity.zig");
 const pipeline = @import("pipeline.zig");
+const structured_out = @import("structured_out.zig");
 const target_mod = @import("target.zig");
 const source_io = @import("source_io.zig");
 const graph = @import("graph.zig");
@@ -18,6 +20,10 @@ pub const Options = struct {
     out_path: []const u8 = "llms.txt",
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
+    /// Optional normalized Pages identity. When present, links are absolute
+    /// public URLs rooted at that identity; otherwise the legacy root-relative
+    /// first-slice form is retained.
+    publication_location: ?*const github_pages.Location = null,
 };
 
 pub const Result = struct {
@@ -115,7 +121,23 @@ fn summary(gpa: std.mem.Allocator, source: []const u8, fallback: []const u8) ![]
     return try paragraph.toOwnedSlice(gpa);
 }
 
-fn appendUrl(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, id: []const u8) !void {
+fn appendUrl(
+    buf: *std.ArrayList(u8),
+    gpa: std.mem.Allocator,
+    id: []const u8,
+    location: ?*const github_pages.Location,
+) !void {
+    if (location) |public_location| {
+        const output_path = try identity.safeOutputRelativePath(gpa, id);
+        defer gpa.free(output_path);
+        var url = structured_out.Sink.init(gpa);
+        defer url.deinit();
+        try url.rawTrusted("github_pages.parse validates the normalized publication base URL", public_location.base_url);
+        try url.lit("/");
+        try url.uriPath(output_path);
+        try buf.appendSlice(gpa, url.items());
+        return;
+    }
     try buf.append(gpa, '/');
     try appendInline(buf, gpa, id);
     try buf.appendSlice(gpa, "/");
@@ -127,7 +149,16 @@ fn findChildren(pages: []const graph.Node, parent: []const u8, visited: []const 
     }
 }
 
-fn renderPage(gpa: std.mem.Allocator, buf: *std.ArrayList(u8), pages: []const graph.Node, sources: []const []const u8, visited: []bool, index: usize, depth: usize) !void {
+fn renderPage(
+    gpa: std.mem.Allocator,
+    buf: *std.ArrayList(u8),
+    pages: []const graph.Node,
+    sources: []const []const u8,
+    visited: []bool,
+    index: usize,
+    depth: usize,
+    location: ?*const github_pages.Location,
+) !void {
     if (visited[index]) return;
     visited[index] = true;
     const page = pages[index];
@@ -137,7 +168,7 @@ fn renderPage(gpa: std.mem.Allocator, buf: *std.ArrayList(u8), pages: []const gr
     try appendInline(buf, gpa, pageTitle(page));
     // Keep the URL fallback deterministic and independent of host deployment.
     try buf.appendSlice(gpa, "](");
-    try appendUrl(buf, gpa, page.id);
+    try appendUrl(buf, gpa, page.id, location);
     try buf.appendSlice(gpa, "): ");
     const text = try summary(gpa, sources[index], pageTitle(page));
     defer gpa.free(text);
@@ -147,10 +178,15 @@ fn renderPage(gpa: std.mem.Allocator, buf: *std.ArrayList(u8), pages: []const gr
     var children: std.ArrayList(usize) = .empty;
     defer children.deinit(gpa);
     try findChildren(pages, page.id, visited, &children, gpa);
-    for (children.items) |child| try renderPage(gpa, buf, pages, sources, visited, child, depth + 1);
+    for (children.items) |child| try renderPage(gpa, buf, pages, sources, visited, child, depth + 1, location);
 }
 
-fn render(gpa: std.mem.Allocator, result: *pipeline.Result, sources: []const []const u8) ![]u8 {
+fn render(
+    gpa: std.mem.Allocator,
+    result: *pipeline.Result,
+    sources: []const []const u8,
+    location: ?*const github_pages.Location,
+) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(gpa);
     try buf.appendSlice(gpa, "# Boris documentation\n\n");
@@ -160,11 +196,11 @@ fn render(gpa: std.mem.Allocator, result: *pipeline.Result, sources: []const []c
     defer gpa.free(visited);
     @memset(visited, false);
     for (result.pages.items, 0..) |page, index| {
-        if (page.parent == null) try renderPage(gpa, &buf, result.pages.items, sources, visited, index, 0);
+        if (page.parent == null) try renderPage(gpa, &buf, result.pages.items, sources, visited, index, 0, location);
     }
     // Validated graphs should make this unnecessary, but keeping an explicit
     // fallback makes the exporter total if a future graph role is introduced.
-    for (visited, 0..) |seen, index| if (!seen) try renderPage(gpa, &buf, result.pages.items, sources, visited, index, 0);
+    for (visited, 0..) |seen, index| if (!seen) try renderPage(gpa, &buf, result.pages.items, sources, visited, index, 0, location);
     return try buf.toOwnedSlice(gpa);
 }
 
@@ -204,7 +240,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !Result {
         gpa.free(sources);
     }
     for (result.compile.pages.items, 0..) |page, index| sources[index] = try source_io.readPageAlloc(io, content_dir, page.source_path, arena);
-    const output = try render(gpa, &result.compile, sources);
+    const output = try render(gpa, &result.compile, sources, opts.publication_location);
     defer gpa.free(output);
     try publish(io, gpa, opts.out_path, output);
     result.published = true;
@@ -331,5 +367,56 @@ test "llms export renders arbitrary-depth hierarchy recursively" {
     for (chain) |entry| {
         const found = std.mem.indexOfPos(u8, output, prior, entry) orelse return error.TestExpectedEqual;
         prior = found + entry.len;
+    }
+}
+
+test "location-aware llms export uses the normalized public base path" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const shapes = [_]struct {
+        base_url: []const u8,
+        origin: []const u8,
+        base_path: []const u8,
+    }{
+        .{ .base_url = "https://owner.github.io/boris", .origin = "https://owner.github.io", .base_path = "/boris" },
+        .{ .base_url = "https://owner.github.io", .origin = "https://owner.github.io", .base_path = "" },
+        .{ .base_url = "https://docs.example.com", .origin = "https://docs.example.com", .base_path = "" },
+    };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    for (shapes, 0..) |shape, index| {
+        const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/location-llms-{d}.txt", .{ tmp.sub_path, index });
+        defer gpa.free(out);
+        const out_again = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/location-llms-{d}-again.txt", .{ tmp.sub_path, index });
+        defer gpa.free(out_again);
+        var location = try github_pages.parse(gpa, shape.base_url, shape.origin, shape.base_path);
+        defer location.deinit(gpa);
+        var first = try run(io, gpa, .{
+            .content_root = "docs/contracts/fixtures/publication-location/content",
+            .out_path = out,
+            .quiet = true,
+            .publication_location = &location,
+        });
+        defer first.deinit();
+        try std.testing.expect(first.ok());
+        var second = try run(io, gpa, .{
+            .content_root = "docs/contracts/fixtures/publication-location/content",
+            .out_path = out_again,
+            .quiet = true,
+            .publication_location = &location,
+        });
+        defer second.deinit();
+        try std.testing.expect(second.ok());
+        const output = try readFileAlloc(io, Io.Dir.cwd(), out, gpa);
+        defer gpa.free(output);
+        const output_again = try readFileAlloc(io, Io.Dir.cwd(), out_again, gpa);
+        defer gpa.free(output_again);
+        try std.testing.expectEqualSlices(u8, output, output_again);
+        const expected = try std.fmt.allocPrint(gpa, "{s}/guides/start.html", .{shape.base_url});
+        defer gpa.free(expected);
+        try std.testing.expect(std.mem.indexOf(u8, output, expected) != null);
+        const legacy_directory_url = try std.fmt.allocPrint(gpa, "{s}/guides/start/", .{shape.base_url});
+        defer gpa.free(legacy_directory_url);
+        try std.testing.expect(std.mem.indexOf(u8, output, legacy_directory_url) == null);
     }
 }

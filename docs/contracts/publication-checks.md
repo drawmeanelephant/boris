@@ -166,6 +166,16 @@ HTML_FRAGMENT_MISSING
 HTML_DUPLICATE_ID
 ```
 
+When a hosted publication location is configured, the HTML producer also runs
+the semantic publication-location gate before target commit. Its
+`EPUBLICATIONLOCATION` diagnostic covers project-site base-path omissions and
+Boris-owned canonical/public URLs with the wrong origin or path. This gate is
+part of the HTML publication transaction, not a fourth `checks` execution and
+not a new claims registry entry: a mismatch aborts target replacement, so no
+committed target-local evidence can honestly describe that output as passed.
+The three post-commit checks remain target-local and do not claim deployment or
+post-deploy HTTP behavior.
+
 A file outside the inventory cannot become a subject, create a stale finding,
 or satisfy a Boris-owned route reference. A complete scope with error or
 warning findings is `failed`; an incomplete scope is `incomplete` even when
@@ -235,4 +245,7 @@ committed payload sizes.
 The report establishes only what these three named checks observed within the
 declared target-local scope. It does not establish deployment behavior,
 accessibility, prose quality, universal reproducibility, or correctness of an
-omitted projection.
+omitted projection. Rendered-search `path` values are target-relative rather
+than public URLs, and IR, RAG, Context, and other non-HTML artifacts are not
+location-verified by this report unless a future contract explicitly adds a
+URL-bearing field and a named check.

@@ -150,6 +150,14 @@ source
 five limitations apply to every claim; the sixth applies only to
 `rendered-search-matches-selected-html`.
 
+The fixed three claims do not include a deployment-location claim. When a
+normalized hosted location is configured, `EPUBLICATIONLOCATION` is a
+pre-commit publication gate: a mismatch prevents target replacement and no
+claims report is derived for that failed output. A successful claims report
+therefore still does not certify deployment, post-deploy HTTP behavior, or
+location-free IR/RAG/Context artifacts; those artifacts currently carry no
+applicable public URL field.
+
 ## Determinism and limits
 
 For identical inventory, checks, and payload bytes, two runs produce

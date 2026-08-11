@@ -23,6 +23,11 @@ The inventory covers the current HTML transaction's:
 - rendered search index; and
 - XML sitemap when sitemap publication is selected.
 
+When a hosted publication identity is configured, these generated HTML and
+sitemap bytes pass the pre-commit publication-location gate as part of the
+same transaction. The inventory records exact local target bytes; it does not
+add a deployment URL field or claim that the deployed host served them.
+
 The shared record vocabulary also reserves `rss` and `llms` kinds for a future
 coordinated HTML publication transaction. The current standalone `--rss` and
 `--llms` commands have separate publication transactions and do not write this

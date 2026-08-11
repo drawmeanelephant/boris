@@ -24,6 +24,21 @@ boris validate --sitemap --site-url https://docs.example/
 - One unqualified public base URL is ambiguous for multiple HTML targets.
   Sitemap selection therefore requires exactly one target.
 
+For a hosted Pages publication, pass the normalized identity alongside the
+sitemap URL:
+
+```text
+--pages-base-url https://owner.github.io/repository
+--pages-origin https://owner.github.io
+--pages-base-path /repository
+```
+
+The compiler requires `--site-url` to equal the normalized `base_url`, and
+checks every emitted `<loc>` against the same origin and base path. Root sites
+and custom domains pass an explicitly empty `--pages-base-path`. A mismatch is
+a publication failure before target replacement, not a warning. This remains a
+local artifact check; it does not verify deployment or search-engine behavior.
+
 Configuration failures are usage errors (exit `2`). `PATH` must be non-empty,
 relative, valid UTF-8, slash-separated, and contain no absolute root,
 backslash, empty segment, `.` segment, `..` segment, control byte, or trailing

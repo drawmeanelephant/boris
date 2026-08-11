@@ -108,6 +108,20 @@ also a usage error. Validation renders sitemap bytes in memory and discards
 them; only `build` publishes the file. See the normative
 [XML sitemap contract](xml-sitemap.md).
 
+## Hosted publication location flags
+
+`--pages-base-url URL`, `--pages-origin URL`, and `--pages-base-path PATH`
+select one normalized GitHub Pages identity for HTML, RSS, or `llms.txt`
+output. All three are required together; `PATH` may be explicitly empty for a
+root site or custom domain. The parser applies the same shape, origin, and
+base-path checks as the publication profile. The flags are accepted by
+`validate` for HTML preflight and rejected with IR, RAG, Context, `check`, and
+`impact`, whose current artifacts have no applicable public URL field.
+
+When selected, the identity is execution configuration, not a deployment claim.
+Applicable generated URLs are checked locally and a mismatch fails the
+publication with `EPUBLICATIONLOCATION`; no post-deploy HTTP request is made.
+
 ## Compatibility rule
 
 Adding a flag or report field is additive only when it preserves existing

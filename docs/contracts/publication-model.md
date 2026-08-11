@@ -139,7 +139,7 @@ changing the contracts of the others.
 | JSON IR | [`ir-schema.md`](ir-schema.md) | A versioned frozen graph and compiler report | HTML routes, theme behavior, or RAG content |
 | RAG | [`rag-export.md`](rag-export.md) | A versioned retrieval-oriented corpus | Boris authoring syntax, embeddings, or answer quality |
 | Context Bundle | [`context-bundle.md`](context-bundle.md) | A versioned provenance-rich context export | The HTML site, the product RAG corpus, or model judgments |
-| `llms.txt` | [`llms-txt.md`](llms-txt.md) | A deterministic discovery map | Deployment-aware URL correctness, crawling, or completeness |
+| `llms.txt` | [`llms-txt.md`](llms-txt.md) | A deterministic discovery map, with local location consistency when a hosted identity is supplied | Crawling, deployment acceptance, post-deploy HTTP behavior, or completeness |
 
 Each projection remains independently:
 
@@ -159,6 +159,14 @@ publication facts and a validated corpus. It must not merge their schemas,
 make one projection’s fields authoritative for another, use one artifact as
 proof that another artifact is correct, or turn an omitted projection into an
 implicit success claim.
+
+For a hosted issue, the normalized publication location is one shared
+publication fact. Applicable URL-bearing projections consume the same
+`base_url`, `origin`, and `base_path`; disagreement is a publication failure.
+This local invariant covers generated HTML/public metadata, sitemap, RSS, and
+location-aware `llms.txt` output. Rendered-search v1, IR, RAG, and Context
+currently use target-relative/source/entity paths and therefore have no public
+URL assertion to verify. None of these local checks is a post-deploy test.
 
 Standalone output modes retain their separate contracts. If a future
 coordinator composes them, composition is an orchestration boundary only; it

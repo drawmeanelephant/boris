@@ -50,6 +50,11 @@ fails. It does not parse frontmatter or graph edges independently.
 The `content_root` field is the caller-provided relative label. Absolute input
 roots are rejected for bundle metadata rather than leaking host paths.
 
+Context Bundle paths are source-relative or bundle-relative and the manifest
+does not carry public URLs. Consequently this projection has no applicable
+Pages location assertion and is not deployment-URL verified by the HTML
+publication gate.
+
 ## Compatibility
 
 Context schema version `1` is independent of `boris-rag` schema `1` and IR

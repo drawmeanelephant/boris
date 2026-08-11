@@ -47,6 +47,13 @@ normalize joining to one slash and use Boris's safe
 `{entity-id}.html` output path, percent-encoding path bytes as needed without
 escaping the configured base path.
 
+When a normalized Pages identity is supplied with `--pages-base-url`,
+`--pages-origin`, and `--pages-base-path`, `--site-url` must equal its
+`base_url`. The channel link, item links, and permalink GUIDs are then all
+checked against that origin and base path. A project-site mismatch, including
+a URL that drops `/repository`, fails feed publication rather than becoming an
+external-link warning. Root/custom sites use an explicitly empty base path.
+
 The emitted document contains the XML declaration, RSS 2.0 channel title,
 link, description, and current Boris compiler identity as generator. Items
 contain title (id fallback), absolute link, permalink GUID, summary,

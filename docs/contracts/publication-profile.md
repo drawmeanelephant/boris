@@ -123,7 +123,10 @@ detect page/asset/derived-route collisions, actual filesystem conflicts, and
 symlink races. This slice performs no publication, so it cannot claim those
 checks or commit semantics. URL projection audits, deployment verification,
 and post-deploy HTTP checks remain outside the profile parser and plan
-declaration.
+declaration. Runtime HTML/RSS/llms coordinators may consume the normalized
+profile identity as one shared `{base_url, origin, base_path, site_kind}`
+value; any applicable local URL disagreement is then a publication failure,
+while artifacts with no public URL field remain explicitly not applicable.
 
 ## Offline and availability boundary
 

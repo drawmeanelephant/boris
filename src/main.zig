@@ -253,6 +253,7 @@ pub fn runLlms(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .out_path = out_path,
         .quiet = opts.quiet,
         .input_format = opts.input_format,
+        .publication_location = if (opts.publication_location) |*location| location else null,
     }) catch |err| {
         if (mapPathError(err, opts.quiet)) |code| return code;
         if (!opts.quiet) std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
@@ -284,12 +285,17 @@ pub fn runRss(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .limit = opts.rss_limit,
         .quiet = opts.quiet,
         .input_format = opts.input_format,
+        .publication_location = if (opts.publication_location) |*location| location else null,
     }) catch |err| {
         if (mapPathError(err, opts.quiet)) |code| return code;
         switch (err) {
             error.InvalidSiteUrl, error.InvalidLimit, error.AbsolutePath => {
                 if (!opts.quiet) std.debug.print("error: invalid RSS configuration: {s}\n", .{@errorName(err)});
                 return .usage;
+            },
+            error.PublicationLocationMismatch => {
+                if (!opts.quiet) std.debug.print("error: RSS publication URL does not match the declared Pages location\n", .{});
+                return .content_error;
             },
             error.InvalidXml => {
                 if (!opts.quiet) std.debug.print("error: RSS projection validation failed: {s}\n", .{@errorName(err)});
@@ -430,6 +436,7 @@ pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .input_format = opts.input_format,
         .sitemap_path = opts.sitemap_path,
         .site_url = opts.site_url,
+        .publication_location = if (opts.publication_location) |*location| location else null,
     }) catch |err| {
         return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
     };
@@ -798,6 +805,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             .input_format = opts.input_format,
             .sitemap_path = opts.sitemap_path,
             .site_url = opts.site_url,
+            .publication_location = if (opts.publication_location) |*location| location else null,
         }) catch |err| {
             return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
         };
@@ -818,6 +826,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             .input_format = opts.input_format,
             .sitemap_path = opts.sitemap_path,
             .site_url = opts.site_url,
+            .publication_location = if (opts.publication_location) |*location| location else null,
         }) catch |err| {
             return mapHtmlError(err, opts.quiet, &.{}, layout_path);
         };
@@ -878,6 +887,7 @@ fn mapHtmlError(
         error.SitemapDuplicateUrl,
         error.SitemapUrlLimitExceeded,
         error.SitemapSizeLimitExceeded,
+        error.PublicationLocationMismatch,
         // The content-asset path already emitted the structured EASSET diagnostic
         // for rejected active SVGs; re-printing only doubles noise.
         error.AssetUnsafeSvg,

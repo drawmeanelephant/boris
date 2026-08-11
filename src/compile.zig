@@ -60,8 +60,10 @@ const content_asset = @import("content_asset.zig");
 const source_io = @import("source_io.zig");
 const search_index = @import("search_index.zig");
 const site_url = @import("site_url.zig");
+const github_pages = @import("github_pages.zig");
 const sitemap = @import("sitemap.zig");
 const link_audit = @import("link_audit.zig");
+const publication_location = @import("publication_location.zig");
 const artifact_inventory = @import("artifact_inventory.zig");
 const publication_checks = @import("publication_checks.zig");
 const publication_claims = @import("publication_claims.zig");
@@ -285,6 +287,9 @@ pub const CompileOptions = struct {
     sitemap_path: ?[]const u8 = null,
     /// Strict public HTTP(S) base URL, required when `sitemap_path` is set.
     site_url: ?[]const u8 = null,
+    /// Normalized publication identity used to audit Pages base paths and
+    /// public metadata. The caller owns the pointed-to location.
+    publication_location: ?*const publication_location.Location = null,
     /// Test-only failure after sitemap staging and before target commit.
     test_fail_after_sitemap_stage: bool = false,
     /// Test-only failure before the artifact inventory writer runs.
@@ -336,6 +341,14 @@ pub const CompileOptions = struct {
 };
 
 fn validateSitemapConfig(gpa: std.mem.Allocator, options: CompileOptions) !void {
+    if (options.publication_location) |location| {
+        if (options.site_url) |raw_url| {
+            publication_location.validateSiteUrl(gpa, location, raw_url) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return error.PublicationLocationMismatch,
+            };
+        }
+    }
     if (options.sitemap_path) |path| {
         try sitemap.validateOutputPath(path);
         const raw_url = options.site_url orelse return error.SitemapSiteUrlRequired;
@@ -1859,7 +1872,10 @@ fn validatePrepublicationTarget(
             if (page.status == .draft) continue;
             try page_paths.append(gpa, page.output_path);
         }
-        const sitemap_bytes = try sitemap.render(gpa, options.site_url.?, page_paths.items);
+        const sitemap_bytes = if (options.publication_location) |location|
+            try sitemap.renderForLocation(gpa, location, page_paths.items)
+        else
+            try sitemap.render(gpa, options.site_url.?, page_paths.items);
         gpa.free(sitemap_bytes);
     }
 
@@ -2587,7 +2603,9 @@ fn compilePagesInner(
 
         var findings: std.ArrayList(link_audit.Finding) = .empty;
         defer link_audit.freeFindings(gpa, &findings);
-        try link_audit.audit(io, gpa, stage_dir, dist_dir, live_page_paths, audit_assets.items, .{}, &findings);
+        try link_audit.audit(io, gpa, stage_dir, dist_dir, live_page_paths, audit_assets.items, .{
+            .publication_location = options.publication_location,
+        }, &findings);
         if (findings.items.len != 0) {
             for (findings.items) |f| {
                 std.debug.print("error: {s}: {s}:{d}: {s}=\"{s}\" {s}\n", .{
@@ -2598,6 +2616,7 @@ fn compilePagesInner(
                     f.target,
                     switch (f.code) {
                         .EROUTEESCAPE => "climbs above the output root and can never be served [point it at a published output, or drop the reference]",
+                        .EPUBLICATIONLOCATION => "does not match the declared publication origin/base path [use a target-relative URL or include the Pages base path]",
                         else => "does not resolve to a published output [fix the path, or publish the file it names]",
                     },
                 });
@@ -6028,6 +6047,160 @@ test "HTML sitemap rejects output ownership collisions and ambiguous multi-targe
         .sitemap_path = "sitemap.xml",
         .site_url = "https://example.test",
     }));
+}
+
+test "Pages publication location mismatches fail before target replacement" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/pages-location-gate", .{tmp.sub_path});
+    defer gpa.free(work);
+    try writeTreeFile(io, work, "layout.html", "<html><head><link rel=\"canonical\" href=\"/boris/index.html\"></head><body><a href=\"/assets/theme.css\">asset</a>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md", "# Home\n");
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layout.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    try writeTreeFile(io, work, "dist/sentinel.txt", "previous target");
+    var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
+    defer location.deinit(gpa);
+
+    try std.testing.expectError(error.LinkAuditFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .publication_location = &location,
+    }));
+    const sentinel_after_link_failure = try readTargetPayload(io, gpa, dist, "sentinel.txt");
+    defer gpa.free(sentinel_after_link_failure);
+    try std.testing.expectEqualStrings("previous target", sentinel_after_link_failure);
+    try std.testing.expectError(error.FileNotFound, readTargetPayload(io, gpa, dist, "index.html"));
+
+    try std.testing.expectError(error.PublicationLocationMismatch, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+        .sitemap_path = "sitemap.xml",
+        .site_url = "https://owner.github.io",
+        .publication_location = &location,
+    }));
+    const sentinel_after_sitemap_failure = try readTargetPayload(io, gpa, dist, "sentinel.txt");
+    defer gpa.free(sentinel_after_sitemap_failure);
+    try std.testing.expectEqualStrings("previous target", sentinel_after_sitemap_failure);
+    try std.testing.expectError(error.FileNotFound, readTargetPayload(io, gpa, dist, "index.html"));
+}
+
+test "Pages publication location fixture covers all site shapes and poisoned metadata" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const fixture = "docs/contracts/fixtures/publication-location";
+    const content = "docs/contracts/fixtures/publication-location/content";
+    const layout = "docs/contracts/fixtures/publication-location/theme/layouts/main.html";
+    const shapes = [_]struct {
+        base_url: []const u8,
+        origin: []const u8,
+        base_path: []const u8,
+    }{
+        .{ .base_url = "https://owner.github.io/boris", .origin = "https://owner.github.io", .base_path = "/boris" },
+        .{ .base_url = "https://owner.github.io", .origin = "https://owner.github.io", .base_path = "" },
+        .{ .base_url = "https://docs.example.com", .origin = "https://docs.example.com", .base_path = "" },
+    };
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    for (shapes, 0..) |shape, index| {
+        const dist = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/valid-{d}", .{ tmp.sub_path, index });
+        defer gpa.free(dist);
+        var location = try github_pages.parse(gpa, shape.base_url, shape.origin, shape.base_path);
+        defer location.deinit(gpa);
+        _ = try compileHtmlSite(io, gpa, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout,
+            .quiet = true,
+            .sitemap_path = "sitemap.xml",
+            .site_url = shape.base_url,
+            .publication_location = &location,
+        });
+
+        const index_html = try readTargetPayload(io, gpa, dist, "index.html");
+        defer gpa.free(index_html);
+        const nested_html = try readTargetPayload(io, gpa, dist, "guides/start.html");
+        defer gpa.free(nested_html);
+        const sitemap_bytes = try readTargetPayload(io, gpa, dist, "sitemap.xml");
+        defer gpa.free(sitemap_bytes);
+        const search_bytes = try readTargetPayload(io, gpa, dist, "_boris/search/search-index.json");
+        defer gpa.free(search_bytes);
+        const expected_index = try std.fmt.allocPrint(gpa, "<loc>{s}/index.html</loc>", .{shape.base_url});
+        defer gpa.free(expected_index);
+        const expected_nested = try std.fmt.allocPrint(gpa, "<loc>{s}/guides/start.html</loc>", .{shape.base_url});
+        defer gpa.free(expected_nested);
+
+        try std.testing.expect(std.mem.indexOf(u8, index_html, "index.assets/logo.svg") != null);
+        try std.testing.expect(std.mem.indexOf(u8, nested_html, "../assets/css/site.css") != null);
+        try std.testing.expect(std.mem.indexOf(u8, nested_html, "start.assets/diagram.svg") != null);
+        try std.testing.expect(std.mem.indexOf(u8, sitemap_bytes, expected_index) != null);
+        try std.testing.expect(std.mem.indexOf(u8, sitemap_bytes, expected_nested) != null);
+        try std.testing.expect(std.mem.indexOf(u8, search_bytes, "guides/start.html") != null);
+        try std.testing.expect(std.mem.indexOf(u8, sitemap_bytes, "index.assets") == null);
+    }
+
+    const poisoned = [_]struct {
+        layout_path: []const u8,
+        base_url: []const u8,
+        origin: []const u8,
+        base_path: []const u8,
+    }{
+        .{
+            .layout_path = fixture ++ "/poisoned/project-root-relative.html",
+            .base_url = "https://owner.github.io/boris",
+            .origin = "https://owner.github.io",
+            .base_path = "/boris",
+        },
+        .{
+            .layout_path = fixture ++ "/poisoned/wrong-origin.html",
+            .base_url = "https://owner.github.io/boris",
+            .origin = "https://owner.github.io",
+            .base_path = "/boris",
+        },
+        .{
+            .layout_path = fixture ++ "/poisoned/stale-root-prefix.html",
+            .base_url = "https://owner.github.io",
+            .origin = "https://owner.github.io",
+            .base_path = "",
+        },
+        .{
+            .layout_path = fixture ++ "/poisoned/custom-github-origin.html",
+            .base_url = "https://docs.example.com",
+            .origin = "https://docs.example.com",
+            .base_path = "",
+        },
+    };
+    for (poisoned, 0..) |case, index| {
+        const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/poisoned-{d}", .{ tmp.sub_path, index });
+        defer gpa.free(work);
+        const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+        defer gpa.free(dist);
+        try writeTreeFile(io, work, "dist/sentinel.txt", "previous target");
+        var location = try github_pages.parse(gpa, case.base_url, case.origin, case.base_path);
+        defer location.deinit(gpa);
+        try std.testing.expectError(error.LinkAuditFailed, compileHtmlSite(io, gpa, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = case.layout_path,
+            .quiet = true,
+            .publication_location = &location,
+        }));
+        const sentinel = try readTargetPayload(io, gpa, dist, "sentinel.txt");
+        defer gpa.free(sentinel);
+        try std.testing.expectEqualStrings("previous target", sentinel);
+        try std.testing.expectError(error.FileNotFound, readTargetPayload(io, gpa, dist, "index.html"));
+    }
 }
 
 test "Feature 9 HTML: heading fragment wiki links resolve to rendered ids" {
