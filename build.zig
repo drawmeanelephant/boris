@@ -1185,6 +1185,14 @@ pub fn build(b: *std.Build) void {
         &ir_schema_tests.step,
         &package_exe.step,
         &package_tests.step,
+        // These two call linkApex() but were absent from this list, so their
+        // test steps could be scheduled before the vendored C library finished
+        // building. On a COLD clone `zig build test` then exits 1 with
+        // "libapex.a: file not found" while reporting 6158/6158 tests passed;
+        // a second run in the same tree succeeds. First contact for a new
+        // contributor was a false build failure.
+        &publication_profile_tests.step,
+        &publication_plan_tests.step,
     };
     for (apex_needing) |s| s.dependOn(&ensure_apex.step);
 }
