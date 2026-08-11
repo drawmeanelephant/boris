@@ -10,7 +10,7 @@ builds can also publish a deterministic XML sitemap.
 Write content locally. Build with one native binary. Get output you can inspect,
 serve, archive, or hand to another tool.
 
-[Migration guide](docs/MIGRATION.md) · [Architecture](docs/) · [Contracts](docs/contracts/) · [Status](docs/STATUS.md)
+[Migration guide](docs/MIGRATION.md) · [Architecture](docs/) · [Contracts](docs/contracts/) · [Status](docs/STATUS.md) · [GitHub Pages](docs/github-pages.md)
 
 ## What Boris does
 
@@ -45,6 +45,7 @@ instead of quietly producing a broken site.
 - JSON IR with typed dependency edges and reverse indexes.
 - Deterministic RAG, Context Bundle, `llms.txt`, and RSS 2.0 exports from the same tree.
 - Deterministic staged XML sitemap for one public HTML target.
+- First-class GitHub Pages publication identity and an official verified Actions workflow.
 - Standalone migration labs for Astro/Starlight, WordPress, Instagram, Obsidian,
   Notion, and related source shapes.
 
@@ -95,6 +96,11 @@ Useful first commands:
 ./zig-out/bin/boris impact getting-started    # dependency impact report
 zig build test
 ```
+
+The repository’s GitHub Pages publication path is documented in
+[`docs/github-pages.md`](docs/github-pages.md). It uses the native Boris
+compiler, keeps proof reports in a retained evidence artifact, and uploads
+only the exact public files declared by the target inventory.
 
 ### Add a page
 

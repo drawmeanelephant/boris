@@ -34,6 +34,7 @@ is **not** proof that every surface is the default CLI product.
 | Documentation Intelligence | **Implemented first slice** — `check` / `impact`; see [documentation-intelligence.md](documentation-intelligence.md) |
 | Textile compatibility | **Implemented, explicit opt-in** — bounded `.textile` body adapter via `--textile`; see [textile-compatibility.md](textile-compatibility.md) |
 | Publication plan declaration | **Implemented** — `plan --profile PATH` emits normalized declaration JSON without publication; see [publication-plan.md](publication-plan.md) |
+| GitHub Pages publication declaration | **Implemented first slice** — normalized `base_url` / `origin` / `base_path` identity and fail-closed public-target validation; see [publication-profile.md](publication-profile.md) and [publication-plan.md](publication-plan.md) |
 | HTML publication artifact inventory | **Implemented first slice** — deterministic target-owned `artifacts.json` inventory for committed HTML payloads; see [publication-artifacts.md](publication-artifacts.md) |
 | HTML publication checks evidence | **Implemented first slice** — deterministic target-local `checks.json` bound to the committed inventory and exact payload bytes; see [publication-checks.md](publication-checks.md) |
 | HTML publication claims evidence | **Implemented first slice** — deterministic target-local `claims.json` derived from committed inventory and checks bytes, with fixed claims and limitations; see [publication-claims.md](publication-claims.md) |
@@ -114,6 +115,7 @@ per topic:
 | [documentation-intelligence.md](documentation-intelligence.md) | Read-only graph health and impact analysis (`check` / `impact`); schema twin under `schemas/` |
 | [publication-profile.md](publication-profile.md) | Strict schema-v1 publication-profile parser, normalization, and static validation boundary |
 | [publication-plan.md](publication-plan.md) | Deterministic schema-v1 normalized publication declaration (`plan --profile PATH`) |
+| [../github-pages.md](../github-pages.md) | GitHub Pages workflow, public/evidence artifact separation, and operational setup |
 | [publication-artifacts.md](publication-artifacts.md) | Deterministic schema-v1 inventory of committed Boris-owned HTML-target payload bytes |
 | [publication-checks.md](publication-checks.md) | Deterministic schema-v1 publication-checks evidence over committed inventory and exact payload bytes |
 | [publication-claims.md](publication-claims.md) | Deterministic schema-v1 claims-and-limitations derivation over committed inventory and checks evidence |

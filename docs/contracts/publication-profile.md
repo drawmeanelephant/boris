@@ -1,4 +1,4 @@
-# Publication profile (schema v1, Slice 1)
+# Publication profile (schema v1, GitHub Pages declaration slice)
 
 **Status:** normative parser and static-plan contract. Boris accepts an
 explicit profile only through the stdout-only `boris plan --profile PATH`
@@ -55,8 +55,28 @@ The root has exactly these fields:
 | `input` | no | Content root, default `content` |
 | `input_format` | no | `markdown` (default) or `textile` |
 | `site` | no | Closed `url`, `title`, `description` object |
+| `publication` | no | Closed publication-target declaration; currently `github-pages` only |
 | `targets` | no | Closed HTML-target array |
 | `editions` | no | Closed `ir`, `rag`, `context` object |
+
+When present, `publication` requires exactly one `public` HTML target. Its
+closed fields are:
+
+| Field | Required | Meaning |
+|---|---|---|
+| `target` | yes | Exact string `github-pages` |
+| `base_url` | yes | Normalized public URL, including the project-site path when applicable |
+| `origin` | yes | Normalized scheme and authority with no path |
+| `base_path` | yes | `/repo` for a project site, or the empty string for a root/custom-domain site |
+
+Boris normalizes trailing slashes, requires `base_url == origin + base_path`,
+and rejects origin/path contradictions. A `github.io` origin with a non-empty
+path is classified as a project site; a pathless `github.io` origin is a root
+site; any other pathless valid origin is classified as a custom domain. Custom
+domains with a non-empty base path are rejected because this declaration does
+not guess at CNAME or host configuration. If `site.url` is supplied, it must
+equal the normalized publication `base_url`; this prevents sitemap/RSS and
+Pages metadata from silently naming different locations.
 
 Each target requires `name` and `output`; optional fields are `public`, exactly
 one of `theme`/`layout`, `layout_rules`, `sitemap`, `rss`, and `llms`.
@@ -85,7 +105,8 @@ Object-key order has no semantic effect. `ProfileOverrides` retains omitted
 versus explicit state. Precedence is compiled profile defaults, then selected
 profile values, then explicit profile-mode overrides; static validation runs
 again after overrides. A global HTML output override is rejected when a profile
-contains multiple targets.
+contains multiple targets. A GitHub Pages declaration remains configuration;
+it is not evidence that a deployment occurred.
 
 ## Static validation and the deferred boundary
 
@@ -100,7 +121,9 @@ Dynamic ownership validation is deliberately deferred: it requires the
 discovered content, layouts, assets, routes, and staged output inventory to
 detect page/asset/derived-route collisions, actual filesystem conflicts, and
 symlink races. This slice performs no publication, so it cannot claim those
-checks or commit semantics.
+checks or commit semantics. URL projection audits, deployment verification,
+and post-deploy HTTP checks remain outside the profile parser and plan
+declaration.
 
 ## Offline and availability boundary
 

@@ -1,0 +1,39 @@
+{
+  "format": "boris-publication-plan",
+  "schema_version": 1,
+  "input": "content",
+  "input_format": "markdown",
+  "site": {
+    "url": "https://owner.github.io/boris",
+    "title": "Boris",
+    "description": "A deterministic documentation compiler."
+  },
+  "publication": {
+    "target": "github-pages",
+    "base_url": "https://owner.github.io/boris",
+    "origin": "https://owner.github.io",
+    "base_path": "/boris",
+    "site_kind": "project-site"
+  },
+  "targets": [
+    {
+      "name": "public",
+      "output": "dist",
+      "public": true,
+      "theme": "themes/boris",
+      "layout": null,
+      "layout_rules": [],
+      "projections": {
+        "html": true,
+        "sitemap": {"path": "sitemap.xml"},
+        "rss": null,
+        "llms": null
+      }
+    }
+  ],
+  "editions": {
+    "ir": null,
+    "rag": null,
+    "context": null
+  }
+}

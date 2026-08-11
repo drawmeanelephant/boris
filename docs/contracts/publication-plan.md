@@ -64,7 +64,22 @@ shown below; object-key order in the source profile has no effect.
 ```
 
 Optional normalized values use explicit `null` so consumers can compare a
-complete plan shape without guessing whether a field was omitted. A target is
+complete plan shape without guessing whether a field was omitted. The optional
+`publication` object is emitted between `site` and `targets` when the selected
+profile declares a GitHub Pages target:
+
+```json
+"publication": {
+  "target": "github-pages",
+  "base_url": "https://owner.github.io/boris",
+  "origin": "https://owner.github.io",
+  "base_path": "/boris",
+  "site_kind": "project-site"
+}
+```
+
+The location is normalized and cross-checked by the profile parser; it is not
+a deployment result. A target is
 an HTML target (`projections.html` is always `true`) and carries normalized
 `name`, `output`, `public`, `theme`, `layout`, and ordered `layout_rules`.
 Configured sitemap, RSS, and `llms.txt` projections appear under
@@ -93,7 +108,8 @@ The declaration contains publication identity and selected projection
 configuration only. It excludes `jobs`, `quiet`, `incremental`, temporary
 staging names, and runtime worker decisions. It also excludes content scan
 results, graph compilation, artifact inventories, file digests, checks, claims,
-limitations, touch maps, and quality scores.
+limitations, touch maps, quality scores, deployment status, environment URLs,
+HTTP responses, and any claim that a Pages artifact was accepted or served.
 
 ## Side-effect and future-evidence boundary
 
