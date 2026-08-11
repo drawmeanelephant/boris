@@ -58,18 +58,11 @@ const FsIdentity = struct {
     fn fromStat(st: Io.File.Stat) FsIdentity {
         return .{ .ino = @intCast(st.inode) };
     }
-
-    fn eql(a: FsIdentity, b: FsIdentity) bool {
-        return a.ino == b.ino;
-    }
 };
 
-fn identitySeen(list: []const FsIdentity, id: FsIdentity) bool {
-    for (list) |v| {
-        if (FsIdentity.eql(v, id)) return true;
-    }
-    return false;
-}
+/// Keep the existing `FsIdentity` key semantics while making re-entry checks
+/// expected O(1) instead of scanning every previously entered directory.
+const FsIdentitySet = std.AutoHashMapUnmanaged(FsIdentity, void);
 
 /// Walk `options.content_root` and append discovered pages to `out`.
 ///
@@ -100,11 +93,11 @@ pub fn scanDirFormat(io: Io, content_dir: Io.Dir, input_format: InputFormat, out
     const list_gpa = out.list_gpa;
     const retain = out.retain;
 
-    var visited_dirs: std.ArrayList(FsIdentity) = .empty;
+    var visited_dirs: FsIdentitySet = .empty;
     defer visited_dirs.deinit(list_gpa);
 
     const root_st = try content_dir.stat(io);
-    try visited_dirs.append(list_gpa, FsIdentity.fromStat(root_st));
+    try visited_dirs.put(list_gpa, FsIdentity.fromStat(root_st), {});
 
     var walker = try content_dir.walkSelectively(list_gpa);
     defer walker.deinit();
@@ -141,10 +134,10 @@ pub fn scanDirFormat(io: Io, content_dir: Io.Dir, input_format: InputFormat, out
             if (st.kind != .directory) continue;
 
             const fs_id = FsIdentity.fromStat(st);
-            if (identitySeen(visited_dirs.items, fs_id)) {
+            if (visited_dirs.contains(fs_id)) {
                 return error.SymlinkCycle;
             }
-            try visited_dirs.append(list_gpa, fs_id);
+            try visited_dirs.put(list_gpa, fs_id, {});
             walker.enter(io, entry) catch |err| switch (err) {
                 error.SymLinkLoop => return error.SymlinkCycle,
                 else => return err,
@@ -516,6 +509,40 @@ test "scan: rejects directory symlink without following" {
     defer list.deinit();
 
     // Policy: reject on symlink encounter (do not follow into link/).
+    try testing.expectError(
+        error.SymlinkRejected,
+        scan(io, .{ .content_root = content_rel }, &list),
+    );
+}
+
+test "scan: rejects a directory symlink cycle before cycle detection" {
+    if (builtin.os.tag == .windows) return;
+
+    const gpa = testing.allocator;
+    const io = testing.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const content_rel = try tmpContentRoot(gpa, io, &tmp);
+    defer gpa.free(content_rel);
+
+    {
+        var content = try Io.Dir.cwd().openDir(io, content_rel, .{});
+        defer content.close(io);
+        content.symLink(io, ".", "loop", .{ .is_directory = true }) catch |err| switch (err) {
+            error.AccessDenied, error.PermissionDenied => return,
+            else => return err,
+        };
+    }
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var list = PageList.init(gpa, arena.allocator());
+    defer list.deinit();
+
+    // A symlink that points back to the root is still rejected as a symlink;
+    // it must not be reported as an inode cycle or followed.
     try testing.expectError(
         error.SymlinkRejected,
         scan(io, .{ .content_root = content_rel }, &list),
