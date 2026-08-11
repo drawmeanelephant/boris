@@ -42,6 +42,7 @@ const ParseError = error{
     UnknownFlag,
     MissingValue,
     InvalidPageCount,
+    InvalidOutDir,
 };
 
 fn parseOptions(args: []const []const u8) ParseError!Options {
@@ -78,6 +79,20 @@ fn parsePageCount(value: []const u8) ParseError!usize {
     return count;
 }
 
+/// The tool owns and deletes its `--out` directory, so the path must stay
+/// inside the current working tree: reject absolute paths and any `..`
+/// segment (or bare `.`/`..`) before anything is removed.
+fn validateOutDir(out_dir: []const u8) ParseError!void {
+    if (out_dir.len == 0) return error.InvalidOutDir;
+    if (out_dir[0] == '/') return error.InvalidOutDir;
+    if (std.mem.indexOfScalar(u8, out_dir, '\\') != null) return error.InvalidOutDir;
+    var segments = std.mem.splitScalar(u8, out_dir, '/');
+    while (segments.next()) |seg| {
+        if (seg.len == 0) return error.InvalidOutDir; // empty or trailing slash
+        if (std.mem.eql(u8, seg, ".") or std.mem.eql(u8, seg, "..")) return error.InvalidOutDir;
+    }
+}
+
 fn printUsage() void {
     std.debug.print(
         \\boris-testdata-generator — deterministic benchmark corpus generator
@@ -90,7 +105,8 @@ fn printUsage() void {
         \\  --out DIR       Output root owned by this tool (default: .generated)
         \\  -h, --help       Show this help and exit
         \\
-        \\The harness owns and removes only its --out directory.
+        \\The harness owns and removes only its --out directory, so --out must be
+        \\a relative path with no . or .. segments and no trailing slash.
         \\
     , .{});
 }
@@ -224,7 +240,10 @@ fn writeSatellite(io: Io, root: []const u8, page: usize, section: usize) !void {
 /// content pages written (always equals `page_count`).
 fn generateSite(io: Io, root: []const u8, page_count: usize) !usize {
     const cwd = Io.Dir.cwd();
-    cwd.deleteTree(io, root) catch {};
+    // A failed pre-cleanup must be visible to the caller. The path has already
+    // been lexically constrained, and hiding this error could leave a partial
+    // tree while reporting only a later, less useful create/write failure.
+    try cwd.deleteTree(io, root);
     errdefer cwd.deleteTree(io, root) catch {};
 
     const pa = std.heap.page_allocator;
@@ -289,6 +308,11 @@ pub fn main(init: std.process.Init) u8 {
         printUsage();
         return @intFromEnum(ExitCode.success);
     }
+    validateOutDir(options.out_dir) catch |err| {
+        std.debug.print("testdata-generator: unsafe --out path \"{s}\": {s}\n", .{ options.out_dir, @errorName(err) });
+        printUsage();
+        return @intFromEnum(ExitCode.usage);
+    };
 
     _ = generateSite(init.io, options.out_dir, options.page_count) catch |err| {
         std.debug.print("testdata-generator: failed: {s}\n", .{@errorName(err)});
@@ -350,6 +374,23 @@ test "parse options accepts large page counts and custom out dir" {
     try std.testing.expectError(error.InvalidPageCount, parseOptions(&.{ "testdata-generator", "--pages=0" }));
     try std.testing.expectError(error.MissingValue, parseOptions(&.{ "testdata-generator", "--pages" }));
     try std.testing.expectError(error.UnknownFlag, parseOptions(&.{ "testdata-generator", "--nope" }));
+}
+
+test "out dir must stay inside the working tree" {
+    const safe = [_][]const u8{ ".generated", ".tmp/corpus", "a/b/c" };
+    for (safe) |p| try validateOutDir(p);
+
+    const unsafe = [_][]const u8{
+        "/tmp/abs",
+        ".",
+        "..",
+        "../escape",
+        "a/../b",
+        ".tmp/",
+        "a\\b",
+        "",
+    };
+    for (unsafe) |p| try std.testing.expectError(error.InvalidOutDir, validateOutDir(p));
 }
 
 test "generation produces the exact requested page count" {
