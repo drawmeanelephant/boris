@@ -7,6 +7,7 @@ const std = @import("std");
 const Io = std.Io;
 const github_pages = @import("github_pages.zig");
 const identity = @import("identity.zig");
+const timings = @import("timings.zig");
 const pipeline = @import("pipeline.zig");
 const structured_out = @import("structured_out.zig");
 const target_mod = @import("target.zig");
@@ -24,6 +25,8 @@ pub const Options = struct {
     /// public URLs rooted at that identity; otherwise the legacy root-relative
     /// first-slice form is retained.
     publication_location: ?*const github_pages.Location = null,
+    /// Opt-in phase timing/counter recorder (`--timings`); null by default.
+    timings: ?*timings.Recorder = null,
 };
 
 pub const Result = struct {
@@ -229,6 +232,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !Result {
         .content_root = opts.content_root,
         .quiet = opts.quiet,
         .input_format = opts.input_format,
+        .timings = opts.timings,
     }) };
     errdefer result.deinit();
     if (!result.compile.ok) return result;

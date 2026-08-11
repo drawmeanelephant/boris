@@ -21,6 +21,7 @@ const textile = @import("textile.zig");
 const source_io = @import("source_io.zig");
 const doclink = @import("doclink.zig");
 const target_mod = @import("target.zig");
+const timings = @import("timings.zig");
 
 pub const schema_version = "0.2.0";
 pub const compiler_id = "boris/0.8.1";
@@ -34,6 +35,8 @@ pub const Options = struct {
     out_dir: []const u8 = ".boris",
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
+    /// Opt-in phase timing/counter recorder (`--timings`); null by default.
+    timings: ?*timings.Recorder = null,
 };
 
 /// Shared load options for IR and RAG (no output paths).
@@ -41,6 +44,8 @@ pub const CompileOptions = struct {
     content_root: []const u8 = "content",
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
+    /// Opt-in phase timing/counter recorder (`--timings`); null by default.
+    timings: ?*timings.Recorder = null,
 };
 
 pub const PageEntry = graph_mod.Node;
@@ -686,6 +691,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     var scan_list = page_mod.PageList.init(gpa, retain);
     defer scan_list.deinit();
 
+    if (options.timings) |t| t.start(.scan);
     scanner.scan(io, .{ .content_root = options.content_root, .input_format = options.input_format }, &scan_list) catch |err| switch (err) {
         error.ContentDirMissing => {
             try result.diagnostics.append(gpa, .{
@@ -745,6 +751,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         },
     };
 
+    if (options.timings) |t| t.stop(.scan);
     logCompile(options.quiet, "boris: roll  parsing {d} page(s)\n", .{scan_list.len()});
 
     // --- 2–3. Read, parse, promote durable metadata only --------------------
@@ -766,6 +773,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     defer content_dir.close(io);
 
     // Per-file scratch: freed after each promote so no parser slice can leak.
+    if (options.timings) |t| t.start(.parse);
     for (scan_list.items()) |disc| {
         const source = source_io.readPageAlloc(io, content_dir, disc.source_path, gpa) catch |err| {
             try result.diagnostics.append(gpa, .{
@@ -880,7 +888,9 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
 
         // Promote copies all durable strings into retain before source free.
         try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset);
+        if (options.timings) |t| t.bump(.page_reads, 1);
     }
+    if (options.timings) |t| t.stop(.parse);
 
     // --- 4. Build provisional graph nodes from PageDb -----------------------
     try result.pages.ensureTotalCapacity(gpa, db.len());
@@ -902,6 +912,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
 
     // --- 5. Validate page identity/topology, then direct dependencies -------
     logCompile(options.quiet, "boris: ignite validating graph\n", .{});
+    if (options.timings) |t| t.start(.graph_validate);
     try graph_mod.validate(gpa, retain, result.pages.items, &result.diagnostics);
     diag.sortDiagnostics(result.diagnostics.items);
 
@@ -911,10 +922,13 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         diag.sortDiagnostics(result.diagnostics.items);
         err_count = diag.countErrors(result.diagnostics.items);
     }
+    if (options.timings) |t| t.stop(.graph_validate);
     if (err_count == 0) {
+        if (options.timings) |t| t.start(.dependency_resolve);
         try resolveDependencies(io, gpa, retain, content_dir, options.input_format, &result);
         diag.sortDiagnostics(result.diagnostics.items);
         err_count = diag.countErrors(result.diagnostics.items);
+        if (options.timings) |t| t.stop(.dependency_resolve);
     }
     result.ok = err_count == 0;
     if (!result.ok) {
@@ -945,6 +959,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
         .content_root = options.content_root,
         .quiet = options.quiet,
         .input_format = options.input_format,
+        .timings = options.timings,
     });
     errdefer result.deinit();
 
@@ -1683,4 +1698,41 @@ test "golden expected IR shape for valid fixture" {
     try std.testing.expect(std.mem.indexOf(u8, graph, "\"bodyOffset\": 81") != null);
     try std.testing.expect(std.mem.indexOf(u8, graph, "\"bodyOffset\": 51") != null);
     try std.testing.expect(std.mem.indexOf(u8, graph, "\"tags\": [\"guide\", \"intro\"]") != null);
+}
+
+test "compile with a --timings recorder records core phases and counters" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try outRel(gpa, &tmp, "timings-out");
+    defer gpa.free(out);
+
+    var recorder = timings.Recorder.init(io);
+    var result = try run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/valid/content",
+        .out_dir = out,
+        .quiet = true,
+        .timings = &recorder,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+
+    // Core compiler phases ran on the IR path; HTML-only phases did not.
+    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.scan)] > 0);
+    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.parse)] > 0);
+    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.graph_validate)] > 0);
+    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.dependency_resolve)] > 0);
+    try std.testing.expect(recorder.phase_ns[@intFromEnum(timings.Phase.render)] == 0);
+    try std.testing.expectEqual(@as(u64, 3), recorder.counters[@intFromEnum(timings.Counter.page_reads)]);
+
+    // The report is well-formed JSON with only recorded phases.
+    const report = try recorder.renderJson(gpa, "ir");
+    defer gpa.free(report);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"format\": \"boris-timings\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"scan\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report, "\"render\"") == null);
+    var parsed = try std.json.parseFromSlice(std.json.Value, gpa, report, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("boris-timings", parsed.value.object.get("format").?.string);
 }

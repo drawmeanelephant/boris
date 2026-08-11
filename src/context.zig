@@ -13,6 +13,7 @@ const identity = @import("identity.zig");
 const export_scope = @import("export_scope.zig");
 const target_mod = @import("target.zig");
 const source_io = @import("source_io.zig");
+const timings = @import("timings.zig");
 
 pub const format = "boris-context";
 pub const schema_version: u32 = 1;
@@ -24,6 +25,8 @@ pub const ContextOptions = struct {
     input_format: identity.InputFormat = .markdown,
     scope: ?[]const u8 = null,
     split_size: ?usize = null,
+    /// Opt-in phase timing/counter recorder (`--timings`); null by default.
+    timings: ?*timings.Recorder = null,
 };
 
 pub const ContextResult = struct {
@@ -439,6 +442,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: ContextOptions) !ContextResult 
         .content_root = opts.content_root,
         .quiet = opts.quiet,
         .input_format = opts.input_format,
+        .timings = opts.timings,
     }) };
     errdefer result.deinit();
     if (!result.compile.ok) return result;
