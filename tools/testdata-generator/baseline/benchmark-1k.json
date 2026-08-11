@@ -1,17 +1,17 @@
 {
   "format": "boris-benchmark-baseline",
-  "schemaVersion": 1,
-  "pages": 1000,
   "jobs": 1,
   "note": "Initial deliberately generous baseline, measured 2026-08-11 with a ReleaseFast boris on Apple silicon (arm64-darwin) over the pinned 1k-page corpus. The gate multiplies each phase by BORIS_BENCHMARK_FACTOR (default 2.0) and fails when a measured phase exceeds that bound. Refresh when host-class or corpus assumptions change: run 'BORIS_BENCHMARK_UPDATE_BASELINE=1 zig build benchmark' and commit the rewritten file.",
+  "pages": 1000,
   "phases": {
-    "dependency_resolve": 490000000,
-    "fingerprint": 34000000,
-    "graph_validate": 495000000,
-    "heading_harvest": 750000,
-    "parse": 17500000,
-    "publish": 51000000,
-    "render": 355000000,
-    "scan": 19500000
-  }
+    "dependency_resolve": 46641000,
+    "fingerprint": 31487167,
+    "graph_validate": 3903958,
+    "heading_harvest": 767750,
+    "parse": 11929375,
+    "publish": 54331708,
+    "render": 349961791,
+    "scan": 1996334
+  },
+  "schemaVersion": 1
 }

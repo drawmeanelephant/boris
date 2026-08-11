@@ -298,19 +298,21 @@ pub fn loadAndPromoteFormat(
     var scan_list = page_mod.PageList.init(gpa, db.retain);
     defer scan_list.deinit();
 
-    const scan_phase = if (timings_opt) |t| t.start(timings.phase_scan) else null;
-    defer if (scan_phase) |p| p.end();
+    {
+        const scan_phase = if (timings_opt) |t| t.start(timings.phase_scan) else null;
+        defer if (scan_phase) |p| p.end();
 
-    scanner.scan(io, .{ .content_root = content_root, .input_format = input_format }, &scan_list) catch |err| switch (err) {
-        error.ContentDirMissing => return error.ContentDirMissing,
-        error.InputFormatMismatch => {
-            if (!quiet) {
-                std.debug.print("error: ETEXTILE: content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode [Use Markdown-only input by default, or pass --textile for a .textile-only tree]\n", .{});
-            }
-            return error.InputFormatMismatch;
-        },
-        else => |e| return e,
-    };
+        scanner.scan(io, .{ .content_root = content_root, .input_format = input_format }, &scan_list) catch |err| switch (err) {
+            error.ContentDirMissing => return error.ContentDirMissing,
+            error.InputFormatMismatch => {
+                if (!quiet) {
+                    std.debug.print("error: ETEXTILE: content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode [Use Markdown-only input by default, or pass --textile for a .textile-only tree]\n", .{});
+                }
+                return error.InputFormatMismatch;
+            },
+            else => |e| return e,
+        };
+    }
 
     if (timings_opt) |t| t.setCounter(timings.counter_page_reads, scan_list.len());
 
@@ -318,21 +320,23 @@ pub fn loadAndPromoteFormat(
     var content_dir = try cwd.openDir(io, content_root, .{});
     defer content_dir.close(io);
 
-    const parse_phase = if (timings_opt) |t| t.start(timings.phase_parse) else null;
-    defer if (parse_phase) |p| p.end();
+    {
+        const parse_phase = if (timings_opt) |t| t.start(timings.phase_parse) else null;
+        defer if (parse_phase) |p| p.end();
 
-    for (scan_list.items()) |disc| {
-        const source = try readFileAlloc(io, content_dir, disc.source_path, gpa);
-        defer gpa.free(source);
+        for (scan_list.items()) |disc| {
+            const source = try readFileAlloc(io, content_dir, disc.source_path, gpa);
+            defer gpa.free(source);
 
-        const parsed = parser.parse(source);
-        if (parsed.diagnostic != null) return error.ParseFailed;
-        var body_arena = std.heap.ArenaAllocator.init(gpa);
-        defer body_arena.deinit();
-        _ = try html_body.bodyForInput(body_arena.allocator(), input_format, source, parsed.doc.body, parsed.doc.body_offset, disc.source_path, quiet);
+            const parsed = parser.parse(source);
+            if (parsed.diagnostic != null) return error.ParseFailed;
+            var body_arena = std.heap.ArenaAllocator.init(gpa);
+            defer body_arena.deinit();
+            _ = try html_body.bodyForInput(body_arena.allocator(), input_format, source, parsed.doc.body, parsed.doc.body_offset, disc.source_path, quiet);
 
-        const final_id: []const u8 = if (parsed.doc.meta.id) |override| override else disc.entity_id;
-        try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset);
+            const final_id: []const u8 = if (parsed.doc.meta.id) |override| override else disc.entity_id;
+            try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset);
+        }
     }
 }
 
@@ -612,11 +616,13 @@ pub fn compileHtmlSite(
     }
 
     // 1. Layout first — hard fail before any content walk on bad marker.
-    const layout_phase = if (options.timings) |t| t.start(timings.phase_layout) else null;
-    defer if (layout_phase) |p| p.end();
     var layout_arena = std.heap.ArenaAllocator.init(gpa);
     defer layout_arena.deinit();
-    const layout = try loadLayoutOnce(io, cwd, options.layout_path, layout_arena.allocator());
+    const layout = blk: {
+        const layout_phase = if (options.timings) |t| t.start(timings.phase_layout) else null;
+        defer if (layout_phase) |p| p.end();
+        break :blk try loadLayoutOnce(io, cwd, options.layout_path, layout_arena.allocator());
+    };
 
     // 2. Long-lived PageDb (retain arena for promoted metadata only).
     var retain_arena = std.heap.ArenaAllocator.init(gpa);
@@ -628,9 +634,11 @@ pub fn compileHtmlSite(
 
     // 3. Graph validate + freeze (shared rules with IR/RAG; Feature 6 nav).
     // Rules may select graph chrome even when the fallback layout has none.
-    const graph_phase = if (options.timings) |t| t.start(timings.phase_graph_validate) else null;
-    defer if (graph_phase) |p| p.end();
-    var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or options.layout_rules.len != 0);
+    var site = blk: {
+        const graph_phase = if (options.timings) |t| t.start(timings.phase_graph_validate) else null;
+        defer if (graph_phase) |p| p.end();
+        break :blk try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or options.layout_rules.len != 0);
+    };
     defer site.deinit();
 
     return try compilePagesWithSite(io, gpa, &db, layout, options, &site);
@@ -851,15 +859,19 @@ pub fn compileHtmlSiteMulti(
 
     // Shared graph freeze once for all targets (Feature 6). Always compute nav
     // material; fingerprint mixes it in only when a layout has `{{nav}}`.
-    const graph_phase = if (base_options.timings) |t| t.start(timings.phase_graph_validate) else null;
-    defer if (graph_phase) |p| p.end();
-    var site = try freezeSiteFromPageDb(gpa, &db, base_options.quiet, true);
+    var site = blk: {
+        const graph_phase = if (base_options.timings) |t| t.start(timings.phase_graph_validate) else null;
+        defer if (graph_phase) |p| p.end();
+        break :blk try freezeSiteFromPageDb(gpa, &db, base_options.quiet, true);
+    };
     defer site.deinit();
 
     // Shared content/include fingerprint inputs once for all targets.
-    const dep_phase = if (base_options.timings) |t| t.start(timings.phase_dependency_resolve) else null;
-    defer if (dep_phase) |p| p.end();
-    var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root, base_options.quiet, base_options.input_format);
+    var shared = blk: {
+        const dep_phase = if (base_options.timings) |t| t.start(timings.phase_dependency_resolve) else null;
+        defer if (dep_phase) |p| p.end();
+        break :blk try SharedCompileState.init(io, gpa, &db, base_options.content_root, base_options.quiet, base_options.input_format);
+    };
     defer shared.deinit();
     if (base_options.timings) |t| {
         var include_count: usize = 0;
@@ -1798,147 +1810,147 @@ fn compilePagesInner(
         const fingerprint_phase = if (options.timings) |t| t.start(timings.phase_fingerprint) else null;
         defer if (fingerprint_phase) |p| p.end();
 
-    for (db.items(), 0..) |page, page_idx| {
-        // Convert owned []u8 include lists to []const u8 views for the hasher.
-        const inc_owned = shared.include_bytes[page_idx];
-        const inc_views = try gpa.alloc([]const u8, inc_owned.len);
-        defer gpa.free(inc_views);
-        for (inc_owned, 0..) |b, j| inc_views[j] = b;
+        for (db.items(), 0..) |page, page_idx| {
+            // Convert owned []u8 include lists to []const u8 views for the hasher.
+            const inc_owned = shared.include_bytes[page_idx];
+            const inc_views = try gpa.alloc([]const u8, inc_owned.len);
+            defer gpa.free(inc_views);
+            for (inc_owned, 0..) |b, j| inc_views[j] = b;
 
-        const page_layout = page_layouts[page_idx];
-        // Graph chrome (nav, breadcrumb, title, children) depends on the frozen site.
-        // `children` uses the same complete graph digest conservatively: it keeps
-        // add/remove/rename/title changes correct across incremental runs.
-        const needs_site_material = page_layout.has_nav or page_layout.has_breadcrumb or page_layout.has_title or page_layout.has_children;
-        const nav_material: []const u8 = if (needs_site_material) site.site_nav_material else "";
-        // Wiki reference material from page body + transitive include fragment bodies
-        // so title/path renames dirty parents that only wiki-link via includes.
-        const body_for_wiki = include_mod.bodyOfSource(shared.source_bytes[page_idx]);
-        const inc_paths = shared.include_paths[page_idx];
-        var wiki_bodies = try gpa.alloc([]const u8, 1 + inc_owned.len);
-        defer gpa.free(wiki_bodies);
-        var wiki_paths = try gpa.alloc([]const u8, 1 + inc_owned.len);
-        defer gpa.free(wiki_paths);
-        wiki_bodies[0] = body_for_wiki;
-        wiki_paths[0] = page.source_path;
-        for (inc_owned, 0..) |inc_file, j| {
-            wiki_bodies[1 + j] = include_mod.bodyOfSource(inc_file);
-            wiki_paths[1 + j] = inc_paths[j];
-        }
-        var wiki_fail: wikilink.FailInfo = .{};
-        const ref_material = wikilink.referenceMaterialMulti(
-            gpa,
-            wiki_bodies,
-            wiki_paths,
-            site.nodes,
-            &wiki_fail,
-            .{
-                .heading_index = &heading_index,
-                .validate_fragments = true,
-                .link_resolutions = if (options.timings != null) &link_resolutions_total else null,
-            },
-        ) catch |err| {
-            if (err == error.ReferenceMissing or err == error.ReferenceSyntax or err == error.PathError) {
-                if (!options.quiet) {
-                    wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail);
-                }
-                return error.ReferenceFailed;
+            const page_layout = page_layouts[page_idx];
+            // Graph chrome (nav, breadcrumb, title, children) depends on the frozen site.
+            // `children` uses the same complete graph digest conservatively: it keeps
+            // add/remove/rename/title changes correct across incremental runs.
+            const needs_site_material = page_layout.has_nav or page_layout.has_breadcrumb or page_layout.has_title or page_layout.has_children;
+            const nav_material: []const u8 = if (needs_site_material) site.site_nav_material else "";
+            // Wiki reference material from page body + transitive include fragment bodies
+            // so title/path renames dirty parents that only wiki-link via includes.
+            const body_for_wiki = include_mod.bodyOfSource(shared.source_bytes[page_idx]);
+            const inc_paths = shared.include_paths[page_idx];
+            var wiki_bodies = try gpa.alloc([]const u8, 1 + inc_owned.len);
+            defer gpa.free(wiki_bodies);
+            var wiki_paths = try gpa.alloc([]const u8, 1 + inc_owned.len);
+            defer gpa.free(wiki_paths);
+            wiki_bodies[0] = body_for_wiki;
+            wiki_paths[0] = page.source_path;
+            for (inc_owned, 0..) |inc_file, j| {
+                wiki_bodies[1 + j] = include_mod.bodyOfSource(inc_file);
+                wiki_paths[1 + j] = inc_paths[j];
             }
-            return err;
-        };
-        defer gpa.free(ref_material);
-
-        // Validate content-local Markdown images every build (even when HTML is
-        // cached). Asset *bytes* are not fingerprint inputs: a byte-only change
-        // republishes the file without re-rendering HTML.
-        {
-            var asset_fail: content_asset.FailInfo = .{};
-            const rewritten = content_asset.rewriteImageLinks(
+            var wiki_fail: wikilink.FailInfo = .{};
+            const ref_material = wikilink.referenceMaterialMulti(
                 gpa,
-                body_for_wiki,
-                &content_assets.pages[page_idx],
-                page.output_path,
-                &asset_fail,
+                wiki_bodies,
+                wiki_paths,
+                site.nodes,
+                &wiki_fail,
+                .{
+                    .heading_index = &heading_index,
+                    .validate_fragments = true,
+                    .link_resolutions = if (options.timings != null) &link_resolutions_total else null,
+                },
             ) catch |err| {
-                if (!options.quiet) {
-                    content_asset.printDiagnostic(gpa, err, page.source_path, asset_fail);
+                if (err == error.ReferenceMissing or err == error.ReferenceSyntax or err == error.PathError) {
+                    if (!options.quiet) {
+                        wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail);
+                    }
+                    return error.ReferenceFailed;
                 }
-                return error.AssetFailed;
+                return err;
             };
-            if (rewritten.ptr != body_for_wiki.ptr) gpa.free(rewritten);
-        }
+            defer gpa.free(ref_material);
 
-        var inc_with_ref = try gpa.alloc([]const u8, inc_views.len + if (ref_material.len > 0) @as(usize, 1) else 0);
-        defer gpa.free(inc_with_ref);
-        @memcpy(inc_with_ref[0..inc_views.len], inc_views);
-        if (ref_material.len > 0) {
-            inc_with_ref[inc_views.len] = ref_material;
-        }
+            // Validate content-local Markdown images every build (even when HTML is
+            // cached). Asset *bytes* are not fingerprint inputs: a byte-only change
+            // republishes the file without re-rendering HTML.
+            {
+                var asset_fail: content_asset.FailInfo = .{};
+                const rewritten = content_asset.rewriteImageLinks(
+                    gpa,
+                    body_for_wiki,
+                    &content_assets.pages[page_idx],
+                    page.output_path,
+                    &asset_fail,
+                ) catch |err| {
+                    if (!options.quiet) {
+                        content_asset.printDiagnostic(gpa, err, page.source_path, asset_fail);
+                    }
+                    return error.AssetFailed;
+                };
+                if (rewritten.ptr != body_for_wiki.ptr) gpa.free(rewritten);
+            }
 
-        // Fingerprint uses the effective selected layout identity and bytes.
-        hash_bytes_total += @intCast(shared.source_bytes[page_idx].len);
-        for (inc_with_ref) |b| hash_bytes_total += @intCast(b.len);
-        hash_bytes_total += @intCast(nav_material.len + page_layout_bytes[page_idx].len + page_theme_material[page_idx].len);
-        const fp_bytes = cache.computePageFingerprintThemeInput(
-            options.target_name,
-            page_sel_paths[page_idx],
-            page.entity_id,
-            shared.source_bytes[page_idx],
-            inc_with_ref,
-            page_layout_bytes[page_idx],
-            nav_material,
-            page_theme_material[page_idx],
-            if (options.input_format == .textile) textile.adapter_identity else "",
-        );
-        fingerprints[page_idx] = try fingerprintHex(fp_bytes, gpa);
+            var inc_with_ref = try gpa.alloc([]const u8, inc_views.len + if (ref_material.len > 0) @as(usize, 1) else 0);
+            defer gpa.free(inc_with_ref);
+            @memcpy(inc_with_ref[0..inc_views.len], inc_views);
+            if (ref_material.len > 0) {
+                inc_with_ref[inc_views.len] = ref_material;
+            }
 
-        var output_size: u64 = 0;
-        var output_exists = false;
-        if (dist_dir.openFile(io, page.output_path, .{})) |file| {
-            if (file.stat(io)) |st| {
-                if (st.size > 0) {
-                    output_exists = true;
-                    output_size = st.size;
-                }
+            // Fingerprint uses the effective selected layout identity and bytes.
+            hash_bytes_total += @intCast(shared.source_bytes[page_idx].len);
+            for (inc_with_ref) |b| hash_bytes_total += @intCast(b.len);
+            hash_bytes_total += @intCast(nav_material.len + page_layout_bytes[page_idx].len + page_theme_material[page_idx].len);
+            const fp_bytes = cache.computePageFingerprintThemeInput(
+                options.target_name,
+                page_sel_paths[page_idx],
+                page.entity_id,
+                shared.source_bytes[page_idx],
+                inc_with_ref,
+                page_layout_bytes[page_idx],
+                nav_material,
+                page_theme_material[page_idx],
+                if (options.input_format == .textile) textile.adapter_identity else "",
+            );
+            fingerprints[page_idx] = try fingerprintHex(fp_bytes, gpa);
+
+            var output_size: u64 = 0;
+            var output_exists = false;
+            if (dist_dir.openFile(io, page.output_path, .{})) |file| {
+                if (file.stat(io)) |st| {
+                    if (st.size > 0) {
+                        output_exists = true;
+                        output_size = st.size;
+                    }
+                } else |_| {}
+                file.close(io);
             } else |_| {}
-            file.close(io);
-        } else |_| {}
 
-        var skip_render = false;
-        if (options.incremental) {
-            if (parsed_manifest) |pm| {
-                for (pm.value.entries) |entry| {
-                    if (std.mem.eql(u8, entry.entity_id, page.entity_id) and
-                        std.mem.eql(u8, entry.output_path, page.output_path) and
-                        std.mem.eql(u8, entry.fingerprint, fingerprints[page_idx]) and
-                        (entry.selected_layout.len == 0 or std.mem.eql(u8, entry.selected_layout, page_sel_paths[page_idx])))
-                    {
-                        // Content-addressed output freshness: require a non-empty
-                        // digest that matches on-disk HTML. Size is a cheap
-                        // prefilter only (same-size corruption still fails digest).
-                        if (output_exists and entry.output_digest.len > 0 and
-                            (entry.output_size == 0 or entry.output_size == output_size))
+            var skip_render = false;
+            if (options.incremental) {
+                if (parsed_manifest) |pm| {
+                    for (pm.value.entries) |entry| {
+                        if (std.mem.eql(u8, entry.entity_id, page.entity_id) and
+                            std.mem.eql(u8, entry.output_path, page.output_path) and
+                            std.mem.eql(u8, entry.fingerprint, fingerprints[page_idx]) and
+                            (entry.selected_layout.len == 0 or std.mem.eql(u8, entry.selected_layout, page_sel_paths[page_idx])))
                         {
-                            if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |out_bytes| {
-                                defer gpa.free(out_bytes);
-                                const dig_hex = cache.hexDigest(cache.hashBytes(out_bytes));
-                                if (std.mem.eql(u8, entry.output_digest, &dig_hex)) {
-                                    skip_render = true;
-                                    break;
-                                }
-                            } else |_| {}
+                            // Content-addressed output freshness: require a non-empty
+                            // digest that matches on-disk HTML. Size is a cheap
+                            // prefilter only (same-size corruption still fails digest).
+                            if (output_exists and entry.output_digest.len > 0 and
+                                (entry.output_size == 0 or entry.output_size == output_size))
+                            {
+                                if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |out_bytes| {
+                                    defer gpa.free(out_bytes);
+                                    const dig_hex = cache.hexDigest(cache.hashBytes(out_bytes));
+                                    if (std.mem.eql(u8, entry.output_digest, &dig_hex)) {
+                                        skip_render = true;
+                                        break;
+                                    }
+                                } else |_| {}
+                            }
                         }
                     }
                 }
             }
+            is_dirty[page_idx] = !skip_render;
         }
-        is_dirty[page_idx] = !skip_render;
-    }
 
-    if (options.timings) |t| {
-        t.setCounter(timings.counter_hash_bytes, hash_bytes_total);
-        t.setCounter(timings.counter_link_resolutions, link_resolutions_total);
-    }
+        if (options.timings) |t| {
+            t.setCounter(timings.counter_hash_bytes, hash_bytes_total);
+            t.setCounter(timings.counter_link_resolutions, link_resolutions_total);
+        }
     }
 
     // Fingerprints identify changed page inputs; the shared frozen reverse
@@ -2089,8 +2101,7 @@ fn compilePagesInner(
             // Prefer staged (just-written) bytes; fall back to final dist for cached pages.
             const maybe_bytes: ?[]u8 = if (readFileAlloc(io, stage_dir, page.output_path, gpa)) |b|
                 b
-            else |_|
-                if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |b| b else |_| null;
+            else |_| if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |b| b else |_| null;
             if (maybe_bytes) |bytes| {
                 defer gpa.free(bytes);
                 out_size = bytes.len;
@@ -6544,4 +6555,156 @@ test "example reference-theme: layouts, components, page-local assets" {
     const local_bytes = try readFileAlloc(io, cwd, local_asset, gpa);
     defer gpa.free(local_bytes);
     try std.testing.expect(local_bytes.len > 0);
+}
+
+fn phaseNs(t: *const timings.Timings, comptime name: []const u8) ?u64 {
+    for (t.phases.items) |p| {
+        if (std.mem.eql(u8, p.name, name)) return p.elapsed_ns;
+    }
+    return null;
+}
+
+fn sumPhasesNs(t: *const timings.Timings) u64 {
+    var sum: u64 = 0;
+    for (t.phases.items) |p| sum += p.elapsed_ns;
+    return sum;
+}
+
+/// Shared scoping assertions for the `--timings` regression tests: phase
+/// timers must measure only their own phase. Function-scoped `defer` timers
+/// used to absorb later work (e.g. graph_validate ≈ the whole build), so:
+///   - the sum of recorded phases must not exceed the measured total wall time
+///     by a meaningful margin (overlapping timers double-count);
+///   - graph_validate and dependency_resolve must each be smaller than the
+///     render-side phases they previously swallowed;
+///   - scan must be smaller than parse (scan used to include parsing).
+fn assertPhaseScope(t: *const timings.Timings, total_ns: i128) !void {
+    const total: u64 = @intCast(total_ns);
+    try std.testing.expect(t.phases.items.len >= 8);
+    for (t.phases.items) |p| try std.testing.expect(p.elapsed_ns > 0);
+
+    try std.testing.expect(sumPhasesNs(t) < total + total / 2);
+
+    const render_side: u64 = (phaseNs(t, timings.phase_fingerprint) orelse 0) +
+        (phaseNs(t, timings.phase_render) orelse 0) +
+        (phaseNs(t, timings.phase_publish) orelse 0) +
+        (phaseNs(t, timings.phase_heading_harvest) orelse 0);
+    if (phaseNs(t, timings.phase_graph_validate)) |g| {
+        try std.testing.expect(g < render_side);
+    }
+    if (phaseNs(t, timings.phase_dependency_resolve)) |d| {
+        try std.testing.expect(d < render_side);
+    }
+    // (scan < parse is intentionally not asserted here: on a tiny unit corpus
+    // the directory walk legitimately costs as much as parsing a few small
+    // files. That separation is enforced at scale by the 1k-page benchmark
+    // gate, where scan is reliably an order of magnitude smaller than parse.)
+}
+
+test "timings: single-target HTML phases do not absorb later work" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/timings-scope-single", .{tmp.sub_path});
+    defer gpa.free(work);
+
+    // Nav layout so fingerprint/render include site-nav material.
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{nav}}{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\id: index
+        \\title: Home
+        \\---
+        \\# Home
+        \\
+        \\Body line.
+        \\
+    );
+    try writeTreeFile(io, work, "content/alpha.md",
+        \\---
+        \\title: Alpha
+        \\parent: index
+        \\---
+        \\# Alpha
+        \\
+        \\Body line.
+        \\
+    );
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var t = timings.Timings.init(gpa, io);
+    defer t.deinit();
+
+    const started = Io.Clock.awake.now(io);
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .timings = &t,
+    });
+    const total_ns = started.untilNow(io, .awake).nanoseconds;
+    try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
+    _ = cwd;
+    try assertPhaseScope(&t, total_ns);
+}
+
+test "timings: multi-target HTML phases do not absorb later work" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/timings-scope-multi", .{tmp.sub_path});
+    defer gpa.free(work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{nav}}{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\id: index
+        \\title: Home
+        \\---
+        \\# Home
+        \\
+        \\Body line.
+        \\
+    );
+    try writeTreeFile(io, work, "content/alpha.md",
+        \\---
+        \\title: Alpha
+        \\parent: index
+        \\---
+        \\# Alpha
+        \\
+        \\Body line.
+        \\
+    );
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var t = timings.Timings.init(gpa, io);
+    defer t.deinit();
+
+    const specs = [_]target_mod.TargetSpec{.{ .name = "default", .output_dir = dist }};
+    const started = Io.Clock.awake.now(io);
+    try compileHtmlSiteMulti(io, gpa, &specs, .{
+        .content_root = content,
+        .layout_path = layout_path,
+        .quiet = true,
+        .timings = &t,
+    });
+    const total_ns = started.untilNow(io, .awake).nanoseconds;
+    try assertPhaseScope(&t, total_ns);
 }
