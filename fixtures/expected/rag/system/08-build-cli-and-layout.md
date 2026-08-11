@@ -90,7 +90,7 @@ JSON IR is opt-in via `--out` / `--no-rag`.
 | `--incremental` | Content-addressed incremental HTML (HTML mode) |
 | `--watch` | Debounced HTML rebuild loop (implies `--incremental`; HTML mode) |
 | `--jobs N` / `-j N` | Bounded parallel HTML page workers `1–64` (HTML mode) |
-| `--quiet` | Suppress progress + diagnostic stderr (exit codes/artifacts unchanged) |
+| `--quiet` | Suppress progress + success stderr; errors always print (exit codes/artifacts unchanged) |
 | `-h`, `--help` | Print usage and exit `0` **without** scanning content |
 
 Malformed empty values for path options are usage errors (exit 2).

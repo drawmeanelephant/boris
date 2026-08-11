@@ -421,7 +421,7 @@ pub fn populateDependencyIndexFormat(
 
     for (nodes) |page| {
         const source = source_io.readPageAlloc(io, content_dir, page.source_path, gpa) catch |err| {
-            if (!quiet) std.debug.print("error: EIO: failed to read {s}: {s}\n", .{ page.source_path, @errorName(err) });
+            std.debug.print("error: EIO: failed to read {s}: {s}\n", .{ page.source_path, @errorName(err) });
             return err;
         };
         defer gpa.free(source);
@@ -445,13 +445,15 @@ pub fn populateDependencyIndexFormat(
 
     if (diag.countErrors(diagnostics.items) > 0) {
         var include_failure = false;
-        if (!quiet) {
-            diag.sortDiagnostics(diagnostics.items);
-            for (diagnostics.items) |d| {
-                const line = diag.formatText(d, gpa) catch continue;
-                defer gpa.free(line);
-                std.debug.print("{s}\n", .{line});
-            }
+        // Errors always reach stderr. `--quiet` suppresses progress, success
+        // output, and sub-error diagnostics — never the explanation for a
+        // nonzero exit.
+        diag.sortDiagnostics(diagnostics.items);
+        for (diagnostics.items) |d| {
+            if (quiet and d.severity != .error_) continue;
+            const line = diag.formatText(d, gpa) catch continue;
+            defer gpa.free(line);
+            std.debug.print("{s}\n", .{line});
         }
         for (diagnostics.items) |d| switch (d.code) {
             .EINCLUDESYNTAX, .EINCLUDEMISSING, .EINCLUDECYCLE, .EINVALIDPATH => include_failure = true,
@@ -1007,8 +1009,13 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
 }
 
 /// Print diagnostics to stderr (text form). Does not change artifacts.
-pub fn printDiagnostics(gpa: std.mem.Allocator, diags: []const diag.Diagnostic) !void {
+///
+/// `quiet` (`--quiet`) drops warnings and info, which are chatter. Errors are
+/// always printed: a nonzero exit must explain itself even when the caller
+/// asked for silence.
+pub fn printDiagnostics(gpa: std.mem.Allocator, diags: []const diag.Diagnostic, quiet: bool) !void {
     for (diags) |d| {
+        if (quiet and d.severity != .error_) continue;
         const line = try diag.formatText(d, gpa);
         defer gpa.free(line);
         std.debug.print("{s}\n", .{line});

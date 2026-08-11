@@ -211,7 +211,25 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
     if (sections.items.len > 1 and sections.items[0].heading.items.len == 0 and
         sections.items[0].prose.items.len == 0 and sections.items[0].code.items.len == 0)
     {
-        sections.items = sections.items[1..];
+        // Drop the empty leading section by shifting the tail down, NOT by
+        // advancing the slice. `sections.items = sections.items[1..]` moves the
+        // ArrayList's base pointer, so the deferred `sections.deinit(a)` above
+        // frees one element past the allocation — libmalloc aborts with SIGTRAP
+        // (exit 133) after the HTML is already written, leaving an empty output
+        // directory and no diagnostic. It also skipped element 0's four child
+        // ArrayLists, leaking them. Debug builds tolerate the invalid free, so
+        // the unit tests never saw it while CI ships ReleaseSafe.
+        var first = sections.items[0];
+        first.heading.deinit(a);
+        first.fragment.deinit(a);
+        first.prose.deinit(a);
+        first.code.deinit(a);
+        std.mem.copyForwards(
+            MutableSection,
+            sections.items[0 .. sections.items.len - 1],
+            sections.items[1..],
+        );
+        sections.items.len -= 1;
     }
     var final = try a.alloc(Section, sections.items.len);
     errdefer a.free(final);

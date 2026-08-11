@@ -55,7 +55,8 @@ Options:
   --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
   --timings           Print a machine-readable phase timing/counter JSON report to stdout
                       (opt-in; default output, diagnostics, and exit codes unchanged)
-  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
+  --quiet             Suppress progress + success stderr; errors always print
+                      (exit codes/artifacts unchanged)
   --format human|json  Analysis output format for check/impact (default human)
   --report PATH        Write an analysis report instead of stdout
   --fail-on-unreferenced Make check fail when it reports unreferenced pages

@@ -20,7 +20,6 @@ const doclink = @import("doclink.zig");
 
 pub const Options = struct {
     input_format: identity.InputFormat = .markdown,
-    quiet: bool = true,
     nodes: []const graph_mod.Node = &.{},
     heading_index: ?*const wikilink.HeadingIndex = null,
     /// When non-null, rewrite Markdown image destinations into this page's
@@ -95,6 +94,9 @@ fn printParserDiagnostic(gpa: std.mem.Allocator, source_path: []const u8, parsed
 
 /// Convert a parsed page body when the whole tree explicitly uses Textile.
 /// Returned bytes are views into the supplied Whiteboard allocator.
+///
+/// The Textile adaptation diagnostic is fatal, so it is never gated on
+/// `--quiet`: that flag suppresses progress and success output only.
 pub fn bodyForInput(
     allocator: std.mem.Allocator,
     input_format: identity.InputFormat,
@@ -102,19 +104,16 @@ pub fn bodyForInput(
     body: []const u8,
     body_offset: usize,
     source_path: []const u8,
-    quiet: bool,
 ) ![]const u8 {
     if (input_format == .markdown) return body;
     const adapted = try textile.toMarkdown(body, allocator);
     if (adapted.diagnostic) |td| {
-        if (!quiet) {
-            std.debug.print("error: ETEXTILE: {s}:{d}:{d}: {s} [Use only the bounded Textile compatibility subset]\n", .{
-                source_path,
-                sourceLineAt(source, body_offset) + td.line - 1,
-                td.column,
-                td.message,
-            });
-        }
+        std.debug.print("error: ETEXTILE: {s}:{d}:{d}: {s} [Use only the bounded Textile compatibility subset]\n", .{
+            source_path,
+            sourceLineAt(source, body_offset) + td.line - 1,
+            td.column,
+            td.message,
+        });
         return error.TextileFailed;
     }
     return adapted.markdown;
@@ -139,10 +138,10 @@ pub fn renderSource(
     const arena = doc_arena.allocator();
     const parsed = parser.parse(source);
     if (parsed.diagnostic) |pd| {
-        if (!options.quiet) try printParserDiagnostic(gpa, source_path, pd);
+        try printParserDiagnostic(gpa, source_path, pd);
         return error.ParseFailed;
     }
-    const body = try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path, options.quiet);
+    const body = try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path);
 
     // Graph-backed Markdown documentation links → canonical page URLs
     // (pre-Apex). This runs before include expansion so source-relative links
@@ -168,7 +167,7 @@ pub fn renderSource(
         source_path,
         &include_fail,
     ) catch |err| {
-        if (!options.quiet) include_mod.printDiagnostic(gpa, err, source_path, include_fail);
+        include_mod.printDiagnostic(gpa, err, source_path, include_fail);
         return error.IncludeFailed;
     };
 
@@ -177,7 +176,7 @@ pub fn renderSource(
         .heading_index = options.heading_index,
         .validate_fragments = options.heading_index != null,
     }) catch |err| {
-        if (!options.quiet) wikilink.printDiagnostic(gpa, err, source_path, wiki_fail);
+        wikilink.printDiagnostic(gpa, err, source_path, wiki_fail);
         return error.ReferenceFailed;
     };
 
@@ -185,14 +184,14 @@ pub fn renderSource(
     const with_assets = if (options.page_assets) |bundle| blk: {
         var asset_fail: content_asset.FailInfo = .{ .line_base = fail_line_base };
         break :blk content_asset.rewriteImageLinks(arena, with_wiki, bundle, output_path, &asset_fail) catch |err| {
-            if (!options.quiet) content_asset.printDiagnostic(gpa, err, source_path, asset_fail);
+            content_asset.printDiagnostic(gpa, err, source_path, asset_fail);
             return error.AssetFailed;
         };
     } else with_wiki;
 
     const tok = try aside.tokenizeBody(with_assets, arena);
     if (tok.hasErrors()) {
-        if (!options.quiet) try printComponentDiagnostics(gpa, source, parsed.doc.body_offset, source_path, tok.diagnostics);
+        try printComponentDiagnostics(gpa, source, parsed.doc.body_offset, source_path, tok.diagnostics);
         return error.ComponentFailed;
     }
 

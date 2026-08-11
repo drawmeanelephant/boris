@@ -211,6 +211,9 @@ pub fn validateSemanticRelations(
     nodes: []const Node,
     diagnostics: *std.ArrayList(diag.Diagnostic),
 ) !void {
+    var by_id = try buildIdIndex(list_gpa, nodes);
+    defer by_id.deinit(list_gpa);
+
     for (nodes) |node| {
         for (node.semantic_relations, 0..) |relation, relation_index| {
             if (std.mem.eql(u8, node.id, relation.target)) {
@@ -226,7 +229,7 @@ pub fn validateSemanticRelations(
                 });
                 continue;
             }
-            if (findIndexById(nodes, relation.target) == null) {
+            if (by_id.get(relation.target) == null) {
                 try diagnostics.append(list_gpa, .{
                     .severity = .error_,
                     .code = .ERELATIONMISSING,
@@ -728,6 +731,86 @@ test "validate detects duplicate ids before parent resolution" {
     try expectCodeCount(diags.items, .EDUPLICATEID, 1);
     // First-wins map: beta's parent lookup may still report missing.
     try std.testing.expect(diag.countErrors(diags.items) >= 1);
+}
+
+test "validateSemanticRelations preserves diagnostic order and text" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+
+    const source_relations = [_]page_mod.SemanticRelation{
+        .{ .kind = .{ .value = "relates_to" }, .target = "source" },
+        .{ .kind = .{ .value = "depends_on" }, .target = "missing" },
+        .{ .kind = .{ .value = "supersedes" }, .target = "target" },
+        .{ .kind = .{ .value = "supersedes" }, .target = "target" },
+    };
+    var nodes = [_]Node{
+        .{ .id = "source", .source_path = "source.md", .semantic_relations = &source_relations },
+        .{ .id = "target", .source_path = "target.md" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+
+    try validateSemanticRelations(gpa, retain, &nodes, &diags);
+    try std.testing.expectEqual(@as(usize, 3), diags.items.len);
+    try std.testing.expectEqual(diag.Code.ERELATIONSELF, diags.items[0].code);
+    try std.testing.expectEqualStrings("semantic relation relates_to targets its source page", diags.items[0].message);
+    try std.testing.expectEqual(diag.Code.ERELATIONMISSING, diags.items[1].code);
+    try std.testing.expectEqualStrings("semantic relation depends_on targets missing page \"missing\"", diags.items[1].message);
+    try std.testing.expectEqual(diag.Code.ERELATIONDUPLICATE, diags.items[2].code);
+    try std.testing.expectEqualStrings("duplicate semantic relation supersedes -> \"target\"", diags.items[2].message);
+}
+
+test "validateSemanticRelations handles a relation-dense page set" {
+    const gpa = std.testing.allocator;
+    const page_count: usize = 1024;
+    const relations_per_page: usize = 16;
+
+    const ids = try gpa.alloc([]u8, page_count);
+    defer {
+        for (ids) |id| if (id.len > 0) gpa.free(id);
+        gpa.free(ids);
+    }
+    for (ids) |*id| id.* = &.{};
+
+    var relation_pages = try gpa.alloc([]page_mod.SemanticRelation, page_count);
+    defer {
+        for (relation_pages) |relations| if (relations.len > 0) gpa.free(relations);
+        gpa.free(relation_pages);
+    }
+    for (relation_pages) |*relations| relations.* = &.{};
+
+    const nodes = try gpa.alloc(Node, page_count);
+    defer gpa.free(nodes);
+
+    for (ids, 0..) |*id, i| {
+        id.* = try std.fmt.allocPrint(gpa, "page-{d:0>4}", .{i});
+    }
+    for (nodes, 0..) |*node, i| {
+        const relations = try gpa.alloc(page_mod.SemanticRelation, relations_per_page);
+        relation_pages[i] = relations;
+        for (relations, 0..) |*relation, offset| {
+            const target = (i + offset + 1) % page_count;
+            relation.* = .{
+                .kind = .{ .value = "relates_to" },
+                .target = ids[target],
+            };
+        }
+        node.* = .{
+            .id = ids[i],
+            .source_path = ids[i],
+            .semantic_relations = relations,
+        };
+    }
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+
+    try validateSemanticRelations(gpa, arena.allocator(), nodes, &diags);
+    try std.testing.expectEqual(@as(usize, 0), diags.items.len);
 }
 
 test "freeze assigns indices by id order" {

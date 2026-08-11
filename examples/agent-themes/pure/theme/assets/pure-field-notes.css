@@ -36,7 +36,7 @@ a:hover { color: var(--blue); }
 .site-header { border-top: 4px solid var(--blue); border-bottom: 1px solid var(--line); background: var(--paper); }
 .site-header--home { border-top-width: 7px; }
 .site-header__inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; max-width: var(--measure); margin: 0 auto; padding: 1rem 1.25rem; }
-.brand { display: inline-flex; align-items: center; gap: .65rem; color: var(--ink); font-weight: 700; text-decoration: none; letter-spacing: .01em; }
+.brand { display: inline-flex; align-items: center; gap: .65rem; margin: 0; color: var(--ink); font-weight: 700; text-decoration: none; letter-spacing: .01em; }
 .brand__mark { display: inline-grid; place-items: center; width: 2.1rem; height: 2.1rem; border: 2px solid var(--blue); color: var(--blue); font: 700 .7rem/1 var(--mono); letter-spacing: -.05em; }
 .brand__text { white-space: nowrap; }
 .breadcrumb { margin: 0; color: var(--muted); font-size: .875rem; }
