@@ -51,6 +51,9 @@ pub const Options = struct {
     /// When present, root-relative and same-origin absolute URLs are checked
     /// against the declared publication origin/base path before route audit.
     publication_location: ?*const publication_location.Location = null,
+    /// When set, counts each local (non-ignored) reference resolved by the
+    /// audit — the audit's per-reference hot path. Never used for decisions.
+    resolution_counter: ?*u64 = null,
 };
 
 /// Attributes whose value is a single URL. `srcset` is deliberately excluded:
@@ -270,6 +273,9 @@ fn auditOne(
     }
 
     if (shouldSkipTarget(route_target, has_effective_base)) return;
+    // Every reference that reaches resolution is a local reference actually
+    // resolved by the audit — the per-reference hot path (observational only).
+    if (opts.resolution_counter) |counter| counter.* += 1;
     const resolution = try resolveWithinRoot(gpa, resolution_source_path, route_target);
     switch (resolution) {
         .escapes_root => try appendFinding(gpa, findings, .EROUTEESCAPE, source_path, target, line, attribute),
@@ -480,7 +486,7 @@ test "references inside code, pre, and comments are documentation, not links" {
         "<!-- <a href=\"../commented.png\">x</a> -->" ++
         "<script>var s = 'href=\"../script.png\"';</script>" ++
         "<a data-href=\"../not-a-link.png\">safe</a>";
-    try auditDocument(gpa, &intended, "index.html", html, &findings);
+    try auditDocumentWithOptions(gpa, &intended, "index.html", html, .{}, &findings);
     try std.testing.expectEqual(@as(usize, 0), findings.items.len);
 }
 
@@ -500,8 +506,7 @@ test "published references are audited across quoting and attribute variants" {
         "<a HREF=\"gone.html\">x</a>" ++ // uppercase, missing
         "<img src=../outside.png>" ++ // unquoted, escapes root
         "<a href=\"../docs/evidence/x.png\">x</a>"; // escapes root
-    try auditDocument(gpa, &intended, "index.html", html, &findings);
-
+    try auditDocumentWithOptions(gpa, &intended, "index.html", html, .{}, &findings);
     try std.testing.expectEqual(@as(usize, 4), findings.items.len);
     try std.testing.expectEqual(diag.Code.EROUTEMISSING, findings.items[0].code);
     try std.testing.expectEqual(diag.Code.EROUTEMISSING, findings.items[1].code);
@@ -520,11 +525,11 @@ test "a local Markdown destination without a published route is rejected" {
 
     // The pre-Apex rewriter may leave a missing `.md` target literal, but the
     // publication audit still rejects the route the output site cannot serve.
-    try auditDocument(gpa, &intended, "guides/start.html", "<a href=\"../reference.md?raw=true#anchor\">x</a>", &findings);
+    try auditDocumentWithOptions(gpa, &intended, "guides/start.html", "<a href=\"../reference.md?raw=true#anchor\">x</a>", .{}, &findings);
     try std.testing.expectEqual(@as(usize, 1), findings.items.len);
     try std.testing.expectEqual(diag.Code.EROUTEMISSING, findings.items[0].code);
     // A missing `.html` sibling is caught by the same manifest check.
-    try auditDocument(gpa, &intended, "guides/start.html", "<a href=\"../reference.html\">x</a>", &findings);
+    try auditDocumentWithOptions(gpa, &intended, "guides/start.html", "<a href=\"../reference.html\">x</a>", .{}, &findings);
     try std.testing.expectEqual(@as(usize, 2), findings.items.len);
     try std.testing.expectEqual(diag.Code.EROUTEMISSING, findings.items[1].code);
 }
@@ -588,7 +593,7 @@ test "a file present in the live tree but not intended to survive is not a valid
     var findings: std.ArrayList(Finding) = .empty;
     defer freeFindings(gpa, &findings);
 
-    try auditDocument(gpa, &intended, "index.html", "<a href=\"old.html\">stale</a>", &findings);
+    try auditDocumentWithOptions(gpa, &intended, "index.html", "<a href=\"old.html\">stale</a>", .{}, &findings);
     try std.testing.expectEqual(@as(usize, 1), findings.items.len);
     try std.testing.expectEqual(diag.Code.EROUTEMISSING, findings.items[0].code);
 }
@@ -699,4 +704,25 @@ test "ambiguous microdata url is not assumed to be the document URL" {
     const html = "<meta itemprop=\"url\" content=\"https://other.example/entity\">";
     try auditDocumentWithOptions(gpa, &intended, "index.html", html, .{ .publication_location = &location }, &findings);
     try std.testing.expectEqual(@as(usize, 0), findings.items.len);
+}
+
+test "resolution counter counts resolved local references" {
+    const gpa = std.testing.allocator;
+    var intended: std.StringHashMapUnmanaged(void) = .{};
+    defer intended.deinit(gpa);
+    try intended.put(gpa, "index.html", {});
+    try intended.put(gpa, "real.html", {});
+
+    var findings: std.ArrayList(Finding) = .empty;
+    defer freeFindings(gpa, &findings);
+
+    var resolved: u64 = 0;
+    const html =
+        "<a href=\"real.html\">ok</a>" ++
+        "<a href=\"https://example.com/x\">external</a>" ++
+        "<a href=\"#top\">fragment</a>" ++
+        "<a href=\"missing.html\">x</a>";
+    try auditDocumentWithOptions(gpa, &intended, "index.html", html, .{ .resolution_counter = &resolved }, &findings);
+    // External and same-document fragment targets are skipped, not resolved.
+    try std.testing.expectEqual(@as(u64, 2), resolved);
 }

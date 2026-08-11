@@ -38,6 +38,7 @@ const graph_mod = @import("graph.zig");
 const identity = @import("identity.zig");
 const target_mod = @import("target.zig");
 const source_io = @import("source_io.zig");
+const timings = @import("timings.zig");
 const pipeline = @import("pipeline.zig");
 const rag_emit = @import("rag_emit.zig");
 const textile = @import("textile.zig");
@@ -81,6 +82,8 @@ pub const RagOptions = struct {
     /// Accepted for compatibility with the pre-v2 scoped-bundle workflow;
     /// working packs are bundle-style by construction, so this is a no-op.
     bundles_only: bool = false,
+    /// Opt-in phase timing/counter recorder (`--timings`); null by default.
+    timings: ?*timings.Recorder = null,
 };
 
 pub const RagStats = struct {
@@ -992,6 +995,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
         .content_root = opts.content_root,
         .quiet = opts.quiet,
         .input_format = opts.input_format,
+        .timings = opts.timings,
     });
     errdefer {
         result.compile.deinit();

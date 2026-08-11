@@ -22,6 +22,7 @@ const intelligence = @import("intelligence.zig");
 const json_out = @import("json_out.zig");
 const publication_profile = @import("publication_profile.zig");
 const publication_plan = @import("publication_plan.zig");
+const timings = @import("timings.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const Options = cli.Options;
@@ -48,7 +49,7 @@ const ProdRunner = struct {
     }
 
     pub fn run(self: *const @This(), opts: Options) ExitCode {
-        return runPipeline(self.io, self.gpa, opts);
+        return runPipelineWithReport(self.io, self.gpa, opts);
     }
 };
 
@@ -74,19 +75,59 @@ fn mapPathError(err: anyerror, quiet: bool) ?ExitCode {
 /// - validation / content errors → 1
 /// - usage errors are handled before this (exit 2)
 /// - I/O / system errors → 3
+///
+/// Runs without printing the `--timings` report: tests call this so the
+/// machine-readable JSON never touches the process stdout (which is the test
+/// runner's protocol channel under `zig build test`). The CLI entry point
+/// uses `runPipelineWithReport` for the identical behavior plus the report.
 pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
-    if (opts.command == .plan) return runPublicationPlan(io, gpa, opts);
-    if (opts.command == .validate) return runValidate(io, gpa, opts);
-    if (opts.command == .check or opts.command == .impact) return runIntelligence(io, gpa, opts);
-    switch (opts.mode) {
-        .rag => return runRag(io, gpa, opts),
-        .context => return runContext(io, gpa, opts),
-        .llms => return runLlms(io, gpa, opts),
-        .rss => return runRss(io, gpa, opts),
-        .html => return runHtml(io, gpa, opts),
-        .ir => {},
+    return runPipelineTimed(io, gpa, opts, false).code;
+}
+
+/// CLI entry point: like `runPipeline`, but also emits the `--timings` JSON
+/// report to stdout after the run finishes.
+pub fn runPipelineWithReport(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    return runPipelineTimed(io, gpa, opts, true).code;
+}
+
+fn runPipelineTimed(io: Io, gpa: std.mem.Allocator, opts: Options, print_report: bool) struct { code: ExitCode } {
+    var recorder: ?timings.Recorder = null;
+    if (opts.timings) recorder = timings.Recorder.init(io);
+    const recorder_ptr: ?*timings.Recorder = if (recorder) |*r| r else null;
+    defer {
+        if (recorder) |*r| {
+            r.stopAll();
+            if (print_report) {
+                const label: []const u8 = switch (opts.command) {
+                    .validate, .check, .impact, .plan => @tagName(opts.command),
+                    else => @tagName(opts.mode),
+                };
+                printTimingsReport(io, gpa, r, label) catch {};
+            }
+        }
     }
 
+    const code: ExitCode = if (opts.command == .plan)
+        runPublicationPlan(io, gpa, opts, recorder_ptr)
+    else if (opts.command == .validate)
+        runValidate(io, gpa, opts, recorder_ptr)
+    else if (opts.command == .check or opts.command == .impact)
+        runIntelligence(io, gpa, opts, recorder_ptr)
+    else switch (opts.mode) {
+        .rag => runRag(io, gpa, opts, recorder_ptr),
+        .context => runContext(io, gpa, opts, recorder_ptr),
+        .llms => runLlms(io, gpa, opts, recorder_ptr),
+        .rss => runRss(io, gpa, opts, recorder_ptr),
+        .html => runHtml(io, gpa, opts, recorder_ptr),
+        .ir => s: {
+            break :s runPipelineIr(io, gpa, opts, recorder_ptr);
+        },
+    };
+
+    return .{ .code = code };
+}
+
+fn runPipelineIr(io: Io, gpa: std.mem.Allocator, opts: Options, recorder_ptr: ?*timings.Recorder) ExitCode {
     const out_dir = opts.out_dir orelse default_out;
 
     var result = pipeline.run(io, gpa, .{
@@ -94,6 +135,7 @@ pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .out_dir = out_dir,
         .quiet = opts.quiet,
         .input_format = opts.input_format,
+        .timings = recorder_ptr,
     }) catch |err| {
         if (mapPathError(err, opts.quiet)) |code| return code;
         if (!opts.quiet) {
@@ -122,9 +164,21 @@ pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     };
 }
 
+/// Write the `--timings` JSON report to stdout. Errors are swallowed: the
+/// report is observational and must never change the exit code or artifacts.
+fn printTimingsReport(io: Io, gpa: std.mem.Allocator, recorder: *const timings.Recorder, label: []const u8) !void {
+    const bytes = try recorder.renderJson(gpa, label);
+    defer gpa.free(bytes);
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+    try stdout_writer.interface.writeAll(bytes);
+    try stdout_writer.interface.flush();
+}
+
 /// Read, normalize, validate, and declare one explicitly selected profile.
 /// This path intentionally stops before content discovery or any publisher.
-pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
+    _ = recorder;
     const profile_path = opts.profile_path orelse return .usage;
     const profile_bytes = Io.Dir.cwd().readFileAlloc(
         io,
@@ -194,7 +248,7 @@ fn reportPublicationPlanConfigError(quiet: bool, err: anyerror) ExitCode {
 }
 
 /// Deterministic provenance-rich AI context export (same compile + graph validation as IR/RAG).
-pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     const context_dir = opts.context_dir orelse "context";
 
     var result = context.run(io, gpa, .{
@@ -204,6 +258,7 @@ pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .input_format = opts.input_format,
         .scope = opts.scope,
         .split_size = opts.split_size,
+        .timings = recorder,
     }) catch |err| switch (err) {
         error.EmptyTargetDirectory,
         error.TargetOutputCollision,
@@ -246,7 +301,7 @@ pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 }
 
 /// Deterministic community `llms.txt` export using the shared validated graph.
-pub fn runLlms(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+pub fn runLlms(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     const out_path = opts.llms_path orelse "llms.txt";
     var result = llms.run(io, gpa, .{
         .content_root = opts.input_dir,
@@ -254,6 +309,7 @@ pub fn runLlms(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .quiet = opts.quiet,
         .input_format = opts.input_format,
         .publication_location = if (opts.publication_location) |*location| location else null,
+        .timings = recorder,
     }) catch |err| {
         if (mapPathError(err, opts.quiet)) |code| return code;
         if (!opts.quiet) std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
@@ -274,7 +330,7 @@ pub fn runLlms(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 }
 
 /// Deterministic RSS 2.0 export using the shared validated graph.
-pub fn runRss(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+pub fn runRss(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     const out_path = opts.rss_path orelse "rss.xml";
     var result = rss.run(io, gpa, .{
         .content_root = opts.input_dir,
@@ -286,6 +342,7 @@ pub fn runRss(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .quiet = opts.quiet,
         .input_format = opts.input_format,
         .publication_location = if (opts.publication_location) |*location| location else null,
+        .timings = recorder,
     }) catch |err| {
         if (mapPathError(err, opts.quiet)) |code| return code;
         switch (err) {
@@ -323,11 +380,12 @@ pub fn runRss(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 
 /// Read-only graph analysis. This intentionally calls pipeline.compile rather
 /// than pipeline.run, so no IR/RAG/HTML artifacts or cache manifests publish.
-pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     var result = pipeline.compile(io, gpa, .{
         .content_root = opts.input_dir,
         .quiet = true,
         .input_format = opts.input_format,
+        .timings = recorder,
     }) catch |err| {
         if (!opts.quiet) std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
         return .io_error;
@@ -427,7 +485,7 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 /// This enters the same in-process compiler coordinator as a normal HTML build
 /// and returns at its explicit prepublication boundary. It never invokes a
 /// build in a temporary directory and never emits an authority/report file.
-pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     const layout_path = opts.html_layout;
     compile.validateHtmlSiteMulti(io, gpa, opts.targets.items, .{
         .content_root = opts.input_dir,
@@ -437,6 +495,7 @@ pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .sitemap_path = opts.sitemap_path,
         .site_url = opts.site_url,
         .publication_location = if (opts.publication_location) |*location| location else null,
+        .timings = recorder,
     }) catch |err| {
         return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
     };
@@ -626,7 +685,7 @@ fn renderAnalysisJson(
 }
 
 /// Optional deterministic RAG export (same compile + graph.validate as IR).
-pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     const rag_dir = opts.rag_dir orelse default_rag;
 
     var result = rag.run(io, gpa, .{
@@ -639,6 +698,7 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .split_size = opts.split_size,
         .bundles_only = opts.bundles_only,
         .complete = opts.complete,
+        .timings = recorder,
     }) catch |err| switch (err) {
         error.EmptyTargetDirectory,
         error.TargetOutputCollision,
@@ -714,7 +774,7 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 }
 
 /// HTML site render via Apex C-ABI + whiteboard arena (default CLI path).
-pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     const html_dir = opts.html_dir orelse default_html;
 
     const layout_path = opts.html_layout;
@@ -806,6 +866,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             .sitemap_path = opts.sitemap_path,
             .site_url = opts.site_url,
             .publication_location = if (opts.publication_location) |*location| location else null,
+            .timings = recorder,
         }) catch |err| {
             return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
         };
@@ -827,6 +888,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             .sitemap_path = opts.sitemap_path,
             .site_url = opts.site_url,
             .publication_location = if (opts.publication_location) |*location| location else null,
+            .timings = recorder,
         }) catch |err| {
             return mapHtmlError(err, opts.quiet, &.{}, layout_path);
         };
@@ -1234,6 +1296,33 @@ test "runPipeline: HTML fixture exits 0" {
     defer gpa.free(index_path);
     var file = try cwd.openFile(io, index_path, .{});
     defer file.close(io);
+}
+
+test "runPipeline: --timings leaves exit codes and artifacts unchanged" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/cli-timings", .{tmp.sub_path});
+    defer gpa.free(out);
+
+    const code = runPipeline(io, gpa, .{
+        .mode = .ir,
+        .input_dir = "docs/contracts/fixtures/valid/content",
+        .out_dir = out,
+        .quiet = true,
+        .timings = true,
+    });
+    // Same exit code as the non-timings run of the same fixture.
+    try std.testing.expectEqual(ExitCode.success, code);
+
+    // Published artifacts match the non-timings expectation.
+    const cwd = Io.Dir.cwd();
+    const manifest_path = try std.fmt.allocPrint(gpa, "{s}/manifest.json", .{out});
+    defer gpa.free(manifest_path);
+    const manifest_bytes = try cwd.readFileAlloc(io, manifest_path, gpa, .unlimited);
+    defer gpa.free(manifest_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, manifest_bytes, "\"pageCount\": 3") != null);
 }
 
 test "runPipeline: HTML missing content root exits 3" {

@@ -5,6 +5,7 @@ const Io = std.Io;
 const graph = @import("graph.zig");
 const github_pages = @import("github_pages.zig");
 const identity = @import("identity.zig");
+const timings = @import("timings.zig");
 const pipeline = @import("pipeline.zig");
 const publication_location = @import("publication_location.zig");
 const rss_date = @import("rss_date.zig");
@@ -26,6 +27,8 @@ pub const Options = struct {
     /// Optional normalized Pages identity. When present, every RSS public URL
     /// is required to use its exact origin and base path.
     publication_location: ?*const github_pages.Location = null,
+    /// Opt-in phase timing/counter recorder (`--timings`); null by default.
+    timings: ?*timings.Recorder = null,
 };
 
 pub const Result = struct {
@@ -193,6 +196,7 @@ pub fn run(io: Io, allocator: std.mem.Allocator, options: Options) !Result {
         .content_root = options.content_root,
         .quiet = options.quiet,
         .input_format = options.input_format,
+        .timings = options.timings,
     }) };
     errdefer result.deinit();
     if (!result.compile.ok) return result;

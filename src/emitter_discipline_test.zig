@@ -213,6 +213,14 @@ const modules = [_]Module{
     .{ .name = "target.zig", .class = .other },
     .{ .name = "textile.zig", .class = .other },
     .{ .name = "theme.zig", .class = .other },
+    .{
+        .name = "timings.zig",
+        .class = .{ .emitter = .{
+            .encoder = .json_out,
+            .note = "opt-in --timings phase report; durations/counters delegate to json_out",
+        } },
+        .source = @embedFile("timings.zig"),
+    },
     .{ .name = "unicode_policy.zig", .class = .other },
     .{ .name = "watch.zig", .class = .other },
     .{ .name = "wikilink.zig", .class = .other },

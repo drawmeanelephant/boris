@@ -69,6 +69,7 @@ const publication_checks = @import("publication_checks.zig");
 const publication_claims = @import("publication_claims.zig");
 const publication_touches = @import("publication_touches.zig");
 const publication_proof_pack = @import("publication_proof_pack.zig");
+const timings = @import("timings.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -166,7 +167,9 @@ pub fn freezeSiteFromPageDb(
     db: *PageDb,
     quiet: bool,
     include_nav_material: bool,
+    recorder: ?*timings.Recorder,
 ) !FrozenSite {
+    if (recorder) |t| t.start(.graph_validate);
     const pages = db.items();
     const nodes = try gpa.alloc(graph_mod.Node, pages.len);
     errdefer gpa.free(nodes);
@@ -228,6 +231,7 @@ pub fn freezeSiteFromPageDb(
     if (include_nav_material) {
         material = try html_nav.siteNavMaterial(gpa, g.nodes);
     }
+    if (recorder) |t| t.stop(.graph_validate);
 
     return .{
         .gpa = gpa,
@@ -338,6 +342,8 @@ pub const CompileOptions = struct {
     /// is written here instead of the process stderr, so tests can assert the
     /// line is emitted even under `--quiet`.
     publication_proof_pack_failure_writer: ?*Io.Writer = null,
+    /// Opt-in phase timing/counter recorder (`--timings`); null by default.
+    timings: ?*timings.Recorder = null,
 };
 
 fn validateSitemapConfig(gpa: std.mem.Allocator, options: CompileOptions) !void {
@@ -436,7 +442,7 @@ pub fn loadAndPromote(
     db: *PageDb,
     content_root: []const u8,
 ) !void {
-    return loadAndPromoteFormat(io, gpa, db, content_root, .markdown, true);
+    return loadAndPromoteFormat(io, gpa, db, content_root, .markdown, true, null);
 }
 
 pub fn loadAndPromoteFormat(
@@ -446,10 +452,12 @@ pub fn loadAndPromoteFormat(
     content_root: []const u8,
     input_format: identity.InputFormat,
     quiet: bool,
+    recorder: ?*timings.Recorder,
 ) !void {
     var scan_list = page_mod.PageList.init(gpa, db.retain);
     defer scan_list.deinit();
 
+    if (recorder) |t| t.start(.scan);
     scanner.scan(io, .{ .content_root = content_root, .input_format = input_format }, &scan_list) catch |err| switch (err) {
         error.ContentDirMissing => return error.ContentDirMissing,
         error.InputFormatMismatch => {
@@ -461,13 +469,17 @@ pub fn loadAndPromoteFormat(
         else => |e| return e,
     };
 
+    if (recorder) |t| t.stop(.scan);
+
     const cwd = Io.Dir.cwd();
     var content_dir = try cwd.openDir(io, content_root, .{});
     defer content_dir.close(io);
 
+    if (recorder) |t| t.start(.parse);
     for (scan_list.items()) |disc| {
         const source = try source_io.readPageAlloc(io, content_dir, disc.source_path, gpa);
         defer gpa.free(source);
+        if (recorder) |t| t.bump(.page_reads, 1);
 
         const parsed = parser.parse(source);
         if (parsed.diagnostic) |pd| {
@@ -493,6 +505,7 @@ pub fn loadAndPromoteFormat(
         const final_id: []const u8 = if (parsed.doc.meta.id) |override| override else disc.entity_id;
         try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset);
     }
+    if (recorder) |t| t.stop(.parse);
 }
 
 /// Optional rendering inputs for `renderAndPublishPage`. Defaults keep the
@@ -754,11 +767,11 @@ pub fn compileHtmlSite(
     var db = PageDb.init(gpa, retain_arena.allocator());
     defer db.deinit();
 
-    try loadAndPromoteFormat(io, gpa, &db, options.content_root, options.input_format, options.quiet);
+    try loadAndPromoteFormat(io, gpa, &db, options.content_root, options.input_format, options.quiet, options.timings);
 
     // 3. Graph validate + freeze (shared rules with IR/RAG; Feature 6 nav).
     // Rules may select graph chrome even when the fallback layout has none.
-    var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0);
+    var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings);
     defer site.deinit();
 
     return try compilePagesWithSite(io, gpa, &db, layout, options, &site);
@@ -802,6 +815,7 @@ const SharedCompileState = struct {
         content_root: []const u8,
         quiet: bool,
         input_format: identity.InputFormat,
+        recorder: ?*timings.Recorder,
     ) !SharedCompileState {
         const cwd = Io.Dir.cwd();
         _ = cwd;
@@ -826,6 +840,7 @@ const SharedCompileState = struct {
             const src = try source_io.readPageAlloc(io, content_dir, p.source_path, gpa);
             source_bytes[i] = src;
             sources_filled = i + 1;
+            if (recorder) |t| t.bump(.page_reads, 1);
         }
 
         // F8.3: use the IR 0.2 resolver for direct parent/include/reference
@@ -844,7 +859,9 @@ const SharedCompileState = struct {
                 .body_offset = p.body_offset,
             };
         }
+        if (recorder) |t| t.start(.dependency_resolve);
         try pipeline.populateDependencyIndexFormat(io, gpa, inc_alloc, content_root, dep_nodes, quiet, input_format, &dep_index);
+        if (recorder) |t| t.stop(.dependency_resolve);
 
         const include_bytes = try gpa.alloc([][]u8, db.len());
         const include_paths = try gpa.alloc([][]u8, db.len());
@@ -886,6 +903,7 @@ const SharedCompileState = struct {
             while (j < transit_includes.items.len) : (j += 1) {
                 list[j] = try readFileAlloc(io, content_dir, transit_includes.items[j], gpa);
                 path_list[j] = try gpa.dupe(u8, transit_includes.items[j]);
+                if (recorder) |t| t.bump(.include_reads, 1);
             }
             include_bytes[page_idx] = list;
             include_paths[page_idx] = path_list;
@@ -989,15 +1007,15 @@ pub fn compileHtmlSiteMulti(
     var db = PageDb.init(gpa, retain_arena.allocator());
     defer db.deinit();
 
-    try loadAndPromoteFormat(io, gpa, &db, base_options.content_root, base_options.input_format, base_options.quiet);
+    try loadAndPromoteFormat(io, gpa, &db, base_options.content_root, base_options.input_format, base_options.quiet, base_options.timings);
 
     // Shared graph freeze once for all targets (Feature 6). Always compute nav
     // material; fingerprint mixes it in only when a layout has `{{nav}}`.
-    var site = try freezeSiteFromPageDb(gpa, &db, base_options.quiet, true);
+    var site = try freezeSiteFromPageDb(gpa, &db, base_options.quiet, true, base_options.timings);
     defer site.deinit();
 
     // Shared content/include fingerprint inputs once for all targets.
-    var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root, base_options.quiet, base_options.input_format);
+    var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root, base_options.quiet, base_options.input_format, base_options.timings);
     defer shared.deinit();
 
     // Preflight layout selection for every target/page before any target publishes
@@ -1247,7 +1265,7 @@ pub fn compilePages(
     // Content-only layouts can compile without graph chrome; still freeze so
     // invalid parents fail loud on the HTML path.
     // Rules may select graph chrome even when the fallback layout has none.
-    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0);
+    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings);
     defer site.deinit();
     return compilePagesWithSite(io, gpa, db, layout, options, &site);
 }
@@ -1277,7 +1295,7 @@ pub fn compilePagesWithShared(
     layout_bytes: []const u8,
 ) !CompileStats {
     // Rules may select graph chrome even when the fallback layout has none.
-    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0);
+    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings);
     defer site.deinit();
     return compilePagesInner(io, gpa, db, layout, options, shared, layout_bytes, &site);
 }
@@ -1464,6 +1482,7 @@ fn buildSiteHeadingIndex(
     quiet: bool,
     input_format: identity.InputFormat,
     prior_harvest: ?*const ParsedHeadingHarvest,
+    recorder: ?*timings.Recorder,
 ) !struct { wikilink.HeadingIndex, HeadingHarvestSnapshot } {
     var index: wikilink.HeadingIndex = .{};
     errdefer index.deinit(gpa);
@@ -1527,6 +1546,7 @@ fn buildSiteHeadingIndex(
         // Cache hit: reuse prior ids (no Apex).
         if (prior_map.get(page.entity_id)) |prior| {
             if (std.mem.eql(u8, prior.harvest_key, &key_hex)) {
+                if (recorder) |t| t.bump(.fast_path_hits, 1);
                 try index.putOwned(gpa, page.entity_id, prior.ids);
                 const ent_id = try gpa.dupe(u8, page.entity_id);
                 errdefer gpa.free(ent_id);
@@ -1550,6 +1570,7 @@ fn buildSiteHeadingIndex(
         _ = doc_arena.reset(.free_all);
         const arena = doc_arena.allocator();
         const source = try source_io.readPageAlloc(io, content_dir, page.source_path, arena);
+        if (recorder) |t| t.bump(.page_reads, 1);
         const html = try html_body.renderSource(io, gpa, content_dir, &doc_arena, source, page.source_path, page.output_path, .{
             .input_format = input_format,
             .quiet = quiet,
@@ -1815,6 +1836,7 @@ fn validatePrepublicationTarget(
     theme_bundle: *const theme_mod.ThemeBundle,
     content_assets: *const content_asset.SiteAssetInventory,
 ) !CompileStats {
+    if (options.timings) |t| t.start(.heading_harvest);
     const heading_built = try buildSiteHeadingIndex(
         io,
         gpa,
@@ -1825,7 +1847,9 @@ fn validatePrepublicationTarget(
         options.quiet,
         options.input_format,
         null,
+        options.timings,
     );
+    if (options.timings) |t| t.stop(.heading_harvest);
     var heading_index = heading_built[0];
     defer heading_index.deinit(gpa);
     var heading_snapshot = heading_built[1];
@@ -1835,6 +1859,7 @@ fn validatePrepublicationTarget(
     var doc_arena = std.heap.ArenaAllocator.init(gpa);
     defer doc_arena.deinit();
 
+    if (options.timings) |t| t.start(.render);
     for (db.items(), 0..) |*page, page_index| {
         defer {
             _ = doc_arena.reset(.free_all);
@@ -1857,10 +1882,12 @@ fn validatePrepublicationTarget(
                 .page_assets = &content_assets.pages[page_index],
             },
         );
+        if (options.timings) |t| t.bump(.page_reads, 1);
         stats.pages_attempted += 1;
         const cap = doc_arena.queryCapacity();
         if (cap > stats.peak_whiteboard_capacity) stats.peak_whiteboard_capacity = cap;
     }
+    if (options.timings) |t| t.stop(.render);
 
     // Sitemap configuration is source/target validity, but sitemap publication
     // is not. Render its deterministic bytes in memory to exercise the exact
@@ -2076,7 +2103,7 @@ fn compilePagesInner(
     var local_shared: ?SharedCompileState = null;
     defer if (local_shared) |*s| s.deinit();
     const shared: *const SharedCompileState = if (shared_opt) |s| s else blk: {
-        local_shared = try SharedCompileState.init(io, gpa, db, options.content_root, options.quiet, options.input_format);
+        local_shared = try SharedCompileState.init(io, gpa, db, options.content_root, options.quiet, options.input_format, options.timings);
         break :blk &(local_shared.?);
     };
 
@@ -2171,6 +2198,7 @@ fn compilePagesInner(
     // only pages that are fragment targets are rendered for the index).
     // Incremental: reuse harvest-cache hits so no-op builds skip Apex (#58).
     const prior_harvest: ?*const ParsedHeadingHarvest = if (parsed_heading_harvest) |*ph| &ph.value else null;
+    if (options.timings) |t| t.start(.heading_harvest);
     const heading_built = try buildSiteHeadingIndex(
         io,
         gpa,
@@ -2181,7 +2209,9 @@ fn compilePagesInner(
         options.quiet,
         options.input_format,
         prior_harvest,
+        options.timings,
     );
+    if (options.timings) |t| t.stop(.heading_harvest);
     var heading_index = heading_built[0];
     defer heading_index.deinit(gpa);
     var heading_snapshot = heading_built[1];
@@ -2209,6 +2239,8 @@ fn compilePagesInner(
     const is_dirty = try gpa.alloc(bool, db.len());
     @memset(is_dirty, false);
     defer gpa.free(is_dirty);
+
+    if (options.timings) |t| t.start(.fingerprint);
 
     for (db.items(), 0..) |page, page_idx| {
         // Convert owned []u8 include lists to []const u8 views for the hasher.
@@ -2319,6 +2351,16 @@ fn compilePagesInner(
             if (options.input_format == .textile) textile.adapter_identity else "",
         );
         fingerprints[page_idx] = try fingerprintHex(fp_bytes, gpa);
+        if (options.timings) |t| {
+            // Payload bytes actually fed to the fingerprint hasher.
+            var hashed: u64 = shared.source_bytes[page_idx].len + page_layout_bytes[page_idx].len +
+                page_theme_material[page_idx].len + page_sel_paths[page_idx].len + page.entity_id.len +
+                cache.CACHE_FORMAT_VERSION.len + options.target_name.len;
+            for (inc_with_ref) |b| hashed += b.len;
+            if (nav_material.len > 0) hashed += nav_material.len;
+            if (options.input_format == .textile) hashed += textile.adapter_identity.len;
+            t.bump(.hash_bytes, hashed);
+        }
 
         var output_size: u64 = 0;
         var output_exists = false;
@@ -2361,7 +2403,11 @@ fn compilePagesInner(
             }
         }
         is_dirty[page_idx] = !skip_render;
+        if (skip_render) {
+            if (options.timings) |t| t.bump(.fast_path_hits, 1);
+        }
     }
+    if (options.timings) |t| t.stop(.fingerprint);
 
     // Fingerprints identify changed page inputs; the shared frozen reverse
     // dependency story expands those seeds to parent/reference dependents.
@@ -2373,6 +2419,7 @@ fn compilePagesInner(
     // Compile loop — dirty pages write into staging only
     var stats: CompileStats = .{};
 
+    if (options.timings) |t| t.start(.render);
     if (options.jobs > 1) {
         var ctx = ParallelContext{
             .gpa = gpa,
@@ -2479,6 +2526,15 @@ fn compilePagesInner(
             if (cap > stats.peak_whiteboard_capacity) stats.peak_whiteboard_capacity = cap;
         }
     }
+    if (options.timings) |t| {
+        t.stop(.render);
+        // Each rendered (dirty) page is read once by renderAndPublishPage.
+        var rendered_reads: u64 = 0;
+        for (is_dirty) |dirty| {
+            if (dirty) rendered_reads += 1;
+        }
+        if (rendered_reads > 0) t.bump(.page_reads, rendered_reads);
+    }
 
     // Write cache manifest into staging (committed with the rest of the target).
     if (options.incremental) {
@@ -2559,7 +2615,9 @@ fn compilePagesInner(
     var live_page_paths = try gpa.alloc([]const u8, db.len());
     defer gpa.free(live_page_paths);
     for (db.items(), 0..) |page, page_idx| live_page_paths[page_idx] = page.output_path;
+    if (options.timings) |t| t.start(.search);
     try search_index.writeOverlay(io, gpa, stage_dir, dist_dir, live_page_paths, false);
+    if (options.timings) |t| t.stop(.search);
 
     var sitemap_page_paths: std.ArrayList([]const u8) = .empty;
     defer sitemap_page_paths.deinit(gpa);
@@ -2603,9 +2661,13 @@ fn compilePagesInner(
 
         var findings: std.ArrayList(link_audit.Finding) = .empty;
         defer link_audit.freeFindings(gpa, &findings);
-        try link_audit.audit(io, gpa, stage_dir, dist_dir, live_page_paths, audit_assets.items, .{
+        var link_audit_opts = link_audit.Options{
             .publication_location = options.publication_location,
-        }, &findings);
+        };
+        if (options.timings) |t| link_audit_opts.resolution_counter = t.counterPtr(.link_resolutions);
+        if (options.timings) |t| t.start(.link_audit);
+        try link_audit.audit(io, gpa, stage_dir, dist_dir, live_page_paths, audit_assets.items, link_audit_opts, &findings);
+        if (options.timings) |t| t.stop(.link_audit);
         if (findings.items.len != 0) {
             for (findings.items) |f| {
                 std.debug.print("error: {s}: {s}:{d}: {s}=\"{s}\" {s}\n", .{
@@ -2679,6 +2741,7 @@ fn compilePagesInner(
         });
     }
     if (options.test_fail_before_inventory_write) return error.TestInjectedInventoryWriteFailure;
+    if (options.timings) |t| t.start(.inventory);
     try artifact_inventory.writeOverlay(
         io,
         gpa,
@@ -2687,6 +2750,7 @@ fn compilePagesInner(
         options.target_name,
         inventory_specs.items,
     );
+    if (options.timings) |t| t.stop(.inventory);
 
     // Move an obsolete compiler-owned sitemap aside immediately before commit.
     // A failed commit restores it; a successful commit removes the backup with
@@ -2804,6 +2868,7 @@ fn compilePagesInner(
     // The payload transaction, including artifacts.json as its deferred last
     // file, is complete before checks read the target. Checks are a separate
     // atomic report publication and never participate in that transaction.
+    if (options.timings) |t| t.start(.checks);
     publication_checks.writeAfterCommit(io, gpa, dist_dir, options.target_name, .{
         .test_fail_execution = options.test_fail_publication_checks,
         .test_fail_write = options.test_fail_publication_checks_write,
@@ -2813,11 +2878,13 @@ fn compilePagesInner(
         writePublicationChecksFailure(&stderr.file_writer.interface, options.target_name, err) catch {};
         return error.PublicationChecksFailed;
     };
+    if (options.timings) |t| t.stop(.checks);
 
     // Claims are derived from the exact committed artifacts and checks bytes.
     // A derivation, stale-binding, parser, I/O, or atomic-write failure keeps
     // the committed target, inventory, and checks and leaves any prior claims
     // report untouched; the diagnostic is emitted even under --quiet.
+    if (options.timings) |t| t.start(.claims);
     publication_claims.writeAfterChecks(io, gpa, dist_dir, options.target_name, .{
         .test_fail_execution = options.test_fail_publication_claims,
         .test_fail_write = options.test_fail_publication_claims_write,
@@ -2831,12 +2898,14 @@ fn compilePagesInner(
         }
         return error.PublicationClaimsFailed;
     };
+    if (options.timings) |t| t.stop(.claims);
 
     // The Touch Atlas is derived from the exact committed artifacts, checks,
     // and claims bytes. A derivation, stale-binding, parser, I/O, or
     // atomic-write failure keeps the committed target, inventory, checks, and
     // claims and leaves any prior touches report untouched; the diagnostic is
     // emitted even under --quiet.
+    if (options.timings) |t| t.start(.touches);
     publication_touches.writeAfterClaims(io, gpa, dist_dir, options.target_name, .{
         .test_fail_execution = options.test_fail_publication_touches,
         .test_fail_write = options.test_fail_publication_touches_write,
@@ -2850,6 +2919,7 @@ fn compilePagesInner(
         }
         return error.PublicationTouchesFailed;
     };
+    if (options.timings) |t| t.stop(.touches);
 
     // The Proof Pack is the final presentation layer, derived exclusively
     // from the exact committed artifacts, checks, claims, and touches bytes.
@@ -2857,6 +2927,7 @@ fn compilePagesInner(
     // failure keeps the committed target and all four evidence reports and
     // restores (or explicitly reports) the prior presentation pair; the
     // diagnostic is emitted even under --quiet.
+    if (options.timings) |t| t.start(.proof_pack);
     publication_proof_pack.writeAfterTouches(io, gpa, dist_dir, options.target_name, .{
         .test_fail_execution = options.test_fail_publication_proof_pack,
         .test_fail_json_tmp_write = options.test_fail_proof_pack_json_tmp_write,
@@ -2876,6 +2947,7 @@ fn compilePagesInner(
         }
         return error.PublicationProofPackFailed;
     };
+    if (options.timings) |t| t.stop(.proof_pack);
 
     return stats;
 }
@@ -3225,6 +3297,52 @@ test "valid layout output equals prefix + rendered html + suffix" {
     const expected = try std.fmt.allocPrint(gpa, "{s}{s}{s}", .{ layout.prefix, body_html.bytes, layout.suffix });
     defer gpa.free(expected);
     try std.testing.expectEqualStrings(expected, got);
+}
+
+test "--timings recorder observes HTML publication phases" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-timings-html", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md", "# Timed\n\nPage **body**.\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var recorder = timings.Recorder.init(io);
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .timings = &recorder,
+    });
+
+    // Every HTML publication phase ran and recorded elapsed time.
+    const phases = [_]timings.Phase{
+        .scan,            .parse,        .graph_validate, .dependency_resolve,
+        .heading_harvest, .fingerprint,  .render,         .search,
+        .link_audit,      .inventory,    .checks,         .claims,
+        .touches,         .proof_pack,
+    };
+    for (phases) |phase| {
+        try std.testing.expect(
+            recorder.phase_ns[@intFromEnum(phase)] > 0,
+        );
+    }
+    // One page: load/parse read, shared-state read, render read.
+    try std.testing.expect(recorder.counters[@intFromEnum(timings.Counter.page_reads)] >= 3);
+    try std.testing.expect(recorder.counters[@intFromEnum(timings.Counter.hash_bytes)] > 0);
 }
 
 test "render failure: whiteboard resets and no final output published" {

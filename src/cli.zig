@@ -50,6 +50,9 @@ pub const Options = struct {
     /// When true, print help and exit successfully (no pipeline).
     help: bool = false,
     quiet: bool = false,
+    /// When true, emit a machine-readable phase timing/counter report
+    /// (`--timings`). Off unless requested; never changes artifacts or codes.
+    timings: bool = false,
     command: Command = .build,
     /// Explicit profile selected by `plan --profile PATH`.
     profile_path: ?[]const u8 = null,
@@ -170,6 +173,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var complete = false;
 
     var saw_quiet = false;
+    var saw_timings = false;
     var saw_input = false;
     var saw_out = false;
     var saw_rag = false;
@@ -269,6 +273,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             return .{
                 .help = true,
                 .quiet = quiet,
+                .timings = saw_timings,
                 .mode = .ir,
                 .input_dir = input_dir,
                 .out_dir = out_dir,
@@ -287,6 +292,12 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             if (saw_quiet) return error.DuplicateFlag;
             saw_quiet = true;
             quiet = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--timings")) {
+            if (saw_timings) return error.DuplicateFlag;
+            saw_timings = true;
             continue;
         }
 
@@ -678,6 +689,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         return .{
             .help = false,
             .quiet = quiet,
+            .timings = saw_timings,
             .command = .plan,
             .profile_path = profile_path,
             .profile_input_override = if (saw_input) input_dir else null,
@@ -875,6 +887,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .ir => .{
             .help = false,
             .quiet = quiet,
+            .timings = saw_timings,
             .mode = .ir,
             .input_dir = input_dir,
             .out_dir = out_dir,
@@ -894,6 +907,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .rag => .{
             .help = false,
             .quiet = quiet,
+            .timings = saw_timings,
             .mode = .rag,
             .input_dir = input_dir,
             .out_dir = null,
@@ -911,6 +925,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .context => .{
             .help = false,
             .quiet = quiet,
+            .timings = saw_timings,
             .mode = .context,
             .input_dir = input_dir,
             .out_dir = null,
@@ -931,6 +946,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .llms => .{
             .help = false,
             .quiet = quiet,
+            .timings = saw_timings,
             .mode = .llms,
             .input_dir = input_dir,
             .out_dir = null,
@@ -951,6 +967,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .rss => .{
             .help = false,
             .quiet = quiet,
+            .timings = saw_timings,
             .mode = .rss,
             .input_dir = input_dir,
             .out_dir = null,
@@ -977,6 +994,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .html => .{
             .help = false,
             .quiet = quiet,
+            .timings = saw_timings,
             .mode = .html,
             .input_dir = input_dir,
             .out_dir = null,
@@ -1099,6 +1117,8 @@ pub fn printUsage() void {
         \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
         \\  --watch             Compatibility flag; same as the watch command
         \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
+        \\  --timings           Print a machine-readable phase timing/counter JSON report to stdout
+        \\                      (opt-in; default output, diagnostics, and exit codes unchanged)
         \\  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
         \\  --format human|json  Analysis output format for check/impact (default human)
         \\  --report PATH        Write an analysis report instead of stdout
@@ -1218,6 +1238,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
         const a = args[i];
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) continue;
         if (std.mem.eql(u8, a, "--quiet") or
+            std.mem.eql(u8, a, "--timings") or
             std.mem.eql(u8, a, "--rag") or
             std.mem.eql(u8, a, "--no-rag") or
             std.mem.eql(u8, a, "--html") or
@@ -1396,6 +1417,29 @@ test "parse: validate selects HTML configuration without publication controls" {
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--jobs", "2" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--format", "json" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--report", "validation.json" }));
+}
+
+test "parse: --timings is opt-in and mode-agnostic" {
+    var o = try parseOptions(std.testing.allocator, &.{ "boris", "--timings" });
+    defer o.deinit(std.testing.allocator);
+    try expect(o.timings);
+    try expectEqual(Mode.html, o.mode);
+
+    var ir = try parseOptions(std.testing.allocator, &.{ "boris", "--out", ".boris", "--timings" });
+    defer ir.deinit(std.testing.allocator);
+    try expect(ir.timings);
+    try expectEqual(Mode.ir, ir.mode);
+
+    var rag = try parseOptions(std.testing.allocator, &.{ "boris", "--rag", "--quiet", "--timings" });
+    defer rag.deinit(std.testing.allocator);
+    try expect(rag.timings);
+    try expect(rag.quiet);
+
+    var default = try parseOptions(std.testing.allocator, &.{"boris"});
+    defer default.deinit(std.testing.allocator);
+    try expect(!default.timings);
+
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "--timings", "--timings" }));
 }
 
 test "parse: explicit build and watch commands are stable aliases" {
