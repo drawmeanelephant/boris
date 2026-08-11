@@ -145,6 +145,28 @@ fn edgeEql(a: DependencyEdge, b: DependencyEdge) bool {
         std.mem.eql(u8, a.kind, b.kind);
 }
 
+const ReverseEndpointContext = struct {
+    pub fn hash(_: @This(), endpoint: Endpoint) u64 {
+        var hasher = std.hash.Wyhash.init(0);
+        hasher.update(&[_]u8{@intCast(@intFromEnum(endpoint.type))});
+        hasher.update(endpoint.value);
+        return hasher.final();
+    }
+
+    pub fn eql(_: @This(), a: Endpoint, b: Endpoint) bool {
+        return endpointEql(a, b);
+    }
+};
+
+const ReverseBucket = struct {
+    target: Endpoint,
+    incoming_edges: std.ArrayList(u32),
+};
+
+fn reverseBucketLess(_: void, a: ReverseBucket, b: ReverseBucket) bool {
+    return endpointLess(a.target, b.target);
+}
+
 fn findPage(nodes: []const PageEntry, id: []const u8) bool {
     for (nodes) |node| {
         if (std.mem.eql(u8, node.id, id)) return true;
@@ -488,34 +510,42 @@ fn freezeDependencyIndex(gpa: std.mem.Allocator, result: *Result) !void {
     }
     result.edges.items.len = write;
 
-    var targets: std.ArrayList(Endpoint) = .empty;
-    defer targets.deinit(gpa);
-    for (result.edges.items) |edge| try targets.append(gpa, edge.to);
-    std.mem.sort(Endpoint, targets.items, {}, struct {
-        fn less(_: void, a: Endpoint, b: Endpoint) bool {
-            return endpointLess(a, b);
-        }
-    }.less);
-    write = 0;
-    for (targets.items) |target| {
-        if (write == 0 or !endpointEql(targets.items[write - 1], target)) {
-            targets.items[write] = target;
-            write += 1;
-        }
+    // Edges are already canonical, so one scan both discovers each target and
+    // appends ascending final edge indices to its bucket. Hash-map iteration is
+    // deliberately not used for output; buckets are sorted below.
+    var buckets: std.ArrayList(ReverseBucket) = .empty;
+    defer {
+        for (buckets.items) |*bucket| bucket.incoming_edges.deinit(gpa);
+        buckets.deinit(gpa);
     }
-    targets.items.len = write;
+    var bucket_by_target: std.HashMapUnmanaged(
+        Endpoint,
+        usize,
+        ReverseEndpointContext,
+        std.hash_map.default_max_load_percentage,
+    ) = .empty;
+    defer bucket_by_target.deinit(gpa);
 
-    for (targets.items) |target| {
-        var incoming: std.ArrayList(u32) = .empty;
-        errdefer incoming.deinit(gpa);
-        for (result.edges.items, 0..) |edge, i| {
-            if (endpointEql(edge.to, target)) try incoming.append(gpa, @intCast(i));
+    for (result.edges.items, 0..) |edge, edge_index| {
+        const target_entry = try bucket_by_target.getOrPut(gpa, edge.to);
+        if (!target_entry.found_existing) {
+            const bucket_index = buckets.items.len;
+            try buckets.append(gpa, .{
+                .target = edge.to,
+                .incoming_edges = .empty,
+            });
+            target_entry.value_ptr.* = bucket_index;
         }
-        const owned_incoming = try incoming.toOwnedSlice(gpa);
-        errdefer gpa.free(owned_incoming);
+        try buckets.items[target_entry.value_ptr.*].incoming_edges.append(gpa, @intCast(edge_index));
+    }
+
+    std.mem.sort(ReverseBucket, buckets.items, {}, reverseBucketLess);
+    for (buckets.items) |*bucket| {
+        const incoming_edges = try bucket.incoming_edges.toOwnedSlice(gpa);
+        errdefer gpa.free(incoming_edges);
         try result.reverse_index.append(gpa, .{
-            .target = target,
-            .incoming_edges = owned_incoming,
+            .target = bucket.target,
+            .incoming_edges = incoming_edges,
         });
     }
 }
@@ -1218,6 +1248,20 @@ test "F8 graph-native fixture matches full graph golden" {
     );
     defer gpa.free(expected);
     try std.testing.expectEqualStrings(expected, actual);
+
+    // Keep the reverse-index projection pinned independently of the surrounding
+    // graph golden so an implementation-only reordering cannot hide here.
+    const reverse_key = "\"reverseIndex\": ";
+    const actual_reverse_start = (std.mem.indexOf(u8, actual, reverse_key) orelse return error.MissingReverseIndex) + reverse_key.len;
+    const expected_reverse_start = (std.mem.indexOf(u8, expected, reverse_key) orelse return error.MissingReverseIndex) + reverse_key.len;
+    const reverse_end_marker = ",\n  \"nav\":";
+    const actual_reverse_end = std.mem.indexOfPos(u8, actual, actual_reverse_start, reverse_end_marker) orelse return error.MissingReverseIndex;
+    const expected_reverse_end = std.mem.indexOfPos(u8, expected, expected_reverse_start, reverse_end_marker) orelse return error.MissingReverseIndex;
+    try std.testing.expectEqualSlices(
+        u8,
+        expected[expected_reverse_start..expected_reverse_end],
+        actual[actual_reverse_start..actual_reverse_end],
+    );
 }
 
 test "incremental dependency index records ordinary Markdown links separately" {
