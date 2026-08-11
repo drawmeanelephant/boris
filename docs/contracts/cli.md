@@ -98,6 +98,11 @@ stderr diagnostics, exit codes, published artifacts, or `--quiet` semantics:
 the option is off unless requested, and the report is never a source of truth
 for correctness.
 
+`plan` is the one exception: it runs no compiler phase, and its stdout is
+reserved for the single normalized declaration JSON document, so
+`plan --timings` is rejected as a conflicting-options usage error (exit 2)
+rather than corrupting the plan stream with trailing data.
+
 The report uses the versioned `boris-timings` schema:
 
 ```json
