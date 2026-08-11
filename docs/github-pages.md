@@ -17,6 +17,10 @@ source. The workflow runs for pushes to `main` and can also be started with
 3. `actions/upload-pages-artifact@v4`
 4. `actions/deploy-pages@v4`
 
+The workflow references immutable action commits with the released major
+version in a comment. The Zig setup action is likewise pinned to the reviewed
+`v2.2.1` commit.
+
 It grants `contents: read` to the build, `pages: write` to the Pages artifact
 and deployment jobs, and `id-token: write` only to the deployment job. Build
 and deployment concurrency is serialized so an older run cannot cancel a
@@ -75,6 +79,31 @@ deployment verification and a post-deploy HTTP audit are not claimed by this
 workflow. A successful `deploy-pages` job means GitHub accepted the Pages
 artifact for deployment; it is not a Boris claim that every URL projection or
 browser request was audited.
+
+## Optional post-deploy audit
+
+The manual **Run workflow** form has an `audit_deployment` boolean, disabled by
+default. When enabled, the deploy job downloads the exact retained plan and
+target-local inventory from the build job, builds the standalone
+`boris-github-pages-audit` Zig tool, and passes it the successful
+`deploy-pages` `page_url`. Push-triggered runs keep the audit disabled unless a
+future workflow-level control explicitly opts in.
+
+The observer writes and uploads
+`boris-github-pages-deployment-evidence-${{ github.run_id }}` as a separate
+ordinary artifact. It is never copied into `public-site`, `_boris/proof`, or
+the Pages artifact. The deployment summary distinguishes the build artifact,
+deployment acceptance, and optional post-deploy audit. The audit step uses
+`continue-on-error` so a failed or incomplete observation still reaches the
+upload step; the JSON report carries the actionable result and limitations.
+
+The default observer bounds are 256 HTTP requests including redirects, 8 MiB
+per decoded response, three redirects per URL, a 10-second per-request
+timeout, and 256 parsed URLs per projection/page. It sends no credentials or
+cookies, accepts only HTTP(S) deployment URLs inside the normalized Pages
+location, and records body digests separately from cache/ETag metadata. See
+the [deployment evidence contract](contracts/github-pages-deployment-evidence.md)
+for the result vocabulary, evidence binding, and coverage limits.
 
 For GitHub’s workflow requirements and action behavior, see the
 [custom workflows for GitHub Pages](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages),

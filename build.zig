@@ -929,6 +929,25 @@ pub fn build(b: *std.Build) void {
     );
     test_content_audit_step.dependOn(&content_audit_test.step);
 
+    // --- Standalone GitHub Pages deployment observer -----------------------
+    // The observer is intentionally outside the product CLI. Its tests are
+    // included in the root aggregate so the workflow-facing safety boundary
+    // cannot silently drift from the ordinary baseline gate.
+    const github_pages_audit_test = b.addSystemCommand(&.{
+        "zig",
+        "build",
+        "--build-file",
+        "tools/github-pages-audit/build.zig",
+        "test",
+    });
+    github_pages_audit_test.setCwd(b.path("."));
+    github_pages_audit_test.has_side_effects = true;
+    const test_github_pages_audit_step = b.step(
+        "test-github-pages-audit",
+        "Run bounded GitHub Pages deployment observer fixture tests",
+    );
+    test_github_pages_audit_step.dependOn(&github_pages_audit_test.step);
+
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_fixtures_tests.step);
@@ -974,6 +993,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_emitter_discipline_tests.step);
     test_step.dependOn(&run_emitter_hostile_tests.step);
     test_step.dependOn(&emitter_registry.step);
+    test_step.dependOn(&github_pages_audit_test.step);
 
     const test_harness_step = b.step(
         "test-harness",
