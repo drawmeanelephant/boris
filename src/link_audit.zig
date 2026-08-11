@@ -66,6 +66,14 @@ fn isIgnoredTarget(target: []const u8) bool {
     return route_resolver.isExternalOrEmpty(target) or target[0] == '#';
 }
 
+fn isSameDocumentTarget(target: []const u8) bool {
+    return target.len == 0 or target[0] == '#';
+}
+
+fn shouldSkipTarget(target: []const u8, has_effective_base: bool) bool {
+    return isIgnoredTarget(target) and !(has_effective_base and isSameDocumentTarget(target));
+}
+
 fn hasRelToken(value: []const u8, wanted: []const u8) bool {
     var it = std.mem.tokenizeAny(u8, value, " \t\r\n");
     while (it.next()) |token| if (std.ascii.eqlIgnoreCase(token, wanted)) return true;
@@ -222,6 +230,7 @@ fn auditOne(
     intended: *const std.StringHashMapUnmanaged(void),
     source_path: []const u8,
     resolution_source_path: []const u8,
+    has_effective_base: bool,
     tag_name: []const u8,
     tag: []const u8,
     target: []const u8,
@@ -230,7 +239,7 @@ fn auditOne(
     findings: *std.ArrayList(Finding),
     line: u32,
 ) !void {
-    if (target.len == 0 or target[0] == '#') return;
+    if (isSameDocumentTarget(target) and !has_effective_base) return;
 
     var route_target: []const u8 = target;
     var owned_route: ?[]u8 = null;
@@ -256,11 +265,11 @@ fn auditOne(
                 route_target = route;
             },
         }
-    } else if (isIgnoredTarget(route_target)) {
+    } else if (shouldSkipTarget(route_target, has_effective_base)) {
         return;
     }
 
-    if (isIgnoredTarget(route_target)) return;
+    if (shouldSkipTarget(route_target, has_effective_base)) return;
     const resolution = try resolveWithinRoot(gpa, resolution_source_path, route_target);
     switch (resolution) {
         .escapes_root => try appendFinding(gpa, findings, .EROUTEESCAPE, source_path, target, line, attribute),
@@ -331,14 +340,15 @@ fn auditDocumentWithOptions(
         }
         if (external_base) continue;
         const resolution_source_path = base_source_path orelse source_path;
+        const has_effective_base = base_source_path != null;
         for (url_attributes) |attribute| {
             const target = html_scan.attrValue(slice, attribute) orelse continue;
-            try auditOne(gpa, intended, source_path, resolution_source_path, tag.name, slice, target, attribute, opts, findings, lineNumber(html, i));
+            try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, attribute, opts, findings, lineNumber(html, i));
         }
         if (std.ascii.eqlIgnoreCase(tag.name, "meta")) {
             const target = html_scan.attrValue(slice, "content") orelse continue;
             if (requiresPublicLocation(tag.name, slice, "content")) {
-                try auditOne(gpa, intended, source_path, resolution_source_path, tag.name, slice, target, "content", opts, findings, lineNumber(html, i));
+                try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, "content", opts, findings, lineNumber(html, i));
             }
         }
     }
@@ -517,6 +527,54 @@ test "a local Markdown destination without a published route is rejected" {
     try auditDocument(gpa, &intended, "guides/start.html", "<a href=\"../reference.html\">x</a>", &findings);
     try std.testing.expectEqual(@as(usize, 2), findings.items.len);
     try std.testing.expectEqual(diag.Code.EROUTEMISSING, findings.items[1].code);
+}
+
+test "same-document references without a base remain ignored" {
+    const gpa = std.testing.allocator;
+    var intended: std.StringHashMapUnmanaged(void) = .{};
+    defer intended.deinit(gpa);
+    try intended.put(gpa, "index.html", {});
+
+    var findings: std.ArrayList(Finding) = .empty;
+    defer freeFindings(gpa, &findings);
+    try auditDocument(gpa, &intended, "index.html", "<a href=\"#missing\">fragment</a><a href=\"\">empty</a>", &findings);
+    try std.testing.expectEqual(@as(usize, 0), findings.items.len);
+}
+
+test "a local base makes fragment-only and empty references audit its document route" {
+    const gpa = std.testing.allocator;
+    const github_pages = @import("github_pages.zig");
+    var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
+    defer location.deinit(gpa);
+
+    var intended: std.StringHashMapUnmanaged(void) = .{};
+    defer intended.deinit(gpa);
+    try intended.put(gpa, "index.html", {});
+    try intended.put(gpa, "guides/index.html", {});
+
+    var findings: std.ArrayList(Finding) = .empty;
+    defer freeFindings(gpa, &findings);
+    const html = "<base href=\"/boris/guides/\"><a href=\"#top\">fragment</a><a href=\"\">empty</a>";
+    try auditDocumentWithOptions(gpa, &intended, "index.html", html, .{ .publication_location = &location }, &findings);
+    try std.testing.expectEqual(@as(usize, 0), findings.items.len);
+}
+
+test "a base makes missing fragment-only and empty references report the base document" {
+    const gpa = std.testing.allocator;
+    const github_pages = @import("github_pages.zig");
+    var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
+    defer location.deinit(gpa);
+
+    var intended: std.StringHashMapUnmanaged(void) = .{};
+    defer intended.deinit(gpa);
+    try intended.put(gpa, "index.html", {});
+
+    var findings: std.ArrayList(Finding) = .empty;
+    defer freeFindings(gpa, &findings);
+    const html = "<base href=\"/boris/guides/\"><a href=\"#top\">fragment</a><a href=\"\">empty</a>";
+    try auditDocumentWithOptions(gpa, &intended, "index.html", html, .{ .publication_location = &location }, &findings);
+    try std.testing.expectEqual(@as(usize, 2), findings.items.len);
+    for (findings.items) |finding| try std.testing.expectEqual(diag.Code.EROUTEMISSING, finding.code);
 }
 
 test "a file present in the live tree but not intended to survive is not a valid target" {

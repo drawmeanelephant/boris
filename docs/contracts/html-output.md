@@ -66,9 +66,11 @@ requires that:
 - same-origin absolute URLs and Boris-owned canonical/public metadata use the
   declared origin and base path;
 - the first effective `<base href>` is validated against the declared location
-  and becomes the resolution base for later relative and query-only URLs; the
-  `<base>` element itself is context, not an artifact that must exist in the
-  output manifest;
+  and becomes the resolution base for later relative, query-only,
+  fragment-only, and empty-reference URLs; when those latter references use a
+  base that names another document, the audit checks that document route but
+  does not check whether the fragment name exists. The `<base>` element itself
+  is context, not an artifact that must exist in the output manifest;
 - recognized document-location metadata is limited to canonical links,
   `og:url`, `twitter:url`, and `meta name="url"`; `itemprop="url"` is not
   classified without microdata context because it may describe a nested entity;
