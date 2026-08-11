@@ -110,54 +110,98 @@ pub fn computePageFingerprintThemeInput(
     theme_material: []const u8,
     input_material: []const u8,
 ) [32]u8 {
-    var hasher = Sha256.init(.{});
+    return computePageFingerprintThemeInputCounted(
+        target_name,
+        layout_path,
+        entity_id,
+        source_bytes,
+        include_deps,
+        layout_bytes,
+        site_nav_material,
+        theme_material,
+        input_material,
+        null,
+    );
+}
 
-    // 1. Format version
+/// `computePageFingerprintThemeInput`, and when `hashed_bytes` is non-null it
+/// also reports the exact byte count fed to the hasher — every framed field's
+/// 8-byte length prefix and the Textile input-adapter marker included — so
+/// callers can account `hash_bytes` truthfully. Kept in lockstep with the
+/// hasher so the counter can never drift from the digest inputs.
+pub fn computePageFingerprintThemeInputCounted(
+    target_name: []const u8,
+    layout_path: []const u8,
+    entity_id: []const u8,
+    source_bytes: []const u8,
+    include_deps: []const []const u8,
+    layout_bytes: []const u8,
+    site_nav_material: []const u8,
+    theme_material: []const u8,
+    input_material: []const u8,
+    hashed_bytes: ?*u64,
+) [32]u8 {
+    var hasher = Sha256.init(.{});
+    var total: u64 = 0;
+
+    // 1. Format version (no length prefix)
     hasher.update(CACHE_FORMAT_VERSION);
+    total += CACHE_FORMAT_VERSION.len;
 
     // 1.5. Target configuration identity
     updateLen(&hasher, target_name.len);
     hasher.update(target_name);
+    total += target_name.len + 8;
 
     updateLen(&hasher, layout_path.len);
     hasher.update(layout_path);
+    total += layout_path.len + 8;
 
     // 2. Normalized page identity (entity_id)
     updateLen(&hasher, entity_id.len);
     hasher.update(entity_id);
+    total += entity_id.len + 8;
 
     // 3. Source bytes
     updateLen(&hasher, source_bytes.len);
     hasher.update(source_bytes);
+    total += source_bytes.len + 8;
 
     // 4. Resolved includes in stable dependency order
     for (include_deps) |inc_bytes| {
         updateLen(&hasher, inc_bytes.len);
         hasher.update(inc_bytes);
+        total += inc_bytes.len + 8;
     }
 
     // 5. Layout bytes
     updateLen(&hasher, layout_bytes.len);
     hasher.update(layout_bytes);
+    total += layout_bytes.len + 8;
 
     // 6. Site nav material (Feature 6) — only when non-empty so content-only
     // layouts keep prior fingerprint inputs.
     if (site_nav_material.len > 0) {
         updateLen(&hasher, site_nav_material.len);
         hasher.update(site_nav_material);
+        total += site_nav_material.len + 8;
     }
 
     // 7. Theme material (F9.1) — footer + referenced assets; empty keeps legacy digests.
     if (theme_material.len > 0) {
         updateLen(&hasher, theme_material.len);
         hasher.update(theme_material);
+        total += theme_material.len + 8;
     }
 
     if (input_material.len > 0) {
         hasher.update("boris-input-adapter\x00");
         updateLen(&hasher, input_material.len);
         hasher.update(input_material);
+        total += "boris-input-adapter\x00".len + input_material.len + 8;
     }
+
+    if (hashed_bytes) |hb| hb.* = total;
 
     var digest: [32]u8 = undefined;
     hasher.final(&digest);

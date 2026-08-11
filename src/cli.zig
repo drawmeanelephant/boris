@@ -680,9 +680,13 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         // input, input format, and the single-target HTML output override.
         // Other projection selectors would either execute or invent a second
         // configuration source, so keep them as usage errors.
+        // `--timings` is rejected here too: `plan` owns stdout for its single
+        // declaration JSON document, and it runs no compiler phase, so the
+        // machine-readable timing report has nowhere to go without corrupting
+        // the plan stream.
         if (saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_layout_rules or wants_sitemap or
             wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or
-            saw_format or saw_report or saw_watch)
+            saw_format or saw_report or saw_watch or saw_timings)
         {
             return error.ConflictingFlags;
         }
@@ -1440,6 +1444,25 @@ test "parse: --timings is opt-in and mode-agnostic" {
     try expect(!default.timings);
 
     try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "--timings", "--timings" }));
+}
+
+test "parse: plan rejects --timings (stdout is the plan document)" {
+    // `plan` writes exactly one JSON document to stdout, and runs no compiler
+    // phase, so combining it with the stdout timing report is a usage error.
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "p.toml", "--timings" }));
+
+    // But timings remains accepted on every phase-running mode/command.
+    var validate = try parseOptions(std.testing.allocator, &.{ "boris", "validate", "--timings" });
+    defer validate.deinit(std.testing.allocator);
+    try expect(validate.timings);
+
+    var check = try parseOptions(std.testing.allocator, &.{ "boris", "check", "--timings" });
+    defer check.deinit(std.testing.allocator);
+    try expect(check.timings);
+
+    var impact = try parseOptions(std.testing.allocator, &.{ "boris", "impact", "x", "--timings" });
+    defer impact.deinit(std.testing.allocator);
+    try expect(impact.timings);
 }
 
 test "parse: explicit build and watch commands are stable aliases" {

@@ -1116,6 +1116,12 @@ pub fn compileHtmlSiteMulti(
             } else {
                 any_io_failed = any_io_failed or !isContentCompileFailure(err);
             }
+            // A failing target can return mid-phase with a timer left active.
+            // Without this, the next target's idempotent `start` inherits the
+            // stale timestamp and the eventual duration absorbs the failure
+            // tail plus unrelated work. Close any leaked phases before moving
+            // on so each target's phases time independently.
+            if (base_options.timings) |t| t.stopAll();
             continue;
         };
     }
@@ -2339,7 +2345,8 @@ fn compilePagesInner(
         }
 
         // Fingerprint uses the effective selected layout identity and bytes.
-        const fp_bytes = cache.computePageFingerprintThemeInput(
+        var fp_hashed: u64 = 0;
+        const fp_bytes = cache.computePageFingerprintThemeInputCounted(
             options.target_name,
             page_sel_paths[page_idx],
             page.entity_id,
@@ -2349,17 +2356,14 @@ fn compilePagesInner(
             nav_material,
             page_theme_material[page_idx],
             if (options.input_format == .textile) textile.adapter_identity else "",
+            &fp_hashed,
         );
         fingerprints[page_idx] = try fingerprintHex(fp_bytes, gpa);
         if (options.timings) |t| {
-            // Payload bytes actually fed to the fingerprint hasher.
-            var hashed: u64 = shared.source_bytes[page_idx].len + page_layout_bytes[page_idx].len +
-                page_theme_material[page_idx].len + page_sel_paths[page_idx].len + page.entity_id.len +
-                cache.CACHE_FORMAT_VERSION.len + options.target_name.len;
-            for (inc_with_ref) |b| hashed += b.len;
-            if (nav_material.len > 0) hashed += nav_material.len;
-            if (options.input_format == .textile) hashed += textile.adapter_identity.len;
-            t.bump(.hash_bytes, hashed);
+            // Exact payload bytes fed to the fingerprint hasher, including the
+            // framed length prefixes and the Textile adapter marker, reported
+            // by the counted cache variant so accounting cannot drift.
+            t.bump(.hash_bytes, fp_hashed);
         }
 
         var output_size: u64 = 0;
