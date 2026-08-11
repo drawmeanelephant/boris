@@ -146,10 +146,37 @@ fn appendUrl(
     try buf.appendSlice(gpa, "/");
 }
 
-fn findChildren(pages: []const graph.Node, parent: []const u8, visited: []const bool, out: *std.ArrayList(usize), gpa: std.mem.Allocator) !void {
-    for (pages, 0..) |page, index| {
-        if (!visited[index] and page.parent != null and std.mem.eql(u8, page.parent.?, parent)) try out.append(gpa, index);
+const ChildrenIndex = struct {
+    by_parent: std.StringHashMapUnmanaged(std.ArrayList(usize)) = .empty,
+
+    fn build(gpa: std.mem.Allocator, pages: []const graph.Node) !ChildrenIndex {
+        var index: ChildrenIndex = .{};
+        errdefer index.deinit(gpa);
+        try index.by_parent.ensureTotalCapacity(gpa, @intCast(pages.len));
+
+        // `pages` is already in canonical entity-id order, so appending while
+        // scanning it once preserves the export's existing child order without
+        // depending on hash-map iteration order.
+        for (pages, 0..) |page, child_index| {
+            if (page.parent) |parent| {
+                const entry = try index.by_parent.getOrPut(gpa, parent);
+                if (!entry.found_existing) entry.value_ptr.* = .empty;
+                try entry.value_ptr.append(gpa, child_index);
+            }
+        }
+        return index;
     }
+
+    fn deinit(self: *ChildrenIndex, gpa: std.mem.Allocator) void {
+        var iterator = self.by_parent.iterator();
+        while (iterator.next()) |entry| entry.value_ptr.deinit(gpa);
+        self.by_parent.deinit(gpa);
+    }
+};
+
+fn findChildren(index: *const ChildrenIndex, parent: []const u8) []const usize {
+    if (index.by_parent.getPtr(parent)) |children| return children.items;
+    return &.{};
 }
 
 fn renderPage(
@@ -158,6 +185,7 @@ fn renderPage(
     pages: []const graph.Node,
     sources: []const []const u8,
     visited: []bool,
+    children_index: *const ChildrenIndex,
     index: usize,
     depth: usize,
     location: ?*const github_pages.Location,
@@ -178,10 +206,12 @@ fn renderPage(
     try appendInline(buf, gpa, text);
     try buf.append(gpa, '\n');
 
-    var children: std.ArrayList(usize) = .empty;
-    defer children.deinit(gpa);
-    try findChildren(pages, page.id, visited, &children, gpa);
-    for (children.items) |child| try renderPage(gpa, buf, pages, sources, visited, child, depth + 1, location);
+    for (findChildren(children_index, page.id)) |child| {
+        // Keep the existing per-render visited check. It is what makes the
+        // unvisited-page fallback below remain total if a future graph role
+        // is not reachable from a trunk.
+        if (!visited[child]) try renderPage(gpa, buf, pages, sources, visited, children_index, child, depth + 1, location);
+    }
 }
 
 fn render(
@@ -198,12 +228,14 @@ fn render(
     const visited = try gpa.alloc(bool, result.pages.items.len);
     defer gpa.free(visited);
     @memset(visited, false);
+    var children_index = try ChildrenIndex.build(gpa, result.pages.items);
+    defer children_index.deinit(gpa);
     for (result.pages.items, 0..) |page, index| {
-        if (page.parent == null) try renderPage(gpa, &buf, result.pages.items, sources, visited, index, 0, location);
+        if (page.parent == null) try renderPage(gpa, &buf, result.pages.items, sources, visited, &children_index, index, 0, location);
     }
     // Validated graphs should make this unnecessary, but keeping an explicit
     // fallback makes the exporter total if a future graph role is introduced.
-    for (visited, 0..) |seen, index| if (!seen) try renderPage(gpa, &buf, result.pages.items, sources, visited, index, 0, location);
+    for (visited, 0..) |seen, index| if (!seen) try renderPage(gpa, &buf, result.pages.items, sources, visited, &children_index, index, 0, location);
     return try buf.toOwnedSlice(gpa);
 }
 
@@ -372,6 +404,45 @@ test "llms export renders arbitrary-depth hierarchy recursively" {
         const found = std.mem.indexOfPos(u8, output, prior, entry) orelse return error.TestExpectedEqual;
         prior = found + entry.len;
     }
+}
+
+test "llms parent children index preserves existing page order" {
+    const gpa = std.testing.allocator;
+    const pages = [_]graph.Node{
+        .{ .id = "root", .source_path = "root.md" },
+        .{ .id = "z-child", .source_path = "z.md", .parent = "root" },
+        .{ .id = "a-child", .source_path = "a.md", .parent = "root" },
+        .{ .id = "leaf", .source_path = "leaf.md", .parent = "z-child" },
+    };
+    var index = try ChildrenIndex.build(gpa, &pages);
+    defer index.deinit(gpa);
+
+    try std.testing.expectEqualSlices(usize, &[_]usize{ 1, 2 }, findChildren(&index, "root"));
+    try std.testing.expectEqualSlices(usize, &[_]usize{3}, findChildren(&index, "z-child"));
+    try std.testing.expectEqual(@as(usize, 0), findChildren(&index, "missing").len);
+}
+
+test "llms valid fixture remains byte-identical to its golden" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const out = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/valid-llms.txt", .{tmp.sub_path});
+    defer gpa.free(out);
+    var result = try run(io, gpa, .{
+        .content_root = "fixtures/content/valid",
+        .out_path = out,
+        .quiet = true,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok());
+
+    const actual = try readFileAlloc(io, Io.Dir.cwd(), out, gpa);
+    defer gpa.free(actual);
+    const expected = try readFileAlloc(io, Io.Dir.cwd(), "fixtures/expected/valid/llms.txt", gpa);
+    defer gpa.free(expected);
+    try std.testing.expectEqualSlices(u8, expected, actual);
 }
 
 test "location-aware llms export uses the normalized public base path" {
