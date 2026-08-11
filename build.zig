@@ -336,6 +336,20 @@ pub fn build(b: *std.Build) void {
     sanitize_run.setCwd(b.path("."));
     sanitize_step.dependOn(&sanitize_run.step);
 
+    // --- Deterministic benchmark corpus generator (PERF-028) ----------------
+    // Tests prove exact page counts, arg validation, the nav-consuming layout,
+    // and the byte-identical determinism contract. No Apex dependency.
+    const testdata_gen_mod = b.createModule(.{
+        .root_source_file = b.path("tools/testdata-generator/main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const testdata_gen_tests = b.addTest(.{
+        .root_module = testdata_gen_mod,
+    });
+    const run_testdata_gen_tests = b.addRunArtifact(testdata_gen_tests);
+    run_testdata_gen_tests.setCwd(b.path("."));
+
     // --- Standalone source RAG tool (not product pipeline) -----------------
     const source_rag_mod = b.createModule(.{
         .root_source_file = b.path("tools/source-rag/main.zig"),
@@ -507,6 +521,7 @@ pub fn build(b: *std.Build) void {
     run_cache_tests.setCwd(b.path("."));
 
     const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&run_testdata_gen_tests.step);
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_fixtures_tests.step);
     test_step.dependOn(&run_scanner_tests.step);
@@ -539,10 +554,40 @@ pub fn build(b: *std.Build) void {
     );
     test_harness_step.dependOn(&run_hardening_tests.step);
 
+    // --- ReleaseFast benchmark + regression gate (PERF-028 / PERF-030) ------
+    // The benchmark entrypoint is ReleaseFast-only by construction: the boris
+    // binary used for measurement is built with `.ReleaseFast` regardless of
+    // the caller's `-Doptimize`, so Debug timing can never be mistaken for
+    // product speed. `scripts/benchmark.sh` generates the pinned corpus and
+    // gates every phase against the checked-in baseline (2x by default).
+    const benchmark_mod = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    linkApex(benchmark_mod, b, false);
+    benchmark_mod.addOptions("build_options", apex_opts);
+    const benchmark_exe = b.addExecutable(.{
+        .name = "boris-benchmark",
+        .root_module = benchmark_mod,
+    });
+    b.installArtifact(benchmark_exe);
+
+    const benchmark_cmd = b.addSystemCommand(&.{ "bash", "scripts/benchmark.sh" });
+    benchmark_cmd.addFileArg(benchmark_exe.getEmittedBin());
+    benchmark_cmd.setCwd(b.path("."));
+    benchmark_cmd.has_side_effects = true;
+    const benchmark_step = b.step(
+        "benchmark",
+        "ReleaseFast HTML benchmark on the pinned deterministic corpus with a generous regression gate (2x baseline)",
+    );
+    benchmark_step.dependOn(&benchmark_cmd.step);
+
     // Product Apex path requires cmake static libs before compile/link.
     // Hostile double intentionally does NOT depend on or link real ApexMarkdown.
     const apex_needing = [_]*std.Build.Step{
         &exe.step,
+        &benchmark_exe.step,
         &unit_tests.step,
         &pipeline_tests.step,
         &aside_tests.step,

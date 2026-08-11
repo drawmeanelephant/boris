@@ -18,6 +18,7 @@ const wikilink = @import("wikilink.zig");
 const dependency = @import("dependency.zig");
 const identity = @import("identity.zig");
 const textile = @import("textile.zig");
+const timings = @import("timings.zig");
 
 pub const schema_version = "0.2.0";
 pub const compiler_id = "boris/0.8.0";
@@ -31,6 +32,8 @@ pub const Options = struct {
     out_dir: []const u8 = ".boris",
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
+    /// Opt-in PERF-027 phase/counter instrumentation (null when not requested).
+    timings: ?*timings.Timings = null,
 };
 
 /// Shared load options for IR and RAG (no output paths).
@@ -38,6 +41,8 @@ pub const CompileOptions = struct {
     content_root: []const u8 = "content",
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
+    /// Opt-in PERF-027 phase/counter instrumentation (null when not requested).
+    timings: ?*timings.Timings = null,
 };
 
 pub const PageEntry = graph_mod.Node;
@@ -718,6 +723,15 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     var scan_list = page_mod.PageList.init(gpa, retain);
     defer scan_list.deinit();
 
+    // Phase timer is ended explicitly after scan: early error returns here
+    // must not keep it alive. The deferred fallback records diagnostics and
+    // other early exits; the success path ends it before parsing starts.
+    const scan_phase = if (options.timings) |t| t.start(timings.phase_scan) else null;
+    var scan_phase_ended = false;
+    defer if (scan_phase) |p| {
+        if (!scan_phase_ended) p.end();
+    };
+
     scanner.scan(io, .{ .content_root = options.content_root, .input_format = options.input_format }, &scan_list) catch |err| switch (err) {
         error.ContentDirMissing => {
             try result.diagnostics.append(gpa, .{
@@ -776,12 +790,22 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             return result;
         },
     };
+    if (scan_phase) |p| p.end();
+    scan_phase_ended = true;
 
+    if (options.timings) |t| t.setCounter(timings.counter_page_reads, scan_list.len());
     logCompile(options.quiet, "boris: roll  parsing {d} page(s)\n", .{scan_list.len()});
 
     // --- 2–3. Read, parse, promote durable metadata only --------------------
     var db = page_mod.PageDb.init(gpa, retain);
     defer db.deinit();
+
+    // Ended explicitly after the parse/promote loop (same rationale as scan).
+    const parse_phase = if (options.timings) |t| t.start(timings.phase_parse) else null;
+    var parse_phase_ended = false;
+    defer if (parse_phase) |p| {
+        if (!parse_phase_ended) p.end();
+    };
 
     const cwd = Io.Dir.cwd();
     var content_dir = cwd.openDir(io, options.content_root, .{}) catch |err| {
@@ -902,6 +926,8 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         // Promote copies all durable strings into retain before source free.
         try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset);
     }
+    if (parse_phase) |p| p.end();
+    parse_phase_ended = true;
 
     // --- 4. Build provisional graph nodes from PageDb -----------------------
     try result.pages.ensureTotalCapacity(gpa, db.len());
@@ -921,16 +947,26 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
 
     // --- 5. Validate page identity/topology, then direct dependencies -------
     logCompile(options.quiet, "boris: ignite validating graph\n", .{});
-    try graph_mod.validate(gpa, retain, result.pages.items, &result.diagnostics);
-    diag.sortDiagnostics(result.diagnostics.items);
 
-    var err_count = diag.countErrors(result.diagnostics.items);
-    if (err_count == 0) {
-        try validateSemanticRelations(gpa, retain, result.pages.items, &result.diagnostics);
+    var err_count: usize = 0;
+    {
+        const graph_phase = if (options.timings) |t| t.start(timings.phase_graph_validate) else null;
+        defer if (graph_phase) |p| p.end();
+
+        try graph_mod.validate(gpa, retain, result.pages.items, &result.diagnostics);
         diag.sortDiagnostics(result.diagnostics.items);
+
         err_count = diag.countErrors(result.diagnostics.items);
+        if (err_count == 0) {
+            try validateSemanticRelations(gpa, retain, result.pages.items, &result.diagnostics);
+            diag.sortDiagnostics(result.diagnostics.items);
+            err_count = diag.countErrors(result.diagnostics.items);
+        }
     }
     if (err_count == 0) {
+        const dep_phase = if (options.timings) |t| t.start(timings.phase_dependency_resolve) else null;
+        defer if (dep_phase) |p| p.end();
+
         try resolveDependencies(io, gpa, retain, content_dir, options.input_format, &result);
         diag.sortDiagnostics(result.diagnostics.items);
         err_count = diag.countErrors(result.diagnostics.items);
@@ -962,6 +998,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
         .content_root = options.content_root,
         .quiet = options.quiet,
         .input_format = options.input_format,
+        .timings = options.timings,
     });
     errdefer result.deinit();
 
@@ -971,6 +1008,8 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
     if (result.ok) {
         log(options, "boris: ignite emitting IR → {s}\n", .{options.out_dir});
     }
+    const emit_phase = if (options.timings) |t| t.start(timings.phase_ir_emit) else null;
+    defer if (emit_phase) |p| p.end();
     try publishArtifacts(io, gpa, &result);
     if (result.ok) {
         log(options, "boris: reset done ({d} page(s))\n", .{result.pages.items.len});
@@ -1001,6 +1040,13 @@ fn expectCode(result: *const Result, code: diag.Code) !void {
 fn hasCode(diags: []const diag.Diagnostic, code: diag.Code) bool {
     for (diags) |d| {
         if (d.code == code) return true;
+    }
+    return false;
+}
+
+fn hasTimedPhase(t: *const timings.Timings, name: []const u8) bool {
+    for (t.phases.items) |phase| {
+        if (std.mem.eql(u8, phase.name, name)) return true;
     }
     return false;
 }
@@ -1568,6 +1614,33 @@ test "missing content root is EIO and does not publish graph IR" {
     try std.testing.expect(!fileExists(io, out, "graph.json"));
 }
 
+test "timings: scan and parse failure paths record their phases" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var scan_timings = timings.Timings.init(gpa, io);
+    defer scan_timings.deinit();
+    var scan_result = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/__no_such_root__",
+        .quiet = true,
+        .timings = &scan_timings,
+    });
+    defer scan_result.deinit();
+    try std.testing.expect(!scan_result.ok);
+    try std.testing.expect(hasTimedPhase(&scan_timings, timings.phase_scan));
+
+    var parse_timings = timings.Timings.init(gpa, io);
+    defer parse_timings.deinit();
+    var parse_result = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/invalid-status/content",
+        .quiet = true,
+        .timings = &parse_timings,
+    });
+    defer parse_result.deinit();
+    try std.testing.expect(!parse_result.ok);
+    try std.testing.expect(hasTimedPhase(&parse_timings, timings.phase_parse));
+}
+
 test "per-file read failure remains EIO with I/O failure classification" {
     if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
 
@@ -1635,4 +1708,47 @@ test "golden expected IR shape for valid fixture" {
     try std.testing.expect(std.mem.indexOf(u8, graph, "\"bodyOffset\": 81") != null);
     try std.testing.expect(std.mem.indexOf(u8, graph, "\"bodyOffset\": 51") != null);
     try std.testing.expect(std.mem.indexOf(u8, graph, "\"tags\": [\"guide\", \"intro\"]") != null);
+}
+
+test "timings: IR phases do not absorb later work" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const out = try outRel(gpa, &tmp, "timings-scope-ir");
+    defer gpa.free(out);
+
+    var t = timings.Timings.init(gpa, io);
+    defer t.deinit();
+
+    const started = Io.Clock.awake.now(io);
+    var result = try run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/valid/content",
+        .out_dir = out,
+        .quiet = true,
+        .timings = &t,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+    const total_ns = started.untilNow(io, .awake).nanoseconds;
+
+    // IR path records exactly: scan, parse, graph_validate, dependency_resolve, ir_emit.
+    try std.testing.expectEqual(@as(usize, 5), t.phases.items.len);
+    var sum: u64 = 0;
+    for (t.phases.items) |p| {
+        try std.testing.expect(p.elapsed_ns > 0);
+        sum += p.elapsed_ns;
+    }
+    // Non-overlapping scoped timers can never sum above wall time; overlapping
+    // function-scoped defers (the reported bug) double-count and break this.
+    const total: u64 = @intCast(total_ns);
+    // Overlapping (function-scoped) timers double-count: a phase whose defer
+    // stayed alive through ir_emit would push sum ≈ total + emit, i.e. ~1.35–
+    // 1.45× wall time. Legitimate non-overlapping runs measured 0.78–0.92× on
+    // both dev and CI runners, so total + total/4 separates the bug from noise
+    // with margin on both sides. (Pairwise phase-vs-phase bounds are not
+    // asserted here: on a 3-page fixture phases land within noise of each
+    // other across machines — that separation is gated by the benchmark at
+    // 1k-page scale instead.)
+    try std.testing.expect(sum < total + total / 4);
 }

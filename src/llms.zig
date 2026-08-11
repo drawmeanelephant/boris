@@ -8,6 +8,7 @@ const Io = std.Io;
 const identity = @import("identity.zig");
 const pipeline = @import("pipeline.zig");
 const graph = @import("graph.zig");
+const timings = @import("timings.zig");
 
 pub const format = "llms.txt";
 
@@ -16,6 +17,8 @@ pub const Options = struct {
     out_path: []const u8 = "llms.txt",
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
+    /// Opt-in PERF-027 phase/counter instrumentation (null when not requested).
+    timings: ?*timings.Timings = null,
 };
 
 pub const Result = struct {
@@ -169,6 +172,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !Result {
         .content_root = opts.content_root,
         .quiet = opts.quiet,
         .input_format = opts.input_format,
+        .timings = opts.timings,
     }) };
     errdefer result.deinit();
     if (!result.compile.ok) return result;

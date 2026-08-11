@@ -1,0 +1,3 @@
+.generated/
+zig-out/
+.zig-cache/

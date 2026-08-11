@@ -125,14 +125,36 @@ Boris performance should be measured on a stated machine, toolchain, content
 tree, optimization mode, and worker count. A single fast run is not a
 benchmark.
 
-The reproducible benchmark work lives under [`benchmark/`](benchmark/) and
-records raw command output, repeated-run statistics, output sizes, file counts,
-determinism, and known equivalence limits. The headline comparison uses the
-median, not the fastest run.
+**The standard optimization mode for all Boris performance measurements is
+ReleaseFast: `zig build -Doptimize=ReleaseFast`.** Debug is the development
+default and is intentionally not changed, but Debug-vs-ReleaseFast differences
+on the HTML path are very large, so benchmarking or release verification in an
+implicit mode produces misleading conclusions. Every benchmark/release
+entrypoint is explicit about the mode it uses.
 
-The benchmark compares a controlled Astro 6.x/7.x pair against the Boris Filed
-dogfood build. It also preserves a historical Astro snapshot separately so
-source/config drift is not hidden behind a headline number.
+The first-class measurement entrypoint is:
+
+```bash
+zig build benchmark
+```
+
+This step is **ReleaseFast-only by construction** (it always builds the
+measured binary with `-Doptimize=ReleaseFast`, regardless of your local build
+mode), generates a pinned deterministic corpus (1k pages, `--pages`
+configurable), runs Boris with `--timings`, and gates every phase against a
+checked-in baseline with a deliberately generous `2×` threshold so noisy
+micro-regressions do not fail CI. Deliberate regressions fail loudly; the
+corpus generator is deterministic and never an authority for production
+content. See [`tools/testdata-generator/`](tools/testdata-generator/) and
+[`scripts/benchmark.sh`](scripts/benchmark.sh).
+
+For hand measurements, `boris --timings` reports per-phase durations and
+counters to stderr as a machine-readable `boris-timings {…}` JSON line.
+
+Historical comparisons (a controlled Astro 6.x/7.x pair against the Boris Filed
+dogfood build, with a preserved historical Astro snapshot) remain recorded
+under the reproducible benchmark notes; the headline comparison uses the
+median, not the fastest run.
 
 ## Migration
 

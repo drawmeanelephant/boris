@@ -67,6 +67,27 @@ else
   pass "docs/STATUS.md documents Zig 0.16 family"
 fi
 
+# --- 8b. ReleaseFast benchmarking guidance (PERF-030) ---------------------
+note "8b. ReleaseFast measurement mode is documented and benchmark is ReleaseFast-only"
+if grep -q 'zig build -Doptimize=ReleaseFast' README.md \
+  && grep -q 'zig build -Doptimize=ReleaseFast' docs/STATUS.md; then
+  pass "README + STATUS document ReleaseFast as the standard measurement mode"
+else
+  fail "README.md and docs/STATUS.md must document -Doptimize=ReleaseFast as the measurement mode"
+fi
+if grep -q '"benchmark"' build.zig && grep -q '\.optimize = \.ReleaseFast' build.zig; then
+  pass "build.zig benchmark step is ReleaseFast-only by construction"
+else
+  fail "build.zig must define the benchmark step with .optimize = .ReleaseFast"
+fi
+# The Debug default itself is intentionally unchanged; only the benchmark path
+# forces ReleaseFast. Guard against silently flipping the dev default.
+if grep -q 'const optimize = b.standardOptimizeOption' build.zig; then
+  pass "local Debug default remains standardOptimizeOption (unchanged)"
+else
+  fail "build.zig no longer uses standardOptimizeOption for the dev default"
+fi
+
 # --- 1. Build ------------------------------------------------------------
 note "1. zig build"
 zig build
