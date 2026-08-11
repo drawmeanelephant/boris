@@ -304,7 +304,32 @@ pub fn renderEntityCatalog(gpa: std.mem.Allocator, pages: []const graph_mod.Node
     return try doc.toOwnedSlice();
 }
 
+/// Render relations from an id-sorted page slice. Scoped exports compact the
+/// frozen graph into a new slice, so parent lookup must be rebuilt locally
+/// from entity ids rather than reusing full-graph `parent_index` values.
 pub fn renderRelations(gpa: std.mem.Allocator, pages: []const graph_mod.Node) ![]u8 {
+    var page_indices: std.StringHashMapUnmanaged(usize) = .empty;
+    defer page_indices.deinit(gpa);
+    try page_indices.ensureTotalCapacity(gpa, @intCast(pages.len));
+    for (pages, 0..) |page, page_index| {
+        const gop = try page_indices.getOrPut(gpa, page.id);
+        if (!gop.found_existing) gop.value_ptr.* = page_index;
+    }
+
+    var children_by_parent = try gpa.alloc(std.ArrayList(u32), pages.len);
+    defer {
+        for (children_by_parent) |*children| children.deinit(gpa);
+        gpa.free(children_by_parent);
+    }
+    for (children_by_parent) |*children| children.* = .empty;
+
+    for (pages, 0..) |child, child_index| {
+        if (child.role != .satellite) continue;
+        const parent = child.parent orelse continue;
+        const parent_index = page_indices.get(parent) orelse continue;
+        try children_by_parent[parent_index].append(gpa, @intCast(child_index));
+    }
+
     var doc = Sink.init(gpa);
     errdefer doc.deinit();
     try doc.lit(
@@ -328,7 +353,7 @@ pub fn renderRelations(gpa: std.mem.Allocator, pages: []const graph_mod.Node) ![
         \\
         \\
     );
-    for (pages) |page| {
+    for (pages, 0..) |page, parent_index| {
         try doc.lit("### ");
         try doc.inlineCode(page.id);
         try doc.lit(" — ");
@@ -338,39 +363,29 @@ pub fn renderRelations(gpa: std.mem.Allocator, pages: []const graph_mod.Node) ![
         try doc.lit(": ");
         try doc.inlineCodeJoined(&.{ "content/pages/", page.id, ".md" });
         try doc.lit("\n- Children:\n");
-        var any = false;
-        for (pages) |child| {
-            if (child.role != .satellite) continue;
-            const parent = child.parent orelse continue;
-            if (!std.mem.eql(u8, parent, page.id)) continue;
-            any = true;
-            try doc.lit("  - ");
-            try doc.inlineCode(child.id);
-            try doc.lit(" (");
-            try doc.field(.md_block_text, pageTitle(child));
-            try doc.lit(") → ");
-            try doc.inlineCodeJoined(&.{ "content/pages/", child.id, ".md" });
-            try doc.lit("\n");
+        if (children_by_parent[parent_index].items.len == 0) {
+            try doc.lit("  - *(none)*\n");
+        } else {
+            for (children_by_parent[parent_index].items) |child_index| {
+                const child = pages[child_index];
+                try doc.lit("  - ");
+                try doc.inlineCode(child.id);
+                try doc.lit(" (");
+                try doc.field(.md_block_text, pageTitle(child));
+                try doc.lit(") → ");
+                try doc.inlineCodeJoined(&.{ "content/pages/", child.id, ".md" });
+                try doc.lit("\n");
+            }
         }
-        if (!any) try doc.lit("  - *(none)*\n");
         try doc.lit("\n");
     }
     try doc.lit("## Edge list (machine-friendly)\n\n```\n");
-    const Pair = struct { src: []const u8, tgt: []const u8 };
-    var pairs: std.ArrayList(Pair) = .empty;
-    defer pairs.deinit(gpa);
-    for (pages) |page| if (page.parent) |parent| try pairs.append(gpa, .{ .src = page.id, .tgt = parent });
-    std.mem.sort(Pair, pairs.items, {}, struct {
-        fn less(_: void, a: Pair, b: Pair) bool {
-            const order = std.mem.order(u8, a.src, b.src);
-            return if (order == .eq) std.mem.order(u8, a.tgt, b.tgt) == .lt else order == .lt;
-        }
-    }.less);
-    for (pairs.items) |pair| {
+    for (pages) |page| {
+        const parent = page.parent orelse continue;
         try doc.lit("parent\t");
-        try doc.field(.md_block_text, pair.src);
+        try doc.field(.md_block_text, page.id);
         try doc.lit("\t->\t");
-        try doc.field(.md_block_text, pair.tgt);
+        try doc.field(.md_block_text, parent);
         try doc.lit("\n");
     }
     try doc.lit("```\n");
