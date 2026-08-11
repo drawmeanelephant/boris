@@ -37,6 +37,9 @@ Options:
   --out <DIR>         IR output directory (selects IR mode; default: .boris)
   --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
   --site-url URL      Required HTTP(S) deployment URL for RSS or sitemap
+  --pages-base-url U  Normalized Pages public base URL
+  --pages-origin U    Normalized Pages public origin
+  --pages-base-path P Normalized Pages path (empty for root/custom sites)
   --rss-title TITLE   Required RSS channel title
   --rss-description T Required RSS channel description
   --rss-limit N       RSS item limit (1–500; default 20)

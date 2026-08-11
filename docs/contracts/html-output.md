@@ -65,6 +65,13 @@ requires that:
   site and is stripped back to a target-relative route before manifest checking;
 - same-origin absolute URLs and Boris-owned canonical/public metadata use the
   declared origin and base path;
+- the first effective `<base href>` is validated against the declared location
+  and becomes the resolution base for later relative and query-only URLs; the
+  `<base>` element itself is context, not an artifact that must exist in the
+  output manifest;
+- recognized document-location metadata is limited to canonical links,
+  `og:url`, `twitter:url`, and `meta name="url"`; `itemprop="url"` is not
+  classified without microdata context because it may describe a nested entity;
 - unrelated external links remain external links and are not rewritten; and
 - a mismatch emits `EPUBLICATIONLOCATION` and prevents target replacement.
 

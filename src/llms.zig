@@ -128,12 +128,13 @@ fn appendUrl(
     location: ?*const github_pages.Location,
 ) !void {
     if (location) |public_location| {
+        const output_path = try identity.safeOutputRelativePath(gpa, id);
+        defer gpa.free(output_path);
         var url = structured_out.Sink.init(gpa);
         defer url.deinit();
         try url.rawTrusted("github_pages.parse validates the normalized publication base URL", public_location.base_url);
         try url.lit("/");
-        try url.uriPath(id);
-        try url.lit("/");
+        try url.uriPath(output_path);
         try buf.appendSlice(gpa, url.items());
         return;
     }
@@ -411,8 +412,11 @@ test "location-aware llms export uses the normalized public base path" {
         const output_again = try readFileAlloc(io, Io.Dir.cwd(), out_again, gpa);
         defer gpa.free(output_again);
         try std.testing.expectEqualSlices(u8, output, output_again);
-        const expected = try std.fmt.allocPrint(gpa, "{s}/guides/start/", .{shape.base_url});
+        const expected = try std.fmt.allocPrint(gpa, "{s}/guides/start.html", .{shape.base_url});
         defer gpa.free(expected);
         try std.testing.expect(std.mem.indexOf(u8, output, expected) != null);
+        const legacy_directory_url = try std.fmt.allocPrint(gpa, "{s}/guides/start/", .{shape.base_url});
+        defer gpa.free(legacy_directory_url);
+        try std.testing.expect(std.mem.indexOf(u8, output, legacy_directory_url) == null);
     }
 }
