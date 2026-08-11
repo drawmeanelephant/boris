@@ -135,16 +135,18 @@ pub fn freezeSiteFromPageDb(
     const nav = try graph_mod.buildNav(gpa, g.nodes);
     errdefer graph_mod.freeNav(gpa, nav);
 
-    // Sync durable graph fields onto PageDb by entity id.
+    // Sync durable graph fields onto PageDb by entity id. `g.nodes` is
+    // id-sorted (graph.freeze sorts in place), so each lookup is an O(log n)
+    // binary search instead of a linear scan (O(n log n) total, was O(n²)).
     for (db.itemsMut()) |*p| {
-        if (findNodeById(g.nodes, p.entity_id)) |n| {
-            p.role = switch (n.role) {
-                .trunk => .trunk,
-                .satellite => .satellite,
-            };
-            p.index = n.index;
-            p.parent_index = n.parent_index;
-        }
+        const gi = std.sort.binarySearch(graph_mod.Node, g.nodes, p.entity_id, nodeIdOrder) orelse continue;
+        const n = g.nodes[gi];
+        p.role = switch (n.role) {
+            .trunk => .trunk,
+            .satellite => .satellite,
+        };
+        p.index = n.index;
+        p.parent_index = n.parent_index;
     }
 
     var material: []const u8 = "";
@@ -161,11 +163,11 @@ pub fn freezeSiteFromPageDb(
     };
 }
 
-fn findNodeById(nodes: []const graph_mod.Node, id: []const u8) ?graph_mod.Node {
-    for (nodes) |n| {
-        if (std.mem.eql(u8, n.id, id)) return n;
-    }
-    return null;
+/// Compare an entity id against a frozen node's id. Frozen nodes are
+/// id-sorted (see `graph.freeze`), so this drives `std.sort.binarySearch`
+/// lookups instead of linear scans.
+fn nodeIdOrder(id: []const u8, n: graph_mod.Node) std.math.Order {
+    return std.mem.order(u8, id, n.id);
 }
 
 /// Experimental path marker — keep CLI default off this surface.
@@ -2826,6 +2828,45 @@ test "HTML path emits site nav and breadcrumb for forest" {
     try std.testing.expect(std.mem.indexOf(u8, child, "../index.html") != null);
     try std.testing.expect(std.mem.indexOf(u8, child, "breadcrumb") != null);
     try std.testing.expect(std.mem.indexOf(u8, child, "<title>Child</title>") != null);
+}
+
+test "freeze-sync lookup: binary search matches linear scan over id-sorted frozen nodes" {
+    const gpa = std.testing.allocator;
+    const nodes = try gpa.alloc(graph_mod.Node, 5);
+    defer gpa.free(nodes);
+    // Deliberately unsorted provisional order; graph.freeze sorts by id and
+    // assigns stable indices.
+    nodes[0] = .{ .id = "zeta", .source_path = "zeta.md" };
+    nodes[1] = .{ .id = "alpha", .source_path = "alpha.md" };
+    nodes[2] = .{ .id = "mid", .source_path = "mid.md" };
+    nodes[3] = .{ .id = "gamma", .source_path = "gamma.md" };
+    nodes[4] = .{ .id = "beta", .source_path = "beta.md" };
+
+    const g = try graph_mod.freeze(gpa, nodes, null);
+    defer gpa.free(g.edges);
+
+    for (g.nodes, 0..) |n, i| {
+        // Post-freeze: id-sorted with stable indices — the invariant the
+        // sync-loop binary search relies on.
+        try std.testing.expectEqual(@as(u32, @intCast(i)), n.index);
+    }
+
+    for (g.nodes) |n| {
+        const gi = std.sort.binarySearch(graph_mod.Node, g.nodes, n.id, nodeIdOrder) orelse
+            return error.TestUnexpectedResult;
+        try std.testing.expectEqualStrings(n.id, g.nodes[gi].id);
+        // Cross-check against the reference linear scan this lookup replaced.
+        var lin: ?usize = null;
+        for (g.nodes, 0..) |m, i| {
+            if (std.mem.eql(u8, m.id, n.id)) {
+                lin = i;
+                break;
+            }
+        }
+        try std.testing.expectEqual(lin, gi);
+    }
+    // Missing ids keep the old not-found semantics (page sync skips them).
+    try std.testing.expect(std.sort.binarySearch(graph_mod.Node, g.nodes, @as([]const u8, "missing"), nodeIdOrder) == null);
 }
 
 test "HTML path emits deterministic escaped direct children with selected layouts" {
