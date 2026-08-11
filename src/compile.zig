@@ -56,6 +56,7 @@ const theme_mod = @import("theme.zig");
 const layout_select = @import("layout_select.zig");
 const textile = @import("textile.zig");
 const content_asset = @import("content_asset.zig");
+const timings = @import("timings.zig");
 
 pub const PageDb = page_mod.PageDb;
 pub const DurablePage = page_mod.DurablePage;
@@ -195,6 +196,8 @@ pub const CompileOptions = struct {
     test_fail_publish_at: ?usize = null,
     /// Opt-in to fast incremental rendering.
     incremental: bool = false,
+    /// Opt-in PERF-027 phase/counter instrumentation (null when not requested).
+    timings: ?*timings.Timings = null,
     /// When set, inject failure before publishing cache manifest to test rollback.
     test_fail_cache_publish: bool = false,
     /// Bounded parallel rendering worker count.
@@ -280,7 +283,7 @@ pub fn loadAndPromote(
     db: *PageDb,
     content_root: []const u8,
 ) !void {
-    return loadAndPromoteFormat(io, gpa, db, content_root, .markdown, true);
+    return loadAndPromoteFormat(io, gpa, db, content_root, .markdown, true, null);
 }
 
 pub fn loadAndPromoteFormat(
@@ -290,9 +293,13 @@ pub fn loadAndPromoteFormat(
     content_root: []const u8,
     input_format: identity.InputFormat,
     quiet: bool,
+    timings_opt: ?*timings.Timings,
 ) !void {
     var scan_list = page_mod.PageList.init(gpa, db.retain);
     defer scan_list.deinit();
+
+    const scan_phase = if (timings_opt) |t| t.start(timings.phase_scan) else null;
+    defer if (scan_phase) |p| p.end();
 
     scanner.scan(io, .{ .content_root = content_root, .input_format = input_format }, &scan_list) catch |err| switch (err) {
         error.ContentDirMissing => return error.ContentDirMissing,
@@ -305,9 +312,14 @@ pub fn loadAndPromoteFormat(
         else => |e| return e,
     };
 
+    if (timings_opt) |t| t.setCounter(timings.counter_page_reads, scan_list.len());
+
     const cwd = Io.Dir.cwd();
     var content_dir = try cwd.openDir(io, content_root, .{});
     defer content_dir.close(io);
+
+    const parse_phase = if (timings_opt) |t| t.start(timings.phase_parse) else null;
+    defer if (parse_phase) |p| p.end();
 
     for (scan_list.items()) |disc| {
         const source = try readFileAlloc(io, content_dir, disc.source_path, gpa);
@@ -600,6 +612,8 @@ pub fn compileHtmlSite(
     }
 
     // 1. Layout first — hard fail before any content walk on bad marker.
+    const layout_phase = if (options.timings) |t| t.start(timings.phase_layout) else null;
+    defer if (layout_phase) |p| p.end();
     var layout_arena = std.heap.ArenaAllocator.init(gpa);
     defer layout_arena.deinit();
     const layout = try loadLayoutOnce(io, cwd, options.layout_path, layout_arena.allocator());
@@ -610,10 +624,12 @@ pub fn compileHtmlSite(
     var db = PageDb.init(gpa, retain_arena.allocator());
     defer db.deinit();
 
-    try loadAndPromoteFormat(io, gpa, &db, options.content_root, options.input_format, options.quiet);
+    try loadAndPromoteFormat(io, gpa, &db, options.content_root, options.input_format, options.quiet, options.timings);
 
     // 3. Graph validate + freeze (shared rules with IR/RAG; Feature 6 nav).
     // Rules may select graph chrome even when the fallback layout has none.
+    const graph_phase = if (options.timings) |t| t.start(timings.phase_graph_validate) else null;
+    defer if (graph_phase) |p| p.end();
     var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or options.layout_rules.len != 0);
     defer site.deinit();
 
@@ -831,16 +847,25 @@ pub fn compileHtmlSiteMulti(
     var db = PageDb.init(gpa, retain_arena.allocator());
     defer db.deinit();
 
-    try loadAndPromoteFormat(io, gpa, &db, base_options.content_root, base_options.input_format, base_options.quiet);
+    try loadAndPromoteFormat(io, gpa, &db, base_options.content_root, base_options.input_format, base_options.quiet, base_options.timings);
 
     // Shared graph freeze once for all targets (Feature 6). Always compute nav
     // material; fingerprint mixes it in only when a layout has `{{nav}}`.
+    const graph_phase = if (base_options.timings) |t| t.start(timings.phase_graph_validate) else null;
+    defer if (graph_phase) |p| p.end();
     var site = try freezeSiteFromPageDb(gpa, &db, base_options.quiet, true);
     defer site.deinit();
 
     // Shared content/include fingerprint inputs once for all targets.
+    const dep_phase = if (base_options.timings) |t| t.start(timings.phase_dependency_resolve) else null;
+    defer if (dep_phase) |p| p.end();
     var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root, base_options.quiet, base_options.input_format);
     defer shared.deinit();
+    if (base_options.timings) |t| {
+        var include_count: usize = 0;
+        for (shared.include_bytes) |list| include_count += list.len;
+        t.setCounter(timings.counter_include_reads, include_count);
+    }
 
     // Preflight layout selection for every target/page before any target publishes
     // (RFC §5: ambiguous globs and mixed roots must not leave partial publications).
@@ -1664,9 +1689,16 @@ fn compilePagesInner(
     var local_shared: ?SharedCompileState = null;
     defer if (local_shared) |*s| s.deinit();
     const shared: *const SharedCompileState = if (shared_opt) |s| s else blk: {
+        const dep_phase = if (options.timings) |t| t.start(timings.phase_dependency_resolve) else null;
+        defer if (dep_phase) |p| p.end();
         local_shared = try SharedCompileState.init(io, gpa, db, options.content_root, options.quiet, options.input_format);
         break :blk &(local_shared.?);
     };
+    if (options.timings) |t| {
+        var include_count: usize = 0;
+        for (shared.include_bytes) |list| include_count += list.len;
+        t.setCounter(timings.counter_include_reads, include_count);
+    }
 
     // Load and parse prior manifest if in incremental mode (from final dist).
     var manifest_bytes: ?[]u8 = null;
@@ -1715,17 +1747,21 @@ fn compilePagesInner(
     // only pages that are fragment targets are rendered for the index).
     // Incremental: reuse harvest-cache hits so no-op builds skip Apex (#58).
     const prior_harvest: ?*const ParsedHeadingHarvest = if (parsed_heading_harvest) |*ph| &ph.value else null;
-    const heading_built = try buildSiteHeadingIndex(
-        io,
-        gpa,
-        content_dir,
-        db,
-        site,
-        shared,
-        options.quiet,
-        options.input_format,
-        prior_harvest,
-    );
+    const heading_built = blk: {
+        const harvest_phase = if (options.timings) |t| t.start(timings.phase_heading_harvest) else null;
+        defer if (harvest_phase) |p| p.end();
+        break :blk try buildSiteHeadingIndex(
+            io,
+            gpa,
+            content_dir,
+            db,
+            site,
+            shared,
+            options.quiet,
+            options.input_format,
+            prior_harvest,
+        );
+    };
     var heading_index = heading_built[0];
     defer heading_index.deinit(gpa);
     var heading_snapshot = heading_built[1];
@@ -1753,6 +1789,14 @@ fn compilePagesInner(
     const is_dirty = try gpa.alloc(bool, db.len());
     @memset(is_dirty, false);
     defer gpa.free(is_dirty);
+
+    // Fingerprint computation (dirty-set seed). Counter `hash_bytes` sums the
+    // dynamic fingerprint inputs (source + includes + nav + layout + theme).
+    var link_resolutions_total: usize = 0;
+    var hash_bytes_total: u64 = 0;
+    {
+        const fingerprint_phase = if (options.timings) |t| t.start(timings.phase_fingerprint) else null;
+        defer if (fingerprint_phase) |p| p.end();
 
     for (db.items(), 0..) |page, page_idx| {
         // Convert owned []u8 include lists to []const u8 views for the hasher.
@@ -1788,7 +1832,11 @@ fn compilePagesInner(
             wiki_paths,
             site.nodes,
             &wiki_fail,
-            .{ .heading_index = &heading_index, .validate_fragments = true },
+            .{
+                .heading_index = &heading_index,
+                .validate_fragments = true,
+                .link_resolutions = if (options.timings != null) &link_resolutions_total else null,
+            },
         ) catch |err| {
             if (err == error.ReferenceMissing or err == error.ReferenceSyntax or err == error.PathError) {
                 if (!options.quiet) {
@@ -1828,6 +1876,9 @@ fn compilePagesInner(
         }
 
         // Fingerprint uses the effective selected layout identity and bytes.
+        hash_bytes_total += @intCast(shared.source_bytes[page_idx].len);
+        for (inc_with_ref) |b| hash_bytes_total += @intCast(b.len);
+        hash_bytes_total += @intCast(nav_material.len + page_layout_bytes[page_idx].len + page_theme_material[page_idx].len);
         const fp_bytes = cache.computePageFingerprintThemeInput(
             options.target_name,
             page_sel_paths[page_idx],
@@ -1884,6 +1935,12 @@ fn compilePagesInner(
         is_dirty[page_idx] = !skip_render;
     }
 
+    if (options.timings) |t| {
+        t.setCounter(timings.counter_hash_bytes, hash_bytes_total);
+        t.setCounter(timings.counter_link_resolutions, link_resolutions_total);
+    }
+    }
+
     // Fingerprints identify changed page inputs; the shared frozen reverse
     // dependency story expands those seeds to parent/reference dependents.
     // This happens before workers and mutates only coordinator-owned state.
@@ -1893,6 +1950,9 @@ fn compilePagesInner(
 
     // Compile loop — dirty pages write into staging only
     var stats: CompileStats = .{};
+
+    const render_phase = if (options.timings) |t| t.start(timings.phase_render) else null;
+    var fast_path_hits: usize = 0;
 
     if (options.jobs > 1) {
         var ctx = ParallelContext{
@@ -1951,6 +2011,7 @@ fn compilePagesInner(
                     std.debug.print("  wrote {s}/{s}\n", .{ options.dist_dir, page.output_path });
                 }
             } else {
+                fast_path_hits += 1;
                 if (!options.quiet) {
                     std.debug.print("  cached {s}/{s}\n", .{ options.dist_dir, page.output_path });
                 }
@@ -1989,6 +2050,7 @@ fn compilePagesInner(
                     std.debug.print("  wrote {s}/{s}\n", .{ options.dist_dir, page.output_path });
                 }
             } else {
+                fast_path_hits += 1;
                 if (!options.quiet) {
                     std.debug.print("  cached {s}/{s}\n", .{ options.dist_dir, page.output_path });
                 }
@@ -1998,6 +2060,11 @@ fn compilePagesInner(
             if (cap > stats.peak_whiteboard_capacity) stats.peak_whiteboard_capacity = cap;
         }
     }
+
+    if (render_phase) |p| p.end();
+    if (options.timings) |t| t.setCounter(timings.counter_fast_path_hits, fast_path_hits);
+
+    const publish_phase = if (options.timings) |t| t.start(timings.phase_publish) else null;
 
     // Write cache manifest into staging (committed with the rest of the target).
     if (options.incremental) {
@@ -2146,6 +2213,7 @@ fn compilePagesInner(
     // Drop staging tree (errdefer also cleans on earlier failure).
     cwd.deleteTree(io, stage_rel) catch {};
 
+    if (publish_phase) |p| p.end();
     return stats;
 }
 

@@ -124,10 +124,37 @@ jobs:
       - name: Migration-lab aggregate tests
         run: zig build --build-file tools/migration-lab/build.zig test
 
+  benchmark:
+    name: benchmark-gate (ReleaseFast, 1k pages)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      # The benchmark step builds a ReleaseFast boris-benchmark, which links the
+      # static ApexMarkdown libs produced by scripts/build-apex-markdown.sh (cmake).
+      - name: Install CMake
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake
+
+      # PERF-028: ReleaseFast-only `zig build benchmark` over the pinned 1k-page
+      # deterministic corpus; every phase is gated against the checked-in baseline
+      # (default 2x, see scripts/benchmark.sh). Generous on purpose — no noisy
+      # micro-regressions.
+      - name: ReleaseFast benchmark + regression gate
+        run: zig build benchmark
+
   # Single required status check for branch protection / rulesets.
   ci:
     name: ci
-    needs: [build-and-test, migration-lab-test]
+    needs: [build-and-test, migration-lab-test, benchmark]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -135,8 +162,11 @@ jobs:
         run: |
           build_and_test="${{ needs.build-and-test.result }}"
           migration_lab_test="${{ needs.migration-lab-test.result }}"
+          benchmark="${{ needs.benchmark.result }}"
           echo "build-and-test result: ${build_and_test}"
           echo "migration-lab-test result: ${migration_lab_test}"
+          echo "benchmark result: ${benchmark}"
           test "${build_and_test}" = "success"
           test "${migration_lab_test}" = "success" || test "${migration_lab_test}" = "skipped"
+          test "${benchmark}" = "success" || test "${benchmark}" = "skipped"
           

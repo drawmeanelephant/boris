@@ -99,6 +99,16 @@ verified. Do not check an item because a design doc exists.
       contract [`multi-target-isolated-output.md`](contracts/multi-target-isolated-output.md)
 - [x] **CI coverage** — continuous integration exercises release-critical
       steps (`zig build` + `zig build test` + `test-apex-hostile` on Linux + macOS)
+- [x] **ReleaseFast benchmark gate** — `zig build benchmark` is ReleaseFast-only
+      by construction, builds a pinned deterministic corpus (1k pages), runs
+      `boris --timings`, and fails when any phase exceeds the checked-in
+      baseline by the configured factor (default 2×); deliberate regressions
+      are demonstrated failing (`scripts/benchmark.sh`,
+      `tools/testdata-generator/`, `baseline/benchmark-1k.json`)
+- [x] **Measurement mode guidance** — `zig build -Doptimize=ReleaseFast` is
+      documented as the standard optimization mode for performance
+      measurements in README + STATUS; the Debug development default is
+      unchanged (release gate section 8b)
 
 ## Current phase notes
 

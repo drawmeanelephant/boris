@@ -320,6 +320,9 @@ pub const ResolveOptions = struct {
     /// When true, fragments require a heading index + membership (fail closed).
     /// Set false only while bootstrapping the heading index (emit, do not check).
     validate_fragments: bool = true,
+    /// Optional PERF-027 counter: number of wiki-link occurrences resolved
+    /// across all bodies (never a correctness dependency).
+    link_resolutions: ?*usize = null,
 };
 
 fn failFragmentDetail(
@@ -582,6 +585,9 @@ pub fn referenceMaterialMulti(
     for (bodies, 0..) |body, i| {
         const path = if (body_paths) |paths| paths[i] else "";
         try collectIdsFromBody(body, path, allocator, &locs, &seen, fail_out, opts);
+    }
+    if (opts.link_resolutions) |counter| {
+        counter.* += locs.items.len;
     }
     return materialFromIdLocs(allocator, locs.items, nodes, fail_out);
 }

@@ -42,6 +42,8 @@ pub const Options = struct {
     /// When true, print help and exit successfully (no pipeline).
     help: bool = false,
     quiet: bool = false,
+    /// Opt-in phase timing/counter report on stderr (PERF-027).
+    timings: bool = false,
     command: Command = .build,
     impact_id: ?[]const u8 = null,
     analysis_format: AnalysisFormat = .human,
@@ -119,6 +121,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var html_dir: []const u8 = default_html_dir;
 
     var saw_quiet = false;
+    var saw_timings = false;
     var saw_input = false;
     var saw_out = false;
     var saw_rag = false;
@@ -184,6 +187,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             return .{
                 .help = true,
                 .quiet = quiet,
+                .timings = saw_timings,
                 .mode = .ir,
                 .input_dir = input_dir,
                 .out_dir = out_dir,
@@ -199,6 +203,12 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             if (saw_quiet) return error.DuplicateFlag;
             saw_quiet = true;
             quiet = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--timings")) {
+            if (saw_timings) return error.DuplicateFlag;
+            saw_timings = true;
             continue;
         }
 
@@ -573,6 +583,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .ir => .{
             .help = false,
             .quiet = quiet,
+            .timings = saw_timings,
             .mode = .ir,
             .input_dir = input_dir,
             .out_dir = out_dir,
@@ -589,6 +600,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .rag => .{
             .help = false,
             .quiet = quiet,
+            .timings = saw_timings,
             .mode = .rag,
             .input_dir = input_dir,
             .out_dir = null,
@@ -602,6 +614,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .context => .{
             .help = false,
             .quiet = quiet,
+            .timings = saw_timings,
             .mode = .context,
             .input_dir = input_dir,
             .out_dir = null,
@@ -619,6 +632,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .llms => .{
             .help = false,
             .quiet = quiet,
+            .timings = saw_timings,
             .mode = .llms,
             .input_dir = input_dir,
             .out_dir = null,
@@ -635,6 +649,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .html => .{
             .help = false,
             .quiet = quiet,
+            .timings = saw_timings,
             .mode = .html,
             .input_dir = input_dir,
             .out_dir = null,
@@ -717,6 +732,7 @@ pub fn printUsage() void {
         \\  --watch             Local-development watch mode for HTML builds (implies --incremental)
         \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
         \\  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
+        \\  --timings           Report per-phase durations + counters to stderr (machine-readable JSON line)
         \\  --format human|json  Analysis output format for check/impact (default human)
         \\  --report PATH        Write an analysis report instead of stdout
         \\  -h, --help          Show this help and exit 0
@@ -918,6 +934,25 @@ test "parse: default is HTML mode" {
     try expectEqualStrings("default", o.targets.items[0].name);
     try expectEqualStrings(default_html_dir, o.targets.items[0].output_dir);
     try expectEqual(identity.InputFormat.markdown, o.input_format);
+}
+
+test "parse: --timings is opt-in and repeatable-flag-safe across modes" {
+    var html = try parseOptions(std.testing.allocator, &.{ "boris", "--timings" });
+    defer html.deinit(std.testing.allocator);
+    try expect(html.timings);
+    try expectEqual(Mode.html, html.mode);
+
+    var ir = try parseOptions(std.testing.allocator, &.{ "boris", "--out", ".boris", "--timings" });
+    defer ir.deinit(std.testing.allocator);
+    try expect(ir.timings);
+    try expectEqual(Mode.ir, ir.mode);
+
+    var rag = try parseOptions(std.testing.allocator, &.{ "boris", "--rag", "--timings", "--quiet" });
+    defer rag.deinit(std.testing.allocator);
+    try expect(rag.timings);
+    try expect(rag.quiet);
+
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "--timings", "--timings" }));
 }
 
 test "parse: Textile input mode is explicit and whole-tree" {

@@ -18,6 +18,7 @@ const wikilink = @import("wikilink.zig");
 const dependency = @import("dependency.zig");
 const identity = @import("identity.zig");
 const textile = @import("textile.zig");
+const timings = @import("timings.zig");
 
 pub const schema_version = "0.2.0";
 pub const compiler_id = "boris/0.8.0";
@@ -31,6 +32,8 @@ pub const Options = struct {
     out_dir: []const u8 = ".boris",
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
+    /// Opt-in PERF-027 phase/counter instrumentation (null when not requested).
+    timings: ?*timings.Timings = null,
 };
 
 /// Shared load options for IR and RAG (no output paths).
@@ -38,6 +41,8 @@ pub const CompileOptions = struct {
     content_root: []const u8 = "content",
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
+    /// Opt-in PERF-027 phase/counter instrumentation (null when not requested).
+    timings: ?*timings.Timings = null,
 };
 
 pub const PageEntry = graph_mod.Node;
@@ -718,6 +723,9 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     var scan_list = page_mod.PageList.init(gpa, retain);
     defer scan_list.deinit();
 
+    const scan_phase = if (options.timings) |t| t.start(timings.phase_scan) else null;
+    defer if (scan_phase) |p| p.end();
+
     scanner.scan(io, .{ .content_root = options.content_root, .input_format = options.input_format }, &scan_list) catch |err| switch (err) {
         error.ContentDirMissing => {
             try result.diagnostics.append(gpa, .{
@@ -777,11 +785,15 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         },
     };
 
+    if (options.timings) |t| t.setCounter(timings.counter_page_reads, scan_list.len());
     logCompile(options.quiet, "boris: roll  parsing {d} page(s)\n", .{scan_list.len()});
 
     // --- 2–3. Read, parse, promote durable metadata only --------------------
     var db = page_mod.PageDb.init(gpa, retain);
     defer db.deinit();
+
+    const parse_phase = if (options.timings) |t| t.start(timings.phase_parse) else null;
+    defer if (parse_phase) |p| p.end();
 
     const cwd = Io.Dir.cwd();
     var content_dir = cwd.openDir(io, options.content_root, .{}) catch |err| {
@@ -921,6 +933,10 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
 
     // --- 5. Validate page identity/topology, then direct dependencies -------
     logCompile(options.quiet, "boris: ignite validating graph\n", .{});
+
+    const graph_phase = if (options.timings) |t| t.start(timings.phase_graph_validate) else null;
+    defer if (graph_phase) |p| p.end();
+
     try graph_mod.validate(gpa, retain, result.pages.items, &result.diagnostics);
     diag.sortDiagnostics(result.diagnostics.items);
 
@@ -931,6 +947,9 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         err_count = diag.countErrors(result.diagnostics.items);
     }
     if (err_count == 0) {
+        const dep_phase = if (options.timings) |t| t.start(timings.phase_dependency_resolve) else null;
+        defer if (dep_phase) |p| p.end();
+
         try resolveDependencies(io, gpa, retain, content_dir, options.input_format, &result);
         diag.sortDiagnostics(result.diagnostics.items);
         err_count = diag.countErrors(result.diagnostics.items);
@@ -962,6 +981,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
         .content_root = options.content_root,
         .quiet = options.quiet,
         .input_format = options.input_format,
+        .timings = options.timings,
     });
     errdefer result.deinit();
 
@@ -971,6 +991,8 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
     if (result.ok) {
         log(options, "boris: ignite emitting IR → {s}\n", .{options.out_dir});
     }
+    const emit_phase = if (options.timings) |t| t.start(timings.phase_ir_emit) else null;
+    defer if (emit_phase) |p| p.end();
     try publishArtifacts(io, gpa, &result);
     if (result.ok) {
         log(options, "boris: reset done ({d} page(s))\n", .{result.pages.items.len});

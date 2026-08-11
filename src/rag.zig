@@ -34,6 +34,7 @@ const aside = @import("aside.zig");
 const pipeline = @import("pipeline.zig");
 const rag_emit = @import("rag_emit.zig");
 const textile = @import("textile.zig");
+const timings = @import("timings.zig");
 
 /// Machine format id written into `catalog_meta.json`.
 pub const catalog_format = "boris-rag";
@@ -53,6 +54,8 @@ pub const RagOptions = struct {
     system_docs_dir: []const u8 = "docs/rag/system",
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
+    /// Opt-in PERF-027 phase/counter instrumentation (null when not requested).
+    timings: ?*timings.Timings = null,
 };
 
 pub const RagStats = struct {
@@ -1053,6 +1056,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: RagOptions) !RagResult {
         .content_root = opts.content_root,
         .quiet = opts.quiet,
         .input_format = opts.input_format,
+        .timings = opts.timings,
     });
     errdefer {
         result.compile.deinit();

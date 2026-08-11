@@ -271,6 +271,24 @@ Reset → free per-page scratch (HTML) / arena (IR/RAG)
 P2 (fingerprints, incremental, layout edges) and P3 scale-out are **complete**
 on the HTML path. Detail lives in contracts and `CHANGELOG.md`, not here.
 
+## Performance measurement mode (do not confuse Debug with ReleaseFast)
+
+**`zig build -Doptimize=ReleaseFast` is the standard optimization mode for all
+Boris performance measurements and release verification.** Debug remains the
+explicit development default and is intentionally never silently switched to
+ReleaseFast for local builds; Debug-vs-ReleaseFast differences on the HTML path
+are very large, so benchmarking or release checks in an implicit mode produce
+misleading numbers.
+
+The first-class entrypoint is `zig build benchmark`: it is **ReleaseFast-only by
+construction**, builds a pinned deterministic corpus (1k pages), runs `boris
+--timings`, and gates every phase against a checked-in baseline with a
+deliberately generous 2× threshold (see `scripts/benchmark.sh` and
+`tools/testdata-generator/`). Hand measurements use `boris --timings`, which
+prints a machine-readable `boris-timings {…}` JSON line to stderr. The Debug
+default and its characteristics are unchanged; the benchmark/release paths just
+state the mode they use.
+
 ---
 
 ## Not now

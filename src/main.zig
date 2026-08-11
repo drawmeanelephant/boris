@@ -19,6 +19,7 @@ const target = @import("target.zig");
 const theme_mod = @import("theme.zig");
 const intelligence = @import("intelligence.zig");
 const json_out = @import("json_out.zig");
+const timings = @import("timings.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const Options = cli.Options;
@@ -55,12 +56,24 @@ const ProdRunner = struct {
 /// - usage errors are handled before this (exit 2)
 /// - I/O / system errors → 3
 pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
-    if (opts.command != .build) return runIntelligence(io, gpa, opts);
+    // PERF-027: create the timing surface only when explicitly requested;
+    // report to stderr on every exit path (including content failures).
+    var timing_holder: ?timings.Timings = null;
+    defer {
+        if (timing_holder) |*t| {
+            t.emit();
+            t.deinit();
+        }
+    }
+    if (opts.timings) timing_holder = timings.Timings.init(gpa, io);
+    const t: ?*timings.Timings = if (timing_holder) |*th| th else null;
+
+    if (opts.command != .build) return runIntelligence(io, gpa, opts, t);
     switch (opts.mode) {
-        .rag => return runRag(io, gpa, opts),
-        .context => return runContext(io, gpa, opts),
-        .llms => return runLlms(io, gpa, opts),
-        .html => return runHtml(io, gpa, opts),
+        .rag => return runRag(io, gpa, opts, t),
+        .context => return runContext(io, gpa, opts, t),
+        .llms => return runLlms(io, gpa, opts, t),
+        .html => return runHtml(io, gpa, opts, t),
         .ir => {},
     }
 
@@ -71,6 +84,7 @@ pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .out_dir = out_dir,
         .quiet = opts.quiet,
         .input_format = opts.input_format,
+        .timings = t,
     }) catch |err| {
         if (!opts.quiet) {
             std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
@@ -99,7 +113,7 @@ pub fn runPipeline(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 }
 
 /// Deterministic provenance-rich AI context export (same compile + graph validation as IR/RAG).
-pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options, timings_opt: ?*timings.Timings) ExitCode {
     const context_dir = opts.context_dir orelse "context";
 
     var result = context.run(io, gpa, .{
@@ -107,6 +121,7 @@ pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .out_dir = context_dir,
         .quiet = opts.quiet,
         .input_format = opts.input_format,
+        .timings = timings_opt,
     }) catch |err| {
         if (!opts.quiet) {
             std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
@@ -135,13 +150,14 @@ pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 }
 
 /// Deterministic community `llms.txt` export using the shared validated graph.
-pub fn runLlms(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+pub fn runLlms(io: Io, gpa: std.mem.Allocator, opts: Options, timings_opt: ?*timings.Timings) ExitCode {
     const out_path = opts.llms_path orelse "llms.txt";
     var result = llms.run(io, gpa, .{
         .content_root = opts.input_dir,
         .out_path = out_path,
         .quiet = opts.quiet,
         .input_format = opts.input_format,
+        .timings = timings_opt,
     }) catch |err| {
         if (!opts.quiet) std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
         return .io_error;
@@ -162,11 +178,12 @@ pub fn runLlms(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 
 /// Read-only graph analysis. This intentionally calls pipeline.compile rather
 /// than pipeline.run, so no IR/RAG/HTML artifacts or cache manifests publish.
-pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, timings_opt: ?*timings.Timings) ExitCode {
     var result = pipeline.compile(io, gpa, .{
         .content_root = opts.input_dir,
         .quiet = true,
         .input_format = opts.input_format,
+        .timings = timings_opt,
     }) catch |err| {
         if (!opts.quiet) std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
         return .io_error;
@@ -384,7 +401,7 @@ fn renderAnalysisJson(
 }
 
 /// Optional deterministic RAG export (same compile + graph.validate as IR).
-pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options, timings_opt: ?*timings.Timings) ExitCode {
     const rag_dir = opts.rag_dir orelse default_rag;
 
     var result = rag.run(io, gpa, .{
@@ -393,6 +410,7 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
         .system_docs_dir = "docs/rag/system",
         .quiet = opts.quiet,
         .input_format = opts.input_format,
+        .timings = timings_opt,
     }) catch |err| {
         if (!opts.quiet) {
             std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
@@ -421,7 +439,7 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
 }
 
 /// HTML site render via Apex C-ABI + whiteboard arena (default CLI path).
-pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, timings_opt: ?*timings.Timings) ExitCode {
     const html_dir = opts.html_dir orelse default_html;
 
     const layout_path = opts.html_layout;
@@ -510,6 +528,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             .quiet = opts.quiet,
             .jobs = opts.jobs,
             .input_format = opts.input_format,
+            .timings = timings_opt,
         }) catch |err| {
             return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
         };
@@ -528,6 +547,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
             .quiet = opts.quiet,
             .jobs = opts.jobs,
             .input_format = opts.input_format,
+            .timings = timings_opt,
         }) catch |err| {
             return mapHtmlError(err, opts.quiet, &.{}, layout_path);
         };
