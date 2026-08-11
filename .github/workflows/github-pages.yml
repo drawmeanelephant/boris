@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      audit_deployment:
+        description: "Run the bounded post-deploy HTTP audit and retain separate evidence"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: pages
@@ -19,10 +25,10 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      pages: write
+      pages: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
@@ -43,7 +49,7 @@ jobs:
       # The profile parser independently cross-checks the same values offline.
       - name: Resolve GitHub Pages location
         id: pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
 
       - name: Create and validate the publication plan
         env:
@@ -192,13 +198,13 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the public Pages artifact
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           name: github-pages
           path: public-site
 
       - name: Upload retained evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: boris-github-pages-evidence-${{ github.run_id }}
           path: evidence
@@ -211,6 +217,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
@@ -219,14 +226,96 @@ jobs:
     steps:
       - name: Deploy
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+
+      # This is an optional, separate observer. It consumes the exact plan and
+      # target-local inventory retained by build; it never mutates the public
+      # Pages artifact or rewrites target-local evidence.
+      - name: Checkout observer source
+        if: ${{ inputs.audit_deployment == true }}
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 1
+
+      - name: Install Zig for deployment observer
+        if: ${{ inputs.audit_deployment == true }}
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Download target-local evidence
+        if: ${{ inputs.audit_deployment == true }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: boris-github-pages-evidence-${{ github.run_id }}
+          path: deployment-input
+
+      - name: Build deployment observer
+        if: ${{ inputs.audit_deployment == true }}
+        run: |
+          mkdir -p deployment-evidence
+          zig build --build-file tools/github-pages-audit/build.zig -Doptimize=ReleaseSafe
+
+      - name: Observe deployed Pages
+        id: deployment_audit
+        if: ${{ inputs.audit_deployment == true }}
+        continue-on-error: true
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          test -n "$PAGE_URL"
+          test -f deployment-input/publication-plan.json
+          test -f deployment-input/proof/artifacts.json
+          mkdir -p deployment-evidence
+          AUDITED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          tools/github-pages-audit/zig-out/bin/boris-github-pages-audit \
+            --plan deployment-input/publication-plan.json \
+            --inventory deployment-input/proof/artifacts.json \
+            --page-url "$PAGE_URL" \
+            --audited-at "$AUDITED_AT" \
+            --out deployment-evidence/github-pages-deployment-evidence.json \
+            --target public \
+            --repository "$GITHUB_REPOSITORY" \
+            --source-commit "$GITHUB_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            --workflow-sha "$GITHUB_WORKFLOW_SHA" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --public-artifact-name github-pages
+
+      - name: Upload deployment evidence
+        if: ${{ always() && inputs.audit_deployment == true }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: boris-github-pages-deployment-evidence-${{ github.run_id }}
+          path: deployment-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Write deployment audit summary
+        if: ${{ always() && inputs.audit_deployment == true }}
+        run: |
+          {
+            echo "## GitHub Pages post-deploy audit"
+            echo ""
+            echo '- Deployment status: succeeded (deploy-pages completed)'
+            if test -f deployment-evidence/github-pages-deployment-evidence.json; then
+              echo "- Audit result: $(jq -r '.audit.result' deployment-evidence/github-pages-deployment-evidence.json)"
+              echo "- Requests: $(jq -r '.audit.requests' deployment-evidence/github-pages-deployment-evidence.json)"
+              echo "- Completed observations: $(jq -r '.audit.observations | length' deployment-evidence/github-pages-deployment-evidence.json)"
+              echo "- Separate evidence: boris-github-pages-deployment-evidence-${GITHUB_RUN_ID}"
+            else
+              echo "- Audit evidence was not produced; inspect the observer setup/build logs."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Write the deployment summary
         run: |
           {
             echo "## GitHub Pages deployment"
             echo ""
+            echo '- Deployment status: succeeded (deploy-pages completed)'
             echo "- Published URL: ${{ steps.deployment.outputs.page_url }}"
             echo "- Deployment artifact: github-pages"
-            echo "- Post-deploy HTTP audit: not run by this workflow"
+            echo "- Post-deploy HTTP audit: optional; enable audit_deployment on manual dispatch"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,17 @@
+{
+  "format": "boris-publication-artifacts",
+  "schema_version": 1,
+  "target": "public",
+  "artifacts": [
+    {
+      "path": "index.html",
+      "kind": "html-page",
+      "producer": "html-render",
+      "required": true,
+      "status": "committed",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "format_version": null
+    }
+  ]
+}

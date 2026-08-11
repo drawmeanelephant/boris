@@ -1,0 +1,22 @@
+{
+  "format": "boris-publication-plan",
+  "schema_version": 1,
+  "publication": {
+    "target": "github-pages",
+    "base_url": "http://127.0.0.1:18080",
+    "origin": "http://127.0.0.1:18080",
+    "base_path": ""
+  },
+  "targets": [
+    {
+      "name": "public",
+      "public": true,
+      "projections": {
+        "html": true,
+        "sitemap": null,
+        "rss": null,
+        "llms": null
+      }
+    }
+  ]
+}
