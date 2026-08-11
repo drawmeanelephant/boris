@@ -54,6 +54,9 @@ pub const Options = struct {
     /// When set, counts each local (non-ignored) reference resolved by the
     /// audit — the audit's per-reference hot path. Never used for decisions.
     resolution_counter: ?*u64 = null,
+    /// When set, counts common references resolved in caller-owned scratch
+    /// storage. Never used for decisions.
+    fast_path_counter: ?*u64 = null,
 };
 
 /// Attributes whose value is a single URL. `srcset` is deliberately excluded:
@@ -276,6 +279,16 @@ fn auditOne(
     // Every reference that reaches resolution is a local reference actually
     // resolved by the audit — the per-reference hot path (observational only).
     if (opts.resolution_counter) |counter| counter.* += 1;
+
+    var fast_path_buffer: [route_resolver.fast_path_buffer_bytes]u8 = undefined;
+    if (route_resolver.tryResolveFastPath(resolution_source_path, route_target, fast_path_buffer[0..])) |resolved| {
+        if (opts.fast_path_counter) |counter| counter.* += 1;
+        if (!intended.contains(resolved)) {
+            try appendFinding(gpa, findings, .EROUTEMISSING, source_path, target, line, attribute);
+        }
+        return;
+    }
+
     const resolution = try resolveWithinRoot(gpa, resolution_source_path, route_target);
     switch (resolution) {
         .escapes_root => try appendFinding(gpa, findings, .EROUTEESCAPE, source_path, target, line, attribute),
@@ -717,12 +730,39 @@ test "resolution counter counts resolved local references" {
     defer freeFindings(gpa, &findings);
 
     var resolved: u64 = 0;
+    var fast_path: u64 = 0;
     const html =
         "<a href=\"real.html\">ok</a>" ++
         "<a href=\"https://example.com/x\">external</a>" ++
         "<a href=\"#top\">fragment</a>" ++
         "<a href=\"missing.html\">x</a>";
-    try auditDocumentWithOptions(gpa, &intended, "index.html", html, .{ .resolution_counter = &resolved }, &findings);
+    try auditDocumentWithOptions(gpa, &intended, "index.html", html, .{
+        .resolution_counter = &resolved,
+        .fast_path_counter = &fast_path,
+    }, &findings);
     // External and same-document fragment targets are skipped, not resolved.
     try std.testing.expectEqual(@as(u64, 2), resolved);
+    try std.testing.expectEqual(@as(u64, 2), fast_path);
+}
+
+test "common audit routes use caller scratch without allocation" {
+    const gpa = std.testing.allocator;
+    var intended: std.StringHashMapUnmanaged(void) = .{};
+    defer intended.deinit(gpa);
+    try intended.put(gpa, "index.html", {});
+    try intended.put(gpa, "real.html", {});
+
+    var findings: std.ArrayList(Finding) = .empty;
+    defer freeFindings(gpa, &findings);
+
+    var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = 0 });
+    try auditDocumentWithOptions(
+        failing.allocator(),
+        &intended,
+        "index.html",
+        "<a href=\"real.html\">ok</a>",
+        .{},
+        &findings,
+    );
+    try std.testing.expectEqual(@as(usize, 0), findings.items.len);
 }
