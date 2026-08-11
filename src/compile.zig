@@ -2619,8 +2619,22 @@ fn compilePagesInner(
     var live_page_paths = try gpa.alloc([]const u8, db.len());
     defer gpa.free(live_page_paths);
     for (db.items(), 0..) |page, page_idx| live_page_paths[page_idx] = page.output_path;
+
+    // Search is public surface, so it obeys the same publication rule as the
+    // sitemap below: a `status: draft` page is not advertised. It gets its own
+    // slice rather than filtering `live_page_paths`, because the link audit
+    // needs the *complete* output set — drafts still render to HTML, so
+    // dropping them from the audit input would both skip auditing draft pages
+    // and report every link that points at one as EROUTEMISSING.
+    var search_page_paths: std.ArrayList([]const u8) = .empty;
+    defer search_page_paths.deinit(gpa);
+    try search_page_paths.ensureTotalCapacity(gpa, live_page_paths.len);
+    for (db.items()) |page| {
+        if (page.status == .draft) continue;
+        search_page_paths.appendAssumeCapacity(page.output_path);
+    }
     if (options.timings) |t| t.start(.search);
-    try search_index.writeOverlay(io, gpa, stage_dir, dist_dir, live_page_paths, false);
+    try search_index.writeOverlay(io, gpa, stage_dir, dist_dir, search_page_paths.items, false);
     if (options.timings) |t| t.stop(.search);
 
     var sitemap_page_paths: std.ArrayList([]const u8) = .empty;
@@ -5908,6 +5922,68 @@ test "HTML publish produces search from live overlay and removes stale pages" {
         "{\n  \"format\": \"boris-rendered-search-index\",\n  \"schema_version\": 1,\n  \"documents\": [\n  ]\n}\n",
         search_json,
     );
+}
+
+test "search publication excludes draft pages while the link audit still resolves them" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/search-draft", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    // The published page links to the draft. A draft still renders to HTML, so
+    // that link must keep resolving: search exclusion is a publication-surface
+    // rule, not a removal from the output set.
+    try writeTreeFile(
+        io,
+        work,
+        "content/index.md",
+        "# Home\n\nBody token PUBLISHEDBODYTOKEN here.\n\n[draft](secret.html)\n",
+    );
+    try writeTreeFile(
+        io,
+        work,
+        "content/secret.md",
+        "---\nstatus: draft\n---\n\n# Secret\n\nBody token DRAFTBODYTOKEN here.\n",
+    );
+
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const layout = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    // A LinkAuditFailed here would mean the draft was dropped from the audit's
+    // intended output set, not merely from search.
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout,
+        .quiet = true,
+    });
+
+    // The draft rendered: it is published HTML, just not advertised.
+    const draft_html = try std.fmt.allocPrint(gpa, "{s}/secret.html", .{dist});
+    defer gpa.free(draft_html);
+    const draft_bytes = try readFileAlloc(io, cwd, draft_html, gpa);
+    defer gpa.free(draft_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, draft_bytes, "DRAFTBODYTOKEN") != null);
+
+    const search_path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ dist, search_index.output_path });
+    defer gpa.free(search_path);
+    const search_json = try readFileAlloc(io, cwd, search_path, gpa);
+    defer gpa.free(search_json);
+    try std.testing.expect(std.mem.indexOf(u8, search_json, "DRAFTBODYTOKEN") == null);
+    try std.testing.expect(std.mem.indexOf(u8, search_json, "\"path\": \"secret.html\"") == null);
+    // Positive control: an exclusion that emptied the index would pass the two
+    // assertions above without publishing anything searchable.
+    try std.testing.expect(std.mem.indexOf(u8, search_json, "PUBLISHEDBODYTOKEN") != null);
+    try std.testing.expect(std.mem.indexOf(u8, search_json, "\"path\": \"index.html\"") != null);
 }
 
 test "HTML sitemap uses the staged live overlay and is deterministic across clean incremental and parallel builds" {
