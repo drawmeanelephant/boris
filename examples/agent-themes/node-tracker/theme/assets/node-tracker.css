@@ -14,7 +14,7 @@ h1, h2 { font-weight: normal; }
 .page-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 1.5rem; max-width: 1200px; margin: 0 auto; padding: 1rem; }
 .node-main { min-width: 0; padding-right: 1rem; }
 .crumbs, .node-search, .node-footer { color: var(--quiet); font-size: 11px; }
-.node-title { margin: 0 0 .1rem; font-size: 1.8rem; }
+.node-copy h1 { margin: 0 0 .75rem; font-size: 1.8rem; }
 .node-search { margin: 0 0 1.5rem; border-bottom: 1px solid var(--line); padding-bottom: .35rem; }
 .node-body { margin-bottom: 2rem; }
 .node-copy { line-height: 1.55; }

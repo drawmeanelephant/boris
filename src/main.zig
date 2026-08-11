@@ -54,16 +54,16 @@ const ProdRunner = struct {
 };
 
 /// Map path validation errors (collisions, escapes, symlinks, empty dirs) to usage (exit code 2).
-fn mapPathError(err: anyerror, quiet: bool) ?ExitCode {
+/// The diagnostic prints unconditionally: `--quiet` silences progress and
+/// success output, never the reason for a nonzero exit.
+fn mapPathError(err: anyerror) ?ExitCode {
     switch (err) {
         error.EmptyTargetDirectory,
         error.TargetOutputCollision,
         error.TargetOutputSymlink,
         error.WorkspaceEscape,
         => {
-            if (!quiet) {
-                std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
-            }
+            std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
             return .usage;
         },
         else => return null,
@@ -137,16 +137,14 @@ fn runPipelineIr(io: Io, gpa: std.mem.Allocator, opts: Options, recorder_ptr: ?*
         .input_format = opts.input_format,
         .timings = recorder_ptr,
     }) catch |err| {
-        if (mapPathError(err, opts.quiet)) |code| return code;
-        if (!opts.quiet) {
-            std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
-        }
+        if (mapPathError(err)) |code| return code;
+        std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer result.deinit();
 
-    if (result.diagnostics.items.len > 0 and !opts.quiet) {
-        pipeline.printDiagnostics(gpa, result.diagnostics.items) catch {
+    if (result.diagnostics.items.len > 0) {
+        pipeline.printDiagnostics(gpa, result.diagnostics.items, opts.quiet) catch {
             return .io_error;
         };
     }
@@ -186,22 +184,22 @@ pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorde
         gpa,
         .limited(publication_profile.max_profile_bytes + 1),
     ) catch |err| switch (err) {
-        error.StreamTooLong => return reportPublicationPlanConfigError(opts.quiet, error.ProfileTooLarge),
+        error.StreamTooLong => return reportPublicationPlanConfigError(error.ProfileTooLarge),
         else => {
-            if (!opts.quiet) std.debug.print("error: unable to read publication profile: {s}\n", .{@errorName(err)});
+            std.debug.print("error: unable to read publication profile: {s}\n", .{@errorName(err)});
             return .io_error;
         },
     };
     defer gpa.free(profile_bytes);
 
     const cwd_path = std.process.currentPathAlloc(io, gpa) catch |err| {
-        if (!opts.quiet) std.debug.print("error: unable to resolve publication profile workspace: {s}\n", .{@errorName(err)});
+        std.debug.print("error: unable to resolve publication profile workspace: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer gpa.free(cwd_path);
 
     const workspace = publication_profile.profileWorkspace(gpa, cwd_path, profile_path) catch |err| {
-        return reportPublicationPlanConfigError(opts.quiet, err);
+        return reportPublicationPlanConfigError(err);
     };
     const profile_input_format: ?publication_profile.InputFormat = if (opts.profile_input_format_override) |format| switch (format) {
         .markdown => .markdown,
@@ -216,12 +214,12 @@ pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorde
         .incremental = opts.incremental,
         .quiet = opts.quiet,
     }) catch |err| {
-        return reportPublicationPlanConfigError(opts.quiet, err);
+        return reportPublicationPlanConfigError(err);
     };
     defer request.deinit(gpa);
 
     const bytes = publication_plan.render(gpa, &request.plan) catch |err| {
-        if (!opts.quiet) std.debug.print("error: unable to render publication plan: {s}\n", .{@errorName(err)});
+        std.debug.print("error: unable to render publication plan: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer gpa.free(bytes);
@@ -229,18 +227,18 @@ pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorde
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
     stdout_writer.interface.writeAll(bytes) catch |err| {
-        if (!opts.quiet) std.debug.print("error: unable to write publication plan: {s}\n", .{@errorName(err)});
+        std.debug.print("error: unable to write publication plan: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     stdout_writer.interface.flush() catch |err| {
-        if (!opts.quiet) std.debug.print("error: unable to flush publication plan: {s}\n", .{@errorName(err)});
+        std.debug.print("error: unable to flush publication plan: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     return .success;
 }
 
-fn reportPublicationPlanConfigError(quiet: bool, err: anyerror) ExitCode {
-    if (!quiet) std.debug.print("error: invalid publication profile: {s}\n", .{@errorName(err)});
+fn reportPublicationPlanConfigError(err: anyerror) ExitCode {
+    std.debug.print("error: invalid publication profile: {s}\n", .{@errorName(err)});
     return switch (err) {
         error.OutOfMemory => .io_error,
         else => .usage,
@@ -265,24 +263,22 @@ pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*tim
         error.TargetOutputSymlink,
         error.WorkspaceEscape,
         => {
-            if (!opts.quiet) std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
+            std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
             return .usage;
         },
         error.InvalidScope, error.OversizedBlock => {
-            if (!opts.quiet) std.debug.print("error: export projection failed: {s}\n", .{@errorName(err)});
+            std.debug.print("error: export projection failed: {s}\n", .{@errorName(err)});
             return .content_error;
         },
         else => {
-            if (!opts.quiet) {
-                std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
-            }
+            std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
             return .io_error;
         },
     };
     defer result.deinit();
 
-    if (result.compile.diagnostics.items.len > 0 and !opts.quiet) {
-        pipeline.printDiagnostics(gpa, result.compile.diagnostics.items) catch {
+    if (result.compile.diagnostics.items.len > 0) {
+        pipeline.printDiagnostics(gpa, result.compile.diagnostics.items, opts.quiet) catch {
             return .io_error;
         };
     }
@@ -311,13 +307,13 @@ pub fn runLlms(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
         .publication_location = if (opts.publication_location) |*location| location else null,
         .timings = recorder,
     }) catch |err| {
-        if (mapPathError(err, opts.quiet)) |code| return code;
-        if (!opts.quiet) std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        if (mapPathError(err)) |code| return code;
+        std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer result.deinit();
-    if (result.compile.diagnostics.items.len > 0 and !opts.quiet) {
-        pipeline.printDiagnostics(gpa, result.compile.diagnostics.items) catch return .io_error;
+    if (result.compile.diagnostics.items.len > 0) {
+        pipeline.printDiagnostics(gpa, result.compile.diagnostics.items, opts.quiet) catch return .io_error;
     }
     if (result.ok()) {
         if (!opts.quiet) std.debug.print("ok: wrote llms.txt under {s} ({d} page(s))\n", .{ out_path, result.compile.pages.items.len });
@@ -344,29 +340,29 @@ pub fn runRss(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings
         .publication_location = if (opts.publication_location) |*location| location else null,
         .timings = recorder,
     }) catch |err| {
-        if (mapPathError(err, opts.quiet)) |code| return code;
+        if (mapPathError(err)) |code| return code;
         switch (err) {
             error.InvalidSiteUrl, error.InvalidLimit, error.AbsolutePath => {
-                if (!opts.quiet) std.debug.print("error: invalid RSS configuration: {s}\n", .{@errorName(err)});
+                std.debug.print("error: invalid RSS configuration: {s}\n", .{@errorName(err)});
                 return .usage;
             },
             error.PublicationLocationMismatch => {
-                if (!opts.quiet) std.debug.print("error: RSS publication URL does not match the declared Pages location\n", .{});
+                std.debug.print("error: RSS publication URL does not match the declared Pages location\n", .{});
                 return .content_error;
             },
             error.InvalidXml => {
-                if (!opts.quiet) std.debug.print("error: RSS projection validation failed: {s}\n", .{@errorName(err)});
+                std.debug.print("error: RSS projection validation failed: {s}\n", .{@errorName(err)});
                 return .content_error;
             },
             else => {
-                if (!opts.quiet) std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+                std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
                 return .io_error;
             },
         }
     };
     defer result.deinit();
-    if (result.compile.diagnostics.items.len > 0 and !opts.quiet) {
-        pipeline.printDiagnostics(gpa, result.compile.diagnostics.items) catch return .io_error;
+    if (result.compile.diagnostics.items.len > 0) {
+        pipeline.printDiagnostics(gpa, result.compile.diagnostics.items, opts.quiet) catch return .io_error;
     }
     if (result.ok()) {
         if (!opts.quiet) std.debug.print("ok: wrote RSS 2.0 feed to {s} ({d} page(s))\n", .{ out_path, result.compile.pages.items.len });
@@ -387,13 +383,13 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
         .input_format = opts.input_format,
         .timings = recorder,
     }) catch |err| {
-        if (!opts.quiet) std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+        std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer result.deinit();
 
     if (!result.ok) {
-        if (!opts.quiet) pipeline.printDiagnostics(gpa, result.diagnostics.items) catch return .io_error;
+        pipeline.printDiagnostics(gpa, result.diagnostics.items, opts.quiet) catch return .io_error;
         return switch (result.failure) {
             .io => .io_error,
             .content, .none => .content_error,
@@ -444,14 +440,14 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
             }
         }
         if (!found) {
-            if (!opts.quiet) std.debug.print("error: impact target not found: {s}\n", .{id});
+            std.debug.print("error: impact target not found: {s}\n", .{id});
             return .usage;
         }
         if (requested == null) requested = .{ .type = .source, .value = id };
     }
 
     var report = intelligence.analyze(gpa, pages.items, edges.items, .{ .impact = requested }) catch |err| {
-        if (!opts.quiet) std.debug.print("error: analysis failed: {s}\n", .{@errorName(err)});
+        std.debug.print("error: analysis failed: {s}\n", .{@errorName(err)});
         return .io_error;
     };
     defer report.deinit();
@@ -464,7 +460,7 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
 
     if (opts.analysis_report) |path| {
         Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = rendered }) catch |err| {
-            if (!opts.quiet) std.debug.print("error: failed to write report {s}: {s}\n", .{ path, @errorName(err) });
+            std.debug.print("error: failed to write report {s}: {s}\n", .{ path, @errorName(err) });
             return .io_error;
         };
     } else {
@@ -495,9 +491,10 @@ pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*ti
         .sitemap_path = opts.sitemap_path,
         .site_url = opts.site_url,
         .publication_location = if (opts.publication_location) |*location| location else null,
+        .allow_markdown_literals = opts.allow_markdown_links,
         .timings = recorder,
     }) catch |err| {
-        return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
+        return mapHtmlError(err, opts.targets.items, layout_path);
     };
 
     if (!opts.quiet) {
@@ -705,24 +702,22 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings
         error.TargetOutputSymlink,
         error.WorkspaceEscape,
         => {
-            if (!opts.quiet) std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
+            std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
             return .usage;
         },
         error.InvalidScope, error.OversizedBlock, error.SeparatorCollision => {
-            if (!opts.quiet) std.debug.print("error: export projection failed: {s}\n", .{@errorName(err)});
+            std.debug.print("error: export projection failed: {s}\n", .{@errorName(err)});
             return .content_error;
         },
         else => {
-            if (!opts.quiet) {
-                std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
-            }
+            std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
             return .io_error;
         },
     };
     defer result.deinit();
 
-    if (result.diagnostics().len > 0 and !opts.quiet) {
-        pipeline.printDiagnostics(gpa, result.diagnostics()) catch {
+    if (result.diagnostics().len > 0) {
+        pipeline.printDiagnostics(gpa, result.diagnostics(), opts.quiet) catch {
             return .io_error;
         };
     }
@@ -785,7 +780,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
         defer watcher.deinit();
 
         watcher.addRoot(opts.input_dir) catch |err| {
-            return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
+            return mapHtmlError(err, opts.targets.items, layout_path);
         };
 
         // Watch unique layout parent directories (global + per-target overrides).
@@ -828,28 +823,28 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             }
         }.go;
         add_layout_root(&watcher, &layout_roots, gpa, layout_path, opts.input_dir) catch |err| {
-            return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
+            return mapHtmlError(err, opts.targets.items, layout_path);
         };
         for (opts.targets.items) |t| {
             if (t.layout_path) |lp| {
                 add_layout_root(&watcher, &layout_roots, gpa, lp, opts.input_dir) catch |err| {
-                    return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
+                    return mapHtmlError(err, opts.targets.items, layout_path);
                 };
             }
             for (t.layout_rules) |rule| {
                 add_layout_root(&watcher, &layout_roots, gpa, rule.layout_path, opts.input_dir) catch |err| {
-                    return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
+                    return mapHtmlError(err, opts.targets.items, layout_path);
                 };
             }
         }
 
         var coord = watch.WatchCoordinator.init(gpa, io, opts, watcher.watcher()) catch |err| {
-            return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
+            return mapHtmlError(err, opts.targets.items, layout_path);
         };
         defer coord.deinit();
 
         coord.run() catch |err| {
-            return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
+            return mapHtmlError(err, opts.targets.items, layout_path);
         };
 
         return .success;
@@ -866,9 +861,10 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .sitemap_path = opts.sitemap_path,
             .site_url = opts.site_url,
             .publication_location = if (opts.publication_location) |*location| location else null,
+        .allow_markdown_literals = opts.allow_markdown_links,
             .timings = recorder,
         }) catch |err| {
-            return mapHtmlError(err, opts.quiet, opts.targets.items, layout_path);
+            return mapHtmlError(err, opts.targets.items, layout_path);
         };
 
         if (!opts.quiet) {
@@ -888,9 +884,10 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .sitemap_path = opts.sitemap_path,
             .site_url = opts.site_url,
             .publication_location = if (opts.publication_location) |*location| location else null,
+        .allow_markdown_literals = opts.allow_markdown_links,
             .timings = recorder,
         }) catch |err| {
-            return mapHtmlError(err, opts.quiet, &.{}, layout_path);
+            return mapHtmlError(err, &.{}, layout_path);
         };
 
         if (!opts.quiet) {
@@ -902,11 +899,14 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
 
 /// Map HTML compile failures to process exit codes.
 /// Target configuration / path isolation → 2; content/layout/component → 1;
-/// missing content root and I/O → 3. When `quiet`, skip stderr text (exit codes
-/// and artifacts still convey failure).
+/// missing content root and I/O → 3.
+///
+/// Every branch that explains a failure prints unconditionally. `--quiet`
+/// suppresses progress and success output, never the reason for a nonzero
+/// exit; branches that print nothing here do so because the compiler already
+/// emitted a structured diagnostic, not because the caller asked for silence.
 fn mapHtmlError(
     err: anyerror,
-    quiet: bool,
     targets: []const target.TargetSpec,
     global_layout: []const u8,
 ) ExitCode {
@@ -931,12 +931,10 @@ fn mapHtmlError(
         error.SitemapSiteUrlWithoutOutput,
         error.AmbiguousSitemapTargets,
         => {
-            if (!quiet) {
-                std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
-                if (targets.len > 0) {
-                    std.debug.print("configured targets (canonical order):\n", .{});
-                    target.printTargetConfigLines(targets, global_layout);
-                }
+            std.debug.print("error: invalid target configuration: {s}\n", .{@errorName(err)});
+            if (targets.len > 0) {
+                std.debug.print("configured targets (canonical order):\n", .{});
+                target.printTargetConfigLines(targets, global_layout);
             }
             return .usage;
         },
@@ -965,9 +963,7 @@ fn mapHtmlError(
         error.InputFormatMismatch,
         => return .content_error,
         error.MultiTargetIoFailed => {
-            if (!quiet) {
-                std.debug.print("error: one or more HTML targets failed due to I/O or a system error\n", .{});
-            }
+            std.debug.print("error: one or more HTML targets failed due to I/O or a system error\n", .{});
             return .io_error;
         },
         // The target commit is already visible when publication checks fail;
@@ -1002,15 +998,11 @@ fn mapHtmlError(
         error.FooterSymlink,
         error.FooterInvalidUtf8,
         => {
-            if (!quiet) {
-                std.debug.print("error: content or layout failure: {s}\n", .{@errorName(err)});
-            }
+            std.debug.print("error: content or layout failure: {s}\n", .{@errorName(err)});
             return .content_error;
         },
         else => {
-            if (!quiet) {
-                std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
-            }
+            std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
             return .io_error;
         },
     }
@@ -1108,45 +1100,44 @@ test "ExitCode contract surface" {
 }
 
 test "mapHtmlError: multi-target I/O failure exits 3" {
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.MultiTargetIoFailed, true, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.MultiTargetIoFailed, &.{}, default_layout));
 }
 
 test "mapHtmlError: unsafe SVG content failure exits 1 without a generic wrapper" {
     // AssetUnsafeSvg already emitted the structured EASSET diagnostic from the
     // content-asset path; mapHtmlError must classify it as a content error
     // (exit 1) and must not print either generic wrapper line.
-    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.AssetUnsafeSvg, true, &.{}, default_layout));
-    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.AssetUnsafeSvg, false, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.AssetUnsafeSvg, &.{}, default_layout));
 }
 
 test "mapHtmlError: link-audit content failure exits 1" {
-    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.LinkAuditFailed, true, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.content_error, mapHtmlError(error.LinkAuditFailed, &.{}, default_layout));
 }
 
 test "mapHtmlError: committed publication with stale checks evidence exits 3" {
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationChecksFailed, true, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationChecksFailed, &.{}, default_layout));
 }
 
 test "mapHtmlError: committed publication with stale claims evidence exits 3" {
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationClaimsFailed, true, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationClaimsFailed, &.{}, default_layout));
 }
 
 test "mapHtmlError: committed publication with unrefreshed Touch Atlas exits 3" {
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationTouchesFailed, true, &.{}, default_layout));
-    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationProofPackFailed, true, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationTouchesFailed, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.io_error, mapHtmlError(error.PublicationProofPackFailed, &.{}, default_layout));
 }
 
 test "mapHtmlError: target configuration failures exit 2" {
     const specs = [_]target.TargetSpec{
         .{ .name = "prod", .output_dir = "dist/prod" },
     };
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.TargetOutputCollision, true, &specs, default_layout));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.WorkspaceEscape, true, &specs, default_layout));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.DuplicateTargetName, true, &specs, default_layout));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.InvalidTargetName, true, &specs, default_layout));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.TargetOutputSymlink, true, &specs, default_layout));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.EmptyTargetDirectory, true, &specs, default_layout));
-    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.NoTargetsSpecified, true, &.{}, default_layout));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.TargetOutputCollision, &specs, default_layout));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.WorkspaceEscape, &specs, default_layout));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.DuplicateTargetName, &specs, default_layout));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.InvalidTargetName, &specs, default_layout));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.TargetOutputSymlink, &specs, default_layout));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.EmptyTargetDirectory, &specs, default_layout));
+    try std.testing.expectEqual(ExitCode.usage, mapHtmlError(error.NoTargetsSpecified, &.{}, default_layout));
 }
 
 test "runPipeline: valid fixture exits 0" {

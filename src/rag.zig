@@ -1775,6 +1775,38 @@ test "complete export: full tree, authoring fidelity, catalog, determinism" {
     try expectDirsByteIdentical(io, gpa, paths.out_a, paths.out_b);
 }
 
+test "scoped relation rendering remaps parents to the selected slice" {
+    const gpa = std.testing.allocator;
+    const pages = [_]graph_mod.Node{
+        .{ .index = 0, .id = "unrelated", .source_path = "unrelated.md", .title = "Unrelated" },
+        .{ .index = 1, .id = "root", .source_path = "root.md", .title = "Root" },
+        .{ .index = 2, .id = "root/child", .source_path = "child.md", .title = "Child", .parent = "root", .parent_index = 1, .role = .satellite },
+    };
+
+    var counts: export_scope.SelectionCounts = .{};
+    const selected = try export_scope.selectPages(gpa, &pages, "root/child", &counts);
+    defer gpa.free(selected);
+    try std.testing.expectEqual(@as(usize, 2), selected.len);
+    try std.testing.expectEqual(@as(usize, 1), counts.requested);
+    try std.testing.expectEqual(@as(usize, 1), counts.structural_parents);
+
+    const scoped_a = try rag_emit.renderRelations(gpa, selected);
+    defer gpa.free(scoped_a);
+    const scoped_b = try rag_emit.renderRelations(gpa, selected);
+    defer gpa.free(scoped_b);
+    try std.testing.expectEqualStrings(scoped_a, scoped_b);
+    try std.testing.expect(std.mem.indexOf(u8, scoped_a, "  - `root/child` (Child) → `content/pages/root/child.md`\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, scoped_a, "### `root/child` — Child\n\n- Parent RAG: `content/pages/root/child.md`\n- Children:\n  - *(none)*\n") != null);
+
+    // A compact slice can also omit a parent. Keep the edge visible, but do
+    // not attach the child to an unrelated local hub or index past the slice.
+    const child_only = [_]graph_mod.Node{pages[2]};
+    const outside_parent = try rag_emit.renderRelations(gpa, &child_only);
+    defer gpa.free(outside_parent);
+    try std.testing.expect(std.mem.indexOf(u8, outside_parent, "- Children:\n  - *(none)*\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, outside_parent, "parent\troot/child\t->\troot\n") != null);
+}
+
 test "rag vs IR: identical diagnostic categories; no graph RAG on failure" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -1893,6 +1925,10 @@ test "rag export against fixtures/content/valid (working + complete)" {
 
     const relations = try readRel(io, gpa, complete_out, "graph/relations.md");
     defer gpa.free(relations);
+    const expected_relations = try readRel(io, gpa, "fixtures/expected/rag", "graph/relations.md");
+    defer gpa.free(expected_relations);
+    try std.testing.expectEqualStrings(expected_relations, relations);
+
     const edges = [_][]const u8{
         "parent\thierarchy-great-grandchild\t->\thierarchy-leaf",
         "parent\thierarchy-leaf\t->\thierarchy-mid",
