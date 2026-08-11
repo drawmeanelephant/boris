@@ -724,9 +724,13 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
     defer scan_list.deinit();
 
     // Phase timer is ended explicitly after scan: early error returns here
-    // must not keep it alive, and a failed build is never gated, so the phase
-    // may be absent from a failure report.
+    // must not keep it alive. The deferred fallback records diagnostics and
+    // other early exits; the success path ends it before parsing starts.
     const scan_phase = if (options.timings) |t| t.start(timings.phase_scan) else null;
+    var scan_phase_ended = false;
+    defer if (scan_phase) |p| {
+        if (!scan_phase_ended) p.end();
+    };
 
     scanner.scan(io, .{ .content_root = options.content_root, .input_format = options.input_format }, &scan_list) catch |err| switch (err) {
         error.ContentDirMissing => {
@@ -787,6 +791,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         },
     };
     if (scan_phase) |p| p.end();
+    scan_phase_ended = true;
 
     if (options.timings) |t| t.setCounter(timings.counter_page_reads, scan_list.len());
     logCompile(options.quiet, "boris: roll  parsing {d} page(s)\n", .{scan_list.len()});
@@ -797,6 +802,10 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
 
     // Ended explicitly after the parse/promote loop (same rationale as scan).
     const parse_phase = if (options.timings) |t| t.start(timings.phase_parse) else null;
+    var parse_phase_ended = false;
+    defer if (parse_phase) |p| {
+        if (!parse_phase_ended) p.end();
+    };
 
     const cwd = Io.Dir.cwd();
     var content_dir = cwd.openDir(io, options.content_root, .{}) catch |err| {
@@ -918,6 +927,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset);
     }
     if (parse_phase) |p| p.end();
+    parse_phase_ended = true;
 
     // --- 4. Build provisional graph nodes from PageDb -----------------------
     try result.pages.ensureTotalCapacity(gpa, db.len());
@@ -1030,6 +1040,13 @@ fn expectCode(result: *const Result, code: diag.Code) !void {
 fn hasCode(diags: []const diag.Diagnostic, code: diag.Code) bool {
     for (diags) |d| {
         if (d.code == code) return true;
+    }
+    return false;
+}
+
+fn hasTimedPhase(t: *const timings.Timings, name: []const u8) bool {
+    for (t.phases.items) |phase| {
+        if (std.mem.eql(u8, phase.name, name)) return true;
     }
     return false;
 }
@@ -1595,6 +1612,33 @@ test "missing content root is EIO and does not publish graph IR" {
     try expectCode(&result, .EIO);
     try std.testing.expect(!fileExists(io, out, "manifest.json"));
     try std.testing.expect(!fileExists(io, out, "graph.json"));
+}
+
+test "timings: scan and parse failure paths record their phases" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var scan_timings = timings.Timings.init(gpa, io);
+    defer scan_timings.deinit();
+    var scan_result = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/__no_such_root__",
+        .quiet = true,
+        .timings = &scan_timings,
+    });
+    defer scan_result.deinit();
+    try std.testing.expect(!scan_result.ok);
+    try std.testing.expect(hasTimedPhase(&scan_timings, timings.phase_scan));
+
+    var parse_timings = timings.Timings.init(gpa, io);
+    defer parse_timings.deinit();
+    var parse_result = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/invalid-status/content",
+        .quiet = true,
+        .timings = &parse_timings,
+    });
+    defer parse_result.deinit();
+    try std.testing.expect(!parse_result.ok);
+    try std.testing.expect(hasTimedPhase(&parse_timings, timings.phase_parse));
 }
 
 test "per-file read failure remains EIO with I/O failure classification" {

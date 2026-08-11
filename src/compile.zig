@@ -1964,6 +1964,10 @@ fn compilePagesInner(
     var stats: CompileStats = .{};
 
     const render_phase = if (options.timings) |t| t.start(timings.phase_render) else null;
+    var render_phase_ended = false;
+    errdefer if (render_phase) |p| {
+        if (!render_phase_ended) p.end();
+    };
     var fast_path_hits: usize = 0;
 
     if (options.jobs > 1) {
@@ -2074,9 +2078,14 @@ fn compilePagesInner(
     }
 
     if (render_phase) |p| p.end();
+    render_phase_ended = true;
     if (options.timings) |t| t.setCounter(timings.counter_fast_path_hits, fast_path_hits);
 
     const publish_phase = if (options.timings) |t| t.start(timings.phase_publish) else null;
+    var publish_phase_ended = false;
+    errdefer if (publish_phase) |p| {
+        if (!publish_phase_ended) p.end();
+    };
 
     // Write cache manifest into staging (committed with the rest of the target).
     if (options.incremental) {
@@ -2225,6 +2234,7 @@ fn compilePagesInner(
     cwd.deleteTree(io, stage_rel) catch {};
 
     if (publish_phase) |p| p.end();
+    publish_phase_ended = true;
     return stats;
 }
 
@@ -6564,6 +6574,14 @@ fn phaseNs(t: *const timings.Timings, comptime name: []const u8) ?u64 {
     return null;
 }
 
+fn phaseCount(t: *const timings.Timings, comptime name: []const u8) usize {
+    var count: usize = 0;
+    for (t.phases.items) |p| {
+        if (std.mem.eql(u8, p.name, name)) count += 1;
+    }
+    return count;
+}
+
 fn sumPhasesNs(t: *const timings.Timings) u64 {
     var sum: u64 = 0;
     for (t.phases.items) |p| sum += p.elapsed_ns;
@@ -6707,4 +6725,49 @@ test "timings: multi-target HTML phases do not absorb later work" {
     });
     const total_ns = started.untilNow(io, .awake).nanoseconds;
     try assertPhaseScope(&t, total_ns);
+}
+
+test "timings: render and publish failures still record their phases" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/timings-failure", .{tmp.sub_path});
+    defer gpa.free(work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nBody.\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var render_timings = timings.Timings.init(gpa, io);
+    defer render_timings.deinit();
+    try std.testing.expectError(error.TestInjectedRenderFailure, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .timings = &render_timings,
+        .test_fail_render_at = 0,
+    }));
+    try std.testing.expectEqual(@as(usize, 1), phaseCount(&render_timings, timings.phase_render));
+
+    var publish_timings = timings.Timings.init(gpa, io);
+    defer publish_timings.deinit();
+    try std.testing.expectError(error.TestInjectedCachePublishFailure, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .timings = &publish_timings,
+        .incremental = true,
+        .test_fail_cache_publish = true,
+    }));
+    try std.testing.expectEqual(@as(usize, 1), phaseCount(&publish_timings, timings.phase_render));
+    try std.testing.expectEqual(@as(usize, 1), phaseCount(&publish_timings, timings.phase_publish));
 }
