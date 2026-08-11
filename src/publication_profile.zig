@@ -5,6 +5,7 @@
 //! and argv views stop at `parseBytes` / `applyOverrides`.
 
 const std = @import("std");
+const github_pages = @import("github_pages.zig");
 const layout_select = @import("layout_select.zig");
 const rss = @import("rss.zig");
 const sitemap = @import("sitemap.zig");
@@ -45,6 +46,9 @@ pub const Error = error{
     PublicArtifactRequiresPublicTarget,
     PublicArtifactRequiresSiteUrl,
     RssRequiresSiteMetadata,
+    InvalidPublication,
+    PublicationRequiresPublicTarget,
+    PublicationSiteMismatch,
     OutputConflict,
     ReservedOutputRoot,
     AmbiguousHtmlOverride,
@@ -92,6 +96,15 @@ pub const IrPlan = struct { output: []u8 };
 pub const RagPlan = struct { output: []u8, scope: ?[]u8 = null, split_size: ?usize = null, bundles_only: bool = false };
 pub const ContextPlan = struct { output: []u8, scope: ?[]u8 = null, split_size: ?usize = null };
 
+pub const PublicationTargetPlan = struct {
+    location: github_pages.Location,
+
+    fn deinit(self: *PublicationTargetPlan, allocator: std.mem.Allocator) void {
+        self.location.deinit(allocator);
+        self.* = undefined;
+    }
+};
+
 pub const HtmlTargetPlan = struct {
     name: []u8,
     output: []u8,
@@ -125,6 +138,7 @@ pub const PublicationPlan = struct {
     input: []u8,
     input_format: InputFormat = .markdown,
     site: ?SiteMetadata = null,
+    publication: ?PublicationTargetPlan = null,
     targets: []HtmlTargetPlan = &.{},
     ir: ?IrPlan = null,
     rag: ?RagPlan = null,
@@ -133,6 +147,7 @@ pub const PublicationPlan = struct {
     pub fn deinit(self: *PublicationPlan, allocator: std.mem.Allocator) void {
         allocator.free(self.input);
         if (self.site) |*v| v.deinit(allocator);
+        if (self.publication) |*v| v.deinit(allocator);
         for (self.targets) |*v| v.deinit(allocator);
         if (self.targets.len > 0) allocator.free(self.targets);
         if (self.ir) |v| allocator.free(v.output);
@@ -291,13 +306,14 @@ fn dup(allocator: std.mem.Allocator, value: []const u8) Error![]u8 {
 
 fn parsePlan(allocator: std.mem.Allocator, value: std.json.Value) Error!PublicationPlan {
     const root = try object(value);
-    try only(root, &.{ "format", "schema_version", "input", "input_format", "site", "targets", "editions" });
+    try only(root, &.{ "format", "schema_version", "input", "input_format", "site", "publication", "targets", "editions" });
     if (!std.mem.eql(u8, try string(try required(root, "format")), "boris-publication-profile")) return error.InvalidFormat;
     if ((try integer(try required(root, "schema_version"))) != 1) return error.InvalidSchemaVersion;
     var plan = PublicationPlan{ .input = try dup(allocator, if (field(root, "input")) |v| try checkedPath(v) else "content") };
     errdefer plan.deinit(allocator);
     if (field(root, "input_format")) |v| plan.input_format = try parseInputFormat(v);
     if (field(root, "site")) |v| plan.site = try parseSite(allocator, v);
+    if (field(root, "publication")) |v| plan.publication = try parsePublication(allocator, v);
     if (field(root, "targets")) |v| plan.targets = try parseTargets(allocator, v);
     if (field(root, "editions")) |v| try parseEditions(allocator, &plan, v);
     return plan;
@@ -328,6 +344,20 @@ fn parseSite(allocator: std.mem.Allocator, value: std.json.Value) Error!SiteMeta
     if (field(obj, "title")) |v| site.title = try boundedText(allocator, v);
     if (field(obj, "description")) |v| site.description = try boundedText(allocator, v);
     return site;
+}
+
+fn parsePublication(allocator: std.mem.Allocator, value: std.json.Value) Error!PublicationTargetPlan {
+    const obj = try object(value);
+    try only(obj, &.{ "target", "base_url", "origin", "base_path" });
+    if (!std.mem.eql(u8, try string(try required(obj, "target")), github_pages.target_name)) return error.InvalidPublication;
+    const base_url = try string(try required(obj, "base_url"));
+    const origin = try string(try required(obj, "origin"));
+    const base_path = try string(try required(obj, "base_path"));
+    const location = github_pages.parse(allocator, base_url, origin, base_path) catch |err| {
+        if (err == error.OutOfMemory) return error.OutOfMemory;
+        return error.InvalidPublication;
+    };
+    return .{ .location = location };
 }
 fn boundedText(allocator: std.mem.Allocator, value: std.json.Value) Error![]u8 {
     const v = try string(value);
@@ -530,6 +560,12 @@ pub fn validatePlan(plan: *const PublicationPlan) Error!void {
         for (plan.targets[i + 1 ..]) |other| if (pathNest(t.output, other.output)) return error.OutputConflict;
     }
     if (public_count > 1) return error.MultiplePublicTargets;
+    if (plan.publication) |publication| {
+        if (public_count != 1) return error.PublicationRequiresPublicTarget;
+        if (plan.site) |site| if (site.url) |url| {
+            if (!std.mem.eql(u8, url, publication.location.base_url)) return error.PublicationSiteMismatch;
+        };
+    }
     if (plan.ir) |e| try validateMachineRoot(plan, e.output);
     if (plan.rag) |e| try validateMachineRoot(plan, e.output);
     if (plan.context) |e| try validateMachineRoot(plan, e.output);
@@ -616,6 +652,37 @@ test "static public and output validation is fail closed" {
         \\{"format":"boris-publication-profile","schema_version":1,"input":"content","targets":[{"name":"x","output":"content/site","layout":"layouts/main.html"}]}
     ;
     try std.testing.expectError(error.OutputConflict, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, overlap, .{}));
+}
+
+test "GitHub Pages publication metadata is normalized in the owned plan" {
+    const source =
+        \\{"format":"boris-publication-profile","schema_version":1,"publication":{"target":"github-pages","base_url":"https://owner.github.io/boris/","origin":"https://owner.github.io/","base_path":"/boris/"},"targets":[{"name":"public","output":"dist","public":true,"layout":"layouts/main.html"}]}
+    ;
+    var request = try parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, source, .{});
+    defer request.deinit(std.testing.allocator);
+    const location = request.plan.publication.?.location;
+    try std.testing.expectEqualStrings("https://owner.github.io/boris", location.base_url);
+    try std.testing.expectEqualStrings("/boris", location.base_path);
+    try std.testing.expectEqual(github_pages.SiteKind.project_site, location.site_kind);
+}
+
+test "GitHub Pages publication metadata fails closed on contradictory inputs" {
+    const source =
+        \\{"format":"boris-publication-profile","schema_version":1,"publication":{"target":"github-pages","base_url":"https://owner.github.io/boris","origin":"https://other.github.io","base_path":"/boris"},"targets":[{"name":"public","output":"dist","public":true,"layout":"layouts/main.html"}]}
+    ;
+    try std.testing.expectError(error.InvalidPublication, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, source, .{}));
+}
+
+test "GitHub Pages publication requires one public target and matching site URL" {
+    const no_public_target =
+        \\{"format":"boris-publication-profile","schema_version":1,"publication":{"target":"github-pages","base_url":"https://owner.github.io/boris","origin":"https://owner.github.io","base_path":"/boris"},"targets":[{"name":"preview","output":"dist","layout":"layouts/main.html"}]}
+    ;
+    try std.testing.expectError(error.PublicationRequiresPublicTarget, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, no_public_target, .{}));
+
+    const mismatched_site =
+        \\{"format":"boris-publication-profile","schema_version":1,"site":{"url":"https://owner.github.io/other"},"publication":{"target":"github-pages","base_url":"https://owner.github.io/boris","origin":"https://owner.github.io","base_path":"/boris"},"targets":[{"name":"public","output":"dist","public":true,"layout":"layouts/main.html"}]}
+    ;
+    try std.testing.expectError(error.PublicationSiteMismatch, parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, mismatched_site, .{}));
 }
 
 test "profile workspace is selected parent and has no discovery" {

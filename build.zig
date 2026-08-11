@@ -143,6 +143,21 @@ pub fn build(b: *std.Build) void {
     const test_publication_profile_step = b.step("test-publication-profile", "Run publication profile parser and planner tests");
     test_publication_profile_step.dependOn(&run_publication_profile_tests.step);
 
+    // --- GitHub Pages publication-location contract -----------------------
+    const github_pages_mod = b.createModule(.{
+        .root_source_file = b.path("src/github_pages.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const github_pages_tests = b.addTest(.{ .root_module = github_pages_mod });
+    const run_github_pages_tests = b.addRunArtifact(github_pages_tests);
+    run_github_pages_tests.setCwd(b.path("."));
+    const test_github_pages_step = b.step(
+        "test-github-pages",
+        "Run GitHub Pages publication-location normalization tests",
+    );
+    test_github_pages_step.dependOn(&run_github_pages_tests.step);
+
     // --- Publication plan declaration renderer -----------------------------
     const publication_plan_mod = b.createModule(.{
         .root_source_file = b.path("src/publication_plan.zig"),
@@ -449,6 +464,11 @@ pub fn build(b: *std.Build) void {
     });
     const run_compile_tests = b.addRunArtifact(compile_tests);
     run_compile_tests.setCwd(b.path("."));
+    const test_compile_step = b.step(
+        "test-compile",
+        "Run HTML compiler and publication integration tests",
+    );
+    test_compile_step.dependOn(&run_compile_tests.step);
 
     // Opt-in 200-page incremental HTML smoke. Kept out of `zig build test`
     // because it exercises a bounded large-site fixture rather than unit scope.
@@ -817,6 +837,20 @@ pub fn build(b: *std.Build) void {
     );
     test_publication_conformance_step.dependOn(&publication_conformance_run.step);
 
+    // GitHub Pages public/evidence artifact boundary: the public tree is
+    // copied only from the exact committed Boris inventory records.
+    const github_pages_artifact_run = b.addSystemCommand(&.{
+        "bash",
+        "scripts/test-github-pages-artifact.sh",
+    });
+    github_pages_artifact_run.setCwd(b.path("."));
+    github_pages_artifact_run.has_side_effects = true;
+    const test_github_pages_artifact_step = b.step(
+        "test-github-pages-artifact",
+        "Run the GitHub Pages public/evidence artifact boundary test",
+    );
+    test_github_pages_artifact_step.dependOn(&github_pages_artifact_run.step);
+
     const invariants_mod = b.createModule(.{
         .root_source_file = b.path("src/artifact_invariants.zig"),
         .target = target,
@@ -903,6 +937,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_textile_tests.step);
     test_step.dependOn(&run_pipeline_tests.step);
     test_step.dependOn(&run_publication_profile_tests.step);
+    test_step.dependOn(&run_github_pages_tests.step);
+    test_step.dependOn(&github_pages_artifact_run.step);
     test_step.dependOn(&run_publication_plan_tests.step);
     test_step.dependOn(&run_doctor_tests.step);
     test_step.dependOn(&run_publication_checks_tests.step);

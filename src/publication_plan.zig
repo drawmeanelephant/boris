@@ -6,6 +6,7 @@
 //! repository's shared `json_out` encoder.
 
 const std = @import("std");
+const github_pages = @import("github_pages.zig");
 const json_out = @import("json_out.zig");
 const publication_profile = @import("publication_profile.zig");
 
@@ -34,6 +35,19 @@ pub fn render(gpa: std.mem.Allocator, plan: *const publication_profile.Publicati
         try renderSite(&out, gpa, site);
     } else {
         try json_out.writeNull(&out, gpa);
+    }
+    if (plan.publication) |publication| {
+        try out.appendSlice(gpa, ",\n  \"publication\": {\n    \"target\": ");
+        try json_out.writeString(&out, gpa, github_pages.target_name);
+        try out.appendSlice(gpa, ",\n    \"base_url\": ");
+        try json_out.writeString(&out, gpa, publication.location.base_url);
+        try out.appendSlice(gpa, ",\n    \"origin\": ");
+        try json_out.writeString(&out, gpa, publication.location.origin);
+        try out.appendSlice(gpa, ",\n    \"base_path\": ");
+        try json_out.writeString(&out, gpa, publication.location.base_path);
+        try out.appendSlice(gpa, ",\n    \"site_kind\": ");
+        try json_out.writeString(&out, gpa, publication.location.site_kind.name());
+        try out.appendSlice(gpa, "\n  }");
     }
     try out.appendSlice(gpa, ",\n  \"targets\": [");
     for (plan.targets, 0..) |target, i| {
@@ -228,6 +242,13 @@ test "full publication plan matches the exact golden bytes" {
     );
 }
 
+test "GitHub Pages publication plan matches the exact golden bytes" {
+    try renderFixture(
+        "docs/contracts/fixtures/publication-plan/github-pages/profile.json",
+        "docs/contracts/fixtures/publication-plan/github-pages/expected/plan.json",
+    );
+}
+
 test "repeated rendering is byte-identical and does not expose workspace state" {
     const source = try readFixture("docs/contracts/fixtures/publication-plan/full/profile.json");
     defer std.testing.allocator.free(source);
@@ -308,6 +329,24 @@ test "public projection metadata remains fail-closed before rendering" {
 
 test "rendered plan parses and conforms to its published schema" {
     const source = try readFixture("docs/contracts/fixtures/publication-plan/full/profile.json");
+    defer std.testing.allocator.free(source);
+    const schema_bytes = try readFixture("docs/contracts/schemas/publication-plan-1.schema.json");
+    defer std.testing.allocator.free(schema_bytes);
+    var request = try parseProfile(source, .{});
+    defer request.deinit(std.testing.allocator);
+    const plan_bytes = try render(std.testing.allocator, &request.plan);
+    defer std.testing.allocator.free(plan_bytes);
+
+    var schema = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, schema_bytes, .{});
+    defer schema.deinit();
+    var document = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, plan_bytes, .{});
+    defer document.deinit();
+    const validator: SchemaValidator = .{ .root = schema.value };
+    try validator.validate(schema.value, document.value);
+}
+
+test "GitHub Pages rendered plan conforms to its published schema" {
+    const source = try readFixture("docs/contracts/fixtures/publication-plan/github-pages/profile.json");
     defer std.testing.allocator.free(source);
     const schema_bytes = try readFixture("docs/contracts/schemas/publication-plan-1.schema.json");
     defer std.testing.allocator.free(schema_bytes);

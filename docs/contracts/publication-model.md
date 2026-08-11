@@ -74,6 +74,8 @@ Publication facts include:
 
 - selected content root and input format;
 - publication-profile identity and site URL, site title, and site description;
+- selected publication adapter and its resolved public location, including the
+  origin and base path used by a hosted target;
 - named HTML targets, public/non-public target status, target output roots,
   themes, layouts, and layout rules;
 - selection and target-relative path for sitemap, RSS, and `llms.txt`;
@@ -242,6 +244,7 @@ artifact or grammar detail.
 | `status`, `tags`, and semantic `relations` | [`frontmatter.md`](frontmatter.md), [`semantic-relations.md`](semantic-relations.md) | Authored | No | No | Yes, when contracted | Eligibility and relation checks are projection-specific. |
 | Body and validated structural references | [`includes-and-wiki-links.md`](includes-and-wiki-links.md), [`components.md`](components.md), [`ir-schema.md`](ir-schema.md) | Authored then validated/derived | No | No | Body, not frontmatter | Link/include/render checks must state their scope. |
 | Content root and input format | [`publication-profile.md`](publication-profile.md) | Configured | Yes | No | No | Configuration is not evidence of attempted publication. |
+| Selected publication adapter and resolved public location | [`publication-profile.md`](publication-profile.md), [`publication-plan.md`](publication-plan.md) | Configured/derived | Yes | No | No | Location identity is not deployment verification. |
 | Site URL, site title, and description | [`rss-2.0.md`](rss-2.0.md), [`xml-sitemap.md`](xml-sitemap.md), profile plan | Configured | Yes | No | No | URL/schema checks do not prove deployment. |
 | Target, public status, theme, layout, and output root | [`multi-target-isolated-output.md`](multi-target-isolated-output.md), [`templating-and-themes.md`](templating-and-themes.md), profile plan | Configured/derived | Yes | No | No | Isolation and render checks are target-scoped. |
 | Sitemap, RSS, `llms.txt`, IR, RAG, and Context selection | Each projection contract; profile plan for selection | Configured | Yes | No | No | Each emitted artifact needs its own check and claim. |
