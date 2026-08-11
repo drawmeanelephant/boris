@@ -199,12 +199,14 @@ pub fn freezeSiteFromPageDb(
     }
     diag.sortDiagnostics(diags.items);
     if (diag.countErrors(diags.items) > 0) {
-        if (!quiet) {
-            for (diags.items) |d| {
-                const line = diag.formatText(d, gpa) catch continue;
-                defer gpa.free(line);
-                std.debug.print("{s}\n", .{line});
-            }
+        // Errors always reach stderr. `--quiet` suppresses progress, success
+        // output, and sub-error diagnostics — never the explanation for a
+        // nonzero exit.
+        for (diags.items) |d| {
+            if (quiet and d.severity != .error_) continue;
+            const line = diag.formatText(d, gpa) catch continue;
+            defer gpa.free(line);
+            std.debug.print("{s}\n", .{line});
         }
         return error.GraphValidationFailed;
     }
@@ -442,7 +444,7 @@ pub fn loadAndPromote(
     db: *PageDb,
     content_root: []const u8,
 ) !void {
-    return loadAndPromoteFormat(io, gpa, db, content_root, .markdown, true, null);
+    return loadAndPromoteFormat(io, gpa, db, content_root, .markdown, null);
 }
 
 pub fn loadAndPromoteFormat(
@@ -451,7 +453,6 @@ pub fn loadAndPromoteFormat(
     db: *PageDb,
     content_root: []const u8,
     input_format: identity.InputFormat,
-    quiet: bool,
     recorder: ?*timings.Recorder,
 ) !void {
     var scan_list = page_mod.PageList.init(gpa, db.retain);
@@ -461,9 +462,7 @@ pub fn loadAndPromoteFormat(
     scanner.scan(io, .{ .content_root = content_root, .input_format = input_format }, &scan_list) catch |err| switch (err) {
         error.ContentDirMissing => return error.ContentDirMissing,
         error.InputFormatMismatch => {
-            if (!quiet) {
-                std.debug.print("error: ETEXTILE: content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode [Use Markdown-only input by default, or pass --textile for a .textile-only tree]\n", .{});
-            }
+            std.debug.print("error: ETEXTILE: content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode [Use Markdown-only input by default, or pass --textile for a .textile-only tree]\n", .{});
             return error.InputFormatMismatch;
         },
         else => |e| return e,
@@ -483,24 +482,22 @@ pub fn loadAndPromoteFormat(
 
         const parsed = parser.parse(source);
         if (parsed.diagnostic) |pd| {
-            if (!quiet) {
-                const text = try diag.formatText(.{
-                    .severity = .error_,
-                    .code = diag.parserCategoryToCode(pd.category),
-                    .message = pd.message,
-                    .remediation = if (pd.remediation.len > 0) pd.remediation else "Fix the frontmatter or encoding for this file",
-                    .source_path = disc.source_path,
-                    .line = pd.line,
-                    .column = pd.column,
-                }, gpa);
-                defer gpa.free(text);
-                std.debug.print("{s}\n", .{text});
-            }
+            const text = try diag.formatText(.{
+                .severity = .error_,
+                .code = diag.parserCategoryToCode(pd.category),
+                .message = pd.message,
+                .remediation = if (pd.remediation.len > 0) pd.remediation else "Fix the frontmatter or encoding for this file",
+                .source_path = disc.source_path,
+                .line = pd.line,
+                .column = pd.column,
+            }, gpa);
+            defer gpa.free(text);
+            std.debug.print("{s}\n", .{text});
             return error.ParseFailed;
         }
         var body_arena = std.heap.ArenaAllocator.init(gpa);
         defer body_arena.deinit();
-        _ = try html_body.bodyForInput(body_arena.allocator(), input_format, source, parsed.doc.body, parsed.doc.body_offset, disc.source_path, quiet);
+        _ = try html_body.bodyForInput(body_arena.allocator(), input_format, source, parsed.doc.body, parsed.doc.body_offset, disc.source_path);
 
         const final_id: []const u8 = if (parsed.doc.meta.id) |override| override else disc.entity_id;
         try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset);
@@ -549,7 +546,6 @@ fn renderPageSlots(
     }
     const html = try html_body.renderSource(io, gpa, content_dir, doc_arena, source, page.source_path, page.output_path, .{
         .input_format = options.input_format,
-        .quiet = options.quiet,
         .nodes = if (render_opts.site) |s| s.nodes else &.{},
         .heading_index = render_opts.heading_index,
         .page_assets = render_opts.page_assets,
@@ -767,7 +763,7 @@ pub fn compileHtmlSite(
     var db = PageDb.init(gpa, retain_arena.allocator());
     defer db.deinit();
 
-    try loadAndPromoteFormat(io, gpa, &db, options.content_root, options.input_format, options.quiet, options.timings);
+    try loadAndPromoteFormat(io, gpa, &db, options.content_root, options.input_format, options.timings);
 
     // 3. Graph validate + freeze (shared rules with IR/RAG; Feature 6 nav).
     // Rules may select graph chrome even when the fallback layout has none.
@@ -1007,7 +1003,7 @@ pub fn compileHtmlSiteMulti(
     var db = PageDb.init(gpa, retain_arena.allocator());
     defer db.deinit();
 
-    try loadAndPromoteFormat(io, gpa, &db, base_options.content_root, base_options.input_format, base_options.quiet, base_options.timings);
+    try loadAndPromoteFormat(io, gpa, &db, base_options.content_root, base_options.input_format, base_options.timings);
 
     // Shared graph freeze once for all targets (Feature 6). Always compute nav
     // material; fingerprint mixes it in only when a layout has `{{nav}}`.
@@ -1022,20 +1018,16 @@ pub fn compileHtmlSiteMulti(
     // (RFC §5: ambiguous globs and mixed roots must not leave partial publications).
     for (plans) |plan| {
         target_mod.rejectMixedThemeRoots(plan.layout_path, plan.layout_rules) catch |err| {
-            if (!base_options.quiet) {
-                std.debug.print("error: target '{s}' mixed theme roots in layout rules: {s}\n", .{ plan.name, @errorName(err) });
-            }
+            std.debug.print("error: target '{s}' mixed theme roots in layout rules: {s}\n", .{ plan.name, @errorName(err) });
             return error.MixedThemeRoots;
         };
         for (db.items()) |page| {
             _ = layout_select.selectLayout(page.entity_id, page.role, plan.layout_rules, plan.layout_path) catch |err| {
-                if (!base_options.quiet) {
-                    std.debug.print("error: target '{s}' layout selection failed for '{s}': {s}\n", .{
-                        plan.name,
-                        page.entity_id,
-                        @errorName(err),
-                    });
-                }
+                std.debug.print("error: target '{s}' layout selection failed for '{s}': {s}\n", .{
+                    plan.name,
+                    page.entity_id,
+                    @errorName(err),
+                });
                 return switch (err) {
                     error.AmbiguousGlob => error.AmbiguousGlob,
                     error.DuplicateSelector => error.DuplicateSelector,
@@ -1074,9 +1066,7 @@ pub fn compileHtmlSiteMulti(
             const gop = try layout_cache.getOrPut(gpa, lp);
             if (gop.found_existing) continue;
             const layout = loadLayoutOnce(io, Io.Dir.cwd(), lp, layout_arena.allocator()) catch |err| {
-                if (!base_options.quiet) {
-                    std.debug.print("error: target '{s}' failed to load layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
-                }
+                std.debug.print("error: target '{s}' failed to load layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
                 any_failed = true;
                 any_io_failed = any_io_failed or !isContentCompileFailure(err);
                 _ = layout_cache.remove(lp);
@@ -1084,9 +1074,7 @@ pub fn compileHtmlSiteMulti(
                 break;
             };
             const bytes = readFileAlloc(io, Io.Dir.cwd(), lp, gpa) catch |err| {
-                if (!base_options.quiet) {
-                    std.debug.print("error: target '{s}' failed to read layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
-                }
+                std.debug.print("error: target '{s}' failed to read layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
                 any_failed = true;
                 any_io_failed = true;
                 _ = layout_cache.remove(lp);
@@ -1099,7 +1087,7 @@ pub fn compileHtmlSiteMulti(
 
         const cached = layout_cache.get(plan.layout_path).?;
         _ = compilePagesWithSharedAndSite(io, gpa, &db, cached.layout, target_options, &shared, cached.bytes, &site) catch |err| {
-            if (!base_options.quiet and err != error.IncludeFailed and err != error.ReferenceFailed and
+            if (err != error.IncludeFailed and err != error.ReferenceFailed and
                 err != error.ComponentFailed and err != error.GraphValidationFailed and err != error.AmbiguousGlob and
                 err != error.MixedThemeRoots and err != error.LayoutSelectionFailed)
             {
@@ -1485,7 +1473,6 @@ fn buildSiteHeadingIndex(
     db: *const PageDb,
     site: *const FrozenSite,
     shared: *const SharedCompileState,
-    quiet: bool,
     input_format: identity.InputFormat,
     prior_harvest: ?*const ParsedHeadingHarvest,
     recorder: ?*timings.Recorder,
@@ -1579,7 +1566,6 @@ fn buildSiteHeadingIndex(
         if (recorder) |t| t.bump(.page_reads, 1);
         const html = try html_body.renderSource(io, gpa, content_dir, &doc_arena, source, page.source_path, page.output_path, .{
             .input_format = input_format,
-            .quiet = quiet,
             .nodes = site.nodes,
             // Do not validate fragments while building the index they depend on.
         });
@@ -1850,7 +1836,6 @@ fn validatePrepublicationTarget(
         db,
         site,
         shared,
-        options.quiet,
         options.input_format,
         null,
         options.timings,
@@ -1976,13 +1961,11 @@ fn compilePagesInner(
 
     for (db.items(), 0..) |page, i| {
         const sel = layout_select.selectLayout(page.entity_id, page.role, options.layout_rules, options.layout_path) catch |err| {
-            if (!options.quiet) {
-                std.debug.print("error: layout selection failed for target '{s}' page '{s}': {s}\n", .{
-                    options.target_name,
-                    page.entity_id,
-                    @errorName(err),
-                });
-            }
+            std.debug.print("error: layout selection failed for target '{s}' page '{s}': {s}\n", .{
+                options.target_name,
+                page.entity_id,
+                @errorName(err),
+            });
             return switch (err) {
                 error.AmbiguousGlob => error.AmbiguousGlob,
                 error.DuplicateSelector => error.DuplicateSelector,
@@ -2032,12 +2015,10 @@ fn compilePagesInner(
     }
     var asset_discovery_fail: content_asset.FailInfo = .{};
     var content_assets = content_asset.loadSiteAssets(io, gpa, content_dir, source_paths, entity_ids, &asset_discovery_fail) catch |err| {
-        if (!options.quiet) {
-            if (err == error.AssetUnsafeSvg) {
-                content_asset.printDiagnostic(gpa, error.AssetUnsafeSvg, "", asset_discovery_fail);
-            } else {
-                std.debug.print("error: content-local asset discovery failed: {s}\n", .{@errorName(err)});
-            }
+        if (err == error.AssetUnsafeSvg) {
+            content_asset.printDiagnostic(gpa, error.AssetUnsafeSvg, "", asset_discovery_fail);
+        } else {
+            std.debug.print("error: content-local asset discovery failed: {s}\n", .{@errorName(err)});
         }
         return err;
     };
@@ -2212,7 +2193,6 @@ fn compilePagesInner(
         db,
         site,
         shared,
-        options.quiet,
         options.input_format,
         prior_harvest,
         options.timings,
@@ -2300,9 +2280,7 @@ fn compilePagesInner(
             .{ .heading_index = &heading_index, .validate_fragments = true },
         ) catch |err| {
             if (err == error.ReferenceMissing or err == error.ReferenceSyntax or err == error.PathError) {
-                if (!options.quiet) {
-                    wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail);
-                }
+                wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail);
                 return error.ReferenceFailed;
             }
             return err;
@@ -2321,9 +2299,7 @@ fn compilePagesInner(
                 page.output_path,
                 &asset_fail,
             ) catch |err| {
-                if (!options.quiet) {
-                    content_asset.printDiagnostic(gpa, err, page.source_path, asset_fail);
-                }
+                content_asset.printDiagnostic(gpa, err, page.source_path, asset_fail);
                 return error.AssetFailed;
             };
             if (rewritten.ptr != body_for_wiki.ptr) gpa.free(rewritten);

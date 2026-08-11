@@ -49,6 +49,13 @@ pub const AnalysisFormat = enum {
 pub const Options = struct {
     /// When true, print help and exit successfully (no pipeline).
     help: bool = false,
+    /// Suppress progress and success chatter on stderr (`--quiet`).
+    ///
+    /// This never suppresses errors or fatal diagnostics. A nonzero exit must
+    /// always explain itself: the README's own examples pass `--quiet`, so a
+    /// flag that silenced the explanation turned every documented command into
+    /// a silent failure. Warnings and info diagnostics count as chatter and
+    /// stay suppressed; anything at error severity does not.
     quiet: bool = false,
     /// When true, emit a machine-readable phase timing/counter report
     /// (`--timings`). Off unless requested; never changes artifacts or codes.
@@ -1123,7 +1130,8 @@ pub fn printUsage() void {
         \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
         \\  --timings           Print a machine-readable phase timing/counter JSON report to stdout
         \\                      (opt-in; default output, diagnostics, and exit codes unchanged)
-        \\  --quiet             Suppress progress + diagnostic stderr (exit codes/artifacts unchanged)
+        \\  --quiet             Suppress progress + success stderr; errors always print
+        \\                      (exit codes/artifacts unchanged)
         \\  --format human|json  Analysis output format for check/impact (default human)
         \\  --report PATH        Write an analysis report instead of stdout
         \\  --fail-on-unreferenced Make check fail when it reports unreferenced pages
