@@ -1893,6 +1893,10 @@ test "rag export against fixtures/content/valid (working + complete)" {
 
     const relations = try readRel(io, gpa, complete_out, "graph/relations.md");
     defer gpa.free(relations);
+    const expected_relations = try readRel(io, gpa, "fixtures/expected/rag", "graph/relations.md");
+    defer gpa.free(expected_relations);
+    try std.testing.expectEqualStrings(expected_relations, relations);
+
     const edges = [_][]const u8{
         "parent\thierarchy-great-grandchild\t->\thierarchy-leaf",
         "parent\thierarchy-leaf\t->\thierarchy-mid",
