@@ -257,11 +257,52 @@ fn writeSatellite(io: Io, root: []const u8, page: usize, section: usize) !void {
     try writeFile(io, path, body);
 }
 
+/// Delete `root` while holding no-follow handles for every existing parent
+/// component. `Io.Dir.deleteTree` protects entries below its initial handle,
+/// but opening a multi-component path can still follow a replaced
+/// intermediate component before that handle exists.
+fn deleteTreeNoFollow(io: Io, cwd: Io.Dir, root: []const u8) !void {
+    const last_slash = std.mem.lastIndexOfScalar(u8, root, '/');
+    const parent_path = if (last_slash) |slash| root[0..slash] else "";
+    const basename = if (last_slash) |slash| root[slash + 1 ..] else root;
+
+    var current_dir = cwd;
+    var owned_dir: ?Io.Dir = null;
+    defer if (owned_dir) |dir| dir.close(io);
+
+    if (parent_path.len > 0) {
+        var segments = std.mem.splitScalar(u8, parent_path, '/');
+        while (segments.next()) |segment| {
+            const stat = current_dir.statFile(io, segment, .{ .follow_symlinks = false }) catch |err| switch (err) {
+                // There is nothing to remove when an uncreated parent is
+                // missing. Any other inspection failure must abort cleanup.
+                error.FileNotFound => return,
+                else => return err,
+            };
+            if (stat.kind != .directory) return error.InvalidOutDir;
+
+            const next_dir = current_dir.openDir(io, segment, .{ .follow_symlinks = false }) catch |err| switch (err) {
+                // The component changed after stat; do not fall back to a
+                // pathname-based delete that could follow the replacement.
+                error.FileNotFound, error.NotDir, error.SymLinkLoop => return error.InvalidOutDir,
+                else => return err,
+            };
+            if (owned_dir) |dir| dir.close(io);
+            owned_dir = next_dir;
+            current_dir = next_dir;
+        }
+    }
+
+    // `basename` is a single component, so deleteTree's no-follow initial
+    // open is anchored to the parent handle rather than to a mutable path.
+    try current_dir.deleteTree(io, basename);
+}
+
 fn deleteSiteIfSafe(io: Io, cwd: Io.Dir, root: []const u8) void {
     // If a path component changes to a symlink while generation is running,
     // leave the partial tree in place rather than risking an external delete.
     validateOutDir(io, cwd, root) catch return;
-    cwd.deleteTree(io, root) catch {};
+    deleteTreeNoFollow(io, cwd, root) catch {};
 }
 
 /// Generate exactly `page_count` pages below `root`. Returns the number of
@@ -273,7 +314,7 @@ fn generateSite(io: Io, root: []const u8, page_count: usize) !usize {
     // been constrained against traversal and symlink components, and hiding
     // this error could leave a partial tree while reporting only a later, less
     // useful create/write failure.
-    try cwd.deleteTree(io, root);
+    try deleteTreeNoFollow(io, cwd, root);
     errdefer deleteSiteIfSafe(io, cwd, root);
 
     const pa = std.heap.page_allocator;
@@ -441,6 +482,7 @@ test "out dir rejects intermediate symlinks before cleanup" {
     };
 
     try std.testing.expectError(error.InvalidOutDir, validateOutDir(io, tmp.dir, "work/corpus"));
+    try std.testing.expectError(error.InvalidOutDir, deleteTreeNoFollow(io, tmp.dir, "work/corpus"));
     const keep = try readFileAlloc(io, tmp.dir, "outside/keep.txt", gpa);
     defer gpa.free(keep);
     try std.testing.expectEqualStrings("must survive\n", keep);

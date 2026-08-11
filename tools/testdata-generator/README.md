@@ -39,7 +39,8 @@ zig run tools/testdata-generator/main.zig -- --help
 `--out` is an owned path: it must be relative to the current working
 directory, contain no `.` or `..` segment, have no trailing separator, and
 pass through no existing symlink component. The generator rejects unsafe paths
-before deleting anything.
+before deleting anything, and cleanup is anchored through no-follow directory
+handles so a concurrent path-component swap cannot redirect recursive deletion.
 
 ## Tests
 
