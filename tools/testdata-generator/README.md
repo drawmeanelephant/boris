@@ -21,6 +21,14 @@ found:
 - wiki-links (`[[index]]`, `[[sections/section-NNNN]]`);
 - several headings per page so heading harvest does real work.
 
+`--dense-links N` (PERF-013, issue #331) additionally writes N wiki-links to
+other pages on every generated page, deterministically (targets are the next N
+generation positions, wrapping, never self). `--dense-links N-1` on an N-page
+tree makes every page link to every other page — the old O(links × pages)
+per-hit page scan worst case — so the `dependency_resolve` phase can be
+measured on dense link sets. With `--dense-links 0` (the default) the corpus
+is byte-identical to previous versions.
+
 ## Usage
 
 ```bash
@@ -32,6 +40,12 @@ zig run tools/testdata-generator/main.zig -- --pages 1000
 
 # Larger trees are supported (exact page counts, e.g. 5k)
 zig run tools/testdata-generator/main.zig -- --pages 5000 --out .tmp/corpus-5k
+
+# Dense-link corpus: every page links to the next 20 pages
+zig run tools/testdata-generator/main.zig -- --pages 1000 --dense-links 20
+
+# Full density: every page links to every other page (N-1 links per page)
+zig run tools/testdata-generator/main.zig -- --pages 1000 --dense-links 999
 
 zig run tools/testdata-generator/main.zig -- --help
 ```

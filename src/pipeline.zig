@@ -142,12 +142,36 @@ fn edgeEql(a: DependencyEdge, b: DependencyEdge) bool {
         std.mem.eql(u8, a.kind, b.kind);
 }
 
-fn findPage(nodes: []const PageEntry, id: []const u8) bool {
-    for (nodes) |node| {
-        if (std.mem.eql(u8, node.id, id)) return true;
+/// PERF-013: page-id membership index. Built once per resolution pass from the
+/// same page set that pass operates on, then reused for every wiki-link hit and
+/// semantic-relation probe — never a second identity authority.
+///
+/// The old resolution scanned every page per hit (O(links × pages)); a hash
+/// lookup keeps each probe O(1). Void values make duplicate ids a no-op, so
+/// first-wins is preserved, and duplicates cannot reach these passes anyway
+/// (EDUPLICATEID is fatal earlier).
+const PageIndex = struct {
+    map: std.StringHashMapUnmanaged(void) = .{},
+
+    fn build(allocator: std.mem.Allocator, nodes: []const PageEntry) !PageIndex {
+        var index: PageIndex = .{ .map = .{} };
+        errdefer index.map.deinit(allocator);
+        try index.map.ensureTotalCapacity(allocator, @intCast(nodes.len));
+        for (nodes) |node| {
+            try index.map.put(allocator, node.id, {});
+        }
+        return index;
     }
-    return false;
-}
+
+    fn deinit(self: *PageIndex, allocator: std.mem.Allocator) void {
+        self.map.deinit(allocator);
+        self.* = .{};
+    }
+
+    fn contains(self: *const PageIndex, id: []const u8) bool {
+        return self.map.contains(id);
+    }
+};
 
 fn validateSemanticRelations(
     list_gpa: std.mem.Allocator,
@@ -155,6 +179,9 @@ fn validateSemanticRelations(
     nodes: []const PageEntry,
     diagnostics: *std.ArrayList(diag.Diagnostic),
 ) !void {
+    var index = try PageIndex.build(list_gpa, nodes);
+    defer index.deinit(list_gpa);
+
     for (nodes) |node| {
         for (node.semantic_relations, 0..) |relation, relation_index| {
             if (std.mem.eql(u8, node.id, relation.target)) {
@@ -170,7 +197,7 @@ fn validateSemanticRelations(
                 });
                 continue;
             }
-            if (!findPage(nodes, relation.target)) {
+            if (!index.contains(relation.target)) {
                 try diagnostics.append(list_gpa, .{
                     .severity = .error_,
                     .code = .ERELATIONMISSING,
@@ -208,12 +235,15 @@ const DependencyResolver = struct {
     gpa: std.mem.Allocator,
     retain: std.mem.Allocator,
     content_dir: Io.Dir,
-    nodes: []const PageEntry,
+    /// PERF-013: one page-id lookup structure per resolution pass, reused for
+    /// every wiki-link hit instead of scanning all pages per hit.
+    page_index: PageIndex,
     edges: *std.ArrayList(DependencyEdge),
     diagnostics: *std.ArrayList(diag.Diagnostic),
     scanned_sources: std.StringHashMapUnmanaged(void) = .empty,
 
     fn deinit(self: *DependencyResolver) void {
+        self.page_index.deinit(self.gpa);
         self.scanned_sources.deinit(self.gpa);
     }
 
@@ -238,7 +268,7 @@ const DependencyResolver = struct {
         };
 
         for (hits.items) |hit| {
-            if (!findPage(self.nodes, hit.entity_id)) {
+            if (!self.page_index.contains(hit.entity_id)) {
                 fail.set(hit.line, hit.column, hit.entity_id, locus);
                 try self.diagnostics.append(self.gpa, try wikilink.makeDiagnostic(
                     self.retain,
@@ -348,7 +378,7 @@ fn resolveDependencies(
         .gpa = gpa,
         .retain = retain,
         .content_dir = content_dir,
-        .nodes = result.pages.items,
+        .page_index = try PageIndex.build(gpa, result.pages.items),
         .edges = &result.edges,
         .diagnostics = &result.diagnostics,
     };
@@ -421,7 +451,7 @@ pub fn populateDependencyIndexFormat(
         .gpa = gpa,
         .retain = retain,
         .content_dir = content_dir,
-        .nodes = nodes,
+        .page_index = try PageIndex.build(gpa, nodes),
         .edges = &edges,
         .diagnostics = &diagnostics,
     };
@@ -1320,28 +1350,28 @@ test "Feature 9 IR: wiki fragment still emits page reference edge only" {
     try dir.writeFile(io, .{
         .sub_path = "index.md",
         .data =
-            \\---
-            \\title: Home
-            \\---
-            \\
-            \\# Home
-            \\
-            \\See [[guides/t#sec]] and [[guides/t]].
-            \\
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+        \\See [[guides/t#sec]] and [[guides/t]].
+        \\
         ,
     });
     try dir.writeFile(io, .{
         .sub_path = "guides/t.md",
         .data =
-            \\---
-            \\title: T
-            \\parent: index
-            \\---
-            \\
-            \\# T
-            \\
-            \\## Sec
-            \\
+        \\---
+        \\title: T
+        \\parent: index
+        \\---
+        \\
+        \\# T
+        \\
+        \\## Sec
+        \\
         ,
     });
 
@@ -1365,6 +1395,77 @@ test "Feature 9 IR: wiki fragment still emits page reference edge only" {
         try std.testing.expectEqualStrings("guides/t", e.to.value);
     }
     try std.testing.expectEqual(@as(usize, 1), ref_count);
+}
+
+test "PERF-013: dense wiki-link corpus resolves without per-hit page scans" {
+    // Complete digraph: every page wiki-links to every other page. With N pages
+    // that is N×(N−1) hits — the old linear `findPage` scanned all pages per
+    // hit (O(N³) comparisons per pass). The page-id index built once in
+    // `resolveDependencies` resolves each hit in O(1), so this stays a
+    // correctness assertion instead of a wall-clock lottery.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const content = try outRel(gpa, &tmp, "content");
+    defer gpa.free(content);
+    const out = try outRel(gpa, &tmp, "out");
+    defer gpa.free(out);
+
+    const cwd = Io.Dir.cwd();
+    try cwd.createDirPath(io, content);
+    var dir = try cwd.openDir(io, content, .{});
+    defer dir.close(io);
+
+    const page_count: usize = 24;
+    for (0..page_count) |i| {
+        var id_buffer: [32]u8 = undefined;
+        const id = try std.fmt.bufPrint(&id_buffer, "page-{d:0>3}", .{i});
+        var path_buffer: [96]u8 = undefined;
+        const path = try std.fmt.bufPrint(&path_buffer, "page-{d:0>3}.md", .{i});
+
+        var body: std.ArrayList(u8) = .empty;
+        defer body.deinit(gpa);
+        try body.appendSlice(gpa, "---\nid: ");
+        try body.appendSlice(gpa, id);
+        try body.appendSlice(gpa, "\ntitle: Page ");
+        try body.appendSlice(gpa, id);
+        try body.appendSlice(gpa, "\n---\n\n# Page\n\n");
+        var target_buffer: [32]u8 = undefined;
+        for (0..page_count) |j| {
+            if (i == j) continue;
+            const target = try std.fmt.bufPrint(&target_buffer, "page-{d:0>3}", .{j});
+            try body.appendSlice(gpa, "- [[");
+            try body.appendSlice(gpa, target);
+            try body.appendSlice(gpa, "]]\n");
+        }
+        try dir.writeFile(io, .{ .sub_path = path, .data = body.items });
+    }
+
+    var result = try run(io, gpa, .{
+        .content_root = content,
+        .out_dir = out,
+        .quiet = true,
+    });
+    defer result.deinit();
+
+    try std.testing.expect(result.ok);
+    try std.testing.expect(result.graph_frozen);
+    try std.testing.expect(result.published_graph_ir);
+    // Every hit resolved: no missing-target diagnostics at any density.
+    for (result.diagnostics.items) |d| {
+        try std.testing.expect(d.code != .EREFERENCEMISSING);
+    }
+
+    // Every directed pair survives as exactly one unique reference edge.
+    var ref_edges: usize = 0;
+    for (result.edges.items) |e| {
+        if (std.mem.eql(u8, e.kind, "reference")) ref_edges += 1;
+    }
+    try std.testing.expectEqual(page_count * (page_count - 1), ref_edges);
+
+    // All pages are referenced, so the frozen reverse index covers every page.
+    try std.testing.expectEqual(@as(usize, page_count), result.reverse_index.items.len);
 }
 
 test "duplicate id fails and does not publish graph-dependent IR" {
