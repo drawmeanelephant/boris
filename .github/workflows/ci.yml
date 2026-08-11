@@ -86,6 +86,29 @@ jobs:
       - name: Test
         run: zig build test
 
+      # KNOWN RED, deliberately non-gating and deliberately not hidden.
+      # `zig build test-publication-fixture` fails on a pristine clone:
+      #   src/publication_checks_fixture_test.zig:627
+      #   test "preserved-edge-v1 publication bytes are identical across
+      #   requested jobs" -> error.BorisExpectationMismatch from
+      #   tools/testdata-generator/src/generator.zig:700
+      # The other three seeded-fixture harnesses are wired into `zig build
+      # test` (build.zig). This one is run here instead of gating on it, so the
+      # failure stays observed rather than unobserved, without holding every
+      # unrelated change behind a fixture-generator fix. The notice below fires
+      # the moment it goes green: wire it into test_step and delete this step.
+      - name: Publication checks fixture harness (known red, non-gating)
+        run: |
+          set +e
+          zig build test-publication-fixture
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "::notice title=known-red carve-out is stale::test-publication-fixture now passes. Add run_publication_fixture_tests to test_step in build.zig and delete this step."
+          else
+            echo "::warning title=known red::test-publication-fixture failed (exit ${rc}), as expected on this branch. See the comment above this step."
+          fi
+
       - name: Publication conformance
         run: zig build test-publication-conformance
 
@@ -207,10 +230,59 @@ jobs:
       - name: Content-audit tests
         run: zig build --build-file tools/content-audit/build.zig test
 
+  # The only lane that builds a release binary and then publishes real content.
+  # Debug cannot substitute for it: every unit test allocates through
+  # std.testing.allocator, a DebugAllocator, which tolerates an invalid free
+  # that a release allocator turns into a fatal signal — the process dies after
+  # rendering but before the staging tree is committed, so the output directory
+  # is left empty with no diagnostic and a nonzero exit is the only symptom.
+  release-html-smoke:
+    name: release-html-smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+
+      - name: Install CMake (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake
+
+      - name: Install CMake (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake
+
+      - name: Build ReleaseSafe
+        run: zig build -Doptimize=ReleaseSafe
+
+      # Publishes a three-page site through the documented
+      # `<main data-boris-search-root>{{content}}</main>` layout, where every
+      # search root opens with a heading, then asserts a zero exit and that the
+      # pages and the search index were actually written.
+      - name: ReleaseSafe HTML publication smoke
+        run: zig build -Doptimize=ReleaseSafe test-release-html-smoke
+
   # Single required status check for branch protection / rulesets.
   ci:
     name: ci
-    needs: [build-and-test, migration-lab-test, standalone_tools_test, testdata_generator_test, content-audit-test]
+    needs:
+      - build-and-test
+      - migration-lab-test
+      - standalone_tools_test
+      - testdata_generator_test
+      - content-audit-test
+      - release-html-smoke
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -221,14 +293,19 @@ jobs:
           standalone_tools_test="${{ needs.standalone_tools_test.result }}"
           testdata_generator_test="${{ needs.testdata_generator_test.result }}"
           content_audit_test="${{ needs.content-audit-test.result }}"
+          release_html_smoke="${{ needs.release-html-smoke.result }}"
           echo "build-and-test result: ${build_and_test}"
           echo "migration-lab-test result: ${migration_lab_test}"
           echo "standalone-tools-test result: ${standalone_tools_test}"
           echo "testdata-generator-test result: ${testdata_generator_test}"
           echo "content-audit-test result: ${content_audit_test}"
+          echo "release-html-smoke result: ${release_html_smoke}"
           test "${build_and_test}" = "success"
           test "${migration_lab_test}" = "success" || test "${migration_lab_test}" = "skipped"
           test "${standalone_tools_test}" = "success" || test "${standalone_tools_test}" = "skipped"
           test "${testdata_generator_test}" = "success" || test "${testdata_generator_test}" = "skipped"
           # Content-audit must actually succeed: no skipped/unobserved escape.
           test "${content_audit_test}" = "success"
+          # Same for the release smoke: it is the only guard against a release-only
+          # crash, so a skip must never read as green.
+          test "${release_html_smoke}" = "success"

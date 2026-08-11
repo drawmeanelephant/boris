@@ -837,6 +837,146 @@ pub fn build(b: *std.Build) void {
     );
     test_publication_conformance_step.dependOn(&publication_conformance_run.step);
 
+    // Release-mode HTML publication smoke. `zig build test` is a Debug build
+    // and every unit test allocates through std.testing.allocator (a
+    // DebugAllocator), so an invalid free is silently tolerated there. CI
+    // publishes a ReleaseSafe binary (.github/workflows/github-pages.yml), and
+    // a ReleaseSafe allocator abort is a fatal signal: the process dies after
+    // the pages are rendered but before the staging tree is committed, leaving
+    // an empty output directory and no diagnostic. That is exactly how a
+    // SIGTRAP in the search indexer shipped undetected. This step runs the real
+    // release binary over a small site whose search root opens with a heading,
+    // under the documented `<main data-boris-search-root>{{content}}</main>`
+    // layout, and asserts both a zero exit and that pages were actually
+    // published.
+    const release_html_smoke_run = b.addSystemCommand(&.{
+        "bash",
+        "-c",
+        \\set -euo pipefail
+        \\
+        \\mode="${1:-}"
+        \\case "$mode" in
+        \\  ReleaseSafe | ReleaseFast | ReleaseSmall) ;;
+        \\  *)
+        \\    echo "test-release-html-smoke: refusing to run against a ${mode:-Debug} build."
+        \\    echo "This guard only has value against a release binary: Debug tolerates the"
+        \\    echo "invalid free that shipped as a fatal allocator abort out of ReleaseSafe."
+        \\    echo "Run: zig build -Doptimize=ReleaseSafe test-release-html-smoke"
+        \\    exit 1
+        \\    ;;
+        \\esac
+        \\
+        \\BIN="$PWD/zig-out/bin/boris"
+        \\test -x "$BIN" || { echo "test-release-html-smoke: $BIN is missing"; exit 1; }
+        \\
+        \\WORK="$(mktemp -d "${TMPDIR:-/tmp}/boris-release-html-smoke.XXXXXX")"
+        \\trap 'rm -rf "$WORK"' EXIT
+        \\mkdir -p "$WORK/content/guides" "$WORK/theme/layouts"
+        \\
+        \\# The documented layout form: exactly one search root, with {{content}}
+        \\# not alone on its line.
+        \\cat >"$WORK/theme/layouts/main.html" <<'LAYOUT'
+        \\<!doctype html>
+        \\<html lang="en">
+        \\<head><meta charset="utf-8"><title>{{title}}</title></head>
+        \\<body>
+        \\  <nav>{{nav}}</nav>
+        \\  <main data-boris-search-root>{{content}}</main>
+        \\</body>
+        \\</html>
+        \\LAYOUT
+        \\
+        \\# Every page's search root opens with a heading, so the indexer takes
+        \\# the drop-the-empty-leading-section path.
+        \\cat >"$WORK/content/index.md" <<'PAGE'
+        \\---
+        \\title: Home
+        \\status: published
+        \\---
+        \\
+        \\# Home
+        \\
+        \\Root prose for the release smoke.
+        \\
+        \\## Quick start
+        \\
+        \\Run `boris`.
+        \\PAGE
+        \\
+        \\cat >"$WORK/content/guides/install.md" <<'PAGE'
+        \\---
+        \\title: Install Boris
+        \\parent: index
+        \\status: published
+        \\---
+        \\
+        \\# Install Boris
+        \\
+        \\Install prose for the release smoke.
+        \\PAGE
+        \\
+        \\cat >"$WORK/content/guides/paths.md" <<'PAGE'
+        \\---
+        \\title: Paths
+        \\parent: index
+        \\status: published
+        \\---
+        \\
+        \\# Paths
+        \\
+        \\Output-relative paths stay stable.
+        \\PAGE
+        \\
+        \\cd "$WORK"
+        \\set +e
+        \\"$BIN" build --input content --html-dir dist --html-layout theme/layouts/main.html
+        \\rc=$?
+        \\set -e
+        \\if [ "$rc" -ne 0 ]; then
+        \\  echo "test-release-html-smoke: FAIL - $mode boris build exited $rc, expected 0."
+        \\  echo "  An exit above 128 is a fatal signal (133 SIGTRAP / 134 SIGABRT):"
+        \\  echo "  an allocator abort after the pages were rendered. The staging tree"
+        \\  echo "  is then never committed, so the output directory is left empty."
+        \\  exit 1
+        \\fi
+        \\
+        \\count="$(find dist -name '*.html' -not -path 'dist/_boris/*' | wc -l | tr -d ' ')"
+        \\if [ "$count" -ne 3 ]; then
+        \\  echo "test-release-html-smoke: FAIL - expected 3 published HTML pages, found $count:"
+        \\  find dist -name '*.html' | sort
+        \\  exit 1
+        \\fi
+        \\for page in dist/index.html dist/guides/install.html dist/guides/paths.html; do
+        \\  test -s "$page" || { echo "test-release-html-smoke: FAIL - $page missing or empty"; exit 1; }
+        \\done
+        \\grep -q '<main data-boris-search-root>' dist/index.html ||
+        \\  { echo "test-release-html-smoke: FAIL - no search root in dist/index.html"; exit 1; }
+        \\
+        \\index="dist/_boris/search/search-index.json"
+        \\test -s "$index" || { echo "test-release-html-smoke: FAIL - $index missing or empty"; exit 1; }
+        \\grep -q '"fragment": "home"' "$index" ||
+        \\  { echo "test-release-html-smoke: FAIL - h1 section absent from $index"; exit 1; }
+        \\grep -q '"heading": "Quick start"' "$index" ||
+        \\  { echo "test-release-html-smoke: FAIL - h2 section absent from $index"; exit 1; }
+        \\if grep -q '"heading": ""' "$index"; then
+        \\  echo "test-release-html-smoke: FAIL - empty leading section survived into $index"
+        \\  exit 1
+        \\fi
+        \\
+        \\echo "test-release-html-smoke: ok - $mode, $count pages, search index intact."
+        ,
+        "test-release-html-smoke",
+        @tagName(optimize),
+    });
+    release_html_smoke_run.setCwd(b.path("."));
+    release_html_smoke_run.has_side_effects = true;
+    release_html_smoke_run.step.dependOn(b.getInstallStep());
+    const test_release_html_smoke_step = b.step(
+        "test-release-html-smoke",
+        "Publish a small site with the release binary (needs -Doptimize=ReleaseSafe)",
+    );
+    test_release_html_smoke_step.dependOn(&release_html_smoke_run.step);
+
     // GitHub Pages public/evidence artifact boundary: the public tree is
     // copied only from the exact committed Boris inventory records.
     const github_pages_artifact_run = b.addSystemCommand(&.{
@@ -963,6 +1103,32 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_publication_checks_tests.step);
     test_step.dependOn(&run_publication_claims_tests.step);
     test_step.dependOn(&run_publication_touches_tests.step);
+    // Both roots already ran incidentally, because several aggregate members
+    // import them and `zig test` runs every test in the root module's import
+    // graph. Incidental coverage is not attributable coverage: a failure was
+    // reported against an unrelated suite, and it disappears the moment an
+    // importer drops the import. Depend on the named steps directly.
+    test_step.dependOn(&run_publication_proof_pack_tests.step);
+    test_step.dependOn(&run_artifact_inventory_tests.step);
+    // Seeded-fixture publication harnesses: they launch the installed binary
+    // against a deterministic poisoned fixture, covering the evidence chain end
+    // to end rather than at unit scope.
+    //
+    // run_publication_fixture_tests is deliberately absent. `zig build
+    // test-publication-fixture` already fails on a pristine clone, in
+    // src/publication_checks_fixture_test.zig:627, test "preserved-edge-v1
+    // publication bytes are identical across requested jobs", raising
+    // error.BorisExpectationMismatch from
+    // tools/testdata-generator/src/generator.zig:700. The defect is in the
+    // fixture generator rather than in the suites wired up here, so gating on it
+    // would hold every unrelated change hostage. It is not omitted silently:
+    // CI runs `zig build test-publication-fixture` as a clearly-named
+    // non-gating step (.github/workflows/ci.yml, "Publication checks fixture
+    // harness"), which prints a ::notice:: the moment it goes green. Add the
+    // dependency here and delete that step at that point.
+    test_step.dependOn(&run_publication_claims_fixture_tests.step);
+    test_step.dependOn(&run_publication_touches_fixture_tests.step);
+    test_step.dependOn(&run_publication_proof_pack_fixture_tests.step);
     test_step.dependOn(&run_graph_tests.step);
     test_step.dependOn(&run_aside_tests.step);
     test_step.dependOn(&run_rag_tests.step);
@@ -1019,6 +1185,14 @@ pub fn build(b: *std.Build) void {
         &ir_schema_tests.step,
         &package_exe.step,
         &package_tests.step,
+        // These two call linkApex() but were absent from this list, so their
+        // test steps could be scheduled before the vendored C library finished
+        // building. On a COLD clone `zig build test` then exits 1 with
+        // "libapex.a: file not found" while reporting 6158/6158 tests passed;
+        // a second run in the same tree succeeds. First contact for a new
+        // contributor was a false build failure.
+        &publication_profile_tests.step,
+        &publication_plan_tests.step,
     };
     for (apex_needing) |s| s.dependOn(&ensure_apex.step);
 }
