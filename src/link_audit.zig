@@ -54,6 +54,23 @@ pub const Options = struct {
     /// When set, counts each local (non-ignored) reference resolved by the
     /// audit — the audit's per-reference hot path. Never used for decisions.
     resolution_counter: ?*u64 = null,
+    /// Opt out of failing the build on a local Markdown destination the
+    /// pre-Apex rewriter deliberately left literal.
+    ///
+    /// `docs/contracts/documentation-links.md` guarantees that a recognized
+    /// Markdown destination with no graph target stays byte-for-byte unchanged.
+    /// This audit is new and fatal, so a pinned site that relies on that skip
+    /// cannot upgrade without a way to keep it. When set, a local reference whose
+    /// resolved output path carries a Markdown extension is not reported as a
+    /// missing route.
+    ///
+    /// Scope is deliberately narrow. It suppresses only `EROUTEMISSING`, never
+    /// `EROUTEESCAPE`: escape is detected lexically because an existence check
+    /// cannot see it, so a `.md` target that climbs above the output root is
+    /// still refused. And it covers exactly the extensions the rewriter
+    /// recognizes (`doclink.zig`), so it cannot be widened by accident into a
+    /// general "ignore missing links" switch.
+    allow_markdown_literals: bool = false,
 };
 
 /// Attributes whose value is a single URL. `srcset` is deliberately excluded:
@@ -164,13 +181,37 @@ fn resolveBase(
 pub const Resolution = route_resolver.Resolution;
 pub const resolveWithinRoot = route_resolver.resolveWithinRoot;
 
-fn lineNumber(html: []const u8, offset: usize) u32 {
-    var line: u32 = 1;
-    for (html[0..@min(offset, html.len)]) |c| {
-        if (c == '\n') line += 1;
+/// Newline counter for finding locations.
+///
+/// Line numbers are needed only for a finding that is actually emitted, and the
+/// document scan visits tags in strictly increasing buffer order, so the count
+/// is carried forward from the previous request instead of being recomputed from
+/// the start of the buffer. Computing it eagerly for every reference made the
+/// audit O(n²) in per-page link count: a page of 20,000 plain links spent all
+/// of its time re-counting newlines it had already counted. On-demand plus
+/// incremental means a clean page counts no newlines at all, and a page with
+/// findings counts each byte at most once.
+const LineCounter = struct {
+    html: []const u8,
+    cursor: usize = 0,
+    line: u32 = 1,
+
+    fn at(self: *LineCounter, offset: usize) u32 {
+        const target = @min(offset, self.html.len);
+        // The scan is monotonic, so this never fires today. It is here because a
+        // stale carried count would be a silently wrong diagnostic rather than a
+        // visible failure, and a rescan is cheaper than that risk.
+        if (target < self.cursor) {
+            self.cursor = 0;
+            self.line = 1;
+        }
+        for (self.html[self.cursor..target]) |c| {
+            if (c == '\n') self.line += 1;
+        }
+        self.cursor = target;
+        return self.line;
     }
-    return line;
-}
+};
 
 fn appendFinding(
     gpa: std.mem.Allocator,
@@ -228,6 +269,13 @@ fn appendPublicationFinding(
     try appendFinding(gpa, findings, .EPUBLICATIONLOCATION, source_path, target, line, attribute);
 }
 
+/// Extensions the pre-Apex rewriter recognizes as Markdown destinations. Kept in
+/// step with `doclink.zig`: the opt-out must cover exactly the class the rewriter
+/// may leave literal, and nothing wider.
+fn hasMarkdownExtension(path: []const u8) bool {
+    return std.mem.endsWith(u8, path, ".md") or std.mem.endsWith(u8, path, ".mdx");
+}
+
 fn auditOne(
     gpa: std.mem.Allocator,
     intended: *const std.StringHashMapUnmanaged(void),
@@ -240,7 +288,10 @@ fn auditOne(
     attribute: []const u8,
     opts: Options,
     findings: *std.ArrayList(Finding),
-    line: u32,
+    /// Buffer offset of the tag carrying the reference. Resolved to a line number
+    /// only when a finding is emitted.
+    offset: usize,
+    lines: *LineCounter,
 ) !void {
     if (isSameDocumentTarget(target) and !has_effective_base) return;
 
@@ -256,7 +307,7 @@ fn auditOne(
             error.BasePathMismatch,
             error.SiteUrlMismatch,
             => {
-                try appendPublicationFinding(gpa, findings, source_path, target, line, attribute);
+                try appendPublicationFinding(gpa, findings, source_path, target, lines.at(offset), attribute);
                 return;
             },
         };
@@ -278,12 +329,12 @@ fn auditOne(
     if (opts.resolution_counter) |counter| counter.* += 1;
     const resolution = try resolveWithinRoot(gpa, resolution_source_path, route_target);
     switch (resolution) {
-        .escapes_root => try appendFinding(gpa, findings, .EROUTEESCAPE, source_path, target, line, attribute),
+        .escapes_root => try appendFinding(gpa, findings, .EROUTEESCAPE, source_path, target, lines.at(offset), attribute),
         .path => |resolved| {
             defer gpa.free(resolved);
-            if (!intended.contains(resolved)) {
-                try appendFinding(gpa, findings, .EROUTEMISSING, source_path, target, line, attribute);
-            }
+            if (intended.contains(resolved)) return;
+            if (opts.allow_markdown_literals and hasMarkdownExtension(resolved)) return;
+            try appendFinding(gpa, findings, .EROUTEMISSING, source_path, target, lines.at(offset), attribute);
         },
     }
 }
@@ -302,6 +353,7 @@ fn auditDocumentWithOptions(
     var external_base = false;
     var base_source_path: ?[]u8 = null;
     defer if (base_source_path) |path| gpa.free(path);
+    var lines: LineCounter = .{ .html = html };
     while (i < html.len) {
         if (html[i] != '<') {
             i += 1;
@@ -332,9 +384,9 @@ fn auditDocumentWithOptions(
                         .external => external_base = true,
                         .invalid => {
                             if (opts.publication_location != null) {
-                                try appendPublicationFinding(gpa, findings, source_path, base_href, lineNumber(html, i), "href");
+                                try appendPublicationFinding(gpa, findings, source_path, base_href, lines.at(i), "href");
                             } else {
-                                try appendFinding(gpa, findings, .EROUTEESCAPE, source_path, base_href, lineNumber(html, i), "href");
+                                try appendFinding(gpa, findings, .EROUTEESCAPE, source_path, base_href, lines.at(i), "href");
                             }
                         },
                     }
@@ -349,12 +401,12 @@ fn auditDocumentWithOptions(
         const has_effective_base = base_source_path != null;
         for (url_attributes) |attribute| {
             const target = html_scan.attrValue(slice, attribute) orelse continue;
-            try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, attribute, opts, findings, lineNumber(html, i));
+            try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, attribute, opts, findings, i, &lines);
         }
         if (std.ascii.eqlIgnoreCase(tag.name, "meta")) {
             const target = html_scan.attrValue(slice, "content") orelse continue;
             if (requiresPublicLocation(tag.name, slice, "content")) {
-                try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, "content", opts, findings, lineNumber(html, i));
+                try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, "content", opts, findings, i, &lines);
             }
         }
     }
@@ -532,6 +584,88 @@ test "a local Markdown destination without a published route is rejected" {
     try auditDocumentWithOptions(gpa, &intended, "guides/start.html", "<a href=\"../reference.html\">x</a>", .{}, &findings);
     try std.testing.expectEqual(@as(usize, 2), findings.items.len);
     try std.testing.expectEqual(diag.Code.EROUTEMISSING, findings.items[1].code);
+}
+
+test "the markdown opt-out spares rewriter-left literals and nothing else" {
+    const gpa = std.testing.allocator;
+    var intended: std.StringHashMapUnmanaged(void) = .{};
+    defer intended.deinit(gpa);
+    try intended.put(gpa, "guides/start.html", {});
+
+    var findings: std.ArrayList(Finding) = .empty;
+    defer freeFindings(gpa, &findings);
+
+    const opts = Options{ .allow_markdown_literals = true };
+    // The same `.md` and `.mdx` literals the default rejects are accepted, so a
+    // site pinned to the pre-audit behaviour can upgrade.
+    try auditDocumentWithOptions(gpa, &intended, "guides/start.html", "<a href=\"../reference.md?raw=true#anchor\">x</a>", opts, &findings);
+    try auditDocumentWithOptions(gpa, &intended, "guides/start.html", "<a href=\"notes.mdx\">x</a>", opts, &findings);
+    try std.testing.expectEqual(@as(usize, 0), findings.items.len);
+
+    // The opt-out is not a general "ignore missing links" switch: a missing
+    // `.html` route still fails, and traversal above the output root is still
+    // refused even when the target is Markdown, because escape cannot be
+    // established by existence.
+    try auditDocumentWithOptions(gpa, &intended, "guides/start.html", "<a href=\"../reference.html\">x</a>", opts, &findings);
+    try auditDocumentWithOptions(gpa, &intended, "guides/start.html", "<a href=\"../../outside.md\">x</a>", opts, &findings);
+    try auditDocumentWithOptions(gpa, &intended, "guides/start.html", "<a href=\"readme.markdown\">x</a>", opts, &findings);
+    try std.testing.expectEqual(@as(usize, 3), findings.items.len);
+    try std.testing.expectEqual(diag.Code.EROUTEMISSING, findings.items[0].code);
+    try std.testing.expectEqual(diag.Code.EROUTEESCAPE, findings.items[1].code);
+    try std.testing.expectEqual(diag.Code.EROUTEMISSING, findings.items[2].code);
+}
+
+test "finding line numbers survive the incremental counter" {
+    const gpa = std.testing.allocator;
+    var intended: std.StringHashMapUnmanaged(void) = .{};
+    defer intended.deinit(gpa);
+    try intended.put(gpa, "index.html", {});
+    try intended.put(gpa, "ok.html", {});
+
+    var findings: std.ArrayList(Finding) = .empty;
+    defer freeFindings(gpa, &findings);
+
+    // Findings at the first line, after clean lines, twice on one line, inside a
+    // tag that spans lines, after CRLF, and on the last line. The counter is
+    // carried forward across the whole scan, so a mistake in it would land here
+    // as a wrong line rather than as a failure elsewhere.
+    const html =
+        "<a href=\"a.html\">1</a>\n" ++ // line 1
+        "<a href=\"ok.html\">clean</a>\n" ++ // line 2, no finding
+        "\n\n" ++ // lines 3-4 blank
+        "<a href=\"b.html\">5</a><a href=\"c.html\">5</a>\n" ++ // line 5, twice
+        "<a\n  href=\"d.html\"\n>6</a>\r\n" ++ // tag opens on line 6
+        "\r\n" ++ // line 9
+        "<img src=\"e.png\">"; // line 10, last line, unterminated by newline
+    try auditDocumentWithOptions(gpa, &intended, "index.html", html, .{}, &findings);
+
+    const want = [_]struct { target: []const u8, line: u32 }{
+        .{ .target = "a.html", .line = 1 },
+        .{ .target = "b.html", .line = 5 },
+        .{ .target = "c.html", .line = 5 },
+        .{ .target = "d.html", .line = 6 },
+        .{ .target = "e.png", .line = 10 },
+    };
+    try std.testing.expectEqual(want.len, findings.items.len);
+    for (want, findings.items) |w, f| {
+        try std.testing.expectEqualStrings(w.target, f.target);
+        try std.testing.expectEqual(w.line, f.line);
+    }
+}
+
+test "the line counter carries forward and recovers from a backwards offset" {
+    const html = "a\nbb\nccc\ndddd";
+    var lines: LineCounter = .{ .html = html };
+    try std.testing.expectEqual(@as(u32, 1), lines.at(0));
+    try std.testing.expectEqual(@as(u32, 1), lines.at(1));
+    try std.testing.expectEqual(@as(u32, 2), lines.at(2));
+    try std.testing.expectEqual(@as(u32, 3), lines.at(5));
+    try std.testing.expectEqual(@as(u32, 4), lines.at(9));
+    // An offset past the end is clamped rather than reading out of bounds.
+    try std.testing.expectEqual(@as(u32, 4), lines.at(html.len + 100));
+    // A backwards request must recount instead of reporting the carried line.
+    try std.testing.expectEqual(@as(u32, 2), lines.at(3));
+    try std.testing.expectEqual(@as(u32, 4), lines.at(html.len));
 }
 
 test "same-document references without a base remain ignored" {
