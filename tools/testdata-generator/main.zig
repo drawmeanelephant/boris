@@ -63,11 +63,11 @@ fn parseOptions(args: []const []const u8) ParseError!Options {
             if (index >= args.len) return error.MissingValue;
             options.page_count = try parsePageCount(args[index]);
         } else if (std.mem.startsWith(u8, arg, "--dense-links=")) {
-            options.dense_links = try parsePageCount(arg["--dense-links=".len..]);
+            options.dense_links = try parseDensity(arg["--dense-links=".len..]);
         } else if (std.mem.eql(u8, arg, "--dense-links")) {
             index += 1;
             if (index >= args.len) return error.MissingValue;
-            options.dense_links = try parsePageCount(args[index]);
+            options.dense_links = try parseDensity(args[index]);
         } else if (std.mem.startsWith(u8, arg, "--out=")) {
             const value = arg["--out=".len..];
             if (value.len == 0) return error.MissingValue;
@@ -87,6 +87,12 @@ fn parsePageCount(value: []const u8) ParseError!usize {
     const count = std.fmt.parseInt(usize, value, 10) catch return error.InvalidPageCount;
     if (count == 0) return error.InvalidPageCount;
     return count;
+}
+
+/// Dense-link density may be zero: the documented default (`--dense-links 0`)
+/// is the explicit way to ask for the sparse corpus.
+fn parseDensity(value: []const u8) ParseError!usize {
+    return std.fmt.parseInt(usize, value, 10) catch return error.InvalidPageCount;
 }
 
 /// The tool owns and deletes its `--out` directory, so the path must stay
@@ -481,9 +487,11 @@ pub fn main(init: std.process.Init) u8 {
         std.debug.print("testdata-generator: failed: {s}\n", .{@errorName(err)});
         return @intFromEnum(ExitCode.failed);
     };
+    // Report the density actually written: generation clamps to page_count - 1.
+    const clamped_density = @min(options.dense_links, options.page_count - 1);
     std.debug.print(
         "testdata-generator: wrote {d} pages under {s} (dense links: {d} per page)\n",
-        .{ options.page_count, options.out_dir, options.dense_links },
+        .{ options.page_count, options.out_dir, clamped_density },
     );
     return @intFromEnum(ExitCode.success);
 }
@@ -542,9 +550,13 @@ test "parse options accepts large page counts and custom out dir" {
     try std.testing.expectEqual(@as(usize, 0), (try parseOptions(&.{"testdata-generator"})).dense_links);
     const dense_eq = try parseOptions(&.{ "testdata-generator", "--dense-links=7" });
     try std.testing.expectEqual(@as(usize, 7), dense_eq.dense_links);
+    // Explicit zero is the documented sparse default, not an error.
+    const dense_zero = try parseOptions(&.{ "testdata-generator", "--dense-links", "0" });
+    try std.testing.expectEqual(@as(usize, 0), dense_zero.dense_links);
+    try std.testing.expectEqual(@as(usize, 0), (try parseOptions(&.{ "testdata-generator", "--dense-links=0" })).dense_links);
 
     try std.testing.expectError(error.InvalidPageCount, parseOptions(&.{ "testdata-generator", "--pages=0" }));
-    try std.testing.expectError(error.InvalidPageCount, parseOptions(&.{ "testdata-generator", "--dense-links=0" }));
+    try std.testing.expectError(error.InvalidPageCount, parseOptions(&.{ "testdata-generator", "--dense-links=nope" }));
     try std.testing.expectError(error.MissingValue, parseOptions(&.{ "testdata-generator", "--pages" }));
     try std.testing.expectError(error.MissingValue, parseOptions(&.{ "testdata-generator", "--dense-links" }));
     try std.testing.expectError(error.UnknownFlag, parseOptions(&.{ "testdata-generator", "--nope" }));
@@ -711,7 +723,9 @@ test "full density links every page to every other page" {
     // the O(links × pages) worst case for the old per-hit page scan.
     const page_count: usize = 21;
     _ = try generateSite(io, root, page_count, page_count - 1);
-    var dir = try Io.Dir.cwd().openDir(io, root, .{});
+    // `.iterate = true` is required: on Linux the dir reader seeks the handle
+    // before readdir, and a non-iterate handle fails with BADF.
+    var dir = try Io.Dir.cwd().openDir(io, root, .{ .iterate = true });
     defer dir.close(io);
 
     var walker = try dir.walk(gpa);
