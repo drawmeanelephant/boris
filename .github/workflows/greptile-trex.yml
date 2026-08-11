@@ -1,7 +1,10 @@
 name: Greptile TREX (opt-in)
 
 on:
-  pull_request:
+  # Use the trusted base-branch workflow so fork PRs receive a write-capable
+  # token for the comment. This job reads only event metadata and posts a fixed
+  # string; it never checks out or executes pull-request code.
+  pull_request_target:
     types: [labeled]
 
 permissions:
