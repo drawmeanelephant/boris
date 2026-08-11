@@ -23,8 +23,8 @@
 //! - `include_reads`: number of transitive include file reads.
 //! - `hash_bytes`: payload bytes fed into page fingerprints.
 //! - `link_resolutions`: local references resolved by the output link audit.
-//! - `fast_path_hits`: heading-harvest cache-key hits and incremental
-//!   cached-page skips.
+//! - `fast_path_hits`: heading-harvest cache-key hits, incremental cached-page
+//!   skips, and common route resolutions completed in caller-owned scratch.
 
 const std = @import("std");
 const Io = std.Io;

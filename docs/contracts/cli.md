@@ -134,7 +134,9 @@ path. Durations and `totalNs` are integer nanoseconds from the monotonic
 clock, so the shape and key order are deterministic even though wall times
 vary between runs. `counters` always appears with every key in canonical
 order: `page_reads`, `include_reads`, `hash_bytes`, `link_resolutions`,
-`fast_path_hits`.
+`fast_path_hits`. The last counter includes route-audit references that take
+the canonical, caller-scratch fast path, in addition to the existing
+heading-harvest and incremental-cache fast paths.
 
 ## RSS mode
 

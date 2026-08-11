@@ -2664,7 +2664,10 @@ fn compilePagesInner(
             .publication_location = options.publication_location,
             .allow_markdown_literals = options.allow_markdown_literals,
         };
-        if (options.timings) |t| link_audit_opts.resolution_counter = t.counterPtr(.link_resolutions);
+        if (options.timings) |t| {
+            link_audit_opts.resolution_counter = t.counterPtr(.link_resolutions);
+            link_audit_opts.fast_path_counter = t.counterPtr(.fast_path_hits);
+        }
         if (options.timings) |t| t.start(.link_audit);
         try link_audit.audit(io, gpa, stage_dir, dist_dir, live_page_paths, audit_assets.items, link_audit_opts, &findings);
         if (options.timings) |t| t.stop(.link_audit);

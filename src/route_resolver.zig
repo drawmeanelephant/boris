@@ -11,6 +11,11 @@ const std = @import("std");
 /// encoded traversal such as `%252e%252e`; the bound stops a decoding loop.
 const max_decode_passes = 4;
 
+/// Stack space used by callers that want to resolve common routes without
+/// allocating. The resolver falls back to the existing slow path when the
+/// joined route does not fit.
+pub const fast_path_buffer_bytes = 4096;
+
 pub const Error = std.mem.Allocator.Error || error{MalformedPercentEscape};
 
 pub const Resolution = union(enum) {
@@ -66,6 +71,55 @@ pub fn validatePercentEscapes(raw: []const u8) error{MalformedPercentEscape}!voi
 
 const DecodePolicy = enum { lenient, checked };
 
+fn isDotSegment(segment: []const u8) bool {
+    return std.mem.eql(u8, segment, ".") or std.mem.eql(u8, segment, "..");
+}
+
+/// Return true only for a canonical path made of non-empty, ordinary
+/// slash-separated segments. This intentionally rejects every shape whose
+/// meaning the slow resolver normalizes: percent escapes, backslashes, empty
+/// segments, and `.`/`..` segments.
+fn hasOnlyOrdinarySegments(path: []const u8) bool {
+    if (path.len == 0) return false;
+
+    var segment_start: usize = 0;
+    for (path, 0..) |c, i| {
+        if (c == '%' or c == '\\') return false;
+        if (c != '/') continue;
+        const segment = path[segment_start..i];
+        if (segment.len == 0 or isDotSegment(segment)) return false;
+        segment_start = i + 1;
+    }
+
+    const final_segment = path[segment_start..];
+    return final_segment.len > 0 and !isDotSegment(final_segment);
+}
+
+/// Resolve the common route shape into caller-owned storage.
+///
+/// A non-null result is borrowed from `scratch` and never needs to be freed.
+/// A null result means that the caller must use `resolve`, which preserves the
+/// allocation-backed behavior for query/fragment, escaped, normalized, and
+/// otherwise non-canonical routes.
+pub fn tryResolveFastPath(
+    source: []const u8,
+    target: []const u8,
+    scratch: []u8,
+) ?[]const u8 {
+    if (!hasOnlyOrdinarySegments(source) or !hasOnlyOrdinarySegments(target)) return null;
+    if (source[0] == '/' or source[source.len - 1] == '/') return null;
+    if (target[0] == '/' or target[target.len - 1] == '/') return null;
+    if (std.mem.indexOfScalar(u8, target, '?') != null) return null;
+    if (std.mem.indexOfScalar(u8, target, '#') != null) return null;
+
+    const prefix_len = if (std.mem.lastIndexOfScalar(u8, source, '/')) |i| i + 1 else 0;
+    if (prefix_len > scratch.len or target.len > scratch.len - prefix_len) return null;
+
+    @memcpy(scratch[0..prefix_len], source[0..prefix_len]);
+    @memcpy(scratch[prefix_len .. prefix_len + target.len], target);
+    return scratch[0 .. prefix_len + target.len];
+}
+
 fn decode(
     gpa: std.mem.Allocator,
     raw: []const u8,
@@ -119,7 +173,7 @@ fn decode(
     return current;
 }
 
-fn resolve(
+fn resolveSlow(
     gpa: std.mem.Allocator,
     source: []const u8,
     target: []const u8,
@@ -186,6 +240,21 @@ fn resolve(
     return .{ .path = try out.toOwnedSlice(gpa) };
 }
 
+fn resolve(
+    gpa: std.mem.Allocator,
+    source: []const u8,
+    target: []const u8,
+    policy: DecodePolicy,
+) Error!Resolution {
+    var scratch: [fast_path_buffer_bytes]u8 = undefined;
+    if (tryResolveFastPath(source, target, scratch[0..])) |path| {
+        // The public result owns its path. This is the one unavoidable copy
+        // for callers that do not provide their own scratch storage.
+        return .{ .path = try gpa.dupe(u8, path) };
+    }
+    return resolveSlow(gpa, source, target, policy);
+}
+
 /// Historical compiler behavior. Malformed `%` sequences remain literal.
 pub fn resolveWithinRoot(
     gpa: std.mem.Allocator,
@@ -248,4 +317,62 @@ test "checked decoding rejects malformed percent escapes without changing compil
         resolveWithinRootChecked(gpa, "index.html", "bad%2.html"),
     );
     try std.testing.expectError(error.MalformedPercentEscape, decodeFragment(gpa, "bad%zz"));
+}
+
+test "common route fast path matches the allocation-backed resolver" {
+    const gpa = std.testing.allocator;
+    const cases = [_]struct {
+        source: []const u8,
+        target: []const u8,
+    }{
+        .{ .source = "index.html", .target = "guide.html" },
+        .{ .source = "guides/start.html", .target = "reference/commands.html" },
+        .{ .source = "nested/deep/page.html", .target = "assets/site.css" },
+        .{ .source = "index.html", .target = "weird/a:b.html" },
+    };
+
+    for (cases) |case| {
+        var scratch: [fast_path_buffer_bytes]u8 = undefined;
+        const fast = tryResolveFastPath(case.source, case.target, scratch[0..]) orelse
+            return error.FastPathNotSelected;
+        const slow = try resolveSlow(gpa, case.source, case.target, .checked);
+        switch (slow) {
+            .escapes_root => return error.UnexpectedRootEscape,
+            .path => |path| {
+                defer gpa.free(path);
+                try std.testing.expectEqualStrings(path, fast);
+            },
+        }
+    }
+}
+
+test "fast route selection excludes normalization and URL complications" {
+    const cases = [_]struct {
+        source: []const u8,
+        target: []const u8,
+    }{
+        .{ .source = "index.html", .target = "../outside.html" },
+        .{ .source = "index.html", .target = "%2e%2e/outside.html" },
+        .{ .source = "index.html", .target = "/root.html" },
+        .{ .source = "index.html", .target = "guide/" },
+        .{ .source = "index.html", .target = "guide/./page.html" },
+        .{ .source = "index.html", .target = "guide.html?view=all" },
+        .{ .source = "index.html", .target = "guide.html#top" },
+        .{ .source = "index.html", .target = "guide\\page.html" },
+        .{ .source = "index.html", .target = "guide//page.html" },
+    };
+
+    var scratch: [fast_path_buffer_bytes]u8 = undefined;
+    for (cases) |case| {
+        try std.testing.expect(tryResolveFastPath(case.source, case.target, scratch[0..]) == null);
+    }
+}
+
+test "common route public resolution uses one final allocation" {
+    const gpa = std.testing.allocator;
+    var failing = std.testing.FailingAllocator.init(gpa, .{ .fail_index = 1 });
+    const allocator = failing.allocator();
+    const resolved = try resolveWithinRoot(allocator, "guides/start.html", "reference.html");
+    defer allocator.free(resolved.path);
+    try std.testing.expectEqualStrings("guides/reference.html", resolved.path);
 }
