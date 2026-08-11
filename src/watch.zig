@@ -702,6 +702,7 @@ pub const WatchCoordinator = struct {
                 .input_format = self.options.input_format,
                 .sitemap_path = self.options.sitemap_path,
                 .site_url = self.options.site_url,
+                .publication_location = if (self.options.publication_location) |*location| location else null,
             }) catch |err| {
                 if (isRecoverableBuildError(err) or err == error.MultiTargetCompilationFailed) {
                     if (!self.options.quiet) {
@@ -725,6 +726,7 @@ pub const WatchCoordinator = struct {
                 .input_format = self.options.input_format,
                 .sitemap_path = self.options.sitemap_path,
                 .site_url = self.options.site_url,
+                .publication_location = if (self.options.publication_location) |*location| location else null,
             }) catch |err| {
                 if (isRecoverableBuildError(err)) {
                     if (!self.options.quiet) {
@@ -764,6 +766,7 @@ pub const WatchCoordinator = struct {
                 .input_format = self.options.input_format,
                 .sitemap_path = self.options.sitemap_path,
                 .site_url = self.options.site_url,
+                .publication_location = if (self.options.publication_location) |*location| location else null,
             }) catch |err| {
                 initial_success = false;
                 if (isRecoverableBuildError(err) or err == error.MultiTargetCompilationFailed) {
@@ -788,6 +791,7 @@ pub const WatchCoordinator = struct {
                 .input_format = self.options.input_format,
                 .sitemap_path = self.options.sitemap_path,
                 .site_url = self.options.site_url,
+                .publication_location = if (self.options.publication_location) |*location| location else null,
             })) |st| {
                 stats = st;
             } else |err| {

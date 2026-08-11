@@ -80,13 +80,21 @@ jobs:
           ./zig-out/bin/boris plan --profile .boris-pages-profile.json > evidence/publication-plan.json
 
       - name: Compile the public HTML target
-        env:
-          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
         run: |
+          # Build from the normalized plan, not a second unbound URL source.
+          PAGES_BASE_URL="$(jq -r '.publication.base_url' evidence/publication-plan.json)"
+          PAGES_ORIGIN="$(jq -r '.publication.origin' evidence/publication-plan.json)"
+          PAGES_BASE_PATH="$(jq -r '.publication.base_path' evidence/publication-plan.json)"
+          test "$PAGES_BASE_URL" != "null"
+          test "$PAGES_ORIGIN" != "null"
+          test "$PAGES_BASE_PATH" != "null"
           ./zig-out/bin/boris \
             --target public=dist \
             --target-layout public=themes/boris/layouts/main.html \
             --sitemap \
+            --pages-base-url "$PAGES_BASE_URL" \
+            --pages-origin "$PAGES_ORIGIN" \
+            --pages-base-path "$PAGES_BASE_PATH" \
             --site-url "$PAGES_BASE_URL" \
             --quiet
 

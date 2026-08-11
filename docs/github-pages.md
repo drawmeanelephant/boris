@@ -40,6 +40,22 @@ not equal `origin + base_path`, the profile fails closed. The normalized
 identity is also available in the [publication profile](contracts/publication-profile.md)
 and [publication plan](contracts/publication-plan.md) contracts.
 
+The build step consumes that normalized plan identity directly:
+
+```text
+boris --target public=dist --sitemap \
+  --pages-base-url https://owner.github.io/boris \
+  --pages-origin https://owner.github.io \
+  --pages-base-path /boris \
+  --site-url https://owner.github.io/boris
+```
+
+The compiler audits rendered root-relative/public metadata URLs before target
+replacement and binds sitemap URLs to the same identity. `EPUBLICATIONLOCATION`
+is an actionable publication failure. Root and custom-domain builds pass an
+explicit empty `--pages-base-path`. The check is against the local generated
+artifact; this workflow still makes no post-deploy HTTP claim.
+
 ## Public artifact and retained evidence
 
 The workflow creates two deliberately different uploads:

@@ -351,6 +351,12 @@ Identical inputs on the **same host** → **byte-identical** corpus trees.
 
 Catalog paths are relative and normalized with `/` (no `\`, no leading `/`).
 
+RAG paths and catalog entity references are corpus-relative identifiers, not
+public URLs. They have no applicable Pages origin/base-path assertion in this
+slice and are not deployment-URL verified. If a future RAG manifest carries
+public URLs, it must add a named projection check and contract version rather
+than reusing HTML evidence implicitly.
+
 ---
 
 ## `catalog.jsonl` field order (complete mode, normative)

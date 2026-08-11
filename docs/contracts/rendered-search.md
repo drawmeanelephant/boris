@@ -80,6 +80,12 @@ fragment. The producer does not URL-encode it; the browser consumer must safely
 join it to the same-origin rendered root and must encode it when constructing a
 URL if required by the host.
 
+Because v1 stores target-relative paths rather than public URLs, a rendered
+search artifact has no applicable publication origin/base-path assertion of its
+own. The HTML publication gate checks the browser-facing theme/search route and
+the publication checks bind search documents to the selected HTML page set;
+neither result is a claim that an external deployed search request succeeded.
+
 Without `--pages-file`, the CLI recursively discovers regular files whose path
 ends in lowercase `.html`, rejects symlinks, and excludes the configured output
 directory when nested below the root. With `--pages-file`, every non-empty line

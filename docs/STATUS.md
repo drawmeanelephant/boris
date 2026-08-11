@@ -1,6 +1,6 @@
 # Project status — Boris
 
-**As of:** 2026-08-08
+**As of:** 2026-08-11
 
 **Integration line:** `afterparty` during the Build Week judging window; `main` is frozen.
 
@@ -24,7 +24,7 @@ frontmatter or claim a unified publication executor.
   context is complete. The historical `v0.8.0` tag remains preserved as
   erroneous evidence: it resolves to a commit carrying 0.7.0 metadata and is
   not an ancestor of `afterparty`.
-- The current afterparty merge set runs through PR **#311**: generated-output
+- The current afterparty merge set runs through PR **#318**: generated-output
   hygiene, docs-maintenance hardening, default-site layout polish, rendered
   search foundation, CLI hardening, browser UI, staged publication,
   standalone-tool CI, nested hierarchy, human-first documentation IA, the
@@ -35,8 +35,8 @@ frontmatter or claim a unified publication executor.
   (contract and first slice), testdata-generator and jobs passthrough, the
   test-throughput audit, and the Proof Pack (contract, first slice, semantic
   rejection probes, HTML presentation, and print-disclosure robustness),
-  release bookkeeping, the standalone content audit, and parser-authority
-  cleanup in PRs #275–#311.
+  release bookkeeping, the standalone content audit, parser-authority cleanup,
+  and the first GitHub Pages publication slice in PRs #275–#318.
 - Rendered-site search is **shipped on `afterparty`**: the compiler produces the
   search artifact from its staged live-page overlay and the default layout has
   a small browser UI with a no-JavaScript navigation fallback. Its normative
@@ -64,7 +64,7 @@ frontmatter or claim a unified publication executor.
 | Relationship candidate classification | **Done on `afterparty`** — exact eligible-key review output reports `inventoried`, `ambiguous`, `absent`, and `invalid`; no automatic selection or relation emission. |
 | Publication Touch Atlas | **Implemented first slice** — deterministic target-local `touches.json` relationship index derived exclusively from the committed bytes of `artifacts.json`, `checks.json`, and `claims.json`; runs after claims replacement with no payload rereads; OOM-safe construction. |
 | Publication Proof Pack | **Done (Step 2C closed)** — deterministic two-file presentation model (`proof-pack.json` + `index.html`) over committed artifact, checks, claims, and Touch Atlas evidence; emitted after the Touch Atlas commits with a staged transaction, embedded model digest, semantic-rejection probes, improved HTML presentation, and print-disclosure robustness. |
-| GitHub Pages publication target | **Implemented first slice** — normalized project/root/custom-domain location identity, strict public-target/site-URL validation, official Pages Actions workflow, exact public-inventory packaging, and retained evidence binding; post-deploy HTTP audit remains explicitly unverified. |
+| GitHub Pages publication target | **Implemented second slice** — normalized project/root/custom-domain location identity is enforced across applicable HTML/public metadata, sitemap, RSS, and location-aware `llms.txt` output; mismatches fail before publication, while post-deploy HTTP audit remains explicitly unverified. |
 | Migration-guide executable pass | **Evidence complete** — the 69-page Starlight dogfood converted, compiled to HTML/IR/RAG, and produced a deployable static tree; human review remains required for 109 preserved, 1 stripped, and 79 manual-review findings plus four link-audit misses. |
 | Source-RAG ergonomics measurement | **Measured** — flat, no-bundle, bundles-only, core/docs profiles, and per-tool packs were timed and sized; no behavior change is justified by this snapshot. |
 | Archive-layout evidence | **Done mechanically** — deterministic fixture, black-box audit, and link audit pass; browser viewport and keyboard review remain explicitly unverified. |
@@ -110,7 +110,7 @@ zig build test-layout-hostile
 | 8 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
 | 9 | Build optimization | **Measured — no change** | Throughput audit: `zig build test` graph is fully sibling-parallel (42 flat test-run deps); scaling `-j1`→`-j8` ≈3x; warm default ≈16–20s. Residual floor is structural ≈8.8× shared-suite duplication across four co-dominant roots (`main`, `compile`, `hardening_test`, `layout_select_hostile_test`); no single root dominates. See [test-throughput-audit.md](audits/test-throughput-audit.md). |
 | 10 | Publication Proof Pack (Phase 7A) | **Done — Step 2C closed** | Deterministic `proof-pack.json` presentation model and static `index.html` emitted after the Touch Atlas commits; strict four-report binding, canonical JSON/HTML rendering, first-slice staged transaction with embedded model digest, exit-3 mapping, quiet diagnostic capture, semantic-rejection probes, HTML presentation cleanup, and print-disclosure robustness. |
-| 11 | GitHub Pages publication target (Issue #302) | **Implemented first slice** | Validate the Pages location offline, build with the official Actions sequence, package only exact inventory records, and retain proof/evidence separately. A future card may add a post-deploy URL audit and broader projection URL invariants. |
+| 11 | GitHub Pages publication target (Issue #302) | **Implemented second slice** | Validate the Pages location offline, consume one normalized identity across applicable URL-bearing projections, fail closed on local origin/base-path disagreement, package only exact inventory records, and retain proof/evidence separately. Post-deploy HTTP audit remains explicitly unverified. |
 
 ## Release bookkeeping
 

@@ -186,6 +186,11 @@ test "Pages root and custom sites are distinct without a CNAME" {
     try std.testing.expectEqual(SiteKind.custom_domain, custom.site_kind);
     try std.testing.expectEqualStrings("", custom.base_path);
 
+    var custom_www = try parse(std.testing.allocator, "https://www.docs.example.com", "https://www.docs.example.com", "");
+    defer custom_www.deinit(std.testing.allocator);
+    try std.testing.expectEqual(SiteKind.custom_domain, custom_www.site_kind);
+    try std.testing.expectEqualStrings("https://www.docs.example.com", custom_www.base_url);
+
     var uppercase = try parse(std.testing.allocator, "https://OWNER.GITHUB.IO/docs/", "https://OWNER.GITHUB.IO", "/docs");
     defer uppercase.deinit(std.testing.allocator);
     try std.testing.expectEqual(SiteKind.project_site, uppercase.site_kind);

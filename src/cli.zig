@@ -8,6 +8,7 @@ const diagnostic = @import("diagnostic.zig");
 const target_mod = @import("target.zig");
 const layout_select = @import("layout_select.zig");
 const identity = @import("identity.zig");
+const github_pages = @import("github_pages.zig");
 const site_url_mod = @import("site_url.zig");
 const sitemap = @import("sitemap.zig");
 
@@ -86,6 +87,8 @@ pub const Options = struct {
     /// RSS XML output path (default `rss.xml`).
     rss_path: ?[]const u8 = null,
     site_url: ?[]const u8 = null,
+    /// Normalized GitHub Pages publication identity for URL-bearing output.
+    publication_location: ?github_pages.Location = null,
     rss_title: ?[]const u8 = null,
     rss_description: ?[]const u8 = null,
     rss_limit: usize = 20,
@@ -107,6 +110,7 @@ pub const Options = struct {
     targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 },
 
     pub fn deinit(self: *Options, gpa: std.mem.Allocator) void {
+        if (self.publication_location) |*location| location.deinit(gpa);
         if (self.owned_html_layout) {
             gpa.free(self.html_layout);
             self.owned_html_layout = false;
@@ -152,6 +156,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var llms_path: []const u8 = default_llms_path;
     var rss_path: []const u8 = default_rss_path;
     var site_url: ?[]const u8 = null;
+    var pages_base_url: ?[]const u8 = null;
+    var pages_origin: ?[]const u8 = null;
+    var pages_base_path: ?[]const u8 = null;
     var rss_title: ?[]const u8 = null;
     var rss_description: ?[]const u8 = null;
     var rss_limit: usize = 20;
@@ -179,6 +186,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_rss = false;
     var saw_rss_path = false;
     var saw_site_url = false;
+    var saw_pages_base_url = false;
+    var saw_pages_origin = false;
+    var saw_pages_base_path = false;
     var saw_rss_title = false;
     var saw_rss_description = false;
     var saw_rss_limit = false;
@@ -208,6 +218,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         }
         targets.deinit(gpa);
     }
+    var publication_location: ?github_pages.Location = null;
+    errdefer if (publication_location) |*location| location.deinit(gpa);
     // Pending --target-layout NAME=PATH applied after targets are known.
     var target_layouts: std.ArrayListUnmanaged(struct { name: []const u8, path: []const u8 }) = .{ .items = &.{}, .capacity = 0 };
     defer target_layouts.deinit(gpa);
@@ -544,6 +556,27 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        if (std.mem.eql(u8, a, "--pages-base-url") or std.mem.startsWith(u8, a, "--pages-base-url=")) {
+            if (saw_pages_base_url) return error.DuplicateFlag;
+            saw_pages_base_url = true;
+            pages_base_url = try takeValue(args, &i, a, "--pages-base-url");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--pages-origin") or std.mem.startsWith(u8, a, "--pages-origin=")) {
+            if (saw_pages_origin) return error.DuplicateFlag;
+            saw_pages_origin = true;
+            pages_origin = try takeValue(args, &i, a, "--pages-origin");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--pages-base-path") or std.mem.startsWith(u8, a, "--pages-base-path=")) {
+            if (saw_pages_base_path) return error.DuplicateFlag;
+            saw_pages_base_path = true;
+            pages_base_path = try takeValueAllowEmpty(args, &i, a, "--pages-base-path");
+            continue;
+        }
+
         if (std.mem.eql(u8, a, "--rss-title") or std.mem.startsWith(u8, a, "--rss-title=")) {
             if (saw_rss_title) return error.DuplicateFlag;
             saw_rss_title = true;
@@ -626,6 +659,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     const wants_context = saw_context or saw_context_dir;
     const wants_llms = saw_llms or saw_llms_path;
     const wants_rss = saw_rss or saw_rss_path;
+    const saw_pages_location = saw_pages_base_url or saw_pages_origin or saw_pages_base_path;
     // Explicit IR: --out and/or --no-rag (bare CLI is HTML, not IR).
     const wants_ir = saw_out or saw_no_rag;
 
@@ -636,7 +670,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         // Other projection selectors would either execute or invent a second
         // configuration source, so keep them as usage errors.
         if (saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_layout_rules or wants_sitemap or
-            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_rss_title or saw_rss_description or saw_rss_limit or
+            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or
             saw_format or saw_report or saw_watch)
         {
             return error.ConflictingFlags;
@@ -675,7 +709,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             return error.ConflictingFlags;
         }
     } else if (command == .check or command == .impact) {
-        if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or wants_sitemap or saw_site_url or saw_rss_title or saw_rss_description or saw_rss_limit or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
+        if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or wants_sitemap or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
             return error.ConflictingFlags;
         }
     } else if ((command == .build or command == .watch) and (saw_format or saw_report)) {
@@ -699,6 +733,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     if (saw_complete and (saw_split_size or saw_bundles_only)) return error.ConflictingFlags;
     if (wants_llms and (wants_rag or wants_ir or wants_context or wants_rss or explicit_html)) return error.ConflictingFlags;
     if (wants_rss and (wants_rag or wants_ir or wants_context or explicit_html)) return error.ConflictingFlags;
+    if (saw_pages_location and (wants_rag or wants_ir or wants_context)) return error.ConflictingFlags;
     if ((saw_rss_title or saw_rss_description or saw_rss_limit) and !wants_rss) return error.ConflictingFlags;
     if (saw_site_url and !(wants_rss or wants_sitemap)) return error.ConflictingFlags;
     if (wants_rss and (site_url == null or rss_title == null or rss_description == null)) return error.MissingValue;
@@ -738,6 +773,21 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .ir
     else
         .html;
+
+    if (saw_pages_location and !(saw_pages_base_url and saw_pages_origin and saw_pages_base_path)) {
+        return error.MissingValue;
+    }
+    if (saw_pages_location) {
+        publication_location = github_pages.parse(
+            gpa,
+            pages_base_url.?,
+            pages_origin.?,
+            pages_base_path.?,
+        ) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.InvalidValue,
+        };
+    }
 
     if (site_url) |raw_url| {
         const normalized = site_url_mod.normalized(gpa, raw_url) catch |err| switch (err) {
@@ -890,6 +940,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .split_size = null,
             .bundles_only = false,
             .llms_path = llms_path,
+            .publication_location = publication_location,
             .targets = targets,
             .command = command,
             .impact_id = impact_id,
@@ -911,6 +962,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .llms_path = null,
             .rss_path = rss_path,
             .site_url = site_url,
+            .publication_location = publication_location,
             .rss_title = rss_title,
             .rss_description = rss_description,
             .rss_limit = rss_limit,
@@ -936,6 +988,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .llms_path = null,
             .sitemap_path = if (wants_sitemap) sitemap_path else null,
             .site_url = site_url,
+            .publication_location = publication_location,
             .html_dir = if (has_explicit_targets) null else html_dir,
             .html_layout = html_layout,
             .owned_html_layout = owned_html_layout,
@@ -973,6 +1026,21 @@ fn takeValue(
     const v = args[i.*];
     if (v.len == 0) return error.EmptyValue;
     return v;
+}
+
+/// Read a value for a flag whose empty string is meaningful. GitHub Pages
+/// root/custom sites use an explicit empty `base_path`.
+fn takeValueAllowEmpty(
+    args: []const []const u8,
+    i: *usize,
+    arg: []const u8,
+    comptime name: []const u8,
+) ParseError![]const u8 {
+    const eq_prefix = name ++ "=";
+    if (std.mem.startsWith(u8, arg, eq_prefix)) return arg[eq_prefix.len..];
+    i.* += 1;
+    if (i.* >= args.len) return error.MissingValue;
+    return args[i.*];
 }
 
 pub fn printUsage() void {
@@ -1015,6 +1083,9 @@ pub fn printUsage() void {
         \\  --out <DIR>         IR output directory (selects IR mode; default: .boris)
         \\  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
         \\  --site-url URL      Required HTTP(S) deployment URL for RSS or sitemap
+        \\  --pages-base-url U  Normalized Pages public base URL
+        \\  --pages-origin U    Normalized Pages public origin
+        \\  --pages-base-path P Normalized Pages path (empty for root/custom sites)
         \\  --rss-title TITLE   Required RSS channel title
         \\  --rss-description T Required RSS channel description
         \\  --rss-limit N       RSS item limit (1–500; default 20)
@@ -1161,6 +1232,9 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.eql(u8, a, "--profile") or
             std.mem.eql(u8, a, "--out") or
             std.mem.eql(u8, a, "--rag-dir") or
+            std.mem.eql(u8, a, "--pages-base-url") or
+            std.mem.eql(u8, a, "--pages-origin") or
+            std.mem.eql(u8, a, "--pages-base-path") or
             std.mem.eql(u8, a, "--html-dir") or
             std.mem.eql(u8, a, "--html-layout") or
             std.mem.eql(u8, a, "--target") or
@@ -1176,6 +1250,9 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.startsWith(u8, a, "--profile=") or
             std.mem.startsWith(u8, a, "--out=") or
             std.mem.startsWith(u8, a, "--rag-dir=") or
+            std.mem.startsWith(u8, a, "--pages-base-url=") or
+            std.mem.startsWith(u8, a, "--pages-origin=") or
+            std.mem.startsWith(u8, a, "--pages-base-path=") or
             std.mem.startsWith(u8, a, "--html-dir=") or
             std.mem.startsWith(u8, a, "--html-layout=") or
             std.mem.startsWith(u8, a, "--target=") or
@@ -2258,4 +2335,52 @@ test "parse: sitemap selection implication validation conflicts and RSS compatib
     defer rss_opts.deinit(std.testing.allocator);
     try expectEqual(Mode.rss, rss_opts.mode);
     try std.testing.expect(rss_opts.sitemap_path == null);
+}
+
+test "parse: normalized Pages location is required as one three-part identity" {
+    var project = try parseOptions(std.testing.allocator, &.{
+        "boris",
+        "--sitemap",
+        "--site-url",
+        "https://owner.github.io/boris",
+        "--pages-base-url",
+        "https://owner.github.io/boris/",
+        "--pages-origin",
+        "https://owner.github.io/",
+        "--pages-base-path",
+        "/boris/",
+    });
+    defer project.deinit(std.testing.allocator);
+    try expect(project.publication_location != null);
+    try expectEqualStrings("https://owner.github.io/boris", project.publication_location.?.base_url);
+    try expectEqualStrings("/boris", project.publication_location.?.base_path);
+
+    var root = try parseOptions(std.testing.allocator, &.{
+        "boris",
+        "--llms",
+        "--pages-base-url=https://owner.github.io",
+        "--pages-origin=https://owner.github.io",
+        "--pages-base-path=",
+    });
+    defer root.deinit(std.testing.allocator);
+    try expectEqual(Mode.llms, root.mode);
+    try expectEqualStrings("", root.publication_location.?.base_path);
+
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{
+        "boris",
+        "--pages-base-url",
+        "https://owner.github.io",
+        "--pages-origin",
+        "https://owner.github.io",
+    }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{
+        "boris",
+        "--no-rag",
+        "--pages-base-url",
+        "https://owner.github.io",
+        "--pages-origin",
+        "https://owner.github.io",
+        "--pages-base-path",
+        "",
+    }));
 }

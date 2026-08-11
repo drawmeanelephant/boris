@@ -265,6 +265,15 @@ schemaVersion, compiler, contentRoot, pageCount, pages
 
 Diagnostics are **not** on the manifest; they live in `build-report.json`.
 
+### Publication-URL boundary
+
+IR v0.2/v0.3 stores source paths, entity ids, and graph semantics; it does not
+store a public origin, deployment base path, canonical URL, or HTML route URL.
+An IR export therefore has no applicable publication-location assertion and is
+not location-verified by the HTML Pages gate. A future URL-bearing IR field
+would require an explicit schema/contract change rather than an inferred copy
+of HTML or sitemap data.
+
 ### Manifest page summary object
 
 Key order: `index`, `id`, `sourcePath`, `role`, `parent`, `title`, `status`

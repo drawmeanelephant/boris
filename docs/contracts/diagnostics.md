@@ -99,6 +99,12 @@ meaning, so a consumer written against v0.2 stays correct; it will encounter
 codes it does not recognize only on a build that publishes a local reference the
 site cannot serve.
 
+The Pages publication slice adds `EPUBLICATIONLOCATION` for the pre-commit
+semantic URL/location gate. It is emitted when a root-relative project-site
+route omits the declared base path, or when a Boris-owned canonical/public URL
+uses a different origin or base path. This is a publication failure, not a
+warning; it does not add a fourth publication-evidence check.
+
 | Code | Severity | When | Emitted by |
 |------|----------|------|------------|
 | `EDUPLICATEID` | error | Two pages would share the same `id` (byte-exact) | `graph.diagnoseDuplicateIds` |
@@ -124,6 +130,7 @@ site cannot serve.
 | `EASSET` | error | Content-local page asset path invalid, outside the owning page’s sibling tree, missing, symlink, not a regular file, contains active SVG content, or collides at publication | `content_asset` → HTML |
 | `EROUTEMISSING` | error | Published local `href`/`src` resolves to no output this build intends to keep | `link_audit` → HTML commit |
 | `EROUTEESCAPE` | error | Published local `href`/`src` climbs above the output root and can never be served | `link_audit` → HTML commit |
+| `EPUBLICATIONLOCATION` | error | A Boris-owned rendered public URL disagrees with the declared publication origin/base path, or a project-site root-relative route omits that base path | `link_audit` → HTML pre-commit gate |
 | `EFRAGMENTMISSING` | reserved | Published local reference resolves, but its `#fragment` is not an id on the target page. Not yet emitted; see [documentation-links.md](documentation-links.md) | — |
 | `EUSAGE` | error | CLI usage / flag error (unknown flag, conflicts, malformed options) | CLI (exit 2; not in build-report) |
 | `EIO` | error | I/O or system failure (missing content root, unreadable file, unexpected runtime) | pipeline / CLI (exit 3 when pure I/O) |

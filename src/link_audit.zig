@@ -26,6 +26,7 @@
 const std = @import("std");
 const diag = @import("diag.zig");
 const html_scan = @import("html_scan.zig");
+const publication_location = @import("publication_location.zig");
 const route_resolver = @import("route_resolver.zig");
 
 pub const Finding = struct {
@@ -46,7 +47,11 @@ pub const Finding = struct {
 /// because it reports success it did not establish. Route checking stands alone
 /// until that is built. `EFRAGMENTMISSING` is reserved in the diagnostics
 /// contract for it.
-pub const Options = struct {};
+pub const Options = struct {
+    /// When present, root-relative and same-origin absolute URLs are checked
+    /// against the declared publication origin/base path before route audit.
+    publication_location: ?*const publication_location.Location = null,
+};
 
 /// Attributes whose value is a single URL. `srcset` is deliberately excluded:
 /// it holds a comma-separated candidate list with descriptors and needs its own
@@ -59,6 +64,33 @@ const url_attributes = [_][]const u8{ "href", "src" };
 /// local paths. Grammar: ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":".
 fn isIgnoredTarget(target: []const u8) bool {
     return route_resolver.isExternalOrEmpty(target) or target[0] == '#';
+}
+
+fn hasRelToken(value: []const u8, wanted: []const u8) bool {
+    var it = std.mem.tokenizeAny(u8, value, " \t\r\n");
+    while (it.next()) |token| if (std.ascii.eqlIgnoreCase(token, wanted)) return true;
+    return false;
+}
+
+/// Canonical/public metadata is a Boris-owned URL even when it is written in
+/// a custom layout. Ordinary absolute links and CDN assets remain external
+/// links and are not forced onto the site's own origin.
+fn requiresPublicLocation(tag_name: []const u8, tag: []const u8, attribute: []const u8) bool {
+    if (std.ascii.eqlIgnoreCase(tag_name, "base") and std.ascii.eqlIgnoreCase(attribute, "href")) return true;
+    if (std.ascii.eqlIgnoreCase(tag_name, "link") and
+        std.ascii.eqlIgnoreCase(attribute, "href"))
+    {
+        return hasRelToken(html_scan.attrValue(tag, "rel") orelse "", "canonical");
+    }
+    if (std.ascii.eqlIgnoreCase(tag_name, "meta") and
+        std.ascii.eqlIgnoreCase(attribute, "content"))
+    {
+        const property = html_scan.attrValue(tag, "property") orelse html_scan.attrValue(tag, "name") orelse html_scan.attrValue(tag, "itemprop") orelse return false;
+        return std.ascii.eqlIgnoreCase(property, "og:url") or
+            std.ascii.eqlIgnoreCase(property, "twitter:url") or
+            std.ascii.eqlIgnoreCase(property, "url");
+    }
+    return false;
 }
 
 pub const Resolution = route_resolver.Resolution;
@@ -114,6 +146,83 @@ pub fn auditDocument(
     html: []const u8,
     findings: *std.ArrayList(Finding),
 ) !void {
+    return auditDocumentWithOptions(gpa, intended, source_path, html, .{}, findings);
+}
+
+fn appendPublicationFinding(
+    gpa: std.mem.Allocator,
+    findings: *std.ArrayList(Finding),
+    source_path: []const u8,
+    target: []const u8,
+    line: u32,
+    attribute: []const u8,
+) !void {
+    try appendFinding(gpa, findings, .EPUBLICATIONLOCATION, source_path, target, line, attribute);
+}
+
+fn auditOne(
+    gpa: std.mem.Allocator,
+    intended: *const std.StringHashMapUnmanaged(void),
+    source_path: []const u8,
+    tag_name: []const u8,
+    tag: []const u8,
+    target: []const u8,
+    attribute: []const u8,
+    opts: Options,
+    findings: *std.ArrayList(Finding),
+    line: u32,
+) !void {
+    if (target.len == 0 or target[0] == '#') return;
+
+    var route_target: []const u8 = target;
+    var owned_route: ?[]u8 = null;
+    defer if (owned_route) |route| gpa.free(route);
+    if (opts.publication_location) |location| {
+        const require_public = requiresPublicLocation(tag_name, tag, attribute);
+        const classification = publication_location.classify(gpa, location, target, require_public) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.InvalidAbsoluteUrl,
+            error.OriginMismatch,
+            error.BasePathMismatch,
+            error.SiteUrlMismatch,
+            => {
+                try appendPublicationFinding(gpa, findings, source_path, target, line, attribute);
+                return;
+            },
+        };
+        switch (classification) {
+            .relative => {},
+            .external => return,
+            .publication => |route| {
+                owned_route = route;
+                route_target = route;
+            },
+        }
+    } else if (isIgnoredTarget(route_target)) {
+        return;
+    }
+
+    if (isIgnoredTarget(route_target)) return;
+    const resolution = try resolveWithinRoot(gpa, source_path, route_target);
+    switch (resolution) {
+        .escapes_root => try appendFinding(gpa, findings, .EROUTEESCAPE, source_path, target, line, attribute),
+        .path => |resolved| {
+            defer gpa.free(resolved);
+            if (!intended.contains(resolved)) {
+                try appendFinding(gpa, findings, .EROUTEMISSING, source_path, target, line, attribute);
+            }
+        },
+    }
+}
+
+fn auditDocumentWithOptions(
+    gpa: std.mem.Allocator,
+    intended: *const std.StringHashMapUnmanaged(void),
+    source_path: []const u8,
+    html: []const u8,
+    opts: Options,
+    findings: *std.ArrayList(Finding),
+) !void {
     var i: usize = 0;
     var raw_text_depth: usize = 0;
     while (i < html.len) {
@@ -139,16 +248,12 @@ pub fn auditDocument(
         const slice = html[i .. tag.end + 1];
         for (url_attributes) |attribute| {
             const target = html_scan.attrValue(slice, attribute) orelse continue;
-            if (isIgnoredTarget(target)) continue;
-            const resolution = try resolveWithinRoot(gpa, source_path, target);
-            switch (resolution) {
-                .escapes_root => try appendFinding(gpa, findings, .EROUTEESCAPE, source_path, target, lineNumber(html, i), attribute),
-                .path => |resolved| {
-                    defer gpa.free(resolved);
-                    if (!intended.contains(resolved)) {
-                        try appendFinding(gpa, findings, .EROUTEMISSING, source_path, target, lineNumber(html, i), attribute);
-                    }
-                },
+            try auditOne(gpa, intended, source_path, tag.name, slice, target, attribute, opts, findings, lineNumber(html, i));
+        }
+        if (std.ascii.eqlIgnoreCase(tag.name, "meta")) {
+            const target = html_scan.attrValue(slice, "content") orelse continue;
+            if (requiresPublicLocation(tag.name, slice, "content")) {
+                try auditOne(gpa, intended, source_path, tag.name, slice, target, "content", opts, findings, lineNumber(html, i));
             }
         }
     }
@@ -195,7 +300,6 @@ pub fn audit(
     opts: Options,
     findings: *std.ArrayList(Finding),
 ) !void {
-    _ = opts;
     var intended: std.StringHashMapUnmanaged(void) = .{};
     defer intended.deinit(gpa);
     for (page_paths) |p| try intended.put(gpa, p, {});
@@ -214,7 +318,7 @@ pub fn audit(
             else => return err,
         };
         defer gpa.free(html);
-        try auditDocument(gpa, &intended, path, html, findings);
+        try auditDocumentWithOptions(gpa, &intended, path, html, opts, findings);
     }
 }
 
@@ -344,4 +448,39 @@ test "a file present in the live tree but not intended to survive is not a valid
     try auditDocument(gpa, &intended, "index.html", "<a href=\"old.html\">stale</a>", &findings);
     try std.testing.expectEqual(@as(usize, 1), findings.items.len);
     try std.testing.expectEqual(diag.Code.EROUTEMISSING, findings.items[0].code);
+}
+
+test "project-site root-relative links must carry the publication base path" {
+    const gpa = std.testing.allocator;
+    const github_pages = @import("github_pages.zig");
+    var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
+    defer location.deinit(gpa);
+    var intended: std.StringHashMapUnmanaged(void) = .{};
+    defer intended.deinit(gpa);
+    try intended.put(gpa, "index.html", {});
+    try intended.put(gpa, "assets/theme.css", {});
+
+    var findings: std.ArrayList(Finding) = .empty;
+    defer freeFindings(gpa, &findings);
+    try auditDocumentWithOptions(gpa, &intended, "index.html", "<a href=\"/boris/assets/theme.css\">ok</a><a href=\"/assets/theme.css\">bad</a>", .{ .publication_location = &location }, &findings);
+    try std.testing.expectEqual(@as(usize, 1), findings.items.len);
+    try std.testing.expectEqual(diag.Code.EPUBLICATIONLOCATION, findings.items[0].code);
+    try std.testing.expectEqualStrings("/assets/theme.css", findings.items[0].target);
+}
+
+test "canonical and public metadata must match the declared origin" {
+    const gpa = std.testing.allocator;
+    const github_pages = @import("github_pages.zig");
+    var location = try github_pages.parse(gpa, "https://owner.github.io/boris", "https://owner.github.io", "/boris");
+    defer location.deinit(gpa);
+    var intended: std.StringHashMapUnmanaged(void) = .{};
+    defer intended.deinit(gpa);
+    try intended.put(gpa, "index.html", {});
+
+    var findings: std.ArrayList(Finding) = .empty;
+    defer freeFindings(gpa, &findings);
+    const html = "<link rel=\"canonical\" href=\"https://wrong.example/docs\"><meta property=\"og:url\" content=\"https://wrong.example/docs\">";
+    try auditDocumentWithOptions(gpa, &intended, "index.html", html, .{ .publication_location = &location }, &findings);
+    try std.testing.expectEqual(@as(usize, 2), findings.items.len);
+    for (findings.items) |finding| try std.testing.expectEqual(diag.Code.EPUBLICATIONLOCATION, finding.code);
 }

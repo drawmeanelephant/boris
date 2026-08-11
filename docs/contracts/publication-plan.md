@@ -111,6 +111,12 @@ results, graph compilation, artifact inventories, file digests, checks, claims,
 limitations, touch maps, quality scores, deployment status, environment URLs,
 HTTP responses, and any claim that a Pages artifact was accepted or served.
 
+The normalized publication identity is also the runtime source of truth for
+location-aware HTML, sitemap, RSS, and `llms.txt` producers when a coordinator
+executes the plan. This declaration itself does not run those producers or
+their local URL gates; it is not deployment verification. IR, RAG, Context,
+and rendered-search v1 currently have no applicable public URL field.
+
 ## Side-effect and future-evidence boundary
 
 `plan` performs no content scan, graph compilation, HTML render, IR/RAG/Context

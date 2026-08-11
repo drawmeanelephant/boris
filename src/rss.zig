@@ -3,8 +3,10 @@
 const std = @import("std");
 const Io = std.Io;
 const graph = @import("graph.zig");
+const github_pages = @import("github_pages.zig");
 const identity = @import("identity.zig");
 const pipeline = @import("pipeline.zig");
+const publication_location = @import("publication_location.zig");
 const rss_date = @import("rss_date.zig");
 const site_url_mod = @import("site_url.zig");
 const structured_out = @import("structured_out.zig");
@@ -21,6 +23,9 @@ pub const Options = struct {
     limit: usize = 20,
     quiet: bool = false,
     input_format: identity.InputFormat = .markdown,
+    /// Optional normalized Pages identity. When present, every RSS public URL
+    /// is required to use its exact origin and base path.
+    publication_location: ?*const github_pages.Location = null,
 };
 
 pub const Result = struct {
@@ -41,7 +46,7 @@ const Item = struct {
     timestamp: rss_date.Timestamp,
 };
 
-pub const Error = error{ InvalidSiteUrl, InvalidXml, InvalidLimit };
+pub const Error = error{ InvalidSiteUrl, InvalidXml, InvalidLimit, PublicationLocationMismatch };
 
 /// Validate a bounded absolute deployment URL and return the no-trailing-slash
 /// channel form. URL path bytes are intentionally preserved as supplied.
@@ -101,6 +106,12 @@ fn appendElement(buf: *Sink, comptime indent: []const u8, comptime name: []const
 
 pub fn render(allocator: std.mem.Allocator, pages: []const graph.Node, options: Options) ![]u8 {
     if (options.limit < 1 or options.limit > 500) return error.InvalidLimit;
+    if (options.publication_location) |location| {
+        publication_location.validateSiteUrl(allocator, location, options.site_url) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.PublicationLocationMismatch,
+        };
+    }
     const site_url = try normalizedSiteUrl(allocator, options.site_url);
     defer allocator.free(site_url);
     var items: std.ArrayList(Item) = .empty;
@@ -144,6 +155,13 @@ pub fn render(allocator: std.mem.Allocator, pages: []const graph.Node, options: 
 
 fn ensureParent(io: Io, path: []const u8) !void {
     if (std.fs.path.dirname(path)) |parent| if (parent.len > 0) try Io.Dir.cwd().createDirPath(io, parent);
+}
+
+fn readFileAlloc(io: Io, path: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    var file = try Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
+    var reader = file.reader(io, &.{});
+    return try reader.interface.allocRemaining(allocator, .unlimited);
 }
 
 fn publish(io: Io, allocator: std.mem.Allocator, path: []const u8, data: []const u8) !void {
@@ -217,4 +235,70 @@ test "XML escaping and site URL validation reject unsafe values" {
     const normalized = try normalizedSiteUrl(std.testing.allocator, "https://[2001:db8::1]:8443/docs/%E2%9C%93/");
     defer std.testing.allocator.free(normalized);
     try std.testing.expectEqualStrings("https://[2001:db8::1]:8443/docs/%E2%9C%93", normalized);
+}
+
+test "RSS publication URLs retain a project-site base path" {
+    const gpa = std.testing.allocator;
+    const pages_location_mod = @import("github_pages.zig");
+    var location = try pages_location_mod.parse(gpa, "https://owner.github.io/boris/", "https://owner.github.io", "/boris/");
+    defer location.deinit(gpa);
+    const pages = [_]graph.Node{
+        .{ .id = "guides/start", .source_path = "guides/start.md", .published_at = "2026-07-28T14:30:00Z", .summary = "Start" },
+    };
+    const rendered = try render(gpa, &pages, .{
+        .site_url = "https://owner.github.io/boris",
+        .title = "Docs",
+        .description = "Description",
+        .publication_location = &location,
+    });
+    defer gpa.free(rendered);
+    try std.testing.expect(std.mem.indexOf(u8, rendered, "https://owner.github.io/boris/guides/start.html") != null);
+    try std.testing.expectError(error.PublicationLocationMismatch, render(gpa, &pages, .{
+        .site_url = "https://owner.github.io",
+        .title = "Docs",
+        .description = "Description",
+        .publication_location = &location,
+    }));
+}
+
+test "RSS fixture uses project root and custom Pages locations" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const shapes = [_]struct {
+        base_url: []const u8,
+        origin: []const u8,
+        base_path: []const u8,
+    }{
+        .{ .base_url = "https://owner.github.io/boris", .origin = "https://owner.github.io", .base_path = "/boris" },
+        .{ .base_url = "https://owner.github.io", .origin = "https://owner.github.io", .base_path = "" },
+        .{ .base_url = "https://docs.example.com", .origin = "https://docs.example.com", .base_path = "" },
+    };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    for (shapes, 0..) |shape, index| {
+        var out_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const out = try std.fmt.bufPrint(&out_buf, ".zig-cache/tmp/{s}/rss-{d}.xml", .{ tmp.sub_path, index });
+        var location = try github_pages.parse(gpa, shape.base_url, shape.origin, shape.base_path);
+        defer location.deinit(gpa);
+        var result = try run(io, gpa, .{
+            .content_root = "docs/contracts/fixtures/publication-location/content",
+            .out_path = out,
+            .site_url = shape.base_url,
+            .title = "Location Fixture",
+            .description = "Publication-location fixture feed",
+            .quiet = true,
+            .publication_location = &location,
+        });
+        defer result.deinit();
+        try std.testing.expect(result.ok());
+        const bytes = try readFileAlloc(io, out, gpa);
+        defer gpa.free(bytes);
+        const expected = switch (index) {
+            0 => "https://owner.github.io/boris/guides/start.html",
+            1 => "https://owner.github.io/guides/start.html",
+            2 => "https://docs.example.com/guides/start.html",
+            else => unreachable,
+        };
+        try std.testing.expect(std.mem.indexOf(u8, bytes, expected) != null);
+    }
 }
