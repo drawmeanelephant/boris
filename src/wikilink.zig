@@ -273,19 +273,18 @@ pub fn scanWikiLinks(
     }
 }
 
-fn buildNodeMap(allocator: std.mem.Allocator, nodes: []const graph_mod.Node) !std.StringHashMapUnmanaged(graph_mod.Node) {
-    var map: std.StringHashMapUnmanaged(graph_mod.Node) = .{};
-    errdefer map.deinit(allocator);
-    try map.ensureTotalCapacity(allocator, @intCast(nodes.len));
-    for (nodes) |n| {
-        const gop = try map.getOrPut(allocator, n.id);
-        if (!gop.found_existing) gop.value_ptr.* = n;
-    }
-    return map;
+/// Frozen nodes are id-sorted (see `graph.freeze`); look up by binary search
+/// instead of rebuilding a map per call (PERF-034). Callers must pass the
+/// frozen, id-sorted node slice (every production call site does).
+fn findNodeById(nodes: []const graph_mod.Node, id: []const u8) ?*const graph_mod.Node {
+    const index = std.sort.binarySearch(graph_mod.Node, nodes, id, nodeIdOrder) orelse return null;
+    return &nodes[index];
 }
 
-fn findNodeMap(map: *const std.StringHashMapUnmanaged(graph_mod.Node), id: []const u8) ?graph_mod.Node {
-    return map.get(id);
+/// Compare an entity id against a node's id for `std.sort.binarySearch`
+/// (bytewise, matching `graph.freeze`'s id sort).
+fn nodeIdOrder(id: []const u8, n: graph_mod.Node) std.math.Order {
+    return std.mem.order(u8, id, n.id);
 }
 
 fn appendUniqueIdLocHashed(
@@ -430,15 +429,12 @@ pub fn rewriteWikiLinksOpts(
         return try allocator.dupe(u8, body);
     }
 
-    var node_map = try buildNodeMap(allocator, nodes);
-    defer node_map.deinit(allocator);
-
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     var copy_from: usize = 0;
 
     for (hits.items) |hit| {
-        const node = findNodeMap(&node_map, hit.entity_id) orelse {
+        const node = findNodeById(nodes, hit.entity_id) orelse {
             if (fail_out) |f| f.set(hit.line, hit.column, hit.entity_id, "");
             return error.ReferenceMissing;
         };
@@ -566,13 +562,10 @@ fn materialFromIdLocs(
         }
     }.less);
 
-    var node_map = try buildNodeMap(allocator, nodes);
-    defer node_map.deinit(allocator);
-
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     for (sorted) |loc| {
-        const node = findNodeMap(&node_map, loc.id) orelse {
+        const node = findNodeById(nodes, loc.id) orelse {
             if (fail_out) |f| f.set(loc.line, loc.column, loc.id, loc.locus);
             return error.ReferenceMissing;
         };
@@ -788,18 +781,19 @@ test "scanWikiLinks syntax FailInfo" {
 
 test "rewriteWikiLinks relative href" {
     const gpa = std.testing.allocator;
+    // Frozen node arrays are id-sorted (see `graph.freeze`); fixtures mirror that.
     const nodes = [_]graph_mod.Node{
-        .{
-            .id = "guides/overview",
-            .source_path = "guides/overview.md",
-            .title = "Content Model",
-            .role = .trunk,
-            .index = 0,
-        },
         .{
             .id = "getting-started",
             .source_path = "getting-started.md",
             .title = "Getting Started",
+            .role = .trunk,
+            .index = 0,
+        },
+        .{
+            .id = "guides/overview",
+            .source_path = "guides/overview.md",
+            .title = "Content Model",
             .role = .trunk,
             .index = 1,
         },
@@ -813,18 +807,19 @@ test "rewriteWikiLinks relative href" {
 
 test "rewriteWikiLinks with validated fragment" {
     const gpa = std.testing.allocator;
+    // Frozen node arrays are id-sorted (see `graph.freeze`); fixtures mirror that.
     const nodes = [_]graph_mod.Node{
-        .{
-            .id = "guides/overview",
-            .source_path = "guides/overview.md",
-            .title = "Content Model",
-            .role = .trunk,
-            .index = 0,
-        },
         .{
             .id = "getting-started",
             .source_path = "getting-started.md",
             .title = "Getting Started",
+            .role = .trunk,
+            .index = 0,
+        },
+        .{
+            .id = "guides/overview",
+            .source_path = "guides/overview.md",
+            .title = "Content Model",
             .role = .trunk,
             .index = 1,
         },
