@@ -6,15 +6,40 @@ const Sha256 = std.crypto.hash.sha2.Sha256;
 /// Fixed renderer/cache format version constant.
 ///
 /// Bumped only when fingerprint inputs or manifest discriminator semantics
-/// change. Layout-rule selection records the effective selected layout per
-/// page (`boris-cache-v2-layout-rules`); older manifests force a cold rebuild.
-pub const CACHE_FORMAT_VERSION = "boris-cache-v2-layout-rules";
+/// change. v3 mixes fixed-size digests of build-constant inputs (site-nav
+/// material, layout bytes, theme material) into each page fingerprint so
+/// constant material is hashed once per build instead of once per page
+/// (`boris-cache-v3-constant-digests`). Older manifests force a cold rebuild.
+pub const CACHE_FORMAT_VERSION = "boris-cache-v3-constant-digests";
 
 /// Hash a u64 length prefix in fixed little-endian (host-independent).
 fn updateLen(hasher: *Sha256, len: u64) void {
     var buf: [8]u8 = undefined;
     std.mem.writeInt(u64, &buf, len, .little);
     hasher.update(&buf);
+}
+
+/// SHA-256 of a build-constant fingerprint input (site-nav material, layout
+/// bytes, theme material). The domain marker plus a u64 little-endian length
+/// prefix keep equal bytes in different roles (or at different lengths)
+/// unambiguous across the fingerprint scheme (PERF-009).
+pub fn constantDigest(comptime domain: []const u8, bytes: []const u8) [32]u8 {
+    var hasher = Sha256.init(.{});
+    hasher.update(domain);
+    updateLen(&hasher, bytes.len);
+    hasher.update(bytes);
+    var digest: [32]u8 = undefined;
+    hasher.final(&digest);
+    return digest;
+}
+
+/// Mix a precomputed build-constant digest into a page fingerprint hasher.
+/// The domain marker plus a fixed u64 length prefix keep the composition
+/// explicit: a 32-byte digest is never confused with raw input bytes.
+fn updateConstantDigest(hasher: *Sha256, comptime domain: []const u8, digest: [32]u8) void {
+    hasher.update(domain);
+    updateLen(hasher, 32);
+    hasher.update(&digest);
 }
 
 /// SHA-256 of published HTML (or any) bytes for content-addressed output freshness.
@@ -97,17 +122,21 @@ pub fn computePageFingerprintTheme(
     );
 }
 
-/// Fingerprint with an optional input-adapter identity. Empty input material
-/// preserves every Markdown-mode digest produced before Textile support.
-pub fn computePageFingerprintThemeInput(
+/// Same as `computePageFingerprintThemeInput`, but accepts precomputed digests
+/// for the build-constant inputs (layout bytes, site-nav material, theme
+/// material) so a multi-page build hashes that material exactly once per
+/// build instead of once per page (PERF-009). `layout_digest` is always mixed;
+/// `site_nav_digest` / `theme_digest` are mixed only when non-null, mirroring
+/// the previous non-empty gating.
+pub fn computePageFingerprintDigests(
     target_name: []const u8,
     layout_path: []const u8,
     entity_id: []const u8,
     source_bytes: []const u8,
     include_deps: []const []const u8,
-    layout_bytes: []const u8,
-    site_nav_material: []const u8,
-    theme_material: []const u8,
+    layout_digest: [32]u8,
+    site_nav_digest: ?[32]u8,
+    theme_digest: ?[32]u8,
     input_material: []const u8,
 ) [32]u8 {
     var hasher = Sha256.init(.{});
@@ -136,22 +165,15 @@ pub fn computePageFingerprintThemeInput(
         hasher.update(inc_bytes);
     }
 
-    // 5. Layout bytes
-    updateLen(&hasher, layout_bytes.len);
-    hasher.update(layout_bytes);
+    // 5. Layout bytes digest (build-constant; hashed once per build)
+    updateConstantDigest(&hasher, "boris-const:layout", layout_digest);
 
-    // 6. Site nav material (Feature 6) — only when non-empty so content-only
-    // layouts keep prior fingerprint inputs.
-    if (site_nav_material.len > 0) {
-        updateLen(&hasher, site_nav_material.len);
-        hasher.update(site_nav_material);
-    }
+    // 6. Site nav material digest (Feature 6) — only when present so
+    // content-only layouts keep the same input set.
+    if (site_nav_digest) |d| updateConstantDigest(&hasher, "boris-const:nav", d);
 
-    // 7. Theme material (F9.1) — footer + referenced assets; empty keeps legacy digests.
-    if (theme_material.len > 0) {
-        updateLen(&hasher, theme_material.len);
-        hasher.update(theme_material);
-    }
+    // 7. Theme material digest (F9.1) — footer + referenced assets.
+    if (theme_digest) |d| updateConstantDigest(&hasher, "boris-const:theme", d);
 
     if (input_material.len > 0) {
         hasher.update("boris-input-adapter\x00");
@@ -162,6 +184,32 @@ pub fn computePageFingerprintThemeInput(
     var digest: [32]u8 = undefined;
     hasher.final(&digest);
     return digest;
+}
+
+/// Fingerprint with an optional input-adapter identity. Empty input material
+/// preserves every Markdown-mode digest produced before Textile support.
+pub fn computePageFingerprintThemeInput(
+    target_name: []const u8,
+    layout_path: []const u8,
+    entity_id: []const u8,
+    source_bytes: []const u8,
+    include_deps: []const []const u8,
+    layout_bytes: []const u8,
+    site_nav_material: []const u8,
+    theme_material: []const u8,
+    input_material: []const u8,
+) [32]u8 {
+    return computePageFingerprintDigests(
+        target_name,
+        layout_path,
+        entity_id,
+        source_bytes,
+        include_deps,
+        constantDigest("boris-const:layout", layout_bytes),
+        if (site_nav_material.len > 0) constantDigest("boris-const:nav", site_nav_material) else null,
+        if (theme_material.len > 0) constantDigest("boris-const:theme", theme_material) else null,
+        input_material,
+    );
 }
 
 /// Calculate the page IDs affected by a changed source/layout/include path.
@@ -313,6 +361,59 @@ test "theme material changes page fingerprint when present" {
     const same_empty = computePageFingerprint("default", "layouts/main.html", "index", "src", &.{}, "layout", "");
     try std.testing.expectEqualSlices(u8, &base, &same_empty);
     try std.testing.expect(!std.mem.eql(u8, &base, &with_theme));
+}
+
+test "nav and layout byte changes invalidate fingerprints (PERF-009)" {
+    const base = computePageFingerprint("t", "l", "id", "s", &.{}, "layout bytes", "nav bytes");
+    const other_nav = computePageFingerprint("t", "l", "id", "s", &.{}, "layout bytes", "nav bytes changed");
+    const other_layout = computePageFingerprint("t", "l", "id", "s", &.{}, "layout bytes changed", "nav bytes");
+    try std.testing.expect(!std.mem.eql(u8, &base, &other_nav));
+    try std.testing.expect(!std.mem.eql(u8, &base, &other_layout));
+}
+
+test "fingerprint composition mixes precomputed constant digests (PERF-009)" {
+    // The raw-bytes wrapper and the digest-core path must agree exactly.
+    const raw = computePageFingerprintThemeInput("t", "l", "id", "s", &.{}, "layout bytes", "nav material", "theme material", "");
+    const dig = computePageFingerprintDigests(
+        "t",
+        "l",
+        "id",
+        "s",
+        &.{},
+        constantDigest("boris-const:layout", "layout bytes"),
+        constantDigest("boris-const:nav", "nav material"),
+        constantDigest("boris-const:theme", "theme material"),
+        "",
+    );
+    try std.testing.expectEqualSlices(u8, &raw, &dig);
+
+    // Domain markers separate identical bytes in different constant roles.
+    const shared = "shared bytes";
+    const as_nav = computePageFingerprintDigests(
+        "t", "l", "id", "s", &.{},
+        constantDigest("boris-const:layout", "layout bytes"),
+        constantDigest("boris-const:nav", shared),
+        constantDigest("boris-const:theme", "theme material"),
+        "",
+    );
+    const as_theme = computePageFingerprintDigests(
+        "t", "l", "id", "s", &.{},
+        constantDigest("boris-const:layout", "layout bytes"),
+        constantDigest("boris-const:nav", "nav material"),
+        constantDigest("boris-const:theme", shared),
+        "",
+    );
+    try std.testing.expect(!std.mem.eql(u8, &as_nav, &as_theme));
+
+    // Non-null vs null constant digest changes the fingerprint (gating parity).
+    const no_nav = computePageFingerprintDigests(
+        "t", "l", "id", "s", &.{},
+        constantDigest("boris-const:layout", "layout bytes"),
+        null,
+        null,
+        "",
+    );
+    try std.testing.expect(!std.mem.eql(u8, &no_nav, &dig));
 }
 
 test "Affected pages query scenarios" {

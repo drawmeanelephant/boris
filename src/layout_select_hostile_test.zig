@@ -667,8 +667,8 @@ test "H6 multi-target: isolated rules, markers, and cache namespaces" {
     defer gpa.free(man_a);
     const man_b = try work.readFile("site-b/.boris-cache/manifest.json", gpa);
     defer gpa.free(man_b);
-    try expect(std.mem.indexOf(u8, man_a, "boris-cache-v2-layout-rules") != null);
-    try expect(std.mem.indexOf(u8, man_b, "boris-cache-v2-layout-rules") != null);
+    try expect(std.mem.indexOf(u8, man_a, "boris-cache-v3-constant-digests") != null);
+    try expect(std.mem.indexOf(u8, man_b, "boris-cache-v3-constant-digests") != null);
     try expect(std.mem.indexOf(u8, man_a, "selected_layout") != null);
     // Distinct selected layouts for index → manifests must differ.
     try expect(!std.mem.eql(u8, man_a, man_b));
@@ -873,7 +873,7 @@ test "H10 cache manifest stable across no-op incremental runs" {
     const m2 = try work.readFile("dist/.boris-cache/manifest.json", gpa);
     defer gpa.free(m2);
     try expectEqualStrings(m1, m2);
-    try expect(std.mem.indexOf(u8, m1, "boris-cache-v2-layout-rules") != null);
+    try expect(std.mem.indexOf(u8, m1, "boris-cache-v3-constant-digests") != null);
     try expect(std.mem.indexOf(u8, m1, "selected_layout") != null);
 }
 

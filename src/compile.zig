@@ -1838,10 +1838,36 @@ fn compilePagesInner(
     @memset(is_dirty, false);
     defer gpa.free(is_dirty);
 
+    // Build-constant fingerprint inputs (site-nav material, per-layout bytes,
+    // per-layout theme material) are hashed once per build; per-page
+    // fingerprints mix the fixed-size digests instead (PERF-009).
+    const nav_constant_digest: ?[32]u8 =
+        if (site.site_nav_material.len > 0) cache.constantDigest("boris-const:nav", site.site_nav_material) else null;
+    var layout_digests: std.StringHashMapUnmanaged([32]u8) = .empty;
+    defer layout_digests.deinit(gpa);
+    var theme_digests: std.StringHashMapUnmanaged([32]u8) = .empty;
+    defer theme_digests.deinit(gpa);
+    {
+        var it = layouts_by_path.iterator();
+        while (it.next()) |e| {
+            try layout_digests.put(gpa, e.key_ptr.*, cache.constantDigest("boris-const:layout", e.value_ptr.bytes));
+            if (e.value_ptr.theme_material.len > 0) {
+                try theme_digests.put(gpa, e.key_ptr.*, cache.constantDigest("boris-const:theme", e.value_ptr.theme_material));
+            }
+        }
+    }
+
     // Fingerprint computation (dirty-set seed). Counter `hash_bytes` sums the
-    // dynamic fingerprint inputs (source + includes + nav + layout + theme).
+    // hashing work: per-page source + includes, plus the build-constant inputs
+    // (nav + layout + theme material) once each for the whole build.
     var link_resolutions_total: usize = 0;
-    var hash_bytes_total: u64 = 0;
+    var hash_bytes_total: u64 = @intCast(site.site_nav_material.len);
+    {
+        var it = layouts_by_path.iterator();
+        while (it.next()) |e| {
+            hash_bytes_total += @intCast(e.value_ptr.bytes.len + e.value_ptr.theme_material.len);
+        }
+    }
     {
         const fingerprint_phase = if (options.timings) |t| t.start(timings.phase_fingerprint) else null;
         defer if (fingerprint_phase) |p| p.end();
@@ -1858,7 +1884,6 @@ fn compilePagesInner(
             // `children` uses the same complete graph digest conservatively: it keeps
             // add/remove/rename/title changes correct across incremental runs.
             const needs_site_material = page_layout.has_nav or page_layout.has_breadcrumb or page_layout.has_title or page_layout.has_children;
-            const nav_material: []const u8 = if (needs_site_material) site.site_nav_material else "";
             // Wiki reference material from page body + transitive include fragment bodies
             // so title/path renames dirty parents that only wiki-link via includes.
             const body_for_wiki = include_mod.bodyOfSource(shared.source_bytes[page_idx]);
@@ -1923,19 +1948,19 @@ fn compilePagesInner(
                 inc_with_ref[inc_views.len] = ref_material;
             }
 
-            // Fingerprint uses the effective selected layout identity and bytes.
+            // Fingerprint uses the effective selected layout identity and mixes
+            // the precomputed constant-input digests (PERF-009).
             hash_bytes_total += @intCast(shared.source_bytes[page_idx].len);
             for (inc_with_ref) |b| hash_bytes_total += @intCast(b.len);
-            hash_bytes_total += @intCast(nav_material.len + page_layout_bytes[page_idx].len + page_theme_material[page_idx].len);
-            const fp_bytes = cache.computePageFingerprintThemeInput(
+            const fp_bytes = cache.computePageFingerprintDigests(
                 options.target_name,
                 page_sel_paths[page_idx],
                 page.entity_id,
                 shared.source_bytes[page_idx],
                 inc_with_ref,
-                page_layout_bytes[page_idx],
-                nav_material,
-                page_theme_material[page_idx],
+                layout_digests.get(page_sel_paths[page_idx]).?,
+                if (needs_site_material) nav_constant_digest else null,
+                if (page_theme_material[page_idx].len > 0) theme_digests.get(page_sel_paths[page_idx]).? else null,
                 if (options.input_format == .textile) textile.adapter_identity else "",
             );
             fingerprints[page_idx] = try fingerprintHex(fp_bytes, gpa);
@@ -4253,6 +4278,102 @@ test "P4 duplicate manifest entries preserve first-match-wins freshness (PERF-01
         try std.testing.expectEqual(@as(usize, 1), stats.pages_written);
         try std.testing.expectEqual(@as(usize, 2), stats.pages_attempted);
     }
+}
+
+test "incremental: foreign cache format forces exactly one cold rebuild (PERF-009)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-p4-format-bump", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/alpha.md",
+        \\---
+        \\title: Alpha
+        \\---
+        \\# Alpha
+        \\
+    );
+
+    const runHtml = struct {
+        fn call(
+            gpa_: std.mem.Allocator,
+            io_: Io,
+            content_: []const u8,
+            dist_: []const u8,
+            layout_path_: []const u8,
+        ) !CompileStats {
+            const cwd_ = Io.Dir.cwd();
+            var layout_arena = std.heap.ArenaAllocator.init(gpa_);
+            defer layout_arena.deinit();
+            const layout = try loadLayoutOnce(io_, cwd_, layout_path_, layout_arena.allocator());
+            var retain_arena = std.heap.ArenaAllocator.init(gpa_);
+            defer retain_arena.deinit();
+            var db = PageDb.init(gpa_, retain_arena.allocator());
+            defer db.deinit();
+            try loadAndPromote(io_, gpa_, &db, content_);
+            return try compilePages(io_, gpa_, &db, layout, .{
+                .content_root = content_,
+                .dist_dir = dist_,
+                .layout_path = layout_path_,
+                .incremental = true,
+                .quiet = true,
+            });
+        }
+    }.call;
+
+    // No-op warm run first: page reused.
+    {
+        _ = try runHtml(gpa, io, content, dist, layout_path);
+        const stats = try runHtml(gpa, io, content, dist, layout_path);
+        try std.testing.expectEqual(@as(usize, 0), stats.pages_written);
+    }
+
+    // Rewrite the manifest with a foreign format version (the pre-v3 value):
+    // the manifest is ignored, so the next run is one full cold rebuild.
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const man = try readAllFile(io, dist_dir, ".boris-cache/manifest.json", gpa);
+    defer gpa.free(man);
+    const pm = try std.json.parseFromSlice(ParsedCacheManifest, gpa, man, .{ .ignore_unknown_fields = true });
+    defer pm.deinit();
+    const entries = try gpa.alloc(CacheEntry, pm.value.entries.len);
+    defer gpa.free(entries);
+    for (pm.value.entries, 0..) |e, i| {
+        entries[i] = .{
+            .entity_id = e.entity_id,
+            .fingerprint = e.fingerprint,
+            .output_path = e.output_path,
+            .selected_layout = e.selected_layout,
+            .output_size = e.output_size,
+            .output_digest = e.output_digest,
+        };
+    }
+    var m_buf: std.ArrayList(u8) = .empty;
+    defer m_buf.deinit(gpa);
+    var sink = ManifestSink{ .buf = &m_buf, .gpa = gpa };
+    try writeCacheManifest(&sink, .{
+        .format_version = "boris-cache-v2-layout-rules",
+        .entries = entries,
+    });
+    const man_path = try std.fmt.allocPrint(gpa, "{s}/.boris-cache/manifest.json", .{dist});
+    defer gpa.free(man_path);
+    try cwd.writeFile(io, .{ .sub_path = man_path, .data = m_buf.items });
+
+    const stats = try runHtml(gpa, io, content, dist, layout_path);
+    try std.testing.expectEqual(@as(usize, 1), stats.pages_written);
+    try std.testing.expectEqual(@as(usize, 1), stats.pages_attempted);
 }
 
 test "compilePages: parallel rendering success, determinism, and error paths" {
