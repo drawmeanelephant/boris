@@ -535,6 +535,14 @@ pub const ParsedCacheManifest = struct {
     entries: []ParsedCacheEntry,
 };
 
+/// Linked-list head/tail into `ParsedCacheManifest.entries` for entries sharing
+/// one fingerprint. Chains preserve manifest order so duplicate entries keep
+/// the existing first-match-wins freshness semantics (PERF-010).
+const FreshnessChain = struct {
+    head: usize,
+    tail: usize,
+};
+
 fn compareStrings(_: void, a: []const u8, b: []const u8) bool {
     return std.mem.order(u8, a, b) == .lt;
 }
@@ -1728,6 +1736,13 @@ fn compilePagesInner(
     defer {
         if (heading_harvest_bytes) |hb| gpa.free(hb);
     }
+    // O(1) freshness lookup index (PERF-010): prior manifest entries keyed by
+    // fingerprint, with per-fingerprint chains preserving manifest order for
+    // duplicate entries. Built once per build; per-page lookup is expected O(1).
+    var freshness_index: std.StringHashMapUnmanaged(FreshnessChain) = .empty;
+    defer freshness_index.deinit(gpa);
+    var entry_next: ?[]?usize = null;
+    defer if (entry_next) |en| gpa.free(en);
     var parsed_heading_harvest: ?std.json.Parsed(ParsedHeadingHarvest) = null;
     defer {
         if (parsed_heading_harvest) |ph| ph.deinit();
@@ -1755,6 +1770,25 @@ fn compilePagesInner(
                 }
             } else |_| {}
         } else |_| {}
+    }
+
+    // Build the per-fingerprint entry chains once (PERF-010). Fingerprint is the
+    // most selective identity dimension; entity/output/layout filters still apply
+    // per entry during the walk, so behavior matches the former linear scan.
+    if (parsed_manifest) |pm| {
+        const entries = pm.value.entries;
+        const en = try gpa.alloc(?usize, entries.len);
+        entry_next = en;
+        for (entries, 0..) |entry, i| {
+            en[i] = null;
+            const gop = try freshness_index.getOrPut(gpa, entry.fingerprint);
+            if (gop.found_existing) {
+                en[gop.value_ptr.tail] = i;
+                gop.value_ptr.tail = i;
+            } else {
+                gop.value_ptr.* = .{ .head = i, .tail = i };
+            }
+        }
     }
 
     // Heading id index for wiki `[[entity#heading]]` (Apex-rendered ids only;
@@ -1920,27 +1954,34 @@ fn compilePagesInner(
 
             var skip_render = false;
             if (options.incremental) {
+                // O(1) lookup via the once-per-build fingerprint index; the chain
+                // keeps manifest order so duplicate entries retain the linear
+                // scan's first-match-wins semantics (a tuple match that fails
+                // digest verification still lets a later duplicate win).
                 if (parsed_manifest) |pm| {
-                    for (pm.value.entries) |entry| {
-                        if (std.mem.eql(u8, entry.entity_id, page.entity_id) and
-                            std.mem.eql(u8, entry.output_path, page.output_path) and
-                            std.mem.eql(u8, entry.fingerprint, fingerprints[page_idx]) and
-                            (entry.selected_layout.len == 0 or std.mem.eql(u8, entry.selected_layout, page_sel_paths[page_idx])))
-                        {
-                            // Content-addressed output freshness: require a non-empty
-                            // digest that matches on-disk HTML. Size is a cheap
-                            // prefilter only (same-size corruption still fails digest).
-                            if (output_exists and entry.output_digest.len > 0 and
-                                (entry.output_size == 0 or entry.output_size == output_size))
+                    if (freshness_index.get(fingerprints[page_idx])) |chain| {
+                        var ei: ?usize = chain.head;
+                        while (ei) |e| : (ei = entry_next.?[e]) {
+                            const entry = pm.value.entries[e];
+                            if (std.mem.eql(u8, entry.entity_id, page.entity_id) and
+                                std.mem.eql(u8, entry.output_path, page.output_path) and
+                                (entry.selected_layout.len == 0 or std.mem.eql(u8, entry.selected_layout, page_sel_paths[page_idx])))
                             {
-                                if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |out_bytes| {
-                                    defer gpa.free(out_bytes);
-                                    const dig_hex = cache.hexDigest(cache.hashBytes(out_bytes));
-                                    if (std.mem.eql(u8, entry.output_digest, &dig_hex)) {
-                                        skip_render = true;
-                                        break;
-                                    }
-                                } else |_| {}
+                                // Content-addressed output freshness: require a non-empty
+                                // digest that matches on-disk HTML. Size is a cheap
+                                // prefilter only (same-size corruption still fails digest).
+                                if (output_exists and entry.output_digest.len > 0 and
+                                    (entry.output_size == 0 or entry.output_size == output_size))
+                                {
+                                    if (readFileAlloc(io, dist_dir, page.output_path, gpa)) |out_bytes| {
+                                        defer gpa.free(out_bytes);
+                                        const dig_hex = cache.hexDigest(cache.hashBytes(out_bytes));
+                                        if (std.mem.eql(u8, entry.output_digest, &dig_hex)) {
+                                            skip_render = true;
+                                            break;
+                                        }
+                                    } else |_| {}
+                                }
                             }
                         }
                     }
@@ -4044,6 +4085,173 @@ test "P4 cache freshness: same-size corruption, truncation, reuse, full=inc, man
             defer gpa.free(bd);
             try std.testing.expectEqualStrings(bf, bd);
         }
+    }
+}
+
+/// Minimal `writeAll` sink so tests can rewrite a cache manifest through
+/// `writeCacheManifest` without a file-backed writer.
+const ManifestSink = struct {
+    buf: *std.ArrayList(u8),
+    gpa: std.mem.Allocator,
+
+    fn writeAll(self: *ManifestSink, bytes: []const u8) !void {
+        try self.buf.appendSlice(self.gpa, bytes);
+    }
+};
+
+test "P4 duplicate manifest entries preserve first-match-wins freshness (PERF-010)" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-p4-dup-manifest", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/alpha.md",
+        \\---
+        \\title: Alpha
+        \\---
+        \\# Alpha
+        \\
+        \\Body line one.
+        \\
+    );
+    try writeTreeFile(io, work, "content/beta.md",
+        \\---
+        \\title: Beta
+        \\---
+        \\# Beta
+        \\
+        \\Stable body.
+        \\
+    );
+
+    const runHtml = struct {
+        fn call(
+            gpa_: std.mem.Allocator,
+            io_: Io,
+            content_: []const u8,
+            dist_: []const u8,
+            layout_path_: []const u8,
+        ) !CompileStats {
+            const cwd_ = Io.Dir.cwd();
+            var layout_arena = std.heap.ArenaAllocator.init(gpa_);
+            defer layout_arena.deinit();
+            const layout = try loadLayoutOnce(io_, cwd_, layout_path_, layout_arena.allocator());
+            var retain_arena = std.heap.ArenaAllocator.init(gpa_);
+            defer retain_arena.deinit();
+            var db = PageDb.init(gpa_, retain_arena.allocator());
+            defer db.deinit();
+            try loadAndPromote(io_, gpa_, &db, content_);
+            return try compilePages(io_, gpa_, &db, layout, .{
+                .content_root = content_,
+                .dist_dir = dist_,
+                .layout_path = layout_path_,
+                .incremental = true,
+                .quiet = true,
+            });
+        }
+    }.call;
+
+    // Cold incremental build writes both pages and records output digests.
+    {
+        const stats = try runHtml(gpa, io, content, dist, layout_path);
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
+    }
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const man = try readAllFile(io, dist_dir, ".boris-cache/manifest.json", gpa);
+    defer gpa.free(man);
+    const pm = try std.json.parseFromSlice(ParsedCacheManifest, gpa, man, .{ .ignore_unknown_fields = true });
+    defer pm.deinit();
+    try std.testing.expectEqual(@as(usize, 2), pm.value.entries.len);
+
+    const man_path = try std.fmt.allocPrint(gpa, "{s}/.boris-cache/manifest.json", .{dist});
+    defer gpa.free(man_path);
+    const bad_digest = "0000000000000000000000000000000000000000000000000000000000000000";
+
+    // Duplicate alpha entry with a corrupt digest, placed BEFORE the valid one.
+    // The freshness index must keep manifest order: the first entry fails digest
+    // verification, so the later valid entry still wins (first-match-wins).
+    {
+        var entries = try gpa.alloc(CacheEntry, pm.value.entries.len + 1);
+        defer gpa.free(entries);
+        var out_i: usize = 0;
+        for (pm.value.entries) |e| {
+            if (std.mem.eql(u8, e.entity_id, "alpha")) {
+                entries[out_i] = .{
+                    .entity_id = e.entity_id,
+                    .fingerprint = e.fingerprint,
+                    .output_path = e.output_path,
+                    .selected_layout = e.selected_layout,
+                    .output_size = e.output_size,
+                    .output_digest = bad_digest,
+                };
+                out_i += 1;
+            }
+            entries[out_i] = .{
+                .entity_id = e.entity_id,
+                .fingerprint = e.fingerprint,
+                .output_path = e.output_path,
+                .selected_layout = e.selected_layout,
+                .output_size = e.output_size,
+                .output_digest = e.output_digest,
+            };
+            out_i += 1;
+        }
+        try std.testing.expectEqual(@as(usize, 3), out_i);
+        var m_buf: std.ArrayList(u8) = .empty;
+        defer m_buf.deinit(gpa);
+        var sink = ManifestSink{ .buf = &m_buf, .gpa = gpa };
+        try writeCacheManifest(&sink, .{
+            .format_version = cache.CACHE_FORMAT_VERSION,
+            .entries = entries,
+        });
+        try cwd.writeFile(io, .{ .sub_path = man_path, .data = m_buf.items });
+
+        const stats = try runHtml(gpa, io, content, dist, layout_path);
+        try std.testing.expectEqual(@as(usize, 0), stats.pages_written);
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_attempted);
+    }
+
+    // Corrupt-only manifest: alpha's single entry has a wrong digest. Digest
+    // verification must not be weakened by the index — alpha re-renders.
+    {
+        var entries = try gpa.alloc(CacheEntry, pm.value.entries.len);
+        defer gpa.free(entries);
+        for (pm.value.entries, 0..) |e, i| {
+            entries[i] = .{
+                .entity_id = e.entity_id,
+                .fingerprint = e.fingerprint,
+                .output_path = e.output_path,
+                .selected_layout = e.selected_layout,
+                .output_size = e.output_size,
+                .output_digest = if (std.mem.eql(u8, e.entity_id, "alpha")) bad_digest else e.output_digest,
+            };
+        }
+        var m_buf: std.ArrayList(u8) = .empty;
+        defer m_buf.deinit(gpa);
+        var sink = ManifestSink{ .buf = &m_buf, .gpa = gpa };
+        try writeCacheManifest(&sink, .{
+            .format_version = cache.CACHE_FORMAT_VERSION,
+            .entries = entries,
+        });
+        try cwd.writeFile(io, .{ .sub_path = man_path, .data = m_buf.items });
+
+        const stats = try runHtml(gpa, io, content, dist, layout_path);
+        try std.testing.expectEqual(@as(usize, 1), stats.pages_written);
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_attempted);
     }
 }
 
