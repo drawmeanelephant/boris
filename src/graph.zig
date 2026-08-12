@@ -108,13 +108,25 @@ pub fn diagnoseDuplicateIds(
         }
     }.less);
 
-    // O(n) exact-id first-wins via hashmap; case collisions still need a scan of
-    // prior ids in source_path order (bounded; case-fold compare is cheap vs n² eql).
+    // O(n) exact-id first-wins via hashmap; case collisions via an ASCII-fold
+    // key map (PERF-033). The fold matches `identity.pathsDifferOnlyInCase`
+    // exactly: byte-equal pairs are handled by the exact-id map first, so any
+    // fold-equality that reaches the case check is differ-only-in-case.
     var first_by_id: std.StringHashMapUnmanaged(usize) = .empty;
     defer first_by_id.deinit(list_gpa);
     try first_by_id.ensureTotalCapacity(list_gpa, @intCast(nodes.len));
 
-    for (order.items, 0..) |ni, pos| {
+    var first_by_fold: std.StringHashMapUnmanaged(usize) = .empty;
+    defer first_by_fold.deinit(list_gpa);
+    try first_by_fold.ensureTotalCapacity(list_gpa, @intCast(nodes.len));
+    var fold_keys: std.ArrayList([]u8) = .empty;
+    defer {
+        for (fold_keys.items) |k| list_gpa.free(k);
+        fold_keys.deinit(list_gpa);
+    }
+    try fold_keys.ensureTotalCapacity(list_gpa, nodes.len);
+
+    for (order.items) |ni| {
         const n = nodes[ni];
         var earlier_exact: ?usize = null;
         var earlier_case: ?usize = null;
@@ -126,15 +138,23 @@ pub fn diagnoseDuplicateIds(
             gop.value_ptr.* = ni;
         }
 
+        // Case-fold once; used for both lookup and (first-wins) registration.
+        const folded = try list_gpa.alloc(u8, n.id.len);
+        for (n.id, 0..) |c, i| folded[i] = std.ascii.toLower(c);
+
         if (earlier_exact == null) {
-            var j: usize = 0;
-            while (j < pos) : (j += 1) {
-                const oj = order.items[j];
-                if (identity.pathsDifferOnlyInCase(nodes[oj].id, n.id)) {
-                    earlier_case = oj;
-                    break;
-                }
+            // Earliest source_path-order node with a case-colliding id
+            // (first-wins, matching the linear scan this replaces).
+            if (first_by_fold.get(folded)) |fi| {
+                earlier_case = fi;
             }
+        }
+        const fgop = first_by_fold.getOrPutAssumeCapacity(folded);
+        if (fgop.found_existing) {
+            list_gpa.free(folded);
+        } else {
+            fgop.value_ptr.* = ni;
+            fold_keys.appendAssumeCapacity(folded);
         }
         if (earlier_exact) |ei| {
             const msg = try std.fmt.allocPrint(
@@ -819,6 +839,32 @@ test "diagnoseDuplicateIds byte-exact still EDUPLICATEID" {
     try diagnoseDuplicateIds(gpa, retain, &nodes, &diags);
     try std.testing.expectEqual(@as(usize, 1), diags.items.len);
     try std.testing.expect(diags.items[0].code == .EDUPLICATEID);
+}
+
+test "diagnoseDuplicateIds first-wins across mixed case and exact dups (PERF-033)" {
+    // Source_path order is normative for reporting; a case-colliding id must
+    // resolve to the EARLIEST node, and exact duplicates must still win over
+    // case collisions for the same id.
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+    var nodes = [_]Node{
+        .{ .id = "Guides/Intro", .source_path = "a.md" },
+        .{ .id = "GUIDES/INTRO", .source_path = "b.md" },
+        .{ .id = "guides/intro", .source_path = "c.md" },
+        .{ .id = "Guides/Intro", .source_path = "d.md" },
+    };
+    var diags: std.ArrayList(diag.Diagnostic) = .empty;
+    defer diags.deinit(gpa);
+    try diagnoseDuplicateIds(gpa, retain, &nodes, &diags);
+    try std.testing.expectEqual(@as(usize, 3), diags.items.len);
+    try std.testing.expect(diags.items[0].code == .EINVALIDPATH);
+    try std.testing.expect(std.mem.indexOf(u8, diags.items[0].message, "a.md") != null);
+    try std.testing.expect(diags.items[1].code == .EINVALIDPATH);
+    try std.testing.expect(std.mem.indexOf(u8, diags.items[1].message, "a.md") != null);
+    try std.testing.expect(diags.items[2].code == .EDUPLICATEID);
+    try std.testing.expect(std.mem.indexOf(u8, diags.items[2].message, "a.md") != null);
 }
 
 test "buildNav breadcrumb children siblings from frozen graph" {
