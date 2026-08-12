@@ -4,6 +4,11 @@
 contract. Boris core was not modified; this is evidence and a recommendation
 for future work.
 
+**Authorization:** this sandbox adds a JS/TS frontend stack to the repo tree
+under the owner's explicit request (AGENTS.md exception), scoped strictly to
+`sandbox/svelte-consumer/`, with the Zig + Apex product path untouched. It is
+disposable experimental evidence, not a product path.
+
 **For:** the next coding agent (Codex/other session) working in the
 `drawmeanelephant/boris` repo.
 

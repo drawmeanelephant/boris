@@ -1,6 +1,15 @@
 # Svelte × Boris — consumer spike
 
-A deliberately small, throwaway experiment answering one question:
+> **Authorization (AGENTS.md exception).** This sandbox intentionally adds a
+> JS/TS frontend stack (SvelteKit/Svelte/Vite) to the repository tree, which
+> AGENTS.md normally forbids. It exists under the repo owner's **explicit
+> user request** (both rounds: "build a small SvelteKit sandbox" / "run the
+> interactive overlay experiment"), is **scoped strictly to this directory**,
+> changes no Boris core behavior, keeps the Zig + Apex path untouched and
+> working, and is disposable (safe to delete once the evidence is absorbed).
+> It is an experiment, not a product path.
+
+A deliberately small, throwable experiment answering one question:
 
 > **Can a Svelte/SvelteKit project consume Boris-managed content or Boris
 > compiler output cleanly, without requiring Boris to become Svelte-specific?**

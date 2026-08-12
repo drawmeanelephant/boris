@@ -36,11 +36,12 @@ export function rewriteInternalLinks(body: string, id: string): string {
 		) {
 			return match;
 		}
-		// Only page links end in .html in Boris output. Assets and unknown
-		// targets are left untouched (this corpus has no page-local assets).
-		if (!trimmed.endsWith('.html')) return match;
-
 		const url = new URL(trimmed, base);
+		// Rewrite only links whose PATH targets a Boris page (*.html), whether
+		// or not they carry a #heading fragment or ?query — heading-target
+		// wiki-links arrive as e.g. "trunk-satellite.html#satellites" and the
+		// raw href does not end in .html.
+		if (!url.pathname.endsWith('.html')) return match;
 		// url.pathname already begins with '/' (root-relative); do not add
 		// another slash or links become '//agents'.
 		const route = `${url.pathname.replace(/\.html$/, '')}${url.search}${url.hash}`;
