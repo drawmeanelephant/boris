@@ -7,8 +7,10 @@
 //!
 //! - a nav-consuming layout (`{{nav}}` renders the full site forest on every
 //!   page, so per-page output is proportional to site size);
-//! - Trunk/Satellite parent relations, nested includes, and wiki-links;
-//! - several headings per page so heading harvest does real work.
+//! - Trunk/Satellite parent relations, nested includes, and wiki-links
+//!   (`--dense-links`, PERF-013);
+//! - wiki fragment links (`--fragment-links`, PERF-021) so heading harvest
+//!   does real work; several headings per page.
 //!
 //! Determinism contract: the same `--pages` value always produces byte-identical
 //! trees (no randomness, timestamps, hostnames, or map-order dependence). The
@@ -39,6 +41,10 @@ const Options = struct {
     /// PERF-013: wiki-links to other pages added to every generated page
     /// (0 = sparse corpus only). Deterministic by generation position.
     dense_links: usize = 0,
+    /// PERF-021: wiki fragment links (`[[entity#overview]]`) added to every
+    /// generated page so heading harvest does real work (0 = sparse corpus
+    /// only). Deterministic by generation position.
+    fragment_links: usize = 0,
     help: bool = false,
 };
 
@@ -68,6 +74,12 @@ fn parseOptions(args: []const []const u8) ParseError!Options {
             index += 1;
             if (index >= args.len) return error.MissingValue;
             options.dense_links = try parseDensity(args[index]);
+        } else if (std.mem.startsWith(u8, arg, "--fragment-links=")) {
+            options.fragment_links = try parseDensity(arg["--fragment-links=".len..]);
+        } else if (std.mem.eql(u8, arg, "--fragment-links")) {
+            index += 1;
+            if (index >= args.len) return error.MissingValue;
+            options.fragment_links = try parseDensity(args[index]);
         } else if (std.mem.startsWith(u8, arg, "--out=")) {
             const value = arg["--out=".len..];
             if (value.len == 0) return error.MissingValue;
@@ -141,6 +153,11 @@ fn printUsage() void {
         \\                  (default: 0; clamps to all other pages). PERF-013 dense
         \\                  synthetic case: resolution cost is O(links), not
         \\                  O(links × pages).
+        \\  --fragment-links N
+        \\                  Add N wiki fragment links (`[[entity#overview]]`) to
+        \\                  every generated page (default: 0; clamps to all other
+        \\                  pages). PERF-021: makes every referenced page a
+        \\                  heading-harvest fragment target.
         \\  --out DIR       Output root owned by this tool (default: .generated)
         \\  -h, --help       Show this help and exit
         \\
@@ -217,7 +234,33 @@ fn appendDenseLinks(
     }
 }
 
-fn writeIndex(io: Io, root: []const u8, page_count: usize, dense_links: usize) !void {
+/// PERF-021 fragment-target corpus: append a "Fragment links" section of
+/// `links_per_page` wiki fragment links (`[[entity#overview]]`) to other pages.
+/// Target selection mirrors `appendDenseLinks` exactly (next generation
+/// positions, wrapping, never self), so the corpus is deterministic. The
+/// `overview` fragment exists on every generated page (`## Overview`), so the
+/// tree builds clean and every referenced page becomes a heading-harvest
+/// fragment target.
+fn appendFragmentLinks(
+    gpa: std.mem.Allocator,
+    body: *std.ArrayList(u8),
+    position: usize,
+    page_count: usize,
+    links_per_page: usize,
+) !void {
+    if (links_per_page == 0) return;
+    try body.appendSlice(gpa, "\n## Fragment links\n\n");
+    const count = @min(links_per_page, page_count - 1);
+    var target_buffer: [64]u8 = undefined;
+    for (0..count) |k| {
+        const target = entityIdAtPosition(&target_buffer, (position + 1 + k) % page_count);
+        try body.appendSlice(gpa, "- [[");
+        try body.appendSlice(gpa, target);
+        try body.appendSlice(gpa, "#overview]]\n");
+    }
+}
+
+fn writeIndex(io: Io, root: []const u8, page_count: usize, dense_links: usize, fragment_links: usize) !void {
     const pa = std.heap.page_allocator;
     const path = try std.fmt.allocPrint(pa, "{s}/content/index.md", .{root});
     defer pa.free(path);
@@ -239,7 +282,7 @@ fn writeIndex(io: Io, root: []const u8, page_count: usize, dense_links: usize) !
         \\Start with [[sections/section-0000]].
         \\
     ;
-    if (dense_links == 0) {
+    if (dense_links == 0 and fragment_links == 0) {
         try writeFile(io, path, base);
         return;
     }
@@ -247,6 +290,7 @@ fn writeIndex(io: Io, root: []const u8, page_count: usize, dense_links: usize) !
     defer body.deinit(pa);
     try body.appendSlice(pa, base);
     try appendDenseLinks(pa, &body, 0, page_count, dense_links);
+    try appendFragmentLinks(pa, &body, 0, page_count, fragment_links);
     try writeFile(io, path, body.items);
 }
 
@@ -256,6 +300,7 @@ fn writeTrunk(
     section: usize,
     page_count: usize,
     dense_links: usize,
+    fragment_links: usize,
 ) !void {
     var path_buffer: [160]u8 = undefined;
     const path = try std.fmt.bufPrint(
@@ -288,7 +333,7 @@ fn writeTrunk(
         \\Return to [[index]].
         \\
     , .{ section, section, section, section });
-    if (dense_links == 0) {
+    if (dense_links == 0 and fragment_links == 0) {
         try writeFile(io, path, base);
         return;
     }
@@ -298,6 +343,7 @@ fn writeTrunk(
     try body.appendSlice(pa, base);
     // Trunk position: section block start (one trunk per block).
     try appendDenseLinks(pa, &body, 1 + section * (1 + satellites_per_trunk), page_count, dense_links);
+    try appendFragmentLinks(pa, &body, 1 + section * (1 + satellites_per_trunk), page_count, fragment_links);
     try writeFile(io, path, body.items);
 }
 
@@ -308,6 +354,7 @@ fn writeSatellite(
     section: usize,
     page_count: usize,
     dense_links: usize,
+    fragment_links: usize,
 ) !void {
     var path_buffer: [160]u8 = undefined;
     const path = try std.fmt.bufPrint(
@@ -341,7 +388,7 @@ fn writeSatellite(
         \\Return to [[index]].
         \\
     , .{ page, page, section, page, page, section });
-    if (dense_links == 0) {
+    if (dense_links == 0 and fragment_links == 0) {
         try writeFile(io, path, base);
         return;
     }
@@ -351,6 +398,7 @@ fn writeSatellite(
     try body.appendSlice(pa, base);
     // Satellite generation position is its article number (see `generateSite`).
     try appendDenseLinks(pa, &body, page, page_count, dense_links);
+    try appendFragmentLinks(pa, &body, page, page_count, fragment_links);
     try writeFile(io, path, body.items);
 }
 
@@ -403,9 +451,10 @@ fn deleteSiteIfSafe(io: Io, cwd: Io.Dir, root: []const u8) void {
 }
 
 /// Generate exactly `page_count` pages below `root`, optionally with
-/// `dense_links` wiki-links to other pages on every page. Returns the number
-/// of content pages written (always equals `page_count`).
-fn generateSite(io: Io, root: []const u8, page_count: usize, dense_links: usize) !usize {
+/// `dense_links` wiki-links and `fragment_links` wiki fragment links to other
+/// pages on every page. Returns the number of content pages written (always
+/// equals `page_count`).
+fn generateSite(io: Io, root: []const u8, page_count: usize, dense_links: usize, fragment_links: usize) !usize {
     const cwd = Io.Dir.cwd();
     try validateOutDir(io, cwd, root);
     // A failed pre-cleanup must be visible to the caller. The path has already
@@ -440,17 +489,17 @@ fn generateSite(io: Io, root: []const u8, page_count: usize, dense_links: usize)
     try writeFile(io, layout_path, layout_html);
     try writeFile(io, common_path, common_include);
     try writeFile(io, shared_path, shared_include);
-    try writeIndex(io, root, page_count, dense_links);
+    try writeIndex(io, root, page_count, dense_links, fragment_links);
 
     var generated_pages: usize = 1; // index
     var section: usize = 0;
     while (generated_pages < page_count) : (section += 1) {
-        try writeTrunk(io, root, section, page_count, dense_links);
+        try writeTrunk(io, root, section, page_count, dense_links, fragment_links);
         generated_pages += 1;
 
         var satellites: usize = 0;
         while (generated_pages < page_count and satellites < satellites_per_trunk) : (satellites += 1) {
-            try writeSatellite(io, root, generated_pages, section, page_count, dense_links);
+            try writeSatellite(io, root, generated_pages, section, page_count, dense_links, fragment_links);
             generated_pages += 1;
         }
     }
@@ -483,15 +532,16 @@ pub fn main(init: std.process.Init) u8 {
         return @intFromEnum(ExitCode.usage);
     };
 
-    _ = generateSite(init.io, options.out_dir, options.page_count, options.dense_links) catch |err| {
+    _ = generateSite(init.io, options.out_dir, options.page_count, options.dense_links, options.fragment_links) catch |err| {
         std.debug.print("testdata-generator: failed: {s}\n", .{@errorName(err)});
         return @intFromEnum(ExitCode.failed);
     };
     // Report the density actually written: generation clamps to page_count - 1.
     const clamped_density = @min(options.dense_links, options.page_count - 1);
+    const clamped_fragments = @min(options.fragment_links, options.page_count - 1);
     std.debug.print(
-        "testdata-generator: wrote {d} pages under {s} (dense links: {d} per page)\n",
-        .{ options.page_count, options.out_dir, clamped_density },
+        "testdata-generator: wrote {d} pages under {s} (dense links: {d}, fragment links: {d} per page)\n",
+        .{ options.page_count, options.out_dir, clamped_density, clamped_fragments },
     );
     return @intFromEnum(ExitCode.success);
 }
@@ -555,8 +605,17 @@ test "parse options accepts large page counts and custom out dir" {
     try std.testing.expectEqual(@as(usize, 0), dense_zero.dense_links);
     try std.testing.expectEqual(@as(usize, 0), (try parseOptions(&.{ "testdata-generator", "--dense-links=0" })).dense_links);
 
+    const frag = try parseOptions(&.{ "testdata-generator", "--fragment-links", "40" });
+    try std.testing.expectEqual(@as(usize, 40), frag.fragment_links);
+    try std.testing.expectEqual(@as(usize, 0), (try parseOptions(&.{"testdata-generator"})).fragment_links);
+    const frag_eq = try parseOptions(&.{ "testdata-generator", "--fragment-links=7" });
+    try std.testing.expectEqual(@as(usize, 7), frag_eq.fragment_links);
+    const frag_zero = try parseOptions(&.{ "testdata-generator", "--fragment-links", "0" });
+    try std.testing.expectEqual(@as(usize, 0), frag_zero.fragment_links);
+
     try std.testing.expectError(error.InvalidPageCount, parseOptions(&.{ "testdata-generator", "--pages=0" }));
     try std.testing.expectError(error.InvalidPageCount, parseOptions(&.{ "testdata-generator", "--dense-links=nope" }));
+    try std.testing.expectError(error.InvalidPageCount, parseOptions(&.{ "testdata-generator", "--fragment-links=nope" }));
     try std.testing.expectError(error.MissingValue, parseOptions(&.{ "testdata-generator", "--pages" }));
     try std.testing.expectError(error.MissingValue, parseOptions(&.{ "testdata-generator", "--dense-links" }));
     try std.testing.expectError(error.UnknownFlag, parseOptions(&.{ "testdata-generator", "--nope" }));
@@ -610,7 +669,7 @@ test "generation produces the exact requested page count" {
     Io.Dir.cwd().deleteTree(io, root) catch {};
     defer Io.Dir.cwd().deleteTree(io, root) catch {};
 
-    _ = try generateSite(io, root, 21, 0);
+    _ = try generateSite(io, root, 21, 0, 0);
     // 21 pages + 1 layout + 2 includes = 24 files.
     try std.testing.expectEqual(@as(usize, 24), try countFiles(io, gpa, root));
 }
@@ -625,8 +684,8 @@ test "repeated generation is byte-identical (determinism contract)" {
     defer Io.Dir.cwd().deleteTree(io, root_a) catch {};
     defer Io.Dir.cwd().deleteTree(io, root_b) catch {};
 
-    _ = try generateSite(io, root_a, 33, 0);
-    _ = try generateSite(io, root_b, 33, 0);
+    _ = try generateSite(io, root_a, 33, 0, 0);
+    _ = try generateSite(io, root_b, 33, 0, 0);
 
     var fp_a: std.ArrayList(u8) = .empty;
     defer fp_a.deinit(gpa);
@@ -644,8 +703,8 @@ test "repeated generation is byte-identical (determinism contract)" {
     defer Io.Dir.cwd().deleteTree(io, dense_a) catch {};
     defer Io.Dir.cwd().deleteTree(io, dense_b) catch {};
 
-    _ = try generateSite(io, dense_a, 21, 5);
-    _ = try generateSite(io, dense_b, 21, 5);
+    _ = try generateSite(io, dense_a, 21, 5, 0);
+    _ = try generateSite(io, dense_b, 21, 5, 0);
 
     var fp_da: std.ArrayList(u8) = .empty;
     defer fp_da.deinit(gpa);
@@ -654,6 +713,25 @@ test "repeated generation is byte-identical (determinism contract)" {
     try writeFingerprint(io, gpa, dense_a, &fp_da);
     try writeFingerprint(io, gpa, dense_b, &fp_db);
     try std.testing.expectEqualSlices(u8, fp_da.items, fp_db.items);
+
+    // The fragment-link mode must honor the same determinism contract.
+    const frag_a = ".zig-cache/tmp/testdata-frag-a";
+    const frag_b = ".zig-cache/tmp/testdata-frag-b";
+    Io.Dir.cwd().deleteTree(io, frag_a) catch {};
+    Io.Dir.cwd().deleteTree(io, frag_b) catch {};
+    defer Io.Dir.cwd().deleteTree(io, frag_a) catch {};
+    defer Io.Dir.cwd().deleteTree(io, frag_b) catch {};
+
+    _ = try generateSite(io, frag_a, 21, 0, 5);
+    _ = try generateSite(io, frag_b, 21, 0, 5);
+
+    var fp_fa: std.ArrayList(u8) = .empty;
+    defer fp_fa.deinit(gpa);
+    var fp_fb: std.ArrayList(u8) = .empty;
+    defer fp_fb.deinit(gpa);
+    try writeFingerprint(io, gpa, frag_a, &fp_fa);
+    try writeFingerprint(io, gpa, frag_b, &fp_fb);
+    try std.testing.expectEqualSlices(u8, fp_fa.items, fp_fb.items);
 }
 
 test "generated layout consumes nav and breadcrumb markers" {
@@ -663,7 +741,7 @@ test "generated layout consumes nav and breadcrumb markers" {
     Io.Dir.cwd().deleteTree(io, root) catch {};
     defer Io.Dir.cwd().deleteTree(io, root) catch {};
 
-    _ = try generateSite(io, root, 5, 0);
+    _ = try generateSite(io, root, 5, 0, 0);
     var dir = try Io.Dir.cwd().openDir(io, root, .{});
     defer dir.close(io);
     const layout = try readFileAlloc(io, dir, "layouts/main.html", gpa);
@@ -684,6 +762,49 @@ fn countOccurrences(haystack: []const u8, needle: []const u8) usize {
     return count;
 }
 
+test "fragment links are deterministic and target existing headings" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    const root = ".zig-cache/tmp/testdata-fragment-links";
+    Io.Dir.cwd().deleteTree(io, root) catch {};
+    defer Io.Dir.cwd().deleteTree(io, root) catch {};
+
+    // 21 pages, 4 fragment links each. Position 0 (index) targets positions
+    // 1..4 with the `#overview` fragment, which exists on every generated page.
+    _ = try generateSite(io, root, 21, 0, 4);
+    var dir = try Io.Dir.cwd().openDir(io, root, .{});
+    defer dir.close(io);
+
+    const index = try readFileAlloc(io, dir, "content/index.md", gpa);
+    defer gpa.free(index);
+    try std.testing.expectEqual(@as(usize, 4), countOccurrences(index, "#overview]]"));
+    try std.testing.expect(std.mem.indexOf(u8, index, "- [[sections/section-0000#overview]]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index, "- [[articles/article-000002#overview]]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index, "- [[articles/article-000003#overview]]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index, "- [[articles/article-000004#overview]]") != null);
+
+    // A later page wraps deterministically and never links to itself.
+    const article = try readFileAlloc(io, dir, "content/articles/article-000005.md", gpa);
+    defer gpa.free(article);
+    try std.testing.expectEqual(@as(usize, 4), countOccurrences(article, "#overview]]"));
+    try std.testing.expect(std.mem.indexOf(u8, article, "- [[articles/article-000005#overview]]") == null);
+
+    // Every page still renders `## Overview`, so every emitted fragment resolves.
+    const section = try readFileAlloc(io, dir, "content/sections/section-0001.md", gpa);
+    defer gpa.free(section);
+    try std.testing.expect(std.mem.indexOf(u8, section, "## Overview") != null);
+    // The dense-link mode is untouched: sparse default writes no fragment section.
+    const sparse_root = ".zig-cache/tmp/testdata-fragment-sparse";
+    Io.Dir.cwd().deleteTree(io, sparse_root) catch {};
+    defer Io.Dir.cwd().deleteTree(io, sparse_root) catch {};
+    _ = try generateSite(io, sparse_root, 5, 0, 0);
+    var sparse_dir = try Io.Dir.cwd().openDir(io, sparse_root, .{});
+    defer sparse_dir.close(io);
+    const sparse_body = try readFileAlloc(io, sparse_dir, "content/index.md", gpa);
+    defer gpa.free(sparse_body);
+    try std.testing.expect(std.mem.indexOf(u8, sparse_body, "#overview") == null);
+}
+
 test "dense links are deterministic and target existing pages" {
     const io = std.testing.io;
     const gpa = std.testing.allocator;
@@ -693,7 +814,7 @@ test "dense links are deterministic and target existing pages" {
 
     // 21 pages, 4 dense links each. Position 0 (index) targets positions
     // 1..4: the first trunk plus its first three satellites.
-    _ = try generateSite(io, root, 21, 4);
+    _ = try generateSite(io, root, 21, 4, 0);
     var dir = try Io.Dir.cwd().openDir(io, root, .{});
     defer dir.close(io);
 
@@ -722,7 +843,7 @@ test "full density links every page to every other page" {
     // links_per_page = page_count - 1 → each page links to all other pages:
     // the O(links × pages) worst case for the old per-hit page scan.
     const page_count: usize = 21;
-    _ = try generateSite(io, root, page_count, page_count - 1);
+    _ = try generateSite(io, root, page_count, page_count - 1, 0);
     // `.iterate = true` is required: on Linux the dir reader seeks the handle
     // before readdir, and a non-iterate handle fails with BADF.
     var dir = try Io.Dir.cwd().openDir(io, root, .{ .iterate = true });
