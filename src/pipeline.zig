@@ -1847,9 +1847,12 @@ test "timings: IR phases do not absorb later work" {
     // stayed alive through ir_emit would push sum ≈ total + emit, i.e. ~1.35–
     // 1.45× wall time. Legitimate non-overlapping runs measured 0.78–0.92× on
     // both dev and CI runners, so total + total/4 separates the bug from noise
-    // with margin on both sides. (Pairwise phase-vs-phase bounds are not
-    // asserted here: on a 3-page fixture phases land within noise of each
-    // other across machines — that separation is gated by the benchmark at
-    // 1k-page scale instead.)
+    // with margin on both sides. This bound is also load-invariant: every
+    // phase is a disjoint sub-interval of the same monotonic clock span, so
+    // descheduling inflates phases and total together and can never push the
+    // sum above the span — no sampled-run retry is needed here. (Pairwise
+    // phase-vs-phase bounds are not asserted here: on a 3-page fixture phases
+    // land within noise of each other across machines — that separation is
+    // gated by the benchmark at 1k-page scale instead.)
     try std.testing.expect(sum < total + total / 4);
 }

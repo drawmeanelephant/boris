@@ -7053,140 +7053,196 @@ fn sumPhasesNs(t: *const timings.Timings) u64 {
 /// Shared scoping assertions for the `--timings` regression tests: phase
 /// timers must measure only their own phase. Function-scoped `defer` timers
 /// used to absorb later work (e.g. graph_validate ≈ the whole build), so:
-///   - the sum of recorded phases must not exceed the measured total wall time
-///     by a meaningful margin (overlapping timers double-count);
-///   - graph_validate and dependency_resolve must each be smaller than the
-///     render-side phases they previously swallowed;
-///   - scan must be smaller than parse (scan used to include parsing).
-fn assertPhaseScope(t: *const timings.Timings, total_ns: i128) !void {
+///   - per-run (`assertPhaseSumScope`): the sum of recorded phases must not
+///     exceed the measured total wall time by a meaningful margin — the
+///     primary overlap detector. Overlapping timers double-count; disjoint
+///     scoped phases on one monotonic clock can never sum above the measured
+///     span, so this bound is load-invariant and is checked on every run.
+///   - across runs (`assertPhasePairwiseScope`): graph_validate and
+///     dependency_resolve must each be smaller than the render-side phases
+///     they previously swallowed. These bounds are asserted on per-phase
+///     minima over several runs (see the tests): descheduling only ever
+///     inflates a wall-clock phase, so each phase's minimum is its
+///     uncontended estimate, and a deterministic overlap inflates every run
+///     and still fails. (scan < parse is intentionally not asserted here: on a
+///     tiny unit corpus the directory walk legitimately costs as much as
+///     parsing a few small files. That separation is enforced at scale by the
+///     1k-page benchmark gate, where scan is reliably an order of magnitude
+///     smaller than parse.)
+fn assertPhaseSumScope(t: *const timings.Timings, total_ns: i128) !void {
     const total: u64 = @intCast(total_ns);
     try std.testing.expect(t.phases.items.len >= 8);
     for (t.phases.items) |p| try std.testing.expect(p.elapsed_ns > 0);
-
     try std.testing.expect(sumPhasesNs(t) < total + total / 2);
+}
 
-    const render_side: u64 = (phaseNs(t, timings.phase_fingerprint) orelse 0) +
-        (phaseNs(t, timings.phase_render) orelse 0) +
-        (phaseNs(t, timings.phase_publish) orelse 0) +
-        (phaseNs(t, timings.phase_heading_harvest) orelse 0);
-    if (phaseNs(t, timings.phase_graph_validate)) |g| {
-        try std.testing.expect(g < render_side);
+fn assertPhasePairwiseScope(min_g: ?u64, min_d: ?u64, min_render_side: ?u64) !void {
+    if (min_render_side) |render_side| {
+        if (min_g) |g| try std.testing.expect(g < render_side);
+        if (min_d) |d| try std.testing.expect(d < render_side);
     }
-    if (phaseNs(t, timings.phase_dependency_resolve)) |d| {
-        try std.testing.expect(d < render_side);
-    }
-    // (scan < parse is intentionally not asserted here: on a tiny unit corpus
-    // the directory walk legitimately costs as much as parsing a few small
-    // files. That separation is enforced at scale by the 1k-page benchmark
-    // gate, where scan is reliably an order of magnitude smaller than parse.)
 }
 
 test "timings: single-target HTML phases do not absorb later work" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     const cwd = Io.Dir.cwd();
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/timings-scope-single", .{tmp.sub_path});
-    defer gpa.free(work);
-
-    // Nav layout so fingerprint/render include site-nav material.
-    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{nav}}{{content}}</body></html>");
-    try writeTreeFile(io, work, "content/index.md",
-        \\---
-        \\id: index
-        \\title: Home
-        \\---
-        \\# Home
-        \\
-        \\Body line.
-        \\
-    );
-    try writeTreeFile(io, work, "content/alpha.md",
-        \\---
-        \\title: Alpha
-        \\parent: index
-        \\---
-        \\# Alpha
-        \\
-        \\Body line.
-        \\
-    );
-
-    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
-    defer gpa.free(layout_path);
-    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
-    defer gpa.free(content);
-    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
-    defer gpa.free(dist);
-
-    var t = timings.Timings.init(gpa, io);
-    defer t.deinit();
-
-    const started = Io.Clock.awake.now(io);
-    const stats = try compileHtmlSite(io, gpa, .{
-        .content_root = content,
-        .dist_dir = dist,
-        .layout_path = layout_path,
-        .quiet = true,
-        .timings = &t,
-    });
-    const total_ns = started.untilNow(io, .awake).nanoseconds;
-    try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
     _ = cwd;
-    try assertPhaseScope(&t, total_ns);
+
+    // Wall-clock phase durations inflate under CPU contention (CI runs the
+    // test binaries in parallel), and on a 2-page corpus the pairwise phase
+    // bounds have no natural margin. Descheduling only ever inflates a phase,
+    // so the compile is repeated and the pairwise bounds are asserted on each
+    // phase's minimum: the uncontended estimate. A deterministic overlap (the
+    // bug this test guards) inflates every run and still fails. The
+    // sum-overlaps-wall-time bound is the primary detector; it is checked on
+    // every run because it is load-invariant (disjoint scoped phases on one
+    // monotonic clock can never sum above the measured span).
+    const runs = 5;
+    var min_g: ?u64 = null;
+    var min_d: ?u64 = null;
+    var min_render_side: ?u64 = null;
+    for (0..runs) |_| {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/timings-scope-single", .{tmp.sub_path});
+        defer gpa.free(work);
+
+        // Nav layout so fingerprint/render include site-nav material.
+        try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{nav}}{{content}}</body></html>");
+        try writeTreeFile(io, work, "content/index.md",
+            \\---
+            \\id: index
+            \\title: Home
+            \\---
+            \\# Home
+            \\
+            \\Body line.
+            \\
+        );
+        try writeTreeFile(io, work, "content/alpha.md",
+            \\---
+            \\title: Alpha
+            \\parent: index
+            \\---
+            \\# Alpha
+            \\
+            \\Body line.
+            \\
+        );
+
+        const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+        defer gpa.free(layout_path);
+        const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+        defer gpa.free(content);
+        const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+        defer gpa.free(dist);
+
+        var t = timings.Timings.init(gpa, io);
+        defer t.deinit();
+
+        const started = Io.Clock.awake.now(io);
+        const stats = try compileHtmlSite(io, gpa, .{
+            .content_root = content,
+            .dist_dir = dist,
+            .layout_path = layout_path,
+            .quiet = true,
+            .timings = &t,
+        });
+        const total_ns = started.untilNow(io, .awake).nanoseconds;
+        try std.testing.expectEqual(@as(usize, 2), stats.pages_written);
+
+        try assertPhaseSumScope(&t, total_ns);
+
+        const render_side: u64 = (phaseNs(&t, timings.phase_fingerprint) orelse 0) +
+            (phaseNs(&t, timings.phase_render) orelse 0) +
+            (phaseNs(&t, timings.phase_publish) orelse 0) +
+            (phaseNs(&t, timings.phase_heading_harvest) orelse 0);
+        if (phaseNs(&t, timings.phase_graph_validate)) |g| {
+            min_g = if (min_g) |m| @min(m, g) else g;
+        }
+        if (phaseNs(&t, timings.phase_dependency_resolve)) |d| {
+            min_d = if (min_d) |m| @min(m, d) else d;
+        }
+        min_render_side = if (min_render_side) |m| @min(m, render_side) else render_side;
+    }
+    try assertPhasePairwiseScope(min_g, min_d, min_render_side);
 }
 
 test "timings: multi-target HTML phases do not absorb later work" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/timings-scope-multi", .{tmp.sub_path});
-    defer gpa.free(work);
 
-    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{nav}}{{content}}</body></html>");
-    try writeTreeFile(io, work, "content/index.md",
-        \\---
-        \\id: index
-        \\title: Home
-        \\---
-        \\# Home
-        \\
-        \\Body line.
-        \\
-    );
-    try writeTreeFile(io, work, "content/alpha.md",
-        \\---
-        \\title: Alpha
-        \\parent: index
-        \\---
-        \\# Alpha
-        \\
-        \\Body line.
-        \\
-    );
+    // Same load-robust strategy as the single-target test: the sum bound is
+    // checked on every run (load-invariant), the pairwise bounds on per-phase
+    // minima across runs (uncontended estimates). See the comment there.
+    const runs = 5;
+    var min_g: ?u64 = null;
+    var min_d: ?u64 = null;
+    var min_render_side: ?u64 = null;
+    for (0..runs) |_| {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/timings-scope-multi", .{tmp.sub_path});
+        defer gpa.free(work);
 
-    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
-    defer gpa.free(layout_path);
-    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
-    defer gpa.free(content);
-    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
-    defer gpa.free(dist);
+        try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{nav}}{{content}}</body></html>");
+        try writeTreeFile(io, work, "content/index.md",
+            \\---
+            \\id: index
+            \\title: Home
+            \\---
+            \\# Home
+            \\
+            \\Body line.
+            \\
+        );
+        try writeTreeFile(io, work, "content/alpha.md",
+            \\---
+            \\title: Alpha
+            \\parent: index
+            \\---
+            \\# Alpha
+            \\
+            \\Body line.
+            \\
+        );
 
-    var t = timings.Timings.init(gpa, io);
-    defer t.deinit();
+        const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+        defer gpa.free(layout_path);
+        const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+        defer gpa.free(content);
+        const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+        defer gpa.free(dist);
 
-    const specs = [_]target_mod.TargetSpec{.{ .name = "default", .output_dir = dist }};
-    const started = Io.Clock.awake.now(io);
-    try compileHtmlSiteMulti(io, gpa, &specs, .{
-        .content_root = content,
-        .layout_path = layout_path,
-        .quiet = true,
-        .timings = &t,
-    });
-    const total_ns = started.untilNow(io, .awake).nanoseconds;
-    try assertPhaseScope(&t, total_ns);
+        var t = timings.Timings.init(gpa, io);
+        defer t.deinit();
+
+        const specs = [_]target_mod.TargetSpec{.{ .name = "default", .output_dir = dist }};
+        const started = Io.Clock.awake.now(io);
+        try compileHtmlSiteMulti(io, gpa, &specs, .{
+            .content_root = content,
+            .layout_path = layout_path,
+            .quiet = true,
+            .timings = &t,
+        });
+        const total_ns = started.untilNow(io, .awake).nanoseconds;
+
+        try assertPhaseSumScope(&t, total_ns);
+
+        const render_side: u64 = (phaseNs(&t, timings.phase_fingerprint) orelse 0) +
+            (phaseNs(&t, timings.phase_render) orelse 0) +
+            (phaseNs(&t, timings.phase_publish) orelse 0) +
+            (phaseNs(&t, timings.phase_heading_harvest) orelse 0);
+        if (phaseNs(&t, timings.phase_graph_validate)) |g| {
+            min_g = if (min_g) |m| @min(m, g) else g;
+        }
+        if (phaseNs(&t, timings.phase_dependency_resolve)) |d| {
+            min_d = if (min_d) |m| @min(m, d) else d;
+        }
+        min_render_side = if (min_render_side) |m| @min(m, render_side) else render_side;
+    }
+    try assertPhasePairwiseScope(min_g, min_d, min_render_side);
 }
 
 test "timings: render and publish failures still record their phases" {
