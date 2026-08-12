@@ -18,9 +18,11 @@ reproduction) + `sandbox/svelte-consumer/EXPERIMENT-REPORT.md` (round 2:
 interactive overlay, persistence, content-edit rebuild, state/content
 independence, page-local assets) + `sandbox/svelte-consumer/EXPERIMENT-3-REPORT.md`
 (round 3: two-resource economy overlay — a time-driven, stateful widget under
-the same seam; verdict unchanged). This file is the compressed handoff; the
-sandbox is the working artifact and may be deleted after the evidence is
-absorbed.
+the same seam; verdict unchanged) + `sandbox/svelte-consumer/EXPERIMENT-4-REPORT.md`
+(round 4: framework-neutral cross-check — a zero-dependency vanilla renderer
+proves the boundary is not Svelte-specific and needs zero link-rewrite glue).
+This file is the compressed handoff; the sandbox is the working artifact and
+may be deleted after the evidence is absorbed.
 
 ---
 

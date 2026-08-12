@@ -34,6 +34,9 @@ IR, and every rendered paragraph comes from a Boris-rendered body fragment.
 > [`EXPERIMENT-REPORT.md`](EXPERIMENT-REPORT.md).
 > Round-3 experiment (two-resource economy overlay — heavier client state
 > under the same seam): [`EXPERIMENT-3-REPORT.md`](EXPERIMENT-3-REPORT.md).
+> Round-4 experiment (framework-neutral cross-check — a zero-dependency
+> vanilla renderer consuming the same feed, proving the boundary is not
+> Svelte-specific): [`EXPERIMENT-4-REPORT.md`](EXPERIMENT-4-REPORT.md).
 
 ---
 
