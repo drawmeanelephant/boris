@@ -60,8 +60,10 @@ themselves:
 1. Run both commands against a **single content state** (no edits between
    them).
 2. Emit both outputs into a **fresh staging directory** and publish only
-   after both succeed (rename into place). Treat any failure as "keep the
-   previous feed" — never update half of it.
+   after both succeed (rename into place). Keep the previous feed
+   **recoverable until the new one is in place** (rename it aside rather
+   than deleting it; restore it if the in-place rename fails). Treat any
+   failure as "keep the previous feed" — never update half of it.
 
 This is consumer-side glue, not a Boris capability; the spike evidence's
 `boris-data.sh` implements exactly this staging pattern. Note that a staged

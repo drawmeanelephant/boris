@@ -44,8 +44,23 @@ mkdir -p "${STAGE_REL}/bodies"
 "${BIN}" --out "${STAGE_REL}" --quiet
 "${BIN}" --html-dir "${STAGE_REL}/bodies" --html-layout "${LAYOUT_REL}" --quiet
 
-rm -rf "${DATA_REL}"
-mv "${STAGE_REL}" "${DATA_REL}"
+# Swap with a recovery path: move the previous feed aside (never delete it
+# first), move the staged feed into place, and only then drop the previous
+# one. If the in-place rename fails, restore the previous feed instead of
+# leaving the consumer without one (consumer-feed.md §2 "Snapshot
+# consistency").
+rm -rf "${DATA_REL}.prev" 2>/dev/null || true
+if [[ -d "${DATA_REL}" ]]; then
+  mv "${DATA_REL}" "${DATA_REL}.prev"
+fi
+if ! mv "${STAGE_REL}" "${DATA_REL}"; then
+  if [[ -d "${DATA_REL}.prev" ]]; then
+    mv "${DATA_REL}.prev" "${DATA_REL}" 2>/dev/null || true
+  fi
+  echo "error: feed swap failed; previous feed restored" >&2
+  exit 1
+fi
+rm -rf "${DATA_REL}.prev"
 
 # Publish the IR into the Svelte app's static tree so the site itself exposes
 # machine-readable content endpoints (/boris/manifest.json, /boris/graph.json).
