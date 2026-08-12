@@ -219,10 +219,14 @@ pub fn computePageFingerprintThemeInput(
 ///   - return sorted entity IDs with duplicates removed
 ///
 /// The returned slice is owned by the caller and allocated using the provided allocator.
+/// `node_by_key` maps every frozen node's `id` and `source_path` to the node,
+/// built once per build by the caller (PERF-032): the reverse walk previously
+/// scanned all nodes per visited key, making incremental dirty expansion
+/// quadratic in graph size.
 pub fn getAffectedPages(
     allocator: std.mem.Allocator,
     changed_path: []const u8,
-    nodes: []const graph_mod.Node,
+    node_by_key: *const std.StringHashMapUnmanaged(*const graph_mod.Node),
     dep_index: *const dependency.DependencyIndex,
 ) ![]const []const u8 {
     var affected_ids: std.StringHashMapUnmanaged(void) = .{};
@@ -241,26 +245,16 @@ pub fn getAffectedPages(
         if (visited.contains(curr)) continue;
         try visited.put(allocator, curr, {});
 
-        var is_page = false;
-        var page_id: []const u8 = "";
-        for (nodes) |node| {
-            if (std.mem.eql(u8, node.id, curr) or std.mem.eql(u8, node.source_path, curr)) {
-                is_page = true;
-                page_id = node.id;
-                break;
-            }
-        }
-
-        if (is_page) {
-            try affected_ids.put(allocator, page_id, {});
+        if (node_by_key.get(curr)) |node| {
+            try affected_ids.put(allocator, node.id, {});
             // Continue reverse walk so page→page (parent/reference) edges propagate.
-            if (dep_index.reverse.get(page_id)) |dep_list| {
+            if (dep_index.reverse.get(node.id)) |dep_list| {
                 for (dep_list.items) |dep| {
                     try stack.append(allocator, dep.path);
                 }
             }
             // Also walk reverse keyed by source path when deps used path form.
-            if (!std.mem.eql(u8, page_id, curr)) {
+            if (!std.mem.eql(u8, node.id, curr)) {
                 if (dep_index.reverse.get(curr)) |dep_list| {
                     for (dep_list.items) |dep| {
                         try stack.append(allocator, dep.path);
@@ -416,6 +410,22 @@ test "fingerprint composition mixes precomputed constant digests (PERF-009)" {
     try std.testing.expect(!std.mem.eql(u8, &no_nav, &dig));
 }
 
+fn buildNodeKeyMap(
+    allocator: std.mem.Allocator,
+    nodes: []const graph_mod.Node,
+) !std.StringHashMapUnmanaged(*const graph_mod.Node) {
+    var map: std.StringHashMapUnmanaged(*const graph_mod.Node) = .empty;
+    errdefer map.deinit(allocator);
+    try map.ensureTotalCapacity(allocator, @intCast(2 * nodes.len));
+    for (nodes) |*node| {
+        const g1 = map.getOrPutAssumeCapacity(node.id);
+        if (!g1.found_existing) g1.value_ptr.* = node;
+        const g2 = map.getOrPutAssumeCapacity(node.source_path);
+        if (!g2.found_existing) g2.value_ptr.* = node;
+    }
+    return map;
+}
+
 test "Affected pages query scenarios" {
     const gpa = std.testing.allocator;
 
@@ -453,8 +463,11 @@ test "Affected pages query scenarios" {
     // page→page reference: intro references install-style id "guides/outro"
     try dep_index.addDependency("guides/intro", "guides/outro", .reference);
 
+    var node_by_key = try buildNodeKeyMap(gpa, &nodes);
+    defer node_by_key.deinit(gpa);
+
     {
-        const affected = try getAffectedPages(gpa, "content/guides/intro.md", &nodes, &dep_index);
+        const affected = try getAffectedPages(gpa, "content/guides/intro.md", &node_by_key, &dep_index);
         defer {
             for (affected) |item| gpa.free(item);
             gpa.free(affected);
@@ -465,7 +478,7 @@ test "Affected pages query scenarios" {
 
     // Editing the reference *target* dirties the referrer (page→page reverse).
     {
-        const affected = try getAffectedPages(gpa, "content/guides/outro.md", &nodes, &dep_index);
+        const affected = try getAffectedPages(gpa, "content/guides/outro.md", &node_by_key, &dep_index);
         defer {
             for (affected) |item| gpa.free(item);
             gpa.free(affected);
@@ -476,7 +489,7 @@ test "Affected pages query scenarios" {
     }
 
     {
-        const affected = try getAffectedPages(gpa, "includes/widget.html", &nodes, &dep_index);
+        const affected = try getAffectedPages(gpa, "includes/widget.html", &node_by_key, &dep_index);
         defer {
             for (affected) |item| gpa.free(item);
             gpa.free(affected);
@@ -487,7 +500,7 @@ test "Affected pages query scenarios" {
     }
 
     {
-        const affected = try getAffectedPages(gpa, "layouts/main.html", &nodes, &dep_index);
+        const affected = try getAffectedPages(gpa, "layouts/main.html", &node_by_key, &dep_index);
         defer {
             for (affected) |item| gpa.free(item);
             gpa.free(affected);
@@ -498,7 +511,7 @@ test "Affected pages query scenarios" {
     }
 
     {
-        const affected = try getAffectedPages(gpa, "layouts/ref.html", &nodes, &dep_index);
+        const affected = try getAffectedPages(gpa, "layouts/ref.html", &node_by_key, &dep_index);
         defer {
             for (affected) |item| gpa.free(item);
             gpa.free(affected);
@@ -524,7 +537,10 @@ test "Output ordering is stable" {
     try dep_index.addDependency("a", "layouts/main.html", .layout);
     try dep_index.addDependency("m", "layouts/main.html", .layout);
 
-    const affected = try getAffectedPages(gpa, "layouts/main.html", &nodes, &dep_index);
+    var node_by_key = try buildNodeKeyMap(gpa, &nodes);
+    defer node_by_key.deinit(gpa);
+
+    const affected = try getAffectedPages(gpa, "layouts/main.html", &node_by_key, &dep_index);
     defer {
         for (affected) |item| gpa.free(item);
         gpa.free(affected);

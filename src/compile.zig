@@ -1431,20 +1431,39 @@ fn expandDirtySet(
     nodes: []const graph_mod.Node,
     dep_index: *const dependency.DependencyIndex,
 ) !void {
+    // Entity id → page index, built once (PERF-032). PageDb entity ids are
+    // unique (validate rejects duplicates), and first-wins page order matches
+    // the linear scan this replaces. Affected ids without a matching page are
+    // silently skipped, exactly as before.
+    var page_by_id: std.StringHashMapUnmanaged(usize) = .empty;
+    defer page_by_id.deinit(gpa);
+    try page_by_id.ensureTotalCapacity(gpa, @intCast(pages.len));
+    for (pages, 0..) |page, page_idx| {
+        const gop = page_by_id.getOrPutAssumeCapacity(page.entity_id);
+        if (!gop.found_existing) gop.value_ptr.* = page_idx;
+    }
+
+    // Frozen node id + source_path → node, built once (PERF-032): the
+    // affected-pages walk previously scanned all nodes per visited key.
+    var node_by_key: std.StringHashMapUnmanaged(*const graph_mod.Node) = .empty;
+    defer node_by_key.deinit(gpa);
+    try node_by_key.ensureTotalCapacity(gpa, @intCast(2 * nodes.len));
+    for (nodes) |*node| {
+        const g1 = node_by_key.getOrPutAssumeCapacity(node.id);
+        if (!g1.found_existing) g1.value_ptr.* = node;
+        const g2 = node_by_key.getOrPutAssumeCapacity(node.source_path);
+        if (!g2.found_existing) g2.value_ptr.* = node;
+    }
+
     for (pages, 0..) |page, page_idx| {
         if (!is_dirty[page_idx]) continue;
-        const affected = try cache.getAffectedPages(gpa, page.source_path, nodes, dep_index);
+        const affected = try cache.getAffectedPages(gpa, page.source_path, &node_by_key, dep_index);
         defer {
             for (affected) |id| gpa.free(id);
             gpa.free(affected);
         }
         for (affected) |id| {
-            for (pages, 0..) |candidate, candidate_idx| {
-                if (std.mem.eql(u8, candidate.entity_id, id)) {
-                    is_dirty[candidate_idx] = true;
-                    break;
-                }
-            }
+            if (page_by_id.get(id)) |candidate_idx| is_dirty[candidate_idx] = true;
         }
     }
 }
