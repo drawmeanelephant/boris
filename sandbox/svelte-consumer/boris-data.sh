@@ -50,15 +50,23 @@ mkdir -p "${STAGE_REL}/bodies"
 # leaving the consumer without one. The signal trap covers interruption
 # (SIGINT/SIGTERM) between the two renames, and the EXIT trap covers every
 # exit path (consumer-feed.md §2 "Snapshot consistency").
+#
+# restore_prev_feed reports HONESTLY: it returns success only when the
+# previous feed is actually back in place, and every caller prints a loud
+# error naming the recovery path if it is not — never a false "restored".
 SWAP_IN_PROGRESS=0
 restore_prev_feed() {
   if [[ "${SWAP_IN_PROGRESS}" == 1 && -d "${DATA_REL}.prev" && ! -d "${DATA_REL}" ]]; then
-    mv "${DATA_REL}.prev" "${DATA_REL}" 2>/dev/null || true
-    echo "note: feed swap interrupted; previous feed restored" >&2
+    mv "${DATA_REL}.prev" "${DATA_REL}" 2>/dev/null
+    return $?
   fi
+  return 0
 }
-trap restore_prev_feed EXIT
-trap 'restore_prev_feed; exit 130' INT TERM
+fail_restore() {
+  echo "error: could not restore the previous feed — data/ is missing; recover ${DATA_REL}.prev manually" >&2
+}
+trap 'if ! restore_prev_feed; then fail_restore; fi' EXIT
+trap 'if ! restore_prev_feed; then fail_restore; fi; exit 130' INT TERM
 
 SWAP_IN_PROGRESS=1
 rm -rf "${DATA_REL}.prev" 2>/dev/null || true
@@ -66,8 +74,11 @@ if [[ -d "${DATA_REL}" ]]; then
   mv "${DATA_REL}" "${DATA_REL}.prev"
 fi
 if ! mv "${STAGE_REL}" "${DATA_REL}"; then
-  restore_prev_feed
-  echo "error: feed swap failed; previous feed restored" >&2
+  if restore_prev_feed; then
+    echo "error: feed swap failed; previous feed restored" >&2
+  else
+    fail_restore
+  fi
   exit 1
 fi
 SWAP_IN_PROGRESS=0
