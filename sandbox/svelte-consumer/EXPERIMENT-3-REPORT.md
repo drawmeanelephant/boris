@@ -167,7 +167,24 @@ navigation and reload with no Boris involvement of any kind, while Boris
 content and determinism remained untouched. The two consumer conventions
 (link re-targeting, asset copy) are unchanged and documented.
 
-## 10. Recommended next step
+## 10. Post-review hardening (Greptile P1, PR #365)
+
+Greptile review found a real bug in the ticker: each interval fire granted
+only **one** tick and the persistence effect then advanced `savedAt` to the
+current wall-clock time — so when the browser throttled or delayed the timer
+(background tab, device suspension, main-thread blocking), the missed elapsed
+production was permanently discarded.
+
+Fixed by making ticks **time-aware**: each fire grants production for the
+wall-clock time actually elapsed since the last granted tick (capped at
+`MAX_OFFLINE_TICKS`), and the persisted `savedAt` anchor is now `lastTickAt`
+so the reload catch-up resumes from the last *granted* tick rather than a
+later write. Verified in a real browser by blocking the main thread for 3 s:
+the delayed tick granted 3 ticks (not 1), and the persisted anchor tracked the
+tick. Normal cadence and reload catch-up both still work; this is pure Svelte
+widget logic, no Boris involvement.
+
+## 11. Recommended next step
 
 The interactive-app thread has now been exercised at two levels of state
 complexity, both clean. Continuing to grow the widget would be building a game,

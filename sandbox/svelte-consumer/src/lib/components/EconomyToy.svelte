@@ -12,6 +12,11 @@
 	// last-saved timestamp, and cross-resource upgrade costs. Still entirely
 	// a Svelte concern — Boris is not involved in any of it.
 	//
+	// Ticks are time-aware: each interval fire grants production for the
+	// wall-clock time actually elapsed since the previous tick, so browser
+	// timer throttling, suspension, or main-thread blocking cannot silently
+	// discard production (Greptile P1, PR #365).
+	//
 	// Persistence: localStorage only, browser-local. State survives SvelteKit
 	// navigation and page reload; production accrues while the widget is
 	// mounted (ticks) and is caught up from wall-clock time on remount.
@@ -28,6 +33,7 @@
 	let stone = $state(0);
 	let axeLevel = $state(0); // +1 wood/tick per level
 	let pickLevel = $state(0); // +1 stone/tick per level
+	let lastTickAt = $state(0); // wall-clock anchor of the last granted production
 	let ready = $state(false); // SSR-safe: never touch localStorage before mount
 
 	const woodRate = $derived(1 + axeLevel);
@@ -67,6 +73,7 @@
 		} catch {
 			// storage unavailable / corrupt — start fresh
 		}
+		lastTickAt = Date.now(); // production granted up to now
 		ready = true;
 		timer = setInterval(tick, TICK_MS);
 	});
@@ -75,10 +82,16 @@
 		if (timer !== undefined) clearInterval(timer);
 	});
 
-	// Passive production while the widget is mounted.
+	// Passive production while the widget is mounted. Grants production for
+	// the wall-clock time elapsed since the last tick (capped like the mount
+	// catch-up), so throttled/delayed intervals cannot lose production.
 	function tick() {
-		wood += 1 + axeLevel;
-		stone += 1 + pickLevel;
+		const now = Date.now();
+		const elapsed = Math.min(MAX_OFFLINE_TICKS, Math.floor((now - lastTickAt) / TICK_MS));
+		const ticks = Math.max(1, elapsed); // normal 1s cadence
+		wood += (1 + axeLevel) * ticks;
+		stone += (1 + pickLevel) * ticks;
+		lastTickAt = now;
 	}
 
 	// Manual gather (flat, independent of upgrades).
@@ -113,15 +126,17 @@
 	// clobber saved state with defaults. savedAt doubles as the offline
 	// catch-up anchor for the next mount.
 	$effect(() => {
-		if (!ready) return;
-		try {
-			localStorage.setItem(
-				storageKey(),
-				JSON.stringify({ v: 1, wood, stone, axeLevel, pickLevel, savedAt: Date.now() })
-			);
-		} catch {
-			// quota / privacy mode — the widget still works in-memory
-		}
+		if (!ready) return;			try {
+				localStorage.setItem(
+					storageKey(),
+					// savedAt = lastTickAt so the reload catch-up resumes from the
+				// last *granted* tick — never from a later wall-clock write that
+				// would silently erase un-granted production.
+					JSON.stringify({ v: 1, wood, stone, axeLevel, pickLevel, savedAt: lastTickAt })
+				);
+			} catch {
+				// quota / privacy mode — the widget still works in-memory
+			}
 	});
 </script>
 
