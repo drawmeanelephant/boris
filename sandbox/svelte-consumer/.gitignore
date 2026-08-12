@@ -15,6 +15,9 @@ node_modules
 /.svelte-kit
 /build
 
+# Round-4 cross-check output (vanilla render) — generated, never commit
+/cross-check/out
+
 # OS
 .DS_Store
 Thumbs.db

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import RelationPanel from '$lib/components/RelationPanel.svelte';
-	import IncrementalToy from '$lib/components/IncrementalToy.svelte';
+	import EconomyToy from '$lib/components/EconomyToy.svelte';
 	import type { PageData } from './$types';
 	let { data }: { data: PageData } = $props();
 
@@ -56,7 +56,7 @@
 <!-- {#key} remounts the widget when navigating between entities so each
      page's browser state loads fresh from localStorage (Experiment 2). -->
 {#key node.id}
-	<IncrementalToy entityId={node.id} />
+	<EconomyToy entityId={node.id} />
 {/key}
 
 <RelationPanel {node} {parent} {children} {siblings} {incoming} {outgoing} {includes} />

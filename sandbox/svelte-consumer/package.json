@@ -10,7 +10,8 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"data": "bash boris-data.sh"
+		"data": "bash boris-data.sh",
+		"cross-check": "node cross-check/render.mjs"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^7.0.1",
