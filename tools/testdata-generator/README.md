@@ -26,7 +26,12 @@ other pages on every generated page, deterministically (targets are the next N
 generation positions, wrapping, never self). `--dense-links N-1` on an N-page
 tree makes every page link to every other page — the old O(links × pages)
 per-hit page scan worst case — so the `dependency_resolve` phase can be
-measured on dense link sets. With `--dense-links 0` (the default) the corpus
+measured on dense link sets. `--fragment-links N` (PERF-021, issue #336)
+writes N wiki *fragment* links (`[[entity#overview]]`) to other pages on every
+generated page, deterministically and never self; the `overview` fragment
+exists on every generated page, so the tree builds clean and every referenced
+page becomes a heading-harvest fragment target. Both link modes can be
+combined. With `--dense-links 0 --fragment-links 0` (the default) the corpus
 is byte-identical to previous versions.
 
 ## Usage
@@ -46,6 +51,9 @@ zig run tools/testdata-generator/main.zig -- --pages 1000 --dense-links 20
 
 # Full density: every page links to every other page (N-1 links per page)
 zig run tools/testdata-generator/main.zig -- --pages 1000 --dense-links 999
+
+# Fragment-link corpus: every page targets the next 20 pages' ## Overview heading
+zig run tools/testdata-generator/main.zig -- --pages 1000 --fragment-links 20
 
 zig run tools/testdata-generator/main.zig -- --help
 ```
