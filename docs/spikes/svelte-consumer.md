@@ -16,7 +16,9 @@ disposable experimental evidence, not a product path.
 `sandbox/svelte-consumer/README.md` (full friction log, assessment,
 reproduction) + `sandbox/svelte-consumer/EXPERIMENT-REPORT.md` (round 2:
 interactive overlay, persistence, content-edit rebuild, state/content
-independence, page-local assets). This file is the compressed handoff; the
+independence, page-local assets) + `sandbox/svelte-consumer/EXPERIMENT-3-REPORT.md`
+(round 3: two-resource economy overlay — a time-driven, stateful widget under
+the same seam; verdict unchanged). This file is the compressed handoff; the
 sandbox is the working artifact and may be deleted after the evidence is
 absorbed.
 
