@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# TEMPORARY GLUE (spike) — runs Boris to regenerate the data/ directory that
+# the SvelteKit app consumes. Two invocations because the Boris CLI keeps
+# HTML and IR modes separate (exit 2 if combined):
+#
+#   1. IR mode:            manifest.json + graph.json + build-report.json
+#   2. HTML mode:          body fragments via a {{content}}-only layout
+#
+# The body-fragment trick is NOT new Boris behavior — it is the existing
+# --html-layout mechanism (layouts are user-authored, framework-neutral HTML).
+# All content comes from the Boris repo's real content/ tree; nothing here is
+# invented for Svelte.
+#
+# Run from anywhere:   bash sandbox/svelte-consumer/boris-data.sh
+# (or: npm run data   from sandbox/svelte-consumer)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+BIN="${REPO_ROOT}/zig-out/bin/boris"
+
+# Boris rejects absolute layout paths and records whatever path strings it is
+# given (determinism), so always invoke it from the repo root with relative
+# paths.
+cd "${REPO_ROOT}"
+SUB="${SCRIPT_DIR#"${REPO_ROOT}/"}"   # e.g. sandbox/svelte-consumer
+DATA_REL="${SUB}/data"
+LAYOUT_REL="${SUB}/layouts/content-only.html"
+
+if [[ ! -x "${BIN}" ]]; then
+  echo "Boris binary not found at ${BIN} — build it first: zig build (repo root)" >&2
+  exit 1
+fi
+
+rm -rf "${DATA_REL}/bodies" "${DATA_REL}.boris-stage" 2>/dev/null || true
+
+"${BIN}" --out "${DATA_REL}" --quiet
+"${BIN}" --html-dir "${DATA_REL}/bodies" --html-layout "${LAYOUT_REL}" --quiet
+
+# Publish the IR into the Svelte app's static tree so the site itself exposes
+# machine-readable content endpoints (/boris/manifest.json, /boris/graph.json).
+mkdir -p "${SCRIPT_DIR}/static/boris"
+cp "${SCRIPT_DIR}/data/manifest.json" "${SCRIPT_DIR}/data/graph.json" "${SCRIPT_DIR}/data/build-report.json" "${SCRIPT_DIR}/static/boris/"
+
+echo "ok: Boris IR + body fragments -> ${DATA_REL}, published to static/boris"

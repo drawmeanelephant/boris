@@ -333,6 +333,8 @@ state the mode they use.
 | [`docs/rag/system/`](rag/system/) | RAG narrative seeds (not contracts) |
 | [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) | Standalone migration laboratories (not product runtime) |
 | [`content/AGENT-DIRECTIVE.txt`](../content/AGENT-DIRECTIVE.txt) | Sample-content rebuild brief |
+| [`docs/spikes/`](spikes/) | **Non-normative** spike/experiment handoffs — evidence + recommendations, not contracts |
+| [`docs/spikes/svelte-consumer.md`](spikes/svelte-consumer.md) | Svelte×Boris consumer-spike handoff: can SvelteKit consume Boris output without Boris becoming Svelte-specific? |
 
 ---
 
