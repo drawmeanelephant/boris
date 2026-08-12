@@ -32,10 +32,20 @@ if [[ ! -x "${BIN}" ]]; then
   exit 1
 fi
 
-rm -rf "${DATA_REL}/bodies" "${DATA_REL}.boris-stage" 2>/dev/null || true
+# Cross-command snapshot consistency (docs/contracts/consumer-feed.md §2):
+# build BOTH outputs into a fresh staging dir, and only after both succeed
+# replace the published feed in one rename. With `set -e`, any failure aborts
+# before the swap, so the previously published feed stays intact — never a
+# half-updated data/ (IR from one content state, bodies from another).
+STAGE_REL="${DATA_REL}.stage"
+rm -rf "${STAGE_REL}" 2>/dev/null || true
+mkdir -p "${STAGE_REL}/bodies"
 
-"${BIN}" --out "${DATA_REL}" --quiet
-"${BIN}" --html-dir "${DATA_REL}/bodies" --html-layout "${LAYOUT_REL}" --quiet
+"${BIN}" --out "${STAGE_REL}" --quiet
+"${BIN}" --html-dir "${STAGE_REL}/bodies" --html-layout "${LAYOUT_REL}" --quiet
+
+rm -rf "${DATA_REL}"
+mv "${STAGE_REL}" "${DATA_REL}"
 
 # Publish the IR into the Svelte app's static tree so the site itself exposes
 # machine-readable content endpoints (/boris/manifest.json, /boris/graph.json).

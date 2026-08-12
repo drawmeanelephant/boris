@@ -43,6 +43,32 @@ error (exit 2). This is an ergonomics constraint of the existing CLI, not a
 semantic one — both invocations validate the same graph and fail the build
 (exit 1) on any content error.
 
+### Snapshot consistency
+
+The two commands are **independent builds**. Boris guarantees consistency
+*within* each build — the HTML path stages and publishes only on full target
+success (a failed HTML build leaves the previous body feed intact), and each
+JSON artifact is deterministic for its input state. Boris does **not** provide
+a cross-command snapshot: if content changes between the two invocations, or
+the HTML build fails after IR publication, the IR and the body feed can
+describe different source states (missing pages, stale bodies, or
+id↔body mismatches).
+
+Consumers that require IR↔body agreement must provide the snapshot
+themselves:
+
+1. Run both commands against a **single content state** (no edits between
+   them).
+2. Emit both outputs into a **fresh staging directory** and publish only
+   after both succeed (rename into place). Treat any failure as "keep the
+   previous feed" — never update half of it.
+
+This is consumer-side glue, not a Boris capability; the spike evidence's
+`boris-data.sh` implements exactly this staging pattern. Note that a staged
+consumer's `build-report.json` records the **invocation** path in `outDir`
+(the staging path), since the files move into place after publication —
+consumers should not treat `outDir` as the final artifact location.
+
 The `{{content}}`-only layout is a normal user-authored layout containing
 exactly the required `{{content}}` marker (see
 [templating-and-themes.md](templating-and-themes.md) and the layout rules in
@@ -58,7 +84,7 @@ recipe is Svelte-specific** — the layouts are framework-neutral HTML.
 |------|---------|-----------|
 | `manifest.json` | `schemaVersion`, `compiler`, `contentRoot`, `pageCount`, `pages[]` (index, id, sourcePath, role, parent, title, status) | [ir-schema.md](ir-schema.md) |
 | `graph.json` | `frozen: true`, `nodes[]` (+ `parentIndex`, `tags`, `bodyOffset`), `edges[]` (typed: `parent` / `include` / `reference`), `reverseIndex[]`, `nav[]` (breadcrumb / children / siblings by node index) | [ir-schema.md](ir-schema.md) |
-| `build-report.json` | `schemaVersion`, `ok`, `contentRoot`, `outDir`, `pageCount`, `errorCount`, `diagnostics[]` | [ir-schema.md](ir-schema.md) |
+| `build-report.json` | `schemaVersion`, `ok`, `contentRoot`, `outDir`, `pageCount`, `errorCount`, `diagnostics[]` — `outDir` records the directory string passed to `--out` | [ir-schema.md](ir-schema.md) |
 
 All files are deterministic JSON in canonical field order; identical inputs
 produce byte-identical files.
@@ -126,6 +152,8 @@ rewriting, and copy rules.
   not already serve `<entity_id>.assets/` trees from the feed directory.
 - Application state, browser persistence, and interaction — including when
   that interaction borrows the canonical entity id as an opaque storage key.
+- Cross-command snapshot staging when IR↔body agreement is required
+  ([Section 2](#2-recipe-two-commands-existing-flags)).
 
 ## 6. Non-claims (explicit)
 
