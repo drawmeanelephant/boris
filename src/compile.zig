@@ -5137,6 +5137,82 @@ test "Feature 9 HTML: missing entity still fails" {
     }));
 }
 
+test "Feature 9 HTML: fragment inside included body validates deferred (PERF-021)" {
+    // PERF-021 captures fragment hits during the fingerprint scan (which reads
+    // page + transitive include bodies) and validates them after the heading
+    // index is built. A fragment link living in an INCLUDED body must be caught
+    // (or pass) by the same deferred pass as one in the page body.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-f9-include-frag", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/includes/part.md",
+        \\See [[guides/target#real-section]].
+        \\
+    );
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+        \\{{include includes/part.md}}
+        \\
+    );
+    try writeTreeFile(io, work, "content/guides/target.md",
+        \\---
+        \\title: Target
+        \\parent: index
+        \\---
+        \\
+        \\# Target Page
+        \\
+        \\## Real Section
+        \\
+    );
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    // Valid fragment in the include: deferred validation passes and the
+    // rewritten href lands in the emitted page.
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const index_html = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(index_html);
+    try std.testing.expect(std.mem.indexOf(u8, index_html, "guides/target.html#real-section") != null);
+
+    // Break the include's fragment: the deferred validation (which reads the
+    // include body during capture) must fail the build.
+    try writeTreeFile(io, work, "content/includes/part.md",
+        \\See [[guides/target#does-not-exist]].
+        \\
+    );
+    try std.testing.expectError(error.ReferenceFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    }));
+}
+
 test "Feature 9 HTML: fenced fragment wiki stays literal" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;

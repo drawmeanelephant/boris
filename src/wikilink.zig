@@ -937,6 +937,67 @@ test "HeadingIndex lookup distinguishes unknown entity from unknown fragment" {
     try std.testing.expectEqual(HeadingIndex.Lookup.unknown_entity, idx.lookup("gone", "sec"));
 }
 
+test "validateFragmentHits mirrors checkFragment diagnostics (PERF-021)" {
+    const gpa = std.testing.allocator;
+    var idx: HeadingIndex = .{};
+    defer idx.deinit(gpa);
+    try idx.putOwned(gpa, "guides/overview", &.{"section-one"});
+
+    // All hits resolve: no failure, no diagnostic.
+    var ok_hits = [_]IdLoc{
+        .{ .id = "guides/overview", .line = 1, .column = 1, .locus = "a.md", .fragment = "section-one" },
+        // Fragment-less hits are skipped (mirrors checkFragment's orelse).
+        .{ .id = "guides/overview", .line = 2, .column = 1, .locus = "a.md", .fragment = null },
+    };
+    var ok_fail: FailInfo = .{};
+    try validateFragmentHits(&ok_hits, &idx, &ok_fail);
+
+    // Unknown fragment names the entity#fragment pair.
+    var frag_fail: FailInfo = .{};
+    try std.testing.expectError(error.ReferenceMissing, validateFragmentHits(
+        &.{.{
+            .id = "guides/overview",
+            .line = 3,
+            .column = 4,
+            .locus = "b.md",
+            .fragment = "nope",
+        }},
+        &idx,
+        &frag_fail,
+    ));
+    try std.testing.expect(std.mem.indexOf(u8, frag_fail.detail(), "#") != null);
+    try std.testing.expect(std.mem.indexOf(u8, frag_fail.detail(), "guides/overview") != null);
+    try std.testing.expect(std.mem.indexOf(u8, frag_fail.detail(), "nope") != null);
+
+    // Unknown entity names the page without the fragment.
+    var ent_fail: FailInfo = .{};
+    try std.testing.expectError(error.ReferenceMissing, validateFragmentHits(
+        &.{.{
+            .id = "guides/typo",
+            .line = 5,
+            .column = 6,
+            .locus = "c.md",
+            .fragment = "section-one",
+        }},
+        &idx,
+        &ent_fail,
+    ));
+    try std.testing.expect(std.mem.indexOf(u8, ent_fail.detail(), "guides/typo") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ent_fail.detail(), "#") == null);
+
+    // Failure stops at the first bad hit, in order.
+    var ordered_fail: FailInfo = .{};
+    try std.testing.expectError(error.ReferenceMissing, validateFragmentHits(
+        &.{
+            .{ .id = "guides/overview", .line = 7, .column = 1, .locus = "d.md", .fragment = "first-bad" },
+            .{ .id = "guides/overview", .line = 8, .column = 1, .locus = "d.md", .fragment = "second-bad" },
+        },
+        &idx,
+        &ordered_fail,
+    ));
+    try std.testing.expect(std.mem.indexOf(u8, ordered_fail.detail(), "first-bad") != null);
+}
+
 test "plan path reports missing entity, not missing heading, for [[typo#frag]]" {
     const gpa = std.testing.allocator;
     var idx: HeadingIndex = .{};
