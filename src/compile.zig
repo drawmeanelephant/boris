@@ -1220,7 +1220,10 @@ fn collectFragmentTargetSet(
 
 /// Side-cache format for heading harvest (separate from page manifest so we
 /// do not force a fingerprint-format bump). See #58.
-const HEADING_HARVEST_FORMAT = "boris-heading-harvest-v1";
+/// v2: harvest keys are the per-page fingerprints, so source/include/adapter
+/// changes invalidate through the fingerprint scheme without re-hashing bytes
+/// (PERF-021). One intentional harvest invalidation on upgrade.
+const HEADING_HARVEST_FORMAT = "boris-heading-harvest-v2";
 
 const ParsedHeadingHarvestEntry = struct {
     entity_id: []const u8 = "",
@@ -1256,38 +1259,6 @@ const HeadingHarvestSnapshot = struct {
     }
 };
 
-/// Content-addressed key for a page's harvested heading ids: source + transitive
-/// include bodies + input adapter identity. Unchanged key ⇒ reusable ids without Apex.
-fn headingHarvestKey(
-    entity_id: []const u8,
-    source_bytes: []const u8,
-    include_bytes: []const []const u8,
-    input_material: []const u8,
-) [32]u8 {
-    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
-    var len_buf: [8]u8 = undefined;
-    const updateLen = struct {
-        fn go(h: *std.crypto.hash.sha2.Sha256, len: u64, buf: *[8]u8) void {
-            std.mem.writeInt(u64, buf, len, .little);
-            h.update(buf);
-        }
-    }.go;
-    updateLen(&hasher, entity_id.len, &len_buf);
-    hasher.update(entity_id);
-    updateLen(&hasher, source_bytes.len, &len_buf);
-    hasher.update(source_bytes);
-    updateLen(&hasher, include_bytes.len, &len_buf);
-    for (include_bytes) |b| {
-        updateLen(&hasher, b.len, &len_buf);
-        hasher.update(b);
-    }
-    updateLen(&hasher, input_material.len, &len_buf);
-    hasher.update(input_material);
-    var out: [32]u8 = undefined;
-    hasher.final(&out);
-    return out;
-}
-
 fn writeHeadingHarvestCache(writer: anytype, entries: []const HeadingHarvestWriteEntry) !void {
     const gpa = std.heap.page_allocator;
     var buf: std.ArrayList(u8) = .empty;
@@ -1320,6 +1291,10 @@ fn writeHeadingHarvestCache(writer: anytype, entries: []const HeadingHarvestWrit
 /// When `prior_harvest` is non-null (incremental) and a page's harvest key
 /// matches a prior entry, Apex is skipped for that page (#58). Callers may
 /// write the returned harvest snapshot under `.boris-cache/heading-harvest.json`.
+/// `fingerprints` is the parallel per-page fingerprint array (hex) computed
+/// before this runs; it doubles as the harvest key (PERF-021) so heading-harvest
+/// identity reuses already-hashed fingerprint inputs instead of re-hashing full
+/// source/include bytes. Source bytes come from the shared in-memory copy.
 fn buildSiteHeadingIndex(
     io: Io,
     gpa: std.mem.Allocator,
@@ -1330,6 +1305,7 @@ fn buildSiteHeadingIndex(
     quiet: bool,
     input_format: identity.InputFormat,
     prior_harvest: ?*const ParsedHeadingHarvest,
+    fingerprints: []const []const u8,
 ) !struct { wikilink.HeadingIndex, HeadingHarvestSnapshot } {
     var index: wikilink.HeadingIndex = .{};
     errdefer index.deinit(gpa);
@@ -1372,31 +1348,20 @@ fn buildSiteHeadingIndex(
     var doc_arena = std.heap.ArenaAllocator.init(gpa);
     defer doc_arena.deinit();
 
-    const input_material: []const u8 = if (input_format == .textile) textile.adapter_identity else "";
-
     for (db.items(), 0..) |page, page_idx| {
         if (!needed.contains(page.entity_id)) continue;
 
-        const inc_owned = shared.include_bytes[page_idx];
-        const inc_views = try gpa.alloc([]const u8, inc_owned.len);
-        defer gpa.free(inc_views);
-        for (inc_owned, 0..) |b, j| inc_views[j] = b;
-
-        const key_bytes = headingHarvestKey(
-            page.entity_id,
-            shared.source_bytes[page_idx],
-            inc_views,
-            input_material,
-        );
-        const key_hex = cache.hexDigest(key_bytes);
+        // Harvest key = the page fingerprint (hex): source/include/adapter
+        // changes invalidate through the fingerprint scheme (PERF-021).
+        const key_hex = fingerprints[page_idx];
 
         // Cache hit: reuse prior ids (no Apex).
         if (prior_map.get(page.entity_id)) |prior| {
-            if (std.mem.eql(u8, prior.harvest_key, &key_hex)) {
+            if (std.mem.eql(u8, prior.harvest_key, key_hex)) {
                 try index.putOwned(gpa, page.entity_id, prior.ids);
                 const ent_id = try gpa.dupe(u8, page.entity_id);
                 errdefer gpa.free(ent_id);
-                const hk = try gpa.dupe(u8, &key_hex);
+                const hk = try gpa.dupe(u8, key_hex);
                 errdefer gpa.free(hk);
                 const ids_owned = try gpa.alloc([]u8, prior.ids.len);
                 errdefer {
@@ -1414,8 +1379,7 @@ fn buildSiteHeadingIndex(
         }
 
         _ = doc_arena.reset(.free_all);
-        const arena = doc_arena.allocator();
-        const source = try readFileAlloc(io, content_dir, page.source_path, arena);
+        const source = shared.source_bytes[page_idx];
         const html = try html_body.renderSource(io, gpa, content_dir, &doc_arena, source, page.source_path, page.output_path, .{
             .input_format = input_format,
             .quiet = quiet,
@@ -1434,7 +1398,7 @@ fn buildSiteHeadingIndex(
 
         const ent_id = try gpa.dupe(u8, page.entity_id);
         errdefer gpa.free(ent_id);
-        const hk = try gpa.dupe(u8, &key_hex);
+        const hk = try gpa.dupe(u8, key_hex);
         errdefer gpa.free(hk);
         const ids_owned = try gpa.alloc([]u8, ids.items.len);
         errdefer {
@@ -1791,30 +1755,6 @@ fn compilePagesInner(
         }
     }
 
-    // Heading id index for wiki `[[entity#heading]]` (Apex-rendered ids only;
-    // only pages that are fragment targets are rendered for the index).
-    // Incremental: reuse harvest-cache hits so no-op builds skip Apex (#58).
-    const prior_harvest: ?*const ParsedHeadingHarvest = if (parsed_heading_harvest) |*ph| &ph.value else null;
-    const heading_built = blk: {
-        const harvest_phase = if (options.timings) |t| t.start(timings.phase_heading_harvest) else null;
-        defer if (harvest_phase) |p| p.end();
-        break :blk try buildSiteHeadingIndex(
-            io,
-            gpa,
-            content_dir,
-            db,
-            site,
-            shared,
-            options.quiet,
-            options.input_format,
-            prior_harvest,
-        );
-    };
-    var heading_index = heading_built[0];
-    defer heading_index.deinit(gpa);
-    var heading_snapshot = heading_built[1];
-    defer heading_snapshot.deinit();
-
     // Precreate output directories under staging
     {
         var paths: std.ArrayList([]const u8) = .empty;
@@ -1837,6 +1777,16 @@ fn compilePagesInner(
     const is_dirty = try gpa.alloc(bool, db.len());
     @memset(is_dirty, false);
     defer gpa.free(is_dirty);
+
+    // Fragment-bearing wiki hits captured during the fingerprint scan, validated
+    // once the heading index is built (which now runs after fingerprints;
+    // PERF-021). Views into shared source/include bytes — live for the build.
+    var page_fragment_hits = try gpa.alloc(std.ArrayList(wikilink.IdLoc), db.len());
+    for (page_fragment_hits) |*list| list.* = .empty;
+    defer {
+        for (page_fragment_hits) |*list| list.deinit(gpa);
+        gpa.free(page_fragment_hits);
+    }
 
     // Build-constant fingerprint inputs (site-nav material, per-layout bytes,
     // per-layout theme material) are hashed once per build; per-page
@@ -1906,8 +1856,12 @@ fn compilePagesInner(
                 site.nodes,
                 &wiki_fail,
                 .{
-                    .heading_index = &heading_index,
-                    .validate_fragments = true,
+                    // Fragment validation is deferred until the heading index is
+                    // built (after fingerprints; PERF-021); hits are captured so
+                    // no second body scan is needed.
+                    .heading_index = null,
+                    .validate_fragments = false,
+                    .fragment_hits = &page_fragment_hits[page_idx],
                     .link_resolutions = if (options.timings != null) &link_resolutions_total else null,
                 },
             ) catch |err| {
@@ -2019,6 +1973,49 @@ fn compilePagesInner(
             t.setCounter(timings.counter_hash_bytes, hash_bytes_total);
             t.setCounter(timings.counter_link_resolutions, link_resolutions_total);
         }
+    }
+
+    // Heading id index for wiki `[[entity#heading]]` (Apex-rendered ids only;
+    // only pages that are fragment targets are rendered for the index).
+    // Harvest keys are the just-computed page fingerprints (PERF-021): unchanged
+    // fingerprint ⇒ reusable ids without Apex (#58).
+    const prior_harvest: ?*const ParsedHeadingHarvest = if (parsed_heading_harvest) |*ph| &ph.value else null;
+    const heading_built = blk: {
+        const harvest_phase = if (options.timings) |t| t.start(timings.phase_heading_harvest) else null;
+        defer if (harvest_phase) |p| p.end();
+        break :blk try buildSiteHeadingIndex(
+            io,
+            gpa,
+            content_dir,
+            db,
+            site,
+            shared,
+            options.quiet,
+            options.input_format,
+            prior_harvest,
+            fingerprints,
+        );
+    };
+    var heading_index = heading_built[0];
+    defer heading_index.deinit(gpa);
+    var heading_snapshot = heading_built[1];
+    defer heading_snapshot.deinit();
+
+    // Deferred fragment validation against the just-built heading index. Same
+    // diagnostics and exit path as the former in-fingerprint validation; the
+    // body scan was already done above (PERF-021).
+    for (db.items(), 0..) |page, page_idx| {
+        if (page_fragment_hits[page_idx].items.len == 0) continue;
+        var fail: wikilink.FailInfo = .{};
+        wikilink.validateFragmentHits(page_fragment_hits[page_idx].items, &heading_index, &fail) catch |err| {
+            if (err == error.ReferenceMissing or err == error.ReferenceSyntax or err == error.PathError) {
+                if (!options.quiet) {
+                    wikilink.printDiagnostic(gpa, err, page.source_path, fail);
+                }
+                return error.ReferenceFailed;
+            }
+            return err;
+        };
     }
 
     // Fingerprints identify changed page inputs; the shared frozen reverse

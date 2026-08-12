@@ -323,6 +323,10 @@ pub const ResolveOptions = struct {
     /// Optional PERF-027 counter: number of wiki-link occurrences resolved
     /// across all bodies (never a correctness dependency).
     link_resolutions: ?*usize = null,
+    /// When non-null, fragment-bearing hits are appended here during the same
+    /// body scan so callers can validate fragments against a heading index that
+    /// is built after fingerprinting (PERF-021). Views into the scanned bodies.
+    fragment_hits: ?*std.ArrayList(IdLoc) = null,
 };
 
 fn failFragmentDetail(
@@ -369,6 +373,32 @@ fn checkFragment(
             if (fail_out) |f| f.set(line, column, entity_id, locus);
             return error.ReferenceMissing;
         },
+    }
+}
+
+/// Validate previously captured fragment hits against a heading index. Used by
+/// callers that build the index after fingerprinting (PERF-021). Mirrors
+/// `checkFragment` diagnostics exactly: an unknown entity is reported without
+/// the fragment so the message names the missing page, an unknown fragment
+/// names the `entity#fragment` pair.
+pub fn validateFragmentHits(
+    hits: []const IdLoc,
+    heading_index: *const HeadingIndex,
+    fail_out: ?*FailInfo,
+) WikiError!void {
+    for (hits) |loc| {
+        const frag = loc.fragment orelse continue;
+        switch (heading_index.lookup(loc.id, frag)) {
+            .ok => {},
+            .unknown_fragment => {
+                failFragmentDetail(fail_out, loc.line, loc.column, loc.id, frag, loc.locus);
+                return error.ReferenceMissing;
+            },
+            .unknown_entity => {
+                if (fail_out) |f| f.set(loc.line, loc.column, loc.id, loc.locus);
+                return error.ReferenceMissing;
+            },
+        }
     }
 }
 
@@ -453,7 +483,7 @@ pub fn rewriteWikiLinksOpts(
 }
 
 /// First-seen location of a wiki entity id (for fingerprint diagnostics).
-const IdLoc = struct {
+pub const IdLoc = struct {
     id: []const u8,
     line: u32,
     column: u32,
@@ -478,6 +508,15 @@ fn collectIdsFromBody(
     for (hits.items) |h| {
         if (h.fragment) |frag| {
             try checkFragment(opts, h.entity_id, frag, h.line, h.column, body_path, fail_out);
+            if (opts.fragment_hits) |fh| {
+                try fh.append(allocator, .{
+                    .id = h.entity_id,
+                    .line = h.line,
+                    .column = h.column,
+                    .locus = body_path,
+                    .fragment = h.fragment,
+                });
+            }
         }
         try appendUniqueIdLocHashed(locs, seen, allocator, .{
             .id = h.entity_id,
