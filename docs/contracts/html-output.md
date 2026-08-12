@@ -214,7 +214,7 @@ chrome keep the prior page-local fingerprint inputs
 On `--incremental`, a page is **reused** only when all of the following hold:
 
 1. Prior `dist/.boris-cache/manifest.json` parses and its `format_version`
-   equals the fingerprint discriminator (`boris-cache-v2-layout-rules`).
+   equals the fingerprint discriminator (`boris-cache-v3-constant-digests`).
 2. A manifest entry matches the page’s `entity_id`, `output_path`, effective
    `selected_layout`, and current **input** fingerprint (source / includes /
    selected layout path+bytes / target / nav material / theme material).
