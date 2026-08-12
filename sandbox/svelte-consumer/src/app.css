@@ -1,0 +1,182 @@
+:root {
+	--text: #1c1e21;
+	--muted: #6a6f76;
+	--surface: #f5f6f7;
+	--border: #d9dce0;
+	--accent: #3b6ef6;
+	--mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--text: #e6e8ea;
+		--muted: #9aa0a6;
+		--surface: #1d1f23;
+		--border: #363a41;
+		--accent: #7fa0ff;
+	}
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	font-family: system-ui, -apple-system, sans-serif;
+	line-height: 1.55;
+	color: var(--text);
+	background: var(--bg, #fff);
+}
+
+a {
+	color: var(--accent);
+}
+
+code {
+	font-family: var(--mono);
+	font-size: 0.9em;
+	background: var(--surface);
+	border-radius: 4px;
+	padding: 0.1em 0.35em;
+}
+
+.shell {
+	max-width: 72rem;
+	margin: 0 auto;
+	padding: 1.5rem 1.25rem 4rem;
+	display: grid;
+	gap: 1.5rem;
+}
+
+@media (min-width: 52rem) {
+	.shell {
+		grid-template-columns: 16rem minmax(0, 1fr);
+		align-items: start;
+	}
+	.brand {
+		grid-column: 1;
+	}
+	.site-nav {
+		grid-column: 1;
+		position: sticky;
+		top: 1rem;
+	}
+	.content {
+		grid-column: 2;
+	}
+}
+
+.brand {
+	display: flex;
+	flex-direction: column;
+	font-size: 1.1rem;
+	font-weight: 700;
+}
+.brand a {
+	text-decoration: none;
+	color: inherit;
+}
+.brand-sub {
+	font-size: 0.75rem;
+	font-weight: 400;
+	opacity: 0.55;
+}
+
+/* --- Boris body styling (mirrors the default Boris layout's body look) --- */
+.body {
+	overflow-wrap: break-word;
+}
+.body h1 {
+	font-size: 1.8rem;
+	margin: 1.5rem 0 0.75rem;
+	line-height: 1.2;
+}
+.body h2 {
+	font-size: 1.35rem;
+	margin: 1.5rem 0 0.5rem;
+}
+.body h3 {
+	font-size: 1.1rem;
+}
+.body h4,
+.body h5,
+.body h6 {
+	font-size: 0.95rem;
+}
+.body table {
+	border-collapse: collapse;
+	width: 100%;
+	margin: 1rem 0;
+	font-size: 0.9rem;
+}
+.body th,
+.body td {
+	border: 1px solid var(--border);
+	padding: 0.4rem 0.6rem;
+	text-align: left;
+	vertical-align: top;
+}
+.body th {
+	background: var(--surface);
+}
+.body blockquote {
+	margin: 1rem 0;
+	padding: 0.4rem 1rem;
+	border-left: 4px solid var(--border);
+	opacity: 0.9;
+}
+.body pre {
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 0.75rem 1rem;
+	overflow-x: auto;
+	font-size: 0.85rem;
+}
+.body :not(pre) > code {
+	background: var(--surface);
+	border-radius: 4px;
+	padding: 0.1em 0.35em;
+	font-size: 0.9em;
+}
+.admonition {
+	margin: 1.25rem 0;
+	padding: 0.75rem 1rem;
+	border-radius: 0.5rem;
+	border-left: 4px solid #888;
+	background: var(--surface);
+}
+.admonition__title {
+	font-size: 0.75rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	opacity: 0.75;
+	margin: 0 0 0.35rem;
+}
+.admonition--tip {
+	border-left-color: #0a7;
+}
+.admonition--info,
+.admonition--note {
+	border-left-color: #48a;
+}
+.admonition--warning {
+	border-left-color: #c80;
+}
+.admonition--danger {
+	border-left-color: #c33;
+}
+.details {
+	margin: 1.25rem 0;
+	padding: 0.75rem 1rem;
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	background: var(--surface);
+}
+.details > summary {
+	cursor: pointer;
+	font-weight: 700;
+}
