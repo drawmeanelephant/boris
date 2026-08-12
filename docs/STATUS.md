@@ -335,6 +335,7 @@ state the mode they use.
 | [`content/AGENT-DIRECTIVE.txt`](../content/AGENT-DIRECTIVE.txt) | Sample-content rebuild brief |
 | [`docs/spikes/`](spikes/) | **Non-normative** spike/experiment handoffs — evidence + recommendations, not contracts |
 | [`docs/spikes/svelte-consumer.md`](spikes/svelte-consumer.md) | Svelte×Boris consumer-spike handoff: can SvelteKit consume Boris output without Boris becoming Svelte-specific? |
+| [`docs/contracts/consumer-feed.md`](contracts/consumer-feed.md) | **Normative** external-consumer feed: `--out` IR + `{{content}}`-only body feed, output-relative hrefs, determinism — validated by Svelte and vanilla consumers |
 
 ---
 

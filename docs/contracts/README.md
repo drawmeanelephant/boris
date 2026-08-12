@@ -49,6 +49,7 @@ per topic:
 | Aside / components | [components.md](components.md) |
 | Apex C ABI | [apex-abi.md](apex-abi.md) |
 | HTML output (default CLI) | [html-output.md](html-output.md) |
+| External consumer feed (IR + body fragments) | [consumer-feed.md](consumer-feed.md) |
 | Parallel rendering | [parallel-rendering.md](parallel-rendering.md) |
 | Watch Mode | [watch-mode.md](watch-mode.md) |
 | Multi-target isolated outputs | [multi-target-isolated-output.md](multi-target-isolated-output.md) |
@@ -74,6 +75,7 @@ per topic:
 | [components.md](components.md) | Constrained `<Aside>` tokenizer, kinds, id grammar, nested policy (m10) |
 | [apex-abi.md](apex-abi.md) | In-process Apex C ABI, allocator lifetime, Zig error rules (m8) |
 | [html-output.md](html-output.md) | HTML Whiteboard, Aside stream, layout splice, Atomic publish (default CLI) |
+| [consumer-feed.md](consumer-feed.md) | External-consumer surface: `--out` IR + `{{content}}`-only body feed, output-relative hrefs, determinism |
 | [parallel-rendering.md](parallel-rendering.md) | Bounded worker pool parallel rendering, thread/memory isolation, deterministic order |
 | [watch-mode.md](watch-mode.md) | Opt-in watch mode, event coalescing/normalization, rebuild serialization, safe recovery |
 | [multi-target-isolated-output.md](multi-target-isolated-output.md) | Multi-target CLI/config, output isolation, cache namespaces (P3.3) |
