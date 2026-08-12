@@ -42,4 +42,15 @@ rm -rf "${DATA_REL}/bodies" "${DATA_REL}.boris-stage" 2>/dev/null || true
 mkdir -p "${SCRIPT_DIR}/static/boris"
 cp "${SCRIPT_DIR}/data/manifest.json" "${SCRIPT_DIR}/data/graph.json" "${SCRIPT_DIR}/data/build-report.json" "${SCRIPT_DIR}/static/boris/"
 
+# Content-local page assets: Boris publishes them into the body feed under
+# {entity_id}.assets/ (content-local-assets.md). Copy those trees to static/
+# so the page-relative URLs (e.g. /guides/overview.assets/spike.svg) resolve
+# in the Svelte app. No-op when the corpus has no assets. See the experiment
+# report — consumer glue, not a Boris gap.
+while IFS= read -r d; do
+  rel="${d#"${SCRIPT_DIR}/data/bodies/"}"
+  mkdir -p "${SCRIPT_DIR}/static/$(dirname "${rel}")"
+  cp -R "${d}" "${SCRIPT_DIR}/static/$(dirname "${rel}")/"
+done < <(find "${SCRIPT_DIR}/data/bodies" -type d -name '*.assets' 2>/dev/null)
+
 echo "ok: Boris IR + body fragments -> ${DATA_REL}, published to static/boris"

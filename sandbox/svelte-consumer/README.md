@@ -20,6 +20,9 @@ IR, and every rendered paragraph comes from a Boris-rendered body fragment.
 
 > Agent handoff: the compressed report for other sessions lives at
 > [`docs/spikes/svelte-consumer.md`](../../docs/spikes/svelte-consumer.md).
+> Round-2 experiment (interactive overlay, persistence, content-edit rebuild,
+> state/content independence, page-local assets):
+> [`EXPERIMENT-REPORT.md`](EXPERIMENT-REPORT.md).
 
 ---
 

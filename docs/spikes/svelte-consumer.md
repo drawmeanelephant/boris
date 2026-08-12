@@ -9,8 +9,11 @@ for future work.
 
 **Source of truth:** this file (`docs/spikes/svelte-consumer.md`) +
 `sandbox/svelte-consumer/README.md` (full friction log, assessment,
-reproduction). This file is the compressed handoff; the sandbox is the
-working artifact and may be deleted after the evidence is absorbed.
+reproduction) + `sandbox/svelte-consumer/EXPERIMENT-REPORT.md` (round 2:
+interactive overlay, persistence, content-edit rebuild, state/content
+independence, page-local assets). This file is the compressed handoff; the
+sandbox is the working artifact and may be deleted after the evidence is
+absorbed.
 
 ---
 
