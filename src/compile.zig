@@ -36,7 +36,7 @@ const std = @import("std");
 const Io = std.Io;
 const page_mod = @import("page.zig");
 const parser = @import("parser.zig");
-const apex = @import("apex.zig");
+const render = @import("render.zig");
 const assemble = @import("assemble.zig");
 const scanner = @import("scanner.zig");
 const identity = @import("identity.zig");
@@ -2310,10 +2310,9 @@ fn compilePagesInner(
             if (rewritten.ptr != body_for_wiki.ptr) gpa.free(rewritten);
         }
 
-        var inc_with_ref = try gpa.alloc([]const u8,
-            inc_views.len +
-                (if (ref_material.len > 0) @as(usize, 1) else 0) +
-                (if (relation_material.len > 0) @as(usize, 1) else 0));
+        var inc_with_ref = try gpa.alloc([]const u8, inc_views.len +
+            (if (ref_material.len > 0) @as(usize, 1) else 0) +
+            (if (relation_material.len > 0) @as(usize, 1) else 0));
         defer gpa.free(inc_with_ref);
         @memcpy(inc_with_ref[0..inc_views.len], inc_views);
         var inc_with_ref_count = inc_views.len;
@@ -2969,7 +2968,7 @@ pub fn observeWhiteboardLifecycle(
     while (i < small_pages) : (i += 1) {
         const a = arena.allocator();
         const md = try std.fmt.allocPrint(a, "# p{d}\n\nsmall body {d}\n", .{ i, i });
-        _ = try apex.render(md, &arena);
+        _ = try render.render(md, &arena);
         _ = arena.reset(.free_all);
     }
     const after_small = arena.queryCapacity();
@@ -2983,7 +2982,7 @@ pub fn observeWhiteboardLifecycle(
         while (filled < large_body_bytes) : (filled += line.len) {
             try md.appendSlice(a, line);
         }
-        _ = try apex.render(md.items, &arena);
+        _ = try render.render(md.items, &arena);
     }
     const peak_large = arena.queryCapacity();
     _ = arena.reset(.free_all);
@@ -3296,7 +3295,7 @@ test "valid layout output equals prefix + rendered html + suffix" {
     // test builds the oracle the same way for equality only).
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
-    const body_html = try apex.render("# Home\n\nHello **world**.\n", &arena);
+    const body_html = try render.render("# Home\n\nHello **world**.\n", &arena);
     const expected = try std.fmt.allocPrint(gpa, "{s}{s}{s}", .{ layout.prefix, body_html.bytes, layout.suffix });
     defer gpa.free(expected);
     try std.testing.expectEqualStrings(expected, got);
@@ -3333,9 +3332,9 @@ test "--timings recorder observes HTML publication phases" {
 
     // Every HTML publication phase ran and recorded elapsed time.
     const phases = [_]timings.Phase{
-        .scan,            .parse,        .graph_validate, .dependency_resolve,
-        .heading_harvest, .fingerprint,  .render,         .search,
-        .link_audit,      .inventory,    .checks,         .claims,
+        .scan,            .parse,       .graph_validate, .dependency_resolve,
+        .heading_harvest, .fingerprint, .render,         .search,
+        .link_audit,      .inventory,   .checks,         .claims,
         .touches,         .proof_pack,
     };
     for (phases) |phase| {
@@ -3817,10 +3816,8 @@ test "HTML semantic relation and backlink slots use canonical nested hrefs" {
     try cwd.createDirPath(io, work);
 
     try writeTreeFile(io, work, "theme/layouts/main.html", "<main>{{content}}</main>");
-    try writeTreeFile(io, work, "theme/layouts/relations.html",
-        "<main>{{relations}}{{backlinks}}{{content}}</main>");
-    try writeTreeFile(io, work, "content/guides/source.md",
-        "---\ntitle: Source\nrelations: [supersedes=reference/spec, verified_by=reference/spec]\n---\n\n# Source\n");
+    try writeTreeFile(io, work, "theme/layouts/relations.html", "<main>{{relations}}{{backlinks}}{{content}}</main>");
+    try writeTreeFile(io, work, "content/guides/source.md", "---\ntitle: Source\nrelations: [supersedes=reference/spec, verified_by=reference/spec]\n---\n\n# Source\n");
     try writeTreeFile(io, work, "content/reference/spec.md", "---\ntitle: Specification\n---\n\n# Spec\n");
     try writeTreeFile(io, work, "content/control.md", "---\ntitle: Control\n---\n\n# Control\n");
 
@@ -3877,8 +3874,7 @@ test "incremental semantic backlink material dirties only affected relation page
 
     try writeTreeFile(io, work, "theme/layouts/main.html", "<main>{{content}}</main>");
     try writeTreeFile(io, work, "theme/layouts/relations.html", "<main>{{relations}}{{backlinks}}{{content}}</main>");
-    try writeTreeFile(io, work, "content/guides/source.md",
-        "---\ntitle: Source\nrelations: [verified_by=reference/spec]\n---\n\n# Source\n");
+    try writeTreeFile(io, work, "content/guides/source.md", "---\ntitle: Source\nrelations: [verified_by=reference/spec]\n---\n\n# Source\n");
     try writeTreeFile(io, work, "content/reference/spec.md", "---\ntitle: Specification\n---\n\n# Spec\n");
     try writeTreeFile(io, work, "content/control.md", "---\ntitle: Control\n---\n\n# Control\n");
 
@@ -3905,8 +3901,7 @@ test "incremental semantic backlink material dirties only affected relation page
 
     try std.testing.expectEqual(@as(usize, 3), (try compileHtmlSite(io, gpa, options)).pages_written);
     try std.testing.expectEqual(@as(usize, 0), (try compileHtmlSite(io, gpa, options)).pages_written);
-    try writeTreeFile(io, work, "content/guides/source.md",
-        "---\ntitle: Source\nrelations: [validated_by=reference/spec]\n---\n\n# Source\n");
+    try writeTreeFile(io, work, "content/guides/source.md", "---\ntitle: Source\nrelations: [validated_by=reference/spec]\n---\n\n# Source\n");
     try std.testing.expectEqual(@as(usize, 2), (try compileHtmlSite(io, gpa, options)).pages_written);
 }
 

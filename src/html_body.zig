@@ -8,7 +8,7 @@ const std = @import("std");
 const Io = std.Io;
 const parser = @import("parser.zig");
 const aside = @import("aside.zig");
-const apex = @import("apex.zig");
+const render = @import("render.zig");
 const graph_mod = @import("graph.zig");
 const identity = @import("identity.zig");
 const include_mod = @import("include.zig");
@@ -200,7 +200,7 @@ pub fn renderSource(
         switch (seg) {
             .markdown => |md| {
                 if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
-                const h = try apex.render(md, doc_arena);
+                const h = try render.render(md, doc_arena);
                 try html_buf.appendSlice(arena, h.bytes);
             },
             .aside => |component| {
