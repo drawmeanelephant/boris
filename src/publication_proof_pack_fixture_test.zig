@@ -108,7 +108,7 @@ fn overallStatus(root: std.json.ObjectMap) []const u8 {
 /// emitted by this first Proof Pack implementation (PR #299). The golden pins
 /// the full report bytes and their SHA-256; a byte change is a breaking
 /// presentation change and must be deliberate.
-const poisoned_golden_sha256 = "86f2be6190df952bd98acb1ef14cbe0557120e52edf7f2a2f6375fe02c9d2dd7";
+const poisoned_golden_sha256 = "f2ebe3101f1a022c2cb006f6b7a2ea0f48e9dfacdd474e30ed1b7a3fc197316d";
 const poisoned_golden_len: usize = 50426;
 
 test "poisoned publication derives a deterministic Proof Pack with findings" {

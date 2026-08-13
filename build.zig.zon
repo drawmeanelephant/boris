@@ -3,7 +3,12 @@
     .version = "0.8.1",
     .fingerprint = 0x6cd378330da76efc, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
-    .dependencies = .{},
+    .dependencies = .{
+        .oliver = .{
+            .url = "https://github.com/drawmeanelephant/oliver/archive/872b002.tar.gz",
+            .hash = "oliver-0.0.0-LOsZkNXyFQBUPCi88goqzMEzB1Buat5HZhgs7-cg9ztM",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",

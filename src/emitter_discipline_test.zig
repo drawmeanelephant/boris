@@ -145,8 +145,7 @@ const modules = [_]Module{
         .note = "review tar of already-emitted IR and RAG artifacts",
     } } },
 
-    .{ .name = "apex.zig", .class = .other },
-    .{ .name = "apex_hostile_test.zig", .class = .other },
+    .{ .name = "render.zig", .class = .other },
     .{ .name = "artifact_invariants.zig", .class = .other },
     .{ .name = "aside.zig", .class = .other },
     .{ .name = "assemble.zig", .class = .other },

@@ -19,7 +19,7 @@
 //! | `default_seed` | `0xB0B15_F027` | Deterministic PRNG seed |
 //! | `frontmatter_iters` | 256 | Frontmatter fuzz iterations |
 //! | `component_iters` | 256 | Component fuzz iterations |
-//! | `apex_iters` | 128 | Apex fuzz iterations |
+//! | `render_iters` | 128 | Renderer fuzz iterations |
 //! | `graph_iters` | 200 | Random graph topologies |
 //! | `max_input_bytes` | 512 | Max random payload size |
 //! | `max_graph_nodes` | 12 | Max nodes per random graph |
@@ -33,7 +33,7 @@
 const std = @import("std");
 const parser = @import("parser.zig");
 const aside = @import("aside.zig");
-const apex = @import("apex.zig");
+const render = @import("render.zig");
 const graph_mod = @import("graph.zig");
 const diag = @import("diag.zig");
 
@@ -43,7 +43,7 @@ pub const default_seed: u64 = 0xB0B15_F027;
 
 pub const frontmatter_iters: usize = 256;
 pub const component_iters: usize = 256;
-pub const apex_iters: usize = 128;
+pub const render_iters: usize = 128;
 pub const graph_iters: usize = 200;
 pub const max_input_bytes: usize = 512;
 pub const max_graph_nodes: usize = 12;
@@ -240,10 +240,10 @@ test "fuzz: component tokenizer bounded (deterministic seed)" {
 }
 
 // ---------------------------------------------------------------------------
-// Apex fuzz — pointer/length contracts + no crash on bounded input
+// Renderer fuzz — no crash on bounded input (Oliver-backed seam)
 // ---------------------------------------------------------------------------
 
-pub fn runApexFuzz(seed: u64, iterations: usize) !void {
+pub fn runRenderFuzz(seed: u64, iterations: usize) !void {
     const gpa = std.testing.allocator;
     var prng = std.Random.DefaultPrng.init(seed ^ 0xA9E5);
     const random = prng.random();
@@ -252,26 +252,11 @@ pub fn runApexFuzz(seed: u64, iterations: usize) !void {
     defer arena.deinit();
     var buf: [max_input_bytes]u8 = undefined;
 
-    // Contract: empty uses non-null sentinel.
-    {
-        const prep = try apex.prepareMdForC(&.{});
-        try std.testing.expect(@intFromPtr(prep.ptr) != 0);
-        try std.testing.expectEqual(@as(usize, 0), prep.len);
-    }
-
-    // Contract: mapRenderResult never slices dirty error outputs.
-    {
-        var poison = [_]u8{ 0xDE, 0xAD };
-        try std.testing.expectError(error.OutOfMemory, apex.mapRenderResult(2, &poison, 99));
-        try std.testing.expectError(error.RenderFailed, apex.mapRenderResult(1, &poison, 99));
-        try std.testing.expectError(error.RenderFailed, apex.mapRenderResult(0, null, 5));
-    }
-
     var i: usize = 0;
     while (i < iterations) : (i += 1) {
         _ = arena.reset(.free_all);
         const n = random.intRangeAtMost(usize, 0, max_input_bytes);
-        // Apex is byte-oriented; random bytes are allowed.
+        // The renderer is byte-oriented; random bytes are allowed.
         random.bytes(buf[0..n]);
         // Occasional structured markdown.
         const md: []const u8 = if (i % 3 == 0) blk: {
@@ -280,19 +265,16 @@ pub fn runApexFuzz(seed: u64, iterations: usize) !void {
             break :blk buf[0..s.len];
         } else buf[0..n];
 
-        const prep = try apex.prepareMdForC(md);
-        try std.testing.expect(@intFromPtr(prep.ptr) != 0);
-        try std.testing.expectEqual(md.len, prep.len);
-
-        // Render must not crash; OOM / RenderFailed are acceptable.
-        _ = apex.render(md, &arena) catch |err| switch (err) {
-            error.OutOfMemory, error.RenderFailed => {},
+        // Render must not crash; OOM / InputTooLarge / writer failures are
+        // acceptable.
+        _ = render.render(md, &arena) catch |err| switch (err) {
+            error.OutOfMemory, error.InputTooLarge, error.WriteFailed, error.NoSpaceLeft => {},
         };
     }
 }
 
-test "fuzz: apex bounded no-crash + pointer contracts (deterministic seed)" {
-    try runApexFuzz(default_seed, apex_iters);
+test "fuzz: renderer bounded no-crash (deterministic seed)" {
+    try runRenderFuzz(default_seed, render_iters);
 }
 
 // ---------------------------------------------------------------------------

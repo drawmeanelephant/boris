@@ -2,37 +2,34 @@ const std = @import("std");
 
 /// Boris build graph.
 /// Product CLI: typed options + IR pipeline (m6) + RAG export (m7) +
-/// scanner/parser (m4–m5). Milestone 8: in-process Apex C ABI (linked; not
-/// default IR/RAG path). Milestone 9: experimental HTML assemble/compile tests
-/// (not default CLI). Milestone 10: Aside tokenizer + hardening. Fixture
+/// scanner/parser (m4–m5). Milestone 9: HTML assemble/compile tests (not
+/// default CLI). Milestone 10: Aside tokenizer + hardening. Fixture
 /// inventory (m2). Separate tools: `boris-source-rag`, `boris-package`.
+/// Markdown → HTML rendering is delegated to the Oliver library (pinned in
+/// build.zig.zon; see docs/contracts/oliver-renderer.md).
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    // Feature 1: build static ApexMarkdown (cmake host tool only).
-    // Host ABI: vendor/apex; engine: vendor/apex-markdown (see VENDOR.md).
-    // Script always runs (side effects) but exits immediately when the D3 stamp
-    // and static archives are current — avoids full cmake on every zig build.
-    // D2: script forces no system libyaml (see scripts/build-apex-markdown.sh).
-    const ensure_apex = b.addSystemCommand(&.{
-        "bash",
-        "scripts/build-apex-markdown.sh",
+    // Oliver: freestanding Zig markup library (source bytes → typed document
+    // → deterministic HTML). Pinned by content hash in build.zig.zon; see
+    // docs/contracts/oliver-renderer.md for the exact revision and the
+    // upgrade procedure. No libc, no host tools, no global state.
+    const oliver_dep = b.dependency("oliver", .{
+        .target = target,
+        .optimize = optimize,
     });
-    ensure_apex.setCwd(b.path("."));
-    ensure_apex.has_side_effects = true;
-    const build_apex_step = b.step(
-        "build-apex",
-        "Build ApexMarkdown static libraries via CMake (host tool: cmake)",
-    );
-    build_apex_step.dependOn(&ensure_apex.step);
+    const oliver_mod = oliver_dep.module("oliver");
 
-    // build_options: hostile_apex swaps the C engine for ABI hostility tests.
-    const apex_opts = b.addOptions();
-    apex_opts.addOption(bool, "hostile_apex", false);
-
-    const hostile_opts = b.addOptions();
-    hostile_opts.addOption(bool, "hostile_apex", true);
+    // Boris's single Markdown → HTML rendering seam. Modules that transitively
+    // import it also import "oliver" (linkOliver below): a relative
+    // @import("render.zig") resolves in the importing module's context.
+    const render_mod = b.createModule(.{
+        .root_source_file = b.path("src/render.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "oliver", .module = oliver_mod }},
+    });
 
     // --- Product CLI (milestone 6 IR surface + m8 Apex link) --------------
     const root_mod = b.createModule(.{
@@ -40,9 +37,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    // Linked into the process for the C ABI surface; default CLI does not call Apex.
-    linkApex(root_mod, b, false);
-    root_mod.addOptions("build_options", apex_opts);
+    linkOliver(root_mod, oliver_mod);
 
     const exe = b.addExecutable(.{
         .name = "boris",
@@ -121,8 +116,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkApex(pipeline_mod, b, false);
-    pipeline_mod.addOptions("build_options", apex_opts);
+    linkOliver(pipeline_mod, oliver_mod);
     const pipeline_tests = b.addTest(.{
         .root_module = pipeline_mod,
     });
@@ -135,8 +129,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkApex(publication_profile_mod, b, false);
-    publication_profile_mod.addOptions("build_options", apex_opts);
+    linkOliver(publication_profile_mod, oliver_mod);
     const publication_profile_tests = b.addTest(.{ .root_module = publication_profile_mod });
     const run_publication_profile_tests = b.addRunArtifact(publication_profile_tests);
     run_publication_profile_tests.setCwd(b.path("."));
@@ -164,8 +157,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkApex(publication_plan_mod, b, false);
-    publication_plan_mod.addOptions("build_options", apex_opts);
+    linkOliver(publication_plan_mod, oliver_mod);
     const publication_plan_tests = b.addTest(.{ .root_module = publication_plan_mod });
     const run_publication_plan_tests = b.addRunArtifact(publication_plan_tests);
     run_publication_plan_tests.setCwd(b.path("."));
@@ -359,8 +351,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkApex(aside_mod, b, false);
-    aside_mod.addOptions("build_options", apex_opts);
+    linkOliver(aside_mod, oliver_mod);
     const aside_tests = b.addTest(.{
         .root_module = aside_mod,
     });
@@ -373,29 +364,24 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkApex(rag_mod, b, false);
-    rag_mod.addOptions("build_options", apex_opts);
+    linkOliver(rag_mod, oliver_mod);
     const rag_tests = b.addTest(.{
         .root_module = rag_mod,
     });
     const run_rag_tests = b.addRunArtifact(rag_tests);
     run_rag_tests.setCwd(b.path("."));
 
-    // --- Apex C ABI tests (milestone 8) ------------------------------------
-    // Direct @cImport binding tests against the real vendor engine.
-    const apex_mod = b.createModule(.{
-        .root_source_file = b.path("src/apex.zig"),
-        .target = target,
-        .optimize = optimize,
+    // --- Oliver rendering seam tests -------------------------------------
+    const render_tests = b.addTest(.{
+        .root_module = render_mod,
     });
-    linkApex(apex_mod, b, false);
-    apex_mod.addOptions("build_options", apex_opts);
-
-    const apex_tests = b.addTest(.{
-        .root_module = apex_mod,
-    });
-    const run_apex_tests = b.addRunArtifact(apex_tests);
-    run_apex_tests.setCwd(b.path("."));
+    const run_render_tests = b.addRunArtifact(render_tests);
+    run_render_tests.setCwd(b.path("."));
+    const test_render_step = b.step(
+        "test-render",
+        "Run Oliver-backed Markdown rendering seam tests",
+    );
+    test_render_step.dependOn(&run_render_tests.step);
 
     // --- Experimental HTML assemble + whiteboard compile (milestone 9) -----
     // Not on the default IR/RAG CLI path; tests only.
@@ -457,8 +443,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkApex(compile_mod, b, false);
-    compile_mod.addOptions("build_options", apex_opts);
+    linkOliver(compile_mod, oliver_mod);
     const compile_tests = b.addTest(.{
         .root_module = compile_mod,
     });
@@ -477,8 +462,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkApex(scale_smoke_mod, b, false);
-    scale_smoke_mod.addOptions("build_options", apex_opts);
+    linkOliver(scale_smoke_mod, oliver_mod);
     const scale_smoke_tests = b.addTest(.{
         .root_module = scale_smoke_mod,
     });
@@ -489,79 +473,6 @@ pub fn build(b: *std.Build) void {
         "Run opt-in 200-page incremental HTML scale smoke",
     );
     test_scale_smoke_step.dependOn(&run_scale_smoke_tests.step);
-
-    // Hostile Apex double: Zig wrapper imports a named "apex" module that
-    // links apex_hostile.c (never the product binary).
-    const apex_hostile_lib_mod = b.createModule(.{
-        .root_source_file = b.path("src/apex.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    linkApex(apex_hostile_lib_mod, b, true);
-    apex_hostile_lib_mod.addOptions("build_options", hostile_opts);
-
-    const apex_hostile_root = b.createModule(.{
-        .root_source_file = b.path("src/apex_hostile_test.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "apex", .module = apex_hostile_lib_mod },
-        },
-    });
-
-    const apex_hostile_tests = b.addTest(.{
-        .root_module = apex_hostile_root,
-    });
-    const run_apex_hostile_tests = b.addRunArtifact(apex_hostile_tests);
-    run_apex_hostile_tests.setCwd(b.path("."));
-
-    const test_apex_hostile_step = b.step(
-        "test-apex-hostile",
-        "Run Apex Zig wrapper tests against the hostile C ABI double",
-    );
-    test_apex_hostile_step.dependOn(&run_apex_hostile_tests.step);
-
-    // Optional ASan+UBSan C smoke (host adapter + real ApexMarkdown, not product binary).
-    // Hosts without sanitizer runtime get a documented skip (exit 0), not a fake pass.
-    const sanitize_step = b.step(
-        "test-apex-sanitize",
-        "Optional ASan+UBSan smoke for vendor/apex adapter (skips if unavailable)",
-    );
-    const sanitize_run = b.addSystemCommand(&.{
-        "bash",
-        "-c",
-        \\set -euo pipefail
-        \\OUT="${TMPDIR:-/tmp}/boris-apex-sanitize-smoke-$$"
-        \\LOG="${TMPDIR:-/tmp}/boris-apex-sanitize-build-$$.log"
-        \\cleanup() { rm -f "$OUT" "$LOG"; }
-        \\trap cleanup EXIT
-        \\bash scripts/build-apex-markdown.sh >/dev/null
-        \\if ! zig cc -std=c11 -fsanitize=address,undefined -fno-omit-frame-pointer -g \
-        \\    -I vendor/apex \
-        \\    -I vendor/apex-markdown/include \
-        \\    -I vendor/apex-markdown/vendor/cmark-gfm/src \
-        \\    -I vendor/apex-markdown/build/vendor/cmark-gfm/src \
-        \\    vendor/apex/apex.c vendor/apex/apex_sanitize_smoke.c \
-        \\    vendor/apex-markdown/build/libapex.a \
-        \\    vendor/apex-markdown/build/vendor/cmark-gfm/extensions/libcmark-gfm-extensions.a \
-        \\    vendor/apex-markdown/build/vendor/cmark-gfm/src/libcmark-gfm.a \
-        \\    -o "$OUT" >"$LOG" 2>&1; then
-        \\  echo "test-apex-sanitize: NOT AVAILABLE on this host (sanitizer build failed)"
-        \\  echo "--- zig cc log (first 40 lines) ---"
-        \\  head -40 "$LOG" || true
-        \\  if [ "${BORIS_REQUIRE_SANITIZE:-}" = "1" ]; then
-        \\    echo "BORIS_REQUIRE_SANITIZE=1: failing (not a documented skip)."
-        \\    exit 1
-        \\  fi
-        \\  echo "Documented skip — not counted as a green sanitizer run."
-        \\  exit 0
-        \\fi
-        \\echo "test-apex-sanitize: running ASan+UBSan smoke..."
-        \\"$OUT"
-        \\echo "test-apex-sanitize: ok"
-    });
-    sanitize_run.setCwd(b.path("."));
-    sanitize_step.dependOn(&sanitize_run.step);
 
     // --- Standalone source RAG tool (not product pipeline) -----------------
     const source_rag_mod = b.createModule(.{
@@ -599,8 +510,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkApex(hardening_mod, b, false);
-    hardening_mod.addOptions("build_options", apex_opts);
+    linkOliver(hardening_mod, oliver_mod);
     const hardening_tests = b.addTest(.{
         .root_module = hardening_mod,
     });
@@ -613,8 +523,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkApex(ir_schema_mod, b, false);
-    ir_schema_mod.addOptions("build_options", apex_opts);
+    linkOliver(ir_schema_mod, oliver_mod);
     const ir_schema_tests = b.addTest(.{
         .root_module = ir_schema_mod,
     });
@@ -632,8 +541,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkApex(layout_hostile_mod, b, false);
-    layout_hostile_mod.addOptions("build_options", apex_opts);
+    linkOliver(layout_hostile_mod, oliver_mod);
     const layout_hostile_tests = b.addTest(.{
         .root_module = layout_hostile_mod,
     });
@@ -651,8 +559,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkApex(fuzz_mod, b, false);
-    fuzz_mod.addOptions("build_options", apex_opts);
+    linkOliver(fuzz_mod, oliver_mod);
     const fuzz_tests = b.addTest(.{
         .root_module = fuzz_mod,
     });
@@ -666,8 +573,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkApex(package_mod, b, false);
-    package_mod.addOptions("build_options", apex_opts);
+    linkOliver(package_mod, oliver_mod);
 
     const package_exe = b.addExecutable(.{
         .name = "boris-package",
@@ -1014,8 +920,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkApex(emitter_hostile_mod, b, false);
-    emitter_hostile_mod.addOptions("build_options", apex_opts);
+    linkOliver(emitter_hostile_mod, oliver_mod);
     const emitter_hostile_tests = b.addTest(.{ .root_module = emitter_hostile_mod });
     const run_emitter_hostile_tests = b.addRunArtifact(emitter_hostile_tests);
     run_emitter_hostile_tests.setCwd(b.path("."));
@@ -1132,7 +1037,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_graph_tests.step);
     test_step.dependOn(&run_aside_tests.step);
     test_step.dependOn(&run_rag_tests.step);
-    test_step.dependOn(&run_apex_tests.step);
+    test_step.dependOn(&run_render_tests.step);
     test_step.dependOn(&run_assemble_tests.step);
     test_step.dependOn(&run_theme_tests.step);
     test_step.dependOn(&run_content_asset_tests.step);
@@ -1166,70 +1071,13 @@ pub fn build(b: *std.Build) void {
         "Run hardening integration tests (alias subset of zig build test)",
     );
     test_harness_step.dependOn(&run_hardening_tests.step);
-
-    // Product Apex path requires cmake static libs before compile/link.
-    // Hostile double intentionally does NOT depend on or link real ApexMarkdown.
-    const apex_needing = [_]*std.Build.Step{
-        &exe.step,
-        &unit_tests.step,
-        &pipeline_tests.step,
-        &aside_tests.step,
-        &rag_tests.step,
-        &apex_tests.step,
-        &compile_tests.step,
-        &scale_smoke_tests.step,
-        &hardening_tests.step,
-        &layout_hostile_tests.step,
-        &fuzz_tests.step,
-        &emitter_hostile_tests.step,
-        &ir_schema_tests.step,
-        &package_exe.step,
-        &package_tests.step,
-        // These two call linkApex() but were absent from this list, so their
-        // test steps could be scheduled before the vendored C library finished
-        // building. On a COLD clone `zig build test` then exits 1 with
-        // "libapex.a: file not found" while reporting 6158/6158 tests passed;
-        // a second run in the same tree succeeds. First contact for a new
-        // contributor was a false build failure.
-        &publication_profile_tests.step,
-        &publication_plan_tests.step,
-    };
-    for (apex_needing) |s| s.dependOn(&ensure_apex.step);
 }
 
-/// Compile and link host Apex C into a Zig module (in-process; never a subprocess).
-///
-/// - `hostile == false`: host adapter `vendor/apex/apex.c` + static ApexMarkdown
-///   libs (libapex + cmark-gfm). Upstream headers are compile-private to the C TU.
-/// - `hostile == true`: `apex_hostile.c` only — no real ApexMarkdown.
-fn linkApex(mod: *std.Build.Module, b: *std.Build, hostile: bool) void {
-    mod.link_libc = true;
-    // Zig @cImport sees only the Boris host ABI header.
-    mod.addIncludePath(b.path("vendor/apex"));
-
-    if (!hostile) {
-        // Adapter C TU includes <apex/apex.h>; paths are LazyPath so zig cc
-        // resolves them regardless of compile cwd. Zig @cImport still only
-        // needs vendor/apex (host ABI) — do not @cInclude upstream headers.
-        mod.addIncludePath(b.path("vendor/apex-markdown/include"));
-        mod.addIncludePath(b.path("vendor/apex-markdown/vendor/cmark-gfm/src"));
-        mod.addIncludePath(b.path("vendor/apex-markdown/build/vendor/cmark-gfm/src"));
-        // Static archives from scripts/build-apex-markdown.sh:
-        mod.addObjectFile(b.path("vendor/apex-markdown/build/libapex.a"));
-        mod.addObjectFile(b.path("vendor/apex-markdown/build/vendor/cmark-gfm/extensions/libcmark-gfm-extensions.a"));
-        mod.addObjectFile(b.path("vendor/apex-markdown/build/vendor/cmark-gfm/src/libcmark-gfm.a"));
-    }
-
-    const c_file = if (hostile)
-        "vendor/apex/apex_hostile.c"
-    else
-        "vendor/apex/apex.c";
-    mod.addCSourceFile(.{
-        .file = b.path(c_file),
-        .flags = &.{
-            "-std=c11",
-            "-Wall",
-            "-Wextra",
-        },
-    });
+/// Give a module access to the Oliver library import. Every module that
+/// transitively imports `src/render.zig` needs "oliver" in its import table,
+/// because a relative `@import("render.zig")` resolves in the importing
+/// module's context. Oliver is a pure Zig library: no libc, no host tools, no
+/// global state, nothing to pre-build.
+fn linkOliver(mod: *std.Build.Module, oliver: *std.Build.Module) void {
+    mod.addImport("oliver", oliver);
 }

@@ -23,7 +23,7 @@
 //! retrieval. That form is **export-only** and **not** round-trippable source.
 
 const std = @import("std");
-const apex = @import("apex.zig");
+const render = @import("render.zig");
 
 // ---------------------------------------------------------------------------
 // Bounds / allowlists
@@ -709,7 +709,7 @@ pub fn renderHtml(a: Aside, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
     const label = kindLabel(kind, &label_buf);
 
     const inner = if (a.body.len > 0)
-        (try apex.render(a.body, doc_arena)).bytes
+        (try render.render(a.body, doc_arena)).bytes
     else
         "";
 
@@ -739,7 +739,7 @@ pub fn renderHtml(a: Aside, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
 /// The summary is intentionally emitted as escaped text, never Markdown.
 pub fn renderDetailsHtml(d: Details, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
     const arena = doc_arena.allocator();
-    const inner = if (d.body.len > 0) (try apex.render(d.body, doc_arena)).bytes else "";
+    const inner = if (d.body.len > 0) (try render.render(d.body, doc_arena)).bytes else "";
     var out: std.ArrayList(u8) = .empty;
     try out.appendSlice(arena, "<details class=\"details\"");
     if (d.id.len > 0) {
@@ -1125,7 +1125,7 @@ test "U15 Aside document order with real Apex stream" {
         switch (seg) {
             .markdown => |md| {
                 if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
-                const h = try apex.render(md, &arena);
+                const h = try render.render(md, &arena);
                 try out.appendSlice(gpa, h.bytes);
             },
             .aside => |a| {
@@ -1150,9 +1150,11 @@ test "U15 Aside document order with real Apex stream" {
     try std.testing.expect(std.mem.indexOf(u8, html, "<Aside") == null);
 }
 
-// Aside body is re-rendered via apex.render — Unified callouts must survive
-// (not double-escaped or dropped). Complements U15 table-in-Aside coverage.
-test "U15b Apex callout inside Aside body renders through" {
+// Aside body is re-rendered via render.render (the Oliver seam). Blockquote
+// bodies (including `> [!NOTE]`-style lines, which Oliver renders as ordinary
+// blockquotes, not callouts) must survive the round trip un-dropped and
+// un-double-escaped. Complements U15 table-in-Aside coverage.
+test "U15b Aside body with a blockquote renders through" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -1176,7 +1178,7 @@ test "U15b Apex callout inside Aside body renders through" {
         switch (seg) {
             .markdown => |md| {
                 if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
-                const h = try apex.render(md, &arena);
+                const h = try render.render(md, &arena);
                 try out.appendSlice(gpa, h.bytes);
             },
             .aside => |a| {
@@ -1192,12 +1194,13 @@ test "U15b Apex callout inside Aside body renders through" {
     const html = out.items;
     const i_before = std.mem.indexOf(u8, html, "BEFORE") orelse return error.TestUnexpectedResult;
     const i_tip = std.mem.indexOf(u8, html, "admonition--tip") orelse return error.TestUnexpectedResult;
-    const i_call = std.mem.indexOf(u8, html, "callout") orelse return error.TestUnexpectedResult;
     const i_body = std.mem.indexOf(u8, html, "CALL-IN-ASIDE") orelse return error.TestUnexpectedResult;
     const i_after = std.mem.indexOf(u8, html, "AFTER") orelse return error.TestUnexpectedResult;
     try std.testing.expect(i_before < i_tip);
-    try std.testing.expect(i_tip < i_call);
-    try std.testing.expect(i_call < i_body or i_tip < i_body);
+    // The `[!NOTE]` marker is ordinary blockquote text under Oliver (no
+    // callout transformation), but the marker and body must survive.
+    try std.testing.expect(std.mem.indexOf(u8, html, "[!NOTE]") != null);
+    try std.testing.expect(i_tip < i_body);
     try std.testing.expect(i_body < i_after);
     try std.testing.expect(std.mem.indexOf(u8, html, "id=\"t-call\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "<Aside") == null);
