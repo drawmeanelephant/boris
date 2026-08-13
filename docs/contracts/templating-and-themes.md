@@ -9,7 +9,7 @@ per §12.
 **Authority:** normative for the F9.1/F9.2 HTML theme path. Subordinate contracts:
 [HTML output](html-output.md), [multi-target](multi-target-isolated-output.md),
 [identity/path](identity-and-paths.md). Does not change frontmatter grammar,
-IR `schemaVersion`, or the Apex trust model.
+IR `schemaVersion`, or the raw-HTML trust model.
 
 This design keeps Boris as a Zig compiler that emits static HTML. It adds no
 MDX, JavaScript execution, runtime hydration, child-process renderer, live CDN,
@@ -26,7 +26,7 @@ small, closed template vocabulary plus explicit static asset ownership.
 The design has four boundaries:
 
 1. Markdown, frontmatter, graph validation, includes, wiki-links, Aside tokens,
-   and Apex remain the existing pipeline.
+   and rendering remain the existing pipeline.
 2. A layout is trusted static HTML with named Boris insertion points. It is not
    a programming language: no conditionals, loops, expressions, arbitrary
    partial calls, or user-defined functions.
@@ -76,11 +76,11 @@ page. Every known marker may occur at most once.
 
 | Marker | Required | Value and escaping |
 |---|---:|---|
-| `{{content}}` | yes | Rendered Apex Markdown and ordered Aside HTML. Raw HTML behavior remains the current trusted-author behavior. |
+| `{{content}}` | yes | Rendered Markdown (Oliver) and ordered Aside HTML. Raw HTML behavior remains the current trusted-author behavior. |
 | `{{title}}` | no | Page `title`, or entity id when the title is absent; HTML-escaped text. |
 | `{{nav}}` | no | Deterministic graph forest from the frozen Trunk/Satellite graph; generated HTML as in `html-output.md`. |
 | `{{breadcrumb}}` | no | Root-to-current graph chain; generated HTML as in `html-output.md`. |
-| `{{toc}}` | no | Page-local h1–h3 outline from Apex-emitted heading ids; generated HTML as in `html-output.md`. |
+| `{{toc}}` | no | Page-local h1–h3 outline from Oliver-emitted heading ids; generated HTML as in `html-output.md`. |
 | `{{children}}` | no | Deterministic direct-child list from the frozen graph; title-or-id labels and links are escaped, and childless pages emit empty. No recursive graph semantics or query language is introduced. |
 | `{{metadata}}` | no | Boris-generated page metadata fragment. Only current closed frontmatter fields are represented; text and attribute values are escaped. |
 | `{{relations}}` | no | Current page's outgoing validated semantic relations with canonical links and stable kind attributes/classes; empty when none. |
@@ -288,7 +288,7 @@ changing the existing cache namespace rules.
 ## 7. Trust, raw HTML, and external stylesheets
 
 Boris currently documents the HTML path as intended for trusted authors, and
-Apex may pass raw HTML through. A theme layout and `footer.html` are also
+The renderer passes raw HTML through. A theme layout and `footer.html` are also
 trusted build inputs. F9 must not advertise them as a sanitizer or security
 boundary.
 
@@ -402,7 +402,7 @@ Migration is deliberately additive:
    and fixture goldens are implemented. A missing optional marker does not
    force every existing layout to change.
 6. Keep the existing Trunk/Satellite graph, `parent` key, output path rules,
-   Aside stream, Apex in-process adapter, and target staging/cache behavior.
+   Aside stream, the Oliver seam, and target staging/cache behavior.
 
 No migration step changes author frontmatter or requires a JavaScript build
 stage. A legacy layout with direct relative `href` values may continue to
@@ -429,7 +429,7 @@ assets/css/docs.css              byte-identical to the theme input
 ```
 
 Generated title, labels, tags, and ids are escaped. The page body preserves
-the existing Apex/Aside behavior.
+the existing render/Aside behavior.
 
 ### Selection and isolation
 

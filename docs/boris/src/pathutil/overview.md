@@ -48,7 +48,7 @@ What this file does **not** provide: new behavior, additive API surface, guards,
 
 ## Role in the Boris architecture
 
-`src/pathutil.zig` sits between legacy call sites and the canonical identity subsystem. It has no relationship to ApexMarkdown, the C ABI, `src/apex.zig`, or any hostile test infrastructure. It is not a test file and is not linked into any test-only build step.
+`src/pathutil.zig` sits between legacy call sites and the canonical identity subsystem. It has no relationship to the Oliver-backed rendering seam (`src/render.zig`). It is not a test file and is not linked into any test-only build step.
 
 **Relative to the product binary:** The file is compiled into the main build whenever any production module imports it. Because it re-exports `identity.zig` symbols verbatim, its presence in the binary is architecturally equivalent to those call sites importing `identity.zig` directly. It introduces no additional code size beyond what `identity.zig` would already contribute.
 

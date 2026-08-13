@@ -5,7 +5,7 @@
 //! published site could not serve never reaches published output.
 //!
 //! This is deliberately separate from `doclink.zig`. That module rewrites
-//! recognized inline Markdown link destinations before Apex and, per
+//! recognized inline Markdown link destinations before the renderer and, per
 //! `docs/contracts/documentation-links.md`, leaves missing targets byte-for-byte
 //! unchanged. Nothing here rewrites anything: it inspects generated HTML and
 //! reports what the published site would actually serve. The rewrite boundary
@@ -58,7 +58,7 @@ pub const Options = struct {
     /// storage. Never used for decisions.
     fast_path_counter: ?*u64 = null,
     /// Opt out of failing the build on a local Markdown destination the
-    /// pre-Apex rewriter deliberately left literal.
+    /// pre-render rewriter deliberately left literal.
     ///
     /// `docs/contracts/documentation-links.md` guarantees that a recognized
     /// Markdown destination with no graph target stays byte-for-byte unchanged.
@@ -272,7 +272,7 @@ fn appendPublicationFinding(
     try appendFinding(gpa, findings, .EPUBLICATIONLOCATION, source_path, target, line, attribute);
 }
 
-/// Extensions the pre-Apex rewriter recognizes as Markdown destinations. Kept in
+/// Extensions the pre-render rewriter recognizes as Markdown destinations. Kept in
 /// step with `doclink.zig`: the opt-out must cover exactly the class the rewriter
 /// may leave literal, and nothing wider.
 fn hasMarkdownExtension(path: []const u8) bool {
@@ -590,7 +590,7 @@ test "a local Markdown destination without a published route is rejected" {
     var findings: std.ArrayList(Finding) = .empty;
     defer freeFindings(gpa, &findings);
 
-    // The pre-Apex rewriter may leave a missing `.md` target literal, but the
+    // The pre-render rewriter may leave a missing `.md` target literal, but the
     // publication audit still rejects the route the output site cannot serve.
     try auditDocumentWithOptions(gpa, &intended, "guides/start.html", "<a href=\"../reference.md?raw=true#anchor\">x</a>", .{}, &findings);
     try std.testing.expectEqual(@as(usize, 1), findings.items.len);

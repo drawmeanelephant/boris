@@ -10,12 +10,12 @@
 //!
 //! 1. **PageDb** — long-lived retain arena for narrowly promoted metadata only
 //!    (`entity_id`, `title`, `parent`, paths, tags, …). Never stores slices into
-//!    source buffers, parser views, Apex HTML, or writer buffers.
+//!    source buffers, parser views, rendered HTML, or writer buffers.
 //! 2. **Whiteboard** — per-page `std.heap.ArenaAllocator`. Source bytes, parse
-//!    scratch, and Apex HTML live only here.
+//!    scratch, and rendered HTML live only here.
 //! 3. After each page (success **or** error): `arena.reset(.free_all)`, but
 //!    **only after**:
-//!    - Apex has returned;
+//!    - Oliver has returned;
 //!    - buffered writes are flushed;
 //!    - temp output is closed/finalized;
 //!    - publication attempt has finished;
@@ -297,7 +297,7 @@ pub const CompileOptions = struct {
     /// public metadata. The caller owns the pointed-to location.
     publication_location: ?*const publication_location.Location = null,
     /// Allow the output link audit to accept literal `.md`/`.mdx` hrefs that the
-    /// pre-Apex rewriter deliberately leaves in place (see
+    /// pre-render rewriter deliberately leaves in place (see
     /// docs/contracts/documentation-links.md). Off by default; suppresses only
     /// EROUTEMISSING for those extensions, never EROUTEESCAPE.
     allow_markdown_literals: bool = false,
@@ -605,7 +605,7 @@ fn renderPageSlots(
     return slots;
 }
 
-/// Render one page body through Apex into the Whiteboard and publish HTML.
+/// Render one page body through Oliver into the Whiteboard and publish HTML.
 ///
 /// Publication is deliberately a thin wrapper over `renderPageSlots` so the
 /// no-publication validator and normal HTML compiler cannot drift on source,
@@ -1409,7 +1409,7 @@ const HeadingHarvestSnapshot = struct {
 };
 
 /// Content-addressed key for a page's harvested heading ids: source + transitive
-/// include bodies + input adapter identity. Unchanged key ⇒ reusable ids without Apex.
+/// include bodies + input adapter identity. Unchanged key ⇒ reusable ids without rendering.
 fn headingHarvestKey(
     entity_id: []const u8,
     source_bytes: []const u8,
@@ -1463,13 +1463,13 @@ fn writeHeadingHarvestCache(allocator: std.mem.Allocator, writer: anytype, entri
     try writer.writeAll(buf.items);
 }
 
-/// Harvest Apex-rendered heading ids for pages that are wiki-fragment targets.
-/// Reuses the same pre-Apex + Apex body pipeline as publish (no second slugger).
+/// Harvest Oliver-rendered heading ids for pages that are wiki-fragment targets.
+/// Reuses the same pre-render + Oliver body pipeline as publish (no second slugger).
 /// Wiki fragments are emitted but not validated here (index bootstrapping).
-/// When no fragment links exist, returns an empty index (no Apex work).
+/// When no fragment links exist, returns an empty index (no render work).
 ///
 /// When `prior_harvest` is non-null (incremental) and a page's harvest key
-/// matches a prior entry, Apex is skipped for that page (#58). Callers may
+/// matches a prior entry, Oliver is skipped for that page (#58). Callers may
 /// write the returned harvest snapshot under `.boris-cache/heading-harvest.json`.
 fn buildSiteHeadingIndex(
     io: Io,
@@ -1541,7 +1541,7 @@ fn buildSiteHeadingIndex(
         );
         const key_hex = cache.hexDigest(key_bytes);
 
-        // Cache hit: reuse prior ids (no Apex).
+        // Cache hit: reuse prior ids (no re-render).
         if (prior_map.get(page.entity_id)) |prior| {
             if (std.mem.eql(u8, prior.harvest_key, &key_hex)) {
                 if (recorder) |t| t.bump(.fast_path_hits, 1);
@@ -1816,7 +1816,7 @@ fn publishStageTree(
 /// without creating or mutating its output tree.
 ///
 /// Every operation here is also an existing normal-compile operation: heading
-/// harvest and page rendering use the same body/Apex path, while layout slots,
+/// harvest and page rendering use the same body/Oliver path, while layout slots,
 /// graph chrome, theme assets, content-local assets, and sitemap bytes use the
 /// same typed helpers as publication. Rendered bytes are deliberately
 /// discarded; search, output link audit, inventories, checks, claims, Touch
@@ -2152,7 +2152,7 @@ fn compilePagesInner(
     defer {
         if (parsed_manifest) |pm| pm.deinit();
     }
-    // Prior heading-harvest cache (#58): reuse Apex ids when harvest keys match.
+    // Prior heading-harvest cache (#58): reuse rendered ids when harvest keys match.
     var heading_harvest_bytes: ?[]u8 = null;
     defer {
         if (heading_harvest_bytes) |hb| gpa.free(hb);
@@ -2186,9 +2186,9 @@ fn compilePagesInner(
         } else |_| {}
     }
 
-    // Heading id index for wiki `[[entity#heading]]` (Apex-rendered ids only;
+    // Heading id index for wiki `[[entity#heading]]` (Oliver-rendered ids only;
     // only pages that are fragment targets are rendered for the index).
-    // Incremental: reuse harvest-cache hits so no-op builds skip Apex (#58).
+    // Incremental: reuse harvest-cache hits so no-op builds skip rendering (#58).
     const prior_harvest: ?*const ParsedHeadingHarvest = if (parsed_heading_harvest) |*ph| &ph.value else null;
     if (options.timings) |t| t.start(.heading_harvest);
     const heading_built = try buildSiteHeadingIndex(
@@ -3108,7 +3108,7 @@ test "experimental flag is true (HTML path not default product)" {
     try std.testing.expect(experimental);
 }
 
-test "Textile adapter feeds the existing Apex HTML path deterministically" {
+test "Textile adapter feeds the existing Oliver HTML path deterministically" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
@@ -3291,7 +3291,7 @@ test "valid layout output equals prefix + rendered html + suffix" {
     defer gpa.free(got);
 
     const layout = try assemble.Layout.split(layout_raw);
-    // Expected = prefix + Apex(body) + suffix (no mega-string in product path;
+    // Expected = prefix + Oliver(body) + suffix (no mega-string in product path;
     // test builds the oracle the same way for equality only).
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -4124,7 +4124,7 @@ test "Feature 7 HTML: include expands and wiki becomes relative href" {
     try std.testing.expect(std.mem.indexOf(u8, page, "INCLUDED_BLURB") != null);
     try std.testing.expect(std.mem.indexOf(u8, page, "{{include") == null);
     try std.testing.expect(std.mem.indexOf(u8, page, "[[") == null);
-    // Wiki rewrite → Markdown link → Apex <a href="…">
+    // Wiki rewrite → Markdown link → Oliver <a href="…">
     try std.testing.expect(std.mem.indexOf(u8, page, "href=\"guides/note.html\"") != null);
 }
 
@@ -4369,7 +4369,7 @@ test "flush-before-reset: compile defers free_all only after writePage" {
     defer gpa.free(got);
     try std.testing.expect(std.mem.startsWith(u8, got, "H"));
     try std.testing.expect(std.mem.endsWith(u8, got, "T"));
-    // Real Apex emits header ids: <h1 id="...">
+    // Oliver emits header ids: <h1 id="...">
     try std.testing.expect(std.mem.indexOf(u8, got, "<h1") != null);
 }
 
@@ -5196,9 +5196,9 @@ test "compilePages: parallel rendering success, determinism, and error paths" {
     }
 }
 
-// D4 product-path smoke: Unified-rich pages under `--jobs` must match sequential
+// D4 product-path smoke: rich pages under `--jobs` must match sequential
 // HTML and two parallel runs must be byte-identical. Distinctive markers detect
-// cross-talk if concurrent Apex renders share mutable engine state.
+// cross-talk if concurrent Oliver renders share mutable state.
 test "compilePages: parallel Unified constructs stable under jobs (D4)" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -6526,8 +6526,8 @@ test "Feature 9 HTML: heading fragment wiki links resolve to rendered ids" {
     try std.testing.expectEqualStrings(index_html, index_inc);
 }
 
-test "Feature 9 incremental: heading harvest cache skips Apex on no-op (#58)" {
-    // Sites with [[entity#heading]] must not re-Apex every fragment target on a
+test "Feature 9 incremental: heading harvest cache skips rendering on no-op (#58)" {
+    // Sites with [[entity#heading]] must not re-render every fragment target on a
     // no-op incremental build. Cold build writes heading-harvest.json; warm
     // no-op reuses harvest keys and still emits correct fragment hrefs.
     const gpa = std.testing.allocator;
@@ -7019,7 +7019,7 @@ test "Feature 9 HTML: heading introduced by include is a valid target" {
     try std.testing.expect(std.mem.indexOf(u8, page, "href=\"index.html#from-include\"") != null);
 }
 
-test "Feature 9 HTML: no fragment links skips heading-index Apex work path" {
+test "Feature 9 HTML: no fragment links skips heading-index render work path" {
     // Regression: pages with only page-only wiki still compile; empty index ok.
     const gpa = std.testing.allocator;
     const io = std.testing.io;

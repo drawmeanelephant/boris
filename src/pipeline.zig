@@ -2,7 +2,7 @@
 //!   scan → parse frontmatter → promote PageDb → graph validate → freeze
 //!   → IR emit (`run`) or shared compile for RAG (`compile`)
 //!
-//! No HTML, layouts, or Apex on this path.
+//! No HTML, layouts, or Markdown rendering on this path.
 
 const std = @import("std");
 const Io = std.Io;
@@ -1331,7 +1331,7 @@ test "include and wiki failures prevent dependency graph freeze and publication"
 }
 
 test "Feature 9 IR: wiki fragment still emits page reference edge only" {
-    // IR does not validate heading membership (no Apex); fragment syntax must not
+    // IR does not validate heading membership (no renderer); fragment syntax must not
     // break edge projection and must not invent a new edge kind.
     const gpa = std.testing.allocator;
     const io = std.testing.io;

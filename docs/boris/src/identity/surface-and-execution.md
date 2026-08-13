@@ -69,4 +69,4 @@ The normative contract is `docs/contracts/identity-and-paths.md`. The following 
 | `stemFromSourcePath` | none (slice into argument) | n/a | Returned slice lifetime ≤ argument lifetime |
 | `htmlOutputPath` | delegates entirely to `safeOutputRelativePath` | caller |  |
 
-All allocating functions use `errdefer` or `defer` correctly to avoid leaking partial allocations on error paths. This is structurally confirmed by code inspection; leak-freedom under all error conditions is not independently verified by a sanitizer run within the `zig build test` path (the ASan/UBSan smoke target in `build.zig` targets the Apex C adapter, not this module).
+All allocating functions use `errdefer` or `defer` correctly to avoid leaking partial allocations on error paths. This is structurally confirmed by code inspection; leak-freedom under all error conditions is not independently verified by a sanitizer run within the `zig build test` path.

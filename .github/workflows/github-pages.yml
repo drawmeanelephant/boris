@@ -124,8 +124,8 @@ jobs:
           mkdir -p evidence/proof
           cp -R dist/_boris/proof/. evidence/proof/
           BORIS_VERSION="$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon | head -1)"
-          APEX_VERSION="$(sed -n 's/.*ApexMarkdown \(v[0-9.]*\) upgrade.*/\1/p' vendor/apex-markdown/VENDOR.md | head -1)"
-          APEX_VERSION="${APEX_VERSION:-unknown}"
+          OLIVER_REV="$(sed -n 's|.*oliver/archive/\([0-9a-f]\{40\}\)\.tar\.gz.*|\1|p' build.zig.zon | head -1)"
+          OLIVER_REV="${OLIVER_REV:-unknown}"
           INVENTORY_SHA256="$(jq -r '.inventory_sha256' evidence/public-artifact-verification.json)"
           PUBLIC_MANIFEST_SHA256="$(jq -r '.public_manifest_sha256' evidence/public-artifact-verification.json)"
           PUBLIC_FILES="$(jq -r '.files' evidence/public-artifact-verification.json)"
@@ -137,7 +137,7 @@ jobs:
             --arg base_path "$PAGES_BASE_PATH" \
             --arg source_commit "$GITHUB_SHA" \
             --arg boris_version "$BORIS_VERSION" \
-            --arg apex_version "$APEX_VERSION" \
+            --arg oliver_revision "$OLIVER_REV" \
             --arg workflow_ref "$GITHUB_WORKFLOW_REF" \
             --arg workflow_sha "$GITHUB_WORKFLOW_SHA" \
             --arg inventory_sha256 "$INVENTORY_SHA256" \
@@ -157,7 +157,7 @@ jobs:
               source: {commit: $source_commit},
               toolchain: {
                 boris_version: $boris_version,
-                apex_version: $apex_version,
+                oliver_revision: $oliver_revision,
                 workflow_ref: $workflow_ref,
                 workflow_sha: $workflow_sha
               },

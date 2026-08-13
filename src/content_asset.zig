@@ -506,7 +506,7 @@ fn scrubOrphanContentAssetsInner(
 }
 
 // ---------------------------------------------------------------------------
-// Markdown image rewrite (pre-Apex, fence-aware)
+// Markdown image rewrite (pre-render, fence-aware)
 // ---------------------------------------------------------------------------
 
 fn atLineStart(body: []const u8, i: usize) bool {
@@ -657,7 +657,7 @@ fn scanImages(
 
             const dest = body[dest_start..dest_end];
             if (dest.len == 0) {
-                // Empty dest — leave for Apex / later validation if local.
+                // Empty dest — leave for the renderer / later validation if local.
                 continue;
             }
             const lc = include_mod.lineColAt(body, start);

@@ -12,9 +12,9 @@ tags: [boris, zig, source-reference, surface, compile]
 
 Documented at file head and enforced by call structure:
 
-1. **PageDb** — long-lived retain arena for promoted metadata only (`entity_id`, title, parent, paths, tags, body_offset, graph role/index after freeze). No slices into source, parser views, Apex HTML, or writers.
-2. **Whiteboard** — per-page (or per-worker) `ArenaAllocator`. Source re-read, parse/render scratch, Apex HTML, slot fragments live here.
-3. **Reset** — `arena.reset(.free_all)` only after Apex returned, writes flushed, temp closed/finalized, publish attempt finished, and no caller-owned object retains Whiteboard slices. `renderAndPublishPage` never resets; callers do.
+1. **PageDb** — long-lived retain arena for promoted metadata only (`entity_id`, title, parent, paths, tags, body_offset, graph role/index after freeze). No slices into source, parser views, rendered HTML, or writers.
+2. **Whiteboard** — per-page (or per-worker) `ArenaAllocator`. Source re-read, parse/render scratch, rendered HTML, slot fragments live here.
+3. **Reset** — `arena.reset(.free_all)` only after Oliver returned, writes flushed, temp closed/finalized, publish attempt finished, and no caller-owned object retains Whiteboard slices. `renderAndPublishPage` never resets; callers do.
 4. **Layout arena** — long-lived for loaded `assemble.Layout` views for the compile.
 5. **GPA** — fingerprints hex, shared source/include bytes, staging paths, harvest snapshot, layout raw bytes, etc.
 
@@ -45,7 +45,7 @@ Tests observe Whiteboard `queryCapacity` after reset; process RSS is explicitly 
 | `compileHtmlSiteMulti` | pub | `validateTargets` → one promote/freeze/shared → preflight layout select all targets → sequential per-target compile |
 | `compilePages` / `WithSite` / `WithShared` / `WithSharedAndSite` | pub | Lower entry points into `compilePagesInner` |
 | `collectTransitIncludes` | private | DFS forward includes for fingerprint inputs |
-| `buildSiteHeadingIndex` | private | Apex harvest for fragment targets; harvest-key reuse |
+| `buildSiteHeadingIndex` | private | Oliver-rendered heading-id harvest for fragment targets; harvest-key reuse |
 | `expandDirtySet` | private | Reverse-dep expansion via `cache.getAffectedPagesIndexed` |
 | `publishStageTree` | private | Walk stage → rename into final; `CrossDevice` → copy+delete |
 | `compilePagesInner` | private | Main stage/fingerprint/render/commit/scrub engine |
@@ -58,7 +58,7 @@ Tests observe Whiteboard `queryCapacity` after reset; process RSS is explicitly 
 - Fingerprint inputs include target name, **selected** layout path/bytes, entity, source, transitive includes (sorted paths), optional site-nav material when layout has graph chrome slots, theme material, textile adapter identity when `--textile`, and wiki reference material (so title/path renames dirty linkers, including via includes).
 - Asset **bytes** are not page fingerprint inputs for content-local images in the sense that image rewrite validates every build; theme referenced asset material **is** in theme fingerprint material (tests show CSS byte change dirties HTML).
 - Dirty seeds expand through reverse dependency index (parent/include/reference) via `expandDirtySet`.
-- Heading harvest is a **separate** side-cache: key = SHA-256(entity + source + includes + input_material); hit reuses heading ids without Apex (\#58).
+- Heading harvest is a **separate** side-cache: key = SHA-256(entity + source + includes + input_material); hit reuses heading ids without re-rendering (#58).
 
 ## Staging and publication
 
@@ -93,7 +93,7 @@ Tests observe Whiteboard `queryCapacity` after reset; process RSS is explicitly 
 | Injected test failures | No final publish / cache rollback paths under test options |
 | Parallel first failure | `shared_error`; other workers stop; stage discarded on errdefer |
 
-Untested or not fully proven here: hostile Apex outputs (covered in `apex_hostile_test.zig`); full OS symlink races; concurrent multi-process writers on same dist.
+Untested or not fully proven here: renderer-seam error mapping in isolation (that is `src/render.zig`'s tests); full OS symlink races; concurrent multi-process writers on same dist.
 
 ## Ownership and allocation summary
 

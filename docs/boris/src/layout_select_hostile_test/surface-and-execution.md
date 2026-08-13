@@ -35,7 +35,7 @@ The file defends against the following categories of adversarial or erroneous in
 **Repeated-run non-determinism (H10).** Threat: timestamps, random content, or non-deterministic iteration order causes successive full builds to differ. Response required: byte-identical output trees across three independent runs; manifest unchanged across no-op incremental runs.
 
 **Categories not exercised by this file:**
-- ABI-level threats (null pointer outputs, dirty output parameters under failure, invalid lengths from the C engine) — those are in `src/apex_hostile_test.zig`.
+- Renderer-seam error mapping in isolation — that is `src/render.zig`'s own tests.
 - Concurrency or re-entrancy hazards in the compile pipeline.
 - Filesystem permission failures or partial-write scenarios during HTML output.
 - Cycle detection in the graph triggered by layout-rule inputs.

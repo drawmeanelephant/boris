@@ -169,7 +169,7 @@ host denies symlink creation (`AccessDenied` / `PermissionDenied`).
 - Frontmatter parse
 - Graph resolution / parent edges
 - Product RAG generation
-- Apex / HTML rendering
+- Renderer / HTML output
 - Concurrency / watch mode
 - mmap
 - Following any content-tree symlink

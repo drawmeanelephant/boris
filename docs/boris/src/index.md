@@ -11,8 +11,7 @@ tags: [boris, zig, source-reference, index]
 
 ## Module Reference
 
-* [[docs/boris/src/apex|`src/apex.zig` Overview]]
-* [[docs/boris/src/apex_hostile_test|`src/apex_hostile_test.zig` Overview]]
+* [[docs/boris/src/render|`src/render.zig` Overview]]
 * [[docs/boris/src/aside|`src/aside.zig` Overview]]
 * [[docs/boris/src/assemble|`src/assemble.zig` Overview]]
 * [[docs/boris/src/cache|`src/cache.zig` Overview]]

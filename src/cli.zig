@@ -100,7 +100,7 @@ pub const Options = struct {
     /// Normalized GitHub Pages publication identity for URL-bearing output.
     publication_location: ?github_pages.Location = null,
     /// Accept literal `.md`/`.mdx` hrefs in the output link audit, which the
-    /// pre-Apex rewriter deliberately leaves in place. Suppresses only
+    /// pre-render rewriter deliberately leaves in place. Suppresses only
     /// EROUTEMISSING for those extensions, never EROUTEESCAPE.
     allow_markdown_links: bool = false,
     rss_title: ?[]const u8 = null,
@@ -1150,7 +1150,7 @@ pub fn printUsage() void {
         \\  --profile PATH       Selected publication profile for `plan`
         \\  -h, --help          Show this help and exit 0
         \\
-        \\HTML artifacts (success; Apex + layout splice):
+        \\HTML artifacts (success; Oliver + layout splice):
         \\  <html-dir>/**/*.html   or   <each-target-dir>/**/*.html
         \\  <target-dir>/sitemap.xml  (with --sitemap; path configurable)
         \\  <target-dir>/.boris-cache/manifest.json  (with --incremental / --watch)

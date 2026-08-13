@@ -34,7 +34,7 @@ is valid UTF-8 **without** a leading BOM.
 ## Notes de café
 
 Prefer inspecting the rendered heading `id` before authoring fragment links.
-Diacritic stripping depends on Apex GFM id generation — see
+Diacritic stripping depends on Oliver's heading-id generation — see
 [[guides/heading-fragments]].
 
 ## Cross links

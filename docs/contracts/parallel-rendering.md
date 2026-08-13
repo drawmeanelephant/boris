@@ -48,29 +48,24 @@ On any rendering or write failure:
 - **Worker Join:** The coordinator MUST block and wait (`join`) for all currently running workers to complete before returning.
 - **Cleanup:** Only the failing operation's temporary files (created via `createFileAtomic`) are discarded. Prior successfully published files MUST remain intact. No intermediate corrupt or partially written files may be promoted.
 
-## Apex concurrency (D4) — mitigated for product options
+## Renderer concurrency (D4)
 
-Workers call in-process Apex via thread-local Whiteboards and a stack-scoped
-allocator. Boris does **not** claim a full formal proof that every ApexMarkdown
-global (extension registry, optional plugin paths) is re-entrant under
-simultaneous `apex_render` calls. Product default keeps plugins/includes/
-highlighters off (`vendor/apex/apex.c`).
-
-**Host serialization:** `apex.render` holds a process-wide mutex around the C
-`apex_render` entry point. Parallel `--jobs` workers still own independent
-Whiteboards and output paths; only engine entry is serialized. This is a
-correctness fence for the current pin, not a claim that Apex is lock-free.
+Workers render through the Oliver seam (`src/render.zig`) with thread-local
+Whiteboards. Oliver is a pure library: no global state, no extension
+registries, no hidden caches, no clock/network/filesystem access, and nothing
+retained between documents, so simultaneous renders on independent arenas are
+safe. The process-wide C-engine mutex the previous renderer required is gone;
+see [oliver-renderer.md](oliver-renderer.md).
 
 **CLI default remains `--jobs 1` (sequential).** `--jobs N` is supported and
-smoke-validated for the product Apex configuration; it is not the silent
-default, so single-thread builds stay the conservative path.
+smoke-validated; it is not the silent default, so single-thread builds stay
+the conservative path.
 
-### Permanent evidence gates (not formal proofs)
+### Permanent evidence gates
 
-- `src/apex.zig` **U18** — concurrent Unified renders vs sequential baselines +
-  cross-talk markers
-- `src/compile.zig` — `compilePages: parallel Unified constructs stable under
-  jobs (D4)` — seq vs `--jobs 8` byte-identical site HTML + dual parallel runs
+- `src/compile.zig` — `compilePages: parallel constructs stable under jobs
+  (D4)` — seq vs `--jobs 8` byte-identical site HTML + dual parallel runs
+- `src/render.zig` — dual-render byte-identical determinism test
 
-If either gate fails, treat concurrent Apex as broken for the pin under test.
-Do not advertise “fully proven thread-safe Apex” in marketing copy.
+If either gate fails, treat concurrent rendering as broken for the pin under
+test.

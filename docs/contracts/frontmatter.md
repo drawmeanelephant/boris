@@ -225,7 +225,7 @@ with no opening `---` fence.
 ## Body
 
 Everything after the closing fence (or the entire file if no frontmatter) is
-**opaque body bytes** for the metadata / IR stage. Markdown AST, Apex render,
+**opaque body bytes** for the metadata / IR stage. Markdown AST, render,
 and component tokenization (`<Aside>`) are **out of scope** for the v0.1 IR
 compiler surface.
 

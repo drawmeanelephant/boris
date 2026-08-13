@@ -25,13 +25,13 @@ const run_intelligence_tests = b.addRunArtifact(intelligence_tests);
 run_intelligence_tests.setCwd(b.path("."));
 ```
 
-No imports are declared beyond the implicit `std`. No `addOptions` call is made, so there is no `build_options` comptime configuration. `linkApex` is not called, so no C code is compiled or linked. The `ensure_apex` step (which builds ApexMarkdown via CMake) is also not a dependency of `intelligence_tests`.
+No imports are declared beyond the implicit `std`. No `addOptions` call is made, so there is no `build_options` comptime configuration. No renderer module is linked: `intelligence_tests` has no dependency on `render_mod`.
 
 The test binary is a self-contained Zig test executable whose only external dependency is `std`. It is added to the default `test_step`, meaning `zig build test` runs it unconditionally. The working directory is set to the package root, which is relevant for any test that might attempt filesystem access, though the current tests do not.
 
 The production binary (`exe`) does **not** have `intelligence_mod` as a declared import in the build configuration inspected. Whether the module is reached transitively through another module (e.g., a module not shown in `build.zig`'s top-level declarations) is **uncertain**.
 
-The hostile Apex double (`apex_hostile.c`) is irrelevant to this module and is never compiled into the intelligence test binary.
+The rendering seam (`src/render.zig`) is irrelevant to this module and is never linked into the intelligence test binary.
 
 ## Tested declarations and entry points
 
@@ -137,7 +137,7 @@ The test uses `pages = &.{}` (empty), so the interaction between hotspot detecti
 
 ```text
 zig build test
-    → intelligence_tests binary (root: src/intelligence.zig, no imports, no Apex link)
+    → intelligence_tests binary (root: src/intelligence.zig, no imports, no renderer link)
         → test "analysis distinguishes parent edges from reference edges"
             → analyze(testing.allocator, pages[^1_2], edges[^1_1]{kind="parent"}, .{})
                 → summary.pages=2, roots=1, satellites=1

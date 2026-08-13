@@ -44,4 +44,4 @@ Execution occurs as part of the normal `zig build test` run. The file's `test` b
 
 Relative to `src/assemble.zig`: `theme.zig` imports `assemble.LayoutError` to extend `ThemeError`, and calls `assemble.validateAssetUrlPath` to enforce the same ASCII path grammar on inventoried asset paths as the layout splicing layer enforces on `&#123;&#123;asset-url …&#125;&#125;` references. This ensures that an asset that passes inventory validation will also pass layout reference validation. The inline test `"validateAssetUrlPath rejects escapes and non-ASCII"` in `theme.zig` exercises `assemble.validateAssetUrlPath` directly, providing cross-module test coverage at the theme integration boundary.
 
-There is no ApexMarkdown dependency, no `src/apex.zig` import, and no C ABI involvement in this file. It is entirely Zig standard library and `assemble.zig`.
+There is no renderer dependency and no `src/render.zig` import in this file. It is entirely Zig standard library and `assemble.zig`.

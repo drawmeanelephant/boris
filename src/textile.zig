@@ -1,7 +1,7 @@
 //! Bounded Textile-to-Markdown body adapter.
 //!
 //! Normative: `docs/contracts/textile-compatibility.md`.
-//! This module is pure: no filesystem, Apex, layout, graph, or process access.
+//! This module is pure: no filesystem, rendering, layout, graph, or process access.
 
 const std = @import("std");
 

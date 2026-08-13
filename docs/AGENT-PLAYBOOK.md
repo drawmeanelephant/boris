@@ -37,14 +37,12 @@ verification command. Keep optional hardening separate.
 
 Capture the initial `git status --short`. Run the smallest relevant gates before
 an aggregate gate so one failure cannot hide others. For a microrelease, normally
-check `zig build`, `zig build test`, `zig build test-apex-hostile`,
-`zig build test-apex-sanitize`, `zig build package`, then
-`./scripts/release-gate.sh` when scope permits.
+check `zig build`, `zig build test`, `zig build test-render`, `zig build
+package`, then `./scripts/release-gate.sh` when scope permits.
 
 Distinguish product failures from environment interference. A Zig global-cache
-`PermissionDenied`, unavailable sanitizer, or denied symlink operation needs an
-allowed rerun or an explicit evidence boundary; it is not a product failure. A
-sanitizer skip is never a pass. If cleanup panics after an earlier assertion,
+`PermissionDenied` or denied symlink operation needs an allowed rerun or an
+explicit evidence boundary; it is not a product failure. If cleanup panics after an earlier assertion,
 report the primary failure and the masking cleanup defect separately; do not
 weaken the test. A reproducibly failing required gate blocks shipping until fixed
 or until the release claim is explicitly narrowed in current docs/contracts.

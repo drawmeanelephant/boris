@@ -7,7 +7,7 @@
 **Product metadata:** `v0.8.1 candidate` / `boris/0.8.1`; base IR `schemaVersion` **`0.2.0`**.
 **Phase:** post-v0.8 integration and release reconciliation.
 
-**Build baseline:** Zig **0.16** and CMake for the vendored ApexMarkdown static libraries.
+**Build baseline:** Zig **0.16** and the Oliver library pinned in `build.zig.zon` (pure Zig; no CMake or other host tools).
 
 Boris is a Zig documentation compiler: Markdown in, validated documentation
 graph out as HTML by default, with optional IR, RAG, Context Bundle, and
@@ -53,7 +53,7 @@ frontmatter or claim a unified publication executor.
 | Capability | Current state |
 |---|---|
 | Default site build | **Done** — `boris` writes HTML to `dist/`. |
-| Markdown rendering | **Done** — in-process ApexMarkdown Unified, including tables and footnotes. |
+| Markdown rendering | **Done** — Oliver (pinned in `build.zig.zon`) through the `src/render.zig` seam: CommonMark + GFM tables + heading ids/IAL, footnotes, definition lists. |
 | Content graph | **Done** — closed frontmatter, validated Trunk/Satellite hierarchy with arbitrary finite acyclic parent chains, includes, wiki links, and heading targets. |
 | No-publication validation | **Done on `afterparty`** — `boris validate` reuses the canonical HTML prepublication compiler path for source, graph, dependency, component, layout, theme, asset, and sitemap validity without creating target, cache, search, or evidence artifacts. |
 | HTML navigation and layouts | **Done** — graph-backed nav, breadcrumbs, TOC, closed layout slots, assets, layout rules, incremental/watch/jobs, isolated targets, and opt-in deterministic XML sitemap publication. |
@@ -136,7 +136,7 @@ The release audit found these follow-ups:
 
 | Not now | Reason |
 |---|---|
-| Subprocess Markdown rendering | Apex remains in-process through the C ABI. |
+| Subprocess Markdown rendering | Oliver is consumed as a native Zig module (never a subprocess). |
 | Node/React/Astro/Next as the compiler | Boris itself is the Zig compiler. |
 | Full YAML frontmatter or arbitrary MDX | The author grammar and registered components are intentionally closed. |
 | Embedded HTTP server | Serve generated `dist/` with any ordinary static host. |
@@ -148,7 +148,7 @@ The release audit found these follow-ups:
 - HTML/IR/RAG publication uses staging and rename where supported; cross-volume
   whole-tree atomicity is not claimed.
 - Symlink tests may skip when the host denies symlink creation.
-- Default HTML assumes trusted author input because Apex raw HTML passes through.
+- Default HTML assumes trusted author input because raw HTML passes through (unchanged raw-HTML policy).
 - `--jobs` is bounded HTML rendering; graph discovery, resolution, and commit
   phases remain coordinated for deterministic output.
 - Generated directories (`dist/`, `rag/`, `source-rag/`, caches, and temporary

@@ -45,16 +45,17 @@ The file provides high confidence that the three published IR JSON Schemas accur
 This file is not linked into the product binary under any build configuration. It is compiled exclusively as a test binary root module. The `build.zig` declaration is unambiguous:
 
 ```zig
-const irschemamod = b.createModule(.{
+const ir_schema_mod = b.createModule(.{
     .root_source_file = b.path("src/ir_schema_conformance_test.zig"),
     ...
 });
-const irschematests = b.addTest(.{ .root_module = irschemamod });
+linkOliver(ir_schema_mod, oliver_mod);   // pinned Oliver via render_mod seam
+const ir_schema_tests = b.addTest(.{ .root_module = ir_schema_mod });
 ```
 
-The binary is separate from the main pipeline unit tests (`unittests`) and from the Apex hostile tests (`apexhostiletests`). It sits in a different layer of the test suite: not a unit test of a single module, and not a boundary-hostile ABI test, but an end-to-end integration test that exercises the full `pipeline.run` call and then validates the on-disk output against external schema files.
+The binary is separate from the main pipeline unit tests (`unittests`) and from the renderer seam's own tests (`test-render`). It sits in a different layer of the test suite: not a unit test of a single module, and not a renderer-contract test, but an end-to-end integration test that exercises the full `pipeline.run` call and then validates the on-disk output against external schema files.
 
-Relative to `src/apex.zig`, this file does not test the Apex wrapper at all. It links Apex because `pipeline.zig` depends on Apex for Markdown rendering, and `linkApex` is applied to the `irschemamod` module with `hostile = false` (the real vendor engine). The Apex integration is an implicit prerequisite for `pipeline.run` to succeed, not the subject of this test.
+Relative to `src/render.zig`, this file does not test the renderer at all. It renders because `pipeline.zig` depends on Oliver for Markdown rendering (via `render_mod`); the renderer is an implicit prerequisite for `pipeline.run` to succeed, not the subject of this test.
 
 Relative to `src/ir_emit.zig`, this file is the external validator of everything `ir_emit.zig` serializes. The `ir_emit.zig` module writes the three IR JSON artifacts; this test reads them back and checks that their shape matches the published schemas. If `ir_emit.zig` adds or removes a field, this test will catch the drift.
 

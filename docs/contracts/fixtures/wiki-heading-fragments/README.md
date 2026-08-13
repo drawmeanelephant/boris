@@ -10,7 +10,7 @@ golden; HTML integration tests exercise the same patterns.
 | Label + fragment | `[[guides/target#code-x-y\|Code heading]]` |
 | From satellite | `guides/from.md` → `[[index#home]]` |
 | Include-borne wiki | fragment in `includes/blurb.md` |
-| Unicode / punctuation ids | target page headings as rendered by Apex |
+| Unicode / punctuation ids | target page headings as rendered by Oliver |
 | Duplicate heading id | `[[guides/target#dup]]` is valid (set membership) |
 
 Normative: `docs/contracts/heading-ids.md`.

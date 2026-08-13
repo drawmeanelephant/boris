@@ -6,9 +6,9 @@
 //!    or records diagnostics without crashing.
 //! 2. **Component tokenizer** never panics on valid UTF-8 bodies; invalid UTF-8
 //!    yields a clean error.
-//! 3. **Apex** never accepts invalid pointer/length contracts (via
-//!    `prepareMdForC` / `mapRenderResult`) and never crashes on bounded
-//!    random payloads.
+//! 3. **Renderer seam** (`render.render`) never crashes on bounded random
+//!    payloads, including arbitrary bytes; OOM / InputTooLarge / writer
+//!    failures are accepted outcomes.
 //! 4. **Graph topology**: random topologies — `graph.validate` agrees with an
 //!    independent simple reference checker on error *categories*.
 //!
@@ -37,8 +37,7 @@ const render = @import("render.zig");
 const graph_mod = @import("graph.zig");
 const diag = @import("diag.zig");
 
-/// Deterministic default seed (document in test/README.md).
-/// Deterministic default seed (`BORIS` + `FUZZ` as hex-ish mnemonic: B0B15 / FUZZ).
+/// Deterministic default seed (`BORIS` + `FUZZ` as hex-ish mnemonic: B0B15 / FUZZ; documented in test/README.md).
 pub const default_seed: u64 = 0xB0B15_F027;
 
 pub const frontmatter_iters: usize = 256;

@@ -15,7 +15,7 @@ publish path.
 | Tool | When needed |
 |------|-------------|
 | Zig 0.16 | Always (build + run) |
-| CMake | Compile time only (Apex static libs) |
+| — | Oliver is a Zig package dependency, pinned in `build.zig.zon` |
 
 ## Clone and build
 

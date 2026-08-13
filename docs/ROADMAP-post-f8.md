@@ -4,7 +4,7 @@
 **0.2.0** · historical planning record · not a substitute for
 [`STATUS.md`](STATUS.md)
 **Current direction:** `v0.8.0` packages post-v0.7 release hardening,
-source-RAG upload ergonomics, migration review tooling, and ApexMarkdown
+source-RAG upload ergonomics, migration review tooling, and the Oliver renderer
 v1.1.13 (compiler `boris/0.8.0`). Through v0.8.0 the tree includes
 knowledge-system exports, layout/theme work, Textile, migration labs, static
 showcase, agent-lore dogfood, native `<Details>`, content-local page assets,
@@ -56,7 +56,7 @@ tag notes in CHANGELOG as cuts land):**
 
 | Slice | PR | Outcome |
 |-------|-----|---------|
-| Heading-target wiki | **#40** | `[[entity-id#heading-id]]` matches Apex-rendered heading ids; fail loud |
+| Heading-target wiki | **#40** | `[[entity-id#heading-id]]` matches Oliver-rendered heading ids; fail loud |
 | F9.1 layout + theme assets | **#41** | Closed layout plan (`metadata` / `footer` / `asset-url`); target-owned theme asset copy |
 | F9.2 theme hardening | **#42** | Layout UTF-8 validation at split; orphan theme-asset scrub after publish |
 
@@ -80,7 +80,7 @@ work, not unrestricted MDX, not marketing perf claims without measurement.
 | Assumption | Detail |
 |------------|--------|
 | Binary ↔ IR | Product **0.3.1** emits IR **0.2.0** with compiler id `boris/0.3.1`; F8.1–F8.3, goldens, and the release-gate check are shipped. |
-| Include / wiki | Same fence-aware, fail-loud rules on HTML and IR paths; Apex FS includes stay off. Heading fragments validated on HTML path only (IR does not check heading membership). |
+| Include / wiki | Same fence-aware, fail-loud rules on HTML and IR paths; renderer FS includes stay off. Heading fragments validated on HTML path only (IR does not check heading membership). |
 | layout / asset | May exist in internal planner/cache; **not** IR v0.2 edge kinds until a later schema decision (F10). |
 | Determinism | Dual-run byte-identical IR **per host**; no bit-identical cross-OS claim without evidence. |
 | Watch | Portable polling remains the baseline; native FS events are platform-qualified bonus. |
@@ -246,7 +246,7 @@ deferred until real-site dogfooding establishes the need.
 | **Shipped** | **PR #40** — `[[entity-id#heading-id]]` / labeled form; Apex-rendered `id` match; fail loud (`heading-ids.md`). **PR #41 (F9.1)** — closed layout plan + target-owned theme assets (`templating-and-themes.md`). **PR #42 (F9.2)** — layout UTF-8 at split; orphan theme-asset scrub; expanded fixture/failure coverage. |
 | **Contract work** | [`heading-ids.md`](contracts/heading-ids.md), [`templating-and-themes.md`](contracts/templating-and-themes.md); theme-site + theme-adversarial fixtures. |
 | **Code hotspots** | `wikilink`, `html_toc`, `assemble`, `theme`, `compile`, `content/`. |
-| **Risks** | Second component without registry discipline; Apex fenced-div quirks — document, don’t fake (`APEX-PENDING`). |
+| **Risks** | Second component without registry discipline; renderer quirks — document, don’t fake (`OLIVER-PENDING`). |
 | **Verification** | HTML fixtures; theme-site full vs incremental; content smoke; no IR schema change. |
 | **Residual F9-adjacent** | TOC/nav polish; sample-content honesty; components policy remains Aside-only unless reopened. Post-F9.2 items live in **§13**. |
 
@@ -284,7 +284,7 @@ deferred until real-site dogfooding establishes the need.
 
 | Theme | Recommendation |
 |-------|----------------|
-| More components beyond Aside | **Explicit non-support for 0.3–0.4** unless a named component + registry contract opens. Prefer Apex-native + Aside. |
+| More components beyond Aside | **Explicit non-support for 0.3–0.4** unless a named component + registry contract opens. Prefer Oliver-native + Aside. |
 | Sample content honesty / dogfood | **Ongoing hygiene** after every feature cut; root `content/` is SoT. |
 | TOC/nav polish; fenced divs pending | **Low-priority residual**; keep pending honesty for fenced divs. |
 | Closed layout + theme assets (F9.1/F9.2) | **Shipped** (#41 / #42). |
@@ -335,7 +335,7 @@ Unless explicitly reopened:
 - Parallel rewrites of freeze/emit during F8 (historical)
 - Silent IR edge-kind expansion under `schemaVersion` `0.2.0`
 - Standalone HTML/RAG pages per Aside
-- Replacing Zig build system or Apex C-ABI path
+- Replacing the Zig build system or the Oliver rendering path
 - Node/bundler/Tailwind **in the product hot path** (optional prebuilt static CSS only; see §13)
 
 ---
@@ -453,7 +453,7 @@ Original planned stack (status annotated):
 | Heading wiki | HTML fixtures; `heading-ids.md` cases; content smoke |
 | F10 (if ever) | New IR goldens; dual-run; schema bump checklist |
 
-Hostile Apex / sanitizer policy unchanged: skip is not a pass.
+Renderer seam / sanitizer policy: skip is not a pass.
 
 ---
 

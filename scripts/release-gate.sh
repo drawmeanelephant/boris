@@ -740,7 +740,7 @@ fi
 if grep -q '<strong>strong</strong>' "${TEXTILE_HTML_A}/index.html" \
   && grep -q '<ins>inserted</ins>' "${TEXTILE_HTML_A}/index.html" \
   && grep -q '<ol>' "${TEXTILE_HTML_A}/index.html"; then
-  pass "Textile subset reaches the existing Apex HTML renderer"
+  pass "Textile subset reaches the existing Oliver HTML renderer"
 else
   fail "Textile HTML is missing contracted rendered forms"
 fi

@@ -1095,9 +1095,9 @@ test "tokenize rejects invalid UTF-8" {
     try std.testing.expectError(error.InvalidUtf8, tokenizeBody(&bad, gpa));
 }
 
-// U15: Zig Aside stream stays in document order under real Apex Unified.
-// Mirrors compile's segment walk: markdown → apex.render, aside → renderHtml.
-test "U15 Aside document order with real Apex stream" {
+// U15: Zig Aside stream stays in document order under Oliver.
+// Mirrors compile's segment walk: markdown → render.render, aside → renderHtml.
+test "U15 Aside document order with real Oliver stream" {
     const gpa = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();

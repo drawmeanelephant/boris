@@ -44,7 +44,7 @@ The confidence the inline tests provide is substantial: they cover the normal-su
 
 `src/target.zig` sits between the CLI argument parser and the per-target render pass. The CLI layer produces an `[]const TargetSpec` from parsed flags; `validateTargets` consumes that slice and returns an `[]const TargetPlan` whose `resolved_output_dir` fields are GPA-owned absolute, normalized paths. Downstream code (compilation, assemble, theme copy) operates on `TargetPlan` values and must not re-validate paths.
 
-The file has no dependency on `src/apex.zig`, the Apex Markdown C ABI, or any hostile test double. It is entirely independent of Markdown rendering. It does not appear in `zig build test-apex-hostile` or `zig build test-apex-sanitize` (as named in `AGENTS.md`); it is tested only by the standard `zig build test` step.
+The file has no dependency on `src/render.zig` or the Oliver-backed rendering seam. It is entirely independent of Markdown rendering and is tested only by the standard `zig build test` step.
 
 The module is not a test-only artifact. It is compiled into every Boris binary. The inline tests (the `test` blocks at the bottom of the file) are compiled and run by the Zig test runner but do not ship in release builds.
 

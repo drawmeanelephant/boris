@@ -18,8 +18,7 @@ const scale_smoke_mod = b.createModule(.{
     .target = target,
     .optimize = optimize,
 });
-linkApex(scale_smoke_mod, b, false);                     // real ApexMarkdown
-scale_smoke_mod.addOptions("build_options", apex_opts);  // hostile_apex = false
+linkOliver(scale_smoke_mod, oliver_mod);                  // pinned Oliver via render_mod seam
 const scale_smoke_tests = b.addTest(.{ .root_module = scale_smoke_mod });
 const run_scale_smoke_tests = b.addRunArtifact(scale_smoke_tests);
 run_scale_smoke_tests.setCwd(b.path("."));
@@ -27,7 +26,7 @@ const test_scale_smoke_step = b.step("test-scale-smoke", ...);
 test_scale_smoke_step.dependOn(&run_scale_smoke_tests.step);
 ```
 
-`scale_smoke_tests.step` is also added to `apex_needing`, so the build ensures the CMake-built ApexMarkdown archives are fresh before compiling. The `hostile_apex` build option is `false` — `apex.zig` will call the real C engine. There is no way for the hostile double to be accidentally used in this target.
+`scale_smoke_mod` depends on `render_mod`, so the Oliver-backed seam is compiled before the test binary. There is no C engine and no hostile double.
 
 The test file imports `compile.zig` directly via `@import("compile.zig")`. There is no indirection through a named import; it is a sibling source import. `std.Io` and `std.testing.io` are used throughout, consistent with the rest of the Boris test surface.
 
@@ -155,7 +154,7 @@ test "scale smoke: ..."
     │
     ├─ compileSite(jobs=1)             → cold: pages_written == 200
     │       └─ compile.compileHtmlSite (incremental=true, jobs=1)
-    │               └─ real ApexMarkdown via apex.zig
+    │               └─ Oliver via render.zig
     │
     ├─ compileSite(jobs=1)             → unchanged: pages_written == 0
     │

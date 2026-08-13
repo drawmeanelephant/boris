@@ -46,7 +46,7 @@ The file provides moderate confidence that the core `summary` extraction logic i
 
 ## Role in the Boris architecture
 
-`src/llms.zig` sits at the end of Boris's main pipeline. It is linked unconditionally into the product binary: `build.zig` roots the product executable and unit-test binary at `src/main.zig`, and `llms.zig` is reached transitively through that import chain. It is not compiled into any separate test step, and it has no dependency on ApexMarkdown (`linkApex` is not applied to a dedicated `llms` module in `build.zig`).
+`src/llms.zig` sits at the end of Boris's main pipeline. It is linked unconditionally into the product binary: `build.zig` roots the product executable and unit-test binary at `src/main.zig`, and `llms.zig` is reached transitively through that import chain. It is not compiled into any separate test step, and it has no dependency on the Markdown renderer.
 
 In the pipeline sequence it occupies the final "emit to disk" position:
 
@@ -59,6 +59,6 @@ src/main.zig
         → publish(io, gpa, path, data)      [staged atomic write]
 ```
 
-It has no relationship to `src/apex.zig` or the ApexMarkdown C ABI. It does not render Markdown to HTML; it produces plain text output formatted with `llms.txt` conventions. The `src/rag.zig` module occupies a parallel role for machine-consumption export (RAG corpus), but the two modules are independent.
+It has no relationship to `src/render.zig` or the Oliver-backed rendering seam. It does not render Markdown to HTML; it produces plain text output formatted with `llms.txt` conventions. The `src/rag.zig` module occupies a parallel role for machine-consumption export (RAG corpus), but the two modules are independent.
 
 ***

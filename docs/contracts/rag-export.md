@@ -435,7 +435,7 @@ relations plus required structural closure is the conservative baseline.
 - Upload integrations / network clients
 - Making RAG the default CLI output
 - Treating `:::kind` as authoring syntax
-- Apex / HTML rendering in the RAG path
+- Oliver / HTML rendering in the RAG path
 - Forensic / byte-for-byte reconstruction metadata in model-facing files
   (belongs to Context Bundle and source tooling)
 

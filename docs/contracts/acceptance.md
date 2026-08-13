@@ -29,7 +29,7 @@ Claim **v0.1 content-compiler acceptance** only when all of the following hold:
 | 2 | Optional RAG export reuses the same validate path; deterministic corpus including `:::kind` Aside export form | `zig build test` (RAG); `--rag` / `--rag-dir` CLI |
 | 3 | Closed diagnostics set for content failures; process exits **0 / 1 / 2 / 3** as documented | [diagnostics.md](diagnostics.md); CLI tests |
 | 4 | Constrained `<Aside>` tokenizer on shared IR/RAG compile path (`ECOMPONENT`) | [components.md](components.md); `src/aside.zig` |
-| 5 | Apex linked in-process (C ABI); hostile ABI tests green; sanitizer opt-in | [apex-abi.md](apex-abi.md); `test-apex-hostile` |
+| 5 | Markdown → HTML through the Oliver seam (native Zig, pinned in build.zig.zon); renderer contract fixtures green | [oliver-renderer.md](oliver-renderer.md); `zig build test-render` |
 | 6 | HTML path tested (Whiteboard + Aside stream); bare `boris` defaults to `dist/` (Feature 2) | [html-output.md](html-output.md) |
 | 7 | CI on Linux + macOS; release-gate script runnable | `.github/workflows/ci.yml`; `scripts/release-gate.sh` |
 | 8 | Contracts + STATUS + CHANGELOG describe reality (no “pipeline not implemented” drift) | this tree |
@@ -38,8 +38,8 @@ Claim **v0.1 content-compiler acceptance** only when all of the following hold:
 
 - Markdown-native `:::` **authoring** (export representation only)
 - Full YAML, MDX, nested asides, multi-component registry
-- Full upstream Apex test suite import (product uses structural U1–U17 fidelity;
-  real ApexMarkdown Unified is already the engine)
+- Full upstream Oliver conformance corpus as a Boris gate (Oliver runs its own
+  652/652 CommonMark conformance; Boris consumes the library through the seam)
 
 **Landed after m10 (HTML path; not part of the content-compiler acceptance bar)**
 
@@ -69,7 +69,7 @@ Cite these — not redirects or this checklist — for acceptance rules:
 | Diagnostics | [diagnostics.md](diagnostics.md) |
 | RAG export | [rag-export.md](rag-export.md) |
 | Aside / components | [components.md](components.md) |
-| Apex C ABI | [apex-abi.md](apex-abi.md) |
+| Oliver renderer | [oliver-renderer.md](oliver-renderer.md) |
 | Opt-in HTML | [html-output.md](html-output.md) |
 | Parallel HTML workers | [parallel-rendering.md](parallel-rendering.md) |
 | Watch mode | [watch-mode.md](watch-mode.md) |

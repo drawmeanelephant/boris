@@ -104,7 +104,7 @@ Context does not define `diag.Code` printers of its own. Failures surface as:
 
 ## What this file does not do
 
-- HTML/Apex rendering, layouts, themes, content-local assets
+- HTML/Oliver rendering, layouts, themes, content-local assets
 - RAG catalog/INDEX/system seeds or `--bundles-only`
 - Independent content discovery or frontmatter parsing
 - Watch/incremental context rebuilds

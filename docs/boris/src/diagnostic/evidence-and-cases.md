@@ -76,7 +76,7 @@ From `build.zig` evidence inspected earlier:
 - No standalone `diagnostic_mod` / `addTest` root for this file.
 - Product `root_mod` uses `src/main.zig`, which imports `diagnostic.zig` (directly or via `cli.zig`).
 - `b.addTest(.{ .root_module = root_mod })` therefore compiles and runs the three embedded tests in this file as part of `zig build test`.
-- No Apex link requirement; no `hostile_apex` option; no C sources.
+- No renderer link requirement; no renderer options; no external library dependency.
 
 **Production accidental use of a “hostile” double:** not applicable — this module has no C or engine dependency.
 

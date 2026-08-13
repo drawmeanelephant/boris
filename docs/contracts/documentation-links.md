@@ -1,6 +1,6 @@
 # Graph-backed Markdown documentation links
 
-**Status:** normative HTML first slice — pre-Apex, afterparty
+**Status:** normative HTML first slice — pre-render, afterparty
 **Modules:** [`src/doclink.zig`](../../src/doclink.zig), [`src/html_body.zig`](../../src/html_body.zig), [`src/link_audit.zig`](../../src/link_audit.zig)
 **Related:** [html-output.md](html-output.md), [identity-and-paths.md](identity-and-paths.md), [frontmatter.md](frontmatter.md)
 
@@ -8,7 +8,7 @@
 
 Boris may make author-facing links to discovered Markdown pages pleasant in the
 published HTML without changing the renderer core. The first slice rewrites
-recognized inline Markdown links before Apex, using the frozen page graph and
+recognized inline Markdown links before rendering, using the frozen page graph and
 the existing canonical output-path functions.
 
 This is a rendered-HTML convenience only. It does not create graph edges,
@@ -23,7 +23,7 @@ Markdown links into IR, graph, or RAG semantic edges.
 
 The rewriter operates on structured inline Markdown link destinations. It is
 not an HTML string substitution pass. It runs on the root page body before
-include expansion, component tokenization, and Apex rendering. That ordering
+include expansion, component tokenization, and rendering. That ordering
 keeps relative paths anchored to the page that authored them.
 
 The first slice rewrites links in the root page body. Links introduced by an
@@ -59,7 +59,7 @@ The following remain byte-for-byte unchanged:
 - image links, raw HTML tags/attributes, code spans, and fenced code;
 - fragment-only/query-only destinations;
 - non-Markdown files and uppercase/noncanonical extensions;
-- missing graph targets remain literal during the pre-Apex rewrite; the
+- missing graph targets remain literal during the pre-render rewrite; the
   published-output link audit still rejects a local destination that does not
   resolve to an intended output route;
 - lexical or percent-encoded traversal, backslashes, malformed escapes, and

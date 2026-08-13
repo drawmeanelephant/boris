@@ -17,7 +17,7 @@ is **not** proof that every surface is the default CLI product.
 | Compiler IR on CLI (`--out` / `--no-rag`) | **Implemented** (opt-in; not bare default) |
 | Optional product RAG (`--rag`) | **Implemented** (working-context packs; verbatim authoring docs) |
 | Aside component tokenizer | **Implemented** (`components.md`) |
-| Apex C ABI + Zig wrapper | **Implemented** (ApexMarkdown Unified host adapter; U1–U17 tested) |
+| Markdown rendering (Oliver) | **Implemented** — Oliver pinned in build.zig.zon; `src/render.zig` seam; see [oliver-renderer.md](oliver-renderer.md) |
 | HTML path (default CLI) | **Implemented** — bare `boris` → `dist/`; also `--html` / `--html-dir` / `--target` |
 | Authoritative no-publication validation | **Implemented** — `boris validate` reuses HTML prepublication compiler semantics and writes no product artifacts; see `validation.md` |
 | P2 dependency indexes / incremental HTML | **Implemented** (`--incremental`; fingerprints + affected set) |
@@ -28,8 +28,8 @@ is **not** proof that every surface is the default CLI product.
 | Content-local page assets | **Implemented** (v0.5.1) — sibling `{stem}.assets/` publish + Markdown image rewrite; see `content-local-assets.md` |
 | Semantic relations (IR 0.3) | **Implemented** — bounded author relations with deliberate schema change; see `semantic-relations.md` |
 | AI Context Bundle (`--context`) | **Implemented** — deterministic provenance-rich export; see `context-bundle.md` |
-| Includes + wiki-links (HTML) | **Implemented** — pre-Apex; see `includes-and-wiki-links.md` |
-| Graph-backed Markdown documentation links | **Implemented first slice** — pre-Apex; see `documentation-links.md` |
+| Includes + wiki-links (HTML) | **Implemented** — pre-render; see `includes-and-wiki-links.md` |
+| Graph-backed Markdown documentation links | **Implemented first slice** — pre-render; see `documentation-links.md` |
 | IR 0.2 dependency edges + reverse index | **Implemented (F8.1–F8.3 shipped)** — `--out` emits typed edges and `reverseIndex`; incremental HTML uses the same reverse-walk dirty-set (v0.3.1) |
 | Documentation Intelligence | **Implemented first slice** — `check` / `impact`; see [documentation-intelligence.md](documentation-intelligence.md) |
 | Textile compatibility | **Implemented, explicit opt-in** — bounded `.textile` body adapter via `--textile`; see [textile-compatibility.md](textile-compatibility.md) |
@@ -61,7 +61,7 @@ per topic:
 | RAG export | [rag-export.md](rag-export.md) |
 | `llms.txt` export | [llms-txt.md](llms-txt.md) |
 | Aside / components | [components.md](components.md) |
-| Apex C ABI | [apex-abi.md](apex-abi.md) |
+| Markdown rendering (Oliver) | [oliver-renderer.md](oliver-renderer.md) |
 | HTML output (default CLI) | [html-output.md](html-output.md) |
 | Parallel rendering | [parallel-rendering.md](parallel-rendering.md) |
 | Watch Mode | [watch-mode.md](watch-mode.md) |
@@ -100,14 +100,14 @@ per topic:
 | [rag-export.md](rag-export.md) | Optional RAG export; working-context packs + complete corpus; authoring fidelity |
 | [llms-txt.md](llms-txt.md) | Deterministic crawler/LLM discovery projection; URL and deployment limits |
 | [components.md](components.md) | Constrained `<Aside>` tokenizer, kinds, id grammar, nested policy (m10) |
-| [apex-abi.md](apex-abi.md) | In-process Apex C ABI, allocator lifetime, Zig error rules (m8) |
+| [oliver-renderer.md](oliver-renderer.md) | Oliver pin + upgrade procedure, render seam, compatibility wall |
 | [html-output.md](html-output.md) | HTML Whiteboard, Aside stream, layout splice, Atomic publish (default CLI) |
 | [parallel-rendering.md](parallel-rendering.md) | Bounded worker pool parallel rendering, thread/memory isolation, deterministic order |
 | [watch-mode.md](watch-mode.md) | Opt-in watch mode, event coalescing/normalization, rebuild serialization, safe recovery |
 | [multi-target-isolated-output.md](multi-target-isolated-output.md) | Multi-target CLI/config, output isolation, cache namespaces (P3.3) |
-| [includes-and-wiki-links.md](includes-and-wiki-links.md) | `{{include}}` + `[[wiki]]` pre-Apex; cycles; fragment tree; IR 0.2 edge projection |
+| [includes-and-wiki-links.md](includes-and-wiki-links.md) | `{{include}}` + `[[wiki]]` pre-render; cycles; fragment tree; IR 0.2 edge projection |
 | [documentation-links.md](documentation-links.md) | Existing-page inline Markdown-link rewrite to canonical HTML hrefs |
-| [heading-ids.md](heading-ids.md) | Apex heading `id` harvest; `[[entity#heading]]` match + URL rules |
+| [heading-ids.md](heading-ids.md) | Oliver heading `id` harvest; `[[entity#heading]]` match + URL rules |
 | [templating-and-themes.md](templating-and-themes.md) | Closed layout plan, theme assets, UTF-8/orphan hardening (F9.1 / F9.2) |
 | [content-local-assets.md](content-local-assets.md) | Page sibling `{stem}.assets/` discovery, Markdown image rewrite, target copy/scrub |
 | [semantic-relations.md](semantic-relations.md) | Bounded author relations and deliberate IR 0.3 schema plan |
@@ -184,6 +184,6 @@ runs against contract fixtures / hardening suites separately (`pipeline`,
 - Markdown-native `:::` **authoring** (export representation only)
 - Generic multi-component systems / MDX / unrestricted executable content
 - Full YAML frontmatter
-- Child-process markdown rendering (forbidden; see apex-abi.md)
+- Child-process markdown rendering (forbidden; Oliver is consumed as a native Zig module — see oliver-renderer.md)
 - Unbounded shared-mutable concurrency outside the documented HTML `--jobs`
   contract (IR/RAG and pre-render coordinator phases stay sequential)

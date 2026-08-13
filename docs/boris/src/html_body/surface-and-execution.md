@@ -71,15 +71,15 @@ The module comment states and the code enforces this exact ordering:
 5. content_asset.rewriteImageLinks(...)  — Markdown image URL rewrite (conditional on page_assets)
 6. aside.tokenizeBody(...)          — split body into .markdown / .aside / .details segments
 7. for each segment:
-     .markdown → apex.render(md, doc_arena)
+     .markdown → render.render(md, &doc_arena)
      .aside    → aside.renderHtml(component, doc_arena)
      .details  → aside.renderDetailsHtml(component, doc_arena)
    → append to html_buf
 ```
 
-This ordering is contractual, not incidental. Include expansion must precede wiki-link rewriting so included fragments can contain wiki links. Asset rewriting must precede Aside tokenization so image URLs in Markdown segments are rewritten before the body is split. Aside tokenization must precede Apex so that `&lt;Aside>` markup is never passed to the C engine.
+This ordering is contractual, not incidental. Include expansion must precede wiki-link rewriting so included fragments can contain wiki links. Asset rewriting must precede Aside tokenization so image URLs in Markdown segments are rewritten before the body is split. Aside tokenization must precede rendering so that `&lt;Aside>` markup is never passed to Oliver.
 
-A notable detail: whitespace-only Markdown segments are skipped before calling `apex.render` (`if (std.mem.trim(u8, md, ...).len == 0) continue`). This avoids a zero-content call to the C engine but also means the C engine is never asked to render purely-whitespace input within a larger body.
+A notable detail: whitespace-only Markdown segments are skipped before calling `render.render` (`if (std.mem.trim(u8, md, ...).len == 0) continue`). This avoids a zero-content call to the renderer but also means Oliver is never asked to render purely-whitespace input within a larger body.
 
 ***
 
@@ -127,8 +127,10 @@ A test-only helper that writes a file at a relative path under a given root dire
 | `error.ReferenceFailed` | `wikilink.rewriteWikiLinksOpts` | Any error from wiki-link rewriting |
 | `error.AssetFailed` | `content_asset.rewriteImageLinks` | Any error from image URL rewriting (only when `page_assets != null`) |
 | `error.ComponentFailed` | `aside.tokenizeBody` | `tok.hasErrors()` returns true |
-| `error.OutOfMemory` | `apex.render` or any arena alloc | OOM from arena or C engine |
-| `error.RenderFailed` | `apex.render` | C engine returns non-OOM error status |
+| `error.OutOfMemory` | `render.render` or any arena alloc | OOM from arena or Oliver |
+| `error.InputTooLarge` | `render.render` | Input exceeds Oliver's `max_input_len` bound |
+| `error.WriteFailed` | `render.render` | Oliver's output writer failed |
+| `error.NoSpaceLeft` | `render.render` | Oliver's output writer ran out of space |
 
 None of these error paths are tested by the two inline tests. The error-path coverage depends on tests in `compile.zig`, `hardening_test.zig`, and `pipeline.zig` that call `renderSource` with inputs designed to trigger each stage.
 

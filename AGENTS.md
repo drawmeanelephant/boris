@@ -67,13 +67,13 @@ This routing exception does not relax product policy.
 **Boris is a Zig documentation compiler:** Markdown in → validated graph → HTML
 site by default, with optional JSON IR and RAG. It is not a Node SSG stack.
 
-- Zig **0.16+** is the product core. Markdown is **Apex**, linked in-process by a
-  C ABI host adapter—not a subprocess or JavaScript pipeline.
+- Zig **0.16+** is the product core. Markdown is **Oliver**, a pinned Zig
+  library consumed natively in-process—not a subprocess or JavaScript pipeline.
 - The content model is **Trunk** / **Satellite** pages with in-page **Aside**
   tokens, not graph nodes. The author frontmatter parent key is **`parent` only**;
   legacy `parentEntry` and `parent_entry` are unknown keys (`EFRONTMATTER`).
 - Favor a shippable `dist/` site, fail-loud validated graph, and measured claims.
-  The normal pipeline is discover/scan → parse → Apex → compile → assemble →
+  The normal pipeline is discover/scan → parse → Oliver render → compile → assemble →
   optional RAG export. Consult [`docs/STATUS.md`](docs/STATUS.md) for the current
   surface and [`docs/ARCHITECTURE-DIRECTION.md`](docs/ARCHITECTURE-DIRECTION.md)
   for future direction.
@@ -84,21 +84,21 @@ Do not, without an explicit user request:
 
 - introduce another Boris application language or toolchain (TypeScript,
   JavaScript, Python build stages, Go, Rust, Ruby, JVM services); C is allowed
-  only for Apex or an explicitly approved native C-ABI engine under `vendor/`;
+  only for the pinned Oliver dependency or an explicitly approved native library;
 - add a framework, SSG, Node modules, bundler, or hydration runtime (including
   Next, Astro, Hugo, Eleventy, Gatsby, Vite/Webpack, React, Vue, Svelte, Deno,
   or Bun) to compile Boris sites;
 - spawn a process to render Markdown, replace Zig's `build.zig` / `build.zig.zon`
   build system, turn the core into a web app, or use shell beyond unavoidable
   local debugging as product architecture;
-- redesign concurrency/multiprocessing, replace Apex with a non-native/non-C-ABI
+- redesign concurrency/multiprocessing, replace Oliver with a non-native
   path, change Trunk–Satellite semantics, or permit arbitrary MDX, executable
   components, or JS expressions; do not invent a parallel pipeline for convenience.
 
 Allowed normal work includes pure Zig under `src/`, allowed C ABI work under
 `vendor/`, author content and registered components, layouts, contracts, tests,
 and small static assets emitted or copied by Boris. If a user authorizes a
-deviation, scope it narrowly, retain Zig+Apex unless removal is explicit, and
+deviation, scope it narrowly, retain Zig+Oliver unless removal is explicit, and
 record a durable exception in the PR/commit and, when appropriate, narrative docs
 and a changelog fragment.
 

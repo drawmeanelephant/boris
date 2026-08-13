@@ -18,19 +18,16 @@ const fuzz_mod = b.createModule(.{
     .target = target,
     .optimize = optimize,
 });
-linkApex(fuzz_mod, b, false);         // real ApexMarkdown static libs
-fuzz_mod.addOptions("build_options", apex_opts);  // hostile_apex = false
+linkOliver(fuzz_mod, oliver_mod);     // pinned Oliver module via render_mod seam
 ```
 
-`linkApex(fuzz_mod, b, false)` compiles `vendor/apex/apex.c` (the real host adapter) and links the three prebuilt static archives (`libapex.a`, `libcmark-gfm-extensions.a`, `libcmark-gfm.a`) into the test binary. The `build_options.hostile_apex = false` flag causes `src/apex.zig`'s `skipIfHostileEngine()` guard to be a no-op in the imported module's own tests. `fuzz.zig` itself does not call `skipIfHostileEngine()` because it operates on the real engine throughout.
-
-The `fuzz_tests` artifact depends on `ensure_apex.step` (the `bash scripts/build-apex-markdown.sh` system command) via the `apex_needing` array, so the CMake static libraries are built before link. The hostile double (`apex_hostile.c`) is never compiled into this module.
+`linkOliver(fuzz_mod, oliver_mod)` wires the pinned Oliver dependency (exact revision in `build.zig.zon`; see `docs/contracts/oliver-renderer.md`) into the test binary through `render_mod`. There is no C adapter, no static-archive build step, and no hostile double — Oliver is consumed as a pure Zig module exactly as production does.
 
 The `fuzz.zig` module imports five production modules directly via `@import`:
 
 - `parser.zig` — used in `runFrontmatterFuzz`
 - `aside.zig` — used in `runComponentFuzz`
-- `apex.zig` — used in `runApexFuzz`
+- `render.zig` — used in `runRenderFuzz`
 - `graph.zig` — used in `runGraphTopologyFuzz` and `referenceCheck`
 - `diag.zig` — used for `diag.Diagnostic`, `diag.Code`, and `diag.countErrors`
 
@@ -44,12 +41,12 @@ The production binary cannot accidentally link the fuzz module: `fuzz_mod` is on
 | :-- | :-- | :-- | :-- | :-- | :-- |
 | `runFrontmatterFuzz(seed, iters)` | Public fn | No-panic property over arbitrary byte payloads for the product frontmatter parser | PRNG seeded with `seed ^ 0` (no XOR); `max_input_bytes=512`; structured templates every 5th iteration | `parser.parse` returns without panicking; successful results preserve the body offset/slice invariant | Product parser must never panic on any byte content |
 | `runComponentFuzz(seed, iters)` | Public fn | No-panic on valid UTF-8; clean error on invalid UTF-8 for component tokenizer | PRNG seeded `seed ^ 0xC0C0`; valid UTF-8 filled via `fillValidUtf8`; structured templates every 4th iteration; explicit `[0xFF, 0xFE, ...]` test after loop | No panic, no `error.InvalidUtf8` on valid UTF-8 paths; `error.InvalidUtf8` on explicit invalid sequence | `aside.tokenizeBody` must reject invalid UTF-8 cleanly |
-| `runApexFuzz(seed, iters)` | Public fn | Pointer/length contract invariants and no-crash for Apex wrapper | PRNG seeded `seed ^ 0xA9E5`; empty input test; three direct `mapRenderResult` calls; 128 iterations of `apex.render` | Non-null sentinel on empty; `mapRenderResult` errors on dirty/invalid; `render` does not panic | `prepareMdForC` and `mapRenderResult` ABI contracts |
+| `runRenderFuzz(seed, iters)` | Public fn | No-crash property for the Oliver-backed render seam over bounded random bytes | PRNG seeded `seed ^ 0xA9E5`; `max_input_bytes=512`; structured Markdown every 3rd iteration; 128 iterations of `render.render` | `render.render` returns or yields an error in the documented set; no panic | `render.render` must not crash on arbitrary bounded bytes |
 | `runGraphTopologyFuzz(seed, iters)` | Public fn | Category-level agreement between production `graph.validate` and independent reference checker | PRNG seeded `seed ^ 0x6BA9`; 200 random topologies of 1–12 nodes; 6 topology modes including dup, star, chain, cycle, self-parent, missing | `expectEqual` assertions on five flag pairs; clean graphs produce zero diagnostics | `graph.validate` must agree with independent oracle on all five error categories |
 | `referenceCheck(nodes)` | Public fn | Independent O(n²) reference oracle for graph topology | `[]const graph_mod.Node` slice | Returns `RefProblems` struct with five boolean flags | No dependency on `graph.zig` internals; uses only `mem.eql` string comparisons |
 | `test "fuzz: frontmatter parser bounded (deterministic seed)"` | Test | Invokes `runFrontmatterFuzz` at `default_seed` and `frontmatter_iters=256` | Fixed constants | Must not error | Same as `runFrontmatterFuzz` |
 | `test "fuzz: component tokenizer bounded (deterministic seed)"` | Test | Invokes `runComponentFuzz` at `default_seed` and `component_iters=256` | Fixed constants | Must not error | Same as `runComponentFuzz` |
-| `test "fuzz: apex bounded no-crash + pointer contracts (deterministic seed)"` | Test | Invokes `runApexFuzz` at `default_seed` and `apex_iters=128` | Fixed constants | Must not error | Same as `runApexFuzz` |
+| `test "fuzz: renderer bounded no-crash (deterministic seed)"` | Test | Invokes `runRenderFuzz` at `default_seed` and `render_iters=128` | Fixed constants | Must not error | Same as `runRenderFuzz` |
 | `test "fuzz: random graph topology agrees with reference checker"` | Test | Invokes `runGraphTopologyFuzz` at `default_seed` and `graph_iters=200` | Fixed constants | Must not error | Same as `runGraphTopologyFuzz` |
 | `test "fuzz: reference checker known cases"` | Test | Validates `referenceCheck` against six hand-constructed named cases | Hardcoded node arrays for: valid trunk+satellite, self-parent, missing parent, two-node cycle, satellite-of-satellite, duplicate ids | Each case asserts exactly the expected flag(s) are set | Reference oracle correctness |
 | `test "fuzz: seeds are stable documented constants"` | Test | Asserts bound constants are within documented safe limits | Inline literal checks | `default_seed == 0xB0B15_F027`, `frontmatter_iters > 0`, `max_input_bytes <= 4096`, `max_graph_nodes <= 32` | Documentation contract on iteration and size bounds |
@@ -62,113 +59,25 @@ The production binary cannot accidentally link the fuzz module: `fuzz_mod` is on
 
 ## Hostile-case walkthrough
 
-### Empty markdown input to `prepareMdForC`
+### Random byte payloads to `render.render` — no-crash property
 
 **Injected behavior:**
-An empty `[]const u8` slice (`&.{}`) is passed to `apex.prepareMdForC`. In Zig, an empty slice has an implementation-defined (but non-null by convention) pointer; the C ABI requires `md != NULL` even for zero-length input.
+128 random byte sequences of length 0–512 (inclusive) are passed to `render.render`, each with a freshly reset arena. Every 3rd iteration substitutes a fixed structured Markdown string (`# H\n\n**b** and *i*\n`) so the no-crash property also covers real parsing paths.
 
-**Wrapper boundary exercised:**
-`apex.prepareMdForC` — the function that converts a Zig slice to a C `ptr+len` pair before `apex_render` is called.
-
-**Expected response:**
-`prepareMdForC` returns `{ .ptr = &empty_md_sentinel, .len = 0 }` where `&empty_md_sentinel` is a file-scope `const [^1_1]u8` with program-lifetime. The test asserts `@intFromPtr(prep.ptr) != 0` and `prep.len == 0`.
-
-**Forbidden unsafe response:**
-Passing a null or zero pointer as `md` to `apex_render`. The C engine may read the pointer (even with a zero `md_len`) through a bug or debug assert.
-
-**Evidence strength:**
-Directly demonstrated — the test calls `prepareMdForC` directly and asserts pointer non-nullity.
-
-**Residual gap:**
-Whether the real `apex_render` actually reads through a null `md` pointer when `md_len == 0` is not verified; the guard is defensive.
-
-***
-
-### `mapRenderResult` with non-zero OOM status and dirty output parameters
-
-**Injected behavior:**
-`mapRenderResult(2, &poison, 99)` simulates a C engine that returned `APEX_ERR_OOM` (status 2) but left `out_html` pointing at a non-null two-byte buffer and `out_len = 99`.
-
-**Wrapper boundary exercised:**
-The status-first gate in `mapRenderResult`: "if rc != 0, return error without reading out_ptr / out_len."
+**Seam boundary exercised:**
+The full `render.render` call path: `oliver.parse` (Markdown options: footnotes, definition lists, heading attributes) → `oliver.html.render` (heading ids + footnotes section) into a Whiteboard arena, returning `Html.bytes` as a view of arena memory.
 
 **Expected response:**
-`error.OutOfMemory` is returned. The poison pointer is never dereferenced.
+Any of: successful `Html`; `error.OutOfMemory`; `error.InputTooLarge`; `error.WriteFailed`; `error.NoSpaceLeft`. No panic and no crash.
 
 **Forbidden unsafe response:**
-Constructing `Html{ .bytes = poison[0..99] }` — this would be a slice of 99 bytes over a 2-byte buffer (out-of-bounds read / UB), or — in the hostile C case — a dangling/invalid pointer.
+A panic from arbitrary bytes, or a returned `Html.bytes` slice that is not a valid view into arena memory.
 
 **Evidence strength:**
-Directly demonstrated — the literal call and `expectError` assertion are in `runApexFuzz`.
+Partial coverage — the no-crash property is demonstrated for 128 bounded random inputs. The property is not proven for all possible inputs or for inputs larger than 512 bytes.
 
 **Residual gap:**
-The test passes `&poison` as a known local address; it does not pass an unmapped or truly invalid pointer. Zig test infrastructure would detect a dereference via address sanitizer if run with `test-apex-sanitize`, but the fuzz test itself does not use ASan.
-
-***
-
-### `mapRenderResult` with ARGS status and dirty output parameters
-
-**Injected behavior:**
-`mapRenderResult(1, &poison, 99)` simulates `APEX_ERR_ARGS` with dirty outputs.
-
-**Wrapper boundary exercised:**
-Non-OOM non-zero status path in `mapRenderResult`.
-
-**Expected response:**
-`error.RenderFailed`. The `poison` buffer is not sliced.
-
-**Forbidden unsafe response:**
-Any slice construction from `out_ptr` / `out_len` on a non-zero status.
-
-**Evidence strength:**
-Directly demonstrated.
-
-**Residual gap:**
-Status codes other than 1, 2, and 99 (the "unknown nonzero" case covered in `apex.zig`'s own tests) are not exercised in `fuzz.zig`; coverage of status-code dispatch completeness resides in `apex.zig`'s inline tests.
-
-***
-
-### `mapRenderResult` with success, null pointer, and nonzero length
-
-**Injected behavior:**
-`mapRenderResult(0, null, 5)` simulates an ABI-violating C engine that returns `APEX_OK` but sets `out_html = NULL` and `out_len = 5`.
-
-**Wrapper boundary exercised:**
-The null-pointer-with-nonzero-length rejection gate in `mapRenderResult`'s success path.
-
-**Expected response:**
-`error.RenderFailed`.
-
-**Forbidden unsafe response:**
-Constructing `Html{ .bytes = null_ptr[0..5] }` — a slice through a null pointer is undefined behavior.
-
-**Evidence strength:**
-Directly demonstrated.
-
-**Residual gap:**
-`mapRenderResult(0, null, 0)` (success, null, zero length) is the valid empty-output path; it is exercised in `apex.zig`'s own inline tests but not repeated in `fuzz.zig`.
-
-***
-
-### Random byte payloads to `apex.render` — no-crash property
-
-**Injected behavior:**
-128 random byte sequences of length 0–512 (inclusive) are passed to `apex.render`, each with a freshly reset arena. Every 3rd iteration uses a fixed structured Markdown string instead.
-
-**Wrapper boundary exercised:**
-The full `render` call path: `prepareMdForC` → `lockRenderMutex` → `apex_render` (real C engine) → `unlockRenderMutex` → `mapRenderResult`. Also exercises the Debug-mode arena-capacity watermark assertion (`post_capacity >= pre_capacity`).
-
-**Expected response:**
-Any of: successful `Html`; `error.OutOfMemory`; `error.RenderFailed`. No panic, no `@import("builtin").zig_backend` crash, no segfault.
-
-**Forbidden unsafe response:**
-Panic inside `apex_render`; access violation from a misaligned or truncated slice; arena capacity decreasing (which would indicate C-side libc-free of arena memory).
-
-**Evidence strength:**
-Partial coverage — the no-crash property is demonstrated for 128 bounded random inputs. The property is not proven for all possible inputs, for inputs larger than 512 bytes, or for inputs that trigger specific C-engine code paths (e.g., footnote table construction).
-
-**Residual gap:**
-Random bytes are not likely to produce valid Markdown that exercises complex C-engine paths (tables, footnotes, math, fenced divs). The no-crash property for those paths is covered only by the structured Markdown inputs in `apex.zig`'s U-series fidelity tests, not by `fuzz.zig`.
+Random bytes rarely produce valid Markdown that exercises complex Oliver paths (footnotes, definition lists, tables). Output correctness for those constructs is covered by the structured fixtures in `src/render.zig` and the Oliver contract fixtures (`docs/contracts/oliver-renderer.md`), not by `fuzz.zig`.
 
 ***
 
@@ -312,32 +221,22 @@ test "fuzz: component tokenizer bounded"
 ```
 
 
-### Apex fuzz
+### Renderer fuzz
 
 ```text
-test "fuzz: apex bounded no-crash + pointer contracts"
-    → runApexFuzz(default_seed, 128)
-        → apex.prepareMdForC(&.{})
-            → expect ptr != 0, len == 0
-        → apex.mapRenderResult(2, &poison, 99) → expect error.OutOfMemory
-        → apex.mapRenderResult(1, &poison, 99) → expect error.RenderFailed
-        → apex.mapRenderResult(0, null, 5)     → expect error.RenderFailed
+test "fuzz: renderer bounded no-crash (deterministic seed)"
+    → runRenderFuzz(default_seed, 128)
         → [loop: 128 iters]
             → arena.reset(.free_all)
-            → random.bytes(buf[0..n])  OR  structured markdown
-            → apex.prepareMdForC(md)
-                → expect ptr != 0, len == md.len
-            → apex.render(md, &arena)
-                → prepareMdForC(md)
-                → lockRenderMutex
-                → c.apex_render(ptr, len, &out_ptr, &out_len, &apex_alloc)
-                    → [real ApexMarkdown C engine]
-                → unlockRenderMutex
-                → [Debug: assert arena capacity did not shrink]
-                → mapRenderResult(rc, out_ptr, out_len)
-                    → [status gate: never slice on rc != 0]
-                → returns Html | error.OutOfMemory | error.RenderFailed
-            → [accepted: any non-panic result]
+            → random.bytes(buf[0..n])  OR  structured markdown [every 3rd iter]
+            → render.render(md, &arena)
+                → oliver.parse(a, md, .markdown, options)
+                    → [Oliver: source bytes → typed document]
+                → oliver.html.render(a, &aw.writer, &result.document, render_options)
+                    → [Oliver: typed document → deterministic HTML]
+                → returns Html{ .bytes = arena-backed view }
+            → [accepted: any non-panic result, including the documented
+               error set: OutOfMemory | InputTooLarge | WriteFailed | NoSpaceLeft]
 ```
 
 

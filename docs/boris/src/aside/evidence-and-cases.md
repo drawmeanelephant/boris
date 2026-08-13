@@ -30,8 +30,8 @@ tags: [boris, zig, source-reference, evidence, aside]
 | `tokenize rejects invalid UTF-8` | test | `0xFF 0xFE…` | `error.InvalidUtf8` | Encoding gate |
 | `renderHtml wraps tip` / omits id / escapes id | test | HTML sinks | classes, no raw tag, escaped id | HTML Aside |
 | `renderDetailsHtml…` | test | native details | open, escaped summary, strong body | HTML Details |
-| `U15 Aside document order with real Apex` | test | stream markers + table in aside | order AAA < aside < BBB; no `&lt;Aside` | HTML body order |
-| `U15b Apex callout inside Aside body` | test | GFM callout in aside | callout survives nested render | Apex-in-Aside |
+| `U15 Aside document order with real Oliver` | test | stream markers + table in aside | order AAA < aside < BBB; no `&lt;Aside` | HTML body order |
+| `U15b Oliver callout inside Aside body` | test | GFM callout in aside | callout survives nested render | Oliver-in-Aside |
 | Hardening: invalid component / valid Aside / Details | integration | pipeline/rag/compile | `ECOMPONENT` or clean export/HTML | Shared path |
 
 
@@ -53,7 +53,7 @@ tags: [boris, zig, source-reference, evidence, aside]
 
 - Full HTML5 or MDX parsing.
 - Nested admonitions or component composition.
-- Sanitization of untrusted author HTML inside Apex (trusted-author boundary lives in Apex ABI).
+- Sanitization of untrusted author HTML inside Oliver (trusted-author boundary lives at the rendering seam).
 - That `renderHtml` re-validates kind/id if called with hand-built structs (escape is last line of defense).
 - Independent Markdown semantics for Details summary (plain text only).
 

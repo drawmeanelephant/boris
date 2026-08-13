@@ -70,7 +70,7 @@ The workflow creates two deliberately different uploads:
   supported 1 GiB Pages artifact limit, and excludes `_boris/proof` reports.
 - The retained evidence artifact contains the normalized plan, the target-local
   proof reports, and `github-pages-evidence.json`. That binding records the
-  source commit, Boris/Apex pins, workflow identity, inventory digest, public
+  source commit, Boris/Oliver pins, workflow identity, inventory digest, public
   file count/bytes, and the exact public-tree manifest digest.
 
 The build summary reports the target, resolved URL/path, public payload size,

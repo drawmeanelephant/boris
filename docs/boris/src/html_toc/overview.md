@@ -18,15 +18,15 @@ tags: [boris, zig, source-reference, html_toc]
 
 ## Executive summary
 
-`src/html_toc.zig` is the in-page table-of-contents subsystem for Boris. It implements Feature 6 follow-on (Feature 6b in the status map): given the already-rendered body HTML produced by ApexMarkdown (and any Aside component HTML), it harvests heading elements with `id` attributes and synthesizes an accessible `<nav>` fragment for the `&#123;&#123;toc&#125;&#125;` template placeholder.
+`src/html_toc.zig` is the in-page table-of-contents subsystem for Boris. It implements Feature 6 follow-on (Feature 6b in the status map): given the already-rendered body HTML produced by Oliver (and any Aside component HTML), it harvests heading elements with `id` attributes and synthesizes an accessible `<nav>` fragment for the `&#123;&#123;toc&#125;&#125;` template placeholder.
 
-The file has a precise, narrow contract: it does not re-implement Apex's heading-slug rules, it does not parse Markdown, and it does not own the rendering pipeline. Its input is finished HTML; its output is either a caller-owned HTML string or a deduplicated list of heading `id` slices. The heading IDs it extracts are the same anchors that Apex emits, so `href="#id"` links in the TOC are structurally consistent with the rest of the rendered page without any coordination overhead.
+The file has a precise, narrow contract: it does not re-implement Oliver's heading-slug rules, it does not parse Markdown, and it does not own the rendering pipeline. Its input is finished HTML; its output is either a caller-owned HTML string or a deduplicated list of heading `id` slices. The heading IDs it extracts are the same anchors that Oliver emits, so `href="#id"` links in the TOC are structurally consistent with the rest of the rendered page without any coordination overhead.
 
 The module exposes three public entry points (`collectHeadingsInRange`, `collectHeadings`, `collectHeadingIds`, and `renderToc`) and a single public struct (`Heading`) plus two exported level-range constants (`toc_min_level`/`toc_max_level` for the TOC view and `fragment_min_level`/`fragment_max_level` for the full wiki-fragment target set). All heap allocations go through caller-supplied `std.mem.Allocator` arguments; there is no module-level state. Ownership rules are documented inline: `id` slices point into the input `html` buffer; `text` slices are allocator-owned and must be freed per item.
 
 The file includes eight embedded Zig tests. These tests exercise: level filtering, entity preservation, tag stripping from inner HTML, the `>` character inside quoted attribute values (a well-known parser edge case), false-positive `id` extraction from attributes like `data-id`, TOC HTML shape and ARIA attributes, allocation-failure cleanup under `std.testing.checkAllAllocationFailures`, and the deduplicated `collectHeadingIds` path. The tests are compiled as part of the standard `zig build test` suite via the `root_mod` unit test artifact; no separate build step is required.
 
-The file does not interact with the ApexMarkdown C ABI, does not import `src/apex.zig`, and has no C linkage. Its only non-standard import is `src/html_nav.zig`, from which it calls `html_nav.appendEscaped` to HTML-escape the extracted `id` value when constructing `href` attribute values. This is the single cross-module dependency.
+The file does not interact with the Markdown rendering seam and does not import `src/render.zig`. Its only non-standard import is `src/html_nav.zig`, from which it calls `html_nav.appendEscaped` to HTML-escape the extracted `id` value when constructing `href` attribute values. This is the single cross-module dependency.
 
 What the file does not prove: it does not prove correct handling of malformed or deeply nested HTML beyond its documented scan strategy; it does not handle multi-byte UTF-8 sequences differently from byte sequences (treating them as opaque bytes, which is correct for ASCII-structured HTML tag parsing but means non-ASCII `id` values are passed through without validation); it does not guarantee that heading IDs in the emitted TOC actually resolve to anchors in the same document (that consistency property depends on the surrounding pipeline producing coherent output, not on this module alone).
 
@@ -48,11 +48,11 @@ What the file does not prove: it does not prove correct handling of malformed or
 
 ## Role in the Boris architecture
 
-`src/html_toc.zig` is a pure post-processing pass that operates entirely within the **Ignite** stage of the Boris pipeline (Load → Roll → Ignite → Reset). By the time it is invoked, ApexMarkdown has already converted Markdown source to body HTML, and Aside components have been rendered. The module reads that HTML without modifying it.
+`src/html_toc.zig` is a pure post-processing pass that operates entirely within the **Ignite** stage of the Boris pipeline (Load → Roll → Ignite → Reset). By the time it is invoked, Oliver has already converted Markdown source to body HTML, and Aside components have been rendered. The module reads that HTML without modifying it.
 
 It is linked into the **product binary** through the main module (`src/main.zig`). It is not isolated to a test-only build; every `boris` invocation that compiles pages with `&#123;&#123;toc&#125;&#125;` calls into this module at runtime.
 
-The module has no relationship to `src/apex.zig` or to the ApexMarkdown C ABI. It does not call any C function. It consumes Apex's output (a Zig `[]const u8` string) rather than Apex's API. The hostile Apex double (`apex_hostile.c`) and the `test-apex-hostile` step are entirely unrelated to this file.
+The module has no relationship to `src/render.zig` or to the Oliver-backed rendering seam. It consumes rendered HTML (a Zig `[]const u8` string) rather than the renderer's API.
 
 The `html_nav.zig` dependency is narrow: `renderToc` calls `html_nav.appendEscaped` to escape the heading `id` string before placing it in an `href="..."` attribute. This prevents raw `&`, `<`, `>`, and `"` characters in heading IDs from producing malformed HTML or attribute injection.
 

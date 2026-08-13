@@ -172,7 +172,7 @@ dist / staging page.html
 HoldUntilFlush (tests only) ── proves flush-before-reset
 ```
 
-`build.zig` wires `assemble_mod` **without** `linkApex` — pure Zig/IO. Product Apex stays in `htmlbody` / `aside` / `compile`.[^4_1]
+`build.zig` wires `assemble_mod` **without** a renderer link — pure Zig/IO. Product rendering stays in `htmlbody` / `aside` / `compile`.[^4_1]
 
 ***
 
@@ -195,7 +195,7 @@ HoldUntilFlush (tests only) ── proves flush-before-reset
 
 ## Acceptance criteria (module health)
 
-- `zig build test` runs `assemble_tests` green (no Apex dependency).
+- `zig build test` runs `assemble_tests` green (no renderer dependency).
 - Bad layouts fail before content compile (`LayoutMissingMarker` / duplicate / unknown).
 - Valid multi-slot layout streams nav/title/content in document order with theme `asset-url` hrefs resolved.
 - `writePage` replace-over-prior and failed-write-preserves-prior pass on the host OS.

@@ -24,7 +24,7 @@ There are no build options that alter `package.zig` test behaviour beyond the `t
 
 The production binary cannot accidentally use any test injection because `test_fail_before_archive_install` defaults to `false` and is only set explicitly in one test.
 
-No `src/apex.zig` involvement; no hostile C implementation; no linked C libraries; no vendor headers.
+No `src/render.zig` involvement; no rendering dependency; no linked renderer modules.
 
 ## Tested declarations and entry points
 

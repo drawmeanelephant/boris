@@ -18,7 +18,7 @@ tags: [boris, zig, source-reference, incremental_scale_smoke_test]
 
 ## Executive summary
 
-`src/incremental_scale_smoke_test.zig` is an opt-in integration smoke test for Boris's incremental HTML site compilation pipeline. It is **not** part of the default `zig build test` suite; it is compiled and run exclusively via `zig build test-scale-smoke`. Its module root is `src/incremental_scale_smoke_test.zig`; it imports only `src/compile.zig` (via the `compile` module) and the Zig standard library. It links against the real ApexMarkdown static libraries — not the hostile double.
+`src/incremental_scale_smoke_test.zig` is an opt-in integration smoke test for Boris's incremental HTML site compilation pipeline. It is **not** part of the default `zig build test` suite; it is compiled and run exclusively via `zig build test-scale-smoke`. Its module root is `src/incremental_scale_smoke_test.zig`; it imports only `src/compile.zig` (via the `compile` module) and the Zig standard library. It renders through the Oliver-backed seam (`render_mod`) via `compile.zig`.
 
 The file exists to provide bounded, end-to-end confidence that the incremental compilation machinery (`options.incremental = true`) behaves correctly at a scale that cannot be adequately covered by unit tests: 200 pages organized into 20 Trunks, each with 9 Satellites. The three properties it specifically verifies are (1) a cold build writes every page, (2) an unchanged build writes none, and (3) editing a single Satellite causes exactly the edited Trunk cohort (`1 + satellites_per_trunk = 10`) to be re-rendered while all other pages remain cached and unmodified on disk.
 
@@ -42,13 +42,13 @@ The confidence provided is: the incremental content-addressed fingerprinting, re
 
 ## Role in the Boris architecture
 
-This file sits entirely outside the product runtime. It is compiled into a dedicated test binary by the `scale_smoke_mod` / `scale_smoke_tests` build graph nodes in `build.zig`. The `test-scale-smoke` step depends on `ensure_apex` (the CMake build step), placing it in the class of targets that require the real ApexMarkdown static libraries (`libapex.a`, `libcmark-gfm.a`, `libcmark-gfm-extensions.a`). It is never linked into the product `boris` CLI executable.
+This file sits entirely outside the product runtime. It is compiled into a dedicated test binary by the `scale_smoke_mod` / `scale_smoke_tests` build graph nodes in `build.zig`. The `test-scale-smoke` step depends on `render_mod` (the Oliver-backed rendering seam), so the pinned Oliver library is compiled before the test binary links. It is never linked into the product `boris` CLI executable.
 
 Relative to the other test targets:
 
 - **`src/compile.zig` tests** (run by `zig build test`) cover layout errors, Whiteboard lifecycle, render-failure isolation, and write-failure atomicity at unit scale (1–3 pages). They are always executed.
 - **`src/incremental_scale_smoke_test.zig`** (this file) covers the same `compileHtmlSite` entry point at a 200-page scale with multiple sequential `compileHtmlSite` invocations against the same `dist/` directory. It is opt-in.
-- **`src/apex_hostile_test.zig`** exercises the Zig wrapper around the C ABI against a hostile double. It has no relationship to this file.
+- **`src/render.zig`** owns the Oliver-backed rendering seam; this file reaches it transitively through `compile.zig` / `html_body.zig`.
 - **`src/hardening_test.zig`** and **`src/layout_select_hostile_test.zig`** cover adversarial layout and path inputs; unrelated to this file.
 
-The scale smoke test uses the real Apex engine through `compileHtmlSite` — the same code path the product binary uses for `--html` builds.
+The scale smoke test renders through the Oliver-backed seam via `compileHtmlSite` — the same code path the product binary uses for `--html` builds.

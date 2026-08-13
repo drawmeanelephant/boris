@@ -26,7 +26,7 @@ The file exists to keep the `main` function thin and testable. Rather than letti
 
 The file is executed as the build root of the `boris` executable step (inferred from the module-file placement; confirmed by `pub fn main(init: std.process.Init) u8` matching Zig 0.16 `std.process.Init`-based entry convention). It is also compiled as a test root, because it ends with inline `test` blocks and the trailing `test { _ = @import("watch.zig"); }` transitive declaration, which pulls the watch module into the test compilation unit. The inline tests do not require a network, external process, or custom C library; they run with `zig build test` under the standard test step.
 
-What this file does not prove: it does not test `apex.zig` or the Markdown-to-HTML rendering path in depth — the HTML integration tests only smoke-check that an `index.html` was written at the expected path. It does not cover incremental build correctness, watch-mode event delivery, multi-job parallel rendering, or theme-asset fingerprinting. No test here exercises the `--textile` input format with the HTML pipeline. The `runIntelligence` function is covered only by the `SilentRunner` dispatch path (via `runArgs`), not by a direct call with fixture content.
+What this file does not prove: it does not test `render.zig` or the Markdown-to-HTML rendering path in depth — the HTML integration tests only smoke-check that an `index.html` was written at the expected path. It does not cover incremental build correctness, watch-mode event delivery, multi-job parallel rendering, or theme-asset fingerprinting. No test here exercises the `--textile` input format with the HTML pipeline. The `runIntelligence` function is covered only by the `SilentRunner` dispatch path (via `runArgs`), not by a direct call with fixture content.
 
 ***
 
@@ -50,7 +50,7 @@ What this file does not prove: it does not test `apex.zig` or the Markdown-to-HT
 
 Its relationship to `src/cli.zig` is asymmetric and deliberate. `cli.zig` is responsible for parsing argv into a typed `Options` value without touching the filesystem or knowing about pipelines. `main.zig` imports that result and performs the actual work. `cli.runArgs` is generic over a runner interface: in production the runner is `ProdRunner` (defined here), which calls `runPipeline`; in CLI-only tests it is `SilentRunner` (also defined here), which increments a counter and returns success. This design means the full conflict-detection and flag-parsing logic in `cli.zig` is tested independently of any filesystem interaction.
 
-`src/apex.zig` and the ApexMarkdown C ABI are not directly imported by `src/main.zig`. They are reached through `compile.zig` → `compile.compileHtmlSite` / `compileHtmlSiteMulti`, which is only invoked from the `runHtml` branch. The hostile ABI test file (`src/apex_hostile_test.zig`) is an entirely separate compilation unit and shares no symbols with `main.zig`.
+`src/render.zig` is not directly imported by `src/main.zig`; the Oliver-backed rendering seam is reached through `compile.zig` → `compile.compileHtmlSite` / `compileHtmlSiteMulti`, which is only invoked from the `runHtml` branch.
 
 The watch subsystem (`watch.zig`) is imported only lazily inside `runHtml` under an `opts.watch` branch (`const watch = @import("watch.zig")`). The final `test { _ = @import("watch.zig"); }` declaration ensures the watch module is included in the test build even though it is a lazy import in production.
 

@@ -1,7 +1,7 @@
 //! Boris — product CLI entry (HTML default + IR + optional RAG).
 //!
 //! Typed flag parsing + exit-code model. Default mode builds an HTML site
-//! under `dist/` (Apex + Whiteboard + layout splice). IR mode (`--out` /
+//! under `dist/` (Oliver + Whiteboard + layout splice). IR mode (`--out` /
 //! `--no-rag`) runs the content compiler pipeline (scan → parse → PageDb →
 //! graph validate → deterministic JSON IR). RAG mode reuses `pipeline.compile`
 //! + exports a deterministic corpus.
@@ -768,7 +768,7 @@ pub fn runRag(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings
     };
 }
 
-/// HTML site render via Apex C-ABI + whiteboard arena (default CLI path).
+/// HTML site render via the Oliver-backed seam + whiteboard arena (default CLI path).
 pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     const html_dir = opts.html_dir orelse default_html;
 

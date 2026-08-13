@@ -109,7 +109,7 @@ HTML is exactly a native semantic shape with no client state or ARIA shim:
 
 Any open tag matching `<[A-Z][A-Za-z0-9_-]*` with a valid tag-name boundary that
 is neither exactly `Aside` nor exactly `Details` is a **hard error** (`unregistered_component` →
-`ECOMPONENT`). Tags are not silently left for Apex as free HTML.
+`ECOMPONENT`). Tags are not silently left for the renderer as free HTML.
 
 Examples of hard errors: `<Figure>`, `<Broside>`, `<AsideFoo>` is **not** matched
 as Aside (name boundary requires next byte space/`/`/`>` — `AsideFoo` is a
@@ -130,7 +130,7 @@ On the **shared** `pipeline.compile` path (IR and RAG):
 Experimental HTML (`compile.renderAndPublishPage`):
 
 ```text
-segments → Apex(markdown) | Aside HTML | Details HTML → ordered HTML body
+segments → Oliver(markdown) | Aside HTML | Details HTML → ordered HTML body
 ```
 
 No raw registered-component tags in published HTML.

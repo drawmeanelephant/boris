@@ -16,12 +16,12 @@ frontmatter parse
   → Boris wiki-link rewrite
   → content-local image rewrite
   → Aside tokenization
-  → ApexMarkdown rendering
+  → Oliver rendering
   → layout assembly
 ```
 
 The natural extension point is a small Markdown adapter immediately before
-Aside tokenization and Apex rendering, after Boris-owned source rewrites. It
+Aside tokenization and Oliver rendering, after Boris-owned source rewrites. It
 must receive Markdown bytes and return Markdown bytes or an explicit error; it
 must not inspect or rewrite generated HTML.
 
@@ -75,7 +75,7 @@ implementation PR:
 1. **Local asset mode (preferred for a real feature):** a manifest maps a
    normalized ordered pair to a repository-local image under the configured
    theme or page-local asset namespace. The adapter emits a normal Markdown
-   image token, allowing Apex to own HTML escaping. The generated alt text is
+   image token, allowing Oliver to own HTML escaping. The generated alt text is
    derived from the normalized operands, for example `Emoji Kitchen: 🐢 + 🔥`.
 2. **Text fallback mode (prototype-friendly):** the adapter emits visible
    Unicode/text such as `Emoji Kitchen: 🐢 + 🔥` and records that no combined

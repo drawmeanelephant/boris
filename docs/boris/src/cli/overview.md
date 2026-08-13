@@ -48,6 +48,6 @@ The file does not prove: that the pipeline correctly interprets every `Options` 
 
 The production binary links `cli.zig` unconditionally. There are no compile-time feature flags controlling its inclusion. It is not test-only. The `runArgs` function is the intended binary entry point: it calls `parseOptions`, dispatches through `execute`, and returns a `u8` exit code directly usable as a process exit value.
 
-`src/apex.zig` and the ApexMarkdown integration are entirely downstream of this file; `cli.zig` does not reference them. The file is similarly independent of `src/cache.zig`, `src/graph.zig`, and all I/O modules.
+`src/render.zig` and the Oliver-backed rendering seam are entirely downstream of this file; `cli.zig` does not reference them. The file is similarly independent of `src/cache.zig`, `src/graph.zig`, and all I/O modules.
 
 The test suite runs inline with `zig build test`. No test double, hostile C implementation, or special build target is needed; all tests exercise pure Zig logic operating on static argv slices and the `std.testing.allocator`.

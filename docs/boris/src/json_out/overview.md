@@ -56,6 +56,6 @@ pipeline.zig / main.zig
 
 `src/ir_emit.zig` imports `json_out` and uses the full primitive set to construct the three canonical Boris IR artifacts. `src/rag_emit.zig` imports `json_out` and uses only `escapeAppend` to produce JSONL catalog lines for the RAG export.
 
-The module has no connection to `src/apex.zig`, the ApexMarkdown C ABI, or any hostile test infrastructure. It is unrelated to `src/apex_hostile_test.zig`, `src/hardening_test.zig`, and `src/layout_select_hostile_test.zig`.
+The module has no connection to `src/render.zig` or the Oliver-backed rendering seam. It is unrelated to `src/hardening_test.zig` and `src/layout_select_hostile_test.zig`.
 
 The module is compiled into the production binary. There is no build-option or feature flag that excludes it. It carries no C dependencies, no external vendor code, and no platform-specific behavior.

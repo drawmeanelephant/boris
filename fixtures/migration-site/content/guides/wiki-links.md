@@ -7,7 +7,7 @@ tags: [guides, linking]
 
 # Wiki links
 
-Boris resolves wiki links **before** Apex, using the frozen graph.
+Boris resolves wiki links **before** rendering, using the frozen graph.
 
 ## Forms
 

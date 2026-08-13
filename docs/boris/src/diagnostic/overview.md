@@ -22,7 +22,7 @@ tags: [boris, zig, source-reference, diagnostic]
 
 The file exists because Milestone 3 introduced a typed CLI with stable process exit codes, and the normative contract in `docs/contracts/diagnostics.md` freezes those four numeric values for CI, scripts, and tooling. Content-level diagnostic codes (`EDUPLICATEID`, `EFRONTMATTER`, and the rest) live in `src/diag.zig`. This module deliberately does **not** own those codes; its module-level doc comment states that it only maps high-level failure classes to process exit status. Keeping the two concerns separate prevents CLI exit logic from depending on the full diagnostic type system and allows the exit model to be tested in isolation.
 
-`src/diagnostic.zig` is imported by `src/cli.zig` (which re-exports `ExitCode` and `RunResult`) and by `src/main.zig` (which uses those types for the production runner). It has no imports beyond `std`, no Apex link, and no `build_options`. It is not a standalone module root in `build.zig`; its three embedded tests execute when any importing module root is compiled under `zig build test`.
+`src/diagnostic.zig` is imported by `src/cli.zig` (which re-exports `ExitCode` and `RunResult`) and by `src/main.zig` (which uses those types for the production runner). It has no imports beyond `std`, no renderer link, and no `build_options`. It is not a standalone module root in `build.zig`; its three embedded tests execute when any importing module root is compiled under `zig build test`.
 
 The confidence this file provides is high relative to its size: the three tests directly demonstrate that every `ExitCode` integer matches the contract, that every `FailureClass` maps to the correct `ExitCode`, and that every `RunResult` factory produces the expected exit code and message. What it does not prove is that the production CLI always classifies real failures into the correct `FailureClass` — that mapping is the responsibility of `main.zig` / `pipeline.zig` callers. It also does not own or format content diagnostics; those remain in `diag.zig`.
 
@@ -58,6 +58,6 @@ The two modules do not import each other. Mapping from a pipeline `Result` (with
 
 Relative to `docs/contracts/diagnostics.md`, the exit-code table (0 / 1 / 2 / 3) is the normative counterpart of `ExitCode`. Severity and content codes in that same contract document are implemented by `diag.zig`, not this file.
 
-Relative to Apex and hostile ABI tests, this file has no relationship.
+Relative to the rendering seam, this file has no relationship.
 
 ***

@@ -10,7 +10,7 @@ tags: [boris, zig, source-reference, evidence, html_toc]
 
 ## Parser design and documented edge cases
 
-The heading scanner is a straightforward linear byte scan without a full HTML parser. This is deliberate: it operates on HTML already produced by a well-behaved renderer (Apex), not on untrusted author HTML. Three notable design choices are documented by tests:
+The heading scanner is a straightforward linear byte scan without a full HTML parser. This is deliberate: it operates on HTML already produced by a well-behaved renderer (Oliver), not on untrusted author HTML. Three notable design choices are documented by tests:
 
 **Tag-boundary guard:** After matching `<h`, the scanner checks that the next byte after the digit is `>`, space, tab, CR, or LF — or is at the end of the buffer. This prevents false matches on element names like `<header` or `<h-custom`. The test `collectHeadings h1-h3 with ids; skip h4` implicitly validates level filtering; the tag-boundary logic is structural.
 
@@ -20,7 +20,7 @@ The heading scanner is a straightforward linear byte scan without a full HTML pa
 
 **Unclosed tags in inner HTML:** `stripTags` drops all content from an unclosed `<` to end of string rather than returning an error. This is a documented soft-failure; the implication is that malformed inner HTML silently truncates the text value. No test asserts this behavior; it is code-structural.
 
-**HTML entity pass-through:** `stripTags` does not decode or re-encode entities. Entities from Apex (e.g., `&amp;`) are preserved literally in `Heading.text`, and `renderToc` passes them through to the output without re-escaping. The entity-double-escape test (`renderToc emits a labeled list landmark and preserves rendered text entities`) verifies that `A &amp;` in the inner HTML produces `A &amp;` in the TOC text (correct — the entity was already escaped by Apex) and that the extracted `id` value `a&amp;b&lt;c&gt;` is re-escaped by `appendEscaped` when placed in the `href` attribute, producing `a&amp;amp;b&amp;lt;c&amp;gt;` (double-escaped, which is the correct output because the raw `id` bytes contain literal `&`, `<`, `>`).
+**HTML entity pass-through:** `stripTags` does not decode or re-encode entities. Entities from Oliver (e.g., `&amp;`) are preserved literally in `Heading.text`, and `renderToc` passes them through to the output without re-escaping. The entity-double-escape test (`renderToc emits a labeled list landmark and preserves rendered text entities`) verifies that `A &amp;` in the inner HTML produces `A &amp;` in the TOC text (correct — the entity was already escaped by Oliver) and that the extracted `id` value `a&amp;b&lt;c&gt;` is re-escaped by `appendEscaped` when placed in the `href` attribute, producing `a&amp;amp;b&amp;lt;c&amp;gt;` (double-escaped, which is the correct output because the raw `id` bytes contain literal `&`, `<`, `>`).
 
 ***
 
@@ -65,7 +65,7 @@ renderToc(allocator, body_html)
             appendSlice "<a href=\"#"
             → html_nav.appendEscaped(&buf, allocator, h.id)
             appendSlice "\">"
-            appendSlice h.text           [entities from Apex passed through]
+            appendSlice h.text           [entities from Oliver passed through]
             appendSlice "</a></li>\n"
         appendSlice "</ul>\n</nav>"
     → buf.toOwnedSlice(allocator)  [caller owns result; errdefer guards buf]

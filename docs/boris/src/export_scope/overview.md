@@ -18,7 +18,7 @@ tags: [boris, zig, source-reference, export_scope]
 
 ## Executive summary
 
-`src/export_scope.zig` is a pure-Zig utility module that provides two independent but complementary operations needed by both the RAG export path (`src/rag.zig`) and the AI context bundle path (`src/context.zig`): graph projection via `selectPages`, and deterministic Markdown body partitioning via `partitionMarkdown`. Neither function performs I/O, accesses the filesystem, calls the pipeline, or touches the ApexMarkdown C ABI. The module is a shared computation layer that sits between the validated pipeline output and the final export serializers.
+`src/export_scope.zig` is a pure-Zig utility module that provides two independent but complementary operations needed by both the RAG export path (`src/rag.zig`) and the AI context bundle path (`src/context.zig`): graph projection via `selectPages`, and deterministic Markdown body partitioning via `partitionMarkdown`. Neither function performs I/O, accesses the filesystem, calls the pipeline, or touches the Markdown renderer. The module is a shared computation layer that sits between the validated pipeline output and the final export serializers.
 
 `selectPages` takes a frozen, pipeline-validated slice of `graph.Node` values together with an optional scope string, and returns a caller-owned filtered subset. The filtering logic implements a three-phase closure: first, an exact-id or prefix-match seed; second, a one-hop semantic neighbor closure over `semanticRelations`; and third, a transitive structural (parent-chain) closure that runs after the relation projection. The function enforces a strict set of syntactic rules on the scope string itself — rejecting empty strings, strings beginning with `.`, and strings containing `..` or `/` — and returns `error.InvalidScope` for any violation, including a valid-looking scope that matches no page.
 
@@ -53,7 +53,7 @@ What this file does not prove: it does not demonstrate that `selectPages` preser
 In relation to the overall pipeline:
 
 - **Product binary**: Compiled into the `boris` binary through `rag.zig` and `context.zig`, which are reachable from `src/main.zig` on the `--rag` and `--context` execution paths respectively.
-- **`src/apex.zig`**: No relationship. `export_scope.zig` operates on already-rendered graph nodes after all Markdown processing has completed. It never calls into the ApexMarkdown C ABI.
+- **`src/render.zig`**: No relationship. `export_scope.zig` operates on already-rendered graph nodes after all Markdown processing has completed.
 - **`src/graph.zig`**: The only non-standard import. `selectPages` consumes `graph.Node` slices, reading `.id`, `.parent`, `.semanticRelations`, and `.sourcePath` fields. It does not modify any node.
 - **`src/rag.zig`**: Primary caller of both `selectPages` and `partitionMarkdown`. Confirmed in `context.zig` source: `const export_scope = @import("export_scope.zig");` with calls to `export_scope.selectPages(...)` and `export_scope.partitionMarkdown(...)`.
 - **`src/context.zig`**: Also imports and calls both public functions. `selectPages` is used to filter the page list before artifact rendering; `partitionMarkdown` is called inside `renderContextChunks` to split a page body against the `splitSize` budget.

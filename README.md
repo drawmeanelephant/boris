@@ -36,7 +36,7 @@ instead of quietly producing a broken site.
 
 ## Features
 
-- Native Markdown through the in-process ApexMarkdown C ABI.
+- Native Markdown through the pinned **Oliver** library (Zig, in-process).
 - Deterministic HTML output with trusted static layouts and copied assets.
 - Validated Trunk/Satellite navigation and graph-aware breadcrumbs/children.
 - Closed, explicit frontmatter rather than unrestricted YAML or executable MDX.
@@ -247,12 +247,12 @@ reviewed or uploaded to an LLM when useful.
 
 ## Roadmap
 
-- [x] Deterministic HTML, JSON IR, graph validation, and native Apex Markdown.
+- [x] Deterministic HTML, JSON IR, graph validation, and native Oliver Markdown.
 - [x] Incremental/watch builds, bounded jobs, multi-target output, and assets.
 - [x] RAG, Context Bundle, `llms.txt`, and RSS 2.0 exports.
 - [x] Migration labs and real-site dogfood evidence.
 - [x] v0.7.0 release and migration-lab theme/link evidence.
-- [x] v0.8.1 candidate packaging, ApexMarkdown 1.1.13, and source-RAG upload ergonomics.
+- [x] v0.8.1 candidate packaging and source-RAG upload ergonomics.
 - [ ] Relationship inventory and archive-layout dogfood.
 - [ ] Real-theme materialization and controlled migration benchmarks.
 - [ ] Broader migration fixtures for Astro/Starlight and WordPress.

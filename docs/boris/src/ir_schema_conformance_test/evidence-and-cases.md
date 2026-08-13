@@ -13,14 +13,13 @@ tags: [boris, zig, source-reference, evidence, ir_schema_conformance_test]
 The test binary is assembled as follows in `build.zig`:
 
 ```zig
-const irschemamod = b.createModule(.{
+const ir_schema_mod = b.createModule(.{
     .root_source_file = b.path("src/ir_schema_conformance_test.zig"),
     .target = target,
     .optimize = optimize,
 });
-linkApex(irschemamod, b, false);              // real vendor Apex, not hostile double
-irschemamod.addOptions(build_options, apexopts);
-const irschematests = b.addTest(.{ .root_module = irschemamod });
+linkOliver(ir_schema_mod, oliver_mod);          // pinned Oliver via render_mod seam
+const ir_schema_tests = b.addTest(.{ .root_module = ir_schema_mod });
 const run_irschematests = b.addRunArtifact(irschematests);
 run_irschematests.setCwd(b.path("."));        // cwd is the repository root
 
@@ -31,7 +30,7 @@ test_ir_schema_step.dependOn(run_irschematests.step);
 
 The `run_irschematests` step is also added to the default `teststep` aggregate, so `zig build test` includes it. The working directory is the repository root, which is required because the test accesses `content/` as the fixture input and `docs/contracts/schemas/` as the schema source.
 
-The module imports only `std` and `src/pipeline.zig` (via `@import("pipeline.zig")`). It does not import `src/apex.zig` directly; Apex is present only because `pipeline.zig` needs it to render Markdown. The real vendor engine is always used (`hostile = false`), so the Apex build prerequisite (`ensureapex.step`) must be satisfied before this binary links.
+The module imports only `std` and `src/pipeline.zig` (via `@import("pipeline.zig")`). It does not import `src/render.zig` directly; Oliver is present only because `pipeline.zig` needs it to render Markdown. The render seam is linked via `render_mod` before this binary links.
 
 The `Validator` struct is defined inline in this file, not imported from a shared module. It is a self-contained, intentionally limited JSON Schema interpreter covering `$ref` (local `$defs` only), `type`, `const`, `enum`, `required`, `properties`, `additionalProperties: false`, and `items`. Full JSON Schema draft semantics are not implemented and are not claimed.
 
@@ -152,7 +151,7 @@ This is a minimal inline schema. Whether `Validator.validate` correctly handles 
 ### Integration: all three IR artifacts conform to their published schemas
 
 **Injected behavior:**
-`pipeline.run` is called with the real `content/` fixture tree and a real Apex engine. The three IR artifacts (`manifest.json`, `graph.json`, `build-report.json`) are written to disk and then read back.
+`pipeline.run` is called with the real `content/` fixture tree and the real Oliver-backed rendering seam. The three IR artifacts (`manifest.json`, `graph.json`, `build-report.json`) are written to disk and then read back.
 
 **Wrapper boundary exercised:**
 `checkArtifact` is called for each artifact/schema pair. The validator is run on each parsed document against the parsed schema.

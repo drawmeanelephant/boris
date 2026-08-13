@@ -21,7 +21,7 @@ related:
   - `zig build` — compile/install
   - `zig build run -- …` — product CLI (IR default; `--rag` / `--rag-dir` for RAG)
   - `zig build test` — unit + hardening + fuzz tests
-  - `zig build test-apex-hostile` / `zig build test-apex-sanitize` — Apex extras
+  - `zig build test-render` — Oliver rendering seam contract fixtures
   - `zig build source-rag` — source-code pack tool (not product RAG)
 
 **Workshop analogy:** one foreman and one workbench (or a small crew for HTML

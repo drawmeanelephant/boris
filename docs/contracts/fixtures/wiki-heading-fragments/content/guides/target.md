@@ -16,7 +16,7 @@ Inline code in the heading.
 
 ## Café résumé
 
-Unicode heading for Apex GFM id.
+Unicode heading for Oliver GFM id.
 
 ## Hello, World!
 
