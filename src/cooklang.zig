@@ -1,7 +1,8 @@
 //! Bounded Cooklang-to-Markdown body adapter with structured recipe extraction.
 //!
 //! Normative: `docs/contracts/cooklang-compatibility.md`.
-//! This module is pure: no filesystem, Apex, layout, graph, or process access.
+//! This module is pure: no filesystem, renderer, layout, graph, or process
+//! access.
 //!
 //! Cooklang metadata is YAML front matter, which is already Boris frontmatter,
 //! so this adapter never sees it: `parser.zig` splits frontmatter off first and
@@ -10,7 +11,7 @@
 //! Two outputs from one pass:
 //!
 //! 1. **Markdown** for the ordinary compile path — the adapted body enters the
-//!    same component/parser/Apex pipeline as any Markdown page.
+//!    same component/parser/renderer pipeline as any Markdown page.
 //! 2. **A `Recipe`** — the ingredients, cookware and timers as structured data,
 //!    which is the whole reason a recipe format is worth supporting. It reaches
 //!    the IR and the RAG corpus, where prose alone would be unqueryable.
@@ -179,22 +180,32 @@ fn reject(diag_out: *?Diagnostic, line: u32, column: usize, message: []const u8)
 
 /// Escape one byte so author text cannot become document structure.
 ///
-/// The set is derived from the engine Boris actually links, **not** from
-/// CommonMark. `apex_options_default` (vendor/apex-markdown/src/apex.c) turns
-/// on tables, footnotes, definition lists, math, critic markup, task lists,
-/// attributes, callouts, marked extensions, fenced divs and spans, so several
-/// characters that are inert in CommonMark are live here:
+/// The set is judged against the engine Boris actually links, and that engine
+/// changed: Oliver replaced ApexMarkdown Unified. Oliver is CommonMark 0.31.2
+/// plus GFM tables and four opted-in extensions — heading attributes,
+/// footnotes, definition lists and strikethrough. See
+/// `docs/contracts/oliver-renderer.md`.
 ///
-/// - `"` — an attribute value delimiter. A fenced div's class is emitted into
-///   `class="…"` with no escaping, so an unescaped `"` in author text was a
-///   real event-handler injection: `:::x"onmouseover="alert(1)` published
-///   `<div class="x"onmouseover="alert(1)">`.
-/// - `^` — superscript, and a footnote label with `[`.
-/// - `=` — `==highlight==`, and a setext underline at the start of a line.
+/// Measured against Oliver, these are live and this set is what closes them:
 ///
-/// Block-only triggers (`:` for divs and definition lists, `$` for math) are
-/// handled by `appendLineStartGuard` instead: they are harmless mid-sentence,
-/// and escaping every colon would litter the published corpus.
+/// - `[` — a footnote reference (`[^1]`) and a link.
+/// - `~` — GFM strikethrough (`~~x~~`). Also the timer sigil, so a bare one is
+///   refused before it reaches here.
+/// - `=` — a setext underline, which promotes the previous line to a heading.
+/// - `#` `|` `` ` `` `*` `_` `-` `+` `!` — ordinary CommonMark block and inline
+///   openers: headings, table cells, code spans, emphasis, list items, images.
+/// - `{` `}` — a heading attribute list (`{#id .class}`).
+/// - `&` `<` `>` — raw-HTML and entity interpretation.
+///
+/// `"`, `^` and `$` are no longer reachable as structure: they were live under
+/// Apex's fenced divs, superscript and math, all of which Oliver does not have.
+/// They are kept deliberately. Escaping them costs nothing under CommonMark and
+/// keeps the adapter from silently becoming unsafe if an extension is opted in
+/// later — the same reasoning Boris applies to the `"` guard in
+/// `docs/changelog.d/368-cooklang-input-format.md`.
+///
+/// The colon is not here: it is position-sensitive, so `appendLineStartGuard`
+/// and `colonIsLive` own it.
 fn appendMarkdownByte(out: *std.ArrayList(u8), allocator: std.mem.Allocator, c: u8) !void {
     switch (c) {
         '&' => try out.appendSlice(allocator, "&amp;"),
@@ -209,29 +220,27 @@ fn appendMarkdownByte(out: *std.ArrayList(u8), allocator: std.mem.Allocator, c: 
     }
 }
 
-/// True when the colon at `i` is live to the definition-list preprocessor.
+/// True when the colon at `i` could pair into a definition-list separator.
 ///
-/// `definition_list.c` has two forms, and only one is line-initial:
+/// Definition lists are still an opted-in Oliver extension, but only in the
+/// line-initial `Term` + `: def` form, which `appendLineStartGuard` owns.
+/// Verified against Oliver: `Reduce the sauce :: then plate it.` and `a::b`
+/// both render as ordinary paragraphs.
 ///
-/// 1. `: term` at the start of a line (kramdown form), handled by
-///    `appendLineStartGuard`.
-/// 2. `term :: definition` **anywhere** on a line. `find_def_separator` scans
-///    the whole line for `::`, needs no spaces and has no block or list
-///    context, so the plainest possible step,
-///    `Reduce the sauce :: then plate it.`, was rewritten into
-///    `<dl><dt>1. Reduce the sauce</dt><dd>then plate it.</dd>`, destroying the
-///    Method list item.
-///
-/// Form 2 needs two adjacent colons, so escaping a colon that touches another
-/// one is sufficient, and ordinary prose (`Note: rest the dough`) stays
-/// untouched in the published corpus.
+/// The `::` form was Apex-specific. Its `find_def_separator` scanned the whole
+/// line, so that plain step was rewritten into
+/// `<dl><dt>1. Reduce the sauce</dt><dd>then plate it.</dd>`, destroying the
+/// Method list item. This check is therefore **defence in depth on Oliver, not
+/// a live requirement** — kept because it costs one comparison, it is invisible
+/// in ordinary prose, and a dialect that scans for `::` again would otherwise
+/// silently reopen the hole.
 ///
 /// The backward look is against `out`, not the input, because a pair can be
 /// assembled across two spans where neither half can see it:
 /// `Mix @salt:{1}: done` emitted `salt:` from the ingredient name and `:` from
-/// the following prose, producing `Mix salt:: done` and a forged `<dl>` while
-/// both input-local checks said the colon was inert. Escaping the *second*
-/// colon of any pair, however it was assembled, is enough to break it.
+/// the following prose, producing `Mix salt:: done` while both input-local
+/// checks said the colon was inert. Escaping the *second* colon of any pair,
+/// however it was assembled, is enough to break it.
 fn colonIsLive(out: *const std.ArrayList(u8), text: []const u8, i: usize) bool {
     if (i + 1 < text.len and text[i + 1] == ':') return true;
     return out.items.len > 0 and out.items[out.items.len - 1] == ':';
@@ -240,9 +249,10 @@ fn colonIsLive(out: *const std.ArrayList(u8), text: []const u8, i: usize) bool {
 /// Escape author text, resolving the colon's context from the whole span.
 fn appendMarkdownText(out: *std.ArrayList(u8), allocator: std.mem.Allocator, text: []const u8) !void {
     for (text, 0..) |c, i| {
-        // A numeric character reference, not a backslash: definition lists and
-        // fenced divs are text preprocessors that run before parsing, so they
-        // never see a backslash escape. Measured, not assumed.
+        // A numeric character reference, not a backslash: under Apex the
+        // definition-list and fenced-div passes ran before parsing and never
+        // saw a backslash escape. An entity is inert to a preprocessor and to a
+        // block parser alike, so it stays correct across both engines.
         if (c == ':' and colonIsLive(out, text, i)) {
             try out.appendSlice(allocator, "&#58;");
             continue;
@@ -255,23 +265,21 @@ fn appendMarkdownText(out: *std.ArrayList(u8), allocator: std.mem.Allocator, tex
 /// returning the number of input bytes consumed.
 ///
 /// The per-byte escaper cannot see position, and two constructs are live only
-/// at the start of a line:
+/// at the start of a line. Both were re-verified against Oliver:
 ///
-/// - `: term` is the kramdown definition-list form. (The other definition-list
-///   form, `term :: def`, is position-independent and handled by
-///   `colonIsLive`.)
-/// - Digits followed by `.` or `)` are an ordered-list marker, so
-///   `1998. Then bake.` opened a nested `<ol start="1998">` inside the step.
+/// - `: def` under a term line is the definition-list form, which Oliver still
+///   opts into. `Term` followed by `: kramdown definition form` renders a real
+///   `<dl>`, so this guard is load-bearing, not historical.
+/// - Digits followed by `.` or `)` are an ordered-list marker: `1998. numbered`
+///   renders `<ol start="1998">`, which inside a step would nest a list in it.
 ///
-/// The colon uses a numeric character reference, measured against the engine
-/// rather than assumed: definition lists and fenced divs are text
-/// preprocessors that run *before* parsing, so a backslash escape never
-/// reaches them — `&#58;::x` still opened a fenced div because the literal `::`
-/// survived, and `\:::x` only escaped notice because `:::` is excluded by the
-/// separator scan. An entity leaves no literal colon to find.
+/// The colon uses a numeric character reference rather than a backslash. Under
+/// Apex the definition-list pass ran before parsing and never saw a backslash
+/// escape; an entity is inert to a preprocessor and to a block parser alike, so
+/// it stays correct across both engines.
 ///
-/// `=` and `$` need no case here: both are escaped as ordinary punctuation
-/// everywhere, which already covers their line-initial forms.
+/// `=` needs no case here — it is escaped as ordinary punctuation everywhere,
+/// which covers its line-initial setext form.
 fn appendLineStartGuard(out: *std.ArrayList(u8), allocator: std.mem.Allocator, text: []const u8) !usize {
     if (text.len == 0) return 0;
     if (text[0] == ':') {
@@ -1205,12 +1213,14 @@ test "a continuation line cannot forge a setext heading" {
     try std.testing.expect(std.mem.indexOf(u8, result.markdown, "\n   =====") == null);
 }
 
-test "a continuation line cannot open a fenced div, definition list, or math block" {
+test "a continuation line cannot open a definition list or a math block" {
     const gpa = std.testing.allocator;
-    // The engine Boris links is Apex Unified, not bare CommonMark: fenced divs,
-    // definition lists and math are all on. `:::x"onmouseover="alert(1)` on a
-    // continuation line published `<div class="x"onmouseover="alert(1)">`,
-    // because a fenced div's class is emitted into an attribute unescaped.
+    // Definition lists are an opted-in Oliver extension, so the `: def` case is
+    // live and this test is load-bearing. The other two are history kept as
+    // regressions: `:::x"onmouseover="alert(1)` published
+    // `<div class="x"onmouseover="alert(1)">` under Apex's fenced divs, and
+    // `$$` opened a math block. Oliver has neither, but a step must never begin
+    // with a block trigger regardless of which dialect is linked.
     const cases = [_][]const u8{
         "Rest the dough.\n:::x\"onmouseover=\"alert(1)\n",
         "Terms\n: forged definition\n",
@@ -1234,10 +1244,9 @@ test "a continuation line cannot open a fenced div, definition list, or math blo
 
 test "the escape set covers every construct the linked engine enables" {
     const gpa = std.testing.allocator;
-    // Derived from `apex_options_default`, not from CommonMark: tables,
-    // footnotes, definition lists, math, critic markup, attributes, callouts,
-    // fenced divs, spans and marked extensions are all on. The invariant is
-    // that such a byte never reaches output raw — either the adapter refuses
+    // Judged against Oliver — CommonMark 0.31.2 plus GFM tables, heading
+    // attributes, footnotes, definition lists and strikethrough. The invariant
+    // is that such a byte never reaches output raw — either the adapter refuses
     // the body, or it escapes the byte. `#` and `~` are refused because a bare
     // sigil is an authoring error; the rest are escaped.
     // `:` is deliberately absent: see the next test.
