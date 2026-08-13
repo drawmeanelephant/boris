@@ -72,7 +72,7 @@ scan .cook
 | Construct | Source | Effect |
 |---|---|---|
 | Ingredient, one word | `@salt` | Name ends at whitespace or sentence punctuation |
-| Ingredient, multi-word | `@ground black pepper{}` | Name ends at `{` |
+| Ingredient, multi-word | `@ground black pepper{}` | Name ends at `{`, which must touch the name |
 | Quantity | `@potato{2}` | `amount` = `2` |
 | Quantity with unit | `@bacon{1%kg}` | `amount` = `1`, `unit` = `kg` |
 | Preparation | `@onion{1}(peeled)` | `preparation` = `peeled` |
@@ -90,10 +90,15 @@ scan .cook
 ### Name termination
 
 A brace-less name is one word. A name containing spaces must be closed with
-`{`. The lookahead for that `{` stops at another sigil (`@`, `#`, `~`), at a
-bracket, or at sentence punctuation followed by a space or end of line —
-otherwise `add @salt and @pepper{1}` would read `salt and @pepper` as one
-ingredient name.
+`{`, and that `{` **must touch the name** — no space between them. The
+lookahead for it also stops at another sigil (`@`, `#`, `~`), at a bracket, or
+at sentence punctuation followed by a space or end of line.
+
+Both conditions are load-bearing. Without the sigil stop,
+`add @salt and @pepper{1}` reads `salt and @pepper` as one name. Without the
+adjacency rule, `add @salt into the {bowl}` reads `salt into the` as the name
+and `bowl` as its amount, deleting the prose between them from the rendered
+step — an unrelated braced word later in a sentence is not part of the name.
 
 Punctuation is judged in context: the `.` in `@./sauces/pepper-oil` and in
 `@milk{1.5%l}` belongs to the token, while the `.` in `add @salt.` ends the

@@ -461,7 +461,15 @@ fn multiWordNameEnd(text: []const u8, start: usize) ?usize {
     while (j < text.len) : (j += 1) {
         if (isSentenceBreak(text, j)) return null;
         switch (text[j]) {
-            '{' => return j,
+            '{' => {
+                // The `{` closes a name only when it touches it. Without this,
+                // `add @salt into the {bowl}` read `salt into the` as the name
+                // and `bowl` as its amount, deleting the prose between them
+                // from the rendered step. A brace-less name is one word, and an
+                // unrelated braced word later in the sentence is not part of it.
+                if (j > start and isAsciiSpace(text[j - 1])) return null;
+                return j;
+            },
             '@', '#', '~', '(', ')', '[', ']', '}', '\t' => return null,
             else => {},
         }
@@ -1493,4 +1501,31 @@ test "the adapter is deterministic" {
     try std.testing.expect(b.isOk());
     defer freeResult(gpa, b);
     try std.testing.expectEqualStrings(a.markdown, b.markdown);
+}
+
+test "a brace-less name does not swallow a later braced word" {
+    const gpa = std.testing.allocator;
+    // `{bowl}` is unrelated prose, not this ingredient's quantity. Reading it as
+    // one recorded `salt into the` with amount `bowl` and deleted the prose
+    // between them from the rendered step.
+    const result = try toMarkdown("Add @salt into the {bowl} now.\n", gpa);
+    try std.testing.expect(result.isOk());
+    defer freeResult(gpa, result);
+    try std.testing.expectEqual(@as(usize, 1), result.recipe.ingredients.len);
+    try std.testing.expectEqualStrings("salt", result.recipe.ingredients[0].name);
+    try std.testing.expect(result.recipe.ingredients[0].quantity.isEmpty());
+    // The prose survives, with the braces escaped as ordinary punctuation.
+    try std.testing.expect(std.mem.indexOf(u8, result.markdown, "Add salt into the \\{bowl\\} now.") != null);
+
+    // A brace that touches the name still closes it, spaces and all.
+    const touching = try toMarkdown("Add @ground black pepper{} to taste.\n", gpa);
+    try std.testing.expect(touching.isOk());
+    defer freeResult(gpa, touching);
+    try std.testing.expectEqualStrings("ground black pepper", touching.recipe.ingredients[0].name);
+
+    // And an anonymous timer's brace, which touches the sigil, still works.
+    const timer = try toMarkdown("Bake for ~{25%minutes}.\n", gpa);
+    try std.testing.expect(timer.isOk());
+    defer freeResult(gpa, timer);
+    try std.testing.expectEqualStrings("25", timer.recipe.timers[0].quantity.amount);
 }

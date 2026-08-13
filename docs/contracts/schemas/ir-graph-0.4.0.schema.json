@@ -52,7 +52,7 @@
       "type": "array",
       "description": "Present only when the corpus carries author semantic relations (the IR 0.3 facet). Same shape as `edges`; never used for build dependency walks.",
       "items": {
-        "$ref": "#/$defs/edge"
+        "$ref": "#/$defs/semanticRelation"
       }
     }
   },
@@ -368,6 +368,30 @@
           "items": {
             "$ref": "#/$defs/cookTimer"
           }
+        }
+      }
+    },
+    "semanticRelation": {
+      "type": "object",
+      "description": "One author semantic relation, reshaped as an edge. Never used for build dependency walks. `kind` is author-defined, unlike a dependency edge's closed set.",
+      "required": [
+        "from",
+        "to",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/endpoint"
+        },
+        "to": {
+          "$ref": "#/$defs/endpoint"
+        },
+        "kind": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "maxLength": 64,
+          "description": "Author-defined token matching `page.RelationKind.parse`: lowercase start, then lowercase, digits or `_`, at most `max_relation_kind_bytes` (64) bytes."
         }
       }
     }
