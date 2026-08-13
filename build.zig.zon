@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .oliver = .{
-            .url = "https://github.com/drawmeanelephant/oliver/archive/253b4c2eacb6726c268878d589f9d0f8a96fa8f2.tar.gz",
-            .hash = "oliver-0.0.0-LOsZkHyCFAD41DZCnpcqF0JtB6MZBbRJ77mKwP1yETjw",
+            .url = "https://github.com/drawmeanelephant/oliver/archive/18dc5ff.tar.gz",
+            .hash = "oliver-0.0.0-LOsZkGuhFAD4TNun5vWRGSgUcUvnQNAaGMA-cr4ekI9T",
         },
     },
     .paths = .{

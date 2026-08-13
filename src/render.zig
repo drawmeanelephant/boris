@@ -82,6 +82,7 @@ const markdown_options = oliver.MarkdownOptions{
     .footnotes = true,
     .definition_lists = true,
     .heading_attributes = true,
+    .strikethrough = true,
 };
 
 /// Oliver's render options — heading auto-ids and the footnotes section.
