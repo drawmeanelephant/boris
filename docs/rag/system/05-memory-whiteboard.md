@@ -57,7 +57,7 @@ Transient data that dies each iteration:
 - raw source bytes
 - cleaned body markdown
 - component/aside slice views (parse-time only; not stored on Page)
-- Apex HTML buffer
+- Oliver-rendered HTML buffer
 
 ## Flat RAM — what is actually tested
 

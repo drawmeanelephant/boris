@@ -37,10 +37,13 @@ jobs:
         with:
           version: 0.16.0
 
+      # Markdown rendering is Oliver, a pure-Zig library pinned by content
+      # hash in build.zig.zon: no CMake, no host tools. jq is used below for
+      # the publication-plan and evidence JSON.
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake jq
+          sudo apt-get install -y jq
 
       - name: Build Boris
         run: zig build -Doptimize=ReleaseSafe
@@ -124,7 +127,7 @@ jobs:
           mkdir -p evidence/proof
           cp -R dist/_boris/proof/. evidence/proof/
           BORIS_VERSION="$(sed -n 's/.*\.version = "\([^"]*\)".*/\1/p' build.zig.zon | head -1)"
-          OLIVER_REV="$(sed -n 's|.*oliver/archive/\([0-9a-f]\{40\}\)\.tar\.gz.*|\1|p' build.zig.zon | head -1)"
+          OLIVER_REV="$(sed -n 's|.*oliver/archive/\([0-9a-f]\{1,\}\)\.tar\.gz.*|\1|p' build.zig.zon | head -1)"
           OLIVER_REV="${OLIVER_REV:-unknown}"
           INVENTORY_SHA256="$(jq -r '.inventory_sha256' evidence/public-artifact-verification.json)"
           PUBLIC_MANIFEST_SHA256="$(jq -r '.public_manifest_sha256' evidence/public-artifact-verification.json)"

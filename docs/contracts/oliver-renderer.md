@@ -34,8 +34,8 @@ are valid until `arena.reset(.free_all)`.
 |-------|-------|
 | Repository | <https://github.com/drawmeanelephant/oliver> |
 | Branch | `boris-markdown-extensions` |
-| Commit | `253b4c2eacb6726c268878d589f9d0f8a96fa8f2` |
-| Package hash | `oliver-0.0.0-LOsZkHyCFAD41DZCnpcqF0JtB6MZBbRJ77mKwP1yETjw` |
+| Commit | `872b00217c31ae271bbd518dc9f3b6df97767185` |
+| Package hash | `oliver-0.0.0-LOsZkNXyFQBUPCi88goqzMEzB1Buat5HZhgs7-cg9ztM` |
 | Zig | 0.16.0 |
 
 The pin lives in `build.zig.zon` (`.dependencies.oliver.url` + `.hash`). Zig
@@ -47,7 +47,7 @@ time and cached by Zig).
 ### Why `boris-markdown-extensions`
 
 Oliver upstream is CommonMark 0.31.2 (652/652 conformance) plus GFM tables.
-Boris publishes three dialect extensions Oliver added for this migration, all
+Boris publishes five dialect extensions Oliver added for this migration, all
 off by default in Oliver and opted into by Boris (so Oliver's own conformance
 corpus stays byte-exact):
 
@@ -57,6 +57,7 @@ corpus stays byte-exact):
 | Heading attribute lists (`{#id .class}`) | `parse.markdown.heading_attributes` | manual ids such as `{#exit-codes}` in `reference/commands.md` |
 | Footnotes (`[^label]` + definitions) | `parse.markdown.footnotes` + `render.footnotes` | footnote refs/sections in published pages |
 | Definition lists (`Term` + `: def`) | `parse.markdown.definition_lists` | definition lists in published pages |
+| GFM strikethrough (`~~x~~`) | `parse.markdown.strikethrough` | Textile `-deleted-` and authored `~~x~~` (`textile-compatibility.md`) |
 
 `src/render.zig` pins these options in one place:
 
@@ -65,6 +66,7 @@ const markdown_options = oliver.MarkdownOptions{
     .footnotes = true,
     .definition_lists = true,
     .heading_attributes = true,
+    .strikethrough = true,
 };
 const render_options = oliver.html.RenderOptions{
     .heading_ids = true,

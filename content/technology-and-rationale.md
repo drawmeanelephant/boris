@@ -41,7 +41,7 @@ Markdown rendering is done by **Oliver**, a freestanding Zig markup library call
 
 The alternative — shelling out to a Markdown CLI on each page — adds process spawn overhead, encoding complexity, and a fragile surface where the subprocess might not be available or might behave differently across versions. Oliver is pinned by content hash in `build.zig.zon` and compiled into the Boris binary by Zig — no CMake, no host tools, no runtime dependency. At render time it is a plain function call: no IPC, no serialization, no subprocess.
 
-Oliver is byte-exact CommonMark 0.31.2 plus GFM tables, with the extensions Boris publishes enabled: heading auto-ids, heading attribute lists, footnotes, and definition lists. It is pure Zig with no global state, no hidden caches, and no filesystem/clock/network access, which keeps renders deterministic and parallel-safe (`--jobs N`).
+Oliver is byte-exact CommonMark 0.31.2 plus GFM tables, with the extensions Boris publishes enabled: heading auto-ids, heading attribute lists, footnotes, definition lists, and strikethrough. It is pure Zig with no global state, no hidden caches, and no filesystem/clock/network access, which keeps renders deterministic and parallel-safe (`--jobs N`).
 
 ## Why a validated content graph?
 

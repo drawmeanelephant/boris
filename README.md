@@ -64,8 +64,9 @@ tools without requiring a Node runtime to publish the site.
 
 ## Quick start
 
-Building Boris requires [Zig 0.16+](https://ziglang.org/) and CMake. CMake is
-used to build the vendored native Markdown engine; it is not part of the
+Building Boris requires [Zig 0.16+](https://ziglang.org/) only. Markdown
+rendering is Oliver, a pure-Zig library pinned by content hash in
+`build.zig.zon` and fetched by Zig at build time; it is not part of the
 authoring or publishing workflow.
 
 ```bash
@@ -260,7 +261,7 @@ reviewed or uploaded to an LLM when useful.
 
 ## Honest limitations
 
-- Zig 0.16+ and CMake are required to build Boris itself.
+- Zig 0.16+ is required to build Boris itself.
 - Frontmatter is intentionally closed; Boris is not a general YAML parser.
 - Unrestricted MDX and executable JavaScript components are out of scope.
 - Raw HTML is trusted input and is not sanitized by default.

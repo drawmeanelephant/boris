@@ -50,10 +50,10 @@ behave exactly as they do for a Markdown page.
 scan .cook
   -> parse the existing Boris frontmatter from original source bytes
   -> adapt ONLY the body: Cooklang -> Markdown + Recipe
-  -> include expansion, wiki rewrite, Aside tokenization, Apex  (unchanged)
+  -> include expansion, wiki rewrite, Aside tokenization, Oliver render  (unchanged)
 ```
 
-- The adapter is pure: no filesystem, Apex, layout, graph, or process access.
+- The adapter is pure: no filesystem, renderer, layout, graph, or process access.
 - Adaptation is total and deterministic; the same body always produces the same
   Markdown and the same `Recipe`.
 - **Adapter** diagnostic lines and columns refer to the author's `.cook` file.

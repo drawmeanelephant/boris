@@ -5,8 +5,8 @@
 [`STATUS.md`](STATUS.md)
 **Current direction:** `v0.8.0` packages post-v0.7 release hardening,
 source-RAG upload ergonomics, migration review tooling, and the Oliver renderer
-v1.1.13 (compiler `boris/0.8.0`). Through v0.8.0 the tree includes
-knowledge-system exports, layout/theme work, Textile, migration labs, static
+pinned in `build.zig.zon` (compiler `boris/0.8.0`). Through v0.8.0 the tree
+includes knowledge-system exports, layout/theme work, Textile, migration labs, static
 showcase, agent-lore dogfood, native `<Details>`, content-local page assets,
 the reference theme, and bounded real-site adoption evidence. Historical
 version claims below preserve the post-F8 decision record. Active work is
