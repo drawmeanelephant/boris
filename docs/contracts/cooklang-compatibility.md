@@ -144,35 +144,56 @@ had not written.
 
 ## Escaping and refusals
 
-Recipe prose is untrusted input, and the escape set is derived from **the engine
-Boris links, not from CommonMark**. `apex_options_default` enables tables,
-footnotes, definition lists, math, critic markup, attributes, callouts, fenced
-divs, spans and marked extensions, so characters that are inert in CommonMark
-are live here. Deriving the set from CommonMark produced a real event-handler
-injection: a fenced div emits its class into `class="…"` unescaped, so
-`:::x"onmouseover="alert(1)` on a step continuation line published
-`<div class="x"onmouseover="alert(1)">`.
+Recipe prose is untrusted input, and the escape set is judged against **the
+engine Boris links, not against CommonMark alone**. That engine changed: Oliver
+replaced ApexMarkdown Unified. Oliver is CommonMark 0.31.2 plus GFM tables and
+four opted-in extensions — heading attributes, footnotes, definition lists and
+strikethrough. See [oliver-renderer.md](oliver-renderer.md).
 
-| Character | Treatment | Why |
+| Character | Treatment | Live construct on Oliver |
 |---|---|---|
-| `&` `<` `>` `"` | entity | `"` delimits an attribute value |
-| `` \ ` * _ { } [ ] # + - ! | ~ ^ = $ `` | backslash | block and inline constructs, incl. `^` superscript, `==highlight==`, `$math$` |
-| `:` at the start of a line | `&#58;` | opens a fenced div (`:::`) or a definition list (`: term`) |
-| `:` adjacent to another `:` | `&#58;` | `term :: definition` is a definition list **anywhere** on a line |
-| `:` elsewhere | passed through | opens nothing mid-sentence, and escaping every one would litter the corpus |
-| digits then `.` or `)` at line start | backslash | an ordered-list marker would nest a list inside the step |
+| `&` `<` `>` | entity | raw-HTML and entity interpretation |
+| `[` `]` | backslash | footnote reference (`[^1]`), link |
+| `~` | backslash | GFM strikethrough (`~~x~~`); also the timer sigil |
+| `=` | backslash | setext underline, which promotes the previous line to a heading |
+| `` ` `` `*` `_` `#` `+` `-` `!` `\|` | backslash | code span, emphasis, heading, list item, image, table cell |
+| `{` `}` | backslash | heading attribute list (`{#id .class}`) |
+| `:` at the start of a line | `&#58;` | definition list (`Term` then `: def`) |
+| digits then `.` or `)` at line start | backslash | ordered-list marker, which would nest a list inside the step |
+| `:` elsewhere | passed through | nothing — and escaping every one would litter the corpus |
+| `"` `^` `$` | entity / backslash | **nothing on Oliver.** Kept deliberately; see below |
+| `:` adjacent to another `:` | `&#58;` | **nothing on Oliver.** Kept deliberately; see below |
 
-Two details are load-bearing and were measured against the engine rather than
-assumed:
+### What is defence in depth, and why it stays
 
-- Definition lists and fenced divs are **text preprocessors that run before
-  parsing**, so a backslash escape never reaches them. `&#58;::x` still opened a
-  fenced div because the literal `::` survived; a numeric character reference
-  leaves no literal colon to find.
+`"`, `^`, `$` and the `::` colon pair were live under Apex and are inert under
+Oliver, verified by rendering each through the linked engine. They are kept
+because escaping them costs nothing under CommonMark and because their absence
+is what made the adapter unsafe the first time. Concretely, under Apex:
+
+- A fenced div emitted its class into `class="…"` unescaped, so
+  `:::x"onmouseover="alert(1)` on a step continuation line published
+  `<div class="x"onmouseover="alert(1)">`. Oliver has no fenced divs.
+- `find_def_separator` scanned a whole line for `::`, so the plainest step,
+  `Reduce the sauce :: then plate it.`, was rewritten into
+  `<dl><dt>1. Reduce the sauce</dt><dd>then plate it.</dd>`. Oliver's definition
+  lists are the line-initial form only.
+
+Two details remain load-bearing and were measured, not assumed:
+
+- The colon uses a **numeric character reference, not a backslash**. Under Apex
+  the definition-list pass ran before parsing and never saw a backslash escape:
+  `&#58;::x` still opened a fenced div because the literal `::` survived. An
+  entity is inert to a preprocessor and to a block parser alike, so it is
+  correct on both engines.
 - Colon adjacency is judged against the **output** buffer, not the input span. A
   pair can be assembled across two spans where neither half can see it:
   `Mix @salt:{1}: done` emitted `salt:` from the ingredient name and `:` from
   the following prose, producing `Mix salt:: done`.
+
+A guard in this table may be removed only after rendering its construct through
+the currently linked engine and showing it is inert. Reasoning from the
+extension list alone is what produced the injection above.
 
 Every author-controlled span is guarded, not just step prose: a token name, a
 `{quantity}`, a `(preparation)` and a section name all reach published output.
@@ -269,11 +290,10 @@ change.
 - `--context` does not adapt non-Markdown bodies, so a context bundle for a
   `.cook` tree carries raw Cooklang source. This matches the existing Textile
   behaviour and is not changed here.
-- A raw U+2028 or U+2029 in an ingredient name reaches `graph.json` unescaped.
-  This is a pre-existing property of `json_out.zig` shared with every other
-  emitter — a Markdown `title` reaches the identical escaper — so the recipe
-  facet adds a field but no new capability. Fixed separately. (U+0085 is already
-  refused at ingest as a C1 control by `unicode_policy.zig`.)
+- ~~A raw U+2028 or U+2029 in an ingredient name reaches `graph.json`
+  unescaped.~~ Fixed: `json_out.zig` now escapes the whole line-terminator class
+  as `\uXXXX`, verified on a `.cook` ingredient name. U+0085 is refused earlier,
+  at ingest, as a C1 control by `unicode_policy.zig`.
 - Scaling, shopping-list aggregation, pantry files and `.menu` files are
   ecosystem conventions outside this slice.
 
