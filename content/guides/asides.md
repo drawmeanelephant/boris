@@ -188,4 +188,4 @@ Asides support full Markdown formatting inside their body, including bold text, 
 ## Next steps
 
 - [[guides/building-pages|Building Pages]] — other page authoring features
-- [[guides/apex-markdown|Apex Markdown Reference]] — the full set of Markdown extensions Boris supports
+- [[guides/oliver-markdown|Markdown Showcase]] — the full set of Markdown extensions Boris supports
