@@ -298,30 +298,21 @@ test "recognizes active SVG constructs" {
 
 test "recognizes constructs that name the dangerous attribute rather than carrying it" {
     // An animation element has no on* attribute of its own; it names one.
-    try std.testing.expectEqual(Violation.animated_event_handler, firstViolation(
-        "<svg><set attributeName=\"onload\" to=\"alert(1)\"/></svg>").?);
-    try std.testing.expectEqual(Violation.animated_event_handler, firstViolation(
-        "<svg><animate attributeName=\"onclick\" to=\"alert(1)\"/></svg>").?);
+    try std.testing.expectEqual(Violation.animated_event_handler, firstViolation("<svg><set attributeName=\"onload\" to=\"alert(1)\"/></svg>").?);
+    try std.testing.expectEqual(Violation.animated_event_handler, firstViolation("<svg><animate attributeName=\"onclick\" to=\"alert(1)\"/></svg>").?);
     // References decode here for the same reason they do in URLs.
-    try std.testing.expectEqual(Violation.animated_event_handler, firstViolation(
-        "<svg><set attributeName=\"&#x6f;nload\" to=\"alert(1)\"/></svg>").?);
+    try std.testing.expectEqual(Violation.animated_event_handler, firstViolation("<svg><set attributeName=\"&#x6f;nload\" to=\"alert(1)\"/></svg>").?);
     // <style> content is active; every other check inspects tags only.
-    try std.testing.expectEqual(Violation.external_style_import, firstViolation(
-        "<svg><style>@import url(\"https://example.test/x.css\");</style></svg>").?);
-    try std.testing.expectEqual(Violation.external_style_import, firstViolation(
-        "<svg><style>@ /* c */ import url(x);</style></svg>").?);
+    try std.testing.expectEqual(Violation.external_style_import, firstViolation("<svg><style>@import url(\"https://example.test/x.css\");</style></svg>").?);
+    try std.testing.expectEqual(Violation.external_style_import, firstViolation("<svg><style>@ /* c */ import url(x);</style></svg>").?);
 }
 
 test "permits animation and styling that do not reach an active attribute" {
-    try std.testing.expect(firstViolation(
-        "<svg><rect><animate attributeName=\"x\" from=\"0\" to=\"10\" dur=\"1s\"/></rect></svg>") == null);
-    try std.testing.expect(firstViolation(
-        "<svg><set attributeName=\"fill\" to=\"red\"/></svg>") == null);
-    try std.testing.expect(firstViolation(
-        "<svg><style>.a{fill:red}</style><rect class=\"a\"/></svg>") == null);
+    try std.testing.expect(firstViolation("<svg><rect><animate attributeName=\"x\" from=\"0\" to=\"10\" dur=\"1s\"/></rect></svg>") == null);
+    try std.testing.expect(firstViolation("<svg><set attributeName=\"fill\" to=\"red\"/></svg>") == null);
+    try std.testing.expect(firstViolation("<svg><style>.a{fill:red}</style><rect class=\"a\"/></svg>") == null);
     // "on" as a prefix of an ordinary word must not trip the check.
-    try std.testing.expect(firstViolation(
-        "<svg><set attributeName=\"opacity\" to=\"0.5\"/></svg>") == null);
+    try std.testing.expect(firstViolation("<svg><set attributeName=\"opacity\" to=\"0.5\"/></svg>") == null);
 }
 
 test "permits inert SVG text and ordinary markup" {

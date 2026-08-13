@@ -641,7 +641,6 @@ fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result) !void {
     const cwd = Io.Dir.cwd();
     try cwd.createDirPath(io, result.out_dir);
 
-
     const report = try renderBuildReport(gpa, result);
     defer gpa.free(report);
 
@@ -1513,28 +1512,28 @@ test "Feature 9 IR: wiki fragment still emits page reference edge only" {
     try dir.writeFile(io, .{
         .sub_path = "index.md",
         .data =
-            \\---
-            \\title: Home
-            \\---
-            \\
-            \\# Home
-            \\
-            \\See [[guides/t#sec]] and [[guides/t]].
-            \\
+        \\---
+        \\title: Home
+        \\---
+        \\
+        \\# Home
+        \\
+        \\See [[guides/t#sec]] and [[guides/t]].
+        \\
         ,
     });
     try dir.writeFile(io, .{
         .sub_path = "guides/t.md",
         .data =
-            \\---
-            \\title: T
-            \\parent: index
-            \\---
-            \\
-            \\# T
-            \\
-            \\## Sec
-            \\
+        \\---
+        \\title: T
+        \\parent: index
+        \\---
+        \\
+        \\# T
+        \\
+        \\## Sec
+        \\
         ,
     });
 

@@ -196,7 +196,6 @@ pub fn validateExportPath(
     try rejectSymlinkAlongPath(io, Io.Dir.cwd(), gpa, stage_path);
 }
 
-
 /// Validate target name grammar. Must be non-empty alphanumeric plus '-', '_', '.'.
 /// Must not be "." or "..".
 pub fn isValidTargetName(name: []const u8) bool {

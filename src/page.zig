@@ -445,10 +445,10 @@ test "PageDb.promote owns strings after source buffer free" {
         \\body
     );
     // Parse views into source (manual view to avoid depending on parser here).
-    const title_view = source[std.mem.indexOf(u8, source, "Durable Title").? ..][0.."Durable Title".len];
-    const parent_view = source[std.mem.indexOf(u8, source, "home").? ..][0.."home".len];
+    const title_view = source[std.mem.indexOf(u8, source, "Durable Title").?..][0.."Durable Title".len];
+    const parent_view = source[std.mem.indexOf(u8, source, "home").?..][0.."home".len];
     const tag_a = source[std.mem.indexOf(u8, source, "[a, b]").? + 1 ..][0..1];
-    const tag_b = source[std.mem.indexOf(u8, source, "b]").? ..][0..1];
+    const tag_b = source[std.mem.indexOf(u8, source, "b]").?..][0..1];
 
     var meta: FrontmatterView = .{
         .title = title_view,
