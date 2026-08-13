@@ -63,28 +63,16 @@ jobs:
         with:
           version: 0.16.0
 
-      # Feature 1: CMake is a compile-time host tool for static ApexMarkdown.
-      # Not a runtime dependency; zig build remains the user entrypoint.
-      - name: Install CMake (Ubuntu)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake
-
-      - name: Install CMake (macOS)
-        if: runner.os == 'macOS'
-        run: brew install cmake
-
-      - name: Verify Apex cmark-gfm CMake modules present
-        run: |
-          test -f vendor/apex-markdown/vendor/cmark-gfm/FindAsan.cmake
-          test -f vendor/apex-markdown/vendor/cmark-gfm/CheckFileOffsetBits.cmake
-
+      # Markdown rendering is Oliver, a pure-Zig library pinned by content
+      # hash in build.zig.zon: no CMake, no host tools, nothing to install.
       - name: Build
         run: zig build
 
       - name: Test
         run: zig build test
+
+      - name: Oliver rendering seam tests
+        run: zig build test-render
 
       # KNOWN RED, deliberately non-gating and deliberately not hidden.
       # `zig build test-publication-fixture` fails on a pristine clone:
@@ -111,34 +99,6 @@ jobs:
 
       - name: Publication conformance
         run: zig build test-publication-conformance
-
-      - name: Apex hostile ABI tests
-        run: zig build test-apex-hostile
-
-      - name: ApexMarkdown static libs present
-        run: |
-          test -f vendor/apex-markdown/build/libapex.a
-          test -f vendor/apex-markdown/build/vendor/cmark-gfm/src/libcmark-gfm.a
-          # Host still stub until Chat 3; version string proves product link path.
-          zig build run -- --help >/dev/null
-          nm zig-out/bin/boris 2>/dev/null | grep -q apex_version_string || \
-            nm zig-out/bin/boris 2>/dev/null | grep -q _apex_version_string || \
-            echo "note: nm symbol check skipped or stripped; libapex.a presence is required"
-
-      # ASan+UBSan smoke: required on Linux (reproducible CI green), opt-in on
-      # macOS (Apple Silicon sanitizer/zig-cc variance). Local default still
-      # skips cleanly when unavailable; BORIS_REQUIRE_SANITIZE=1 fails the skip.
-      - name: Apex sanitizer smoke (Linux required)
-        if: runner.os == 'Linux'
-        env:
-          BORIS_REQUIRE_SANITIZE: "1"
-        run: zig build test-apex-sanitize
-
-      - name: Document sanitizer policy (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          echo "C sanitizers required on Linux CI via BORIS_REQUIRE_SANITIZE=1."
-          echo "macOS: opt-in local zig build test-apex-sanitize (may skip)."
 
   migration-lab-test:
     name: migration-lab-test (Linux)
