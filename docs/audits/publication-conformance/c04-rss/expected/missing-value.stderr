@@ -34,6 +34,7 @@ Modes:
 Options:
   --input <DIR>       Content root (default: content)
   --textile          Explicit .textile-only input adapter mode (no mixed trees)
+  --cooklang         Explicit .cook-only Cooklang recipe mode (no mixed trees)
   --out <DIR>         IR output directory (selects IR mode; default: .boris)
   --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
   --site-url URL      Required HTTP(S) deployment URL for RSS or sitemap
