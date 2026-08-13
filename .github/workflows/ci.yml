@@ -213,16 +213,8 @@ jobs:
         with:
           version: 0.16.0
 
-      - name: Install CMake (Ubuntu)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake
-
-      - name: Install CMake (macOS)
-        if: runner.os == 'macOS'
-        run: brew install cmake
-
+      # Markdown rendering is Oliver, a pure-Zig library pinned by content
+      # hash in build.zig.zon: no CMake, no host tools, nothing to install.
       - name: Build ReleaseSafe
         run: zig build -Doptimize=ReleaseSafe
 
