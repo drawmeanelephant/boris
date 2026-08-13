@@ -121,11 +121,9 @@ pub fn renderWorkingPack(
     try doc.num(pack_index);
     try doc.lit("/");
     try doc.num(pack_count);
-    try doc.lit(
-        "\n\nEach document below is a complete Boris source file. To reuse one, copy\n" ++
-            "everything after its `<!-- boris-rag-doc: ... -->` marker through the next\n" ++
-            "marker (or the end of the file).\n\n"
-    );
+    try doc.lit("\n\nEach document below is a complete Boris source file. To reuse one, copy\n" ++
+        "everything after its `<!-- boris-rag-doc: ... -->` marker through the next\n" ++
+        "marker (or the end of the file).\n\n");
     for (docs) |d| {
         try doc.lit("\n<!-- boris-rag-doc: id=\"");
         try doc.field(.md_block_text, d.rag_id);
@@ -620,7 +618,7 @@ test "working manifest field order is stable and complete" {
         .selected_relation_count = 1,
         .pack_target = 262144,
         .approximate_tokens = 512,
-        .packs = &.{ .{ .path = "working-1.md", .bytes = 2048, .documents = 2 } },
+        .packs = &.{.{ .path = "working-1.md", .bytes = 2048, .documents = 2 }},
         .docs = &.{.{ .rag_id = "content/mascots/foo", .source = "mascots/foo.md", .category = "content", .entity_id = "mascots/foo", .pack = "working-1.md", .part = 1, .part_count = 1, .continuation = "single", .bytes = 1000, .source_sha256 = "abc" }},
     });
     defer gpa.free(bytes);

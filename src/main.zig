@@ -862,7 +862,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .sitemap_path = opts.sitemap_path,
             .site_url = opts.site_url,
             .publication_location = if (opts.publication_location) |*location| location else null,
-        .allow_markdown_literals = opts.allow_markdown_links,
+            .allow_markdown_literals = opts.allow_markdown_links,
             .timings = recorder,
         }) catch |err| {
             return mapHtmlError(err, opts.targets.items, layout_path);
@@ -885,7 +885,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .sitemap_path = opts.sitemap_path,
             .site_url = opts.site_url,
             .publication_location = if (opts.publication_location) |*location| location else null,
-        .allow_markdown_literals = opts.allow_markdown_links,
+            .allow_markdown_literals = opts.allow_markdown_links,
             .timings = recorder,
         }) catch |err| {
             return mapHtmlError(err, &.{}, layout_path);

@@ -198,14 +198,7 @@ fn scanInto(source: []const u8, sink: anytype) !void {
         }
 
         const reason: ?Finding.Reason =
-            if (isC0Forbidden(c)) .control_character
-            else if (isC1OrDel(c)) .control_character
-            else if (isNoncharacter(c)) .noncharacter
-            else if (isDeprecatedFormat(c)) .deprecated_format_control
-            else if (isInterlinear(c)) .interlinear_annotation
-            else if (isBidiOverride(c)) .bidi_override
-            else if (c == 0xFEFF and offset != 0) .interior_byte_order_mark
-            else null;
+            if (isC0Forbidden(c)) .control_character else if (isC1OrDel(c)) .control_character else if (isNoncharacter(c)) .noncharacter else if (isDeprecatedFormat(c)) .deprecated_format_control else if (isInterlinear(c)) .interlinear_annotation else if (isBidiOverride(c)) .bidi_override else if (c == 0xFEFF and offset != 0) .interior_byte_order_mark else null;
 
         if (reason) |r| {
             try sink.add(.{ .tier = .reject, .offset = offset, .codepoint = c, .reason = r });

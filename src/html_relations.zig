@@ -198,7 +198,7 @@ test "semantic relation views sort and derive backlinks" {
     const kind_a = page_mod.RelationKind.parse("implements").?;
     const kind_b = page_mod.RelationKind.parse("verified_by").?;
     const nodes = [_]graph_mod.Node{
-        .{ .id = "guides/deep/source", .source_path = "source.md", .output_path = "guides/deep/source.html", .semantic_relations = &.{.{ .kind = kind_b, .target = "reference/target" }, .{ .kind = kind_a, .target = "reference/target" }} },
+        .{ .id = "guides/deep/source", .source_path = "source.md", .output_path = "guides/deep/source.html", .semantic_relations = &.{ .{ .kind = kind_b, .target = "reference/target" }, .{ .kind = kind_a, .target = "reference/target" } } },
         .{ .id = "reference/target", .source_path = "target.md", .output_path = "reference/target.html", .title = "Target" },
     };
     const outgoing = try renderRelations(gpa, &nodes, 0, nodes[0].output_path);

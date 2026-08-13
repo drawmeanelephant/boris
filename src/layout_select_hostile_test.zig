@@ -394,9 +394,12 @@ test "H4 fallback: target-layout beats global html-layout beats product default"
     {
         var o = try cli.parseOptions(std.testing.allocator, &.{
             "boris",
-            "--input", content_root,
-            "--theme", theme_alpha,
-            "--html-dir", "dist-theme",
+            "--input",
+            content_root,
+            "--theme",
+            theme_alpha,
+            "--html-dir",
+            "dist-theme",
         });
         defer o.deinit(std.testing.allocator);
         try expectEqualStrings(layout_main, o.html_layout);
@@ -413,11 +416,18 @@ test "H4 fallback: target-layout beats global html-layout beats product default"
     {
         var o = try cli.parseOptions(std.testing.allocator, &.{
             "boris",
-            "--input", content_root,
-            "--theme", theme_alpha,
-            "--target", "docs=dist-docs",
-            "--target-layout", "docs=" ++ layout_section,
-            "--layout-rule", "docs", "id:index", layout_home,
+            "--input",
+            content_root,
+            "--theme",
+            theme_alpha,
+            "--target",
+            "docs=dist-docs",
+            "--target-layout",
+            "docs=" ++ layout_section,
+            "--layout-rule",
+            "docs",
+            "id:index",
+            layout_home,
         });
         defer o.deinit(std.testing.allocator);
         try expectEqual(@as(usize, 1), o.targets.items.len);
@@ -445,8 +455,7 @@ test "H4 fallback: target-layout beats global html-layout beats product default"
     const dist = try work.join("dist");
     defer gpa.free(dist);
     // Tiny one-page content under workdir for product default layout.
-    try work.writeFile(
-        "content/index.md",
+    try work.writeFile("content/index.md",
         \\---
         \\title: Default Fallback
         \\---
@@ -526,9 +535,12 @@ test "H5 traversal / cross-theme via .. is InvalidLayoutPath at every surface" {
     // CLI: usage error before discovery.
     try expectError(error.InvalidValue, cli.parseOptions(std.testing.allocator, &.{
         "boris",
-        "--layout-rule", "default", "id:index",
+        "--layout-rule",
+        "default",
+        "id:index",
         theme_alpha ++ "/layouts/../../themes/beta/layouts/main.html",
-        "--html-dir", "d",
+        "--html-dir",
+        "d",
     }));
     try expectError(error.InvalidValue, cli.parseOptions(std.testing.allocator, &.{
         "boris", "--html-layout", "../layouts/main.html", "--html-dir", "d",
@@ -583,14 +595,25 @@ test "H5 invalid selectors and duplicate selectors are usage errors at parse" {
     }));
     try expectError(error.DuplicateFlag, cli.parseOptions(gpa, &.{
         "boris",
-        "--layout-rule", "default", "id:index", layout_home,
-        "--layout-rule", "default", "id:index", layout_section,
-        "--html-dir", "d",
+        "--layout-rule",
+        "default",
+        "id:index",
+        layout_home,
+        "--layout-rule",
+        "default",
+        "id:index",
+        layout_section,
+        "--html-dir",
+        "d",
     }));
     try expectError(error.ConflictingFlags, cli.parseOptions(gpa, &.{
         "boris",
-        "--layout-rule", "default", "id:index", layout_home,
-        "--out", ".boris",
+        "--layout-rule",
+        "default",
+        "id:index",
+        layout_home,
+        "--out",
+        ".boris",
     }));
 }
 
@@ -725,8 +748,7 @@ test "H8 stale cleanup: removed page HTML dropped; layout-rule change updates li
     defer work.cleanup();
 
     // Local content tree so we can delete a page between builds.
-    try work.writeFile(
-        "content/index.md",
+    try work.writeFile("content/index.md",
         \\---
         \\title: Home
         \\---
@@ -734,8 +756,7 @@ test "H8 stale cleanup: removed page HTML dropped; layout-rule change updates li
         \\# Home
         \\
     );
-    try work.writeFile(
-        "content/extra.md",
+    try work.writeFile("content/extra.md",
         \\---
         \\title: Extra
         \\---

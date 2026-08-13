@@ -53,16 +53,16 @@ fn report(
 /// Top-level frontmatter keys the RAG emitters are allowed to write.
 /// A key outside this set in published output means a value escaped its scalar.
 pub const rag_frontmatter_keys = [_][]const u8{
-    "rag_id",       "rag_path", "category",      "entity_id",  "source_path",
-    "role",         "title",    "tags",          "related",    "parent_entry",
-    "part",         "summary",  "source_sha256", "part_count", "continuation",
+    "rag_id", "rag_path", "category",      "entity_id",  "source_path",
+    "role",   "title",    "tags",          "related",    "parent_entry",
+    "part",   "summary",  "source_sha256", "part_count", "continuation",
 };
 
 /// Top-level frontmatter keys the `--context` emitters are allowed to write,
 /// across both the per-page documents and the bundle header.
 pub const context_frontmatter_keys = [_][]const u8{
-    "format",       "schema_version", "entity_id",   "source_path", "source_sha256",
-    "role",         "title",          "parent",      "relations",   "tags",
+    "format",       "schema_version",    "entity_id",  "source_path",    "source_sha256",
+    "role",         "title",             "parent",     "relations",      "tags",
     "content_root", "ir_schema_version", "page_count", "relation_count",
 };
 

@@ -63,6 +63,9 @@ jobs:
         with:
           version: 0.16.0
 
+      - name: Format check
+        run: zig fmt --check build.zig build.zig.zon src tools test fixtures
+
       # Markdown rendering is Oliver, a pure-Zig library pinned by content
       # hash in build.zig.zon: no CMake, no host tools, nothing to install.
       - name: Build

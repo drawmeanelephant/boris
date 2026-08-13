@@ -376,8 +376,7 @@ test "hardening: invalid component fails IR with ECOMPONENT" {
     var work = try WorkDir.create(gpa, io, "bad-comp");
     defer work.cleanup();
 
-    try work.writeFile(
-        "content/index.md",
+    try work.writeFile("content/index.md",
         \\---
         \\title: Bad
         \\---
@@ -408,8 +407,7 @@ test "hardening: valid Aside passes IR and RAG with authoring fidelity" {
     var work = try WorkDir.create(gpa, io, "aside-ok");
     defer work.cleanup();
 
-    try work.writeFile(
-        "content/index.md",
+    try work.writeFile("content/index.md",
         \\---
         \\title: Home
         \\---
@@ -453,8 +451,7 @@ test "hardening: Details include preserves IR and projects to HTML and RAG" {
     var work = try WorkDir.create(gpa, io, "details-ok");
     defer work.cleanup();
 
-    try work.writeFile(
-        "content/index.md",
+    try work.writeFile("content/index.md",
         \\---
         \\title: Home
         \\---
@@ -525,8 +522,7 @@ test "hardening: Details HTML is stable across jobs and incremental builds" {
     var work = try WorkDir.create(gpa, io, "details-determinism");
     defer work.cleanup();
     try work.writeFile("layouts/main.html", "<html><body>{{content}}</body></html>\n");
-    try work.writeFile(
-        "content/index.md",
+    try work.writeFile("content/index.md",
         \\---
         \\title: Home
         \\---

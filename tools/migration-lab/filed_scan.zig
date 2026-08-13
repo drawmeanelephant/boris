@@ -22,13 +22,17 @@ const Source = struct { path: []const u8, ext: []const u8, collection: []const u
 const ParentRef = struct { source: []const u8, field: []const u8, target: []const u8, raw_target: []const u8 };
 const RelationRef = struct { source: []const u8, field: []const u8, target: []const u8, raw_target: []const u8 };
 
-fn trim(s: []const u8) []const u8 { return std.mem.trim(u8, s, " \t\r"); }
+fn trim(s: []const u8) []const u8 {
+    return std.mem.trim(u8, s, " \t\r");
+}
 fn scalarValue(s: []const u8) []const u8 {
     const value = trim(s);
     if (value.len >= 2 and value[0] == '"' and value[value.len - 1] == '"') return value[1 .. value.len - 1];
     return value;
 }
-fn lineNumber(bytes: []const u8, pos: usize) usize { return 1 + std.mem.count(u8, bytes[0..@min(pos, bytes.len)], "\n"); }
+fn lineNumber(bytes: []const u8, pos: usize) usize {
+    return 1 + std.mem.count(u8, bytes[0..@min(pos, bytes.len)], "\n");
+}
 
 fn indentation(s: []const u8) usize {
     var count: usize = 0;
@@ -69,7 +73,9 @@ fn jsonLine(a: std.mem.Allocator, out: *std.ArrayList(u8), pairs: []const Pair) 
     try out.append(a, '\n');
 }
 
-fn number(a: std.mem.Allocator, value: anytype) ![]u8 { return std.fmt.allocPrint(a, "{}", .{value}); }
+fn number(a: std.mem.Allocator, value: anytype) ![]u8 {
+    return std.fmt.allocPrint(a, "{}", .{value});
+}
 
 fn hashBytes(bytes: []const u8) [32]u8 {
     var digest_bytes: [32]u8 = undefined;
@@ -130,8 +136,12 @@ fn fieldDisposition(key: []const u8) semantics.FieldDisposition {
     return semantics.dispositionForKey(key);
 }
 
-fn fieldName(value: semantics.FieldDisposition) []const u8 { return value.name(); }
-fn dispositionName(value: Disposition) []const u8 { return @tagName(value); }
+fn fieldName(value: semantics.FieldDisposition) []const u8 {
+    return value.name();
+}
+fn dispositionName(value: Disposition) []const u8 {
+    return @tagName(value);
+}
 
 fn identityKind(field: []const u8) []const u8 {
     if (std.mem.eql(u8, field, "id")) return "explicit_id";
@@ -336,7 +346,10 @@ fn scanReferences(a: std.mem.Allocator, source: []const u8, full: []const u8, bo
         const trimmed = trim(text);
         const line_start = offset;
         offset += raw.len + 1;
-        if (std.mem.startsWith(u8, trimmed, "```") or std.mem.startsWith(u8, trimmed, "~~~")) { fence = !fence; continue; }
+        if (std.mem.startsWith(u8, trimmed, "```") or std.mem.startsWith(u8, trimmed, "~~~")) {
+            fence = !fence;
+            continue;
+        }
         if (fence) continue;
         var i: usize = 0;
         while (i < text.len) : (i += 1) {
@@ -354,9 +367,15 @@ fn scanReferences(a: std.mem.Allocator, source: []const u8, full: []const u8, bo
         for (attr_names) |attr| {
             var at: usize = 0;
             while (std.mem.indexOfPos(u8, text, at, attr)) |start| {
-                if (start > 0 and (std.ascii.isAlphanumeric(text[start - 1]) or text[start - 1] == '-' or text[start - 1] == '_')) { at = start + attr.len; continue; }
+                if (start > 0 and (std.ascii.isAlphanumeric(text[start - 1]) or text[start - 1] == '-' or text[start - 1] == '_')) {
+                    at = start + attr.len;
+                    continue;
+                }
                 const value_start = start + attr.len;
-                if (value_start >= text.len or (text[value_start] != '"' and text[value_start] != '\'')) { at = value_start; continue; }
+                if (value_start >= text.len or (text[value_start] != '"' and text[value_start] != '\'')) {
+                    at = value_start;
+                    continue;
+                }
                 const quote = text[value_start];
                 const end = std.mem.indexOfScalarPos(u8, text, value_start + 1, quote) orelse break;
                 const raw_target = text[value_start + 1 .. end];
@@ -441,11 +460,17 @@ fn scanComponents(a: std.mem.Allocator, source: []const u8, full: []const u8, bo
         const line_start = offset;
         offset += raw.len + 1;
         const trimmed = trim(text);
-        if (std.mem.startsWith(u8, trimmed, "```") or std.mem.startsWith(u8, trimmed, "~~~")) { fence = !fence; continue; }
+        if (std.mem.startsWith(u8, trimmed, "```") or std.mem.startsWith(u8, trimmed, "~~~")) {
+            fence = !fence;
+            continue;
+        }
         if (fence) continue;
         var pos: usize = 0;
         while (std.mem.indexOfScalarPos(u8, text, pos, '<')) |start| {
-            if (start + 1 >= text.len or text[start + 1] == '/' or text[start + 1] < 'A' or text[start + 1] > 'Z') { pos = start + 1; continue; }
+            if (start + 1 >= text.len or text[start + 1] == '/' or text[start + 1] < 'A' or text[start + 1] > 'Z') {
+                pos = start + 1;
+                continue;
+            }
             var end_name = start + 1;
             while (end_name < text.len and ((text[end_name] >= 'A' and text[end_name] <= 'Z') or (text[end_name] >= 'a' and text[end_name] <= 'z') or (text[end_name] >= '0' and text[end_name] <= '9') or text[end_name] == '_' or text[end_name] == '-')) : (end_name += 1) {}
             const name = text[start + 1 .. end_name];
@@ -462,7 +487,9 @@ fn scanComponents(a: std.mem.Allocator, source: []const u8, full: []const u8, bo
     }
 }
 
-fn ledgerRows(data: []const u8) usize { return if (data.len == 0) 0 else std.mem.count(u8, data, "\n"); }
+fn ledgerRows(data: []const u8) usize {
+    return if (data.len == 0) 0 else std.mem.count(u8, data, "\n");
+}
 
 fn validateJsonl(a: std.mem.Allocator, data: []const u8) !void {
     var lines = std.mem.splitScalar(u8, data, '\n');
@@ -529,26 +556,46 @@ fn validateLedgers(sources: []const Source, all_paths: []const []const u8, files
 
 fn digest(a: std.mem.Allocator, files: []const OutputFile) ![]u8 {
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
-    for (files) |file| { hasher.update(file.name); hasher.update(&.{0}); hasher.update(file.data); }
+    for (files) |file| {
+        hasher.update(file.name);
+        hasher.update(&.{0});
+        hasher.update(file.data);
+    }
     var bytes: [32]u8 = undefined;
     hasher.final(&bytes);
     return hexEncode(a, &bytes);
 }
 
 fn writeManifest(a: std.mem.Allocator, output: *std.ArrayList(u8), opts: Options, tree: []const u8, out_digest: []const u8, sources: usize, fields: usize, candidates: usize, collisions: usize, parents: usize, relations: usize, links: usize, components: usize, assets: usize, blocked: usize) !void {
-    const root = try escape(a, opts.root_dir); defer a.free(root);
-    const tree_value = try escape(a, tree); defer a.free(tree_value);
-    const output_value = try escape(a, out_digest); defer a.free(output_value);
+    const root = try escape(a, opts.root_dir);
+    defer a.free(root);
+    const tree_value = try escape(a, tree);
+    defer a.free(tree_value);
+    const output_value = try escape(a, out_digest);
+    defer a.free(output_value);
     try output.appendSlice(a, "{\"format\":\"boris-filed-native-scan\",\"schema_version\":1,\"boris_version\":\"boris/0.8.1\",\"migration_lab_version\":\"");
-    const lab = try escape(a, migration_lab_version); defer a.free(lab); try output.appendSlice(a, lab);
-    try output.appendSlice(a, "\",\"ruleset_version\":\""); const rules = try escape(a, ruleset_version); defer a.free(rules); try output.appendSlice(a, rules);
-    try output.appendSlice(a, "\",\"source_root\":\""); try output.appendSlice(a, root);
+    const lab = try escape(a, migration_lab_version);
+    defer a.free(lab);
+    try output.appendSlice(a, lab);
+    try output.appendSlice(a, "\",\"ruleset_version\":\"");
+    const rules = try escape(a, ruleset_version);
+    defer a.free(rules);
+    try output.appendSlice(a, rules);
+    try output.appendSlice(a, "\",\"source_root\":\"");
+    try output.appendSlice(a, root);
     try output.appendSlice(a, "\",\"source_tree_digest\":\"");
     try output.appendSlice(a, tree_value);
     try output.append(a, '"');
     const fields_text = [_]struct { name: []const u8, value: usize }{ .{ .name = "source_file_count", .value = sources }, .{ .name = "content_record_count", .value = sources }, .{ .name = "frontmatter_occurrence_count", .value = fields }, .{ .name = "identity_candidate_count", .value = candidates }, .{ .name = "collision_count", .value = collisions }, .{ .name = "parent_candidate_count", .value = parents }, .{ .name = "relation_candidate_count", .value = relations }, .{ .name = "link_count", .value = links }, .{ .name = "component_count", .value = components }, .{ .name = "asset_count", .value = assets }, .{ .name = "blocked_record_count", .value = blocked } };
-    for (fields_text) |field| { try output.appendSlice(a, ",\""); try output.appendSlice(a, field.name); try output.appendSlice(a, "\":"); try output.appendSlice(a, try number(a, field.value)); }
-    try output.appendSlice(a, ",\"output_digest\":\""); try output.appendSlice(a, output_value); try output.appendSlice(a, "\"}\n");
+    for (fields_text) |field| {
+        try output.appendSlice(a, ",\"");
+        try output.appendSlice(a, field.name);
+        try output.appendSlice(a, "\":");
+        try output.appendSlice(a, try number(a, field.value));
+    }
+    try output.appendSlice(a, ",\"output_digest\":\"");
+    try output.appendSlice(a, output_value);
+    try output.appendSlice(a, "\"}\n");
 }
 
 pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
@@ -587,7 +634,9 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
         if (ext.len == 0) continue;
         content_count += 1;
         const bytes = try readFile(io, a, root, path);
-        tree_hasher.update(path); tree_hasher.update(&.{0}); tree_hasher.update(bytes);
+        tree_hasher.update(path);
+        tree_hasher.update(&.{0});
+        tree_hasher.update(bytes);
         const source_sha = try sha256(a, bytes);
         var body = bytes;
         var body_offset: usize = 0;
@@ -601,7 +650,9 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
         const bom = bytes.len >= 3 and bytes[0] == 0xef and bytes[1] == 0xbb and bytes[2] == 0xbf;
         if (invalid or bom) {
             parse_status = if (bom) "invalid_utf8_bom" else "invalid_utf8";
-            disposition = .blocked_invalid_utf8; malformed_record = true; blocked_count += 1;
+            disposition = .blocked_invalid_utf8;
+            malformed_record = true;
+            blocked_count += 1;
             try jsonLine(a, &malformed, &.{ .{ .key = "source_path", .value = path }, .{ .key = "reason", .value = if (bom) "leading_utf8_bom_rejected" else "invalid_utf8" }, .{ .key = "parse_status", .value = parse_status } });
         } else if (std.mem.startsWith(u8, bytes, "---\n") or std.mem.startsWith(u8, bytes, "---\r\n")) {
             const open_end: usize = if (bytes[3] == '\r') 5 else 4;
@@ -619,11 +670,15 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
                 cursor = nl + 1;
             }
             if (close_end == null) {
-                parse_status = "malformed_frontmatter_unclosed"; disposition = .blocked_malformed_frontmatter; malformed_record = true; blocked_count += 1;
+                parse_status = "malformed_frontmatter_unclosed";
+                disposition = .blocked_malformed_frontmatter;
+                malformed_record = true;
+                blocked_count += 1;
                 try jsonLine(a, &malformed, &.{ .{ .key = "source_path", .value = path }, .{ .key = "reason", .value = "unclosed_frontmatter" }, .{ .key = "parse_status", .value = parse_status } });
             } else {
                 parse_status = "parsed";
-                body_offset = close_end.?; body = bytes[body_offset..];
+                body_offset = close_end.?;
+                body = bytes[body_offset..];
                 var seen = std.StringHashMap(void).init(a);
                 var active_relation_field: []const u8 = "";
                 var block_scalar = false;
@@ -742,7 +797,11 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
         try scanReferences(a, path, bytes, body, body_offset, paths, &links, &assets, &link_count, &asset_count);
         try scanComponents(a, path, bytes, body, body_offset, &components, &component_count);
         try sources.append(a, .{ .path = path, .ext = ext, .collection = collection(path), .sha = source_sha, .body_sha = body_sha, .field_count = field_count, .identity = proposed, .parse_status = parse_status, .disposition = disposition });
-        if (proposed.len != 0) { const entry = try counts.getOrPut(proposed); if (!entry.found_existing) entry.value_ptr.* = 0; entry.value_ptr.* += 1; }
+        if (proposed.len != 0) {
+            const entry = try counts.getOrPut(proposed);
+            if (!entry.found_existing) entry.value_ptr.* = 0;
+            entry.value_ptr.* += 1;
+        }
     }
 
     var collision_count: usize = 0;
@@ -775,7 +834,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
     for (parents_ref.items) |ref| {
         const resolved = identityResolution(sources.items, candidates.items, ref.target);
         const decision = if (std.mem.eql(u8, ref.field, "parent") and std.mem.eql(u8, resolved.status, "resolved")) "parent" else if (std.mem.eql(u8, ref.field, "parent")) "review" else if (std.mem.eql(u8, resolved.status, "resolved")) "relation" else "review";
-        try jsonLine(a, &parents, &.{ .{ .key = "source_id", .value = sourceIdentity(sources.items, ref.source) }, .{ .key = "source_field", .value = ref.field },            .{ .key = "raw_target", .value = ref.raw_target }, .{ .key = "resolved_target_candidate", .value = resolved.resolved }, .{ .key = "target_entity_type", .value = resolved.entity_type }, .{ .key = "decision", .value = decision }, .{ .key = "confidence", .value = if (std.mem.eql(u8, resolved.status, "resolved")) "high" else "low" }, .{ .key = "resolution_status", .value = resolved.status }, .{ .key = "EPARENTNOTTRUNK_risk", .value = if (std.mem.eql(u8, ref.field, "parent")) "true" else "false" } });
+        try jsonLine(a, &parents, &.{ .{ .key = "source_id", .value = sourceIdentity(sources.items, ref.source) }, .{ .key = "source_field", .value = ref.field }, .{ .key = "raw_target", .value = ref.raw_target }, .{ .key = "resolved_target_candidate", .value = resolved.resolved }, .{ .key = "target_entity_type", .value = resolved.entity_type }, .{ .key = "decision", .value = decision }, .{ .key = "confidence", .value = if (std.mem.eql(u8, resolved.status, "resolved")) "high" else "low" }, .{ .key = "resolution_status", .value = resolved.status }, .{ .key = "EPARENTNOTTRUNK_risk", .value = if (std.mem.eql(u8, ref.field, "parent")) "true" else "false" } });
     }
     for (relations_ref.items) |ref| {
         const resolved = identityResolution(sources.items, candidates.items, ref.target);
@@ -784,7 +843,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: Options) !void {
             if (std.mem.eql(u8, other.source, ref.source)) same_source_count += 1;
         }
         const status = if (same_source_count > 16) "overflow" else resolved.status;
-        try jsonLine(a, &relations, &.{ .{ .key = "source_path", .value = ref.source }, .{ .key = "source_field", .value = ref.field },            .{ .key = "raw_target", .value = ref.raw_target }, .{ .key = "resolved_target", .value = resolved.resolved }, .{ .key = "status", .value = status }, .{ .key = "canonical", .value = "false" }, .{ .key = "reason", .value = if (std.mem.eql(u8, status, "resolved")) "exact target evidence only; scan does not emit relations" else if (std.mem.eql(u8, status, "overflow")) "exceeds Boris relation bound" else "unresolved or ambiguous target" } });
+        try jsonLine(a, &relations, &.{ .{ .key = "source_path", .value = ref.source }, .{ .key = "source_field", .value = ref.field }, .{ .key = "raw_target", .value = ref.raw_target }, .{ .key = "resolved_target", .value = resolved.resolved }, .{ .key = "status", .value = status }, .{ .key = "canonical", .value = "false" }, .{ .key = "reason", .value = if (std.mem.eql(u8, status, "resolved")) "exact target evidence only; scan does not emit relations" else if (std.mem.eql(u8, status, "overflow")) "exceeds Boris relation bound" else "unresolved or ambiguous target" } });
     }
 
     var source_rows: std.ArrayList(u8) = .empty;
@@ -926,7 +985,8 @@ test "fixture: multiline YAML remains valid and retains every relationship targe
         const object = parsed.value.object;
         if (std.mem.eql(u8, object.get("source_id").?.string, "LEGACY-PARENT") and
             std.mem.eql(u8, object.get("source_field").?.string, "parentEntry") and
-            std.mem.eql(u8, object.get("raw_target").?.string, "legacy-target")) {
+            std.mem.eql(u8, object.get("raw_target").?.string, "legacy-target"))
+        {
             parent_review = std.mem.eql(u8, object.get("decision").?.string, "review");
             parent_promoted = std.mem.eql(u8, object.get("decision").?.string, "parent");
         }
