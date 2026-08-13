@@ -405,7 +405,13 @@ fn appendBodyBarbs(
 ) !void {
     if (hasBarbForPage(assignments, page.index, .broken_wikilink)) try writer.writeAll("\n[[missing/fixture-target]]\n");
     if (hasBarbForPage(assignments, page.index, .missing_heading_fragment)) try writer.print("\n[[{s}#does-not-exist]]\n", .{related_id});
-    if (hasBarbForPage(assignments, page.index, .unsafe_markdown_link)) try writer.writeAll("\n[escape](../../../../outside.md)\n");
+    // The link uses `..` traversal but stays within the content/output root:
+    // the published-output link audit deliberately refuses a destination that
+    // climbs above the output root (EROUTEESCAPE) even for a literal Markdown
+    // link, so an escape cannot be a preserved-and-successful edge. A within-
+    // root missing `.md` target stays literal in the rewrite and is suppressed
+    // by --allow-markdown-links when the harness runs this profile.
+    if (hasBarbForPage(assignments, page.index, .unsafe_markdown_link)) try writer.writeAll("\n[escape](../../outside.md)\n");
     if (hasBarbForPage(assignments, page.index, .invalid_utf8)) {
         try writer.writeAll("\ninvalid utf8 follows: ");
         try writer.writeByte(0xff);
@@ -592,14 +598,22 @@ pub fn buildBorisInvocation(
     theme_arg: []const u8,
     html_arg: []const u8,
     jobs: usize,
+    allow_markdown_literals: bool,
 ) !BorisInvocation {
     try validateJobs(jobs);
     const jobs_arg = try std.fmt.allocPrint(allocator, "{d}", .{jobs});
     errdefer allocator.free(jobs_arg);
-    const argv = try allocator.dupe([]const u8, &.{
-        boris_abs,    "--input", input_arg, "--theme", theme_arg,
-        "--html-dir", html_arg,  "--jobs",  jobs_arg,  "--quiet",
-    });
+    const argv = if (allow_markdown_literals)
+        try allocator.dupe([]const u8, &.{
+            boris_abs,    "--input", input_arg, "--theme", theme_arg,
+            "--html-dir", html_arg,  "--jobs",  jobs_arg,  "--allow-markdown-links",
+            "--quiet",
+        })
+    else
+        try allocator.dupe([]const u8, &.{
+            boris_abs,    "--input", input_arg, "--theme", theme_arg,
+            "--html-dir", html_arg,  "--jobs",  jobs_arg,  "--quiet",
+        });
     return .{ .argv = argv, .jobs_arg = jobs_arg };
 }
 
@@ -612,6 +626,10 @@ pub const RunOptions = struct {
     /// worker request passed to `--jobs N`; it is never inferred from the
     /// page count and does not measure actual thread creation.
     jobs: usize = 1,
+    /// Pass `--allow-markdown-links` so a preserved literal `.md` destination
+    /// (the documentation-links unchanged-input guarantee) is not reported as
+    /// a missing route. Only suppresses EROUTEMISSING, never EROUTEESCAPE.
+    allow_markdown_literals: bool = false,
 };
 
 pub fn runFixture(options: RunOptions) !void {
@@ -638,7 +656,7 @@ pub fn runFixture(options: RunOptions) !void {
     var expected = try readExpectedFixture(options.io, options.allocator, fixture_abs);
     defer expected.deinit(options.allocator);
     const expected_code = expected.exit_code;
-    var invocation = try buildBorisInvocation(options.allocator, boris_abs, input_arg, theme_arg, html_arg, options.jobs);
+    var invocation = try buildBorisInvocation(options.allocator, boris_abs, input_arg, theme_arg, html_arg, options.jobs, options.allow_markdown_literals);
     defer invocation.deinit(options.allocator);
     const result = try std.process.run(options.allocator, options.io, .{
         .argv = invocation.argv,
@@ -726,7 +744,7 @@ pub fn republishCleanFixture(options: RunOptions) !void {
     const theme_arg = try std.fmt.allocPrint(options.allocator, "{s}/optional-theme", .{base});
     defer options.allocator.free(theme_arg);
 
-    var invocation = try buildBorisInvocation(options.allocator, boris_abs, input_arg, theme_arg, html_arg, options.jobs);
+    var invocation = try buildBorisInvocation(options.allocator, boris_abs, input_arg, theme_arg, html_arg, options.jobs, options.allow_markdown_literals);
     defer invocation.deinit(options.allocator);
     const result = try std.process.run(options.allocator, options.io, .{
         .argv = invocation.argv,
@@ -1759,7 +1777,7 @@ test "asset-excluded profiles do not emit dangling generated image references" {
     defer a.free(edge_path);
     const edge_bytes = try readFilePath(io, a, edge_path, 256 * 1024);
     defer a.free(edge_bytes);
-    try std.testing.expect(std.mem.indexOf(u8, edge_bytes, "[escape](../../../../outside.md)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, edge_bytes, "[escape](../../outside.md)") != null);
 }
 
 test "artifact mutations use clean baseline targets across overlapping surfaces" {
@@ -1999,7 +2017,7 @@ test "successful run evidence is versioned, path-valid, and deterministic" {
 
     // The recorded worker request is exactly the decimal value placed in the
     // Boris argument vector for the same requested bound (evidence == argv).
-    var tie_invocation = try buildBorisInvocation(a, "/bin/boris", "site/content", "site/optional-theme", "site/results/boris-output", 4);
+    var tie_invocation = try buildBorisInvocation(a, "/bin/boris", "site/content", "site/optional-theme", "site/results/boris-output", 4, false);
     defer tie_invocation.deinit(a);
     try std.testing.expectEqualStrings("4", tie_invocation.argv[8]);
     try std.testing.expectEqualStrings(tie_invocation.jobs_arg, tie_invocation.argv[8]);
@@ -2011,7 +2029,7 @@ test "Boris argument vector carries the exact html-dir jobs quiet sequence" {
     const a = std.testing.allocator;
     const jobs_values = [_]usize{ 1, 4, 64 };
     for (jobs_values) |jobs| {
-        var invocation = try buildBorisInvocation(a, "/bin/boris", "site/content", "site/optional-theme", "site/results/boris-output", jobs);
+        var invocation = try buildBorisInvocation(a, "/bin/boris", "site/content", "site/optional-theme", "site/results/boris-output", jobs, false);
         defer invocation.deinit(a);
         try std.testing.expectEqual(@as(usize, 10), invocation.argv.len);
         try std.testing.expectEqualStrings("/bin/boris", invocation.argv[0]);

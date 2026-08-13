@@ -1032,19 +1032,7 @@ pub fn build(b: *std.Build) void {
     // Seeded-fixture publication harnesses: they launch the installed binary
     // against a deterministic poisoned fixture, covering the evidence chain end
     // to end rather than at unit scope.
-    //
-    // run_publication_fixture_tests is deliberately absent. `zig build
-    // test-publication-fixture` already fails on a pristine clone, in
-    // src/publication_checks_fixture_test.zig:627, test "preserved-edge-v1
-    // publication bytes are identical across requested jobs", raising
-    // error.BorisExpectationMismatch from
-    // tools/testdata-generator/src/generator.zig:700. The defect is in the
-    // fixture generator rather than in the suites wired up here, so gating on it
-    // would hold every unrelated change hostage. It is not omitted silently:
-    // CI runs `zig build test-publication-fixture` as a clearly-named
-    // non-gating step (.github/workflows/ci.yml, "Publication checks fixture
-    // harness"), which prints a ::notice:: the moment it goes green. Add the
-    // dependency here and delete that step at that point.
+    test_step.dependOn(&run_publication_fixture_tests.step);
     test_step.dependOn(&run_publication_claims_fixture_tests.step);
     test_step.dependOn(&run_publication_touches_fixture_tests.step);
     test_step.dependOn(&run_publication_proof_pack_fixture_tests.step);

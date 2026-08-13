@@ -409,6 +409,7 @@ fn captureJobsRun(
     allocator: std.mem.Allocator,
     fixture_rel: []const u8,
     jobs: usize,
+    allow_markdown_literals: bool,
 ) !JobEvidence {
     try generator.runFixture(.{
         .io = io,
@@ -416,6 +417,7 @@ fn captureJobsRun(
         .fixture_path = fixture_rel,
         .boris_path = "./zig-out/bin/boris",
         .jobs = jobs,
+        .allow_markdown_literals = allow_markdown_literals,
     });
     const fixture_abs = try fixtureAbsolute(io, allocator, fixture_rel);
     defer allocator.free(fixture_abs);
@@ -562,7 +564,7 @@ test "mild-poison-v1 publication bytes are identical across requested jobs" {
         const run_fixture = try std.fmt.allocPrint(allocator, "{s}-{d}", .{ fixture_rel, jobs });
         defer allocator.free(run_fixture);
         try generateJobsFixture(io, allocator, run_fixture, "mild-poison-v1", 24);
-        runs[index] = try captureJobsRun(io, allocator, run_fixture, jobs);
+        runs[index] = try captureJobsRun(io, allocator, run_fixture, jobs, false);
     }
     defer for (&runs) |*run| run.deinit(allocator);
 
@@ -624,7 +626,7 @@ test "preserved-edge-v1 publication bytes are identical across requested jobs" {
         const run_fixture = try std.fmt.allocPrint(allocator, "{s}-{d}", .{ fixture_rel, jobs });
         defer allocator.free(run_fixture);
         try generateJobsFixture(io, allocator, run_fixture, "preserved-edge-v1", 24);
-        runs[index] = try captureJobsRun(io, allocator, run_fixture, jobs);
+        runs[index] = try captureJobsRun(io, allocator, run_fixture, jobs, true);
     }
     defer for (&runs) |*run| run.deinit(allocator);
     try expectCrossJobsDeterministic(io, allocator, runs[0], runs[1]);
@@ -647,7 +649,7 @@ test "clean ideal-site publication bytes are identical across requested jobs inc
         const run_fixture = try std.fmt.allocPrint(allocator, "{s}-{d}", .{ fixture_rel, jobs });
         defer allocator.free(run_fixture);
         try generateJobsFixture(io, allocator, run_fixture, "readme-realistic-v1", 24);
-        runs[index] = try captureJobsRun(io, allocator, run_fixture, jobs);
+        runs[index] = try captureJobsRun(io, allocator, run_fixture, jobs, false);
     }
     defer for (&runs) |*run| run.deinit(allocator);
 
@@ -732,7 +734,7 @@ test "repeated runs with the same requested jobs are byte-identical" {
         const run_fixture = try std.fmt.allocPrint(allocator, "{s}-{d}", .{ fixture_rel, index });
         defer allocator.free(run_fixture);
         try generateJobsFixture(io, allocator, run_fixture, "mild-poison-v1", 24);
-        runs[index] = try captureJobsRun(io, allocator, run_fixture, jobs);
+        runs[index] = try captureJobsRun(io, allocator, run_fixture, jobs, false);
     }
     defer for (&runs) |*run| run.deinit(allocator);
     try expectSameJobsIdentical(io, allocator, runs[0], runs[1]);
