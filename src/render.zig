@@ -276,3 +276,59 @@ test "render: large input stays bounded" {
         }
     }.run);
 }
+
+test "docs: renderer contract pin matches build.zig.zon" {
+    const io = std.testing.io;
+    const gpa = testing.allocator;
+    const root = std.Io.Dir.cwd();
+
+    const zon = try readFileAlloc(io, root, "build.zig.zon", gpa);
+    defer gpa.free(zon);
+
+    // Extract the Oliver dependency pin (revision + content hash) from
+    // build.zig.zon so the contract docs cannot drift from what Zig actually
+    // fetches and content-verifies.
+    const url_prefix = "https://github.com/drawmeanelephant/oliver/archive/";
+    const url_start = std.mem.indexOf(u8, zon, url_prefix) orelse
+        return error.TestUnexpectedResult;
+    const sha_start = url_start + url_prefix.len;
+    const sha_end = std.mem.indexOfPos(u8, zon, sha_start, ".tar.gz") orelse
+        return error.TestUnexpectedResult;
+    const revision = zon[sha_start..sha_end];
+
+    const hash_prefix = ".hash = \"oliver-0.0.0-";
+    const hash_start = (std.mem.indexOf(u8, zon, hash_prefix) orelse
+        return error.TestUnexpectedResult) + hash_prefix.len;
+    const hash_end = std.mem.indexOfPos(u8, zon, hash_start, "\"") orelse
+        return error.TestUnexpectedResult;
+    const package_hash = zon[hash_start..hash_end];
+
+    // docs/contracts/oliver-renderer.md (pin table) and
+    // docs/contracts/fixtures/oliver-compat/MATRIX.md must cite the same
+    // revision and content hash as build.zig.zon.
+    try expectDocPin(io, root, "docs/contracts/oliver-renderer.md", try std.fmt.allocPrint(gpa, "| Commit | `{s}` |", .{revision}), gpa);
+    try expectDocPin(io, root, "docs/contracts/oliver-renderer.md", try std.fmt.allocPrint(gpa, "| Package hash | `oliver-0.0.0-{s}` |", .{package_hash}), gpa);
+    try expectDocPin(io, root, "docs/contracts/fixtures/oliver-compat/MATRIX.md", try std.fmt.allocPrint(gpa, "Pin: Oliver `{s}`", .{revision}), gpa);
+}
+
+fn readFileAlloc(io: std.Io, dir: std.Io.Dir, path: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    var file = try dir.openFile(io, path, .{});
+    defer file.close(io);
+    var reader = file.reader(io, &.{});
+    return try reader.interface.allocRemaining(allocator, .unlimited);
+}
+
+/// Asserts a doc file cites a build.zig.zon pin; fails with the offending
+/// needle when the docs drift from the dependency declaration.
+fn expectDocPin(io: std.Io, root: std.Io.Dir, path: []const u8, needle: []const u8, gpa: std.mem.Allocator) !void {
+    defer gpa.free(needle);
+    const contents = try readFileAlloc(io, root, path, gpa);
+    defer gpa.free(contents);
+    if (std.mem.indexOf(u8, contents, needle) == null) {
+        std.debug.print(
+            \\pin guard: {s} does not cite `{s}` from build.zig.zon
+            \\  update the doc when the Oliver pin moves
+        , .{ path, needle });
+        return error.TestUnexpectedResult;
+    }
+}
