@@ -65,7 +65,7 @@ Start with a small representative section of your site. For each page:
 1. Create the file under `content/` with a Boris-compatible path.
 2. Rewrite frontmatter to use only Boris's eight keys: `id`, `title`, `parent`,
    `status`, `tags`, `relations`, `published_at`, and `summary`.
-3. Replace SSG-specific shortcodes with Boris `&lt;Aside&gt;` callouts and [[guides/apex-markdown#wiki-links|wiki-links]].
+3. Replace SSG-specific shortcodes with Boris `&lt;Aside&gt;` callouts and [[guides/oliver-markdown#wiki-links|wiki-links]].
 4. Remove MDX `import` statements and executable component usage.
 
 ### Frontmatter Migration Specimen (Critic Markup)

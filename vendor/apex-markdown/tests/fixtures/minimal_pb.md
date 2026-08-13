@@ -1,2 +1,0 @@
-## Page breaks
-    {::pagebreak /}
