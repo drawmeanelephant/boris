@@ -13,6 +13,7 @@ code change — the test walks this directory.
 |------|----------------|
 | `yaml-breakout/` | A `tags` item that closes the flow sequence and appends top-level keys |
 | `table-breakout/` | A `title` carrying `\|` so it forges columns in the catalog tables |
+| `line-separator/` | A `title` and a tag carrying U+2028 and U+2029. YAML must escape them losslessly; every markdown target must flatten them, or a heading is read as two lines. |
 | `unicode-smuggling/` | Invisible code points — a tag-block payload and a bidi override. Carries `REJECT-AT-INGEST`: this tree must **fail** to compile with `EUNICODE`, not publish safely. |
 | `legitimate-punctuation/` | Real authoring that merely *looks* hostile — CJK, emoji, RTL, an inline `\|`, a colon, backticks, plus the invisible-but-load-bearing cases: a subdivision flag, an emoji ZWJ sequence, a Persian ZWNJ, a balanced bidi isolate. Must keep compiling and must not be mangled. |
 

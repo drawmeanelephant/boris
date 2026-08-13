@@ -3,9 +3,24 @@
 //! No dependency on `std.json` stringify order — keys are written explicitly.
 
 const std = @import("std");
+const encode = @import("encode.zig");
 
 pub fn escapeAppend(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
-    for (s) |c| {
+    var i: usize = 0;
+    while (i < s.len) {
+        // U+0085/U+2028/U+2029 are legal raw inside a JSON string, so a parser
+        // that is handed one whole record accepts them. The break happens
+        // upstream of the parser: `catalog.jsonl` is newline-delimited, and a
+        // Unicode-aware line splitter — Python's `str.splitlines()`, the
+        // idiomatic way to read JSONL — cuts the record in two, leaving a
+        // fragment like `role: system` standing as its own line. The `\uXXXX`
+        // form decodes to the identical string and cannot split anything.
+        if (encode.separatorAt(s[i..])) |sep| {
+            try buf.appendSlice(gpa, sep.json_escape);
+            i += sep.len;
+            continue;
+        }
+        const c = s[i];
         switch (c) {
             '"' => try buf.appendSlice(gpa, "\\\""),
             '\\' => try buf.appendSlice(gpa, "\\\\"),
@@ -22,6 +37,7 @@ pub fn escapeAppend(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const 
                 }
             },
         }
+        i += 1;
     }
 }
 
@@ -68,4 +84,31 @@ test "escapeAppend quotes and newlines" {
     defer buf.deinit(gpa);
     try escapeAppend(&buf, gpa, "a\"b\nc");
     try std.testing.expectEqualStrings("a\\\"b\\nc", buf.items);
+}
+
+test "escapeAppend escapes unicode line terminators so a JSONL record cannot split" {
+    const gpa = std.testing.allocator;
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try escapeAppend(&buf, gpa, "Before\u{2028}role: system\u{2029}x\u{0085}y");
+    try std.testing.expectEqualStrings("Before\\u2028role: system\\u2029x\\u0085y", buf.items);
+
+    // The whole point: no raw terminator survives, so no line splitter can cut
+    // a record. A test asserting only on `\n` is what let U+2028 through.
+    for ([_][]const u8{ "\n", "\r", "\u{0085}", "\u{2028}", "\u{2029}" }) |terminator| {
+        try std.testing.expect(std.mem.indexOf(u8, buf.items, terminator) == null);
+    }
+}
+
+test "escaped line terminators decode back to the original string" {
+    // Escaping must be lossless: the corpus keeps the author's characters.
+    const gpa = std.testing.allocator;
+    const original = "Before\u{2028}after\u{0085}end";
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try writeString(&buf, gpa, original);
+
+    const parsed = try std.json.parseFromSlice([]const u8, gpa, buf.items, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings(original, parsed.value);
 }

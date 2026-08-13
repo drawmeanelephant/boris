@@ -8,6 +8,7 @@ const Io = std.Io;
 const cache = @import("cache.zig");
 const graph_mod = @import("graph.zig");
 const json_out = @import("json_out.zig");
+const encode = @import("encode.zig");
 const pipeline = @import("pipeline.zig");
 const identity = @import("identity.zig");
 const export_scope = @import("export_scope.zig");
@@ -109,10 +110,19 @@ fn appendQuoted(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, value: []const 
     try buf.append(gpa, '"');
 }
 
+/// YAML double-quoted scalar. Identical to the JSON form above for every value
+/// without a Unicode line terminator — but `json_out` has no reason to know
+/// about U+2028/U+2029/U+0085, and YAML treats them as line breaks. A raw one
+/// inside a quoted title is read as a newline by anything that splits on them,
+/// which puts `role: system` on a line of its own.
+fn appendYamlQuoted(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, value: []const u8) !void {
+    try encode.escapeAppend(buf, gpa, .yaml_quoted_scalar, value);
+}
+
 fn appendYamlString(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, key: []const u8, value: []const u8) !void {
     try buf.appendSlice(gpa, key);
     try buf.appendSlice(gpa, ": ");
-    try appendQuoted(buf, gpa, value);
+    try appendYamlQuoted(buf, gpa, value);
     try buf.append(gpa, '\n');
 }
 
@@ -187,19 +197,22 @@ fn renderPageDocWithChunk(
         try buf.appendSlice(gpa, "\npart_count: ");
         try json_out.writeUsize(&buf, gpa, info.count);
         try buf.appendSlice(gpa, "\ncontinuation: ");
-        try appendQuoted(&buf, gpa, if (info.count == 1) "single" else if (info.number == 1) "continues" else if (info.number == info.count) "continued" else "continues");
+        try appendYamlQuoted(&buf, gpa, if (info.count == 1) "single" else if (info.number == 1) "continues" else if (info.number == info.count) "continued" else "continues");
         try buf.append(gpa, '\n');
     }
     try buf.appendSlice(gpa, "relations:\n");
     for (page.semantic_relations) |relation| {
         try buf.appendSlice(gpa, "  - kind: ");
-        try appendQuoted(&buf, gpa, relation.kind.name());
+        try appendYamlQuoted(&buf, gpa, relation.kind.name());
         try buf.appendSlice(gpa, "\n    target: ");
-        try appendQuoted(&buf, gpa, relation.target);
+        try appendYamlQuoted(&buf, gpa, relation.target);
         try buf.append(gpa, '\n');
     }
     try buf.appendSlice(gpa, "---\n\n# ");
-    try buf.appendSlice(gpa, pageTitle(page));
+    // A title can carry U+2028/U+2029, which the line-scoped frontmatter parser
+    // cannot block the way it blocks an ASCII newline. Raw in an H1 it reads as
+    // two lines to anything that splits on line terminators.
+    try encode.escapeAppend(&buf, gpa, .md_heading, pageTitle(page));
     try buf.appendSlice(gpa, "\n\n## Source\n");
     try appendFence(&buf, gpa, source);
     try buf.appendSlice(gpa, "markdown\n");
@@ -240,7 +253,7 @@ fn renderBundle(
         try buf.appendSlice(gpa, "- `");
         try buf.appendSlice(gpa, artifact.page.id);
         try buf.appendSlice(gpa, "` — ");
-        try buf.appendSlice(gpa, pageTitle(artifact.page));
+        try encode.escapeAppend(&buf, gpa, .md_block_text, pageTitle(artifact.page));
         try buf.appendSlice(gpa, " (`");
         try buf.appendSlice(gpa, artifact.page.source_path);
         try buf.appendSlice(gpa, "`)\n");
