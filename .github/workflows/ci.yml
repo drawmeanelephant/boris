@@ -77,29 +77,9 @@ jobs:
       - name: Oliver rendering seam tests
         run: zig build test-render
 
-      # KNOWN RED, deliberately non-gating and deliberately not hidden.
-      # `zig build test-publication-fixture` fails on a pristine clone:
-      #   src/publication_checks_fixture_test.zig:627
-      #   test "preserved-edge-v1 publication bytes are identical across
-      #   requested jobs" -> error.BorisExpectationMismatch from
-      #   tools/testdata-generator/src/generator.zig:700
-      # The other three seeded-fixture harnesses are wired into `zig build
-      # test` (build.zig). This one is run here instead of gating on it, so the
-      # failure stays observed rather than unobserved, without holding every
-      # unrelated change behind a fixture-generator fix. The notice below fires
-      # the moment it goes green: wire it into test_step and delete this step.
-      - name: Publication checks fixture harness (known red, non-gating)
-        run: |
-          set +e
-          zig build test-publication-fixture
-          rc=$?
-          set -e
-          if [ "$rc" -eq 0 ]; then
-            echo "::notice title=known-red carve-out is stale::test-publication-fixture now passes. Add run_publication_fixture_tests to test_step in build.zig and delete this step."
-          else
-            echo "::warning title=known red::test-publication-fixture failed (exit ${rc}), as expected on this branch. See the comment above this step."
-          fi
-
+      # Seeded publication-checks fixture harness is wired into `zig build
+      # test` (build.zig) now that the fixture generator runs green on a
+      # pristine clone.
       - name: Publication conformance
         run: zig build test-publication-conformance
 
