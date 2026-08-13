@@ -7,12 +7,19 @@
   cookware, timers, sections, notes, both comment forms, short-hand
   preparations, and forced line breaks. The rendered document is an
   `## Ingredients` list, a `## Cookware` list, and `## Method` numbered steps.
-  Author text is escaped against **the engine Boris links, not CommonMark** —
-  `apex_options_default` enables fenced divs, definition lists, math, callouts
-  and spans, so a set derived from CommonMark left a real event-handler
-  injection open (`:::x"onmouseover="alert(1)` published
-  `<div class="x"onmouseover="alert(1)">`). Every author-controlled span is
-  guarded, including token names, quantities, preparations and section names,
+  Author text is escaped against the engine Boris actually links — Oliver,
+  CommonMark 0.31.2 (652/652 conformance) plus GFM tables and the opted-in
+  heading-attribute, footnote, definition-list and strikethrough extensions.
+  The per-byte set covers CommonMark's live punctuation (`|` table cells, `#`
+  headings, `-`/`+` list items, `` ` `` code spans, `[`/`]` links, `=` setext
+  underlines, `~` strikethrough) and the entity characters `&`, `<`, `>`
+  against raw-HTML interpretation. A `"` guard survives from the old Apex
+  path, where fenced divs emitted `class="…"` unescaped and
+  `:::x"onmouseover="alert(1)` published `<div class="x"onmouseover="alert(1)">`;
+  Oliver has no fenced divs, so that injection is closed by the renderer
+  migration, but the guard is harmless under CommonMark and keeps the adapter
+  engine-agnostic. Every author-controlled span is guarded, including token
+  names, quantities, preparations and section names,
   and the bounded subset refuses macros, wiki links, raw HTML, control
   characters, unterminated `{`, `(` or `[-`, and over-long or over-numerous
   tokens with `ECOOKLANG`.
