@@ -66,6 +66,7 @@ fn inputFormatName(input_format: publication_profile.InputFormat) []const u8 {
     return switch (input_format) {
         .markdown => "markdown",
         .textile => "textile",
+        .cook => "cook",
     };
 }
 

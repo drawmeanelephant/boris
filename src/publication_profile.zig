@@ -54,7 +54,7 @@ pub const Error = error{
     AmbiguousHtmlOverride,
 } || std.mem.Allocator.Error;
 
-pub const InputFormat = enum { markdown, textile };
+pub const InputFormat = enum { markdown, textile, cook };
 
 pub const ProfileWorkspace = struct {
     /// Normalized absolute parent directory of the selected profile file.
@@ -323,6 +323,7 @@ fn parseInputFormat(value: std.json.Value) Error!InputFormat {
     const v = try string(value);
     if (std.mem.eql(u8, v, "markdown")) return .markdown;
     if (std.mem.eql(u8, v, "textile")) return .textile;
+    if (std.mem.eql(u8, v, "cook")) return .cook;
     return error.InvalidInputFormat;
 }
 fn checkedPath(value: std.json.Value) Error![]const u8 {

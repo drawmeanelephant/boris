@@ -17,7 +17,8 @@
 //! - Entity ids preserve letter case of the source stem.
 //! - Separators in logical metadata are always `/`.
 //! - Page extensions are **case-sensitive**: `.md` / `.mdx` in the default
-//!   input format, or `.textile` in the explicit Textile input format.
+//!   input format, `.textile` in the explicit Textile input format, or `.cook`
+//!   in the explicit Cooklang input format.
 //! - Output paths are built only from validated entity ids (cannot escape).
 
 const std = @import("std");
@@ -40,11 +41,13 @@ pub const PathError = error{
 pub const InputFormat = enum {
     markdown,
     textile,
+    cook,
 
     pub fn accepts(self: InputFormat, kind: ContentKind) bool {
         return switch (self) {
             .markdown => kind == .md or kind == .mdx,
             .textile => kind == .textile,
+            .cook => kind == .cook,
         };
     }
 };
@@ -53,12 +56,14 @@ pub const ContentKind = enum {
     md,
     mdx,
     textile,
+    cook,
 
     pub fn extension(self: ContentKind) []const u8 {
         return switch (self) {
             .md => ".md",
             .mdx => ".mdx",
             .textile => ".textile",
+            .cook => ".cook",
         };
     }
 };
@@ -70,6 +75,7 @@ fn isSep(c: u8) bool {
 /// Case-sensitive page-extension check on a basename or full relative path.
 pub fn isPageFile(name: []const u8) bool {
     return std.mem.endsWith(u8, name, ".textile") or
+        std.mem.endsWith(u8, name, ".cook") or
         std.mem.endsWith(u8, name, ".mdx") or
         std.mem.endsWith(u8, name, ".md");
 }
@@ -77,6 +83,7 @@ pub fn isPageFile(name: []const u8) bool {
 /// Length of the accepted trailing page extension, or null if not a page file.
 pub fn pageExtensionLen(path: []const u8) ?usize {
     if (std.mem.endsWith(u8, path, ".textile")) return 8;
+    if (std.mem.endsWith(u8, path, ".cook")) return 5;
     if (std.mem.endsWith(u8, path, ".mdx")) return 4;
     if (std.mem.endsWith(u8, path, ".md")) return 3;
     return null;
@@ -85,6 +92,7 @@ pub fn pageExtensionLen(path: []const u8) ?usize {
 /// Content kind for a path ending with an accepted page extension.
 pub fn contentKind(path: []const u8) PathError!ContentKind {
     if (std.mem.endsWith(u8, path, ".textile")) return .textile;
+    if (std.mem.endsWith(u8, path, ".cook")) return .cook;
     if (std.mem.endsWith(u8, path, ".mdx")) return .mdx;
     if (std.mem.endsWith(u8, path, ".md")) return .md;
     return error.UnsupportedExtension;
@@ -450,15 +458,35 @@ test "canonicalEntityId rejects traversal non-page and empty stem" {
     try std.testing.expectError(error.EmptyId, canonicalEntityId(gpa, ".md"));
     try std.testing.expectError(error.EmptyId, canonicalEntityId(gpa, ".mdx"));
     try std.testing.expectError(error.EmptyId, canonicalEntityId(gpa, ".textile"));
+    try std.testing.expectError(error.EmptyId, canonicalEntityId(gpa, ".cook"));
+    try std.testing.expectError(error.UnsupportedExtension, canonicalEntityId(gpa, "notes.COOK"));
 }
 
 test "InputFormat admits one explicit source family" {
     try std.testing.expect(InputFormat.markdown.accepts(.md));
     try std.testing.expect(InputFormat.markdown.accepts(.mdx));
     try std.testing.expect(!InputFormat.markdown.accepts(.textile));
+    try std.testing.expect(!InputFormat.markdown.accepts(.cook));
     try std.testing.expect(InputFormat.textile.accepts(.textile));
     try std.testing.expect(!InputFormat.textile.accepts(.md));
     try std.testing.expect(!InputFormat.textile.accepts(.mdx));
+    try std.testing.expect(!InputFormat.textile.accepts(.cook));
+    // A recipe tree is its own family: mixing `.cook` with Markdown would make
+    // the ingredient index depend on which files happened to be scanned.
+    try std.testing.expect(InputFormat.cook.accepts(.cook));
+    try std.testing.expect(!InputFormat.cook.accepts(.md));
+    try std.testing.expect(!InputFormat.cook.accepts(.mdx));
+    try std.testing.expect(!InputFormat.cook.accepts(.textile));
+}
+
+test "a .cook path derives an entity id like any other page" {
+    const gpa = std.testing.allocator;
+    const id = try canonicalEntityId(gpa, "recipes/Carbonara.cook");
+    defer gpa.free(id);
+    try std.testing.expectEqualStrings("recipes/Carbonara", id);
+    try std.testing.expect(isPageFile("Carbonara.cook"));
+    try std.testing.expectEqual(@as(?usize, 5), pageExtensionLen("Carbonara.cook"));
+    try std.testing.expectEqual(ContentKind.cook, try contentKind("Carbonara.cook"));
 }
 
 test "canonicalEntityId rejects oversize stem" {

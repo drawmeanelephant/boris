@@ -194,6 +194,29 @@ test "published IR schemas match freshly emitted IR" {
     try checkArtifact(io, gpa, work_dir ++ "/build-report.json", "docs/contracts/schemas/ir-build-report-0.2.0.schema.json");
 }
 
+test "the published IR 0.4 graph schema matches freshly emitted recipe IR" {
+    // A schema nobody validates is prose. The Cooklang fixture is the only tree
+    // that emits the `recipe` facet, so it is the only thing that can prove the
+    // 0.4 schema describes what the emitter actually writes.
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    const cook_work = output_root ++ "/ir-schema-conformance-cook";
+    Io.Dir.cwd().deleteTree(io, cook_work) catch {};
+    defer Io.Dir.cwd().deleteTree(io, cook_work) catch {};
+
+    var result = try pipeline.run(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/cooklang-compatibility/content",
+        .out_dir = cook_work,
+        .quiet = true,
+        .input_format = .cook,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+
+    try checkArtifact(io, gpa, cook_work ++ "/graph.json", "docs/contracts/schemas/ir-graph-0.4.0.schema.json");
+}
+
 test "conformance validator actually rejects drift" {
     // Guard against a validator that silently passes everything: a schema this
     // strict must reject both an added and a missing property.

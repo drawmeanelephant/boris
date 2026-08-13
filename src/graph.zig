@@ -7,6 +7,7 @@ const std = @import("std");
 const diag = @import("diag.zig");
 const identity = @import("identity.zig");
 const page_mod = @import("page.zig");
+const cooklang = @import("cooklang.zig");
 
 pub const Role = enum {
     trunk,
@@ -37,6 +38,8 @@ pub const Node = struct {
     body_offset: usize = 0,
     /// Author semantic relations; never used for build dependency walks.
     semantic_relations: []const page_mod.SemanticRelation = &.{},
+    /// Structured recipe for a Cooklang page; empty for every other format.
+    recipe: cooklang.Recipe = .{},
 };
 
 pub const Edge = struct {

@@ -217,6 +217,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_jobs = false;
     var saw_watch = false;
     var saw_textile = false;
+    var saw_cooklang = false;
     var saw_format = false;
     var saw_report = false;
     var saw_fail_on_unreferenced = false;
@@ -323,6 +324,12 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (std.mem.eql(u8, a, "--textile")) {
             if (saw_textile) return error.DuplicateFlag;
             saw_textile = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--cooklang")) {
+            if (saw_cooklang) return error.DuplicateFlag;
+            saw_cooklang = true;
             continue;
         }
 
@@ -690,6 +697,17 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     // Explicit IR: --out and/or --no-rag (bare CLI is HTML, not IR).
     const wants_ir = saw_out or saw_no_rag;
 
+    // One explicit source family per build. Two adapters at once has no
+    // meaning: each is a whole-tree mode that refuses the other's extension.
+    if (saw_textile and saw_cooklang) return error.ConflictingFlags;
+    const input_format: identity.InputFormat = if (saw_textile)
+        .textile
+    else if (saw_cooklang)
+        .cook
+    else
+        .markdown;
+    const saw_input_format = saw_textile or saw_cooklang;
+
     if (command == .plan) {
         if (profile_path == null) return error.MissingValue;
         // The plan command has one publication identity boundary: profile
@@ -713,10 +731,10 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .command = .plan,
             .profile_path = profile_path,
             .profile_input_override = if (saw_input) input_dir else null,
-            .profile_input_format_override = if (saw_textile) .textile else null,
+            .profile_input_format_override = if (saw_input_format) input_format else null,
             .profile_html_output_override = if (saw_html_dir) html_dir else null,
             .mode = .html,
-            .input_format = if (saw_textile) .textile else .markdown,
+            .input_format = input_format,
             .input_dir = input_dir,
             .html_dir = if (saw_html_dir) html_dir else null,
             .incremental = saw_incremental,
@@ -922,7 +940,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .impact_id = impact_id,
             .analysis_format = analysis_format,
             .analysis_report = analysis_report,
-            .input_format = if (saw_textile) .textile else .markdown,
+            .input_format = input_format,
         },
         .rag => .{
             .help = false,
@@ -940,7 +958,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .llms_path = null,
             .html_dir = null,
             .targets = targets,
-            .input_format = if (saw_textile) .textile else .markdown,
+            .input_format = input_format,
         },
         .context => .{
             .help = false,
@@ -961,7 +979,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .impact_id = impact_id,
             .analysis_format = analysis_format,
             .analysis_report = analysis_report,
-            .input_format = if (saw_textile) .textile else .markdown,
+            .input_format = input_format,
         },
         .llms => .{
             .help = false,
@@ -983,7 +1001,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .impact_id = impact_id,
             .analysis_format = analysis_format,
             .analysis_report = analysis_report,
-            .input_format = if (saw_textile) .textile else .markdown,
+            .input_format = input_format,
         },
         .rss => .{
             .help = false,
@@ -1011,7 +1029,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .impact_id = impact_id,
             .analysis_format = analysis_format,
             .analysis_report = analysis_report,
-            .input_format = if (saw_textile) .textile else .markdown,
+            .input_format = input_format,
         },
         .html => .{
             .help = false,
@@ -1042,7 +1060,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .analysis_format = analysis_format,
             .analysis_report = analysis_report,
             .fail_on_unreferenced = fail_on_unreferenced,
-            .input_format = if (saw_textile) .textile else .markdown,
+            .input_format = input_format,
         },
     };
 }
@@ -1121,6 +1139,7 @@ pub fn printUsage() void {
         \\Options:
         \\  --input <DIR>       Content root (default: content)
         \\  --textile          Explicit .textile-only input adapter mode (no mixed trees)
+        \\  --cooklang         Explicit .cook-only Cooklang recipe mode (no mixed trees)
         \\  --out <DIR>         IR output directory (selects IR mode; default: .boris)
         \\  --rag-dir <DIR>     RAG corpus directory (implies RAG-only; default: rag)
         \\  --site-url URL      Required HTTP(S) deployment URL for RSS or sitemap
@@ -1267,6 +1286,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.eql(u8, a, "--no-rag") or
             std.mem.eql(u8, a, "--html") or
             std.mem.eql(u8, a, "--textile") or
+            std.mem.eql(u8, a, "--cooklang") or
             std.mem.eql(u8, a, "--incremental") or
             std.mem.eql(u8, a, "--watch") or
             std.mem.eql(u8, a, "--fail-on-unreferenced"))

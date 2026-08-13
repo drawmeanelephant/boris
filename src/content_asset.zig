@@ -115,11 +115,16 @@ fn readFileAlloc(io: Io, dir: Io.Dir, path: []const u8, gpa: std.mem.Allocator) 
 }
 
 /// Source-path stem with page extension stripped (`guides/intro.md` → `guides/intro`).
+///
+/// Delegates to `identity.pageExtensionLen` rather than keeping a second copy
+/// of the extension table. The copy that used to live here fell behind when
+/// `.cook` was added: a recipe page's sibling asset root resolved to
+/// `carbonara.cook.assets`, so an author following the documented
+/// `<stem>.assets` convention had their whole asset tree ignored with no
+/// diagnostic. One table cannot drift from itself.
 pub fn sourceStem(source_path: []const u8) []const u8 {
-    if (std.mem.endsWith(u8, source_path, ".mdx")) return source_path[0 .. source_path.len - 4];
-    if (std.mem.endsWith(u8, source_path, ".md")) return source_path[0 .. source_path.len - 3];
-    if (std.mem.endsWith(u8, source_path, ".textile")) return source_path[0 .. source_path.len - 8];
-    return source_path;
+    const ext_len = identity.pageExtensionLen(source_path) orelse return source_path;
+    return source_path[0 .. source_path.len - ext_len];
 }
 
 /// Content-root-relative sibling asset root for a page source path.
@@ -854,11 +859,15 @@ fn writeTreeFile(io: Io, root: []const u8, rel: []const u8, data: []const u8) !v
 
 test "sourceStem and assetRootForSource" {
     const gpa = std.testing.allocator;
+    // Every page extension, so this cannot fall behind `identity` again.
     try std.testing.expectEqualStrings("guides/intro", sourceStem("guides/intro.md"));
     try std.testing.expectEqualStrings("a/b", sourceStem("a/b.mdx"));
-    const root = try assetRootForSource("guides/intro.md", gpa);
+    try std.testing.expectEqualStrings("a/b", sourceStem("a/b.textile"));
+    try std.testing.expectEqualStrings("recipes/carbonara", sourceStem("recipes/carbonara.cook"));
+    try std.testing.expectEqualStrings("notes.txt", sourceStem("notes.txt"));
+    const root = try assetRootForSource("recipes/carbonara.cook", gpa);
     defer gpa.free(root);
-    try std.testing.expectEqualStrings("guides/intro.assets", root);
+    try std.testing.expectEqualStrings("recipes/carbonara.assets", root);
 }
 
 test "validateWithinTreePath rejects traversal and backslash" {

@@ -21,6 +21,7 @@
 
 const std = @import("std");
 const identity = @import("identity.zig");
+const cooklang = @import("cooklang.zig");
 
 pub const max_entity_id_bytes = identity.max_entity_id_bytes;
 pub const ContentKind = identity.ContentKind;
@@ -242,6 +243,12 @@ pub const DurablePage = struct {
     tags: []const []const u8 = &.{},
     /// Retain-owned semantic relation targets (IR 0.3 when emitted).
     relations: []const SemanticRelation = &.{},
+    /// Structured recipe extracted from a `.cook` page (IR 0.4 when emitted).
+    ///
+    /// Retain-owned like every other field here: the Cooklang adapter is handed
+    /// the retain allocator so its strings outlive the per-page scratch arena.
+    /// Empty for every other input format.
+    recipe: cooklang.Recipe = .{},
     kind: ContentKind = .md,
     /// Byte offset of body start in the source file (not a live buffer).
     body_offset: usize = 0,
@@ -319,6 +326,8 @@ pub const PageDb = struct {
         entity_id: []const u8,
         meta: FrontmatterView,
         body_offset: usize,
+        /// Already retain-owned; empty for every format but Cooklang.
+        recipe: cooklang.Recipe,
     ) !void {
         const tags_src = meta.tagsSlice();
         var tags_owned: []const []const u8 = &.{};
@@ -360,6 +369,7 @@ pub const PageDb = struct {
             .summary = try self.dupeOpt(meta.summary),
             .tags = tags_owned,
             .relations = relations_owned,
+            .recipe = recipe,
             .kind = discovery.kind,
             .body_offset = body_offset,
             .role = if (meta.parent != null) .satellite else .trunk,
@@ -456,7 +466,7 @@ test "PageDb.promote owns strings after source buffer free" {
         .kind = .md,
     };
 
-    try db.promote(discovery, "child", meta, 64);
+    try db.promote(discovery, "child", meta, 64, .{});
 
     // Free the temporary source — promoted strings must remain valid.
     gpa.free(source);

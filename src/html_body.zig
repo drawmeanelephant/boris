@@ -14,6 +14,7 @@ const identity = @import("identity.zig");
 const include_mod = @import("include.zig");
 const wikilink = @import("wikilink.zig");
 const textile = @import("textile.zig");
+const cooklang = @import("cooklang.zig");
 const diag = @import("diag.zig");
 const content_asset = @import("content_asset.zig");
 const doclink = @import("doclink.zig");
@@ -92,11 +93,20 @@ fn printParserDiagnostic(gpa: std.mem.Allocator, source_path: []const u8, parsed
     std.debug.print("{s}\n", .{text});
 }
 
-/// Convert a parsed page body when the whole tree explicitly uses Textile.
-/// Returned bytes are views into the supplied Whiteboard allocator.
+/// An adapted page body plus whatever structured data the adapter recovered.
+pub const AdaptedBody = struct {
+    markdown: []const u8,
+    /// Non-empty only for Cooklang input.
+    recipe: cooklang.Recipe = .{},
+};
+
+/// Convert a parsed page body when the whole tree explicitly uses one of the
+/// non-Markdown input formats. Returned bytes are views into the supplied
+/// allocator, so a caller that needs the recipe to outlive a per-page scratch
+/// arena must pass a longer-lived one.
 ///
-/// The Textile adaptation diagnostic is fatal, so it is never gated on
-/// `--quiet`: that flag suppresses progress and success output only.
+/// An adaptation diagnostic is fatal, so it is never gated on `--quiet`: that
+/// flag suppresses progress and success output only.
 pub fn bodyForInput(
     allocator: std.mem.Allocator,
     input_format: identity.InputFormat,
@@ -104,19 +114,36 @@ pub fn bodyForInput(
     body: []const u8,
     body_offset: usize,
     source_path: []const u8,
-) ![]const u8 {
-    if (input_format == .markdown) return body;
-    const adapted = try textile.toMarkdown(body, allocator);
-    if (adapted.diagnostic) |td| {
-        std.debug.print("error: ETEXTILE: {s}:{d}:{d}: {s} [Use only the bounded Textile compatibility subset]\n", .{
-            source_path,
-            sourceLineAt(source, body_offset) + td.line - 1,
-            td.column,
-            td.message,
-        });
-        return error.TextileFailed;
+) !AdaptedBody {
+    switch (input_format) {
+        .markdown => return .{ .markdown = body },
+        .textile => {
+            const adapted = try textile.toMarkdown(body, allocator);
+            if (adapted.diagnostic) |td| {
+                std.debug.print("error: ETEXTILE: {s}:{d}:{d}: {s} [Use only the bounded Textile compatibility subset]\n", .{
+                    source_path,
+                    sourceLineAt(source, body_offset) + td.line - 1,
+                    td.column,
+                    td.message,
+                });
+                return error.TextileFailed;
+            }
+            return .{ .markdown = adapted.markdown };
+        },
+        .cook => {
+            const adapted = try cooklang.toMarkdown(body, allocator);
+            if (adapted.diagnostic) |cd| {
+                std.debug.print("error: ECOOKLANG: {s}:{d}:{d}: {s} [Use only the bounded Cooklang subset]\n", .{
+                    source_path,
+                    sourceLineAt(source, body_offset) + cd.line - 1,
+                    cd.column,
+                    cd.message,
+                });
+                return error.CooklangFailed;
+            }
+            return .{ .markdown = adapted.markdown, .recipe = adapted.recipe };
+        },
     }
-    return adapted.markdown;
 }
 
 /// Render one already-read page source through Boris's ordered HTML body path.
@@ -141,7 +168,7 @@ pub fn renderSource(
         try printParserDiagnostic(gpa, source_path, pd);
         return error.ParseFailed;
     }
-    const body = try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path);
+    const body = (try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path)).markdown;
 
     // Graph-backed Markdown documentation links → canonical page URLs
     // (pre-render). This runs before include expansion so source-relative links

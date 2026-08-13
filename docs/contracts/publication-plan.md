@@ -21,7 +21,8 @@ and absolute workspace are never fields in the declaration.
 The existing profile-mode publication overrides are available on this command:
 
 - `--input PATH` overrides the normalized content input.
-- `--textile` overrides the normalized input format.
+- `--textile` and `--cooklang` each override the normalized input format;
+  they are mutually exclusive, and supplying both is a usage conflict.
 - `--html-dir PATH` overrides the HTML output when the profile has exactly one
   HTML target.
 
@@ -62,6 +63,8 @@ shown below; object-key order in the source profile has no effect.
   }
 }
 ```
+
+`input_format` renders as `markdown`, `textile`, or `cook`.
 
 Optional normalized values use explicit `null` so consumers can compare a
 complete plan shape without guessing whether a field was omitted. The optional
