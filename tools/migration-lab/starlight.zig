@@ -3922,7 +3922,7 @@ fn writeUnsupported(
 
 fn writeHeadingFragments(a: std.mem.Allocator, io: Io, out: Io.Dir, pages: []const SourcePage) !void {
     var buf: std.ArrayList(u8) = .empty;
-    try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-heading-fragments\",\n  \"schema_version\": 1,\n  \"policy\": \"Fragments are inventoried only. Heading ids are not verified against Apex or source headings. Page targets may still be wiki-rewritten when proven.\",\n  \"fragments\": [\n");
+    try buf.appendSlice(a, "{\n  \"format\": \"boris-starlight-heading-fragments\",\n  \"schema_version\": 1,\n  \"policy\": \"Fragments are inventoried only. Heading ids are not verified against Oliver or source headings. Page targets may still be wiki-rewritten when proven.\",\n  \"fragments\": [\n");
     var first = true;
     for (pages) |p| {
         for (p.link_events) |ev| {

@@ -36,8 +36,9 @@ and target-local publication evidence.
 - **One source, several projections.** HTML, IR, RAG, Context, `llms.txt`, RSS,
   and sitemap output are separate, deterministic selections over the same
   source revision.
-- **In-process Markdown.** Page bodies are rendered by ApexMarkdown Unified
-  through Boris's in-process C ABI adapter.
+- **In-process Markdown.** Page bodies are rendered by the Oliver library
+  (pinned in `build.zig.zon`) through Boris's `src/render.zig` seam — a native
+  Zig module, never a subprocess.
 
 ## The product shape
 

@@ -95,7 +95,7 @@ projection boundaries, and verification vocabulary.
 5. **Includes** — `{{include path}}` relative to content root; prefer
    `includes/` (not discovered as pages).
 6. **Wiki links** — `[[entity-id]]` and `[[entity-id#heading-id]]`; heading
-   fragments must match Apex-rendered ids exactly. Wiki entity ids use an
+   fragments must match Oliver-rendered ids exactly. Wiki entity ids use an
    **ASCII** character class — prefer ASCII path stems for linkable pages.
    Missing wiki targets **fail the build**. Ordinary Markdown
    `[text](./page.md)` hrefs are **not** fully validated as a site-wide link
@@ -121,8 +121,8 @@ zig build
 ./zig-out/bin/boris --help   # optional orientation
 ```
 
-Host tools to build Boris itself: **Zig 0.16** + **CMake** (CMake is
-compile-time for vendored ApexMarkdown only). Authors who already have
+Host tools to build Boris itself: **Zig 0.16** (the Oliver dependency is
+fetched and pinned by Zig's package manager). Authors who already have
 `zig-out/bin/boris` do not need Node to publish docs.
 
 Exit codes for product `boris`: **0** ok · **1** content · **2** usage · **3** I/O.
@@ -558,7 +558,8 @@ beacon. Compile-time theme asset copy does **not** fetch CDNs.
 1. **Theme injection** — edit a layout under `theme/layouts/` (or `footer.html`
    spliced via `{{footer}}`) and add a first-party or vendor snippet you
    accept as trusted HTML. Raw HTML in layouts and Markdown is **passed
-   through** ([apex-abi](contracts/apex-abi.md) trust model).
+   through** (Oliver passes author HTML through; see
+   [oliver-renderer](contracts/oliver-renderer.md)).
 2. **Host / CDN injection** — configure the static host to inject a script
    without touching the Boris tree.
 
@@ -656,7 +657,7 @@ Use after cutover when paths or titles change.
 | Missing parent | Point `parent` at an existing entity id |
 | Parent cycle | Break the cycle so the chain terminates at a root Trunk |
 | `EREFERENCEMISSING` page | Fix entity id spelling/case |
-| `EREFERENCEMISSING` heading | Copy Apex `id` from rendered HTML/TOC |
+| `EREFERENCEMISSING` heading | Copy the rendered `id` from HTML/TOC |
 | `EINCLUDEMISSING` | Fix include path relative to content root |
 | `ECOMPONENT` / invalid Details/Aside | Stick to closed component grammar |
 | `EASSET` | Fix page-local path; stay inside `<stem>.assets/` |

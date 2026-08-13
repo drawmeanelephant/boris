@@ -26,7 +26,7 @@ Its architectural purpose is to re-use the existing `pipeline.compile` path (sca
 
 The output tree is normatively described in the module doc-comment and in `docs/contracts/rag-export.md` (referenced but not inspected here). Produced artifacts are: `INDEX.md`, `UPLOAD-GUIDE.md`, `catalog.jsonl`, `catalog_meta.json`, `system/**` (seeded from an optional curated directory), `content/pages/**` (path-mirrored page segments), `graph/entity-catalog.md`, and `graph/relations.md`. All bytes are intended to be deterministic: the module explicitly excludes timestamps, absolute paths, hostnames, random values, and hash-map or filesystem-walk order from emitted bytes, using stable sorts throughout.
 
-The module does not perform HTML rendering, does not invoke ApexMarkdown, and does not use any Apex C ABI machinery. It is entirely decoupled from `src/apex.zig` and the HTML rendering path.
+The module does not perform HTML rendering and does not invoke the Oliver-backed rendering seam. It is entirely decoupled from `src/render.zig` and the HTML rendering path.
 
 ## Classification
 
@@ -46,7 +46,7 @@ The module does not perform HTML rendering, does not invoke ApexMarkdown, and do
 
 The file is **linked into the production binary** and is **not** compiled only for tests. Its `pub fn run` is the sole public API surface.
 
-Relative to `src/apex.zig`: `src/rag.zig` has no dependency on `src/apex.zig` or any ApexMarkdown C ABI. Zig-internal Markdown manipulation (H1 stripping, H1 demotion, aside-to-directive conversion) is performed entirely in pure Zig helpers. The real ApexMarkdown engine is irrelevant to the RAG path.
+Relative to `src/render.zig`: `src/rag.zig` has no dependency on it. Zig-internal Markdown manipulation (H1 stripping, H1 demotion, aside-to-directive conversion) is performed entirely in pure Zig helpers. The Oliver renderer is irrelevant to the RAG path.
 
 Relative to `src/rag_emit.zig`: `src/rag.zig` owns the orchestration layer — file discovery, ordering, staging directory management, catalog accumulation, and publish mechanics. `src/rag_emit.zig` owns the byte-level rendering of individual documents and catalog records, and is stateless with respect to the filesystem. The split means that `rag_emit.zig` can be tested independently of I/O.
 

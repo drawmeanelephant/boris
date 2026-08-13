@@ -6,6 +6,7 @@
 .zig-cache/
 .zig-global-cache/
 zig-cache/
+/zig-pkg/
 *.a
 *.o
 /dist/
@@ -19,9 +20,6 @@ zig-cache/
 # just the repo root — matches how .zig-cache/ and zig-cache/ are handled above.
 zig-out/
 
-# ApexMarkdown vendor: cmake/local build trees (sources stay tracked)
-/vendor/apex-markdown/build/
-/vendor/apex-markdown/**/build/
 
 
 # Local scratch / private drop (images, notes dumps) — not product source
@@ -32,4 +30,3 @@ zig-out/
 
 # Takeout migration lab: real exports stay local and uncommitted.
 /tools/migration-lab/fixtures/takeout-intake/raw-local/
-zig-pkg/

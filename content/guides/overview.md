@@ -77,8 +77,8 @@ The shared authority sequence is easier to understand as four responsibilities:
 2. **Validate and freeze.** Resolve ids, parent chains, semantic relations,
    components, and include/wiki dependencies into a valid graph.
 3. **Prepare the selected output.** For HTML, load layouts and assets, harvest
-   headings, render with ApexMarkdown Unified, and prepare navigation/chrome.
-   Other commands select IR, RAG, Context, `llms.txt`, RSS, or sitemap rules.
+   headings, render with Oliver, and prepare navigation/chrome. Other commands
+   select IR, RAG, Context, `llms.txt`, RSS, or sitemap rules.
 4. **Act on the command.** `validate` discards prepared bytes; `build` stages
    and commits its publication; analysis commands report graph facts; export
    commands stage their own projection.

@@ -50,12 +50,12 @@ What the tests do not prove: correct behavior when `scanFiles` encounters symlin
 
 `src/watch.zig` is a production dependency of `src/main.zig`. When the user runs `boris watch`, `main.zig` constructs a `PollingWatcher`, wraps it in the `Watcher` interface, passes both to `WatchCoordinator.init`, and calls `WatchCoordinator.run`. The coordinator owns the event loop for the lifetime of that process invocation.
 
-This file has no dependency on `src/apex.zig` or ApexMarkdown. It does not perform Markdown parsing, HTML rendering, or any content transformation. Its only contact with compilation is through two call sites in `triggerRebuild`: `compile.compileHtmlSite` (single-target path) and `compile.compileHtmlSiteMulti` (multi-target path). It treats those calls as black boxes and catches errors by name using `isRecoverableBuildError`.
+This file has no dependency on `src/render.zig` or the Oliver-backed rendering seam. It does not perform Markdown parsing, HTML rendering, or any content transformation. Its only contact with compilation is through two call sites in `triggerRebuild`: `compile.compileHtmlSite` (single-target path) and `compile.compileHtmlSiteMulti` (multi-target path). It treats those calls as black boxes and catches errors by name using `isRecoverableBuildError`.
 
 The `FakeWatcher` type is architecturally a test double for any `Watcher`-interface implementation. It is defined in this file alongside production code; there is no separate test-doubles package. It is not compiled conditionally — it is always present in the module. Whether it is included in the production binary depends on whether the linker dead-strips unreferenced symbols; this is not confirmed from the available build configuration.
 
 The normal test suite (`src/fixtures_test.zig`, `src/hardening_test.zig`, etc.) tests the compile and pipeline layers. `src/watch.zig`'s inline tests specifically exercise the watch coordinator and its helpers in isolation from the filesystem and compile pipeline.
 
-`src/watch.zig` has no relationship to `src/apex_hostile_test.zig`. The two files occupy different subsystems and share no imports.
+`src/watch.zig` has no relationship to the rendering seam tests. The files occupy different subsystems and share no imports.
 
 ***

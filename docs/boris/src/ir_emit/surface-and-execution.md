@@ -115,7 +115,7 @@ src/ir_emit.zig
 `ir_emit.zig` does **not** import:
 
 - `pipeline.zig` (intentional inversion; prevents cycle)
-- `apex.zig`, `compile.zig`, `rag.zig`, or any I/O module
+- `render.zig`, `compile.zig`, `rag.zig`, or any I/O module
 - Any C ABI or external library
 
 ***

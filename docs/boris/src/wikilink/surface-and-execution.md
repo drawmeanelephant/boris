@@ -38,7 +38,7 @@ When `ResolveOptions.validate_fragments = true` and `heading_index = null`, the 
 
 **Bootstrap mode: fragment emitted without validation**
 
-When `validate_fragments = false`, `checkFragment` returns immediately without consulting the index. This is the deliberate bootstrap mode for the first Apex render pass that populates heading IDs. A test confirms that a fragment link is emitted correctly when this option is set.
+When `validate_fragments = false`, `checkFragment` returns immediately without consulting the index. This is the deliberate bootstrap mode for the first render pass that populates heading IDs. A test confirms that a fragment link is emitted correctly when this option is set.
 
 **Output slice construction from body views**
 

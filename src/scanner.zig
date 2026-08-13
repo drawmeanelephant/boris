@@ -18,7 +18,7 @@
 //! - **Duplicates:** both pages kept when entity ids collide so later graph
 //!   validation can emit a precise `EDUPLICATEID` diagnostic.
 //!
-//! No frontmatter parse, graph resolve, RAG, Apex, HTML render, or concurrency.
+//! No frontmatter parse, graph resolve, RAG, Markdown render, or concurrency.
 
 const std = @import("std");
 const builtin = @import("builtin");

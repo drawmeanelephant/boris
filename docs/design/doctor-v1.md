@@ -293,7 +293,7 @@ observed tree.
 | `LLMS_LINK_STALE` | artifact | error | certain | publication | regenerate |
 | `LLMS_CONTENT_MISMATCH` | artifact | error | certain | publication | regenerate |
 
-`HTML_DUPLICATE_ID` is a warning because Apex duplicate heading IDs are a
+`HTML_DUPLICATE_ID` is a warning because duplicate heading IDs are a
 documented current behavior. A fragment that names the duplicated value exists,
 but is ambiguous; Doctor does not invent suffixes.
 
@@ -458,8 +458,8 @@ WARN HTML_DUPLICATE_ID [public:comparison]
   observed: id="why-choose-boris" occurs 3 times
   fix: Give each rendered element a unique id; do not rely on an ambiguous fragment.
 
-WARN A11Y_HEADING_LEVEL_JUMP [public:guides/apex-markdown]
-  output: dist/guides/apex-markdown.html:131:1
+WARN A11Y_HEADING_LEVEL_JUMP [public:guides/oliver-markdown]
+  output: dist/guides/oliver-markdown.html:131:1
   observed: h1 is followed by h3
   fix: Insert the missing heading level or lower the later heading.
 ```

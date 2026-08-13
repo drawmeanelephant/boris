@@ -31,7 +31,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "oliver", .module = oliver_mod }},
     });
 
-    // --- Product CLI (milestone 6 IR surface + m8 Apex link) --------------
+    // --- Product CLI (milestone 6 IR surface + m10 Oliver render seam) -----
     const root_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -110,7 +110,7 @@ pub fn build(b: *std.Build) void {
     run_textile_tests.setCwd(b.path("."));
 
     // --- Pipeline + graph tests (milestone 6) ------------------------------
-    // Pipeline imports aside (component validation) → needs Apex link.
+    // Pipeline imports aside (component validation) → needs the Oliver render seam.
     const pipeline_mod = b.createModule(.{
         .root_source_file = b.path("src/pipeline.zig"),
         .target = target,
@@ -553,7 +553,7 @@ pub fn build(b: *std.Build) void {
     );
     test_layout_hostile_step.dependOn(&run_layout_hostile_tests.step);
 
-    // Fuzz suite (frontmatter / component / apex / graph) — deterministic seeds.
+    // Fuzz suite (frontmatter / component / renderer / graph) — deterministic seeds.
     const fuzz_mod = b.createModule(.{
         .root_source_file = b.path("src/fuzz.zig"),
         .target = target,

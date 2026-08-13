@@ -50,7 +50,7 @@ The confidence provided is good for the tested structural cases: missing parents
 
 The module is linked directly into the production binary. It is not a test-only file. The `validate` function is explicitly documented as the **single shared graph-validation entry point** for both `pipeline.zig` and `rag.zig`, with a normative doc comment forbidding reimplementation of parent resolution, duplicate-ID checks, or cycle detection in those modules.
 
-`src/apex.zig` and the ApexMarkdown C ABI are unrelated to this module. `src/graph.zig` operates purely on Zig-owned data structures and performs no I/O and no C interop.
+`src/render.zig` and the Oliver-backed rendering seam are unrelated to this module. `src/graph.zig` operates purely on Zig-owned data structures and performs no I/O and no rendering.
 
 The `resolve` public declaration is an alias for `validateTopology` maintained for historical call sites; it does not represent a distinct code path.
 

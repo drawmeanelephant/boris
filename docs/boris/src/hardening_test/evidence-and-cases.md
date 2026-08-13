@@ -213,7 +213,7 @@ test declaration
             → graph_mod.validate (check IDs, parents, cycles)
             → aside / compile (component validation and transformation)
             → ir_emit / rag_emit (serialize JSON or Markdown)
-            → Apex (real engine via vendor/apex/apex.c) [for HTML compile path]
+            → Oliver (pinned library via src/render.zig) [for HTML compile path]
         → returns Result with ok flag, diagnostics, pages
     → Assertions (expectEqual, expectEqualSlices, expectEqualStrings,
                   expectError, std.mem.indexOf)

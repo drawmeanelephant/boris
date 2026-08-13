@@ -5,14 +5,15 @@ publication implemented in Feature 8.1–F8.2
 **Modules:** [`src/include.zig`](../../src/include.zig), [`src/wikilink.zig`](../../src/wikilink.zig),
 wired from [`src/compile.zig`](../../src/compile.zig)  
 **Related:** [html-output.md](html-output.md), [diagnostics.md](diagnostics.md),
-[apex-abi.md](apex-abi.md), [scanner.md](scanner.md)
+[oliver-renderer.md](oliver-renderer.md), [scanner.md](scanner.md)
 
 ---
 
 ## Goals
 
-- Expand Markdown includes and resolve wiki-links **in Zig before Apex**.
-- Keep Apex sandboxed: `enable_file_includes = false` always (never engine FS reads).
+- Expand Markdown includes and resolve wiki-links **in Zig before Oliver**.
+- The renderer never reads files: includes are Boris-mediated (`{{include}}`),
+  and Oliver has no filesystem access.
 - Fail loud on missing targets, illegal paths, and include cycles.
 - Include file bytes contribute to the parent page’s HTML cache fingerprint.
 - Under historical IR schema `0.1.0`, include/reference edges were not published.
@@ -69,11 +70,11 @@ pages if they contain `.md` / `.mdx`.
 ## Resolve order (HTML)
 
 1. Fence- and inline-code-aware **include expansion** (depth limit 32 + cycle stack).
-2. Build per-page **heading id index** from Apex-rendered body HTML (see
+2. Build per-page **heading id index** from Oliver-rendered body HTML (see
    [heading-ids.md](heading-ids.md)); used only to validate wiki fragments.
 3. Fence- and inline-code-aware **wiki rewrite** against frozen graph nodes (+ optional fragment).
 4. **Aside** tokenize.
-5. **Apex** render markdown segments.
+5. **Oliver** render markdown segments.
 
 Coordinator phases (discover, parent graph freeze, include plan, heading index,
 fingerprint) stay sequential. Workers only render with precomputed deps.
@@ -162,8 +163,8 @@ error: EINCLUDEMISSING: path/to/page.md:line:col: message [remediation]
 
 ## Non-goals (this contract)
 
-- Apex-native includes or wiki plugins.
+- Renderer-native includes or wiki plugins (Oliver has no such features).
 - Soft warnings for broken links.
-- Re-implementing Apex heading slug rules in Zig (see [heading-ids.md](heading-ids.md)).
+- Re-implementing Oliver heading slug rules in Zig (see [heading-ids.md](heading-ids.md)).
 - Emitting internal `layout` or `asset` dependency kinds in IR 0.2.
 - Fragment-aware IR edge kinds or schema changes.

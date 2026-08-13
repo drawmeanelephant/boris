@@ -22,7 +22,7 @@ tags: [boris, zig, source-reference, diag]
 
 The file exists because Boris must emit machine-readable, stable-category diagnostics to both stderr (text) and `build-report.json` (JSON), and because the normative contract in `docs/contracts/diagnostics.md` requires those codes, field names, and sort order to be frozen for fixture testing, CI, and downstream tooling. By centralizing the type definitions and enforcing them through `@tagName` (which derives the code string directly from the enum variant name), the compiler gains a single authoritative source of truth that is structurally incapable of emitting an alias or underscore variant without a source change.
 
-`src/diag.zig` is a shared import, not a standalone module root. It has no build entry of its own in `build.zig`; its embedded tests execute when any of the modules that import it are compiled under `zig build test`. The module has no external dependencies beyond `std` — no Apex C ABI link, no `build_options`, no platform-specific code.
+`src/diag.zig` is a shared import, not a standalone module root. It has no build entry of its own in `build.zig`; its embedded tests execute when any of the modules that import it are compiled under `zig build test`. The module has no external dependencies beyond `std` — no renderer link, no `build_options`, no platform-specific code.
 
 The confidence provided is twofold. The `"Code names match contract strings"` test directly demonstrates that 17 of the 21 declared codes produce the exact string expected by the normative contract, using `@tagName` as the mechanism. The `"sortDiagnostics orders by path then line"` test directly demonstrates that the primary (path) and secondary (line) sort keys work correctly for a three-element fixture. What the tests do not prove includes: the four codes omitted from the name test (`ERELATIONMISSING`, `ERELATIONSELF`, `ERELATIONDUPLICATE`, `EASSET`); the behavior of the tertiary (column), quaternary (code), and quinary (message) sort keys; the correctness of `formatText` for all three text-form branches; or behavior of `countErrors` beyond what callers exercise.
 
@@ -49,7 +49,7 @@ The confidence provided is twofold. The `"Code names match contract strings"` te
 
 Relative to the product binary, `diag.zig` is compiled into `boris` via every module that imports it. It is not linked directly as a named module in `build.zig`; instead it participates in the transitive closure of `root_mod` (through pipeline.zig), `pipeline_mod`, `graph_mod`, `parser_mod`, and similar roots. Its tests therefore run inside those modules' test binaries rather than in a dedicated artifact.
 
-Relative to `src/apex.zig` and the hostile C implementation, `diag.zig` has no relationship. Diagnostics are a pure Zig concern; no diagnostic type crosses the C ABI boundary. The Apex wrapper may receive a `Diagnostic` after the wrapper returns to Zig, but that is a caller concern, not this file's.
+Relative to `src/render.zig`, `diag.zig` has no relationship. Diagnostics are a pure Zig concern; the rendering seam may surface an error after `render.render` returns, but mapping it onto a diagnostic is a caller concern, not this file's.
 
 Relative to `docs/contracts/diagnostics.md`, `diag.zig` is the normative implementation counterpart. The contract document specifies the closed code set, JSON field names, sort order, and text format; `diag.zig` implements all of these directly.
 

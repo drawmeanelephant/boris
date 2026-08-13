@@ -17,7 +17,7 @@ tags: [boris, zig, source-reference, surface, aside]
 5. **Tokenizer** — `tokenizeBody`, alias `parseBodySegmentsSimple`.
 6. **HTML render** — `sanitizeClass`, `appendEscapedAttr`, `kindLabel`, `renderHtml`, `renderDetailsHtml`.
 7. **RAG export** — `formatRagDirective`, `formatDetailsRagDirective`, `exportBodyWithDirectives`.
-8. **Embedded tests** — tokenize matrix, render sinks, RAG shapes, U15/U15b Apex stream order.
+8. **Embedded tests** — tokenize matrix, render sinks, RAG shapes, U15/U15b Oliver stream order.
 
 ***
 
@@ -39,8 +39,8 @@ tags: [boris, zig, source-reference, surface, aside]
 | `TokenizeResult` | struct | segments, asides, details, diagnostics; `hasErrors()` |
 | `tokenizeBody` | fn | Primary entry; requires valid UTF-8 |
 | `parseBodySegmentsSimple` | fn | Alias for harness/fuzz |
-| `renderHtml` | fn | Aside → admonition HTML via Apex on body |
-| `renderDetailsHtml` | fn | Details → native `<details>` HTML via Apex on body |
+| `renderHtml` | fn | Aside → admonition HTML via Oliver on body |
+| `renderDetailsHtml` | fn | Details → native `<details>` HTML via Oliver on body |
 | `formatRagDirective` | fn | Aside → `:::kind` / `:::kind{id="…"}` block |
 | `formatDetailsRagDirective` | fn | Details → export-only `:::details` directive |
 | `exportBodyWithDirectives` | fn | Rebuild body: md via caller prep + component directives |
@@ -105,7 +105,7 @@ tokenizeBody(body, allocator)
 
 Allocation: four `ArrayList`s (segments, asides, details, diagnostics) with `errdefer` deinit, then `toOwnedSlice`. No recursion. Close-tag matching uses fixed prefixes `&lt;/Aside&gt;` (8) and `&lt;/Details&gt;` (10) after optional whitespace.
 
-**What it does not do:** expand includes, resolve wiki links, parse Markdown inside the component shell (inner body remains raw Markdown for later Apex), or mutate the source buffer.
+**What it does not do:** expand includes, resolve wiki links, parse Markdown inside the component shell (inner body remains raw Markdown for later Oliver), or mutate the source buffer.
 
 ***
 
@@ -119,13 +119,13 @@ Builds:
 <aside class="admonition admonition--{kind}" [id="…"] aria-label="{Label}">
 <p class="admonition__title">{Label}</p>
 <div class="admonition__body">
-{apex.render(body)}
+{render.render(body)}
 </div>
 </aside>
 ```
 
-- Inner body goes through `apex.render` on the **same** document `ArenaAllocator` (Whiteboard).
-- Empty body → empty inner string (no Apex call).
+- Inner body goes through `render.render` on the **same** document `ArenaAllocator` (Whiteboard).
+- Empty body → empty inner string (no render call).
 - `id` and `aria-label` pass through `appendEscapedAttr` (`&`, `"`, `<`, `>`).
 - Class stem from `sanitizeClass` (allowlisted kinds already safe; empty falls back to `note`).
 - Output bytes are arena-owned; caller must keep the Whiteboard alive until flush.
@@ -139,7 +139,7 @@ Builds native:
 <details class="details" [id="…"] [open]>
 <summary>{escaped summary}</summary>
 <div class="details__body">
-{apex.render(body)}
+{render.render(body)}
 </div>
 </details>
 ```
@@ -193,14 +193,14 @@ aside.tokenizeBody ──► TokenizeResult
        │                    ├─► rag/ragemit: formatRagDirective*
        │                    └─► html_body/compile: segment walk
        │                              │
-       │                              ├─ markdown → apex.render
-       │                              ├─ aside    → renderHtml → apex.render(body)
-       │                              └─ details  → renderDetailsHtml → apex.render(body)
+       │                              ├─ markdown → render.render
+       │                              ├─ aside    → renderHtml → render.render(body)
+       │                              └─ details  → renderDetailsHtml → render.render(body)
        ▼
 layouts CSS (.admonition--*, .details)
 ```
 
-`build.zig` links Apex into `aside_mod` because unit tests call real `apex.render` (U15/U15b and `renderHtml` tests). Hostile Apex is not the default for this module’s test binary.
+`build.zig` links `render_mod` into `aside_mod` because unit tests call the real `render.render` (U15/U15b and `renderHtml` tests).
 
 ***
 
@@ -214,7 +214,7 @@ layouts CSS (.admonition--*, .details)
 | `sanitizeClass` silently drops bad chars | Defense in depth | Kinds already allowlisted at parse |
 | Component body may contain fence-like text | OK | Inner body not re-tokenized for nested components; nesting already rejected at open |
 | Large bodies | Bounded by page source limits upstream | No extra aside-specific size cap on body text |
-| Parallel HTML `--jobs` | Safe w.r.t. aside | Pure functions + per-doc arena; Apex serialized in `apex.zig` |
+| Parallel HTML `--jobs` | Safe w.r.t. aside | Pure functions + per-doc arena; Oliver is stateless, so no serialization is needed |
 
 **Phased suggestions (non-blocking):** keep any new component behind the same PascalCase + allowlisted-attr pattern; add contract fixture golden for `:::details` if not already under `docs/contracts/`; prefer extending tests over widening grammar when migration-lab encounters Starlight-like tags.
 
@@ -222,11 +222,11 @@ layouts CSS (.admonition--*, .details)
 
 ## Acceptance criteria (module health)
 
-- `zig build test` runs `aside_tests` green with Apex linked.
+- `zig build test` runs `aside_tests` green with the render seam linked.
 - Unregistered tags fail IR with `ECOMPONENT` (`hardening_test` / component-fail fixture).
 - Valid Aside appears in RAG as `:::kind` without raw tags; Details as `:::details` with escaped summary.
 - HTML publish emits `.admonition--*` / `<details class="details"` and never leaves raw `&lt;Aside` in output for valid input.
-- U15/U15b preserve document order and nested Apex features inside aside bodies.
+- U15/U15b preserve document order and nested Oliver features inside aside bodies.
 
 ***
 

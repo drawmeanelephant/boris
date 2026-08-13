@@ -40,7 +40,7 @@ scan selected extension
   -> parse the existing Boris frontmatter from original source bytes
   -> convert only the body to Markdown in memory
   -> existing component/dependency validation
-  -> existing Apex / IR / RAG / Context / graph pipeline
+  -> existing render / IR / RAG / Context / graph pipeline
 ```
 
 The frontmatter grammar is unchanged and remains normative under
@@ -67,7 +67,7 @@ are accepted; adapted Markdown uses LF. Blank-line count is preserved.
 | `* Item` | `- Item` | Flat unordered list; every line in the block is a non-empty `* ` item. |
 | `# Item` | `1. Item`, `2. Item`, … | Flat ordered list; every line in the block is a non-empty `# ` item and output numbering is deterministic from 1. |
 
-Nested or mixed list markers are outside this slice. Because Apex Unified mode
+Nested or mixed list markers are outside this slice. Because the renderer
 intentionally merges adjacent list blocks with different marker types, such
 adjacent unordered/ordered blocks fail with `ETEXTILE`; an ordinary paragraph
 between them makes each block unambiguous.
@@ -107,12 +107,13 @@ Other schemes, including `javascript:`, fail with `ETEXTILE`.
 ## Escaping and generated HTML
 
 The adapter escapes literal Markdown punctuation so a Textile paragraph cannot
-smuggle an unrelated Markdown construct into Apex. Literal `&`, `<`, and `>`
-become HTML entities before Apex. Raw HTML is never passed through.
+smuggle an unrelated Markdown construct into the renderer. Literal `&`, `<`,
+and `>` become HTML entities before rendering. Raw HTML is never passed
+through.
 
 The only generated raw HTML is the fixed `<ins>…</ins>` wrapper because the
 Markdown path has no insertion equivalent. Its content is entity-escaped and
-cannot add attributes or tags. Delete uses Apex's existing `~~…~~` Markdown
+cannot add attributes or tags. Delete uses the existing `~~…~~` Markdown
 path. Links use Markdown rather than generated anchors.
 
 ## Unsupported syntax
@@ -150,7 +151,7 @@ before body adaptation.
 ## Output and cache behavior
 
 - HTML: adapted Markdown follows the existing include/wiki/component stages
-  (which are inert for valid Textile input), then Apex and the normal layout
+  (which are inert for valid Textile input), then rendering and the normal layout
   splice. There is no direct Textile-to-HTML renderer.
 - IR: graph and artifact shape are unchanged. `sourcePath` ends in `.textile`
   and `bodyOffset` refers to original source bytes.

@@ -22,7 +22,7 @@ tags: [boris, zig, source-reference, assemble]
 
 The module exists so layout chrome (nav, breadcrumb, title, toc, children, metadata, footer, theme asset hrefs) stays a reusable immutable plan while per-page Whiteboard HTML lives only until flush completes. Trunk/Satellite graph identity stays in `graph.zig` / `compile.zig`; assemble only splices already-rendered fragments and publishes bytes under `dist`.[^4_2][^4_1]
 
-Callers include `compile.zig` (`loadLayoutOnce`, `writePage` / `writePageWithSlotsOpts`, `precreateOutputDirs`, `scrubStaleAtomicTemps`), product HTML site builds, incremental/multi-target staging, harness/hardening paths, and `assemble_tests` under `zig build test`. Build wiring creates `assemble_mod` without linking Apex — assemble does not render Markdown.[^4_1]
+Callers include `compile.zig` (`loadLayoutOnce`, `writePage` / `writePageWithSlotsOpts`, `precreateOutputDirs`, `scrubStaleAtomicTemps`), product HTML site builds, incremental/multi-target staging, harness/hardening paths, and `assemble_tests` under `zig build test`. Build wiring creates `assemble_mod` without linking the renderer — assemble does not render Markdown.[^4_1]
 
 Correctness properties it owns: required single `&#123;&#123;content&#125;&#125;`; no duplicate known markers; unknown tokens hard-fail at load; UTF-8 gate on layout raw; `asset-url` path grammar (`assets/…`, no `..`, ASCII-only); segment views into `Layout.raw` with lifetime tied to the long-lived layout arena; multi-slot stream order; atomic-ish same-dir replace; prior-final preservation on write failure; HoldUntilFlush flush-before-reset discipline for tests. What it does not own: body Markdown/Aside rendering, graph nav HTML generation, theme file copy, IR/RAG emit, or cross-volume atomic rename.[^4_1]
 
@@ -47,7 +47,7 @@ Confidence is high on the closed marker grammar, multi-slot/asset-url plan, sequ
 
 ## Role in the Boris architecture
 
-In the HTML pipeline, order is roughly: validate/load layout → discover/promote PageDb → graph freeze → per-page Whiteboard body render (includes, wiki, assets, Aside/Details, Apex) → fill `SlotValues` → **`assemble.writePageWithSlots*`** → stage commit / cache. Assemble is the last pure IO leaf of page materialization: it neither parses content nor talks to Apex.[^4_2][^4_1]
+In the HTML pipeline, order is roughly: validate/load layout → discover/promote PageDb → graph freeze → per-page Whiteboard body render (includes, wiki, assets, Aside/Details, Oliver) → fill `SlotValues` → **`assemble.writePageWithSlots*`** → stage commit / cache. Assemble is the last pure IO leaf of page materialization: it neither parses content nor renders Markdown.[^4_2][^4_1]
 
 Layouts are process/build-lifetime. `Layout.raw` and all segment slices must outlive every `writePage` call for that target. Multi-target compile caches layouts by path; per-page selection only chooses which closed plan to stream. Incremental fingerprints include layout path/bytes (and nav material when slots need graph chrome) outside this module.[^4_2]
 

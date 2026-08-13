@@ -82,10 +82,10 @@ Do the irreversible-looking work only after shape and validation:
 |---------|----------------|
 | v0.1 default | Emit deterministic JSON under `.boris/` |
 | Optional | Package product RAG under `rag/` |
-| Opt-in HTML | Apex render + zero-copy layout writes to `dist/` (or multi-target roots) |
+| Opt-in HTML | Oliver render + zero-copy layout writes to `dist/` (or multi-target roots) |
 
 Ignite is **not** “spawn a markdown process farm.” When markdown becomes HTML,
-Apex is in-process C ABI.
+Oliver is an in-process Zig library.
 
 ### Reset
 

@@ -1,8 +1,8 @@
 //! Feature 6 follow-on — in-page heading `{{toc}}`.
 //!
-//! Builds a per-page outline from **rendered body HTML** (Apex + Aside), so
-//! `href="#id"` targets match the `id` attributes Apex already emitted.
-//! Does not re-implement Apex slug rules in Markdown.
+//! Builds a per-page outline from **rendered body HTML** (Oliver + Aside), so
+//! `href="#id"` targets match the `id` attributes Oliver already emitted.
+//! Does not re-implement Oliver slug rules in Markdown.
 
 const std = @import("std");
 const html_nav = @import("html_nav.zig");
@@ -18,7 +18,7 @@ pub const fragment_max_level: u8 = 6;
 pub const Heading = struct {
     level: u8,
     id: []const u8,
-    /// Inner text with tags stripped; HTML entities left as Apex emitted them.
+    /// Inner text with tags stripped; HTML entities left as Oliver emitted them.
     text: []const u8,
 };
 
@@ -248,7 +248,7 @@ pub fn renderToc(allocator: std.mem.Allocator, body_html: []const u8) ![]u8 {
         // ids are usually slug-safe; still escape attribute specials
         try html_nav.appendEscaped(&buf, allocator, h.id);
         try buf.appendSlice(allocator, "\">");
-        // Text already entity-escaped from Apex; do not double-escape.
+        // Text already entity-escaped from Oliver; do not double-escape.
         try buf.appendSlice(allocator, h.text);
         try buf.appendSlice(allocator, "</a></li>\n");
     }

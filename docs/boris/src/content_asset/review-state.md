@@ -14,7 +14,7 @@ tags: [boris, zig, source-reference, review-state, content_asset]
 
 ## Known gaps and uncertain claims
 
-- **Empty image dest `![]()`:** scanner continues without error; Apex may see empty dest later — not a hard `AssetPath` here.
+- **Empty image dest `![]()`:** scanner continues without error; the renderer may see an empty dest later — not a hard `AssetPath` here.
 - **Reference-style / HTML images:** not rewritten by this scanner; authors must use inline Markdown images for local assets.
 - **Unicode filenames in `.assets`:** rejected by `validateWithinTreePath`; authors need ASCII names.
 - **Symlink on Windows:** tests often early-return on `AccessDenied` — not a green proof on all CI hosts.

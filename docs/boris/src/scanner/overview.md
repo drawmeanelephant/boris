@@ -18,7 +18,7 @@ tags: [boris, zig, source-reference, scanner]
 
 ## Executive summary
 
-`src/scanner.zig` is the deterministic recursive content-discovery module for Boris milestone 4. Its sole public responsibility is to walk a content root directory, identify page files that belong to the explicitly selected input format family, derive canonical identity records for each, and deliver a sorted flat list of `Page` values to the caller before any downstream stage (frontmatter parse, graph resolution, HTML render, Apex) has been invoked. It has no frontmatter awareness, no graph logic, no rendering, and no concurrency. 
+`src/scanner.zig` is the deterministic recursive content-discovery module for Boris milestone 4. Its sole public responsibility is to walk a content root directory, identify page files that belong to the explicitly selected input format family, derive canonical identity records for each, and deliver a sorted flat list of `Page` values to the caller before any downstream stage (frontmatter parse, graph resolution, Markdown render) has been invoked. It has no frontmatter awareness, no graph logic, no rendering, and no concurrency. 
 
 The file implements three public entry points — `scan`, `scanDir`, and `scanDirFormat` — that converge on a private `scanDirFormat` implementation driving a `Io.Dir.SelectiveWalker`. Within the walk loop, the code enforces a strict policy hierarchy: symlinks are rejected unconditionally; directories are entered only once per filesystem inode (cycle detection via a linear `FsIdentity` list); the content-root `includes/` subtree and any directory whose name ends with `.assets` are skipped; and every file entry must pass a case-sensitive page-extension gate and an input-format family check before being registered. A secondary `stat` call with `follow_symlinks = false` provides defense-in-depth against walker entries that superficially appear to be regular files but are actually symlinks. 
 
@@ -48,11 +48,11 @@ What the file does not prove: it does not test scanner behavior under allocation
 
 ## Role in the Boris architecture
 
-`src/scanner.zig` is the first active stage of the Boris compilation pipeline. It sits immediately after CLI option parsing and before `parser.zig`, `graph.zig`, and anything involving Apex or HTML rendering. In the milestone-4 pipeline it is the only module that touches the filesystem during content discovery; all later stages operate on the `PageList` or `PageDb` data structures that the scanner populates. 
+`src/scanner.zig` is the first active stage of the Boris compilation pipeline. It sits immediately after CLI option parsing and before `parser.zig`, `graph.zig`, and anything involving Markdown rendering. In the milestone-4 pipeline it is the only module that touches the filesystem during content discovery; all later stages operate on the `PageList` or `PageDb` data structures that the scanner populates. 
 
 The scanner is linked into the product binary (`src/main.zig`) via `root_mod`, which imports `scanner.zig` transitively through `pipeline.zig`. It is not test-only code. The scanner module is also compiled as a separate `scanner_mod` build target in `build.zig` for its standalone test step, but this produces only a test binary — the same source participates in both the product link and the test link. 
 
-The scanner has no dependency on `src/apex.zig`, the hostile C double, the real ApexMarkdown engine, or any Apex build options. Its `build_options` are not wired into the `scanner_mod` build step. The scanner is therefore unaffected by the `hostile_apex` flag. 
+The scanner has no dependency on `src/render.zig` or the Oliver-backed rendering seam. It is unaffected by renderer configuration.
 
 `src/identity.zig` is the scanner's core collaborator: `identity.canonicalize` normalizes raw walker paths; `identity.canonicalEntityId` derives the graph key; `identity.safeOutputRelativePath` builds the output-relative HTML path; `identity.isPageFile` and `identity.contentKind` implement the case-sensitive extension gate; and `identity.InputFormat.accepts` enforces input-family isolation. The scanner delegates all path logic to `identity.zig` and does none of it ad-hoc. 
 

@@ -87,8 +87,8 @@ The implementation ownership at the boundary is:
 | Discovery, source paths, input family, frontmatter, IDs, and PageDb promotion | scanner/parser and `compile.loadAndPromoteFormat` |
 | Duplicate IDs, parent topology, cycles, roles, and semantic relations | shared `graph` validators used before freeze |
 | Includes, wiki targets, and dependency indexes | `SharedCompileState` and the normal dependency resolvers |
-| Heading IDs and wiki fragments | the normal Apex heading-harvest path |
-| Registered components, Markdown/Apex rendering, graph chrome, TOC, metadata, footer, and rewritten asset URLs | the shared per-page render/slot helper |
+| Heading IDs and wiki fragments | the normal Oliver heading-harvest path |
+| Registered components, Markdown/Oliver rendering, graph chrome, TOC, metadata, footer, and rewritten asset URLs | the shared per-page render/slot helper |
 | Layout markers/rules, theme files, and content-local asset safety | normal layout, theme, and content-asset loaders |
 
 Diagnostic ordering is the normal canonical ordering. Target plans and layout
@@ -99,7 +99,7 @@ each selected target; it publishes none of them even when all pass.
 ## Why bounded rendering is included
 
 Some source validity is established only while preparing rendered HTML:
-heading IDs used by wiki fragments, component expansion, Apex failures, layout
+heading IDs used by wiki fragments, component expansion, render failures, layout
 slots, footer content, and content-asset URL rewriting all live on that path.
 `validate` therefore renders pages into its normal per-page in-memory arena and
 discards the prepared slots. Sitemap bytes are likewise rendered in memory and

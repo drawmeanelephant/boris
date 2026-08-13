@@ -22,9 +22,9 @@ tags: [boris, zig, source-reference, aside]
 
 The module exists because Boris keeps admonitions and disclosures as **in-document tokens**, not graph nodes or separate pages. Trunk/Satellite topology stays in `graph.zig`; asides stay in source order inside a page body. That separation lets IR validation, HTML publish, and RAG export share one parse of the body without inventing standalone aside routes or executable component semantics.
 
-Callers that depend on it include `html_body.zig` (ordered HTML body pipeline), `pipeline.zig` / `rag.zig` (shared compile validation and `:::kind` / `:::details` export), `compile.zig` (via the body path), `hardening_test.zig`, and the fuzz harness via `parseBodySegmentsSimple`. Build wiring creates `aside_mod` from this file, links Apex (`linkApex(..., false)`), and runs `aside_tests` under `zig build test`.
+Callers that depend on it include `html_body.zig` (ordered HTML body pipeline), `pipeline.zig` / `rag.zig` (shared compile validation and `:::kind` / `:::details` export), `compile.zig` (via the body path), `hardening_test.zig`, and the fuzz harness via `parseBodySegmentsSimple`. Build wiring creates `aside_mod` from this file, links the render seam (`linkOliver(aside_mod, oliver_mod)`), and runs `aside_tests` under `zig build test`.
 
-Correctness properties the module owns: fence-aware recognition; line-start-only close tags; no nesting or cross-nesting; allowlisted Aside kinds; safe-anchor ids; plain-text Details summaries; quoted attributes only; UTF-8 gate on tokenize; HTML attribute escaping at render sinks; document-order segment stream; RAG export that drops raw `&lt;Aside>`/`&lt;Details>` tags. What it does not own: full Markdown rendering of outer page prose (Apex does that), layout chrome, graph identity, or a general component plugin system.
+Correctness properties the module owns: fence-aware recognition; line-start-only close tags; no nesting or cross-nesting; allowlisted Aside kinds; safe-anchor ids; plain-text Details summaries; quoted attributes only; UTF-8 gate on tokenize; HTML attribute escaping at render sinks; document-order segment stream; RAG export that drops raw `&lt;Aside>`/`&lt;Details>` tags. What it does not own: full Markdown rendering of outer page prose (Oliver does that), layout chrome, graph identity, or a general component plugin system.
 
 Confidence is high on the closed grammar and happy/error unit matrix embedded in the file, and on end-to-end hardening coverage (invalid component → `ECOMPONENT`; valid Aside/Details through IR, RAG, and HTML). Residual risk is concentrated in adversarial edge cases at the fence/tag boundary, attribute scan on malformed multi-line tags (mitigated by newline ending quote mode), and the fact that HTML render trusts already-tokenized structs — bypassing tokenize can still feed hostile ids into escape sinks (defensively escaped, but not re-validated).
 
@@ -39,7 +39,7 @@ Confidence is high on the closed grammar and happy/error unit matrix embedded in
 | Build or test root | Root of `aside_mod` / `aside_tests` (`zig build test`); also imported by pipeline, rag, html_body, compile, hardening, fuzz |
 | Production runtime dependency | Yes — HTML body path, IR/RAG component validation, RAG export projection |
 | Expected execution command | `zig build test` (aside unit tests + hardening integration) |
-| Main collaborators | `apex.zig` (inner Markdown → HTML), `html_body.zig`, `pipeline.zig`, `rag.zig` / `ragemit.zig`, `diag.zig`, `build.zig`, `docs/contracts/components.md` |
+| Main collaborators | `render.zig` (inner Markdown → HTML), `html_body.zig`, `pipeline.zig`, `rag.zig` / `ragemit.zig`, `diag.zig`, `build.zig`, `docs/contracts/components.md` |
 | Documentation depth warranted | High — authoring contract surface; every diagnostic kind maps to product exit behavior |
 
 
@@ -47,7 +47,7 @@ Confidence is high on the closed grammar and happy/error unit matrix embedded in
 
 ## Role in the Boris architecture
 
-In the product pipeline, body handling is ordered roughly as: parse frontmatter → optional Textile adapt → includes → wiki/doc links → content-local assets → **Aside/Details tokenize** → stream markdown segments through Apex and component segments through `renderHtml` / `renderDetailsHtml`. `aside.zig` is the tokenize + component-render leaf of that chain. IR and RAG reuse the same tokenizer so an unregistered `&lt;Figure>` fails content validation with `ECOMPONENT` whether or not HTML is published.
+In the product pipeline, body handling is ordered roughly as: parse frontmatter → optional Textile adapt → includes → wiki/doc links → content-local assets → **Aside/Details tokenize** → stream markdown segments through Oliver and component segments through `renderHtml` / `renderDetailsHtml`. `aside.zig` is the tokenize + component-render leaf of that chain. IR and RAG reuse the same tokenizer so an unregistered `&lt;Figure>` fails content validation with `ECOMPONENT` whether or not HTML is published.
 
 Asides are never first-class graph nodes. Entity catalogs and parent edges ignore them; document order is preserved in HTML and in RAG page bodies as `:::tip` / `:::details` blocks. That matches AGENTS policy: no standalone HTML/RAG pages per aside; no arbitrary MDX.
 

@@ -31,16 +31,15 @@ The `aside.tokenizeBody` function requires valid UTF-8. Threat categories exerci
 
 Category **not** exercised: semantic correctness of tokens; that valid-UTF-8 inputs produce structurally sound token output.
 
-### Apex wrapper — pointer/length contract invariants and no-crash
+### Renderer seam — no-crash on bounded input
 
-The `apex.prepareMdForC` and `apex.mapRenderResult` functions are the Zig-side gates that prevent illegal pointer/length combinations from reaching or returning from the C engine. Threat categories exercised:
+The `render.render` seam (Oliver-backed) accepts arbitrary byte slices — in production, Markdown-typed body segments after Aside tokenization. Threat categories exercised:
 
-- **Empty input pointer contract**: asserts that `prepareMdForC(&.{})` returns a non-null sentinel pointer with length 0. The C ABI requires a non-null `md` even for zero-length input.
-- **Non-zero status with dirty outputs via `mapRenderResult`**: three direct `mapRenderResult` calls simulate a hostile engine: `rc=2` (OOM) with a non-null poison pointer and length 99 → must return `error.OutOfMemory`; `rc=1` (ARGS) with a non-null poison pointer and length 99 → must return `error.RenderFailed`; `rc=0` (OK) with a null pointer and length 5 → must return `error.RenderFailed` (null+nonzero length ABI violation).
-- **No-crash on bounded random payloads**: 128 iterations of `apex.render` with random byte inputs of 0–512 bytes, accepting `error.OutOfMemory` and `error.RenderFailed` as valid outcomes alongside success.
-- **Non-empty input pointer and length preservation**: asserts `prep.ptr == md.ptr` and `prep.len == md.len` for each random input.
+- **Random byte payloads**: 128 iterations of `render.render` with random byte inputs of 0–512 bytes (the renderer is byte-oriented; random bytes are allowed), each with a freshly reset arena.
+- **Structured Markdown interleave**: every 3rd iteration substitutes a fixed structured Markdown string, so the no-crash property also covers real parsing paths rather than only garbage.
+- **Documented error set**: `OutOfMemory`, `InputTooLarge`, `WriteFailed`, and `NoSpaceLeft` are accepted as valid outcomes alongside success — the same error set the production callers tolerate.
 
-Category **not** exercised: behavior of the real ApexMarkdown C implementation on adversarial inputs (only the Zig wrapper contracts are verified here); allocator callback exhaustion; pointer-retention after return; reentrancy.
+Category **not** exercised: HTML correctness on adversarial inputs (structured fixtures in `src/render.zig` and the Oliver contract fixtures cover that); Oliver's own parser internals; reentrancy (Oliver is stateless).
 
 ### Graph topology — reference-checker agreement
 

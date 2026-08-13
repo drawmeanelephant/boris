@@ -25,7 +25,7 @@ tags: [boris, zig, source-reference, doclink]
 | Includes | `include` | After doclink so owning-page source path still applies |
 | Wiki-links | `wikilink` | Entity ids / fragments |
 | Content-local images | `content_asset` | Sibling `.assets` |
-| Aside → Apex | `aside` / `apex` | HTML |
+| Aside → Renderer | `aside` / `render` | HTML |
 
 Call site in `html_body.renderSource`: doclink first, then includes, with a deliberate first-slice limit that **included fragments do not re-resolve links against the including page**. Failures map to `error.ReferenceFailed`.[^4_1]
 

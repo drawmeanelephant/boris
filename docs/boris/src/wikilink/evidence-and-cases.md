@@ -122,7 +122,7 @@ Reporting a missing-heading diagnostic for a page that was never present, which 
 **Evidence strength:** Directly demonstrated.
 
 **Residual gap:**
-In this test, `guides/typo` is absent from both the `HeadingIndex` and the `nodes` slice. The case where a typo entity exists in `nodes` but was never added to the `HeadingIndex` (e.g., a page that was never Apex-rendered) is not independently tested.
+In this test, `guides/typo` is absent from both the `HeadingIndex` and the `nodes` slice. The case where a typo entity exists in `nodes` but was never added to the `HeadingIndex` (e.g., a page that was never rendered) is not independently tested.
 
 ***
 

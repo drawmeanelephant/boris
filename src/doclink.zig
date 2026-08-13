@@ -1,4 +1,4 @@
-//! Graph-backed Markdown documentation-link rewriting before Apex.
+//! Graph-backed Markdown documentation-link rewriting before rendering.
 //!
 //! This is intentionally a small Markdown boundary, not an HTML replacement
 //! pass. It recognizes inline Markdown links outside fences, code spans, and

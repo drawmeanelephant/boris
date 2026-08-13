@@ -17,7 +17,7 @@ tags: [boris, zig, source-reference, review-state, compile]
 - **`experimental = true`:** name is historical; product default is HTML — do not treat flag as “off by default.”
 - **Process RSS:** not measured; only arena capacity after `free_all`.
 - **Publish atomicity:** same-filesystem rename preferred; cross-device copy+delete; concurrent readers during replace not claimed.
-- **Apex under `--jobs`:** serialized at wrapper; C engine not proven re-entrant; U18 smoke is separate.
+- **Rendering under `--jobs`:** Oliver is stateless and arena-scoped, so parallel page workers render concurrently; the D4 parallel smoke test byte-compares `jobs=1` vs `jobs=2` output.
 - **Fingerprint completeness:** depends on callers supplying stable include order (this file sorts transitive include paths before hash) and on wiki/theme material builders; pipeline/HTML parity of every edge kind should be verified against `cache.zig` + `pipeline.populateDependencyIndexFormat` when diagnosing “stale skip.”
 - **Watch mode:** implemented outside this file; rebuilds call compile APIs — debounce/ignore roots not defined here.
 - **Bundle evidence:** this dossier is based on the packed `src/compile.zig` document in the Space source bundle (~253534 bytes) plus collaborator modules already inspected (`cache`, `graph`, `dependency`, `cli`, `build.zig`). Live GitHub raw fetch failed once; if the tree moves, re-diff against `main`.

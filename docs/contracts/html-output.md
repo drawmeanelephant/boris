@@ -20,7 +20,7 @@ tested** behavior from **platform-qualified** publication notes.
 |----------|--------------|
 | Layout load + closed plan (`{{content}}` + optional slots / `asset-url`) | Process-RSS guarantees |
 | Whiteboard per-page arena lifecycle | Generic component HTML / MDX |
-| Ordered body stream: pre-Apex link/image rewrites + Apex(markdown) + Aside HTML | Mega-string assembly |
+| Ordered body stream: pre-render link/image rewrites + Oliver(markdown) + Aside HTML | Mega-string assembly |
 | Three-write layout splice | Cross-volume atomic rename claims |
 | Temp-file publish via Zig 0.16 Atomic API | Full YAML frontmatter / MDX |
 | PageDb durable metadata only | Multi-OS CI atomicity matrix for every FS |
@@ -29,14 +29,15 @@ tested** behavior from **platform-qualified** publication notes.
 
 Modules:
 
-- `src/compile.zig` — site loop, PageDb promote, Whiteboard, Apex render
+- `src/compile.zig` — site loop, PageDb promote, Whiteboard, Oliver render
 - `src/assemble.zig` — closed layout plan, zero-copy splice, Atomic publish
 - `src/theme.zig` — theme root, asset inventory/copy, collision checks (F9.1)
 - `src/artifact_inventory.zig` — deterministic target-owned payload inventory
 - `themes/boris/layouts/main.html` — default managed theme template (exactly
   one `{{content}}`); its copied stylesheet is emitted as
   `assets/css/boris.css`
-- `src/apex.zig` — in-process markdown → HTML (m8)
+- `src/render.zig` — the Oliver seam: in-process markdown → HTML (see
+  [oliver-renderer.md](oliver-renderer.md))
 - `src/cache.zig` / `src/dependency.zig` — fingerprints and indexes (P2)
 - `src/watch.zig` — opt-in watch loop (P3.2)
 - `src/target.zig` — multi-target isolation (P3.3)
@@ -94,7 +95,7 @@ Long-lived retain arena holds **narrowly promoted** metadata only, for example:
 - graph role fields when populated by other paths
 
 **Forbidden on PageDb:** any raw slice into a source buffer, parser view,
-Apex HTML, buffered writer storage, or Whiteboard allocation.
+Oliver-rendered HTML, buffered writer storage, or Whiteboard allocation.
 
 Promotion duplicates strings into the retain arena **before** the source buffer
 is freed (or before Whiteboard `free_all`).
@@ -105,8 +106,8 @@ For each page:
 
 1. Document-local `std.heap.ArenaAllocator` (“Whiteboard”).
 2. Read source, parse frontmatter, tokenize body segments (markdown + Aside),
-   render through Apex / `aside.renderHtml` — all transient bytes live on the
-   Whiteboard.
+   render through Oliver (`src/render.zig`) / `aside.renderHtml` — all transient
+   bytes live on the Whiteboard.
 3. Assemble/publish while slices remain valid.
 4. `arena.reset(.free_all)` after every page on **success and error** paths.
 
@@ -114,7 +115,7 @@ For each page:
 
 Reset only after **all** of:
 
-1. Apex has returned;
+1. Oliver has returned;
 2. all buffered writes are flushed;
 3. temporary output has been closed/finalized;
 4. publication attempt has finished (success or failure cleanup);
@@ -137,7 +138,7 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
 
 1. Template (e.g. `themes/boris/layouts/main.html`) is scanned once for **known** markers.
    Load layout once at startup into **long-lived** ownership.
-2. **Required marker:** exactly one `{{content}}` (page body: Apex + Aside HTML).
+2. **Required marker:** exactly one `{{content}}` (page body: Oliver + Aside HTML).
 3. **Optional markers** (each at most once):
 
    | Marker | Value |
@@ -284,13 +285,13 @@ byte-identical manifests. Truncation, replacement, or same-size bit flips of
 published HTML must re-render the affected page while leaving truly unchanged
 siblings cached.
 
-### Includes and wiki-links (pre-Apex)
+### Includes and wiki-links (pre-render)
 
-Before Aside tokenize and Apex, the HTML path:
+Before Aside tokenize and Oliver, the HTML path:
 
-1. Expands `{{include path}}` (Boris-mediated; Apex FS includes stay off).
+1. Expands `{{include path}}` (Boris-mediated; the renderer never reads files).
 2. Rewrites `[[entity-id]]` / `[[entity-id#heading-id]]` wiki-links to relative
-   Markdown links (fragments match Apex-rendered heading ids; see
+   Markdown links (fragments match Oliver-rendered heading ids; see
    [heading-ids.md](heading-ids.md)).
 3. Rewrites safe relative Markdown image destinations into the page’s sibling
    content-local asset tree (see [content-local-assets.md](content-local-assets.md)).
@@ -306,11 +307,11 @@ edits on the same page.
 
 ### In-page `{{toc}}` (normative shape)
 
-When `{{toc}}` is present, after body render (Apex + Aside stream):
+When `{{toc}}` is present, after body render (Oliver + Aside stream):
 
 1. Scan the **rendered body HTML** for `h1`–`h3` elements that have an `id`
    attribute (document order). Do **not** re-slug Markdown independently —
-   anchors must match Apex-emitted ids.
+   anchors must match Oliver-emitted ids.
 2. Levels `h4`–`h6` are omitted from the outline (still render in the body).
 3. Headings without `id` are omitted.
 4. When zero qualifying headings exist, emit an **empty** fragment (no empty
@@ -439,7 +440,7 @@ changes.
 
 ## Related
 
-- [`apex-abi.md`](apex-abi.md) — Apex C ABI + Whiteboard allocator rules
+- [`oliver-renderer.md`](oliver-renderer.md) — Oliver pin, render seam, upgrade procedure
 - [`identity-and-paths.md`](identity-and-paths.md) — safe output paths
 - Narrative seeds: `docs/rag/system/05-memory-whiteboard.md`,
   `07-zero-copy-assembly.md` (descriptive; this file wins on conflict)

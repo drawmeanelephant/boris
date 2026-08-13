@@ -33,7 +33,7 @@ zig build test-layout-hostile   # focused step
 zig build test                  # includes this suite
 ```
 
-Source: `src/layout_select_hostile_test.zig` (Zig-only; links Apex like other
+Source: `src/layout_select_hostile_test.zig` (Zig-only; links the Oliver render seam like other
 HTML integration tests). Product modules under test are **not** patched by this
 suite — failures are reported, not silently “fixed.”
 

@@ -1,8 +1,8 @@
 //! Boris-mediated Markdown includes (`{{include path}}`).
 //!
-//! Apex file includes stay off; this module expands directives in Zig before
-//! Apex runs. Fence- and inline-code-aware: directives inside Markdown code
-//! are left literal.
+//! Renderer file includes stay off; this module expands directives in Zig
+//! before Oliver runs. Fence- and inline-code-aware: directives inside
+//! Markdown code are left literal.
 //!
 //! Normative: `docs/contracts/includes-and-wiki-links.md`.
 

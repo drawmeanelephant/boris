@@ -18,11 +18,10 @@ const layout_hostile_mod = b.createModule(.{
     .target = target,
     .optimize = optimize,
 });
-linkApex(layout_hostile_mod, b, false);
-layout_hostile_mod.addOptions("build_options", apex_opts);
+linkOliver(layout_hostile_mod, oliver_mod);
 ```
 
-`linkApex(..., false)` compiles `vendor/apex/apex.c` (the real host adapter) and links the static ApexMarkdown archives. `apex_opts` adds `build_options` with `hostile_apex = false`. The module is added to `apex_needing`, so `ensure_apex.step` (the CMake build script) must complete before this test binary is compiled. The production binary is never affected.
+`linkOliver(layout_hostile_mod, oliver_mod)` wires the pinned Oliver module through `render_mod`, the same seam production uses. There is no C adapter, no static-archive build step, and no hostile double. The production binary is never affected.
 
 The module imports four product source files directly by relative path:
 
@@ -34,7 +33,7 @@ const page_mod     = @import("page.zig");
 const cli          = @import("cli.zig");
 ```
 
-No named module imports (e.g. `@import("apex")`) are present in this file — unlike `apex_hostile_test.zig`, which receives `apex` as an injected named module. This means `layout_select_hostile_test.zig` reaches the real Apex engine only transitively, through `compile.zig` and `aside.zig`, which themselves import `apex.zig`.
+No named module imports (e.g. `@import("render.zig")`) are present in this file. This means `layout_select_hostile_test.zig` reaches the renderer only transitively, through `compile.zig` and `aside.zig`, which themselves import `render.zig`.
 
 The fixture tree is at `docs/contracts/fixtures/layout-rules/hostile/`. The harness resolves fixture paths via compile-time constants:
 
@@ -59,7 +58,7 @@ test_step.dependOn(&run_layout_hostile_tests.step);
 
 So the layout hostile tests run on every `zig build test` invocation. The opt-in `zig build test-layout-hostile` is an alias for the same step without running unrelated tests.
 
-There is no mechanism by which the hostile Apex double (`apex_hostile.c`) can be accidentally linked into this module. The `hostile_opts` (`hostile_apex = true`) and `apex_hostile_lib_mod` are used only for `apex_hostile_root` / `apex_hostile_tests`. The build graph is strictly partitioned.
+There is no hostile double and no alternate renderer path that could be accidentally linked into this module: production and tests both resolve Oliver through the single `render_mod` seam. The build graph is strictly partitioned.
 
 ## Tested declarations and entry points
 

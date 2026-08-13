@@ -128,7 +128,7 @@ scrubOrphanContentAssets:
 **Injected:** Change SVG bytes; leave Markdown and layout unchanged.
 **Boundary:** fingerprint excludes asset bytes; copy always from inventory.
 **Expected:** zero HTML pages written; published asset new bytes.
-**Forbidden:** Forcing full site Apex re-render solely due to asset bytes.
+**Forbidden:** Forcing a full-site re-render solely due to asset bytes.
 **Evidence:** compile test `content-local assets byte change does not re-render HTML`.
 
 ### Collision with page or theme output

@@ -68,7 +68,7 @@ until explicit equivalence tests make it safe.
 - remote deployment, upload, URL probing, feed submission, or sitemap pinging;
 - an extension/plugin registry;
 - changing author frontmatter or Trunk/Satellite graph semantics;
-- replacing Apex, the Zig build, themes, or layouts;
+- replacing the renderer, the Zig build, themes, or layouts;
 - making `check` or `impact` produce publication artifacts;
 - absorbing migration labs or source-RAG into the product compiler;
 - promising a single graph representation before equivalence is proven;

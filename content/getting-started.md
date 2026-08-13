@@ -24,8 +24,9 @@ index command for a normal Boris build.
 
 Building Boris itself requires:
 
-- **Zig 0.16+** — the compiler language Boris is written in.
-- **CMake** — used at build time for the vendored ApexMarkdown library.
+- **Zig 0.16+** — the compiler language Boris is written in. Markdown
+  rendering uses the Oliver library, pinned in `build.zig.zon` and fetched by
+  Zig at build time — no CMake or other host tools are required.
 
 ```bash
 git clone https://github.com/drawmeanelephant/boris.git

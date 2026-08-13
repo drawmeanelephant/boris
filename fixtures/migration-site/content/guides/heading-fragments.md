@@ -7,7 +7,7 @@ tags: [guides, linking]
 
 # Heading fragment links
 
-Wiki section links use the **exact** Apex-rendered heading `id` on the target
+Wiki section links use the **exact** Oliver-rendered heading `id` on the target
 page. Boris does not invent a second slugger.
 
 ## Author form

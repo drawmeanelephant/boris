@@ -20,10 +20,10 @@ Boris is a dedicated static documentation compiler. This document contrasts Bori
 | Feature / Goal | Plain Markdown / Wiki | JS Frameworks (Docusaurus, Astro) | Boris Documentation Compiler |
 | :--- | :---: | :---: | :--- |
 | **Build Runtime** | None (Raw files) | Node.js / npm | **Single native Zig binary** |
-| **Build Execution** | N/A | Subprocess / Node pipelines | **In-process C ABI execution**[^speed] |
+| **Build Execution** | N/A | Subprocess / Node pipelines | **In-process native renderer**[^speed] |
 | **Memory Design** | N/A | Garbage collected JS heap | **Per-page arena scratch reset**[^memory] |
 | **Link & Graph Safety** | None | Optional plugins | **Parent & Wiki-Link Validation** |
-| **Rich Markdown** | Basic CommonMark | MDX (arbitrary JS) | **ApexMarkdown + Boris extensions**: callouts, footnotes, wiki-links, includes |
+| **Rich Markdown** | Basic CommonMark | MDX (arbitrary JS) | **CommonMark + GFM tables + Boris extensions**: heading ids, footnotes, definition lists, wiki-links, includes |
 | **Full-Text Search** | External service | Bundled JS indexers | **Compiler-owned rendered index + optional browser UI** |
 | **Machine & AI Exports** | Scraping / plugins | Custom build scripts | **Native Exports**: JSON IR 0.2.0, RAG, Context, `llms.txt` |
 | **Client JS Footprint** | None | Varies by framework setup | **No required runtime; search UI is optional** |
@@ -70,8 +70,8 @@ Uncompiled Markdown folders in git repositories lack navigation menus, breadcrum
 ## Next Steps
 
 - [[getting-started|Getting Started]] — Build your first site in 5 minutes.
-- [[technology-and-rationale|Technology & Rationale]] — Deep dive into Zig, in-process ApexMarkdown, and memory design.
+- [[technology-and-rationale|Technology & Rationale]] — Deep dive into Zig, native Markdown rendering, and memory design.
 - [[guides/overview|Content Model & Pipeline]] — Learn how Trunk/Satellite page graphs operate.
 
-[^speed]: Builds use in-process C ABI calls to ApexMarkdown, eliminating per-page subprocess spawning and JS bundler overhead.
+[^speed]: Builds render Markdown in-process through the Oliver library, eliminating per-page subprocess spawning and JS bundler overhead.
 [^memory]: Per-page arena allocation ensures that memory scratch space allocated while parsing a page is reset after page emission, keeping memory usage controlled throughout build runs.

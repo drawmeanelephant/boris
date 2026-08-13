@@ -82,11 +82,11 @@ first error wins shared_error; workers stop
 coordinator joins; propagates error
 ```
 
-Apex concurrency is serialized inside `apex.render` (atomic mutex); Whiteboards stay thread-local.
+Each Whiteboard arena is thread-local; Oliver rendering is pure with no global state, so parallel page workers render concurrently without serialization.
 
 ## Test harness construction
 
-- Root: `src/compile.zig` module tests; Apex linked non-hostile.
+- Root: `src/compile.zig` module tests; Oliver render seam linked.
 - Fixtures: temp dirs under `.zig-cache/tmp/…`, tree writes, some committed fixtures (`docs/contracts/fixtures/theme-site/…`, sample `content/` + `layouts/main.html`).
 - Helpers: `writeTreeFile`, `readAllFile`, `observeWhiteboardLifecycle`, multi-run byte compare.
 - No hostile C engine in this module’s default test link.
@@ -143,12 +143,12 @@ Apex concurrency is serialized inside `apex.render` (atomic mutex); Whiteboards 
 **Evidence:** structurally checked in code; digest equality path tested via warm no-op builds.
 **Gap:** Explicit “corrupt same-size file” fixture may live only implicitly.
 
-### Heading harvest cache hit skips Apex
+### Heading harvest cache hit skips rendering
 
 **Injected behavior:** Warm incremental with unchanged harvest keys.
 **Boundary:** `buildSiteHeadingIndex` prior_map key compare.
 **Expected:** `pages_written == 0` on no-op; harvest file byte-stable; fragment hrefs remain.
-**Forbidden:** Re-Apex every fragment target on no-op.
+**Forbidden:** Re-rendering every fragment target on no-op.
 **Evidence:** directly demonstrated (\#58 test).
 **Gap:** Does not prove harvest file atomicity under crash mid-write beyond createFileAtomic usage.
 
@@ -163,11 +163,11 @@ Apex concurrency is serialized inside `apex.render` (atomic mutex); Whiteboards 
 ### Parallel jobs byte identity
 
 **Injected behavior:** Same tree jobs=1 vs jobs=8 twice.
-**Boundary:** `parallelWorker` + Apex mutex.
+**Boundary:** `parallelWorker` + per-page Whiteboard arenas.
 **Expected:** Identical HTML bytes; page markers isolated.
 **Forbidden:** Cross-page buffer reuse; nondeterministic nav order from races.
 **Evidence:** directly demonstrated for fixture set.
-**Gap:** Not a proof of Apex C reentrancy; product docs say concurrent Apex is smoke-validated, default jobs=1.
+**Gap:** The D4 parallel smoke test demonstrates byte-identical output under `--jobs`; Oliver is a pure library with no global state, so concurrent renders on separate arenas are safe by construction.
 
 ### Multi-target output collision
 

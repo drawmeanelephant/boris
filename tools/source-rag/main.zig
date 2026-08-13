@@ -144,8 +144,8 @@ const skip_dir_names = [_][]const u8{
     ".release-gate",
     "node_modules",
     ".DS_Store",
-    // CMake/local object trees (e.g. vendor/apex-markdown/build/) — host-specific
-    // and gitignored; must not enter LLM source packs / external audit corpora.
+    // Local object/build trees (e.g. vendor/**/build/) — host-specific and
+    // gitignored; must not enter LLM source packs / external audit corpora.
     "build",
     "CMakeFiles",
 };
@@ -2376,19 +2376,19 @@ test "profiles keep their documented scopes" {
 test "langFromPath and extensions" {
     try std.testing.expectEqualStrings("zig", langFromPath("src/main.zig"));
     try std.testing.expectEqualStrings("markdown", langFromPath("README.md"));
-    try std.testing.expectEqualStrings("c", langFromPath("vendor/apex/apex.c"));
+    try std.testing.expectEqualStrings("c", langFromPath("vendor/sample/engine.c"));
     try std.testing.expect(hasIncludedExtension("src/a.zig"));
     try std.testing.expect(hasIncludedExtension("LICENSE"));
     try std.testing.expect(!hasIncludedExtension("photo.png"));
     try std.testing.expect(isSkippedDirName("zig-out"));
-    try std.testing.expect(isSkippedDirName("build")); // cmake trees e.g. vendor/apex-markdown/build
+    try std.testing.expect(isSkippedDirName("build")); // local object trees e.g. vendor/x/build
     try std.testing.expect(isSkippedDirName("CMakeFiles"));
     try std.testing.expect(!isSkippedDirName("source-rag")); // tool lives at tools/source-rag
     try std.testing.expect(isUnderOutDir("source-rag", "source-rag"));
     try std.testing.expect(isUnderOutDir("source-rag/INDEX.md", "source-rag"));
     try std.testing.expect(!isUnderOutDir("tools/source-rag/main.zig", "source-rag"));
     try std.testing.expect(isSkippedTopLevelTree("rag/INDEX.md"));
-    try std.testing.expect(isSkippedTopLevelTree("vendor/apex/apex.c"));
+    try std.testing.expect(isSkippedTopLevelTree("vendor/sample/engine.c"));
     try std.testing.expect(!isSkippedTopLevelTree("docs/rag/system/00-overview.md"));
     try std.testing.expect(!isSkippedTopLevelTree("tools/source-rag/main.zig"));
 }

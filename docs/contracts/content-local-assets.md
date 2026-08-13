@@ -3,7 +3,7 @@
 **Status:** normative for the HTML path · test-driven  
 **Modules:** `src/content_asset.zig`, `src/html_body.zig`, `src/compile.zig`  
 **Does not change:** IR `schemaVersion`, frontmatter grammar, theme ownership,
-or Apex trust model.
+or the raw-HTML trust model.
 
 A Markdown page may reference **opaque local files** stored in an exact sibling
 directory named after the page stem:
@@ -197,6 +197,6 @@ compiler only publishes the sibling-tree contract above. See
 | Concern | Module |
 |---------|--------|
 | Discover / validate / rewrite / copy / scrub | `src/content_asset.zig` |
-| Pre-Apex image rewrite in body pipeline | `src/html_body.zig` |
+| Pre-render image rewrite in body pipeline | `src/html_body.zig` |
 | Site loop: inventory, collisions, stage copy, scrub | `src/compile.zig` |
 | Theme assets (separate) | `src/theme.zig` |

@@ -620,7 +620,7 @@ component lists under this schema version.
 | Feature | Status |
 |---------|--------|
 | HTML `dist/` as IR output | **Out of IR** — HTML is the default CLI mode but not part of this schema; see [html-output.md](html-output.md) |
-| Apex markdown render | Out of IR acceptance |
+| Markdown render output | Out of IR acceptance |
 | Product RAG export | Optional product path; separate [rag-export.md](rag-export.md) |
 | Full YAML frontmatter | Rejected — [frontmatter.md](frontmatter.md) |
 | Concurrency / worker pools | **Out of IR emit** — HTML-only via [parallel-rendering.md](parallel-rendering.md) |

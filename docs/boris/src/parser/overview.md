@@ -44,7 +44,7 @@ The parser provides high confidence on the positive path (a complete valid front
 
 ## Role in the Boris architecture
 
-`src/parser.zig` occupies the second stage of the Boris pipeline, immediately after file discovery. It is not an integration point with ApexMarkdown; it operates entirely on raw source bytes before the body is ever handed to a Markdown renderer. It has no dependency on `src/apex.zig`, `src/apex_hostile_test.zig`, or any C ABI.
+`src/parser.zig` occupies the second stage of the Boris pipeline, immediately after file discovery. It is not an integration point with the Markdown renderer; it operates entirely on raw source bytes before the body is ever handed to a renderer. It has no dependency on `src/render.zig`.
 
 The typical call chain is:
 

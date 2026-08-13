@@ -462,7 +462,7 @@ At minimum, the future implementation gate runs:
 ```bash
 zig build
 zig build test
-zig build test-apex-hostile
+zig build test-render
 zig build package
 ./scripts/release-gate.sh
 ```

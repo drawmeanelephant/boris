@@ -33,7 +33,7 @@ The documentation is organized around a 4-stage narrative progression:
 
 ```
 1. Write Expressive Markdown
-   ├── ApexMarkdown Syntax (`guides/apex-markdown.md`)
+   ├── Markdown Syntax (`guides/oliver-markdown.md`)
    └── Callout Asides (`guides/asides.md`)
        │
        ▼
@@ -60,10 +60,10 @@ The documentation is organized around a 4-stage narrative progression:
 | `content/index.md` | All Readers | What is Boris and why use it? | Navigate to getting started or feature guides | Site Compiler & Multi-Output | Homepage | Leads with **User Value** |
 | `content/getting-started.md` | New Users & Agents | How do I build my first site in 5 minutes? | Run 4 commands to produce HTML, search, and AI outputs | Quickstart & CLI | Onboarding | Leads with **User Value** |
 | `content/comparison.md` | Decision Makers | Why use Boris instead of Next.js/Astro/MDX/CMS? | Choose Boris for static docs & AI exports | Native Execution & Multi-Output | Comparison | Leads with **User Value** |
-| `content/technology-and-rationale.md` | Architects / Engineers | Why is Boris built in Zig with in-process ApexMarkdown? | Understand architectural design choices | Memory Model & In-Process C ABI | Concepts | Leads with **Value & Rationale** |
+| `content/technology-and-rationale.md` | Architects / Engineers | Why is Boris built in Zig with a native Markdown library? | Understand architectural design choices | Memory Model & Native Rendering | Concepts | Leads with **Value & Rationale** |
 | `content/guides.md` | Authors & Devs | What guides are available? | Jump to specific guide | Documentation Map | Landing | Leads with **User Value** |
 | `content/guides/overview.md` | Authors & Devs | How does Boris organize and validate pages? | Structure pages into parent-child trees | Validated Page Graph | Concepts | Leads with **User Value** |
-| `content/guides/apex-markdown.md` | Content Authors | What rich syntax features does Boris Markdown support? | Write tables, footnotes, wiki-links, includes | Rich ApexMarkdown Syntax | Authoring Guides | Leads with **User Value** |
+| `content/guides/oliver-markdown.md` | Content Authors | What rich syntax features does Boris Markdown support? | Write tables, footnotes, wiki-links, includes | Rich Markdown Syntax | Authoring Guides | Leads with **User Value** |
 | `content/guides/asides.md` | Content Authors | How do I create callouts and admonitions? | Add `<Aside>` blocks to Markdown | Callout Admonition Components | Authoring Guides | Leads with **User Value** |
 | `content/guides/building-pages.md` | Content Authors | How do I create, link, and organize pages? | Write frontmatter and `[[wiki-links]]` | Page Creation & Linking | Authoring Guides | Leads with **User Value** |
 | `content/guides/cli-and-modes.md` | Developers / CI | What CLI flags and run modes exist? | Configure watch, parallel `--jobs`, or output flags | Multi-Mode CLI Surface | Guides / Reference | Leads with **User Value** |

@@ -12,13 +12,13 @@
 Keep `content/` a living sample site that matches the Boris v0.8.1 candidate:
 
 1. Markdown in → validated Trunk/Satellite graph → static HTML by default.
-2. ApexMarkdown Unified v1.1.13 runs in-process through the native C ABI host.
+2. Oliver (pinned Zig library, see `docs/contracts/oliver-renderer.md`) renders Markdown in-process.
 3. The same compiler authorities support IR, RAG, Context, `llms.txt`, RSS,
    sitemap, rendered search, and publication evidence projections.
 4. Examples are real, clickable, and safe to compile.
 
 This is author-content work. Do not change the Zig compiler, build system,
-contracts, or Apex pin as a documentation cleanup.
+contracts, or the Oliver pin as a documentation cleanup.
 
 ## Product truth
 
@@ -68,8 +68,8 @@ and may return exit `1` for an analysis finding such as an unreferenced page.
 - Keep live includes and wiki-links pointed at real pages/fragments.
 - Keep component tags outside fences, with line-start closing tags and no
   nesting.
-- Keep examples of unsupported Apex syntax in inert `text` fences, with
-  `APEX-PENDING` or `PRODUCT-OFF` labels.
+- Keep examples of unsupported syntax in inert `text` fences, with
+  `OLIVER-PENDING` or `PRODUCT-OFF` labels.
 - Prefer wiki-links for internal references and verify rendered `.html` routes.
 - Do not claim compiler-owned search is a separate required post-build step.
 - Do not commit `dist/`, `.boris/`, `rag/`, `context/`, search caches, or proof

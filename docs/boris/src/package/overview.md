@@ -44,7 +44,7 @@ What the file does not prove: behaviour under concurrent archive readers during 
 
 Relative to the **product binary** (`boris` or the primary CLI), `package.zig` provides an entirely independent delivery mechanism. It does not alter `pipeline.run` behaviour, the `schemaVersion` of the IR, or the HTML output path. It calls `pipeline.run` and `rag.run` as opaque black boxes, consuming only their `Result`/`RagResult` structures and the files those functions write to the stage directory.
 
-Relative to `src/apex.zig` and the ApexMarkdown integration: `package.zig` has **no direct dependency** on Apex. It operates on already-compiled IR JSON files on disk; Apex is consumed only inside `pipeline.run` (on the HTML rendering path, which this file explicitly excludes from its scope via the `//! Does **not** change compiler semantics, schemaVersion, or the HTML path` note).
+Relative to `src/render.zig` and the Oliver-backed rendering seam: `package.zig` has **no direct dependency** on the renderer. It operates on already-compiled IR JSON files on disk; Oliver is consumed only inside `pipeline.run` (on the HTML rendering path, which this file explicitly excludes from its scope via the `//! Does **not** change compiler semantics, schemaVersion, or the HTML path` note).
 
 Relative to the **normal test suite**: the tests in this file are integration tests that invoke the full `run` function against the same fixture content trees used by `pipeline.zig` and `rag.zig` tests. They share the real filesystem via `std.testing.io` and the real allocator. There is no stubbing of sub-systems.
 

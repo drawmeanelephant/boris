@@ -1,8 +1,8 @@
 //! Boris-mediated wiki-links (`[[entity-id]]` / `[[entity-id|label]]` /
 //! `[[entity-id#heading]]` / `[[entity-id#heading|label]]`).
 //!
-//! Resolved against the frozen page graph by entity id **before** Apex.
-//! Optional heading fragments match Apex-rendered `id` attributes on the
+//! Resolved against the frozen page graph by entity id **before** rendering.
+//! Optional heading fragments match Oliver-rendered `id` attributes on the
 //! target page (see `docs/contracts/heading-ids.md`). Fence- and
 //! inline-code-aware: links inside Markdown code stay literal.
 //!
@@ -36,7 +36,7 @@ pub const WikiHit = struct {
     column: u32,
 };
 
-/// Per-entity set of Apex-rendered heading ids (views or owned — caller owns lifetime).
+/// Per-entity set of Oliver-rendered heading ids (views or owned — caller owns lifetime).
 pub const HeadingIndex = struct {
     /// entity_id → list of unique heading id strings for that page.
     map: std.StringHashMapUnmanaged([]const []const u8) = .{},

@@ -31,8 +31,9 @@ publishes an HTML site under `dist/`.
 ```
 
 `validate` is the authoritative no-publication HTML preflight. It checks the
-same content, graph, Apex, layout, theme, target, and sitemap configuration
-used by an HTML build, but writes no HTML, cache, search, IR, RAG, Context,
+same content, graph, renderer, layout, theme, target, and sitemap
+configuration used by an HTML build, but writes no HTML, cache, search, IR,
+RAG, Context,
 `llms.txt`, RSS, sitemap, or publication-evidence files.
 
 `check` is different: it runs Documentation Intelligence over a valid frozen

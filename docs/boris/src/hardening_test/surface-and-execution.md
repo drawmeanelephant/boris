@@ -28,7 +28,7 @@ tags: [boris, zig, source-reference, surface, testing, integration]
 
 **HTML rendering instability across job counts and incremental mode.** If parallel or incremental builds produce different HTML than sequential single-job builds, downstream consumers would receive non-reproducible output. The Details determinism test drives `compile.compileHtmlSite` with `jobs=1`, `jobs=2`, and `incremental=true` and byte-compares the emitted HTML files for all combinations.
 
-**Categories not covered by this file:** ABI layout mismatch, hostile C status codes, invalid output pointer/length combinations, allocator callback misuse, reentrancy hazards, integer-width assumptions, or any behavior injectable from `apex_hostile.c`. Those are out of scope; they are exercised by `src/apex_hostile_test.zig`.
+**Categories not covered by this file:** renderer-seam error mapping in isolation (that is `src/render.zig`'s own tests) and Oliver's internal parser/renderer correctness (that is Oliver's test suite plus the contract fixtures in `docs/contracts/oliver-renderer.md`).
 
 ## Test harness construction
 
@@ -40,22 +40,21 @@ const hardening_mod = b.createModule(.{
     .target = target,
     .optimize = optimize,
 });
-linkApex(hardening_mod, b, false);
-hardening_mod.addOptions("build_options", apex_opts);
+linkOliver(hardening_mod, oliver_mod);
 const hardening_tests = b.addTest(.{ .root_module = hardening_mod });
 const run_hardening_tests = b.addRunArtifact(hardening_tests);
 run_hardening_tests.setCwd(b.path("."));
 ```
 
-`linkApex(hardening_mod, b, false)` compiles `vendor/apex/apex.c` (not `apex_hostile.c`) and links the three static archives built by `scripts/build-apex-markdown.sh`. `apex_opts` sets `build_options.hostile_apex = false`. The module therefore sees the real ApexMarkdown engine throughout; there is no mechanism by which the hostile double can be substituted accidentally.
+`linkOliver(hardening_mod, oliver_mod)` wires the pinned Oliver module through the `render_mod` seam — the exact same rendering path production uses. Oliver is a pure Zig library; there is no C adapter, no static-archive build step, and no hostile double.
 
 The `run_hardening_tests` step sets its working directory to the repository root (`b.path(".")`), which is required because the tests reference relative fixture paths such as `fixtures/content/valid`, `docs/contracts/fixtures/duplicate-ids/content`, and `test/fixtures/component-fail/content` that must resolve from the repository root.
 
-`hardening_tests` depends on `ensure_apex.step` (the `build-apex` CMake script) via the `apex_needing` array in `build.zig`, so the static libraries are built before compilation begins.
+The pinned Oliver dependency is fetched and cached by Zig's normal package machinery (`build.zig.zon`), so no external build step is required before compilation.
 
-No imports named `apex` are injected into `hardening_test.zig` itself; the file imports only standard Zig modules and Boris source modules (`pipeline`, `rag`, `diag`, `graph_mod`, `aside`, `compile`, `identity`, `scanner`, `page_mod`). The file has no compile-time options of its own.
+No imports named `render` are injected into `hardening_test.zig` itself; the file imports only standard Zig modules and Boris source modules (`pipeline`, `rag`, `diag`, `graph_mod`, `aside`, `compile`, `identity`, `scanner`, `page_mod`). The file has no compile-time options of its own.
 
-The production binary (`boris`) also links the real Apex and uses `apex_opts` (hostile_apex = false). There is no build path by which the hardening test module could be accidentally included in the production binary: it is registered only as an `addTest` artifact, never as a dependency of `exe` or `source_rag_exe` or `package_exe`.
+There is no build path by which the hardening test module could be accidentally included in the production binary: it is registered only as an `addTest` artifact, never as a dependency of `exe` or `source_rag_exe` or `package_exe`.
 
 Invocation commands:
 

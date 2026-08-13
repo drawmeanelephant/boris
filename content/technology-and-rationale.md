@@ -14,8 +14,8 @@ Boris makes specific, deliberate technical choices. This page explains what thos
 Deterministic Per-Page Scratch
 : Per-page arena allocation frees rendering scratch after each page publish. Durable metadata stays in a long-lived `PageDb` for the run. Process RSS is not claimed to be flat.[^arena]
 
-In-Process Apex C ABI
-: Markdown rendering is invoked via direct memory pointer calls into vendored ApexMarkdown, eliminating subprocess IPC overhead.[^cabi]
+In-Process Markdown Rendering
+: Markdown rendering is a native Zig library call into Oliver (pinned in `build.zig.zon`), eliminating subprocess IPC overhead.[^cabi]
 
 Fail-Loud Graph Freeze
 : Parent relationships, supported wiki-links, and transclusion includes are validated before a new publication is committed.
@@ -33,15 +33,15 @@ across large builds.
 
 **Single static binary.** `zig build` produces one self-contained binary with no Node package tree, Python virtualenv, or Ruby gem set to manage. The supported host platforms and release packaging remain deployment concerns; Boris does not promise one binary for every operating system.
 
-**Direct C interop.** Zig calls C code without a binding layer or a separate process. This is critical for ApexMarkdown — see below.
+**Native Zig library, no glue.** Boris consumes the Oliver Markdown library as a Zig module — same language, same allocator model, no binding layer, no separate process — see below.
 
-## Why ApexMarkdown?
+## Why Oliver?
 
-Markdown rendering is done by ApexMarkdown (a C library) called **in-process** via Zig's C ABI. This is the most consequential architectural choice in Boris.
+Markdown rendering is done by **Oliver**, a freestanding Zig markup library called **in-process** as a native module. This is the most consequential architectural choice in Boris.
 
-The alternative — shelling out to a Markdown CLI on each page — adds process spawn overhead, encoding complexity, and a fragile surface where the subprocess might not be available or might behave differently across versions. ApexMarkdown is compiled from source into the Boris binary at build time via CMake and linked as a static library. At runtime it is called via memory pointer — no IPC, no serialization, no subprocess.
+The alternative — shelling out to a Markdown CLI on each page — adds process spawn overhead, encoding complexity, and a fragile surface where the subprocess might not be available or might behave differently across versions. Oliver is pinned by content hash in `build.zig.zon` and compiled into the Boris binary by Zig — no CMake, no host tools, no runtime dependency. At render time it is a plain function call: no IPC, no serialization, no subprocess.
 
-ApexMarkdown is an extended Markdown variant (based on cmark-gfm) that adds tables, footnotes, callouts, math, and a range of other authoring-friendly extensions. Boris uses it in **Unified** mode.
+Oliver is byte-exact CommonMark 0.31.2 plus GFM tables, with the extensions Boris publishes enabled: heading auto-ids, heading attribute lists, footnotes, and definition lists. It is pure Zig with no global state, no hidden caches, and no filesystem/clock/network access, which keeps renders deterministic and parallel-safe (`--jobs N`).
 
 ## Why a validated content graph?
 
@@ -84,11 +84,11 @@ If each output format used a different content model, they would drift. Boris so
 | Choice | Reason |
 |---|---|
 | Zig | Explicit scratch control, single binary, direct C interop |
-| ApexMarkdown in-process | No subprocess overhead; consistent across builds |
+| Oliver native renderer | No subprocess overhead; consistent across builds |
 | Validated content graph | Breaks loudly before publishing, not silently after |
 | Closed frontmatter grammar | Every key has a defined meaning; rejections are diagnostic |
 | No required client JS runtime | Works everywhere; no build toolchain needed |
 | Single-source multi-output | Same graph model per mode; align by generating from one revision |
 
 [^arena]: Per-page arena allocation frees rendering scratch after each page publish. Durable `PageDb` metadata is retained for the run. Process RSS is not claimed.
-[^cabi]: Direct C ABI binding links ApexMarkdown directly into the host Zig executable, executing markdown transformation in-memory without child processes.
+[^cabi]: A native Zig library call renders markdown in-process, without child processes or a separate renderer executable.

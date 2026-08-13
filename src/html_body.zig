@@ -122,7 +122,7 @@ pub fn bodyForInput(
 /// Render one already-read page source through Boris's ordered HTML body path.
 ///
 /// Ordering is contractual: parse/adapt, include expansion, wiki rewrite,
-/// content-local image rewrite, Aside tokenization, then Apex/Aside body
+/// content-local image rewrite, Aside tokenization, then Oliver/Aside body
 /// streaming. Diagnostics retain the same source-locus behavior as the old
 /// compile-local implementation.
 pub fn renderSource(
@@ -144,7 +144,7 @@ pub fn renderSource(
     const body = try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path);
 
     // Graph-backed Markdown documentation links → canonical page URLs
-    // (pre-Apex). This runs before include expansion so source-relative links
+    // (pre-render). This runs before include expansion so source-relative links
     // retain the owning page's source context; included fragments are a
     // deliberate first-slice limitation.
     const with_doc_links = doclink.rewrite(arena, body, .{
@@ -180,7 +180,7 @@ pub fn renderSource(
         return error.ReferenceFailed;
     };
 
-    // Content-local Markdown images → published sibling-tree URLs (pre-Apex).
+    // Content-local Markdown images → published sibling-tree URLs (pre-render).
     const with_assets = if (options.page_assets) |bundle| blk: {
         var asset_fail: content_asset.FailInfo = .{ .line_base = fail_line_base };
         break :blk content_asset.rewriteImageLinks(arena, with_wiki, bundle, output_path, &asset_fail) catch |err| {

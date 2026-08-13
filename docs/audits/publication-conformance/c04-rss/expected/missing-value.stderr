@@ -63,7 +63,7 @@ Options:
   --profile PATH       Selected publication profile for `plan`
   -h, --help          Show this help and exit 0
 
-HTML artifacts (success; Apex + layout splice):
+HTML artifacts (success; Oliver + layout splice):
   <html-dir>/**/*.html   or   <each-target-dir>/**/*.html
   <target-dir>/sitemap.xml  (with --sitemap; path configurable)
   <target-dir>/.boris-cache/manifest.json  (with --incremental / --watch)

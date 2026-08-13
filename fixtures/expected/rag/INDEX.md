@@ -56,7 +56,7 @@ verbatim authoring documents (frontmatter, H1s, and `<Aside>` /
 | `system/03-trunk-and-satellite.md` | system | Trunk and Satellite graph model | — |
 | `system/04-components-and-admonitions.md` | system | Components and admonitions | — |
 | `system/05-memory-whiteboard.md` | system | Memory: the Whiteboard strategy | — |
-| `system/06-apex-native-engine.md` | system | Apex: native C-ABI markdown engine | — |
+| `system/06-oliver-renderer.md` | system | Oliver: native Zig markdown renderer | — |
 | `system/07-zero-copy-assembly.md` | system | Zero-copy layout splicing | — |
 | `system/08-build-cli-and-layout.md` | system | Build system, CLI, and layout contract | — |
 | `system/09-rag-export.md` | system | RAG export system | — |

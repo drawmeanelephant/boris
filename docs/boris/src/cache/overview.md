@@ -48,8 +48,8 @@ The file does not prove: cross-architecture endianness equivalence at the byte l
 
 `src/cache.zig` sits between the dependency-resolution layer and the render/emit layer in the Boris pipeline. It does not parse content, resolve graph topology, or emit HTML or JSON; those responsibilities belong to `graph.zig`, `pipeline.zig`, and similar modules. Its role is strictly to answer two questions: "Is this page's previously rendered output still valid?" and "Which pages must be re-rendered given that this path changed?"
 
-The production binary links `cache.zig` directly. There is no build option, conditional compilation flag, or feature gate that excludes it from a release build. It does not depend on `src/apex.zig` or any ApexMarkdown integration; it is entirely self-contained aside from its two imports (`graph.zig` and `dependency.zig`) and the standard library.
+The production binary links `cache.zig` directly. There is no build option, conditional compilation flag, or feature gate that excludes it from a release build. It does not depend on `src/render.zig` or any Markdown rendering; it is entirely self-contained aside from its two imports (`graph.zig` and `dependency.zig`) and the standard library.
 
-`src/apex.zig` and the hostile ABI test infrastructure are orthogonal to this file. `cache.zig` has no interaction with the C ABI, no pointer lifetime contract across language boundaries, and no allocator callback behavior to validate.
+`src/render.zig` and the rendering seam are orthogonal to this file. `cache.zig` has no interaction with HTML rendering.
 
 The normal test suite for `cache.zig` runs inline — all `test` blocks are in the same file and are compiled as part of the standard `zig build test` step. There is no specialized test harness, no hostile double, and no separate test-only build target.

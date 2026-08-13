@@ -14,7 +14,7 @@ site. Full author checklist: [Migrating to Boris](../../../docs/MIGRATION.md)
 ## Prerequisites
 
 - Zig **0.16+**
-- CMake (compile-time only, for vendored ApexMarkdown)
+- Zig 0.16 (Oliver is fetched and pinned by Zig's package manager)
 
 ## Build the compiler
 
