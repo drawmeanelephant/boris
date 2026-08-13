@@ -10,7 +10,7 @@ the pinned Oliver library through the `src/render.zig` seam.
 | File | Role |
 |------|------|
 | [`MATRIX.md`](MATRIX.md) | Compatibility matrix (classifications) |
-| `content/` | Construct probes rendered by `src/render.zig`'s unit tests and the html fixture goldens |
+| Construct probes | Exercised by `src/render.zig`'s unit tests (`zig build test-render`) and the html fixture goldens under `test/fixtures/html/` |
 
 ## Classifications
 
