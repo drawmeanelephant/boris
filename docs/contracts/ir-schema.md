@@ -2,7 +2,7 @@
 
 **Status:** normative Feature 8 contract — F8.1–F8.3 implemented
 **Target product / compiler id:** `0.8.1` / `boris/0.8.1`
-**schemaVersion:** `0.2.0`
+**schemaVersion:** `0.2.0` base; `0.3.0` / `0.4.0` for optional facets
 
 IR is explicit (`--out DIR` / `--no-rag`) and deterministic. Bare `boris`
 continues to emit HTML under `dist/`; this schema does not change CLI mode
@@ -21,6 +21,7 @@ parser from prose, the same shapes are published as JSON Schema (draft 2020-12):
 | `manifest.json` | [`schemas/ir-manifest-0.2.0.schema.json`](schemas/ir-manifest-0.2.0.schema.json) |
 | `graph.json` | [`schemas/ir-graph-0.2.0.schema.json`](schemas/ir-graph-0.2.0.schema.json) |
 | `build-report.json` | [`schemas/ir-build-report-0.2.0.schema.json`](schemas/ir-build-report-0.2.0.schema.json) |
+| `graph.json` with the `recipe` facet | [`schemas/ir-graph-0.4.0.schema.json`](schemas/ir-graph-0.4.0.schema.json) |
 
 Where the two disagree, this document wins and the schema is a bug. They are
 kept honest mechanically: `zig build test-ir-schema` validates freshly emitted
@@ -81,13 +82,42 @@ Every top-level IR document **must** include:
 | Rule | Detail |
 |------|--------|
 | Type | JSON string |
-| v0.2 value | exactly `"0.2.0"` |
+| Base v0.2 value | exactly `"0.2.0"` |
+| Conditional facet values | `"0.3.0"` or `"0.4.0"` — see below |
 | Breaking change | Typed dependency endpoints and `reverseIndex`; old writers must not silently emit these under `"0.1.0"` |
 
 Also required on success paths: a compiler id string of the form
 `boris/<product-version>` (target `boris/0.8.1`). Product version bumps may
 update this string without changing the IR schema, but this breaking IR change
 requires both the schema and compiler/product bumps.
+
+### Conditional facet versions
+
+Two optional facets raise the emitted version **only when the corpus actually
+carries them**. A corpus without either is byte-identical to base v0.2, so
+adding a facet to the compiler never reshapes an existing consumer's artifacts.
+
+| Corpus carries | `schemaVersion` | Compiler id | Adds |
+|---|---|---|---|
+| neither facet | `0.2.0` | `boris/0.8.1` | — |
+| author semantic relations | `0.3.0` | `boris/0.8.1+semantic-relations` | top-level `relations` in `graph.json` |
+| Cooklang recipes | `0.4.0` | `boris/0.8.1+cooklang` | `recipe` on every `graph.json` node |
+
+`0.4.0` is a superset of `0.3.0`: a recipe corpus that also carries semantic
+relations still emits `relations`, so one version string describes both rather
+than requiring a matrix of them.
+
+The `recipe` facet is normatively specified in
+[cooklang-compatibility.md](cooklang-compatibility.md) and published as
+[`schemas/ir-graph-0.4.0.schema.json`](schemas/ir-graph-0.4.0.schema.json),
+which `zig build test-ir-schema` validates against freshly emitted recipe IR.
+Two of its properties are contractual and easy to get wrong: quantities are
+**strings** (Cooklang admits `1/2` and `1-2`, so the compiler never converts one
+to a number), and ingredient references are **never merged** (adding `200%g` to
+`1%cup` is not decidable without a unit model).
+
+Consumers MUST branch on `schemaVersion` and MUST tolerate a facet they do not
+understand; they must not infer shape from the compiler id.
 
 ### v0.1 → v0.2 migration
 
@@ -109,7 +139,7 @@ from the compiler id.
 
 | Stage | Name | Input | Output |
 |------:|------|-------|--------|
-| 1 | Discover | content root on disk | set of source paths (`.md` / `.mdx`) |
+| 1 | Discover | content root on disk | set of source paths (`.md` / `.mdx`, or `.textile` / `.cook` in an explicit input mode) |
 | 2 | Identify | source paths | `sourcePath` + path-derived `id` per page |
 | 3 | Parse + promote | file bytes | durable PageDb fields + `bodyOffset` |
 | 4 | Validate pages | pages + `parent` fields | identity/topology diagnostics; **no freeze yet** |

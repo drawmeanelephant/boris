@@ -56,6 +56,7 @@ const pipeline = @import("pipeline.zig");
 const theme_mod = @import("theme.zig");
 const layout_select = @import("layout_select.zig");
 const textile = @import("textile.zig");
+const cooklang = @import("cooklang.zig");
 const content_asset = @import("content_asset.zig");
 const source_io = @import("source_io.zig");
 const search_index = @import("search_index.zig");
@@ -439,6 +440,16 @@ fn renderMetadata(allocator: std.mem.Allocator, page: *const DurablePage) ![]con
     return try buf.toOwnedSlice(allocator);
 }
 
+/// Cache-key material identifying which body adapter produced a page's
+/// Markdown. Empty for Markdown input so existing fingerprints do not move.
+fn adapterIdentity(input_format: identity.InputFormat) []const u8 {
+    return switch (input_format) {
+        .markdown => "",
+        .textile => textile.adapter_identity,
+        .cook => cooklang.adapter_identity,
+    };
+}
+
 /// Discover pages and promote durable frontmatter into `db` (PageDb retain).
 ///
 /// Transient source buffers are GPA-owned and freed after each promote — no
@@ -467,7 +478,11 @@ pub fn loadAndPromoteFormat(
     scanner.scan(io, .{ .content_root = content_root, .input_format = input_format }, &scan_list) catch |err| switch (err) {
         error.ContentDirMissing => return error.ContentDirMissing,
         error.InputFormatMismatch => {
-            std.debug.print("error: ETEXTILE: content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode [Use Markdown-only input by default, or pass --textile for a .textile-only tree]\n", .{});
+            if (input_format == .cook) {
+                std.debug.print("error: ECOOKLANG: content root mixes Cooklang and non-Cooklang page extensions, or uses the wrong explicit input mode [Use a .cook-only tree with --cooklang, or drop --cooklang for Markdown input]\n", .{});
+            } else {
+                std.debug.print("error: ETEXTILE: content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode [Use Markdown-only input by default, or pass --textile for a .textile-only tree]\n", .{});
+            }
             return error.InputFormatMismatch;
         },
         else => |e| return e,
@@ -500,12 +515,19 @@ pub fn loadAndPromoteFormat(
             std.debug.print("{s}\n", .{text});
             return error.ParseFailed;
         }
+        // Validates the adapter subset for this page; the adapted body is
+        // discarded because rendering adapts again per target.
+        //
+        // The recipe is discarded too, and deliberately: the HTML path has no
+        // consumer for it — only the IR path in `pipeline.zig` promotes and
+        // emits it. Adapting into `db.retain` to fill an unread field would pin
+        // a second copy of every recipe body for the whole build.
         var body_arena = std.heap.ArenaAllocator.init(gpa);
         defer body_arena.deinit();
         _ = try html_body.bodyForInput(body_arena.allocator(), input_format, source, parsed.doc.body, parsed.doc.body_offset, disc.source_path);
 
         const final_id: []const u8 = if (parsed.doc.meta.id) |override| override else disc.entity_id;
-        try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset);
+        try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset, .{});
     }
     if (recorder) |t| t.stop(.parse);
 }
@@ -1523,7 +1545,9 @@ fn buildSiteHeadingIndex(
     var doc_arena = std.heap.ArenaAllocator.init(gpa);
     defer doc_arena.deinit();
 
-    const input_material: []const u8 = if (input_format == .textile) textile.adapter_identity else "";
+    // The adapter identity is part of a page's cache key: changing which
+    // language produced the Markdown must invalidate the fingerprint.
+    const input_material: []const u8 = adapterIdentity(input_format);
 
     for (db.items(), 0..) |page, page_idx| {
         if (!needed.contains(page.entity_id)) continue;
@@ -2336,7 +2360,7 @@ fn compilePagesInner(
             page_layout_bytes[page_idx],
             nav_material,
             page_theme_material[page_idx],
-            if (options.input_format == .textile) textile.adapter_identity else "",
+            adapterIdentity(options.input_format),
             &fp_hashed,
         );
         fingerprints[page_idx] = try fingerprintHex(fp_bytes, gpa);

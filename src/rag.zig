@@ -42,6 +42,7 @@ const timings = @import("timings.zig");
 const pipeline = @import("pipeline.zig");
 const rag_emit = @import("rag_emit.zig");
 const textile = @import("textile.zig");
+const cooklang = @import("cooklang.zig");
 const export_scope = @import("export_scope.zig");
 
 /// Machine format id (`format` in `manifest.json` and complete-mode
@@ -58,6 +59,33 @@ pub const boris_version = pipeline.boris_version;
 
 /// Default working pack target (bytes) when `--split-size` is not given.
 pub const default_pack_target: usize = 262144;
+
+/// One published corpus document for the active input format: frontmatter
+/// verbatim, body adapted to Markdown.
+///
+/// The corpus is the machine-facing copy, so a `.cook` page reaches a model as
+/// its rendered ingredient list and numbered method rather than as raw sigils
+/// no consumer understands.
+fn adaptedDoc(
+    arena: std.mem.Allocator,
+    input_format: identity.InputFormat,
+    source: []const u8,
+    body_offset: usize,
+) ![]const u8 {
+    switch (input_format) {
+        .markdown => return source,
+        .textile => {
+            const adapted = try textile.toMarkdown(source[body_offset..], arena);
+            if (!adapted.isOk()) return error.UnexpectedParseFailure;
+            return try std.mem.concat(arena, u8, &.{ source[0..body_offset], adapted.markdown });
+        },
+        .cook => {
+            const adapted = try cooklang.toMarkdown(source[body_offset..], arena);
+            if (!adapted.isOk()) return error.UnexpectedParseFailure;
+            return try std.mem.concat(arena, u8, &.{ source[0..body_offset], adapted.markdown });
+        },
+    }
+}
 
 fn relationCountForPages(pages: []const graph_mod.Node) usize {
     var count: usize = 0;
@@ -545,11 +573,7 @@ fn gatherWorkingItems(
     defer content_dir.close(io);
     for (selected_pages) |p| {
         const source = try source_io.readPageAlloc(io, content_dir, p.source_path, arena);
-        const doc = if (opts.input_format == .textile) blk: {
-            const adapted = try textile.toMarkdown(source[p.body_offset..], arena);
-            if (!adapted.isOk()) return error.UnexpectedParseFailure;
-            break :blk try std.mem.concat(arena, u8, &.{ source[0..p.body_offset], adapted.markdown });
-        } else source;
+        const doc = try adaptedDoc(arena, opts.input_format, source, p.body_offset);
         const rag_id = try std.fmt.allocPrint(arena, "content/{s}", .{p.id});
         try items.append(gpa, .{
             .rag_id = rag_id,
@@ -758,11 +782,7 @@ fn exportComplete(
     defer content_dir.close(io);
     for (selected_pages) |p| {
         const source = try source_io.readPageAlloc(io, content_dir, p.source_path, arena);
-        const doc = if (opts.input_format == .textile) blk: {
-            const adapted = try textile.toMarkdown(source[p.body_offset..], arena);
-            if (!adapted.isOk()) return error.UnexpectedParseFailure;
-            break :blk try std.mem.concat(arena, u8, &.{ source[0..p.body_offset], adapted.markdown });
-        } else source;
+        const doc = try adaptedDoc(arena, opts.input_format, source, p.body_offset);
         const rag_path = try identity.ragPagePath(arena, p.id);
         const rag_id = try std.fmt.allocPrint(arena, "content/{s}", .{p.id});
         try writeBytes(io, out_dir, rag_path, doc);

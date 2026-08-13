@@ -18,6 +18,7 @@ const wikilink = @import("wikilink.zig");
 const dependency = @import("dependency.zig");
 const identity = @import("identity.zig");
 const textile = @import("textile.zig");
+const cooklang = @import("cooklang.zig");
 const source_io = @import("source_io.zig");
 const doclink = @import("doclink.zig");
 const target_mod = @import("target.zig");
@@ -27,6 +28,11 @@ pub const schema_version = "0.2.0";
 pub const compiler_id = "boris/0.8.1";
 pub const semantic_schema_version = "0.3.0";
 pub const semantic_compiler_id = "boris/0.8.1+semantic-relations";
+/// IR 0.4 adds the `recipe` node facet. Like semantic relations before it, the
+/// bump is conditional: a corpus with no recipes still publishes 0.2.0 or
+/// 0.3.0, so adding Cooklang support does not reshape existing artifacts.
+pub const recipe_schema_version = "0.4.0";
+pub const recipe_compiler_id = "boris/0.8.1+cooklang";
 /// Product version string (package / catalog_meta.boris_version).
 pub const boris_version = "0.8.1";
 
@@ -367,6 +373,14 @@ fn resolveDependencies(
             if (!adapted.isOk()) return error.InvalidTextile;
             defer gpa.free(adapted.markdown);
             try resolver.scanPage(page, adapted.markdown, 0);
+        } else if (input_format == .cook) {
+            // The adapted Markdown is what carries a recipe reference's wiki
+            // link, so dependency resolution has to see the adapted body or
+            // `@./sauces/Hollandaise` would never become a graph edge.
+            const adapted = try cooklang.toMarkdown(source[page.body_offset..], gpa);
+            defer adapted.deinit(gpa);
+            if (!adapted.isOk()) return error.InvalidCooklang;
+            try resolver.scanPage(page, adapted.markdown, 0);
         } else {
             try resolver.scanPage(page, source[page.body_offset..], include_mod.frontmatterLineBase(source, page.body_offset));
         }
@@ -430,6 +444,11 @@ pub fn populateDependencyIndexFormat(
             const adapted = try textile.toMarkdown(source[page.body_offset..], gpa);
             if (!adapted.isOk()) return error.InvalidTextile;
             defer gpa.free(adapted.markdown);
+            try resolver.scanPageWithHtmlLinks(page, adapted.markdown, true, 0);
+        } else if (input_format == .cook) {
+            const adapted = try cooklang.toMarkdown(source[page.body_offset..], gpa);
+            defer adapted.deinit(gpa);
+            if (!adapted.isOk()) return error.InvalidCooklang;
             try resolver.scanPageWithHtmlLinks(page, adapted.markdown, true, 0);
         } else {
             try resolver.scanPageWithHtmlLinks(page, source[page.body_offset..], true, include_mod.frontmatterLineBase(source, page.body_offset));
@@ -565,6 +584,8 @@ pub fn renderManifest(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
         .compiler_id = compiler_id,
         .semantic_schema_version = semantic_schema_version,
         .semantic_compiler_id = semantic_compiler_id,
+        .recipe_schema_version = recipe_schema_version,
+        .recipe_compiler_id = recipe_compiler_id,
     });
 }
 
@@ -574,6 +595,8 @@ pub fn renderGraph(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
         .compiler_id = compiler_id,
         .semantic_schema_version = semantic_schema_version,
         .semantic_compiler_id = semantic_compiler_id,
+        .recipe_schema_version = recipe_schema_version,
+        .recipe_compiler_id = recipe_compiler_id,
     });
 }
 
@@ -583,6 +606,8 @@ pub fn renderBuildReport(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
         .compiler_id = compiler_id,
         .semantic_schema_version = semantic_schema_version,
         .semantic_compiler_id = semantic_compiler_id,
+        .recipe_schema_version = recipe_schema_version,
+        .recipe_compiler_id = recipe_compiler_id,
     });
 }
 
@@ -759,11 +784,21 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             return result;
         },
         error.InputFormatMismatch => {
+            // Naming the wrong adapter is worse than naming none: a `.cook`
+            // tree told to fix its Textile extensions sends the author looking
+            // for a file that does not exist.
+            const is_cook = options.input_format == .cook;
             try result.diagnostics.append(gpa, .{
                 .severity = .error_,
-                .code = .ETEXTILE,
-                .message = try retain.dupe(u8, "content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode"),
-                .remediation = try retain.dupe(u8, "Use Markdown-only input by default, or pass --textile for a .textile-only tree"),
+                .code = if (is_cook) .ECOOKLANG else .ETEXTILE,
+                .message = try retain.dupe(u8, if (is_cook)
+                    "content root mixes Cooklang and non-Cooklang page extensions, or uses the wrong explicit input mode"
+                else
+                    "content root mixes Markdown and Textile page extensions, or uses the wrong explicit input mode"),
+                .remediation = try retain.dupe(u8, if (is_cook)
+                    "Use a .cook-only tree with --cooklang, or drop --cooklang for Markdown input"
+                else
+                    "Use Markdown-only input by default, or pass --textile for a .textile-only tree"),
             });
             result.failure = .content;
             diag.sortDiagnostics(result.diagnostics.items);
@@ -849,9 +884,10 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             });
         }
 
-        // Textile mode adapts only the already-frontmatter-split body. The
-        // adapted Markdown then enters the same component/parser pipeline.
+        // An explicit adapter converts only the already-frontmatter-split body.
+        // The adapted Markdown then enters the same component/parser pipeline.
         // Scratch arena owns tokenizer arrays; only diagnostics are retained.
+        var recipe: cooklang.Recipe = .{};
         {
             var tok_arena = std.heap.ArenaAllocator.init(gpa);
             defer tok_arena.deinit();
@@ -874,6 +910,29 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
                     body = "";
                 } else {
                     body = adapted.markdown;
+                }
+            } else if (options.input_format == .cook) {
+                // Allocated from `retain`, not the scratch arena: the recipe is
+                // promoted onto the page and has to outlive this block. That
+                // retains the adapted Markdown for the whole build too, which is
+                // the cost of keeping the adapter's one-allocation ownership
+                // model rather than splitting its result across two allocators.
+                const adapted = try cooklang.toMarkdown(body, retain);
+                if (adapted.diagnostic) |cd| {
+                    const body_line_base = countLinesUpTo(source, parsed.doc.body_offset);
+                    try result.diagnostics.append(gpa, .{
+                        .severity = .error_,
+                        .code = .ECOOKLANG,
+                        .message = try retain.dupe(u8, cd.message),
+                        .remediation = try retain.dupe(u8, "Use only the bounded Cooklang subset"),
+                        .source_path = disc.source_path,
+                        .line = body_line_base + cd.line - 1,
+                        .column = cd.column,
+                    });
+                    body = "";
+                } else {
+                    body = adapted.markdown;
+                    recipe = adapted.recipe;
                 }
             }
             const tok = aside.tokenizeBody(body, tok_arena.allocator()) catch |err| switch (err) {
@@ -919,7 +978,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         const final_id: []const u8 = if (parsed.doc.meta.id) |override| override else disc.entity_id;
 
         // Promote copies all durable strings into retain before source free.
-        try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset);
+        try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset, recipe);
         if (options.timings) |t| t.bump(.page_reads, 1);
     }
     if (options.timings) |t| t.stop(.parse);
@@ -939,6 +998,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             .body_offset = p.body_offset,
             .role = if (p.parent != null) .satellite else .trunk,
             .semantic_relations = p.relations,
+            .recipe = p.recipe,
         });
     }
 
@@ -1218,6 +1278,105 @@ test "Textile mode preserves graph identity and fails closed" {
     defer mixed.deinit();
     try std.testing.expect(!mixed.ok);
     try std.testing.expectEqual(diag.Code.ETEXTILE, mixed.diagnostics.items[0].code);
+}
+
+test "Cooklang mode extracts recipes, links them, and fails closed" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+
+    var valid = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/cooklang-compatibility/content",
+        .quiet = true,
+        .input_format = .cook,
+    });
+    defer valid.deinit();
+    try std.testing.expect(valid.ok);
+    try std.testing.expect(valid.graph_frozen);
+    try std.testing.expectEqual(@as(usize, 3), valid.pages.items.len);
+
+    // Nodes are id-sorted after freeze: carbonara, index, sauces/pepper-oil.
+    const carbonara = valid.pages.items[0];
+    try std.testing.expectEqualStrings("carbonara", carbonara.id);
+    try std.testing.expectEqualStrings("carbonara.cook", carbonara.source_path);
+
+    // The structured recipe is the point of the format; prose alone would make
+    // an ingredient unqueryable.
+    try std.testing.expectEqual(@as(usize, 7), carbonara.recipe.ingredients.len);
+    try std.testing.expectEqualStrings("spaghetti", carbonara.recipe.ingredients[0].name);
+    try std.testing.expectEqualStrings("400", carbonara.recipe.ingredients[0].quantity.amount);
+    try std.testing.expectEqualStrings("g", carbonara.recipe.ingredients[0].quantity.unit);
+    try std.testing.expectEqualStrings("cut into strips", carbonara.recipe.ingredients[4].preparation);
+    try std.testing.expectEqual(@as(usize, 3), carbonara.recipe.cookware.len);
+    try std.testing.expectEqualStrings("large pot", carbonara.recipe.cookware[0].name);
+    try std.testing.expectEqual(@as(usize, 2), carbonara.recipe.timers.len);
+    try std.testing.expectEqualStrings("pasta", carbonara.recipe.timers[1].name);
+
+    // A Markdown page in the same tree has no recipe, and says so.
+    try std.testing.expectEqualStrings("index", valid.pages.items[1].id);
+    try std.testing.expect(valid.pages.items[1].recipe.isEmpty());
+
+    // `@./sauces/pepper-oil` must be a validated graph edge, not dead prose:
+    // that is what makes a recipe reference break the build when it rots.
+    const last = valid.pages.items[2];
+    try std.testing.expectEqualStrings("sauces/pepper-oil", last.id);
+    try std.testing.expectEqualStrings("sauces/pepper-oil", carbonara.recipe.ingredients[6].recipe_ref);
+    var saw_reference_edge = false;
+    for (valid.edges.items) |e| {
+        if (std.mem.eql(u8, e.kind, "reference") and
+            std.mem.eql(u8, e.from.value, "carbonara") and
+            std.mem.eql(u8, e.to.value, "sauces/pepper-oil")) saw_reference_edge = true;
+    }
+    try std.testing.expect(saw_reference_edge);
+
+    // A recipe corpus publishes IR 0.4; a corpus without one is untouched.
+    const graph_bytes = try renderGraph(gpa, &valid);
+    defer gpa.free(graph_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, graph_bytes, "\"schemaVersion\": \"0.4.0\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, graph_bytes, "\"recipeRef\": \"sauces/pepper-oil\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, graph_bytes, "\"recipe\": null") != null);
+
+    var malformed = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/cooklang-compatibility/invalid/content",
+        .quiet = true,
+        .input_format = .cook,
+    });
+    defer malformed.deinit();
+    try std.testing.expect(!malformed.ok);
+    try std.testing.expect(!malformed.graph_frozen);
+    var saw_cooklang = false;
+    for (malformed.diagnostics.items) |d| if (d.code == .ECOOKLANG) {
+        saw_cooklang = true;
+    };
+    try std.testing.expect(saw_cooklang);
+
+    // A mixed tree is refused, and the diagnostic names Cooklang rather than
+    // sending the author looking for Textile files that do not exist.
+    var mixed = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/cooklang-compatibility/mixed/content",
+        .quiet = true,
+        .input_format = .cook,
+    });
+    defer mixed.deinit();
+    try std.testing.expect(!mixed.ok);
+    try std.testing.expectEqual(diag.Code.ECOOKLANG, mixed.diagnostics.items[0].code);
+}
+
+test "a corpus without recipes keeps its existing IR version" {
+    // The conditional bump is the whole reason adding Cooklang is not a
+    // breaking IR change; a regression here reshapes every consumer's graph.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var result = try compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/textile-compatibility/content",
+        .quiet = true,
+        .input_format = .textile,
+    });
+    defer result.deinit();
+    try std.testing.expect(result.ok);
+    const graph_bytes = try renderGraph(gpa, &result);
+    defer gpa.free(graph_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, graph_bytes, "\"schemaVersion\": \"0.2.0\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, graph_bytes, "\"recipe\"") == null);
 }
 
 test "F8 graph-native fixture matches full graph golden" {

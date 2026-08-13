@@ -33,6 +33,7 @@ is **not** proof that every surface is the default CLI product.
 | IR 0.2 dependency edges + reverse index | **Implemented (F8.1–F8.3 shipped)** — `--out` emits typed edges and `reverseIndex`; incremental HTML uses the same reverse-walk dirty-set (v0.3.1) |
 | Documentation Intelligence | **Implemented first slice** — `check` / `impact`; see [documentation-intelligence.md](documentation-intelligence.md) |
 | Textile compatibility | **Implemented, explicit opt-in** — bounded `.textile` body adapter via `--textile`; see [textile-compatibility.md](textile-compatibility.md) |
+| Cooklang compatibility | **Implemented, explicit opt-in** — bounded `.cook` body adapter via `--cooklang`, also emitting a structured `recipe` IR facet; see [cooklang-compatibility.md](cooklang-compatibility.md) |
 | Publication plan declaration | **Implemented** — `plan --profile PATH` emits normalized declaration JSON without publication; see [publication-plan.md](publication-plan.md) |
 | GitHub Pages publication declaration | **Implemented first slice** — normalized `base_url` / `origin` / `base_path` identity and fail-closed public-target validation; see [publication-profile.md](publication-profile.md) and [publication-plan.md](publication-plan.md) |
 | HTML publication artifact inventory | **Implemented first slice** — deterministic target-owned `artifacts.json` inventory for committed HTML payloads; see [publication-artifacts.md](publication-artifacts.md) |
@@ -75,6 +76,7 @@ per topic:
 | AI Context Bundle | [context-bundle.md](context-bundle.md) |
 | Documentation Intelligence | [documentation-intelligence.md](documentation-intelligence.md) |
 | Textile compatibility adapter | [textile-compatibility.md](textile-compatibility.md) |
+| Cooklang recipe input adapter | [cooklang-compatibility.md](cooklang-compatibility.md) |
 | Rendered-site search artifacts | [rendered-search.md](rendered-search.md) |
 | HTML publication artifact inventory | [publication-artifacts.md](publication-artifacts.md) |
 | HTML publication checks evidence | [publication-checks.md](publication-checks.md) |
@@ -123,6 +125,7 @@ per topic:
 | [publication-proof-pack.md](publication-proof-pack.md) | Deterministic schema-v1 two-file presentation model and static HTML over committed artifact, checks, claims, and Touch Atlas evidence; implemented first slice |
 | [cli.md](cli.md) | Stable command routing, exit codes, and report-consumer boundary |
 | [textile-compatibility.md](textile-compatibility.md) | Explicit bounded `.textile`-to-Markdown input mode |
+| [cooklang-compatibility.md](cooklang-compatibility.md) | Explicit bounded `.cook`-to-Markdown input mode with structured `recipe` IR facet |
 | [rendered-search.md](rendered-search.md) | Deterministic v1 search JSON for rendered HTML pages; browser/compiler seams are explicit |
 | [astro-import-plan.md](astro-import-plan.md) | Plan-only plain-Markdown Astro intake; snapshot, identity, and digest rules |
 | [astro-import-apply.md](astro-import-apply.md) | Initial-create application of a verified Astro import plan |

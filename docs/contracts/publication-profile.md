@@ -53,7 +53,7 @@ The root has exactly these fields:
 | `format` | yes | Exact string `boris-publication-profile` |
 | `schema_version` | yes | Exact integer `1` |
 | `input` | no | Content root, default `content` |
-| `input_format` | no | `markdown` (default) or `textile` |
+| `input_format` | no | `markdown` (default), `textile`, or `cook` |
 | `site` | no | Closed `url`, `title`, `description` object |
 | `publication` | no | Closed publication-target declaration; currently `github-pages` only |
 | `targets` | no | Closed HTML-target array |

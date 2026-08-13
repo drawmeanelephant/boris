@@ -204,6 +204,7 @@ pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorde
     const profile_input_format: ?publication_profile.InputFormat = if (opts.profile_input_format_override) |format| switch (format) {
         .markdown => .markdown,
         .textile => .textile,
+        .cook => .cook,
     } else null;
 
     var request = publication_profile.parseBytes(gpa, workspace, profile_bytes, .{

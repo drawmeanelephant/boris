@@ -7,7 +7,8 @@
 //! ## Policies (see docs/contracts/scanner.md)
 //!
 //! - **Extensions:** default Markdown accepts lowercase `.md` / `.mdx`;
-//!   explicit Textile accepts lowercase `.textile` only.
+//!   explicit Textile accepts lowercase `.textile` only; explicit Cooklang
+//!   accepts lowercase `.cook` only.
 //! - **Isolation:** a recognized page from the other input family fails the
 //!   scan; Boris never guesses a dialect per page.
 //! - **Paths:** logical metadata uses `/` only; no host absolute paths.

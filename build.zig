@@ -114,6 +114,19 @@ pub fn build(b: *std.Build) void {
     const run_textile_tests = b.addRunArtifact(textile_tests);
     run_textile_tests.setCwd(b.path("."));
 
+    // --- Explicit bounded Cooklang recipe adapter -------------------------
+    // Pure like the Textile adapter: no Apex link, no build options.
+    const cooklang_mod = b.createModule(.{
+        .root_source_file = b.path("src/cooklang.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const cooklang_tests = b.addTest(.{
+        .root_module = cooklang_mod,
+    });
+    const run_cooklang_tests = b.addRunArtifact(cooklang_tests);
+    run_cooklang_tests.setCwd(b.path("."));
+
     // --- Pipeline + graph tests (milestone 6) ------------------------------
     // Pipeline imports aside (component validation) → needs Apex link.
     const pipeline_mod = b.createModule(.{
@@ -1094,6 +1107,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_scanner_tests.step);
     test_step.dependOn(&run_parser_tests.step);
     test_step.dependOn(&run_textile_tests.step);
+    test_step.dependOn(&run_cooklang_tests.step);
     test_step.dependOn(&run_pipeline_tests.step);
     test_step.dependOn(&run_publication_profile_tests.step);
     test_step.dependOn(&run_github_pages_tests.step);

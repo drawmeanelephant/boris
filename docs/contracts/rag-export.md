@@ -152,9 +152,9 @@ A split document's marker additionally carries `part="k/n"`:
   own frontmatter; nothing else is repeated.
 - **Documents are verbatim**: each document's bytes are the source file
   (frontmatter + body). No H1 stripping or demotion, no `:::kind` directive
-  replacement. `<Aside>` / `<Details>` remain authoring syntax. For Textile
-  input, the body is the deterministically adapted Boris-authorable Markdown
-  (see [Authoring fidelity](#authoring-fidelity-both-modes)).
+  replacement. `<Aside>` / `<Details>` remain authoring syntax. For Textile and
+  Cooklang input, the body is the deterministically adapted Boris-authorable
+  Markdown (see [Authoring fidelity](#authoring-fidelity-both-modes)).
 - **Boundaries are unambiguous by construction**: a source line that begins
   (after leading whitespace) with the marker prefix `<!-- boris-rag-doc:`
   would be indistinguishable from a real envelope during marker-free
@@ -251,9 +251,10 @@ and still model-usable:
 
 Same authoring-fidelity rules as the working packs: content pages and system
 seeds are verbatim source documents (Markdown) or deterministically adapted
-Boris-authorable Markdown (Textile). `INDEX.md` and `UPLOAD-GUIDE.md` describe
-the tree and recommend the working packs for normal site-writing work. There is
-no per-file RAG frontmatter envelope and no `:::kind` export representation.
+Boris-authorable Markdown (Textile, Cooklang). `INDEX.md` and `UPLOAD-GUIDE.md`
+describe the tree and recommend the working packs for normal site-writing work.
+There is no per-file RAG frontmatter envelope and no `:::kind` export
+representation.
 
 `--complete` rejects `--scope`: the complete export is the entire validated
 corpus, never a projection. (Scoped, tree-shaped exports remain available on
@@ -400,6 +401,15 @@ documented in `INDEX.md` but are **not** catalog rows.
   the exported document is the adapted Markdown, not the original Textile
   bytes. Textile exports are therefore deterministic, faithful *adaptations* —
   not byte-for-byte originals. Markdown exports remain verbatim.
+- **Cooklang input is deterministically adapted.** The Cooklang adapter
+  (`src/cooklang.zig`) converts the contracted Cooklang body subset to
+  Boris-authorable Markdown (per [cooklang-compatibility.md](cooklang-compatibility.md));
+  the exported document is the adapted Markdown — an `## Ingredients` list, a
+  `## Cookware` list, and `## Method` numbered steps — not the original `.cook`
+  bytes with their raw `@`, `#`, and `~` sigils. A model reading the corpus
+  cannot be assumed to understand Cooklang sigils, so the corpus carries the
+  rendered form. Only the body is adapted: Cooklang metadata is ordinary Boris
+  frontmatter and is preserved verbatim.
 - **`<Aside>` / `<Details>` remain authoring syntax.** The v1 `:::kind`
   export representation is gone; component tags survive as the author wrote
   them. Unknown PascalCase tags still fail compile with `ECOMPONENT` on the

@@ -42,6 +42,8 @@ pub const Code = enum {
     EUNICODE,
     /// Explicit Textile-mode adapter failures and input-family mismatches.
     ETEXTILE,
+    /// Explicit Cooklang-mode adapter failures and input-family mismatches.
+    ECOOKLANG,
     /// Aside / registered-component tokenizer failures (milestone 10).
     ECOMPONENT,
     /// Malformed `{{include …}}` directive.
