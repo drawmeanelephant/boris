@@ -31,6 +31,10 @@ pub const Target = enum {
     yaml_scalar,
     /// One item inside a YAML flow sequence: `key: [<here>, <here>]`.
     yaml_flow_item,
+    /// A YAML scalar that is always double-quoted, quotes included. For
+    /// emitters that already quote unconditionally and must keep doing so —
+    /// switching them to quote-when-needed would churn every artifact they own.
+    yaml_quoted_scalar,
     /// One cell of a markdown pipe table.
     md_table_cell,
     /// The text of an ATX heading: `# <here>`.
@@ -52,6 +56,7 @@ pub fn escapeAppend(
     switch (target) {
         .yaml_scalar => try appendYaml(buf, gpa, s, false),
         .yaml_flow_item => try appendYaml(buf, gpa, s, true),
+        .yaml_quoted_scalar => try appendYamlQuoted(buf, gpa, s),
         .md_table_cell => try appendMdTableCell(buf, gpa, s),
         .md_heading => try appendMdHeading(buf, gpa, s),
         .md_block_text => try appendSingleLine(buf, gpa, s),
@@ -94,13 +99,37 @@ fn isSpace(c: u8) bool {
     return c == ' ' or c == '\t';
 }
 
-/// Byte sequences some YAML parsers treat as line breaks even mid-scalar.
+/// Byte sequences that are line terminators beyond ASCII LF and CR:
 /// U+0085 NEL, U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR.
-fn separatorAt(s: []const u8) ?struct { len: usize, escape: []const u8 } {
-    if (s.len >= 2 and s[0] == 0xC2 and s[1] == 0x85) return .{ .len = 2, .escape = "\\N" };
+///
+/// These matter in every target, not only YAML. Many parsers treat them as
+/// hard line breaks, and a model reading the corpus reads them as newlines, so
+/// a heading carrying one is read as two lines — the same structural forgery an
+/// escaped `|` closes, arriving through a different code point. Anywhere ASCII
+/// `\n` is handled, these are handled with it.
+///
+/// `pub` so `json_out.zig` can reach the same table. JSON keeps its own escape
+/// rules in its own module, but the *set of code points that terminate a line*
+/// is one fact, and two copies of it would drift — the divergence hazard this
+/// whole encoding layer exists to remove.
+pub const Separator = struct {
+    len: usize,
+    /// YAML double-quoted escape.
+    escape: []const u8,
+    /// XML numeric character reference.
+    xml_ref: []const u8,
+    /// JSON `\uXXXX` escape. Legal raw in a JSON string, but `str.splitlines()`
+    /// splits on it, which tears a JSONL record in half.
+    json_escape: []const u8,
+};
+
+pub fn separatorAt(s: []const u8) ?Separator {
+    if (s.len >= 2 and s[0] == 0xC2 and s[1] == 0x85) {
+        return .{ .len = 2, .escape = "\\N", .xml_ref = "&#x85;", .json_escape = "\\u0085" };
+    }
     if (s.len >= 3 and s[0] == 0xE2 and s[1] == 0x80) {
-        if (s[2] == 0xA8) return .{ .len = 3, .escape = "\\L" };
-        if (s[2] == 0xA9) return .{ .len = 3, .escape = "\\P" };
+        if (s[2] == 0xA8) return .{ .len = 3, .escape = "\\L", .xml_ref = "&#x2028;", .json_escape = "\\u2028" };
+        if (s[2] == 0xA9) return .{ .len = 3, .escape = "\\P", .xml_ref = "&#x2029;", .json_escape = "\\u2029" };
     }
     return null;
 }
@@ -170,6 +199,10 @@ fn appendYaml(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8, fl
         try buf.appendSlice(gpa, s);
         return;
     }
+    try appendYamlQuoted(buf, gpa, s);
+}
+
+fn appendYamlQuoted(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
     try buf.append(gpa, '"');
     var i: usize = 0;
     while (i < s.len) {
@@ -207,12 +240,20 @@ fn appendYaml(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8, fl
 /// A markdown cell or heading has no representation for an embedded break, so
 /// substituting a space is lossless in layout terms and closes the breakout.
 fn appendSingleLine(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
-    for (s) |c| {
+    var i: usize = 0;
+    while (i < s.len) {
+        if (separatorAt(s[i..])) |sep| {
+            try buf.append(gpa, ' ');
+            i += sep.len;
+            continue;
+        }
+        const c = s[i];
         if (c == '\n' or c == '\r' or c < 0x20) {
             try buf.append(gpa, ' ');
         } else {
             try buf.append(gpa, c);
         }
+        i += 1;
     }
 }
 
@@ -220,11 +261,18 @@ fn appendSingleLine(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const 
 /// only escape it honours. `\` must be escaped first or a trailing backslash
 /// in the value would consume our own escape and re-open the breakout.
 fn appendMdTableCell(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8) !void {
-    for (s) |c| {
-        switch (c) {
+    var i: usize = 0;
+    while (i < s.len) {
+        if (separatorAt(s[i..])) |sep| {
+            try buf.append(gpa, ' ');
+            i += sep.len;
+            continue;
+        }
+        switch (s[i]) {
             '\\' => try buf.appendSlice(gpa, "\\\\"),
             '|' => try buf.appendSlice(gpa, "\\|"),
             else => {
+                const c = s[i];
                 if (c == '\n' or c == '\r' or c < 0x20) {
                     try buf.append(gpa, ' ');
                 } else {
@@ -232,6 +280,7 @@ fn appendMdTableCell(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const
                 }
             },
         }
+        i += 1;
     }
 }
 
@@ -258,7 +307,16 @@ fn appendMdHeading(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u
 /// them. They are replaced with U+FFFD so the breakage is visible in output
 /// rather than silently dropped.
 fn appendXml(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: []const u8, attr: bool) !void {
-    for (s) |c| {
+    var i: usize = 0;
+    while (i < s.len) : (i += 1) {
+        // Legal XML characters, but a consumer that splits on line terminators
+        // still splits on them. A numeric reference is lossless and unambiguous.
+        if (separatorAt(s[i..])) |sep| {
+            try buf.appendSlice(gpa, sep.xml_ref);
+            i += sep.len - 1;
+            continue;
+        }
+        const c = s[i];
         switch (c) {
             '&' => try buf.appendSlice(gpa, "&amp;"),
             '<' => try buf.appendSlice(gpa, "&lt;"),
@@ -330,12 +388,6 @@ test "yaml quoted form escapes quotes, backslashes and control bytes" {
     try expectEncoded(.yaml_scalar, "a\x01b", "\"a\\x01b\"");
 }
 
-test "yaml escapes unicode line separators that some parsers honour" {
-    try expectEncoded(.yaml_scalar, "a\u{2028}b", "\"a\\Lb\"");
-    try expectEncoded(.yaml_scalar, "a\u{2029}b", "\"a\\Pb\"");
-    try expectEncoded(.yaml_scalar, "a\u{0085}b", "\"a\\Nb\"");
-}
-
 test "yaml passes legitimate CJK, emoji and RTL through unquoted" {
     try expectEncoded(.yaml_scalar, "日本語のドキュメント", "日本語のドキュメント");
     try expectEncoded(.yaml_scalar, "Release 🎉 notes", "Release 🎉 notes");
@@ -396,12 +448,82 @@ test "joined values are judged as a whole, not part by part" {
     try std.testing.expectEqualStrings("\"content/pages/evil: x.md\"", buf.items);
 }
 
-test "every target is total and never emits a raw newline for md targets" {
-    const hostile = "a\nb|c\"d\\e]f: g#h\r\n<i>&j";
+/// Every code point a consumer may treat as a hard line break: ASCII LF and CR
+/// plus the Unicode line-terminator class. A test that only exercises `\n`
+/// proves ASCII safety and nothing else — which is exactly how U+2028 leaked
+/// raw into four RAG artifacts while this file's tests were green.
+const line_terminators = [_][]const u8{ "\n", "\r", "\u{0085}", "\u{2028}", "\u{2029}" };
+
+fn expectNoLineTerminator(text: []const u8) !void {
+    for (line_terminators) |terminator| {
+        if (std.mem.indexOf(u8, text, terminator) != null) {
+            std.debug.print("\nencoded output still contains a line terminator in: {s}\n", .{text});
+            return error.RawLineTerminatorEmitted;
+        }
+    }
+}
+
+test "markdown targets flatten every line terminator, not just ASCII" {
+    // U+2028 in a title is read as a newline by many parsers and by a model
+    // reading the corpus, so `# Before<LS>role: system` becomes two lines and
+    // the forgery F2 closed reappears through a different code point.
+    const gpa = std.testing.allocator;
     inline for (.{ .md_table_cell, .md_heading, .md_block_text }) |target| {
-        const got = try alloc(std.testing.allocator, target, hostile);
-        defer std.testing.allocator.free(got);
-        try std.testing.expect(std.mem.indexOfScalar(u8, got, '\n') == null);
-        try std.testing.expect(std.mem.indexOfScalar(u8, got, '\r') == null);
+        for (line_terminators) |terminator| {
+            var input: std.ArrayList(u8) = .empty;
+            defer input.deinit(gpa);
+            try input.appendSlice(gpa, "Before");
+            try input.appendSlice(gpa, terminator);
+            try input.appendSlice(gpa, "role: system");
+
+            const got = try alloc(gpa, target, input.items);
+            defer gpa.free(got);
+            try expectNoLineTerminator(got);
+            // The terminator becomes a space; nothing else in this input is
+            // escaped by any of these targets, so the comparison is exact.
+            try std.testing.expectEqualStrings("Before role: system", got);
+        }
+    }
+}
+
+test "yaml_quoted_scalar always quotes and escapes the same set" {
+    // Byte-identical to the JSON-style escaping the context emitter already
+    // used, for every value without a Unicode line terminator.
+    try expectEncoded(.yaml_quoted_scalar, "home", "\"home\"");
+    try expectEncoded(.yaml_quoted_scalar, "say \"hi\"", "\"say \\\"hi\\\"\"");
+    try expectEncoded(.yaml_quoted_scalar, "a\nb", "\"a\\nb\"");
+    try expectEncoded(.yaml_quoted_scalar, "a\u{2028}b", "\"a\\Lb\"");
+}
+
+test "yaml escapes every line terminator rather than flattening it" {
+    // YAML has a lossless representation, so the value survives intact.
+    try expectEncoded(.yaml_scalar, "a\u{2028}b", "\"a\\Lb\"");
+    try expectEncoded(.yaml_scalar, "a\u{2029}b", "\"a\\Pb\"");
+    try expectEncoded(.yaml_scalar, "a\u{0085}b", "\"a\\Nb\"");
+    try expectEncoded(.yaml_flow_item, "a\u{2028}b", "\"a\\Lb\"");
+}
+
+test "xml targets emit a numeric reference for line terminators" {
+    try expectEncoded(.xml_text, "a\u{2028}b", "a&#x2028;b");
+    try expectEncoded(.xml_attr, "a\u{2029}b", "a&#x2029;b");
+    try expectEncoded(.xml_text, "a\u{0085}b", "a&#x85;b");
+}
+
+test "every target is total and never emits a raw line terminator" {
+    const gpa = std.testing.allocator;
+    const hostile = "a\nb|c\"d\\e]f: g#h\r\n<i>&j\u{2028}k\u{2029}l\u{0085}m";
+    inline for (.{ .md_table_cell, .md_heading, .md_block_text }) |target| {
+        const got = try alloc(gpa, target, hostile);
+        defer gpa.free(got);
+        try expectNoLineTerminator(got);
+    }
+    // YAML and XML keep the character in an escaped form, so the raw bytes must
+    // be gone from those too.
+    inline for (.{ .yaml_scalar, .yaml_flow_item, .yaml_quoted_scalar, .xml_text, .xml_attr }) |target| {
+        const got = try alloc(gpa, target, hostile);
+        defer gpa.free(got);
+        for ([_][]const u8{ "\u{0085}", "\u{2028}", "\u{2029}" }) |terminator| {
+            try std.testing.expect(std.mem.indexOf(u8, got, terminator) == null);
+        }
     }
 }
