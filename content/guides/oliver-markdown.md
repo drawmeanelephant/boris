@@ -11,8 +11,8 @@ Boris renders page bodies with **Oliver**, a freestanding Zig markup library
 pinned by content hash in `build.zig.zon` and consumed natively through
 `src/render.zig` — never a subprocess, never a shell-out to a CLI. Oliver is
 byte-exact CommonMark 0.31.2 plus GFM tables, with the extensions Boris
-publishes enabled: heading auto-ids, heading attribute lists, footnotes, and
-definition lists.
+publishes enabled: heading auto-ids, heading attribute lists, footnotes,
+definition lists, and strikethrough.
 
 This page is a living gallery of the constructs that matter on documentation
 sites.
@@ -257,7 +257,7 @@ Content inside a raw HTML block.
 
 The following constructs are **not** part of Boris's Markdown surface. If a
 source line uses them, Oliver treats it as ordinary text (block quotes keep
-the `>` marker and `[!NOTE]` text; `~~` stays literal; math stays literal):
+the `>` marker and `[!NOTE]` text; math stays literal):
 
 - Math (`$x$`, `$$x$$`)
 - Callouts (`> [!NOTE]` and Python-Markdown `!!!`)

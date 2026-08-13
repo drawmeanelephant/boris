@@ -33,7 +33,7 @@ markdown slice  →  oliver.parse(...)  →  typed document  →  oliver.html.re
 
 ## The seam (`src/render.zig`)
 
-- `oliver.parse(arena, md, .markdown, .{ .markdown = .{ footnotes, definition_lists, heading_attributes } })`
+- `oliver.parse(arena, md, .markdown, .{ .markdown = .{ footnotes, definition_lists, heading_attributes, strikethrough } })`
 - `oliver.html.render(arena, writer, &document, .{ .heading_ids, .footnotes })`
 - Input `md` is a slice into Whiteboard arena memory; Oliver borrows it
   (text nodes slice into it) for the duration of the call.
@@ -55,12 +55,13 @@ publication remain in `assemble.zig` / `compile.zig`.
 
 Oliver is byte-exact CommonMark 0.31.2 (652/652 conformance) plus GFM tables,
 with optional extensions Boris enables: heading auto-ids (`heading_ids`),
-heading attribute lists (`heading_attributes`), footnotes (`footnotes`), and
-definition lists (`definition_lists`). Raw HTML in trusted author content
-passes through unescaped (unchanged raw-HTML policy). Apex-only extensions the
-old renderer provided (math, callouts, task lists, fenced divs, smart
-typography, captions, strikethrough) are not rendered; the compatibility wall
-in `docs/contracts/oliver-renderer.md` classifies every output delta.
+heading attribute lists (`heading_attributes`), footnotes (`footnotes`),
+definition lists (`definition_lists`), and GFM strikethrough
+(`strikethrough`). Raw HTML in trusted author content passes through unescaped
+(unchanged raw-HTML policy). Apex-only extensions the old renderer provided
+(math, callouts, task lists, fenced divs, smart typography, captions) are not
+rendered; the compatibility wall in `docs/contracts/oliver-renderer.md`
+classifies every output delta.
 
 ## Build linkage (`build.zig`)
 
