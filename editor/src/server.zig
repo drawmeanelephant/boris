@@ -5,6 +5,7 @@ const net = std.Io.net;
 const authoring = @import("authoring.zig");
 const file_api = @import("file_api.zig");
 const project = @import("project.zig");
+const preview = @import("preview.zig");
 const recovery = @import("recovery.zig");
 const runner = @import("runner.zig");
 const security = @import("security.zig");
@@ -18,6 +19,7 @@ pub const Config = struct {
     state_root: []const u8,
     port: u16 = 0,
     token: [32]u8,
+    preview: *preview.Manager,
 };
 
 pub fn serve(io: Io, allocator: std.mem.Allocator, config: Config) !void {
@@ -111,6 +113,15 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
             defer allocator.free(bytes);
             return respondJson(request, .ok, bytes);
         }
+        if (std.mem.eql(u8, target, "/api/preview/state")) {
+            if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
+            return servePreviewState(allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/preview/rebuild")) {
+            if (request.head.method != .POST) return methodNotAllowed(request, "POST");
+            config.preview.rebuild(allocator, io) catch |err| return respondApiError(request, err);
+            return servePreviewState(allocator, request, config);
+        }
         return respondText(request, .not_found, "Not found", "text/plain; charset=utf-8");
     }
 
@@ -127,6 +138,12 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
         return serveUiFile(io, allocator, request, config.ui_dir, path, false);
     }
     return respondText(request, .not_found, "Not found", "text/plain; charset=utf-8");
+}
+
+fn servePreviewState(allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    const bytes = try config.preview.renderState(allocator, &config.token);
+    defer allocator.free(bytes);
+    return respondJson(request, .ok, bytes);
 }
 
 const PathRequest = struct {

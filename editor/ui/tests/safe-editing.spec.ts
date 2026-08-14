@@ -6,6 +6,7 @@ type MockOptions = {
   disk?: string;
   commands?: Partial<Record<string, CommandResult>>;
   authoring?: Array<Record<string, unknown>>;
+  previewRebuilds?: Array<Record<string, unknown>>;
 };
 
 type CommandResult = {
@@ -62,6 +63,7 @@ async function installApi(page: Page, options: MockOptions = {}) {
   let disk = options.disk ?? '# Home\n';
   let fingerprint = 'a'.repeat(64);
   let authoringRequest = 0;
+  let previewRebuild = 0;
 
   await page.route('**/api/health', route => route.fulfill({
     contentType: 'application/json',
@@ -138,6 +140,17 @@ async function installApi(page: Page, options: MockOptions = {}) {
     authoringRequest += 1;
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });
+  await page.route('**/api/preview/state', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ phase: 'idle', generation: 0, exit_code: null, used_stderr_fallback: false, message: 'Preview has not been built yet.', preview_url: 'https://preview.invalid/?token=test' })
+  }));
+  await page.route('**/api/preview/rebuild', route => {
+    const sequence = options.previewRebuilds ?? [{ phase: 'success', generation: 1, exit_code: 0, used_stderr_fallback: false, message: 'Preview is current from a successful Boris incremental build.', preview_url: 'https://preview.invalid/?token=test' }];
+    const body = sequence[Math.min(previewRebuild, sequence.length - 1)];
+    previewRebuild += 1;
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+  });
+  await page.route('https://preview.invalid/**', route => route.fulfill({ contentType: 'text/html', body: '<h1>Compiler output</h1>' }));
   await page.goto('/#token=test-session-token');
 }
 
@@ -354,4 +367,34 @@ test('completion categories match Boris artifacts and refresh after a successful
   await expect(listbox.getByRole('option', { name: /guides\/intro/ })).toBeVisible();
   await wiki.press('Enter');
   await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('[[guides/intro]]');
+});
+
+test('explicit save rebuilds and reloads the real-output preview by keyboard', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Saved preview\n');
+  const rebuild = page.waitForRequest('**/api/preview/rebuild');
+  await page.getByRole('button', { name: 'Save file', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await rebuild;
+  await expect(page.locator('.preview-state')).toContainText('Preview is current');
+  await expect(page.getByTitle('Boris site preview')).toHaveAttribute('src', /generation=1/);
+  await expect(page.getByRole('link', { name: 'Open preview in new tab', exact: true })).toHaveText('Open preview in new tab');
+});
+
+test('failed rebuild keeps last output and labels it stale with stderr fallback', async ({ page }) => {
+  await installApi(page, {
+    previewRebuilds: [{
+      phase: 'stale', generation: 7, exit_code: 1, used_stderr_fallback: true,
+      message: 'error: EFRONTMATTER: index.md:1:1: invalid field; last valid output is stale.',
+      preview_url: 'https://preview.invalid/?token=test'
+    }]
+  });
+  const rebuild = page.getByRole('button', { name: 'Rebuild preview', exact: true });
+  await expect(rebuild).toHaveText('Rebuild preview');
+  await rebuild.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.preview-state')).toContainText('last valid output is stale');
+  await expect(page.getByText(/bounded Boris stderr/)).toBeVisible();
+  await expect(page.getByTitle('Boris site preview')).toHaveAttribute('src', /generation=7/);
 });

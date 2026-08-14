@@ -160,3 +160,42 @@ schema-only startup, and refresh after a successful graph build.
 
 M4 deliberately does not add a frontmatter grammar, Markdown parser, LSP,
 heading-fragment completion, typing-time autocomplete, or editor-owned graph.
+
+## M5 live preview fallback
+
+Until `boris serve` is available, the host runs exactly one fixed preview
+command per requested rebuild:
+
+```text
+boris build --input content --incremental --html-dir dist
+```
+
+An explicit successful save requests that build; authors can also use the
+visibly named Rebuild preview button. The host never watches or renders source.
+A second ephemeral loopback origin serves the committed `dist/` bytes unchanged
+and terminates with the editor process. The preview origin requires its random
+session token, validates Host and any supplied Origin, rejects traversal and
+symlinks, and uses a port-scoped HttpOnly cookie for generated subresources.
+
+The UI reports idle, running, success, failed, and stale distinctly. Boris's
+staged output commit preserves the last valid `dist/` tree after a failed
+rebuild; the iframe generation advances only on success. While #421 remains
+open, failures show bounded Boris stderr and identify that fallback. Embedded
+preview content is sandboxed; a named link opens the exact site origin in a new
+tab for full behavior.
+
+The M5 gate adds:
+
+```bash
+./editor/scripts/test-preview.sh \
+  ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+```
+
+It verifies save/rebuild behavior, byte identity with a plain Boris build,
+last-good preservation, loopback/header/token/traversal defenses, and server
+shutdown with the editor. Playwright covers keyboard/voice names, reload
+generation, and honest stale/failure states.
+
+M5 deliberately does not add HMR, CSS injection, a watcher, a daemon, a second
+renderer, typing-triggered builds, or editor-side HTML transformation. Replace
+this fallback with compiler-owned `boris serve` when #392 lands.

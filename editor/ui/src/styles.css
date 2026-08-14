@@ -87,6 +87,15 @@ input, select { width: 100%; padding: 0.7rem; border: 1px solid #82958b; border-
 .analysis-results { min-height: 0; margin-top: 1rem; padding: 1rem; background: #f4f8f5; }
 .analysis-results li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.45rem 0; }
 
+#preview { grid-column: 1 / -1; }
+.preview-heading { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
+.preview-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; }
+.button-link { display: inline-flex; min-height: 2.6rem; align-items: center; padding: 0.55rem 0.8rem; border: 1px solid #82958b; border-radius: 0.35rem; background: #fff; text-decoration: none; }
+.preview-state { padding: 0.75rem; border-left: 0.3rem solid #718078; background: #f1f3f2; }
+.preview-state.current { border-color: #176247; background: #e5f5ec; }
+.preview-state.failure { border-color: #ad584d; background: #fff0ed; }
+#preview iframe { width: 100%; min-height: 36rem; border: 1px solid #82958b; border-radius: 0.4rem; background: #fff; }
+
 dialog { width: min(52rem, calc(100% - 2rem)); max-height: calc(100vh - 3rem); overflow: auto; padding: 1.5rem; border: 1px solid #82958b; border-radius: 0.75rem; box-shadow: 0 1.25rem 4rem #11231d55; }
 dialog::backdrop { background: #10251dc7; }
 .dialog-actions { justify-content: flex-end; margin-top: 1.25rem; }
@@ -101,6 +110,7 @@ footer { padding: 1rem clamp(1rem, 4vw, 4rem) 2rem; }
   main, .comparison { grid-template-columns: 1fr; }
   .project-pane, .source-pane, .problems-pane { min-height: auto; }
   .problems-heading, .analysis-results li { display: block; }
+  .preview-heading { display: block; }
   .command-result { display: inline-block; }
   .impact-command > div { grid-template-columns: 1fr; }
   .authoring-heading { display: block; }
