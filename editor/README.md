@@ -137,3 +137,26 @@ copying.
 
 M3 deliberately does not add layout diagnostics, LSP, autofix, arbitrary
 commands, source parsing, autosave, or preview serving.
+
+## M4 schema and completion-aware authoring
+
+The source pane exposes an ARIA combobox whose categories are explicit, so it
+does not need to parse frontmatter or Markdown. Frontmatter keys, enums, and
+bounds come from the canonical `boris-frontmatter-1.schema.json`, embedded
+verbatim in the host at build time and checked through the contract adapter.
+Entity ids, wiki-link targets, parents, relation kinds/targets, and layout slots
+come from a successful Boris `.boris/completion.json` only.
+
+Schema suggestions remain available before an IR artifact exists. Graph-backed
+categories then explain that Build diagnostics is required. After a successful
+IR build, the UI reloads `completion.json` without restarting. The native source
+textarea remains the editing surface; completion insertion is explicit and
+undoable, with no typing-time rewrite.
+
+The diagnostics integration gate deep-compares the authoring endpoint with the
+canonical schema and a real compiler-generated completion index. Playwright
+covers listbox/combobox semantics, arrow/Enter insertion, visible voice names,
+schema-only startup, and refresh after a successful graph build.
+
+M4 deliberately does not add a frontmatter grammar, Markdown parser, LSP,
+heading-fragment completion, typing-time autocomplete, or editor-owned graph.

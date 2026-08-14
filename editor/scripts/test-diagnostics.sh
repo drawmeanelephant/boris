@@ -43,6 +43,13 @@ run_command() {
     --data "$2" "$base_url/api/commands/run" >"$1"
 }
 
+get_api() {
+  curl --fail --silent --show-error \
+    -H "Host: 127.0.0.1:$port" \
+    -H "X-Boris-Editor-Token: $token" \
+    "$base_url$2" >"$1"
+}
+
 run_command "$work/ir-invalid.json" '{"mode":"ir_build"}'
 node -e '
   const fs = require("fs");
@@ -63,6 +70,18 @@ node -e '
 ' "$work/validate-invalid.json"
 
 rm "$work/project/content/a.md" "$work/project/content/b.md"
+run_command "$work/ir-valid.json" '{"mode":"ir_build"}'
+get_api "$work/authoring.json" '/api/authoring'
+node -e '
+  const fs = require("fs");
+  const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const completion = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+  const schema = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+  if (payload.completion_status !== "ready") throw Error("completion did not refresh after build");
+  if (JSON.stringify(payload.completion) !== JSON.stringify(completion)) throw Error("completion payload differs from Boris artifact");
+  if (JSON.stringify(payload.frontmatter_schema) !== JSON.stringify(schema)) throw Error("frontmatter payload differs from canonical Boris schema");
+' "$work/authoring.json" "$work/project/.boris/completion.json" "$repo_root/docs/contracts/schemas/boris-frontmatter-1.schema.json"
+
 run_command "$work/check-valid.json" '{"mode":"check"}'
 node -e '
   const r = require(process.argv[1]);
