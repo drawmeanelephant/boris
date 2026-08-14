@@ -232,29 +232,6 @@
             position: relative;
         }
 
-        .copy-btn {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            background-color: var(--color-surface-container-low);
-            color: var(--color-on-surface);
-            font-size: 12px;
-            font-weight: 600;
-            letter-spacing: 0.05em;
-            padding: 4px 12px;
-            border: 1px solid var(--color-outline-variant);
-            opacity: 0;
-            transition: opacity 0.15s ease-in-out;
-        }
-        
-        .code-block:hover .copy-btn {
-            opacity: 1;
-        }
-        
-        .copy-btn:hover {
-            border-color: var(--color-primary);
-        }
-
         .admonition {
             border-left: 4px solid var(--color-primary);
             background-color: var(--color-surface-container-low);
