@@ -295,6 +295,15 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     while (i < args.len) : (i += 1) {
         const a = args[i];
 
+        // `init [DIR]` — the single positional target may also follow flags
+        // (`boris init --quiet DIR`); the pre-loop capture handles the
+        // immediate-after-command form, this handles flags in between. A
+        // second positional still falls through to UnexpectedPositional.
+        if (command == .init and init_dir == null and !std.mem.startsWith(u8, a, "-")) {
+            init_dir = a;
+            continue;
+        }
+
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
             // Help short-circuits: do not validate remaining args.
             return .{
@@ -1582,6 +1591,13 @@ test "parse: init takes an optional target directory" {
     defer quiet.deinit(std.testing.allocator);
     try expectEqual(Command.init, quiet.command);
     try expect(quiet.quiet);
+
+    // The positional target may follow flags, not only the command token.
+    var flag_first = try parseOptions(std.testing.allocator, &.{ "boris", "init", "--quiet", "site" });
+    defer flag_first.deinit(std.testing.allocator);
+    try expectEqual(Command.init, flag_first.command);
+    try expectEqualStrings("site", flag_first.init_dir.?);
+    try expect(flag_first.quiet);
 
     // init performs no compiler phase: mode/output/analysis flags are usage
     // errors, and the target directory is positional, so --input is not an

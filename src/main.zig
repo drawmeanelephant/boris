@@ -181,7 +181,7 @@ fn printTimingsReport(io: Io, gpa: std.mem.Allocator, recorder: *const timings.R
 /// Materialize a deterministic starter site into `opts.init_dir` (default ".").
 pub fn runInit(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
     const target_dir = opts.init_dir orelse ".";
-    return @enumFromInt(init_mod.run(io, gpa, target_dir));
+    return @enumFromInt(init_mod.run(io, gpa, target_dir, opts.quiet));
 }
 
 pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {

@@ -70,5 +70,20 @@ grep -q "refusing to overwrite" "$OUT/refuse.stderr" || fail "refusal message mi
 [[ -f "$OUT/occupied/keep.txt" ]] || fail "init modified the occupied directory"
 pass "refusal enforced"
 
-rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied"
+# --- nested targets: parents are created, not assumed ---------------------
+note "init creates missing parent directories for a nested target"
+"$ROOT/zig-out/bin/boris" init "$OUT/projects/site" >"$OUT/nested.stdout" 2>"$OUT/nested.stderr" \
+    || fail "nested init failed: $(head -3 "$OUT/nested.stderr")"
+[[ -f "$OUT/projects/site/boris.json" ]] || fail "nested init wrote no tree"
+pass "nested target materialized"
+
+# --- quiet suppresses the success chatter ----------------------------------
+note "init --quiet prints nothing on success"
+"$ROOT/zig-out/bin/boris" init --quiet "$OUT/quiet-site" >"$OUT/quiet.stdout" 2>"$OUT/quiet.stderr" \
+    || fail "quiet init failed"
+[[ -s "$OUT/quiet.stderr" ]] && fail "init --quiet still printed stderr: $(head -2 "$OUT/quiet.stderr")"
+[[ -s "$OUT/quiet.stdout" ]] && fail "init --quiet still printed stdout"
+pass "quiet silence honored"
+
+rm -rf "$OUT/site" "$OUT/site-b" "$OUT/occupied" "$OUT/projects" "$OUT/quiet-site"
 echo "boris-init: all assertions passed"

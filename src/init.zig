@@ -166,10 +166,12 @@ const files = [_]FileToWrite{
     .{ .path = "boris.json", .data = starter_profile },
 };
 
-/// Create one directory level relative to `dir`, tolerating an existing
-/// directory (the leaf may already exist when re-creating a partial tree).
+/// Create `sub_path` (including any missing parents) relative to `dir`,
+/// tolerating an existing leaf directory. `Io.Dir.createDir` creates exactly
+/// one level, so a nested target like `projects/site` needs the full-path
+/// variant to build its parents.
 fn createDirIfMissing(io: Io, dir: Io.Dir, sub_path: []const u8) !void {
-    dir.createDir(io, sub_path, .default_dir) catch |err| switch (err) {
+    dir.createDirPath(io, sub_path) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
     };
@@ -193,6 +195,12 @@ pub fn materialize(io: Io, gpa: std.mem.Allocator, target_dir: []const u8) ![]co
         return gpa.dupe(u8, "target directory is not empty; refusing to overwrite an existing site");
     }
 
+    // If any write fails midway (permission, disk, I/O), remove the partial
+    // tree so the next invocation can retry without manual cleanup. Installed
+    // only after the emptiness check: a refusal writes nothing and must never
+    // delete user content.
+    errdefer cwd.deleteTree(io, target_dir) catch {};
+
     // One level at a time: Io.Dir.createDir creates exactly one level, so
     // every parent prefix is created explicitly, in order.
     const dirs = [_][]const u8{
@@ -214,7 +222,7 @@ pub fn materialize(io: Io, gpa: std.mem.Allocator, target_dir: []const u8) ![]co
     return "";
 }
 
-pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8) u8 {
+pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, quiet: bool) u8 {
     const message = materialize(io, gpa, target_dir) catch |err| {
         std.debug.print("error: boris init failed: {s}\n", .{@errorName(err)});
         return @intFromEnum(ExitCode.io_error);
@@ -225,19 +233,21 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8) u8 {
         return @intFromEnum(ExitCode.usage);
     }
 
-    std.debug.print(
-        \\ok: initialized a Boris site in {s}
-        \\  content/index.md                  trunk page
-        \\  content/guides/getting-started.md satellite page
-        \\  content/guides/publishing.md      satellite page with a relation
-        \\  themes/boris/                     starter theme (closed layout slots)
-        \\  boris.json                        publication profile
-        \\
-        \\next steps:
-        \\  boris --input content --html-dir dist --theme themes/boris     build the site
-        \\  boris plan --profile boris.json                                inspect the plan
-        \\  boris watch --input content --html-dir dist --theme themes/boris   rebuild on change
-        \\
-    , .{target_dir});
+    if (!quiet) {
+        std.debug.print(
+            \\ok: initialized a Boris site in {s}
+            \\  content/index.md                  trunk page
+            \\  content/guides/getting-started.md satellite page
+            \\  content/guides/publishing.md      satellite page with a relation
+            \\  themes/boris/                     starter theme (closed layout slots)
+            \\  boris.json                        publication profile
+            \\
+            \\next steps:
+            \\  boris --input content --html-dir dist --theme themes/boris     build the site
+            \\  boris plan --profile boris.json                                inspect the plan
+            \\  boris watch --input content --html-dir dist --theme themes/boris   rebuild on change
+            \\
+        , .{target_dir});
+    }
     return @intFromEnum(ExitCode.success);
 }
