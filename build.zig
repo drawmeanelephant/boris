@@ -222,6 +222,19 @@ pub fn build(b: *std.Build) void {
     );
     test_version_pin_step.dependOn(&version_pin_run.step);
 
+    // Teaching-layer link guard (#394): every relative markdown link in
+    // README.md and docs/authoring-spine.md must resolve to a real file or
+    // directory, and heading anchors must match GitHub-style slugs, so the
+    // teaching layer cannot rot silently. Docs-only: no binary dependency.
+    const doc_links_run = b.addSystemCommand(&.{ "bash", "scripts/test-doc-links.sh" });
+    doc_links_run.setCwd(b.path("."));
+    doc_links_run.has_side_effects = true;
+    const test_doc_links_step = b.step(
+        "test-doc-links",
+        "Run the README + authoring-spine internal link guard",
+    );
+    test_doc_links_step.dependOn(&doc_links_run.step);
+
     // --- Pipeline + graph tests (milestone 6) ------------------------------
     // Pipeline imports aside (component validation) → needs the Oliver render seam.
     const pipeline_mod = b.createModule(.{
@@ -1200,6 +1213,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_emitter_discipline_tests.step);
     test_step.dependOn(&run_emitter_hostile_tests.step);
     test_step.dependOn(&emitter_registry.step);
+    test_step.dependOn(&doc_links_run.step);
     test_step.dependOn(&github_pages_audit_test.step);
 
     const test_harness_step = b.step(

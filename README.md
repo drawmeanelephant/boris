@@ -213,14 +213,11 @@ Boris performance should be measured on a stated machine, toolchain, content
 tree, optimization mode, and worker count. A single fast run is not a
 benchmark.
 
-The reproducible benchmark work lives under [`benchmark/`](benchmark/) and
-records raw command output, repeated-run statistics, output sizes, file counts,
-determinism, and known equivalence limits. The headline comparison uses the
-median, not the fastest run.
-
-The benchmark compares a controlled Astro 6.x/7.x pair against the Boris Filed
-dogfood build. It also preserves a historical Astro snapshot separately so
-source/config drift is not hidden behind a headline number.
+No committed benchmark harness exists yet (see
+[`docs/audits/optimization-audit.md`](docs/audits/optimization-audit.md));
+until one lands, numbers in issues and audits should name the machine,
+toolchain, content tree, optimization mode, and worker count they were
+measured with.
 
 ## Migration
 
