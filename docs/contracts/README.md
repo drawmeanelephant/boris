@@ -152,6 +152,7 @@ Supporting / historical drafts may also remain in this tree. Prefer linking the
 |----------------------------|------|
 | [acceptance.md](acceptance.md) | v0.1 acceptance checklist |
 | [v0.1-overview.md](v0.1-overview.md) | Orientation; points at canonical contracts |
+| [../authoring-spine.md](../authoring-spine.md) | Non-normative teaching path (init → publish → verify) that links into contracts |
 | [../STATUS.md](../STATUS.md) | Living status + next work |
 | [`../../CHANGELOG.md`](../../CHANGELOG.md) | Shipped history; removed campaign reviews are not normative |
 

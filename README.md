@@ -10,7 +10,7 @@ builds can also publish a deterministic XML sitemap.
 Write content locally. Build with one native binary. Get output you can inspect,
 serve, archive, or hand to another tool.
 
-[Migration guide](docs/MIGRATION.md) · [Architecture](docs/) · [Contracts](docs/contracts/) · [Status](docs/STATUS.md) · [GitHub Pages](docs/github-pages.md)
+[Authoring spine](docs/authoring-spine.md) · [Migration guide](docs/MIGRATION.md) · [Architecture](docs/) · [Contracts](docs/contracts/) · [Status](docs/STATUS.md) · [GitHub Pages](docs/github-pages.md)
 
 ## What Boris does
 
@@ -78,6 +78,10 @@ zig build
 
 The sample content is compiled to `dist/`. Open `dist/index.html` or serve the
 directory with any static file server.
+
+New to authoring? The [authoring spine](docs/authoring-spine.md) is the
+six-step teaching path from `boris init` to a published, verified site;
+it links into the contracts instead of duplicating them.
 
 Useful first commands:
 
