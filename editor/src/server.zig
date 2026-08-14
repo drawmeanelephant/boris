@@ -2,7 +2,9 @@ const std = @import("std");
 const Io = std.Io;
 const http = std.http;
 const net = std.Io.net;
+const file_api = @import("file_api.zig");
 const project = @import("project.zig");
+const recovery = @import("recovery.zig");
 const security = @import("security.zig");
 
 pub const editor_id = "boris-editor/0.1.0";
@@ -11,6 +13,7 @@ pub const Config = struct {
     project_root: []const u8,
     ui_dir: []const u8,
     boris_path: []const u8,
+    state_root: []const u8,
     port: u16 = 0,
     token: [32]u8,
 };
@@ -42,10 +45,6 @@ fn handleConnection(io: Io, allocator: std.mem.Allocator, stream: net.Stream, co
 }
 
 fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config, port: u16) !void {
-    if (request.head.method != .GET and request.head.method != .HEAD) {
-        return respondText(request, .method_not_allowed, "Method not allowed", "text/plain; charset=utf-8");
-    }
-
     const target = stripQuery(request.head.target);
     const headers = collectHeaders(request);
     if (!validHost(headers.host, port)) {
@@ -56,9 +55,55 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
         security.validate(headers, port, &config.token) catch {
             return respondText(request, .forbidden, "Forbidden", "text/plain; charset=utf-8");
         };
-        if (std.mem.eql(u8, target, "/api/health")) return serveHealth(io, allocator, request, config);
-        if (std.mem.eql(u8, target, "/api/version")) return serveVersion(io, allocator, request, config);
+        if (std.mem.eql(u8, target, "/api/health")) {
+            if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
+            return serveHealth(io, allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/version")) {
+            if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
+            return serveVersion(io, allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/files")) {
+            if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
+            return serveFileList(io, allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/files/open")) {
+            if (request.head.method != .POST) return methodNotAllowed(request, "POST");
+            return serveFileOpen(io, allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/files/save")) {
+            if (request.head.method != .POST) return methodNotAllowed(request, "POST");
+            return serveFileSave(io, allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/files/create")) {
+            if (request.head.method != .POST) return methodNotAllowed(request, "POST");
+            return serveFileCreate(io, allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/files/rename")) {
+            if (request.head.method != .POST) return methodNotAllowed(request, "POST");
+            return serveFileRename(io, allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/files/delete")) {
+            if (request.head.method != .POST) return methodNotAllowed(request, "POST");
+            return serveFileDelete(io, allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/recovery")) {
+            if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
+            return serveRecoveryList(io, allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/recovery/snapshot")) {
+            if (request.head.method != .POST) return methodNotAllowed(request, "POST");
+            return serveRecoverySnapshot(io, allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/recovery/clear")) {
+            if (request.head.method != .POST) return methodNotAllowed(request, "POST");
+            return serveRecoveryClear(io, allocator, request, config);
+        }
         return respondText(request, .not_found, "Not found", "text/plain; charset=utf-8");
+    }
+
+    if (!isReadMethod(request.head.method)) {
+        return methodNotAllowed(request, "GET, HEAD");
     }
 
     if (std.mem.eql(u8, target, "/") or std.mem.eql(u8, target, "/index.html")) {
@@ -70,6 +115,218 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
         return serveUiFile(io, allocator, request, config.ui_dir, path, false);
     }
     return respondText(request, .not_found, "Not found", "text/plain; charset=utf-8");
+}
+
+const PathRequest = struct {
+    path: []const u8,
+};
+
+const SaveRequest = struct {
+    path: []const u8,
+    content: []const u8,
+    fingerprint: []const u8,
+    recreate: bool = false,
+};
+
+const CreateRequest = struct {
+    path: []const u8,
+    content: []const u8 = "",
+};
+
+const RenameRequest = struct {
+    path: []const u8,
+    new_path: []const u8,
+};
+
+const DeleteRequest = struct {
+    path: []const u8,
+    confirmed: bool = false,
+};
+
+const SnapshotRequest = struct {
+    path: []const u8,
+    content: []const u8,
+    fingerprint: []const u8,
+};
+
+fn serveFileList(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    var files = file_api.list(allocator, io, config.project_root) catch |err| return respondApiError(request, err);
+    defer files.deinit(allocator);
+    const bytes = try std.json.Stringify.valueAlloc(allocator, .{ .files = files.entries }, .{});
+    defer allocator.free(bytes);
+    return respondJson(request, .ok, bytes);
+}
+
+fn serveFileOpen(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    const body = readJsonBody(allocator, request) catch |err| return respondApiError(request, err);
+    defer allocator.free(body);
+    const parsed = std.json.parseFromSlice(PathRequest, allocator, body, .{}) catch return respondApiError(request, error.InvalidJson);
+    defer parsed.deinit();
+    var buffer = file_api.open(allocator, io, config.project_root, parsed.value.path) catch |err| return respondApiError(request, err);
+    defer buffer.deinit(allocator);
+    return respondBuffer(allocator, request, .ok, "opened", parsed.value.path, buffer);
+}
+
+fn serveFileSave(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    const body = readJsonBody(allocator, request) catch |err| return respondApiError(request, err);
+    defer allocator.free(body);
+    const parsed = std.json.parseFromSlice(SaveRequest, allocator, body, .{}) catch return respondApiError(request, error.InvalidJson);
+    defer parsed.deinit();
+    var outcome = file_api.save(
+        allocator,
+        io,
+        config.project_root,
+        parsed.value.path,
+        parsed.value.content,
+        parsed.value.fingerprint,
+        parsed.value.recreate,
+    ) catch |err| return respondApiError(request, err);
+    defer outcome.deinit(allocator);
+    switch (outcome) {
+        .saved => |buffer| {
+            recovery.clear(io, config.state_root, parsed.value.path) catch |err| {
+                std.log.warn("could not clear recovery snapshot after save: {s}", .{@errorName(err)});
+            };
+            return respondBuffer(allocator, request, .ok, "saved", parsed.value.path, buffer);
+        },
+        .conflict => |buffer| return respondBuffer(allocator, request, .conflict, "conflict", parsed.value.path, buffer),
+        .deleted => return respondJson(request, .conflict, "{\"status\":\"deleted\"}"),
+    }
+}
+
+fn serveFileCreate(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    const body = readJsonBody(allocator, request) catch |err| return respondApiError(request, err);
+    defer allocator.free(body);
+    const parsed = std.json.parseFromSlice(CreateRequest, allocator, body, .{}) catch return respondApiError(request, error.InvalidJson);
+    defer parsed.deinit();
+    var buffer = file_api.create(allocator, io, config.project_root, parsed.value.path, parsed.value.content) catch |err| return respondApiError(request, err);
+    defer buffer.deinit(allocator);
+    return respondBuffer(allocator, request, .created, "created", parsed.value.path, buffer);
+}
+
+fn serveFileRename(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    const body = readJsonBody(allocator, request) catch |err| return respondApiError(request, err);
+    defer allocator.free(body);
+    const parsed = std.json.parseFromSlice(RenameRequest, allocator, body, .{}) catch return respondApiError(request, error.InvalidJson);
+    defer parsed.deinit();
+    file_api.rename(io, config.project_root, parsed.value.path, parsed.value.new_path) catch |err| return respondApiError(request, err);
+    recovery.clear(io, config.state_root, parsed.value.path) catch |err| {
+        std.log.warn("could not clear recovery snapshot after rename: {s}", .{@errorName(err)});
+    };
+    const bytes = try std.json.Stringify.valueAlloc(allocator, .{ .status = "renamed", .path = parsed.value.new_path }, .{});
+    defer allocator.free(bytes);
+    return respondJson(request, .ok, bytes);
+}
+
+fn serveFileDelete(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    const body = readJsonBody(allocator, request) catch |err| return respondApiError(request, err);
+    defer allocator.free(body);
+    const parsed = std.json.parseFromSlice(DeleteRequest, allocator, body, .{}) catch return respondApiError(request, error.InvalidJson);
+    defer parsed.deinit();
+    file_api.delete(io, config.project_root, parsed.value.path, parsed.value.confirmed) catch |err| return respondApiError(request, err);
+    recovery.clear(io, config.state_root, parsed.value.path) catch |err| {
+        std.log.warn("could not clear recovery snapshot after delete: {s}", .{@errorName(err)});
+    };
+    return respondJson(request, .ok, "{\"status\":\"deleted\"}");
+}
+
+fn serveRecoveryList(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    var snapshots = recovery.loadAll(allocator, io, config.state_root) catch |err| return respondApiError(request, err);
+    defer snapshots.deinit(allocator);
+    const bytes = try std.json.Stringify.valueAlloc(allocator, .{ .snapshots = snapshots.snapshots }, .{});
+    defer allocator.free(bytes);
+    return respondJson(request, .ok, bytes);
+}
+
+fn serveRecoverySnapshot(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    const body = readJsonBody(allocator, request) catch |err| return respondApiError(request, err);
+    defer allocator.free(body);
+    const parsed = std.json.parseFromSlice(SnapshotRequest, allocator, body, .{}) catch return respondApiError(request, error.InvalidJson);
+    defer parsed.deinit();
+    file_api.validatePath(parsed.value.path) catch |err| return respondApiError(request, err);
+    recovery.save(allocator, io, config.state_root, parsed.value.path, parsed.value.content, parsed.value.fingerprint) catch |err| return respondApiError(request, err);
+    return respondJson(request, .ok, "{\"status\":\"snapshotted\"}");
+}
+
+fn serveRecoveryClear(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    const body = readJsonBody(allocator, request) catch |err| return respondApiError(request, err);
+    defer allocator.free(body);
+    const parsed = std.json.parseFromSlice(PathRequest, allocator, body, .{}) catch return respondApiError(request, error.InvalidJson);
+    defer parsed.deinit();
+    file_api.validatePath(parsed.value.path) catch |err| return respondApiError(request, err);
+    recovery.clear(io, config.state_root, parsed.value.path) catch |err| return respondApiError(request, err);
+    return respondJson(request, .ok, "{\"status\":\"cleared\"}");
+}
+
+fn respondBuffer(
+    allocator: std.mem.Allocator,
+    request: *http.Server.Request,
+    status: http.Status,
+    outcome: []const u8,
+    path: []const u8,
+    buffer: file_api.Buffer,
+) !void {
+    const bytes = try std.json.Stringify.valueAlloc(allocator, .{
+        .status = outcome,
+        .path = path,
+        .content = buffer.content,
+        .fingerprint = buffer.fingerprint[0..],
+        .read_only = buffer.read_only,
+    }, .{});
+    defer allocator.free(bytes);
+    return respondJson(request, status, bytes);
+}
+
+fn readJsonBody(allocator: std.mem.Allocator, request: *http.Server.Request) ![]u8 {
+    const content_type = request.head.content_type orelse return error.UnsupportedMediaType;
+    if (!isJsonContentType(content_type)) return error.UnsupportedMediaType;
+    const max_body_bytes = file_api.max_file_bytes + 1024 * 1024;
+    if (request.head.content_length) |length| {
+        if (length > max_body_bytes) return error.PayloadTooLarge;
+    }
+    var read_buffer: [16 * 1024]u8 = undefined;
+    const reader = try request.readerExpectContinue(&read_buffer);
+    return reader.allocRemaining(allocator, .limited(max_body_bytes)) catch |err| switch (err) {
+        error.StreamTooLong => error.PayloadTooLarge,
+        else => |other| other,
+    };
+}
+
+fn respondApiError(request: *http.Server.Request, err: anyerror) !void {
+    const result: struct { status: http.Status, code: []const u8 } = switch (err) {
+        error.InvalidJson => .{ .status = .bad_request, .code = "invalid_json" },
+        error.InvalidPath => .{ .status = .bad_request, .code = "invalid_path" },
+        error.PathNotAuthorOwned => .{ .status = .forbidden, .code = "path_not_author_owned" },
+        error.FileNotFound => .{ .status = .not_found, .code = "file_not_found" },
+        error.PathAlreadyExists => .{ .status = .conflict, .code = "path_already_exists" },
+        error.ReadOnly => .{ .status = .conflict, .code = "read_only" },
+        error.ConfirmationRequired => .{ .status = .conflict, .code = "confirmation_required" },
+        error.InvalidFingerprint => .{ .status = .bad_request, .code = "invalid_fingerprint" },
+        error.InvalidUtf8 => .{ .status = .unprocessable_entity, .code = "invalid_utf8" },
+        error.FileTooLarge, error.SnapshotTooLarge, error.PayloadTooLarge => .{ .status = .payload_too_large, .code = "payload_too_large" },
+        error.UnsupportedMediaType => .{ .status = .unsupported_media_type, .code = "unsupported_media_type" },
+        error.TooManyFiles => .{ .status = .payload_too_large, .code = "too_many_files" },
+        error.CorruptRecovery => .{ .status = .internal_server_error, .code = "corrupt_recovery" },
+        else => .{ .status = .internal_server_error, .code = "io_error" },
+    };
+    var buffer: [128]u8 = undefined;
+    const body = std.fmt.bufPrint(&buffer, "{{\"error\":\"{s}\"}}", .{result.code}) catch unreachable;
+    return respondJson(request, result.status, body);
+}
+
+fn isReadMethod(method: http.Method) bool {
+    return method == .GET or method == .HEAD;
+}
+
+fn isJsonContentType(value: []const u8) bool {
+    const media_type = "application/json";
+    if (!std.ascii.startsWithIgnoreCase(value, media_type)) return false;
+    return value.len == media_type.len or value[media_type.len] == ';';
+}
+
+fn methodNotAllowed(request: *http.Server.Request, allow: []const u8) !void {
+    const headers = [_]http.Header{.{ .name = "allow", .value = allow }};
+    try request.respond("Method not allowed", .{ .status = .method_not_allowed, .keep_alive = false, .extra_headers = &headers });
 }
 
 fn serveHealth(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {

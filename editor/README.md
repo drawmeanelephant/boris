@@ -63,3 +63,40 @@ zig build --build-file editor/build.zig
 
 M0 deliberately does not edit files, display diagnostics, preview a site, or
 provide completion UI.
+
+## M2 safe file editing
+
+The safe-editing slice exposes only author-owned project files: `boris.json`
+and regular files below `content/` or `themes/`. Generated output, editor state,
+absolute paths, traversal, and symlinks are excluded. API reads and mutations
+continue to require the loopback session token, valid `Host`, and matching
+`Origin` when one is supplied.
+
+The editor now supports explicit open/save, create, no-clobber rename, confirmed
+delete, and session-local content undo/redo. Save is never autosave: the host
+compares the open-time fingerprint (mtime, size, and content hash), writes a
+temporary file in the destination directory, flushes and fsyncs it, and then
+atomically renames it. A changed, deleted, or read-only disk file is reported
+without replacing it. The conflict dialog keeps both the unsaved editor buffer
+and current disk version visible and requires an explicit choice.
+
+Dirty buffers are periodically snapshotted to the disposable OS user-cache
+state root. A later editor process labels them as recovered and requires an
+explicit Restore or Discard action; recovery data never becomes repository
+truth unless the author explicitly saves it.
+
+The authenticated file API is intentionally small:
+
+- `GET /api/files` and `POST /api/files/open` enumerate and open safe files;
+- `POST /api/files/save`, `/create`, `/rename`, and `/delete` perform explicit
+  project mutations with conflict/no-clobber checks;
+- `GET /api/recovery` and `POST /api/recovery/snapshot` or `/clear` manage
+  disposable dirty-buffer recovery.
+
+The M2 gate remains the M0 gate list above. Its host integration now exercises
+the real filesystem failure paths and a host restart, while Playwright covers
+the semantic tree, keyboard shortcuts, visible voice-command names, native
+dialogs, conflict comparison, and recovered-state labeling.
+
+M2 deliberately does not invoke Boris, parse frontmatter or Markdown, provide
+completion, autosave, Git integration, diagnostics, or preview.
