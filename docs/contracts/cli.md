@@ -92,6 +92,37 @@ their normal deterministic stderr form and exit classes; `--quiet` suppresses
 that text. `--format` and `--report` remain analysis-only flags and must not be
 accepted as an invitation to invent a second validation schema.
 
+## Version query
+
+`boris --version` (or `boris -V`) prints the compiler id and exits `0` without
+reading content or writing artifacts, short-circuiting exactly like `--help`
+(invalid trailing flags are ignored; the first of `--version`/`--help` seen
+wins). The output is exactly one line on **stdout**:
+
+```text
+boris/0.8.1
+```
+
+The id is `pipeline.compiler_id` (`src/pipeline.zig`), the same constant
+recorded as `compiler_id` in the IR `manifest.json` and the editor
+`completion.json` (`manifest.json` also carries a `compiler` field with the
+same value). Scripts and CI can therefore pin the compiler and also
+cross-check which compiler produced a given artifact set:
+
+```bash
+# Pin: refuse to build with an unexpected compiler.
+BORIS_VERSION="$(boris --version)"
+[ "$BORIS_VERSION" = "boris/0.8.1" ] || exit 2
+
+# Verify an artifact set's provenance: the recorded id must match.
+grep -q "\"compiler_id\": \"$BORIS_VERSION\"" .boris/manifest.json
+```
+
+Treat the id as opaque `name/version` text: compare it exactly rather than
+substring-matching on the version portion, since future ids may carry
+suffixes (for example the semantic-relations and cooklang variants already
+use `+`-suffixed ids internally).
+
 ## Timing report (`--timings`)
 
 `--timings` is an opt-in, observation-only flag accepted alongside any command
