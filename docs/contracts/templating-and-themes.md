@@ -106,7 +106,8 @@ load** (`Layout.split` / `loadLayout`), not later during page writes.
 
 **Empty output.** A slot omitted from the layout emits nothing, so a theme
 controls its surrounding HTML. A slot present in the layout but with no data
-for a page emits the empty fragment with no wrapper of its own:`{{children}}` on a childless page, `{{footer}}` when the theme has no `footer.html`,
+for a page emits the empty fragment with no wrapper of its own: `{{children}}` on
+a childless page, `{{footer}}` when the theme has no `footer.html`,
 `{{relations}}` / `{{backlinks}}` when the page has none. `{{asset-url}}` is
 never empty: each occurrence resolves to a real theme-owned file (missing
 file → `AssetNotFound`) or the layout fails to load.
