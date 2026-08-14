@@ -1,62 +1,82 @@
-# Manual Review - Ambiguous & Unsupported DOM Elements (Corporate Theme)
+# Manual Review — Corporate theme layout (`layouts/main.html`)
 
-This report documents all interactive, custom, or ambiguous DOM elements from the Google Stitch screens in the Modern Corporate theme project (`9485581018269572800`) that do not directly map to static Boris compiler layout slots. Following our strict zero-dependency, zero-JS constraints, these elements have been preserved in the HTML structure but are documented here for manual review.
+This report documents the interactive and custom DOM elements in the Corporate
+theme layout that do not directly map to static Boris compiler layout slots.
+The layout has **no external dependencies** — no CDN, no framework, no remote
+assets. Exactly one self-contained inline script ships with the page: the
+search integration against the compiled Boris search index. Everything else is
+static markup.
+
+Element inventory (what the shipped layout actually contains):
+
+1. Header search — **scripted, functional** (see §1).
+2. Theme toggle + settings icon buttons — **static placeholders**, accessible
+   names, no behavior (see §2).
+3. Header links — static anchors (see §3).
+
+The earlier Stitch export's `⌘K` keyboard badge, per-code-block "Copy"
+buttons, and sidebar "Download SDK" CTA are **not present** in the shipped
+layout and are not documented here.
 
 ---
 
-## 1. Top Header Search Bar with Keyboard Shortcuts
-- **HTML Element:**
+## 1. Header search (scripted, against the compiled search index)
+
+- **HTML element:** `.search-container[data-boris-search-ui]` wrapping a
+  `<form role="search" data-boris-search-form>` with a search input, a live
+  status region, and a results list:
   ```html
-  <div class="relative group">
-    <div class="absolute inset-y-0 left-3 flex items-center pointer-events-none text-on-surface-variant">
-      <span class="material-symbols-outlined text-[20px]">search</span>
-    </div>
-    <input class="bg-surface-container-low border-none rounded-full pl-10 pr-16 py-2 text-body-sm font-body-sm focus:ring-2 focus:ring-primary-container w-[280px] transition-all" placeholder="Search documentation..." type="text"/>
-    <div class="absolute inset-y-0 right-3 flex items-center pointer-events-none">
-      <kbd class="font-label-caps text-label-caps bg-surface-variant px-1.5 py-0.5 rounded text-on-surface-variant">⌘K</kbd>
-    </div>
+  <div class="search-container" data-boris-search-ui>
+    <form action="_boris/search/" method="get" role="search" data-boris-search-form>
+      <input id="site-search-input" class="search-input" name="q" type="search"
+             placeholder="Search documentation (Press '/' to focus)..."
+             aria-label="Search documentation"/>
+      <p class="site-search__status" data-boris-search-status role="status" aria-live="polite"></p>
+      <ol class="site-search__results" data-boris-search-results aria-label="Search results"></ol>
+    </form>
   </div>
   ```
-- **Context:** Stitch renders a rounded search bar in the top header with a visual `⌘K` keyboard shortcut badge.
-- **Static Boris Mapping:** Unsupported. Purely visual placeholder. Statically, there is no search index, and the `⌘K` keyboard trigger event is not wired up without JavaScript.
-- **Recommendation:** Retain as a premium layout placeholder.
+- **Behavior:** the inline `<script>` wires the search UI to the compiler's
+  `_boris/search/search-index.json` (the `<main data-boris-search-root>`
+  element makes Boris emit it). It derives the site-root prefix from the
+  emitted stylesheet `href`, validates the index (`boris-rendered-search-index`
+  schema 1), scores heading/text/code matches, renders up to 12 results with
+  excerpts, and announces results through the `aria-live` status region.
+  `'/'` focuses the input; `Escape` clears and blurs it; submitting renders
+  results in place. No external requests; `credentials: "same-origin"` only.
+- **Fallback:** if the index is missing or unreadable, the status region reads
+  "Search index unavailable." and the page still renders — the failure is
+  contained to the search UI.
+- **Static mapping:** not a compiler slot; the search index itself is a
+  compiled artifact, but the widget is author markup.
 
----
+## 2. Theme toggle + settings icon buttons (static placeholders)
 
-## 2. Interactive Code Copy Button
-- **HTML Element:**
+- **HTML elements:** two `.icon-btn` buttons, each with an accessible name:
   ```html
-  <button class="copy-btn">Copy</button>
+  <button class="icon-btn" aria-label="Toggle theme">…moon svg…</button>
+  <button class="icon-btn" aria-label="Settings">…gear svg…</button>
   ```
-- **Context:** Every `.code-block` contains an overlay "Copy" button that appears on hover, mimicking the original design.
-- **Static Boris Mapping:** Unsupported. Purely visual placeholder. Since the theme is strictly zero-JS, clicking this button does not copy text to the system clipboard.
-- **Recommendation:** Preserve the button and its hover CSS rules. If clipboard copy is required, it can be wired up in a subsequent stage using a tiny, self-contained inline script.
+- **Context:** the header actions area mimics theme and settings controls from
+  the reference design.
+- **Static mapping:** unsupported — no JavaScript toggles `<html>`'s `light`
+  class or opens a settings panel. Clicking is a no-op. They are retained for
+  layout fidelity and are named for assistive technology.
+- **Recommendation:** keep as static placeholders. A theme toggle could be
+  wired to the existing `class="light"` root in a later stage, or replaced by
+  a `prefers-color-scheme` stylesheet.
 
----
+## 3. Header links (static anchors)
 
-## 3. Light / Dark Theme & Language Selection Buttons
-- **HTML Elements:**
+- **HTML elements:** `.header-links` with four hardcoded anchors:
   ```html
-  <button class="icon-btn">
-    <svg class="w-6" ...><path d="M20.354 15.354A9 9 0 018.646..."></path></svg>
-  </button>
-  <button class="icon-btn">
-    <svg class="w-6" ...><path d="M12 2a10 10..."></path></svg>
-  </button>
+  <a class="header-link active" href="#">Documentation</a>
+  <a class="header-link" href="#">Reference</a>
+  <a class="header-link" href="#">Guides</a>
+  <a class="header-link" href="#">Community</a>
   ```
-- **Context:** Two icon buttons (a moon icon and a globe icon) in the header represent theme toggles and language selection.
-- **Static Boris Mapping:** Unsupported. Since we have a strict zero-JS constraint, clicking them does not trigger dynamic theme or translation switching.
-- **Recommendation:** Retain for high layout fidelity.
-
----
-
-## 4. Sidebar "Download SDK" CTA Button
-- **HTML Element:**
-  ```html
-  <button class="w-full bg-primary text-on-primary py-sm px-md rounded-lg font-body-sm text-body-sm font-medium hover:bg-primary-container transition-all flex items-center justify-center gap-2">
-    Download SDK
-  </button>
-  ```
-- **Context:** An eye-catching blue call-to-action button placed at the bottom of the sidebar.
-- **Static Boris Mapping:** Unsupported. It is rendered statically in the sidebar, but doesn't have an active link.
-- **Recommendation:** Keep as a placeholder or convert to a static anchor `<a>` linking to an SDK download file in future deployments.
+- **Context:** top-level navigation for the documentation space.
+- **Static mapping:** partial — the anchors are hardcoded and `.active` cannot
+  move per page without per-section layouts.
+- **Recommendation:** retain; replace `href="#"` with real routes when the
+  example gains content.
