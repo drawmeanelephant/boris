@@ -75,7 +75,9 @@ Publication facts include:
 - selected content root and input format;
 - publication-profile identity and site URL, site title, and site description;
 - selected publication adapter and its resolved public location, including the
-  origin and base path used by a hosted target;
+  origin and base path used by a hosted target; a platform is three small
+  adapters (location provider, deployer, packaging rules) per the
+  [publication platform model](publication-platforms.md);
 - named HTML targets, public/non-public target status, target output roots,
   themes, layouts, and layout rules;
 - selection and target-relative path for sitemap, RSS, and `llms.txt`;
