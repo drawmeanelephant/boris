@@ -1853,6 +1853,27 @@ fn publishStageTree(
 /// same typed helpers as publication. Rendered bytes are deliberately
 /// discarded; search, output link audit, inventories, checks, claims, Touch
 /// Atlas, and Proof Pack remain publication phases.
+/// Report link-audit findings on stderr and fail the pipeline. Shared by the
+/// publish path (staged/live overlay audit) and the validation path (in-memory
+/// audit) so the two diagnostics cannot drift.
+fn reportLinkAuditFindings(findings: []const link_audit.Finding) error{LinkAuditFailed} {
+    for (findings) |f| {
+        std.debug.print("error: {s}: {s}:{d}: {s}=\"{s}\" {s}\n", .{
+            f.code.name(),
+            f.source,
+            f.line,
+            f.attribute,
+            f.target,
+            switch (f.code) {
+                .EROUTEESCAPE => "climbs above the output root and can never be served [point it at a published output, or drop the reference]",
+                .EPUBLICATIONLOCATION => "does not match the declared publication origin/base path [use a target-relative URL or include the Pages base path]",
+                else => "does not resolve to a published output [fix the path, or publish the file it names]",
+            },
+        });
+    }
+    return error.LinkAuditFailed;
+}
+
 fn validatePrepublicationTarget(
     io: Io,
     gpa: std.mem.Allocator,
@@ -1883,6 +1904,37 @@ fn validatePrepublicationTarget(
     var heading_snapshot = heading_built[1];
     defer heading_snapshot.deinit();
 
+    // Output link audit, in memory. `validate` writes nothing, so instead of
+    // the publish path's staged/live overlay it audits the exact assembled
+    // page bytes (same render helper + layout splice as `writePageWithSlots`)
+    // against the intended output set: every page plus published content,
+    // theme, and sitemap assets. This keeps validate authoritative for
+    // EROUTEMISSING / EROUTEESCAPE / EPUBLICATIONLOCATION without ever
+    // creating a target or stage directory.
+    var audit_assets: std.ArrayList([]const u8) = .empty;
+    defer audit_assets.deinit(gpa);
+    const audit_content_outs = try content_assets.collectOutputPaths(gpa);
+    defer gpa.free(audit_content_outs);
+    try audit_assets.appendSlice(gpa, audit_content_outs);
+    for (theme_bundle.assets) |a| try audit_assets.append(gpa, a.rel_path);
+    if (options.sitemap_path) |path| try audit_assets.append(gpa, path);
+
+    var intended: std.StringHashMapUnmanaged(void) = .{};
+    defer intended.deinit(gpa);
+    for (db.items()) |page| try intended.put(gpa, page.output_path, {});
+    for (audit_assets.items) |path| try intended.put(gpa, path, {});
+
+    var findings: std.ArrayList(link_audit.Finding) = .empty;
+    defer link_audit.freeFindings(gpa, &findings);
+    var link_audit_opts = link_audit.Options{
+        .publication_location = options.publication_location,
+        .allow_markdown_literals = options.allow_markdown_literals,
+    };
+    if (options.timings) |t| {
+        link_audit_opts.resolution_counter = t.counterPtr(.link_resolutions);
+        link_audit_opts.fast_path_counter = t.counterPtr(.fast_path_hits);
+    }
+
     var stats: CompileStats = .{};
     var doc_arena = std.heap.ArenaAllocator.init(gpa);
     defer doc_arena.deinit();
@@ -1894,7 +1946,7 @@ fn validatePrepublicationTarget(
             stats.last_reset_capacity = doc_arena.queryCapacity();
         }
 
-        _ = try renderPageSlots(
+        const slots = try renderPageSlots(
             io,
             gpa,
             content_dir,
@@ -1910,12 +1962,30 @@ fn validatePrepublicationTarget(
                 .page_assets = &content_assets.pages[page_index],
             },
         );
+
+        // Assemble the exact published bytes in memory (same splice ordering
+        // as `writePageWithSlotsOpts`) and audit them while the arena is live.
+        if (options.timings) |t| t.start(.link_audit);
+        var sink = assemble.HoldUntilFlush.init(gpa);
+        defer sink.deinit();
+        try assemble.spliceToHoldSlots(page_layouts[page_index], slots, &sink);
+        try link_audit.auditDocumentWithOptions(
+            gpa,
+            &intended,
+            page.output_path,
+            sink.materialized.?,
+            link_audit_opts,
+            &findings,
+        );
+        if (options.timings) |t| t.stop(.link_audit);
+
         if (options.timings) |t| t.bump(.page_reads, 1);
         stats.pages_attempted += 1;
         const cap = doc_arena.queryCapacity();
         if (cap > stats.peak_whiteboard_capacity) stats.peak_whiteboard_capacity = cap;
     }
     if (options.timings) |t| t.stop(.render);
+    if (findings.items.len != 0) return reportLinkAuditFindings(findings.items);
 
     // Sitemap configuration is source/target validity, but sitemap publication
     // is not. Render its deterministic bytes in memory to exercise the exact
@@ -2702,23 +2772,7 @@ fn compilePagesInner(
         if (options.timings) |t| t.start(.link_audit);
         try link_audit.audit(io, gpa, stage_dir, dist_dir, live_page_paths, audit_assets.items, link_audit_opts, &findings);
         if (options.timings) |t| t.stop(.link_audit);
-        if (findings.items.len != 0) {
-            for (findings.items) |f| {
-                std.debug.print("error: {s}: {s}:{d}: {s}=\"{s}\" {s}\n", .{
-                    f.code.name(),
-                    f.source,
-                    f.line,
-                    f.attribute,
-                    f.target,
-                    switch (f.code) {
-                        .EROUTEESCAPE => "climbs above the output root and can never be served [point it at a published output, or drop the reference]",
-                        .EPUBLICATIONLOCATION => "does not match the declared publication origin/base path [use a target-relative URL or include the Pages base path]",
-                        else => "does not resolve to a published output [fix the path, or publish the file it names]",
-                    },
-                });
-            }
-            return error.LinkAuditFailed;
-        }
+        if (findings.items.len != 0) return reportLinkAuditFindings(findings.items);
     }
 
     // Build the inventory from authoritative producer paths and the staged/live
@@ -5471,6 +5525,125 @@ test "validateHtmlSiteMulti shares prepublication semantics without output" {
     try compileHtmlSiteMulti(io, gpa, &targets, options);
     try cwd.access(io, index_path, .{});
     try cwd.access(io, sitemap_path, .{});
+}
+
+test "validateHtmlSiteMulti runs the output link audit in memory" {
+    // Regression for #430: `boris validate` must reject the same two poison
+    // classes the publish path rejects — a root-relative URL escaping the
+    // declared publication base path (EPUBLICATIONLOCATION) and a local
+    // reference resolving to no published output (EROUTEMISSING) — without
+    // writing a target or stage directory.
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-validate-link-audit-test", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<html><body>{{content}}</body></html>");
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\status: published
+        \\---
+        \\# Home
+        \\
+    );
+    // Poison A: a project-site root-relative URL that omits the base path.
+    try writeTreeFile(io, work, "content/escape.md",
+        \\---
+        \\title: Escape
+        \\status: published
+        \\---
+        \\# Escape
+        \\
+        \\[outside](/outside-boris)
+        \\
+    );
+    // Poison B: a local reference that resolves to no published output.
+    try writeTreeFile(io, work, "content/broken.md",
+        \\---
+        \\title: Broken
+        \\status: published
+        \\---
+        \\# Broken
+        \\
+        \\[missing](./no-such-page.md)
+        \\
+    );
+    try writeTreeFile(io, work, "content/ok.md",
+        \\---
+        \\title: Ok
+        \\status: published
+        \\---
+        \\# Ok
+        \\
+        \\[home](./index.html)
+        \\
+    );
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const stage = try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{dist});
+    defer gpa.free(stage);
+
+    var location = try github_pages.parse(
+        gpa,
+        "https://drawmeanelephant.github.io/boris/",
+        "https://drawmeanelephant.github.io",
+        "/boris",
+    );
+    defer location.deinit(gpa);
+
+    const targets = [_]target_mod.TargetSpec{
+        .{ .name = "default", .output_dir = dist },
+    };
+    const options: CompileOptions = .{
+        .content_root = content_path,
+        .layout_path = layout_path,
+        .publication_location = &location,
+        .quiet = true,
+    };
+
+    // Both poison classes fail validation as content failures (the multi-target
+    // wrapper aggregates LinkAuditFailed into MultiTargetCompilationFailed, the
+    // same exit-1 class the CLI maps), and neither the target nor its stage
+    // appears. The diagnostics above are emitted by the shared reporter, so the
+    // find text must show both the EPUBLICATIONLOCATION and EROUTEMISSING poisons.
+    try std.testing.expectError(error.MultiTargetCompilationFailed, validateHtmlSiteMulti(io, gpa, &targets, options));
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, dist, .{}));
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, stage, .{}));
+
+    // A second run re-reads source, so fixing the poisons must flip the result.
+    try writeTreeFile(io, work, "content/escape.md",
+        \\---
+        \\title: Escape
+        \\status: published
+        \\---
+        \\# Escape
+        \\
+        \\[home](/boris/index.html)
+        \\
+    );
+    try writeTreeFile(io, work, "content/broken.md",
+        \\---
+        \\title: Broken
+        \\status: published
+        \\---
+        \\# Broken
+        \\
+        \\[home](./index.html)
+        \\
+    );
+    try validateHtmlSiteMulti(io, gpa, &targets, options);
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, dist, .{}));
+    try std.testing.expectError(error.FileNotFound, cwd.access(io, stage, .{}));
 }
 
 test "compileHtmlSiteMulti - success, validation, and isolation" {

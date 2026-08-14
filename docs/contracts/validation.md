@@ -71,8 +71,9 @@ target + sitemap configuration
 → layout selection and loading
 → theme/footer and content-local asset inventory
                          ├─ validate: heading harvest → shared page render/slot
-                         │  preparation → in-memory sitemap render → discard
-                         │  all bytes and return
+                         │  preparation → in-memory output link audit over the
+                         │  assembled page bytes → in-memory sitemap render →
+                         │  discard all bytes and return
                          └─ build: create target/stage → heading/fingerprint work
                             → shared page render/slot preparation + writes
                             → sitemap/search/audit/commit/cache/evidence
@@ -104,6 +105,15 @@ slots, footer content, and content-asset URL rewriting all live on that path.
 `validate` therefore renders pages into its normal per-page in-memory arena and
 discards the prepared slots. Sitemap bytes are likewise rendered in memory and
 discarded so its exact size/count/URL rules cannot drift from `build`.
+
+Because the rendered HTML exists in memory anyway, `validate` also runs the
+same output link audit as `build`, over the exact assembled page bytes (the
+same render helper and layout splice) against the intended output set: every
+page plus published content, theme, and sitemap assets. `EROUTEMISSING`,
+`EROUTEESCAPE`, and `EPUBLICATIONLOCATION` therefore fail validation exactly
+as they fail compilation — without a target or stage directory ever appearing.
+The audit's diagnostics are the shared `build`/`validate` diagnostic form,
+emitted by the same reporter.
 
 This is not a temporary-directory build. Validation returns before the first
 target or sibling stage directory is created.
@@ -164,7 +174,9 @@ nor folded into `validate`.
 The following require committed/staged output, an existing deployment, or a
 separate policy contract and are not source validity:
 
-- rendered-search artifact generation and final-output route/link audit;
+- rendered-search artifact generation (the search index is a written
+  projection, not a validity question; the output link audit itself runs
+  in memory during validation);
 - cache reuse, parallel worker behavior, watch recovery, and commit atomicity;
 - artifact inventory, publication checks, claims, Touch Atlas, and Proof Pack;
 - deployed URLs, network behavior, redirects, HTTP metadata, or indexing;
