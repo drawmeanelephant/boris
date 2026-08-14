@@ -8,10 +8,10 @@
 </head>
 <body>
   <header class="topbar">
-    <a class="logo" href="{{asset-url assets/node-tracker.css}}">Boris<span>2</span></a>
+    <span class="logo" title="Static showcase control">Boris<span>2</span></span>
     <nav class="topnav" aria-label="Account and site links">
-      <a href="{{asset-url assets/node-tracker.css}}">Front Page</a>
-      <a href="{{asset-url assets/node-tracker.css}}">New Nodes</a>
+      <span class="static-control" title="Static showcase control">Front Page</span>
+      <span class="static-control" title="Static showcase control">New Nodes</span>
       <span class="static-control" title="Static showcase control">Log In</span>
       <span class="static-control" title="Static showcase control">Create Account</span>
     </nav>
@@ -20,7 +20,7 @@
   <div class="page-wrap">
     <main class="node-main">
       <div class="crumbs">{{breadcrumb}}</div>
-      <p class="node-search">(thing) by <a href="{{asset-url assets/node-tracker.css}}">AdminUser</a></p>
+      <p class="node-search">(thing) by <span class="static-control" title="Static showcase control">AdminUser</span></p>
 
       <article class="node-body">
         <div class="node-copy">{{content}}</div>
@@ -49,7 +49,7 @@
       </nav>
       <section class="nodelet">
         <h2>Personal Nodelet</h2>
-        <div class="nodelet-body">Welcome, Anonymous Coward<br><a href="{{asset-url assets/node-tracker.css}}">Log in</a> or register</div>
+        <div class="nodelet-body">Welcome, Anonymous Coward<br><span class="static-control" title="Static showcase control">Log in</span> or register</div>
       </section>
     </aside>
   </div>

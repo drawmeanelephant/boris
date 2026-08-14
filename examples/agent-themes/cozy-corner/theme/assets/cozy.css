@@ -17,6 +17,8 @@
 body { margin: 0; padding: 1.25rem 0; background: var(--paper); color: var(--ink); font: 14px/1.65 var(--sans); }
 a { color: var(--rust); text-decoration: underline; text-underline-offset: 3px; }
 a:hover, a:focus-visible { color: var(--rust-bright); }
+/* Static showcase controls (nav/blogroll placeholders that are not links). */
+.static-control { opacity: .75; cursor: not-allowed; }
 :focus-visible { outline: 2px dashed var(--slate); outline-offset: 3px; background: #f0f4f5; }
 h1, h2, h3 { color: var(--rust); font-family: var(--serif); font-weight: normal; line-height: 1.2; }
 h1 { margin: 0; font-size: clamp(2rem, 6vw, 3.25rem); }
