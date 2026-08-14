@@ -10,11 +10,10 @@
 #   zig build test-doc-links
 #
 # Skipped by design: fenced code blocks and inline code spans (code is not
-# navigation), external protocols (http/https/mailto/ftp/file), the generated
-# per-module/tool evidence code maps (docs/boris/, docs/tools/), and fixture
-# test data (content/ and expected/ subtrees under docs/contracts/fixtures/)
-# whose "links" are fixture placeholders. Archival-by-intent links are
-# allowed explicitly in the ARCHIVAL list below.
+# navigation) and external protocols (http/https/mailto/ftp/file). Whole-tree
+# and link-level exclusions live in scripts/doc-links-exclusions.txt, with a
+# comment per entry — see that file for why docs/boris/, docs/tools/, and
+# fixture test data are excluded and which links are archival by intent.
 #
 # NOTE: bash 3.2 compatibility is deliberate (macOS /bin/bash); no
 # associative arrays, no bash-4+isms — a vacuous pass would defeat the guard.
@@ -60,22 +59,43 @@ has_heading_slug() {
   return 1
 }
 
-# Archival-by-intent links: docs that deliberately keep dead links as a
-# record (e.g. v0.1-overview.md's removed Apex-era paths, noted in the doc
-# itself). Format: "source_file|target" — exact match only.
-ARCHIVAL=(
-  "docs/contracts/v0.1-overview.md|apex-abi.md"
-)
+EXCLUSIONS_FILE="scripts/doc-links-exclusions.txt"
 
-# Trees skipped by design: the generated per-module/tool evidence code maps
-# (docs/boris/, docs/tools/) and fixture test data (content/ and expected/
-# subtrees under docs/contracts/fixtures/), whose "links" are fixture
-# placeholders rather than navigable documentation.
+# Load the exclusion manifest into TREES (glob patterns) and LINKS
+# ("src|target" exact matches). A missing, empty, or unparseable manifest is
+# a hard failure: the guard must never vacuously pass because its blind
+# spots were accidentally widened.
+load_exclusions() {
+  local line
+  TREES=()
+  LINKS=()
+  [ -f "$EXCLUSIONS_FILE" ] || {
+    echo "doc-links: missing exclusion manifest $EXCLUSIONS_FILE" >&2
+    exit 1
+  }
+  while IFS= read -r line; do
+    case "$line" in
+      ""|\#*) continue ;;
+      "tree "*) TREES+=("${line#tree }") ;;
+      "link "*) LINKS+=("${line#link }") ;;
+      *) echo "doc-links: unparseable exclusion line: '$line' (in $EXCLUSIONS_FILE)" >&2; exit 1 ;;
+    esac
+  done < "$EXCLUSIONS_FILE"
+  if [ "${#TREES[@]}" -eq 0 ] && [ "${#LINKS[@]}" -eq 0 ]; then
+    echo "doc-links: exclusion manifest $EXCLUSIONS_FILE has no entries" >&2
+    exit 1
+  fi
+}
+
+# Is this repo-relative markdown path inside an excluded tree? Matches the
+# manifest's `tree` globs (case-style globs match across path separators).
 is_skipped_tree() {
-  case "$1" in
-    docs/boris/*|docs/tools/*) return 0 ;;
-    docs/contracts/fixtures/*/content/*|docs/contracts/fixtures/*/expected/*) return 0 ;;
-  esac
+  local glob
+  for glob in "${TREES[@]}"; do
+    case "$1" in
+      $glob) return 0 ;;
+    esac
+  done
   return 1
 }
 
@@ -91,7 +111,7 @@ check_file() {
       http://*|https://*|mailto:*|ftp://*|file://*|//*) continue ;;  # external
     esac
     skip=false
-    for entry in "${ARCHIVAL[@]}"; do
+    for entry in "${LINKS[@]}"; do
       if [ "$entry" = "$src|$target" ]; then skip=true; break; fi
     done
     $skip && continue
@@ -128,7 +148,7 @@ check_file() {
         line = substr(line, RSTART + RLENGTH)
       }
       # reference-style definitions outside code spans
-      while (match(line, /^[[:space:]]*\[[^]]*\]:[[:space:]]*\S+/)) {
+      while (match(line, /^[[:space:]]*\[[^]]*\]:[[:space:]]*[^[:space:]]+/)) {
         t = substr(line, RSTART, RLENGTH)
         sub(/^[[:space:]]*\[[^]]*\]:[[:space:]]*/, "", t)
         sub(/[[:space:]]*$/, "", t)
@@ -138,6 +158,8 @@ check_file() {
     }
   ' "$src")
 }
+
+load_exclusions
 
 note "walking internal links in README.md and the whole docs/ tree"
 check_file README.md
