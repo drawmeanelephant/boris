@@ -74,6 +74,28 @@ const render_options = oliver.html.RenderOptions{
 };
 ```
 
+## Cooklang pin (second Oliver dependency)
+
+Boris also pins Oliver's Cooklang stack (`.dependencies.oliver_cooklang` in
+`build.zig.zon`) for the `.cook` input mode. It is a **separate revision**
+because the two feature sets live on different branches today:
+
+| Field | Value |
+|-------|-------|
+| Repository | <https://github.com/drawmeanelephant/oliver> |
+| Branch | `main` |
+| Commit | `bcf167fa99d0267d015d8c14a9434150e77b14fe` |
+| Package hash | `oliver-0.0.0-LOsZkEhLGgDlZpXvoutXDnGHv9UgMQzvH1q9MPgL6EDA` |
+| Zig | 0.16.0 |
+
+The Cooklang parser is a pure typed `Recipe` frontend (ingredients, cookware,
+timers, steps, sections, notes, frontmatter fence) — see
+[`cooklang-compatibility.md`](cooklang-compatibility.md) for how Boris consumes
+it. This pin is temporary: when the renderer-extension embargo lifts and
+[oliver#39](https://github.com/drawmeanelephant/oliver/pull/39) merges, the two
+Oliver revisions converge on `main`, the two pins collapse into one, and the
+`.oliver_cooklang` dependency is deleted.
+
 ## Upgrade procedure (mechanical)
 
 Because Oliver is young and moves quickly, upgrades are a deliberate, boring
