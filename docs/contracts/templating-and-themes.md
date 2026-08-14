@@ -76,9 +76,13 @@ The vocabulary has two construct kinds with different multiplicity rules:
 
 - **Slots** — the ten closed markers in §3.1. Each slot marker may occur at
   most **once** per layout; a duplicate is a hard layout error.
-- **`asset-url` helper** (§3.2) — argument-bearing and deliberately
-  **repeatable**: it may appear any number of times, and each occurrence
-  copies the asset and emits one page-relative URL.
+- **`asset-url` helper** (§3.2) — argument-bearing and **repeatable**, with
+  bounded multiplicity: up to **16** occurrences per layout, and the total
+  layout segment count (static text + slots + asset-urls) is capped at
+  **32**; beyond either bound is a hard layout error
+  (`LayoutTooManyAssetUrls` / `LayoutTooManySegments`). Each occurrence
+  emits one page-relative URL; the referenced file is copied once per
+  distinct path.
 
 ### 3.1 Slots
 
@@ -102,11 +106,10 @@ load** (`Layout.split` / `loadLayout`), not later during page writes.
 
 **Empty output.** A slot omitted from the layout emits nothing, so a theme
 controls its surrounding HTML. A slot present in the layout but with no data
-for a page emits the empty fragment with no wrapper of its own: `{{children}}`
-on a childless page, `{{footer}}` when the theme has no `footer.html`,
+for a page emits the empty fragment with no wrapper of its own:`{{children}}` on a childless page, `{{footer}}` when the theme has no `footer.html`,
 `{{relations}}` / `{{backlinks}}` when the page has none. `{{asset-url}}` is
-never empty: each occurrence copies a real theme-owned file or fails layout
-load.
+never empty: each occurrence resolves to a real theme-owned file (missing
+file → `AssetNotFound`) or the layout fails to load.
 
 `metadata` is intentionally boring and deterministic. A future implementation
 may emit a stable fragment such as:
