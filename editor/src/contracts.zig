@@ -48,6 +48,34 @@ pub const TextDiagnostic = struct {
     message: []const u8,
 };
 
+pub const Diagnostic = struct {
+    severity: Severity,
+    code: []const u8,
+    message: []const u8,
+    remediation: []const u8,
+    source_path: ?[]const u8,
+    line: ?u32,
+    column: ?u32,
+    id: ?[]const u8,
+};
+
+pub const EndpointType = enum { page, source };
+
+pub const AnalysisFinding = struct {
+    code: []const u8,
+    endpoint_type: EndpointType,
+    value: []const u8,
+    count: u32,
+    source_path: ?[]const u8,
+    line: ?u32,
+    column: ?u32,
+};
+
+pub const Endpoint = struct {
+    endpoint_type: EndpointType,
+    value: []const u8,
+};
+
 pub const supported_ir_versions = [_][]const u8{ "0.2.0", "0.3.0", "0.4.0" };
 
 pub fn readCompletion(allocator: std.mem.Allocator, bytes: []const u8) Error!Document {
@@ -74,6 +102,8 @@ pub fn readBuildReport(allocator: std.mem.Allocator, bytes: []const u8) Error!Do
     try requireInteger(&document, "pageCount");
     try requireInteger(&document, "errorCount");
     try requireArray(&document, "diagnostics");
+    const diagnostic_views = try extractDiagnostics(allocator, &document);
+    allocator.free(diagnostic_views);
     return withVersion(document, version);
 }
 
@@ -110,6 +140,12 @@ pub fn readDocumentationIntelligence(allocator: std.mem.Allocator, bytes: []cons
     try requireArray(&document, "edges");
     try requireArray(&document, "findings");
     try requireArray(&document, "diagnostics");
+    const diagnostic_views = try extractDiagnostics(allocator, &document);
+    allocator.free(diagnostic_views);
+    const finding_views = try extractFindings(allocator, &document);
+    allocator.free(finding_views);
+    const impact_views = try extractImpact(allocator, &document);
+    allocator.free(impact_views);
     return withVersion(document, "0.2.0");
 }
 
@@ -165,6 +201,76 @@ pub fn parseTextDiagnostic(line_bytes: []const u8) Error!TextDiagnostic {
     };
 }
 
+pub fn extractDiagnostics(allocator: std.mem.Allocator, document: *const Document) Error![]Diagnostic {
+    if (document.kind != .build_report and document.kind != .documentation_intelligence) return error.InvalidField;
+    const value = rootObject(document).get("diagnostics") orelse return error.MissingField;
+    if (value != .array) return error.InvalidField;
+    const result = allocator.alloc(Diagnostic, value.array.items.len) catch return error.InvalidField;
+    errdefer allocator.free(result);
+    for (value.array.items, 0..) |item, index| {
+        if (item != .object) return error.InvalidDiagnostic;
+        const object = &item.object;
+        const severity_text = try objectString(object, "severity");
+        const severity = std.meta.stringToEnum(Severity, severity_text) orelse return error.InvalidDiagnostic;
+        const code = try objectString(object, "code");
+        if (code.len == 0) return error.InvalidDiagnostic;
+        result[index] = .{
+            .severity = severity,
+            .code = code,
+            .message = try objectString(object, "message"),
+            .remediation = try objectString(object, "remediation"),
+            .source_path = try objectOptionalString(object, "sourcePath"),
+            .line = try objectOptionalU32(object, "line"),
+            .column = try objectOptionalU32(object, "column"),
+            .id = try objectOptionalString(object, "id"),
+        };
+    }
+    return result;
+}
+
+pub fn extractFindings(allocator: std.mem.Allocator, document: *const Document) Error![]AnalysisFinding {
+    if (document.kind != .documentation_intelligence) return error.InvalidField;
+    const value = rootObject(document).get("findings") orelse return error.MissingField;
+    if (value != .array) return error.InvalidField;
+    const result = allocator.alloc(AnalysisFinding, value.array.items.len) catch return error.InvalidField;
+    errdefer allocator.free(result);
+    for (value.array.items, 0..) |item, index| {
+        if (item != .object) return error.InvalidField;
+        const object = &item.object;
+        const endpoint_text = try objectString(object, "type");
+        const endpoint_type = std.meta.stringToEnum(EndpointType, endpoint_text) orelse return error.InvalidField;
+        result[index] = .{
+            .code = try objectString(object, "code"),
+            .endpoint_type = endpoint_type,
+            .value = try objectString(object, "value"),
+            .count = try objectU32(object, "count"),
+            .source_path = try objectOptionalString(object, "sourcePath"),
+            .line = try objectOptionalU32(object, "line"),
+            .column = try objectOptionalU32(object, "column"),
+        };
+    }
+    return result;
+}
+
+pub fn extractImpact(allocator: std.mem.Allocator, document: *const Document) Error![]Endpoint {
+    if (document.kind != .documentation_intelligence) return error.InvalidField;
+    const value = rootObject(document).get("impact") orelse return error.MissingField;
+    if (value == .null) return allocator.alloc(Endpoint, 0) catch return error.InvalidField;
+    if (value != .array) return error.InvalidField;
+    const result = allocator.alloc(Endpoint, value.array.items.len) catch return error.InvalidField;
+    errdefer allocator.free(result);
+    for (value.array.items, 0..) |item, index| {
+        if (item != .object) return error.InvalidField;
+        const object = &item.object;
+        const endpoint_text = try objectString(object, "type");
+        result[index] = .{
+            .endpoint_type = std.meta.stringToEnum(EndpointType, endpoint_text) orelse return error.InvalidField,
+            .value = try objectString(object, "value"),
+        };
+    }
+    return result;
+}
+
 const LocatedTail = struct {
     source_path: []const u8,
     line: ?u32,
@@ -176,7 +282,6 @@ fn parseLocatedTail(tail: []const u8) ?LocatedTail {
     const message_separator = std.mem.indexOf(u8, tail, ": ") orelse return null;
     const locus = tail[0..message_separator];
     const message = tail[message_separator + 2 ..];
-    if (!looksLikeSourcePath(locus)) return null;
 
     var pieces = std.mem.splitBackwardsScalar(u8, locus, ':');
     const last = pieces.first();
@@ -191,7 +296,7 @@ fn parseLocatedTail(tail: []const u8) ?LocatedTail {
         const maybe_line = std.fmt.parseInt(u32, second_last, 10) catch null;
         if (maybe_line) |line| {
             const source_len = locus.len - last.len - second_last.len - 2;
-            if (source_len == 0 or line == 0 or column == 0) return null;
+            if (source_len == 0 or line == 0 or column == 0 or !looksLikeSourcePath(locus[0..source_len])) return null;
             return .{
                 .source_path = locus[0..source_len],
                 .line = line,
@@ -200,6 +305,7 @@ fn parseLocatedTail(tail: []const u8) ?LocatedTail {
             };
         }
     }
+    if (!looksLikeSourcePath(locus)) return null;
     return .{
         .source_path = locus,
         .line = null,
@@ -231,6 +337,36 @@ fn withVersion(document: Document, version: []const u8) Document {
 
 fn rootObject(document: *const Document) *const std.json.ObjectMap {
     return &document.parsed.value.object;
+}
+
+fn objectString(object: *const std.json.ObjectMap, key: []const u8) Error![]const u8 {
+    const value = object.get(key) orelse return error.MissingField;
+    if (value != .string) return error.InvalidField;
+    return value.string;
+}
+
+fn objectOptionalString(object: *const std.json.ObjectMap, key: []const u8) Error!?[]const u8 {
+    const value = object.get(key) orelse return error.MissingField;
+    return switch (value) {
+        .null => null,
+        .string => |text| text,
+        else => error.InvalidField,
+    };
+}
+
+fn objectU32(object: *const std.json.ObjectMap, key: []const u8) Error!u32 {
+    const value = object.get(key) orelse return error.MissingField;
+    if (value != .integer or value.integer < 0 or value.integer > std.math.maxInt(u32)) return error.InvalidField;
+    return @intCast(value.integer);
+}
+
+fn objectOptionalU32(object: *const std.json.ObjectMap, key: []const u8) Error!?u32 {
+    const value = object.get(key) orelse return error.MissingField;
+    return switch (value) {
+        .null => null,
+        .integer => |number| if (number < 0 or number > std.math.maxInt(u32)) error.InvalidField else @intCast(number),
+        else => error.InvalidField,
+    };
 }
 
 fn supportedIrVersion(document: *const Document) Error![]const u8 {

@@ -100,3 +100,40 @@ dialogs, conflict comparison, and recovered-state labeling.
 
 M2 deliberately does not invoke Boris, parse frontmatter or Markdown, provide
 completion, autosave, Git integration, diagnostics, or preview.
+
+## M3 Boris commands and problems
+
+The host exposes one authenticated `POST /api/commands/run` endpoint backed by
+a fixed command allowlist: validate, IR build, HTML build, check, and impact.
+The UI cannot supply argv or a working directory. Commands run against saved
+repository files, so all controls are disabled while the active buffer is
+dirty.
+
+IR build diagnostics come only from Boris's `.boris/build-report.json`.
+Check and impact consume Boris Documentation Intelligence reports under
+`.boris/`. Until the HTML-path machine-readable diagnostics contract lands,
+validate and HTML build use a bounded stderr adapter and label source positions
+as best-effort. Exit 1 (content), 2 (usage/configuration), and 3 (I/O/system)
+remain distinct.
+
+Problems are grouped by content-relative source, severity, and Boris code.
+Named buttons navigate to Boris-reported UTF-8 byte positions and copy a
+bounded, metadata-only diagnostic packet. Packets contain no source excerpt or
+absolute project root. Analysis findings and impact endpoints are displayed as
+Boris-owned facts; the editor does not infer either.
+
+The M3 gate adds:
+
+```bash
+./editor/scripts/test-diagnostics.sh \
+  ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+```
+
+The seeded black-box test compares the host response with Boris's generated
+build report, exercises the stderr fallback, and preserves real CLI exits 1,
+2, and 3. Playwright covers keyboard invocation, visible voice names,
+accessibility grouping, exact UTF-8 navigation, fallback labeling, and packet
+copying.
+
+M3 deliberately does not add layout diagnostics, LSP, autofix, arbitrary
+commands, source parsing, autosave, or preview serving.

@@ -34,7 +34,7 @@ h1 { margin-bottom: 0; font-size: clamp(2rem, 5vw, 3.5rem); letter-spacing: -0.0
 
 main { display: grid; grid-template-columns: minmax(16rem, 0.7fr) minmax(24rem, 1.3fr); gap: 1rem; padding: 2rem clamp(1rem, 4vw, 4rem); }
 section { min-height: 11rem; padding: 1.5rem; background: #fff; border: 1px solid #ccd6cf; border-radius: 0.75rem; }
-.project-pane, .source-pane { min-height: 32rem; }
+.project-pane, .source-pane, .problems-pane { min-height: 32rem; }
 .file-actions, .source-actions, .dialog-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; }
 .file-actions { margin: 1.25rem 0; }
 .file-tree { max-height: 22rem; overflow: auto; border-top: 1px solid #d8e0da; }
@@ -50,6 +50,29 @@ textarea[readonly] { background: #f3f4f3; }
 input { width: 100%; padding: 0.7rem; border: 1px solid #82958b; border-radius: 0.35rem; }
 .buffer-state { margin-top: 0.65rem; color: #3d554b; font-weight: 700; }
 .buffer-state.warning { color: #842a1f; }
+.inline-problems { margin-top: 1rem; padding: 0.85rem; border: 1px solid #d8a39a; border-radius: 0.4rem; background: #fff7f4; }
+.inline-problems h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+.inline-problems ul, .problem-group ul, .analysis-results ul { margin: 0; padding: 0; list-style: none; }
+.inline-problems li + li { margin-top: 0.4rem; }
+.inline-problems button { width: 100%; text-align: left; }
+
+.problems-pane { grid-column: 1 / -1; }
+.problems-heading { display: flex; justify-content: space-between; align-items: start; gap: 1rem; }
+.command-result { flex: 0 0 auto; padding: 0.4rem 0.65rem; border-radius: 999px; color: #13563e; background: #dff1e8; font-weight: 700; }
+.command-result.failure { color: #7d241b; background: #ffe6e1; }
+.command-bar { display: flex; gap: 0.55rem; flex-wrap: wrap; margin: 1rem 0; }
+.impact-command { max-width: 38rem; margin: 1rem 0; }
+.impact-command > div { display: grid; grid-template-columns: minmax(12rem, 1fr) auto; gap: 0.55rem; }
+.warning-text, .fallback-notice { padding: 0.75rem; border-left: 0.3rem solid #bd7020; background: #fff4db; }
+.problem-groups { display: grid; gap: 0.8rem; margin-top: 1rem; }
+.problem-group { min-height: 0; padding: 1rem; border-color: #d8a39a; background: #fffaf8; }
+.problem-group h3 { overflow-wrap: anywhere; }
+.problem-card + .problem-card { margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid #e6cbc5; }
+.problem-card p { margin-bottom: 0.55rem; }
+.confidence { color: #5c6863; font-size: 0.9rem; }
+.problem-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; }
+.analysis-results { min-height: 0; margin-top: 1rem; padding: 1rem; background: #f4f8f5; }
+.analysis-results li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.45rem 0; }
 
 dialog { width: min(52rem, calc(100% - 2rem)); max-height: calc(100vh - 3rem); overflow: auto; padding: 1.5rem; border: 1px solid #82958b; border-radius: 0.75rem; box-shadow: 0 1.25rem 4rem #11231d55; }
 dialog::backdrop { background: #10251dc7; }
@@ -63,7 +86,10 @@ footer { padding: 1rem clamp(1rem, 4vw, 4rem) 2rem; }
   .connection, .recovery-banner ul { margin-top: 1rem; }
   .section-nav { overflow-x: auto; }
   main, .comparison { grid-template-columns: 1fr; }
-  .project-pane, .source-pane { min-height: auto; }
+  .project-pane, .source-pane, .problems-pane { min-height: auto; }
+  .problems-heading, .analysis-results li { display: block; }
+  .command-result { display: inline-block; }
+  .impact-command > div { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

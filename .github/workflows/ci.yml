@@ -132,6 +132,9 @@ jobs:
       - name: Loopback host integration
         run: ./editor/scripts/test-host.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
 
+      - name: Boris diagnostics integration
+        run: ./editor/scripts/test-diagnostics.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+
   migration-lab-test:
     name: migration-lab-test (Linux)
     needs: changes
