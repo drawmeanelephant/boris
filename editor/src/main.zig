@@ -34,6 +34,12 @@ pub fn main(init: std.process.Init) u8 {
     };
     defer allocator.free(canonical_project);
 
+    const boris_path = resolveBorisPath(allocator, init.io, options.boris_path) catch |err| {
+        std.debug.print("boris-editor: cannot resolve --boris '{s}': {s}\n", .{ options.boris_path, @errorName(err) });
+        return 2;
+    };
+    defer allocator.free(boris_path);
+
     const found = project.discover(init.io, canonical_project) catch |err| {
         std.debug.print("boris-editor: project discovery failed: {s}\n", .{@errorName(err)});
         return 3;
@@ -60,7 +66,7 @@ pub fn main(init: std.process.Init) u8 {
     server.serve(init.io, allocator, .{
         .project_root = canonical_project,
         .ui_dir = options.ui_dir,
-        .boris_path = options.boris_path,
+        .boris_path = boris_path,
         .port = options.port,
         .token = token,
     }) catch |err| {
@@ -111,11 +117,41 @@ fn printUsage() void {
     , .{});
 }
 
+/// Resolves the --boris value into a path the host can spawn. A bare command
+/// name (no path separator) is passed through for PATH lookup; a path-like
+/// value is canonicalized against the editor's current directory so that child
+/// processes spawned with a different cwd (the project root) still find it.
+fn resolveBorisPath(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![:0]u8 {
+    if (std.mem.indexOfAny(u8, path, "/\\") == null) return allocator.dupeZ(u8, path);
+    return std.Io.Dir.cwd().realPathFileAlloc(io, path, allocator) catch return error.BorisPathUnresolvable;
+}
+
 test "CLI accepts one project and explicit host options" {
     const options = try parseOptions(&.{ "boris-editor", "site", "--port", "0", "--boris", "./zig-out/bin/boris" });
     try std.testing.expectEqualStrings("site", options.project_root);
     try std.testing.expectEqual(@as(u16, 0), options.port);
     try std.testing.expectError(error.UnexpectedArgument, parseOptions(&.{ "boris-editor", "a", "b" }));
+}
+
+test "boris path resolution canonicalizes paths and passes through command names" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+
+    const bare = try resolveBorisPath(allocator, io, "boris");
+    defer allocator.free(bare);
+    try std.testing.expectEqualStrings("boris", bare);
+
+    var temp = std.testing.tmpDir(.{});
+    defer temp.cleanup();
+    try temp.dir.writeFile(io, .{ .sub_path = "boris.bin", .data = "" });
+    const absolute = try temp.dir.realPathFileAlloc(io, "boris.bin", allocator);
+    defer allocator.free(absolute);
+    const resolved = try resolveBorisPath(allocator, io, absolute);
+    defer allocator.free(resolved);
+    try std.testing.expectEqualStrings(absolute, resolved);
+    try std.testing.expect(std.fs.path.isAbsolute(resolved));
+
+    try std.testing.expectError(error.BorisPathUnresolvable, resolveBorisPath(allocator, io, "no/such/binary"));
 }
 
 test {

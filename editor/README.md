@@ -35,7 +35,10 @@ a random session token in its URL fragment, and serves:
 Every API request requires the random token and a loopback `Host`; any supplied
 `Origin` must match the session origin. The state-root path is computed from the
 canonical project path under the OS user cache directory. M0 does not create
-that directory and has no project-content write endpoint.
+that directory and has no project-content write endpoint. A path-like `--boris`
+value is canonicalized against the editor's current directory at startup (so
+`./zig-out/bin/boris` keeps working from inside the project); a bare command
+name is resolved through `PATH` instead.
 
 The adapter accepts only the published Boris versions for `completion.json`,
 `build-report.json`, `manifest.json`, `graph.json`, Documentation Intelligence,
