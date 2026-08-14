@@ -754,6 +754,32 @@ test "layout multi-slot nav breadcrumb title toc" {
     try std.testing.expectError(error.UnknownLayoutMarker, Layout.split("{{nope}}{{content}}"));
 }
 
+test "layout asset-url and segment bounds are hard errors" {
+    // 17 asset-url occurrences exceeds max_asset_urls (16): the helper is
+    // repeatable but bounded (contract templating-and-themes.md §3).
+    var many_urls: std.ArrayList(u8) = .empty;
+    defer many_urls.deinit(std.testing.allocator);
+    try many_urls.appendSlice(std.testing.allocator, "<main>{{content}}</main>");
+    for (0..max_asset_urls + 1) |_| try many_urls.appendSlice(std.testing.allocator, "{{asset-url assets/a.css}}");
+    try std.testing.expectError(error.TooManyAssetUrls, Layout.split(many_urls.items));
+
+    // The segment bound (32, static + slots + asset-urls) is independent of
+    // the asset-url count: interleaved static text hits TooManyLayoutSegments
+    // first.
+    var many_segments: std.ArrayList(u8) = .empty;
+    defer many_segments.deinit(std.testing.allocator);
+    try many_segments.appendSlice(std.testing.allocator, "<main>{{content}}</main>");
+    for (0..max_segments) |_| try many_segments.appendSlice(std.testing.allocator, " x {{asset-url assets/a.css}}");
+    try std.testing.expectError(error.TooManyLayoutSegments, Layout.split(many_segments.items));
+
+    // The bound is not an off-by-one: max_asset_urls occurrences load fine.
+    var at_limit: std.ArrayList(u8) = .empty;
+    defer at_limit.deinit(std.testing.allocator);
+    try at_limit.appendSlice(std.testing.allocator, "{{content}}");
+    for (0..max_asset_urls) |_| try at_limit.appendSlice(std.testing.allocator, "{{asset-url assets/a.css}}");
+    _ = try Layout.split(at_limit.items);
+}
+
 test "layout metadata footer and asset-url plan" {
     const raw =
         \\<link href="{{asset-url assets/css/docs.css}}">{{metadata}}{{footer}}{{content}}

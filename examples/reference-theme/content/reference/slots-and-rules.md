@@ -23,8 +23,12 @@ This page is a compact checklist for authors building a theme like this one.
 | `{{footer}}` | Theme `footer.html` |
 | `{{asset-url …}}` | Page-relative theme asset URL |
 
-Every known marker may appear **at most once**. Unknown markers fail layout
-load.
+Slots are single-use: each may appear **at most once** per layout, and
+`{{content}}` must appear exactly once. The `{{asset-url …}}` helper is
+**repeatable** — this theme uses it twice (stylesheet + mark). Unknown
+markers fail layout load. A slot omitted from the layout (or empty for a
+page, e.g. `{{children}}` on a childless page) emits nothing, so the theme
+controls its surrounding HTML.
 
 ## Layout-rule variation
 

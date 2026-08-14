@@ -139,7 +139,8 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
 1. Template (e.g. `themes/boris/layouts/main.html`) is scanned once for **known** markers.
    Load layout once at startup into **long-lived** ownership.
 2. **Required marker:** exactly one `{{content}}` (page body: Oliver + Aside HTML).
-3. **Optional markers** (each at most once):
+3. **Optional slot markers** (each at most once; full vocabulary in
+   `templating-and-themes.md` §3.1):
 
    | Marker | Value |
    |--------|--------|
@@ -148,15 +149,27 @@ cleanup). `compile` runs `free_all` in a per-page `defer` **after** that return.
    | `{{title}}` | Page title, or entity id when title is absent (HTML-escaped text) |
    | `{{toc}}` | In-page outline from **this page’s** body headings (h1–h3 with `id`) |
    | `{{children}}` | Direct frozen children of the current page (or empty) |
+   | `{{metadata}}` | Status / tags fragment; unset fields omitted |
+   | `{{relations}}` | Outgoing validated semantic relations (or empty) |
+   | `{{backlinks}}` | Incoming relations derived from the validated set (or empty) |
+   | `{{footer}}` | Theme `footer.html` contents, or empty when the theme has none |
+
+   The `{{asset-url PATH}}` helper is **repeatable** — it may appear more
+   than once (up to 16 occurrences per layout; total layout segments ≤ 32;
+   beyond either bound the layout fails to load with
+   `LayoutTooManyAssetUrls` / `LayoutTooManySegments`) and is not subject
+   to the at-most-once slot rule.
 
 4. Missing `{{content}}` → hard error **before** content compilation.
-5. Duplicate of any known marker → hard error **before** content compilation.
+5. Duplicate of any slot marker → hard error **before** content compilation.
 6. Unknown `{{…}}` token → hard error **before** content compilation (fail loud).
 7. Split into an ordered list of **static** slices and **slot** placeholders
    (`assemble.Layout`), all views into the long-lived layout buffer.
 8. Final assembly streams sequential writes only: static segments and per-page
-   slot fragments (content, and nav/breadcrumb/title/toc/children when those slots exist).
-   **No** full-page mega-string concatenation in the product assembly path.
+   slot fragments (content, and any of nav/breadcrumb/title/toc/children/
+   metadata/relations/backlinks/footer present in the layout), plus one URL
+   per `asset-url` occurrence. **No** full-page mega-string concatenation in
+   the product assembly path.
 
 ### Graph gate (HTML path)
 
