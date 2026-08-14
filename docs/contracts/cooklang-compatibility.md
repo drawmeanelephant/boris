@@ -205,9 +205,12 @@ Everything below therefore falls into one of three classes.
 crashes on malformed input and Boris never synthesizes a second parser to
 second-guess it. An unterminated `{`, `(`, or `[-` degrades to literal text and
 carries a structured warning with Oliver's stable code and the exact position
-(`unclosed-braces`, `unclosed-paren`, `unclosed-block-comment`; the body-only
-frontmatter-fence case reports `unclosed-frontmatter`). The literal is escaped
-like any other author text, so it cannot forge document structure.
+(`unclosed-braces`, `unclosed-preparation`, `unclosed-block-comment`; the
+body-only frontmatter-fence case reports `unclosed-frontmatter`). A `(` only
+counts as a construct after an ingredient's `{quantity}` — a bare `(` in prose
+is not Cooklang syntax and stays silent. The literal is escaped like any other
+author text, so it cannot forge document structure. The exact warning lines are
+pinned below in [Diagnostic output](#diagnostic-output).
 
 **Degrades silently to literal text.** `{{ … }}` macros, `[[ … ]]` wiki links,
 raw HTML, an empty ingredient or cookware name (a bare `@{}` or `#{}`), and a
@@ -224,6 +227,49 @@ output, all checked by the seam after the parse:
 - a recipe reference that is not a valid page id (below)
 - a token name longer than `max_token_name_bytes`, or more than
   `max_ingredient_count` / `max_cookware_count` / `max_timer_count` items
+
+### Diagnostic output
+
+Malformed structure never fails the build: an unterminated `{`, `(`, or `[-`
+degrades to literal text and the build completes with **exit code 0**. Each
+construct prints one warning line on stderr carrying Oliver's stable code, the
+content-root-relative path, and the body-relative line and column of the
+opening delimiter. Verified against the pinned Oliver revision (see
+[oliver-renderer.md](oliver-renderer.md)):
+
+| Code | Trigger |
+|---|---|
+| `unclosed-braces` | `{` with no `}` on the line |
+| `unclosed-preparation` | `(` after an ingredient's `{quantity}`, with no `)` on the line |
+| `unclosed-block-comment` | `[-` with no `-]` in the step |
+| `unclosed-frontmatter` | a body-only `---` fence with no close |
+
+The pipeline path (IR, RAG, `check`, `impact`) reports through the structured
+diagnostic formatter, which appends the remediation hint; the HTML path prints
+the same line without it, once at load time:
+
+```text
+# pipeline:  boris --cooklang --input content --out .boris
+warning: ECOOKLANG: broken.cook:12:6: unclosed-block-comment: unclosed block comment `[-` (no `-]` in the step) [Fix or remove the malformed Cooklang syntax]
+warning: ECOOKLANG: index.cook:8:11: unclosed-braces: unclosed `{` (no `}` on the line) [Fix or remove the malformed Cooklang syntax]
+
+# html:  boris --cooklang --input content --html-dir dist --html-layout layouts/main.html
+warning: ECOOKLANG: broken.cook:12:6: unclosed-block-comment: unclosed block comment `[-` (no `-]` in the step)
+warning: ECOOKLANG: index.cook:8:11: unclosed-braces: unclosed `{` (no `}` on the line)
+```
+
+Both examples come from the same two-page corpus: `broken.cook` line 12 is
+`Stir [- never closed.` and `index.cook` line 8 is `Mix @flour{200%g to the
+bowl.`. Both builds succeed (`exit 0`): the IR run writes `manifest.json`,
+`graph.json` and `build-report.json`, and the HTML run writes every page.
+
+The column points at the opening delimiter — the author's own character — and
+the pipeline orders diagnostics by path, then line, then column. The HTML path
+prints in page order at load time, once per warning: its validation pass is the
+only one that runs for every page, so even the cache-reused pages of an
+incremental build (which skip render entirely) still report. (Graph
+diagnostics on the *adapted* Markdown are a separate matter; see Known
+limitations.)
 
 ### Bounds
 

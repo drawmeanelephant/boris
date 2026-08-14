@@ -114,6 +114,10 @@ pub fn bodyForInput(
     body: []const u8,
     body_offset: usize,
     source_path: []const u8,
+    /// Print degraded-structure warnings to stderr. Only the load-time
+    /// validation call in `compile.zig` prints; the render and heading-harvest
+    /// passes pass false so each warning surfaces exactly once per build.
+    print_warnings: bool,
 ) !AdaptedBody {
     switch (input_format) {
         .markdown => return .{ .markdown = body },
@@ -142,14 +146,18 @@ pub fn bodyForInput(
                 return error.CooklangFailed;
             }
             // Oliver's structural warnings degrade to literal text; they
-            // surface as warnings, not failures.
-            for (adapted.warnings) |w| {
-                std.debug.print("warning: ECOOKLANG: {s}:{d}:{d}: {s}\n", .{
-                    source_path,
-                    sourceLineAt(source, body_offset) + w.line - 1,
-                    w.column,
-                    w.message,
-                });
+            // surface as warnings, not failures. The load-time validation call
+            // passes `print_warnings = true`; the render and heading-harvest
+            // passes stay silent so the build prints each warning once.
+            if (print_warnings) {
+                for (adapted.warnings) |w| {
+                    std.debug.print("warning: ECOOKLANG: {s}:{d}:{d}: {s}\n", .{
+                        source_path,
+                        sourceLineAt(source, body_offset) + w.line - 1,
+                        w.column,
+                        w.message,
+                    });
+                }
             }
             return .{ .markdown = adapted.markdown, .recipe = adapted.recipe };
         },
@@ -178,7 +186,7 @@ pub fn renderSource(
         try printParserDiagnostic(gpa, source_path, pd);
         return error.ParseFailed;
     }
-    const body = (try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path)).markdown;
+    const body = (try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path, false)).markdown;
 
     // Graph-backed Markdown documentation links → canonical page URLs
     // (pre-render). This runs before include expansion so source-relative links

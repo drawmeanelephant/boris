@@ -522,9 +522,15 @@ pub fn loadAndPromoteFormat(
         // consumer for it — only the IR path in `pipeline.zig` promotes and
         // emits it. Adapting into `db.retain` to fill an unread field would pin
         // a second copy of every recipe body for the whole build.
+        //
+        // This is the one pass that prints degraded-structure warnings: it
+        // runs once per build and always covers every page, including the
+        // cache-reused pages an incremental build skips at render time. The
+        // render and heading-harvest passes pass `print_warnings = false`, so
+        // each warning surfaces exactly once.
         var body_arena = std.heap.ArenaAllocator.init(gpa);
         defer body_arena.deinit();
-        _ = try html_body.bodyForInput(body_arena.allocator(), input_format, source, parsed.doc.body, parsed.doc.body_offset, disc.source_path);
+        _ = try html_body.bodyForInput(body_arena.allocator(), input_format, source, parsed.doc.body, parsed.doc.body_offset, disc.source_path, true);
 
         const final_id: []const u8 = if (parsed.doc.meta.id) |override| override else disc.entity_id;
         try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset, .{});

@@ -1062,6 +1062,15 @@ test "seam: an unterminated block comment warns and degrades" {
     try std.testing.expect(std.mem.indexOf(u8, result.warnings[0].message, "unclosed-block-comment") != null);
 }
 
+test "seam: an unclosed preparation warns and degrades" {
+    const gpa = std.testing.allocator;
+    const result = try toMarkdown("Add @salt{1}(peeled and never closed.\n", gpa);
+    try std.testing.expect(result.isOk());
+    defer freeResult(gpa, result);
+    try std.testing.expectEqual(@as(usize, 1), result.warnings.len);
+    try std.testing.expect(std.mem.indexOf(u8, result.warnings[0].message, "unclosed-preparation") != null);
+}
+
 test "seam: an invalid recipe reference is refused" {
     const gpa = std.testing.allocator;
     const result = try toMarkdown("Pour over with @./sauces/pepper-oil|bad{1}.\n", gpa);
