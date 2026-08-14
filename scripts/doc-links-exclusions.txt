@@ -1,0 +1,39 @@
+# Boris documentation link-guard exclusions
+# (read by scripts/test-doc-links.sh, wired as `zig build test-doc-links`).
+#
+# Format: one entry per line; blank lines and '#' comments are ignored.
+# Entry forms:
+#   tree <glob>         skip whole subtrees whose "links" are fixture or test
+#                       placeholders, not navigable documentation. <glob> is
+#                       matched against the repo-relative markdown path.
+#   link <src>|<target> allow one archival-by-intent link: exact match on
+#                       "source file|target".
+#
+# Every entry must be preceded by a comment saying why it exists, so adding
+# an exclusion is a deliberate, reviewed act rather than a silent widening
+# of the guard's blind spot.
+
+# tree docs/boris/ — generated per-module evidence code map (the "code map"
+#   of issue #394): its surface/evidence/review packs use fixture-name
+#   "links" (boris-source-1.md, INDEX.md, dest, path, href) that describe
+#   hypothetical test files, not navigable documentation.
+tree docs/boris/*
+
+# tree docs/tools/ — generated tool evidence packs (migration-lab and the
+#   other standalone tools): the same fixture-placeholder "links" as
+#   docs/boris/, in the same generated format.
+tree docs/tools/*
+
+# tree docs/contracts/fixtures/*/content/* — fixture INPUT data (test
+#   corpora like archive-layout-audit and emoji-kitchen-prototype): their
+#   links are expected site pages or hostile test values, not documentation.
+tree docs/contracts/fixtures/*/content/*
+
+# tree docs/contracts/fixtures/*/expected/* — fixture GOLDEN output data:
+#   expected trees and byte-exact reports, same reason as content/.
+tree docs/contracts/fixtures/*/expected/*
+
+# link docs/contracts/v0.1-overview.md|apex-abi.md — archival by intent:
+#   the doc itself records its removed Apex-era paths (superseded by Oliver)
+#   as a deliberate record; the target file is gone by design.
+link docs/contracts/v0.1-overview.md|apex-abi.md
