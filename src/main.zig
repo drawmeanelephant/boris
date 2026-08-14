@@ -44,6 +44,16 @@ const ProdRunner = struct {
         cli.printUsage();
     }
 
+    /// Print the compiler version to stdout. Errors are swallowed: the
+    /// version is informational and must never change the exit code.
+    pub fn printVersion(self: *const @This()) void {
+        const bytes = pipeline.compiler_id ++ "\n";
+        var stdout_buffer: [128]u8 = undefined;
+        var stdout_writer = std.Io.File.stdout().writer(self.io, &stdout_buffer);
+        stdout_writer.interface.writeAll(bytes) catch return;
+        stdout_writer.interface.flush() catch {};
+    }
+
     pub fn reportUsage(_: *const @This(), err: cli.ParseError, bad_arg: ?[]const u8) void {
         cli.printParseError(err, bad_arg);
         cli.printUsage();
@@ -1054,9 +1064,13 @@ pub fn main(init: std.process.Init) u8 {
 
 // --- main-level exit-code mapping tests ------------------------------------
 
-/// Silent runner for CLI-only tests: no help/usage/pipeline I/O.
+/// Silent runner for CLI-only tests: no help/version/usage/pipeline I/O.
 const SilentRunner = struct {
     pipeline_calls: usize = 0,
+
+    pub fn printVersion(self: *@This()) void {
+        _ = self;
+    }
 
     pub fn printHelp(self: *@This()) void {
         _ = self;
@@ -1080,6 +1094,8 @@ test "runArgs: documented exit code mapping" {
 
     try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--help" }, &runner));
     try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "-h" }, &runner));
+    try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "--version" }, &runner));
+    try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{ "boris", "-V" }, &runner));
     try std.testing.expectEqual(@as(usize, 0), runner.pipeline_calls);
 
     try std.testing.expectEqual(@as(u8, 0), cli.runArgs(&.{"boris"}, &runner));

@@ -50,6 +50,8 @@ pub const AnalysisFormat = enum {
 pub const Options = struct {
     /// When true, print help and exit successfully (no pipeline).
     help: bool = false,
+    /// When true, print the compiler version and exit successfully (no pipeline).
+    version: bool = false,
     /// Suppress progress and success chatter on stderr (`--quiet`).
     ///
     /// This never suppresses errors or fatal diagnostics. A nonzero exit must
@@ -309,10 +311,23 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
-        if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
-            // Help short-circuits: do not validate remaining args.
+        if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h") or
+            std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V"))
+        {
+            // Help/version short-circuits: do not validate remaining args.
+            // The first of the two flags wins (they share one exit path).
+            // Release any targets accumulated before the flag: the returned
+            // Options carries an empty list (no allocation), and the caller's
+            // deinit would never see the accumulated one (errdefer only fires
+            // on error), so `--target X --help`/`--version` must not leak it.
+            for (targets.items) |t| {
+                if (t.layout_rules.len > 0) gpa.free(t.layout_rules);
+            }
+            targets.deinit(gpa);
+            const wants_help = std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h");
             return .{
-                .help = true,
+                .help = wants_help,
+                .version = !wants_help,
                 .quiet = quiet,
                 .timings = saw_timings,
                 .mode = .ir,
@@ -1229,6 +1244,7 @@ pub fn printUsage() void {
         \\  --fail-on-unreferenced Make check fail when it reports unreferenced pages
         \\  --profile PATH       Selected publication profile for `plan`
         \\  -h, --help          Show this help and exit 0
+        \\  -V, --version       Print the compiler version (`boris/<ver>`) and exit 0
         \\
         \\HTML artifacts (success; Oliver + layout splice):
         \\  <html-dir>/**/*.html   or   <each-target-dir>/**/*.html
@@ -1341,6 +1357,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
     while (i < args.len) : (i += 1) {
         const a = args[i];
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) continue;
+        if (std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V")) continue;
         if (std.mem.eql(u8, a, "--quiet") or
             std.mem.eql(u8, a, "--timings") or
             std.mem.eql(u8, a, "--rag") or
@@ -1396,11 +1413,16 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
 
 /// Dispatch parsed options through a small injectable runner.
 ///
+/// - Version: calls `runner.printVersion()` and returns success; never calls `run`.
 /// - Help: calls `runner.printHelp()` and returns success; never calls `run`.
 /// - Build modes: calls `runner.run(opts)` and returns its exit code.
 ///
-/// `runner` must provide `printHelp` and `run` methods.
+/// `runner` must provide `printVersion`, `printHelp`, and `run` methods.
 pub fn execute(opts: Options, runner: anytype) ExitCode {
+    if (opts.version) {
+        runner.printVersion();
+        return .success;
+    }
     if (opts.help) {
         runner.printHelp();
         return .success;
@@ -2020,20 +2042,55 @@ test "parse: --watch with HTML implies incremental" {
     try expect(o4.incremental);
 }
 
-test "parse: help short-circuits and does not validate trailing junk" {
+test "parse: help/version short-circuit and do not validate trailing junk" {
     var o = try parseOptions(std.testing.allocator, &.{ "boris", "--help", "--not-a-real-flag", "--rag", "--no-rag" });
     defer o.deinit(std.testing.allocator);
     try expect(o.help);
+    try expect(!o.version);
 
     var o2 = try parseOptions(std.testing.allocator, &.{ "boris", "-h" });
     defer o2.deinit(std.testing.allocator);
     try expect(o2.help);
+    try expect(!o2.version);
+
+    var o3 = try parseOptions(std.testing.allocator, &.{ "boris", "--version", "--not-a-real-flag" });
+    defer o3.deinit(std.testing.allocator);
+    try expect(o3.version);
+    try expect(!o3.help);
+
+    var o4 = try parseOptions(std.testing.allocator, &.{ "boris", "-V" });
+    defer o4.deinit(std.testing.allocator);
+    try expect(o4.version);
+    try expect(!o4.help);
+
+    // First flag wins when both appear.
+    var o5 = try parseOptions(std.testing.allocator, &.{ "boris", "--version", "--help" });
+    defer o5.deinit(std.testing.allocator);
+    try expect(o5.version);
+    try expect(!o5.help);
+
+    // Targets accumulated before the short-circuit must be released, not
+    // leaked: std.testing.allocator fails the test if the allocation survives.
+    var o6 = try parseOptions(std.testing.allocator, &.{ "boris", "--target", "a=dist", "--help" });
+    defer o6.deinit(std.testing.allocator);
+    try expect(o6.help);
+    try expectEqual(@as(usize, 0), o6.targets.items.len);
+
+    var o7 = try parseOptions(std.testing.allocator, &.{ "boris", "--target", "a=dist", "--version" });
+    defer o7.deinit(std.testing.allocator);
+    try expect(o7.version);
+    try expectEqual(@as(usize, 0), o7.targets.items.len);
 }
 
 test "execute: help does not invoke pipeline (dependency injection)" {
     const Spy = struct {
         pipeline_calls: usize = 0,
         help_calls: usize = 0,
+        version_calls: usize = 0,
+
+        pub fn printVersion(self: *@This()) void {
+            self.version_calls += 1;
+        }
 
         pub fn printHelp(self: *@This()) void {
             self.help_calls += 1;
@@ -2055,10 +2112,45 @@ test "execute: help does not invoke pipeline (dependency injection)" {
     try expectEqual(@as(usize, 0), spy.pipeline_calls);
 }
 
+test "execute: version does not invoke pipeline (dependency injection)" {
+    const Spy = struct {
+        pipeline_calls: usize = 0,
+        help_calls: usize = 0,
+        version_calls: usize = 0,
+
+        pub fn printVersion(self: *@This()) void {
+            self.version_calls += 1;
+        }
+
+        pub fn printHelp(self: *@This()) void {
+            self.help_calls += 1;
+        }
+
+        pub fn run(self: *@This(), opts: Options) ExitCode {
+            _ = opts;
+            self.pipeline_calls += 1;
+            return .success;
+        }
+    };
+
+    var spy: Spy = .{};
+    var opts = try parseOptions(std.testing.allocator, &.{ "boris", "--version" });
+    defer opts.deinit(std.testing.allocator);
+    const code = execute(opts, &spy);
+    try expectEqual(ExitCode.success, code);
+    try expectEqual(@as(usize, 1), spy.version_calls);
+    try expectEqual(@as(usize, 0), spy.help_calls);
+    try expectEqual(@as(usize, 0), spy.pipeline_calls);
+}
+
 test "execute: build mode invokes pipeline once" {
     const Spy = struct {
         pipeline_calls: usize = 0,
         last_mode: ?Mode = null,
+
+        pub fn printVersion(self: *@This()) void {
+            _ = self;
+        }
 
         pub fn printHelp(self: *@This()) void {
             _ = self;
@@ -2080,10 +2172,15 @@ test "execute: build mode invokes pipeline once" {
     try expectEqual(Mode.rag, spy.last_mode.?);
 }
 
-test "runArgs: usage errors exit 2; help exits 0" {
+test "runArgs: usage errors exit 2; help/version exit 0" {
     const Spy = struct {
         gpa: std.mem.Allocator = std.testing.allocator,
         pipeline_calls: usize = 0,
+        version_calls: usize = 0,
+
+        pub fn printVersion(self: *@This()) void {
+            self.version_calls += 1;
+        }
 
         pub fn printHelp(self: *@This()) void {
             _ = self;
@@ -2104,6 +2201,11 @@ test "runArgs: usage errors exit 2; help exits 0" {
 
     var spy: Spy = .{};
     try expectEqual(@as(u8, 0), runArgs(&.{ "boris", "--help" }, &spy));
+    try expectEqual(@as(usize, 0), spy.pipeline_calls);
+
+    try expectEqual(@as(u8, 0), runArgs(&.{ "boris", "--version" }, &spy));
+    try expectEqual(@as(u8, 0), runArgs(&.{ "boris", "-V" }, &spy));
+    try expectEqual(@as(usize, 2), spy.version_calls);
     try expectEqual(@as(usize, 0), spy.pipeline_calls);
 
     try expectEqual(@as(u8, 2), runArgs(&.{ "boris", "--rag", "--no-rag" }, &spy));
@@ -2321,6 +2423,10 @@ test "runArgs: invalid target parse errors exit 2" {
     const Spy = struct {
         gpa: std.mem.Allocator = std.testing.allocator,
         pipeline_calls: usize = 0,
+
+        pub fn printVersion(self: *@This()) void {
+            _ = self;
+        }
 
         pub fn printHelp(self: *@This()) void {
             _ = self;
