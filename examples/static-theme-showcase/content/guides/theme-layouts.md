@@ -42,6 +42,12 @@ fallback → product default. Rule declaration order never changes the winner.
 - `{{title}}`, `{{nav}}`, `{{breadcrumb}}`, `{{toc}}`, `{{metadata}}`, `{{footer}}`
 - `{{asset-url assets/…}}` — page-relative URL + copy into the target
 
+Slots are single-use (each at most once per layout; `{{content}}` exactly
+once), while `{{asset-url …}}` is **repeatable** — the layouts here emit both
+the stylesheet and the mark through it. A slot that is empty for a page
+(e.g. `{{children}}` on a childless page, `{{footer}}` when the theme has no
+`footer.html`) emits nothing, so the theme controls its surrounding HTML.
+
 ## Verify the winner
 
 Each layout stamps `data-layout` on `<html>` and `<body>`:

@@ -70,7 +70,15 @@ configuration format and cannot turn layouts into executable content.
 
 Templates are UTF-8 HTML files. Boris scans the complete file before compiling
 content. Static bytes are streamed unchanged; slot values are generated per
-page. Every known marker may occur at most once.
+page.
+
+The vocabulary has two construct kinds with different multiplicity rules:
+
+- **Slots** — the ten closed markers in §3.1. Each slot marker may occur at
+  most **once** per layout; a duplicate is a hard layout error.
+- **`asset-url` helper** (§3.2) — argument-bearing and deliberately
+  **repeatable**: it may appear any number of times, and each occurrence
+  copies the asset and emits one page-relative URL.
 
 ### 3.1 Slots
 
@@ -87,12 +95,18 @@ page. Every known marker may occur at most once.
 | `{{backlinks}}` | no | Incoming relations derived from the validated semantic relation set with canonical links and stable kind attributes/classes; empty when none. |
 | `{{footer}}` | no | Contents of the theme's optional `footer.html`, or the empty string. This is theme-owned trusted static HTML, not page-authored executable content. |
 
-`{{content}}` must occur exactly once. Missing or duplicate markers, unknown
-markers, invalid UTF-8, or an unclosed marker are hard layout errors before
-content compilation. Layout UTF-8 is validated at **plan split / load**
-(`Layout.split` / `loadLayout`), not later during page writes. An absent
-optional slot emits no wrapper of its own, so a theme controls its surrounding
-HTML.
+`{{content}}` must occur exactly once. Missing `{{content}}`, a duplicate or
+unknown marker, invalid UTF-8, or an unclosed marker are hard layout errors
+before content compilation. Layout UTF-8 is validated at **plan split /
+load** (`Layout.split` / `loadLayout`), not later during page writes.
+
+**Empty output.** A slot omitted from the layout emits nothing, so a theme
+controls its surrounding HTML. A slot present in the layout but with no data
+for a page emits the empty fragment with no wrapper of its own: `{{children}}`
+on a childless page, `{{footer}}` when the theme has no `footer.html`,
+`{{relations}}` / `{{backlinks}}` when the page has none. `{{asset-url}}` is
+never empty: each occurrence copies a real theme-owned file or fails layout
+load.
 
 `metadata` is intentionally boring and deterministic. A future implementation
 may emit a stable fragment such as:
