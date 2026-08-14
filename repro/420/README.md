@@ -5,6 +5,11 @@ recorded in **#417**). It compiles the checked-out boris `src/` (via the `src`
 symlink below) — any revision carrying the bug. Verified at `30805ab8` (the
 merged #409 tip, which shipped it) and the `afterparty` tip at filing time.
 
+**Status: FIXED on `afterparty`** (see the `skipJsonValue` partial-token
+consumption change in `src/publication_touches.zig`, #420 resolution). The
+harness is now a canary: on a fixed tree it exits 1 with
+`repro did NOT reproduce`, which is the desired post-fix result.
+
 No oliver content, no site tree: the harness *synthesizes* a schema-valid
 216-finding `checks.json`, pads it so that finding #207's `"owner"` value
 straddles a 64 KiB chunk boundary, and drives the **real** `parseChecksStream`

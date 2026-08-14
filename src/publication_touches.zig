@@ -352,6 +352,36 @@ fn skipJsonValue(reader: *std.json.Reader) Error!void {
                 }
             }
         },
+        // A bare string or number that straddles a streaming chunk boundary
+        // is surfaced as a sequence of partial tokens terminated by the
+        // completing `.string` / `.number` token (std/json Scanner.zig).
+        // Consume the whole sequence; otherwise the next key read would
+        // consume the remainder of the value as a key token and fail the
+        // report (#420). Inside an object/array skip the depth loop above is
+        // already boundary-safe because it keeps reading tokens.
+        .partial_string,
+        .partial_string_escaped_1,
+        .partial_string_escaped_2,
+        .partial_string_escaped_3,
+        .partial_string_escaped_4,
+        .partial_number,
+        => {
+            while (true) {
+                const token = try nextJsonToken(reader);
+                switch (token) {
+                    .partial_string,
+                    .partial_string_escaped_1,
+                    .partial_string_escaped_2,
+                    .partial_string_escaped_3,
+                    .partial_string_escaped_4,
+                    .partial_number,
+                    => {},
+                    .string, .number => break,
+                    .end_of_document => return error.InvalidClaimsReport,
+                    else => return error.InvalidClaimsReport,
+                }
+            }
+        },
         .end_of_document => return error.InvalidClaimsReport,
         else => {},
     }
@@ -5633,6 +5663,93 @@ test "checks and claims parsers are leak-free under std.testing.allocator" {
         var reader = std.Io.Reader.fixed(checks[0..cut]);
         try std.testing.expectError(error.InvalidChecksReport, parseChecksStream(gpa, &reader, "default"));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Regression: #420 — streaming checks parse must derive token boundaries
+// from report content, not absolute byte offsets.
+//
+// `writeAfterClaims` streams the committed checks report through a fixed
+// 64 KiB chunk, and a bare string value (a finding's `owner`) that straddles
+// a chunk boundary used to be skipped as a complete value: the scanner was
+// left mid-string and the next key read consumed the remainder of the value
+// as a key token, failing the report. The identical content at another byte
+// length (no straddle) parsed cleanly, which is why the failure moved with
+// file length, not content (#417).
+// ---------------------------------------------------------------------------
+
+test "streaming checks parse survives a string value straddling the 64 KiB chunk boundary (#420)" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const boundary = 64 * 1024;
+    const expected_target = "public";
+    const finding_index = 207; // 0-based: the 208th finding
+
+    // Locate finding #207's `"owner":"publication"` value in the unpadded
+    // report, then pad with leading spaces so the 64 KiB boundary lands six
+    // bytes into that token — the exact failing layout from the incident.
+    const base = try buildBoundaryChecksReport(gpa, 0);
+    defer gpa.free(base);
+    const owner_val_off = nthOccurrence(base, "\"owner\":\"publication\"", finding_index) + "\"owner\":".len;
+    if (owner_val_off >= boundary - 14 or owner_val_off < boundary - 65536)
+        return error.TestUnsupportedLayout;
+    const report = try buildBoundaryChecksReport(gpa, boundary - owner_val_off - 6);
+    defer gpa.free(report);
+
+    try tmp.dir.writeFile(io, .{ .sub_path = "checks.json", .data = report });
+    const file = try tmp.dir.openFile(io, "checks.json", .{});
+    defer file.close(io);
+    var buffer: [64 * 1024]u8 = undefined;
+    var stream = file.readerStreaming(io, &buffer);
+
+    const parsed = try parseChecksStream(gpa, &stream.interface, expected_target);
+    defer freeParsedChecks(gpa, &parsed);
+    try std.testing.expectEqual(@as(usize, 216), parsed.findings.len);
+}
+
+/// Preamble of the committed checks report (format / schema_version / target /
+/// artifact_inventory / three checks with finding counts [0, 0, 216] and
+/// finding_offset 0) exactly as the Touch Atlas derives it, so the tail
+/// validation (finding_offset chaining + last_end == findings.len) agrees
+/// with the findings generated below.
+const boundary_checks_preamble =
+    "{\n  \"format\": \"boris-publication-checks\",\n  \"schema_version\": 1,\n  \"target\": \"public\",\n  \"artifact_inventory\": {\n    \"path\": \"_boris/proof/artifacts.json\",\n    \"bytes\": 11840,\n    \"sha256\": \"ac5ef4252a00b30b0f06cee65d07c24c171ef3117389a6151dde208dc78194f3\",\n    \"format\": \"boris-publication-artifacts\",\n    \"schema_version\": 1,\n    \"target\": \"public\",\n    \"artifact_count\": 39\n  },\n  \"checks\": [\n    {\n      \"id\": \"artifact-integrity\",\n      \"eligible\": true,\n      \"ran\": true,\n      \"status\": \"passed\",\n      \"coverage\": \"complete\",\n      \"scope\": {\n        \"subject_statuses\": [\"committed\"],\n        \"subject_kinds\": [],\n        \"subject_sha256\": \"68a3191bdc5ae6ebb4931e2108efa916721edf61225d3559a679066cff1276b2\",\n        \"supporting_statuses\": [],\n        \"supporting_kinds\": [],\n        \"supporting_sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"\n      },\n      \"counts\": {\"eligible\": 39, \"checked\": 39, \"findings\": 0},\n      \"finding_offset\": 0\n    },\n    {\n      \"id\": \"rendered-html\",\n      \"eligible\": true,\n      \"ran\": true,\n      \"status\": \"passed\",\n      \"coverage\": \"complete\",\n      \"scope\": {\n        \"subject_statuses\": [\"committed\"],\n        \"subject_kinds\": [\"html-page\"],\n        \"subject_sha256\": \"a427ccd6e427b14cb183ed61da84b0471aa9f37d1dba53e5533bf632ed67d10e\",\n        \"supporting_statuses\": [\"committed\"],\n        \"supporting_kinds\": [],\n        \"supporting_sha256\": \"68a3191bdc5ae6ebb4931e2108efa916721edf61225d3559a679066cff1276b2\"\n      },\n      \"counts\": {\"eligible\": 36, \"checked\": 36, \"findings\": 0},\n      \"finding_offset\": 0\n    },\n    {\n      \"id\": \"rendered-search\",\n      \"eligible\": true,\n      \"ran\": true,\n      \"status\": \"failed\",\n      \"coverage\": \"complete\",\n      \"scope\": {\n        \"subject_statuses\": [\"committed\"],\n        \"subject_kinds\": [\"rendered-search\"],\n        \"subject_sha256\": \"994fdf17774d76af6283a2c94ca18a16773a4fd3b0d10feb5d616e857fe27e33\",\n        \"supporting_statuses\": [\"committed\"],\n        \"supporting_kinds\": [\"html-page\"],\n        \"supporting_sha256\": \"a427ccd6e427b14cb183ed61da84b0471aa9f37d1dba53e5533bf632ed67d10e\"\n      },\n      \"counts\": {\"eligible\": 1, \"checked\": 1, \"findings\": 216},\n      \"finding_offset\": 0\n    }\n  ],\n  \"findings\": [";
+
+fn buildBoundaryChecksReport(gpa: std.mem.Allocator, pad: usize) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(gpa);
+    try out.appendNTimes(gpa, ' ', pad);
+    try out.appendSlice(gpa, boundary_checks_preamble);
+    for (0..216) |index| {
+        if (index != 0) try out.appendSlice(gpa, ",\n    ");
+        try appendBoundaryFinding(gpa, &out, index);
+    }
+    try out.appendSlice(gpa, "\n  ]\n}\n");
+    return out.toOwnedSlice(gpa);
+}
+
+fn appendBoundaryFinding(gpa: std.mem.Allocator, out: *std.ArrayList(u8), index: usize) !void {
+    try out.appendSlice(gpa, "{\"code\":\"SEARCH_CONTENT_MISMATCH\",\"domain\":\"artifact\",\"severity\":\"error\",\"confidence\":\"certain\",\"owner\":\"publication\",\"subject\":{\"kind\":\"artifact\",\"id\":\"docs/page-");
+    var id_buf: [64]u8 = undefined;
+    const id = try std.fmt.bufPrint(&id_buf, "{d:0>3}", .{index});
+    try out.appendSlice(gpa, id);
+    try out.appendSlice(gpa, ".md\",\"target\":\"public\"},\"remediation\":\"");
+    try out.appendNTimes(gpa, 'R', 56);
+    try out.appendSlice(gpa, "\",\"fixability\":\"regenerate\"}");
+}
+
+fn nthOccurrence(haystack: []const u8, needle: []const u8, n: usize) usize {
+    var idx: usize = 0;
+    var seen: usize = 0;
+    while (std.mem.indexOfPos(u8, haystack, idx, needle)) |pos| {
+        if (seen == n) return pos;
+        seen += 1;
+        idx = pos + needle.len;
+    }
+    unreachable;
 }
 
 // ---------------------------------------------------------------------------
