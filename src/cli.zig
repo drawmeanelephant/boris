@@ -156,6 +156,9 @@ pub const ParseError = error{
     RSSMetadataRequired,
     SitemapSiteUrlRequired,
     PagesLocationIncomplete,
+    // `--rss-limit` given a non-numeric or out-of-range value: the parse
+    // loop knows the flag, so name it instead of letting findBadArg guess.
+    InvalidRssLimit,
     OutOfMemory,
 };
 
@@ -678,8 +681,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (std.mem.eql(u8, a, "--rss-limit") or std.mem.startsWith(u8, a, "--rss-limit=")) {
             if (saw_rss_limit) return error.DuplicateFlag;
             saw_rss_limit = true;
-            rss_limit = std.fmt.parseInt(usize, try takeValue(args, &i, a, "--rss-limit"), 10) catch return error.InvalidValue;
-            if (rss_limit < 1 or rss_limit > 500) return error.InvalidValue;
+            rss_limit = std.fmt.parseInt(usize, try takeValue(args, &i, a, "--rss-limit"), 10) catch return error.InvalidRssLimit;
+            if (rss_limit < 1 or rss_limit > 500) return error.InvalidRssLimit;
             continue;
         }
 
@@ -1370,6 +1373,12 @@ pub fn printParseError(err: ParseError, bad_arg: ?[]const u8) void {
         error.PagesLocationIncomplete => {
             std.debug.print(
                 "error: --pages-base-url, --pages-origin, and --pages-base-path are required together (try --help)\n",
+                .{},
+            );
+        },
+        error.InvalidRssLimit => {
+            std.debug.print(
+                "error: invalid value for --rss-limit (must be 1-500; try --help)\n",
                 .{},
             );
         },
@@ -2696,7 +2705,8 @@ test "parse: RSS mode, required channel settings, and conflicts" {
     try expectError(error.RSSMetadataRequired, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs" }));
     try expectError(error.RSSMetadataRequired, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--input", "content" }));
     try expectError(error.RSSMetadataRequired, parseOptions(std.testing.allocator, &.{ "boris", "--rss-path", "out.xml", "--site-url", "https://example.test" }));
-    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D", "--rss-limit", "0" }));
+    try expectError(error.InvalidRssLimit, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D", "--rss-limit", "0" }));
+    try expectError(error.InvalidRssLimit, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D", "--rss-limit", "abc" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--rag", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D" }));
     try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "relative", "--rss-title", "Docs", "--rss-description", "D" }));

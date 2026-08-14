@@ -1,4 +1,4 @@
-error: invalid value for --rss
+error: invalid value for --rss-limit (must be 1-500; try --help)
 Boris — Zig content compiler (HTML site + IR + optional RAG)
 
 Usage: boris <command> [options]
