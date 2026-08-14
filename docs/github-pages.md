@@ -68,6 +68,9 @@ The workflow creates two deliberately different uploads:
   `dist/_boris/proof/artifacts.json`. The copier checks every byte count and
   SHA-256, requires `index.html`, rejects symlinks and hard links, enforces the
   supported 1 GiB Pages artifact limit, and excludes `_boris/proof` reports.
+- No `.nojekyll` is needed or emitted: artifact-based `deploy-pages` uploads
+  are served as-is, while Jekyll processing applies only to branch-based
+  publishing, which this workflow does not use.
 - The retained evidence artifact contains the normalized plan, the target-local
   proof reports, and `github-pages-evidence.json`. That binding records the
   source commit, Boris/Oliver pins, workflow identity, inventory digest, public
