@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Boris frontmatter grammar (schema v1)",
-  "description": "JSON view of the closed author-facing frontmatter grammar (docs/contracts/frontmatter.md). Frontmatter source is not JSON: tools convert the parsed field set to this object shape before validating. Keys absent from the source are null. The key set is closed — additionalProperties:false is normative, matching the product parser's unknown-key rejection.",
+  "description": "JSON view of the closed author-facing frontmatter grammar (docs/contracts/frontmatter.md). Frontmatter source is not JSON: tools convert the parsed field set to this object shape before validating. Keys absent from the source are null. The key set is closed — additionalProperties:false is normative, matching the product parser's unknown-key rejection. Length bounds: JSON Schema maxLength counts Unicode code points, while the product parser's limits are UTF-8 bytes (see frontmatter.md), so for multibyte content this schema is a looser pre-check and the parser stays normative. published_at: the pattern checks shape only; the parser additionally requires a real Gregorian calendar date (rss_date.parse), which JSON Schema cannot express.",
   "type": "object",
   "additionalProperties": false,
   "properties": {

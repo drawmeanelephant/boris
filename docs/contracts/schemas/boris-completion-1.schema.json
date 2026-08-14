@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Boris editor completion index (schema v1)",
-  "description": "Deterministic editor completion surface derived from the frozen graph: entity ids (with title/parent/role/status/tags/relations for display), the relation-kind vocabulary, observed parent targets, and the closed layout-slot set. Published as completion.json alongside the IR artifact set on a successful freeze.",
+  "description": "Deterministic editor completion surface derived from the frozen graph: entity ids (with title/parent/role/status/tags/relations for display), the relation-kind vocabulary, observed parent targets, and the closed layout-slot set. Published as completion.json alongside the IR artifact set on a successful freeze. Length bounds count Unicode code points (JSON Schema semantics); the values originate from parser-validated source, whose UTF-8 byte limits (frontmatter.md) are normative.",
   "type": "object",
   "additionalProperties": false,
   "required": ["format", "schema_version", "compiler_id", "frozen", "entities", "relation_kinds", "parent_targets", "layout_slots"],
