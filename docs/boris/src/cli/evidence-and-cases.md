@@ -106,10 +106,10 @@ The tests in this file are correctness and contract tests, not hostile ABI tests
 `--help` appears before a set of flags that would otherwise be invalid (`--not-a-real-flag --rag --no-rag`).
 
 **Wrapper boundary exercised:**
-The early-return branch inside the flag loop when `a == "--help"`. The returned `Options` value carries zeroed-out optional fields and an empty `targets` with `capacity = 0` (no allocation for targets occurs).
+The early-return branch inside the flag loop when `a == "--help"`. The returned `Options` value carries zeroed-out optional fields and an empty `targets` with `capacity = 0` (no allocation for targets occurs). Any targets accumulated before the flag (`--target X --help`) are released first: the returned `Options` never owns them, and the local `errdefer` only fires on error, so the short-circuit frees them explicitly. The same branch covers `--version` / `-V`.
 
 **Expected response:**
-`Options{.help = true}` is returned; `ParseError` is never triggered despite the invalid trailing flags.
+`Options{.help = true}` is returned; `ParseError` is never triggered despite the invalid trailing flags. The short-circuit parse test asserts the accumulated `targets` are released (`--target a=dist --help` / `--target a=dist --version` under `std.testing.allocator`, which fails the test on a leak).
 
 ### `--version` shares the short-circuit path
 

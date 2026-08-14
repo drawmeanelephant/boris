@@ -316,6 +316,14 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         {
             // Help/version short-circuits: do not validate remaining args.
             // The first of the two flags wins (they share one exit path).
+            // Release any targets accumulated before the flag: the returned
+            // Options carries an empty list (no allocation), and the caller's
+            // deinit would never see the accumulated one (errdefer only fires
+            // on error), so `--target X --help`/`--version` must not leak it.
+            for (targets.items) |t| {
+                if (t.layout_rules.len > 0) gpa.free(t.layout_rules);
+            }
+            targets.deinit(gpa);
             const wants_help = std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h");
             return .{
                 .help = wants_help,
@@ -2060,6 +2068,18 @@ test "parse: help/version short-circuit and do not validate trailing junk" {
     defer o5.deinit(std.testing.allocator);
     try expect(o5.version);
     try expect(!o5.help);
+
+    // Targets accumulated before the short-circuit must be released, not
+    // leaked: std.testing.allocator fails the test if the allocation survives.
+    var o6 = try parseOptions(std.testing.allocator, &.{ "boris", "--target", "a=dist", "--help" });
+    defer o6.deinit(std.testing.allocator);
+    try expect(o6.help);
+    try expectEqual(@as(usize, 0), o6.targets.items.len);
+
+    var o7 = try parseOptions(std.testing.allocator, &.{ "boris", "--target", "a=dist", "--version" });
+    defer o7.deinit(std.testing.allocator);
+    try expect(o7.version);
+    try expectEqual(@as(usize, 0), o7.targets.items.len);
 }
 
 test "execute: help does not invoke pipeline (dependency injection)" {
