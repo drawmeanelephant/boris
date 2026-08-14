@@ -27,6 +27,7 @@ args[1] == "impact" → command = .impact; i += 1
 The loop processes `args[i]` for `i` from the post-command position to the end:
 
 - `--help` / `-h`: immediately returns a partial `Options{.help = true}` without further validation.
+- `--version` / `-V`: shares the help early-exit path, returning `Options{.version = true}` without further validation; the first of the two flags seen wins.
 - Boolean flags (`--quiet`, `--rag`, `--html`, `--incremental`, `--watch`, `--textile`, `--no-rag`, `--context`, `--llms`): set a `saw_*` boolean; return `error.DuplicateFlag` if already set.
 - Value flags (`--input`, `--out`, `--rag-dir`, `--html-dir`, `--html-layout`, `--rag-dir`, `--context-dir`, `--llms-path`, `--jobs`, `-j`): call `takeValue` to extract inline (`--flag=value`) or next-token (`--flag value`) form; apply per-flag validation (e.g., `--jobs` range 1–64, `--llms-path` rejects absolute paths, `--html-layout` calls `layout_select.validateLayoutPath`).
 - `--target NAME=DIR`: splits on `=`, validates name via `target_mod.isValidTargetName`, checks for duplicate name, appends to `targets`.
@@ -75,10 +76,11 @@ Handles both `--flag=value` (inline, returns `arg[eq_prefix.len..]`) and `--flag
 | `"parse: valid modes table"` | test | 19-case mode coverage | All major flag combinations for IR, RAG, HTML | Correct `mode`, `input_dir`, `out_dir`, `rag_dir`, `html_dir`, `quiet`, `jobs` per case | Full mode matrix |
 | `"parse: conflicts and missing values table"` | test | 55+ error cases | All known conflict pairs, empty/missing/duplicate/unknown/positional | Exact `ParseError` variant per case | Conflict matrix completeness |
 | `"parse: --watch with HTML implies incremental"` | test | `--watch` semantics | `--html --watch`, `--html-dir site --watch --jobs 2`, `--watch --incremental`, bare `--watch` | `watch = true`, `incremental = true` in all cases | Watch/incremental implication |
-| `"parse: help short-circuits and does not validate trailing junk"` | test | `--help` early exit | `--help --not-a-real-flag --rag --no-rag`, `-h` | `help = true`; no error despite invalid trailing flags | Help short-circuit |
-| `"execute: help does not invoke pipeline"` | test | `execute` dependency injection | Spy with `printHelp` and `run` counts; `--help` opts | `help_calls = 1`, `pipeline_calls = 0`, exit code 0 | `execute` help routing |
+| `"parse: help/version short-circuit and do not validate trailing junk"` | test | `--help` / `--version` early exit | `--help --not-a-real-flag --rag --no-rag`, `-h`, `--version --not-a-real-flag`, `-V`, `--version --help` | `help = true` / `version = true`; no error despite invalid trailing flags; first flag wins | Help/version short-circuit |
+| `"execute: help does not invoke pipeline"` | test | `execute` dependency injection | Spy with `printVersion`/`printHelp`/`run` counts; `--help` opts | `help_calls = 1`, `pipeline_calls = 0`, exit code 0 | `execute` help routing |
+| `"execute: version does not invoke pipeline"` | test | `execute` version routing | Spy; `--version` opts | `version_calls = 1`, `pipeline_calls = 0`, exit code 0 | `execute` version routing |
 | `"execute: build mode invokes pipeline once"` | test | `execute` build routing | Spy; RAG mode opts | `pipeline_calls = 1`, `last_mode = .rag`, exit code 0 | `execute` build routing |
-| `"runArgs: usage errors exit 2; help exits 0"` | test | `runArgs` end-to-end | Spy with `reportUsage`; multiple conflict/unknown inputs; valid inputs | Exit 2 for all parse errors; exit 0 for valid; `pipeline_calls` count | `runArgs` error dispatch |
+| `"runArgs: usage errors exit 2; help/version exit 0"` | test | `runArgs` end-to-end | Spy with `reportUsage`; multiple conflict/unknown inputs; `--version`/`-V`; valid inputs | Exit 2 for all parse errors; exit 0 for help/version/valid; `pipeline_calls` count | `runArgs` error dispatch |
 | `"parse: --target flag parsing and conflict checks"` | test | Multi-target parsing and conflicts | Various `--target`, `--html-dir`, `--out`, `--rag`, invalid name/format, duplicate, `--target-layout` binding | Correct target list; correct conflicts; layout assignment | Target and target-layout contract |
 | `"findBadArg reports --target"` | test | `findBadArg` best-effort | Various argv with missing/invalid flag tokens | Correct string returned for each case | `findBadArg` output |
 | `"parse: --theme sugar selects theme layouts/main.html"` | test | Theme sugar composition | `--theme experimental-theme`, conflict with `--html-layout` | Correct composed path; `owned_html_layout = true`; `ConflictingFlags` | Theme path allocation and conflict |
@@ -108,6 +110,17 @@ The early-return branch inside the flag loop when `a == "--help"`. The returned 
 
 **Expected response:**
 `Options{.help = true}` is returned; `ParseError` is never triggered despite the invalid trailing flags.
+
+### `--version` shares the short-circuit path
+
+**Injected behavior:**
+`--version` / `-V` appear before invalid trailing flags, and alongside `--help`.
+
+**Wrapper boundary exercised:**
+The same early-return branch as `--help`, selecting `Options{.version = true}` (or `{.help = true}`) by which flag was seen first.
+
+**Expected response:**
+`Options{.version = true}` (or `.help = true` for a first-seen help flag) is returned with no parse error; the production runner prints `pipeline.compiler_id` (e.g. `boris/0.8.1`) to stdout and exits 0.
 
 **Forbidden unsafe response:**
 Allocating the `targets` ArrayList in the help-return path and then not freeing it. The implementation avoids this by returning a literal with `targets = .{ .items = &.{}, .capacity = 0 }`, which requires no deallocation.

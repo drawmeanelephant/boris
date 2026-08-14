@@ -53,6 +53,8 @@ selectors, `--incremental`, `--watch`, `--jobs`, `--format`, and `--report`.
 
 The command parser must reject unknown positional arguments and conflicting
 mode flags before touching the content tree. `--help` exits `0` without reading
+content or writing artifacts. `--version` / `-V` exit `0` printing the compiler
+id (`pipeline.compiler_id`, e.g. `boris/0.8.1`) to stdout without reading
 content or writing artifacts.
 
 ## Machine-readable reports

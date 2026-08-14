@@ -64,6 +64,7 @@ Options:
   --fail-on-unreferenced Make check fail when it reports unreferenced pages
   --profile PATH       Selected publication profile for `plan`
   -h, --help          Show this help and exit 0
+  -V, --version       Print the compiler version (`boris/<ver>`) and exit 0
 
 HTML artifacts (success; Oliver + layout splice):
   <html-dir>/**/*.html   or   <each-target-dir>/**/*.html
