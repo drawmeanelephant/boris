@@ -9,6 +9,12 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    editor_mod.addAnonymousImport("frontmatter_schema", .{
+        .root_source_file = b.path("../docs/contracts/schemas/boris-frontmatter-1.schema.json"),
+    });
+    editor_mod.addAnonymousImport("completion_fixture", .{
+        .root_source_file = b.path("../docs/contracts/fixtures/valid/expected/completion.json"),
+    });
     const editor = b.addExecutable(.{
         .name = "boris-editor",
         .root_module = editor_mod,

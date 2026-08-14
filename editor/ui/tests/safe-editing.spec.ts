@@ -5,6 +5,7 @@ type MockOptions = {
   recovery?: Array<{ path: string; content: string; fingerprint: string }>;
   disk?: string;
   commands?: Partial<Record<string, CommandResult>>;
+  authoring?: Array<Record<string, unknown>>;
 };
 
 type CommandResult = {
@@ -32,9 +33,35 @@ function commandResult(mode: string, overrides: Partial<CommandResult> = {}): Co
   };
 }
 
+function authoringPayload(withGraph = true) {
+  return {
+    frontmatter_schema: {
+      title: 'Boris frontmatter grammar (schema v1)',
+      properties: {
+        id: { type: ['string', 'null'], maxLength: 255 },
+        title: { type: ['string', 'null'], maxLength: 512 },
+        parent: { type: ['string', 'null'], maxLength: 255 },
+        status: { type: ['string', 'null'], enum: ['draft', 'published', 'archived', null] },
+        tags: { type: 'array', maxItems: 32 },
+        relations: { type: 'array', maxItems: 128 },
+        published_at: { type: ['string', 'null'] },
+        summary: { type: ['string', 'null'], maxLength: 1024 }
+      }
+    },
+    completion: withGraph ? {
+      format: 'boris-completion-index', schema_version: 1, compiler_id: 'boris/0.8.1', frozen: true,
+      entities: [{ id: 'guides/intro', title: 'Introduction', parent: null, role: 'trunk', status: 'published', tags: ['guide'], relations: [] }],
+      relation_kinds: ['depends_on', 'relates_to'], parent_targets: ['guides/intro'],
+      layout_slots: ['content', 'title', 'nav']
+    } : null,
+    completion_status: withGraph ? 'ready' : 'build_required'
+  };
+}
+
 async function installApi(page: Page, options: MockOptions = {}) {
   let disk = options.disk ?? '# Home\n';
   let fingerprint = 'a'.repeat(64);
+  let authoringRequest = 0;
 
   await page.route('**/api/health', route => route.fulfill({
     contentType: 'application/json',
@@ -104,6 +131,12 @@ async function installApi(page: Page, options: MockOptions = {}) {
       contentType: 'application/json',
       body: JSON.stringify(options.commands?.[mode] ?? commandResult(mode))
     });
+  });
+  await page.route('**/api/authoring', route => {
+    const sequence = options.authoring ?? [authoringPayload()];
+    const body = sequence[Math.min(authoringRequest, sequence.length - 1)];
+    authoringRequest += 1;
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });
   await page.goto('/#token=test-session-token');
 }
@@ -280,4 +313,45 @@ test('stderr diagnostics are announced as best-effort and dirty buffers disable 
   await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Dirty\n');
   await expect(page.getByRole('button', { name: 'Validate project', exact: true })).toBeDisabled();
   await expect(page.getByText(/commands read repository files from disk/)).toBeVisible();
+});
+
+test('schema and graph completion are an ARIA combobox operable by keyboard and visible names', async ({ page }) => {
+  await installApi(page, { disk: '' });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Boris authoring hints' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Refresh Boris suggestions', exact: true })).toHaveText('Refresh Boris suggestions');
+  await expect(page.getByRole('button', { name: 'Insert selected completion', exact: true })).toHaveText('Insert selected completion');
+
+  const filter = page.getByRole('combobox', { name: 'Filter frontmatter key', exact: true });
+  await expect(filter).toHaveAttribute('aria-autocomplete', 'list');
+  await filter.fill('sta');
+  await filter.press('Enter');
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await expect(editor).toHaveValue('status: ');
+
+  await page.getByRole('combobox', { name: 'Completion category', exact: true }).selectOption('status');
+  const statusFilter = page.getByRole('combobox', { name: 'Filter status', exact: true });
+  await statusFilter.fill('dra');
+  await statusFilter.press('Enter');
+  await expect(editor).toHaveValue('status: draft');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Inserted draft from Boris authoring vocabulary');
+});
+
+test('completion categories match Boris artifacts and refresh after a successful graph build', async ({ page }) => {
+  await installApi(page, {
+    disk: '',
+    authoring: [authoringPayload(false), authoringPayload(true)],
+    commands: { ir_build: commandResult('ir_build') }
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await expect(page.getByText('Frontmatter schema ready. Build diagnostics to create graph completion data.')).toBeVisible();
+  await page.getByRole('button', { name: 'Build diagnostics', exact: true }).click();
+  await expect(page.getByText('Boris completion index ready from boris/0.8.1.')).toBeVisible();
+  await page.getByRole('combobox', { name: 'Completion category', exact: true }).selectOption('wiki_link');
+  const wiki = page.getByRole('combobox', { name: 'Filter wiki link', exact: true });
+  await wiki.fill('guides');
+  const listbox = page.getByRole('listbox', { name: 'Boris completion suggestions' });
+  await expect(listbox.getByRole('option', { name: /guides\/intro/ })).toBeVisible();
+  await wiki.press('Enter');
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('[[guides/intro]]');
 });

@@ -56,6 +56,12 @@
     impact: ImpactEndpoint[];
   };
   type ProblemGroup = { key: string; label: string; problems: Problem[] };
+  type JsonSchemaProperty = { type?: string | string[]; enum?: Array<string | null>; maxLength?: number; maxItems?: number; pattern?: string; items?: JsonSchemaProperty };
+  type CompletionEntity = { id: string; title: string | null; parent: string | null; role: string; status: string | null; tags: string[]; relations: Array<{ kind: string; target: string }> };
+  type CompletionIndex = { format: string; schema_version: number; compiler_id: string; frozen: boolean; entities: CompletionEntity[]; relation_kinds: string[]; parent_targets: string[]; layout_slots: string[] };
+  type AuthoringPayload = { frontmatter_schema: { title: string; properties: Record<string, JsonSchemaProperty> }; completion: CompletionIndex | null; completion_status: 'ready' | 'build_required' };
+  type CompletionKind = 'frontmatter_key' | 'status' | 'entity' | 'wiki_link' | 'parent' | 'relation_kind' | 'relation_target' | 'layout_slot';
+  type Suggestion = { value: string; insert: string; detail: string };
 
   let connection = 'Connecting to the local host…';
   let compiler = 'Checking Boris version…';
@@ -84,12 +90,19 @@
   let commandRunning = false;
   let commandResult: CommandResult | null = null;
   let impactId = '';
+  let authoring: AuthoringPayload | null = null;
+  let authoringStatus = 'Loading Boris authoring vocabulary…';
+  let completionKind: CompletionKind = 'frontmatter_key';
+  let completionQuery = '';
+  let selectedSuggestion = 0;
 
   $: dirty = activePath !== '' && content !== baseline;
   $: problemGroups = groupProblems(commandResult?.problems ?? []);
   $: activeProblems = (commandResult?.problems ?? []).filter(problem =>
     problem.source_path !== null && projectPathForProblem(problem.source_path) === activePath
   );
+  $: suggestions = completionSuggestions(authoring, completionKind, completionQuery);
+  $: if (selectedSuggestion >= suggestions.length) selectedSuggestion = Math.max(0, suggestions.length - 1);
 
   const token = new URLSearchParams(window.location.hash.slice(1)).get('token') ?? '';
 
@@ -125,10 +138,11 @@
       return;
     }
     try {
-      const [healthResult, versionResult, filesResult] = await Promise.all([
+      const [healthResult, versionResult, filesResult, authoringResult] = await Promise.all([
         api<Health>('/api/health'),
         api<Version>('/api/version'),
-        api<FileList>('/api/files')
+        api<FileList>('/api/files'),
+        api<AuthoringPayload>('/api/authoring')
       ]);
       if (![healthResult, versionResult, filesResult].every(result => result.response.ok)) {
         throw new Error('host request failed');
@@ -140,6 +154,8 @@
         ? `Project found${health.project.publication_profile ? ' with boris.json' : ''}.`
         : 'This folder is not a Boris project.';
       files = filesResult.data.files;
+      if (authoringResult.response.ok) setAuthoring(authoringResult.data);
+      else authoringStatus = 'Boris authoring vocabulary is unavailable.';
       const recoveryResult = await api<RecoveryList>('/api/recovery');
       if (recoveryResult.response.ok) {
         snapshots = recoveryResult.data.snapshots;
@@ -216,6 +232,66 @@
         ? 'The last HTML build succeeded. Live preview serving arrives in the preview slice.'
         : 'The HTML build failed. Existing dist output, if any, is previous and stale.';
     }
+    if (mode === 'ir_build' && commandResult.failure_class === 'success') await refreshAuthoring();
+  }
+
+  function setAuthoring(payload: AuthoringPayload) {
+    authoring = payload;
+    authoringStatus = payload.completion
+      ? `Boris completion index ready from ${payload.completion.compiler_id}.`
+      : 'Frontmatter schema ready. Build diagnostics to create graph completion data.';
+  }
+
+  async function refreshAuthoring() {
+    const result = await api<AuthoringPayload>('/api/authoring');
+    if (result.response.ok) setAuthoring(result.data);
+    else authoringStatus = 'The Boris build succeeded, but completion.json could not be adapted.';
+  }
+
+  function completionSuggestions(payload: AuthoringPayload | null, kind: CompletionKind, query: string): Suggestion[] {
+    if (!payload) return [];
+    const schema = payload.frontmatter_schema.properties;
+    const index = payload.completion;
+    let values: Suggestion[] = [];
+    if (kind === 'frontmatter_key') values = Object.entries(schema).map(([name, property]) => ({ value: name, insert: `${name}: `, detail: schemaHint(property) }));
+    if (kind === 'status') values = (schema.status?.enum ?? []).filter((value): value is string => typeof value === 'string').map(value => ({ value, insert: value, detail: 'Closed enum from Boris frontmatter schema' }));
+    if (kind === 'entity' || kind === 'relation_target') values = (index?.entities ?? []).map(entity => ({ value: entity.id, insert: entity.id, detail: `${entity.role}${entity.title ? ` · ${entity.title}` : ''}` }));
+    if (kind === 'wiki_link') values = (index?.entities ?? []).map(entity => ({ value: entity.id, insert: `[[${entity.id}]]`, detail: entity.title ?? entity.role }));
+    if (kind === 'parent') values = (index?.parent_targets ?? []).map(value => ({ value, insert: value, detail: 'Observed parent target from completion.json' }));
+    if (kind === 'relation_kind') values = (index?.relation_kinds ?? []).map(value => ({ value, insert: `${value}=`, detail: 'Relation kind from completion.json' }));
+    if (kind === 'layout_slot') values = (index?.layout_slots ?? []).map(value => ({ value, insert: `{{${value}}}`, detail: 'Closed layout slot from completion.json' }));
+    const needle = query.trim().toLocaleLowerCase();
+    return values.filter(item => !needle || item.value.toLocaleLowerCase().startsWith(needle)).slice(0, 50);
+  }
+
+  function schemaHint(property: JsonSchemaProperty): string {
+    const type = Array.isArray(property.type) ? property.type.filter(value => value !== 'null').join(' or ') : (property.type ?? 'value');
+    const bounds = property.maxLength ? ` · at most ${property.maxLength} characters` : property.maxItems ? ` · at most ${property.maxItems} items` : '';
+    return `${type}${bounds}`;
+  }
+
+  function completionKeydown(event: KeyboardEvent) {
+    if (!suggestions.length) return;
+    if (event.key === 'ArrowDown') { event.preventDefault(); selectedSuggestion = (selectedSuggestion + 1) % suggestions.length; }
+    if (event.key === 'ArrowUp') { event.preventDefault(); selectedSuggestion = (selectedSuggestion + suggestions.length - 1) % suggestions.length; }
+    if (event.key === 'Enter') { event.preventDefault(); void insertSuggestion(suggestions[selectedSuggestion]); }
+    if (event.key === 'Escape') completionQuery = '';
+  }
+
+  async function insertSuggestion(suggestion: Suggestion | undefined) {
+    if (!suggestion || !activePath || readOnly) return;
+    const editor = document.querySelector<HTMLTextAreaElement>('#source-editor');
+    if (!editor) return;
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    undoStack = [...undoStack.slice(-99), content];
+    redoStack = [];
+    content = `${content.slice(0, start)}${suggestion.insert}${content.slice(end)}`;
+    editorStatus = `Inserted ${suggestion.value} from Boris authoring vocabulary.`;
+    scheduleRecovery();
+    await tick();
+    editor.focus();
+    editor.setSelectionRange(start + suggestion.insert.length, start + suggestion.insert.length);
   }
 
   function commandLabel(mode: CommandMode): string {
@@ -646,6 +722,70 @@
         spellcheck="false"
         oninput={editSource}
       ></textarea>
+      <aside class="authoring-tools" aria-labelledby="authoring-heading">
+        <div class="authoring-heading">
+          <div>
+            <h3 id="authoring-heading">Boris authoring hints</h3>
+            <p>{authoringStatus}</p>
+          </div>
+          <button type="button" onclick={refreshAuthoring}>Refresh Boris suggestions</button>
+        </div>
+        <div class="completion-controls">
+          <div>
+            <label for="completion-kind">Completion category</label>
+            <select id="completion-kind" bind:value={completionKind} onchange={() => { completionQuery = ''; selectedSuggestion = 0; }}>
+              <option value="frontmatter_key">Frontmatter key</option>
+              <option value="status">Status value</option>
+              <option value="entity">Entity id</option>
+              <option value="wiki_link">Wiki link</option>
+              <option value="parent">Parent target</option>
+              <option value="relation_kind">Relation kind</option>
+              <option value="relation_target">Relation target</option>
+              <option value="layout_slot">Layout slot</option>
+            </select>
+          </div>
+          <div class="combobox-wrap">
+            <label for="completion-query">Filter {completionKind.replaceAll('_', ' ')}</label>
+            <input
+              id="completion-query"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={suggestions.length > 0}
+              aria-controls="completion-options"
+              aria-activedescendant={suggestions.length ? `completion-option-${selectedSuggestion}` : undefined}
+              bind:value={completionQuery}
+              onkeydown={completionKeydown}
+            />
+          </div>
+          <button type="button" disabled={!suggestions.length || readOnly} onclick={() => insertSuggestion(suggestions[selectedSuggestion])}>Insert selected completion</button>
+        </div>
+        <ul id="completion-options" role="listbox" aria-label="Boris completion suggestions">
+          {#each suggestions as suggestion, suggestionIndex (`${completionKind}-${suggestion.value}`)}
+            <li
+              id="completion-option-{suggestionIndex}"
+              role="option"
+              tabindex="-1"
+              aria-selected={suggestionIndex === selectedSuggestion}
+              class:selected={suggestionIndex === selectedSuggestion}
+              onclick={() => { selectedSuggestion = suggestionIndex; void insertSuggestion(suggestion); }}
+              onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void insertSuggestion(suggestion); } }}
+            >
+              <strong>{suggestion.value}</strong><span>{suggestion.detail}</span>
+            </li>
+          {/each}
+        </ul>
+        {#if authoring}
+          <details>
+            <summary>Frontmatter field bounds from Boris schema</summary>
+            <dl>
+              {#each Object.entries(authoring.frontmatter_schema.properties) as [field, property]}
+                <div><dt>{field}</dt><dd>{schemaHint(property)}</dd></div>
+              {/each}
+            </dl>
+            <p>The schema is a looser pre-check for multibyte lengths and dates. The Boris parser remains authoritative.</p>
+          </details>
+        {/if}
+      </aside>
       <p class:warning={dirty || readOnly} class="buffer-state">
         {readOnly ? 'Read-only file' : dirty ? 'Unsaved changes' : 'Saved on disk'}
       </p>

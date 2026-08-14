@@ -2,6 +2,7 @@ const std = @import("std");
 const Io = std.Io;
 const http = std.http;
 const net = std.Io.net;
+const authoring = @import("authoring.zig");
 const file_api = @import("file_api.zig");
 const project = @import("project.zig");
 const recovery = @import("recovery.zig");
@@ -103,6 +104,12 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
         if (std.mem.eql(u8, target, "/api/commands/run")) {
             if (request.head.method != .POST) return methodNotAllowed(request, "POST");
             return serveCommandRun(io, allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/authoring")) {
+            if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
+            const bytes = authoring.render(allocator, io, config.project_root) catch |err| return respondApiError(request, err);
+            defer allocator.free(bytes);
+            return respondJson(request, .ok, bytes);
         }
         return respondText(request, .not_found, "Not found", "text/plain; charset=utf-8");
     }
