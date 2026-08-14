@@ -107,10 +107,13 @@ warning; it does not add a fourth publication-evidence check.
 
 The Cooklang input slice adds `ECOOKLANG` for the `.cook` input family. It is
 emitted when a page tree mixes `.cook` with another page extension or selects
-the wrong input mode, and for every adapter refusal: an unsupported construct,
-an unterminated `{`, `(` or `[-`, an empty ingredient or cookware name, a timer
-with neither name nor duration, an unnamed section, a macro, a wiki link, raw
-HTML or a control character.
+the wrong input mode, and for the seam's refusals: a timer with neither name
+nor duration, an unnamed section, an invalid recipe reference, or a control
+character. Malformed structure (an unterminated `{`, `(` or `[-`, or an
+unclosed body-only frontmatter fence) is **not** an error: Oliver degrades it
+to literal text and the same code is emitted as a warning with Oliver's stable
+code in the message. Macros, wiki links and raw HTML written as author text are
+escaped, not refused.
 See [cooklang-compatibility.md](cooklang-compatibility.md).
 
 | Code | Severity | When | Emitted by |
@@ -125,7 +128,7 @@ See [cooklang-compatibility.md](cooklang-compatibility.md).
 | `EUNICODE` | error | Source contains a code point with no legitimate authoring use: a control character, a Unicode noncharacter, a deprecated format control, an interlinear annotation, a bidi embedding/override (U+202A–U+202E), an unclosed bidi isolate, an interior U+FEFF, or a tag character outside an emoji subdivision-flag sequence | `parser.parse` → pipeline |
 | `EUNICODE` | warning | Source contains invisible characters in a shape that reads as smuggling — a run of three or more, or zero-width characters interleaved between ASCII letters. Advisory only: ZWJ, ZWNJ, ZWSP, word joiner and soft hyphen are load-bearing in emoji sequences and in Persian, Indic and CJK text, so they are reported and never rewritten | `parser.parse` → pipeline |
 | `EINVALIDPATH` | error | Path or entity id cannot be canonicalized; illegal segments; absolute path; empty / `.` / `..` components; invalid frontmatter `id:`; **or** two pages’ entity ids differ only in letter case (output collision on case-insensitive FS) | scanner / `parser.parse` / `graph.diagnoseDuplicateIds` → pipeline |
-| `ECOOKLANG` | error | Explicit Cooklang input-family mismatch, unsupported Cooklang construct, malformed supported syntax, or a refused macro, wiki link, raw HTML or control character | scanner / `cooklang.toMarkdown` → pipeline / HTML |
+| `ECOOKLANG` | error / warning | Input-family mismatch, refused Cooklang construct (empty timer or section, invalid recipe reference, control character), or — as a warning — malformed structure Oliver degraded to literal text | scanner / `cooklang_seam.toMarkdown` → pipeline / HTML |
 | `ETEXTILE` | error | Explicit Textile input-family mismatch, unsupported Textile feature, malformed supported syntax, or unsafe Textile link | scanner / `textile.toMarkdown` → pipeline / HTML |
 | `ECOMPONENT` | error | Aside / component tokenizer failure (unknown PascalCase tag, nested Aside, invalid kind/id, bad attributes, unterminated Aside) | `aside.tokenizeBody` → pipeline |
 | `EINCLUDESYNTAX` | error | Malformed `{{include …}}` directive | `include` → HTML / IR dependency resolution |

@@ -18,7 +18,7 @@ const wikilink = @import("wikilink.zig");
 const dependency = @import("dependency.zig");
 const identity = @import("identity.zig");
 const textile = @import("textile.zig");
-const cooklang = @import("cooklang.zig");
+const cooklang_seam = @import("cooklang_seam.zig");
 const source_io = @import("source_io.zig");
 const doclink = @import("doclink.zig");
 const target_mod = @import("target.zig");
@@ -377,7 +377,7 @@ fn resolveDependencies(
             // The adapted Markdown is what carries a recipe reference's wiki
             // link, so dependency resolution has to see the adapted body or
             // `@./sauces/Hollandaise` would never become a graph edge.
-            const adapted = try cooklang.toMarkdown(source[page.body_offset..], gpa);
+            const adapted = try cooklang_seam.toMarkdown(source[page.body_offset..], gpa);
             defer adapted.deinit(gpa);
             if (!adapted.isOk()) return error.InvalidCooklang;
             try resolver.scanPage(page, adapted.markdown, 0);
@@ -446,7 +446,7 @@ pub fn populateDependencyIndexFormat(
             defer gpa.free(adapted.markdown);
             try resolver.scanPageWithHtmlLinks(page, adapted.markdown, true, 0);
         } else if (input_format == .cook) {
-            const adapted = try cooklang.toMarkdown(source[page.body_offset..], gpa);
+            const adapted = try cooklang_seam.toMarkdown(source[page.body_offset..], gpa);
             defer adapted.deinit(gpa);
             if (!adapted.isOk()) return error.InvalidCooklang;
             try resolver.scanPageWithHtmlLinks(page, adapted.markdown, true, 0);
@@ -886,7 +886,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         // An explicit adapter converts only the already-frontmatter-split body.
         // The adapted Markdown then enters the same component/parser pipeline.
         // Scratch arena owns tokenizer arrays; only diagnostics are retained.
-        var recipe: cooklang.Recipe = .{};
+        var recipe: cooklang_seam.Recipe = .{};
         {
             var tok_arena = std.heap.ArenaAllocator.init(gpa);
             defer tok_arena.deinit();
@@ -916,7 +916,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
                 // retains the adapted Markdown for the whole build too, which is
                 // the cost of keeping the adapter's one-allocation ownership
                 // model rather than splitting its result across two allocators.
-                const adapted = try cooklang.toMarkdown(body, retain);
+                const adapted = try cooklang_seam.toMarkdown(body, retain);
                 if (adapted.diagnostic) |cd| {
                     const body_line_base = countLinesUpTo(source, parsed.doc.body_offset);
                     try result.diagnostics.append(gpa, .{
@@ -930,6 +930,21 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
                     });
                     body = "";
                 } else {
+                    // Oliver's structural warnings (unclosed `{`, `(`, `[-`,
+                    // frontmatter fence) degrade to literal text; they reach
+                    // the author as warnings, not failures.
+                    for (adapted.warnings) |w| {
+                        const body_line_base = countLinesUpTo(source, parsed.doc.body_offset);
+                        try result.diagnostics.append(gpa, .{
+                            .severity = .warning,
+                            .code = .ECOOKLANG,
+                            .message = try retain.dupe(u8, w.message),
+                            .remediation = try retain.dupe(u8, "Fix or remove the malformed Cooklang syntax"),
+                            .source_path = disc.source_path,
+                            .line = body_line_base + w.line - 1,
+                            .column = w.column,
+                        });
+                    }
                     body = adapted.markdown;
                     recipe = adapted.recipe;
                 }

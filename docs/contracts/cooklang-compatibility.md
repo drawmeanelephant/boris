@@ -2,7 +2,7 @@
 
 **Status:** normative, additive input compatibility slice
 **CLI selector:** `--cooklang`
-**Adapter identity:** `boris-cooklang-adapter-v1`
+**Adapter identity:** `boris-cooklang-seam-v1`
 **IR facet:** `recipe` (IR `0.4.0`)
 
 Cooklang is a plain-text recipe markup language: prose steps with sigils that
@@ -53,13 +53,12 @@ scan .cook
   -> include expansion, wiki rewrite, Aside tokenization, Oliver render  (unchanged)
 ```
 
-- The adapter is pure: no filesystem, renderer, layout, graph, or process access.
+- The seam is pure: no filesystem, renderer, layout, graph, or process access.
 - Adaptation is total and deterministic; the same body always produces the same
   Markdown and the same `Recipe`.
-- **Adapter** diagnostic lines and columns refer to the author's `.cook` file.
-  Comment removal preserves every newline so a payload inside a block comment
-  cannot shift the line a later error reports, and the column is compensated for
-  stripped leading indentation.
+- **Seam** diagnostic lines and columns refer to the author's `.cook` file.
+  Oliver reports positions against the body it parsed, so the line and column
+  an author sees match the `.cook` source.
 - **Graph** diagnostics (`EREFERENCEMISSING` and friends) are located against
   the *adapted* Markdown, which the adapter restructures — the ingredient list
   is synthesized before the method — so their line numbers do not correspond to
@@ -123,8 +122,8 @@ in the ingredient list, which is where a cook reads them.
 A recipe reference renders in the ingredient list as a Boris wiki link
 (`[[sauces/pepper-oil]]`). This is deliberate: the reference becomes a validated
 graph edge of kind `reference`, so a reference to a recipe that does not exist
-fails the build instead of rendering as dead prose. The adapter emits Boris
-syntax here; author-written `[[` is still refused (below).
+fails the build instead of rendering as dead prose. The seam emits Boris syntax
+here; author-written `[[` is escaped as inert text (below).
 
 Because the adapter synthesizes that link, the derived id must satisfy **both**
 consumers before it is emitted: `identity.validateEntityId` (no traversal, no
@@ -198,14 +197,28 @@ extension list alone is what produced the injection above.
 Every author-controlled span is guarded, not just step prose: a token name, a
 `{quantity}`, a `(preparation)` and a section name all reach published output.
 
-The adapter fails the build with `ECOOKLANG` on:
+Parsing is Oliver's: there is deliberately **no parser in Boris** (see
+[oliver-renderer.md](oliver-renderer.md) for the pin and its boundaries).
+Everything below therefore falls into one of three classes.
 
-- `{{ … }}` macros, `[[ … ]]` wiki links, and raw HTML or components
-- control characters other than tab
-- an unterminated `{`, `(`, or `[-`
-- a nested `{` in a quantity or `(` in a preparation
-- an empty ingredient or cookware name, so a bare `#` or `@` is an authoring
-  error rather than silent literal text
+**Degrades to inert literal text with a structured warning.** Oliver never
+crashes on malformed input and Boris never synthesizes a second parser to
+second-guess it. An unterminated `{`, `(`, or `[-` degrades to literal text and
+carries a structured warning with Oliver's stable code and the exact position
+(`unclosed-braces`, `unclosed-paren`, `unclosed-block-comment`; the body-only
+frontmatter-fence case reports `unclosed-frontmatter`). The literal is escaped
+like any other author text, so it cannot forge document structure.
+
+**Degrades silently to literal text.** `{{ … }}` macros, `[[ … ]]` wiki links,
+raw HTML, an empty ingredient or cookware name (a bare `@{}` or `#{}`), and a
+nested `{` in a quantity or `(` in a preparation all parse as ordinary prose on
+Oliver; the escaping table above makes that prose inert in the rendered
+document. They are not refusals.
+
+**Fails the build with `ECOOKLANG`** — the refusals that protect published
+output, all checked by the seam after the parse:
+
+- control characters other than tab, newline, or carriage return
 - a timer with neither a name nor a duration, including `~{}`
 - a section with no name between its `=` markers
 - a recipe reference that is not a valid page id (below)
@@ -280,9 +293,12 @@ change.
   the `.cook` file, so a broken `@./recipe` reference reports a line inside the
   synthesized ingredient list. Carrying the authored line through the adapter
   onto each `Ingredient` would fix it and is a follow-up, not this slice.
-- **A diagnostic column after an inline comment is approximate.** Comment bytes
-  are deleted before conversion, which shifts later columns left. Leading
-  indentation is compensated; an inline `[- … -]` is not.
+- **A diagnostic column after an inline comment is no longer approximate.**
+  The old adapter deleted comment bytes before conversion, shifting later
+  columns left. Oliver reports positions against the body it parsed, so both
+  the seam's refusals and its degraded-structure warnings carry accurate
+  columns. (The column a later graph diagnostic reports against the *adapted*
+  Markdown is a different matter — see the first bullet.)
 - A `.cook` body cannot express an inline Markdown image: `!` and `[` are
   escaped as author text. A recipe's sibling `<stem>.assets/` tree is still
   discovered and published, which matches Cooklang's own convention of naming

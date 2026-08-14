@@ -14,7 +14,7 @@ const identity = @import("identity.zig");
 const include_mod = @import("include.zig");
 const wikilink = @import("wikilink.zig");
 const textile = @import("textile.zig");
-const cooklang = @import("cooklang.zig");
+const cooklang_seam = @import("cooklang_seam.zig");
 const diag = @import("diag.zig");
 const content_asset = @import("content_asset.zig");
 const doclink = @import("doclink.zig");
@@ -97,7 +97,7 @@ fn printParserDiagnostic(gpa: std.mem.Allocator, source_path: []const u8, parsed
 pub const AdaptedBody = struct {
     markdown: []const u8,
     /// Non-empty only for Cooklang input.
-    recipe: cooklang.Recipe = .{},
+    recipe: cooklang_seam.Recipe = .{},
 };
 
 /// Convert a parsed page body when the whole tree explicitly uses one of the
@@ -131,7 +131,7 @@ pub fn bodyForInput(
             return .{ .markdown = adapted.markdown };
         },
         .cook => {
-            const adapted = try cooklang.toMarkdown(body, allocator);
+            const adapted = try cooklang_seam.toMarkdown(body, allocator);
             if (adapted.diagnostic) |cd| {
                 std.debug.print("error: ECOOKLANG: {s}:{d}:{d}: {s} [Use only the bounded Cooklang subset]\n", .{
                     source_path,
@@ -140,6 +140,16 @@ pub fn bodyForInput(
                     cd.message,
                 });
                 return error.CooklangFailed;
+            }
+            // Oliver's structural warnings degrade to literal text; they
+            // surface as warnings, not failures.
+            for (adapted.warnings) |w| {
+                std.debug.print("warning: ECOOKLANG: {s}:{d}:{d}: {s}\n", .{
+                    source_path,
+                    sourceLineAt(source, body_offset) + w.line - 1,
+                    w.column,
+                    w.message,
+                });
             }
             return .{ .markdown = adapted.markdown, .recipe = adapted.recipe };
         },

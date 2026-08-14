@@ -56,7 +56,7 @@ const pipeline = @import("pipeline.zig");
 const theme_mod = @import("theme.zig");
 const layout_select = @import("layout_select.zig");
 const textile = @import("textile.zig");
-const cooklang = @import("cooklang.zig");
+const cooklang_seam = @import("cooklang_seam.zig");
 const content_asset = @import("content_asset.zig");
 const source_io = @import("source_io.zig");
 const search_index = @import("search_index.zig");
@@ -446,7 +446,7 @@ fn adapterIdentity(input_format: identity.InputFormat) []const u8 {
     return switch (input_format) {
         .markdown => "",
         .textile => textile.adapter_identity,
-        .cook => cooklang.adapter_identity,
+        .cook => cooklang_seam.adapter_identity,
     };
 }
 

@@ -21,7 +21,7 @@
 
 const std = @import("std");
 const identity = @import("identity.zig");
-const cooklang = @import("cooklang.zig");
+const cooklang_seam = @import("cooklang_seam.zig");
 
 pub const max_entity_id_bytes = identity.max_entity_id_bytes;
 pub const ContentKind = identity.ContentKind;
@@ -248,7 +248,7 @@ pub const DurablePage = struct {
     /// Retain-owned like every other field here: the Cooklang adapter is handed
     /// the retain allocator so its strings outlive the per-page scratch arena.
     /// Empty for every other input format.
-    recipe: cooklang.Recipe = .{},
+    recipe: cooklang_seam.Recipe = .{},
     kind: ContentKind = .md,
     /// Byte offset of body start in the source file (not a live buffer).
     body_offset: usize = 0,
@@ -327,7 +327,7 @@ pub const PageDb = struct {
         meta: FrontmatterView,
         body_offset: usize,
         /// Already retain-owned; empty for every format but Cooklang.
-        recipe: cooklang.Recipe,
+        recipe: cooklang_seam.Recipe,
     ) !void {
         const tags_src = meta.tagsSlice();
         var tags_owned: []const []const u8 = &.{};
