@@ -103,11 +103,9 @@ wins). The output is exactly one line on **stdout**:
 boris/0.8.1
 ```
 
-The id is `pipeline.compiler_id` (`src/pipeline.zig`), the same constant
-recorded as `compiler_id` in the IR `manifest.json` and the editor
-`completion.json` (`manifest.json` also carries a `compiler` field with the
-same value). Scripts and CI can therefore pin the compiler and also
-cross-check which compiler produced a given artifact set:
+The id is `pipeline.compiler_id` (`src/pipeline.zig`). The IR `manifest.json`
+records the same unsuffixed constant as its `compiler` field, so scripts and
+CI can pin the compiler and verify an artifact set's provenance:
 
 ```bash
 # Pin: refuse to build with an unexpected compiler.
@@ -115,13 +113,15 @@ BORIS_VERSION="$(boris --version)"
 [ "$BORIS_VERSION" = "boris/0.8.1" ] || exit 2
 
 # Verify an artifact set's provenance: the recorded id must match.
-grep -q "\"compiler_id\": \"$BORIS_VERSION\"" .boris/manifest.json
+grep -q "\"compiler\": \"$BORIS_VERSION\"" .boris/manifest.json
 ```
 
-Treat the id as opaque `name/version` text: compare it exactly rather than
-substring-matching on the version portion, since future ids may carry
-suffixes (for example the semantic-relations and cooklang variants already
-use `+`-suffixed ids internally).
+The editor `completion.json` also carries a `compiler_id` field, but for
+variant corpora it is the suffixed artifact id (`boris/0.8.1+cooklang`,
+`boris/0.8.1+semantic-relations`), not the bare `pipeline.compiler_id` — so
+use `manifest.json`'s `compiler` field for exact provenance checks, and treat
+all ids as opaque `name/version` text: compare exactly rather than
+substring-matching on the version portion, since suffixes are possible.
 
 ## Timing report (`--timings`)
 
