@@ -40,14 +40,18 @@ BASE_ID="$(sed -n 's/^pub const compiler_id = "\([^"]*\)".*/\1/p' src/pipeline.z
 # --- Version query ---------------------------------------------------------
 note "boris --version and -V print exactly the base compiler id on stdout"
 for flag in --version -V; do
+  # Redirect to files (not command substitution): the line count must see
+  # the raw bytes, since substitution strips trailing newlines and would
+  # let extra blank lines pass the exact-one-line guarantee.
   set +e
-  out="$("$BORIS" "$flag" 2>"$OUT/stderr.tmp")"
+  "$BORIS" "$flag" >"$OUT/stdout.tmp" 2>"$OUT/stderr.tmp"
   rc=$?
   set -e
   [[ "$rc" -eq 0 ]] || fail "boris $flag exited $rc, expected 0"
   [[ -s "$OUT/stderr.tmp" ]] && fail "boris $flag wrote to stderr: $(cat "$OUT/stderr.tmp")"
-  lines="$(printf '%s' "$out" | awk 'END { print NR }')"
+  lines="$(wc -l < "$OUT/stdout.tmp" | tr -d ' ')"
   [[ "$lines" -eq 1 ]] || fail "boris $flag printed $lines lines, expected exactly one"
+  out="$(cat "$OUT/stdout.tmp")"
   [[ "$out" == "$BASE_ID" ]] \
     || fail "boris $flag printed '$out', expected '$BASE_ID'"
   pass "boris $flag -> $out"
@@ -55,10 +59,13 @@ done
 
 # Short-circuit: trailing junk is unvalidated, exactly like --help.
 set +e
-out="$("$BORIS" --version --definitely-not-a-flag 2>"$OUT/stderr.tmp")"
+"$BORIS" --version --definitely-not-a-flag >"$OUT/stdout.tmp" 2>"$OUT/stderr.tmp"
 rc=$?
 set -e
 [[ "$rc" -eq 0 ]] || fail "boris --version with trailing junk exited $rc"
+[[ -s "$OUT/stderr.tmp" ]] \
+  && fail "boris --version with trailing junk wrote to stderr: $(cat "$OUT/stderr.tmp")"
+out="$(cat "$OUT/stdout.tmp")"
 [[ "$out" == "$BASE_ID" ]] \
   || fail "boris --version with trailing junk printed '$out'"
 pass "trailing junk after --version is ignored (short-circuit)"
