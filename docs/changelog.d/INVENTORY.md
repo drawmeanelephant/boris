@@ -11,7 +11,6 @@ fragments describe distinct commits or acceptance surfaces and remain retained.
 
 | Fragment | Category | PR / commit | Landed | Kind | Action |
 |---|---|---|---|---|---|
-| `001-apex-v1.1.13.md` | Changed | `1829f12` | yes | contract-visible | retained numeric fragment |
 | `001-product-rag-context-segments.md` | Added | `5306da5` | yes | user/contract-visible | retained numeric fragment; added bullet marker |
 | `002-context-rag-export-correctness.md` | Fixed | `5306da5` | yes | contract-visible | retained numeric fragment |
 | `002-doc-link-resolution.md` | Added | `5306da5` | yes | user/contract-visible | retained numeric fragment |
@@ -56,7 +55,6 @@ fragments describe distinct commits or acceptance surfaces and remain retained.
 | `253-output-link-audit.md` | Added | PR #253 / `9a43d39` | yes | user/contract-visible | retained numeric fragment |
 | `254-diagnostic-full-source-lines.md` | Fixed | PR #254 / `3457cde` | yes | user-visible | retained numeric fragment |
 | `255-inline-code-directives.md` | Fixed | PR #255 / `c21c958` | yes | user/contract-visible | retained numeric fragment |
-| `255-ir-schema-apex-dependency.md` | Fixed | PR #257 / `cbdaf92` | yes | test-only | retained numeric fragment |
 | `256-agent-binary-kits.md` | Added | PR #268 / `25f03fd` | yes | developer tool | retained numeric fragment |
 | `258-search-index-control-characters.md` | Security | PR #258 / `1693dc0` | yes | security | retained numeric fragment |
 | `259-structured-output-encoding.md` | Fixed | PR #259 / `fe8243f` | yes | security | retained numeric fragment |
