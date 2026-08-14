@@ -185,6 +185,23 @@ pub fn build(b: *std.Build) void {
     );
     test_boris_init_step.dependOn(&init_run.step);
 
+    // Layout-rule precedence guard (#400): the reference-theme example must
+    // select identical layouts under both rule declaration orders (fixed
+    // precedence: id > glob specificity > role > fallback) and publish the
+    // documented assets.
+    const reference_theme_run = b.addSystemCommand(&.{
+        "bash",
+        "scripts/test-reference-theme-layout.sh",
+    });
+    reference_theme_run.setCwd(b.path("."));
+    reference_theme_run.has_side_effects = true;
+    reference_theme_run.step.dependOn(b.getInstallStep());
+    const test_reference_theme_step = b.step(
+        "test-reference-theme-layout",
+        "Run reference-theme layout-rule precedence black-box test",
+    );
+    test_reference_theme_step.dependOn(&reference_theme_run.step);
+
     // --- Pipeline + graph tests (milestone 6) ------------------------------
     // Pipeline imports aside (component validation) → needs the Oliver render seam.
     const pipeline_mod = b.createModule(.{
@@ -1105,6 +1122,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_cooklang_tests.step);
     test_step.dependOn(&cooklang_incremental_run.step);
     test_step.dependOn(&init_run.step);
+    test_step.dependOn(&reference_theme_run.step);
     test_step.dependOn(&run_pipeline_tests.step);
     test_step.dependOn(&run_publication_profile_tests.step);
     test_step.dependOn(&run_github_pages_tests.step);
