@@ -452,12 +452,15 @@ pub fn build(b: *std.Build) void {
     run_graph_tests.setCwd(b.path("."));
 
     // --- Aside component tokenizer + HTML render (milestone 10) ------------
+    // aside now imports include.zig for inline-code-span awareness, which
+    // reaches the Oliver Cooklang seam via parser → page → cooklang_seam.
     const aside_mod = b.createModule(.{
         .root_source_file = b.path("src/aside.zig"),
         .target = target,
         .optimize = optimize,
     });
     linkOliver(aside_mod, oliver_mod);
+    linkCooklangSeam(aside_mod, oliver_cooklang_mod);
     const aside_tests = b.addTest(.{
         .root_module = aside_mod,
     });
