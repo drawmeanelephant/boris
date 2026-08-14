@@ -22,8 +22,3 @@ static review notes.
 The index Trunk owns the blogroll-style sidebar and direct child posts. Each
 post is a Satellite linked with `parent: index`. The local SVG is published
 through the normal content-local asset path.
-
-The layout now exercises the full reading surface: metadata, graph navigation,
-breadcrumbs, TOC, direct children, content, shared footer, local page asset,
-and native focus/reduced-motion behavior. The blogroll copy is intentionally
-authored text; theme CSS is not a navigation target.

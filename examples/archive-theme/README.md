@@ -24,11 +24,11 @@ the direct children in canonical entity-id order, so the `010`, `040`, and
 `120` entry ids make the intended order visible without adding an archive
 sorting feature.
 
-The updated layout keeps the focused chronological `{{children}}` index while
-also exposing `{{nav}}`, `{{toc}}`, and `{{metadata}}` in quiet side modules.
-That makes the example useful as a complete archive shell without turning the
-entry cards into a new query or sorting feature. The footer is shared through
-`theme/footer.html`.
+Archive layouts intentionally omit `{{nav}}`. A full-site tree becomes noisy
+as an import grows; this landing page needs a focused, chronological index of
+its own entries instead. `{{children}}` keeps that index graph-backed,
+page-relative, and deterministic while the entry layout retains a compact
+breadcrumb back to the archive.
 
 ## Expected output
 

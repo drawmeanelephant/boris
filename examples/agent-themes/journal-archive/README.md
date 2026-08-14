@@ -23,10 +23,6 @@ From the repository root, after `zig build`:
 The landing page is the Trunk. Chronological entries are Satellites linked by
 `parent: index`; `{{children}}` renders their deterministic archive list.
 
-The updated shell also surfaces page metadata, graph navigation, breadcrumbs,
-the current-page TOC, and a keyboard-visible skip link. The phosphor styling
-is still intentionally static and has no pretend live journal controls.
-
 ## Design decisions
 
 - Dates, mood, music, and tags are ordinary authored Markdown so they remain

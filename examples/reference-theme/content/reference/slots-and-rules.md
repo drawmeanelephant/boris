@@ -43,10 +43,8 @@ This example selects layouts without any frontmatter layout key:
 | `role:trunk` | `section.html` | Children-first column; compact chrome |
 | fallback | `main.html` | Three-column docs shell with TOC |
 
-Rule declaration order does not change a selection; exact ids, the most
-specific matching glob, the role rule, and then the fallback are considered
-in that order. The fallback layout is the theme’s `layouts/main.html` (via
-`--theme`).
+Rules are evaluated in declaration order; first match wins. The fallback
+layout is the theme’s `layouts/main.html` (via `--theme`).
 
 ## Asset ownership
 

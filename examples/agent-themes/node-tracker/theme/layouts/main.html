@@ -7,22 +7,21 @@
   <link rel="stylesheet" href="{{asset-url assets/node-tracker.css}}">
 </head>
 <body>
-  <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="topbar">
-    <span class="logo">Boris<span>2</span></span>
+    <a class="logo" href="{{asset-url assets/node-tracker.css}}">Boris<span>2</span></a>
     <nav class="topnav" aria-label="Account and site links">
-      <span>Front Page</span>
-      <span>New Nodes</span>
+      <a href="{{asset-url assets/node-tracker.css}}">Front Page</a>
+      <a href="{{asset-url assets/node-tracker.css}}">New Nodes</a>
       <span class="static-control" title="Static showcase control">Log In</span>
       <span class="static-control" title="Static showcase control">Create Account</span>
     </nav>
   </header>
 
   <div class="page-wrap">
-    <main id="main-content" class="node-main" tabindex="-1">
+    <main class="node-main">
       <div class="crumbs">{{breadcrumb}}</div>
-      {{metadata}}
-      <p class="node-search">(thing) by <span class="author">AdminUser</span></p>
+      <h1 class="node-title">{{title}}</h1>
+      <p class="node-search">(thing) by <a href="{{asset-url assets/node-tracker.css}}">AdminUser</a></p>
 
       <article class="node-body">
         <div class="node-copy">{{content}}</div>
@@ -50,12 +49,8 @@
         <div class="nodelet-body">{{nav}}</div>
       </nav>
       <section class="nodelet">
-        <h2>On this page</h2>
-        <div class="nodelet-body">{{toc}}</div>
-      </section>
-      <section class="nodelet">
         <h2>Personal Nodelet</h2>
-        <div class="nodelet-body">Welcome, Anonymous Coward<br><span class="static-control">Log in</span> or register</div>
+        <div class="nodelet-body">Welcome, Anonymous Coward<br><a href="{{asset-url assets/node-tracker.css}}">Log in</a> or register</div>
       </section>
     </aside>
   </div>

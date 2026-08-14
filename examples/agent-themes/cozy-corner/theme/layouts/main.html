@@ -7,20 +7,19 @@
   <link rel="stylesheet" href="{{asset-url assets/cozy.css}}">
 </head>
 <body>
-  <a class="skip-link" href="#main-content">Skip to content</a>
   <div class="site-shell">
-    <header class="site-header" role="banner">
+    <header class="site-header">
       <p class="site-kicker">personal web archive // 2004—forever</p>
-      <h1>The Cozy Corner</h1>
+      <h1>{{title}}</h1>
       <p class="tagline">Ramblings, thoughts, and web design in the mid-2000s</p>
     </header>
     <div class="layout">
-      <main id="main-content" class="site-main" tabindex="-1">
+      <main class="site-main">
         <div class="breadcrumb">{{breadcrumb}}</div>
         <article class="entry">
           <header class="entry-header">
+            <h2>{{title}}</h2>
             <p class="entry-meta">hand-coded entry · static archive</p>
-            {{metadata}}
           </header>
           <div class="entry-content">{{content}}</div>
           <footer class="entry-footer">comments and TrackBacks are preserved as authored metadata</footer>
@@ -44,9 +43,9 @@
         <section class="sidebar-module">
           <h2>Blogroll</h2>
           <ul class="blogroll">
-            <li>the stylesheet stays local</li>
-            <li>the archive rules stay visible</li>
-            <li>the quiet corner stays hand-coded</li>
+            <li><a href="{{asset-url assets/cozy.css}}">the stylesheet</a></li>
+            <li><a href="{{asset-url assets/cozy.css}}">the archive rules</a></li>
+            <li><a href="{{asset-url assets/cozy.css}}">the quiet corner</a></li>
           </ul>
         </section>
         <section class="sidebar-module toc-module" aria-label="On this page">{{toc}}</section>

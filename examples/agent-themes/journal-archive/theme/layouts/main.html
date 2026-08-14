@@ -8,22 +8,23 @@
   <link rel="stylesheet" href="{{asset-url assets/journal.css}}">
 </head>
 <body>
-  <a class="skip-link" href="#main-content">Skip to content</a>
   <div class="journal-frame">
-    <header class="journal-header" role="banner">
+    <header class="journal-header">
       <p class="prompt" aria-label="shell prompt">root@localhost:~# cat /docs/spec.md</p>
-      <h1>system.log</h1>
+      <h1>{{title}}</h1>
       <p class="status-line">static archive // load → roll → ignite → reset</p>
       <nav class="journal-nav" aria-label="Archive navigation">{{nav}}</nav>
     </header>
 
-    <main id="main-content" class="journal-main" tabindex="-1">
+    <main class="journal-main">
       <div class="journal-breadcrumb">{{breadcrumb}}</div>
       <article class="entry-box">
         <header class="entry-header">
-          <p class="entry-kicker">DOCUMENT ENTRY</p>
+          <div>
+            <p class="entry-kicker">DOCUMENT ENTRY</p>
+            <h2>{{title}}</h2>
+          </div>
           <div class="userpic" role="img" aria-label="Text userpic: SYS_ADMIN">SYS_ADMIN</div>
-          {{metadata}}
         </header>
         <div class="entry-content">{{content}}</div>
       </article>
@@ -33,10 +34,7 @@
         {{children}}
       </section>
 
-      <aside class="journal-toc" aria-label="On this page">
-        <p class="entry-kicker">ON THIS PAGE</p>
-        {{toc}}
-      </aside>
+      <aside class="journal-toc" aria-label="On this page">{{toc}}</aside>
     </main>
 
     <footer class="journal-footer">{{footer}}</footer>
