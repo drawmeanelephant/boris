@@ -10,6 +10,7 @@ Modes:
   check               Read-only graph health report (findings do not fail by default)
   impact <ID>         Read-only transitive impact report for a page
   plan                Emit a normalized publication plan (no publication)
+  init [DIR]          Write a starter site (content, theme, profile) into DIR (default: .)
   (no command)        Same as build
   --html              Explicit HTML site mode → --html-dir (default dist)
   --html-dir <DIR>    HTML site mode with output directory DIR

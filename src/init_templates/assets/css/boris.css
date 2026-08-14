@@ -1,0 +1,42 @@
+/* Starter theme for a Boris site. Replace or extend freely. */
+:root {
+  --ink: #1f2328;
+  --paper: #ffffff;
+  --muted: #59636e;
+  --accent: #0969da;
+  --rule: #d1d9e0;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0 auto;
+  max-width: 64rem;
+  padding: 1rem 1.5rem 3rem;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.site-header {
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.site-title { font-size: 1.1rem; font-weight: 700; margin: 0 0 0.5rem; }
+
+.site-nav ul, .site-toc ul { list-style: none; padding-left: 1rem; }
+.site-nav a, .site-toc a, .site-breadcrumb a { color: var(--accent); text-decoration: none; }
+.site-nav a:hover, .site-toc a:hover, .site-breadcrumb a:hover { text-decoration: underline; }
+
+.site-breadcrumb { color: var(--muted); font-size: 0.9rem; margin-bottom: 1rem; }
+.site-toc { border: 1px solid var(--rule); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1.5rem; font-size: 0.95rem; }
+.site-toc:empty { display: none; }
+
+.site-content h1 { font-size: 1.8rem; margin-top: 0; }
+.site-content code { background: #f6f8fa; border-radius: 4px; padding: 0.1em 0.35em; }
+.site-content pre { background: #f6f8fa; border-radius: 6px; padding: 0.75rem 1rem; overflow-x: auto; }
+
+.site-footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--rule); color: var(--muted); font-size: 0.9rem; }

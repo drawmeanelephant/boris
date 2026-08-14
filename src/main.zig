@@ -22,6 +22,7 @@ const intelligence = @import("intelligence.zig");
 const json_out = @import("json_out.zig");
 const publication_profile = @import("publication_profile.zig");
 const publication_plan = @import("publication_plan.zig");
+const init_mod = @import("init.zig");
 const timings = @import("timings.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
@@ -109,6 +110,8 @@ fn runPipelineTimed(io: Io, gpa: std.mem.Allocator, opts: Options, print_report:
 
     const code: ExitCode = if (opts.command == .plan)
         runPublicationPlan(io, gpa, opts, recorder_ptr)
+    else if (opts.command == .init)
+        runInit(io, gpa, opts)
     else if (opts.command == .validate)
         runValidate(io, gpa, opts, recorder_ptr)
     else if (opts.command == .check or opts.command == .impact)
@@ -175,6 +178,12 @@ fn printTimingsReport(io: Io, gpa: std.mem.Allocator, recorder: *const timings.R
 
 /// Read, normalize, validate, and declare one explicitly selected profile.
 /// This path intentionally stops before content discovery or any publisher.
+/// Materialize a deterministic starter site into `opts.init_dir` (default ".").
+pub fn runInit(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    const target_dir = opts.init_dir orelse ".";
+    return @enumFromInt(init_mod.run(io, gpa, target_dir, opts.quiet));
+}
+
 pub fn runPublicationPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     _ = recorder;
     const profile_path = opts.profile_path orelse return .usage;

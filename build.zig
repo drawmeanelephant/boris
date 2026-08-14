@@ -169,6 +169,22 @@ pub fn build(b: *std.Build) void {
     );
     test_cooklang_incremental_step.dependOn(&cooklang_incremental_run.step);
 
+    // `boris init` black-box: the generated starter must build/validate/plan
+    // out of the box, refuse to clobber an existing project, and be
+    // byte-deterministic.
+    const init_run = b.addSystemCommand(&.{
+        "bash",
+        "scripts/test-boris-init.sh",
+    });
+    init_run.setCwd(b.path("."));
+    init_run.has_side_effects = true;
+    init_run.step.dependOn(b.getInstallStep());
+    const test_boris_init_step = b.step(
+        "test-boris-init",
+        "Run boris init starter-tree black-box test",
+    );
+    test_boris_init_step.dependOn(&init_run.step);
+
     // --- Pipeline + graph tests (milestone 6) ------------------------------
     // Pipeline imports aside (component validation) → needs the Oliver render seam.
     const pipeline_mod = b.createModule(.{
@@ -1088,6 +1104,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_textile_tests.step);
     test_step.dependOn(&run_cooklang_tests.step);
     test_step.dependOn(&cooklang_incremental_run.step);
+    test_step.dependOn(&init_run.step);
     test_step.dependOn(&run_pipeline_tests.step);
     test_step.dependOn(&run_publication_profile_tests.step);
     test_step.dependOn(&run_github_pages_tests.step);
