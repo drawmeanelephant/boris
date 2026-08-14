@@ -103,24 +103,30 @@ wins). The output is exactly one line on **stdout**:
 boris/0.8.1
 ```
 
-The id is `pipeline.compiler_id` (`src/pipeline.zig`). The IR `manifest.json`
-records the same unsuffixed constant as its `compiler` field, so scripts and
-CI can pin the compiler and verify an artifact set's provenance:
+The id is `pipeline.compiler_id` (`src/pipeline.zig`): the base compiler id,
+never suffixed. Artifacts record the base id, or a variant-suffixed id when
+the corpus engages the Cooklang or semantic-relations stack — both the IR
+`manifest.json` (`compiler` field) and the editor `completion.json`
+(`compiler_id` field) write e.g. `boris/0.8.1` for a Markdown corpus and
+`boris/0.8.1+cooklang` for a Cooklang corpus. Scripts and CI can therefore
+pin the compiler, and provenance checks must accept the base or a
+`+`-suffixed artifact id:
 
 ```bash
 # Pin: refuse to build with an unexpected compiler.
 BORIS_VERSION="$(boris --version)"
 [ "$BORIS_VERSION" = "boris/0.8.1" ] || exit 2
 
-# Verify an artifact set's provenance: the recorded id must match.
-grep -q "\"compiler\": \"$BORIS_VERSION\"" .boris/manifest.json
+# Verify an artifact set's provenance: the recorded id is the base id,
+# possibly suffixed for variant corpora (e.g. boris/0.8.1+cooklang).
+ARTIFACT_ID="$(sed -n 's/.*"compiler": "\([^"]*\)".*/\1/p' .boris/manifest.json)"
+case "$ARTIFACT_ID" in
+  "$BORIS_VERSION" | "$BORIS_VERSION"+*) ;;  # base or variant-suffixed id
+  *) echo "compiler mismatch: $ARTIFACT_ID" >&2; exit 2 ;;
+esac
 ```
 
-The editor `completion.json` also carries a `compiler_id` field, but for
-variant corpora it is the suffixed artifact id (`boris/0.8.1+cooklang`,
-`boris/0.8.1+semantic-relations`), not the bare `pipeline.compiler_id` — so
-use `manifest.json`'s `compiler` field for exact provenance checks, and treat
-all ids as opaque `name/version` text: compare exactly rather than
+Treat all ids as opaque `name/version` text: compare them exactly rather than
 substring-matching on the version portion, since suffixes are possible.
 
 ## Timing report (`--timings`)
