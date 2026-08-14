@@ -1,4 +1,4 @@
-error: missing value for --rss
+error: RSS mode requires --site-url, --rss-title, and --rss-description (try --help)
 Boris — Zig content compiler (HTML site + IR + optional RAG)
 
 Usage: boris <command> [options]
