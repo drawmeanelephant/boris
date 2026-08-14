@@ -27,6 +27,8 @@ a { color: var(--signal); text-decoration-thickness: 2px; text-underline-offset:
 a:hover, a:focus-visible { background: var(--signal); color: var(--paper); }
 
 :focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
+.skip-link { position: fixed; left: 1rem; top: -4rem; z-index: 5; padding: .5rem .75rem; background: var(--signal); color: var(--paper); text-decoration: none; font-weight: bold; }
+.skip-link:focus { top: 1rem; }
 
 h1, h2, h3 { line-height: 1.15; text-transform: uppercase; }
 h1 { margin: .5rem 0; font-size: clamp(2.25rem, 8vw, 4.5rem); border-bottom: 2px solid var(--signal); }
@@ -53,10 +55,21 @@ th { color: var(--signal); background: #111; }
 .entry-header { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px dashed var(--line); padding-bottom: 1rem; }
 .entry-header h2 { margin: 0; }
 .entry-kicker { margin: 0 0 .5rem; }
+.page-metadata { display: flex; flex-wrap: wrap; gap: .4rem .9rem; margin-top: .7rem; color: var(--quiet); font-size: .72rem; }
+.page-metadata div { display: flex; gap: .3rem; }
+.page-metadata dt { color: var(--signal); }
+.page-metadata dd { margin: 0; }
 .userpic { display: grid; place-items: center; flex: 0 0 6rem; min-height: 6rem; border: 1px solid var(--signal); background: #111; color: var(--quiet); font-size: .75rem; text-align: center; }
 .entry-content { margin-top: 1.5rem; }
 .archive-children { margin-top: 2rem; border-top: 1px solid var(--signal); padding-top: 1rem; }
 .archive-children h2 { color: var(--signal); font-size: 1.1rem; }
+.page-children ul, .page-toc ul, .site-nav ul { margin: 0; padding: 0; list-style: none; }
+.page-children li, .page-toc li, .site-nav li { margin: .35rem 0; }
+.page-children a, .page-toc a, .site-nav a { color: var(--signal); }
+.site-nav ul ul { margin: .25rem 0 .35rem .7rem; padding-left: .7rem; border-left: 1px dashed var(--line); }
+.site-nav .is-current > a { background: var(--signal); color: var(--paper); }
+.page-toc__l2 { padding-left: .75rem; }
+.page-toc__l3 { padding-left: 1.35rem; }
 .journal-toc { margin-top: 1.5rem; color: var(--quiet); font-size: .85rem; }
 .journal-footer { margin-top: 2rem; border-top: 1px dashed var(--line); padding-top: 1rem; }
 

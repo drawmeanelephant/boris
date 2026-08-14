@@ -18,6 +18,12 @@ ship Boris.
 Use this tree when you want a polished reference for authoring a theme, not
 as a dependency of the compiler.
 
+The current pass makes each layout a fuller slot specimen: the home and
+article shells expose a skip link and page outline, section pages expose both
+generated direct children and navigation/TOC, and blog pages expose their
+related-post stream. The visual component vocabulary remains hand-authored
+and framework-free.
+
 ## DaisyUI decision (provenance)
 
 We evaluated an official pinned DaisyUI static CSS artifact

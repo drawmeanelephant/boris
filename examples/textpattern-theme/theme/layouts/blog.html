@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en" data-layout="blog" data-theme="textpattern">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Journal · Textpattern Notes</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/textpattern.css}}">
+  <link rel="icon" href="{{asset-url assets/img/textpattern-mark.svg}}" type="image/svg+xml">
+</head>
+<body class="txp-body txp-blog-body" data-layout="blog">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="txp-header" role="banner">
+    <div class="txp-container txp-header-inner">
+      <div class="txp-branding" aria-label="Textpattern Notes">
+        <img class="txp-brand-mark txp-brand-mark--small" src="{{asset-url assets/img/textpattern-mark.svg}}" width="38" height="38" alt="">
+        <span>
+          <span class="txp-overline">journal / field reports</span>
+          <span class="txp-site-name">Textpattern Notes</span>
+        </span>
+      </div>
+      <div class="txp-header-trail">{{breadcrumb}}</div>
+    </div>
+  </header>
+
+  <main id="main-content" class="txp-container txp-blog-layout" tabindex="-1" data-boris-search-root>
+    <article class="txp-paper txp-content txp-blog-post">
+      {{metadata}}
+      <div class="txp-article-content">
+        {{content}}
+      </div>
+      <section class="txp-page-children" aria-labelledby="blog-children-heading">
+        <p class="txp-widget-title" id="blog-children-heading">More from the journal</p>
+        {{children}}
+      </section>
+    </article>
+    <aside class="txp-sidebar txp-blog-sidebar" aria-label="Journal tools">
+      <section class="txp-widget">
+        <p class="txp-widget-title">On this page</p>
+        {{toc}}
+      </section>
+      <section class="txp-widget txp-widget--nav">
+        <p class="txp-widget-title">Journal index</p>
+        <nav class="txp-nav txp-nav--rail" aria-label="Journal index">{{nav}}</nav>
+      </section>
+    </aside>
+  </main>
+
+  <footer class="txp-footer" role="contentinfo">{{footer}}</footer>
+</body>
+</html>

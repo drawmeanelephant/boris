@@ -3,11 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>{{title}} · Section · Boris Showcase</title>
   <link rel="stylesheet" href="{{asset-url assets/css/showcase.css}}">
   <link rel="icon" href="{{asset-url assets/img/mark.svg}}" type="image/svg+xml">
 </head>
 <body data-layout="section">
+  <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="navbar navbar--compact">
     <div class="navbar__brand">
       <img class="navbar__mark" src="{{asset-url assets/img/mark.svg}}" width="24" height="24" alt="">
@@ -16,16 +18,22 @@
     </div>
     {{breadcrumb}}
   </header>
-  <main class="section-main">
+  <main id="main-content" class="section-main" tabindex="-1">
     <div class="card section-intro">
       {{metadata}}
       <article class="prose">
         {{content}}
       </article>
+      <section class="children-panel" aria-labelledby="section-children-heading">
+        <p class="sidebar__label" id="section-children-heading">In this section</p>
+        {{children}}
+      </section>
     </div>
     <aside class="card section-children">
       <p class="sidebar__label">In this section</p>
       {{nav}}
+      <p class="sidebar__label section-toc-label">On this page</p>
+      {{toc}}
     </aside>
   </main>
   <footer class="footer">{{footer}}</footer>
