@@ -522,9 +522,14 @@ pub fn allowedRedirect(
 fn resolveRedirect(gpa: std.mem.Allocator, current: []const u8, location: []const u8) ![]u8 {
     if (location.len > 8192) return error.UnsafeRedirect;
     var buffer = try gpa.alloc(u8, 16 * 1024);
+    defer gpa.free(buffer);
     const copied = buffer[0..location.len];
     @memcpy(copied, location);
-    var remaining = buffer[location.len..];
+    // `resolveInPlace` reads `location.len` bytes from this slice, so it must
+    // view the copied bytes — pointing it past them fed it uninitialized
+    // memory and made the first observed redirect resolve to a garbage URL
+    // (#441).
+    var remaining = buffer[0..location.len];
     const base = std.Uri.parse(current) catch return error.UnsafeRedirect;
     const resolved = std.Uri.resolveInPlace(base, location.len, &remaining) catch return error.UnsafeRedirect;
     var out = std.Io.Writer.Allocating.init(gpa);
@@ -1672,6 +1677,24 @@ test "deployment location accepts project, root, and custom Pages identities" {
         try std.testing.expect(allowedRedirect(gpa, &plan, case.page));
         // The test-owned plan must not deinitialize the borrowed location.
     }
+}
+
+test "resolveRedirect follows a same-location canonical 301 without uninitialized memory (#441)" {
+    const gpa = std.testing.allocator;
+    // The oliver incident: the RSS channel link is the no-trailing-slash base
+    // URL, and Pages answers it with a 301 to the canonical trailing-slash
+    // form, inside the declared location.
+    const current = "https://drawmeanelephant.github.io/oliver";
+    const location_header = "https://drawmeanelephant.github.io/oliver/";
+    const resolved = try resolveRedirect(gpa, current, location_header);
+    defer gpa.free(resolved);
+    try std.testing.expectEqualStrings(location_header, resolved);
+
+    // The resolved candidate is a permitted redirect for the project-site plan.
+    var location = try github_pages.parse(gpa, "https://drawmeanelephant.github.io/oliver", "https://drawmeanelephant.github.io", "/oliver");
+    defer location.deinit(gpa);
+    const plan = Plan{ .gpa = gpa, .location = location, .target = "public", .projections = .{} };
+    try std.testing.expect(allowedRedirect(gpa, &plan, resolved));
 }
 
 test "redirect policy rejects wrong origins and unsafe schemes" {
