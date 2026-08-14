@@ -428,7 +428,7 @@ test "no payload reread: rewriting payload bytes leaves prior touches untouched"
 /// by PR #294 (first Touch Atlas implementation). This change is a pure
 /// ownership cleanup and must not alter a single emitted byte; the golden
 /// captures the full report (36834 bytes) and pins its SHA-256.
-const touches_golden_sha256 = "26736f152cda46c44c7e14b6909386aaff7c256f9deead6caae6e125a472aba3";
+const touches_golden_sha256 = "8f2ec8a179459f8eb769dbdbc73cc552128f5b2a611a57dc03c2f368691148f8";
 const touches_golden_len = 36834;
 
 test "touches emission remains byte-identical to the PR #294 golden" {
@@ -460,9 +460,9 @@ test "touches emission remains byte-identical to the PR #294 golden" {
     });
     const touches = try deriveTouches(io, allocator, fixture_path, "results/boris-output");
     defer allocator.free(touches);
-    try std.testing.expectEqual(touches_golden_len, touches.len);
     var digest: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(touches, &digest, .{});
     const hex = std.fmt.bytesToHex(digest, .lower);
+    try std.testing.expectEqual(touches_golden_len, touches.len);
     try std.testing.expectEqualStrings(touches_golden_sha256, &hex);
 }

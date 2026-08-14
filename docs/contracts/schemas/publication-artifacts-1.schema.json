@@ -41,7 +41,29 @@
         "status": { "enum": ["committed", "omitted-by-plan", "not-applicable"] },
         "bytes": { "type": "integer", "minimum": 0 },
         "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "format_version": { "type": ["string", "null"], "minLength": 1 }
+        "format_version": { "type": ["string", "null"], "minLength": 1 },
+        "dimensions": {
+          "description": "Pixel dimensions for image assets where determinable from header bytes; null for non-images, unsupported formats, and malformed headers (#396).",
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["width", "height"],
+              "properties": {
+                "width": { "type": "integer", "minimum": 1 },
+                "height": { "type": "integer", "minimum": 1 }
+              }
+            }
+          ]
+        },
+        "semantics": {
+          "description": "Explicit author-facing asset semantics (#396): theme-owned assets are static; content-local .assets trees are content-references. Null for non-asset records.",
+          "anyOf": [
+            { "type": "null" },
+            { "enum": ["static", "content-reference"] }
+          ]
+        }
       }
     }
   }

@@ -177,6 +177,7 @@ const modules = [_]Module{
     .{ .name = "html_scan.zig", .class = .other },
     .{ .name = "html_toc.zig", .class = .other },
     .{ .name = "identity.zig", .class = .other },
+    .{ .name = "image_dimensions.zig", .class = .other },
     // Not an emitter: init materializes a deterministic starter tree
     // (content, theme, profile) from fixed constants.
     .{ .name = "init.zig", .class = .other },
