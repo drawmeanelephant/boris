@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, afterparty]
   pull_request:
-    branches: [main, afterparty]
+    branches: [main, afterparty, 'codex/editor-*']
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -82,6 +82,55 @@ jobs:
       # pristine clone.
       - name: Publication conformance
         run: zig build test-publication-conformance
+
+  editor-test:
+    name: editor-test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editor/ui/package-lock.json
+
+      - name: Install editor UI dependencies
+        run: npm --prefix editor/ui ci
+
+      - name: Install browser
+        run: npm exec --prefix editor/ui -- playwright install --with-deps chromium
+
+      - name: Editor format
+        run: zig fmt --check editor/build.zig editor/build.zig.zon editor/src
+
+      - name: Editor host tests
+        run: zig build --build-file editor/build.zig test
+
+      - name: Build Boris and editor host
+        run: |
+          zig build
+          zig build --build-file editor/build.zig
+
+      - name: Editor UI checks
+        run: |
+          npm --prefix editor/ui run check
+          npm --prefix editor/ui run build
+          npm --prefix editor/ui run test:e2e
+
+      - name: Compiler contract fixture
+        run: ./editor/scripts/test-contract-fixture.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor-contract-probe
+
+      - name: Loopback host integration
+        run: ./editor/scripts/test-host.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
 
   migration-lab-test:
     name: migration-lab-test (Linux)
@@ -213,6 +262,7 @@ jobs:
     name: ci
     needs:
       - build-and-test
+      - editor-test
       - migration-lab-test
       - standalone_tools_test
       - testdata_generator_test
@@ -224,18 +274,21 @@ jobs:
       - name: Require matrix success
         run: |
           build_and_test="${{ needs.build-and-test.result }}"
+          editor_test="${{ needs.editor-test.result }}"
           migration_lab_test="${{ needs.migration-lab-test.result }}"
           standalone_tools_test="${{ needs.standalone_tools_test.result }}"
           testdata_generator_test="${{ needs.testdata_generator_test.result }}"
           content_audit_test="${{ needs.content-audit-test.result }}"
           release_html_smoke="${{ needs.release-html-smoke.result }}"
           echo "build-and-test result: ${build_and_test}"
+          echo "editor-test result: ${editor_test}"
           echo "migration-lab-test result: ${migration_lab_test}"
           echo "standalone-tools-test result: ${standalone_tools_test}"
           echo "testdata-generator-test result: ${testdata_generator_test}"
           echo "content-audit-test result: ${content_audit_test}"
           echo "release-html-smoke result: ${release_html_smoke}"
           test "${build_and_test}" = "success"
+          test "${editor_test}" = "success"
           test "${migration_lab_test}" = "success" || test "${migration_lab_test}" = "skipped"
           test "${standalone_tools_test}" = "success" || test "${standalone_tools_test}" = "skipped"
           test "${testdata_generator_test}" = "success" || test "${testdata_generator_test}" = "skipped"

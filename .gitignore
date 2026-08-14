@@ -20,6 +20,12 @@ zig-cache/
 # just the repo root — matches how .zig-cache/ and zig-cache/ are handled above.
 zig-out/
 
+# Boris Editor local toolchain and browser-test outputs.
+/editor/ui/node_modules/
+/editor/ui/dist/
+/editor/ui/playwright-report/
+/editor/ui/test-results/
+
 
 
 # Local scratch / private drop (images, notes dumps) — not product source

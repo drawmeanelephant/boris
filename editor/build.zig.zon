@@ -1,0 +1,14 @@
+.{
+    .name = .boris_editor,
+    .version = "0.1.0",
+    .fingerprint = 0xf49d6b689e39b2e5,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "scripts",
+        "README.md",
+        "ui",
+    },
+}
