@@ -319,12 +319,43 @@ fn runTool(io: std.Io, gpa: std.mem.Allocator, args: []const []const u8) u8 {
     };
 
     if (!options.quiet) {
+        // List only the report files actually emitted for the selected
+        // format: a json-only run must not claim REPORT.md or site/.
+        const artifacts = buildSummaryList(gpa, final_path, options.format) catch {
+            diag("boris-content-audit: out of memory building summary\n", .{});
+            return @intFromEnum(ExitCode.io_error);
+        };
+        defer gpa.free(artifacts);
         diag(
-            "boris-content-audit: wrote {s}/report.json, {s}/REPORT.md, {s}/site/ · {d} source records, {d} poetry records, {d} exceptions, exit {d}\n",
-            .{ final_path, final_path, final_path, findings.source_count, findings.poetry_count, findings.exceptions, @intFromEnum(exit_code) },
+            "boris-content-audit: wrote {s} · {d} source records, {d} poetry records, {d} exceptions, exit {d}\n",
+            .{ artifacts, findings.source_count, findings.poetry_count, findings.exceptions, @intFromEnum(exit_code) },
         );
     }
     return @intFromEnum(exit_code);
+}
+
+/// The "wrote ..." summary lists only the report artifacts the selected
+/// format actually emits (report.json / REPORT.md / site/).
+fn buildSummaryList(gpa: std.mem.Allocator, final_path: []const u8, format: cli.Format) ![]u8 {
+    var artifacts: std.ArrayList(u8) = .empty;
+    errdefer artifacts.deinit(gpa);
+    var first = true;
+    if (format.includeJson()) {
+        if (!first) try artifacts.appendSlice(gpa, ", ");
+        try artifacts.print(gpa, "{s}/report.json", .{final_path});
+        first = false;
+    }
+    if (format.includeMarkdown()) {
+        if (!first) try artifacts.appendSlice(gpa, ", ");
+        try artifacts.print(gpa, "{s}/REPORT.md", .{final_path});
+        first = false;
+    }
+    if (format.includeHtml()) {
+        if (!first) try artifacts.appendSlice(gpa, ", ");
+        try artifacts.print(gpa, "{s}/site/", .{final_path});
+        first = false;
+    }
+    return try artifacts.toOwnedSlice(gpa);
 }
 
 fn buildRepro(gpa: std.mem.Allocator, options: *const cli.Options) ![]u8 {
@@ -667,6 +698,66 @@ test "byte-identical second run" {
         const b1 = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/{s}", .{ out1, rel }), a);
         const b2 = try output.readFileAlloc(io, std.Io.Dir.cwd(), try std.fmt.allocPrint(a, "{s}/{s}", .{ out2, rel }), a);
         try std.testing.expectEqualStrings(b1, b2);
+    }
+}
+
+test "summary lists exactly the emitted report artifacts per format" {
+    const io = std.testing.io;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer {
+        tmp.dir.close(io);
+        tmp.parent_dir.deleteTree(io, &tmp.sub_path) catch {};
+        tmp.parent_dir.close(io);
+    }
+    const root = try tmpPath(a, tmp, "sum-root");
+    const content = try std.fmt.allocPrint(a, "{s}/content", .{root});
+    try makeTree(io, a, content, &.{
+        .{ .path = "lorelog/llg-100.md", .data = "---\nid: lorelog/LLG-100\nparent: lorelog\nstatus: published\n---\n# 100\n" },
+        .{ .path = "haikus/hai-100.md", .data = "---\nid: haikus/HAI-100\nparent: haikus\ntitle: For 100\n---\n# For 100\n\none\ntwo\nthree\n" },
+    });
+    const policy_path = try writeFixturePolicy(io, a, root);
+
+    // For every format, the summary artifact list and the emitted tree must
+    // agree exactly: nothing listed is missing, and nothing emitted is left
+    // out (a json-only run must not claim REPORT.md or site/).
+    const formats = [_]cli.Format{ .json, .markdown, .html, .all };
+    for (formats) |format| {
+        const out = try std.fmt.allocPrint(a, "{s}/out-{s}", .{ root, format.cliName() });
+        const code = try runAudit(io, a, root, policy_path, out, null, &.{
+            try std.fmt.allocPrint(a, "--format={s}", .{format.cliName()}),
+            "--fail-on=none",
+        });
+        try std.testing.expectEqual(@as(u8, 0), code);
+
+        const listed = try buildSummaryList(a, out, format);
+        var it = std.mem.splitScalar(u8, listed, ',');
+        while (it.next()) |piece| {
+            const rel = std.mem.trim(u8, piece, " ");
+            _ = try std.Io.Dir.cwd().statFile(io, rel, .{});
+        }
+
+        if (!format.includeJson()) {
+            try std.testing.expectError(
+                error.FileNotFound,
+                std.Io.Dir.cwd().statFile(io, try std.fmt.allocPrint(a, "{s}/report.json", .{out}), .{}),
+            );
+        }
+        if (!format.includeMarkdown()) {
+            try std.testing.expectError(
+                error.FileNotFound,
+                std.Io.Dir.cwd().statFile(io, try std.fmt.allocPrint(a, "{s}/REPORT.md", .{out}), .{}),
+            );
+        }
+        if (!format.includeHtml()) {
+            try std.testing.expectError(
+                error.FileNotFound,
+                std.Io.Dir.cwd().statFile(io, try std.fmt.allocPrint(a, "{s}/site/index.html", .{out}), .{}),
+            );
+        }
     }
 }
 
