@@ -92,6 +92,43 @@ their normal deterministic stderr form and exit classes; `--quiet` suppresses
 that text. `--format` and `--report` remain analysis-only flags and must not be
 accepted as an invitation to invent a second validation schema.
 
+## Version query
+
+`boris --version` (or `boris -V`) prints the compiler id and exits `0` without
+reading content or writing artifacts, short-circuiting exactly like `--help`
+(invalid trailing flags are ignored; the first of `--version`/`--help` seen
+wins). The output is exactly one line on **stdout**:
+
+```text
+boris/0.8.1
+```
+
+The id is `pipeline.compiler_id` (`src/pipeline.zig`): the base compiler id,
+never suffixed. Artifacts record the base id, or a variant-suffixed id when
+the corpus engages the Cooklang or semantic-relations stack — both the IR
+`manifest.json` (`compiler` field) and the editor `completion.json`
+(`compiler_id` field) write e.g. `boris/0.8.1` for a Markdown corpus and
+`boris/0.8.1+cooklang` for a Cooklang corpus. Scripts and CI can therefore
+pin the compiler, and provenance checks must accept the base or a
+`+`-suffixed artifact id:
+
+```bash
+# Pin: refuse to build with an unexpected compiler.
+BORIS_VERSION="$(boris --version)"
+[ "$BORIS_VERSION" = "boris/0.8.1" ] || exit 2
+
+# Verify an artifact set's provenance: the recorded id is the base id,
+# possibly suffixed for variant corpora (e.g. boris/0.8.1+cooklang).
+ARTIFACT_ID="$(sed -n 's/.*"compiler": "\([^"]*\)".*/\1/p' .boris/manifest.json)"
+case "$ARTIFACT_ID" in
+  "$BORIS_VERSION" | "$BORIS_VERSION"+*) ;;  # base or variant-suffixed id
+  *) echo "compiler mismatch: $ARTIFACT_ID" >&2; exit 2 ;;
+esac
+```
+
+Treat all ids as opaque `name/version` text: compare them exactly rather than
+substring-matching on the version portion, since suffixes are possible.
+
 ## Timing report (`--timings`)
 
 `--timings` is an opt-in, observation-only flag accepted alongside any command
