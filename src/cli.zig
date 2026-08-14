@@ -275,9 +275,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     } else if (i < args.len and std.mem.eql(u8, args[i], "impact")) {
         command = .impact;
         i += 1;
-        if (i >= args.len or std.mem.startsWith(u8, args[i], "-")) return error.MissingValue;
-        impact_id = args[i];
-        i += 1;
+        // The target id is captured in the loop so flags may precede it
+        // (`boris impact --quiet ID`); a missing target is checked after
+        // the loop so `boris impact` stays a usage error.
     } else if (i < args.len and std.mem.eql(u8, args[i], "plan")) {
         command = .plan;
         i += 1;
@@ -295,12 +295,17 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     while (i < args.len) : (i += 1) {
         const a = args[i];
 
-        // `init [DIR]` — the single positional target may also follow flags
-        // (`boris init --quiet DIR`); the pre-loop capture handles the
-        // immediate-after-command form, this handles flags in between. A
-        // second positional still falls through to UnexpectedPositional.
+        // `init [DIR]` and `impact <ID>` — the single positional may also
+        // follow flags (`boris init --quiet DIR`, `boris impact --quiet ID`);
+        // the pre-loop capture handles the immediate-after-command form, this
+        // handles flags in between. A second positional still falls through
+        // to UnexpectedPositional.
         if (command == .init and init_dir == null and !std.mem.startsWith(u8, a, "-")) {
             init_dir = a;
+            continue;
+        }
+        if (command == .impact and impact_id == null and !std.mem.startsWith(u8, a, "-")) {
+            impact_id = a;
             continue;
         }
 
@@ -704,6 +709,10 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             return error.InvalidValue;
         };
     }
+
+    // `impact` requires its target; the loop capture defers the immediate-
+    // after-command check so flags may precede the positional.
+    if (command == .impact and impact_id == null) return error.MissingValue;
     errdefer if (owned_html_layout) gpa.free(html_layout);
 
     const has_explicit_targets = targets.items.len > 0;
@@ -1481,6 +1490,16 @@ test "parse: documentation intelligence commands" {
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "impact", "guides/cache", "--fail-on-unreferenced" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--fail-on-unreferenced" }));
 
+    // The positional id may follow flags, not only the command token.
+    var impact_flags_first = try parseOptions(std.testing.allocator, &.{ "boris", "impact", "--quiet", "guides/cache" });
+    defer impact_flags_first.deinit(std.testing.allocator);
+    try expectEqual(Command.impact, impact_flags_first.command);
+    try expectEqualStrings("guides/cache", impact_flags_first.impact_id.?);
+    try expect(impact_flags_first.quiet);
+    // A second positional is still a usage error; a missing id after flags is
+    // still a missing value.
+    try expectError(error.UnexpectedPositional, parseOptions(std.testing.allocator, &.{ "boris", "impact", "a", "b" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "impact", "--quiet" }));
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "impact" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--out", ".boris" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--format", "json" }));
