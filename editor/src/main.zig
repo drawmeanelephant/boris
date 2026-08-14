@@ -1,6 +1,8 @@
 const std = @import("std");
 const contracts = @import("contracts.zig");
+const file_api = @import("file_api.zig");
 const project = @import("project.zig");
+const recovery = @import("recovery.zig");
 const security = @import("security.zig");
 const server = @import("server.zig");
 const state_root = @import("state_root.zig");
@@ -67,6 +69,7 @@ pub fn main(init: std.process.Init) u8 {
         .project_root = canonical_project,
         .ui_dir = options.ui_dir,
         .boris_path = boris_path,
+        .state_root = cache_path,
         .port = options.port,
         .token = token,
     }) catch |err| {
@@ -156,5 +159,7 @@ test "boris path resolution canonicalizes paths and passes through command names
 
 test {
     _ = contracts;
+    _ = file_api;
+    _ = recovery;
     _ = security;
 }
