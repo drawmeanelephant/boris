@@ -152,6 +152,23 @@ pub fn build(b: *std.Build) void {
     const run_cooklang_tests = b.addRunArtifact(cooklang_tests);
     run_cooklang_tests.setCwd(b.path("."));
 
+    // Black-box regression for seam warning printing: the load-time
+    // validation pass is the only printer, so plain and incremental HTML
+    // builds (and the IR path) each emit every structural warning exactly
+    // once — including cache-reused pages that skip render.
+    const cooklang_incremental_run = b.addSystemCommand(&.{
+        "bash",
+        "scripts/test-cooklang-incremental-warnings.sh",
+    });
+    cooklang_incremental_run.setCwd(b.path("."));
+    cooklang_incremental_run.has_side_effects = true;
+    cooklang_incremental_run.step.dependOn(b.getInstallStep());
+    const test_cooklang_incremental_step = b.step(
+        "test-cooklang-incremental-warnings",
+        "Run Cooklang warning-printing regression on plain/incremental HTML and IR paths",
+    );
+    test_cooklang_incremental_step.dependOn(&cooklang_incremental_run.step);
+
     // --- Pipeline + graph tests (milestone 6) ------------------------------
     // Pipeline imports aside (component validation) → needs the Oliver render seam.
     const pipeline_mod = b.createModule(.{
@@ -1070,6 +1087,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_parser_tests.step);
     test_step.dependOn(&run_textile_tests.step);
     test_step.dependOn(&run_cooklang_tests.step);
+    test_step.dependOn(&cooklang_incremental_run.step);
     test_step.dependOn(&run_pipeline_tests.step);
     test_step.dependOn(&run_publication_profile_tests.step);
     test_step.dependOn(&run_github_pages_tests.step);
