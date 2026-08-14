@@ -38,6 +38,7 @@ pub const Command = enum {
     impact,
     watch,
     plan,
+    init,
 };
 
 pub const AnalysisFormat = enum {
@@ -69,6 +70,8 @@ pub const Options = struct {
     profile_input_format_override: ?identity.InputFormat = null,
     profile_html_output_override: ?[]const u8 = null,
     impact_id: ?[]const u8 = null,
+    /// Target directory for `boris init [DIR]` (default: ".").
+    init_dir: ?[]const u8 = null,
     analysis_format: AnalysisFormat = .human,
     analysis_report: ?[]const u8 = null,
     /// Make ordinary unreferenced-page analysis findings fatal for `check`.
@@ -250,6 +253,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
 
     var command: Command = .build;
     var impact_id: ?[]const u8 = null;
+    var init_dir: ?[]const u8 = null;
     var analysis_format: AnalysisFormat = .human;
     var analysis_report: ?[]const u8 = null;
     var fail_on_unreferenced = false;
@@ -277,6 +281,16 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     } else if (i < args.len and std.mem.eql(u8, args[i], "plan")) {
         command = .plan;
         i += 1;
+    } else if (i < args.len and std.mem.eql(u8, args[i], "init")) {
+        command = .init;
+        i += 1;
+        // `boris init [DIR]` — exactly one optional positional target
+        // directory. A second positional is a usage error.
+        if (i < args.len and !std.mem.startsWith(u8, args[i], "-")) {
+            init_dir = args[i];
+            i += 1;
+        }
+        if (i < args.len and !std.mem.startsWith(u8, args[i], "-")) return error.UnexpectedPositional;
     }
     while (i < args.len) : (i += 1) {
         const a = args[i];
@@ -743,6 +757,34 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         };
     }
 
+    if (command == .init) {
+        // `init` writes a deterministic starter tree into one positional
+        // target directory. Compiler modes, output selectors, publication
+        // inputs, analysis flags, and watch/incremental controls select work
+        // init does not perform; the target directory is positional, so
+        // `--input` is rejected rather than silently misread.
+        if (saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_layout_rules or
+            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or
+            saw_rss_title or saw_rss_description or saw_rss_limit or saw_format or saw_report or saw_watch or saw_timings or
+            saw_profile or saw_input or saw_textile or saw_cooklang or saw_out or saw_rag_dir or saw_incremental or saw_jobs)
+        {
+            return error.ConflictingFlags;
+        }
+        return .{
+            .help = false,
+            .quiet = quiet,
+            .timings = false,
+            .command = .init,
+            .init_dir = init_dir,
+            .mode = .html,
+            .input_format = identity.InputFormat.markdown,
+            .input_dir = "content",
+            .out_dir = null,
+            .html_dir = null,
+            .targets = targets,
+        };
+    }
+
     if (saw_profile) return error.ConflictingFlags;
     if (saw_fail_on_unreferenced and command != .check) return error.ConflictingFlags;
 
@@ -1115,6 +1157,7 @@ pub fn printUsage() void {
         \\  check               Read-only graph health report (findings do not fail by default)
         \\  impact <ID>         Read-only transitive impact report for a page
         \\  plan                Emit a normalized publication plan (no publication)
+        \\  init [DIR]          Write a starter site (content, theme, profile) into DIR (default: .)
         \\  (no command)        Same as build
         \\  --html              Explicit HTML site mode → --html-dir (default dist)
         \\  --html-dir <DIR>    HTML site mode with output directory DIR
@@ -1522,6 +1565,32 @@ test "parse: explicit build and watch commands are stable aliases" {
     try expectEqualStrings("docs", watch.input_dir);
 
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "watch", "--format", "json" }));
+}
+
+test "parse: init takes an optional target directory" {
+    var bare = try parseOptions(std.testing.allocator, &.{ "boris", "init" });
+    defer bare.deinit(std.testing.allocator);
+    try expectEqual(Command.init, bare.command);
+    try expect(bare.init_dir == null);
+
+    var with_dir = try parseOptions(std.testing.allocator, &.{ "boris", "init", "site" });
+    defer with_dir.deinit(std.testing.allocator);
+    try expectEqual(Command.init, with_dir.command);
+    try expectEqualStrings("site", with_dir.init_dir.?);
+
+    var quiet = try parseOptions(std.testing.allocator, &.{ "boris", "init", "--quiet" });
+    defer quiet.deinit(std.testing.allocator);
+    try expectEqual(Command.init, quiet.command);
+    try expect(quiet.quiet);
+
+    // init performs no compiler phase: mode/output/analysis flags are usage
+    // errors, and the target directory is positional, so --input is not an
+    // alias for it.
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "init", "--html-dir", "site" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "init", "--out", "ir" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "init", "--input", "docs" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "init", "--rag" }));
+    try expectError(error.UnexpectedPositional, parseOptions(std.testing.allocator, &.{ "boris", "init", "a", "b" }));
 }
 
 test "parse: plan selects an explicit profile and preserves only supported overrides" {
