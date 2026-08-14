@@ -6,7 +6,8 @@ to disagree, the contract wins (see the [rules of use](contracts/README.md#rules
 
 This is the shortest honest path from a blank directory to a published,
 verified Boris site. Six steps, each about a screen of guidance, grounded in
-the starter tree that `boris init` writes:
+the starter tree that `boris init` writes; step 7 then adds the Boris Editor,
+the compiler-backed surface where steps 2–4 happen:
 
 ```
 start → content & frontmatter → links & graph → layout → publish → verify
@@ -116,6 +117,34 @@ binds the deployed site back to the committed inventory.
   [checks](contracts/publication-checks.md) · [claims](contracts/publication-claims.md) ·
   [Touch Atlas](contracts/publication-touches.md) · [Proof Pack](contracts/publication-proof-pack.md) ·
   [deployment evidence](contracts/github-pages-deployment-evidence.md)
+
+## 7. Edit with the Boris Editor
+
+The Boris Editor is a local, browser-served authoring surface for the trail
+above. It is an interaction layer only: Boris stays the sole parser, graph,
+validation, completion, rendering, and publication authority, and Oliver
+stays the markup authority.
+
+- **Schema- and graph-aware completion** — the frontmatter schema
+  (`boris-frontmatter-1.schema.json`) completes step 2's keys and enums; a
+  successful IR build's `completion.json` completes step 3's entity ids,
+  wiki-links, parents, and relations, and step 4's layout slots. Insertion is
+  explicit and undoable, never a typing-time rewrite.
+- **Compiler-backed commands and problems** — a fixed allowlist wraps the
+  step 3 and step 6 commands (`validate`, IR build, HTML build, `check`,
+  `impact`). Problems group by source, severity, and code; navigate to exact
+  UTF-8 positions; and copy metadata-only diagnostic packets. Exits 1, 2,
+  and 3 stay distinct.
+- **Live preview** — one fixed rebuild
+  (`boris build --input content --incremental --html-dir dist`) serves the
+  committed `dist/` tree byte-for-byte, preserving the last good output after
+  a failed rebuild.
+
+Saving is explicit and never automatic: the editor writes nothing to your
+repository without a save. See the guide for the launch command and the full
+surface:
+
+- [Boris Editor: compiler-backed authoring](../content/guides/editor.md)
 
 ## Schema-aware authoring
 

@@ -11,6 +11,7 @@ Step-by-step guides for authoring, organizing, and publishing documentation with
 
 - [[guides/overview]] — Content model and compiler pipeline overview
 - [[guides/cli-and-modes]] — Choosing build, validate, watch, analysis, and export commands
+- [[guides/editor]] — The local Boris Editor: safe editing, schema-aware completion, compiler-backed problems, and live preview
 - [[guides/building-pages]] — Creating Markdown pages, writing frontmatter, using wiki-links and includes
 - [[guides/trunk-satellite]] — How the content graph works, parent/child relationships, navigation hierarchy
 - [[guides/themes-and-layouts]] — Custom HTML layouts, the `--theme` flag, layout markers and asset management
