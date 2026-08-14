@@ -1346,6 +1346,62 @@ fn readArtifactRecord(allocator: std.mem.Allocator, reader: *std.json.Reader) !A
                 .string, .allocated_string => {},
                 else => return error.InvalidArtifactInventory,
             }
+        } else if (std.mem.eql(u8, key, "dimensions")) {
+            // Extended asset record (#396): null or { width, height }. Not
+            // needed by the generator — consume strictly so a malformed
+            // shape still fails closed.
+            const token = try reader.nextAllocMax(allocator, .alloc_if_needed, 4096);
+            defer freeJsonToken(allocator, token);
+            switch (token) {
+                .null => {},
+                .object_begin => {
+                    var have_width = false;
+                    var have_height = false;
+                    while (true) {
+                        const dim_key_token = try reader.nextAllocMax(allocator, .alloc_if_needed, 4096);
+                        switch (dim_key_token) {
+                            .object_end => break,
+                            else => {},
+                        }
+                        defer freeJsonToken(allocator, dim_key_token);
+                        const dim_key = jsonTokenText(dim_key_token) orelse return error.InvalidArtifactInventory;
+                        if (std.mem.eql(u8, dim_key, "width")) {
+                            if (have_width) return error.InvalidArtifactInventory;
+                            _ = try readJsonInteger(allocator, reader);
+                            have_width = true;
+                        } else if (std.mem.eql(u8, dim_key, "height")) {
+                            if (have_height) return error.InvalidArtifactInventory;
+                            _ = try readJsonInteger(allocator, reader);
+                            have_height = true;
+                        } else {
+                            return error.InvalidArtifactInventory;
+                        }
+                    }
+                    if (!have_width or !have_height) return error.InvalidArtifactInventory;
+                },
+                else => return error.InvalidArtifactInventory,
+            }
+        } else if (std.mem.eql(u8, key, "semantics")) {
+            // Extended asset record (#396): null, "static", or
+            // "content-reference"; not needed by the generator, but the
+            // vocabulary is strict so an unknown value still fails closed.
+            const token = try reader.nextAllocMax(allocator, .alloc_if_needed, 4096);
+            defer freeJsonToken(allocator, token);
+            switch (token) {
+                .null => {},
+                .string => |value| {
+                    if (!std.mem.eql(u8, value, "static") and
+                        !std.mem.eql(u8, value, "content-reference"))
+                        return error.InvalidArtifactInventory;
+                },
+                .allocated_string => |value| {
+                    defer allocator.free(value);
+                    if (!std.mem.eql(u8, value, "static") and
+                        !std.mem.eql(u8, value, "content-reference"))
+                        return error.InvalidArtifactInventory;
+                },
+                else => return error.InvalidArtifactInventory,
+            }
         } else {
             return error.InvalidArtifactInventory;
         }

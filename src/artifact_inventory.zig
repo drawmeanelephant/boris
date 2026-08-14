@@ -7,6 +7,7 @@
 const std = @import("std");
 const Io = std.Io;
 const cache = @import("cache.zig");
+const image_dimensions = @import("image_dimensions.zig");
 const json_out = @import("json_out.zig");
 
 pub const output_path = "_boris/proof/artifacts.json";
@@ -128,6 +129,29 @@ pub const Spec = struct {
     allow_live: bool = false,
 };
 
+/// Explicit author-facing semantics for asset kinds (#396). Theme-owned
+/// `assets/` files are static: copied verbatim, never processed. Content-local
+/// `.assets/` trees are content-references: copied byte-for-byte but owned by
+/// page content and pointed at by rewritten Markdown destinations. Generated
+/// projections and rendered pages are not assets and carry null semantics.
+pub const AssetSemantics = enum {
+    static,
+    content_reference,
+
+    pub fn name(self: AssetSemantics) []const u8 {
+        return switch (self) {
+            .static => "static",
+            .content_reference => "content-reference",
+        };
+    }
+
+    pub fn parse(value: []const u8) ?AssetSemantics {
+        if (std.mem.eql(u8, value, "static")) return .static;
+        if (std.mem.eql(u8, value, "content-reference")) return .content_reference;
+        return null;
+    }
+};
+
 pub const Record = struct {
     path: []const u8,
     kind: Kind,
@@ -137,6 +161,13 @@ pub const Record = struct {
     bytes: usize,
     sha256: [64]u8,
     format_version: ?[]const u8,
+    /// Pixel dimensions for image assets "where determinable" (see
+    /// image_dimensions.zig); null for non-images, unsupported formats, and
+    /// malformed headers.
+    dimensions: ?image_dimensions.Dimensions = null,
+    /// Explicit static/content-reference semantics for asset kinds; null for
+    /// non-asset records.
+    semantics: ?AssetSemantics = null,
 };
 
 pub const Inventory = struct {
@@ -340,6 +371,10 @@ fn parseRecordStreamAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader)
     record.path = &.{};
     record.producer = &.{};
     record.format_version = null;
+    // Extended fields (#396) are optional-on-parse so v1 fixtures written
+    // before them round-trip with null; `undefined` would leave them garbage.
+    record.dimensions = null;
+    record.semantics = null;
     errdefer freeRecord(gpa, record);
 
     var have_path = false;
@@ -350,6 +385,8 @@ fn parseRecordStreamAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader)
     var have_bytes = false;
     var have_sha256 = false;
     var have_format_version = false;
+    var have_dimensions = false;
+    var have_semantics = false;
 
     while (true) {
         const key_token = try nextJsonAllocToken(gpa, reader, 4096);
@@ -414,6 +451,59 @@ fn parseRecordStreamAfterBegin(gpa: std.mem.Allocator, reader: *std.json.Reader)
                 else => return error.InvalidInventory,
             }
             have_format_version = true;
+        } else if (std.mem.eql(u8, key, "dimensions")) {
+            if (have_dimensions) return error.InvalidInventory;
+            const token = try nextJsonAllocToken(gpa, reader, 4096);
+            defer freeJsonToken(gpa, token);
+            switch (token) {
+                .null => record.dimensions = null,
+                .object_begin => {
+                    var width: ?u32 = null;
+                    var height: ?u32 = null;
+                    while (true) {
+                        const dim_key_token = try nextJsonAllocToken(gpa, reader, 4096);
+                        switch (dim_key_token) {
+                            .object_end => break,
+                            else => {},
+                        }
+                        defer freeJsonToken(gpa, dim_key_token);
+                        const dim_key = jsonTokenText(dim_key_token) orelse return error.InvalidInventory;
+                        if (std.mem.eql(u8, dim_key, "width")) {
+                            if (width != null) return error.InvalidInventory;
+                            const value = try readJsonInteger(gpa, reader);
+                            if (value == 0 or value > std.math.maxInt(u32)) return error.InvalidInventory;
+                            width = @intCast(value);
+                        } else if (std.mem.eql(u8, dim_key, "height")) {
+                            if (height != null) return error.InvalidInventory;
+                            const value = try readJsonInteger(gpa, reader);
+                            if (value == 0 or value > std.math.maxInt(u32)) return error.InvalidInventory;
+                            height = @intCast(value);
+                        } else {
+                            return error.InvalidInventory;
+                        }
+                    }
+                    if (width == null or height == null) return error.InvalidInventory;
+                    record.dimensions = .{ .width = width.?, .height = height.? };
+                },
+                else => return error.InvalidInventory,
+            }
+            have_dimensions = true;
+        } else if (std.mem.eql(u8, key, "semantics")) {
+            if (have_semantics) return error.InvalidInventory;
+            const token = try nextJsonAllocToken(gpa, reader, 4096);
+            defer freeJsonToken(gpa, token);
+            switch (token) {
+                .null => record.semantics = null,
+                .string => |value| {
+                    record.semantics = AssetSemantics.parse(value) orelse return error.InvalidInventory;
+                },
+                .allocated_string => |value| {
+                    defer gpa.free(value);
+                    record.semantics = AssetSemantics.parse(value) orelse return error.InvalidInventory;
+                },
+                else => return error.InvalidInventory,
+            }
+            have_semantics = true;
         } else {
             return error.InvalidInventory;
         }
@@ -578,6 +668,12 @@ pub fn collect(
             .bytes = bytes.len,
             .sha256 = digest,
             .format_version = spec.format_version,
+            .dimensions = image_dimensions.dimensions(spec.path, bytes),
+            .semantics = switch (spec.kind) {
+                .theme_asset => .static,
+                .content_asset => .content_reference,
+                else => null,
+            },
         };
         filled += 1;
     }
@@ -630,6 +726,22 @@ pub fn render(gpa: std.mem.Allocator, inventory: *const Inventory) ![]u8 {
         try out.appendSlice(gpa, ",\n      \"format_version\": ");
         if (record.format_version) |version| {
             try json_out.writeString(&out, gpa, version);
+        } else {
+            try json_out.writeNull(&out, gpa);
+        }
+        try out.appendSlice(gpa, ",\n      \"dimensions\": ");
+        if (record.dimensions) |d| {
+            try out.appendSlice(gpa, "{\n        \"width\": ");
+            try json_out.writeUsize(&out, gpa, d.width);
+            try out.appendSlice(gpa, ",\n        \"height\": ");
+            try json_out.writeUsize(&out, gpa, d.height);
+            try out.appendSlice(gpa, "\n      }");
+        } else {
+            try json_out.writeNull(&out, gpa);
+        }
+        try out.appendSlice(gpa, ",\n      \"semantics\": ");
+        if (record.semantics) |semantics| {
+            try json_out.writeString(&out, gpa, semantics.name());
         } else {
             try json_out.writeNull(&out, gpa);
         }
@@ -745,6 +857,91 @@ test "generated projections are staged-only and missing paths fail closed" {
     }));
 }
 
+test "asset records carry dimensions and explicit semantics (#396)" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, "stage/assets");
+    try tmp.dir.createDirPath(io, "stage/pages/guide.assets");
+    try tmp.dir.createDirPath(io, "live");
+    try tmp.dir.writeFile(io, .{ .sub_path = "stage/z.html", .data = "new page" });
+
+    // Synthetic 24-byte PNG header: 320x200.
+    var png_bytes: [24]u8 = undefined;
+    @memcpy(png_bytes[0..8], "\x89PNG\r\n\x1a\n");
+    @memcpy(png_bytes[8..12], &[_]u8{ 0, 0, 0, 13 });
+    @memcpy(png_bytes[12..16], "IHDR");
+    png_bytes[16] = 0; png_bytes[17] = 0; png_bytes[18] = 1; png_bytes[19] = 0x40;
+    png_bytes[20] = 0; png_bytes[21] = 0; png_bytes[22] = 0; png_bytes[23] = 0xC8;
+
+    try tmp.dir.writeFile(io, .{ .sub_path = "stage/assets/logo.png", .data = &png_bytes });
+    try tmp.dir.writeFile(io, .{ .sub_path = "stage/assets/site.css", .data = "css" });
+    try tmp.dir.writeFile(io, .{ .sub_path = "stage/pages/guide.assets/diagram.svg", .data = "<svg width='120' height='80'></svg>" });
+
+    var stage = try tmp.dir.openDir(io, "stage", .{ .iterate = true });
+    defer stage.close(io);
+    var live = try tmp.dir.openDir(io, "live", .{ .iterate = true });
+    defer live.close(io);
+
+    var inventory = try collect(io, gpa, stage, live, "public", &.{
+        .{ .path = "z.html", .kind = .html_page, .producer = "html-render", .allow_live = true },
+        .{ .path = "assets/logo.png", .kind = .theme_asset, .producer = "theme-assets" },
+        .{ .path = "assets/site.css", .kind = .theme_asset, .producer = "theme-assets" },
+        .{ .path = "pages/guide.assets/diagram.svg", .kind = .content_asset, .producer = "content-assets" },
+    });
+    defer inventory.deinit();
+
+    try std.testing.expectEqual(@as(usize, 4), inventory.records.len);
+    // Records are sorted by path: assets/logo.png, assets/site.css, pages/..., z.html.
+    const logo = inventory.records[0];
+    try std.testing.expectEqualStrings("assets/logo.png", logo.path);
+    try std.testing.expectEqual(@as(u32, 320), logo.dimensions.?.width);
+    try std.testing.expectEqual(@as(u32, 200), logo.dimensions.?.height);
+    try std.testing.expectEqual(AssetSemantics.static, logo.semantics.?);
+    const css = inventory.records[1];
+    try std.testing.expect(css.dimensions == null);
+    try std.testing.expectEqual(AssetSemantics.static, css.semantics.?);
+    const svg = inventory.records[2];
+    try std.testing.expectEqualStrings("pages/guide.assets/diagram.svg", svg.path);
+    try std.testing.expectEqual(@as(u32, 120), svg.dimensions.?.width);
+    try std.testing.expectEqual(@as(u32, 80), svg.dimensions.?.height);
+    try std.testing.expectEqual(AssetSemantics.content_reference, svg.semantics.?);
+    const page = inventory.records[3];
+    try std.testing.expect(page.dimensions == null);
+    try std.testing.expect(page.semantics == null);
+
+    // Render/parse round-trip preserves the extended fields.
+    const rendered = try render(gpa, &inventory);
+    defer gpa.free(rendered);
+    var parsed = try parse(gpa, rendered, "public");
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 4), parsed.records.len);
+    try std.testing.expectEqual(@as(u32, 320), parsed.records[0].dimensions.?.width);
+    try std.testing.expectEqual(AssetSemantics.static, parsed.records[0].semantics.?);
+    try std.testing.expectEqual(AssetSemantics.content_reference, parsed.records[2].semantics.?);
+    try std.testing.expect(parsed.records[3].dimensions == null);
+
+    // Absent extended fields parse as null (v1 fixture compatibility):
+    // inventories written before #396 have no dimensions/semantics keys.
+    // (Built with appends rather than allocPrint — this module is on the
+    // json_out emitter tier, which bans raw formatting calls everywhere.)
+    const digest = cache.hexDigest(cache.hashBytes("page"));
+    var legacy: std.ArrayList(u8) = .empty;
+    defer legacy.deinit(gpa);
+    try legacy.appendSlice(gpa, "{\n  \"format\": \"");
+    try legacy.appendSlice(gpa, artifact_format);
+    try legacy.appendSlice(gpa, "\",\n  \"schema_version\": 1,\n  \"target\": \"public\",\n  \"artifacts\": [\n    {\n      \"path\": \"index.html\",\n      \"kind\": \"html-page\",\n      \"producer\": \"html-render\",\n      \"required\": true,\n      \"status\": \"committed\",\n      \"bytes\": 4,\n      \"sha256\": \"");
+    try legacy.appendSlice(gpa, &digest);
+    try legacy.appendSlice(gpa, "\",\n      \"format_version\": null\n    }\n  ]\n}\n");
+    var legacy_inventory = try parse(gpa, legacy.items, "public");
+    defer legacy_inventory.deinit();
+    try std.testing.expectEqual(@as(usize, 1), legacy_inventory.records.len);
+    try std.testing.expect(legacy_inventory.records[0].dimensions == null);
+    try std.testing.expect(legacy_inventory.records[0].semantics == null);
+}
+
 test "inventory JSON has the fixed schema field set" {
     const gpa = std.testing.allocator;
     const digest = cache.hexDigest(cache.hashBytes("page"));
@@ -779,6 +976,10 @@ test "inventory JSON has the fixed schema field set" {
     try std.testing.expect(item.get("bytes") != null);
     try std.testing.expect(item.get("sha256") != null);
     try std.testing.expect(item.get("format_version") != null);
+    try std.testing.expect(item.get("dimensions") != null);
+    try std.testing.expect(item.get("semantics") != null);
+    try std.testing.expect(item.get("dimensions").? == .null);
+    try std.testing.expect(item.get("semantics").? == .null);
 }
 
 test "published artifact schema matches the fixed runtime vocabulary" {
@@ -803,6 +1004,9 @@ test "published artifact schema matches the fixed runtime vocabulary" {
     const defs = root.get("$defs").?.object;
     const artifact = defs.get("artifact").?.object;
     try std.testing.expect(artifact.get("additionalProperties").?.bool == false);
+    // The extended fields (#396) are additive-optional: v1 fixtures written
+    // before them parse unchanged (absent == null), while the renderer always
+    // emits them. `required` therefore stays the original eight.
     try expectStringArray(artifact.get("required").?, &[_][]const u8{
         "path",
         "kind",
@@ -814,7 +1018,7 @@ test "published artifact schema matches the fixed runtime vocabulary" {
         "format_version",
     });
     const properties = artifact.get("properties").?.object;
-    try std.testing.expectEqual(@as(usize, 8), properties.count());
+    try std.testing.expectEqual(@as(usize, 10), properties.count());
     for ([_][]const u8{
         "path",
         "kind",
@@ -824,6 +1028,8 @@ test "published artifact schema matches the fixed runtime vocabulary" {
         "bytes",
         "sha256",
         "format_version",
+        "dimensions",
+        "semantics",
     }) |field| try std.testing.expect(properties.get(field) != null);
     try expectStringArray(properties.get("kind").?.object.get("enum").?, &[_][]const u8{
         "html-page",
