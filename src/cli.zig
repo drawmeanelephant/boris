@@ -149,6 +149,16 @@ pub const ParseError = error{
     ConflictingFlags,
     DuplicateFlag,
     InvalidValue,
+    // A mode was selected but its required companion options were never
+    // supplied (e.g. RSS without channel metadata). Distinct from
+    // MissingValue, which means a flag that takes a value was given without
+    // one — reporting that for these cases misnames the flag.
+    RSSMetadataRequired,
+    SitemapSiteUrlRequired,
+    PagesLocationIncomplete,
+    // `--rss-limit` given a non-numeric or out-of-range value: the parse
+    // loop knows the flag, so name it instead of letting findBadArg guess.
+    InvalidRssLimit,
     OutOfMemory,
 };
 
@@ -671,8 +681,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (std.mem.eql(u8, a, "--rss-limit") or std.mem.startsWith(u8, a, "--rss-limit=")) {
             if (saw_rss_limit) return error.DuplicateFlag;
             saw_rss_limit = true;
-            rss_limit = std.fmt.parseInt(usize, try takeValue(args, &i, a, "--rss-limit"), 10) catch return error.InvalidValue;
-            if (rss_limit < 1 or rss_limit > 500) return error.InvalidValue;
+            rss_limit = std.fmt.parseInt(usize, try takeValue(args, &i, a, "--rss-limit"), 10) catch return error.InvalidRssLimit;
+            if (rss_limit < 1 or rss_limit > 500) return error.InvalidRssLimit;
             continue;
         }
 
@@ -861,8 +871,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     if (saw_pages_location and (wants_rag or wants_ir or wants_context)) return error.ConflictingFlags;
     if ((saw_rss_title or saw_rss_description or saw_rss_limit) and !wants_rss) return error.ConflictingFlags;
     if (saw_site_url and !(wants_rss or wants_sitemap)) return error.ConflictingFlags;
-    if (wants_rss and (site_url == null or rss_title == null or rss_description == null)) return error.MissingValue;
-    if (wants_sitemap and site_url == null) return error.MissingValue;
+    if (wants_rss and (site_url == null or rss_title == null or rss_description == null)) return error.RSSMetadataRequired;
+    if (wants_sitemap and site_url == null) return error.SitemapSiteUrlRequired;
     if (wants_sitemap and (wants_rag or wants_ir or wants_context or wants_llms or wants_rss)) return error.ConflictingFlags;
     // Explicit HTML selectors own the output destination; refuse IR/RAG flags.
     if (explicit_html and (wants_rag or wants_context or saw_out)) {
@@ -900,7 +910,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .html;
 
     if (saw_pages_location and !(saw_pages_base_url and saw_pages_origin and saw_pages_base_path)) {
-        return error.MissingValue;
+        return error.PagesLocationIncomplete;
     }
     if (saw_pages_location) {
         publication_location = github_pages.parse(
@@ -1345,6 +1355,33 @@ pub fn printParseError(err: ParseError, bad_arg: ?[]const u8) void {
                 std.debug.print("error: invalid option value\n", .{});
             }
         },
+        error.RSSMetadataRequired => {
+            // `--rss` / `--rss-path` are mode flags; a missing value here
+            // means the required channel metadata was never supplied, not
+            // that the mode flag itself needs a value.
+            std.debug.print(
+                "error: RSS mode requires --site-url, --rss-title, and --rss-description (try --help)\n",
+                .{},
+            );
+        },
+        error.SitemapSiteUrlRequired => {
+            std.debug.print(
+                "error: --sitemap / --sitemap-path require --site-url (try --help)\n",
+                .{},
+            );
+        },
+        error.PagesLocationIncomplete => {
+            std.debug.print(
+                "error: --pages-base-url, --pages-origin, and --pages-base-path are required together (try --help)\n",
+                .{},
+            );
+        },
+        error.InvalidRssLimit => {
+            std.debug.print(
+                "error: invalid value for --rss-limit (must be 1-500; try --help)\n",
+                .{},
+            );
+        },
         error.OutOfMemory => {
             std.debug.print("error: out of memory\n", .{});
         },
@@ -1358,6 +1395,9 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
         const a = args[i];
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) continue;
         if (std.mem.eql(u8, a, "--version") or std.mem.eql(u8, a, "-V")) continue;
+        // Boolean mode/switch flags: never the bad arg — a failure elsewhere
+        // must not be misattributed to them (e.g. `--rss` plus an unknown
+        // flag, or RSS mode missing its channel metadata).
         if (std.mem.eql(u8, a, "--quiet") or
             std.mem.eql(u8, a, "--timings") or
             std.mem.eql(u8, a, "--rag") or
@@ -1367,7 +1407,14 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.eql(u8, a, "--cooklang") or
             std.mem.eql(u8, a, "--incremental") or
             std.mem.eql(u8, a, "--watch") or
-            std.mem.eql(u8, a, "--fail-on-unreferenced"))
+            std.mem.eql(u8, a, "--fail-on-unreferenced") or
+            std.mem.eql(u8, a, "--context") or
+            std.mem.eql(u8, a, "--bundles-only") or
+            std.mem.eql(u8, a, "--complete") or
+            std.mem.eql(u8, a, "--llms") or
+            std.mem.eql(u8, a, "--rss") or
+            std.mem.eql(u8, a, "--sitemap") or
+            std.mem.eql(u8, a, "--allow-markdown-links"))
         {
             continue;
         }
@@ -1375,9 +1422,22 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.eql(u8, a, "--profile") or
             std.mem.eql(u8, a, "--out") or
             std.mem.eql(u8, a, "--rag-dir") or
+            std.mem.eql(u8, a, "--context-dir") or
+            std.mem.eql(u8, a, "--scope") or
+            std.mem.eql(u8, a, "--split-size") or
+            std.mem.eql(u8, a, "--llms-path") or
+            std.mem.eql(u8, a, "--rss-path") or
+            std.mem.eql(u8, a, "--rss-title") or
+            std.mem.eql(u8, a, "--rss-description") or
+            std.mem.eql(u8, a, "--rss-limit") or
+            std.mem.eql(u8, a, "--site-url") or
+            std.mem.eql(u8, a, "--sitemap-path") or
             std.mem.eql(u8, a, "--pages-base-url") or
             std.mem.eql(u8, a, "--pages-origin") or
             std.mem.eql(u8, a, "--pages-base-path") or
+            std.mem.eql(u8, a, "--format") or
+            std.mem.eql(u8, a, "--report") or
+            std.mem.eql(u8, a, "--theme") or
             std.mem.eql(u8, a, "--html-dir") or
             std.mem.eql(u8, a, "--html-layout") or
             std.mem.eql(u8, a, "--target") or
@@ -1393,9 +1453,22 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.startsWith(u8, a, "--profile=") or
             std.mem.startsWith(u8, a, "--out=") or
             std.mem.startsWith(u8, a, "--rag-dir=") or
+            std.mem.startsWith(u8, a, "--context-dir=") or
+            std.mem.startsWith(u8, a, "--scope=") or
+            std.mem.startsWith(u8, a, "--split-size=") or
+            std.mem.startsWith(u8, a, "--llms-path=") or
+            std.mem.startsWith(u8, a, "--rss-path=") or
+            std.mem.startsWith(u8, a, "--rss-title=") or
+            std.mem.startsWith(u8, a, "--rss-description=") or
+            std.mem.startsWith(u8, a, "--rss-limit=") or
+            std.mem.startsWith(u8, a, "--site-url=") or
+            std.mem.startsWith(u8, a, "--sitemap-path=") or
             std.mem.startsWith(u8, a, "--pages-base-url=") or
             std.mem.startsWith(u8, a, "--pages-origin=") or
             std.mem.startsWith(u8, a, "--pages-base-path=") or
+            std.mem.startsWith(u8, a, "--format=") or
+            std.mem.startsWith(u8, a, "--report=") or
+            std.mem.startsWith(u8, a, "--theme=") or
             std.mem.startsWith(u8, a, "--html-dir=") or
             std.mem.startsWith(u8, a, "--html-layout=") or
             std.mem.startsWith(u8, a, "--target=") or
@@ -2284,6 +2357,18 @@ test "findBadArg reports --target" {
     try expectEqualStrings("--target-layout", findBadArg(&.{ "boris", "--target-layout" }).?);
 }
 
+test "findBadArg never blames a boolean mode flag" {
+    // `--rss` / `--sitemap` / `--context` / `--llms` are mode flags, not
+    // value flags: a failure with them present must be attributed to the
+    // actual offending token, never to the mode flag itself (#405, #407).
+    // Value flags (--rss-path, --input, ...) are still reported by design:
+    // findBadArg is best-effort and returns the first non-boolean token.
+    try expectEqualStrings("--bogus", findBadArg(&.{ "boris", "--rss", "--bogus" }).?);
+    try expectEqualStrings("--bogus", findBadArg(&.{ "boris", "--sitemap", "--bogus" }).?);
+    try expectEqualStrings("--bogus", findBadArg(&.{ "boris", "--context", "--bogus" }).?);
+    try expectEqualStrings("--bogus", findBadArg(&.{ "boris", "--llms", "--bogus" }).?);
+}
+
 test "parse: --theme sugar selects theme layouts/main.html" {
     var o = try parseOptions(std.testing.allocator, &.{
         "boris", "--theme", "experimental-theme",
@@ -2615,8 +2700,13 @@ test "parse: RSS mode, required channel settings, and conflicts" {
     try expectEqual(Mode.rss, opts.mode);
     try expectEqualStrings("public/rss.xml", opts.rss_path.?);
     try expectEqualStrings("https://example.test/docs/", opts.site_url.?);
-    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs" }));
-    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D", "--rss-limit", "0" }));
+    // A bare mode flag or a supplied path is not "missing a value": the
+    // missing channel metadata is what the parse must report (#405, #407).
+    try expectError(error.RSSMetadataRequired, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs" }));
+    try expectError(error.RSSMetadataRequired, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--input", "content" }));
+    try expectError(error.RSSMetadataRequired, parseOptions(std.testing.allocator, &.{ "boris", "--rss-path", "out.xml", "--site-url", "https://example.test" }));
+    try expectError(error.InvalidRssLimit, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D", "--rss-limit", "0" }));
+    try expectError(error.InvalidRssLimit, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D", "--rss-limit", "abc" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--rag", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "check", "--rss", "--site-url", "https://example.test", "--rss-title", "Docs", "--rss-description", "D" }));
     try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--rss", "--site-url", "relative", "--rss-title", "Docs", "--rss-description", "D" }));
@@ -2634,7 +2724,7 @@ test "parse: sitemap selection implication validation conflicts and RSS compatib
     try expectEqual(Mode.html, custom.mode);
     try expectEqualStrings("meta/discovery.xml", custom.sitemap_path.?);
 
-    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap" }));
+    try expectError(error.SitemapSiteUrlRequired, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap" }));
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap-path" }));
     try expectError(error.EmptyValue, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap-path=" }));
     try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "--sitemap", "--sitemap", "--site-url", "https://example.test" }));
@@ -2683,7 +2773,7 @@ test "parse: normalized Pages location is required as one three-part identity" {
     try expectEqual(Mode.llms, root.mode);
     try expectEqualStrings("", root.publication_location.?.base_path);
 
-    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{
+    try expectError(error.PagesLocationIncomplete, parseOptions(std.testing.allocator, &.{
         "boris",
         "--pages-base-url",
         "https://owner.github.io",
