@@ -3,7 +3,7 @@
 - Cooklang recipe input via `--cooklang`, a `.cook`-only tree mode alongside
   `--textile`. Cooklang metadata is already YAML front matter, so Boris's
   frontmatter parser is unchanged and
-  [`src/cooklang.zig`](/src/cooklang.zig) adapts only the body: ingredients,
+  [`src/cooklang_seam.zig`](/src/cooklang_seam.zig) adapts only the body: ingredients,
   cookware, timers, sections, notes, both comment forms, short-hand
   preparations, and forced line breaks. The rendered document is an
   `## Ingredients` list, a `## Cookware` list, and `## Method` numbered steps.

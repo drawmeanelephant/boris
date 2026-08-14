@@ -686,7 +686,7 @@ Before moving files, make a small manual conversion ledger:
 - [ ] **Navigation:** use `mkdocs.yml` only as an inventory, then flatten each
   nested `nav:` branch into a Trunk landing page plus direct Satellite pages.
   A Satellite cannot parent another Satellite; see the
-  [parent/graph rules](contracts/ir-schema.md#trunk--satellite-graph-rules).
+  [parent/graph rules](contracts/ir-schema.md#trunk-satellite-graph-rules).
 - [ ] **Links:** replace relative Markdown page links such as
   `[Install](../setup.md)` with `[[setup|Install]]` (and validate any heading
   fragment against the rendered heading id). The exact include/wiki syntax and
