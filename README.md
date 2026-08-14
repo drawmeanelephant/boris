@@ -83,6 +83,7 @@ Useful first commands:
 
 ```bash
 ./zig-out/bin/boris --help
+./zig-out/bin/boris --version                 # print the compiler id (e.g. boris/0.8.1)
 ./zig-out/bin/boris --out .boris --quiet       # JSON IR
 ./zig-out/bin/boris --rag --quiet              # RAG working-context packs
 ./zig-out/bin/boris --rag --complete --quiet    # complete-corpus RAG export
