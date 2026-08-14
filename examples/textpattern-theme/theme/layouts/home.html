@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en" data-layout="home" data-theme="textpattern">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Boris / Textpattern</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/textpattern.css}}">
+  <link rel="icon" href="{{asset-url assets/img/textpattern-mark.svg}}" type="image/svg+xml">
+</head>
+<body class="txp-body txp-home" data-layout="home">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="txp-header txp-header--home" role="banner">
+    <div class="txp-container txp-header-inner">
+      <div class="txp-branding">
+        <img class="txp-brand-mark" src="{{asset-url assets/img/textpattern-mark.svg}}" width="58" height="58" alt="">
+        <div>
+          <p class="txp-overline">classic publishing · contemporary graph</p>
+          <p class="txp-site-name">Textpattern Notes</p>
+          <p class="txp-tagline">A quiet place for marked-up thoughts and well-kept pages.</p>
+        </div>
+      </div>
+      <nav class="txp-nav txp-nav--home" aria-label="Primary navigation">
+        {{nav}}
+      </nav>
+    </div>
+  </header>
+
+  <main id="main-content" class="txp-container txp-home-main" tabindex="-1" data-boris-search-root>
+    <div class="txp-home-grid">
+      <section class="txp-paper txp-home-reading" aria-labelledby="home-heading">
+        {{metadata}}
+        <article class="txp-article">
+          <div class="txp-article-content">
+            {{content}}
+          </div>
+        </article>
+      </section>
+      <aside class="txp-sidebar txp-home-sidebar" aria-label="On this page">
+        <section class="txp-widget txp-widget--toc">
+          <p class="txp-widget-title">On this page</p>
+          {{toc}}
+        </section>
+        <section class="txp-widget txp-widget--principles">
+          <p class="txp-widget-title">House rules</p>
+          <p>Keep the prose human, the links visible, and the source local.</p>
+        </section>
+      </aside>
+    </div>
+    <section class="txp-paper txp-children-panel" aria-labelledby="home-children-heading">
+      <div class="txp-section-heading">
+        <p class="txp-overline" id="home-children-heading">The notebook</p>
+        <span class="txp-section-rule" aria-hidden="true"></span>
+      </div>
+      {{children}}
+    </section>
+  </main>
+
+  <footer class="txp-footer" role="contentinfo">{{footer}}</footer>
+</body>
+</html>

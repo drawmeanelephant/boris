@@ -69,6 +69,23 @@ body {
   line-height: 1.65;
 }
 
+.skip-link {
+  position: fixed;
+  left: 1rem;
+  top: -4rem;
+  z-index: 5;
+  padding: 0.55rem 0.75rem;
+  background: var(--b-base-content);
+  color: var(--b-base-100);
+  border-radius: var(--b-radius-sm);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  top: 1rem;
+}
+
 a {
   color: var(--b-primary);
 }
@@ -390,6 +407,39 @@ a:hover {
 .page-toc a:hover {
   color: var(--b-primary);
   text-decoration: underline;
+}
+
+.children-panel {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--b-line);
+}
+
+.page-children ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.page-children li + li {
+  margin-top: 0.35rem;
+}
+
+.page-children a {
+  display: block;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--b-radius-sm);
+  color: var(--b-primary);
+  text-decoration: none;
+}
+
+.page-children a:hover {
+  background: color-mix(in oklab, var(--b-primary) 10%, transparent);
+  text-decoration: underline;
+}
+
+.section-toc-label {
+  margin-top: 1.25rem;
 }
 
 /* —— Prose —— */

@@ -7,18 +7,20 @@
   <link rel="stylesheet" href="{{asset-url assets/cozy.css}}">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
   <div class="site-shell">
-    <header class="site-header">
+    <header class="site-header" role="banner">
       <p class="site-kicker">personal web archive // 2004—forever</p>
       <h1>The Cozy Corner</h1>
       <p class="tagline">Ramblings, thoughts, and web design in the mid-2000s</p>
     </header>
     <div class="layout">
-      <main class="site-main">
+      <main id="main-content" class="site-main" tabindex="-1">
         <div class="breadcrumb">{{breadcrumb}}</div>
         <article class="entry">
           <header class="entry-header">
             <p class="entry-meta">hand-coded entry · static archive</p>
+            {{metadata}}
           </header>
           <div class="entry-content">{{content}}</div>
           <footer class="entry-footer">comments and TrackBacks are preserved as authored metadata</footer>
