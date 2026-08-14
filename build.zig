@@ -202,6 +202,26 @@ pub fn build(b: *std.Build) void {
     );
     test_reference_theme_step.dependOn(&reference_theme_run.step);
 
+    // Version query + artifact provenance guard (#410/#419): the binary's
+    // `--version` / `-V` must print exactly the base compiler id from
+    // src/pipeline.zig, and real artifact sets (plain, Cooklang, and
+    // semantic-relations corpora) must record the base or a `+`-suffixed
+    // variant id, per the pin + provenance recipe in docs/contracts/cli.md.
+    // Also proves a tampered recorded id is rejected, so the documented
+    // recipe cannot drift silently from the executable behavior.
+    const version_pin_run = b.addSystemCommand(&.{
+        "bash",
+        "scripts/test-version-pin.sh",
+    });
+    version_pin_run.setCwd(b.path("."));
+    version_pin_run.has_side_effects = true;
+    version_pin_run.step.dependOn(b.getInstallStep());
+    const test_version_pin_step = b.step(
+        "test-version-pin",
+        "Run the version query + artifact provenance pin guard",
+    );
+    test_version_pin_step.dependOn(&version_pin_run.step);
+
     // --- Pipeline + graph tests (milestone 6) ------------------------------
     // Pipeline imports aside (component validation) → needs the Oliver render seam.
     const pipeline_mod = b.createModule(.{
@@ -1126,6 +1146,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cooklang_incremental_run.step);
     test_step.dependOn(&init_run.step);
     test_step.dependOn(&reference_theme_run.step);
+    test_step.dependOn(&version_pin_run.step);
     test_step.dependOn(&run_pipeline_tests.step);
     test_step.dependOn(&run_publication_profile_tests.step);
     test_step.dependOn(&run_github_pages_tests.step);
