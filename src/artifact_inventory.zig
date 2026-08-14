@@ -873,8 +873,14 @@ test "asset records carry dimensions and explicit semantics (#396)" {
     @memcpy(png_bytes[0..8], "\x89PNG\r\n\x1a\n");
     @memcpy(png_bytes[8..12], &[_]u8{ 0, 0, 0, 13 });
     @memcpy(png_bytes[12..16], "IHDR");
-    png_bytes[16] = 0; png_bytes[17] = 0; png_bytes[18] = 1; png_bytes[19] = 0x40;
-    png_bytes[20] = 0; png_bytes[21] = 0; png_bytes[22] = 0; png_bytes[23] = 0xC8;
+    png_bytes[16] = 0;
+    png_bytes[17] = 0;
+    png_bytes[18] = 1;
+    png_bytes[19] = 0x40;
+    png_bytes[20] = 0;
+    png_bytes[21] = 0;
+    png_bytes[22] = 0;
+    png_bytes[23] = 0xC8;
 
     try tmp.dir.writeFile(io, .{ .sub_path = "stage/assets/logo.png", .data = &png_bytes });
     try tmp.dir.writeFile(io, .{ .sub_path = "stage/assets/site.css", .data = "css" });

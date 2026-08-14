@@ -350,8 +350,18 @@ test "jpeg dimensions walk the marker stream" {
     // SOI + APP0 + SOF0 (width 640, height 480).
     const jpg = [_]u8{
         0xFF, 0xD8,
-        0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0, 1, 1, 0, 0, 1, 0, 1, 0, 0,
-        0xFF, 0xC0, 0x00, 0x11, 8,
+        0xFF, 0xE0,
+        0x00, 0x10,
+        'J',  'F',
+        'I',  'F',
+        0,    1,
+        1,    0,
+        0,    1,
+        0,    1,
+        0,    0,
+        0xFF, 0xC0,
+        0x00, 0x11,
+        8,
         0x01, 0xE0, // height 480
         0x02, 0x80, // width 640
     };
@@ -404,8 +414,12 @@ test "bmp dimensions with top-down height" {
     var bytes: [26]u8 = undefined;
     @memset(&bytes, 0);
     @memcpy(bytes[0..2], "BM");
-    bytes[18] = 0x80; bytes[19] = 0x02; // width 640
-    bytes[22] = 0xD4; bytes[23] = 0xFE; bytes[24] = 0xFF; bytes[25] = 0xFF; // -300 as i32 (top-down)
+    bytes[18] = 0x80;
+    bytes[19] = 0x02; // width 640
+    bytes[22] = 0xD4;
+    bytes[23] = 0xFE;
+    bytes[24] = 0xFF;
+    bytes[25] = 0xFF; // -300 as i32 (top-down)
     const d = bmp(&bytes).?;
     try t.expectEqual(@as(u32, 640), d.width);
     try t.expectEqual(@as(u32, 300), d.height);
