@@ -540,7 +540,10 @@ pub fn run(io: Io, gpa: std.mem.Allocator, opts: ContextOptions) !ContextResult 
     }
     try publish(io, gpa, stage, opts.out_dir);
     result.published = true;
-    log(opts, "context export complete: {s} ({d} page(s))\n", .{ opts.out_dir, artifacts.items.len });
+    // The artifact count is the selected page set actually written under
+    // pages/ — with `--scope` this is smaller than the full graph count
+    // reported by the CLI wrapper, so label it explicitly (#406).
+    log(opts, "context export complete: {s} ({d} selected page(s))\n", .{ opts.out_dir, artifacts.items.len });
     return result;
 }
 
