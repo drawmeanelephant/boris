@@ -135,6 +135,9 @@ jobs:
       - name: Boris diagnostics integration
         run: ./editor/scripts/test-diagnostics.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
 
+      - name: Live preview integration
+        run: ./editor/scripts/test-preview.sh ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+
   migration-lab-test:
     name: migration-lab-test (Linux)
     needs: changes

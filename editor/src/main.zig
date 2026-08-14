@@ -4,6 +4,7 @@ const contracts = @import("contracts.zig");
 const diagnostic_packet = @import("diagnostic_packet.zig");
 const file_api = @import("file_api.zig");
 const project = @import("project.zig");
+const preview = @import("preview.zig");
 const recovery = @import("recovery.zig");
 const runner = @import("runner.zig");
 const security = @import("security.zig");
@@ -68,6 +69,12 @@ pub fn main(init: std.process.Init) u8 {
     var token: [32]u8 = undefined;
     _ = std.fmt.bufPrint(&token, "{x}", .{random_bytes}) catch unreachable;
 
+    const preview_port = preview.startStatic(init.io, canonical_project, token) catch |err| {
+        std.debug.print("boris-editor: preview server failed: {s}\n", .{@errorName(err)});
+        return 3;
+    };
+    var preview_manager = preview.Manager.init(init.io, canonical_project, boris_path, preview_port);
+
     server.serve(init.io, allocator, .{
         .project_root = canonical_project,
         .ui_dir = options.ui_dir,
@@ -75,6 +82,7 @@ pub fn main(init: std.process.Init) u8 {
         .state_root = cache_path,
         .port = options.port,
         .token = token,
+        .preview = &preview_manager,
     }) catch |err| {
         std.debug.print("boris-editor: host failed: {s}\n", .{@errorName(err)});
         return 3;
@@ -165,6 +173,7 @@ test {
     _ = contracts;
     _ = diagnostic_packet;
     _ = file_api;
+    _ = preview;
     _ = recovery;
     _ = runner;
     _ = security;

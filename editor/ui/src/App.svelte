@@ -62,6 +62,7 @@
   type AuthoringPayload = { frontmatter_schema: { title: string; properties: Record<string, JsonSchemaProperty> }; completion: CompletionIndex | null; completion_status: 'ready' | 'build_required' };
   type CompletionKind = 'frontmatter_key' | 'status' | 'entity' | 'wiki_link' | 'parent' | 'relation_kind' | 'relation_target' | 'layout_slot';
   type Suggestion = { value: string; insert: string; detail: string };
+  type PreviewState = { phase: 'idle' | 'running' | 'success' | 'failed' | 'stale'; generation: number; exit_code: number | null; used_stderr_fallback: boolean; message: string; preview_url: string };
 
   let connection = 'Connecting to the local host…';
   let compiler = 'Checking Boris version…';
@@ -69,6 +70,7 @@
   let editorStatus = 'Choose a project file to begin editing.';
   let commandStatus = 'No Boris command has run yet.';
   let previewState = 'Preview is not running.';
+  let previewData: PreviewState | null = null;
   let files: FileEntry[] = [];
   let snapshots: RecoverySnapshot[] = [];
   let activePath = '';
@@ -138,11 +140,12 @@
       return;
     }
     try {
-      const [healthResult, versionResult, filesResult, authoringResult] = await Promise.all([
+      const [healthResult, versionResult, filesResult, authoringResult, previewResult] = await Promise.all([
         api<Health>('/api/health'),
         api<Version>('/api/version'),
         api<FileList>('/api/files'),
-        api<AuthoringPayload>('/api/authoring')
+        api<AuthoringPayload>('/api/authoring'),
+        api<PreviewState>('/api/preview/state')
       ]);
       if (![healthResult, versionResult, filesResult].every(result => result.response.ok)) {
         throw new Error('host request failed');
@@ -156,6 +159,7 @@
       files = filesResult.data.files;
       if (authoringResult.response.ok) setAuthoring(authoringResult.data);
       else authoringStatus = 'Boris authoring vocabulary is unavailable.';
+      if (previewResult.response.ok) setPreview(previewResult.data);
       const recoveryResult = await api<RecoveryList>('/api/recovery');
       if (recoveryResult.response.ok) {
         snapshots = recoveryResult.data.snapshots;
@@ -246,6 +250,23 @@
     const result = await api<AuthoringPayload>('/api/authoring');
     if (result.response.ok) setAuthoring(result.data);
     else authoringStatus = 'The Boris build succeeded, but completion.json could not be adapted.';
+  }
+
+  function setPreview(state: PreviewState) {
+    previewData = state;
+    previewState = state.message;
+  }
+
+  async function rebuildPreview(reason: 'save' | 'manual' = 'manual') {
+    if (dirty) {
+      previewState = `Save or undo changes to ${activePath} before rebuilding preview.`;
+      return;
+    }
+    if (previewData) previewData = { ...previewData, phase: 'running' };
+    previewState = reason === 'save' ? 'Saved. Boris preview build is running…' : 'Boris preview build is running…';
+    const result = await api<PreviewState | ErrorResponse>('/api/preview/rebuild', { method: 'POST', body: '{}' });
+    if (result.response.ok) setPreview(result.data as PreviewState);
+    else previewState = `Preview host failed: ${(result.data as ErrorResponse).error ?? 'request failed'}. Existing output is not current.`;
   }
 
   function completionSuggestions(payload: AuthoringPayload | null, kind: CompletionKind, query: string): Suggestion[] {
@@ -463,6 +484,7 @@
       conflict = null;
       deletedConflict = false;
       await refreshFiles();
+      await rebuildPreview('save');
       return;
     }
     const error = result.data as ErrorResponse;
@@ -907,8 +929,33 @@
   </section>
 
   <section id="preview" aria-labelledby="preview-heading">
-    <h2 id="preview-heading">Preview</h2>
-    <p>{previewState}</p>
+    <div class="preview-heading">
+      <div>
+        <h2 id="preview-heading">Preview</h2>
+        <p>The frame serves unchanged files from Boris's committed <code>dist/</code> output.</p>
+      </div>
+      <div class="preview-actions" aria-label="Preview actions">
+        <button type="button" disabled={dirty || previewData?.phase === 'running'} onclick={() => rebuildPreview('manual')}>Rebuild preview</button>
+        {#if previewData && (previewData.phase === 'success' || previewData.phase === 'stale')}
+          <a class="button-link" href={previewData.preview_url} target="_blank" rel="noreferrer">Open preview in new tab</a>
+        {/if}
+      </div>
+    </div>
+    <p class="preview-state" class:current={previewData?.phase === 'success'} class:failure={previewData?.phase === 'failed' || previewData?.phase === 'stale'}>
+      <strong>{previewData?.phase ?? 'idle'}:</strong> {previewState}
+    </p>
+    {#if previewData?.used_stderr_fallback}
+      <p class="fallback-notice">Rich HTML diagnostics are unavailable; this failure message comes from bounded Boris stderr.</p>
+    {/if}
+    {#if previewData && (previewData.phase === 'success' || previewData.phase === 'stale')}
+      <iframe
+        title="Boris site preview"
+        src={`${previewData.preview_url}&generation=${previewData.generation}`}
+        sandbox="allow-same-origin"
+      ></iframe>
+    {:else}
+      <p>No valid Boris preview output is available yet.</p>
+    {/if}
   </section>
 </main>
 
