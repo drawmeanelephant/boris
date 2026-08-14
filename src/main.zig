@@ -305,7 +305,10 @@ pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*tim
 
     if (result.ok()) {
         if (!opts.quiet) {
-            std.debug.print("ok: wrote context bundle under {s} ({d} page(s))\n", .{ context_dir, result.compile.pages.items.len });
+            // The full validated graph count (may exceed the selected page
+            // set under `--scope`); the bundle log labels the selected count
+            // (#406).
+            std.debug.print("ok: wrote context bundle under {s} ({d} graph page(s))\n", .{ context_dir, result.compile.pages.items.len });
         }
         return .success;
     }
