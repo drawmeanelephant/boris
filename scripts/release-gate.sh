@@ -226,7 +226,7 @@ fi
 note "4. Valid fixture produces expected IR artifacts"
 rm -rf "${IR_OUT}"
 "${BORIS}" --input="${VALID_CONTENT}" --out="${IR_OUT}" --quiet
-for f in manifest.json graph.json build-report.json; do
+for f in manifest.json graph.json completion.json build-report.json; do
   [[ -f "${IR_OUT}/${f}" ]] || fail "missing ${f}"
 done
 if diff -u "${VALID_EXPECTED}/manifest.json" "${IR_OUT}/manifest.json"; then
@@ -238,6 +238,11 @@ if diff -u "${VALID_EXPECTED}/graph.json" "${IR_OUT}/graph.json"; then
   pass "graph.json matches golden"
 else
   fail "graph.json golden mismatch"
+fi
+if diff -u "${VALID_EXPECTED}/completion.json" "${IR_OUT}/completion.json"; then
+  pass "completion.json matches golden"
+else
+  fail "completion.json golden mismatch"
 fi
 if diff -u "${VALID_EXPECTED}/build-report.json" "${IR_OUT}/build-report.json"; then
   pass "build-report.json matches golden"

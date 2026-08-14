@@ -372,8 +372,8 @@ rg -n 'https?://' test-output/reference-theme --glob '*.html' || true
   --quiet
 ```
 
-**Expected:** exit `0` and `manifest.json`, `graph.json`, `build-report.json`
-under `test-output/migration-ir/`.
+**Expected:** exit `0` and `manifest.json`, `graph.json`, `completion.json`,
+`build-report.json` under `test-output/migration-ir/`.
 
 #### 4d. RAG pack
 

@@ -4,6 +4,14 @@
 **Module:** `src/parser.zig` (product frontmatter); pipeline invokes parse before
 Aside tokenize and graph validation.
 
+**Machine-readable twin:** the parsed field set as a JSON object is published
+as [`schemas/boris-frontmatter-1.schema.json`](schemas/boris-frontmatter-1.schema.json)
+(draft 2020-12). Frontmatter source is not JSON, so tools convert parsed
+fields to that object shape before validating — the same conversion the
+schema-conformance test applies to every fixture tree. Key order is
+irrelevant; the closed key set (`additionalProperties: false`) and the
+bounds below are normative.
+
 Boris frontmatter is a **deliberately closed, bounded grammar**. It is **not**
 general YAML and must never be documented or implemented as “YAML support.”
 Implementations must not grow into a YAML 1.1/1.2 subset by accident.

@@ -76,11 +76,13 @@ compiler version, and host filesystem semantics. Arrays are sorted; it contains
 no timestamps, hostnames, absolute source identities, or random IDs.
 
 The existing compiler export remains a separate, richer artifact contract:
-`build --out DIR` writes IR `manifest.json`, `graph.json`, and
-`build-report.json` under the versioned [`ir-schema.md`](ir-schema.md) contract.
-`build-report.json` is authoritative for compiler diagnostics and source
-locations; `graph.json` is authoritative for frozen nodes and edges. Nova and
-other editor integrations must consume these published contracts rather than
+`build --out DIR` writes IR `manifest.json`, `graph.json`, `completion.json`,
+and `build-report.json` under the versioned [`ir-schema.md`](ir-schema.md)
+contract. `build-report.json` is authoritative for compiler diagnostics and
+source locations; `graph.json` is authoritative for frozen nodes and edges;
+`completion.json` is the deterministic editor completion surface (entity ids,
+relation kinds, parent targets, layout slots). Nova and other editor
+integrations must consume these published contracts rather than
 reimplementing frontmatter or graph resolution.
 
 `validate` has no report artifact. It reuses canonical compiler diagnostics in
