@@ -1,0 +1,38 @@
+{
+  "format": "boris-completion-index",
+  "schema_version": 1,
+  "compiler_id": "boris/0.8.1",
+  "frozen": true,
+  "entities": [
+    {
+      "id": "guides/intro",
+      "title": "Introduction",
+      "parent": null,
+      "role": "trunk",
+      "status": "published",
+      "tags": ["guide", "intro"],
+      "relations": []
+    },
+    {
+      "id": "guides/intro-tips",
+      "title": "Intro Tips",
+      "parent": "guides/intro",
+      "role": "satellite",
+      "status": "draft",
+      "tags": ["guide", "tips"],
+      "relations": []
+    },
+    {
+      "id": "index",
+      "title": "Home",
+      "parent": null,
+      "role": "trunk",
+      "status": "published",
+      "tags": ["home"],
+      "relations": []
+    }
+  ],
+  "relation_kinds": ["depends_on", "implements", "relates_to", "supersedes"],
+  "parent_targets": ["guides/intro"],
+  "layout_slots": ["backlinks", "breadcrumb", "children", "content", "footer", "metadata", "nav", "relations", "title", "toc"]
+}

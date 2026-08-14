@@ -20,7 +20,7 @@ pub const semantic_compiler_id = "boris/0.8.1+semantic-relations";
 pub const boris_version = "0.8.1";
 ```
 
-These are the sole source of truth for all version strings embedded in emitted JSON. `ir_emit.zig` receives them as a struct argument from `renderManifest`, `renderGraph`, and `renderBuildReport`. Callers outside `pipeline.zig` should reference these constants rather than hardcoding version strings.
+These are the sole source of truth for all version strings embedded in emitted JSON. `ir_emit.zig` receives them as a struct argument from `renderManifest`, `renderGraph`, `renderCompletion`, and `renderBuildReport`. Callers outside `pipeline.zig` should reference these constants rather than hardcoding version strings.
 
 ### `Options` and `CompileOptions`
 
@@ -128,7 +128,7 @@ Freeze is skipped entirely on failed builds. `result.graph_frozen` will be `fals
 
 **Success path:** All three JSON artifacts are written to a sibling staging directory `{out_dir}.boris-stage`, then renamed (or copy+delete on `error.CrossDevice`) into `out_dir`. No partial artifact set is published: if a mid-write fails, the staging directory is abandoned. Cross-volume atomic replace is explicitly disclaimed in the doc comment.
 
-**Failure path:** `manifest.json` and `graph.json` are deleted from `out_dir` (if present). Only `build-report.json` with `ok: false` is written. This ensures that a failed rebuild cannot leave a valid-looking prior IR set in place.
+**Failure path:** `manifest.json`, `graph.json`, and `completion.json` are deleted from `out_dir` (if present). Only `build-report.json` with `ok: false` is written. This ensures that a failed rebuild cannot leave a valid-looking prior IR set in place.
 
 The staging directory name (`.boris-stage` suffix) is never embedded in any JSON output — verified by the `"stale-IR cleanup"` test's assertion `std.mem.indexOf(u8, graph_bytes, ".boris-stage") == null`.
 
@@ -185,9 +185,9 @@ Public helpers used by the incremental HTML path and the `dependency.DependencyI
 
 1-based line counter: scans `source[0..min(index, source.len)]` counting `'\n'` characters. Used to convert parser- or tokenizer-relative line numbers to full-source line numbers in diagnostics. Returns `1` for index `0` (correct: first line is line 1).
 
-### `renderManifest`, `renderGraph`, `renderBuildReport`
+### `renderManifest`, `renderGraph`, `renderCompletion`, `renderBuildReport`
 
-Thin delegation wrappers that pass the version constant bundle to `ir_emit.*` functions. All three accept `*const Result` and return `![]u8` (caller-owned, GPA-allocated). No caching or state is held.
+Thin delegation wrappers that pass the version constant bundle to `ir_emit.*` functions. All four accept `*const Result` and return `![]u8` (caller-owned, GPA-allocated). No caching or state is held.
 
 ## Allocation ownership summary
 

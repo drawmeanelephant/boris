@@ -81,7 +81,7 @@ Emits `build-report.json`. Top-level keys in fixed order: `schemaVersion`, `ok`,
 
 The `diagnostics` value is either the JSON literal `[]` (when `result.diagnostics.items.len == 0`) or a full array of diagnostic objects. Each diagnostic object has keys: `severity`, `code`, `message`, `remediation`, `sourcePath`, `line`, `column`, `id`. The `sourcePath` field emits `null` when `d.source_path.len == 0`; `line` and `column` use `jsonout.writeOptionalU32` (emits the integer or `null`); `id` emits `null` when `d.id.len == 0`.
 
-Unlike `manifest.json` and `graph.json`, `build-report.json` is written on **both success and failure** paths in `pipeline.publishArtifacts`. On content failure, it is the only artifact published; on success, all three are published atomically via staging.
+Unlike `manifest.json`, `graph.json`, and `completion.json`, `build-report.json` is written on **both success and failure** paths in `pipeline.publishArtifacts`. On content failure, it is the only artifact published; on success, all four are published atomically via staging.
 
 **Schema version note:** `renderBuildReport` also calls `artifactSchemaVersion(result, versions)`, so the `schemaVersion` field reflects the conditional semantic-relations version even in the failure case where the build report is the sole artifact. This is consistent with the code but arguably surprising: a failed build report where no pages were parsed will always emit the base `"0.2.0"` schema version because no pages exist to carry semantic relations.
 

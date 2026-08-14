@@ -600,6 +600,17 @@ pub fn renderGraph(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
     });
 }
 
+pub fn renderCompletion(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
+    return ir_emit.renderCompletion(gpa, result, .{
+        .schema_version = schema_version,
+        .compiler_id = compiler_id,
+        .semantic_schema_version = semantic_schema_version,
+        .semantic_compiler_id = semantic_compiler_id,
+        .recipe_schema_version = recipe_schema_version,
+        .recipe_compiler_id = recipe_compiler_id,
+    });
+}
+
 pub fn renderBuildReport(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
     return ir_emit.renderBuildReport(gpa, result, .{
         .schema_version = schema_version,
@@ -617,10 +628,10 @@ pub fn renderBuildReport(gpa: std.mem.Allocator, result: *const Result) ![]u8 {
 
 /// Artifact publication policy (v0.1):
 ///
-/// **Success (`ok`):** write `manifest.json`, `graph.json`, and
-/// `build-report.json` under a sibling staging directory
+/// **Success (`ok`):** write `manifest.json`, `graph.json`, `completion.json`,
+/// and `build-report.json` under a sibling staging directory
 /// (`{out_dir}.boris-stage`), then rename each file into `out_dir`. This avoids
-/// publishing a partial three-file set if a mid-write fails. Staging lives
+/// publishing a partial file set if a mid-write fails. Staging lives
 /// next to the final directory (same parent) so same-filesystem rename is
 /// likely; **cross-volume atomic replace is not claimed**.
 ///
@@ -650,6 +661,7 @@ fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result) !void {
         defer out.close(io);
         out.deleteFile(io, "manifest.json") catch {};
         out.deleteFile(io, "graph.json") catch {};
+        out.deleteFile(io, "completion.json") catch {};
         try out.writeFile(io, .{ .sub_path = "build-report.json", .data = report });
         result.published_graph_ir = false;
         return;
@@ -659,6 +671,8 @@ fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result) !void {
     defer gpa.free(manifest);
     const graph_json = try renderGraph(gpa, result);
     defer gpa.free(graph_json);
+    const completion_json = try renderCompletion(gpa, result);
+    defer gpa.free(completion_json);
 
     // Sibling staging directory: `{out_dir}.boris-stage`
     const stage_rel = try std.fmt.allocPrint(gpa, "{s}.boris-stage", .{result.out_dir});
@@ -672,6 +686,7 @@ fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result) !void {
         defer stage.close(io);
         try stage.writeFile(io, .{ .sub_path = "manifest.json", .data = manifest });
         try stage.writeFile(io, .{ .sub_path = "graph.json", .data = graph_json });
+        try stage.writeFile(io, .{ .sub_path = "completion.json", .data = completion_json });
         try stage.writeFile(io, .{ .sub_path = "build-report.json", .data = report });
     }
 
@@ -682,7 +697,7 @@ fn publishArtifacts(io: Io, gpa: std.mem.Allocator, result: *Result) !void {
     var out_dir = try cwd.openDir(io, result.out_dir, .{});
     defer out_dir.close(io);
 
-    const names = [_][]const u8{ "manifest.json", "graph.json", "build-report.json" };
+    const names = [_][]const u8{ "manifest.json", "graph.json", "completion.json", "build-report.json" };
     for (names) |name| {
         stage_dir.rename(name, out_dir, name, io) catch |err| switch (err) {
             error.CrossDevice => {

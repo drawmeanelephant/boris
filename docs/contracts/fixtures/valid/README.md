@@ -22,6 +22,8 @@ content/
 ## Checks
 
 - `schemaVersion` is `"0.2.0"` on `manifest.json`, `graph.json`, and `build-report.json`
+- `completion.json` is `format: "boris-completion-index"`, `schema_version: 1`, with the
+  entity list, relation kinds, parent targets, and layout slots derived from the same frozen graph
 - Pages/nodes sorted by `id` as in the table order above
 - `graph.json` has `frozen: true`, one typed `parent` edge, its `reverseIndex`, and `nav` derived from
   the frozen graph (breadcrumb / children / siblings by node index)

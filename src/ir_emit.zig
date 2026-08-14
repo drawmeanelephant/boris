@@ -442,6 +442,175 @@ pub fn renderGraph(gpa: std.mem.Allocator, result: anytype, versions: VersionInf
     return try buf.toOwnedSlice(gpa);
 }
 
+/// Canonical relation kinds from the constrained-open vocabulary in
+/// `docs/contracts/semantic-relations.md`. The grammar is open (`[a-z][a-z0-9_]{0,63}`),
+/// so the completion index lists these canonical kinds plus any kinds actually
+/// observed in the frozen graph.
+const canonical_relation_kinds = [_][]const u8{
+    "depends_on",
+    "implements",
+    "relates_to",
+    "supersedes",
+};
+
+/// Closed layout slot set from `docs/contracts/templating-and-themes.md`
+/// (slot vocabulary section). `asset-url` is a non-slot helper, not a slot.
+const layout_slots = [_][]const u8{
+    "backlinks",
+    "breadcrumb",
+    "children",
+    "content",
+    "footer",
+    "metadata",
+    "nav",
+    "relations",
+    "title",
+    "toc",
+};
+
+fn stringLess(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.order(u8, a, b) == .lt;
+}
+
+/// Deterministic editor completion surface derived from the frozen graph:
+/// entity ids (with title/parent/role/status/tags/relations for display),
+/// the relation-kind vocabulary, observed parent targets, and the closed
+/// layout-slot set. Only published on a successful freeze (caller does not
+/// write completion.json when validation failed). Wiki-link fragment heading
+/// ids are Oliver-rendered on the HTML path and are deliberately out of scope
+/// here; entity ids serve the `[[entity#…]]` completion prefix.
+pub fn renderCompletion(gpa: std.mem.Allocator, result: anytype, versions: VersionInfo) ![]u8 {
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(gpa);
+
+    // Observed relation kinds (seeded with the canonical vocabulary) and
+    // observed parent targets. Both are sorted for determinism.
+    var kinds: std.ArrayList([]const u8) = .empty;
+    defer kinds.deinit(gpa);
+    try kinds.appendSlice(gpa, &canonical_relation_kinds);
+    var seen_kinds: std.StringHashMapUnmanaged(void) = .{};
+    defer seen_kinds.deinit(gpa);
+    for (canonical_relation_kinds) |k| try seen_kinds.put(gpa, k, {});
+
+    var parents: std.ArrayList([]const u8) = .empty;
+    defer parents.deinit(gpa);
+    var seen_parents: std.StringHashMapUnmanaged(void) = .{};
+    defer seen_parents.deinit(gpa);
+
+    for (result.pages.items) |p| {
+        for (p.semantic_relations) |relation| {
+            const k = relation.kind.name();
+            if (!seen_kinds.contains(k)) {
+                try seen_kinds.put(gpa, k, {});
+                try kinds.append(gpa, k);
+            }
+        }
+        if (p.parent) |par| {
+            if (!seen_parents.contains(par)) {
+                try seen_parents.put(gpa, par, {});
+                try parents.append(gpa, par);
+            }
+        }
+    }
+    std.mem.sort([]const u8, kinds.items, {}, stringLess);
+    std.mem.sort([]const u8, parents.items, {}, stringLess);
+
+    try buf.appendSlice(gpa, "{\n");
+    try json_out.indent(&buf, gpa, 1);
+    try buf.appendSlice(gpa, "\"format\": ");
+    try json_out.writeString(&buf, gpa, "boris-completion-index");
+    try buf.appendSlice(gpa, ",\n");
+    try json_out.indent(&buf, gpa, 1);
+    try buf.appendSlice(gpa, "\"schema_version\": 1,\n");
+    try json_out.indent(&buf, gpa, 1);
+    try buf.appendSlice(gpa, "\"compiler_id\": ");
+    try json_out.writeString(&buf, gpa, artifactCompilerId(result, versions));
+    try buf.appendSlice(gpa, ",\n");
+    try json_out.indent(&buf, gpa, 1);
+    try buf.appendSlice(gpa, "\"frozen\": ");
+    try json_out.writeBool(&buf, gpa, result.graph_frozen);
+    try buf.appendSlice(gpa, ",\n");
+
+    try json_out.indent(&buf, gpa, 1);
+    try buf.appendSlice(gpa, "\"entities\": [\n");
+    for (result.pages.items, 0..) |p, i| {
+        try json_out.indent(&buf, gpa, 2);
+        try buf.appendSlice(gpa, "{\n");
+        try json_out.indent(&buf, gpa, 3);
+        try buf.appendSlice(gpa, "\"id\": ");
+        try json_out.writeString(&buf, gpa, p.id);
+        try buf.appendSlice(gpa, ",\n");
+        try json_out.indent(&buf, gpa, 3);
+        try buf.appendSlice(gpa, "\"title\": ");
+        try writeOptionalString(&buf, gpa, p.title);
+        try buf.appendSlice(gpa, ",\n");
+        try json_out.indent(&buf, gpa, 3);
+        try buf.appendSlice(gpa, "\"parent\": ");
+        try writeOptionalString(&buf, gpa, p.parent);
+        try buf.appendSlice(gpa, ",\n");
+        try json_out.indent(&buf, gpa, 3);
+        try buf.appendSlice(gpa, "\"role\": ");
+        try json_out.writeString(&buf, gpa, p.role.name());
+        try buf.appendSlice(gpa, ",\n");
+        try json_out.indent(&buf, gpa, 3);
+        try buf.appendSlice(gpa, "\"status\": ");
+        try writeOptionalString(&buf, gpa, p.status);
+        try buf.appendSlice(gpa, ",\n");
+        try json_out.indent(&buf, gpa, 3);
+        try buf.appendSlice(gpa, "\"tags\": [");
+        for (p.tags, 0..) |t, ti| {
+            if (ti > 0) try buf.appendSlice(gpa, ", ");
+            try json_out.writeString(&buf, gpa, t);
+        }
+        try buf.appendSlice(gpa, "]");
+        try buf.appendSlice(gpa, ",\n");
+        try json_out.indent(&buf, gpa, 3);
+        try buf.appendSlice(gpa, "\"relations\": [");
+        for (p.semantic_relations, 0..) |relation, ri| {
+            if (ri > 0) try buf.appendSlice(gpa, ", ");
+            try buf.appendSlice(gpa, "{\"kind\": ");
+            try json_out.writeString(&buf, gpa, relation.kind.name());
+            try buf.appendSlice(gpa, ", \"target\": ");
+            try json_out.writeString(&buf, gpa, relation.target);
+            try buf.appendSlice(gpa, "}");
+        }
+        try buf.appendSlice(gpa, "]");
+        try buf.appendSlice(gpa, "\n");
+        try json_out.indent(&buf, gpa, 2);
+        try buf.append(gpa, '}');
+        if (i + 1 < result.pages.items.len) try buf.append(gpa, ',');
+        try buf.append(gpa, '\n');
+    }
+    try json_out.indent(&buf, gpa, 1);
+    try buf.appendSlice(gpa, "],\n");
+
+    try json_out.indent(&buf, gpa, 1);
+    try buf.appendSlice(gpa, "\"relation_kinds\": [");
+    for (kinds.items, 0..) |k, i| {
+        if (i > 0) try buf.appendSlice(gpa, ", ");
+        try json_out.writeString(&buf, gpa, k);
+    }
+    try buf.appendSlice(gpa, "],\n");
+
+    try json_out.indent(&buf, gpa, 1);
+    try buf.appendSlice(gpa, "\"parent_targets\": [");
+    for (parents.items, 0..) |par, i| {
+        if (i > 0) try buf.appendSlice(gpa, ", ");
+        try json_out.writeString(&buf, gpa, par);
+    }
+    try buf.appendSlice(gpa, "],\n");
+
+    try json_out.indent(&buf, gpa, 1);
+    try buf.appendSlice(gpa, "\"layout_slots\": [");
+    for (layout_slots, 0..) |slot, i| {
+        if (i > 0) try buf.appendSlice(gpa, ", ");
+        try json_out.writeString(&buf, gpa, slot);
+    }
+    try buf.appendSlice(gpa, "]\n}\n");
+
+    return try buf.toOwnedSlice(gpa);
+}
+
 pub fn renderBuildReport(gpa: std.mem.Allocator, result: anytype, versions: VersionInfo) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(gpa);

@@ -20,6 +20,7 @@ parser from prose, the same shapes are published as JSON Schema (draft 2020-12):
 |----------|--------|
 | `manifest.json` | [`schemas/ir-manifest-0.2.0.schema.json`](schemas/ir-manifest-0.2.0.schema.json) |
 | `graph.json` | [`schemas/ir-graph-0.2.0.schema.json`](schemas/ir-graph-0.2.0.schema.json) |
+| `completion.json` | [`schemas/boris-completion-1.schema.json`](schemas/boris-completion-1.schema.json) |
 | `build-report.json` | [`schemas/ir-build-report-0.2.0.schema.json`](schemas/ir-build-report-0.2.0.schema.json) |
 | `graph.json` with the `recipe` facet | [`schemas/ir-graph-0.4.0.schema.json`](schemas/ir-graph-0.4.0.schema.json) |
 
@@ -34,21 +35,36 @@ be expressed in JSON Schema, so it remains prose-only here.
 
 ## Artifacts
 
-On a **successful** compile (`ok: true`), Boris publishes three files under the
+On a **successful** compile (`ok: true`), Boris publishes four files under the
 output directory (CLI default `.boris/`):
 
 ```text
 .boris/
   manifest.json       # required — page summaries
   graph.json          # required — frozen nodes + dependency edges + reverse index + nav
+  completion.json     # required — editor completion surface derived from the frozen graph
   build-report.json   # required — ok flag, errorCount, diagnostics
 ```
+
+`completion.json` (`format: "boris-completion-index"`) is a deterministic
+editor/tooling surface: entity ids (with title, parent, role, status, tags,
+and validated semantic relations for display), the relation-kind vocabulary
+(canonical kinds plus any kinds observed in the graph), distinct parent
+targets, and the closed layout-slot set. Wiki-link fragment **heading ids**
+are Oliver-rendered on the HTML path and are deliberately **not** in the IR
+completion index; the entity id list serves the `[[entity#…]]` prefix, and
+heading-level completion remains an HTML-path concern. The author-facing
+frontmatter grammar has its own machine-readable twin:
+[`schemas/boris-frontmatter-1.schema.json`](schemas/boris-frontmatter-1.schema.json)
+(the parsed field set as a JSON object; see
+[frontmatter.md](frontmatter.md)).
 
 On **content validation failure** (`ok: false`):
 
 - `build-report.json` is written with `ok: false` and diagnostics
-- **Graph-dependent** artifacts (`manifest.json`, `graph.json`) are **not**
-  published; any prior copies under the out directory are removed
+- **Graph-dependent** artifacts (`manifest.json`, `graph.json`,
+  `completion.json`) are **not** published; any prior copies under the out
+  directory are removed
 - The process exits **1**
 
 On **I/O/system failure** (exit **3**), files may be missing or partial;
@@ -272,7 +288,7 @@ Implementation (`src/pipeline.zig`):
 | Same-directory file rename after staging | Used on success path |
 | Whole-directory atomic replace of `outDir` | **Not** used |
 | Cross-volume / cross-device atomic publish | **Not claimed** |
-| Concurrent readers never observe a torn three-file set | Best-effort via staging; not formally proven on all hosts |
+| Concurrent readers never observe a torn artifact set | Best-effort via staging; not formally proven on all hosts |
 | Staging path names inside JSON | Never — only final `outDir` string as passed to the CLI |
 
 ---

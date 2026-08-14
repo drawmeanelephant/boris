@@ -4,6 +4,27 @@
 **Module:** `src/parser.zig` (product frontmatter); pipeline invokes parse before
 Aside tokenize and graph validation.
 
+**Machine-readable twin:** the parsed field set as a JSON object is published
+as [`schemas/boris-frontmatter-1.schema.json`](schemas/boris-frontmatter-1.schema.json)
+(draft 2020-12). Frontmatter source is not JSON, so tools convert parsed
+fields to that object shape before validating — the same conversion the
+schema-conformance test applies to every fixture tree. Key order is
+irrelevant; the closed key set (`additionalProperties: false`) and the
+bounds below are normative.
+
+Two caveats for schema consumers, because JSON Schema cannot express the
+parser's exact rules:
+
+1. **Length units.** The schema's `maxLength` counts **Unicode code points**
+   (JSON Schema semantics); the parser's limits in the bounds table are
+   **UTF-8 bytes**. A multibyte value can therefore pass the schema and still
+   exceed the parser's byte bound — treat the parser as the authority and the
+   schema as a looser pre-check.
+2. **Calendar validity.** The `published_at` pattern checks shape only; the
+   parser additionally requires a **real Gregorian calendar date** (via
+   `rss_date.parse`, e.g. `2026-02-29T…` is rejected). Editors validating
+   against the pattern alone will not catch invalid calendar dates.
+
 Boris frontmatter is a **deliberately closed, bounded grammar**. It is **not**
 general YAML and must never be documented or implemented as “YAML support.”
 Implementations must not grow into a YAML 1.1/1.2 subset by accident.

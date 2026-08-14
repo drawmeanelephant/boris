@@ -1228,7 +1228,7 @@ pub fn printUsage() void {
         \\  Staging: <target-dir>.boris-stage (ephemeral; committed only on full target success)
         \\
         \\IR artifacts (success; --out or --no-rag):
-        \\  <out>/manifest.json  <out>/graph.json  <out>/build-report.json
+        \\  <out>/manifest.json  <out>/graph.json  <out>/completion.json  <out>/build-report.json
         \\
         \\RAG artifacts (success; same graph validation as IR):
         \\  working-N.md          model-facing working packs (site documents only)
