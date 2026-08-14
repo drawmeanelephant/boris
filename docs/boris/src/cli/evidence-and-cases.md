@@ -16,11 +16,11 @@ The function processes argv in four logical phases:
 
 ```text
 args[1] == "check"  → command = .check; i += 1
-args[1] == "impact" → command = .impact; impact_id = args[2]; i += 2
+args[1] == "impact" → command = .impact; i += 1
 (else)              → command = .build
 ```
 
-`impact` requires exactly one non-flag positional argument immediately after the subcommand token. If it is absent or starts with `-`, `error.MissingValue` is returned immediately.
+`impact` requires exactly one non-flag positional argument (the target id). The id may immediately follow the subcommand or come after flags (`boris impact --quiet ID`); it is captured in the flag loop when `impact_id` is still unset. A second positional is `error.UnexpectedPositional`. After the loop, if no id was captured (`boris impact` or `boris impact --quiet`), `error.MissingValue` is returned — the immediate-return form was removed so flags may precede the positional.
 
 ### Phase 2 — Flag loop (linear scan)
 
