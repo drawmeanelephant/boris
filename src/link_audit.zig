@@ -354,7 +354,7 @@ fn auditOne(
     }
 }
 
-fn auditDocumentWithOptions(
+pub fn auditDocumentWithOptions(
     gpa: std.mem.Allocator,
     intended: *const std.StringHashMapUnmanaged(void),
     source_path: []const u8,
