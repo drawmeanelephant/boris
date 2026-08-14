@@ -21,3 +21,8 @@ dependency.
 
 The index page is the Trunk. Each writeup is a Satellite linked with
 `parent: index`; `{{children}}` gives the node its deterministic writeup stream.
+
+The updated shell also exercises metadata, breadcrumbs, a generated current
+page outline, graph navigation, direct children, and a keyboard-visible skip
+link. The account/search controls remain explicitly static placeholders; theme
+CSS is no longer used as a fake navigation destination.

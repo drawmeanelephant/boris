@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" data-layout="section">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bulma / Boris study</title>
+    <link rel="stylesheet" href="{{asset-url assets/css/bulma-classic.css}}">
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <header class="navbar">
+      <div class="container navbar-inner">
+        <div><p class="brand-kicker">CSS-only theme study</p><p class="brand">Bulma / Boris</p></div>
+        <div class="navbar-menu" aria-label="Site navigation">{{nav}}</div>
+      </div>
+    </header>
+    <main id="main-content" class="section container" data-boris-search-root>
+      <nav class="breadcrumb" aria-label="Breadcrumb">{{breadcrumb}}</nav>
+      <div class="notification is-primary is-light">Section landing / direct graph children</div>
+      <div class="columns is-variable is-6">
+        <article class="column is-8">
+          <div class="box article-box"><header class="content-header"><h1>{{title}}</h1>{{metadata}}</header><div class="content prose">{{content}}</div></div>
+          <section class="box children-box" aria-labelledby="children-heading"><h2 id="children-heading" class="title is-4">Pages in this section</h2>{{children}}</section>
+        </article>
+        <aside class="column is-4 sidebar"><div class="menu box"><p class="menu-label">On this page</p>{{toc}}</div></aside>
+      </div>
+    </main>
+    <footer class="footer">{{footer}}</footer>
+  </body>
+</html>
