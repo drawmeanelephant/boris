@@ -42,7 +42,7 @@ const timings = @import("timings.zig");
 const pipeline = @import("pipeline.zig");
 const rag_emit = @import("rag_emit.zig");
 const textile = @import("textile.zig");
-const cooklang = @import("cooklang.zig");
+const cooklang_seam = @import("cooklang_seam.zig");
 const export_scope = @import("export_scope.zig");
 
 /// Machine format id (`format` in `manifest.json` and complete-mode
@@ -80,7 +80,7 @@ fn adaptedDoc(
             return try std.mem.concat(arena, u8, &.{ source[0..body_offset], adapted.markdown });
         },
         .cook => {
-            const adapted = try cooklang.toMarkdown(source[body_offset..], arena);
+            const adapted = try cooklang_seam.toMarkdown(source[body_offset..], arena);
             if (!adapted.isOk()) return error.UnexpectedParseFailure;
             return try std.mem.concat(arena, u8, &.{ source[0..body_offset], adapted.markdown });
         },

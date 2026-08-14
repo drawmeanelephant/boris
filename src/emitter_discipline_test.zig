@@ -153,9 +153,10 @@ const modules = [_]Module{
     .{ .name = "cli.zig", .class = .other },
     .{ .name = "compile.zig", .class = .other },
     .{ .name = "content_asset.zig", .class = .other },
-    // Body adapter, not an emitter: it produces Markdown for the compile
+    // Cooklang seam, not an emitter: it produces Markdown for the compile
     // pipeline and escapes author text itself, exactly like textile.zig.
-    .{ .name = "cooklang.zig", .class = .other },
+    // Parsing is delegated to Oliver; this module renders and validates.
+    .{ .name = "cooklang_seam.zig", .class = .other },
     .{ .name = "dependency.zig", .class = .other },
     .{ .name = "diag.zig", .class = .other },
     .{ .name = "diagnostic.zig", .class = .other },

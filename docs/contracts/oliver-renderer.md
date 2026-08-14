@@ -1,7 +1,10 @@
 # Oliver renderer contract (pin, seam, upgrade)
 
 **Status:** normative — Markdown → HTML rendering  \
-**Module:** [`src/render.zig`](../../src/render.zig) (the only Oliver call site)  \
+**Module:** [`src/render.zig`](../../src/render.zig) (Markdown → HTML; the only
+call site for the `oliver` pin). The Cooklang stack is a second, separate
+dependency (`oliver_cooklang`) consumed by
+[`src/cooklang_seam.zig`](../../src/cooklang_seam.zig); see below.  \
 **Upstream:** <https://github.com/drawmeanelephant/oliver>  \
 **Related:** [html-output.md](html-output.md), [heading-ids.md](heading-ids.md),
 [parallel-rendering.md](parallel-rendering.md),

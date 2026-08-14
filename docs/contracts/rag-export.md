@@ -401,9 +401,9 @@ documented in `INDEX.md` but are **not** catalog rows.
   the exported document is the adapted Markdown, not the original Textile
   bytes. Textile exports are therefore deterministic, faithful *adaptations* —
   not byte-for-byte originals. Markdown exports remain verbatim.
-- **Cooklang input is deterministically adapted.** The Cooklang adapter
-  (`src/cooklang.zig`) converts the contracted Cooklang body subset to
-  Boris-authorable Markdown (per [cooklang-compatibility.md](cooklang-compatibility.md));
+- **Cooklang input is deterministically adapted.** The Cooklang seam
+  (`src/cooklang_seam.zig`) parses the body with Oliver's Cooklang stack and
+  renders Boris-authorable Markdown (per [cooklang-compatibility.md](cooklang-compatibility.md));
   the exported document is the adapted Markdown — an `## Ingredients` list, a
   `## Cookware` list, and `## Method` numbered steps — not the original `.cook`
   bytes with their raw `@`, `#`, and `~` sigils. A model reading the corpus
