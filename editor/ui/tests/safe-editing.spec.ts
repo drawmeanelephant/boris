@@ -3,10 +3,37 @@ import { expect, test, type Page } from '@playwright/test';
 type MockOptions = {
   saveConflict?: boolean;
   recovery?: Array<{ path: string; content: string; fingerprint: string }>;
+  disk?: string;
+  commands?: Partial<Record<string, CommandResult>>;
 };
 
+type CommandResult = {
+  mode: string;
+  exit_code: number | null;
+  failure_class: 'success' | 'content' | 'usage' | 'io' | 'terminated';
+  compiler_id: string;
+  report_version: string | null;
+  used_stderr_fallback: boolean;
+  problems: Array<{
+    severity: 'error' | 'warning' | 'info'; code: string | null; message: string; remediation: string;
+    source_path: string | null; line: number | null; column: number | null; id: string | null;
+    origin: 'build_report' | 'analysis_report' | 'stderr' | 'process';
+    position_confidence: 'exact' | 'best_effort' | 'none'; packet: string;
+  }>;
+  findings: Array<Record<string, unknown>>;
+  impact: Array<Record<string, unknown>>;
+};
+
+function commandResult(mode: string, overrides: Partial<CommandResult> = {}): CommandResult {
+  return {
+    mode, exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.8.1',
+    report_version: null, used_stderr_fallback: false, problems: [], findings: [], impact: [],
+    ...overrides
+  };
+}
+
 async function installApi(page: Page, options: MockOptions = {}) {
-  let disk = '# Home\n';
+  let disk = options.disk ?? '# Home\n';
   let fingerprint = 'a'.repeat(64);
 
   await page.route('**/api/health', route => route.fulfill({
@@ -71,6 +98,13 @@ async function installApi(page: Page, options: MockOptions = {}) {
       contentType: 'application/json', body: JSON.stringify({ status: endpoint === 'rename' ? 'renamed' : 'deleted' })
     }));
   }
+  await page.route('**/api/commands/run', async route => {
+    const { mode } = route.request().postDataJSON() as { mode: string };
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(options.commands?.[mode] ?? commandResult(mode))
+    });
+  });
   await page.goto('/#token=test-session-token');
 }
 
@@ -164,4 +198,86 @@ test('native file dialogs are keyboard-dismissible and all controls have visible
   await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toHaveText('Cancel');
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
+});
+
+test('Boris commands expose visible voice names and distinct exit classes', async ({ page }) => {
+  await installApi(page, {
+    commands: {
+      validate: commandResult('validate', { exit_code: 2, failure_class: 'usage' }),
+      ir_build: commandResult('ir_build', { exit_code: 1, failure_class: 'content' }),
+      html_build: commandResult('html_build', { exit_code: 3, failure_class: 'io' })
+    }
+  });
+  for (const name of ['Validate project', 'Build diagnostics', 'Build HTML', 'Check graph', 'Run impact']) {
+    await expect(page.getByRole('button', { name, exact: true })).toHaveText(name);
+  }
+  await page.getByRole('button', { name: 'Build diagnostics', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Content or graph failure (exit 1)');
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Usage or configuration failure (exit 2)');
+  await page.getByRole('button', { name: 'Build HTML', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('I/O or system failure (exit 3)');
+});
+
+test('structured problems group, navigate by UTF-8 byte position, and copy a bounded packet', async ({ page }) => {
+  let copied = '';
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: async (value: string) => { (window as unknown as { copied: string }).copied = value; } }
+    });
+  });
+  const packet = 'Boris diagnostic packet\ncode: EDUPLICATEID\nsource: index.md\nposition: 1:6';
+  await installApi(page, {
+    disk: '# Héllo\n',
+    commands: {
+      ir_build: commandResult('ir_build', {
+        exit_code: 1, failure_class: 'content', report_version: '0.3.0',
+        problems: [{
+          severity: 'error', code: 'EDUPLICATEID', message: 'Duplicate id.', remediation: 'Choose a unique id.',
+          source_path: 'index.md', line: 1, column: 6, id: 'home', origin: 'build_report',
+          position_confidence: 'exact', packet
+        }]
+      })
+    }
+  });
+  await page.getByRole('button', { name: 'Build diagnostics', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'index.md · error · EDUPLICATEID' })).toBeVisible();
+  const go = page.getByRole('button', { name: 'Go to index.md line 1 column 6', exact: true });
+  await expect(go).toHaveText('Go to index.md line 1 column 6');
+  await go.focus();
+  await page.keyboard.press('Enter');
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await expect(editor).toBeFocused();
+  expect(await editor.evaluate(node => (node as HTMLTextAreaElement).selectionStart)).toBe(4);
+
+  const copy = page.getByRole('button', { name: 'Copy packet for EDUPLICATEID at index.md', exact: true });
+  await expect(copy).toHaveText('Copy packet for EDUPLICATEID at index.md');
+  await copy.click();
+  copied = await page.evaluate(() => (window as unknown as { copied: string }).copied);
+  expect(copied).toBe(packet);
+  expect(copied.length).toBeLessThanOrEqual(4096);
+  expect(copied).not.toContain('/Users/');
+});
+
+test('stderr diagnostics are announced as best-effort and dirty buffers disable commands', async ({ page }) => {
+  await installApi(page, {
+    commands: {
+      validate: commandResult('validate', {
+        exit_code: 1, failure_class: 'content', used_stderr_fallback: true,
+        problems: [{
+          severity: 'error', code: 'EFRONTMATTER', message: 'Unknown frontmatter key.', remediation: '',
+          source_path: 'index.md', line: 2, column: 1, id: null, origin: 'stderr',
+          position_confidence: 'best_effort', packet: 'code: EFRONTMATTER'
+        }]
+      })
+    }
+  });
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  await expect(page.getByText(/stderr was used/)).toBeVisible();
+  await expect(page.getByText('Best-effort source position', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Dirty\n');
+  await expect(page.getByRole('button', { name: 'Validate project', exact: true })).toBeDisabled();
+  await expect(page.getByText(/commands read repository files from disk/)).toBeVisible();
 });

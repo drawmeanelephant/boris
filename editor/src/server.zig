@@ -5,6 +5,7 @@ const net = std.Io.net;
 const file_api = @import("file_api.zig");
 const project = @import("project.zig");
 const recovery = @import("recovery.zig");
+const runner = @import("runner.zig");
 const security = @import("security.zig");
 
 pub const editor_id = "boris-editor/0.1.0";
@@ -98,6 +99,10 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
         if (std.mem.eql(u8, target, "/api/recovery/clear")) {
             if (request.head.method != .POST) return methodNotAllowed(request, "POST");
             return serveRecoveryClear(io, allocator, request, config);
+        }
+        if (std.mem.eql(u8, target, "/api/commands/run")) {
+            if (request.head.method != .POST) return methodNotAllowed(request, "POST");
+            return serveCommandRun(io, allocator, request, config);
         }
         return respondText(request, .not_found, "Not found", "text/plain; charset=utf-8");
     }
@@ -258,6 +263,23 @@ fn serveRecoveryClear(io: Io, allocator: std.mem.Allocator, request: *http.Serve
     return respondJson(request, .ok, "{\"status\":\"cleared\"}");
 }
 
+fn serveCommandRun(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
+    const body = readJsonBody(allocator, request) catch |err| return respondApiError(request, err);
+    defer allocator.free(body);
+    const parsed = std.json.parseFromSlice(runner.Request, allocator, body, .{}) catch return respondApiError(request, error.InvalidJson);
+    defer parsed.deinit();
+    var arena: std.heap.ArenaAllocator = .init(allocator);
+    defer arena.deinit();
+    const result = runner.run(arena.allocator(), io, .{
+        .project_root = config.project_root,
+        .boris_path = config.boris_path,
+        .editor_id = editor_id,
+    }, parsed.value) catch |err| return respondApiError(request, err);
+    const bytes = try std.json.Stringify.valueAlloc(allocator, result, .{});
+    defer allocator.free(bytes);
+    return respondJson(request, .ok, bytes);
+}
+
 fn respondBuffer(
     allocator: std.mem.Allocator,
     request: *http.Server.Request,
@@ -307,6 +329,11 @@ fn respondApiError(request: *http.Server.Request, err: anyerror) !void {
         error.UnsupportedMediaType => .{ .status = .unsupported_media_type, .code = "unsupported_media_type" },
         error.TooManyFiles => .{ .status = .payload_too_large, .code = "too_many_files" },
         error.CorruptRecovery => .{ .status = .internal_server_error, .code = "corrupt_recovery" },
+        error.ImpactIdRequired, error.UnexpectedImpactId, error.InvalidImpactId => .{ .status = .bad_request, .code = "invalid_command_request" },
+        error.UnsupportedArtifact => .{ .status = .bad_gateway, .code = "unsupported_boris_artifact" },
+        error.InvalidBorisVersion => .{ .status = .bad_gateway, .code = "invalid_boris_version" },
+        error.BorisUnavailable => .{ .status = .service_unavailable, .code = "boris_unavailable" },
+        error.UnsafeArtifact, error.SymLinkLoop => .{ .status = .conflict, .code = "unsafe_artifact_path" },
         else => .{ .status = .internal_server_error, .code = "io_error" },
     };
     var buffer: [128]u8 = undefined;

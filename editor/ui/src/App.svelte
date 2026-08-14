@@ -19,11 +19,50 @@
   type RecoverySnapshot = { path: string; content: string; fingerprint: string };
   type RecoveryList = { snapshots: RecoverySnapshot[] };
   type ErrorResponse = { error?: string; status?: string };
+  type CommandMode = 'validate' | 'ir_build' | 'html_build' | 'check' | 'impact';
+  type FailureClass = 'success' | 'content' | 'usage' | 'io' | 'terminated';
+  type Problem = {
+    severity: 'error' | 'warning' | 'info';
+    code: string | null;
+    message: string;
+    remediation: string;
+    source_path: string | null;
+    line: number | null;
+    column: number | null;
+    id: string | null;
+    origin: 'build_report' | 'analysis_report' | 'stderr' | 'process';
+    position_confidence: 'exact' | 'best_effort' | 'none';
+    packet: string;
+  };
+  type AnalysisFinding = {
+    code: string;
+    endpoint_type: 'page' | 'source';
+    value: string;
+    count: number;
+    source_path: string | null;
+    line: number | null;
+    column: number | null;
+  };
+  type ImpactEndpoint = { endpoint_type: 'page' | 'source'; value: string };
+  type CommandResult = {
+    mode: CommandMode;
+    exit_code: number | null;
+    failure_class: FailureClass;
+    compiler_id: string;
+    report_version: string | null;
+    used_stderr_fallback: boolean;
+    problems: Problem[];
+    findings: AnalysisFinding[];
+    impact: ImpactEndpoint[];
+  };
+  type ProblemGroup = { key: string; label: string; problems: Problem[] };
 
   let connection = 'Connecting to the local host…';
   let compiler = 'Checking Boris version…';
   let project = 'Checking project conventions…';
   let editorStatus = 'Choose a project file to begin editing.';
+  let commandStatus = 'No Boris command has run yet.';
+  let previewState = 'Preview is not running.';
   let files: FileEntry[] = [];
   let snapshots: RecoverySnapshot[] = [];
   let activePath = '';
@@ -42,8 +81,15 @@
   let deleteDialog: HTMLDialogElement;
   let createPath = 'content/new-page.md';
   let renamePath = '';
+  let commandRunning = false;
+  let commandResult: CommandResult | null = null;
+  let impactId = '';
 
   $: dirty = activePath !== '' && content !== baseline;
+  $: problemGroups = groupProblems(commandResult?.problems ?? []);
+  $: activeProblems = (commandResult?.problems ?? []).filter(problem =>
+    problem.source_path !== null && projectPathForProblem(problem.source_path) === activePath
+  );
 
   const token = new URLSearchParams(window.location.hash.slice(1)).get('token') ?? '';
 
@@ -124,11 +170,11 @@
     editorStatus = status;
   }
 
-  async function openFile(path: string) {
-    if (path === activePath) return;
+  async function openFile(path: string): Promise<boolean> {
+    if (path === activePath) return true;
     if (dirty) {
       editorStatus = `Save or undo changes to ${activePath} before opening another file.`;
-      return;
+      return false;
     }
     const result = await api<BufferResponse | ErrorResponse>('/api/files/open', {
       method: 'POST', body: JSON.stringify({ path })
@@ -136,9 +182,143 @@
     if (result.response.ok) {
       const buffer = result.data as BufferResponse;
       loadBuffer(buffer, buffer.read_only ? `Opened ${path} read-only.` : `Opened ${path}.`);
+      return true;
     } else {
       editorStatus = `Could not open ${path}.`;
+      return false;
     }
+  }
+
+  async function runCommand(mode: CommandMode) {
+    if (dirty) {
+      commandStatus = `Save or undo changes to ${activePath}; Boris commands read project files from disk.`;
+      return;
+    }
+    if (mode === 'impact' && !impactId.trim()) {
+      commandStatus = 'Enter an entity or source endpoint before running impact.';
+      return;
+    }
+    commandRunning = true;
+    commandStatus = `Running ${commandLabel(mode)}…`;
+    const body = mode === 'impact' ? { mode, impact_id: impactId.trim() } : { mode };
+    const result = await api<CommandResult | ErrorResponse>('/api/commands/run', {
+      method: 'POST', body: JSON.stringify(body)
+    });
+    commandRunning = false;
+    if (!result.response.ok) {
+      commandStatus = `Could not run ${commandLabel(mode)}: ${(result.data as ErrorResponse).error ?? 'request failed'}.`;
+      return;
+    }
+    commandResult = result.data as CommandResult;
+    commandStatus = `${commandLabel(mode)} finished: ${failureLabel(commandResult.failure_class, commandResult.exit_code)}.`;
+    if (mode === 'html_build') {
+      previewState = commandResult.failure_class === 'success'
+        ? 'The last HTML build succeeded. Live preview serving arrives in the preview slice.'
+        : 'The HTML build failed. Existing dist output, if any, is previous and stale.';
+    }
+  }
+
+  function commandLabel(mode: CommandMode): string {
+    return ({
+      validate: 'Validate project',
+      ir_build: 'Build diagnostics',
+      html_build: 'Build HTML',
+      check: 'Check graph',
+      impact: 'Run impact'
+    } satisfies Record<CommandMode, string>)[mode];
+  }
+
+  function failureLabel(failure: FailureClass, exitCode: number | null): string {
+    const labels: Record<FailureClass, string> = {
+      success: 'Success',
+      content: 'Content or graph failure',
+      usage: 'Usage or configuration failure',
+      io: 'I/O or system failure',
+      terminated: 'Process terminated'
+    };
+    return exitCode === null ? labels[failure] : `${labels[failure]} (exit ${exitCode})`;
+  }
+
+  function groupProblems(problems: Problem[]): ProblemGroup[] {
+    const groups = new Map<string, ProblemGroup>();
+    for (const problem of problems) {
+      const source = problem.source_path ?? 'Project';
+      const code = problem.code ?? 'Unstructured Boris output';
+      const key = `${source}\u0000${problem.severity}\u0000${code}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.problems.push(problem);
+      } else {
+        groups.set(key, { key, label: `${source} · ${problem.severity} · ${code}`, problems: [problem] });
+      }
+    }
+    const severityOrder = { error: 0, warning: 1, info: 2 };
+    return [...groups.values()].sort((left, right) => {
+      const source = (left.problems[0].source_path ?? '\uffff').localeCompare(right.problems[0].source_path ?? '\uffff');
+      if (source !== 0) return source;
+      const severity = severityOrder[left.problems[0].severity] - severityOrder[right.problems[0].severity];
+      return severity !== 0 ? severity : left.label.localeCompare(right.label);
+    });
+  }
+
+  function projectPathForProblem(sourcePath: string): string {
+    if (sourcePath === 'boris.json' || sourcePath.startsWith('content/') || sourcePath.startsWith('themes/')) return sourcePath;
+    return `content/${sourcePath}`;
+  }
+
+  async function navigateToProblem(problem: Problem | AnalysisFinding) {
+    if (!problem.source_path) return;
+    const path = projectPathForProblem(problem.source_path);
+    if (!await openFile(path)) return;
+    await tick();
+    const editor = document.getElementById('source-editor') as HTMLTextAreaElement | null;
+    if (!editor) return;
+    const offset = sourceOffset(content, problem.line, problem.column);
+    editor.focus();
+    editor.setSelectionRange(offset, offset);
+    editor.scrollTop = Math.max(0, editor.scrollHeight * (offset / Math.max(1, content.length)) - editor.clientHeight / 2);
+    editorStatus = problem.line
+      ? `Moved to ${path}, line ${problem.line}${problem.column ? `, column ${problem.column}` : ''}.`
+      : `Opened ${path} for this Boris finding.`;
+  }
+
+  function sourceOffset(source: string, line: number | null, column: number | null): number {
+    if (!line || line < 1) return 0;
+    let lineStart = 0;
+    for (let currentLine = 1; currentLine < line; currentLine += 1) {
+      const newline = source.indexOf('\n', lineStart);
+      if (newline < 0) return source.length;
+      lineStart = newline + 1;
+    }
+    if (!column || column <= 1) return lineStart;
+    const lineEnd = source.indexOf('\n', lineStart);
+    const text = source.slice(lineStart, lineEnd < 0 ? source.length : lineEnd);
+    const wantedBytes = column - 1;
+    let consumedBytes = 0;
+    let codeUnits = 0;
+    const encoder = new TextEncoder();
+    for (const character of text) {
+      const bytes = encoder.encode(character).length;
+      if (consumedBytes + bytes > wantedBytes) break;
+      consumedBytes += bytes;
+      codeUnits += character.length;
+    }
+    return lineStart + codeUnits;
+  }
+
+  async function copyDiagnosticPacket(problem: Problem) {
+    try {
+      await navigator.clipboard.writeText(problem.packet);
+      commandStatus = `Copied diagnostic packet for ${problem.code ?? 'unstructured Boris output'}.`;
+    } catch {
+      commandStatus = 'Could not copy the diagnostic packet. Clipboard access was denied.';
+    }
+  }
+
+  function problemLocationLabel(problem: Problem | AnalysisFinding): string {
+    if (!problem.source_path) return 'project';
+    if (!problem.line) return problem.source_path;
+    return `${problem.source_path} line ${problem.line}${problem.column ? ` column ${problem.column}` : ''}`;
   }
 
   function editSource(event: Event) {
@@ -469,20 +649,126 @@
       <p class:warning={dirty || readOnly} class="buffer-state">
         {readOnly ? 'Read-only file' : dirty ? 'Unsaved changes' : 'Saved on disk'}
       </p>
+      {#if activeProblems.length > 0}
+        <aside class="inline-problems" aria-label="Problems in {activePath}">
+          <h3>Problems in this file</h3>
+          <ul>
+            {#each activeProblems as problem}
+              <li>
+                <button type="button" onclick={() => navigateToProblem(problem)}>
+                  Go to {problemLocationLabel(problem)}: {problem.code ?? 'Unstructured Boris output'}
+                </button>
+              </li>
+            {/each}
+          </ul>
+        </aside>
+      {/if}
     {:else}
       <p>Choose a file from Project files. Generated output and editor state are intentionally excluded.</p>
     {/if}
     <p role="status" aria-label="Editing status" aria-live="polite">{editorStatus}</p>
   </section>
 
-  <section id="problems" aria-labelledby="problems-heading">
-    <h2 id="problems-heading">Problems</h2>
-    <p>Boris diagnostics arrive in the compiler-invocation slice.</p>
+  <section id="problems" class="problems-pane" aria-labelledby="problems-heading">
+    <div class="problems-heading">
+      <div>
+        <h2 id="problems-heading">Problems</h2>
+        <p>Every result below comes from the Boris CLI or one of its published artifacts.</p>
+      </div>
+      {#if commandResult}
+        <p class:failure={commandResult.failure_class !== 'success'} class="command-result">
+          {failureLabel(commandResult.failure_class, commandResult.exit_code)}
+        </p>
+      {/if}
+    </div>
+    <div class="command-bar" aria-label="Boris commands">
+      <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('validate')}>Validate project</button>
+      <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('ir_build')}>Build diagnostics</button>
+      <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('html_build')}>Build HTML</button>
+      <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('check')}>Check graph</button>
+    </div>
+    <div class="impact-command">
+      <label for="impact-id">Impact entity or source endpoint</label>
+      <div>
+        <input id="impact-id" bind:value={impactId} disabled={commandRunning || dirty} />
+        <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('impact')}>Run impact</button>
+      </div>
+    </div>
+    {#if dirty}
+      <p class="warning-text">Save or undo changes before running Boris; commands read repository files from disk.</p>
+    {/if}
+    <p role="status" aria-label="Boris command status" aria-live="polite">{commandStatus}</p>
+
+    {#if commandResult?.used_stderr_fallback}
+      <p class="fallback-notice">Machine-readable diagnostics were unavailable for this command. Boris stderr was used; reported source positions are labeled best-effort.</p>
+    {/if}
+
+    {#if commandResult && commandResult.problems.length === 0}
+      <p>No Boris diagnostics were reported by the last command.</p>
+    {/if}
+
+    <div class="problem-groups" aria-label="Boris diagnostic groups">
+      {#each problemGroups as group, groupIndex (group.key)}
+        <section class="problem-group" aria-labelledby="problem-group-{groupIndex}">
+          <h3 id="problem-group-{groupIndex}">{group.label}</h3>
+          <ul>
+            {#each group.problems as problem}
+              <li class="problem-card">
+                <p>{problem.message}</p>
+                {#if problem.remediation}<p><strong>Remediation:</strong> {problem.remediation}</p>{/if}
+                <p class="confidence">
+                  {problem.position_confidence === 'exact'
+                    ? 'Exact compiler-reported source position'
+                    : problem.position_confidence === 'best_effort'
+                      ? 'Best-effort source position'
+                      : 'No source position reported'}
+                </p>
+                <div class="problem-actions">
+                  {#if problem.source_path}
+                    <button type="button" onclick={() => navigateToProblem(problem)}>Go to {problemLocationLabel(problem)}</button>
+                  {/if}
+                  <button type="button" onclick={() => copyDiagnosticPacket(problem)}>
+                    Copy packet for {problem.code ?? 'unstructured Boris output'} at {problem.source_path ?? 'project'}
+                  </button>
+                </div>
+              </li>
+            {/each}
+          </ul>
+        </section>
+      {/each}
+    </div>
+
+    {#if commandResult && commandResult.findings.length > 0}
+      <section class="analysis-results" aria-labelledby="analysis-findings-heading">
+        <h3 id="analysis-findings-heading">Analysis findings</h3>
+        <ul>
+          {#each commandResult.findings as finding}
+            <li>
+              <span>{finding.code} · {finding.endpoint_type} {finding.value} · count {finding.count}</span>
+              {#if finding.source_path}
+                <button type="button" onclick={() => navigateToProblem(finding)}>Go to {problemLocationLabel(finding)}</button>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+
+    {#if commandResult?.mode === 'impact' && commandResult.impact.length > 0}
+      <section class="analysis-results" aria-labelledby="impact-results-heading">
+        <h3 id="impact-results-heading">Impact results</h3>
+        <ul>
+          {#each commandResult.impact as endpoint}
+            <li>{endpoint.endpoint_type}: {endpoint.value}</li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
   </section>
 
   <section id="preview" aria-labelledby="preview-heading">
     <h2 id="preview-heading">Preview</h2>
-    <p>Compiler-produced preview arrives in the live-preview slice.</p>
+    <p>{previewState}</p>
   </section>
 </main>
 
