@@ -536,6 +536,18 @@ fn fenceAtLineStart(body: []const u8, i: usize) ?struct { u8, usize } {
     return .{ ch, run };
 }
 
+/// True when a line-start fence opener appears in body[from..to]. A
+/// would-be inline-code span must not cross one: the closer search would
+/// otherwise swallow the fence opener and let fenced content be scanned as
+/// real images.
+fn fenceOpenerInRange(body: []const u8, from: usize, to: usize) bool {
+    var j = from;
+    while (j < to) : (j += 1) {
+        if (atLineStart(body, j) and fenceAtLineStart(body, j) != null) return true;
+    }
+    return false;
+}
+
 const ImageHit = struct {
     /// Destination slice view into body (inside the parens, not including titles).
     dest: []const u8,
@@ -556,7 +568,8 @@ fn setFail(fail_out: ?*FailInfo, body: []const u8, offset: usize, detail: []cons
     }
 }
 
-/// Scan for inline Markdown images outside fenced code. Views into `body`.
+/// Scan for inline Markdown images outside fenced code and inline code spans.
+/// Views into `body`.
 fn scanImages(
     body: []const u8,
     allocator: std.mem.Allocator,
@@ -589,6 +602,24 @@ fn scanImages(
 
         if (fence_ch != 0) {
             i += 1;
+            continue;
+        }
+
+        if (body[i] == '`') {
+            // Inline code spans stay literal; only skip a span when a
+            // matching equal-length closer exists ahead — and not across a
+            // line-start fence, which the closer search would otherwise
+            // swallow. An unmatched backtick is literal and cannot suppress
+            // scanning for the rest of the body.
+            if (include_mod.inlineCodeSpanEnd(body, i)) |end| {
+                if (fenceOpenerInRange(body, i, end)) {
+                    i += include_mod.backtickRunLength(body, i);
+                } else {
+                    i = end;
+                }
+            } else {
+                i += include_mod.backtickRunLength(body, i);
+            }
             continue;
         }
 
@@ -937,6 +968,18 @@ test "loadPageAssets discovers nested files sorted" {
     try std.testing.expectEqualStrings("guides/intro.assets/z.svg", bundle.entries[1].output_rel);
 }
 
+test "rewrite skips adjacent inline-code spans without pairing closers" {
+    // The closer of the first span must not pair with the opener of the
+    // second: per-backtick pairing would "consume" the second span's opener
+    // and resume scanning inside it at `![x](u)` (a false local asset).
+    const gpa = std.testing.allocator;
+    var bundle: PageAssetBundle = .{ .gpa = gpa, .source_path = "guides/intro.md", .entity_id = "guides/intro" };
+    defer bundle.deinit();
+    const body = "to the `alt` string — `![x](u)` stays literal\n";
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null);
+    try std.testing.expectEqualStrings(body, out);
+}
+
 test "rewriteImageLinks rewrites sibling asset and leaves remote" {
     const gpa = std.testing.allocator;
     const io = std.testing.io;
@@ -1012,6 +1055,119 @@ test "rewrite skips fenced image-looking text" {
     const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null);
     // body unchanged (same slice or equal)
     try std.testing.expectEqualStrings(body, out);
+}
+
+test "rewrite skips inline-code image-looking text and still rewrites real images" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-inline-code", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "x");
+    try writeTreeFile(io, work, "content/guides/intro.assets/diagram.svg", "<svg/>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
+    defer bundle.deinit();
+
+    const body =
+        \\`![x](../escape.svg)` stays literal
+        \\![d](intro.assets/diagram.svg)
+        \\
+    ;
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null);
+    defer gpa.free(out);
+    // The image-looking text inside the backtick span is untouched: its `..`
+    // path must not be treated as a content-local asset (no AssetPath error,
+    // span bytes preserved).
+    try std.testing.expect(std.mem.indexOf(u8, out, "`![x](../escape.svg)`") != null);
+    // The real local image after the span is still resolved to its asset href.
+    try std.testing.expect(std.mem.indexOf(u8, out, "![d](intro.assets/diagram.svg)") != null);
+}
+
+test "unmatched backtick does not suppress later image rewriting" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-unmatched-tick", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "x");
+    try writeTreeFile(io, work, "content/guides/intro.assets/diagram.svg", "<svg/>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
+    defer bundle.deinit();
+
+    // The stray tick has no matching closer, so it is literal text: the real
+    // local image after it must still be resolved (no persistent span state).
+    const body =
+        \\an ` stray tick
+        \\![d](intro.assets/diagram.svg)
+        \\
+    ;
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null);
+    defer gpa.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "an ` stray tick") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "![d](intro.assets/diagram.svg)") != null);
+}
+
+test "stray backtick does not swallow a later fence opener" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-fence-cross", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "x");
+    try writeTreeFile(io, work, "content/guides/intro.assets/diagram.svg", "<svg/>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
+    defer bundle.deinit();
+
+    // The stray tick must not pair with the equal-length tick inside the
+    // fenced block: that would swallow the fence opener and scan the
+    // image-looking text inside the fence as a real local asset. A real
+    // local image after the fence keeps the returned buffer owned.
+    const body =
+        \\a ` stray tick
+        \\```
+        \\code with ` and ![x](../escape.svg)
+        \\```
+        \\
+        \\![d](intro.assets/diagram.svg)
+        \\
+    ;
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null);
+    defer gpa.free(out);
+    // The fenced content was never scanned: the image-looking text inside
+    // it is preserved verbatim (its `..` path would otherwise fail).
+    try std.testing.expect(std.mem.indexOf(u8, out, "![x](../escape.svg)") != null);
+    // The real local image after the fence is still resolved.
+    try std.testing.expect(std.mem.indexOf(u8, out, "![d](intro.assets/diagram.svg)") != null);
 }
 
 test "copyAssetsToOutput and scrub orphans" {

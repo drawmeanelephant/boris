@@ -10,8 +10,9 @@
 //! ## Recognition rules
 //!
 //! - Components are recognized **only outside** fenced code blocks
-//!   (``` / ~~~ CommonMark-style fences).
-//! - Literal `<Aside>` / `</Aside>` text inside fences stays literal.
+//!   (``` / ~~~ CommonMark-style fences) and inline code spans.
+//! - Literal `<Aside>` / `</Aside>` text inside fences or backticks stays
+//!   literal.
 //! - Close tag `</Aside>` is recognized only at **logical line start**
 //!   (optional ASCII spaces/tabs). Mid-line `</Aside>` does not close.
 //! - Nested Aside is rejected with a stable diagnostic.
@@ -24,6 +25,7 @@
 
 const std = @import("std");
 const render = @import("render.zig");
+const include_mod = @import("include.zig");
 
 // ---------------------------------------------------------------------------
 // Bounds / allowlists
@@ -195,6 +197,18 @@ fn fenceAtLineStart(source: []const u8, index: usize) ?struct { u8, usize } {
     if (run < 3) return null;
     // Info string may follow; we only need the marker.
     return .{ ch, run };
+}
+
+/// True when a line-start fence opener appears in body[from..to]. A
+/// would-be inline-code span must not cross one: the closer search would
+/// otherwise swallow the fence opener and let fenced content be scanned as
+/// real components.
+fn fenceOpenerInRange(body: []const u8, from: usize, to: usize) bool {
+    var j = from;
+    while (j < to) : (j += 1) {
+        if (atLineStart(body, j) and fenceAtLineStart(body, j) != null) return true;
+    }
+    return false;
 }
 
 fn lineEndIndex(source: []const u8, start: usize) usize {
@@ -448,7 +462,7 @@ pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeRes
     }.go;
 
     while (i < body.len) {
-        // Fence open/close only at line starts, and only when not mid-tag open wait.
+        // Fence open/close only at line starts, and only when not mid-tag.
         if (atLineStart(body, i)) {
             if (fenceAtLineStart(body, i)) |f| {
                 const ch = f[0];
@@ -474,6 +488,26 @@ pub fn tokenizeBody(body: []const u8, allocator: std.mem.Allocator) !TokenizeRes
         // Inside fenced code: never recognize components.
         if (fence_ch != 0) {
             i += 1;
+            continue;
+        }
+
+        // Inline code spans stay literal: component-looking text inside
+        // backticks is documentation, not a component (mirrors the wikilink,
+        // include, and content-asset scanners; see #255). Only skip a span
+        // when a matching equal-length closer exists ahead — and not across
+        // a line-start fence, which the closer search would otherwise
+        // swallow. An unmatched backtick is literal and cannot suppress
+        // scanning for the rest of the document.
+        if (body[i] == '`') {
+            if (include_mod.inlineCodeSpanEnd(body, i)) |end| {
+                if (fenceOpenerInRange(body, i, end)) {
+                    i += include_mod.backtickRunLength(body, i);
+                } else {
+                    i = end;
+                }
+            } else {
+                i += include_mod.backtickRunLength(body, i);
+            }
             continue;
         }
 
@@ -1030,6 +1064,59 @@ test "tokenize: fenced code keeps Aside literal" {
         }
     }
     try std.testing.expect(std.mem.indexOf(u8, joined.items, "<Aside kind=\"tip\">") != null);
+}
+
+test "tokenize: inline code keeps component-looking text literal" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    // Tag-looking literals inside backtick spans are documentation, not
+    // components; a real Aside after the spans still tokenizes.
+    const body = "`<DIV>` and `<Figure kind=\"x\">` stay literal; then a real Aside:\n<Aside kind=\"note\">\nreal\n</Aside>\n";
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(!r.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), r.asides.len);
+    try std.testing.expectEqualStrings("note", r.asides[0].kind);
+}
+
+test "tokenize: adjacent inline-code spans do not pair closers with openers" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    // The closer of the first span must not pair with the opener of the
+    // second: per-backtick pairing would consume the second span's opener
+    // and resume scanning inside the code span at `<DIV>`.
+    const body = "to the `alt` string — `<DIV>` stays literal; then a real Aside:\n<Aside kind=\"note\">\nreal\n</Aside>\n";
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(!r.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), r.asides.len);
+    try std.testing.expectEqualStrings("note", r.asides[0].kind);
+}
+
+test "tokenize: unmatched backtick does not suppress later component" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    // A stray tick without a matching closer is literal text: the real Aside
+    // after it must still be recognized (no persistent span state).
+    const body = "a ` stray tick\n<Aside kind=\"note\">\nreal\n</Aside>\n";
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(!r.hasErrors());
+    try std.testing.expectEqual(@as(usize, 1), r.asides.len);
+    try std.testing.expectEqualStrings("note", r.asides[0].kind);
+}
+
+test "tokenize: stray backtick does not swallow a later fence opener" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    // The stray tick must not pair with the equal-length tick inside the
+    // fenced block: that would swallow the fence opener and recognize the
+    // Aside inside the fence as a real component.
+    const body = "a ` stray tick\n```\ncode with ` and <Aside kind=\"note\">\nx\n</Aside>\n```\n";
+    const r = try tokenizeBody(body, arena.allocator());
+    try std.testing.expect(!r.hasErrors());
+    try std.testing.expectEqual(@as(usize, 0), r.asides.len);
 }
 
 test "tokenize: real Aside after fence still works" {
