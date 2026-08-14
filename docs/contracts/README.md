@@ -41,6 +41,7 @@ is **not** proof that every surface is the default CLI product.
 | HTML publication claims evidence | **Implemented first slice** — deterministic target-local `claims.json` derived from committed inventory and checks bytes, with fixed claims and limitations; see [publication-claims.md](publication-claims.md) |
 | Publication Touch Atlas | **Implemented first slice** — deterministic `touches.json` relationship index derived exclusively from the three existing evidence reports; see [publication-touches.md](publication-touches.md) |
 | Publication Proof Pack | **Implemented first slice** — deterministic two-file presentation model (`proof-pack.json` + `index.html`) over committed evidence; see [publication-proof-pack.md](publication-proof-pack.md) |
+| Publication platform model | **Documented** — normative verified-target model, adapter seam, and platform deployment matrix; GitHub Pages is the shipped verified target; see [publication-platforms.md](publication-platforms.md) |
 
 ## Canonical ownership (one document per topic)
 
@@ -83,6 +84,7 @@ per topic:
 | HTML publication claims evidence | [publication-claims.md](publication-claims.md) |
 | Publication Touch Atlas | [publication-touches.md](publication-touches.md) |
 | Publication Proof Pack | [publication-proof-pack.md](publication-proof-pack.md) |
+| Publication platform model / deployment matrix | [publication-platforms.md](publication-platforms.md) |
 | Astro plan-only migration intake | [astro-import-plan.md](astro-import-plan.md) |
 | Astro initial-create migration apply | [astro-import-apply.md](astro-import-apply.md) |
 
@@ -123,6 +125,7 @@ per topic:
 | [publication-claims.md](publication-claims.md) | Deterministic schema-v1 claims-and-limitations derivation over committed inventory and checks evidence |
 | [publication-touches.md](publication-touches.md) | Deterministic schema-v1 relationship index over committed artifact, checks, and claims evidence; implemented first slice |
 | [publication-proof-pack.md](publication-proof-pack.md) | Deterministic schema-v1 two-file presentation model and static HTML over committed artifact, checks, claims, and Touch Atlas evidence; implemented first slice |
+| [publication-platforms.md](publication-platforms.md) | Verified-target model, three-adapter seam (location provider, deployer, packaging rules), and platform deployment matrix; no proactive Vercel/Netlify work |
 | [cli.md](cli.md) | Stable command routing, exit codes, and report-consumer boundary |
 | [textile-compatibility.md](textile-compatibility.md) | Explicit bounded `.textile`-to-Markdown input mode |
 | [cooklang-compatibility.md](cooklang-compatibility.md) | Explicit bounded `.cook`-to-Markdown input mode with structured `recipe` IR facet |
