@@ -192,9 +192,10 @@ The M5 gate adds:
 ```
 
 It verifies save/rebuild behavior, byte identity with a plain Boris build,
-last-good preservation, loopback/header/token/traversal defenses, and server
-shutdown with the editor. Playwright covers keyboard/voice names, reload
-generation, and honest stale/failure states.
+last-good preservation, loopback/header/token/traversal defenses, real-browser
+frame rendering through the host CSP, and server shutdown with the editor.
+Playwright covers keyboard/voice names, reload generation, and honest
+stale/failure states.
 
 M5 deliberately does not add HMR, CSS injection, a watcher, a daemon, a second
 renderer, typing-triggered builds, or editor-side HTML transformation. Replace

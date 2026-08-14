@@ -68,11 +68,16 @@ node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="success"||r.generati
 curl --fail --silent --show-error --cookie "$work/cookies" "$preview_origin/" >"$work/last-good.html"
 grep -q 'Preview changed' "$work/last-good.html"
 
+NODE_PATH="$(dirname "$3")/node_modules" node "$(dirname "$0")/preview-frame-check.cjs" "$base_url/#token=$token" "Preview changed"
+
+stale_state="$(api_get /api/preview/state)"
+stale_generation="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).generation))' "$stale_state")"
+
 opened="$(api_post /api/files/open '{"path":"content/index.md"}')"
 fingerprint="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).fingerprint)' "$opened")"
 api_post /api/files/save "{\"path\":\"content/index.md\",\"content\":\"---\\nid: broken\\n\",\"fingerprint\":\"$fingerprint\"}" >/dev/null
 failed="$(api_post /api/preview/rebuild '{}')"
-node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="stale"||r.generation!==2||r.exit_code!==1||!r.used_stderr_fallback||!r.message.includes("error:")) throw Error("failure state was not honest")' "$failed"
+node -e 'const r=JSON.parse(process.argv[1]); if(r.phase!=="stale"||r.generation!==Number(process.argv[2])||r.exit_code!==1||!r.used_stderr_fallback||!r.message.includes("error:")) throw Error("failure state was not honest")' "$failed" "$stale_generation"
 curl --fail --silent --show-error --cookie "$work/cookies" "$preview_origin/" >"$work/after-failure.html"
 cmp "$work/last-good.html" "$work/after-failure.html"
 

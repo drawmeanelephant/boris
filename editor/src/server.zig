@@ -52,12 +52,12 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
     const target = stripQuery(request.head.target);
     const headers = collectHeaders(request);
     if (!validHost(headers.host, port)) {
-        return respondText(request, .forbidden, "Invalid Host", "text/plain; charset=utf-8");
+        return respondText(request, .forbidden, "Invalid Host", "text/plain; charset=utf-8", config.preview.port);
     }
 
     if (std.mem.startsWith(u8, target, "/api/")) {
         security.validate(headers, port, &config.token) catch {
-            return respondText(request, .forbidden, "Forbidden", "text/plain; charset=utf-8");
+            return respondText(request, .forbidden, "Forbidden", "text/plain; charset=utf-8", config.preview.port);
         };
         if (std.mem.eql(u8, target, "/api/health")) {
             if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
@@ -122,7 +122,7 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
             config.preview.rebuild(allocator, io) catch |err| return respondApiError(request, err);
             return servePreviewState(allocator, request, config);
         }
-        return respondText(request, .not_found, "Not found", "text/plain; charset=utf-8");
+        return respondText(request, .not_found, "Not found", "text/plain; charset=utf-8", config.preview.port);
     }
 
     if (!isReadMethod(request.head.method)) {
@@ -130,14 +130,14 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
     }
 
     if (std.mem.eql(u8, target, "/") or std.mem.eql(u8, target, "/index.html")) {
-        return serveUiFile(io, allocator, request, config.ui_dir, "index.html", true);
+        return serveUiFile(io, allocator, request, config.ui_dir, "index.html", true, config.preview.port);
     }
     if (std.mem.startsWith(u8, target, "/assets/")) {
         const path = target[1..];
-        if (!safeStaticPath(path)) return respondText(request, .bad_request, "Invalid path", "text/plain; charset=utf-8");
-        return serveUiFile(io, allocator, request, config.ui_dir, path, false);
+        if (!safeStaticPath(path)) return respondText(request, .bad_request, "Invalid path", "text/plain; charset=utf-8", config.preview.port);
+        return serveUiFile(io, allocator, request, config.ui_dir, path, false, config.preview.port);
     }
-    return respondText(request, .not_found, "Not found", "text/plain; charset=utf-8");
+    return respondText(request, .not_found, "Not found", "text/plain; charset=utf-8", config.preview.port);
 }
 
 fn servePreviewState(allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
@@ -432,16 +432,16 @@ fn serveVersion(io: Io, allocator: std.mem.Allocator, request: *http.Server.Requ
     return respondJson(request, .ok, bytes);
 }
 
-fn serveUiFile(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, ui_dir_path: []const u8, relative_path: []const u8, html: bool) !void {
+fn serveUiFile(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, ui_dir_path: []const u8, relative_path: []const u8, html: bool, preview_port: u16) !void {
     var ui_dir = Io.Dir.cwd().openDir(io, ui_dir_path, .{}) catch {
-        return respondText(request, .service_unavailable, "Editor UI is not built", "text/plain; charset=utf-8");
+        return respondText(request, .service_unavailable, "Editor UI is not built", "text/plain; charset=utf-8", preview_port);
     };
     defer ui_dir.close(io);
     const bytes = ui_dir.readFileAlloc(io, relative_path, allocator, .limited(16 * 1024 * 1024)) catch {
-        return respondText(request, .not_found, "Not found", "text/plain; charset=utf-8");
+        return respondText(request, .not_found, "Not found", "text/plain; charset=utf-8", preview_port);
     };
     defer allocator.free(bytes);
-    return respondText(request, .ok, bytes, if (html) "text/html; charset=utf-8" else contentType(relative_path));
+    return respondText(request, .ok, bytes, if (html) "text/html; charset=utf-8" else contentType(relative_path), preview_port);
 }
 
 fn respondJson(request: *http.Server.Request, status: http.Status, body: []const u8) !void {
@@ -453,12 +453,14 @@ fn respondJson(request: *http.Server.Request, status: http.Status, body: []const
     try request.respond(body, .{ .status = status, .keep_alive = false, .extra_headers = &headers });
 }
 
-fn respondText(request: *http.Server.Request, status: http.Status, body: []const u8, content_type: []const u8) !void {
+fn respondText(request: *http.Server.Request, status: http.Status, body: []const u8, content_type: []const u8, preview_port: u16) !void {
+    var csp_buffer: [256]u8 = undefined;
+    const csp = std.fmt.bufPrint(&csp_buffer, "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self' http://127.0.0.1:{d}; connect-src 'self'; base-uri 'none'; form-action 'none'", .{preview_port}) catch unreachable;
     const headers = [_]http.Header{
         .{ .name = "content-type", .value = content_type },
         .{ .name = "cache-control", .value = "no-store" },
         .{ .name = "x-content-type-options", .value = "nosniff" },
-        .{ .name = "content-security-policy", .value = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'" },
+        .{ .name = "content-security-policy", .value = csp },
     };
     try request.respond(body, .{ .status = status, .keep_alive = false, .extra_headers = &headers });
 }
