@@ -10,8 +10,8 @@
         // branch and are held off `main` by an embargo (oliver#39). See
         // docs/contracts/oliver-renderer.md for the pin table.
         .oliver = .{
-            .url = "https://github.com/drawmeanelephant/oliver/archive/872b00217c31ae271bbd518dc9f3b6df97767185.tar.gz",
-            .hash = "oliver-0.0.0-LOsZkNXyFQBUPCi88goqzMEzB1Buat5HZhgs7-cg9ztM",
+            .url = "https://github.com/drawmeanelephant/oliver/archive/42cf472b635f8cbe9dad0da081b830f5db21c745.tar.gz",
+            .hash = "oliver-0.0.0-LOsZkB24HwCKTBQ9WYpJ9OP1ZKMdrF2lJoCZNU8j177O",
         },
         // Cooklang stack pin (Oliver `main`): the typed Recipe parser and its
         // pure operations. Boris consumes `oliver.cooklang.parse` here and owns
