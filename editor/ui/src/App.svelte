@@ -104,6 +104,7 @@
   let completionKind: CompletionKind = 'frontmatter_key';
   let completionQuery = '';
   let selectedSuggestion = 0;
+  let completionOpen = false;
 
   $: dirty = activePath !== '' && content !== baseline;
   $: problemGroups = groupProblems(commandResult?.problems ?? []);
@@ -308,11 +309,14 @@
   }
 
   function completionKeydown(event: KeyboardEvent) {
-    if (!suggestions.length) return;
+    if (event.key === 'Escape') {
+      completionOpen = false;
+      return;
+    }
+    if (!suggestions.length || !completionOpen) return;
     if (event.key === 'ArrowDown') { event.preventDefault(); selectedSuggestion = (selectedSuggestion + 1) % suggestions.length; }
     if (event.key === 'ArrowUp') { event.preventDefault(); selectedSuggestion = (selectedSuggestion + suggestions.length - 1) % suggestions.length; }
     if (event.key === 'Enter') { event.preventDefault(); void insertSuggestion(suggestions[selectedSuggestion]); }
-    if (event.key === 'Escape') completionQuery = '';
   }
 
   async function insertSuggestion(suggestion: Suggestion | undefined) {
@@ -790,6 +794,7 @@
     <div>
       <h2 id="recovery-heading">Recovered unsaved work</h2>
       <p>Recovery copies never replace project files without an explicit save.</p>
+      <p class="key-hint"><kbd>Tab</kbd> to an action · <kbd>Enter</kbd> runs it</p>
     </div>
     <ul>
       {#each snapshots as snapshot (snapshot.path)}
@@ -867,7 +872,7 @@
         <div class="completion-controls">
           <div>
             <label for="completion-kind">Completion category</label>
-            <select id="completion-kind" bind:value={completionKind} onchange={() => { completionQuery = ''; selectedSuggestion = 0; }}>
+            <select id="completion-kind" bind:value={completionKind} onchange={() => { completionQuery = ''; selectedSuggestion = 0; completionOpen = true; }}>
               <option value="frontmatter_key">Frontmatter key</option>
               <option value="status">Status value</option>
               <option value="entity">Entity id</option>
@@ -884,15 +889,19 @@
               id="completion-query"
               role="combobox"
               aria-autocomplete="list"
-              aria-expanded={suggestions.length > 0}
+              aria-expanded={completionOpen && suggestions.length > 0}
               aria-controls="completion-options"
-              aria-activedescendant={suggestions.length ? `completion-option-${selectedSuggestion}` : undefined}
+              aria-activedescendant={completionOpen && suggestions.length ? `completion-option-${selectedSuggestion}` : undefined}
               bind:value={completionQuery}
+              onfocus={() => completionOpen = true}
+              oninput={() => completionOpen = true}
               onkeydown={completionKeydown}
             />
+            <p class="key-hint"><kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> insert · <kbd>Esc</kbd> close</p>
           </div>
           <button type="button" disabled={!suggestions.length || readOnly} onclick={() => insertSuggestion(suggestions[selectedSuggestion])}>Insert selected completion</button>
         </div>
+        {#if completionOpen && suggestions.length > 0}
         <ul id="completion-options" role="listbox" aria-label="Boris completion suggestions">
           {#each suggestions as suggestion, suggestionIndex (`${completionKind}-${suggestion.value}`)}
             <li
@@ -908,6 +917,7 @@
             </li>
           {/each}
         </ul>
+        {/if}
         {#if authoring}
           <details>
             <summary>Frontmatter field bounds from Boris schema</summary>
