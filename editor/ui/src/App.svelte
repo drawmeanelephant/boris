@@ -642,6 +642,28 @@
     }
   }
 
+  function handleDialogKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Tab') return;
+    const dialog = event.currentTarget as HTMLDialogElement;
+    if (!dialog.open) return;
+    const focusable = [...dialog.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )];
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey) {
+      if (active === first || active === dialog || !dialog.contains(active)) {
+        event.preventDefault();
+        last.focus();
+      }
+    } else if (active === last || !dialog.contains(active)) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
   function warnUnsaved(event: BeforeUnloadEvent) {
     if (!dirty) return;
     event.preventDefault();
@@ -962,7 +984,7 @@
   </section>
 </main>
 
-<dialog bind:this={conflictDialog} aria-labelledby="conflict-heading">
+<dialog bind:this={conflictDialog} onkeydown={handleDialogKeydown} aria-labelledby="conflict-heading">
   <h2 id="conflict-heading">{deletedConflict ? 'File deleted outside Boris Editor' : 'External changes detected'}</h2>
   {#if deletedConflict}
     <p>{activePath} no longer exists on disk. Your unsaved version is still in the editor.</p>
@@ -993,7 +1015,7 @@
   {/if}
 </dialog>
 
-<dialog bind:this={createDialog} aria-labelledby="create-heading">
+<dialog bind:this={createDialog} onkeydown={handleDialogKeydown} aria-labelledby="create-heading">
   <h2 id="create-heading">Create file</h2>
   <p>Use a project-relative path under content/ or themes/, or boris.json.</p>
   <form onsubmit={(event) => { event.preventDefault(); void createFile(); }}>
@@ -1006,7 +1028,7 @@
   </form>
 </dialog>
 
-<dialog bind:this={renameDialog} aria-labelledby="rename-heading">
+<dialog bind:this={renameDialog} onkeydown={handleDialogKeydown} aria-labelledby="rename-heading">
   <h2 id="rename-heading">Rename file</h2>
   <p>Rename {activePath} without replacing an existing file.</p>
   <form onsubmit={(event) => { event.preventDefault(); void renameFile(); }}>
@@ -1019,7 +1041,7 @@
   </form>
 </dialog>
 
-<dialog bind:this={deleteDialog} aria-labelledby="delete-heading">
+<dialog bind:this={deleteDialog} onkeydown={handleDialogKeydown} aria-labelledby="delete-heading">
   <h2 id="delete-heading">Delete file</h2>
   <p>Delete {activePath || 'selected file'}? This changes the project immediately and cannot be undone in Boris Editor.</p>
   <div class="dialog-actions">
