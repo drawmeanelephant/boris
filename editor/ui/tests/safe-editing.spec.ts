@@ -255,7 +255,7 @@ test('restoring recovered work while dirty offers Save & restore and Discard & r
   const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
   await expect(dialog).toBeVisible();
   await expect(dialog.locator('p').first()).toContainText('content/guides/getting-started.md');
-  await expect(dialog.getByRole('button', { name: 'Save & restore', exact: true })).toHaveText('Save & restore');
+  await expect(dialog.getByRole('button', { name: /Save & restore/ })).toContainText('Save & restore');
 
   // Cancel keeps the dirty buffer and does not restore.
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -269,7 +269,7 @@ test('restoring recovered work while dirty offers Save & restore and Discard & r
   });
   const openRequest = page.waitForRequest('**/api/files/open');
   await restore.click();
-  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Discard & restore', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: /Discard & restore/ }).click();
   expect((await openRequest).postDataJSON()).toMatchObject({ path: 'content/guides/getting-started.md' });
   expect(saveRequests).toBe(0);
   await expect(page.getByRole('textbox', { name: 'Source for content/guides/getting-started.md' })).toHaveValue('# Recovered guide\n');
@@ -443,7 +443,7 @@ test('switching files while dirty offers Cancel and Save & Switch (#462)', async
   const saveRequest = page.waitForRequest('**/api/files/save');
   const openRequest = page.waitForRequest('**/api/files/open');
   await target.click();
-  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Save & switch', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: /Save & switch/ }).click();
   expect((await saveRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', content: '# Draft\n' });
   expect((await openRequest).postDataJSON()).toMatchObject({ path: 'boris.json' });
   await expect(page.getByRole('textbox', { name: 'Source for boris.json' })).toBeVisible();
@@ -461,7 +461,7 @@ test('Discard & Switch drops the dirty buffer without saving and opens the targe
   });
   const openRequest = page.waitForRequest('**/api/files/open');
   await page.getByRole('button', { name: 'boris.json', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Discard & switch', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: /Discard & switch/ }).click();
   expect((await openRequest).postDataJSON()).toMatchObject({ path: 'boris.json' });
   expect(saveRequests).toBe(0);
   await expect(page.getByRole('textbox', { name: 'Source for boris.json' })).toHaveValue('# Home\n');
@@ -574,7 +574,7 @@ test('stderr diagnostics are announced as best-effort and dirty buffers route co
   const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
   await expect(dialog).toBeVisible();
   await expect(dialog.locator('p').first()).toContainText('Validate project');
-  await dialog.getByRole('button', { name: 'Discard & run', exact: true }).click();
+  await dialog.getByRole('button', { name: /Discard & run/ }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Content or graph failure (exit 1)');
   await expect(page.getByText(/stderr was used/)).toBeVisible();
@@ -601,10 +601,48 @@ test('running a Boris command while dirty offers Cancel and Save & run (#462)', 
   const saveRequest = page.waitForRequest('**/api/files/save');
   const commandRequest = page.waitForRequest('**/api/commands/run');
   await page.getByRole('button', { name: 'Validate project', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Save & run', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: /Save & run/ }).click();
   expect((await saveRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', content: '# Draft\n' });
   expect((await commandRequest).postDataJSON()).toMatchObject({ mode: 'validate' });
   await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Validate project finished: Success (exit 0).');
+});
+
+test('Alt+S in the resolution dialog saves and continues (#462)', async ({ page }) => {
+  await installApi(page, { commands: { validate: commandResult('validate') } });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n');
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: /Save & run/ })).toContainText('Alt+S');
+  await expect(dialog.getByRole('button', { name: /Discard & run/ })).toContainText('Alt+D');
+
+  const saveRequest = page.waitForRequest('**/api/files/save');
+  const commandRequest = page.waitForRequest('**/api/commands/run');
+  await page.keyboard.press('Alt+S');
+  expect((await saveRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', content: '# Draft\n' });
+  expect((await commandRequest).postDataJSON()).toMatchObject({ mode: 'validate' });
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Validate project finished: Success (exit 0).');
+});
+
+test('Alt+D in the resolution dialog discards and continues (#462)', async ({ page }) => {
+  await installApi(page, { commands: { validate: commandResult('validate') } });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n');
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await expect(dialog).toBeVisible();
+  let saveRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/save')) saveRequests += 1;
+  });
+  const commandRequest = page.waitForRequest('**/api/commands/run');
+  await page.keyboard.press('Alt+D');
+  expect((await commandRequest).postDataJSON()).toMatchObject({ mode: 'validate' });
+  expect(saveRequests).toBe(0);
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Home\n');
 });
 
 test('rebuilding the preview while dirty offers Cancel and Discard & rebuild (#462)', async ({ page }) => {
@@ -623,7 +661,7 @@ test('rebuilding the preview while dirty offers Cancel and Discard & rebuild (#4
   const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
   await page.getByRole('button', { name: 'Rebuild preview', exact: true }).click();
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Save & rebuild', exact: true })).toHaveText('Save & rebuild');
+  await expect(dialog.getByRole('button', { name: /Save & rebuild/ })).toContainText('Save & rebuild');
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(editor).toHaveValue('# Draft\n');
@@ -635,7 +673,7 @@ test('rebuilding the preview while dirty offers Cancel and Discard & rebuild (#4
   });
   const rebuildRequest = page.waitForRequest('**/api/preview/rebuild');
   await page.getByRole('button', { name: 'Rebuild preview', exact: true }).click();
-  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Discard & rebuild', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: /Discard & rebuild/ }).click();
   await rebuildRequest;
   expect(saveRequests).toBe(0);
   await expect(page.locator('.preview-state')).toContainText('Preview is current');
