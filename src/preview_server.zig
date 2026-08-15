@@ -558,3 +558,83 @@ test "preview server serves files and pushes reload events" {
         try std.testing.expect(try readUntil(&reader.interface, &buf2, "event: reload"));
     }
 }
+
+// Teardown stress guard: repeated start/stop cycles must never wedge the
+// accept thread or the handler drain. On Linux, closing the listener socket
+// alone does not reliably unblock a thread blocked in accept(2) — stop()
+// self-connects (`wakeAccept`) to make the accept loop exit — so this test
+// hammers that path: a real request every cycle, an SSE connection held open
+// across `stop()` every few cycles (the handler is blocked in cond.wait and
+// must be woken by broadcast), an explicit stop followed by deinit's stop
+// (double-stop is documented safe), and a never-started server.
+test "preview server: repeated start/stop cycles tear down cleanly" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root_path = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-392-serve", .{tmp.sub_path});
+    defer gpa.free(root_path);
+    try tmp.dir.createDirPath(io, "boris-392-serve");
+    try tmp.dir.writeFile(io, .{ .sub_path = "boris-392-serve/index.html", .data = "<h1>hi</h1>" });
+
+    var i: usize = 0;
+    while (i < 30) : (i += 1) {
+        var server = try Server.init(gpa, io, root_path, 0);
+        defer server.deinit();
+        try server.start();
+        const port = server.boundPort();
+        try std.testing.expect(port != 0);
+        var addr = try Io.net.IpAddress.parseIp4("127.0.0.1", port);
+
+        // A real request every cycle: the accept loop has work and a handler
+        // thread is alive when teardown runs.
+        {
+            var conn = try addr.connect(io, .{ .mode = .stream });
+            defer conn.close(io);
+            var wbuf: [4096]u8 = undefined;
+            var writer = conn.writer(io, &wbuf);
+            try writer.interface.writeAll("GET /index.html HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+            try writer.interface.flush();
+            var rbuf: [8192]u8 = undefined;
+            var reader = conn.reader(io, &rbuf);
+            var got: std.ArrayList(u8) = .empty;
+            defer got.deinit(gpa);
+            try slurpToEof(&reader.interface, gpa, &got);
+            try std.testing.expect(std.mem.indexOf(u8, got.items, "200 OK") != null);
+        }
+
+        if (i % 5 == 0) {
+            // Hold an SSE client open across stop(): the handler is blocked
+            // in cond.wait, so teardown must wake it via broadcast before the
+            // bounded handler drain can finish.
+            var conn = try addr.connect(io, .{ .mode = .stream });
+            defer conn.close(io);
+            var wbuf: [4096]u8 = undefined;
+            var writer = conn.writer(io, &wbuf);
+            try writer.interface.writeAll("GET /__boris/events HTTP/1.1\r\nHost: localhost\r\n\r\n");
+            try writer.interface.flush();
+            var rbuf: [8192]u8 = undefined;
+            var reader = conn.reader(io, &rbuf);
+            var buf: [4096]u8 = undefined;
+            try std.testing.expect(try readUntil(&reader.interface, &buf, "event: reload"));
+
+            server.notifyRebuild();
+
+            var buf2: [4096]u8 = undefined;
+            try std.testing.expect(try readUntil(&reader.interface, &buf2, "event: reload"));
+
+            // Explicit stop while the SSE connection is still open, then
+            // deinit()'s own stop() runs again (double-stop is safe).
+            server.stop();
+        } else {
+            server.stop();
+        }
+    }
+
+    // A server that was never started must also tear down cleanly (no accept
+    // thread to join; the self-connect just closes the probe).
+    {
+        var server = try Server.init(gpa, io, root_path, 0);
+        server.deinit();
+    }
+}
