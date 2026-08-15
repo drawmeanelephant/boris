@@ -297,6 +297,11 @@ pub const CompileOptions = struct {
     diagnostics: ?*diag.Collector = null,
     /// Whole-tree authoring format. Markdown is the byte-compatible default.
     input_format: identity.InputFormat = .markdown,
+    /// Oliver serialization profile for this target's page bodies (#448).
+    /// `.html` is the byte-identical default; `.xhtml` fails closed on
+    /// verbatim raw HTML. The XHTML *document* wrapper (XML declaration +
+    /// `xmlns`) is the layout template's responsibility.
+    output_profile: render.OutputProfile = .html,
     /// Target-root-relative sitemap output path; null disables the projection.
     sitemap_path: ?[]const u8 = null,
     /// Strict public HTTP(S) base URL, required when `sitemap_path` is set.
@@ -590,6 +595,7 @@ fn renderPageSlots(
         .heading_index = render_opts.heading_index,
         .page_assets = render_opts.page_assets,
         .diagnostics = options.diagnostics,
+        .output_profile = options.output_profile,
     });
 
     var slots: assemble.SlotValues = .{ .content = html };
@@ -1137,6 +1143,7 @@ pub fn compileHtmlSiteMulti(
         target_options.dist_dir = plan.output_dir;
         target_options.layout_path = plan.layout_path;
         target_options.layout_rules = plan.layout_rules;
+        target_options.output_profile = plan.html_profile orelse base_options.output_profile;
 
         // Load every declared layout (fallback + rules), even if no page selects it.
         const declared = layout_select.collectDeclaredLayouts(gpa, plan.layout_path, plan.layout_rules) catch {
@@ -3599,6 +3606,71 @@ test "#395: rule-selected layout emits an info ILAYOUTSELECTED outcome finding" 
     try std.testing.expectEqualStrings("index", d.id);
     try std.testing.expect(std.mem.indexOf(u8, d.message, "id:index") != null);
     try std.testing.expect(std.mem.indexOf(u8, d.message, "layouts/home.html") != null);
+}
+
+test "#448: xhtml target emits a well-formed document and fails closed on raw HTML" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-448-xhtml", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    const xhtml_layout =
+        \\<?xml version="1.0" encoding="utf-8"?>
+        \\<html xmlns="http://www.w3.org/1999/xhtml"><head><title>X</title></head><body>{{content}}</body></html>
+    ;
+    try writeTreeFile(io, work, "layouts/xhtml.html", xhtml_layout);
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\nHello **world**.\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/xhtml.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    // 1. Happy path: XHTML profile + declaration-bearing layout → document starts
+    // with the XML declaration and carries the xmlns wrapper.
+    const stats = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .output_profile = .xhtml,
+        .quiet = true,
+    });
+    try std.testing.expectEqual(@as(usize, 1), stats.pages_written);
+
+    var dist_dir = try cwd.openDir(io, dist, .{});
+    defer dist_dir.close(io);
+    const got = try readAllFile(io, dist_dir, "index.html", gpa);
+    defer gpa.free(got);
+    try std.testing.expect(std.mem.startsWith(u8, got, "<?xml version=\"1.0\" encoding=\"utf-8\"?>"));
+    try std.testing.expect(std.mem.indexOf(u8, got, "xmlns=\"http://www.w3.org/1999/xhtml\"") != null);
+    // Fragment body: heading ids are plain XML-legal attributes, list items
+    // are well-formed block elements.
+    try std.testing.expect(std.mem.indexOf(u8, got, "<h1 id=\"home\">Home</h1>") != null);
+
+    // 2. Fail closed: verbatim raw HTML on an XHTML target is a hard error.
+    try writeTreeFile(io, work, "content/raw.md", "before <em>raw</em> after\n");
+    try writeTreeFile(io, work, "content/index.md", "# Home\n\n[[raw]]\n");
+    try std.testing.expectError(error.RawHtmlNotXmlWellFormed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .output_profile = .xhtml,
+        .quiet = true,
+    }));
+
+    // 3. The same raw content renders under the default HTML profile.
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+    });
 }
 
 test "valid layout output equals prefix + rendered html + suffix" {

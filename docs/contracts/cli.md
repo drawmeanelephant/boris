@@ -227,6 +227,28 @@ also a usage error. Validation renders sitemap bytes in memory and discards
 them; only `build` publishes the file. See the normative
 [XML sitemap contract](xml-sitemap.md).
 
+## Serialization profile (`--target-profile`)
+
+`--target-profile NAME=PROFILE` selects Oliver's serializer profile for one
+HTML target (`NAME` must match a `--target` or the synthetic `default`;
+repeatable). `PROFILE` is `html` (default, byte-identical to pre-profile
+output) or `xhtml` (XML-compatible serialization of the same normalized
+document).
+
+An XHTML *document* is a layout concern: the layout template emits the XML
+declaration + `<html xmlns="http://www.w3.org/1999/xhtml">` and the page-body
+slot receives the XHTML fragment. The profile fails closed — verbatim raw
+HTML in content is a hard build error on an XHTML target
+(`error.RawHtmlNotXmlWellFormed`, surfaced with page/offset context in the
+diagnostics surface); the same bytes render fine under `html`. Flipping a
+target to XHTML requires a raw-HTML sweep of its content first. See the
+[multi-target contract](multi-target-isolated-output.md) and
+[Oliver renderer contract](oliver-renderer.md).
+
+`--target-profile` implies HTML mode, is valid for `build` and `validate`
+(the no-publication HTML path renders with the selected profile in memory),
+and is rejected by non-HTML projections, `check`, and `impact`.
+
 ## Hosted publication location flags
 
 `--pages-base-url URL`, `--pages-origin URL`, and `--pages-base-path PATH`
