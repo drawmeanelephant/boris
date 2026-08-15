@@ -253,6 +253,72 @@ test('native file dialogs are keyboard-dismissible and all controls have visible
   await expect(dialog).toBeHidden();
 });
 
+test('Enter in the Create file path input submits the primary action exactly once (#459)', async ({ page }) => {
+  await installApi(page);
+  let createRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/create')) createRequests += 1;
+  });
+  await page.getByRole('button', { name: 'Create file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create file' });
+  await expect(dialog).toBeVisible();
+  const input = dialog.getByRole('textbox', { name: 'New file path' });
+  await input.fill('content/posts/new-post.md');
+  await input.press('Enter');
+  await expect(dialog).toBeHidden();
+  expect(createRequests).toBe(1);
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Created content/posts/new-post.md.');
+});
+
+test('Enter in the Rename file path input submits the primary action exactly once (#459)', async ({ page }) => {
+  await installApi(page);
+  let renameRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/rename')) renameRequests += 1;
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('button', { name: 'Rename file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Rename file' });
+  await expect(dialog).toBeVisible();
+  const request = page.waitForRequest('**/api/files/rename');
+  const input = dialog.getByRole('textbox', { name: 'New file path' });
+  await input.fill('content/posts/moved.md');
+  await input.press('Enter');
+  expect((await request).postDataJSON()).toMatchObject({ path: 'content/index.md', new_path: 'content/posts/moved.md' });
+  await expect(dialog).toBeHidden();
+  expect(renameRequests).toBe(1);
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Renamed content/index.md to content/posts/moved.md.');
+});
+
+test('Enter with an invalid Create path does not submit (#459)', async ({ page }) => {
+  await installApi(page);
+  let createRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/create')) createRequests += 1;
+  });
+  await page.getByRole('button', { name: 'Create file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create file' });
+  const input = dialog.getByRole('textbox', { name: 'New file path' });
+  await input.fill('   ');
+  await input.press('Enter');
+  await expect(dialog).toBeVisible();
+  expect(createRequests).toBe(0);
+});
+
+test('the Create file primary button still submits the same action (#459)', async ({ page }) => {
+  await installApi(page);
+  let createRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/create')) createRequests += 1;
+  });
+  await page.getByRole('button', { name: 'Create file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Create file' });
+  await dialog.getByRole('textbox', { name: 'New file path' }).fill('content/posts/button-post.md');
+  await dialog.getByRole('button', { name: 'Create file', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  expect(createRequests).toBe(1);
+});
+
 test('Boris commands expose visible voice names and distinct exit classes', async ({ page }) => {
   await installApi(page, {
     commands: {

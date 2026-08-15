@@ -993,23 +993,27 @@
 <dialog bind:this={createDialog} aria-labelledby="create-heading">
   <h2 id="create-heading">Create file</h2>
   <p>Use a project-relative path under content/ or themes/, or boris.json.</p>
-  <label for="create-path">New file path</label>
-  <input id="create-path" bind:value={createPath} />
-  <div class="dialog-actions">
-    <button type="button" onclick={() => createDialog.close()}>Cancel</button>
-    <button type="button" class="primary" onclick={createFile}>Create file</button>
-  </div>
+  <form onsubmit={(event) => { event.preventDefault(); void createFile(); }}>
+    <label for="create-path">New file path</label>
+    <input id="create-path" bind:value={createPath} />
+    <div class="dialog-actions">
+      <button type="button" onclick={() => createDialog.close()}>Cancel</button>
+      <button type="submit" class="primary">Create file</button>
+    </div>
+  </form>
 </dialog>
 
 <dialog bind:this={renameDialog} aria-labelledby="rename-heading">
   <h2 id="rename-heading">Rename file</h2>
   <p>Rename {activePath} without replacing an existing file.</p>
-  <label for="rename-path">New file path</label>
-  <input id="rename-path" bind:value={renamePath} />
-  <div class="dialog-actions">
-    <button type="button" onclick={() => renameDialog.close()}>Cancel</button>
-    <button type="button" class="primary" onclick={renameFile}>Rename file</button>
-  </div>
+  <form onsubmit={(event) => { event.preventDefault(); void renameFile(); }}>
+    <label for="rename-path">New file path</label>
+    <input id="rename-path" bind:value={renamePath} />
+    <div class="dialog-actions">
+      <button type="button" onclick={() => renameDialog.close()}>Cancel</button>
+      <button type="submit" class="primary">Rename file</button>
+    </div>
+  </form>
 </dialog>
 
 <dialog bind:this={deleteDialog} aria-labelledby="delete-heading">
