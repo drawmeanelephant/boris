@@ -195,6 +195,9 @@ const modules = [_]Module{
     // IR report's json_out discipline and diagnostic-object key order.
     .{ .name = "html_report.zig", .class = .{ .emitter = .{ .encoder = .json_out } }, .source = @embedFile("html_report.zig") },
     .{ .name = "html_relations.zig", .class = .other },
+    // Loopback preview server (`watch --serve`): plain HTTP responder, no
+    // JSON encoding, no stdout artifact discipline.
+    .{ .name = "preview_server.zig", .class = .other },
     .{ .name = "html_scan.zig", .class = .other },
     .{ .name = "html_toc.zig", .class = .other },
     .{ .name = "identity.zig", .class = .other },

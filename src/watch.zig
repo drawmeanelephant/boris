@@ -6,6 +6,7 @@ const Io = std.Io;
 const compile = @import("compile.zig");
 const cli = @import("cli.zig");
 const target_mod = @import("target.zig");
+const preview_server = @import("preview_server.zig");
 
 /// Debounce window after the first change is observed (ms).
 pub const debounce_ms: i64 = 100;
@@ -546,6 +547,9 @@ pub const WatchCoordinator = struct {
     pending_changes: std.StringHashMap(void),
     /// Normalized forward-slash output roots, computed once at init.
     ignored_output_roots: []const []const u8,
+    /// Loopback preview server (`watch --serve`); bound at init so port
+    /// errors fail fast, started after the initial build in `run`.
+    serve: ?preview_server.Server = null,
 
     /// Build the ignore-root list once for the coordinator lifetime
     /// (final outs + sibling `.boris-stage` trees).
@@ -580,6 +584,19 @@ pub const WatchCoordinator = struct {
             for (ignored) |r| gpa.free(r);
             gpa.free(ignored);
         }
+        var serve: ?preview_server.Server = null;
+        if (options.serve) {
+            // HTML mode always synthesizes at least the "default" target, so
+            // targets.items[0] is the served root (canonical order).
+            // The errdefer above owns `ignored`; a bind error just propagates.
+            const root = options.targets.items[0].output_dir;
+            serve = try preview_server.Server.init(
+                gpa,
+                io,
+                root,
+                options.serve_port orelse preview_server.default_port,
+            );
+        }
         return .{
             .gpa = gpa,
             .io = io,
@@ -587,10 +604,12 @@ pub const WatchCoordinator = struct {
             .watcher = watcher,
             .pending_changes = std.StringHashMap(void).init(gpa),
             .ignored_output_roots = ignored,
+            .serve = serve,
         };
     }
 
     pub fn deinit(self: *WatchCoordinator) void {
+        if (self.serve) |*s| s.deinit();
         var it = self.pending_changes.iterator();
         while (it.next()) |entry| {
             self.gpa.free(entry.key_ptr.*);
@@ -744,6 +763,7 @@ pub const WatchCoordinator = struct {
         if (!self.options.quiet) {
             std.debug.print("watch: rebuild succeeded.\n", .{});
         }
+        if (self.serve) |*s| s.notifyRebuild();
     }
 
     /// Perform initial build, set up signal handlers, and execute the watch poll loop.
@@ -825,6 +845,17 @@ pub const WatchCoordinator = struct {
         }
 
         should_shutdown_global.store(false, .unordered);
+
+        // Start the loopback preview server after the initial build so the
+        // first served tree is the freshest complete output (or the partial
+        // tree after a recoverable failure, which the author can still view).
+        if (self.serve) |*s| {
+            try s.start();
+            if (!self.options.quiet) {
+                const port = s.boundPort();
+                std.debug.print("preview: http://127.0.0.1:{d}/  (auto-reload helper: http://127.0.0.1:{d}/__boris/)\n", .{ port, port });
+            }
+        }
 
         while (!should_shutdown_global.load(.unordered)) {
             self.processEvents() catch |err| {
