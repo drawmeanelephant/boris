@@ -84,11 +84,13 @@
   let conflict: BufferResponse | null = null;
   let deletedConflict = false;
   let conflictDialog: HTMLDialogElement;
+  let switchDialog: HTMLDialogElement;
   let createDialog: HTMLDialogElement;
   let renameDialog: HTMLDialogElement;
   let deleteDialog: HTMLDialogElement;
   let createPath = 'content/new-page.md';
   let renamePath = '';
+  let pendingSwitchPath = '';
   let commandRunning = false;
   let commandResult: CommandResult | null = null;
   let impactId = '';
@@ -190,10 +192,12 @@
     editorStatus = status;
   }
 
-  async function openFile(path: string): Promise<boolean> {
+  async function openFile(path: string, discardUnsaved = false): Promise<boolean> {
     if (path === activePath) return true;
-    if (dirty) {
-      editorStatus = `Save or undo changes to ${activePath} before opening another file.`;
+    if (dirty && !discardUnsaved) {
+      pendingSwitchPath = path;
+      await tick();
+      switchDialog.showModal();
       return false;
     }
     const result = await api<BufferResponse | ErrorResponse>('/api/files/open', {
@@ -470,8 +474,8 @@
     if (!result.response.ok) editorStatus = `Unsaved changes in ${activePath}; recovery snapshot failed.`;
   }
 
-  async function saveFile(recreate = false, replacementFingerprint = fingerprint) {
-    if (!activePath || readOnly || !dirty) return;
+  async function saveFile(recreate = false, replacementFingerprint = fingerprint): Promise<boolean> {
+    if (!activePath || readOnly || !dirty) return false;
     const result = await api<BufferResponse | ErrorResponse>('/api/files/save', {
       method: 'POST',
       body: JSON.stringify({ path: activePath, content, fingerprint: replacementFingerprint, recreate })
@@ -485,7 +489,7 @@
       deletedConflict = false;
       await refreshFiles();
       await rebuildPreview('save');
-      return;
+      return true;
     }
     const error = result.data as ErrorResponse;
     if (result.response.status === 409 && error.status === 'conflict') {
@@ -506,6 +510,29 @@
     } else {
       editorStatus = `Save failed for ${activePath}. Your buffer remains unsaved.`;
     }
+    return false;
+  }
+
+  async function saveAndSwitch() {
+    const target = pendingSwitchPath;
+    if (!target) return;
+    switchDialog.close();
+    if (await saveFile()) {
+      await openFile(target);
+    } else if (readOnly) {
+      editorStatus = `${activePath} is read-only, so it was not saved. Discard the unsaved buffer to switch to ${target}.`;
+    }
+  }
+
+  async function discardAndSwitch() {
+    const target = pendingSwitchPath;
+    if (!target) return;
+    const discardedPath = activePath;
+    await clearRecovery(discardedPath);
+    stopRecoveryTimer();
+    switchDialog.close();
+    editorStatus = `Discarded unsaved changes in ${discardedPath}.`;
+    await openFile(target, true);
   }
 
   async function loadDiskVersion() {
@@ -1013,6 +1040,16 @@
       <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version</button>
     </div>
   {/if}
+</dialog>
+
+<dialog bind:this={switchDialog} onkeydown={handleDialogKeydown} aria-labelledby="switch-heading">
+  <h2 id="switch-heading">Unsaved changes in {activePath}</h2>
+  <p>Save or discard the changes before opening {pendingSwitchPath}?</p>
+  <div class="dialog-actions">
+    <button type="button" onclick={() => switchDialog.close()}>Cancel</button>
+    <button type="button" onclick={discardAndSwitch}>Discard &amp; switch</button>
+    <button type="button" class="primary" onclick={saveAndSwitch}>Save &amp; switch</button>
+  </div>
 </dialog>
 
 <dialog bind:this={createDialog} onkeydown={handleDialogKeydown} aria-labelledby="create-heading">
