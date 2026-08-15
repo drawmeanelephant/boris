@@ -319,6 +319,34 @@ test('the Create file primary button still submits the same action (#459)', asyn
   expect(createRequests).toBe(1);
 });
 
+test('Delete dialog falls back to a named placeholder when no file is selected (#461)', async ({ page }) => {
+  await installApi(page);
+  const dialog = page.locator('dialog').filter({ has: page.locator('#delete-heading') });
+  expect(await dialog.locator('p').first().textContent()).toBe(
+    'Delete selected file? This changes the project immediately and cannot be undone in Boris Editor.'
+  );
+  expect(await dialog.locator('.dialog-actions .danger').textContent()).toBe('Delete file');
+});
+
+test('Delete dialog names the selected file and deletes exactly once (#461)', async ({ page }) => {
+  await installApi(page);
+  let deleteRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/delete')) deleteRequests += 1;
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Delete file' });
+  await page.getByRole('button', { name: 'Delete file', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('p').first()).toContainText('Delete content/index.md?');
+  const deleteRequest = page.waitForRequest('**/api/files/delete');
+  await dialog.getByRole('button', { name: 'Delete content/index.md', exact: true }).click();
+  expect((await deleteRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', confirmed: true });
+  await expect(dialog).toBeHidden();
+  expect(deleteRequests).toBe(1);
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Deleted content/index.md.');
+});
+
 test('Boris commands expose visible voice names and distinct exit classes', async ({ page }) => {
   await installApi(page, {
     commands: {
