@@ -883,6 +883,7 @@
     <p role="status" aria-label="Editing status" aria-live="polite">{editorStatus}</p>
   </section>
 
+  <div class="workspace-rail">
   <section id="problems" class="problems-pane" aria-labelledby="problems-heading">
     <div class="problems-heading">
       <div>
@@ -1009,6 +1010,7 @@
       <p>No valid Boris preview output is available yet.</p>
     {/if}
   </section>
+  </div>
 </main>
 
 <dialog bind:this={conflictDialog} onkeydown={handleDialogKeydown} aria-labelledby="conflict-heading">
