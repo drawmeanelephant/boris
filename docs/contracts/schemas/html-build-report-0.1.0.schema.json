@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Boris HTML-path build-report.json (v0.1)",
+  "description": "Machine-readable twin of the HTML-path stderr text, written by `boris build --report PATH` and `boris validate --report PATH` on both success and failure. The prose contract in docs/contracts/diagnostics.md remains normative. Unlike the IR build-report it is flag-opt-in (no artifact is auto-written into the output tree); diagnostics cover all HTML-path classes including layout/theme.",
+  "type": "object",
+  "required": ["schemaVersion", "compilerId", "ok", "contentRoot", "outDir", "errorCount", "diagnostics"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "html-build-report-0.1.0" },
+    "compilerId": {
+      "type": "string",
+      "description": "Compiler id from the version constants (see docs/contracts/version.md); lets tooling pin the producing compiler."
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "true iff the HTML build/validate succeeded with zero error diagnostics."
+    },
+    "contentRoot": { "type": "string" },
+    "outDir": {
+      "type": "string",
+      "description": "Configured HTML output directory (dist/ or --html-dir). validate writes the same value even though it publishes nothing."
+    },
+    "errorCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of severity=error diagnostics."
+    },
+    "diagnostics": {
+      "type": "array",
+      "description": "Sorted diagnostics; see docs/contracts/diagnostics.md for the closed code set (including the ELAYOUT* family).",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    }
+  },
+  "$defs": {
+    "diagnostic": {
+      "type": "object",
+      "description": "Key order: severity, code, message, remediation, sourcePath, line, column, id — identical to the IR diagnostic object.",
+      "required": ["severity", "code", "message", "remediation", "sourcePath", "line", "column", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "severity": { "type": "string", "enum": ["error", "warning", "info"] },
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "remediation": { "type": "string" },
+        "sourcePath": { "type": ["string", "null"] },
+        "line": { "type": ["integer", "null"] },
+        "column": { "type": ["integer", "null"] },
+        "id": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

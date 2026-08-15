@@ -100,7 +100,7 @@ per topic:
 | [xml-sitemap.md](xml-sitemap.md) | Deterministic staged XML Sitemap Protocol projection for one HTML target |
 | [identity-and-paths.md](identity-and-paths.md) | Source paths, entity ids, `/` separators, `.md`/`.mdx` case rules |
 | [scanner.md](scanner.md) | Deterministic discovery walk, sort key, symlink policy (m4) |
-| [diagnostics.md](diagnostics.md) | Stable categories (`EDUPLICATEID`, …), severity, exit codes |
+| [diagnostics.md](diagnostics.md) | Stable categories (`EDUPLICATEID`, …, `ELAYOUT*`), severity, exit codes, HTML-path `--report` surface (schema twin `html-build-report-0.1.0`) |
 | [validation.md](validation.md) | Canonical HTML prepublication validity boundary, no-write guarantee, and adjacent-command distinctions |
 | [ir-schema.md](ir-schema.md) | Trunk/Satellite graph, typed dependency edges, reverse index, deterministic JSON under `.boris/` |
 | [rag-export.md](rag-export.md) | Optional RAG export; working-context packs + complete corpus; authoring fidelity |

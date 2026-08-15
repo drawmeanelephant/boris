@@ -10,6 +10,8 @@ const std = @import("std");
 const Io = std.Io;
 const cli = @import("cli.zig");
 const diagnostic = @import("diagnostic.zig");
+const diag = @import("diag.zig");
+const html_report = @import("html_report.zig");
 const pipeline = @import("pipeline.zig");
 const rag = @import("rag.zig");
 const context = @import("context.zig");
@@ -506,6 +508,13 @@ pub fn runIntelligence(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: 
 /// build in a temporary directory and never emits an authority/report file.
 pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     const layout_path = opts.html_layout;
+    const out_dir = opts.html_dir orelse default_html;
+
+    var report_collector: ?diag.Collector = null;
+    if (opts.report_path != null) report_collector = diag.Collector.init(gpa, io);
+    defer if (report_collector) |*c| c.deinit();
+    const collector_ptr: ?*diag.Collector = if (report_collector) |*c| c else null;
+
     compile.validateHtmlSiteMulti(io, gpa, opts.targets.items, .{
         .content_root = opts.input_dir,
         .layout_path = layout_path,
@@ -516,14 +525,57 @@ pub fn runValidate(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*ti
         .publication_location = if (opts.publication_location) |*location| location else null,
         .allow_markdown_literals = opts.allow_markdown_links,
         .timings = recorder,
+        .diagnostics = collector_ptr,
     }) catch |err| {
-        return mapHtmlError(err, opts.targets.items, layout_path);
+        const code = mapHtmlError(err, opts.targets.items, layout_path);
+        appendEscapedDiagnostic(collector_ptr, err, code);
+        writeHtmlReport(io, gpa, opts, collector_ptr, false, out_dir);
+        return code;
     };
 
     if (!opts.quiet) {
         std.debug.print("ok: validation passed for {d} target(s)\n", .{opts.targets.items.len});
     }
+    writeHtmlReport(io, gpa, opts, collector_ptr, true, out_dir);
     return .success;
+}
+
+/// Append one diagnostic for a compile error that escaped as a bare exit-code
+/// mapping (usage / I/O classes), so the machine-readable report still
+/// explains the nonzero exit even when the failing phase had no structured
+/// diagnostic of its own.
+fn appendEscapedDiagnostic(collector: ?*diag.Collector, err: anyerror, code: ExitCode) void {
+    if (collector) |c| c.append(.{
+        .severity = .error_,
+        .code = if (code == .usage) .EUSAGE else .EIO,
+        .message = @errorName(err),
+        .remediation = "See the stderr diagnostic for the full explanation",
+    });
+}
+
+/// Write the HTML-path diagnostics report (`--report PATH`) deterministically
+/// on success and failure. Never changes the exit code or stderr text.
+fn writeHtmlReport(
+    io: Io,
+    gpa: std.mem.Allocator,
+    opts: Options,
+    collector: ?*diag.Collector,
+    ok: bool,
+    out_dir: []const u8,
+) void {
+    const path = opts.report_path orelse return;
+    const c = collector orelse return;
+    diag.sortDiagnostics(c.list.items);
+    const rendered = html_report.renderHtmlReport(gpa, pipeline.compiler_id, .{
+        .ok = ok,
+        .content_root = opts.input_dir,
+        .out_dir = out_dir,
+        .diagnostics = c.list.items,
+    }) catch return;
+    defer gpa.free(rendered);
+    Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = rendered }) catch |err| {
+        std.debug.print("error: failed to write report {s}: {s}\n", .{ path, @errorName(err) });
+    };
 }
 
 fn renderAnalysisHuman(
@@ -873,6 +925,11 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
         return .success;
     }
 
+    var report_collector: ?diag.Collector = null;
+    if (opts.report_path != null) report_collector = diag.Collector.init(gpa, io);
+    defer if (report_collector) |*c| c.deinit();
+    const collector_ptr: ?*diag.Collector = if (report_collector) |*c| c else null;
+
     if (opts.targets.items.len > 0) {
         compile.compileHtmlSiteMulti(io, gpa, opts.targets.items, .{
             .content_root = opts.input_dir,
@@ -886,8 +943,12 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .publication_location = if (opts.publication_location) |*location| location else null,
             .allow_markdown_literals = opts.allow_markdown_links,
             .timings = recorder,
+            .diagnostics = collector_ptr,
         }) catch |err| {
-            return mapHtmlError(err, opts.targets.items, layout_path);
+            const code = mapHtmlError(err, opts.targets.items, layout_path);
+            appendEscapedDiagnostic(collector_ptr, err, code);
+            writeHtmlReport(io, gpa, opts, collector_ptr, false, html_dir);
+            return code;
         };
 
         if (!opts.quiet) {
@@ -909,14 +970,19 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .publication_location = if (opts.publication_location) |*location| location else null,
             .allow_markdown_literals = opts.allow_markdown_links,
             .timings = recorder,
+            .diagnostics = collector_ptr,
         }) catch |err| {
-            return mapHtmlError(err, &.{}, layout_path);
+            const code = mapHtmlError(err, &.{}, layout_path);
+            appendEscapedDiagnostic(collector_ptr, err, code);
+            writeHtmlReport(io, gpa, opts, collector_ptr, false, html_dir);
+            return code;
         };
 
         if (!opts.quiet) {
             std.debug.print("ok: wrote HTML under {s} ({d} page(s))\n", .{ html_dir, stats.pages_written });
         }
     }
+    writeHtmlReport(io, gpa, opts, collector_ptr, true, html_dir);
     return .success;
 }
 

@@ -169,6 +169,7 @@ pub fn freezeSiteFromPageDb(
     quiet: bool,
     include_nav_material: bool,
     recorder: ?*timings.Recorder,
+    sink: ?*diag.Collector,
 ) !FrozenSite {
     if (recorder) |t| t.start(.graph_validate);
     const pages = db.items();
@@ -203,6 +204,7 @@ pub fn freezeSiteFromPageDb(
         // Errors always reach stderr. `--quiet` suppresses progress, success
         // output, and sub-error diagnostics — never the explanation for a
         // nonzero exit.
+        if (sink) |s| for (diags.items) |d| s.append(d);
         for (diags.items) |d| {
             if (quiet and d.severity != .error_) continue;
             const line = diag.formatText(d, gpa) catch continue;
@@ -288,6 +290,11 @@ pub const CompileOptions = struct {
     test_fail_cache_publish: bool = false,
     /// Bounded parallel rendering worker count.
     jobs: usize = 1,
+    /// Optional thread-safe collector for the HTML-path diagnostics report
+    /// (`build`/`validate --report PATH`). When set, every HTML-path
+    /// diagnostic is appended here in addition to the existing stderr text.
+    /// Safe under the bounded parallel renderer (`jobs > 1`).
+    diagnostics: ?*diag.Collector = null,
     /// Whole-tree authoring format. Markdown is the byte-compatible default.
     input_format: identity.InputFormat = .markdown,
     /// Target-root-relative sitemap output path; null disables the projection.
@@ -582,6 +589,7 @@ fn renderPageSlots(
         .nodes = if (render_opts.site) |s| s.nodes else &.{},
         .heading_index = render_opts.heading_index,
         .page_assets = render_opts.page_assets,
+        .diagnostics = options.diagnostics,
     });
 
     var slots: assemble.SlotValues = .{ .content = html };
@@ -780,7 +788,18 @@ pub fn compileHtmlSite(
     try validateSitemapConfig(gpa, options);
 
     // 0. Lexical layout-path grammar before any open (no .. / absolute escapes).
-    try layout_select.validateLayoutPath(options.layout_path);
+    layout_select.validateLayoutPath(options.layout_path) catch |err| {
+        const msg = try std.fmt.allocPrint(gpa, "invalid layout path {s}: {s}", .{ options.layout_path, @errorName(err) });
+        defer gpa.free(msg);
+        appendHtmlDiagnostic(&options, .{
+            .severity = .error_,
+            .code = .ELAYOUTPATH,
+            .message = msg,
+            .remediation = diag.Code.remediationForLayout(.ELAYOUTPATH),
+            .source_path = options.layout_path,
+        });
+        return err;
+    };
     for (options.layout_rules) |rule| {
         try layout_select.validateLayoutPath(rule.layout_path);
     }
@@ -788,7 +807,18 @@ pub fn compileHtmlSite(
     // 1. Layout first — hard fail before any content walk on bad marker.
     var layout_arena = std.heap.ArenaAllocator.init(gpa);
     defer layout_arena.deinit();
-    const layout = try loadLayoutOnce(io, cwd, options.layout_path, layout_arena.allocator());
+    const layout = loadLayoutOnce(io, cwd, options.layout_path, layout_arena.allocator()) catch |err| {
+        const msg = try std.fmt.allocPrint(gpa, "failed to load layout {s}: {s}", .{ options.layout_path, @errorName(err) });
+        defer gpa.free(msg);
+        appendHtmlDiagnostic(&options, .{
+            .severity = .error_,
+            .code = layoutCodeFor(err),
+            .message = msg,
+            .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
+            .source_path = options.layout_path,
+        });
+        return err;
+    };
 
     // 2. Long-lived PageDb (retain arena for promoted metadata only).
     var retain_arena = std.heap.ArenaAllocator.init(gpa);
@@ -800,7 +830,7 @@ pub fn compileHtmlSite(
 
     // 3. Graph validate + freeze (shared rules with IR/RAG; Feature 6 nav).
     // Rules may select graph chrome even when the fallback layout has none.
-    var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings);
+    var site = try freezeSiteFromPageDb(gpa, &db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings, options.diagnostics);
     defer site.deinit();
 
     return try compilePagesWithSite(io, gpa, &db, layout, options, &site);
@@ -845,6 +875,7 @@ const SharedCompileState = struct {
         quiet: bool,
         input_format: identity.InputFormat,
         recorder: ?*timings.Recorder,
+        sink: ?*diag.Collector,
     ) !SharedCompileState {
         const cwd = Io.Dir.cwd();
         _ = cwd;
@@ -889,7 +920,7 @@ const SharedCompileState = struct {
             };
         }
         if (recorder) |t| t.start(.dependency_resolve);
-        try pipeline.populateDependencyIndexFormat(io, gpa, inc_alloc, content_root, dep_nodes, quiet, input_format, &dep_index);
+        try pipeline.populateDependencyIndexFormat(io, gpa, inc_alloc, content_root, dep_nodes, quiet, input_format, &dep_index, sink);
         if (recorder) |t| t.stop(.dependency_resolve);
 
         const include_bytes = try gpa.alloc([][]u8, db.len());
@@ -1042,11 +1073,11 @@ pub fn compileHtmlSiteMulti(
 
     // Shared graph freeze once for all targets (Feature 6). Always compute nav
     // material; fingerprint mixes it in only when a layout has `{{nav}}`.
-    var site = try freezeSiteFromPageDb(gpa, &db, base_options.quiet, true, base_options.timings);
+    var site = try freezeSiteFromPageDb(gpa, &db, base_options.quiet, true, base_options.timings, base_options.diagnostics);
     defer site.deinit();
 
     // Shared content/include fingerprint inputs once for all targets.
-    var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root, base_options.quiet, base_options.input_format, base_options.timings);
+    var shared = try SharedCompileState.init(io, gpa, &db, base_options.content_root, base_options.quiet, base_options.input_format, base_options.timings, base_options.diagnostics);
     defer shared.deinit();
 
     // Preflight layout selection for every target/page before any target publishes
@@ -1054,6 +1085,15 @@ pub fn compileHtmlSiteMulti(
     for (plans) |plan| {
         target_mod.rejectMixedThemeRoots(plan.layout_path, plan.layout_rules) catch |err| {
             std.debug.print("error: target '{s}' mixed theme roots in layout rules: {s}\n", .{ plan.name, @errorName(err) });
+            const msg = try std.fmt.allocPrint(gpa, "target '{s}' mixed theme roots in layout rules: {s}", .{ plan.name, @errorName(err) });
+            defer gpa.free(msg);
+            appendHtmlDiagnostic(&base_options, .{
+                .severity = .error_,
+                .code = .ELAYOUTRULE,
+                .message = msg,
+                .remediation = diag.Code.remediationForLayout(.ELAYOUTRULE),
+                .source_path = plan.layout_path,
+            });
             return error.MixedThemeRoots;
         };
         for (db.items()) |page| {
@@ -1062,6 +1102,16 @@ pub fn compileHtmlSiteMulti(
                     plan.name,
                     page.entity_id,
                     @errorName(err),
+                });
+                const msg = try std.fmt.allocPrint(gpa, "layout selection failed for '{s}': {s}", .{ page.entity_id, @errorName(err) });
+                defer gpa.free(msg);
+                appendHtmlDiagnostic(&base_options, .{
+                    .severity = .error_,
+                    .code = layoutCodeFor(err),
+                    .message = msg,
+                    .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
+                    .source_path = plan.layout_path,
+                    .id = page.entity_id,
                 });
                 return switch (err) {
                     error.AmbiguousGlob => error.AmbiguousGlob,
@@ -1102,6 +1152,15 @@ pub fn compileHtmlSiteMulti(
             if (gop.found_existing) continue;
             const layout = loadLayoutOnce(io, Io.Dir.cwd(), lp, layout_arena.allocator()) catch |err| {
                 std.debug.print("error: target '{s}' failed to load layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
+                const msg = try std.fmt.allocPrint(gpa, "failed to load layout {s}: {s}", .{ lp, @errorName(err) });
+                defer gpa.free(msg);
+                appendHtmlDiagnostic(&base_options, .{
+                    .severity = .error_,
+                    .code = layoutCodeFor(err),
+                    .message = msg,
+                    .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
+                    .source_path = lp,
+                });
                 any_failed = true;
                 any_io_failed = any_io_failed or !isContentCompileFailure(err);
                 _ = layout_cache.remove(lp);
@@ -1110,6 +1169,15 @@ pub fn compileHtmlSiteMulti(
             };
             const bytes = readFileAlloc(io, Io.Dir.cwd(), lp, gpa) catch |err| {
                 std.debug.print("error: target '{s}' failed to read layout {s}: {s}\n", .{ plan.name, lp, @errorName(err) });
+                const msg = try std.fmt.allocPrint(gpa, "failed to read layout {s}: {s}", .{ lp, @errorName(err) });
+                defer gpa.free(msg);
+                appendHtmlDiagnostic(&base_options, .{
+                    .severity = .error_,
+                    .code = .EIO,
+                    .message = msg,
+                    .remediation = "Check the layout path spelling and file permissions",
+                    .source_path = lp,
+                });
                 any_failed = true;
                 any_io_failed = true;
                 _ = layout_cache.remove(lp);
@@ -1127,6 +1195,15 @@ pub fn compileHtmlSiteMulti(
                 err != error.MixedThemeRoots and err != error.LayoutSelectionFailed)
             {
                 std.debug.print("error: target '{s}' compilation failed: {s}\n", .{ plan.name, @errorName(err) });
+                const msg = try std.fmt.allocPrint(gpa, "target '{s}' compilation failed: {s}", .{ plan.name, @errorName(err) });
+                defer gpa.free(msg);
+                appendHtmlDiagnostic(&base_options, .{
+                    .severity = .error_,
+                    .code = layoutCodeFor(err),
+                    .message = msg,
+                    .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
+                    .source_path = plan.layout_path,
+                });
             }
             any_failed = true;
             if (err == error.AmbiguousGlob or err == error.MixedThemeRoots or
@@ -1294,7 +1371,7 @@ pub fn compilePages(
     // Content-only layouts can compile without graph chrome; still freeze so
     // invalid parents fail loud on the HTML path.
     // Rules may select graph chrome even when the fallback layout has none.
-    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings);
+    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings, options.diagnostics);
     defer site.deinit();
     return compilePagesWithSite(io, gpa, db, layout, options, &site);
 }
@@ -1324,7 +1401,7 @@ pub fn compilePagesWithShared(
     layout_bytes: []const u8,
 ) !CompileStats {
     // Rules may select graph chrome even when the fallback layout has none.
-    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings);
+    var site = try freezeSiteFromPageDb(gpa, db, options.quiet, layout.has_nav or layout.has_breadcrumb or layout.has_title or layout.has_children or layout.has_relations or layout.has_backlinks or options.layout_rules.len != 0, options.timings, options.diagnostics);
     defer site.deinit();
     return compilePagesInner(io, gpa, db, layout, options, shared, layout_bytes, &site);
 }
@@ -1511,6 +1588,7 @@ fn buildSiteHeadingIndex(
     input_format: identity.InputFormat,
     prior_harvest: ?*const ParsedHeadingHarvest,
     recorder: ?*timings.Recorder,
+    sink: ?*diag.Collector,
 ) !struct { wikilink.HeadingIndex, HeadingHarvestSnapshot } {
     var index: wikilink.HeadingIndex = .{};
     errdefer index.deinit(gpa);
@@ -1605,6 +1683,7 @@ fn buildSiteHeadingIndex(
             .input_format = input_format,
             .nodes = site.nodes,
             // Do not validate fragments while building the index they depend on.
+            .diagnostics = sink,
         });
 
         var ids: std.ArrayList([]const u8) = .empty;
@@ -1856,19 +1935,55 @@ fn publishStageTree(
 /// Report link-audit findings on stderr and fail the pipeline. Shared by the
 /// publish path (staged/live overlay audit) and the validation path (in-memory
 /// audit) so the two diagnostics cannot drift.
-fn reportLinkAuditFindings(findings: []const link_audit.Finding) error{LinkAuditFailed} {
+/// Append `d` to the optional HTML-path diagnostic collector (OOM-safe).
+fn appendHtmlDiagnostic(options: *const CompileOptions, d: diag.Diagnostic) void {
+    if (options.diagnostics) |sink| sink.append(d);
+}
+
+/// Stable diagnostic code for layout/theme load failures.
+fn layoutCodeFor(err: anyerror) diag.Code {
+    return switch (err) {
+        error.LayoutMissingMarker => .ELAYOUTMISSINGMARKER,
+        error.LayoutUnknownMarker => .ELAYOUTMISSINGMARKER,
+        error.LayoutDuplicateMarker => .ELAYOUTDUPLICATEMARKER,
+        error.LayoutInvalidAssetUrl => .ELAYOUTASSET,
+        error.LayoutTooManyAssetUrls => .ELAYOUTASSET,
+        error.InvalidLayoutPath => .ELAYOUTPATH,
+        error.AmbiguousGlob,
+        error.DuplicateSelector,
+        error.EmptySelector,
+        error.InvalidSelector,
+        error.UnknownSelectorKind,
+        error.RuleLimitExceeded,
+        error.LayoutSelectionFailed,
+        error.MixedThemeRoots,
+        => .ELAYOUTRULE,
+        else => .ELAYOUT,
+    };
+}
+
+fn reportLinkAuditFindings(sink: ?*diag.Collector, findings: []const link_audit.Finding) error{LinkAuditFailed} {
     for (findings) |f| {
+        const detail = switch (f.code) {
+            .EROUTEESCAPE => "climbs above the output root and can never be served [point it at a published output, or drop the reference]",
+            .EPUBLICATIONLOCATION => "does not match the declared publication origin/base path [use a target-relative URL or include the Pages base path]",
+            else => "does not resolve to a published output [fix the path, or publish the file it names]",
+        };
         std.debug.print("error: {s}: {s}:{d}: {s}=\"{s}\" {s}\n", .{
             f.code.name(),
             f.source,
             f.line,
             f.attribute,
             f.target,
-            switch (f.code) {
-                .EROUTEESCAPE => "climbs above the output root and can never be served [point it at a published output, or drop the reference]",
-                .EPUBLICATIONLOCATION => "does not match the declared publication origin/base path [use a target-relative URL or include the Pages base path]",
-                else => "does not resolve to a published output [fix the path, or publish the file it names]",
-            },
+            detail,
+        });
+        if (sink) |s| s.append(.{
+            .severity = .error_,
+            .code = f.code,
+            .message = detail,
+            .remediation = "Fix the path, or publish the file it names",
+            .source_path = f.source,
+            .line = f.line,
         });
     }
     return error.LinkAuditFailed;
@@ -1897,6 +2012,7 @@ fn validatePrepublicationTarget(
         options.input_format,
         null,
         options.timings,
+        options.diagnostics,
     );
     if (options.timings) |t| t.stop(.heading_harvest);
     var heading_index = heading_built[0];
@@ -1985,7 +2101,7 @@ fn validatePrepublicationTarget(
         if (cap > stats.peak_whiteboard_capacity) stats.peak_whiteboard_capacity = cap;
     }
     if (options.timings) |t| t.stop(.render);
-    if (findings.items.len != 0) return reportLinkAuditFindings(findings.items);
+    if (findings.items.len != 0) return reportLinkAuditFindings(options.diagnostics, findings.items);
 
     // Sitemap configuration is source/target validity, but sitemap publication
     // is not. Render its deterministic bytes in memory to exercise the exact
@@ -2073,6 +2189,16 @@ fn compilePagesInner(
                 page.entity_id,
                 @errorName(err),
             });
+            const msg = try std.fmt.allocPrint(gpa, "layout selection failed for '{s}': {s}", .{ page.entity_id, @errorName(err) });
+            defer gpa.free(msg);
+            appendHtmlDiagnostic(&options, .{
+                .severity = .error_,
+                .code = layoutCodeFor(err),
+                .message = msg,
+                .remediation = diag.Code.remediationForLayout(layoutCodeFor(err)),
+                .source_path = options.layout_path,
+                .id = page.entity_id,
+            });
             return switch (err) {
                 error.AmbiguousGlob => error.AmbiguousGlob,
                 error.DuplicateSelector => error.DuplicateSelector,
@@ -2123,7 +2249,7 @@ fn compilePagesInner(
     var asset_discovery_fail: content_asset.FailInfo = .{};
     var content_assets = content_asset.loadSiteAssets(io, gpa, content_dir, source_paths, entity_ids, &asset_discovery_fail) catch |err| {
         if (err == error.AssetUnsafeSvg) {
-            content_asset.printDiagnostic(gpa, error.AssetUnsafeSvg, "", asset_discovery_fail);
+            content_asset.printDiagnostic(gpa, error.AssetUnsafeSvg, "", asset_discovery_fail, options.diagnostics);
         } else {
             std.debug.print("error: content-local asset discovery failed: {s}\n", .{@errorName(err)});
         }
@@ -2197,7 +2323,7 @@ fn compilePagesInner(
     var local_shared: ?SharedCompileState = null;
     defer if (local_shared) |*s| s.deinit();
     const shared: *const SharedCompileState = if (shared_opt) |s| s else blk: {
-        local_shared = try SharedCompileState.init(io, gpa, db, options.content_root, options.quiet, options.input_format, options.timings);
+        local_shared = try SharedCompileState.init(io, gpa, db, options.content_root, options.quiet, options.input_format, options.timings, options.diagnostics);
         break :blk &(local_shared.?);
     };
 
@@ -2303,6 +2429,7 @@ fn compilePagesInner(
         options.input_format,
         prior_harvest,
         options.timings,
+        options.diagnostics,
     );
     if (options.timings) |t| t.stop(.heading_harvest);
     var heading_index = heading_built[0];
@@ -2387,7 +2514,7 @@ fn compilePagesInner(
             .{ .heading_index = &heading_index, .validate_fragments = true },
         ) catch |err| {
             if (err == error.ReferenceMissing or err == error.ReferenceSyntax or err == error.PathError) {
-                wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail);
+                wikilink.printDiagnostic(gpa, err, page.source_path, wiki_fail, options.diagnostics);
                 return error.ReferenceFailed;
             }
             return err;
@@ -2406,7 +2533,7 @@ fn compilePagesInner(
                 page.output_path,
                 &asset_fail,
             ) catch |err| {
-                content_asset.printDiagnostic(gpa, err, page.source_path, asset_fail);
+                content_asset.printDiagnostic(gpa, err, page.source_path, asset_fail, options.diagnostics);
                 return error.AssetFailed;
             };
             if (rewritten.ptr != body_for_wiki.ptr) gpa.free(rewritten);
@@ -2772,7 +2899,7 @@ fn compilePagesInner(
         if (options.timings) |t| t.start(.link_audit);
         try link_audit.audit(io, gpa, stage_dir, dist_dir, live_page_paths, audit_assets.items, link_audit_opts, &findings);
         if (options.timings) |t| t.stop(.link_audit);
-        if (findings.items.len != 0) return reportLinkAuditFindings(findings.items);
+        if (findings.items.len != 0) return reportLinkAuditFindings(options.diagnostics, findings.items);
     }
 
     // Build the inventory from authoritative producer paths and the staged/live
@@ -3330,6 +3457,83 @@ test "layout duplicate marker aborts before content compile" {
         .layout_path = layout_path,
         .quiet = true,
     }));
+}
+
+test "#421: broken layout surfaces a structured ELAYOUTDUPLICATEMARKER diagnostic" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-421-layout", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "<a>{{content}}</a>{{content}}");
+    try writeTreeFile(io, work, "content/index.md", "# Hi\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+    try std.testing.expectError(error.LayoutDuplicateMarker, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .diagnostics = &collector,
+    }));
+
+    try std.testing.expectEqual(@as(usize, 1), collector.list.items.len);
+    const d = collector.list.items[0];
+    try std.testing.expectEqual(diag.Code.ELAYOUTDUPLICATEMARKER, d.code);
+    try std.testing.expectEqual(diag.Severity.error_, d.severity);
+    try std.testing.expectEqualStrings(layout_path, d.source_path);
+    try std.testing.expect(d.line == null);
+}
+
+test "#421: content failures are collected with source path and position" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-421-content", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "{{content}}");
+    try writeTreeFile(io, work, "content/index.md", "# Hi\n\n{{include missing.md}}\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+    try std.testing.expectError(error.IncludeFailed, compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .diagnostics = &collector,
+    }));
+
+    try std.testing.expectEqual(@as(usize, 1), collector.list.items.len);
+    const d = collector.list.items[0];
+    try std.testing.expectEqual(diag.Code.EINCLUDEMISSING, d.code);
+    // Source paths are content-root-relative (the stderr contract).
+    try std.testing.expectEqualStrings("index.md", d.source_path);
+    try std.testing.expect(d.line != null);
+    try std.testing.expect(d.column != null);
 }
 
 test "valid layout output equals prefix + rendered html + suffix" {

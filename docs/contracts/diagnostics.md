@@ -150,8 +150,42 @@ See [cooklang-compatibility.md](cooklang-compatibility.md).
 | `EROUTEESCAPE` | error | Published local `href`/`src` climbs above the output root and can never be served | `link_audit` → HTML commit / validate |
 | `EPUBLICATIONLOCATION` | error | A Boris-owned rendered public URL disagrees with the declared publication origin/base path, or a project-site root-relative route omits that base path | `link_audit` → HTML pre-commit gate / validate |
 | `EFRAGMENTMISSING` | reserved | Published local reference resolves, but its `#fragment` is not an id on the target page. Not yet emitted; see [documentation-links.md](documentation-links.md) | — |
+| `ELAYOUTMISSINGMARKER` | error | Layout template lacks a required/declared slot marker, or names an unknown marker | `assemble.loadLayout` → HTML load/validate |
+| `ELAYOUTDUPLICATEMARKER` | error | Layout template repeats a slot marker | `assemble.loadLayout` → HTML load/validate |
+| `ELAYOUTPATH` | error | Layout path is illegal (absolute, `..`, backslash, or otherwise non-relative) | `layout_select.validateLayoutPath` → HTML load/validate |
+| `ELAYOUTASSET` | error | Layout template references an invalid or excessive asset url | `assemble.loadLayout` / `theme.requireReferencedAssets` → HTML load/validate |
+| `ELAYOUTRULE` | error | Layout-rule selection failure (ambiguous glob, duplicate/invalid selector, mixed theme roots, or rule bounds) | `layout_select` → HTML load/validate |
+| `ELAYOUT` | error | Generic layout failure (structural bounds, invalid UTF-8, …) | HTML load/validate fallback |
 | `EUSAGE` | error | CLI usage / flag error (unknown flag, conflicts, malformed options) | CLI (exit 2; not in build-report) |
 | `EIO` | error | I/O or system failure (missing content root, unreadable file, unexpected runtime) | pipeline / CLI (exit 3 when pure I/O) |
+
+## HTML-path machine-readable report
+
+`build` and `validate` accept `--report PATH` and write a deterministic JSON
+report to `PATH` on **both** success and failure (the file is written even when
+the command exits 1). This is the machine-readable twin of the HTML-path
+stderr text, covering every HTML-path diagnostic class: parse/graph,
+component, include, wiki-link, asset, link-audit (`EROUTEMISSING`,
+`EROUTEESCAPE`, `EPUBLICATIONLOCATION`), and layout/theme. It is the surface
+the preview server ([#392]'s `serve` loop) and the Boris editor expose; the IR
+path keeps its own auto-written `build-report.json`.
+
+- Schema: `html-build-report-0.1.0` — see
+  [schemas/html-build-report-0.1.0.schema.json](schemas/html-build-report-0.1.0.schema.json).
+- Top-level shape matches the IR report: `schemaVersion`, `compilerId`, `ok`,
+  `contentRoot`, `outDir`, `errorCount`, `diagnostics`. There is no
+  `pageCount` (the HTML path does not expose a single page count across
+  targets).
+- Each diagnostic object uses the **exact key order** of the IR diagnostic
+  object: `severity, code, message, remediation, sourcePath, line, column, id`.
+- Diagnostics are sorted with the same deterministic comparator as the IR
+  report (source path, line, column, code, message).
+- `--report` is additive: stderr text, exit codes, and emitted artifact bytes
+  are unchanged with or without it. `validate --report` writes the same shape
+  (its `outDir` reflects the configured HTML output directory even though
+  validation publishes nothing).
+- `--report` is rejected on `watch` and on non-HTML build modes (IR/RAG/etc.);
+  `check`/`impact` keep their own `--report` analysis surface.
 
 ### `EPARENTNOTTRUNK` compatibility disposition
 
