@@ -26,6 +26,9 @@ pub const Options = struct {
     /// When non-null, rewrite Markdown image destinations into this page's
     /// sibling asset tree (see `docs/contracts/content-local-assets.md`).
     page_assets: ?*const content_asset.PageAssetBundle = null,
+    /// Optional HTML-path report collector; every diagnostic printed by this
+    /// module is also appended here.
+    diagnostics: ?*diag.Collector = null,
 };
 
 fn sourceLineAt(source: []const u8, offset: usize) u32 {
@@ -64,10 +67,12 @@ fn printComponentDiagnostics(
     body_offset: usize,
     source_path: []const u8,
     diagnostics: []const aside.Diagnostic,
+    sink: ?*diag.Collector,
 ) !void {
     for (diagnostics) |component_diag| {
         const structured = try componentDiagnostic(gpa, source, body_offset, source_path, component_diag);
         defer gpa.free(structured.message);
+        if (sink) |s| s.append(structured);
         const text = try diag.formatText(structured, gpa);
         defer gpa.free(text);
         std.debug.print("{s}\n", .{text});
@@ -86,8 +91,9 @@ fn parserDiagnostic(source_path: []const u8, parsed: parser.Diagnostic) diag.Dia
     };
 }
 
-fn printParserDiagnostic(gpa: std.mem.Allocator, source_path: []const u8, parsed: parser.Diagnostic) !void {
+fn printParserDiagnostic(gpa: std.mem.Allocator, source_path: []const u8, parsed: parser.Diagnostic, sink: ?*diag.Collector) !void {
     const structured = parserDiagnostic(source_path, parsed);
+    if (sink) |s| s.append(structured);
     const text = try diag.formatText(structured, gpa);
     defer gpa.free(text);
     std.debug.print("{s}\n", .{text});
@@ -183,7 +189,7 @@ pub fn renderSource(
     const arena = doc_arena.allocator();
     const parsed = parser.parse(source);
     if (parsed.diagnostic) |pd| {
-        try printParserDiagnostic(gpa, source_path, pd);
+        try printParserDiagnostic(gpa, source_path, pd, options.diagnostics);
         return error.ParseFailed;
     }
     const body = (try bodyForInput(arena, options.input_format, source, parsed.doc.body, parsed.doc.body_offset, source_path, false)).markdown;
@@ -212,7 +218,7 @@ pub fn renderSource(
         source_path,
         &include_fail,
     ) catch |err| {
-        include_mod.printDiagnostic(gpa, err, source_path, include_fail);
+        include_mod.printDiagnostic(gpa, err, source_path, include_fail, options.diagnostics);
         return error.IncludeFailed;
     };
 
@@ -221,7 +227,7 @@ pub fn renderSource(
         .heading_index = options.heading_index,
         .validate_fragments = options.heading_index != null,
     }) catch |err| {
-        wikilink.printDiagnostic(gpa, err, source_path, wiki_fail);
+        wikilink.printDiagnostic(gpa, err, source_path, wiki_fail, options.diagnostics);
         return error.ReferenceFailed;
     };
 
@@ -229,14 +235,14 @@ pub fn renderSource(
     const with_assets = if (options.page_assets) |bundle| blk: {
         var asset_fail: content_asset.FailInfo = .{ .line_base = fail_line_base };
         break :blk content_asset.rewriteImageLinks(arena, with_wiki, bundle, output_path, &asset_fail) catch |err| {
-            content_asset.printDiagnostic(gpa, err, source_path, asset_fail);
+            content_asset.printDiagnostic(gpa, err, source_path, asset_fail, options.diagnostics);
             return error.AssetFailed;
         };
     } else with_wiki;
 
     const tok = try aside.tokenizeBody(with_assets, arena);
     if (tok.hasErrors()) {
-        try printComponentDiagnostics(gpa, source, parsed.doc.body_offset, source_path, tok.diagnostics);
+        try printComponentDiagnostics(gpa, source, parsed.doc.body_offset, source_path, tok.diagnostics, options.diagnostics);
         return error.ComponentFailed;
     }
 

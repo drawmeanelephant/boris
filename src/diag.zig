@@ -74,8 +74,33 @@ pub const Code = enum {
     /// Reserved: published reference resolves but its `#fragment` is not an id
     /// on the target page. Not yet emitted; see `link_audit.zig`.
     EFRAGMENTMISSING,
+    /// Layout template lacks a required or declared slot marker (or names an
+    /// unknown marker).
+    ELAYOUTMISSINGMARKER,
+    /// Layout template repeats a slot marker.
+    ELAYOUTDUPLICATEMARKER,
+    /// Layout path is illegal (absolute, `..`, or otherwise non-relative).
+    ELAYOUTPATH,
+    /// Layout template references an invalid or excessive asset url.
+    ELAYOUTASSET,
+    /// Layout-rule selection failure (ambiguous glob, duplicate/invalid
+    /// selector, or rule bounds).
+    ELAYOUTRULE,
+    /// Generic layout failure (structural bounds, invalid utf-8, …).
+    ELAYOUT,
     EUSAGE,
     EIO,
+
+    pub fn remediationForLayout(code: Code) []const u8 {
+        return switch (code) {
+            .ELAYOUTMISSINGMARKER => "Add the required {{content}} (and any other referenced slot) marker to the layout template",
+            .ELAYOUTDUPLICATEMARKER => "Keep exactly one marker per slot in the layout template",
+            .ELAYOUTPATH => "Use a workspace-relative layout path with no .., absolute, or backslash segments",
+            .ELAYOUTASSET => "Reference layout assets as assets/… urls relative to the theme root, one per slot",
+            .ELAYOUTRULE => "Give each layout rule a unique, valid selector and stay under the per-target rule limit",
+            else => "Fix the layout template and retry the build",
+        };
+    }
 
     pub fn name(self: Code) []const u8 {
         return @tagName(self);
@@ -178,6 +203,49 @@ pub fn countErrors(diags: []const Diagnostic) usize {
     }
     return n;
 }
+
+/// Thread-safe diagnostic collector for the HTML/preview path. `append` is
+/// safe from the bounded parallel renderer (`build --jobs N`); every other
+/// phase is single-threaded and takes the same uncontended path. Append
+/// failures (OOM) are dropped rather than changing compile behavior, matching
+/// the stderr `formatText catch continue` convention.
+///
+/// The collector owns durable copies of every string field: sources may hand
+/// it diagnostics whose strings live on short-lived arenas (e.g. graph
+/// validation), and the report is written after the compile call returns.
+pub const Collector = struct {
+    list: std.ArrayList(Diagnostic) = .empty,
+    /// Owns durable copies of diagnostic string fields.
+    arena: std.heap.ArenaAllocator,
+    mutex: std.Io.Mutex = .init,
+    io: std.Io,
+
+    pub fn init(gpa: std.mem.Allocator, io: std.Io) Collector {
+        return .{ .arena = std.heap.ArenaAllocator.init(gpa), .io = io };
+    }
+
+    pub fn append(self: *Collector, d: Diagnostic) void {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        const a = self.arena.allocator();
+        const owned: Diagnostic = .{
+            .severity = d.severity,
+            .code = d.code,
+            .message = a.dupe(u8, d.message) catch return,
+            .remediation = a.dupe(u8, d.remediation) catch return,
+            .source_path = a.dupe(u8, d.source_path) catch return,
+            .line = d.line,
+            .column = d.column,
+            .id = a.dupe(u8, d.id) catch return,
+        };
+        self.list.append(self.arena.child_allocator, owned) catch {};
+    }
+
+    pub fn deinit(self: *Collector) void {
+        self.list.deinit(self.arena.child_allocator);
+        self.arena.deinit();
+    }
+};
 
 test "sortDiagnostics orders by path then line" {
     var diags = [_]Diagnostic{

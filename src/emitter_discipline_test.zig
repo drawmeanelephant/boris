@@ -187,6 +187,9 @@ const modules = [_]Module{
     .{ .name = "hardening_test.zig", .class = .other },
     .{ .name = "html_body.zig", .class = .other },
     .{ .name = "html_nav.zig", .class = .other },
+    // Emitter: the HTML-path diagnostics report (`--report PATH`). Shares the
+    // IR report's json_out discipline and diagnostic-object key order.
+    .{ .name = "html_report.zig", .class = .{ .emitter = .{ .encoder = .json_out } }, .source = @embedFile("html_report.zig") },
     .{ .name = "html_relations.zig", .class = .other },
     .{ .name = "html_scan.zig", .class = .other },
     .{ .name = "html_toc.zig", .class = .other },

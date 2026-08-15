@@ -814,7 +814,7 @@ pub fn rewriteImageLinks(
     return try out.toOwnedSlice(allocator);
 }
 
-pub fn printDiagnostic(gpa: std.mem.Allocator, err: AssetError, source_path: []const u8, fail: FailInfo) void {
+pub fn printDiagnostic(gpa: std.mem.Allocator, err: AssetError, source_path: []const u8, fail: FailInfo, sink: ?*diag.Collector) void {
     const code: diag.Code = switch (err) {
         error.AssetPath => .EASSET,
         error.AssetMissing => .EASSET,
@@ -865,6 +865,7 @@ pub fn printDiagnostic(gpa: std.mem.Allocator, err: AssetError, source_path: []c
         .line = fail.line,
         .column = fail.column,
     };
+    if (sink) |s| s.append(d);
     if (diag.formatText(d, gpa)) |line| {
         defer gpa.free(line);
         std.debug.print("{s}\n", .{line});

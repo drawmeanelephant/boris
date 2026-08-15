@@ -76,6 +76,9 @@ pub const Options = struct {
     init_dir: ?[]const u8 = null,
     analysis_format: AnalysisFormat = .human,
     analysis_report: ?[]const u8 = null,
+    /// HTML-path diagnostics report path (`--report` on build/validate).
+    /// Written on both success and failure; see `html-build-report` schema.
+    report_path: ?[]const u8 = null,
     /// Make ordinary unreferenced-page analysis findings fatal for `check`.
     fail_on_unreferenced: bool = false,
     mode: Mode = .html,
@@ -839,7 +842,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or
             saw_rss_title or saw_rss_description or saw_rss_limit or saw_scope or
             saw_split_size or saw_bundles_only or saw_incremental or saw_watch or
-            saw_jobs or saw_format or saw_report)
+            saw_jobs or saw_format)
         {
             return error.ConflictingFlags;
         }
@@ -847,7 +850,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or wants_sitemap or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
             return error.ConflictingFlags;
         }
-    } else if ((command == .build or command == .watch) and (saw_format or saw_report)) {
+    } else if (command == .build and saw_format) {
+        return error.ConflictingFlags;
+    } else if (command == .watch and (saw_format or saw_report)) {
         return error.ConflictingFlags;
     }
 
@@ -908,6 +913,13 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         .ir
     else
         .html;
+
+    // The HTML-path diagnostics report (`--report`) belongs to the HTML mode.
+    // `check`/`impact` reuse the same flag name for their analysis report (see
+    // `analysis_report`), so only non-HTML build/watch runs must refuse it.
+    if (mode != .html and (command == .build or command == .watch) and saw_report) {
+        return error.ConflictingFlags;
+    }
 
     if (saw_pages_location and !(saw_pages_base_url and saw_pages_origin and saw_pages_base_path)) {
         return error.PagesLocationIncomplete;
@@ -1143,7 +1155,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .command = command,
             .impact_id = impact_id,
             .analysis_format = analysis_format,
-            .analysis_report = analysis_report,
+            .analysis_report = if (command == .check or command == .impact) analysis_report else null,
+            .report_path = if (command == .check or command == .impact) null else analysis_report,
             .fail_on_unreferenced = fail_on_unreferenced,
             .input_format = input_format,
         },
@@ -1626,7 +1639,19 @@ test "parse: validate selects HTML configuration without publication controls" {
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--incremental" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--jobs", "2" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--format", "json" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--report", "validation.json" }));
+    // `--report` is the HTML-path diagnostics surface: accepted on validate
+    // and build, still rejected on watch and on non-HTML build modes.
+    var with_report = try parseOptions(std.testing.allocator, &.{ "boris", "validate", "--report", "validation.json" });
+    defer with_report.deinit(std.testing.allocator);
+    try expectEqualStrings("validation.json", with_report.report_path.?);
+    try expect(with_report.analysis_report == null);
+
+    var build_report = try parseOptions(std.testing.allocator, &.{ "boris", "build", "--report", "build-report.json" });
+    defer build_report.deinit(std.testing.allocator);
+    try expectEqualStrings("build-report.json", build_report.report_path.?);
+
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "watch", "--report", "watch.json" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "build", "--out", ".boris", "--report", "x.json" }));
 }
 
 test "parse: --timings is opt-in and mode-agnostic" {

@@ -87,10 +87,15 @@ relation kinds, parent targets, layout slots). Nova and other editor
 integrations must consume these published contracts rather than
 reimplementing frontmatter or graph resolution.
 
-`validate` has no report artifact. It reuses canonical compiler diagnostics in
-their normal deterministic stderr form and exit classes; `--quiet` suppresses
-that text. `--format` and `--report` remain analysis-only flags and must not be
-accepted as an invitation to invent a second validation schema.
+The HTML path has its own machine-readable diagnostics report: `boris build
+--report PATH` and `boris validate --report PATH` write a deterministic JSON
+report on both success and failure (`html-build-report-0.1.0` schema, same
+diagnostic-object shape as the IR report). It covers every HTML-path
+diagnostic class — parse/graph, component, include, wiki-link, asset,
+link-audit, and layout/theme — and is the surface the preview server and
+editor consume. `--report` is rejected on `watch` and on non-HTML build modes;
+`--format` remains analysis-only. See
+[`diagnostics.md`](diagnostics.md#html-path-machine-readable-report).
 
 ## Version query
 
