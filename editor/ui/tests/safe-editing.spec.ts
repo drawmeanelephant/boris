@@ -944,6 +944,61 @@ test('the command palette disables guarded actions while dirty and opens files t
   await expect(resolution).toBeHidden();
 });
 
+test('the Ctrl+K palette runs Boris commands (#462)', async ({ page }) => {
+  await installApi(page, {
+    commands: { validate: commandResult('validate', { exit_code: 2, failure_class: 'usage' }) }
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  const input = palette.getByRole('combobox', { name: 'Filter commands' });
+  await input.fill('validate');
+  const commandRequest = page.waitForRequest('**/api/commands/run');
+  await input.press('Enter');
+  expect((await commandRequest).postDataJSON()).toMatchObject({ mode: 'validate' });
+  await expect(palette).toBeHidden();
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Usage or configuration failure (exit 2)');
+});
+
+test('the Ctrl+K palette saves the dirty buffer (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n');
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  const input = palette.getByRole('combobox', { name: 'Filter commands' });
+  await input.fill('save');
+  const saveRequest = page.waitForRequest('**/api/files/save');
+  await input.press('Enter');
+  expect((await saveRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', content: '# Draft\n' });
+  await expect(palette).toBeHidden();
+  await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
+});
+
+test('the Ctrl+K palette focuses the Source pane editor (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  const input = palette.getByRole('combobox', { name: 'Filter commands' });
+  await input.fill('focus source');
+  await input.press('Enter');
+  await expect(palette).toBeHidden();
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeFocused();
+});
+
+test('the palette marks editor commands by their enabled state (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  const options = palette.locator('[role="option"]');
+  await expect(options.filter({ hasText: 'Save file' })).toHaveAttribute('aria-disabled', 'true');
+  await expect(options.filter({ hasText: 'Validate project' })).toHaveAttribute('aria-disabled', 'false');
+  await expect(options.filter({ hasText: 'Rebuild preview' })).toHaveAttribute('aria-disabled', 'false');
+  await expect(options.filter({ hasText: 'Focus source pane' })).toHaveAttribute('aria-disabled', 'false');
+});
+
 test('explicit save rebuilds and reloads the real-output preview by keyboard', async ({ page }) => {
   await installApi(page);
   await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
