@@ -658,7 +658,10 @@
 <svelte:window onkeydown={handleShortcut} onbeforeunload={warnUnsaved} />
 
 <header>
-  <a class="skip-link" href="#workspace">Skip to workspace</a>
+  <a class="skip-link" href="#workspace" onclick={(event) => {
+    event.preventDefault();
+    document.getElementById('workspace')?.focus();
+  }}>Skip to workspace</a>
   <div>
     <p class="eyebrow">Local authoring environment</p>
     <h1>Boris Editor</h1>

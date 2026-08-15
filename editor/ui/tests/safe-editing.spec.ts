@@ -347,6 +347,21 @@ test('Delete dialog names the selected file and deletes exactly once (#461)', as
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Deleted content/index.md.');
 });
 
+test('Skip to workspace moves focus to the workspace landmark and keeps the session token (#447)', async ({ page }) => {
+  await installApi(page);
+  const skipLink = page.getByRole('link', { name: 'Skip to workspace' });
+  const workspace = page.locator('main#workspace');
+  await expect(workspace).toHaveAttribute('tabindex', '-1');
+  await page.keyboard.press('Tab');
+  await expect(skipLink).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(workspace).toBeFocused();
+  expect(await page.evaluate(() => window.location.hash)).toContain('token=');
+  await page.evaluate(() => (document.querySelector('.skip-link') as HTMLAnchorElement).click());
+  await expect(workspace).toBeFocused();
+  expect(await page.evaluate(() => window.location.hash)).toContain('token=');
+});
+
 test('Boris commands expose visible voice names and distinct exit classes', async ({ page }) => {
   await installApi(page, {
     commands: {
