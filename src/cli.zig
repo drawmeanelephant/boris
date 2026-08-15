@@ -128,6 +128,12 @@ pub const Options = struct {
     jobs: usize = 1,
     /// Opt-in local-development watch mode for HTML builds.
     watch: bool = false,
+    /// Serve the built HTML tree over loopback HTTP with reload-on-rebuild
+    /// (`watch --serve`). Requires watch mode.
+    serve: bool = false,
+    /// Loopback port for `--serve` (default `preview_server.default_port`;
+    /// `0` selects an ephemeral port). Implies `serve`.
+    serve_port: ?u16 = null,
     /// Dynamic target list.
     targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 },
 
@@ -234,6 +240,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_incremental = false;
     var saw_jobs = false;
     var saw_watch = false;
+    var saw_serve = false;
+    var serve_port: ?u16 = null;
     var saw_textile = false;
     var saw_cooklang = false;
     var saw_format = false;
@@ -458,6 +466,19 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         if (std.mem.eql(u8, a, "--watch")) {
             if (saw_watch) return error.DuplicateFlag;
             saw_watch = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--serve")) {
+            if (saw_serve) return error.DuplicateFlag;
+            saw_serve = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--port") or std.mem.startsWith(u8, a, "--port=")) {
+            if (serve_port != null) return error.DuplicateFlag;
+            const value = try takeValue(args, &i, a, "--port");
+            serve_port = std.fmt.parseUnsigned(u16, value, 10) catch return error.InvalidValue;
             continue;
         }
 
@@ -856,6 +877,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         return error.ConflictingFlags;
     }
 
+    // The preview server is a watch-mode surface (`boris watch --serve`).
+    if ((saw_serve or serve_port != null) and !saw_watch) return error.ConflictingFlags;
+
     // --- conflict matrix ---------------------------------------------------
     if (saw_rag and saw_no_rag) return error.ConflictingFlags;
     if (saw_no_rag and saw_rag_dir) return error.ConflictingFlags;
@@ -1151,6 +1175,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .incremental = saw_incremental or saw_watch,
             .jobs = jobs,
             .watch = saw_watch,
+            .serve = saw_serve or serve_port != null,
+            .serve_port = serve_port,
             .targets = targets,
             .command = command,
             .impact_id = impact_id,
@@ -1257,6 +1283,10 @@ pub fn printUsage() void {
         \\                      Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
         \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
         \\  --watch             Compatibility flag; same as the watch command
+        \\  --serve             Serve the built tree over loopback HTTP (watch only);
+        \\                      auto-reload helper: http://127.0.0.1:PORT/__boris/
+        \\  --port N            Loopback port for --serve (default 8090; 0 = ephemeral);
+        \\                      implies --serve
         \\  --jobs N, -j N      Bounded parallel HTML page workers (1–64; HTML mode; default 1; smoke-validated)
         \\  --timings           Print a machine-readable phase timing/counter JSON report to stdout
         \\                      (opt-in; default output, diagnostics, and exit codes unchanged)
@@ -1713,6 +1743,34 @@ test "parse: explicit build and watch commands are stable aliases" {
     try expectEqualStrings("docs", watch.input_dir);
 
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "watch", "--format", "json" }));
+}
+
+test "parse: watch --serve and --port (preview server)" {
+    // `watch --serve` enables the loopback preview server with the default port.
+    var serve = try parseOptions(std.testing.allocator, &.{ "boris", "watch", "--serve" });
+    defer serve.deinit(std.testing.allocator);
+    try expect(serve.watch);
+    try expect(serve.serve);
+    try expect(serve.serve_port == null);
+
+    // `--port` implies `--serve` and parses a u16.
+    var port = try parseOptions(std.testing.allocator, &.{ "boris", "watch", "--port", "8123" });
+    defer port.deinit(std.testing.allocator);
+    try expect(port.serve);
+    try expectEqual(@as(u16, 8123), port.serve_port.?);
+
+    // `--watch --serve` (flag form) works too.
+    var flag = try parseOptions(std.testing.allocator, &.{ "boris", "--watch", "--serve", "--port", "0" });
+    defer flag.deinit(std.testing.allocator);
+    try expect(flag.serve);
+    try expectEqual(@as(u16, 0), flag.serve_port.?);
+
+    // Serve requires watch mode; duplicates are usage errors.
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "build", "--serve" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--port", "8080" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "watch", "--serve", "--serve" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "watch", "--port", "1", "--port", "2" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "watch", "--port", "70000" }));
 }
 
 test "parse: init takes an optional target directory" {
