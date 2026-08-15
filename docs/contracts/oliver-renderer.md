@@ -103,6 +103,15 @@ context in the diagnostics surface; flipping a target to XHTML requires a
 raw-HTML sweep of its content first. The same bytes render fine under the
 `html` profile.
 
+**Known upstream gap (footnotes):** the pinned Oliver's footnote markers
+(`data-footnote-ref`, `data-footnotes`, `data-footnote-backref`) are
+hardcoded valueless attributes, so an XHTML target whose content uses
+footnotes produces XML that is *not* well-formed — the build does not fail
+closed on it (tracked upstream as [drawmeanelephant/oliver#60](https://github.com/drawmeanelephant/oliver/issues/60)).
+Until the pinned revision carries the fix, keep footnote use off XHTML
+targets; the evidence guard (`zig build test-xhtml-evidence`) verifies
+well-formedness on a footnote-free page.
+
 ## Cooklang seam (same pin)
 
 Boris consumes Oliver's Cooklang stack through the **same** `.oliver` pin for
