@@ -4,24 +4,15 @@
     .fingerprint = 0x6cd378330da76efc, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
-        // Renderer pin (Markdown -> HTML). The dialect extensions Boris's
-        // render seam requires (heading auto-ids, IALs, footnotes, definition
-        // lists, GFM strikethrough) live on Oliver's `boris-markdown-extensions`
-        // branch and are held off `main` by an embargo (oliver#39). See
-        // docs/contracts/oliver-renderer.md for the pin table.
+        // Oliver pin (shared). oliver#39 merged (c0b3d2b): the Markdown
+        // renderer extensions (heading auto-ids, IALs, footnotes, definition
+        // lists, GFM strikethrough) and the Cooklang stack now share one
+        // revision, so the former `.oliver_cooklang` split pin collapsed back
+        // into `.oliver`. See docs/contracts/oliver-renderer.md for the pin
+        // table.
         .oliver = .{
-            .url = "https://github.com/drawmeanelephant/oliver/archive/42cf472b635f8cbe9dad0da081b830f5db21c745.tar.gz",
-            .hash = "oliver-0.0.0-LOsZkB24HwCKTBQ9WYpJ9OP1ZKMdrF2lJoCZNU8j177O",
-        },
-        // Cooklang stack pin (Oliver `main`): the typed Recipe parser and its
-        // pure operations. Boris consumes `oliver.cooklang.parse` here and owns
-        // everything outside the parse: path/corpus resolution, frontmatter
-        // authority, Markdown rendering, and the IR `recipe` facet. Collapses
-        // back into `.oliver` when oliver#39 merges and both features share one
-        // revision.
-        .oliver_cooklang = .{
-            .url = "https://github.com/drawmeanelephant/oliver/archive/bcf167fa99d0267d015d8c14a9434150e77b14fe.tar.gz",
-            .hash = "oliver-0.0.0-LOsZkEhLGgDlZpXvoutXDnGHv9UgMQzvH1q9MPgL6EDA",
+            .url = "https://github.com/drawmeanelephant/oliver/archive/c0b3d2b683f0cecf2181b22a800908619e56d0d7.tar.gz",
+            .hash = "oliver-0.0.0-LOsZkAe_HwD1k4BLmgWJcT9AI3AopaxmZwjc2gx-23pz",
         },
     },
     .paths = .{
