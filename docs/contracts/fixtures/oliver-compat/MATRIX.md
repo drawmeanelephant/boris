@@ -1,6 +1,6 @@
 # Oliver compatibility matrix (through the Boris seam)
 
-Pin: Oliver `872b00217c31ae271bbd518dc9f3b6df97767185` (see
+Pin: Oliver `42cf472b635f8cbe9dad0da081b830f5db21c745` (see
 [`oliver-renderer.md`](../../oliver-renderer.md)). Classification legend in
 [`README.md`](README.md).
 

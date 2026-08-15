@@ -61,6 +61,12 @@ pub const RenderError = error{
     WriteFailed,
     /// The output writer ran out of space.
     NoSpaceLeft,
+    /// Oliver's renderer rejects content it cannot guarantee XML-well-formed
+    /// under the XHTML profile. Boris always renders with the default HTML
+    /// profile, so this member is structurally unreachable through this seam;
+    /// it exists so the error set tracks Oliver's public return type exactly
+    /// (compile-time seam review when Oliver's surface changes).
+    RawHtmlNotXmlWellFormed,
 };
 
 /// Zig-side view of rendered HTML.

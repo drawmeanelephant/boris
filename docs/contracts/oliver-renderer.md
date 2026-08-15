@@ -37,8 +37,8 @@ are valid until `arena.reset(.free_all)`.
 |-------|-------|
 | Repository | <https://github.com/drawmeanelephant/oliver> |
 | Branch | `boris-markdown-extensions` |
-| Commit | `872b00217c31ae271bbd518dc9f3b6df97767185` |
-| Package hash | `oliver-0.0.0-LOsZkNXyFQBUPCi88goqzMEzB1Buat5HZhgs7-cg9ztM` |
+| Commit | `42cf472b635f8cbe9dad0da081b830f5db21c745` |
+| Package hash | `oliver-0.0.0-LOsZkB24HwCKTBQ9WYpJ9OP1ZKMdrF2lJoCZNU8j177O` |
 | Zig | 0.16.0 |
 
 The pin lives in `build.zig.zon` (`.dependencies.oliver.url` + `.hash`). Zig
@@ -140,7 +140,7 @@ choice.
 | 1 | Fenced-code info attribute | `<pre lang="bash"><code>` | `<pre><code class="language-bash">` | Harmless formatting; the `class="language-"` convention is the CommonMark-recommended form. Content that relies on `lang=` styling is updated (none does). |
 | 2 | Smart typography | `'` → `’`, `"` → `“ ”` (Unified default) | Source bytes kept literal | Apex extension removed. Oliver keeps author bytes; no Boris contract required smart quotes. |
 | 3 | Table captions | `Table: X` / `: X` consumed into `<figure class="table-figure"><table data-caption="X">` | Caption line renders as ordinary paragraph text | Apex extension removed. Caption lines in published content were converted to visible bold lead-ins. |
-| 4 | Footnote anchor naming | `fn-<label>` / `fnref-<label>` (e.g. `fn-speed`) | `fn-<n>` / `fnref-<n>` (first-reference order) | Harmless internal naming; footnote links and back-refs are renderer-generated and self-consistent within a page. |
+| 4 | Footnote anchor naming | `fn-<label>` / `fnref-<label>` (e.g. `fn-speed`) | `fn-<n>` / `fnref-<n>` (first-reference order) | Harmless internal naming; footnote links and back-refs are renderer-generated and self-consistent within a page. The rereference scheme (`fnref-N` then `fnref-N-2`, one backref per reference) matches GFM/GitHub's `micromark-extension-gfm-footnote` (which "matches github.com"); Pandoc is number-based like Oliver's `fnref-<n>` but still emits duplicate ids for repeated references — the defect Oliver fixes (see `docs/MARKDOWN-EXTENSIONS.md` §1 provenance). |
 | 5 | Footnotes inside definition-list bodies | Ref left as literal `[^label]` text and **no footnote section emitted** | Ref renders as `<sup class="footnote-ref">` and the section renders | **Oliver fixes an Apex gap.** Footnotes are a published Boris construct; they now actually render inside `<dd>` bodies (see `technology-and-rationale.md`). |
 | 6 | Paragraph structure | Merged consecutive paragraphs whose next line starts with `**…**`; lazy `</p>` placement | One `<p>` per paragraph (CommonMark-correct) | Oliver standards correction. |
 | 7 | Table false-positive | A paragraph containing `—|—|` was misparsed as a table | Plain paragraph | Oliver correct (no delimiter row present). |
