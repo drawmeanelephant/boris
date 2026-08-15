@@ -510,12 +510,14 @@
       editorStatus = `External changes detected in ${activePath}. Nothing was overwritten.`;
       await tick();
       conflictDialog.showModal();
+      conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
     } else if (result.response.status === 409 && error.status === 'deleted') {
       conflict = null;
       deletedConflict = true;
       editorStatus = `${activePath} was deleted outside the editor. Nothing was written.`;
       await tick();
       conflictDialog.showModal();
+      conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
     } else if (error.error === 'read_only') {
       readOnly = true;
       editorStatus = `${activePath} is read-only. Nothing was written.`;
@@ -651,6 +653,11 @@
   function openRenameDialog() {
     renamePath = activePath;
     renameDialog.showModal();
+  }
+
+  function openDeleteDialog() {
+    deleteDialog.showModal();
+    deleteDialog.querySelector<HTMLButtonElement>('.dialog-actions .danger')?.focus();
   }
 
   async function renameFile() {
@@ -806,7 +813,7 @@
     <div class="file-actions" aria-label="File actions">
       <button type="button" disabled={dirty} onclick={() => createDialog.showModal()}>Create file</button>
       <button type="button" disabled={!activePath || dirty} onclick={openRenameDialog}>Rename file</button>
-      <button type="button" class="danger" disabled={!activePath || dirty} onclick={() => deleteDialog.showModal()}>Delete file</button>
+      <button type="button" class="danger" disabled={!activePath || dirty} onclick={openDeleteDialog}>Delete file</button>
     </div>
     <nav class="file-tree" aria-label="Project files">
       {#if files.length === 0}
@@ -1073,9 +1080,9 @@
     <label for="deleted-version">Your unsaved version</label>
     <textarea id="deleted-version" readonly value={content}></textarea>
     <div class="dialog-actions">
-      <button type="button" onclick={() => conflictDialog.close()}>Keep editing</button>
+      <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
       <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
-      <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file</button>
+      <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
     </div>
   {:else if conflict}
     <p>{activePath} changed on disk after you opened it. Compare both versions before choosing.</p>
@@ -1090,9 +1097,9 @@
       </div>
     </div>
     <div class="dialog-actions">
-      <button type="button" onclick={() => conflictDialog.close()}>Keep editing</button>
+      <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
       <button type="button" onclick={loadDiskVersion}>Load disk version</button>
-      <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version</button>
+      <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version<kbd>Enter</kbd></button>
     </div>
   {/if}
 </dialog>
@@ -1114,8 +1121,8 @@
     <label for="create-path">New file path</label>
     <input id="create-path" bind:value={createPath} />
     <div class="dialog-actions">
-      <button type="button" onclick={() => createDialog.close()}>Cancel</button>
-      <button type="submit" class="primary">Create file</button>
+      <button type="button" onclick={() => createDialog.close()}>Cancel<kbd>Esc</kbd></button>
+      <button type="submit" class="primary">Create file<kbd>Enter</kbd></button>
     </div>
   </form>
 </dialog>
@@ -1127,8 +1134,8 @@
     <label for="rename-path">New file path</label>
     <input id="rename-path" bind:value={renamePath} />
     <div class="dialog-actions">
-      <button type="button" onclick={() => renameDialog.close()}>Cancel</button>
-      <button type="submit" class="primary">Rename file</button>
+      <button type="button" onclick={() => renameDialog.close()}>Cancel<kbd>Esc</kbd></button>
+      <button type="submit" class="primary">Rename file<kbd>Enter</kbd></button>
     </div>
   </form>
 </dialog>
@@ -1137,8 +1144,8 @@
   <h2 id="delete-heading">Delete file</h2>
   <p>Delete {activePath || 'selected file'}? This changes the project immediately and cannot be undone in Boris Editor.</p>
   <div class="dialog-actions">
-    <button type="button" onclick={() => deleteDialog.close()}>Cancel</button>
-    <button type="button" class="danger" onclick={deleteFile}>Delete {activePath || 'file'}</button>
+    <button type="button" onclick={() => deleteDialog.close()}>Cancel<kbd>Esc</kbd></button>
+    <button type="button" class="danger" onclick={deleteFile}>Delete {activePath || 'file'}<kbd>Enter</kbd></button>
   </div>
 </dialog>
 

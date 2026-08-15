@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 type MockOptions = {
   saveConflict?: boolean;
+  saveConflictOnce?: boolean;
   recovery?: Array<{ path: string; content: string; fingerprint: string }>;
   disk?: string;
   commands?: Partial<Record<string, CommandResult>>;
@@ -71,6 +72,7 @@ async function installApi(page: Page, options: MockOptions = {}) {
   let fingerprint = 'a'.repeat(64);
   let authoringRequest = 0;
   let previewRebuild = 0;
+  let conflictOnceRemaining = options.saveConflictOnce ? 1 : 0;
 
   await page.route('**/api/health', route => route.fulfill({
     contentType: 'application/json',
@@ -99,7 +101,8 @@ async function installApi(page: Page, options: MockOptions = {}) {
   });
   await page.route('**/api/files/save', async route => {
     const body = route.request().postDataJSON() as { path: string; content: string };
-    if (options.saveConflict) {
+    if (options.saveConflict || conflictOnceRemaining > 0) {
+      if (conflictOnceRemaining > 0) conflictOnceRemaining -= 1;
       await route.fulfill({
         status: 409,
         contentType: 'application/json',
@@ -219,11 +222,65 @@ test('external edits open an explicit two-version conflict dialog', async ({ pag
   await expect(dialog.getByRole('textbox', { name: 'Your unsaved version' })).toHaveValue('# Mine\n');
   await expect(dialog.getByRole('textbox', { name: 'Current disk version' })).toHaveValue('# Changed elsewhere\n');
   for (const name of ['Keep editing', 'Load disk version', 'Replace disk version']) {
-    await expect(dialog.getByRole('button', { name, exact: true })).toHaveText(name);
+    await expect(dialog.getByRole('button', { name: new RegExp(name) })).toContainText(name);
   }
   await dialog.getByRole('button', { name: 'Load disk version' }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Changed elsewhere\n');
+});
+
+test('Enter confirms the Delete dialog primary action with a visible hint (#462)', async ({ page }) => {
+  await installApi(page);
+  let deleteRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/delete')) deleteRequests += 1;
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('button', { name: 'Delete file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Delete file' });
+  await expect(dialog).toBeVisible();
+  const confirm = dialog.getByRole('button', { name: /Delete content\/index\.md/ });
+  await expect(confirm).toContainText('Enter');
+  await expect(dialog.getByRole('button', { name: /Cancel/ })).toContainText('Esc');
+  await expect(confirm).toBeFocused();
+  const deleteRequest = page.waitForRequest('**/api/files/delete');
+  await page.keyboard.press('Enter');
+  expect((await deleteRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', confirmed: true });
+  await expect(dialog).toBeHidden();
+  expect(deleteRequests).toBe(1);
+});
+
+test('Enter confirms the conflict dialog primary action with a visible hint (#462)', async ({ page }) => {
+  await installApi(page, { saveConflictOnce: true });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Mine\n');
+  await page.getByRole('button', { name: 'Save file', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'External changes detected' });
+  await expect(dialog).toBeVisible();
+  const primary = dialog.getByRole('button', { name: /Replace disk version/ });
+  await expect(primary).toBeFocused();
+  await expect(primary).toContainText('Enter');
+  const saveRequest = page.waitForRequest('**/api/files/save');
+  await page.keyboard.press('Enter');
+  expect((await saveRequest).postDataJSON()).toMatchObject({
+    path: 'content/index.md', content: '# Mine\n', fingerprint: 'b'.repeat(64)
+  });
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saved content/index.md.');
+});
+
+test('Create and Rename dialogs show visible Enter and Esc key hints (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'Create file', exact: true }).click();
+  const create = page.getByRole('dialog', { name: 'Create file' });
+  await expect(create.getByRole('button', { name: /Create file/ })).toContainText('Enter');
+  await expect(create.getByRole('button', { name: /Cancel/ })).toContainText('Esc');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('button', { name: 'Rename file', exact: true }).click();
+  const rename = page.getByRole('dialog', { name: 'Rename file' });
+  await expect(rename.getByRole('button', { name: /Rename file/ })).toContainText('Enter');
+  await expect(rename.getByRole('button', { name: /Cancel/ })).toContainText('Esc');
 });
 
 test('recovery is announced and restored only on an explicit named action', async ({ page }) => {
@@ -284,7 +341,7 @@ test('native file dialogs are keyboard-dismissible and all controls have visible
   const dialog = page.getByRole('dialog', { name: 'Create file' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('textbox', { name: 'New file path' })).toBeFocused();
-  await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toHaveText('Cancel');
+  await expect(dialog.getByRole('button', { name: /Cancel/ })).toContainText('Cancel');
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
 });
@@ -350,7 +407,7 @@ test('the Create file primary button still submits the same action (#459)', asyn
   await page.getByRole('button', { name: 'Create file', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Create file' });
   await dialog.getByRole('textbox', { name: 'New file path' }).fill('content/posts/button-post.md');
-  await dialog.getByRole('button', { name: 'Create file', exact: true }).click();
+  await dialog.getByRole('button', { name: /Create file/ }).click();
   await expect(dialog).toBeHidden();
   expect(createRequests).toBe(1);
 });
@@ -361,7 +418,7 @@ test('Delete dialog falls back to a named placeholder when no file is selected (
   expect(await dialog.locator('p').first().textContent()).toBe(
     'Delete selected file? This changes the project immediately and cannot be undone in Boris Editor.'
   );
-  expect(await dialog.locator('.dialog-actions .danger').textContent()).toBe('Delete file');
+  expect(await dialog.locator('.dialog-actions .danger').textContent()).toContain('Delete file');
 });
 
 test('Delete dialog names the selected file and deletes exactly once (#461)', async ({ page }) => {
@@ -376,7 +433,7 @@ test('Delete dialog names the selected file and deletes exactly once (#461)', as
   await expect(dialog).toBeVisible();
   await expect(dialog.locator('p').first()).toContainText('Delete content/index.md?');
   const deleteRequest = page.waitForRequest('**/api/files/delete');
-  await dialog.getByRole('button', { name: 'Delete content/index.md', exact: true }).click();
+  await dialog.getByRole('button', { name: /Delete content\/index\.md/ }).click();
   expect((await deleteRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', confirmed: true });
   await expect(dialog).toBeHidden();
   expect(deleteRequests).toBe(1);
@@ -411,7 +468,7 @@ test('modal dialogs trap keyboard focus while open (#460)', async ({ page }) => 
     await page.keyboard.press('Tab');
     expect(await insideDialog()).toBe(true);
   }
-  await expect(dialog.getByRole('button', { name: 'Create file', exact: true })).toBeFocused();
+  await expect(dialog.getByRole('button', { name: /Create file/ })).toBeFocused();
   for (let i = 0; i < 8; i++) {
     await page.keyboard.press('Shift+Tab');
     expect(await insideDialog()).toBe(true);
