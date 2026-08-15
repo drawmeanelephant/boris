@@ -11,6 +11,46 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Portable AT Protocol OAuth primitives. This module has no host I/O,
+    // clock, filesystem, or ambient-randomness dependency; consumers provide
+    // those capabilities at their platform boundary.
+    const atproto_oauth_mod = b.addModule("atproto_oauth", .{
+        .root_source_file = b.path("src/atproto_oauth.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const atproto_oauth_tests = b.addTest(.{ .root_module = atproto_oauth_mod });
+    const run_atproto_oauth_tests = b.addRunArtifact(atproto_oauth_tests);
+    run_atproto_oauth_tests.setCwd(b.path("."));
+
+    // A compile-only portability gate: the core must stay usable without an
+    // operating system. Host adapters are intentionally tested elsewhere.
+    const freestanding_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+        .abi = .none,
+    });
+    const atproto_oauth_freestanding_mod = b.createModule(.{
+        .root_source_file = b.path("src/atproto_oauth.zig"),
+        .target = freestanding_target,
+        .optimize = .ReleaseSafe,
+    });
+    const atproto_oauth_freestanding = b.addObject(.{
+        .name = "atproto-oauth-freestanding",
+        .root_module = atproto_oauth_freestanding_mod,
+    });
+    const check_atproto_oauth_freestanding = b.step(
+        "check-atproto-oauth-freestanding",
+        "Compile the ATProto OAuth core for wasm32-freestanding",
+    );
+    check_atproto_oauth_freestanding.dependOn(&atproto_oauth_freestanding.step);
+    const test_atproto_oauth = b.step(
+        "test-atproto-oauth",
+        "Run ATProto OAuth core tests and its freestanding compile gate",
+    );
+    test_atproto_oauth.dependOn(&run_atproto_oauth_tests.step);
+    test_atproto_oauth.dependOn(check_atproto_oauth_freestanding);
+
     // Oliver: freestanding Zig markup library (source bytes → typed document
     // → deterministic HTML). Pinned by content hash in build.zig.zon; see
     // docs/contracts/oliver-renderer.md for the exact revision and the
@@ -1150,6 +1190,7 @@ pub fn build(b: *std.Build) void {
     test_github_pages_audit_step.dependOn(&github_pages_audit_test.step);
 
     const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(test_atproto_oauth);
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_fixtures_tests.step);
     test_step.dependOn(&run_scanner_tests.step);
