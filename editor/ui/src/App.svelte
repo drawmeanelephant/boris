@@ -24,7 +24,8 @@
   type PendingResolution =
     | { action: 'open'; target: string }
     | { action: 'command'; mode: CommandMode }
-    | { action: 'preview'; reason: 'save' | 'manual' };
+    | { action: 'preview'; reason: 'save' | 'manual' }
+    | { action: 'restore'; snapshot: RecoverySnapshot };
   type Problem = {
     severity: 'error' | 'warning' | 'info';
     code: string | null;
@@ -116,9 +117,10 @@
     if (!pending) return '';
     if (pending.action === 'open') return `Save or discard the changes before opening ${pending.target}?`;
     if (pending.action === 'command') return `Boris commands read repository files from disk. Save or discard the changes before running ${commandLabel(pending.mode)}?`;
+    if (pending.action === 'restore') return `Save or discard the changes before restoring ${pending.snapshot.path}?`;
     return 'Save or discard the changes before rebuilding the preview?';
   })();
-  $: resolutionVerb = pendingResolution?.action === 'open' ? 'switch' : pendingResolution?.action === 'command' ? 'run' : 'rebuild';
+  $: resolutionVerb = pendingResolution?.action === 'open' ? 'switch' : pendingResolution?.action === 'command' ? 'run' : pendingResolution?.action === 'restore' ? 'restore' : 'rebuild';
 
   const token = new URLSearchParams(window.location.hash.slice(1)).get('token') ?? '';
 
@@ -555,6 +557,8 @@
       await openFile(pending.target);
     } else if (pending.action === 'command') {
       await runCommand(pending.mode);
+    } else if (pending.action === 'restore') {
+      await restoreSnapshot(pending.snapshot);
     } else {
       await rebuildPreview(pending.reason);
     }
@@ -606,7 +610,7 @@
 
   async function restoreSnapshot(snapshot: RecoverySnapshot) {
     if (dirty) {
-      editorStatus = `Save or undo changes to ${activePath} before restoring recovered work.`;
+      await requestResolution({ action: 'restore', snapshot });
       return;
     }
     const opened = await api<BufferResponse>('/api/files/open', {
