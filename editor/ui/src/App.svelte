@@ -1018,10 +1018,10 @@
 
 <dialog bind:this={deleteDialog} aria-labelledby="delete-heading">
   <h2 id="delete-heading">Delete file</h2>
-  <p>Delete {activePath}? This changes the project immediately and cannot be undone in Boris Editor.</p>
+  <p>Delete {activePath || 'selected file'}? This changes the project immediately and cannot be undone in Boris Editor.</p>
   <div class="dialog-actions">
     <button type="button" onclick={() => deleteDialog.close()}>Cancel</button>
-    <button type="button" class="danger" onclick={deleteFile}>Delete {activePath}</button>
+    <button type="button" class="danger" onclick={deleteFile}>Delete {activePath || 'file'}</button>
   </div>
 </dialog>
 
