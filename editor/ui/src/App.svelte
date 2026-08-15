@@ -789,7 +789,7 @@
               tabindex="-1"
               aria-selected={suggestionIndex === selectedSuggestion}
               class:selected={suggestionIndex === selectedSuggestion}
-              onclick={() => { selectedSuggestion = suggestionIndex; void insertSuggestion(suggestion); }}
+              onclick={() => { selectedSuggestion = suggestionIndex; }}
               onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); void insertSuggestion(suggestion); } }}
             >
               <strong>{suggestion.value}</strong><span>{suggestion.detail}</span>
