@@ -1,9 +1,9 @@
 //! Portable, capability-based transport seam for AT Protocol discovery.
 //!
 //! This module defines no sockets, DNS, clocks, files, proxy lookup, or other
-//! host behavior. Discovery asks for one bounded JSON GET at an already
-//! validated URL. A host adapter or deterministic test double supplies the
-//! capability.
+//! host behavior. Discovery asks for bounded GETs at already validated URLs.
+//! A host adapter or deterministic test double supplies the capability; no
+//! adapter follows redirects without portable policy code validating the hop.
 
 const std = @import("std");
 
@@ -24,7 +24,10 @@ pub const Error = std.mem.Allocator.Error || error{
 };
 
 pub const Method = enum { get };
-pub const RedirectPolicy = enum { forbid };
+/// Native adapters never redirect implicitly. `manual_https` permits a 3xx
+/// response to cross the capability boundary so portable policy code can
+/// validate and issue the next HTTPS request itself.
+pub const RedirectPolicy = enum { forbid, manual_https };
 
 pub const Header = struct {
     name: []const u8,
@@ -115,7 +118,6 @@ pub const Client = struct {
 
     pub fn request(client: Client, allocator: std.mem.Allocator, request_value: Request) Error!Response {
         if (request_value.url.len == 0 or request_value.url.len > max_url_bytes) return error.UnsafeTarget;
-        if (request_value.redirect_policy != .forbid) return error.RedirectRejected;
         try validateHeaders(request_value.headers, request_value.limits);
         return client.request_fn(client.context, allocator, request_value);
     }

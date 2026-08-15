@@ -91,6 +91,46 @@ pub fn build(b: *std.Build) void {
     test_atproto_discovery.dependOn(&run_atproto_transport_std_tests.step);
     test_atproto_discovery.dependOn(check_atproto_oauth_freestanding);
 
+    // Portable handle resolution composes an injected DNS TXT capability with
+    // the existing HTTPS and DID authority chain. The native DNS wire adapter
+    // remains host-only and is tested independently.
+    const atproto_handle_mod = b.addModule("atproto_handle", .{
+        .root_source_file = b.path("src/atproto_handle.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const atproto_handle_tests = b.addTest(.{ .root_module = atproto_handle_mod });
+    const run_atproto_handle_tests = b.addRunArtifact(atproto_handle_tests);
+    run_atproto_handle_tests.setCwd(b.path("."));
+
+    const atproto_dns_std_mod = b.createModule(.{
+        .root_source_file = b.path("src/atproto_dns_std.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const atproto_dns_std_tests = b.addTest(.{ .root_module = atproto_dns_std_mod });
+    const run_atproto_dns_std_tests = b.addRunArtifact(atproto_dns_std_tests);
+    run_atproto_dns_std_tests.setCwd(b.path("."));
+
+    const atproto_handle_freestanding_mod = b.createModule(.{
+        .root_source_file = b.path("src/atproto_handle.zig"),
+        .target = freestanding_target,
+        .optimize = .ReleaseSafe,
+    });
+    const atproto_handle_freestanding = b.addObject(.{
+        .name = "atproto-handle-freestanding",
+        .root_module = atproto_handle_freestanding_mod,
+    });
+    check_atproto_oauth_freestanding.dependOn(&atproto_handle_freestanding.step);
+
+    const test_atproto_handles = b.step(
+        "test-atproto-handles",
+        "Run ATProto handle, DNS, bidirectional-verification, and freestanding gates",
+    );
+    test_atproto_handles.dependOn(&run_atproto_handle_tests.step);
+    test_atproto_handles.dependOn(&run_atproto_dns_std_tests.step);
+    test_atproto_handles.dependOn(check_atproto_oauth_freestanding);
+
     // Oliver: freestanding Zig markup library (source bytes → typed document
     // → deterministic HTML). Pinned by content hash in build.zig.zon; see
     // docs/contracts/oliver-renderer.md for the exact revision and the
@@ -1232,6 +1272,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(test_atproto_oauth);
     test_step.dependOn(test_atproto_discovery);
+    test_step.dependOn(test_atproto_handles);
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_fixtures_tests.step);
     test_step.dependOn(&run_scanner_tests.step);

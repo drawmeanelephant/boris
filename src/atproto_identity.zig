@@ -8,6 +8,7 @@ const std = @import("std");
 const transport = @import("atproto_transport.zig");
 
 pub const max_did_bytes = 2048;
+pub const max_handle_bytes = 253;
 pub const max_origin_bytes = 512;
 pub const max_endpoint_bytes = transport.max_url_bytes;
 pub const max_json_nesting = 16;
@@ -24,6 +25,7 @@ pub const Error = transport.Error || std.mem.Allocator.Error || error{
     InvalidContentType,
     InvalidDid,
     InvalidEndpoint,
+    InvalidHandle,
     InvalidIssuer,
     InvalidOrigin,
     InvalidPdsService,
@@ -31,6 +33,7 @@ pub const Error = transport.Error || std.mem.Allocator.Error || error{
     JsonTooDeep,
     MalformedJson,
     MissingPdsService,
+    HandleMismatch,
     UnsupportedDidMethod,
     UnexpectedStatus,
 };
@@ -82,6 +85,66 @@ pub const Did = struct {
             .plc => std.fmt.bufPrint(&buffer, "https://plc.directory/{s}", .{did.slice()}) catch return error.InvalidEndpoint,
             .web => std.fmt.bufPrint(&buffer, "https://{s}/.well-known/did.json", .{did.slice()["did:web:".len..]}) catch return error.InvalidEndpoint,
         };
+        return Endpoint.parse(url);
+    }
+};
+
+/// Normalized ATProto handle syntax. Parsing is deliberately distinct from
+/// production resolution policy: reserved names remain syntactically valid,
+/// but `requireResolutionAllowed` rejects them before network use.
+pub const Handle = struct {
+    bytes: [max_handle_bytes]u8 = undefined,
+    len: u8,
+
+    pub fn parse(input: []const u8) Error!Handle {
+        if (input.len == 0 or input.len > max_handle_bytes) return error.InvalidHandle;
+        var result: Handle = .{ .len = @intCast(input.len) };
+        for (input, 0..) |byte, index| {
+            if (byte >= 0x80) return error.InvalidHandle;
+            result.bytes[index] = std.ascii.toLower(byte);
+        }
+        const normalized = result.slice();
+        if (std.mem.indexOfScalar(u8, normalized, '.') == null or normalized[0] == '.' or normalized[normalized.len - 1] == '.') {
+            return error.InvalidHandle;
+        }
+        var labels = std.mem.splitScalar(u8, normalized, '.');
+        var last: []const u8 = undefined;
+        while (labels.next()) |label| {
+            if (label.len == 0 or label.len > 63 or label[0] == '-' or label[label.len - 1] == '-') {
+                return error.InvalidHandle;
+            }
+            for (label) |byte| {
+                if (!std.ascii.isAlphanumeric(byte) and byte != '-') return error.InvalidHandle;
+            }
+            last = label;
+        }
+        if (!std.ascii.isAlphabetic(last[0])) return error.InvalidHandle;
+        return result;
+    }
+
+    pub fn slice(handle: *const Handle) []const u8 {
+        return handle.bytes[0..handle.len];
+    }
+
+    pub fn eql(a: *const Handle, b: *const Handle) bool {
+        return std.mem.eql(u8, a.slice(), b.slice());
+    }
+
+    pub fn requireResolutionAllowed(handle: *const Handle) Error!void {
+        const text = handle.slice();
+        const tld = text[(std.mem.lastIndexOfScalar(u8, text, '.') orelse unreachable) + 1 ..];
+        inline for (.{ "alt", "arpa", "example", "internal", "invalid", "local", "localhost", "onion", "test" }) |blocked| {
+            if (std.mem.eql(u8, tld, blocked)) return error.InvalidHandle;
+        }
+    }
+
+    pub fn httpsResolutionUrl(handle: *const Handle) Error!Endpoint {
+        var buffer: [max_endpoint_bytes]u8 = undefined;
+        const url = std.fmt.bufPrint(
+            &buffer,
+            "https://{s}/.well-known/atproto-did",
+            .{handle.slice()},
+        ) catch return error.InvalidEndpoint;
         return Endpoint.parse(url);
     }
 };
@@ -138,8 +201,17 @@ pub const AuthorizationServerMetadata = struct {
     pushed_authorization_request_endpoint: Endpoint,
 };
 
+pub const DidDocument = struct {
+    did: Did,
+    pds_origin: Origin,
+    /// First syntactically valid `at://handle` entry, per the ordered ATProto
+    /// DID-document rule. Presence alone is not authentication.
+    claimed_handle: ?Handle,
+};
+
 pub const DiscoveredAccount = struct {
     did: Did,
+    verified_handle: ?Handle,
     pds_origin: Origin,
     authorization_server_origin: Origin,
     authorization_endpoint: Endpoint,
@@ -149,10 +221,35 @@ pub const DiscoveredAccount = struct {
 
 pub fn discover(allocator: std.mem.Allocator, client: transport.Client, configured_did: []const u8) Error!DiscoveredAccount {
     const did = try Did.parse(configured_did);
+    const document = try resolveDidDocument(allocator, client, did);
+    return discoverResolvedDocument(allocator, client, document, null);
+}
+
+pub fn resolveDidDocument(
+    allocator: std.mem.Allocator,
+    client: transport.Client,
+    did: Did,
+) Error!DidDocument {
     const did_url = try did.resolutionUrl();
     var did_response = try getJson(allocator, client, did_url, did_document_limits, true);
     defer did_response.deinit();
-    const pds = try validateDidDocument(allocator, did, did_response.body);
+    return validateDidDocument(allocator, did, did_response.body);
+}
+
+/// Continues authority discovery from one already-resolved DID document. This
+/// avoids a second DID fetch between handle verification and OAuth binding.
+pub fn discoverResolvedDocument(
+    allocator: std.mem.Allocator,
+    client: transport.Client,
+    document: DidDocument,
+    verified_handle: ?Handle,
+) Error!DiscoveredAccount {
+    if (verified_handle) |handle| {
+        try handle.requireResolutionAllowed();
+        const claimed = document.claimed_handle orelse return error.HandleMismatch;
+        if (!handle.eql(&claimed)) return error.HandleMismatch;
+    }
+    const pds = document.pds_origin;
 
     const resource_url = try pds.wellKnown("oauth-protected-resource");
     var resource_response = try getJson(allocator, client, resource_url, resource_metadata_limits, false);
@@ -169,7 +266,8 @@ pub fn discover(allocator: std.mem.Allocator, client: transport.Client, configur
     );
 
     return .{
-        .did = did,
+        .did = document.did,
+        .verified_handle = verified_handle,
         .pds_origin = pds,
         .authorization_server_origin = authorization.issuer,
         .authorization_endpoint = authorization.authorization_endpoint,
@@ -178,7 +276,7 @@ pub fn discover(allocator: std.mem.Allocator, client: transport.Client, configur
     };
 }
 
-pub fn validateDidDocument(allocator: std.mem.Allocator, expected: Did, body: []const u8) Error!Origin {
+pub fn validateDidDocument(allocator: std.mem.Allocator, expected: Did, body: []const u8) Error!DidDocument {
     try validateJsonEnvelope(body);
     var parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{
         .max_value_len = max_json_value_bytes,
@@ -191,6 +289,7 @@ pub fn validateDidDocument(allocator: std.mem.Allocator, expected: Did, body: []
     };
     const document_id = jsonString(document.get("id") orelse return error.MalformedJson) orelse return error.MalformedJson;
     if (!std.mem.eql(u8, document_id, expected.slice())) return error.DidDocumentIdMismatch;
+    const claimed_handle = parseClaimedHandle(document.get("alsoKnownAs"));
     const services = switch (document.get("service") orelse return error.MissingPdsService) {
         .array => |array| array,
         else => return error.InvalidPdsService,
@@ -206,9 +305,24 @@ pub fn validateDidDocument(allocator: std.mem.Allocator, expected: Did, body: []
         if (!isPdsServiceId(service_id, expected.slice()) or
             !std.mem.eql(u8, service_type, "AtprotoPersonalDataServer")) continue;
         const endpoint = jsonString(service.get("serviceEndpoint") orelse return error.InvalidPdsService) orelse return error.InvalidPdsService;
-        return Origin.parse(endpoint) catch error.InvalidPdsService;
+        const pds_origin = Origin.parse(endpoint) catch return error.InvalidPdsService;
+        return .{ .did = expected, .pds_origin = pds_origin, .claimed_handle = claimed_handle };
     }
     return error.MissingPdsService;
+}
+
+fn parseClaimedHandle(value: ?std.json.Value) ?Handle {
+    const aliases = switch (value orelse return null) {
+        .array => |array| array,
+        else => return null,
+    };
+    for (aliases.items) |alias_value| {
+        const alias = jsonString(alias_value) orelse continue;
+        if (!std.mem.startsWith(u8, alias, "at://")) continue;
+        const handle = Handle.parse(alias["at://".len..]) catch continue;
+        return handle;
+    }
+    return null;
 }
 
 pub fn validateResourceMetadata(
@@ -506,8 +620,9 @@ test "DID document validates identity and first matching PDS service" {
         \\{"id":"did:plc:ewvi7nxzyoun6zhxrhs64oiz#atproto_pds","type":"AtprotoPersonalDataServer","serviceEndpoint":"https://second.example.com"}
         \\]}
     ;
-    const pds = try validateDidDocument(std.testing.allocator, did, relative);
-    try std.testing.expectEqualStrings("https://pds.example.com", pds.slice());
+    const document = try validateDidDocument(std.testing.allocator, did, relative);
+    try std.testing.expectEqualStrings("https://pds.example.com", document.pds_origin.slice());
+    try std.testing.expectEqualStrings("untrusted.example.com", document.claimed_handle.?.slice());
 
     try std.testing.expectError(error.DidDocumentIdMismatch, validateDidDocument(
         std.testing.allocator,
@@ -526,8 +641,8 @@ test "DID document validates identity and first matching PDS service" {
         \\{"id":"did:plc:ewvi7nxzyoun6zhxrhs64oiz#atproto_pds","type":"AtprotoPersonalDataServer","serviceEndpoint":"https://qualified.example.com"}
         \\]}
     ;
-    const qualified_pds = try validateDidDocument(std.testing.allocator, did, fully_qualified);
-    try std.testing.expectEqualStrings("https://qualified.example.com", qualified_pds.slice());
+    const qualified_document = try validateDidDocument(std.testing.allocator, did, fully_qualified);
+    try std.testing.expectEqualStrings("https://qualified.example.com", qualified_document.pds_origin.slice());
     try std.testing.expectError(error.InvalidPdsService, validateDidDocument(
         std.testing.allocator,
         did,
