@@ -240,6 +240,42 @@ test('recovery is announced and restored only on an explicit named action', asyn
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Recovered unsaved work');
 });
 
+test('restoring recovered work while dirty offers Save & restore and Discard & restore (#462)', async ({ page }) => {
+  await installApi(page, {
+    recovery: [{ path: 'content/guides/getting-started.md', content: '# Recovered guide\n', fingerprint: 'a'.repeat(64) }]
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await editor.fill('# Draft\n');
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+  const recovery = page.getByRole('complementary', { name: 'Recovered unsaved work' });
+  const restore = recovery.getByRole('button', { name: 'Restore content/guides/getting-started.md', exact: true });
+  await restore.click();
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('p').first()).toContainText('content/guides/getting-started.md');
+  await expect(dialog.getByRole('button', { name: 'Save & restore', exact: true })).toHaveText('Save & restore');
+
+  // Cancel keeps the dirty buffer and does not restore.
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(editor).toHaveValue('# Draft\n');
+
+  // Discard & restore drops the buffer without saving, then restores the recovered work.
+  let saveRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/save')) saveRequests += 1;
+  });
+  const openRequest = page.waitForRequest('**/api/files/open');
+  await restore.click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Discard & restore', exact: true }).click();
+  expect((await openRequest).postDataJSON()).toMatchObject({ path: 'content/guides/getting-started.md' });
+  expect(saveRequests).toBe(0);
+  await expect(page.getByRole('textbox', { name: 'Source for content/guides/getting-started.md' })).toHaveValue('# Recovered guide\n');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Recovered unsaved work for content/guides/getting-started.md.');
+});
+
 test('native file dialogs are keyboard-dismissible and all controls have visible names', async ({ page }) => {
   await installApi(page);
   const create = page.getByRole('button', { name: 'Create file', exact: true });
