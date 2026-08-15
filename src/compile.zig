@@ -63,6 +63,8 @@ const search_index = @import("search_index.zig");
 const site_url = @import("site_url.zig");
 const github_pages = @import("github_pages.zig");
 const sitemap = @import("sitemap.zig");
+const standard_site = @import("standard_site.zig");
+const standard_site_emit = @import("standard_site_emit.zig");
 const link_audit = @import("link_audit.zig");
 const publication_location = @import("publication_location.zig");
 const artifact_inventory = @import("artifact_inventory.zig");
@@ -304,6 +306,14 @@ pub const CompileOptions = struct {
     /// Normalized publication identity used to audit Pages base paths and
     /// public metadata. The caller owns the pointed-to location.
     publication_location: ?*const publication_location.Location = null,
+    /// Opt-in Standard.site verification emission (#475). When set, eligible
+    /// pages emit deterministic `site.standard.document` head links into the
+    /// compiler-owned `{{head}}` slot, the well-known file is emitted (or
+    /// recorded as `limited` for base-path sites), and a verification report
+    /// distinguishes `emitted`, `limited`, and `not verified`. The caller
+    /// owns the pointed-to projection and surfaces, which must outlive the
+    /// compile run.
+    standard_site_verification: ?*const standard_site_emit.VerificationContext = null,
     /// Allow the output link audit to accept literal `.md`/`.mdx` hrefs that the
     /// pre-render rewriter deliberately leaves in place (see
     /// docs/contracts/documentation-links.md). Off by default; suppresses only
@@ -552,6 +562,10 @@ pub const RenderOptions = struct {
     heading_index: ?*const wikilink.HeadingIndex = null,
     theme: ?*const theme_mod.ThemeBundle = null,
     page_assets: ?*const content_asset.PageAssetBundle = null,
+    /// Standard.site verification surfaces for the compiler-owned `{{head}}`
+    /// slot. Set automatically from `CompileOptions.standard_site_verification`
+    /// by `renderAndPublishPage`; the validation path sets it explicitly.
+    verification: ?*const standard_site.VerificationSurfaces = null,
 };
 
 /// Render one page through the canonical prepublication body and layout-slot
@@ -638,6 +652,15 @@ fn renderPageSlots(
         return error.GraphValidationFailed;
     }
 
+    // Compiler-owned head output. The layout opts in via the closed `{{head}}`
+    // slot; absence (or an ineligible page) leaves the slot empty so nothing
+    // silently claims document verification.
+    if (layout.has_head) {
+        if (render_opts.verification) |surfaces| {
+            slots.head = try standard_site_emit.documentHeadFragment(arena, surfaces, page.entity_id);
+        }
+    }
+
     return slots;
 }
 
@@ -656,8 +679,14 @@ pub fn renderAndPublishPage(
     doc_arena: *std.heap.ArenaAllocator,
     options: CompileOptions,
     page_index: usize,
-    render_opts: RenderOptions,
+    render_opts_in: RenderOptions,
 ) !void {
+    // The compiler-owned {{head}} slot always mirrors the configured Standard.site
+    // verification, so every production render path agrees with the report.
+    var render_opts = render_opts_in;
+    if (options.standard_site_verification) |ctx| {
+        render_opts.verification = ctx.surfaces;
+    }
     const slots = try renderPageSlots(
         io,
         gpa,
@@ -2076,6 +2105,7 @@ fn validatePrepublicationTarget(
                 .heading_index = &heading_index,
                 .theme = theme_bundle,
                 .page_assets = &content_assets.pages[page_index],
+                .verification = if (options.standard_site_verification) |ctx| ctx.surfaces else null,
             },
         );
 
@@ -2209,6 +2239,42 @@ fn compilePagesInner(
         const cached = layouts_by_path.get(sel.layout_path) orelse return error.LayoutSelectionFailed;
         page_layouts[i] = cached.layout;
         page_layout_bytes[i] = cached.bytes;
+    }
+
+    // Standard.site verification is opt-in and cross-checks the offline
+    // projection against the live page set before any publication: every
+    // planned document record must resolve to the same canonical URL as the
+    // rendered page (fail closed). Layouts that omit the compiler-owned
+    // {{head}} slot are reported as a warning so absence never silently
+    // claims verification; the report artifact still records those pages as
+    // `not_verified`. Runs for both the publish and validation paths.
+    if (options.standard_site_verification) |ctx| {
+        var page_paths: std.ArrayList(standard_site_emit.PagePath) = .empty;
+        defer page_paths.deinit(gpa);
+        for (db.items()) |p| try page_paths.append(gpa, .{
+            .entity_id = p.entity_id,
+            .output_path = p.output_path,
+        });
+        try standard_site_emit.validateProjection(gpa, ctx, page_paths.items);
+
+        for (db.items(), 0..) |p, i| {
+            if (page_layouts[i].has_head) continue;
+            if (standard_site_emit.documentAtUri(gpa, ctx.surfaces, p.entity_id) == null) continue;
+            const msg = try std.fmt.allocPrint(
+                gpa,
+                "Standard.site verification configured but selected layout omits the compiler-owned {{head}} slot; page '{s}' cannot emit its document AT-URI link (recorded as not verified)",
+                .{p.entity_id},
+            );
+            defer gpa.free(msg);
+            appendHtmlDiagnostic(&options, .{
+                .severity = .warning,
+                .code = .EVERIFICATIONHEAD,
+                .message = msg,
+                .remediation = "Add {{head}} inside the layout <head> so eligible pages can emit site.standard.document links",
+                .source_path = page_sel_paths[i],
+                .id = p.entity_id,
+            });
+        }
     }
 
     // F9.1 theme: one root per target from the fallback layout (rules share it).
@@ -2366,6 +2432,12 @@ fn compilePagesInner(
 
     var stage_dir = try cwd.openDir(io, stage_rel, .{ .iterate = true });
     defer stage_dir.close(io);
+
+    // Standard.site verification state shared between the pre-commit staging
+    // and the post-commit evidence report.
+    var standard_site_wke: ?standard_site_emit.WellKnownEmission = null;
+    defer if (standard_site_wke) |*wke| wke.deinit(gpa);
+    var prior_well_known_emitted = false;
 
     // Assets are target-owned members of the same staging transaction.
     try theme_mod.copyAssetsToOutput(io, stage_dir, theme_bundle.assets);
@@ -2868,6 +2940,19 @@ fn compilePagesInner(
         try stageSitemapOwnership(io, stage_dir, options.sitemap_path);
     }
 
+    // Standard.site verification surfaces are members of the same staged
+    // target commit: the well-known file (root/custom-domain sites) or the
+    // exact-bytes sideband artifact (limited for base-path deployments), plus
+    // the ownership marker the next build reads to remove its own decoy. The
+    // report itself is written after commit, alongside the other proof
+    // artifacts. A base-path build never stages a plausible `.well-known`
+    // file; it records the limitation instead.
+    if (options.standard_site_verification) |ctx| {
+        prior_well_known_emitted = (try standard_site_emit.readPriorOwnership(io, gpa, dist_dir)).emitted;
+        standard_site_wke = try standard_site_emit.writeWellKnownOverlay(io, gpa, stage_dir, ctx.surfaces);
+        try standard_site_emit.stageOwnership(io, stage_dir, ctx.surfaces.well_known.emittable);
+    }
+
     // Output link audit: every published local `href`/`src` must resolve to an
     // output this build intends to keep. It runs on the same staged/live
     // overlay as search, before the commit below, so a failure leaves the
@@ -3002,6 +3087,36 @@ fn compilePagesInner(
         return err;
     };
     if (sitemap_backed_up) try cwd.deleteFile(io, sitemap_backup_rel);
+
+    // Standard.site verification evidence, derived from the exact committed
+    // bytes and written post-commit like the other proof artifacts. A limited
+    // (base-path) build removes the decoy well-known file it emitted in an
+    // earlier root-site build — and only that file, never a user-managed one.
+    if (options.standard_site_verification) |ctx| {
+        if (prior_well_known_emitted and !ctx.surfaces.well_known.emittable) {
+            dist_dir.deleteFile(io, standard_site.well_known_path) catch |err| switch (err) {
+                error.FileNotFound => {},
+                else => return err,
+            };
+        }
+        const wke = standard_site_wke.?;
+        var doc_emissions: std.ArrayList(standard_site_emit.DocumentEmission) = .empty;
+        defer {
+            for (doc_emissions.items) |d| d.deinit(gpa);
+            doc_emissions.deinit(gpa);
+        }
+        for (db.items(), 0..) |p, i| {
+            const at_uri = standard_site_emit.documentAtUri(gpa, ctx.surfaces, p.entity_id) orelse continue;
+            try doc_emissions.append(gpa, .{
+                .entity_id = try gpa.dupe(u8, p.entity_id),
+                .at_uri = try gpa.dupe(u8, at_uri),
+                .status = if (page_layouts[i].has_head) .emitted else .not_verified,
+            });
+        }
+        const report_json = try standard_site_emit.renderReport(gpa, &wke, doc_emissions.items);
+        defer gpa.free(report_json);
+        try standard_site_emit.writeReport(io, dist_dir, report_json);
+    }
 
     // Live page-output set for this build. Shared by stale cleanup AND the theme
     // scrub below, so a page published under `assets/` is never mistaken for an
@@ -9710,4 +9825,264 @@ test "proof-pack restore failure surfaces the recovery-failed diagnostic and pre
     const new_touches = try readTargetPayload(io, gpa, dist, publication_touches.output_path);
     defer gpa.free(new_touches);
     try std.testing.expectEqualStrings(old_touches, new_touches);
+}
+
+test "standard-site verification emits head links, well-known file, and report" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-standard-site-emit", .{tmp.sub_path});
+    defer gpa.free(work);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+
+    try writeTreeFile(io, work, "layouts/main.html",
+        \\<!DOCTYPE html>
+        \\<html>
+        \\<head>
+        \\  <title>{{title}}</title>
+        \\  {{head}}
+        \\</head>
+        \\<body>{{content}}</body>
+        \\</html>
+        \\
+    );
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\published_at: 2026-08-15T00:00:00Z
+        \\summary: The front page.
+        \\---
+        \\# Home
+        \\
+    );
+    try writeTreeFile(io, work, "content/guide.md",
+        \\---
+        \\title: Guide
+        \\published_at: 2026-08-15T00:00:00Z
+        \\summary: The guide.
+        \\---
+        \\# Guide
+        \\
+    );
+    try writeTreeFile(io, work, "content/draft.md",
+        \\---
+        \\title: Draft
+        \\status: draft
+        \\---
+        \\# Draft
+        \\
+    );
+
+    var layout_arena = std.heap.ArenaAllocator.init(gpa);
+    defer layout_arena.deinit();
+    const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+    try std.testing.expect(layout.has_head);
+
+    var retain_arena = std.heap.ArenaAllocator.init(gpa);
+    defer retain_arena.deinit();
+    var db = PageDb.init(gpa, retain_arena.allocator());
+    defer db.deinit();
+    try loadAndPromote(io, gpa, &db, content);
+
+    var page_inputs: std.ArrayList(standard_site.PageInput) = .empty;
+    defer page_inputs.deinit(gpa);
+    for (db.items()) |p| {
+        try page_inputs.append(gpa, .{
+            .entity_id = p.entity_id,
+            .output_path = p.output_path,
+            .title = p.title,
+            .status = if (p.status) |s| switch (s) {
+                .published => .published,
+                .archived => .archived,
+                .draft => .draft,
+            } else .none,
+            .published_at = p.published_at,
+            .summary = p.summary,
+            .tags = p.tags,
+        });
+    }
+
+    var config: standard_site.TargetConfig = .{
+        .location = try standard_site.parseLocation(gpa, "https://example.com/", "https://example.com", ""),
+        .did = try gpa.dupe(u8, "did:plc:testtesttesttesttest"),
+    };
+    defer config.deinit(gpa);
+    var projection = try standard_site.project(gpa, .{
+        .config = &config,
+        .site_title = "Boris",
+        .pages = page_inputs.items,
+    });
+    defer projection.deinit(gpa);
+    const surfaces = try standard_site.verificationSurfaces(gpa, &config, &projection);
+    defer {
+        gpa.free(surfaces.well_known.content);
+        gpa.free(surfaces.well_known.required_public_url);
+        if (surfaces.well_known.project_path) |path| gpa.free(path);
+        for (surfaces.document_links) |link| {
+            gpa.free(link.page);
+            gpa.free(link.href);
+        }
+        gpa.free(surfaces.document_links);
+    }
+    const vctx: standard_site_emit.VerificationContext = .{ .surfaces = &surfaces, .projection = &projection };
+
+    const stats = try compilePages(io, gpa, &db, layout, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .standard_site_verification = &vctx,
+    });
+    try std.testing.expectEqual(@as(usize, 3), stats.pages_written);
+
+    // Eligible pages carry the exact document AT-URI in <head>, never the body.
+    const index_html = try readTargetPayload(io, gpa, dist, "index.html");
+    defer gpa.free(index_html);
+    const index_at_uri = standard_site_emit.documentAtUri(gpa, &surfaces, "index").?;
+    try std.testing.expect(std.mem.indexOf(u8, index_html, index_at_uri) != null);
+    const head_open = std.mem.indexOf(u8, index_html, "<head>").?;
+    const body_open = std.mem.indexOf(u8, index_html, "<body>").?;
+    const link_pos = std.mem.indexOf(u8, index_html, "site.standard.document").?;
+    try std.testing.expect(link_pos > head_open and link_pos < body_open);
+
+    // The well-known file matches the configured publication location.
+    const well_known_bytes = try readTargetPayload(io, gpa, dist, standard_site.well_known_path);
+    defer gpa.free(well_known_bytes);
+    try std.testing.expectEqualStrings(projection.publication.at_uri, well_known_bytes);
+
+    // The report records emitted documents (never ineligible drafts).
+    const report_json = try readTargetPayload(io, gpa, dist, standard_site_emit.report_output_path);
+    defer gpa.free(report_json);
+    try std.testing.expect(std.mem.indexOf(u8, report_json, "\"emitted\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_json, "\"index\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_json, "\"draft\"") == null);
+}
+
+test "standard-site base-path build records limited and reports missing head slots" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-standard-site-limited", .{tmp.sub_path});
+    defer gpa.free(work);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+
+    // Layout deliberately omits the compiler-owned {{head}} slot.
+    try writeTreeFile(io, work, "layouts/main.html",
+        \\<html>
+        \\<head><title>{{title}}</title></head>
+        \\<body>{{content}}</body>
+        \\</html>
+        \\
+    );
+    try writeTreeFile(io, work, "content/index.md",
+        \\---
+        \\title: Home
+        \\published_at: 2026-08-15T00:00:00Z
+        \\summary: The front page.
+        \\---
+        \\# Home
+        \\
+    );
+
+    var layout_arena = std.heap.ArenaAllocator.init(gpa);
+    defer layout_arena.deinit();
+    const layout = try loadLayoutOnce(io, cwd, layout_path, layout_arena.allocator());
+    try std.testing.expect(!layout.has_head);
+
+    var retain_arena = std.heap.ArenaAllocator.init(gpa);
+    defer retain_arena.deinit();
+    var db = PageDb.init(gpa, retain_arena.allocator());
+    defer db.deinit();
+    try loadAndPromote(io, gpa, &db, content);
+
+    var page_inputs: std.ArrayList(standard_site.PageInput) = .empty;
+    defer page_inputs.deinit(gpa);
+    for (db.items()) |p| {
+        try page_inputs.append(gpa, .{
+            .entity_id = p.entity_id,
+            .output_path = p.output_path,
+            .title = p.title,
+            .status = if (p.status) |s| switch (s) {
+                .published => .published,
+                .archived => .archived,
+                .draft => .draft,
+            } else .none,
+            .published_at = p.published_at,
+            .summary = p.summary,
+            .tags = p.tags,
+        });
+    }
+
+    var config: standard_site.TargetConfig = .{
+        .location = try standard_site.parseLocation(gpa, "https://example.com/repo/", "https://example.com", "/repo"),
+        .did = try gpa.dupe(u8, "did:plc:testtesttesttesttest"),
+    };
+    defer config.deinit(gpa);
+    var projection = try standard_site.project(gpa, .{
+        .config = &config,
+        .site_title = "Boris",
+        .pages = page_inputs.items,
+    });
+    defer projection.deinit(gpa);
+    const surfaces = try standard_site.verificationSurfaces(gpa, &config, &projection);
+    defer {
+        gpa.free(surfaces.well_known.content);
+        gpa.free(surfaces.well_known.required_public_url);
+        if (surfaces.well_known.project_path) |path| gpa.free(path);
+        for (surfaces.document_links) |link| {
+            gpa.free(link.page);
+            gpa.free(link.href);
+        }
+        gpa.free(surfaces.document_links);
+    }
+    const vctx: standard_site_emit.VerificationContext = .{ .surfaces = &surfaces, .projection = &projection };
+
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+
+    const stats = try compilePages(io, gpa, &db, layout, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .quiet = true,
+        .standard_site_verification = &vctx,
+        .diagnostics = &collector,
+    });
+    try std.testing.expectEqual(@as(usize, 1), stats.pages_written);
+
+    // The base-path limitation is explicit: no plausible public well-known
+    // file, the exact bytes preserved as a sideband artifact, and the
+    // report records `limited` plus the missing-head `not_verified` page.
+    try std.testing.expectError(error.FileNotFound, readTargetPayload(io, gpa, dist, standard_site.well_known_path));
+    const sideband = try readTargetPayload(io, gpa, dist, standard_site_emit.sideband_output_path);
+    defer gpa.free(sideband);
+    try std.testing.expectEqualStrings(projection.publication.at_uri, sideband);
+
+    const report_json = try readTargetPayload(io, gpa, dist, standard_site_emit.report_output_path);
+    defer gpa.free(report_json);
+    try std.testing.expect(std.mem.indexOf(u8, report_json, "\"limited\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, report_json, "\"not_verified\"") != null);
+
+    // Layouts that omit {{head}} are reported so absence is never silent.
+    var saw_head_warning = false;
+    for (collector.list.items) |d| {
+        if (d.code == .EVERIFICATIONHEAD and d.severity == .warning) saw_head_warning = true;
+    }
+    try std.testing.expect(saw_head_warning);
 }

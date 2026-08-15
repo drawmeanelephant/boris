@@ -118,6 +118,258 @@ pub fn render(md: []const u8, arena: *std.heap.ArenaAllocator) RenderError!Html 
 }
 
 // =============================================================================
+// Deterministic semantic plain-text projection (#480)
+// =============================================================================
+
+/// Zig-side view of rendered plain text.
+///
+/// **Borrowed lifetime:** `bytes` is a view of Whiteboard (arena) memory
+/// produced by `renderPlainText`. Valid only until the arena is reset or
+/// deinitialized. Do not free these bytes individually.
+pub const PlainText = struct {
+    bytes: []const u8,
+};
+
+/// Render a markdown payload to deterministic semantic plain text over the
+/// same typed document used for HTML rendering.
+///
+/// The projection walks Oliver's normalized document (never re-parses
+/// Markdown, never regex-strips HTML) and keeps the author's words while
+/// dropping presentation-only markup. The exact output grammar is documented
+/// in `docs/contracts/plain-text-projection.md`; in short:
+///
+/// - Headings, paragraphs, block quotes, and footnote text keep their words;
+///   `#`, `**`, backticks, `[label](url)`, `![alt](url)`, `<tags>`, and `>`
+///   markers never survive.
+/// - Links render as their label; images render as their alt text.
+/// - Fenced code is emitted verbatim (LF-normalized by Oliver), flush-left.
+/// - Unordered lists use `• `, ordered lists use `N. `, nested two spaces.
+/// - Table cells are tab-separated, one row per line.
+/// - Blocks are separated by a single blank line; the document ends with
+///   exactly one LF (a trailing blank line inside a final code block is
+///   normalized away; its interior blank lines are preserved).
+/// - Empty input yields empty output.
+pub fn renderPlainText(md: []const u8, arena: *std.heap.ArenaAllocator) RenderError!PlainText {
+    const a = arena.allocator();
+
+    var result = try oliver.parse(a, md, .markdown, .{ .markdown = markdown_options });
+    defer result.deinit();
+
+    var buf: std.ArrayList(u8) = .empty;
+    var w = PWriter{ .buf = &buf, .a = a };
+    try renderBlocks(&w, result.document.root.children.items, 0, true);
+    try renderFootnotes(&w, result.document.footnotes.items);
+    try finalize(&w);
+
+    return .{ .bytes = buf.items };
+}
+
+/// Bounded output writer. Every append goes through the document arena, so
+/// the returned slice shares the same lifetime contract as `Html.bytes`.
+const PWriter = struct {
+    buf: *std.ArrayList(u8),
+    a: std.mem.Allocator,
+
+    fn write(self: *PWriter, s: []const u8) RenderError!void {
+        self.buf.appendSlice(self.a, s) catch return error.OutOfMemory;
+    }
+
+    fn writeByte(self: *PWriter, c: u8) RenderError!void {
+        self.buf.append(self.a, c) catch return error.OutOfMemory;
+    }
+
+    fn writeIndent(self: *PWriter, n: usize) RenderError!void {
+        var i: usize = 0;
+        while (i < n) : (i += 1) try self.writeByte(' ');
+    }
+
+    fn endsWith(self: *PWriter, s: []const u8) bool {
+        return std.mem.endsWith(u8, self.buf.items, s);
+    }
+
+    /// Ensure one blank line precedes the next block without duplicating a
+    /// newline already written by a code block's verbatim terminator.
+    fn blankLine(self: *PWriter) RenderError!void {
+        const items = self.buf.items;
+        if (items.len == 0) return;
+        if (items.len >= 2 and items[items.len - 1] == '\n' and items[items.len - 2] == '\n') return;
+        if (items[items.len - 1] == '\n') return self.writeByte('\n');
+        try self.write("\n\n");
+    }
+
+    /// A single newline separator within a container (list item, table row).
+    fn newline(self: *PWriter) RenderError!void {
+        const items = self.buf.items;
+        if (items.len == 0) return;
+        if (items[items.len - 1] == '\n') return;
+        try self.writeByte('\n');
+    }
+};
+
+fn renderBlocks(w: *PWriter, blocks: []const *oliver.document.Node, indent: usize, blank_separated: bool) RenderError!void {
+    for (blocks, 0..) |node, index| {
+        if (index > 0) {
+            if (blank_separated) try w.blankLine() else try w.newline();
+        }
+        try renderBlock(w, node, indent);
+    }
+}
+
+fn renderBlock(w: *PWriter, node: *const oliver.document.Node, indent: usize) RenderError!void {
+    switch (node.tag) {
+        .paragraph, .heading => {
+            try w.writeIndent(indent);
+            try renderInlines(w, node.children.items);
+        },
+        // Presentation-only: no author text survives.
+        .thematic_break, .html_block => {},
+        // Verbatim, flush-left (never indented), so fenced code is never
+        // altered by nesting.
+        .code_block => try w.write(node.data.code_block.content),
+        .block_quote => try renderBlocks(w, node.children.items, indent, true),
+        .list => try renderList(w, node, indent),
+        .table => try renderTable(w, node, indent),
+        .definition_list => try renderDefinitionList(w, node, indent),
+        // A `.footnote` container is never a document child; render it
+        // defensively as its blocks so no text is silently dropped.
+        .footnote => try renderBlocks(w, node.children.items, indent, true),
+        else => {},
+    }
+}
+
+fn renderInlines(w: *PWriter, nodes: []const *oliver.document.Node) RenderError!void {
+    for (nodes) |node| {
+        switch (node.tag) {
+            .text => try w.write(node.data.text),
+            .code_span => try w.write(node.data.code_span),
+            .soft_break => try w.writeByte(' '),
+            .hard_break => try w.writeByte('\n'),
+            .image => try w.write(node.data.image.alt),
+            .autolink => try w.write(node.data.autolink.label),
+            .acronym => try w.write(node.data.acronym.text),
+            // Formatting carries no words of its own; recurse into children.
+            .emphasis, .strong, .bold, .italic, .deleted, .inserted, .big, .small, .superscript, .subscript, .cite, .span, .link => try renderInlines(w, node.children.items),
+            // Markup and reference markers have no prose.
+            .raw_html, .footnote_ref => {},
+            else => try renderInlines(w, node.children.items),
+        }
+    }
+}
+
+fn renderList(w: *PWriter, node: *const oliver.document.Node, indent: usize) RenderError!void {
+    const list = node.data.list;
+    const items = node.children.items;
+    for (items, 0..) |item, index| {
+        if (index > 0) try w.newline();
+        switch (list.kind) {
+            .bullet => {
+                try w.writeIndent(indent);
+                try w.write("• ");
+            },
+            .ordered => {
+                try w.writeIndent(indent);
+                var num_buf: [20]u8 = undefined;
+                const num = std.fmt.bufPrint(&num_buf, "{d}", .{list.start + @as(u32, @intCast(index))}) catch unreachable;
+                try w.write(num);
+                try w.write(". ");
+            },
+            .definition => {},
+        }
+        try renderListItem(w, item, indent + 2, list.kind);
+    }
+}
+
+fn renderListItem(w: *PWriter, item: *const oliver.document.Node, indent: usize, kind: oliver.document.ListKind) RenderError!void {
+    const blocks = item.children.items;
+    switch (kind) {
+        .definition => {
+            const role = item.data.list_item.role;
+            for (blocks, 0..) |b, index| {
+                if (index > 0) try w.newline();
+                if (role == .term) {
+                    if (index == 0) try renderInlines(w, b.children.items) else try renderBlock(w, b, indent);
+                } else {
+                    try renderBlock(w, b, indent);
+                }
+            }
+        },
+        else => {
+            for (blocks, 0..) |b, index| {
+                if (index == 0) {
+                    try renderBlockAtMarker(w, b, indent);
+                } else {
+                    try w.newline();
+                    try renderBlock(w, b, indent);
+                }
+            }
+        },
+    }
+}
+
+/// The first block of a list item already sits after the marker, so a
+/// paragraph/heading renders inline (no re-indent) while a nested list keeps
+/// the continuation indent.
+fn renderBlockAtMarker(w: *PWriter, node: *const oliver.document.Node, indent: usize) RenderError!void {
+    switch (node.tag) {
+        .paragraph, .heading => try renderInlines(w, node.children.items),
+        .list => try renderList(w, node, indent),
+        .code_block => try w.write(node.data.code_block.content),
+        else => try renderBlock(w, node, indent),
+    }
+}
+
+fn renderTable(w: *PWriter, node: *const oliver.document.Node, indent: usize) RenderError!void {
+    for (node.children.items, 0..) |row, index| {
+        if (index > 0) try w.newline();
+        try w.writeIndent(indent);
+        for (row.children.items, 0..) |cell, cell_index| {
+            if (cell_index > 0) try w.writeByte('\t');
+            try renderInlines(w, cell.children.items);
+        }
+    }
+}
+
+fn renderDefinitionList(w: *PWriter, node: *const oliver.document.Node, indent: usize) RenderError!void {
+    for (node.children.items, 0..) |child, index| {
+        if (index > 0) try w.newline();
+        switch (child.tag) {
+            .definition_term => {
+                try w.writeIndent(indent);
+                try renderInlines(w, child.children.items);
+            },
+            .definition_body => try renderBlocks(w, child.children.items, indent + 2, false),
+            else => try renderBlock(w, child, indent),
+        }
+    }
+}
+
+/// Footnote reference markers are omitted from the body; the definitions are
+/// appended after it in definition order as `label: text`.
+fn renderFootnotes(w: *PWriter, footnotes: []const oliver.document.FootnoteDef) RenderError!void {
+    for (footnotes) |fd| {
+        try w.blankLine();
+        try w.write(fd.label);
+        try w.write(": ");
+        const blocks = fd.node.children.items;
+        for (blocks, 0..) |b, index| {
+            if (index > 0) try w.newline();
+            try renderBlock(w, b, 0);
+        }
+    }
+}
+
+/// Collapse the projection to a single trailing LF; an empty document stays
+/// empty.
+fn finalize(w: *PWriter) RenderError!void {
+    if (w.buf.items.len == 0) return;
+    while (w.buf.items.len > 0 and w.buf.items[w.buf.items.len - 1] == '\n') {
+        _ = w.buf.pop();
+    }
+    try w.writeByte('\n');
+}
+
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -281,6 +533,149 @@ test "render: large input stays bounded" {
             try testing.expect(std.mem.indexOf(u8, html, "<h1 id=\"big\">Big</h1>") != null);
         }
     }.run);
+}
+
+/// Renders and calls `f` with the arena-backed plain-text view.
+fn withPlainText(md: []const u8, f: anytype) !void {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const text = try renderPlainText(md, &arena);
+    try f(text.bytes);
+}
+
+test "plain text: headings and paragraphs drop markup, keep words" {
+    try withPlainText("# Title\n\nHello **world** and *em* and `code`.\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("Title\n\nHello world and em and code.\n", text);
+        }
+    }.run);
+}
+
+test "plain text: links keep label, images keep alt, raw html drops" {
+    try withPlainText("See [docs](https://x.dev) and ![alt text](img.png) and a <b>b</b> c.\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("See docs and alt text and a b c.\n", text);
+        }
+    }.run);
+}
+
+test "plain text: empty image alt and empty input stay empty" {
+    try withPlainText("![](x.png)\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("", text);
+        }
+    }.run);
+    try withPlainText("", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("", text);
+        }
+    }.run);
+}
+
+test "plain text: unordered and ordered lists" {
+    try withPlainText("- a\n- b\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("• a\n• b\n", text);
+        }
+    }.run);
+    try withPlainText("3. three\n4. four\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("3. three\n4. four\n", text);
+        }
+    }.run);
+}
+
+test "plain text: nested list indents two spaces" {
+    try withPlainText("- a\n  - b\n  - c\n- d\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("• a\n  • b\n  • c\n• d\n", text);
+        }
+    }.run);
+}
+
+test "plain text: fenced code is verbatim" {
+    try withPlainText("```c\nint x = 1 < 2;\n```\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("int x = 1 < 2;\n", text);
+        }
+    }.run);
+}
+
+test "plain text: table cells are tab-separated, one row per line" {
+    try withPlainText("| a | b |\n|---|---|\n| 1 | 2 |\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("a\tb\n1\t2\n", text);
+        }
+    }.run);
+}
+
+test "plain text: block quote and thematic break" {
+    try withPlainText("> quoted **words**\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("quoted words\n", text);
+        }
+    }.run);
+    try withPlainText("a\n\n---\n\nb\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("a\n\nb\n", text);
+        }
+    }.run);
+}
+
+test "plain text: footnotes omit refs and append definitions" {
+    try withPlainText("Hi[^1].\n\n[^1]: note body\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("Hi.\n\n1: note body\n", text);
+        }
+    }.run);
+}
+
+test "plain text: soft and hard breaks" {
+    try withPlainText("one\ntwo\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("one two\n", text);
+        }
+    }.run);
+    try withPlainText("one  \ntwo\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("one\ntwo\n", text);
+        }
+    }.run);
+}
+
+test "plain text: definition list term then indented definition" {
+    try withPlainText("Term\n: Definition\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("Term\n  Definition\n", text);
+        }
+    }.run);
+}
+
+test "plain text: html block drops, prose survives" {
+    try withPlainText("<div>\ninside\n</div>\n\nAfter\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("After\n", text);
+        }
+    }.run);
+}
+
+test "plain text: unicode and strikethrough" {
+    try withPlainText("# Café résumé\n\n~~gone~~ kept\n", struct {
+        fn run(text: []const u8) !void {
+            try testing.expectEqualStrings("Café résumé\n\ngone kept\n", text);
+        }
+    }.run);
+}
+
+test "plain text: dual render is byte-identical (determinism)" {
+    const md = "# Dual\n\n**bold** and `code`\n\n- a\n- b\n\n| t |\n|---|\n| 1 |\n";
+    var arena_a = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_a.deinit();
+    var arena_b = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena_b.deinit();
+    const a = try renderPlainText(md, &arena_a);
+    const b = try renderPlainText(md, &arena_b);
+    try testing.expectEqualStrings(a.bytes, b.bytes);
 }
 
 test "docs: renderer contract pin matches build.zig.zon" {

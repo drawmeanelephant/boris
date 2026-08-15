@@ -52,6 +52,10 @@ pub const metadata_marker = "{{metadata}}";
 pub const relations_marker = "{{relations}}";
 pub const backlinks_marker = "{{backlinks}}";
 pub const footer_marker = "{{footer}}";
+/// Compiler-owned, closed head slot for validated head-only output (e.g.
+/// Standard.site verification link tags). Layouts opt in explicitly; absence
+/// must never silently claim document verification.
+pub const head_marker = "{{head}}";
 /// Prefix of the argument-bearing helper (path follows a single space).
 pub const asset_url_prefix = "{{asset-url ";
 
@@ -87,6 +91,7 @@ pub const Slot = enum {
     relations,
     backlinks,
     footer,
+    head,
 };
 
 pub const Segment = union(enum) {
@@ -109,6 +114,9 @@ pub const SlotValues = struct {
     relations: []const u8 = "",
     backlinks: []const u8 = "",
     footer: []const u8 = "",
+    /// Compiler-owned head-only output; empty when the layout has no `{{head}}`
+    /// or the page has nothing to emit into it.
+    head: []const u8 = "",
     /// Page-relative hrefs for each `asset_url` segment, in layout order.
     asset_hrefs: []const []const u8 = &.{},
 
@@ -124,6 +132,7 @@ pub const SlotValues = struct {
             .relations => self.relations,
             .backlinks => self.backlinks,
             .footer => self.footer,
+            .head => self.head,
         };
     }
 };
@@ -179,6 +188,7 @@ pub const Layout = struct {
     has_relations: bool = false,
     has_backlinks: bool = false,
     has_footer: bool = false,
+    has_head: bool = false,
     has_asset_url: bool = false,
 
     /// Content-only convenience: bytes before the single `{{content}}`.
@@ -207,6 +217,7 @@ pub const Layout = struct {
         var seen_relations = false;
         var seen_backlinks = false;
         var seen_footer = false;
+        var seen_head = false;
 
         var pos: usize = 0;
         while (pos < raw.len) {
@@ -275,6 +286,11 @@ pub const Layout = struct {
                 seen_footer = true;
                 layout.has_footer = true;
                 try layout.appendSlot(.footer);
+            } else if (std.mem.eql(u8, token, head_marker)) {
+                if (seen_head) return error.DuplicateLayoutMarker;
+                seen_head = true;
+                layout.has_head = true;
+                try layout.appendSlot(.head);
             } else if (std.mem.startsWith(u8, token, asset_url_prefix) and std.mem.endsWith(u8, token, "}}")) {
                 // `{{asset-url PATH}}` — single space after the helper name.
                 const inner = token[asset_url_prefix.len .. token.len - 2];
@@ -293,7 +309,7 @@ pub const Layout = struct {
 
         // Content-only convenience prefix/suffix for legacy three-write tests.
         if (!layout.has_nav and !layout.has_breadcrumb and !layout.has_title and !layout.has_toc and !layout.has_children and
-            !layout.has_metadata and !layout.has_relations and !layout.has_backlinks and !layout.has_footer and !layout.has_asset_url)
+            !layout.has_metadata and !layout.has_relations and !layout.has_backlinks and !layout.has_footer and !layout.has_head and !layout.has_asset_url)
         {
             if (layout.segment_count == 3 and
                 layout.segments[0] == .static and

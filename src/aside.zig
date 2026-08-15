@@ -790,6 +790,28 @@ pub fn renderDetailsHtml(d: Details, doc_arena: *std.heap.ArenaAllocator) ![]con
     return try out.toOwnedSlice(arena);
 }
 
+/// Render one Aside to deterministic plain text: the inner body's semantic
+/// text, with the admonition chrome dropped (no kind label, no markup).
+pub fn renderPlainText(a: Aside, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
+    if (a.body.len == 0) return "";
+    return (try render.renderPlainText(a.body, doc_arena)).bytes;
+}
+
+/// Render one Details component to deterministic plain text: the summary on
+/// its own line, then the body's semantic text. The summary is text (never
+/// Markdown), matching `renderDetailsHtml`.
+pub fn renderDetailsPlainText(d: Details, doc_arena: *std.heap.ArenaAllocator) ![]const u8 {
+    const arena = doc_arena.allocator();
+    const body = if (d.body.len > 0) (try render.renderPlainText(d.body, doc_arena)).bytes else "";
+    if (d.summary.len == 0) return body;
+    if (body.len == 0) return arena.dupe(u8, d.summary) catch return error.OutOfMemory;
+    var out: std.ArrayList(u8) = .empty;
+    try out.appendSlice(arena, d.summary);
+    try out.appendSlice(arena, "\n");
+    try out.appendSlice(arena, body);
+    return out.toOwnedSlice(arena);
+}
+
 // ---------------------------------------------------------------------------
 // Diagnostic → pipeline code mapping
 // ---------------------------------------------------------------------------
@@ -861,6 +883,35 @@ test "renderDetailsHtml uses native semantics and escapes text sinks" {
     try std.testing.expect(std.mem.indexOf(u8, html, "<summary>A &lt; B &amp; &quot;quoted&quot;</summary>") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "<div class=\"details__body\">") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "<strong>body</strong>") != null);
+}
+
+test "renderPlainText drops admonition chrome and keeps body words" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const text = try renderPlainText(.{
+        .kind = "tip",
+        .id = "006-1",
+        .body = "Stay **hydrated**.\n",
+        .raw_span = "",
+    }, &arena);
+    try std.testing.expectEqualStrings("Stay hydrated.\n", text);
+    // The kind label and id are presentation chrome; neither survives.
+    try std.testing.expect(std.mem.indexOf(u8, text, "tip") == null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "006-1") == null);
+}
+
+test "renderDetailsPlainText keeps summary line then body" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const text = try renderDetailsPlainText(.{
+        .summary = "See more",
+        .id = "detail-1",
+        .open = true,
+        .body = "Inside **body**.\n",
+    }, &arena);
+    try std.testing.expectEqualStrings("See more\nInside body.\n", text);
 }
 
 test "tokenize: valid Details attributes" {

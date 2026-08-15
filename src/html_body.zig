@@ -187,6 +187,82 @@ pub fn renderSource(
     options: Options,
 ) ![]const u8 {
     const arena = doc_arena.allocator();
+    const prepared = try prepareBody(io, gpa, content_dir, doc_arena, source, source_path, output_path, options);
+
+    var html_buf: std.ArrayList(u8) = .empty;
+    for (prepared.tok.segments) |seg| {
+        switch (seg) {
+            .markdown => |md| {
+                if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
+                const h = try render.render(md, doc_arena);
+                try html_buf.appendSlice(arena, h.bytes);
+            },
+            .aside => |component| {
+                const h = try aside.renderHtml(component, doc_arena);
+                try html_buf.appendSlice(arena, h);
+            },
+            .details => |component| {
+                const h = try aside.renderDetailsHtml(component, doc_arena);
+                try html_buf.appendSlice(arena, h);
+            },
+        }
+    }
+    return html_buf.items;
+}
+
+/// Render one already-read page source through the same ordered preprocessing
+/// as `renderSource`, then project each segment to deterministic semantic
+/// plain text (`docs/contracts/plain-text-projection.md`). Markdown segments go
+/// through the Oliver typed-document walk in `render.renderPlainText`; Aside and
+/// Details components render their body text without their admonition chrome.
+pub fn renderSourcePlainText(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    doc_arena: *std.heap.ArenaAllocator,
+    source: []const u8,
+    source_path: []const u8,
+    output_path: []const u8,
+    options: Options,
+) ![]const u8 {
+    const arena = doc_arena.allocator();
+    const prepared = try prepareBody(io, gpa, content_dir, doc_arena, source, source_path, output_path, options);
+
+    var text_buf: std.ArrayList(u8) = .empty;
+    for (prepared.tok.segments) |seg| {
+        const text: []const u8 = switch (seg) {
+            .markdown => |md| blk: {
+                if (std.mem.trim(u8, md, " \t\r\n").len == 0) break :blk "";
+                break :blk (try render.renderPlainText(md, doc_arena)).bytes;
+            },
+            .aside => |component| try aside.renderPlainText(component, doc_arena),
+            .details => |component| try aside.renderDetailsPlainText(component, doc_arena),
+        };
+        try appendPlainSegment(&text_buf, arena, text);
+    }
+    if (text_buf.items.len > 0) try text_buf.append(arena, '\n');
+    return text_buf.items;
+}
+
+/// Preprocessing shared by the HTML and plain-text body paths: parse/adapt,
+/// documentation-link rewrite, include expansion, wiki rewrite, content-local
+/// image rewrite, and Aside tokenization — in that fixed order. The returned
+/// segments are slices into `doc_arena`.
+const PreparedBody = struct {
+    tok: aside.TokenizeResult,
+};
+
+fn prepareBody(
+    io: Io,
+    gpa: std.mem.Allocator,
+    content_dir: Io.Dir,
+    doc_arena: *std.heap.ArenaAllocator,
+    source: []const u8,
+    source_path: []const u8,
+    output_path: []const u8,
+    options: Options,
+) !PreparedBody {
+    const arena = doc_arena.allocator();
     const parsed = parser.parse(source);
     if (parsed.diagnostic) |pd| {
         try printParserDiagnostic(gpa, source_path, pd, options.diagnostics);
@@ -245,26 +321,18 @@ pub fn renderSource(
         try printComponentDiagnostics(gpa, source, parsed.doc.body_offset, source_path, tok.diagnostics, options.diagnostics);
         return error.ComponentFailed;
     }
+    return .{ .tok = tok };
+}
 
-    var html_buf: std.ArrayList(u8) = .empty;
-    for (tok.segments) |seg| {
-        switch (seg) {
-            .markdown => |md| {
-                if (std.mem.trim(u8, md, " \t\r\n").len == 0) continue;
-                const h = try render.render(md, doc_arena);
-                try html_buf.appendSlice(arena, h.bytes);
-            },
-            .aside => |component| {
-                const h = try aside.renderHtml(component, doc_arena);
-                try html_buf.appendSlice(arena, h);
-            },
-            .details => |component| {
-                const h = try aside.renderDetailsHtml(component, doc_arena);
-                try html_buf.appendSlice(arena, h);
-            },
-        }
-    }
-    return html_buf.items;
+/// Join one segment's plain text into the accumulated output with a single
+/// blank line between non-empty segments. Trailing whitespace of each segment
+/// (typically a code block's terminal newline) is treated as a terminator, not
+/// content.
+fn appendPlainSegment(buf: *std.ArrayList(u8), arena: std.mem.Allocator, text: []const u8) !void {
+    const trimmed = std.mem.trim(u8, text, " \t\r\n");
+    if (trimmed.len == 0) return;
+    if (buf.items.len > 0) try buf.appendSlice(arena, "\n\n");
+    try buf.appendSlice(arena, trimmed);
 }
 
 fn writeTestFile(io: Io, root: []const u8, rel: []const u8, data: []const u8) !void {
@@ -353,4 +421,41 @@ test "shared body pipeline preserves include wiki Aside render order" {
     const aside_at = std.mem.indexOf(u8, html, "<aside").?;
     const after = std.mem.indexOf(u8, html, "After").?;
     try std.testing.expect(before < included and included < wiki and wiki < aside_at and aside_at < after);
+}
+
+test "plain-text body pipeline keeps words and drops chrome across segments" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const root = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/plain-body", .{tmp.sub_path});
+    defer gpa.free(root);
+    try writeTestFile(io, root, "content/includes/fragment.md", "## Included\n");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{root});
+    defer gpa.free(content_path);
+    var content_dir = try Io.Dir.cwd().openDir(io, content_path, .{});
+    defer content_dir.close(io);
+    var whiteboard = std.heap.ArenaAllocator.init(gpa);
+    defer whiteboard.deinit();
+
+    const nodes = [_]graph_mod.Node{.{
+        .id = "guides/target",
+        .source_path = "guides/target.md",
+        .title = "Target",
+    }};
+    const text = try renderSourcePlainText(io, gpa, content_dir, &whiteboard,
+        "Before\n\n{{include includes/fragment.md}}\n\n[[guides/target]]\n\n[Docs](guides/target.md?x=1&y=2#section)\n\n<Aside kind=\"tip\">\nInside **aside**\n</Aside>\n\n<Details summary=\"More\">\nBody text\n</Details>\n\nAfter\n",
+        "index.md", "index.html", .{ .nodes = &nodes });
+
+    // Markdown syntax, admonition chrome, and the `<Aside>`/`<Details>` tags
+    // are gone; include-expanded headings, wiki link labels, and link labels
+    // survive as prose, and segments join with single blank lines.
+    try std.testing.expectEqualStrings(
+        "Before\n\nIncluded\n\nTarget\n\nDocs\n\nInside aside\n\nMore\nBody text\n\nAfter\n",
+        text,
+    );
+    try std.testing.expect(std.mem.indexOf(u8, text, "<Aside") == null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "<Details") == null);
+    try std.testing.expect(std.mem.indexOf(u8, text, "**") == null);
 }

@@ -9,6 +9,7 @@ const github_pages = @import("github_pages.zig");
 const layout_select = @import("layout_select.zig");
 const rss = @import("rss.zig");
 const sitemap = @import("sitemap.zig");
+const standard_site = @import("standard_site.zig");
 const target = @import("target.zig");
 const theme = @import("theme.zig");
 
@@ -96,11 +97,18 @@ pub const IrPlan = struct { output: []u8 };
 pub const RagPlan = struct { output: []u8, scope: ?[]u8 = null, split_size: ?usize = null, bundles_only: bool = false };
 pub const ContextPlan = struct { output: []u8, scope: ?[]u8 = null, split_size: ?usize = null };
 
-pub const PublicationTargetPlan = struct {
-    location: github_pages.Location,
+/// The publication-target registry. The seam stays closed and additive:
+/// existing `github-pages` profiles parse byte-identically, and `standard-site`
+/// is the second verified target (see docs/contracts/standard-site.md).
+pub const PublicationTargetPlan = union(enum) {
+    github_pages: github_pages.Location,
+    standard_site: standard_site.TargetConfig,
 
     fn deinit(self: *PublicationTargetPlan, allocator: std.mem.Allocator) void {
-        self.location.deinit(allocator);
+        switch (self.*) {
+            .github_pages => |*location| location.deinit(allocator),
+            .standard_site => |*config| config.deinit(allocator),
+        }
         self.* = undefined;
     }
 };
@@ -349,16 +357,66 @@ fn parseSite(allocator: std.mem.Allocator, value: std.json.Value) Error!SiteMeta
 
 fn parsePublication(allocator: std.mem.Allocator, value: std.json.Value) Error!PublicationTargetPlan {
     const obj = try object(value);
-    try only(obj, &.{ "target", "base_url", "origin", "base_path" });
-    if (!std.mem.eql(u8, try string(try required(obj, "target")), github_pages.target_name)) return error.InvalidPublication;
-    const base_url = try string(try required(obj, "base_url"));
-    const origin = try string(try required(obj, "origin"));
-    const base_path = try string(try required(obj, "base_path"));
-    const location = github_pages.parse(allocator, base_url, origin, base_path) catch |err| {
-        if (err == error.OutOfMemory) return error.OutOfMemory;
-        return error.InvalidPublication;
-    };
-    return .{ .location = location };
+    try only(obj, &.{ "target", "base_url", "origin", "base_path", "did", "pds", "name", "description", "show_in_discover", "include", "exclude", "prune" });
+    const target_text = try string(try required(obj, "target"));
+    if (std.mem.eql(u8, target_text, github_pages.target_name)) {
+        try only(obj, &.{ "target", "base_url", "origin", "base_path" });
+        const base_url = try string(try required(obj, "base_url"));
+        const origin = try string(try required(obj, "origin"));
+        const base_path = try string(try required(obj, "base_path"));
+        const location = github_pages.parse(allocator, base_url, origin, base_path) catch |err| {
+            if (err == error.OutOfMemory) return error.OutOfMemory;
+            return error.InvalidPublication;
+        };
+        return .{ .github_pages = location };
+    }
+    if (std.mem.eql(u8, target_text, standard_site.target_name)) {
+        const base_url = try string(try required(obj, "base_url"));
+        const origin = try string(try required(obj, "origin"));
+        const base_path = try string(try required(obj, "base_path"));
+        const did = try string(try required(obj, "did"));
+        if (did.len == 0 or !standard_site.validDid(did)) return error.InvalidPublication;
+        const location = standard_site.parseLocation(allocator, base_url, origin, base_path) catch |err| {
+            if (err == error.OutOfMemory) return error.OutOfMemory;
+            return error.InvalidPublication;
+        };
+        var config: standard_site.TargetConfig = .{
+            .location = location,
+            .did = try dup(allocator, did),
+        };
+        errdefer config.deinit(allocator);
+        if (field(obj, "pds")) |v| {
+            const pds = try boundedText(allocator, v);
+            if (!standard_site.validPdsOrigin(pds)) return error.InvalidPublication;
+            config.pds_origin = pds;
+        }
+        if (field(obj, "name")) |v| config.name = try boundedText(allocator, v);
+        if (field(obj, "description")) |v| config.description = try boundedText(allocator, v);
+        if (field(obj, "show_in_discover")) |v| config.show_in_discover = try boolean(v);
+        if (field(obj, "include")) |v| config.include = try parseFilters(allocator, v);
+        if (field(obj, "exclude")) |v| config.exclude = try parseFilters(allocator, v);
+        if (field(obj, "prune")) |v| config.prune = try boolean(v);
+        return .{ .standard_site = config };
+    }
+    return error.InvalidPublication;
+}
+
+fn parseFilters(allocator: std.mem.Allocator, value: std.json.Value) Error![][]const u8 {
+    const values = try array(value);
+    if (values.len > max_array_items) return error.ArrayLimitExceeded;
+    var filters = try allocator.alloc([]const u8, values.len);
+    var initialized: usize = 0;
+    errdefer {
+        for (filters[0..initialized]) |entry| allocator.free(entry);
+        allocator.free(filters);
+    }
+    for (values) |entry| {
+        const text = try string(entry);
+        if (text.len == 0) return error.InvalidPublication;
+        filters[initialized] = try dup(allocator, text);
+        initialized += 1;
+    }
+    return filters;
 }
 fn boundedText(allocator: std.mem.Allocator, value: std.json.Value) Error![]u8 {
     const v = try string(value);
@@ -564,7 +622,11 @@ pub fn validatePlan(plan: *const PublicationPlan) Error!void {
     if (plan.publication) |publication| {
         if (public_count != 1) return error.PublicationRequiresPublicTarget;
         if (plan.site) |site| if (site.url) |url| {
-            if (!std.mem.eql(u8, url, publication.location.base_url)) return error.PublicationSiteMismatch;
+            const base_url = switch (publication) {
+                .github_pages => |location| location.base_url,
+                .standard_site => |config| config.location.base_url,
+            };
+            if (!std.mem.eql(u8, url, base_url)) return error.PublicationSiteMismatch;
         };
     }
     if (plan.ir) |e| try validateMachineRoot(plan, e.output);
@@ -661,7 +723,7 @@ test "GitHub Pages publication metadata is normalized in the owned plan" {
     ;
     var request = try parseBytes(std.testing.allocator, .{ .root = try std.testing.allocator.dupe(u8, "/work") }, source, .{});
     defer request.deinit(std.testing.allocator);
-    const location = request.plan.publication.?.location;
+    const location = request.plan.publication.?.github_pages;
     try std.testing.expectEqualStrings("https://owner.github.io/boris", location.base_url);
     try std.testing.expectEqualStrings("/boris", location.base_path);
     try std.testing.expectEqual(github_pages.SiteKind.project_site, location.site_kind);

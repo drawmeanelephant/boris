@@ -27,14 +27,20 @@ pub const Error = transport.Error || oauth.Error || std.mem.Allocator.Error || e
     InvalidContentType,
     InvalidGrant,
     InvalidIssuer,
+    InvalidKeySeed,
     InvalidLoopbackRedirect,
     InvalidParResponse,
     InvalidScope,
+    InvalidSessionWire,
     InvalidTokenResponse,
+    NoRefreshToken,
     OAuthRequestFailed,
     ProofUnavailable,
     InvalidWallClock,
+    ScopeReduced,
+    SessionRevoked,
     StateMismatch,
+    SubjectDidMismatch,
     UnexpectedStatus,
 };
 
@@ -71,6 +77,7 @@ const Scope = Fixed(4096);
 pub const PendingAuthorization = struct {
     account: identity.DiscoveredAccount,
     key_pair: oauth.KeyPair,
+    key_seed: [oauth.Scheme.KeyPair.seed_length]u8 = @splat(0),
     verifier: [oauth.verifier_length]u8,
     state: [oauth.digest_encoded_length]u8,
     redirect_uri: RedirectUri,
@@ -206,6 +213,7 @@ pub const PendingAuthorization = struct {
 
     fn clearSecrets(pending: *PendingAuthorization) void {
         secureZero(std.mem.asBytes(&pending.key_pair));
+        secureZero(&pending.key_seed);
         secureZero(&pending.verifier);
         secureZero(&pending.state);
         secureZero(pending.authorization_code.mutableSlice());
@@ -218,14 +226,32 @@ pub const PendingAuthorization = struct {
 pub const AuthorizedSession = struct {
     account: identity.DiscoveredAccount,
     key_pair: oauth.KeyPair,
+    /// The raw entropy the DPoP key pair was derived from. Persisted with the
+    /// session so the client key (the refresh-token holder's proof identity)
+    /// survives restart; the derived scalar cannot be fed back through
+    /// `generateDeterministic`, so the seed itself is what must be kept.
+    key_seed: [oauth.Scheme.KeyPair.seed_length]u8,
     access_token: Token,
     refresh_token: ?Token,
     scope: Scope,
+    /// The loopback client identifier used at PAR time; refresh requests must
+    /// present the identical `client_id` to the same Authorization Server.
+    client_id: ClientId,
     authorization_server_nonce: Nonce,
     access_token_expires_in: u64,
+    /// Host wall-clock seconds when the access token was obtained (0 when
+    /// unknown). The host sets this via `markObtained` after exchange/refresh;
+    /// persistence uses it to decide whether to refresh before the token is
+    /// presented to a PDS.
+    access_token_obtained_at_seconds: u64,
+
+    pub fn markObtained(session: *AuthorizedSession, now_seconds: u64) void {
+        session.access_token_obtained_at_seconds = now_seconds;
+    }
 
     pub fn deinit(session: *AuthorizedSession) void {
         secureZero(std.mem.asBytes(&session.key_pair));
+        secureZero(&session.key_seed);
         secureZero(session.access_token.mutableSlice());
         if (session.refresh_token) |*token| secureZero(token.mutableSlice());
         session.* = undefined;
@@ -252,6 +278,7 @@ pub fn begin(
     var pending: PendingAuthorization = .{
         .account = account,
         .key_pair = key_pair,
+        .key_seed = entropy.key_seed,
         .verifier = pkce.verifier,
         .state = state,
         .redirect_uri = redirect_uri,
@@ -444,20 +471,288 @@ fn parseTokenResponse(
         !scopeContains(value.scope, "include:site.standard.authFull")) return error.InvalidTokenResponse;
     var access = try Token.from(value.access_token);
     errdefer secureZero(access.mutableSlice());
-    var refresh: ?Token = null;
+    var rotated_refresh: ?Token = null;
     if (value.refresh_token) |text| {
         if (!validOpaque(text, oauth.max_access_token_length)) return error.InvalidTokenResponse;
-        refresh = try Token.from(text);
+        rotated_refresh = try Token.from(text);
     }
     return .{
         .account = pending.account,
         .key_pair = pending.key_pair,
+        .key_seed = pending.key_seed,
         .access_token = access,
-        .refresh_token = refresh,
+        .refresh_token = rotated_refresh,
         .scope = try Scope.from(value.scope),
+        .client_id = pending.client_id,
         .authorization_server_nonce = nonce,
         .access_token_expires_in = value.expires_in,
+        .access_token_obtained_at_seconds = 0,
     };
+}
+
+/// In-memory serialization seam for a durable session. Views borrow the
+/// session; the host copies them into its own storage format. Contains secret
+/// material (access token, refresh token, DPoP seed, AS nonce) by design — the
+/// host must treat every field as confidential.
+pub const SessionWire = struct {
+    did: []const u8,
+    pds_origin: []const u8,
+    authorization_server_origin: []const u8,
+    authorization_endpoint: []const u8,
+    token_endpoint: []const u8,
+    pushed_authorization_request_endpoint: []const u8,
+    verified_handle: ?[]const u8,
+    client_id: []const u8,
+    scope: []const u8,
+    access_token: []const u8,
+    refresh_token: ?[]const u8,
+    key_seed: []const u8,
+    authorization_server_nonce: []const u8,
+    access_token_expires_in: u64,
+    access_token_obtained_at_seconds: u64,
+};
+
+/// Non-secret identity facts needed to compare a stored session against fresh
+/// discovery (the account/authority-change recovery check).
+pub const SessionIdentity = struct {
+    did: []const u8,
+    pds_origin: []const u8,
+    authorization_server_origin: []const u8,
+};
+
+pub fn sessionToWire(session: *const AuthorizedSession) SessionWire {
+    return .{
+        .did = session.account.did.slice(),
+        .pds_origin = session.account.pds_origin.slice(),
+        .authorization_server_origin = session.account.authorization_server_origin.slice(),
+        .authorization_endpoint = session.account.authorization_endpoint.slice(),
+        .token_endpoint = session.account.token_endpoint.slice(),
+        .pushed_authorization_request_endpoint = session.account.pushed_authorization_request_endpoint.slice(),
+        .verified_handle = if (session.account.verified_handle) |handle| handle.slice() else null,
+        .client_id = session.client_id.slice(),
+        .scope = session.scope.slice(),
+        .access_token = session.access_token.slice(),
+        .refresh_token = if (session.refresh_token) |token| token.slice() else null,
+        .key_seed = session.key_seed[0..],
+        .authorization_server_nonce = session.authorization_server_nonce.slice(),
+        .access_token_expires_in = session.access_token_expires_in,
+        .access_token_obtained_at_seconds = session.access_token_obtained_at_seconds,
+    };
+}
+
+/// The non-secret identity subset of a session, for authority-change checks.
+pub fn sessionToIdentity(session: *const AuthorizedSession) SessionIdentity {
+    return .{
+        .did = session.account.did.slice(),
+        .pds_origin = session.account.pds_origin.slice(),
+        .authorization_server_origin = session.account.authorization_server_origin.slice(),
+    };
+}
+
+/// Rebuild an owned session from validated wire material. Every field is
+/// revalidated (DID syntax, origin/endpoint syntax, opaque token bounds,
+/// scope, key-seed length) so corrupted or tampered storage fails closed.
+pub fn sessionFromWire(allocator: std.mem.Allocator, wire: SessionWire) Error!AuthorizedSession {
+    _ = allocator;
+    const did = identity.Did.parse(wire.did) catch return error.InvalidSessionWire;
+    const pds_origin = identity.Origin.parse(wire.pds_origin) catch return error.InvalidSessionWire;
+    const authorization_server_origin = identity.Origin.parse(wire.authorization_server_origin) catch return error.InvalidSessionWire;
+    const authorization_endpoint = identity.Endpoint.parse(wire.authorization_endpoint) catch return error.InvalidSessionWire;
+    const token_endpoint = identity.Endpoint.parse(wire.token_endpoint) catch return error.InvalidSessionWire;
+    const par_endpoint = identity.Endpoint.parse(wire.pushed_authorization_request_endpoint) catch return error.InvalidSessionWire;
+    const verified_handle: ?identity.Handle = if (wire.verified_handle) |text| identity.Handle.parse(text) catch return error.InvalidSessionWire else null;
+
+    if (wire.key_seed.len != oauth.Scheme.KeyPair.seed_length) return error.InvalidKeySeed;
+    var key_seed: [oauth.Scheme.KeyPair.seed_length]u8 = undefined;
+    @memcpy(&key_seed, wire.key_seed);
+    const key_pair = try oauth.keyPairFromEntropy(key_seed);
+
+    if (wire.access_token_expires_in == 0) return error.InvalidSessionWire;
+    if (!validOpaque(wire.access_token, oauth.max_access_token_length)) return error.InvalidSessionWire;
+    if (!validScope(wire.scope) or
+        !scopeContains(wire.scope, "atproto") or
+        !scopeContains(wire.scope, "include:site.standard.authFull")) return error.InvalidSessionWire;
+    if (wire.refresh_token) |text| {
+        if (!validOpaque(text, oauth.max_access_token_length)) return error.InvalidSessionWire;
+    }
+
+    return .{
+        .account = .{
+            .did = did,
+            .verified_handle = verified_handle,
+            .pds_origin = pds_origin,
+            .authorization_server_origin = authorization_server_origin,
+            .authorization_endpoint = authorization_endpoint,
+            .token_endpoint = token_endpoint,
+            .pushed_authorization_request_endpoint = par_endpoint,
+        },
+        .key_pair = key_pair,
+        .key_seed = key_seed,
+        .access_token = try Token.from(wire.access_token),
+        .refresh_token = if (wire.refresh_token) |text| try Token.from(text) else null,
+        .scope = try Scope.from(wire.scope),
+        .client_id = try ClientId.from(wire.client_id),
+        .authorization_server_nonce = try Nonce.from(wire.authorization_server_nonce),
+        .access_token_expires_in = wire.access_token_expires_in,
+        .access_token_obtained_at_seconds = wire.access_token_obtained_at_seconds,
+    };
+}
+
+/// Rotate a DPoP-bound session with the refresh-token grant. The request is
+/// DPoP-signed by the same client key, targets the stored token endpoint, and
+/// retries exactly one `use_dpop_nonce` challenge. The response is fully
+/// revalidated: token type, subject DID, scope (no reduction), expiry, opaque
+/// bounds, and the rotated refresh token (single-use; an omitted refresh token
+/// leaves the session unable to refresh again). The caller owns the returned
+/// session and must atomically replace its stored predecessor only after this
+/// returns success.
+pub fn refresh(
+    allocator: std.mem.Allocator,
+    client: transport.Client,
+    session: *const AuthorizedSession,
+    proofs: ProofSource,
+) Error!AuthorizedSession {
+    if (session.refresh_token == null) return error.NoRefreshToken;
+    const body = try buildRefreshBody(allocator, session);
+    defer {
+        secureZero(body);
+        allocator.free(body);
+    }
+
+    var nonce = session.authorization_server_nonce;
+    var response = try postWithProof(
+        allocator,
+        client,
+        proofs,
+        session.key_pair,
+        session.account.token_endpoint.slice(),
+        body,
+        nonce.slice(),
+        token_limits,
+    );
+    defer {
+        secureZero(response.body);
+        response.deinit();
+    }
+    const first_nonce = try requiredNonce(response);
+    try nonce.set(first_nonce);
+    if (response.status == 400) try requireJson(response);
+    if (response.status == 400 and isUseDpopNonce(allocator, response.body)) {
+        secureZero(response.body);
+        response.deinit();
+        response = try postWithProof(
+            allocator,
+            client,
+            proofs,
+            session.key_pair,
+            session.account.token_endpoint.slice(),
+            body,
+            nonce.slice(),
+            token_limits,
+        );
+        const retry_nonce = try requiredNonce(response);
+        try nonce.set(retry_nonce);
+        if (response.status == 400) try requireJson(response);
+        if (response.status == 400 and isUseDpopNonce(allocator, response.body)) return error.DpopNonceRepeated;
+    }
+    if (response.status == 400 and isInvalidGrant(allocator, response.body)) return error.SessionRevoked;
+    if (response.status != 200) return classifyTokenFailure(allocator, response.body);
+    try requireJson(response);
+    return parseRefreshResponse(allocator, session, response.body, nonce);
+}
+
+fn buildRefreshBody(allocator: std.mem.Allocator, session: *const AuthorizedSession) Error![]u8 {
+    var result: std.ArrayList(u8) = .empty;
+    errdefer result.deinit(allocator);
+    const fields = [_]struct { name: []const u8, value: []const u8 }{
+        .{ .name = "grant_type", .value = "refresh_token" },
+        .{ .name = "refresh_token", .value = session.refresh_token.?.slice() },
+        .{ .name = "client_id", .value = session.client_id.slice() },
+        .{ .name = "scope", .value = session.scope.slice() },
+    };
+    for (fields, 0..) |field, index| {
+        if (index != 0) try result.append(allocator, '&');
+        try appendFormPair(&result, allocator, field.name, field.value);
+    }
+    if (result.items.len > token_limits.max_request_body_bytes) return error.InvalidTokenResponse;
+    return result.toOwnedSlice(allocator);
+}
+
+fn parseRefreshResponse(
+    allocator: std.mem.Allocator,
+    previous: *const AuthorizedSession,
+    body: []const u8,
+    nonce: Nonce,
+) Error!AuthorizedSession {
+    const Wire = struct {
+        access_token: []const u8,
+        token_type: []const u8,
+        sub: []const u8,
+        scope: []const u8,
+        expires_in: u64,
+        refresh_token: ?[]const u8 = null,
+    };
+    var parsed = std.json.parseFromSlice(Wire, allocator, body, .{
+        .ignore_unknown_fields = true,
+        .max_value_len = oauth.max_access_token_length,
+        .allocate = .alloc_always,
+    }) catch return error.InvalidTokenResponse;
+    defer parsed.deinit();
+    const value = parsed.value;
+    defer {
+        secureZero(@constCast(value.access_token));
+        if (value.refresh_token) |text| secureZero(@constCast(text));
+    }
+    if (!std.ascii.eqlIgnoreCase(value.token_type, "DPoP") or
+        !std.mem.eql(u8, value.sub, previous.account.did.slice()) or
+        value.expires_in == 0 or
+        !validOpaque(value.access_token, oauth.max_access_token_length) or
+        !validScope(value.scope) or
+        !scopeContains(value.scope, "atproto") or
+        !scopeContains(value.scope, "include:site.standard.authFull"))
+    {
+        return error.InvalidTokenResponse;
+    }
+    if (!std.mem.eql(u8, value.sub, previous.account.did.slice())) return error.SubjectDidMismatch;
+    if (!scopeIsSuperset(value.scope, previous.scope.slice())) return error.ScopeReduced;
+
+    var access = try Token.from(value.access_token);
+    errdefer secureZero(access.mutableSlice());
+    var rotated_refresh: ?Token = null;
+    if (value.refresh_token) |text| {
+        if (!validOpaque(text, oauth.max_access_token_length)) return error.InvalidTokenResponse;
+        rotated_refresh = try Token.from(text);
+    }
+    return .{
+        .account = previous.account,
+        .key_pair = previous.key_pair,
+        .key_seed = previous.key_seed,
+        .access_token = access,
+        .refresh_token = rotated_refresh,
+        .scope = try Scope.from(value.scope),
+        .client_id = previous.client_id,
+        .authorization_server_nonce = nonce,
+        .access_token_expires_in = value.expires_in,
+        .access_token_obtained_at_seconds = previous.access_token_obtained_at_seconds,
+    };
+}
+
+fn isInvalidGrant(allocator: std.mem.Allocator, body: []const u8) bool {
+    const Wire = struct { @"error": []const u8 };
+    var parsed = std.json.parseFromSlice(Wire, allocator, body, .{
+        .ignore_unknown_fields = true,
+        .max_value_len = 1024,
+    }) catch return false;
+    defer parsed.deinit();
+    return std.mem.eql(u8, parsed.value.@"error", "invalid_grant");
+}
+
+fn scopeIsSuperset(superset: []const u8, previous: []const u8) bool {
+    var values = std.mem.splitScalar(u8, previous, ' ');
+    while (values.next()) |value| {
+        if (!scopeContains(superset, value)) return false;
+    }
+    return true;
 }
 
 fn classifyTokenFailure(allocator: std.mem.Allocator, body: []const u8) Error {
@@ -826,4 +1121,194 @@ test "one-shot PAR callback and token exchange retry nonce challenges offline" {
     try std.testing.expectEqual(@as(u64, 3600), session.access_token_expires_in);
     try std.testing.expectEqualStrings("token-nonce-2", session.authorization_server_nonce.slice());
     try std.testing.expectError(error.CodeAlreadyConsumed, pending.exchange(std.testing.allocator, mock.client(), proofs.source()));
+}
+
+
+const StaticProofSource = struct {
+    issued_at: u64,
+    jti_entropy: u8,
+    signing_noise: u8,
+
+    fn source(self: *const StaticProofSource) ProofSource {
+        return .{ .context = @constCast(self), .next_fn = next };
+    }
+
+    fn next(context: *anyopaque) Error!ProofMaterial {
+        const self: *const StaticProofSource = @ptrCast(@alignCast(context));
+        return .{
+            .issued_at = self.issued_at,
+            .jti_entropy = @splat(self.jti_entropy),
+            .signing_noise = @splat(self.signing_noise),
+        };
+    }
+};
+
+const ParTokenMock = struct {
+    call: usize = 0,
+
+    fn client(self: *ParTokenMock) transport.Client {
+        return .{ .context = self, .request_fn = request };
+    }
+
+    fn request(
+        context: *anyopaque,
+        allocator: std.mem.Allocator,
+        value: transport.Request,
+    ) transport.Error!transport.Response {
+        const self: *ParTokenMock = @ptrCast(@alignCast(context));
+        if (self.call >= 2 or value.method != .post) return error.UnexpectedRequest;
+        const par = self.call == 0;
+        self.call += 1;
+        const expected_url = if (par) "https://auth.example.com/par" else "https://auth.example.com/token";
+        if (!std.mem.eql(u8, value.url, expected_url)) return error.UnexpectedRequest;
+        const status: u16 = if (par) 201 else 200;
+        const nonce = if (par) "par-n" else "tok-n";
+        const body = if (par)
+            "{\"request_uri\":\"urn:ietf:params:oauth:request_uri:abc\",\"expires_in\":90}"
+        else
+            "{\"access_token\":\"old-access\",\"refresh_token\":\"old-refresh\",\"token_type\":\"DPoP\",\"sub\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"scope\":\"atproto include:site.standard.authFull\",\"expires_in\":3600}";
+        const headers = [_]transport.Header{
+            .{ .name = "content-type", .value = "application/json" },
+            .{ .name = "dpop-nonce", .value = nonce },
+        };
+        return transport.Response.initCopy(allocator, status, &headers, body, value.limits);
+    }
+};
+
+/// A session created entirely offline: PAR served by `TokenResponseMock`
+/// (single response per endpoint), callback accepted, then exchanged.
+fn makeRefreshableSession(allocator: std.mem.Allocator) !AuthorizedSession {
+    const entropy: SessionEntropy = .{ .key_seed = @splat(21), .pkce = @splat(22), .state = @splat(23) };
+    var flow = ParTokenMock{};
+    var pending = try begin(
+        allocator,
+        flow.client(),
+        try testAccount(),
+        "http://127.0.0.1:49152/oauth/callback",
+        entropy,
+        .{ .context = (&StaticProofSource{ .issued_at = 1_700_000_100, .jti_entropy = 30, .signing_noise = 31 }).source().context, .next_fn = (&StaticProofSource{ .issued_at = 1_700_000_100, .jti_entropy = 30, .signing_noise = 31 }).source().next_fn },
+    );
+    defer pending.deinit();
+    const callback = try std.fmt.allocPrint(
+        std.testing.allocator,
+        "/oauth/callback?code=auth-code&iss=https%3A%2F%2Fauth.example.com&state={s}",
+        .{&pending.state},
+    );
+    defer std.testing.allocator.free(callback);
+    try pending.acceptCallback(callback);
+    const session = try pending.exchange(allocator, flow.client(), .{ .context = (&StaticProofSource{ .issued_at = 1_700_000_100, .jti_entropy = 30, .signing_noise = 31 }).source().context, .next_fn = (&StaticProofSource{ .issued_at = 1_700_000_100, .jti_entropy = 30, .signing_noise = 31 }).source().next_fn });
+    return session;
+}
+
+const RefreshMock = struct {
+    const Response = struct {
+        status: u16,
+        body: []const u8,
+        nonce: []const u8,
+    };
+
+    call: usize = 0,
+    response: Response,
+
+    fn client(self: *RefreshMock) transport.Client {
+        return .{ .context = self, .request_fn = request };
+    }
+
+    fn request(
+        context: *anyopaque,
+        allocator: std.mem.Allocator,
+        value: transport.Request,
+    ) transport.Error!transport.Response {
+        const self: *RefreshMock = @ptrCast(@alignCast(context));
+        if (self.call >= 2 or value.method != .post or
+            !std.mem.eql(u8, value.url, "https://auth.example.com/token") or
+            std.mem.indexOf(u8, value.body, "grant_type=refresh_token") == null or
+            std.mem.indexOf(u8, value.body, "refresh_token=old-refresh") == null or
+            std.mem.indexOf(u8, value.body, "client_id=") == null or
+            std.mem.indexOf(u8, value.body, "scope=atproto%20include%3Asite.standard.authFull") == null or
+            value.headers.len != 3 or
+            !std.ascii.eqlIgnoreCase(value.headers[2].name, "dpop") or value.headers[2].value.len == 0)
+        {
+            return error.UnexpectedRequest;
+        }
+        const selected: Response = if (self.call == 0)
+            .{ .status = 400, .body = "{\"error\":\"use_dpop_nonce\"}", .nonce = "refresh-nonce-1" }
+        else
+            self.response;
+        self.call += 1;
+        const headers = [_]transport.Header{
+            .{ .name = "content-type", .value = "application/json" },
+            .{ .name = "dpop-nonce", .value = selected.nonce },
+        };
+        return transport.Response.initCopy(allocator, selected.status, &headers, selected.body, value.limits);
+    }
+};
+
+const RejectAllMock = struct {
+    fn client(self: *RejectAllMock) transport.Client {
+        return .{ .context = self, .request_fn = request };
+    }
+
+    fn request(_: *anyopaque, allocator: std.mem.Allocator, value: transport.Request) transport.Error!transport.Response {
+        _ = allocator;
+        _ = value;
+        return error.UnexpectedRequest;
+    }
+};
+
+fn nextProof() Error!ProofMaterial {
+    return .{ .issued_at = 1_700_000_200, .jti_entropy = @splat(40), .signing_noise = @splat(41) };
+}
+
+test "refresh rotates DPoP-bound session with one-shot nonce retry" {
+    var mock = RefreshMock{ .response = .{ .status = 200, .body = "{\"access_token\":\"new-access\",\"refresh_token\":\"new-refresh\",\"token_type\":\"DPoP\",\"sub\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"scope\":\"atproto include:site.standard.authFull\",\"expires_in\":7200}", .nonce = "refresh-nonce-2" } };
+    var session = try makeRefreshableSession(std.testing.allocator);
+    defer session.deinit();
+    var refreshed = try refresh(std.testing.allocator, mock.client(), &session, .{ .context = (&StaticProofSource{ .issued_at = 1_700_000_200, .jti_entropy = 40, .signing_noise = 41 }).source().context, .next_fn = (&StaticProofSource{ .issued_at = 1_700_000_200, .jti_entropy = 40, .signing_noise = 41 }).source().next_fn });
+    defer refreshed.deinit();
+    try std.testing.expectEqual(@as(usize, 2), mock.call);
+    try std.testing.expectEqualStrings("new-access", refreshed.access_token.slice());
+    try std.testing.expectEqualStrings("new-refresh", refreshed.refresh_token.?.slice());
+    try std.testing.expectEqual(@as(u64, 7200), refreshed.access_token_expires_in);
+    try std.testing.expectEqualStrings("refresh-nonce-2", refreshed.authorization_server_nonce.slice());
+    try std.testing.expectEqualStrings("https://auth.example.com/token", refreshed.account.token_endpoint.slice());
+}
+
+test "refresh rejects revoked sessions and refuses missing refresh tokens" {
+    var session = try makeRefreshableSession(std.testing.allocator);
+    defer session.deinit();
+    var no_refresh = session;
+    no_refresh.refresh_token = null;
+    defer no_refresh.deinit();
+    var reject = RejectAllMock{};
+    try std.testing.expectError(error.NoRefreshToken, refresh(std.testing.allocator, reject.client(), &no_refresh, .{ .context = (&StaticProofSource{ .issued_at = 1_700_000_200, .jti_entropy = 40, .signing_noise = 41 }).source().context, .next_fn = (&StaticProofSource{ .issued_at = 1_700_000_200, .jti_entropy = 40, .signing_noise = 41 }).source().next_fn }));
+
+    var revoked_mock = RefreshMock{ .response = .{ .status = 400, .body = "{\"error\":\"invalid_grant\"}", .nonce = "refresh-nonce-2" } };
+    try std.testing.expectError(error.SessionRevoked, refresh(std.testing.allocator, revoked_mock.client(), &session, .{ .context = (&StaticProofSource{ .issued_at = 1_700_000_200, .jti_entropy = 40, .signing_noise = 41 }).source().context, .next_fn = (&StaticProofSource{ .issued_at = 1_700_000_200, .jti_entropy = 40, .signing_noise = 41 }).source().next_fn }));
+}
+
+test "session wire seams round trip and fail closed on tampering" {
+    var session = try makeRefreshableSession(std.testing.allocator);
+    defer session.deinit();
+    const wire = sessionToWire(&session);
+    var rebuilt = try sessionFromWire(std.testing.allocator, wire);
+    defer rebuilt.deinit();
+    try std.testing.expectEqualStrings(session.access_token.slice(), rebuilt.access_token.slice());
+    try std.testing.expectEqualStrings(session.refresh_token.?.slice(), rebuilt.refresh_token.?.slice());
+    try std.testing.expectEqualStrings(session.client_id.slice(), rebuilt.client_id.slice());
+    try std.testing.expectEqualStrings(session.account.did.slice(), rebuilt.account.did.slice());
+    try std.testing.expectEqual(session.access_token_expires_in, rebuilt.access_token_expires_in);
+    try std.testing.expectEqualStrings("atproto include:site.standard.authFull", rebuilt.scope.slice());
+
+    var tampered = wire;
+    tampered.scope = "atproto";
+    try std.testing.expectError(error.InvalidSessionWire, sessionFromWire(std.testing.allocator, tampered));
+    tampered = wire;
+    tampered.access_token = "bad token";
+    try std.testing.expectError(error.InvalidSessionWire, sessionFromWire(std.testing.allocator, tampered));
+    tampered = wire;
+    tampered.access_token_expires_in = 0;
+    try std.testing.expectError(error.InvalidSessionWire, sessionFromWire(std.testing.allocator, tampered));
+    const identity_facts = sessionToIdentity(&session);
+    try std.testing.expectEqualStrings("did:plc:ewvi7nxzyoun6zhxrhs64oiz", identity_facts.did);
 }

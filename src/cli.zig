@@ -39,6 +39,20 @@ pub const Command = enum {
     watch,
     plan,
     init,
+    /// `standard-site publish` — the explicit one-shot publish family. The
+    /// network operation lives only here; no other command publishes.
+    standard_site,
+};
+
+/// The subcommand selected under the `standard-site` family. All four are
+/// explicit: a missing or unknown subcommand is a usage error, never a
+/// silent fallback.
+pub const StandardSiteCommand = enum {
+    publish,
+    login,
+    sessions,
+    logout,
+    smoke,
 };
 
 pub const AnalysisFormat = enum {
@@ -64,6 +78,40 @@ pub const Options = struct {
     /// (`--timings`). Off unless requested; never changes artifacts or codes.
     timings: bool = false,
     command: Command = .build,
+    /// Which `standard-site` subcommand was selected.
+    standard_site_command: StandardSiteCommand = .publish,
+    /// True when `standard-site publish` was selected (kept for callers that
+    /// dispatch on the bool; prefer `standard_site_command`).
+    standard_site_publish: bool = false,
+    /// Committed `boris-standard-site-plan` file to validate against the
+    /// freshly rendered plan before any network mutation.
+    plan_path: ?[]const u8 = null,
+    /// Evidence artifact output path for `standard-site publish` (default:
+    /// stdout, mirroring `plan`).
+    publish_out: ?[]const u8 = null,
+    /// Explicit prune authority for `standard-site publish`; ANDs with the
+    /// profile's `prune` flag.
+    publish_prune: bool = false,
+    /// Optional source commit recorded in the publish evidence bindings.
+    source_commit: ?[]const u8 = null,
+    /// DID for `standard-site login` / `standard-site logout` (required by
+    /// both; forbidden elsewhere in the family).
+    session_did: ?[]const u8 = null,
+    /// Override the persistent session root for the `standard-site` family
+    /// (default: `$HOME/.local/share/boris/sessions`).
+    session_root: ?[]const u8 = null,
+    /// Namespace prefix for `standard-site smoke` test rkeys (default: a
+    /// clock-derived unique namespace).
+    smoke_namespace: ?[]const u8 = null,
+    /// Served verification-surface origin checked by `standard-site smoke`
+    /// (`--surface-url`): the well-known publication file is fetched and
+    /// validated at `https://<origin>/.well-known/site.standard.publication`.
+    smoke_surface_url: ?[]const u8 = null,
+    /// Indexer/AppView origin observed non-normatively by
+    /// `standard-site smoke` (`--indexer`).
+    smoke_indexer_origin: ?[]const u8 = null,
+    /// Result output path for `standard-site smoke` (default: stdout).
+    smoke_out: ?[]const u8 = null,
     /// Explicit profile selected by `plan --profile PATH`.
     profile_path: ?[]const u8 = null,
     /// Explicit profile-mode publication overrides. These remain argv views;
@@ -238,6 +286,24 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_cooklang = false;
     var saw_format = false;
     var saw_report = false;
+    // `standard-site` family state.
+    var standard_site_command: StandardSiteCommand = .publish;
+    var standard_site_publish = false;
+    var session_did: ?[]const u8 = null;
+    var saw_session_did = false;
+    var session_root: ?[]const u8 = null;
+    var saw_session_root = false;
+    var plan_path: ?[]const u8 = null;
+    var saw_plan_path = false;
+    var publish_prune = false;
+    var source_commit: ?[]const u8 = null;
+    var saw_source_commit = false;
+    var smoke_namespace: ?[]const u8 = null;
+    var saw_smoke_namespace = false;
+    var smoke_surface_url: ?[]const u8 = null;
+    var saw_smoke_surface_url = false;
+    var smoke_indexer_origin: ?[]const u8 = null;
+    var saw_smoke_indexer_origin = false;
     var saw_fail_on_unreferenced = false;
     var saw_profile = false;
     var jobs: usize = 1;
@@ -305,6 +371,28 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             init_dir = args[i];
             i += 1;
         }
+        if (i < args.len and !std.mem.startsWith(u8, args[i], "-")) return error.UnexpectedPositional;
+    } else if (i < args.len and std.mem.eql(u8, args[i], "standard-site")) {
+        command = .standard_site;
+        i += 1;
+        // The network family has four explicit subcommands. A missing or
+        // unknown subcommand is a usage error, never a silent fallback.
+        if (i >= args.len) return error.UnexpectedPositional;
+        if (std.mem.eql(u8, args[i], "publish")) {
+            standard_site_command = .publish;
+            standard_site_publish = true;
+        } else if (std.mem.eql(u8, args[i], "login")) {
+            standard_site_command = .login;
+        } else if (std.mem.eql(u8, args[i], "sessions")) {
+            standard_site_command = .sessions;
+        } else if (std.mem.eql(u8, args[i], "logout")) {
+            standard_site_command = .logout;
+        } else if (std.mem.eql(u8, args[i], "smoke")) {
+            standard_site_command = .smoke;
+        } else {
+            return error.UnexpectedPositional;
+        }
+        i += 1;
         if (i < args.len and !std.mem.startsWith(u8, args[i], "-")) return error.UnexpectedPositional;
     }
     while (i < args.len) : (i += 1) {
@@ -570,6 +658,61 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        if (std.mem.eql(u8, a, "--plan") or std.mem.startsWith(u8, a, "--plan=")) {
+            if (saw_plan_path) return error.DuplicateFlag;
+            saw_plan_path = true;
+            plan_path = try takeValue(args, &i, a, "--plan");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--prune")) {
+            if (publish_prune) return error.DuplicateFlag;
+            publish_prune = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--source-commit") or std.mem.startsWith(u8, a, "--source-commit=")) {
+            if (saw_source_commit) return error.DuplicateFlag;
+            saw_source_commit = true;
+            source_commit = try takeValue(args, &i, a, "--source-commit");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--did") or std.mem.startsWith(u8, a, "--did=")) {
+            if (saw_session_did) return error.DuplicateFlag;
+            saw_session_did = true;
+            session_did = try takeValue(args, &i, a, "--did");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--session-root") or std.mem.startsWith(u8, a, "--session-root=")) {
+            if (saw_session_root) return error.DuplicateFlag;
+            saw_session_root = true;
+            session_root = try takeValue(args, &i, a, "--session-root");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--namespace") or std.mem.startsWith(u8, a, "--namespace=")) {
+            if (saw_smoke_namespace) return error.DuplicateFlag;
+            saw_smoke_namespace = true;
+            smoke_namespace = try takeValue(args, &i, a, "--namespace");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--surface-url") or std.mem.startsWith(u8, a, "--surface-url=")) {
+            if (saw_smoke_surface_url) return error.DuplicateFlag;
+            saw_smoke_surface_url = true;
+            smoke_surface_url = try takeValue(args, &i, a, "--surface-url");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--indexer") or std.mem.startsWith(u8, a, "--indexer=")) {
+            if (saw_smoke_indexer_origin) return error.DuplicateFlag;
+            saw_smoke_indexer_origin = true;
+            smoke_indexer_origin = try takeValue(args, &i, a, "--indexer");
+            continue;
+        }
+
         if (std.mem.eql(u8, a, "--input") or std.mem.startsWith(u8, a, "--input=")) {
             if (saw_input) return error.DuplicateFlag;
             saw_input = true;
@@ -825,6 +968,67 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .mode = .html,
             .input_format = identity.InputFormat.markdown,
             .input_dir = "content",
+            .out_dir = null,
+            .html_dir = null,
+            .targets = targets,
+        };
+    }
+
+    if (command == .standard_site) {
+        // The `standard-site` family is the one-shot network family: publish,
+        // login, sessions, and logout. Compiler modes, targets, and projection
+        // selectors have no meaning here, and `--timings` must not corrupt the
+        // evidence stream on stdout. `publish` requires a profile and forbids
+        // `--did`; `login`/`logout` require `--did`; `sessions` forbids it.
+        if (saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_layout_rules or
+            wants_sitemap or wants_rag or saw_no_rag or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or
+            saw_rss_title or saw_rss_description or saw_rss_limit or saw_format or saw_report or saw_watch or saw_timings or
+            saw_input or saw_textile or saw_cooklang or saw_rag_dir or saw_scope or saw_split_size or saw_bundles_only or saw_complete or
+            saw_incremental or saw_jobs or saw_llms_path or saw_rss_path or saw_sitemap_path or saw_context_dir)
+        {
+            return error.ConflictingFlags;
+        }
+        // Smoke-only flags have no meaning on the other subcommands; reject
+        // them rather than silently ignoring them.
+        const saw_smoke_only = saw_smoke_namespace or saw_smoke_surface_url or saw_smoke_indexer_origin;
+        switch (standard_site_command) {
+            .publish => {
+                if (profile_path == null) return error.MissingValue;
+                if (saw_session_did or saw_smoke_only) return error.ConflictingFlags;
+            },
+            .login, .logout => {
+                if (session_did == null) return error.MissingValue;
+                if (profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only) return error.ConflictingFlags;
+            },
+            .sessions => {
+                if (saw_session_did or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only) return error.ConflictingFlags;
+            },
+            .smoke => {
+                if (session_did == null) return error.MissingValue;
+                if (profile_path != null or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
+            },
+        }
+        return .{
+            .help = false,
+            .quiet = quiet,
+            .timings = false,
+            .command = .standard_site,
+            .standard_site_command = standard_site_command,
+            .standard_site_publish = standard_site_command == .publish,
+            .plan_path = plan_path,
+            .publish_out = if (saw_out) out_dir else null,
+            .publish_prune = publish_prune,
+            .source_commit = source_commit,
+            .session_did = session_did,
+            .session_root = session_root,
+            .smoke_namespace = smoke_namespace,
+            .smoke_surface_url = smoke_surface_url,
+            .smoke_indexer_origin = smoke_indexer_origin,
+            .smoke_out = if (saw_out) out_dir else null,
+            .profile_path = profile_path,
+            .mode = .html,
+            .input_format = identity.InputFormat.markdown,
+            .input_dir = input_dir,
             .out_dir = null,
             .html_dir = null,
             .targets = targets,
@@ -1213,8 +1417,29 @@ pub fn printUsage() void {
         \\  check               Read-only graph health report (findings do not fail by default)
         \\  impact <ID>         Read-only transitive impact report for a page
         \\  plan                Emit a normalized publication plan (no publication)
+        \\  standard-site publish  One-shot Standard.site publish (OAuth + reconcile; never implicit)
+        \\  standard-site login  Authorize a DID and persist the session for later publishes
+        \\  standard-site sessions  List persisted sessions (DIDs only; no secrets)
+        \\  standard-site logout  Remove a persisted session (secure erase; does not revoke)
+        \\  standard-site smoke  Live interop smoke against a real PDS (manual, opt-in; never in CI)
         \\  init [DIR]          Write a starter site (content, theme, profile) into DIR (default: .)
         \\  (no command)        Same as build
+        \\  standard-site publish options:
+        \\  --profile PATH      Standard.site publication profile (required)
+        \\  --plan PATH         Committed standard-site plan to validate (fail closed on drift)
+        \\  --out PATH          Evidence artifact path (default: stdout)
+        \\  --prune             Explicit prune authority (ANDs with the profile prune flag)
+        \\  --source-commit C   Source commit recorded in the evidence bindings
+        \\  standard-site login/logout options:
+        \\  --did DID           AT Protocol DID to authorize (login) or forget (logout)
+        \\  standard-site smoke options:
+        \\  --did DID           Test identity DID (required)
+        \\  --namespace NAME    Unique rkey namespace prefix (default: clock-derived)
+        \\  --surface-url URL   Served verification-surface origin to check (optional)
+        \\  --indexer URL       Indexer/AppView origin observed non-normatively (optional)
+        \\  --out PATH          Smoke result artifact path (default: stdout)
+        \\  standard-site options (all subcommands):
+        \\  --session-root PATH Override the persistent session store root
         \\  --html              Explicit HTML site mode → --html-dir (default dist)
         \\  --html-dir <DIR>    HTML site mode with output directory DIR
         \\  --target NAME=DIR   HTML multi-target mode (repeatable; order-independent); implies HTML
@@ -1773,6 +1998,105 @@ test "parse: plan requires a profile and rejects execution or projection selecto
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--out", "out" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--target", "public=dist" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--watch" }));
+}
+
+test "parse: standard-site publish selects the family and its options" {
+    var o = try parseOptions(std.testing.allocator, &.{
+        "boris",          "standard-site", "publish", "--profile", "boris.json", "--plan",     "standard-site-plan.json",
+        "--out",          "evidence.json", "--prune", "--source-commit", "abc123",     "--quiet",
+    });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(Command.standard_site, o.command);
+    try expect(o.standard_site_publish);
+    try expectEqualStrings("boris.json", o.profile_path.?);
+    try expectEqualStrings("standard-site-plan.json", o.plan_path.?);
+    try expectEqualStrings("evidence.json", o.publish_out.?);
+    try expect(o.publish_prune);
+    try expectEqualStrings("abc123", o.source_commit.?);
+    try expect(o.quiet);
+    try expectEqual(@as(usize, 0), o.targets.items.len);
+}
+
+test "parse: standard-site publish validates its contract" {
+    // The network family requires the explicit subcommand and a profile.
+    try expectError(error.UnexpectedPositional, parseOptions(std.testing.allocator, &.{ "boris", "standard-site" }));
+    try expectError(error.UnexpectedPositional, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "plan" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--plan" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--prune", "--prune" }));
+    // Compiler mode / projection selectors are usage errors: publish never
+    // runs as a side effect of build/validate/watch/plan flags.
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--rag" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--target", "public=dist" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--watch" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--timings" }));
+    // --out is the evidence path here, never an IR mode selector.
+    var o = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--out", "ev.json" });
+    defer o.deinit(std.testing.allocator);
+    try expectEqualStrings("ev.json", o.publish_out.?);
+    try expectEqual(Mode.html, o.mode);
+}
+
+test "parse: standard-site login requires a DID and persists the session root" {
+    var o = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "did:plc:ewvi7nxzyoun6zhxrhs64oiz", "--session-root", "/tmp/boris-sessions" });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(Command.standard_site, o.command);
+    try expectEqual(StandardSiteCommand.login, o.standard_site_command);
+    try expect(!o.standard_site_publish);
+    try expectEqualStrings("did:plc:ewvi7nxzyoun6zhxrhs64oiz", o.session_did.?);
+    try expectEqualStrings("/tmp/boris-sessions", o.session_root.?);
+}
+
+test "parse: standard-site sessions lists without a DID" {
+    var o = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "sessions", "--session-root", "/tmp/boris-sessions" });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(StandardSiteCommand.sessions, o.standard_site_command);
+    try expect(o.session_did == null);
+    try expectEqualStrings("/tmp/boris-sessions", o.session_root.?);
+}
+
+test "parse: standard-site logout requires a DID and rejects compiler flags" {
+    var o = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "logout", "--did", "did:plc:ewvi7nxzyoun6zhxrhs64oiz" });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(StandardSiteCommand.logout, o.standard_site_command);
+    try expectEqualStrings("did:plc:ewvi7nxzyoun6zhxrhs64oiz", o.session_did.?);
+
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "logout" }));
+    try expectError(error.UnexpectedPositional, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "a", "extra" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "a", "--rag" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "a", "--profile", "p.json" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "sessions", "--did", "a" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--did", "d" }));
+}
+
+test "parse: standard-site smoke requires a DID and accepts its opt-in flags" {
+    var o = try parseOptions(std.testing.allocator, &.{
+        "boris", "standard-site", "smoke", "--did", "did:plc:ewvi7nxzyoun6zhxrhs64oiz",
+        "--namespace", "boris-smoke-manual", "--surface-url", "https://example.com",
+        "--indexer", "https://public.api.example.com", "--out", "smoke-result.json",
+    });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(StandardSiteCommand.smoke, o.standard_site_command);
+    try expectEqualStrings("did:plc:ewvi7nxzyoun6zhxrhs64oiz", o.session_did.?);
+    try expectEqualStrings("boris-smoke-manual", o.smoke_namespace.?);
+    try expectEqualStrings("https://example.com", o.smoke_surface_url.?);
+    try expectEqualStrings("https://public.api.example.com", o.smoke_indexer_origin.?);
+    try expectEqualStrings("smoke-result.json", o.smoke_out.?);
+}
+
+test "parse: standard-site smoke validates its contract" {
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--profile", "p.json" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--plan", "plan.json" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--rag" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--namespace", "n" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "a", "--indexer", "i" }));
+    // --out is the smoke result path here, never an IR mode selector.
+    var o = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--out", "smoke.json" });
+    defer o.deinit(std.testing.allocator);
+    try expectEqualStrings("smoke.json", o.smoke_out.?);
+    try expectEqual(Mode.html, o.mode);
 }
 
 test "parse: --out selects IR mode" {

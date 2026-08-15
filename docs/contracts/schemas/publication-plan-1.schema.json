@@ -31,15 +31,37 @@
     },
     "publication": {
       "type": "object",
-      "additionalProperties": false,
-      "required": ["target", "base_url", "origin", "base_path", "site_kind"],
-      "properties": {
-        "target": { "const": "github-pages" },
-        "base_url": { "type": "string", "minLength": 1, "maxLength": 2048 },
-        "origin": { "type": "string", "minLength": 1, "maxLength": 2048 },
-        "base_path": { "type": "string", "maxLength": 2048 },
-        "site_kind": { "enum": ["project-site", "root-site", "custom-domain"] }
-      }
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "required": ["target", "base_url", "origin", "base_path", "site_kind"],
+          "properties": {
+            "target": { "const": "github-pages" },
+            "base_url": { "type": "string", "minLength": 1, "maxLength": 2048 },
+            "origin": { "type": "string", "minLength": 1, "maxLength": 2048 },
+            "base_path": { "type": "string", "maxLength": 2048 },
+            "site_kind": { "enum": ["project-site", "root-site", "custom-domain"] }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["target", "base_url", "origin", "base_path", "did"],
+          "properties": {
+            "target": { "const": "standard-site" },
+            "base_url": { "type": "string", "minLength": 1, "maxLength": 2048 },
+            "origin": { "type": "string", "minLength": 1, "maxLength": 2048 },
+            "base_path": { "type": "string", "maxLength": 2048 },
+            "did": { "type": "string", "minLength": 1, "maxLength": 2048 },
+            "pds_origin": { "type": ["string", "null"], "maxLength": 2048 },
+            "name": { "type": ["string", "null"], "maxLength": 1024 },
+            "description": { "type": ["string", "null"], "maxLength": 1024 },
+            "show_in_discover": { "type": "boolean" },
+            "include": { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1 } },
+            "exclude": { "type": "array", "maxItems": 256, "items": { "type": "string", "minLength": 1 } },
+            "prune": { "type": "boolean" }
+          }
+        }
+      ]
     },
     "layout_rule": {
       "type": "object",

@@ -88,6 +88,11 @@ pub const Code = enum {
     ELAYOUTRULE,
     /// Generic layout failure (structural bounds, invalid utf-8, …).
     ELAYOUT,
+    /// Standard.site verification is configured but a selected layout omits
+    /// the compiler-owned `{{head}}` slot, so eligible pages cannot emit their
+    /// document AT-URI links. Warning: the build still succeeds and the
+    /// verification report records those pages as `not_verified`.
+    EVERIFICATIONHEAD,
     EUSAGE,
     EIO,
 
@@ -280,6 +285,7 @@ test "Code names match contract strings" {
     try std.testing.expectEqualStrings("EUSAGE", Code.EUSAGE.name());
     try std.testing.expectEqualStrings("EIO", Code.EIO.name());
     try std.testing.expectEqualStrings("EPUBLICATIONLOCATION", Code.EPUBLICATIONLOCATION.name());
+    try std.testing.expectEqualStrings("EVERIFICATIONHEAD", Code.EVERIFICATIONHEAD.name());
 }
 
 test "parser categories map to shared diagnostic codes" {

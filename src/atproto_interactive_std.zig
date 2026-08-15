@@ -61,10 +61,12 @@ pub fn authorize(
     return pending.exchange(allocator, client, proof_context.source());
 }
 
-const NativeProofSource = struct {
+/// Native DPoP proof source bound to an explicit host I/O. The publish CLI
+/// reuses this source for PDS-bound DPoP proofs after authorization.
+pub const NativeProofSource = struct {
     io: std.Io,
 
-    fn source(self: *NativeProofSource) authorization.ProofSource {
+    pub fn source(self: *NativeProofSource) authorization.ProofSource {
         return .{ .context = self, .next_fn = next };
     }
 
