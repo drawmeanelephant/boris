@@ -827,6 +827,57 @@ test('completion categories match Boris artifacts and refresh after a successful
   await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('[[guides/intro]]');
 });
 
+test('the completion combobox shows arrow, Enter, and Esc key hints (#462)', async ({ page }) => {
+  await installApi(page, { disk: '' });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const filter = page.getByRole('combobox', { name: 'Filter frontmatter key', exact: true });
+  const hint = page.locator('.combobox-wrap .key-hint');
+  await expect(hint).toBeVisible();
+  await expect(hint).toContainText('navigate');
+  await expect(hint).toContainText('insert');
+  await expect(hint).toContainText('close');
+  await expect(hint).toContainText('↑');
+  await filter.focus();
+  const listbox = page.getByRole('listbox', { name: 'Boris completion suggestions' });
+  await expect(listbox).toBeVisible();
+  await expect(filter).toHaveAttribute('aria-expanded', 'true');
+  await filter.press('Escape');
+  await expect(listbox).toBeHidden();
+  await expect(filter).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('Esc closes the completion list without clearing the filter (#462)', async ({ page }) => {
+  await installApi(page, { disk: '' });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const filter = page.getByRole('combobox', { name: 'Filter frontmatter key', exact: true });
+  await filter.fill('sta');
+  const listbox = page.getByRole('listbox', { name: 'Boris completion suggestions' });
+  await expect(listbox).toBeVisible();
+  await expect(listbox.getByRole('option', { name: /status/ }).first()).toBeVisible();
+  await filter.press('Escape');
+  await expect(listbox).toBeHidden();
+  await expect(filter).toHaveValue('sta');
+  // Refocusing (after moving focus away) reopens the filtered list, and Enter still inserts.
+  await page.getByRole('button', { name: 'Insert selected completion', exact: true }).focus();
+  await filter.focus();
+  await expect(listbox).toBeVisible();
+  await expect(listbox.getByRole('option', { name: /status/ }).first()).toBeVisible();
+  await filter.press('Enter');
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('status: ');
+});
+
+test('the recovery banner shows a Tab + Enter key hint for its actions (#462)', async ({ page }) => {
+  await installApi(page, {
+    recovery: [{ path: 'content/index.md', content: '# Recovered draft\n', fingerprint: 'a'.repeat(64) }]
+  });
+  const recovery = page.getByRole('complementary', { name: 'Recovered unsaved work' });
+  await expect(recovery).toBeVisible();
+  const hint = recovery.locator('.key-hint');
+  await expect(hint).toBeVisible();
+  await expect(hint).toContainText('Tab');
+  await expect(hint).toContainText('Enter');
+});
+
 test('explicit save rebuilds and reloads the real-output preview by keyboard', async ({ page }) => {
   await installApi(page);
   await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
