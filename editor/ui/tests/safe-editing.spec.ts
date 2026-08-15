@@ -432,6 +432,28 @@ test('Discard & Switch drops the dirty buffer without saving and opens the targe
   await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
 });
 
+test('desktop viewports place Problems and Preview beside the editor without a deep page scroll (#463)', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await installApi(page);
+  const source = page.locator('#source');
+  const problems = page.locator('#problems');
+  const preview = page.locator('#preview');
+  await expect(problems).toBeVisible();
+  await expect(preview).toBeVisible();
+  const sourceBox = await source.boundingBox();
+  const problemsBox = await problems.boundingBox();
+  const previewBox = await preview.boundingBox();
+  expect(sourceBox).not.toBeNull();
+  expect(problemsBox).not.toBeNull();
+  expect(previewBox).not.toBeNull();
+  // Files | Editor | Diagnostics+Preview: Problems and Preview open to the right of the editor.
+  expect(problemsBox!.x).toBeGreaterThan(sourceBox!.x + sourceBox!.width - 1);
+  expect(previewBox!.x).toBeGreaterThan(sourceBox!.x + sourceBox!.width - 1);
+  // Neither pane starts below the fold (previously ~1244px / ~1772px on this viewport).
+  expect(problemsBox!.y).toBeLessThan(900);
+  expect(previewBox!.y).toBeLessThan(900);
+});
+
 test('Boris commands expose visible voice names and distinct exit classes', async ({ page }) => {
   await installApi(page, {
     commands: {
