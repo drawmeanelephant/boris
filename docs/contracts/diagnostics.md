@@ -156,8 +156,15 @@ See [cooklang-compatibility.md](cooklang-compatibility.md).
 | `ELAYOUTASSET` | error | Layout template references an invalid or excessive asset url | `assemble.loadLayout` / `theme.requireReferencedAssets` → HTML load/validate |
 | `ELAYOUTRULE` | error | Layout-rule selection failure (ambiguous glob, duplicate/invalid selector, mixed theme roots, or rule bounds) | `layout_select` → HTML load/validate |
 | `ELAYOUT` | error | Generic layout failure (structural bounds, invalid UTF-8, …) | HTML load/validate fallback |
+| `ILAYOUTSELECTED` | info | A layout rule (`id:` / `glob:` / `role:`) selected a non-fallback layout for a page; records the selection outcome (selector, winning layout path) on the page's source path. Never affects exit codes or `errorCount`. | `compile.compilePagesInner` per-page selection → HTML report |
 | `EUSAGE` | error | CLI usage / flag error (unknown flag, conflicts, malformed options) | CLI (exit 2; not in build-report) |
 | `EIO` | error | I/O or system failure (missing content root, unreadable file, unexpected runtime) | pipeline / CLI (exit 3 when pure I/O) |
+
+The `I` prefix marks **informational** codes (severity `info`): they appear in
+reports with the same stable `severity/code/message/…` shape as errors but are
+filtered out of `errorCount` and never change exit behavior. Today the only
+`I` code is `ILAYOUTSELECTED`; the closed set keeps this convention so tool
+authors can rely on the prefix.
 
 ## HTML-path machine-readable report
 

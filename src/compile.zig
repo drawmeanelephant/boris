@@ -2205,6 +2205,24 @@ fn compilePagesInner(
                 else => error.LayoutSelectionFailed,
             };
         };
+        // #395: record the selection outcome when a rule (not the fallback)
+        // picked the layout — informational, so it never affects exit codes.
+        if (sel.kind != .fallback) {
+            const rule = options.layout_rules[sel.rule_index orelse return error.LayoutSelectionFailed];
+            const msg = try std.fmt.allocPrint(gpa, "layout rule {s}:{s} selected {s}", .{
+                @tagName(rule.kind),
+                rule.value,
+                sel.layout_path,
+            });
+            defer gpa.free(msg);
+            appendHtmlDiagnostic(&options, .{
+                .severity = .info,
+                .code = .ILAYOUTSELECTED,
+                .message = msg,
+                .source_path = page.source_path,
+                .id = page.entity_id,
+            });
+        }
         page_sel_paths[i] = sel.layout_path;
         const cached = layouts_by_path.get(sel.layout_path) orelse return error.LayoutSelectionFailed;
         page_layouts[i] = cached.layout;
@@ -3534,6 +3552,53 @@ test "#421: content failures are collected with source path and position" {
     try std.testing.expectEqualStrings("index.md", d.source_path);
     try std.testing.expect(d.line != null);
     try std.testing.expect(d.column != null);
+}
+
+test "#395: rule-selected layout emits an info ILAYOUTSELECTED outcome finding" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-395-layout-outcome", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "{{content}}");
+    try writeTreeFile(io, work, "layouts/home.html", "HOME-{{content}}");
+    try writeTreeFile(io, work, "content/index.md", "# Hi\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const home_path = try std.fmt.allocPrint(gpa, "{s}/layouts/home.html", .{work});
+    defer gpa.free(home_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .layout_rules = &.{
+            .{ .kind = .id, .value = "index", .layout_path = home_path },
+        },
+        .quiet = true,
+        .diagnostics = &collector,
+    });
+
+    // Exactly one finding: the info selection outcome (no errors, no fallback noise).
+    try std.testing.expectEqual(@as(usize, 1), collector.list.items.len);
+    const d = collector.list.items[0];
+    try std.testing.expectEqual(diag.Code.ILAYOUTSELECTED, d.code);
+    try std.testing.expectEqual(diag.Severity.info, d.severity);
+    try std.testing.expectEqualStrings("index.md", d.source_path);
+    try std.testing.expectEqualStrings("index", d.id);
+    try std.testing.expect(std.mem.indexOf(u8, d.message, "id:index") != null);
+    try std.testing.expect(std.mem.indexOf(u8, d.message, "layouts/home.html") != null);
 }
 
 test "valid layout output equals prefix + rendered html + suffix" {

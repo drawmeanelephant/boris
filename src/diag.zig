@@ -88,6 +88,10 @@ pub const Code = enum {
     ELAYOUTRULE,
     /// Generic layout failure (structural bounds, invalid utf-8, …).
     ELAYOUT,
+    /// Informational: a layout rule (id/glob/role selector) selected a
+    /// non-fallback layout for a page. Records the selection outcome for
+    /// editors/tools; never affects exit codes or errorCount.
+    ILAYOUTSELECTED,
     EUSAGE,
     EIO,
 
