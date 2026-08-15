@@ -473,7 +473,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(nostr_mod, oliver_mod);
-    linkCooklangSeam(nostr_mod, oliver_cooklang_mod);
     const nostr_tests = b.addTest(.{ .root_module = nostr_mod });
     const run_nostr_tests = b.addRunArtifact(nostr_tests);
     run_nostr_tests.setCwd(b.path("."));
@@ -486,7 +485,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(nostr_plan_mod, oliver_mod);
-    linkCooklangSeam(nostr_plan_mod, oliver_cooklang_mod);
     const nostr_plan_tests = b.addTest(.{ .root_module = nostr_plan_mod });
     const run_nostr_plan_tests = b.addRunArtifact(nostr_plan_tests);
     run_nostr_plan_tests.setCwd(b.path("."));
