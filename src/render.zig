@@ -91,10 +91,17 @@ const markdown_options = oliver.MarkdownOptions{
     .strikethrough = true,
 };
 
-/// Oliver's render options — heading auto-ids and the footnotes section.
-const render_options = oliver.html.RenderOptions{
-    .heading_ids = true,
-    .footnotes = true,
+/// Serialization profile for the Oliver render seam (#448). `.html` is the
+/// byte-identical default; `.xhtml` opts into Oliver's XML-compatible
+/// profile (same normalized document, different bytes). The XHTML profile is
+/// fail-closed on verbatim raw HTML — see `RawHtmlNotXmlWellFormed`.
+pub const OutputProfile = enum {
+    html,
+    xhtml,
+
+    pub fn jsonName(self: OutputProfile) []const u8 {
+        return @tagName(self);
+    }
 };
 
 /// Render a markdown payload to HTML through Oliver into the Whiteboard arena.
@@ -102,10 +109,28 @@ const render_options = oliver.html.RenderOptions{
 /// `arena` owns all produced bytes; the returned `Html.bytes` slice is a view
 /// into it and must be consumed before `arena.reset(.free_all)`.
 pub fn render(md: []const u8, arena: *std.heap.ArenaAllocator) RenderError!Html {
+    return renderProfile(md, arena, .html);
+}
+
+/// `render` with an explicit serialization profile (default `.html`;
+/// `.xhtml` opts into Oliver's XML-compatible profile).
+pub fn renderProfile(md: []const u8, arena: *std.heap.ArenaAllocator, profile: OutputProfile) RenderError!Html {
     const a = arena.allocator();
 
     var result = try oliver.parse(a, md, .markdown, .{ .markdown = markdown_options });
     defer result.deinit();
+
+    // Oliver's render options — heading auto-ids and the footnotes section,
+    // plus the serialization profile (#448). `.html` must stay byte-identical
+    // (Oliver's own invariant in oliver#54).
+    const render_options = oliver.html.RenderOptions{
+        .heading_ids = true,
+        .footnotes = true,
+        .profile = switch (profile) {
+            .html => .html,
+            .xhtml => .xhtml,
+        },
+    };
 
     var aw = std.Io.Writer.Allocating.init(a);
     errdefer aw.deinit();
@@ -218,6 +243,40 @@ fn withRender(md: []const u8, f: anytype) !void {
     defer arena.deinit();
     const html = try render(md, &arena);
     try f(html.bytes);
+}
+
+/// Renders with an explicit profile and calls `f` with the arena-backed view.
+fn withRenderProfile(md: []const u8, profile: OutputProfile, f: anytype) !void {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const html = try renderProfile(md, &arena, profile);
+    try f(html.bytes);
+}
+
+test "render: xhtml profile emits XML-compatible fragments (#448)" {
+    // Void elements self-close (hard break → <br />), and the default HTML
+    // profile keeps the same byte form — the XHTML contract is XML
+    // well-formedness, not a distinct tag vocabulary.
+    try withRenderProfile("a  \nb\n\n1. one\n2. two\n", .xhtml, struct {
+        fn run(html: []const u8) !void {
+            // A CommonMark hard break (two trailing spaces) becomes an
+            // XML-legal self-closing tag.
+            try testing.expect(std.mem.indexOf(u8, html, "<br />") != null);
+            try testing.expect(std.mem.indexOf(u8, html, "<ol>\n<li>one</li>\n<li>two</li>\n</ol>") != null);
+        }
+    }.run);
+}
+
+test "render: xhtml profile fails closed on verbatim raw HTML (#448)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    // Inline raw HTML is a verbatim leaf Oliver refuses under XHTML.
+    try testing.expectError(error.RawHtmlNotXmlWellFormed, renderProfile("before <em>raw</em> after\n", &arena, .xhtml));
+    // An HTML block is refused the same way.
+    try testing.expectError(error.RawHtmlNotXmlWellFormed, renderProfile("<div>block</div>\n\nafter\n", &arena, .xhtml));
+    // The same content renders fine under the default HTML profile.
+    const html = try render("before <em>raw</em> after\n", &arena);
+    try testing.expect(std.mem.indexOf(u8, html.bytes, "<em>raw</em>") != null);
 }
 
 test "render: ordinary markdown through Oliver" {

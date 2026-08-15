@@ -398,8 +398,9 @@ pub fn populateDependencyIndex(
     nodes: []const graph_mod.Node,
     quiet: bool,
     index: *dependency.DependencyIndex,
+    sink: ?*diag.Collector,
 ) !void {
-    return populateDependencyIndexFormat(io, gpa, retain, content_root, nodes, quiet, .markdown, index);
+    return populateDependencyIndexFormat(io, gpa, retain, content_root, nodes, quiet, .markdown, index, sink);
 }
 
 /// Mode-aware dependency population used by explicit Textile builds. The
@@ -413,6 +414,7 @@ pub fn populateDependencyIndexFormat(
     quiet: bool,
     input_format: identity.InputFormat,
     index: *dependency.DependencyIndex,
+    sink: ?*diag.Collector,
 ) !void {
     var content_dir = try Io.Dir.cwd().openDir(io, content_root, .{});
     defer content_dir.close(io);
@@ -468,6 +470,7 @@ pub fn populateDependencyIndexFormat(
         // output, and sub-error diagnostics — never the explanation for a
         // nonzero exit.
         diag.sortDiagnostics(diagnostics.items);
+        if (sink) |s| for (diagnostics.items) |d| s.append(d);
         for (diagnostics.items) |d| {
             if (quiet and d.severity != .error_) continue;
             const line = diag.formatText(d, gpa) catch continue;
@@ -1475,7 +1478,7 @@ test "incremental dependency index records ordinary Markdown links separately" {
     };
     var retain_arena = std.heap.ArenaAllocator.init(gpa);
     defer retain_arena.deinit();
-    try populateDependencyIndex(io, gpa, retain_arena.allocator(), content, &nodes, true, &index);
+    try populateDependencyIndex(io, gpa, retain_arena.allocator(), content, &nodes, true, &index, null);
     const deps = index.forward.get("index") orelse return error.TestUnexpectedResult;
     var found = false;
     for (deps.items) |dep| {

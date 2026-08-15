@@ -42,7 +42,7 @@ is **not** proof that every surface is the default CLI product.
 | Publication Touch Atlas | **Implemented first slice** — deterministic `touches.json` relationship index derived exclusively from the three existing evidence reports; see [publication-touches.md](publication-touches.md) |
 | Publication Proof Pack | **Implemented first slice** — deterministic two-file presentation model (`proof-pack.json` + `index.html`) over committed evidence; see [publication-proof-pack.md](publication-proof-pack.md) |
 | Publication platform model | **Documented** — normative verified-target model, adapter seam, and platform deployment matrix; GitHub Pages is the shipped verified target; see [publication-platforms.md](publication-platforms.md) |
-| AT Protocol OAuth core | **Implemented foundation** — host-independent PKCE, P-256 JWK/thumbprints, ES256 DPoP, explicit-DID identity resolution, bounded OAuth authority discovery, and a hardened native transport boundary; see [atproto-oauth.md](atproto-oauth.md) |
+| AT Protocol OAuth core | **Implemented foundation** — host-independent crypto, DID/handle discovery, one-shot PAR/callback/token state, and hardened native HTTP/DNS/loopback/browser boundaries; no session persistence or publication yet; see [atproto-oauth.md](atproto-oauth.md) |
 
 ## Canonical ownership (one document per topic)
 
@@ -100,7 +100,7 @@ per topic:
 | [xml-sitemap.md](xml-sitemap.md) | Deterministic staged XML Sitemap Protocol projection for one HTML target |
 | [identity-and-paths.md](identity-and-paths.md) | Source paths, entity ids, `/` separators, `.md`/`.mdx` case rules |
 | [scanner.md](scanner.md) | Deterministic discovery walk, sort key, symlink policy (m4) |
-| [diagnostics.md](diagnostics.md) | Stable categories (`EDUPLICATEID`, …), severity, exit codes |
+| [diagnostics.md](diagnostics.md) | Stable categories (`EDUPLICATEID`, …, `ELAYOUT*`), severity, exit codes, HTML-path `--report` surface (schema twin `html-build-report-0.1.0`) |
 | [validation.md](validation.md) | Canonical HTML prepublication validity boundary, no-write guarantee, and adjacent-command distinctions |
 | [ir-schema.md](ir-schema.md) | Trunk/Satellite graph, typed dependency edges, reverse index, deterministic JSON under `.boris/` |
 | [rag-export.md](rag-export.md) | Optional RAG export; working-context packs + complete corpus; authoring fidelity |
@@ -128,7 +128,7 @@ per topic:
 | [publication-touches.md](publication-touches.md) | Deterministic schema-v1 relationship index over committed artifact, checks, and claims evidence; implemented first slice |
 | [publication-proof-pack.md](publication-proof-pack.md) | Deterministic schema-v1 two-file presentation model and static HTML over committed artifact, checks, claims, and Touch Atlas evidence; implemented first slice |
 | [publication-platforms.md](publication-platforms.md) | Verified-target model, three-adapter seam (location provider, deployer, packaging rules), and platform deployment matrix; no proactive Vercel/Netlify work |
-| [atproto-oauth.md](atproto-oauth.md) | Host-independent crypto plus explicit-DID → PDS → OAuth authority discovery and the native/freestanding transport boundary |
+| [atproto-oauth.md](atproto-oauth.md) | Host-independent crypto, handle/DID authority discovery, one-shot authorization, and native/freestanding capability boundaries |
 | [cli.md](cli.md) | Stable command routing, exit codes, and report-consumer boundary |
 | [textile-compatibility.md](textile-compatibility.md) | Explicit bounded `.textile`-to-Markdown input mode |
 | [cooklang-compatibility.md](cooklang-compatibility.md) | Explicit bounded `.cook`-to-Markdown input mode with structured `recipe` IR facet |

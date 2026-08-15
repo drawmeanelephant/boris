@@ -680,10 +680,12 @@ pub fn printDiagnostic(
     err: WikiError,
     source_path: []const u8,
     fail: FailInfo,
+    sink: ?*diag.Collector,
 ) void {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const d = makeDiagnostic(arena.allocator(), err, source_path, fail) catch return;
+    if (sink) |s| s.append(d);
     const line = diag.formatText(d, gpa) catch return;
     defer gpa.free(line);
     std.debug.print("{s}\n", .{line});

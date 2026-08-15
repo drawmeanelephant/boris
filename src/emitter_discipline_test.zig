@@ -158,8 +158,15 @@ const modules = [_]Module{
         .source = @embedFile("atproto_oauth.zig"),
     },
     .{ .name = "atproto_identity.zig", .class = .other },
+    .{ .name = "atproto_handle.zig", .class = .other },
+    .{ .name = "atproto_dns.zig", .class = .other },
+    .{ .name = "atproto_dns_std.zig", .class = .other },
     .{ .name = "atproto_transport.zig", .class = .other },
     .{ .name = "atproto_transport_std.zig", .class = .other },
+    .{ .name = "atproto_authorization.zig", .class = .other },
+    .{ .name = "atproto_browser_std.zig", .class = .other },
+    .{ .name = "atproto_interactive_std.zig", .class = .other },
+    .{ .name = "atproto_loopback_std.zig", .class = .other },
     .{ .name = "cache.zig", .class = .other },
     .{ .name = "cli.zig", .class = .other },
     .{ .name = "compile.zig", .class = .other },
@@ -184,7 +191,13 @@ const modules = [_]Module{
     .{ .name = "hardening_test.zig", .class = .other },
     .{ .name = "html_body.zig", .class = .other },
     .{ .name = "html_nav.zig", .class = .other },
+    // Emitter: the HTML-path diagnostics report (`--report PATH`). Shares the
+    // IR report's json_out discipline and diagnostic-object key order.
+    .{ .name = "html_report.zig", .class = .{ .emitter = .{ .encoder = .json_out } }, .source = @embedFile("html_report.zig") },
     .{ .name = "html_relations.zig", .class = .other },
+    // Loopback preview server (`watch --serve`): plain HTTP responder, no
+    // JSON encoding, no stdout artifact discipline.
+    .{ .name = "preview_server.zig", .class = .other },
     .{ .name = "html_scan.zig", .class = .other },
     .{ .name = "html_toc.zig", .class = .other },
     .{ .name = "identity.zig", .class = .other },

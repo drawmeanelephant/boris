@@ -155,8 +155,49 @@ See [cooklang-compatibility.md](cooklang-compatibility.md).
 | `ENOSTRTIME` | error | The page's authored publication date does not convert to the Unix second count NIP-23 `published_at` requires | `nostr.publishedAtUnix` → `boris nostr plan` |
 | `ENOSTRRELAY` | error | Reserved: a relay rejects, times out, or demands authentication. Not yet emitted — relay *configuration* is refused by the strict profile parser as an invalid `nostr` section (exit 2); see `nostr.normalizeRelayUrl` | reserved for the Nostr publish slice |
 | `ENOSTRPLAN` | error | The corpus changed under the run: a selected source no longer parses after the graph validated | `nostr_plan` → `boris nostr plan` |
+| `ELAYOUTMISSINGMARKER` | error | Layout template lacks a required/declared slot marker, or names an unknown marker | `assemble.loadLayout` → HTML load/validate |
+| `ELAYOUTDUPLICATEMARKER` | error | Layout template repeats a slot marker | `assemble.loadLayout` → HTML load/validate |
+| `ELAYOUTPATH` | error | Layout path is illegal (absolute, `..`, backslash, or otherwise non-relative) | `layout_select.validateLayoutPath` → HTML load/validate |
+| `ELAYOUTASSET` | error | Layout template references an invalid or excessive asset url | `assemble.loadLayout` / `theme.requireReferencedAssets` → HTML load/validate |
+| `ELAYOUTRULE` | error | Layout-rule selection failure (ambiguous glob, duplicate/invalid selector, mixed theme roots, or rule bounds) | `layout_select` → HTML load/validate |
+| `ELAYOUT` | error | Generic layout failure (structural bounds, invalid UTF-8, …) | HTML load/validate fallback |
+| `ILAYOUTSELECTED` | info | A layout rule (`id:` / `glob:` / `role:`) selected a non-fallback layout for a page; records the selection outcome (selector, winning layout path) on the page's source path. Never affects exit codes or `errorCount`. | `compile.compilePagesInner` per-page selection → HTML report |
 | `EUSAGE` | error | CLI usage / flag error (unknown flag, conflicts, malformed options) | CLI (exit 2; not in build-report) |
 | `EIO` | error | I/O or system failure (missing content root, unreadable file, unexpected runtime) | pipeline / CLI (exit 3 when pure I/O) |
+
+The `I` prefix marks **informational** codes (severity `info`): they appear in
+reports with the same stable `severity/code/message/…` shape as errors but are
+filtered out of `errorCount` and never change exit behavior. Today the only
+`I` code is `ILAYOUTSELECTED`; the closed set keeps this convention so tool
+authors can rely on the prefix.
+
+## HTML-path machine-readable report
+
+`build` and `validate` accept `--report PATH` and write a deterministic JSON
+report to `PATH` on **both** success and failure (the file is written even when
+the command exits 1). This is the machine-readable twin of the HTML-path
+stderr text, covering every HTML-path diagnostic class: parse/graph,
+component, include, wiki-link, asset, link-audit (`EROUTEMISSING`,
+`EROUTEESCAPE`, `EPUBLICATIONLOCATION`), and layout/theme. It is the surface
+the preview server ([#392]'s `serve` loop) and the Boris editor expose; the IR
+path keeps its own auto-written `build-report.json`.
+
+- Schema: `html-build-report-0.1.0` — see
+  [schemas/html-build-report-0.1.0.schema.json](schemas/html-build-report-0.1.0.schema.json).
+- Top-level shape matches the IR report: `schemaVersion`, `compilerId`, `ok`,
+  `contentRoot`, `outDir`, `errorCount`, `diagnostics`. There is no
+  `pageCount` (the HTML path does not expose a single page count across
+  targets).
+- Each diagnostic object uses the **exact key order** of the IR diagnostic
+  object: `severity, code, message, remediation, sourcePath, line, column, id`.
+- Diagnostics are sorted with the same deterministic comparator as the IR
+  report (source path, line, column, code, message).
+- `--report` is additive: stderr text, exit codes, and emitted artifact bytes
+  are unchanged with or without it. `validate --report` writes the same shape
+  (its `outDir` reflects the configured HTML output directory even though
+  validation publishes nothing).
+- `--report` is rejected on `watch` and on non-HTML build modes (IR/RAG/etc.);
+  `check`/`impact` keep their own `--report` analysis surface.
 
 ### `EPARENTNOTTRUNK` compatibility disposition
 

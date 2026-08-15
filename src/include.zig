@@ -692,15 +692,19 @@ pub fn makeDiagnostic(
 }
 
 /// Print one structured include diagnostic to stderr via `diag.formatText`.
+/// When `sink` is set, the diagnostic is also appended to the HTML-path
+/// machine-readable report collector.
 pub fn printDiagnostic(
     gpa: std.mem.Allocator,
     err: IncludeError,
     source_path: []const u8,
     fail: FailInfo,
+    sink: ?*diag.Collector,
 ) void {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const d = makeDiagnostic(arena.allocator(), err, source_path, fail) catch return;
+    if (sink) |s| s.append(d);
     const line = diag.formatText(d, gpa) catch return;
     defer gpa.free(line);
     std.debug.print("{s}\n", .{line});
