@@ -83,6 +83,12 @@ jobs:
       - name: Publication conformance
         run: zig build test-publication-conformance
 
+      # The standalone GitHub Pages observer has its own build graph; run its
+      # fixture tests here so the redirect-policy regression (resolveRedirect)
+      # is guarded on every push, not only when the observer is built.
+      - name: GitHub Pages observer tests
+        run: zig build --build-file tools/github-pages-audit/build.zig test
+
   editor-test:
     name: editor-test (Linux)
     runs-on: ubuntu-latest
