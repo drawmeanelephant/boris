@@ -383,6 +383,55 @@ test('modal dialogs trap keyboard focus while open (#460)', async ({ page }) => 
   await expect(dialog.getByRole('textbox', { name: 'New file path' })).toBeFocused();
 });
 
+test('switching files while dirty offers Cancel and Save & Switch (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await editor.fill('# Draft\n');
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+  const target = page.getByRole('button', { name: 'boris.json', exact: true });
+  await target.click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: /content\/index\.md/ })).toBeVisible();
+  await expect(dialog.locator('p').first()).toContainText('boris.json');
+
+  // Cancel keeps the current file and its unsaved buffer.
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(editor).toHaveValue('# Draft\n');
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+
+  // Save & Switch persists the buffer, then opens the target.
+  const saveRequest = page.waitForRequest('**/api/files/save');
+  const openRequest = page.waitForRequest('**/api/files/open');
+  await target.click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Save & switch', exact: true }).click();
+  expect((await saveRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', content: '# Draft\n' });
+  expect((await openRequest).postDataJSON()).toMatchObject({ path: 'boris.json' });
+  await expect(page.getByRole('textbox', { name: 'Source for boris.json' })).toBeVisible();
+  await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
+});
+
+test('Discard & Switch drops the dirty buffer without saving and opens the target (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Discard me\n');
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+  let saveRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/save')) saveRequests += 1;
+  });
+  const openRequest = page.waitForRequest('**/api/files/open');
+  await page.getByRole('button', { name: 'boris.json', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Discard & switch', exact: true }).click();
+  expect((await openRequest).postDataJSON()).toMatchObject({ path: 'boris.json' });
+  expect(saveRequests).toBe(0);
+  await expect(page.getByRole('textbox', { name: 'Source for boris.json' })).toHaveValue('# Home\n');
+  await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
+});
+
 test('Boris commands expose visible voice names and distinct exit classes', async ({ page }) => {
   await installApi(page, {
     commands: {
