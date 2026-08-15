@@ -127,6 +127,14 @@ fn decode(
     normalize_separators: bool,
     policy: DecodePolicy,
 ) Error![]u8 {
+    // Fast path: with no percent escape and nothing to normalize, decoding is
+    // the identity copy. Skip the per-byte ArrayList pass entirely — this is
+    // the common shape for audit/doctor route resolution on ordinary links.
+    if (std.mem.indexOfScalar(u8, raw, '%') == null and
+        (!normalize_separators or std.mem.indexOfScalar(u8, raw, '\\') == null))
+    {
+        return gpa.dupe(u8, raw);
+    }
     var current = try gpa.dupe(u8, raw);
     errdefer gpa.free(current);
 
