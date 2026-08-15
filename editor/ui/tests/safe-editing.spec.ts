@@ -362,6 +362,27 @@ test('Skip to workspace moves focus to the workspace landmark and keeps the sess
   expect(await page.evaluate(() => window.location.hash)).toContain('token=');
 });
 
+test('modal dialogs trap keyboard focus while open (#460)', async ({ page }) => {
+  await installApi(page);
+  const dialog = page.getByRole('dialog', { name: 'Create file' });
+  await page.getByRole('button', { name: 'Create file', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  const insideDialog = () => page.evaluate(() => {
+    const el = document.activeElement;
+    return el instanceof HTMLElement && Boolean(el.closest('dialog'));
+  });
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.press('Tab');
+    expect(await insideDialog()).toBe(true);
+  }
+  await expect(dialog.getByRole('button', { name: 'Create file', exact: true })).toBeFocused();
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.press('Shift+Tab');
+    expect(await insideDialog()).toBe(true);
+  }
+  await expect(dialog.getByRole('textbox', { name: 'New file path' })).toBeFocused();
+});
+
 test('Boris commands expose visible voice names and distinct exit classes', async ({ page }) => {
   await installApi(page, {
     commands: {
