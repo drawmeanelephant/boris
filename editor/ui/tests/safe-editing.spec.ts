@@ -34,7 +34,14 @@ function commandResult(mode: string, overrides: Partial<CommandResult> = {}): Co
   };
 }
 
-function authoringPayload(withGraph = true) {
+type CompletionEntity = {
+  id: string; title: string | null; parent: string | null; role: string; status: string;
+  tags: string[]; relations: Array<{ kind: string; target: string }>;
+};
+
+function authoringPayload(withGraph = true, entities: CompletionEntity[] = [
+  { id: 'guides/intro', title: 'Introduction', parent: null, role: 'trunk', status: 'published', tags: ['guide'], relations: [] }
+]) {
   return {
     frontmatter_schema: {
       title: 'Boris frontmatter grammar (schema v1)',
@@ -51,7 +58,7 @@ function authoringPayload(withGraph = true) {
     },
     completion: withGraph ? {
       format: 'boris-completion-index', schema_version: 1, compiler_id: 'boris/0.8.1', frozen: true,
-      entities: [{ id: 'guides/intro', title: 'Introduction', parent: null, role: 'trunk', status: 'published', tags: ['guide'], relations: [] }],
+      entities,
       relation_kinds: ['depends_on', 'relates_to'], parent_targets: ['guides/intro'],
       layout_slots: ['content', 'title', 'nav']
     } : null,
@@ -348,6 +355,55 @@ test('schema and graph completion are an ARIA combobox operable by keyboard and 
   await statusFilter.press('Enter');
   await expect(editor).toHaveValue('status: draft');
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Inserted draft from Boris authoring vocabulary');
+});
+
+test('clicking a completion option selects without inserting; the insert action inserts exactly one token (#446)', async ({ page }) => {
+  await installApi(page, { disk: '' });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await expect(editor).toHaveValue('');
+  await page.getByRole('combobox', { name: 'Completion category', exact: true }).selectOption('wiki_link');
+  const wiki = page.getByRole('combobox', { name: 'Filter wiki link', exact: true });
+  await wiki.fill('guides');
+  const option = page.getByRole('listbox', { name: 'Boris completion suggestions' }).getByRole('option', { name: /guides\/intro/ });
+  await option.click();
+  await expect(option).toHaveAttribute('aria-selected', 'true');
+  await expect(editor).toHaveValue('');
+  await page.getByRole('button', { name: 'Insert selected completion', exact: true }).click();
+  await expect(editor).toHaveValue('[[guides/intro]]');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Inserted guides/intro from Boris authoring vocabulary');
+  await editor.focus();
+  await page.keyboard.press('Control+z');
+  await expect(editor).toHaveValue('');
+});
+
+test('keyboard selection in the completion combobox inserts only the selected token once (#446)', async ({ page }) => {
+  await installApi(page, {
+    disk: '',
+    authoring: [authoringPayload(true, [
+      { id: 'guides/intro', title: 'Introduction', parent: null, role: 'trunk', status: 'published', tags: ['guide'], relations: [] },
+      { id: 'guides/advanced', title: 'Advanced guides', parent: null, role: 'trunk', status: 'published', tags: ['guide'], relations: [] }
+    ])]
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await page.getByRole('combobox', { name: 'Completion category', exact: true }).selectOption('wiki_link');
+  const wiki = page.getByRole('combobox', { name: 'Filter wiki link', exact: true });
+  await wiki.fill('guides');
+  const listbox = page.getByRole('listbox', { name: 'Boris completion suggestions' });
+  const first = listbox.getByRole('option', { name: /guides\/intro/ });
+  await expect(first).toHaveAttribute('aria-selected', 'true');
+  await expect(editor).toHaveValue('');
+  await wiki.press('ArrowDown');
+  const second = listbox.getByRole('option', { name: /guides\/advanced/ });
+  await expect(second).toHaveAttribute('aria-selected', 'true');
+  await expect(first).not.toHaveAttribute('aria-selected', 'true');
+  await expect(editor).toHaveValue('');
+  await wiki.press('Enter');
+  await expect(editor).toHaveValue('[[guides/advanced]]');
+  await editor.focus();
+  await page.keyboard.press('Control+z');
+  await expect(editor).toHaveValue('');
 });
 
 test('completion categories match Boris artifacts and refresh after a successful graph build', async ({ page }) => {
