@@ -878,6 +878,72 @@ test('the recovery banner shows a Tab + Enter key hint for its actions (#462)', 
   await expect(hint).toContainText('Enter');
 });
 
+test('Ctrl+K opens the command palette; filtering and arrows select a file to open (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  await expect(palette).toBeVisible();
+  const input = palette.getByRole('combobox', { name: 'Filter commands' });
+  await expect(input).toBeFocused();
+
+  await input.fill('open');
+  const listbox = palette.getByRole('listbox', { name: 'Boris commands' });
+  const openOptions = listbox.getByRole('option', { name: /Open file/ });
+  await expect(openOptions).toHaveCount(2);
+  await expect(openOptions.first()).toHaveAttribute('aria-selected', 'true');
+  await input.press('ArrowDown');
+  await expect(openOptions.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await input.press('Enter');
+  await expect(palette).toBeHidden();
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+});
+
+test('the command palette reuses the file dialogs and Esc closes it (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  await expect(palette).toBeVisible();
+  const input = palette.getByRole('combobox', { name: 'Filter commands' });
+
+  // The first command (Create file) executes the existing create dialog.
+  await input.press('Enter');
+  const create = page.getByRole('dialog', { name: 'Create file' });
+  await expect(create).toBeVisible();
+  await expect(palette).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(create).toBeHidden();
+
+  // Esc closes the palette directly.
+  await page.keyboard.press('Control+K');
+  await expect(palette).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(palette).toBeHidden();
+});
+
+test('the command palette disables guarded actions while dirty and opens files through the resolution dialog (#462)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n');
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  const listbox = palette.getByRole('listbox', { name: 'Boris commands' });
+  const options = listbox.locator('[role="option"]');
+  await expect(options.filter({ hasText: 'Create file' })).toHaveAttribute('aria-disabled', 'true');
+  await expect(options.filter({ hasText: 'Rename file' })).toHaveAttribute('aria-disabled', 'true');
+  await expect(options.filter({ hasText: 'Delete file' })).toHaveAttribute('aria-disabled', 'true');
+  await expect(options.filter({ hasText: 'Open file' }).first()).toHaveAttribute('aria-disabled', 'false');
+
+  // Open entries stay usable: Enter on the selected entry asks how to resolve the buffer.
+  const input = palette.getByRole('combobox', { name: 'Filter commands' });
+  await input.fill('open');
+  await input.press('Enter');
+  const resolution = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await expect(resolution).toBeVisible();
+  await expect(resolution.getByRole('button', { name: /Save & switch/ })).toBeVisible();
+  await resolution.getByRole('button', { name: /Cancel/ }).click();
+  await expect(resolution).toBeHidden();
+});
+
 test('explicit save rebuilds and reloads the real-output preview by keyboard', async ({ page }) => {
   await installApi(page);
   await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
