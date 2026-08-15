@@ -163,6 +163,19 @@ authority is exercised. The emitted bytes are byte-identical to the plan
 `publish` validates and publishes, so the same artifact can be committed and
 later passed to `publish --plan` for the drift gate.
 
+### `boris standard-site records`
+
+The full-payload offline dump. `boris standard-site records --profile PATH
+[--out PATH]` runs the identical compile + projection pipeline as
+`plan`/`publish` and renders the complete, canonical record bodies — the
+publication plus every eligible document, with each document's full
+`textContent` embedded — as `boris-standard-site-records` (schema v1). Unlike
+the plan, which carries only per-record digests, this artifact contains the
+exact JSON `publish` would PUT, so an operator can review every byte (including
+the plain-text projection) without any discovery, OAuth, transport, or
+mutation. Fixed key order, LF endings, no timestamps or host data; identical
+inputs produce byte-identical output.
+
 ### `boris standard-site publish`
 
 The explicit, never-implicit network family. `boris standard-site publish

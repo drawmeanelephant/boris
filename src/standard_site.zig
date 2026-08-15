@@ -930,6 +930,51 @@ pub fn renderPlan(
     return out.toOwnedSlice(gpa);
 }
 
+pub const records_format = "boris-standard-site-records";
+pub const records_schema_version: u32 = 1;
+
+/// Render the full, canonical record payloads — the exact JSON bodies `publish`
+/// would PUT — for byte-level offline review. Unlike the plan (which carries
+/// only per-record digests), this embeds each record's complete payload,
+/// including the document `textContent`. Fixed key order, LF endings, no
+/// timestamps or host data. The returned bytes are allocator-owned and always
+/// end in one LF.
+pub fn renderRecords(gpa: std.mem.Allocator, projection: *const Projection) Error![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(gpa);
+
+    try out.appendSlice(gpa, "{\n  \"format\": ");
+    try json_out.writeString(&out, gpa, records_format);
+    try out.appendSlice(gpa, ",\n  \"schema_version\": ");
+    try json_out.writeUsize(&out, gpa, records_schema_version);
+    try out.appendSlice(gpa, ",\n  \"records\": [\n    {\n      \"collection\": ");
+    try json_out.writeString(&out, gpa, publication_collection);
+    try out.appendSlice(gpa, ",\n      \"rkey\": ");
+    try json_out.writeString(&out, gpa, projection.publication.rkey);
+    try out.appendSlice(gpa, ",\n      \"at_uri\": ");
+    try json_out.writeString(&out, gpa, projection.publication.at_uri);
+    try out.appendSlice(gpa, ",\n      \"payload\": ");
+    try out.appendSlice(gpa, projection.publication.payload);
+    try out.appendSlice(gpa, "\n    }");
+
+    for (projection.documents) |document| {
+        try out.appendSlice(gpa, ",\n    {\n      \"collection\": ");
+        try json_out.writeString(&out, gpa, document_collection);
+        try out.appendSlice(gpa, ",\n      \"rkey\": ");
+        try json_out.writeString(&out, gpa, document.rkey);
+        try out.appendSlice(gpa, ",\n      \"at_uri\": ");
+        try json_out.writeString(&out, gpa, document.at_uri);
+        try out.appendSlice(gpa, ",\n      \"entity_id\": ");
+        try json_out.writeString(&out, gpa, document.entity_id);
+        try out.appendSlice(gpa, ",\n      \"payload\": ");
+        try out.appendSlice(gpa, document.payload);
+        try out.appendSlice(gpa, "\n    }");
+    }
+
+    try out.appendSlice(gpa, "\n  ]\n}\n");
+    return out.toOwnedSlice(gpa);
+}
+
 fn writeHex(out: *std.ArrayList(u8), gpa: std.mem.Allocator, digest: *const [64]u8) !void {
     try out.append(gpa, '"');
     try out.appendSlice(gpa, digest);
@@ -1160,6 +1205,32 @@ test "plan rendering is byte-identical and carries digests and surfaces" {
     try std.testing.expect(std.mem.indexOf(u8, first, "\"project_path\": \".well-known/site.standard.publication\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, first, "\"text_content_sha256\": \"") != null);
     try std.testing.expect(std.mem.indexOf(u8, first, "jobs") == null);
+}
+
+test "records rendering embeds the full canonical payloads with textContent" {
+    const gpa = std.testing.allocator;
+    var config = try testConfig(gpa);
+    defer config.deinit(gpa);
+    const pages = [_]PageInput{
+        .{ .entity_id = "guides/intro", .output_path = "guides/intro.html", .title = "Intro", .status = .published, .published_at = "2024-01-20T14:30:00Z", .summary = "A guide", .tags = &.{ "guide" }, .text_content = "Intro prose.\n" },
+    };
+    var projection = try project(gpa, .{ .config = &config, .site_title = "Boris", .pages = &pages });
+    defer projection.deinit(gpa);
+
+    const first = try renderRecords(gpa, &projection);
+    defer gpa.free(first);
+    const second = try renderRecords(gpa, &projection);
+    defer gpa.free(second);
+    try std.testing.expectEqualStrings(first, second);
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"format\": \"boris-standard-site-records\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"collection\": \"site.standard.publication\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"payload\": {\"url\":\"https://example.com\",\"name\":\"Boris\"}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"collection\": \"site.standard.document\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"entity_id\": \"guides/intro\"") != null);
+    // The full document payload — including the plain-text `textContent` — is
+    // embedded verbatim, unlike the plan's digest-only projection.
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"textContent\":\"Intro prose.\\n\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"payload_sha256\"") == null);
 }
 
 test "base-path deployments report the well-known limitation instead of a decoy" {
