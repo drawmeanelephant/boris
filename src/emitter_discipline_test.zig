@@ -149,6 +149,17 @@ const modules = [_]Module{
     .{ .name = "artifact_invariants.zig", .class = .other },
     .{ .name = "aside.zig", .class = .other },
     .{ .name = "assemble.zig", .class = .other },
+    .{
+        .name = "atproto_oauth.zig",
+        .class = .{ .emitter = .{
+            .encoder = .json_out,
+            .note = "signed OAuth JWT wire values; runtime claims delegate to json_out",
+        } },
+        .source = @embedFile("atproto_oauth.zig"),
+    },
+    .{ .name = "atproto_identity.zig", .class = .other },
+    .{ .name = "atproto_transport.zig", .class = .other },
+    .{ .name = "atproto_transport_std.zig", .class = .other },
     .{ .name = "cache.zig", .class = .other },
     .{ .name = "cli.zig", .class = .other },
     .{ .name = "compile.zig", .class = .other },
