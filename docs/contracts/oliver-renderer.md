@@ -75,8 +75,42 @@ const markdown_options = oliver.MarkdownOptions{
 const render_options = oliver.html.RenderOptions{
     .heading_ids = true,
     .footnotes = true,
+    // .profile = .html (default) | .xhtml — per-target via `--target-profile`
 };
 ```
+
+The default profile is `.html` and its output is byte-identical to
+pre-profile renders. An XHTML target opts in per publication target
+(`--target-profile NAME=xhtml`); the profile is a serializer switch and does
+not touch `heading_ids`/`footnotes` (heading ids are plain attributes —
+XML-legal). See [XHTML output profile](#xhtml-output-profile) below.
+
+## XHTML output profile
+
+The pinned Oliver revision carries Oliver's XHTML serializer profile
+(`oliver.html.RenderOptions.profile`), which serializes the *same* normalized
+document in XML-compatible bytes — same semantics, different markup. By
+Oliver contract it emits **fragments only**: no DOCTYPE, no
+`<html>/<head>/<body>` wrapper. Boris's layouts own the document wrapper, so an
+XHTML *document* means the layout template emits the XML declaration +
+`<html xmlns="http://www.w3.org/1999/xhtml">` and the page-body slot receives
+the XHTML fragment. The fragment serializer is never given fake wrappers.
+
+The profile **fails closed** on verbatim raw HTML (`error.RawHtmlNotXmlWellFormed`
+— never repaired, never rewritten). An XHTML target whose content contains raw
+HTML hard-fails the build with the typed error surfaced with page/offset
+context in the diagnostics surface; flipping a target to XHTML requires a
+raw-HTML sweep of its content first. The same bytes render fine under the
+`html` profile.
+
+**Known upstream gap (footnotes):** the pinned Oliver's footnote markers
+(`data-footnote-ref`, `data-footnotes`, `data-footnote-backref`) are
+hardcoded valueless attributes, so an XHTML target whose content uses
+footnotes produces XML that is *not* well-formed — the build does not fail
+closed on it (tracked upstream as [drawmeanelephant/oliver#60](https://github.com/drawmeanelephant/oliver/issues/60)).
+Until the pinned revision carries the fix, keep footnote use off XHTML
+targets; the evidence guard (`zig build test-xhtml-evidence`) verifies
+well-formedness on a footnote-free page.
 
 ## Cooklang seam (same pin)
 

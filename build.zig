@@ -347,6 +347,24 @@ pub fn build(b: *std.Build) void {
     // select identical layouts under both rule declaration orders (fixed
     // precedence: id > glob specificity > role > fallback) and publish the
     // documented assets.
+    // XHTML output profile evidence (#448, acceptance criterion 5): Boris
+    // content must publish a page under the XHTML profile that an independent
+    // XML parser (xmllint/libxml2, else python3 ElementTree) accepts, and the
+    // layout-owned document wrapper must carry the XML declaration +
+    // xhtml namespace exactly once. Pins the profile seam so it cannot rot.
+    const xhtml_evidence_run = b.addSystemCommand(&.{
+        "bash",
+        "scripts/test-xhtml-evidence.sh",
+    });
+    xhtml_evidence_run.setCwd(b.path("."));
+    xhtml_evidence_run.has_side_effects = true;
+    xhtml_evidence_run.step.dependOn(b.getInstallStep());
+    const test_xhtml_evidence_step = b.step(
+        "test-xhtml-evidence",
+        "Run the XHTML output-profile well-formedness evidence guard",
+    );
+    test_xhtml_evidence_step.dependOn(&xhtml_evidence_run.step);
+
     const reference_theme_run = b.addSystemCommand(&.{
         "bash",
         "scripts/test-reference-theme-layout.sh",
@@ -1364,6 +1382,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&emitter_registry.step);
     test_step.dependOn(&doc_links_run.step);
     test_step.dependOn(&github_pages_audit_test.step);
+    test_step.dependOn(&xhtml_evidence_run.step);
 
     const test_harness_step = b.step(
         "test-harness",

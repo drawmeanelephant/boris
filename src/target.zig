@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const layout_select = @import("layout_select.zig");
+const render = @import("render.zig");
 const theme_mod = @import("theme.zig");
 
 /// User-configured target specification from the CLI.
@@ -14,6 +15,10 @@ pub const TargetSpec = struct {
     /// Canonical `--layout-rule` table for this target (GPA-owned slice of rules;
     /// rule string fields are typically argv views). Empty when no rules.
     layout_rules: []const layout_select.LayoutRule = &.{},
+    /// Optional per-target Oliver serialization profile (`--target-profile`;
+    /// `.xhtml` opts into the XML-compatible output profile, #448). When null,
+    /// the target renders with the default `.html` profile.
+    html_profile: ?render.OutputProfile = null,
 };
 
 /// Fully resolved and validated execution target plan.
@@ -25,6 +30,8 @@ pub const TargetPlan = struct {
     layout_path: []const u8,
     /// Rule table view (not owned; points into TargetSpec).
     layout_rules: []const layout_select.LayoutRule = &.{},
+    /// Effective per-target serialization profile (spec override, else default).
+    html_profile: ?render.OutputProfile = null,
 };
 
 /// Effective layout for a target given the global default.
@@ -323,6 +330,7 @@ pub fn validateTargets(
             .resolved_output_dir = normalized,
             .layout_path = layout,
             .layout_rules = target.layout_rules,
+            .html_profile = target.html_profile,
         });
     }
 

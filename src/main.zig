@@ -971,6 +971,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .allow_markdown_literals = opts.allow_markdown_links,
             .timings = recorder,
             .diagnostics = collector_ptr,
+            .output_profile = opts.html_profile orelse .html,
         }) catch |err| {
             const code = mapHtmlError(err, &.{}, layout_path);
             appendEscapedDiagnostic(collector_ptr, err, code);

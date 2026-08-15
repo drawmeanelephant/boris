@@ -50,6 +50,7 @@ Options:
   --theme ROOT        Theme root sugar → ROOT/layouts/main.html (+ managed assets/)
   --target NAME=DIR   Named HTML output root (repeatable; exclusive with --html-dir)
   --target-layout N=P Per-target layout (NAME=PATH; may precede or follow --target)
+  --target-profile N=P Per-target Oliver serialization profile (NAME=html|xhtml; default html)
   --layout-rule T S P HTML layout rule: TARGET SELECTOR LAYOUT_PATH (repeatable; max 256/target)
                       Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
   --incremental       Content-addressed incremental HTML rendering (HTML mode)

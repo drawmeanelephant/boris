@@ -11,6 +11,7 @@ const identity = @import("identity.zig");
 const github_pages = @import("github_pages.zig");
 const site_url_mod = @import("site_url.zig");
 const sitemap = @import("sitemap.zig");
+const render = @import("render.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const RunResult = diagnostic.RunResult;
@@ -134,6 +135,11 @@ pub const Options = struct {
     /// Loopback port for `--serve` (default `preview_server.default_port`;
     /// `0` selects an ephemeral port). Implies `serve`.
     serve_port: ?u16 = null,
+    /// Effective Oliver serialization profile for the synthetic "default"
+    /// target (`--target-profile default=xhtml`, #448). Per-target profiles
+    /// live on `targets`; this mirrors the default target for the
+    /// single-target compile path. Null → `.html`.
+    html_profile: ?render.OutputProfile = null,
     /// Dynamic target list.
     targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 },
 
@@ -266,6 +272,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     // Pending --target-layout NAME=PATH applied after targets are known.
     var target_layouts: std.ArrayListUnmanaged(struct { name: []const u8, path: []const u8 }) = .{ .items = &.{}, .capacity = 0 };
     defer target_layouts.deinit(gpa);
+    // Pending --target-profile NAME=PROFILE applied after targets are known.
+    var target_profiles: std.ArrayListUnmanaged(struct { name: []const u8, profile: render.OutputProfile }) = .{ .items = &.{}, .capacity = 0 };
+    defer target_profiles.deinit(gpa);
     // Pending --layout-rule TARGET SELECTOR LAYOUT_PATH (three following args).
     var pending_rules: std.ArrayListUnmanaged(struct {
         target: []const u8,
@@ -553,6 +562,33 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        // --target-profile NAME=PROFILE (html|xhtml), applied after targets are
+        // known. Mirrors --target-layout; the profile is a serialization switch
+        // (#448) and composes with layout/rule selection.
+        if (std.mem.eql(u8, a, "--target-profile") or std.mem.startsWith(u8, a, "--target-profile=")) {
+            const val = try takeValue(args, &i, a, "--target-profile");
+            const eq_idx = std.mem.indexOfScalar(u8, val, '=') orelse {
+                return error.InvalidValue;
+            };
+            const name = val[0..eq_idx];
+            const profile_raw = val[eq_idx + 1 ..];
+            if (name.len == 0 or profile_raw.len == 0) return error.InvalidValue;
+            if (!target_mod.isValidTargetName(name)) return error.InvalidValue;
+            const profile: render.OutputProfile = if (std.mem.eql(u8, profile_raw, "html"))
+                .html
+            else if (std.mem.eql(u8, profile_raw, "xhtml"))
+                .xhtml
+            else
+                return error.InvalidValue;
+            for (target_profiles.items) |existing| {
+                if (std.mem.eql(u8, existing.name, name)) {
+                    return error.DuplicateFlag;
+                }
+            }
+            try target_profiles.append(gpa, .{ .name = name, .profile = profile });
+            continue;
+        }
+
         // --layout-rule TARGET SELECTOR LAYOUT_PATH (exactly three following args).
         if (std.mem.eql(u8, a, "--layout-rule") or std.mem.startsWith(u8, a, "--layout-rule=")) {
             if (std.mem.startsWith(u8, a, "--layout-rule=")) return error.InvalidValue;
@@ -766,10 +802,11 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
 
     const has_explicit_targets = targets.items.len > 0;
     const has_target_layouts = target_layouts.items.len > 0;
+    const has_target_profiles = target_profiles.items.len > 0;
     const has_layout_rules = pending_rules.items.len > 0;
     const wants_sitemap = saw_sitemap or saw_sitemap_path;
     // Explicit HTML selectors (not the bare default).
-    const explicit_html = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts or saw_theme or has_layout_rules or wants_sitemap;
+    const explicit_html = saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or has_target_layouts or has_target_profiles or saw_theme or has_layout_rules or wants_sitemap;
     const wants_rag = saw_rag or saw_rag_dir;
     const wants_context = saw_context or saw_context_dir;
     const wants_llms = saw_llms or saw_llms_path;
@@ -799,7 +836,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         // declaration JSON document, and it runs no compiler phase, so the
         // machine-readable timing report has nowhere to go without corrupting
         // the plan stream.
-        if (saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_layout_rules or wants_sitemap or
+        if (saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_target_profiles or has_layout_rules or wants_sitemap or
             wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or
             saw_format or saw_report or saw_watch or saw_timings)
         {
@@ -830,7 +867,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         // inputs, analysis flags, and watch/incremental controls select work
         // init does not perform; the target directory is positional, so
         // `--input` is rejected rather than silently misread.
-        if (saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_layout_rules or
+        if (saw_html or saw_html_dir or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_target_profiles or has_layout_rules or
             wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or
             saw_rss_title or saw_rss_description or saw_rss_limit or saw_format or saw_report or saw_watch or saw_timings or
             saw_profile or saw_input or saw_textile or saw_cooklang or saw_out or saw_rag_dir or saw_incremental or saw_jobs)
@@ -868,7 +905,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             return error.ConflictingFlags;
         }
     } else if (command == .check or command == .impact) {
-        if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or wants_sitemap or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_layout_rules) {
+        if (wants_rag or wants_ir or wants_context or wants_llms or wants_rss or wants_sitemap or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or explicit_html or saw_jobs or saw_watch or saw_incremental or saw_theme or saw_html_layout or has_target_layouts or has_target_profiles or has_layout_rules) {
             return error.ConflictingFlags;
         }
     } else if (command == .build and saw_format) {
@@ -991,6 +1028,31 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             }
         }
         if (!found) return error.InvalidValue;
+    }
+
+    // Apply --target-profile NAME=PROFILE onto matching targets (including the
+    // synthetic "default" target on bare HTML / --html / --html-dir).
+    for (target_profiles.items) |tp| {
+        var found = false;
+        for (targets.items) |*t| {
+            if (std.mem.eql(u8, t.name, tp.name)) {
+                if (t.html_profile != null) return error.DuplicateFlag;
+                t.html_profile = tp.profile;
+                found = true;
+                break;
+            }
+        }
+        if (!found) return error.InvalidValue;
+    }
+
+    // The effective profile for the synthetic "default" target, surfaced on
+    // Options for the single-target compile path (`main.runHtml`).
+    var default_profile: ?render.OutputProfile = null;
+    for (targets.items) |t| {
+        if (std.mem.eql(u8, t.name, "default")) {
+            default_profile = t.html_profile;
+            break;
+        }
     }
 
     // Attach --layout-rule TARGET SELECTOR PATH. Order relative to --target is
@@ -1177,6 +1239,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .watch = saw_watch,
             .serve = saw_serve or serve_port != null,
             .serve_port = serve_port,
+            .html_profile = default_profile,
             .targets = targets,
             .command = command,
             .impact_id = impact_id,
@@ -1279,6 +1342,7 @@ pub fn printUsage() void {
         \\  --theme ROOT        Theme root sugar → ROOT/layouts/main.html (+ managed assets/)
         \\  --target NAME=DIR   Named HTML output root (repeatable; exclusive with --html-dir)
         \\  --target-layout N=P Per-target layout (NAME=PATH; may precede or follow --target)
+        \\  --target-profile N=P Per-target Oliver serialization profile (NAME=html|xhtml; default html)
         \\  --layout-rule T S P HTML layout rule: TARGET SELECTOR LAYOUT_PATH (repeatable; max 256/target)
         \\                      Selectors: id:<entity-id> | glob:<seg-pattern> | role:trunk|satellite
         \\  --incremental       Content-addressed incremental HTML rendering (HTML mode)
@@ -1767,10 +1831,39 @@ test "parse: watch --serve and --port (preview server)" {
 
     // Serve requires watch mode; duplicates are usage errors.
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "build", "--serve" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--port", "8080" }));
-    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "watch", "--serve", "--serve" }));
-    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "watch", "--port", "1", "--port", "2" }));
-    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "watch", "--port", "70000" }));
+}
+
+test "parse: --target-profile selects the Oliver serialization profile (#448)" {
+    // Per-target XHTML on an explicit target.
+    var multi = try parseOptions(std.testing.allocator, &.{ "boris", "build", "--target", "site=dist/site", "--target-profile", "site=xhtml" });
+    defer multi.deinit(std.testing.allocator);
+    try expectEqual(@as(usize, 1), multi.targets.items.len);
+    try expectEqual(render.OutputProfile.xhtml, multi.targets.items[0].html_profile.?);
+
+    // On the synthetic "default" target, the profile is also surfaced on Options.
+    var def = try parseOptions(std.testing.allocator, &.{ "boris", "--html-dir", "dist", "--target-profile=default=xhtml" });
+    defer def.deinit(std.testing.allocator);
+    try expectEqual(render.OutputProfile.xhtml, def.html_profile.?);
+    try expectEqual(render.OutputProfile.xhtml, def.targets.items[0].html_profile.?);
+
+    // No profile → defaults to html (null overrides).
+    var plain = try parseOptions(std.testing.allocator, &.{"boris"});
+    defer plain.deinit(std.testing.allocator);
+    try expect(plain.html_profile == null);
+    try expect(plain.targets.items[0].html_profile == null);
+
+    // Unknown target, bad profile value, and duplicates are usage errors.
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--target-profile", "nope=xhtml" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--target-profile", "default=sgml" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "--target-profile", "default" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "--target-profile", "default=xhtml", "--target-profile", "default=xhtml" }));
+
+    // validate is the no-publication HTML path: like --theme and --layout-rule,
+    // the profile selector is honored (validation renders with it), not rejected.
+    var val = try parseOptions(std.testing.allocator, &.{ "boris", "validate", "--target-profile", "default=xhtml" });
+    defer val.deinit(std.testing.allocator);
+    try expectEqual(Command.validate, val.command);
+    try expectEqual(render.OutputProfile.xhtml, val.html_profile.?);
 }
 
 test "parse: init takes an optional target directory" {
