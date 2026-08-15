@@ -151,6 +151,18 @@ observable. The one-shot publish path reconciles the plan against observed
 record state and writes evidence with intended-vs-observed claims per
 [`standard-site-reconciliation.md`](standard-site-reconciliation.md).
 
+### `boris standard-site plan`
+
+The pure-offline projection surface. `boris standard-site plan --profile PATH
+[--out PATH]` compiles the content tree, renders the deterministic
+`boris-standard-site-plan` (schema v1) — publication + document records,
+`textContent` digests, exclusions, and verification surfaces — and writes it to
+`--out` or stdout. It performs no discovery, OAuth, transport, or mutation, so
+an operator can inspect exactly what `publish` would do before any network
+authority is exercised. The emitted bytes are byte-identical to the plan
+`publish` validates and publishes, so the same artifact can be committed and
+later passed to `publish --plan` for the drift gate.
+
 ### `boris standard-site publish`
 
 The explicit, never-implicit network family. `boris standard-site publish

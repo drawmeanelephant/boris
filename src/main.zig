@@ -140,6 +140,7 @@ fn runPipelineTimed(io: Io, gpa: std.mem.Allocator, opts: Options, print_report:
     else if (opts.command == .standard_site)
         switch (opts.standard_site_command) {
             .publish => runStandardSitePublish(io, gpa, opts, environ orelse return .{ .code = .session }),
+            .plan => runStandardSitePlan(io, gpa, opts),
             .login => runStandardSiteLogin(io, gpa, opts, environ orelse return .{ .code = .session }),
             .sessions => runStandardSiteSessions(io, gpa, opts, environ orelse return .{ .code = .session }),
             .logout => runStandardSiteLogout(io, gpa, opts, environ orelse return .{ .code = .session }),
@@ -614,6 +615,181 @@ pub fn runStandardSiteSmoke(io: Io, gpa: std.mem.Allocator, opts: Options, envir
     }
 
     return smokeResultExitCode(&result);
+}
+
+/// `boris standard-site plan --profile PATH [--out PATH]`
+///
+/// Pure-offline projection: read and validate the profile, compile the content
+/// tree, render the deterministic Standard.site plan (publication + document
+/// records, `textContent`, exclusions, and verification surfaces), and write it
+/// to `--out` or stdout. No discovery, OAuth, transport, or mutation — this is
+/// the "inspect exactly what publish will do" surface, and it never reaches the
+/// network code path shared with `publish`.
+pub fn runStandardSitePlan(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    const profile_path = opts.profile_path orelse return .usage;
+    const profile_bytes = Io.Dir.cwd().readFileAlloc(
+        io,
+        profile_path,
+        gpa,
+        .limited(publication_profile.max_profile_bytes + 1),
+    ) catch |err| switch (err) {
+        error.StreamTooLong => return reportPublicationPlanConfigError(error.ProfileTooLarge),
+        else => {
+            std.debug.print("error: unable to read publication profile: {s}\n", .{@errorName(err)});
+            return .io_error;
+        },
+    };
+    defer gpa.free(profile_bytes);
+
+    const cwd_path = std.process.currentPathAlloc(io, gpa) catch |err| {
+        std.debug.print("error: unable to resolve publication profile workspace: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer gpa.free(cwd_path);
+
+    const workspace = publication_profile.profileWorkspace(gpa, cwd_path, profile_path) catch |err| {
+        return reportPublicationPlanConfigError(err);
+    };
+
+    var request = publication_profile.parseBytes(gpa, workspace, profile_bytes, .{
+        .jobs = opts.jobs,
+        .incremental = opts.incremental,
+        .quiet = opts.quiet,
+    }) catch |err| {
+        return reportPublicationPlanConfigError(err);
+    };
+    defer request.deinit(gpa);
+
+    const target_config = switch (request.plan.publication orelse return reportPublicationPlanConfigError(error.InvalidPublication)) {
+        .standard_site => |*config| config,
+        .github_pages => {
+            std.debug.print("error: profile targets github-pages; standard-site plan requires a standard-site profile\n", .{});
+            return .usage;
+        },
+    };
+
+    const content_root = std.fs.path.resolve(gpa, &.{ request.workspace.root, request.plan.input }) catch |err| {
+        std.debug.print("error: unable to resolve content root: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer gpa.free(content_root);
+
+    const input_format: identity.InputFormat = switch (request.plan.input_format) {
+        .markdown => identity.InputFormat.markdown,
+        .textile => identity.InputFormat.textile,
+        .cook => identity.InputFormat.cook,
+    };
+    var result = pipeline.compile(io, gpa, .{
+        .content_root = content_root,
+        .quiet = opts.quiet,
+        .input_format = input_format,
+    }) catch |err| {
+        std.debug.print("error: unable to compile content: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer result.deinit();
+
+    if (!result.ok) {
+        pipeline.printDiagnostics(gpa, result.diagnostics.items, opts.quiet) catch {
+            return .io_error;
+        };
+        return switch (result.failure) {
+            .io => .io_error,
+            .content, .none => .content_error,
+        };
+    }
+
+    var input_arena = std.heap.ArenaAllocator.init(gpa);
+    defer input_arena.deinit();
+    const arena = input_arena.allocator();
+    var content_dir = Io.Dir.cwd().openDir(io, content_root, .{}) catch |err| {
+        std.debug.print("error: unable to open the content root for the plain-text projection: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer content_dir.close(io);
+    var page_inputs: std.ArrayList(standard_site.PageInput) = .empty;
+    defer page_inputs.deinit(gpa);
+    for (result.pages.items) |node| {
+        const output_path = identity.safeOutputRelativePath(arena, node.id) catch |err| {
+            std.debug.print("error: unable to derive page output path: {s}\n", .{@errorName(err)});
+            return .content_error;
+        };
+        // Deterministic semantic plain-text projection (#480): include
+        // `textContent` only when it renders cleanly and stays in bounds.
+        const text_content: ?[]const u8 = blk: {
+            const source = source_io.readPageAlloc(io, content_dir, node.source_path, gpa) catch break :blk null;
+            defer gpa.free(source);
+            const text = html_body.renderSourcePlainText(io, gpa, content_dir, &input_arena, source, node.source_path, output_path, .{
+                .input_format = input_format,
+                .nodes = result.pages.items,
+            }) catch break :blk null;
+            if (text.len == 0 or text.len > standard_site.max_text_content_bytes) break :blk null;
+            break :blk text;
+        };
+        page_inputs.append(gpa, .{
+            .entity_id = node.id,
+            .output_path = output_path,
+            .title = node.title,
+            .status = standardSiteStatus(node.status),
+            .published_at = node.published_at,
+            .summary = node.summary,
+            .tags = node.tags,
+            .text_content = text_content,
+        }) catch |err| {
+            std.debug.print("error: unable to build page projection: {s}\n", .{@errorName(err)});
+            return .io_error;
+        };
+    }
+
+    var projection = standard_site.project(gpa, .{
+        .config = target_config,
+        .site_title = if (request.plan.site) |site| site.title else null,
+        .pages = page_inputs.items,
+    }) catch |err| {
+        std.debug.print("error: unable to project the Standard.site plan: {s}\n", .{@errorName(err)});
+        return .content_error;
+    };
+    defer projection.deinit(gpa);
+
+    const surfaces = standard_site.verificationSurfaces(gpa, target_config, &projection) catch |err| {
+        std.debug.print("error: unable to compute verification surfaces: {s}\n", .{@errorName(err)});
+        return .content_error;
+    };
+    defer {
+        gpa.free(surfaces.well_known.content);
+        if (surfaces.well_known.project_path) |path| gpa.free(path);
+        gpa.free(surfaces.well_known.required_public_url);
+        for (surfaces.document_links) |link| {
+            gpa.free(link.page);
+            gpa.free(link.href);
+        }
+        gpa.free(surfaces.document_links);
+    }
+
+    const plan = standard_site.renderPlan(gpa, target_config, &projection, &surfaces) catch |err| {
+        std.debug.print("error: unable to render the Standard.site plan: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer gpa.free(plan);
+
+    if (opts.plan_out) |out_path| {
+        Io.Dir.cwd().writeFile(io, .{ .sub_path = out_path, .data = plan }) catch |err| {
+            std.debug.print("error: unable to write the Standard.site plan: {s}\n", .{@errorName(err)});
+            return .io_error;
+        };
+    } else {
+        var stdout_buffer: [4096]u8 = undefined;
+        var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+        stdout_writer.interface.writeAll(plan) catch |err| {
+            std.debug.print("error: unable to write the Standard.site plan: {s}\n", .{@errorName(err)});
+            return .io_error;
+        };
+        stdout_writer.interface.flush() catch |err| {
+            std.debug.print("error: unable to flush the Standard.site plan: {s}\n", .{@errorName(err)});
+            return .io_error;
+        };
+    }
+    return .success;
 }
 
 /// `boris standard-site publish --profile PATH [--plan PATH] [--out PATH] [--prune]`
