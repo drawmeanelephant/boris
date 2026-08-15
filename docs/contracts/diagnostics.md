@@ -150,6 +150,11 @@ See [cooklang-compatibility.md](cooklang-compatibility.md).
 | `EROUTEESCAPE` | error | Published local `href`/`src` climbs above the output root and can never be served | `link_audit` → HTML commit / validate |
 | `EPUBLICATIONLOCATION` | error | A Boris-owned rendered public URL disagrees with the declared publication origin/base path, or a project-site root-relative route omits that base path | `link_audit` → HTML pre-commit gate / validate |
 | `EFRAGMENTMISSING` | reserved | Published local reference resolves, but its `#fragment` is not an id on the target page. Not yet emitted; see [documentation-links.md](documentation-links.md) | — |
+| `ENOSTRELIGIBILITY` | error | An allowlisted Nostr article cannot be published as NIP-23: non-Markdown source, `status: draft`, path-derived entity id, a missing title / summary / publication date, an entity id absent from the page graph, or a tag that is not a lowercase `t` topic | `nostr.ineligibility` → `boris nostr plan` |
+| `ENOSTRMARKDOWN` | error | Publication-safe Markdown carries a defect a relay client would show: raw HTML, a hard-wrapped paragraph, a Boris-only component, or an unresolved relative URL/asset | `render.inspectMarkdown` → `boris nostr plan` |
+| `ENOSTRTIME` | error | The page's authored publication date does not convert to the Unix second count NIP-23 `published_at` requires | `nostr.publishedAtUnix` → `boris nostr plan` |
+| `ENOSTRRELAY` | error | Reserved: a relay rejects, times out, or demands authentication. Not yet emitted — relay *configuration* is refused by the strict profile parser as an invalid `nostr` section (exit 2); see `nostr.normalizeRelayUrl` | reserved for the Nostr publish slice |
+| `ENOSTRPLAN` | error | The corpus changed under the run: a selected source no longer parses after the graph validated | `nostr_plan` → `boris nostr plan` |
 | `ELAYOUTMISSINGMARKER` | error | Layout template lacks a required/declared slot marker, or names an unknown marker | `assemble.loadLayout` → HTML load/validate |
 | `ELAYOUTDUPLICATEMARKER` | error | Layout template repeats a slot marker | `assemble.loadLayout` → HTML load/validate |
 | `ELAYOUTPATH` | error | Layout path is illegal (absolute, `..`, backslash, or otherwise non-relative) | `layout_select.validateLayoutPath` → HTML load/validate |

@@ -74,6 +74,25 @@ pub const Code = enum {
     /// Reserved: published reference resolves but its `#fragment` is not an id
     /// on the target page. Not yet emitted; see `link_audit.zig`.
     EFRAGMENTMISSING,
+    /// A selected Nostr article is not publishable: wrong source dialect,
+    /// draft, path-derived entity id, or missing required metadata.
+    ENOSTRELIGIBILITY,
+    /// A selected Nostr article's publication-safe Markdown view is refused:
+    /// raw HTML, hard-wrapped prose, a Boris-only component, or a reference
+    /// that does not resolve to a canonical URL.
+    ENOSTRMARKDOWN,
+    /// A Nostr article's `published_at` does not convert to a representable
+    /// Unix timestamp.
+    ENOSTRTIME,
+    /// Reserved: a Nostr relay rejects an event, times out, or demands
+    /// authentication. Not yet emitted — relay *configuration* is refused by
+    /// the strict profile parser before any content is read, so this code
+    /// belongs to the publish slice, where a relay is a live endpoint.
+    ENOSTRRELAY,
+    /// A Nostr publication plan cannot be built because the corpus changed
+    /// under the run: a selected source no longer parses after the graph
+    /// validated.
+    ENOSTRPLAN,
     /// Layout template lacks a required or declared slot marker (or names an
     /// unknown marker).
     ELAYOUTMISSINGMARKER,
@@ -92,6 +111,7 @@ pub const Code = enum {
     /// non-fallback layout for a page. Records the selection outcome for
     /// editors/tools; never affects exit codes or errorCount.
     ILAYOUTSELECTED,
+
     EUSAGE,
     EIO,
 

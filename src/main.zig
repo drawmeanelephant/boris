@@ -24,6 +24,7 @@ const intelligence = @import("intelligence.zig");
 const json_out = @import("json_out.zig");
 const publication_profile = @import("publication_profile.zig");
 const publication_plan = @import("publication_plan.zig");
+const nostr_plan = @import("nostr_plan.zig");
 const init_mod = @import("init.zig");
 const timings = @import("timings.zig");
 
@@ -112,7 +113,7 @@ fn runPipelineTimed(io: Io, gpa: std.mem.Allocator, opts: Options, print_report:
             r.stopAll();
             if (print_report) {
                 const label: []const u8 = switch (opts.command) {
-                    .validate, .check, .impact, .plan => @tagName(opts.command),
+                    .validate, .check, .impact, .plan, .nostr_plan => @tagName(opts.command),
                     else => @tagName(opts.mode),
                 };
                 printTimingsReport(io, gpa, r, label) catch {};
@@ -122,6 +123,8 @@ fn runPipelineTimed(io: Io, gpa: std.mem.Allocator, opts: Options, print_report:
 
     const code: ExitCode = if (opts.command == .plan)
         runPublicationPlan(io, gpa, opts, recorder_ptr)
+    else if (opts.command == .nostr_plan)
+        runNostrPlan(io, gpa, opts, recorder_ptr)
     else if (opts.command == .init)
         runInit(io, gpa, opts)
     else if (opts.command == .validate)
@@ -265,6 +268,116 @@ fn reportPublicationPlanConfigError(err: anyerror) ExitCode {
         error.OutOfMemory => .io_error,
         else => .usage,
     };
+}
+
+/// Offline Nostr NIP-23 publication plan.
+///
+/// Shares the profile-reading boundary with `runPublicationPlan`, then compiles
+/// the corpus — the one difference that matters, and the reason this is its own
+/// command: `plan` declares configuration, while `nostr plan` must know what
+/// the content actually says. It still opens no socket and reads no key.
+pub fn runNostrPlan(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
+    const profile_path = opts.profile_path orelse return .usage;
+    const profile_bytes = Io.Dir.cwd().readFileAlloc(
+        io,
+        profile_path,
+        gpa,
+        .limited(publication_profile.max_profile_bytes + 1),
+    ) catch |err| switch (err) {
+        error.StreamTooLong => return reportPublicationPlanConfigError(error.ProfileTooLarge),
+        else => {
+            std.debug.print("error: unable to read publication profile: {s}\n", .{@errorName(err)});
+            return .io_error;
+        },
+    };
+    defer gpa.free(profile_bytes);
+
+    const cwd_path = std.process.currentPathAlloc(io, gpa) catch |err| {
+        std.debug.print("error: unable to resolve publication profile workspace: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer gpa.free(cwd_path);
+
+    const workspace = publication_profile.profileWorkspace(gpa, cwd_path, profile_path) catch |err| {
+        return reportPublicationPlanConfigError(err);
+    };
+    const profile_input_format: ?publication_profile.InputFormat = if (opts.profile_input_format_override) |format| switch (format) {
+        .markdown => .markdown,
+        .textile => .textile,
+        .cook => .cook,
+    } else null;
+
+    var request = publication_profile.parseBytes(gpa, workspace, profile_bytes, .{
+        .input = opts.profile_input_override,
+        .input_format = profile_input_format,
+        .quiet = opts.quiet,
+    }) catch |err| {
+        return reportPublicationPlanConfigError(err);
+    };
+    defer request.deinit(gpa);
+
+    const config = request.plan.nostr orelse {
+        std.debug.print("error: profile declares no nostr section\n", .{});
+        return .usage;
+    };
+    if (!config.enabled) {
+        std.debug.print("error: nostr publication is disabled in this profile (set nostr.enabled)\n", .{});
+        return .usage;
+    }
+    const publication = request.plan.publication orelse {
+        // validatePlan already refuses this pairing; keep the runner honest
+        // rather than unwrapping a null on a future profile path.
+        std.debug.print("error: nostr publication requires a publication location\n", .{});
+        return .usage;
+    };
+
+    var result = nostr_plan.run(io, gpa, .{
+        .content_root = request.plan.input,
+        .input_format = switch (request.plan.input_format) {
+            .markdown => .markdown,
+            .textile => .textile,
+            .cook => .cook,
+        },
+        .quiet = opts.quiet,
+        .location = &publication.location,
+        .pubkey = config.pubkey,
+        .articles = config.articles,
+        .relays = config.relays,
+        .timeout_ms = config.timeout_ms,
+        .retries = config.retries,
+        .timings = recorder,
+    }) catch |err| switch (err) {
+        error.InvalidPubkey, error.InvalidNostrConfig, error.AbsolutePath => {
+            std.debug.print("error: invalid nostr configuration: {s}\n", .{@errorName(err)});
+            return .usage;
+        },
+        else => {
+            if (mapPathError(err)) |code| return code;
+            std.debug.print("error: I/O or system failure: {s}\n", .{@errorName(err)});
+            return .io_error;
+        },
+    };
+    defer result.deinit();
+
+    if (result.compile.diagnostics.items.len > 0) {
+        pipeline.printDiagnostics(gpa, result.compile.diagnostics.items, opts.quiet) catch return .io_error;
+    }
+    const bytes = result.plan orelse return switch (result.compile.failure) {
+        .io => .io_error,
+        .content, .none => .content_error,
+    };
+
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+    stdout_writer.interface.writeAll(bytes) catch |err| {
+        std.debug.print("error: unable to write nostr publication plan: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    stdout_writer.interface.flush() catch |err| {
+        std.debug.print("error: unable to flush nostr publication plan: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    return .success;
 }
 
 /// Deterministic provenance-rich AI context export (same compile + graph validation as IR/RAG).

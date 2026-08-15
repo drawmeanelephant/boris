@@ -142,6 +142,93 @@ pub fn renderProfile(md: []const u8, arena: *std.heap.ArenaAllocator, profile: O
     return .{ .bytes = list.items };
 }
 
+/// A publication-safe-Markdown defect found by `inspectMarkdown`.
+///
+/// These are the two structural conditions NIP-23 forbids a creating client
+/// from publishing (`docs/contracts/nostr-publication.md`). They are reported
+/// from Oliver's typed document rather than by scanning bytes, so markup that
+/// merely *looks* like HTML inside a code span or fenced block cannot trip
+/// them.
+pub const MarkdownDefect = enum {
+    /// An HTML block or an inline raw-HTML run. NIP-23 forbids HTML in
+    /// long-form content outright.
+    raw_html,
+    /// A paragraph broken across source lines. NIP-23 forbids hard-wrapped
+    /// paragraphs because the receiving client controls the line width.
+    ///
+    /// An authored line break (two trailing spaces or a backslash) parses as
+    /// `hard_break`, not `soft_break`, and is deliberate authorial intent —
+    /// it is preserved, not reported.
+    hard_wrapped_paragraph,
+
+    pub fn name(self: MarkdownDefect) []const u8 {
+        return switch (self) {
+            .raw_html => "raw-html",
+            .hard_wrapped_paragraph => "hard-wrapped-paragraph",
+        };
+    }
+};
+
+/// The first defect in document order, with a 1-based position in the
+/// inspected payload.
+pub const MarkdownFinding = struct {
+    defect: MarkdownDefect,
+    line: u32,
+    column: u32,
+};
+
+/// Inspect a Markdown payload structurally and report the first
+/// publication-safety defect in document order, or `null` when there is none.
+///
+/// This parses through the same seam and the same dialect options production
+/// rendering uses, then walks Oliver's typed document — it never renders and
+/// never inspects HTML. Boris owns the policy (which constructs are refused);
+/// Oliver keeps owning markup semantics, so the answer cannot drift from what
+/// Boris actually publishes.
+///
+/// Determinism: Oliver's traversal is documented pre-order with children in
+/// append order, and only the first finding is returned, so identical input
+/// always yields an identical finding. Parse diagnostics are not consulted,
+/// matching `render`'s behavior on the same input.
+pub fn inspectMarkdown(md: []const u8, arena: *std.heap.ArenaAllocator) RenderError!?MarkdownFinding {
+    const a = arena.allocator();
+
+    var result = try oliver.parse(a, md, .markdown, .{ .markdown = markdown_options });
+    defer result.deinit();
+
+    // Explicit stack, mirroring Oliver's own iterator: traversal depth must not
+    // consume the call stack on deeply nested input. Each frame remembers
+    // whether it sits inside a paragraph, which is what distinguishes wrapped
+    // prose from a line break in some other container.
+    const Frame = struct { node: *const oliver.document.Node, in_paragraph: bool };
+    var stack: std.ArrayList(Frame) = .empty;
+    defer stack.deinit(a);
+    try stack.append(a, .{ .node = result.document.root, .in_paragraph = false });
+
+    while (stack.pop()) |frame| {
+        const node = frame.node;
+        switch (node.tag) {
+            .html_block, .raw_html => return finding(&result.document, node.span.start, .raw_html),
+            .soft_break => if (frame.in_paragraph) {
+                return finding(&result.document, node.span.start, .hard_wrapped_paragraph);
+            },
+            else => {},
+        }
+        const in_paragraph = frame.in_paragraph or node.tag == .paragraph;
+        var i = node.children.items.len;
+        while (i > 0) {
+            i -= 1;
+            try stack.append(a, .{ .node = node.children.items[i], .in_paragraph = in_paragraph });
+        }
+    }
+    return null;
+}
+
+fn finding(doc: *const oliver.document.Document, offset: u32, defect: MarkdownDefect) MarkdownFinding {
+    const at = doc.src.lineCol(offset);
+    return .{ .defect = defect, .line = at.line, .column = at.column };
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
@@ -396,4 +483,104 @@ fn expectDocPin(io: std.Io, root: std.Io.Dir, path: []const u8, needle: []const 
         , .{ path, needle });
         return error.TestUnexpectedResult;
     }
+}
+
+// --- publication-safe Markdown inspection ---------------------------------
+
+fn inspect(md: []const u8) !?MarkdownFinding {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    return try inspectMarkdown(md, &arena);
+}
+
+test "inspect: ordinary single-line paragraphs are publication safe" {
+    try testing.expectEqual(@as(?MarkdownFinding, null), try inspect(
+        \\# Title
+        \\
+        \\One paragraph on one line.
+        \\
+        \\Another one, with *emphasis* and a [link](https://example.com/a).
+        \\
+    ));
+}
+
+test "inspect: an HTML block is reported at its own line" {
+    const found = (try inspect(
+        \\Intro line.
+        \\
+        \\<div class="callout">raw</div>
+        \\
+    )).?;
+    try testing.expectEqual(MarkdownDefect.raw_html, found.defect);
+    try testing.expectEqual(@as(u32, 3), found.line);
+}
+
+test "inspect: inline raw HTML is reported" {
+    const found = (try inspect("Text with <span>markup</span> inline.\n")).?;
+    try testing.expectEqual(MarkdownDefect.raw_html, found.defect);
+    try testing.expectEqual(@as(u32, 1), found.line);
+}
+
+test "inspect: a wrapped paragraph is reported at the wrap point" {
+    const found = (try inspect(
+        \\This paragraph is wrapped
+        \\across two source lines.
+        \\
+    )).?;
+    try testing.expectEqual(MarkdownDefect.hard_wrapped_paragraph, found.defect);
+    try testing.expectEqual(@as(u32, 1), found.line);
+}
+
+test "inspect: a wrapped list item paragraph is still wrapped prose" {
+    const found = (try inspect(
+        \\- an item that continues
+        \\  onto the next line
+        \\
+    )).?;
+    try testing.expectEqual(MarkdownDefect.hard_wrapped_paragraph, found.defect);
+}
+
+test "inspect: HTML-looking text inside code is not raw HTML" {
+    // The whole point of inspecting the typed document instead of the bytes:
+    // a fenced block and a code span are leaves, so their contents are never
+    // parsed as markup.
+    try testing.expectEqual(@as(?MarkdownFinding, null), try inspect(
+        \\Use `<div>` for a block.
+        \\
+        \\```html
+        \\<div class="x">not markup here</div>
+        \\```
+        \\
+    ));
+}
+
+test "inspect: an authored hard break is deliberate, not a wrap" {
+    // Two trailing spaces parse as `hard_break`; NIP-23 forbids arbitrary
+    // wrapping, not an authored line break.
+    try testing.expectEqual(@as(?MarkdownFinding, null), try inspect("Line one.  \nLine two.\n"));
+}
+
+test "inspect: raw HTML wins over a later wrap (first defect in document order)" {
+    const found = (try inspect(
+        \\<p>raw</p>
+        \\
+        \\wrapped prose
+        \\continues here.
+        \\
+    )).?;
+    try testing.expectEqual(MarkdownDefect.raw_html, found.defect);
+    try testing.expectEqual(@as(u32, 1), found.line);
+}
+
+test "inspect: repeated inspection of one payload is stable" {
+    const md = "wrapped\nprose\n";
+    const first = (try inspect(md)).?;
+    const second = (try inspect(md)).?;
+    try testing.expectEqual(first.defect, second.defect);
+    try testing.expectEqual(first.line, second.line);
+    try testing.expectEqual(first.column, second.column);
+}
+
+test "inspect: empty input is publication safe" {
+    try testing.expectEqual(@as(?MarkdownFinding, null), try inspect(""));
 }

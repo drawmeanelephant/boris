@@ -466,6 +466,30 @@ pub fn build(b: *std.Build) void {
     const test_publication_plan_step = b.step("test-publication-plan", "Run publication plan renderer and schema tests");
     test_publication_plan_step.dependOn(&run_publication_plan_tests.step);
 
+    // --- Nostr NIP-23 long-form publication (offline plan slice) ----------
+    const nostr_mod = b.createModule(.{
+        .root_source_file = b.path("src/nostr.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkOliver(nostr_mod, oliver_mod);
+    const nostr_tests = b.addTest(.{ .root_module = nostr_mod });
+    const run_nostr_tests = b.addRunArtifact(nostr_tests);
+    run_nostr_tests.setCwd(b.path("."));
+    const test_nostr_step = b.step("test-nostr", "Run Nostr NIP-23 mapping, eligibility, and plan tests");
+    test_nostr_step.dependOn(&run_nostr_tests.step);
+
+    const nostr_plan_mod = b.createModule(.{
+        .root_source_file = b.path("src/nostr_plan.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkOliver(nostr_plan_mod, oliver_mod);
+    const nostr_plan_tests = b.addTest(.{ .root_module = nostr_plan_mod });
+    const run_nostr_plan_tests = b.addRunArtifact(nostr_plan_tests);
+    run_nostr_plan_tests.setCwd(b.path("."));
+    test_nostr_step.dependOn(&run_nostr_plan_tests.step);
+
     // --- Runtime publication artifact inventory ---------------------------
     const artifact_inventory_mod = b.createModule(.{
         .root_source_file = b.path("src/artifact_inventory.zig"),
@@ -1332,6 +1356,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_github_pages_tests.step);
     test_step.dependOn(&github_pages_artifact_run.step);
     test_step.dependOn(&run_publication_plan_tests.step);
+    test_step.dependOn(&run_nostr_tests.step);
+    test_step.dependOn(&run_nostr_plan_tests.step);
     test_step.dependOn(&run_doctor_tests.step);
     test_step.dependOn(&run_publication_checks_tests.step);
     test_step.dependOn(&run_publication_claims_tests.step);

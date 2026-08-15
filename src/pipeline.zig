@@ -1010,7 +1010,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         const final_id: []const u8 = if (parsed.doc.meta.id) |override| override else disc.entity_id;
 
         // Promote copies all durable strings into retain before source free.
-        try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset, recipe);
+        try db.promote(disc, final_id, parsed.doc.meta.id != null, parsed.doc.meta, parsed.doc.body_offset, recipe);
         if (options.timings) |t| t.bump(.page_reads, 1);
     }
     if (options.timings) |t| t.stop(.parse);
@@ -1021,6 +1021,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
         try result.pages.append(gpa, .{
             .id = p.entity_id,
             .source_path = p.source_path,
+            .id_explicit = p.id_explicit,
             .title = p.title,
             .parent = p.parent,
             .status = statusName(p.status),

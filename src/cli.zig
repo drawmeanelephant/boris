@@ -39,6 +39,10 @@ pub const Command = enum {
     impact,
     watch,
     plan,
+    /// `boris nostr plan` — the offline NIP-23 publication plan. A family of
+    /// its own rather than a mode of `plan`, because `plan` is a configuration
+    /// declaration that never scans content and must not start.
+    nostr_plan,
     init,
 };
 
@@ -174,6 +178,10 @@ pub const ParseError = error{
     // `--rss-limit` given a non-numeric or out-of-range value: the parse
     // loop knows the flag, so name it instead of letting findBadArg guess.
     InvalidRssLimit,
+    // `boris nostr <x>` where `<x>` is not a subcommand this build implements.
+    // Named separately so the message can list what does exist rather than
+    // reporting a bare unknown positional.
+    UnknownNostrSubcommand,
     OutOfMemory,
 };
 
@@ -312,6 +320,13 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         // the loop so `boris impact` stays a usage error.
     } else if (i < args.len and std.mem.eql(u8, args[i], "plan")) {
         command = .plan;
+        i += 1;
+    } else if (i < args.len and std.mem.eql(u8, args[i], "nostr")) {
+        i += 1;
+        // Exactly one subcommand today. An unknown one is a usage error rather
+        // than a stub, so nothing can look like signing or publishing exists.
+        if (i >= args.len or !std.mem.eql(u8, args[i], "plan")) return error.UnknownNostrSubcommand;
+        command = .nostr_plan;
         i += 1;
     } else if (i < args.len and std.mem.eql(u8, args[i], "init")) {
         command = .init;
@@ -861,6 +876,34 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         };
     }
 
+    if (command == .nostr_plan) {
+        if (profile_path == null) return error.MissingValue;
+        // Same boundary as `plan`, and for the same reason: the profile is the
+        // only configuration source. This command does scan content, so
+        // `--input`/`--cooklang`/`--textile` overrides stay meaningful, but
+        // stdout belongs to the single plan document — hence no `--timings`.
+        if (saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_layout_rules or wants_sitemap or
+            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or
+            saw_format or saw_report or saw_watch or saw_timings or saw_html_dir or saw_incremental)
+        {
+            return error.ConflictingFlags;
+        }
+        return .{
+            .help = false,
+            .quiet = quiet,
+            .timings = false,
+            .command = .nostr_plan,
+            .profile_path = profile_path,
+            .profile_input_override = if (saw_input) input_dir else null,
+            .profile_input_format_override = if (saw_input_format) input_format else null,
+            .mode = .html,
+            .input_format = input_format,
+            .input_dir = input_dir,
+            .jobs = jobs,
+            .targets = targets,
+        };
+    }
+
     if (command == .init) {
         // `init` writes a deterministic starter tree into one positional
         // target directory. Compiler modes, output selectors, publication
@@ -1302,6 +1345,7 @@ pub fn printUsage() void {
         \\  check               Read-only graph health report (findings do not fail by default)
         \\  impact <ID>         Read-only transitive impact report for a page
         \\  plan                Emit a normalized publication plan (no publication)
+        \\  nostr plan          Emit the offline Nostr NIP-23 publication plan (no signing, no relay)
         \\  init [DIR]          Write a starter site (content, theme, profile) into DIR (default: .)
         \\  (no command)        Same as build
         \\  --html              Explicit HTML site mode → --html-dir (default dist)
@@ -1406,6 +1450,8 @@ pub fn printUsage() void {
         \\Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
         \\      `boris validate` observes the selected HTML target configuration but writes no artifacts.
         \\      `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
+        \\      `boris nostr plan --profile PATH` emits the offline NIP-23 publication plan on stdout;
+        \\      it never signs, never contacts a relay, and never reads a key.
         \\      --html / --html-dir / bare CLI map to a single target named "default".
         \\      Equivalent --target / --target-layout / --layout-rule permutations yield the
         \\      same config (targets sorted by name; rules canonicalized). No layout frontmatter.
@@ -1461,6 +1507,9 @@ pub fn printParseError(err: ParseError, bad_arg: ?[]const u8) void {
             } else {
                 std.debug.print("error: invalid option value\n", .{});
             }
+        },
+        error.UnknownNostrSubcommand => {
+            std.debug.print("error: unknown nostr subcommand (available: plan)\n", .{});
         },
         error.RSSMetadataRequired => {
             // `--rss` / `--rss-path` are mode flags; a missing value here
@@ -1924,6 +1973,60 @@ test "parse: plan requires a profile and rejects execution or projection selecto
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--out", "out" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--target", "public=dist" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--watch" }));
+}
+
+test "parse: nostr plan selects a profile and keeps content-scan overrides" {
+    var o = try parseOptions(std.testing.allocator, &.{
+        "boris", "nostr", "plan", "--profile", "profiles/site.json", "--input", "docs", "--quiet",
+    });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(Command.nostr_plan, o.command);
+    try expectEqualStrings("profiles/site.json", o.profile_path.?);
+    // Unlike `plan`, this command compiles content, so the input overrides are
+    // meaningful; the HTML output override is not, and is rejected below.
+    try expectEqualStrings("docs", o.profile_input_override.?);
+    try expect(o.quiet);
+    try expect(!o.timings);
+}
+
+test "parse: nostr plan takes the cooklang and textile input overrides" {
+    var cook = try parseOptions(std.testing.allocator, &.{ "boris", "nostr", "plan", "--profile", "a", "--cooklang" });
+    defer cook.deinit(std.testing.allocator);
+    try expectEqual(identity.InputFormat.cook, cook.profile_input_format_override.?);
+
+    var textile = try parseOptions(std.testing.allocator, &.{ "boris", "nostr", "plan", "--profile", "a", "--textile" });
+    defer textile.deinit(std.testing.allocator);
+    try expectEqual(identity.InputFormat.textile, textile.profile_input_format_override.?);
+}
+
+test "parse: nostr has exactly one subcommand, and it needs a profile" {
+    // A missing or unknown subcommand is named, so nothing suggests that
+    // signing or publishing exists in this build.
+    try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr" }));
+    try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign" }));
+    try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish" }));
+    try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "--profile", "a" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "plan" }));
+}
+
+test "parse: nostr plan owns stdout and rejects every other selector" {
+    const rejected = [_][]const []const u8{
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--timings" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--html-dir", "dist" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--target", "public=dist" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--rss" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--llms" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--sitemap" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--rag" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--context" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--watch" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--incremental" },
+        &.{ "boris", "nostr", "plan", "--profile", "a", "--format", "json" },
+    };
+    for (rejected) |args| {
+        try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, args));
+    }
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "plan", "--profile", "a", "--profile", "b" }));
 }
 
 test "parse: --out selects IR mode" {

@@ -8,6 +8,7 @@
 const std = @import("std");
 const github_pages = @import("github_pages.zig");
 const json_out = @import("json_out.zig");
+const nostr_mod = @import("nostr.zig");
 const publication_profile = @import("publication_profile.zig");
 
 pub const artifact_format = "boris-publication-plan";
@@ -58,8 +59,42 @@ pub fn render(gpa: std.mem.Allocator, plan: *const publication_profile.Publicati
     if (plan.targets.len > 0) try out.appendSlice(gpa, "\n  ");
     try out.appendSlice(gpa, "],\n  \"editions\": ");
     try renderEditions(&out, gpa, plan);
+    // Omitted entirely when unconfigured, exactly like `publication`: an absent
+    // key says "no Nostr surface", which is not the same statement as a
+    // configured-but-empty one.
+    if (plan.nostr) |nostr| try renderNostr(&out, gpa, nostr);
     try out.appendSlice(gpa, "\n}\n");
     return out.toOwnedSlice(gpa);
+}
+
+/// The declared Nostr surface. Public configuration only — the plan is a
+/// publishable artifact, so a key never reaches it.
+fn renderNostr(out: *std.ArrayList(u8), gpa: std.mem.Allocator, nostr: publication_profile.NostrPlan) !void {
+    try out.appendSlice(gpa, ",\n  \"nostr\": {\n    \"enabled\": ");
+    try json_out.writeBool(out, gpa, nostr.enabled);
+    try out.appendSlice(gpa, ",\n    \"kind\": ");
+    try json_out.writeUsize(out, gpa, nostr_mod.kind_long_form);
+    try out.appendSlice(gpa, ",\n    \"pubkey\": ");
+    try json_out.writeString(out, gpa, nostr.pubkey);
+    try out.appendSlice(gpa, ",\n    \"articles\": [");
+    for (nostr.articles, 0..) |article, i| {
+        if (i > 0) try out.appendSlice(gpa, ",");
+        try out.appendSlice(gpa, "\n      ");
+        try json_out.writeString(out, gpa, article);
+    }
+    if (nostr.articles.len > 0) try out.appendSlice(gpa, "\n    ");
+    try out.appendSlice(gpa, "],\n    \"relays\": [");
+    for (nostr.relays, 0..) |relay, i| {
+        if (i > 0) try out.appendSlice(gpa, ",");
+        try out.appendSlice(gpa, "\n      ");
+        try json_out.writeString(out, gpa, relay);
+    }
+    if (nostr.relays.len > 0) try out.appendSlice(gpa, "\n    ");
+    try out.appendSlice(gpa, "],\n    \"timeout_ms\": ");
+    try json_out.writeUsize(out, gpa, nostr.timeout_ms);
+    try out.appendSlice(gpa, ",\n    \"retries\": ");
+    try json_out.writeUsize(out, gpa, nostr.retries);
+    try out.appendSlice(gpa, "\n  }");
 }
 
 fn inputFormatName(input_format: publication_profile.InputFormat) []const u8 {

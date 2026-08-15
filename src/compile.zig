@@ -180,6 +180,7 @@ pub fn freezeSiteFromPageDb(
         nodes[i] = .{
             .id = p.entity_id,
             .source_path = p.source_path,
+            .id_explicit = p.id_explicit,
             .output_path = p.output_path,
             .title = p.title,
             .parent = p.parent,
@@ -545,7 +546,7 @@ pub fn loadAndPromoteFormat(
         _ = try html_body.bodyForInput(body_arena.allocator(), input_format, source, parsed.doc.body, parsed.doc.body_offset, disc.source_path, true);
 
         const final_id: []const u8 = if (parsed.doc.meta.id) |override| override else disc.entity_id;
-        try db.promote(disc, final_id, parsed.doc.meta, parsed.doc.body_offset, .{});
+        try db.promote(disc, final_id, parsed.doc.meta.id != null, parsed.doc.meta, parsed.doc.body_offset, .{});
     }
     if (recorder) |t| t.stop(.parse);
 }
@@ -2557,6 +2558,7 @@ fn compilePagesInner(
                 &content_assets.pages[page_idx],
                 page.output_path,
                 &asset_fail,
+                null,
             ) catch |err| {
                 content_asset.printDiagnostic(gpa, err, page.source_path, asset_fail, options.diagnostics);
                 return error.AssetFailed;

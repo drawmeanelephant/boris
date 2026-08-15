@@ -214,6 +214,15 @@ const modules = [_]Module{
     .{ .name = "layout_select_hostile_test.zig", .class = .other },
     .{ .name = "link_audit.zig", .class = .other },
     .{ .name = "main.zig", .class = .other },
+    .{ .name = "nostr.zig", .class = .other },
+    .{
+        .name = "nostr_plan.zig",
+        .class = .{ .emitter = .{
+            .encoder = .json_out,
+            .note = "offline NIP-23 event intentions; every runtime value goes through json_out",
+        } },
+        .source = @embedFile("nostr_plan.zig"),
+    },
     .{ .name = "page.zig", .class = .other },
     .{ .name = "parser.zig", .class = .other },
     .{ .name = "pathutil.zig", .class = .other },

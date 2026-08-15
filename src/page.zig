@@ -232,6 +232,11 @@ pub const Role = enum {
 pub const DurablePage = struct {
     /// Final entity id (path-derived or frontmatter `id:` override).
     entity_id: []const u8,
+    /// Whether `entity_id` came from a frontmatter `id:` override rather than
+    /// path derivation. Recorded at promotion because only the caller knows
+    /// which branch of the id resolution was taken; consumers needing
+    /// rename-stable external identity cannot re-derive it afterwards.
+    id_explicit: bool = false,
     title: ?[]const u8 = null,
     parent: ?[]const u8 = null,
     source_path: []const u8,
@@ -324,6 +329,9 @@ pub const PageDb = struct {
         discovery: Page,
         /// Final entity id (after optional frontmatter override).
         entity_id: []const u8,
+        /// True when `entity_id` came from `meta.id`; the caller owns the
+        /// resolution decision, so it is passed rather than re-derived here.
+        id_explicit: bool,
         meta: FrontmatterView,
         body_offset: usize,
         /// Already retain-owned; empty for every format but Cooklang.
@@ -360,6 +368,7 @@ pub const PageDb = struct {
 
         try self.append(.{
             .entity_id = try self.retain.dupe(u8, entity_id),
+            .id_explicit = id_explicit,
             .title = try self.dupeOpt(meta.title),
             .parent = try self.dupeOpt(meta.parent),
             .source_path = try self.retain.dupe(u8, discovery.source_path),
@@ -466,7 +475,7 @@ test "PageDb.promote owns strings after source buffer free" {
         .kind = .md,
     };
 
-    try db.promote(discovery, "child", meta, 64, .{});
+    try db.promote(discovery, "child", false, meta, 64, .{});
 
     // Free the temporary source — promoted strings must remain valid.
     gpa.free(source);
@@ -482,4 +491,32 @@ test "PageDb.promote owns strings after source buffer free" {
     try std.testing.expectEqualStrings("a", p.tags[0]);
     try std.testing.expectEqualStrings("b", p.tags[1]);
     try std.testing.expect(p.role == .satellite);
+}
+
+test "PageDb.promote records frontmatter id override provenance" {
+    const gpa = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const retain = arena.allocator();
+
+    var db = PageDb.init(gpa, retain);
+    defer db.deinit();
+
+    const derived: Page = .{
+        .source_path = "notes/child.md",
+        .entity_id = "notes-child",
+        .output_path = "notes-child.html",
+        .kind = .md,
+    };
+    const no_id: FrontmatterView = .{};
+    try db.promote(derived, derived.entity_id, false, no_id, 0, .{});
+
+    // Same discovery, but the author pinned `id: pinned` in frontmatter.
+    const overridden: FrontmatterView = .{ .id = "pinned" };
+    try db.promote(derived, overridden.id.?, true, overridden, 0, .{});
+
+    try std.testing.expect(!db.items()[0].id_explicit);
+    try std.testing.expectEqualStrings("notes-child", db.items()[0].entity_id);
+    try std.testing.expect(db.items()[1].id_explicit);
+    try std.testing.expectEqualStrings("pinned", db.items()[1].entity_id);
 }
