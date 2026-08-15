@@ -95,6 +95,17 @@ pub const Server = struct {
         self.cond.broadcast(self.io);
     }
 
+    /// Best-effort probe connection to our own listener so a blocked
+    /// `accept()` returns (see `stop`). The kernel completes the handshake
+    /// into the listen backlog, so this connect never blocks; the accept loop
+    /// drains it, sees `shutdown`, and exits. Any failure is ignorable: the
+    /// accept loop also exits when the listener is closed afterwards.
+    fn wakeAccept(self: *Server) void {
+        var addr = Io.net.IpAddress.parseIp4("127.0.0.1", self.bound_port) catch return;
+        var conn = addr.connect(self.io, .{ .mode = .stream }) catch return;
+        conn.close(self.io);
+    }
+
     /// Open the served root on first use (cached for the server lifetime).
     fn rootDir(self: *Server) !Io.Dir {
         if (self.root_dir) |d| return d;
@@ -111,9 +122,16 @@ pub const Server = struct {
         self.mutex.lockUncancelable(self.io);
         self.cond.broadcast(self.io);
         self.mutex.unlock(self.io);
-        // Unblock the accept loop (accept on a closed listener errors out).
+        // Unblock the accept loop portably. Closing the listener socket alone
+        // does NOT reliably wake a thread blocked in accept(): it does on
+        // BSD/macOS (the accept errors out with EBADF) but on Linux the
+        // blocked accept(2) keeps waiting on the closed description, which
+        // would wedge the join below. A self-connect makes accept() return a
+        // real connection; the loop sees `shutdown` and exits. The listener is
+        // still closed afterwards (harmless once the loop is gone).
         if (!self.listener_closed) {
             self.listener_closed = true;
+            self.wakeAccept();
             self.listener.socket.close(self.io);
         }
         if (self.accept_thread) |t| {
