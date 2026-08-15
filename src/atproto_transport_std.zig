@@ -100,28 +100,51 @@ pub const StdTransport = struct {
     }
 
     fn fetchTask(self: *StdTransport, allocator: std.mem.Allocator, request_value: transport.Request) transport.Error!transport.Response {
-        if (request_value.method != .get) return error.UnexpectedRequest;
-        if (request_value.headers.len != 1 or
+        const expected_header_count: usize = if (request_value.method == .get) 1 else 3;
+        if (request_value.headers.len != expected_header_count or
             !std.ascii.eqlIgnoreCase(request_value.headers[0].name, "accept")) return error.UnexpectedRequest;
         const accept = request_value.headers[0].value;
         if (!std.mem.eql(u8, accept, "application/json") and
             !std.mem.eql(u8, accept, "text/plain")) return error.UnexpectedRequest;
+        if (request_value.method == .post) {
+            if (!std.ascii.eqlIgnoreCase(request_value.headers[1].name, "content-type") or
+                !std.mem.eql(u8, request_value.headers[1].value, "application/x-www-form-urlencoded") or
+                !std.ascii.eqlIgnoreCase(request_value.headers[2].name, "dpop") or
+                request_value.headers[2].value.len == 0 or
+                request_value.body.len == 0) return error.UnexpectedRequest;
+        }
         if (!std.mem.startsWith(u8, request_value.url, "https://")) return error.UnsafeTarget;
         const uri = std.Uri.parse(request_value.url) catch return error.UnsafeTarget;
         if (uri.host == null or uri.user != null or uri.password != null or uri.fragment != null) return error.UnsafeTarget;
 
-        const extra_headers = [_]std.http.Header{.{ .name = "accept", .value = accept }};
-        var request = self.http.request(.GET, uri, .{
+        var extra_headers: [3]std.http.Header = undefined;
+        for (request_value.headers, 0..) |header, index| {
+            extra_headers[index] = .{ .name = header.name, .value = header.value };
+        }
+        const method: std.http.Method = switch (request_value.method) {
+            .get => .GET,
+            .post => .POST,
+        };
+        var request = self.http.request(method, uri, .{
             .keep_alive = false,
             .redirect_behavior = .unhandled,
             .headers = .{
+                .authorization = .omit,
                 .user_agent = .omit,
                 .accept_encoding = .omit,
+                .content_type = .omit,
             },
-            .extra_headers = &extra_headers,
+            .extra_headers = extra_headers[0..request_value.headers.len],
         }) catch |err| return mapOpenError(err);
         defer request.deinit();
-        request.sendBodiless() catch |err| return mapIoError(err);
+        switch (request_value.method) {
+            .get => request.sendBodiless() catch |err| return mapIoError(err),
+            .post => {
+                const body = allocator.dupe(u8, request_value.body) catch return error.OutOfMemory;
+                defer allocator.free(body);
+                request.sendBodyComplete(body) catch |err| return mapIoError(err);
+            },
+        }
 
         var response = request.receiveHead(&.{}) catch |err| return mapHeadError(err);
         if (response.head.status.class() == .redirect and request_value.redirect_policy == .forbid) {

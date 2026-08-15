@@ -1,9 +1,10 @@
 //! Portable, capability-based transport seam for AT Protocol discovery.
 //!
 //! This module defines no sockets, DNS, clocks, files, proxy lookup, or other
-//! host behavior. Discovery asks for bounded GETs at already validated URLs.
-//! A host adapter or deterministic test double supplies the capability; no
-//! adapter follows redirects without portable policy code validating the hop.
+//! host behavior. OAuth asks for bounded GETs or form-encoded POSTs at already
+//! validated URLs. A host adapter or deterministic test double supplies the
+//! capability; no adapter follows redirects without portable policy code
+//! validating the hop.
 
 const std = @import("std");
 
@@ -23,7 +24,7 @@ pub const Error = std.mem.Allocator.Error || error{
     UnsafeTarget,
 };
 
-pub const Method = enum { get };
+pub const Method = enum { get, post };
 /// Native adapters never redirect implicitly. `manual_https` permits a 3xx
 /// response to cross the capability boundary so portable policy code can
 /// validate and issue the next HTTPS request itself.
@@ -37,6 +38,7 @@ pub const Header = struct {
 /// Safety bounds are implementation limits, not AT Protocol wire semantics.
 pub const Limits = struct {
     max_body_bytes: usize,
+    max_request_body_bytes: usize = 16 * 1024,
     max_header_count: usize = 64,
     max_header_bytes: usize = 16 * 1024,
     max_header_name_bytes: usize = 256,
@@ -48,6 +50,7 @@ pub const Request = struct {
     method: Method = .get,
     url: []const u8,
     headers: []const Header = &.{.{ .name = "accept", .value = "application/json" }},
+    body: []const u8 = "",
     redirect_policy: RedirectPolicy = .forbid,
     limits: Limits,
 };
@@ -118,6 +121,8 @@ pub const Client = struct {
 
     pub fn request(client: Client, allocator: std.mem.Allocator, request_value: Request) Error!Response {
         if (request_value.url.len == 0 or request_value.url.len > max_url_bytes) return error.UnsafeTarget;
+        if (request_value.body.len > request_value.limits.max_request_body_bytes) return error.ResponseTooLarge;
+        if (request_value.method == .get and request_value.body.len != 0) return error.UnexpectedRequest;
         try validateHeaders(request_value.headers, request_value.limits);
         return client.request_fn(client.context, allocator, request_value);
     }
@@ -137,6 +142,7 @@ pub const ScriptedMock = struct {
         expected_method: Method = .get,
         expected_url: []const u8,
         expected_headers: []const Header = &.{.{ .name = "accept", .value = "application/json" }},
+        expected_body: []const u8 = "",
         expected_redirect_policy: RedirectPolicy = .forbid,
         outcome: Outcome,
     };
@@ -160,6 +166,7 @@ pub const ScriptedMock = struct {
         if (step.expected_method != request_value.method or
             step.expected_redirect_policy != request_value.redirect_policy or
             !std.mem.eql(u8, step.expected_url, request_value.url) or
+            !std.mem.eql(u8, step.expected_body, request_value.body) or
             !headersEqual(step.expected_headers, request_value.headers))
         {
             return error.UnexpectedRequest;
@@ -194,6 +201,7 @@ pub fn validateResponseShape(headers: []const Header, body_len: usize, limits: L
 fn validateHeaders(headers: []const Header, limits: Limits) Error!void {
     return validateResponseShape(headers, 0, .{
         .max_body_bytes = 0,
+        .max_request_body_bytes = limits.max_request_body_bytes,
         .max_header_count = limits.max_header_count,
         .max_header_bytes = limits.max_header_bytes,
         .max_header_name_bytes = limits.max_header_name_bytes,
@@ -291,4 +299,19 @@ test "hostile response bodies and headers are rejected before copying" {
         "",
         .{ .max_body_bytes = 0 },
     ));
+}
+
+test "request bodies are bounded and GET remains bodyless" {
+    var mock: ScriptedMock = .{ .steps = &.{} };
+    try std.testing.expectError(error.ResponseTooLarge, mock.client().request(std.testing.allocator, .{
+        .method = .post,
+        .url = "https://example.com/token",
+        .body = "oversized",
+        .limits = .{ .max_body_bytes = 1, .max_request_body_bytes = 4 },
+    }));
+    try std.testing.expectError(error.UnexpectedRequest, mock.client().request(std.testing.allocator, .{
+        .url = "https://example.com/token",
+        .body = "not-empty",
+        .limits = .{ .max_body_bytes = 1 },
+    }));
 }

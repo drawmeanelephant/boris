@@ -131,6 +131,66 @@ pub fn build(b: *std.Build) void {
     test_atproto_handles.dependOn(&run_atproto_dns_std_tests.step);
     test_atproto_handles.dependOn(check_atproto_oauth_freestanding);
 
+    // Portable PAR/callback/token state machine plus the narrow native
+    // loopback/browser composition. Only the portable module joins the
+    // wasm32-freestanding gate.
+    const atproto_authorization_mod = b.addModule("atproto_authorization", .{
+        .root_source_file = b.path("src/atproto_authorization.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const atproto_authorization_tests = b.addTest(.{ .root_module = atproto_authorization_mod });
+    const run_atproto_authorization_tests = b.addRunArtifact(atproto_authorization_tests);
+    run_atproto_authorization_tests.setCwd(b.path("."));
+
+    const atproto_interactive_std_mod = b.createModule(.{
+        .root_source_file = b.path("src/atproto_interactive_std.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const atproto_interactive_std_tests = b.addTest(.{ .root_module = atproto_interactive_std_mod });
+    const run_atproto_interactive_std_tests = b.addRunArtifact(atproto_interactive_std_tests);
+    run_atproto_interactive_std_tests.setCwd(b.path("."));
+    const atproto_loopback_std_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/atproto_loopback_std.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_atproto_loopback_std_tests = b.addRunArtifact(atproto_loopback_std_tests);
+    run_atproto_loopback_std_tests.setCwd(b.path("."));
+    const atproto_browser_std_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/atproto_browser_std.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_atproto_browser_std_tests = b.addRunArtifact(atproto_browser_std_tests);
+    run_atproto_browser_std_tests.setCwd(b.path("."));
+
+    const atproto_authorization_freestanding_mod = b.createModule(.{
+        .root_source_file = b.path("src/atproto_authorization.zig"),
+        .target = freestanding_target,
+        .optimize = .ReleaseSafe,
+    });
+    const atproto_authorization_freestanding = b.addObject(.{
+        .name = "atproto-authorization-freestanding",
+        .root_module = atproto_authorization_freestanding_mod,
+    });
+    check_atproto_oauth_freestanding.dependOn(&atproto_authorization_freestanding.step);
+
+    const test_atproto_authorization = b.step(
+        "test-atproto-authorization",
+        "Run ATProto PAR/callback/token, native loopback/browser, and freestanding gates",
+    );
+    test_atproto_authorization.dependOn(&run_atproto_authorization_tests.step);
+    test_atproto_authorization.dependOn(&run_atproto_interactive_std_tests.step);
+    test_atproto_authorization.dependOn(&run_atproto_loopback_std_tests.step);
+    test_atproto_authorization.dependOn(&run_atproto_browser_std_tests.step);
+    test_atproto_authorization.dependOn(check_atproto_oauth_freestanding);
+
     // Oliver: freestanding Zig markup library (source bytes → typed document
     // → deterministic HTML). Pinned by content hash in build.zig.zon; see
     // docs/contracts/oliver-renderer.md for the exact revision and the
@@ -1238,6 +1298,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(test_atproto_oauth);
     test_step.dependOn(test_atproto_discovery);
     test_step.dependOn(test_atproto_handles);
+    test_step.dependOn(test_atproto_authorization);
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_fixtures_tests.step);
     test_step.dependOn(&run_scanner_tests.step);
