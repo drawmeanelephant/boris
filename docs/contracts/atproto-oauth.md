@@ -1,20 +1,22 @@
 # AT Protocol OAuth core contract
 
-**Status:** normative foundation slice; DID- and handle-first authority
-discovery are implemented, while interactive login, session persistence, and
-record publication remain future adapters.
+**Status:** normative foundation slice; DID/handle authority discovery and one
+native, one-shot authorization-code flow are implemented. Session persistence,
+token refresh, and record publication remain future adapters.
 
 This contract defines Boris's portable AT Protocol OAuth cryptographic core and
-the boundary that future local interactive publishing must preserve. It does
-not add a CLI command, perform network access, store credentials, or amend an
-existing publication artifact schema.
+the boundary that future local interactive publishing must preserve. It adds
+library-level native network/browser capabilities, but no CLI command,
+credential storage, or publication artifact schema.
 
 The cryptographic core is exported as the Zig module `atproto_oauth`.
 `atproto_identity` owns portable DID, handle, and metadata validation;
 `atproto_handle` composes the small capabilities in `atproto_dns` and
-`atproto_transport`. The crypto, identity, handle, DNS contract, and discovery
-side compile under the repository's `wasm32-freestanding` gate. Native HTTP and
-DNS adapters are host-only.
+`atproto_transport`; `atproto_authorization` owns portable PAR, callback, and
+token state. The crypto, identity, handle, DNS contract, discovery, and
+authorization state machine compile under the repository's
+`wasm32-freestanding` gate. Native HTTP, DNS, loopback, browser, entropy, and
+clock adapters are host-only.
 The cryptographic core may use allocator-backed memory, `std.crypto`, hashing,
 base64url, and pure byte validation. It must not import or consult HTTP, DNS,
 files, processes, environment variables, a wall clock, global randomness, or
@@ -22,7 +24,7 @@ operating-system credential services.
 
 ## Capability boundary
 
-The future client is split across these two ownership domains:
+The client is split across these two ownership domains:
 
 | Portable protocol core | Host adapter |
 |---|---|
@@ -31,7 +33,8 @@ The future client is split across these two ownership domains:
 | ES256 compact JWS | HTTPS and DNS TXT policy |
 | DPoP claim construction and access-token hash | Loopback callback listener |
 | Bounded signing-input validation | Browser/user handoff |
-| Protocol state transitions | Locked, atomic secret storage |
+| PAR, callback, and token state transitions | Browser and loopback handoff |
+| Bounded token/session values and explicit erasure | Locked, atomic secret storage |
 
 Host capabilities are explicit inputs. Tests and freestanding consumers may
 supply deterministic values; production adapters must supply fresh secure
@@ -199,13 +202,86 @@ and JSON. The validator requires:
 - DPoP signing algorithms containing `ES256`; and
 - optional `require_request_uri_registration` absent/true, never false.
 
-These checks prove readiness for later PAR and token cards; they do not make a
-PAR request or exchange a token.
+These checks are the mandatory typed input to authorization; raw metadata can
+never be supplied directly to the PAR or token functions.
+
+## One-shot interactive authorization
+
+`atproto_authorization.begin` consumes a validated `DiscoveredAccount`, an
+exact ephemeral redirect URI, session entropy, an injected DPoP proof source,
+and the bounded transport. It creates one ES256 key, PKCE verifier/challenge,
+and OAuth state, then makes a PAR request. The client ID uses ATProto's native
+public-client convention:
+
+```text
+http://localhost?redirect_uri={percent-encoded actual redirect}&scope={percent-encoded scope}
+```
+
+The metadata URL contains no port and the actual redirect is exactly
+`http://127.0.0.1:{ephemeral-port}/oauth/callback`. Production code accepts no
+hostname, IPv6, HTTPS, fixed-port configuration, alternate path, query, or
+fragment at this boundary. The loopback exception is isolated from production
+network URL validation and cannot enable HTTP discovery or HTTP token calls.
+
+PAR is a form-encoded POST with `client_id`, `response_type=code`, exact
+`redirect_uri`, requested `scope`, state, PKCE S256 challenge, and the expected
+DID as `login_hint`. It carries a fresh ES256 DPoP proof. Success is status 201,
+JSON, a bounded non-empty `request_uri`, positive `expires_in`, and exactly one
+valid `DPoP-Nonce`. A status-400 `use_dpop_nonce` response is retried once with
+the supplied nonce and a fresh proof; a second challenge fails closed.
+
+The browser URL contains only the encoded `client_id` and server-issued
+`request_uri` at the validated authorization endpoint. State, DID, scopes,
+redirect, and PKCE inputs remain inside the pushed request rather than being
+repeated in the browser URL.
+
+The callback parser accepts one bounded GET target at `/oauth/callback`. It
+requires unique form-encoded `state`, `iss`, and either `code` or `error`, uses
+a constant-time state comparison, and requires `iss` to equal the discovered
+Authorization Server origin byte-for-byte. Duplicate fields, malformed
+encoding, controls, wrong path/state/issuer, and authorization errors burn the
+attempt. No second callback can revive it.
+
+Token exchange is also single-use. It posts the code, exact client ID and
+redirect, original verifier, and `authorization_code` grant type with the same
+DPoP key. The current Authorization Server nonce from PAR is sent immediately;
+one `use_dpop_nonce` retry is allowed. Success requires status 200, JSON, one
+fresh `DPoP-Nonce`, token type `DPoP`, `sub` exactly equal to the account DID,
+positive `expires_in`, and a bounded granted scope containing both `atproto` and
+`include:site.standard.authFull`. Partial grants fail instead of producing a
+session that cannot safely publish. Access and optional refresh tokens remain
+opaque and bounded to 16 KiB each.
+
+`AuthorizedSession` is an in-memory value binding the validated account,
+session DPoP key, tokens, granted scope, and current Authorization Server
+nonce. Explicit `deinit` erases secret bytes. There is no serialization,
+refresh, recovery, caching, or filesystem storage in this slice.
+
+### Native loopback and browser boundary
+
+`atproto_loopback_std` binds only `127.0.0.1` with port zero, backlog one, and
+no address reuse. It accepts one HTTP request under the smaller of the PAR
+expiry and a ten-minute whole-operation deadline, bounds the head, target,
+header count, and header bytes,
+requires GET, no body, the exact callback path, and exactly one Host value equal
+to `127.0.0.1:{selected-port}`. Its response disables caching, sniffing, and
+all content sources. The listener closes after the attempt.
+
+`atproto_browser_std` accepts only a bounded HTTPS authorization URL and invokes
+`/usr/bin/open` on macOS or `xdg-open` on Linux directly, never through a shell.
+Child output is capped at 4 KiB per stream and execution at ten seconds. Boris
+passes no tokens, verifier, DPoP key, or callback data to the process.
+
+`atproto_interactive_std.authorize` composes the listener, secure host entropy,
+real wall clock, existing hardened HTTPS transport, browser handoff, callback,
+and exchange. It creates no files. It is library infrastructure only: no Boris
+CLI or publication command invokes it yet.
 
 ## Transport and network policy
 
-`atproto_transport.Client` exposes only the operation discovery needs: a GET at
-an already validated URL, fixed bounded headers, a forbidden-redirect policy,
+`atproto_transport.Client` exposes only the operations these slices need: GET
+at an already validated URL or form-encoded POST to a validated PAR/token
+endpoint, fixed bounded headers and body, a forbidden-redirect policy,
 a manual-HTTPS redirect response mode used only by handle resolution, explicit
 response limits, and a whole-request timeout. Responses carry only a
 status, bounded headers, and bounded body. `ScriptedMock` validates the exact
@@ -277,7 +353,10 @@ claims:
 | Handle HTTPS body | 4 KiB |
 | DID document body | 256 KiB |
 | Resource Server metadata body | 64 KiB |
-| Authorization Server metadata body | 64 KiB |
+| Authorization Server metadata / token body | 64 KiB |
+| PAR response / outbound form body | 16 KiB |
+| Loopback request head | 16 KiB |
+| Loopback request target | 8 KiB |
 | Response headers | 64 |
 | Total response-header name/value bytes | 16 KiB |
 | One response-header name | 256 bytes |
@@ -295,14 +374,15 @@ minutes for authorization flows.
 
 ## Specification baseline
 
-This implementation was re-grounded on 2026-08-14 against these exact primary
-documents. ATProto pages and the did:web community draft do not publish a
-stable revision identifier, so the retrieval date is the recorded revision:
+Discovery was re-grounded on 2026-08-14 and authorization on 2026-08-15 against
+these exact primary documents. ATProto pages and the did:web community draft do
+not publish a stable revision identifier, so the retrieval date is the recorded
+revision:
 
 - [AT Protocol DID](https://atproto.com/specs/did), unversioned current page,
   retrieved 2026-08-14;
 - [AT Protocol OAuth](https://atproto.com/specs/oauth), unversioned current
-  page, retrieved 2026-08-14;
+  page, retrieved 2026-08-15;
 - [AT Protocol Handle](https://atproto.com/specs/handle), unversioned current
   page, retrieved 2026-08-14;
 - [AT Protocol HTTP API/XRPC](https://atproto.com/specs/xrpc), unversioned
@@ -318,6 +398,18 @@ stable revision identifier, so the retrieval date is the recorded revision:
   Resource Metadata, April 2025;
 - [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414), OAuth 2.0 Authorization
   Server Metadata, June 2018;
+- [RFC 9126](https://www.rfc-editor.org/rfc/rfc9126), OAuth 2.0 Pushed
+  Authorization Requests, September 2021;
+- [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252), OAuth 2.0 for Native Apps,
+  October 2017;
+- [RFC 9207](https://www.rfc-editor.org/rfc/rfc9207), OAuth 2.0 Authorization
+  Server Issuer Identification, March 2022;
+- [RFC 9449](https://www.rfc-editor.org/rfc/rfc9449), OAuth 2.0 Demonstrating
+  Proof of Possession, September 2023;
+- [AT Protocol Permission Sets](https://atproto.com/specs/permission),
+  unversioned current page, retrieved 2026-08-15;
+- [Standard.site permission contract](https://standard.site/docs/permissions/),
+  retrieved 2026-08-15;
 - [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035), Domain Names —
   Implementation and Specification, November 1987;
 - [RFC 1464](https://www.rfc-editor.org/rfc/rfc1464), Using the Domain Name
@@ -373,20 +465,20 @@ Tokens are bounded to 16 KiB at this layer. DPoP nonces use the RFC header-value
 alphabet and are bounded to 1 KiB. These bounds are rejection rules, not
 truncation rules.
 
-## Future interactive client requirements
+## Interactive client profile
 
 The first host integration is a native public client with authorization code,
-PKCE S256, pushed authorization requests, and DPoP. Its local login surface can
-now begin with a handle, `did:plc`, or `did:web`, and requests exactly:
+PKCE S256, pushed authorization requests, and DPoP. Its resolved account can
+begin with a handle, `did:plc`, or `did:web`, and it requests exactly:
 
 ```text
 atproto include:site.standard.authFull
 ```
 
 The Standard.site permission is defined by its
-[permission contract](https://standard.site/docs/permissions/). The complete
-flow must follow the current
-[AT Protocol OAuth profile](https://atproto.com/specs/oauth) and keep the
+[permission contract](https://standard.site/docs/permissions/). The implemented
+flow follows the current
+[AT Protocol OAuth profile](https://atproto.com/specs/oauth) and keeps the
 expected DID, resolved PDS, authorization-server issuer, exact client ID,
 granted scopes, tokens, and DPoP key bound as one session.
 
@@ -397,7 +489,7 @@ it must not fall back to an app password, export a token, or weaken the redirect
 binding. A hosted callback or installed custom URI scheme is a separate future
 client profile.
 
-Authorization-server and PDS nonces are separate per-origin state. A
+Authorization-server and future PDS nonces are separate per-origin state. A
 `use_dpop_nonce` response permits one retry with the newly supplied nonce and a
 fresh proof. Refresh tokens are treated as rotating, single-use credentials;
 future persistence must lock refresh, durably mark an in-flight exchange, and
@@ -411,29 +503,33 @@ The foundation gate is:
 zig build test-atproto-oauth
 zig build test-atproto-discovery
 zig build test-atproto-handles
+zig build test-atproto-authorization
 ```
 
 It covers the RFC 7636 PKCE vector, the public-key/thumbprint values published
 in RFC 9449, P-256 JWK shape, query/fragment removal, access-token hashing,
 nonce and input bounds, and verification of the emitted raw ES256 signature.
-The gates compile all portable OAuth, identity, handle, DNS-capability, and
-transport modules for `wasm32-freestanding` so an accidental host dependency
-fails mechanically. Native std HTTP and DNS adapters are tested only on the
-host target.
+The gates compile all portable OAuth, identity, handle, DNS-capability,
+transport, and authorization modules for `wasm32-freestanding` so an accidental
+host dependency fails mechanically. Native std HTTP, DNS, loopback, browser,
+clock, and entropy adapters are tested only on the host target.
 
 Discovery, SSRF/connection-address policy, metadata substitution, redirects,
 response bounds, and changing-network-state tests are deterministic and
-offline. Future host slices add loopback callback parsing, nonce rotation,
-session locking, refresh crash recovery, diagnostic redaction, and mock
-end-to-end publication.
+offline. Authorization tests additionally cover exact form construction,
+browser URL minimization, state/issuer binding, one-shot callback and code
+consumption, token identity/scope validation, and both PAR and token DPoP nonce
+retries. Future slices add session locking, refresh crash recovery, diagnostic
+redaction, and mock end-to-end publication.
 Automated tests must not require internet access. Live PDS compatibility is a
 separate recorded manual gate using dedicated test identities.
 
 ## Explicitly not implemented
 
-This is not a complete OAuth client. It does not open a browser, listen on
-loopback, issue PAR, display authorization UI, exchange/refresh tokens, persist
-sessions or credentials, publish
+This is not a complete publishing client. The native library flow can open a
+browser, listen once on loopback, issue PAR, and exchange an authorization code,
+but no CLI surface invokes it. It does not render authorization UI, refresh
+tokens, persist sessions or credentials, resume interrupted attempts, publish
 Standard.site/XRPC records, prune remote state, authenticate CI, or implement
 generic OAuth/DID provider support. No live-network smoke is in CI; a stable
 non-personal public fixture was not identified, so this slice keeps all tests
