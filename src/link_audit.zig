@@ -79,8 +79,6 @@ pub const Options = struct {
 /// Attributes whose value is a single URL. `srcset` is deliberately excluded:
 /// it holds a comma-separated candidate list with descriptors and needs its own
 /// grammar rather than being treated as one URL.
-const url_attributes = [_][]const u8{ "href", "src" };
-
 /// True when the target carries any URI scheme, is protocol-relative, is empty,
 /// or is a same-document fragment. A generic scheme test is used rather than an
 /// allowlist so `ftp:`, `blob:`, `urn:`, and future schemes are not mistaken for
@@ -370,10 +368,10 @@ pub fn auditDocumentWithOptions(
     defer if (base_source_path) |path| gpa.free(path);
     var lines: LineCounter = .{ .html = html };
     while (i < html.len) {
-        if (html[i] != '<') {
-            i += 1;
-            continue;
-        }
+        // Vectorized search for the next tag start instead of probing every
+        // byte; each byte is still visited at most once across the document.
+        const next = std.mem.indexOfScalarPos(u8, html, i, '<') orelse break;
+        i = next;
         const tag = html_scan.tagAt(html, i) orelse {
             i += 1;
             continue;
@@ -414,14 +412,38 @@ pub fn auditDocumentWithOptions(
         if (external_base) continue;
         const resolution_source_path = base_source_path orelse source_path;
         const has_effective_base = base_source_path != null;
-        for (url_attributes) |attribute| {
-            const target = html_scan.attrValue(slice, attribute) orelse continue;
-            try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, attribute, opts, findings, i, &lines);
+
+        // Single pass over the tag's attributes. `attrValue` is itself an
+        // AttrIter pass, so the old per-attribute lookups re-scanned each tag
+        // once per name; collecting href/src/meta-content in one iteration
+        // scans it once. First-match and emission order are preserved
+        // (href, then src, then meta content) so findings cannot reorder.
+        const is_meta = std.ascii.eqlIgnoreCase(tag.name, "meta");
+        var href: ?[]const u8 = null;
+        var src: ?[]const u8 = null;
+        var meta_content: ?[]const u8 = null;
+        var attrs = html_scan.AttrIter.init(slice);
+        while (attrs.next()) |attribute| {
+            const value = attribute.value orelse continue;
+            if (std.ascii.eqlIgnoreCase(attribute.name, "href")) {
+                if (href == null) href = value;
+            } else if (std.ascii.eqlIgnoreCase(attribute.name, "src")) {
+                if (src == null) src = value;
+            } else if (is_meta and std.ascii.eqlIgnoreCase(attribute.name, "content")) {
+                if (meta_content == null) meta_content = value;
+            }
         }
-        if (std.ascii.eqlIgnoreCase(tag.name, "meta")) {
-            const target = html_scan.attrValue(slice, "content") orelse continue;
-            if (requiresPublicLocation(tag.name, slice, "content")) {
-                try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, "content", opts, findings, i, &lines);
+        if (href) |target| {
+            try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, "href", opts, findings, i, &lines);
+        }
+        if (src) |target| {
+            try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, "src", opts, findings, i, &lines);
+        }
+        if (is_meta) {
+            if (meta_content) |target| {
+                if (requiresPublicLocation(tag.name, slice, "content")) {
+                    try auditOne(gpa, intended, source_path, resolution_source_path, has_effective_base, tag.name, slice, target, "content", opts, findings, i, &lines);
+                }
             }
         }
     }
