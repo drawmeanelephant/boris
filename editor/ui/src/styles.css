@@ -59,6 +59,7 @@ input, select { width: 100%; padding: 0.7rem; border: 1px solid #82958b; border-
 [role="option"] { display: grid; grid-template-columns: minmax(8rem, 0.45fr) 1fr; gap: 0.6rem; padding: 0.55rem 0.7rem; cursor: pointer; }
 [role="option"] + [role="option"] { border-top: 1px solid #e1e8e3; }
 [role="option"].selected, [role="option"]:hover { background: #e1f1e8; }
+[role="option"].disabled { opacity: 0.55; cursor: not-allowed; }
 [role="option"] span { color: #53625c; }
 .authoring-tools dl > div { display: grid; grid-template-columns: minmax(7rem, 0.3fr) 1fr; gap: 0.75rem; padding: 0.25rem 0; }
 .authoring-tools dt { font-weight: 700; }

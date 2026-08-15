@@ -26,6 +26,11 @@
     | { action: 'command'; mode: CommandMode }
     | { action: 'preview'; reason: 'save' | 'manual' }
     | { action: 'restore'; snapshot: RecoverySnapshot };
+  type PaletteItem =
+    | { kind: 'create' }
+    | { kind: 'rename' }
+    | { kind: 'delete' }
+    | { kind: 'open'; path: string };
   type Problem = {
     severity: 'error' | 'warning' | 'info';
     code: string | null;
@@ -93,6 +98,7 @@
   let createDialog: HTMLDialogElement;
   let renameDialog: HTMLDialogElement;
   let deleteDialog: HTMLDialogElement;
+  let paletteDialog: HTMLDialogElement;
   let createPath = 'content/new-page.md';
   let renamePath = '';
   let pendingResolution: PendingResolution | null = null;
@@ -105,6 +111,8 @@
   let completionQuery = '';
   let selectedSuggestion = 0;
   let completionOpen = false;
+  let paletteQuery = '';
+  let paletteSelection = 0;
 
   $: dirty = activePath !== '' && content !== baseline;
   $: problemGroups = groupProblems(commandResult?.problems ?? []);
@@ -122,6 +130,27 @@
     return 'Save or discard the changes before rebuilding the preview?';
   })();
   $: resolutionVerb = pendingResolution?.action === 'open' ? 'switch' : pendingResolution?.action === 'command' ? 'run' : pendingResolution?.action === 'restore' ? 'restore' : 'rebuild';
+  $: paletteItems = (() => {
+    const items: PaletteItem[] = [{ kind: 'create' }, { kind: 'rename' }, { kind: 'delete' }];
+    for (const file of files) items.push({ kind: 'open', path: file.path });
+    const needle = paletteQuery.trim().toLocaleLowerCase();
+    return needle ? items.filter(item => paletteItemLabel(item).toLocaleLowerCase().includes(needle)) : items;
+  })();
+  $: paletteEnabled = new Map<string, boolean>(
+    paletteItems.map(item => {
+      if (item.kind === 'open') return [paletteItemKey(item), true] as const;
+      if (dirty) return [paletteItemKey(item), false] as const;
+      return [paletteItemKey(item), item.kind === 'create' || activePath !== ''] as const;
+    })
+  );
+  $: if (paletteEnabled.size > 0) {
+    const current = paletteItems[paletteSelection];
+    const currentEnabled = current ? paletteEnabled.get(paletteItemKey(current)) : undefined;
+    if (!currentEnabled) {
+      const first = paletteItems.findIndex(item => paletteEnabled.get(paletteItemKey(item)));
+      paletteSelection = first >= 0 ? first : 0;
+    }
+  }
 
   const token = new URLSearchParams(window.location.hash.slice(1)).get('token') ?? '';
 
@@ -664,6 +693,72 @@
     deleteDialog.querySelector<HTMLButtonElement>('.dialog-actions .danger')?.focus();
   }
 
+  function paletteItemLabel(item: PaletteItem): string {
+    if (item.kind === 'create') return 'Create file';
+    if (item.kind === 'rename') return 'Rename file';
+    if (item.kind === 'delete') return 'Delete file';
+    return 'Open file';
+  }
+
+  function paletteItemDetail(item: PaletteItem): string {
+    if (item.kind === 'create') return 'New project-relative path';
+    if (item.kind === 'rename' || item.kind === 'delete') return activePath;
+    return item.path;
+  }
+
+  function paletteItemEnabled(item: PaletteItem): boolean {
+    if (item.kind === 'open') return true;
+    if (dirty) return false;
+    return item.kind === 'create' || activePath !== '';
+  }
+
+  function paletteItemKey(item: PaletteItem): string {
+    return item.kind === 'open' ? `open:${item.path}` : item.kind;
+  }
+
+  function paletteEnabledIndices(): number[] {
+    return paletteItems
+      .map((item, index) => paletteItemEnabled(item) ? index : -1)
+      .filter((index): index is number => index >= 0);
+  }
+
+  function openPalette() {
+    if (document.querySelector('dialog[open]')) return;
+    paletteQuery = '';
+    paletteSelection = 0;
+    paletteDialog.showModal();
+  }
+
+  function paletteKeydown(event: KeyboardEvent) {
+    handleDialogKeydown(event);
+    if (event.defaultPrevented) return;
+    const enabled = paletteEnabledIndices();
+    if (enabled.length === 0) return;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      const current = enabled.indexOf(paletteSelection);
+      const base = current >= 0 ? current : -1;
+      paletteSelection = enabled[(base + 1 + enabled.length) % enabled.length];
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      const current = enabled.indexOf(paletteSelection);
+      const base = current >= 0 ? current : enabled.length;
+      paletteSelection = enabled[(base - 1 + enabled.length) % enabled.length];
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      const item = paletteItems[paletteSelection];
+      if (item && paletteItemEnabled(item)) executePaletteItem(item);
+    }
+  }
+
+  function executePaletteItem(item: PaletteItem) {
+    paletteDialog.close();
+    if (item.kind === 'create') createDialog.showModal();
+    else if (item.kind === 'rename') openRenameDialog();
+    else if (item.kind === 'delete') openDeleteDialog();
+    else void openFile(item.path);
+  }
+
   async function renameFile() {
     const newPath = renamePath.trim();
     if (!activePath || !newPath) return;
@@ -709,6 +804,9 @@
       event.preventDefault();
       if (document.querySelector('dialog[open]')) return;
       void saveFile();
+    } else if (event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      openPalette();
     } else if (event.key.toLowerCase() === 'z' && event.shiftKey) {
       if ((event.target as HTMLElement | null)?.id !== 'source-editor') return;
       event.preventDefault();
@@ -1159,6 +1257,44 @@
   </div>
 </dialog>
 
+<dialog bind:this={paletteDialog} onkeydown={paletteKeydown} aria-labelledby="palette-heading">
+  <h2 id="palette-heading">Commands</h2>
+  <p>Ctrl+K anywhere opens this palette.</p>
+  <label for="palette-query">Filter commands</label>
+  <input
+    id="palette-query"
+    role="combobox"
+    aria-autocomplete="list"
+    aria-expanded={paletteItems.length > 0}
+    aria-controls="palette-options"
+    aria-activedescendant={paletteItems.length ? `palette-option-${paletteSelection}` : undefined}
+    bind:value={paletteQuery}
+    onkeydown={paletteKeydown}
+  />
+  {#if paletteItems.length > 0}
+    <ul id="palette-options" role="listbox" aria-label="Boris commands">
+      {#each paletteItems as item, itemIndex (paletteItemKey(item))}
+        <li
+          id="palette-option-{itemIndex}"
+          role="option"
+          tabindex="-1"
+          aria-selected={itemIndex === paletteSelection}
+          aria-disabled={paletteEnabled.get(paletteItemKey(item)) ? 'false' : 'true'}
+          class:selected={itemIndex === paletteSelection}
+          class:disabled={!paletteEnabled.get(paletteItemKey(item))}
+          onclick={() => { if (paletteItemEnabled(item)) executePaletteItem(item); }}
+          onkeydown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (paletteItemEnabled(item)) executePaletteItem(item); } }}
+        >
+          <strong>{paletteItemLabel(item)}</strong><span>{paletteItemDetail(item)}</span>
+        </li>
+      {/each}
+    </ul>
+  {:else}
+    <p>No commands match “{paletteQuery}”.</p>
+  {/if}
+</dialog>
+
 <footer>
+  <p class="key-hint"><kbd>Ctrl</kbd>+<kbd>K</kbd> opens commands</p>
   <p>Boris owns meaning. Oliver owns markup semantics. The editor owns interaction.</p>
 </footer>
