@@ -21,6 +21,10 @@
   type ErrorResponse = { error?: string; status?: string };
   type CommandMode = 'validate' | 'ir_build' | 'html_build' | 'check' | 'impact';
   type FailureClass = 'success' | 'content' | 'usage' | 'io' | 'terminated';
+  type PendingResolution =
+    | { action: 'open'; target: string }
+    | { action: 'command'; mode: CommandMode }
+    | { action: 'preview'; reason: 'save' | 'manual' };
   type Problem = {
     severity: 'error' | 'warning' | 'info';
     code: string | null;
@@ -84,13 +88,13 @@
   let conflict: BufferResponse | null = null;
   let deletedConflict = false;
   let conflictDialog: HTMLDialogElement;
-  let switchDialog: HTMLDialogElement;
+  let resolutionDialog: HTMLDialogElement;
   let createDialog: HTMLDialogElement;
   let renameDialog: HTMLDialogElement;
   let deleteDialog: HTMLDialogElement;
   let createPath = 'content/new-page.md';
   let renamePath = '';
-  let pendingSwitchPath = '';
+  let pendingResolution: PendingResolution | null = null;
   let commandRunning = false;
   let commandResult: CommandResult | null = null;
   let impactId = '';
@@ -107,6 +111,14 @@
   );
   $: suggestions = completionSuggestions(authoring, completionKind, completionQuery);
   $: if (selectedSuggestion >= suggestions.length) selectedSuggestion = Math.max(0, suggestions.length - 1);
+  $: resolutionPrompt = (() => {
+    const pending = pendingResolution;
+    if (!pending) return '';
+    if (pending.action === 'open') return `Save or discard the changes before opening ${pending.target}?`;
+    if (pending.action === 'command') return `Boris commands read repository files from disk. Save or discard the changes before running ${commandLabel(pending.mode)}?`;
+    return 'Save or discard the changes before rebuilding the preview?';
+  })();
+  $: resolutionVerb = pendingResolution?.action === 'open' ? 'switch' : pendingResolution?.action === 'command' ? 'run' : 'rebuild';
 
   const token = new URLSearchParams(window.location.hash.slice(1)).get('token') ?? '';
 
@@ -192,12 +204,10 @@
     editorStatus = status;
   }
 
-  async function openFile(path: string, discardUnsaved = false): Promise<boolean> {
+  async function openFile(path: string): Promise<boolean> {
     if (path === activePath) return true;
-    if (dirty && !discardUnsaved) {
-      pendingSwitchPath = path;
-      await tick();
-      switchDialog.showModal();
+    if (dirty) {
+      await requestResolution({ action: 'open', target: path });
       return false;
     }
     const result = await api<BufferResponse | ErrorResponse>('/api/files/open', {
@@ -215,7 +225,7 @@
 
   async function runCommand(mode: CommandMode) {
     if (dirty) {
-      commandStatus = `Save or undo changes to ${activePath}; Boris commands read project files from disk.`;
+      await requestResolution({ action: 'command', mode });
       return;
     }
     if (mode === 'impact' && !impactId.trim()) {
@@ -263,7 +273,7 @@
 
   async function rebuildPreview(reason: 'save' | 'manual' = 'manual') {
     if (dirty) {
-      previewState = `Save or undo changes to ${activePath} before rebuilding preview.`;
+      await requestResolution({ action: 'preview', reason });
       return;
     }
     if (previewData) previewData = { ...previewData, phase: 'running' };
@@ -513,26 +523,52 @@
     return false;
   }
 
-  async function saveAndSwitch() {
-    const target = pendingSwitchPath;
-    if (!target) return;
-    switchDialog.close();
+  async function requestResolution(pending: PendingResolution) {
+    pendingResolution = pending;
+    await tick();
+    resolutionDialog.showModal();
+  }
+
+  async function resolvePendingSave() {
+    const pending = pendingResolution;
+    if (!pending) return;
+    pendingResolution = null;
+    resolutionDialog.close();
     if (await saveFile()) {
-      await openFile(target);
+      await proceedAfterResolution(pending);
     } else if (readOnly) {
-      editorStatus = `${activePath} is read-only, so it was not saved. Discard the unsaved buffer to switch to ${target}.`;
+      editorStatus = `${activePath} is read-only, so it was not saved. Discard the unsaved buffer to continue.`;
     }
   }
 
-  async function discardAndSwitch() {
-    const target = pendingSwitchPath;
-    if (!target) return;
+  async function resolvePendingDiscard() {
+    const pending = pendingResolution;
+    if (!pending) return;
+    pendingResolution = null;
+    resolutionDialog.close();
+    await discardBuffer();
+    await proceedAfterResolution(pending);
+  }
+
+  async function proceedAfterResolution(pending: PendingResolution) {
+    if (pending.action === 'open') {
+      await openFile(pending.target);
+    } else if (pending.action === 'command') {
+      await runCommand(pending.mode);
+    } else {
+      await rebuildPreview(pending.reason);
+    }
+  }
+
+  async function discardBuffer() {
+    if (!activePath) return;
     const discardedPath = activePath;
     await clearRecovery(discardedPath);
     stopRecoveryTimer();
-    switchDialog.close();
+    content = baseline;
+    undoStack = [];
+    redoStack = [];
     editorStatus = `Discarded unsaved changes in ${discardedPath}.`;
-    await openFile(target, true);
   }
 
   async function loadDiskVersion() {
@@ -897,20 +933,20 @@
       {/if}
     </div>
     <div class="command-bar" aria-label="Boris commands">
-      <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('validate')}>Validate project</button>
-      <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('ir_build')}>Build diagnostics</button>
-      <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('html_build')}>Build HTML</button>
-      <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('check')}>Check graph</button>
+      <button type="button" disabled={commandRunning} onclick={() => runCommand('validate')}>Validate project</button>
+      <button type="button" disabled={commandRunning} onclick={() => runCommand('ir_build')}>Build diagnostics</button>
+      <button type="button" disabled={commandRunning} onclick={() => runCommand('html_build')}>Build HTML</button>
+      <button type="button" disabled={commandRunning} onclick={() => runCommand('check')}>Check graph</button>
     </div>
     <div class="impact-command">
       <label for="impact-id">Impact entity or source endpoint</label>
       <div>
-        <input id="impact-id" bind:value={impactId} disabled={commandRunning || dirty} />
-        <button type="button" disabled={commandRunning || dirty} onclick={() => runCommand('impact')}>Run impact</button>
+        <input id="impact-id" bind:value={impactId} disabled={commandRunning} />
+        <button type="button" disabled={commandRunning} onclick={() => runCommand('impact')}>Run impact</button>
       </div>
     </div>
     {#if dirty}
-      <p class="warning-text">Save or undo changes before running Boris; commands read repository files from disk.</p>
+      <p class="warning-text">Boris commands read repository files from disk. Choose Save &amp; run or Discard &amp; run to resolve the unsaved buffer.</p>
     {/if}
     <p role="status" aria-label="Boris command status" aria-live="polite">{commandStatus}</p>
 
@@ -988,7 +1024,7 @@
         <p>The frame serves unchanged files from Boris's committed <code>dist/</code> output.</p>
       </div>
       <div class="preview-actions" aria-label="Preview actions">
-        <button type="button" disabled={dirty || previewData?.phase === 'running'} onclick={() => rebuildPreview('manual')}>Rebuild preview</button>
+        <button type="button" disabled={previewData?.phase === 'running'} onclick={() => rebuildPreview('manual')}>Rebuild preview</button>
         {#if previewData && (previewData.phase === 'success' || previewData.phase === 'stale')}
           <a class="button-link" href={previewData.preview_url} target="_blank" rel="noreferrer">Open preview in new tab</a>
         {/if}
@@ -1044,13 +1080,13 @@
   {/if}
 </dialog>
 
-<dialog bind:this={switchDialog} onkeydown={handleDialogKeydown} aria-labelledby="switch-heading">
-  <h2 id="switch-heading">Unsaved changes in {activePath}</h2>
-  <p>Save or discard the changes before opening {pendingSwitchPath}?</p>
+<dialog bind:this={resolutionDialog} onkeydown={handleDialogKeydown} aria-labelledby="resolution-heading">
+  <h2 id="resolution-heading">Unsaved changes in {activePath}</h2>
+  <p>{resolutionPrompt}</p>
   <div class="dialog-actions">
-    <button type="button" onclick={() => switchDialog.close()}>Cancel</button>
-    <button type="button" onclick={discardAndSwitch}>Discard &amp; switch</button>
-    <button type="button" class="primary" onclick={saveAndSwitch}>Save &amp; switch</button>
+    <button type="button" onclick={() => { pendingResolution = null; resolutionDialog.close(); }}>Cancel</button>
+    <button type="button" onclick={resolvePendingDiscard}>Discard &amp; {resolutionVerb}</button>
+    <button type="button" class="primary" onclick={resolvePendingSave}>Save &amp; {resolutionVerb}</button>
   </div>
 </dialog>
 

@@ -514,7 +514,7 @@ test('structured problems group, navigate by UTF-8 byte position, and copy a bou
   expect(copied).not.toContain('/Users/');
 });
 
-test('stderr diagnostics are announced as best-effort and dirty buffers disable commands', async ({ page }) => {
+test('stderr diagnostics are announced as best-effort and dirty buffers route commands through a resolution dialog', async ({ page }) => {
   await installApi(page, {
     commands: {
       validate: commandResult('validate', {
@@ -532,8 +532,78 @@ test('stderr diagnostics are announced as best-effort and dirty buffers disable 
   await expect(page.getByText('Best-effort source position', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
   await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Dirty\n');
-  await expect(page.getByRole('button', { name: 'Validate project', exact: true })).toBeDisabled();
   await expect(page.getByText(/commands read repository files from disk/)).toBeVisible();
+  // Dirty buffers no longer disable commands; running one asks how to resolve the buffer.
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('p').first()).toContainText('Validate project');
+  await dialog.getByRole('button', { name: 'Discard & run', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Content or graph failure (exit 1)');
+  await expect(page.getByText(/stderr was used/)).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Home\n');
+});
+
+test('running a Boris command while dirty offers Cancel and Save & run (#462)', async ({ page }) => {
+  await installApi(page, { commands: { validate: commandResult('validate') } });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await editor.fill('# Draft\n');
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('p').first()).toContainText('Validate project');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(editor).toHaveValue('# Draft\n');
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('No Boris command has run yet.');
+
+  // Save & run persists the buffer, then runs the command.
+  const saveRequest = page.waitForRequest('**/api/files/save');
+  const commandRequest = page.waitForRequest('**/api/commands/run');
+  await page.getByRole('button', { name: 'Validate project', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Save & run', exact: true }).click();
+  expect((await saveRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', content: '# Draft\n' });
+  expect((await commandRequest).postDataJSON()).toMatchObject({ mode: 'validate' });
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Validate project finished: Success (exit 0).');
+});
+
+test('rebuilding the preview while dirty offers Cancel and Discard & rebuild (#462)', async ({ page }) => {
+  await installApi(page, {
+    previewRebuilds: [{
+      phase: 'success', generation: 2, exit_code: 0, used_stderr_fallback: false,
+      message: 'Preview is current from a successful Boris incremental build.',
+      preview_url: 'https://preview.invalid/?token=test'
+    }]
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await editor.fill('# Draft\n');
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+  const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+  await page.getByRole('button', { name: 'Rebuild preview', exact: true }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Save & rebuild', exact: true })).toHaveText('Save & rebuild');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(editor).toHaveValue('# Draft\n');
+
+  // Discard & rebuild drops the buffer without saving, then rebuilds.
+  let saveRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/api/files/save')) saveRequests += 1;
+  });
+  const rebuildRequest = page.waitForRequest('**/api/preview/rebuild');
+  await page.getByRole('button', { name: 'Rebuild preview', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Discard & rebuild', exact: true }).click();
+  await rebuildRequest;
+  expect(saveRequests).toBe(0);
+  await expect(page.locator('.preview-state')).toContainText('Preview is current');
+  await expect(page.getByTitle('Boris site preview')).toHaveAttribute('src', /generation=2/);
 });
 
 test('schema and graph completion are an ARIA combobox operable by keyboard and visible names', async ({ page }) => {
