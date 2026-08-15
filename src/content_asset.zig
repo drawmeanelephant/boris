@@ -718,12 +718,21 @@ fn scanImages(
 /// Passthrough schemes (`http(s)`, `//`, `data:`, `mailto:`) are left unchanged.
 /// Every other destination must resolve into this page's sibling asset tree and
 /// exist as a regular inventoried file. Returns a new body (arena/allocator owned).
+///
+/// When `base_url` is non-null, each rewritten destination is the absolute
+/// canonical asset URL (`base_url ++ "/" ++ <published asset path>`) instead of
+/// a path relative to `output_path`. Consumers that publish the Markdown
+/// *outside* the site — the Nostr NIP-23 projection — must not emit relative
+/// destinations, which a reader client resolves against the wrong origin.
+/// `null` keeps today's relative destinations byte-for-byte. `base_url` carries
+/// no trailing slash.
 pub fn rewriteImageLinks(
     allocator: std.mem.Allocator,
     body: []const u8,
     bundle: *const PageAssetBundle,
     output_path: []const u8,
     fail_out: ?*FailInfo,
+    base_url: ?[]const u8,
 ) AssetError![]const u8 {
     var hits: std.ArrayList(ImageHit) = .empty;
     defer hits.deinit(allocator);
@@ -795,15 +804,23 @@ pub fn rewriteImageLinks(
             return error.AssetMissing;
         };
 
-        const href = identity.relativeHref(allocator, output_path, entry.output_rel) catch {
-            setFail(fail_out, body, hit.offset, hit.dest, bundle.source_path);
-            return error.AssetPath;
+        const href = href_blk: {
+            if (base_url) |base| {
+                // A published asset path never begins with `/`, so this single
+                // separator is the only one in the joined URL.
+                break :href_blk try std.fmt.allocPrint(allocator, "{s}/{s}", .{ base, entry.output_rel });
+            }
+            break :href_blk identity.relativeHref(allocator, output_path, entry.output_rel) catch {
+                setFail(fail_out, body, hit.offset, hit.dest, bundle.source_path);
+                return error.AssetPath;
+            };
         };
         defer allocator.free(href);
 
         if (hit.angle) {
             // Preserve angle-bracket form when the author used it.
-            // Our href is always a safe relative path without spaces.
+            // Our href is a safe published path (or its absolute form) with
+            // no spaces, so the bracket form needs no escaping either way.
             try out.appendSlice(allocator, href);
         } else {
             try out.appendSlice(allocator, href);
@@ -976,7 +993,7 @@ test "rewrite skips adjacent inline-code spans without pairing closers" {
     var bundle: PageAssetBundle = .{ .gpa = gpa, .source_path = "guides/intro.md", .entity_id = "guides/intro" };
     defer bundle.deinit();
     const body = "to the `alt` string — `![x](u)` stays literal\n";
-    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null);
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
     try std.testing.expectEqualStrings(body, out);
 }
 
@@ -1007,7 +1024,7 @@ test "rewriteImageLinks rewrites sibling asset and leaves remote" {
         \\![r](https://example.com/r.png)
         \\
     ;
-    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null);
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
     defer gpa.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "intro.assets/diagram.svg") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "https://example.com/r.png") != null);
@@ -1035,11 +1052,11 @@ test "rewriteImageLinks rejects traversal absolute backslash and outside tree" {
     var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
     defer bundle.deinit();
 
-    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](../secret.png)\n", &bundle, "guides/intro.html", null));
-    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](/abs.svg)\n", &bundle, "guides/intro.html", null));
-    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](intro.assets\\ok.svg)\n", &bundle, "guides/intro.html", null));
-    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](other.assets/ok.svg)\n", &bundle, "guides/intro.html", null));
-    try std.testing.expectError(error.AssetMissing, rewriteImageLinks(gpa, "![x](intro.assets/missing.svg)\n", &bundle, "guides/intro.html", null));
+    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](../secret.png)\n", &bundle, "guides/intro.html", null, null));
+    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](/abs.svg)\n", &bundle, "guides/intro.html", null, null));
+    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](intro.assets\\ok.svg)\n", &bundle, "guides/intro.html", null, null));
+    try std.testing.expectError(error.AssetPath, rewriteImageLinks(gpa, "![x](other.assets/ok.svg)\n", &bundle, "guides/intro.html", null, null));
+    try std.testing.expectError(error.AssetMissing, rewriteImageLinks(gpa, "![x](intro.assets/missing.svg)\n", &bundle, "guides/intro.html", null, null));
 }
 
 test "rewrite skips fenced image-looking text" {
@@ -1052,7 +1069,7 @@ test "rewrite skips fenced image-looking text" {
         \\```
         \\
     ;
-    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null);
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
     // body unchanged (same slice or equal)
     try std.testing.expectEqualStrings(body, out);
 }
@@ -1083,7 +1100,7 @@ test "rewrite skips inline-code image-looking text and still rewrites real image
         \\![d](intro.assets/diagram.svg)
         \\
     ;
-    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null);
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
     defer gpa.free(out);
     // The image-looking text inside the backtick span is untouched: its `..`
     // path must not be treated as a content-local asset (no AssetPath error,
@@ -1121,7 +1138,7 @@ test "unmatched backtick does not suppress later image rewriting" {
         \\![d](intro.assets/diagram.svg)
         \\
     ;
-    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null);
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
     defer gpa.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "an ` stray tick") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "![d](intro.assets/diagram.svg)") != null);
@@ -1161,7 +1178,7 @@ test "stray backtick does not swallow a later fence opener" {
         \\![d](intro.assets/diagram.svg)
         \\
     ;
-    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null);
+    const out = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
     defer gpa.free(out);
     // The fenced content was never scanned: the image-looking text inside
     // it is preserved verbatim (its `..` path would otherwise fail).
@@ -1260,7 +1277,7 @@ test "id override rewrites to entity-scoped asset URL" {
     defer bundle.deinit();
     try std.testing.expectEqualStrings("custom.assets/d.svg", bundle.entries[0].output_rel);
 
-    const out = try rewriteImageLinks(gpa, "![d](intro.assets/d.svg)\n", &bundle, "custom.html", null);
+    const out = try rewriteImageLinks(gpa, "![d](intro.assets/d.svg)\n", &bundle, "custom.html", null, null);
     defer gpa.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "custom.assets/d.svg") != null);
 }
@@ -1286,4 +1303,84 @@ test "loadPageAssets rejects active SVG and records the asset construct" {
     try std.testing.expectError(error.AssetUnsafeSvg, loadPageAssets(io, gpa, content_dir, "index.md", "index", &fail));
     try std.testing.expectEqualStrings("index.assets/logo.SVG", fail.locus());
     try std.testing.expectEqualStrings("active SVG <script> element", fail.detail());
+}
+
+test "rewriteImageLinks emits absolute asset URLs under base_url" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-abs", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "x");
+    try writeTreeFile(io, work, "content/guides/intro.assets/diagram.svg", "<svg/>");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
+    defer bundle.deinit();
+
+    const body = "![d](intro.assets/diagram.svg)\n";
+
+    // `null` keeps the site-relative destination byte-for-byte.
+    const rel = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, null);
+    defer gpa.free(rel);
+    try std.testing.expectEqualStrings("![d](intro.assets/diagram.svg)\n", rel);
+
+    // Non-null joins the published path onto the base, which is what a Nostr
+    // reader client needs: a relative path would resolve against relay origin.
+    const abs = try rewriteImageLinks(gpa, body, &bundle, "guides/intro.html", null, "https://example.com/docs");
+    defer gpa.free(abs);
+    try std.testing.expectEqualStrings(
+        "![d](https://example.com/docs/guides/intro.assets/diagram.svg)\n",
+        abs,
+    );
+
+    // Exactly one separator between base and path: the only `//` in the
+    // result belongs to the scheme.
+    const after_scheme = std.mem.indexOf(u8, abs, "://").? + 3;
+    try std.testing.expect(std.mem.indexOf(u8, abs[after_scheme..], "//") == null);
+}
+
+test "rewriteImageLinks reports unresolvable assets in absolute mode" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/ca-abs-fail", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "content/guides/intro.md", "x");
+    try writeTreeFile(io, work, "content/guides/intro.assets/ok.svg", "ok");
+
+    const content_path = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content_path);
+    var content_dir = try cwd.openDir(io, content_path, .{});
+    defer content_dir.close(io);
+
+    var bundle = try loadPageAssets(io, gpa, content_dir, "guides/intro.md", "guides/intro", null);
+    defer bundle.deinit();
+
+    // Absolute mode is a destination change, not a relaxation: a missing
+    // sibling asset still fails loud with the same located FailInfo.
+    var fail: FailInfo = .{};
+    try std.testing.expectError(error.AssetMissing, rewriteImageLinks(
+        gpa,
+        "![x](intro.assets/missing.svg)\n",
+        &bundle,
+        "guides/intro.html",
+        &fail,
+        "https://example.com/docs",
+    ));
+    try std.testing.expectEqualStrings("intro.assets/missing.svg", fail.detail());
+    try std.testing.expectEqualStrings("guides/intro.md", fail.locus());
+    try std.testing.expectEqual(@as(u32, 1), fail.line);
 }

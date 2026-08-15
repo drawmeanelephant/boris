@@ -23,6 +23,13 @@ pub const Node = struct {
     index: u32 = 0,
     id: []const u8,
     source_path: []const u8,
+    /// Whether `id` came from an explicit frontmatter `id:` override rather
+    /// than being derived from `source_path`. Path-derived ids are `false`.
+    ///
+    /// Consumers that mint rename-stable external identity — the Nostr
+    /// long-form projection, whose article address must survive a source-path
+    /// rename — require `true` and must refuse to publish otherwise.
+    id_explicit: bool = false,
     /// Canonical HTML output path. Empty in graph-only unit fixtures, where
     /// consumers may derive the legacy `{id}.html` path.
     output_path: []const u8 = "",

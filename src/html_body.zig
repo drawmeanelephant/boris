@@ -228,7 +228,7 @@ pub fn renderSource(
     // Content-local Markdown images → published sibling-tree URLs (pre-render).
     const with_assets = if (options.page_assets) |bundle| blk: {
         var asset_fail: content_asset.FailInfo = .{ .line_base = fail_line_base };
-        break :blk content_asset.rewriteImageLinks(arena, with_wiki, bundle, output_path, &asset_fail) catch |err| {
+        break :blk content_asset.rewriteImageLinks(arena, with_wiki, bundle, output_path, &asset_fail, null) catch |err| {
             content_asset.printDiagnostic(gpa, err, source_path, asset_fail);
             return error.AssetFailed;
         };

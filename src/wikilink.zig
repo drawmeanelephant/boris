@@ -329,6 +329,14 @@ pub const ResolveOptions = struct {
     /// When true, fragments require a heading index + membership (fail closed).
     /// Set false only while bootstrapping the heading index (emit, do not check).
     validate_fragments: bool = true,
+    /// When non-null, link destinations are absolute canonical web URLs
+    /// (`base_url ++ "/" ++ html_output_path`) instead of hrefs relative to
+    /// `current_output_path`. Consumers that publish the Markdown *outside*
+    /// the site — the Nostr NIP-23 projection — need links that resolve from
+    /// anywhere, since a relative href has no meaning in a reader client.
+    /// `null` keeps the site's relative hrefs byte-for-byte. `base_url`
+    /// carries no trailing slash.
+    base_url: ?[]const u8 = null,
 };
 
 fn failFragmentDetail(
@@ -430,9 +438,14 @@ pub fn rewriteWikiLinksOpts(
             return error.PathError;
         };
         defer allocator.free(to_out);
-        const href = identity.relativeHref(allocator, current_output_path, to_out) catch {
-            if (fail_out) |f| f.set(hit.line, hit.column, hit.entity_id, "");
-            return error.PathError;
+        const href = href_blk: {
+            if (opts.base_url) |base| {
+                break :href_blk try std.fmt.allocPrint(allocator, "{s}/{s}", .{ base, to_out });
+            }
+            break :href_blk identity.relativeHref(allocator, current_output_path, to_out) catch {
+                if (fail_out) |f| f.set(hit.line, hit.column, hit.entity_id, "");
+                return error.PathError;
+            };
         };
         defer allocator.free(href);
 
@@ -1124,4 +1137,59 @@ test "referenceMaterialMulti missing target keeps include locus" {
     try std.testing.expectEqualStrings("missing/id", fail.detail());
     try std.testing.expectEqualStrings("includes/blurb.md", fail.locus());
     try std.testing.expectEqual(@as(u32, 2), fail.line);
+}
+
+fn absoluteUrlTestNodes() [2]graph_mod.Node {
+    return .{
+        .{
+            .id = "guides/intro",
+            .source_path = "guides/intro.md",
+            .title = "Intro",
+            .role = .trunk,
+            .index = 0,
+        },
+        .{
+            .id = "getting-started",
+            .source_path = "getting-started.md",
+            .title = "Getting Started",
+            .role = .trunk,
+            .index = 1,
+        },
+    };
+}
+
+test "rewriteWikiLinks stays relative when no base url is configured" {
+    const gpa = std.testing.allocator;
+    const nodes = absoluteUrlTestNodes();
+    const out = try rewriteWikiLinksOpts(gpa, "Go to [[guides/intro]].", &nodes, "getting-started.html", null, .{
+        .base_url = null,
+    });
+    defer gpa.free(out);
+    try std.testing.expectEqualStrings("Go to [Intro](guides/intro.html).", out);
+}
+
+test "rewriteWikiLinks emits absolute canonical urls under a base url" {
+    const gpa = std.testing.allocator;
+    const nodes = absoluteUrlTestNodes();
+    const out = try rewriteWikiLinksOpts(gpa, "Go to [[guides/intro]].", &nodes, "getting-started.html", null, .{
+        .base_url = "https://example.com/docs",
+    });
+    defer gpa.free(out);
+    try std.testing.expectEqualStrings("Go to [Intro](https://example.com/docs/guides/intro.html).", out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "docs//") == null);
+}
+
+test "absolute wiki links keep validated heading fragments" {
+    const gpa = std.testing.allocator;
+    const nodes = absoluteUrlTestNodes();
+    var idx: HeadingIndex = .{};
+    defer idx.deinit(gpa);
+    try idx.putOwned(gpa, "guides/intro", &.{"usage"});
+
+    const out = try rewriteWikiLinksOpts(gpa, "See [[guides/intro#usage]].", &nodes, "getting-started.html", null, .{
+        .heading_index = &idx,
+        .base_url = "https://example.com/docs",
+    });
+    defer gpa.free(out);
+    try std.testing.expectEqualStrings("See [Intro](https://example.com/docs/guides/intro.html#usage).", out);
 }
