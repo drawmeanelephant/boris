@@ -30,6 +30,10 @@
     | { kind: 'create' }
     | { kind: 'rename' }
     | { kind: 'delete' }
+    | { kind: 'save' }
+    | { kind: 'command'; mode: CommandMode }
+    | { kind: 'preview' }
+    | { kind: 'source' }
     | { kind: 'open'; path: string };
   type Problem = {
     severity: 'error' | 'warning' | 'info';
@@ -131,14 +135,27 @@
   })();
   $: resolutionVerb = pendingResolution?.action === 'open' ? 'switch' : pendingResolution?.action === 'command' ? 'run' : pendingResolution?.action === 'restore' ? 'restore' : 'rebuild';
   $: paletteItems = (() => {
-    const items: PaletteItem[] = [{ kind: 'create' }, { kind: 'rename' }, { kind: 'delete' }];
+    const items: PaletteItem[] = [
+      { kind: 'create' }, { kind: 'rename' }, { kind: 'delete' },
+      { kind: 'save' },
+      { kind: 'command', mode: 'validate' },
+      { kind: 'command', mode: 'ir_build' },
+      { kind: 'command', mode: 'html_build' },
+      { kind: 'command', mode: 'check' },
+      { kind: 'command', mode: 'impact' },
+      { kind: 'preview' },
+      { kind: 'source' }
+    ];
     for (const file of files) items.push({ kind: 'open', path: file.path });
     const needle = paletteQuery.trim().toLocaleLowerCase();
     return needle ? items.filter(item => paletteItemLabel(item).toLocaleLowerCase().includes(needle)) : items;
   })();
   $: paletteEnabled = new Map<string, boolean>(
     paletteItems.map(item => {
-      if (item.kind === 'open') return [paletteItemKey(item), true] as const;
+      if (item.kind === 'open' || item.kind === 'source') return [paletteItemKey(item), true] as const;
+      if (item.kind === 'save') return [paletteItemKey(item), dirty && !readOnly] as const;
+      if (item.kind === 'preview') return [paletteItemKey(item), previewData?.phase !== 'running'] as const;
+      if (item.kind === 'command') return [paletteItemKey(item), !commandRunning] as const;
       if (dirty) return [paletteItemKey(item), false] as const;
       return [paletteItemKey(item), item.kind === 'create' || activePath !== ''] as const;
     })
@@ -697,23 +714,35 @@
     if (item.kind === 'create') return 'Create file';
     if (item.kind === 'rename') return 'Rename file';
     if (item.kind === 'delete') return 'Delete file';
+    if (item.kind === 'save') return 'Save file';
+    if (item.kind === 'command') return commandLabel(item.mode);
+    if (item.kind === 'preview') return 'Rebuild preview';
+    if (item.kind === 'source') return 'Focus source pane';
     return 'Open file';
   }
 
   function paletteItemDetail(item: PaletteItem): string {
     if (item.kind === 'create') return 'New project-relative path';
-    if (item.kind === 'rename' || item.kind === 'delete') return activePath;
+    if (item.kind === 'rename' || item.kind === 'delete' || item.kind === 'save') return activePath;
+    if (item.kind === 'command') return 'Boris command';
+    if (item.kind === 'preview') return 'Rebuild the published output';
+    if (item.kind === 'source') return 'Jump to the editor';
     return item.path;
   }
 
   function paletteItemEnabled(item: PaletteItem): boolean {
-    if (item.kind === 'open') return true;
+    if (item.kind === 'open' || item.kind === 'source') return true;
+    if (item.kind === 'save') return dirty && !readOnly;
+    if (item.kind === 'preview') return previewData?.phase !== 'running';
+    if (item.kind === 'command') return !commandRunning;
     if (dirty) return false;
     return item.kind === 'create' || activePath !== '';
   }
 
   function paletteItemKey(item: PaletteItem): string {
-    return item.kind === 'open' ? `open:${item.path}` : item.kind;
+    if (item.kind === 'open') return `open:${item.path}`;
+    if (item.kind === 'command') return `command:${item.mode}`;
+    return item.kind;
   }
 
   function paletteEnabledIndices(): number[] {
@@ -756,7 +785,20 @@
     if (item.kind === 'create') createDialog.showModal();
     else if (item.kind === 'rename') openRenameDialog();
     else if (item.kind === 'delete') openDeleteDialog();
+    else if (item.kind === 'save') void saveFile();
+    else if (item.kind === 'command') void runCommand(item.mode);
+    else if (item.kind === 'preview') void rebuildPreview('manual');
+    else if (item.kind === 'source') focusSourcePane();
     else void openFile(item.path);
+  }
+
+  function focusSourcePane() {
+    const editor = document.getElementById('source-editor') as HTMLTextAreaElement | null;
+    if (editor) {
+      editor.focus();
+      return;
+    }
+    document.getElementById('source')?.focus();
   }
 
   async function renameFile() {
@@ -938,7 +980,7 @@
     </nav>
   </section>
 
-  <section id="source" class="source-pane" aria-labelledby="source-heading">
+  <section id="source" class="source-pane" tabindex="-1" aria-labelledby="source-heading">
     <div class="source-heading">
       <div>
         <h2 id="source-heading">Source</h2>
