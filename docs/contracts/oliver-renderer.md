@@ -1,10 +1,9 @@
 # Oliver renderer contract (pin, seam, upgrade)
 
-**Status:** normative — Markdown → HTML rendering  \
-**Module:** [`src/render.zig`](../../src/render.zig) (Markdown → HTML; the only
-call site for the `oliver` pin). The Cooklang stack is a second, separate
-dependency (`oliver_cooklang`) consumed by
-[`src/cooklang_seam.zig`](../../src/cooklang_seam.zig); see below.  \
+**Status:** normative — Markdown → HTML rendering and the Cooklang seam  \
+**Module:** [`src/render.zig`](../../src/render.zig) (Markdown → HTML) and
+[`src/cooklang_seam.zig`](../../src/cooklang_seam.zig) (`.cook` parsing). Both
+consume the single `oliver` pin.  \
 **Upstream:** <https://github.com/drawmeanelephant/oliver>  \
 **Related:** [html-output.md](html-output.md), [heading-ids.md](heading-ids.md),
 [parallel-rendering.md](parallel-rendering.md),
@@ -36,9 +35,9 @@ are valid until `arena.reset(.free_all)`.
 | Field | Value |
 |-------|-------|
 | Repository | <https://github.com/drawmeanelephant/oliver> |
-| Branch | `boris-markdown-extensions` |
-| Commit | `42cf472b635f8cbe9dad0da081b830f5db21c745` |
-| Package hash | `oliver-0.0.0-LOsZkB24HwCKTBQ9WYpJ9OP1ZKMdrF2lJoCZNU8j177O` |
+| Branch | `main` |
+| Commit | `c0b3d2b683f0cecf2181b22a800908619e56d0d7` |
+| Package hash | `oliver-0.0.0-LOsZkAe_HwD1k4BLmgWJcT9AI3AopaxmZwjc2gx-23pz` |
 | Zig | 0.16.0 |
 
 The pin lives in `build.zig.zon` (`.dependencies.oliver.url` + `.hash`). Zig
@@ -47,10 +46,12 @@ globally installed `oliver` executable, no PATH tricks, no environment-specific
 clone, and no network access at runtime (the package is fetched once at build
 time and cached by Zig).
 
-### Why `boris-markdown-extensions`
+### Why this revision
 
 Oliver upstream is CommonMark 0.31.2 (652/652 conformance) plus GFM tables.
-Boris publishes five dialect extensions Oliver added for this migration, all
+The pinned revision is Oliver `main` as of oliver#39's merge (`c0b3d2b`): the
+Markdown renderer extensions and the Cooklang stack share one revision. Boris
+publishes five dialect extensions Oliver added for the renderer migration, all
 off by default in Oliver and opted into by Boris (so Oliver's own conformance
 corpus stays byte-exact):
 
@@ -77,27 +78,20 @@ const render_options = oliver.html.RenderOptions{
 };
 ```
 
-## Cooklang pin (second Oliver dependency)
+## Cooklang seam (same pin)
 
-Boris also pins Oliver's Cooklang stack (`.dependencies.oliver_cooklang` in
-`build.zig.zon`) for the `.cook` input mode. It is a **separate revision**
-because the two feature sets live on different branches today:
-
-| Field | Value |
-|-------|-------|
-| Repository | <https://github.com/drawmeanelephant/oliver> |
-| Branch | `main` |
-| Commit | `bcf167fa99d0267d015d8c14a9434150e77b14fe` |
-| Package hash | `oliver-0.0.0-LOsZkEhLGgDlZpXvoutXDnGHv9UgMQzvH1q9MPgL6EDA` |
-| Zig | 0.16.0 |
+Boris consumes Oliver's Cooklang stack through the **same** `.oliver` pin for
+the `.cook` input mode. Until oliver#39 merged, the Cooklang stack lived on
+Oliver `main` while the renderer extensions were embargoed on the
+`boris-markdown-extensions` branch, so Boris carried a second `.oliver_cooklang`
+dependency (previously pinned at `bcf167fa`, Oliver main pre-#39). With the
+embargo lifted and oliver#39 on `main`, the two revisions converged and the
+split dependency was deleted.
 
 The Cooklang parser is a pure typed `Recipe` frontend (ingredients, cookware,
 timers, steps, sections, notes, frontmatter fence) — see
 [`cooklang-compatibility.md`](cooklang-compatibility.md) for how Boris consumes
-it. This pin is temporary: when the renderer-extension embargo lifts and
-[oliver#39](https://github.com/drawmeanelephant/oliver/pull/39) merges, the two
-Oliver revisions converge on `main`, the two pins collapse into one, and the
-`.oliver_cooklang` dependency is deleted.
+it.
 
 ## Upgrade procedure (mechanical)
 

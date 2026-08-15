@@ -3,7 +3,7 @@
 //! Normative: `docs/contracts/cooklang-compatibility.md`.
 //!
 //! There is deliberately **no parser in Boris**. `toMarkdown` delegates the
-//! `.cook` body to `oliver.cooklang.parse` (pinned as `.oliver_cooklang` in
+//! `.cook` body to `oliver.cooklang.parse` (the shared `.oliver` pin in
 //! `build.zig.zon`; see `docs/contracts/oliver-renderer.md`), which returns a
 //! typed `Recipe` — steps, sections, notes and their ingredient/cookware/timer
 //! parts — plus structured warnings for malformed structure. Oliver never
@@ -29,7 +29,10 @@
 //! contains it.
 
 const std = @import("std");
-const oliver_cooklang = @import("oliver_cooklang");
+// The Markdown renderer seam and the Cooklang stack share one Oliver pin; this
+// module binds the shared module under the `oliver_cooklang` alias for
+// readability at the usage sites.
+const oliver_cooklang = @import("oliver");
 
 pub const adapter_identity = "boris-cooklang-seam-v1";
 

@@ -141,21 +141,6 @@ pub fn build(b: *std.Build) void {
     });
     const oliver_mod = oliver_dep.module("oliver");
 
-    // The Cooklang stack pin: Oliver `main`'s build.zig creates the core
-    // library with `createModule` (private in Zig 0.16), so the dependency
-    // does not export an "oliver" module for consumers. Root a Boris-side
-    // module directly at the pinned package's source instead; the package is
-    // still fetched and content-verified by the build.zig.zon hash.
-    const oliver_cooklang_dep = b.dependency("oliver_cooklang", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    const oliver_cooklang_mod = b.createModule(.{
-        .root_source_file = oliver_cooklang_dep.path("src/oliver.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
     // Boris's single Markdown → HTML rendering seam. Modules that transitively
     // import it also import "oliver" (linkOliver below): a relative
     // @import("render.zig") resolves in the importing module's context.
@@ -173,7 +158,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(root_mod, oliver_mod);
-    linkCooklangSeam(root_mod, oliver_cooklang_mod);
 
     const exe = b.addExecutable(.{
         .name = "boris",
@@ -215,7 +199,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkCooklangSeam(scanner_mod, oliver_cooklang_mod);
+    linkOliver(scanner_mod, oliver_mod);
     const scanner_tests = b.addTest(.{
         .root_module = scanner_mod,
     });
@@ -228,7 +212,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkCooklangSeam(parser_mod, oliver_cooklang_mod);
+    linkOliver(parser_mod, oliver_mod);
     const parser_tests = b.addTest(.{
         .root_module = parser_mod,
     });
@@ -241,7 +225,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkCooklangSeam(textile_mod, oliver_cooklang_mod);
+    linkOliver(textile_mod, oliver_mod);
     const textile_tests = b.addTest(.{
         .root_module = textile_mod,
     });
@@ -249,21 +233,15 @@ pub fn build(b: *std.Build) void {
     run_textile_tests.setCwd(b.path("."));
 
     // --- Explicit Cooklang seam (parse via Oliver, render/validate here) ---
-    // Oliver's Cooklang stack is pinned as `.oliver_cooklang`; the seam module
-    // imports it as `oliver_cooklang` and owns Markdown rendering, the IR
+    // Oliver's Cooklang stack shares the single `.oliver` pin; the seam module
+    // imports the shared module as `oliver` and owns Markdown rendering, the IR
     // recipe facet, and output-safety validation (docs/contracts/oliver-renderer.md).
     const cooklang_mod = b.createModule(.{
         .root_source_file = b.path("src/cooklang_seam.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
-            // Oliver main's build.zig creates the core library with
-            // `createModule` (private in Zig 0.16), so the dependency does not
-            // export an "oliver" module for consumers. Root a Boris-side
-            // module directly at the pinned package's source instead; the
-            // package is still fetched and content-verified by the
-            // build.zig.zon hash.
-            .{ .name = "oliver_cooklang", .module = oliver_cooklang_mod },
+            .{ .name = "oliver", .module = oliver_mod },
         },
     });
     const cooklang_tests = b.addTest(.{
@@ -363,7 +341,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(pipeline_mod, oliver_mod);
-    linkCooklangSeam(pipeline_mod, oliver_cooklang_mod);
     const pipeline_tests = b.addTest(.{
         .root_module = pipeline_mod,
     });
@@ -377,7 +354,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(publication_profile_mod, oliver_mod);
-    linkCooklangSeam(publication_profile_mod, oliver_cooklang_mod);
     const publication_profile_tests = b.addTest(.{ .root_module = publication_profile_mod });
     const run_publication_profile_tests = b.addRunArtifact(publication_profile_tests);
     run_publication_profile_tests.setCwd(b.path("."));
@@ -406,7 +382,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(publication_plan_mod, oliver_mod);
-    linkCooklangSeam(publication_plan_mod, oliver_cooklang_mod);
     const publication_plan_tests = b.addTest(.{ .root_module = publication_plan_mod });
     const run_publication_plan_tests = b.addRunArtifact(publication_plan_tests);
     run_publication_plan_tests.setCwd(b.path("."));
@@ -419,7 +394,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkCooklangSeam(artifact_inventory_mod, oliver_cooklang_mod);
+    linkOliver(artifact_inventory_mod, oliver_mod);
     const artifact_inventory_tests = b.addTest(.{ .root_module = artifact_inventory_mod });
     const run_artifact_inventory_tests = b.addRunArtifact(artifact_inventory_tests);
     run_artifact_inventory_tests.setCwd(b.path("."));
@@ -450,7 +425,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkCooklangSeam(publication_checks_mod, oliver_cooklang_mod);
+    linkOliver(publication_checks_mod, oliver_mod);
     const publication_checks_tests = b.addTest(.{ .root_module = publication_checks_mod });
     const run_publication_checks_tests = b.addRunArtifact(publication_checks_tests);
     run_publication_checks_tests.setCwd(b.path("."));
@@ -466,7 +441,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkCooklangSeam(publication_claims_mod, oliver_cooklang_mod);
+    linkOliver(publication_claims_mod, oliver_mod);
     const publication_claims_tests = b.addTest(.{ .root_module = publication_claims_mod });
     const run_publication_claims_tests = b.addRunArtifact(publication_claims_tests);
     run_publication_claims_tests.setCwd(b.path("."));
@@ -482,7 +457,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkCooklangSeam(publication_touches_mod, oliver_cooklang_mod);
+    linkOliver(publication_touches_mod, oliver_mod);
     const publication_touches_tests = b.addTest(.{ .root_module = publication_touches_mod });
     const run_publication_touches_tests = b.addRunArtifact(publication_touches_tests);
     run_publication_touches_tests.setCwd(b.path("."));
@@ -498,7 +473,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkCooklangSeam(publication_proof_pack_mod, oliver_cooklang_mod);
+    linkOliver(publication_proof_pack_mod, oliver_mod);
     const publication_proof_pack_tests = b.addTest(.{ .root_module = publication_proof_pack_mod });
     const run_publication_proof_pack_tests = b.addRunArtifact(publication_proof_pack_tests);
     run_publication_proof_pack_tests.setCwd(b.path("."));
@@ -521,7 +496,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{.{ .name = "fixture_generator", .module = testdata_generator_mod }},
     });
-    linkCooklangSeam(publication_fixture_mod, oliver_cooklang_mod);
+    linkOliver(publication_fixture_mod, oliver_mod);
     const publication_fixture_tests = b.addTest(.{ .root_module = publication_fixture_mod });
     const run_publication_fixture_tests = b.addRunArtifact(publication_fixture_tests);
     run_publication_fixture_tests.setCwd(b.path("."));
@@ -540,7 +515,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{.{ .name = "fixture_generator", .module = testdata_generator_mod }},
     });
-    linkCooklangSeam(publication_claims_fixture_mod, oliver_cooklang_mod);
+    linkOliver(publication_claims_fixture_mod, oliver_mod);
     const publication_claims_fixture_tests = b.addTest(.{ .root_module = publication_claims_fixture_mod });
     const run_publication_claims_fixture_tests = b.addRunArtifact(publication_claims_fixture_tests);
     run_publication_claims_fixture_tests.setCwd(b.path("."));
@@ -560,7 +535,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{.{ .name = "fixture_generator", .module = testdata_generator_mod }},
     });
-    linkCooklangSeam(publication_touches_fixture_mod, oliver_cooklang_mod);
+    linkOliver(publication_touches_fixture_mod, oliver_mod);
     const publication_touches_fixture_tests = b.addTest(.{ .root_module = publication_touches_fixture_mod });
     const run_publication_touches_fixture_tests = b.addRunArtifact(publication_touches_fixture_tests);
     run_publication_touches_fixture_tests.setCwd(b.path("."));
@@ -581,7 +556,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{.{ .name = "fixture_generator", .module = testdata_generator_mod }},
     });
-    linkCooklangSeam(publication_proof_pack_fixture_mod, oliver_cooklang_mod);
+    linkOliver(publication_proof_pack_fixture_mod, oliver_mod);
     const publication_proof_pack_fixture_tests = b.addTest(.{ .root_module = publication_proof_pack_fixture_mod });
     const run_publication_proof_pack_fixture_tests = b.addRunArtifact(publication_proof_pack_fixture_tests);
     run_publication_proof_pack_fixture_tests.setCwd(b.path("."));
@@ -597,7 +572,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkCooklangSeam(graph_mod, oliver_cooklang_mod);
+    linkOliver(graph_mod, oliver_mod);
     const graph_tests = b.addTest(.{
         .root_module = graph_mod,
     });
@@ -613,7 +588,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(aside_mod, oliver_mod);
-    linkCooklangSeam(aside_mod, oliver_cooklang_mod);
     const aside_tests = b.addTest(.{
         .root_module = aside_mod,
     });
@@ -627,7 +601,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(rag_mod, oliver_mod);
-    linkCooklangSeam(rag_mod, oliver_cooklang_mod);
     const rag_tests = b.addTest(.{
         .root_module = rag_mod,
     });
@@ -675,7 +648,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkCooklangSeam(content_asset_mod, oliver_cooklang_mod);
+    linkOliver(content_asset_mod, oliver_mod);
     const content_asset_tests = b.addTest(.{
         .root_module = content_asset_mod,
     });
@@ -696,7 +669,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkCooklangSeam(layout_select_mod, oliver_cooklang_mod);
+    linkOliver(layout_select_mod, oliver_mod);
     const layout_select_tests = b.addTest(.{
         .root_module = layout_select_mod,
     });
@@ -709,7 +682,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(compile_mod, oliver_mod);
-    linkCooklangSeam(compile_mod, oliver_cooklang_mod);
     const compile_tests = b.addTest(.{
         .root_module = compile_mod,
     });
@@ -729,7 +701,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(scale_smoke_mod, oliver_mod);
-    linkCooklangSeam(scale_smoke_mod, oliver_cooklang_mod);
     const scale_smoke_tests = b.addTest(.{
         .root_module = scale_smoke_mod,
     });
@@ -778,7 +749,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(hardening_mod, oliver_mod);
-    linkCooklangSeam(hardening_mod, oliver_cooklang_mod);
     const hardening_tests = b.addTest(.{
         .root_module = hardening_mod,
     });
@@ -792,7 +762,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(ir_schema_mod, oliver_mod);
-    linkCooklangSeam(ir_schema_mod, oliver_cooklang_mod);
     const ir_schema_tests = b.addTest(.{
         .root_module = ir_schema_mod,
     });
@@ -811,7 +780,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(layout_hostile_mod, oliver_mod);
-    linkCooklangSeam(layout_hostile_mod, oliver_cooklang_mod);
     const layout_hostile_tests = b.addTest(.{
         .root_module = layout_hostile_mod,
     });
@@ -830,7 +798,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(fuzz_mod, oliver_mod);
-    linkCooklangSeam(fuzz_mod, oliver_cooklang_mod);
     const fuzz_tests = b.addTest(.{
         .root_module = fuzz_mod,
     });
@@ -845,7 +812,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(package_mod, oliver_mod);
-    linkCooklangSeam(package_mod, oliver_cooklang_mod);
 
     const package_exe = b.addExecutable(.{
         .name = "boris-package",
@@ -878,7 +844,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkCooklangSeam(include_mod, oliver_cooklang_mod);
+    linkOliver(include_mod, oliver_mod);
     const include_tests = b.addTest(.{
         .root_module = include_mod,
     });
@@ -890,7 +856,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkCooklangSeam(wikilink_mod, oliver_cooklang_mod);
+    linkOliver(wikilink_mod, oliver_mod);
     const wikilink_tests = b.addTest(.{
         .root_module = wikilink_mod,
     });
@@ -926,7 +892,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    linkCooklangSeam(cache_mod, oliver_cooklang_mod);
+    linkOliver(cache_mod, oliver_mod);
     const cache_tests = b.addTest(.{
         .root_module = cache_mod,
     });
@@ -1196,7 +1162,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     linkOliver(emitter_hostile_mod, oliver_mod);
-    linkCooklangSeam(emitter_hostile_mod, oliver_cooklang_mod);
     const emitter_hostile_tests = b.addTest(.{ .root_module = emitter_hostile_mod });
     const run_emitter_hostile_tests = b.addRunArtifact(emitter_hostile_tests);
     run_emitter_hostile_tests.setCwd(b.path("."));
@@ -1353,13 +1318,4 @@ pub fn build(b: *std.Build) void {
 /// global state, nothing to pre-build.
 fn linkOliver(mod: *std.Build.Module, oliver: *std.Build.Module) void {
     mod.addImport("oliver", oliver);
-}
-
-/// Give a module access to the Oliver Cooklang stack import. Every module that
-/// transitively imports `src/cooklang_seam.zig` needs "oliver_cooklang" in its
-/// import table for the same reason `linkOliver` documents: a relative
-/// `@import("cooklang_seam.zig")` resolves in the importing module's context,
-/// and the seam's own `@import("oliver_cooklang")` resolves there too.
-fn linkCooklangSeam(mod: *std.Build.Module, oliver_cooklang: *std.Build.Module) void {
-    mod.addImport("oliver_cooklang", oliver_cooklang);
 }
