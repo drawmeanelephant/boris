@@ -444,30 +444,72 @@ fn ownerAt(root: ?html_scan.Range, offset: usize) Owner {
     return .theme;
 }
 
+/// Advance a running (line, column) cursor across `html[from..to]` in O(span),
+/// matching `html_scan.lineColumn`'s semantics (newline resets column to 1).
+fn advanceCursor(
+    html: []const u8,
+    from: usize,
+    to: usize,
+    line: *u32,
+    column: *u32,
+) void {
+    var col = column.*;
+    for (html[from..to]) |c| {
+        if (c == '\n') {
+            line.* += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    column.* = col;
+}
+
+/// Per-page HTML scan for ids and references. The running (line, column)
+/// cursor accounts for every consumed byte exactly once, so the whole scan is
+/// O(page length). Previously each id/reference called `html_scan.lineColumn`,
+/// which rescans from byte 0 — O(references × page length) per page, and the
+/// dominant cost of the `checks` evidence phase on link-dense sites (#456).
 fn scanPage(a: std.mem.Allocator, state: *PageState) !void {
     const html = state.page.html;
     state.root = uniqueSearchRoot(html);
     var i: usize = 0;
+    var cursor: usize = 0;
+    var line: u32 = 1;
+    var column: u32 = 1;
     while (i < html.len) {
         const start = std.mem.indexOfScalarPos(u8, html, i, '<') orelse break;
+        advanceCursor(html, cursor, start, &line, &column);
+        cursor = start;
+
         const tag = html_scan.tagAt(html, start) orelse {
             i = start + 1;
+            advanceCursor(html, cursor, i, &line, &column);
+            cursor = i;
             continue;
         };
+        const tag_end = tag.end + 1;
         if (std.mem.eql(u8, tag.name, "!comment")) {
-            i = tag.end + 1;
+            i = tag_end;
+            advanceCursor(html, cursor, i, &line, &column);
+            cursor = i;
             continue;
         }
         if (!tag.closing and !tag.self_closing and html_scan.isRawTextElement(tag.name)) {
-            i = html_scan.rawTextEnd(html, tag.end + 1, tag.name) orelse html.len;
+            i = html_scan.rawTextEnd(html, tag_end, tag.name) orelse html.len;
+            advanceCursor(html, cursor, i, &line, &column);
+            cursor = i;
             continue;
         }
         if (tag.closing) {
-            i = tag.end + 1;
+            i = tag_end;
+            advanceCursor(html, cursor, i, &line, &column);
+            cursor = i;
             continue;
         }
 
-        const tag_bytes = html[start .. tag.end + 1];
+        // The cursor now describes `start` exactly.
+        const tag_bytes = html[start..tag_end];
         var attributes = html_scan.AttrIter.init(tag_bytes);
         while (attributes.next()) |attribute| {
             const value = attribute.value orelse continue;
@@ -477,8 +519,8 @@ fn scanPage(a: std.mem.Allocator, state: *PageState) !void {
                     try state.ids.append(a, .{
                         .value = decoded,
                         .offset = start,
-                        .line = html_scan.lineColumn(html, start).line,
-                        .column = html_scan.lineColumn(html, start).column,
+                        .line = line,
+                        .column = column,
                         .owner = ownerAt(state.root, start),
                     });
                 }
@@ -489,13 +531,15 @@ fn scanPage(a: std.mem.Allocator, state: *PageState) !void {
                     .target = try a.dupe(u8, value),
                     .attribute = try a.dupe(u8, attribute.name),
                     .offset = start,
-                    .line = html_scan.lineColumn(html, start).line,
-                    .column = html_scan.lineColumn(html, start).column,
+                    .line = line,
+                    .column = column,
                     .owner = ownerAt(state.root, start),
                 });
             }
         }
-        i = tag.end + 1;
+        i = tag_end;
+        advanceCursor(html, cursor, i, &line, &column);
+        cursor = i;
     }
 }
 
@@ -559,6 +603,24 @@ fn duplicateIdFindings(builder: *Builder, state: *PageState, target_name: []cons
         }
         i = end;
     }
+}
+
+/// Whether any id occurrence in `ids` equals `wanted`. `duplicateIdFindings`
+/// sorts the list by (value, offset) before any lookup runs, so equal values
+/// are contiguous and presence is a binary search over value groups — O(log n)
+/// instead of the previous linear scan per reference (#456).
+fn hasIdValue(ids: []const IdOccurrence, wanted: []const u8) bool {
+    var lo: usize = 0;
+    var hi: usize = ids.len;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        switch (std.mem.order(u8, ids[mid].value, wanted)) {
+            .eq => return true,
+            .lt => lo = mid + 1,
+            .gt => hi = mid,
+        }
+    }
+    return false;
 }
 
 fn stateForPath(
@@ -692,14 +754,7 @@ fn auditReferences(
                 };
                 const target_state = stateForPath(states, page_index, resolved) orelse continue;
                 if (!target_state.valid) continue;
-                var found = false;
-                for (target_state.ids.items) |occurrence| {
-                    if (std.mem.eql(u8, occurrence.value, decoded_fragment)) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
+                if (!hasIdValue(target_state.ids.items, decoded_fragment)) {
                     try appendUrlFinding(
                         builder,
                         state,
@@ -1013,14 +1068,7 @@ fn auditSearch(
             const section = valueObject(section_value).?;
             const fragment_value = valueString(section.get("fragment").?).?;
             if (fragment_value.len == 0) continue;
-            var found = false;
-            for (state.ids.items) |occurrence| {
-                if (std.mem.eql(u8, occurrence.value, fragment_value)) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
+            if (!hasIdValue(state.ids.items, fragment_value)) {
                 const observed = try std.fmt.allocPrint(
                     builder.allocator,
                     "stored fragment \"{s}\" does not resolve on {s}",
@@ -1648,6 +1696,80 @@ test "rendered analyzer checks routes fragments ids and ownership without judgin
     for (report.findings) |finding| {
         try std.testing.expect(!std.mem.eql(u8, @tagName(finding.code), "HTML_PAGE_STALE"));
     }
+}
+
+test "id value presence lookup is a binary search over sorted groups" {
+    // Sorted by (value, offset) exactly as `duplicateIdFindings` leaves the
+    // list before any lookup runs (#456).
+    const ids = [_]IdOccurrence{
+        .{ .value = "a", .offset = 10, .owner = .content },
+        .{ .value = "a", .offset = 20, .owner = .content },
+        .{ .value = "b", .offset = 5, .owner = .content },
+        .{ .value = "c", .offset = 1, .owner = .content },
+        .{ .value = "c", .offset = 99, .owner = .content },
+        .{ .value = "d", .offset = 0, .owner = .content },
+    };
+    try std.testing.expect(hasIdValue(&ids, "a"));
+    try std.testing.expect(hasIdValue(&ids, "b"));
+    try std.testing.expect(hasIdValue(&ids, "c"));
+    try std.testing.expect(hasIdValue(&ids, "d"));
+    try std.testing.expect(!hasIdValue(&ids, ""));
+    try std.testing.expect(!hasIdValue(&ids, "ab"));
+    try std.testing.expect(!hasIdValue(&ids, "A"));
+    try std.testing.expect(!hasIdValue(&ids, "e"));
+    try std.testing.expect(!hasIdValue(&ids, "z"));
+    try std.testing.expect(!hasIdValue(&.{}, "a"));
+}
+
+test "scanPage line/column positions match lineColumn semantics" {
+    // Regression for #456: the per-page scan advances an incremental
+    // (line, column) cursor instead of rescanning from byte 0 per reference.
+    // The fixture deliberately mixes comments, raw text, and content so the
+    // cursor must skip exactly the spans the old lineColumn calls did, and
+    // the raw-text `<a>` must not become a reference at all.
+    const pages = [_]PageInput{
+        .{ .path = "guide.html", .html =
+        \\<html><body>
+        \\<!-- comment
+        \\     spanning two lines -->
+        \\<pre>
+        \\raw <a href="not-a-link.html">text</a>
+        \\</pre>
+        \\<main data-boris-search-root>
+        \\  <h1 id="present">Start</h1>
+        \\  <p>Some
+        \\text
+        \\<a id="broken" href="#absent">missing same-page</a>
+        \\</main>
+        \\</body></html>
+        },
+    };
+    const expected = [_][]const u8{"guide.html"};
+    var report = try analyzeTarget(std.testing.allocator, .{
+        .target_name = "public",
+        .pages = &pages,
+        .expected_page_paths = &expected,
+        .intended_route_paths = &expected,
+    });
+    defer report.deinit();
+
+    // Only the same-page fragment finding survives; the raw-text link is
+    // documentation, and no route finding is invented for it.
+    try std.testing.expectEqual(@as(usize, 1), countCode(report, .HTML_FRAGMENT_MISSING));
+    try std.testing.expectEqual(@as(usize, 0), countCode(report, .HTML_LOCAL_ROUTE_MISSING));
+    var seen = false;
+    for (report.findings) |finding| {
+        if (finding.code != .HTML_FRAGMENT_MISSING) continue;
+        const loc = finding.output_location orelse continue;
+        seen = true;
+        // `<a id="broken" href="#absent">` sits on line 11, column 1 of the
+        // fixture above — the incremental cursor must report exactly what
+        // `html_scan.lineColumn` would.
+        try std.testing.expectEqualStrings("guide.html", loc.path);
+        try std.testing.expectEqual(@as(u32, 11), loc.line);
+        try std.testing.expectEqual(@as(u32, 1), loc.column);
+    }
+    try std.testing.expect(seen);
 }
 
 test "malformed HTML variants make rendered coverage incomplete" {
