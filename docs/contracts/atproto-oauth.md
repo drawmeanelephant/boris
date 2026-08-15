@@ -1,8 +1,8 @@
 # AT Protocol OAuth core contract
 
-**Status:** normative foundation slice; explicit-DID authority discovery is
-implemented, while interactive login, session persistence, and record
-publication remain future adapters.
+**Status:** normative foundation slice; DID- and handle-first authority
+discovery are implemented, while interactive login, session persistence, and
+record publication remain future adapters.
 
 This contract defines Boris's portable AT Protocol OAuth cryptographic core and
 the boundary that future local interactive publishing must preserve. It does
@@ -10,14 +10,15 @@ not add a CLI command, perform network access, store credentials, or amend an
 existing publication artifact schema.
 
 The cryptographic core is exported as the Zig module `atproto_oauth`.
-`atproto_identity` owns portable DID and metadata validation, and consumes the
-small capability in `atproto_transport`. All three compile for the ordinary
-Boris target; the crypto and identity/discovery side compile under the
-repository's `wasm32-freestanding` gate.
-It may use allocator-backed memory, `std.crypto`, hashing, base64url, and pure
-byte validation. It must not import or consult HTTP, DNS, files, processes,
-environment variables, a wall clock, global randomness, or operating-system
-credential services.
+`atproto_identity` owns portable DID, handle, and metadata validation;
+`atproto_handle` composes the small capabilities in `atproto_dns` and
+`atproto_transport`. The crypto, identity, handle, DNS contract, and discovery
+side compile under the repository's `wasm32-freestanding` gate. Native HTTP and
+DNS adapters are host-only.
+The cryptographic core may use allocator-backed memory, `std.crypto`, hashing,
+base64url, and pure byte validation. It must not import or consult HTTP, DNS,
+files, processes, environment variables, a wall clock, global randomness, or
+operating-system credential services.
 
 ## Capability boundary
 
@@ -27,7 +28,7 @@ The future client is split across these two ownership domains:
 |---|---|
 | PKCE S256 | Cryptographically secure entropy |
 | P-256 public JWK and RFC 7638 thumbprint | Unix time |
-| ES256 compact JWS | HTTPS and DNS policy |
+| ES256 compact JWS | HTTPS and DNS TXT policy |
 | DPoP claim construction and access-token hash | Loopback callback listener |
 | Bounded signing-input validation | Browser/user handoff |
 | Protocol state transitions | Locked, atomic secret storage |
@@ -48,7 +49,9 @@ boundary without replacing the OAuth implementation.
 The implemented milestone is deliberately narrower than an OAuth client:
 
 ```text
-configured did:plc or did:web
+configured handle or did:plc/did:web
+  -> DNS TXT or HTTPS handle resolution (handle input only)
+  -> exact DID-document handle backlink (handle input only)
   -> exact DID document
   -> validated ATProto PDS origin
   -> bound Protected Resource Metadata
@@ -56,19 +59,60 @@ configured did:plc or did:web
   -> bound Authorization Server issuer and required capabilities
 ```
 
-`discover` accepts an explicit DID only. It does not reinterpret an arbitrary
-string as a handle. Handle DNS TXT/HTTPS resolution and the mandatory
-bidirectional handle-to-DID check are deferred; a later resolver can feed its
-verified DID into the existing discovery path without changing the transport
-or metadata validators. `alsoKnownAs` is ignored for authentication in this
-slice.
+`atproto_identity.discover` accepts an explicit DID only and never interprets
+arbitrary text as a handle. `atproto_handle.discover` is the explicit
+handle-first entry point. It resolves and normalizes a handle, resolves the DID
+document once, requires the document's first syntactically valid `at://`
+`alsoKnownAs` handle to equal the normalized input, then continues through the
+same PDS and OAuth authority validators without refetching the DID document.
 
 The returned `DiscoveredAccount` contains only validated values: the exact DID,
-PDS origin, Authorization Server origin, authorization endpoint, token
+an optional bidirectionally verified normalized handle, PDS origin,
+Authorization Server origin, authorization endpoint, token
 endpoint, and pushed-authorization-request endpoint. The result guarantees the
 required `atproto`, authorization-code, refresh-token, S256, public/confidential
 client-auth, client-metadata-document, PAR, issuer-response, and ES256 DPoP
 capabilities. Raw JSON and arbitrary URL strings do not cross this boundary.
+
+### Handle syntax and resolution
+
+Handles use the current ATProto hostname grammar: ASCII only, at most 253
+bytes, at least two labels, labels of 1–63 alphanumeric/hyphen bytes with no
+edge hyphen, and a final label beginning with an ASCII letter. Input ASCII case
+is normalized to lowercase and not retained. `@` prefixes, Unicode display
+forms, IP literals, whitespace, controls, trailing dots, empty labels, and URL
+syntax are rejected. Punycode is accepted only in its already-encoded ASCII
+form.
+
+Syntax and network eligibility are separate. `.alt`, `.arpa`, `.example`,
+`.internal`, `.invalid`, `.local`, `.localhost`, `.onion`, and `.test` remain
+recognizable syntax but fail before production resolution. There is no switch
+for localhost, HTTP, or test-TLD resolution.
+
+The preferred DNS query is TXT at `_atproto.{handle}`. Handles longer than 244
+bytes skip DNS because adding `_atproto.` would exceed the 253-byte DNS-name
+limit, then use HTTPS. TXT character-string chunks are concatenated by the DNS
+adapter. Records without `did=` are ignored. Repeated records containing the
+same supported DID are harmless; different supported DIDs are ambiguous and
+fail. A `did=` record containing malformed or unsupported DID text fails
+closed. No matching record, DNS timeout, or resolver failure falls back to the
+independently authenticated HTTPS method; malformed, oversized, or ambiguous
+DNS responses do not.
+
+HTTPS resolution starts at
+`https://{handle}/.well-known/atproto-did`, default port 443 only. Any 2xx body
+may carry the DID; response `Content-Type` is intentionally not required by the
+current protocol. At most 32 total bytes of ASCII space, tab, CR, or LF are
+trimmed from the body edges before strict DID parsing.
+
+The HTTPS method permits at most three manually processed redirects. Absolute
+HTTPS and absolute-path relative targets are accepted, including a change to
+another production public origin. HTTP downgrade, scheme-relative or
+path-relative location, user information, fragments, ambiguous encoding,
+non-default ports, duplicate/missing `Location`, loops, and a fourth hop fail.
+Each target goes through URL validation and the native pre-connect address
+policy. DID documents and both OAuth metadata endpoints still permit zero
+redirects.
 
 ### DID methods and documents
 
@@ -98,6 +142,13 @@ the configured DID. The ordered `service` array is scanned for an ID equal to
 first matching entry is authoritative and later entries are ignored. A malformed
 first match fails closed. Unrelated services may use other DID-Core shapes and
 are ignored.
+
+For handle verification, the ordered `alsoKnownAs` array is scanned separately.
+The first syntactically valid URI consisting of exactly `at://` plus one handle
+is the claimed handle; invalid and non-handle URI entries are skipped, and all
+entries after the first valid handle are ignored. A missing or different first
+claim fails handle-first discovery even if a later entry matches. Merely having
+an `alsoKnownAs` member never authenticates an explicit-DID discovery.
 
 ### Origins and endpoints
 
@@ -155,7 +206,8 @@ PAR request or exchange a token.
 
 `atproto_transport.Client` exposes only the operation discovery needs: a GET at
 an already validated URL, fixed bounded headers, a forbidden-redirect policy,
-explicit response limits, and a whole-request timeout. Responses carry only a
+a manual-HTTPS redirect response mode used only by handle resolution, explicit
+response limits, and a whole-request timeout. Responses carry only a
 status, bounded headers, and bounded body. `ScriptedMock` validates the exact
 method, URL, headers, and redirect policy and can inject status/headers/body,
 redirects, timeouts, failures, oversized inputs, and changed responses.
@@ -165,9 +217,8 @@ The native `atproto_transport_std` adapter owns a fresh `std.http.Client` and:
 - loads no proxy environment configuration, cookie jar, credentials, or
   implicit authorization;
 - uses platform TLS certificate verification and never downgrades HTTPS;
-- disables automatic redirects and returns every 3xx as
-  `RedirectRejected`; therefore cross-origin redirects, downgrade redirects,
-  redirect loops, and oversized chains all terminate at the first hop;
+- disables automatic redirects; forbidden-policy requests reject every 3xx,
+  while handle requests return the response to portable redirect validation;
 - races the complete request against the explicit 15-second default timeout;
 - disables response compression and reads into a fixed-capacity body buffer;
 - classifies DNS, connection, TLS, timeout, unsafe-target, header, body, and
@@ -193,10 +244,25 @@ an HTTP client is exposed. The adapter is currently a macOS/Linux host adapter,
 not a freestanding network stack; DipshitOS can implement the same portable
 capability with its own resolver, TLS, deadline, and socket-address policy.
 
-All identity and discovery redirects are forbidden because the current PLC,
-`did:web`, RFC 9728, RFC 8414, and ATProto profile endpoints are deterministic
-and require an exact successful response. No redirect can downgrade, change
-origin, reach a private address, loop, or consume a redirect budget.
+The native `atproto_dns_std` adapter reads the host `/etc/resolv.conf` through
+Zig I/O and sends DNS wire queries directly to a configured recursive resolver.
+It uses a fresh secure random transaction ID, checks the responding socket
+address, exact echoed question, response ID/opcode/rcode/truncation, name
+compression bounds, TXT framing, record count, and aggregate bytes under one
+five-second operation deadline. It invokes no subprocess or libc resolver API,
+requires no DNSSEC because the ATProto handle profile does not require it, and
+does not cache answers. A truncated UDP response fails closed; the small single
+ATProto DID TXT record is expected to fit the bounded response, and DNS TCP
+fallback is not implemented in this slice.
+
+The native DNS adapter uses only the nameservers visible through
+`/etc/resolv.conf`. It does not yet integrate macOS per-interface or split-DNS
+resolver state, so those configurations can fail closed or fall back to the
+handle's HTTPS method instead of reproducing the platform resolver's answer.
+
+DID-document, Resource Server, and Authorization Server redirects remain
+forbidden. Only the handle HTTPS endpoint receives the separate three-hop
+manual policy described above.
 
 Implementation limits are rejection bounds, never truncation or protocol
 claims:
@@ -204,6 +270,11 @@ claims:
 | Input | Limit |
 |---|---:|
 | DID or URL | 2,048 bytes |
+| Handle / DNS name | 253 bytes |
+| DNS-prefixed handle | 244 bytes |
+| DNS TXT records | 16 records / 2 KiB each / 8 KiB total |
+| DNS packet | 4 KiB |
+| Handle HTTPS body | 4 KiB |
 | DID document body | 256 KiB |
 | Resource Server metadata body | 64 KiB |
 | Authorization Server metadata body | 64 KiB |
@@ -213,10 +284,12 @@ claims:
 | One response-header value | 8 KiB |
 | One JSON string/value token | 16 KiB |
 | JSON object/array nesting | 16 levels |
+| Handle HTTPS redirects | 3 hops |
 
-There is no persistent or in-memory discovery cache. Every `discover` call
-resolves the DID and both metadata documents anew, so changed identity data is
-not silently retained across operations. A future session layer may add a
+There is no persistent or in-memory discovery cache. Every handle-first
+`discover` resolves the handle, DID, and both metadata documents anew, so
+changed identity data is not silently retained across operations. A future
+session layer may add a
 bounded, explicit cache with the ATProto recommendation of less than ten
 minutes for authorization flows.
 
@@ -231,7 +304,7 @@ stable revision identifier, so the retrieval date is the recorded revision:
 - [AT Protocol OAuth](https://atproto.com/specs/oauth), unversioned current
   page, retrieved 2026-08-14;
 - [AT Protocol Handle](https://atproto.com/specs/handle), unversioned current
-  page, retrieved 2026-08-14 (architecture input only; resolution deferred);
+  page, retrieved 2026-08-14;
 - [AT Protocol HTTP API/XRPC](https://atproto.com/specs/xrpc), unversioned
   current page, retrieved 2026-08-14 (no XRPC call is made in this slice);
 - [`did:plc` method specification v0.3.0](https://web.plc.directory/spec/v0.1/did-plc),
@@ -242,14 +315,25 @@ stable revision identifier, so the retrieval date is the recorded revision:
 - [W3C DID Core 1.0](https://www.w3.org/TR/2022/REC-did-core-20220719/), W3C
   Recommendation dated 2022-07-19;
 - [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728), OAuth 2.0 Protected
-  Resource Metadata, April 2025; and
+  Resource Metadata, April 2025;
 - [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414), OAuth 2.0 Authorization
-  Server Metadata, June 2018.
+  Server Metadata, June 2018;
+- [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035), Domain Names —
+  Implementation and Specification, November 1987;
+- [RFC 1464](https://www.rfc-editor.org/rfc/rfc1464), Using the Domain Name
+  System To Store Arbitrary String Attributes, May 1993; and
+- the official ATProto handle syntax interop vectors at
+  [`abc6cf9a`](https://github.com/bluesky-social/atproto/commit/abc6cf9ab4f3bcea02b3fe3637bb2bd520ed8edf),
+  retrieved from the current ATProto repository on 2026-08-14.
 
 Current protocol truth resolves two points that older planning language can
 misstate: RFC 9728 now requires the exact `resource` member, and the ATProto DID
 specification selects the first matching PDS service rather than rejecting a
-later duplicate as ambiguous.
+later duplicate as ambiguous. Handle truth likewise requires lower-case
+normalization and bidirectional verification against the first syntactically
+valid DID-document handle claim; DNS is preferred, HTTPS fallback is required,
+and bounded HTTPS redirects are explicitly allowed only for that handle
+well-known endpoint.
 
 ## Implemented primitives
 
@@ -292,8 +376,8 @@ truncation rules.
 ## Future interactive client requirements
 
 The first host integration is a native public client with authorization code,
-PKCE S256, pushed authorization requests, and DPoP. Its local login surface is
-DID-only (`did:plc` and `did:web`) and requests exactly:
+PKCE S256, pushed authorization requests, and DPoP. Its local login surface can
+now begin with a handle, `did:plc`, or `did:web`, and requests exactly:
 
 ```text
 atproto include:site.standard.authFull
@@ -326,27 +410,30 @@ The foundation gate is:
 ```text
 zig build test-atproto-oauth
 zig build test-atproto-discovery
+zig build test-atproto-handles
 ```
 
 It covers the RFC 7636 PKCE vector, the public-key/thumbprint values published
 in RFC 9449, P-256 JWK shape, query/fragment removal, access-token hashing,
 nonce and input bounds, and verification of the emitted raw ES256 signature.
-The gates compile both portable modules for `wasm32-freestanding` so an
-accidental host dependency fails mechanically. The native std HTTP adapter is
-tested only on the host target.
+The gates compile all portable OAuth, identity, handle, DNS-capability, and
+transport modules for `wasm32-freestanding` so an accidental host dependency
+fails mechanically. Native std HTTP and DNS adapters are tested only on the
+host target.
 
 Discovery, SSRF/connection-address policy, metadata substitution, redirects,
 response bounds, and changing-network-state tests are deterministic and
-offline. Future host slices add loopback callback parsing, nonce rotation, session locking,
-refresh crash recovery, diagnostic redaction, and mock end-to-end publication.
+offline. Future host slices add loopback callback parsing, nonce rotation,
+session locking, refresh crash recovery, diagnostic redaction, and mock
+end-to-end publication.
 Automated tests must not require internet access. Live PDS compatibility is a
 separate recorded manual gate using dedicated test identities.
 
 ## Explicitly not implemented
 
-This is not a complete OAuth client. It does not resolve handles or DNS TXT,
-open a browser, listen on loopback, issue PAR, display authorization UI,
-exchange/refresh tokens, persist sessions or credentials, publish
+This is not a complete OAuth client. It does not open a browser, listen on
+loopback, issue PAR, display authorization UI, exchange/refresh tokens, persist
+sessions or credentials, publish
 Standard.site/XRPC records, prune remote state, authenticate CI, or implement
 generic OAuth/DID provider support. No live-network smoke is in CI; a stable
 non-personal public fixture was not identified, so this slice keeps all tests
