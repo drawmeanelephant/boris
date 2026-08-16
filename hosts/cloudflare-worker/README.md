@@ -39,6 +39,12 @@ Paid, Paid CPU 30 s default / 5 min max, 1 s startup, no Wasm threads).
 ReleaseSmall after M6 is about **937 KiB** uncompressed / **331 KiB** gzip-9.
 That fits Workers Free. Use Paid only if you later switch to ReleaseSafe.
 
+Instantiation happens **once at isolate startup** (module-scope `await`, inside
+the 1 s startup budget on Free and Paid), and the instance is reused for every
+request — the compile ABI is stateless per call. Per-request CPU is therefore
+just the compile execution itself, which is what the Free 10 ms budget must
+fit.
+
 Rejected before compile: empty/absolute/`..` paths, backslash traversal,
 duplicate canonical paths (`index.md` vs `./index.md`), over-limit counts or
 sizes.
@@ -102,7 +108,10 @@ Do **not** enable Cloudflare's experimental WASI filesystem. The module lists
 |---|---|
 | Module (ReleaseSmall) | 937.3 KiB / 330.8 KiB gzip-9 (M6 snapshot) |
 | Local valid smoke | `test.mjs` printed 15 ms on 2026-08-16 (developer machine; not a gate) |
-| Live Worker CPU / isolate peak | **not measured** — needs a paid-account invoke |
+| Live warm CPU (9-artifact compile + R2 upload) | 4 ms — under the Free 10 ms budget (measured 2026-08-16, ORD/IAD) |
+| Live compile-only CPU | 1 ms |
+| Live cold CPU (incl. module instantiation) | 39 ms — charged to the 1 s isolate **startup** budget, not per-request |
+| Live Worker wall (parallel R2 uploads) | ~1.2–1.4 s; R2 write latency on this account measures ~0.6–1.1 s per put (worker binding and admin API, 2026-08-16), unrelated to worker code or bucket region (verified with an `enam`-located bucket) |
 | Max tested source bundle | the two-file fixtures in `fixtures/` |
 
 ## Non-goals

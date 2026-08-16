@@ -49,6 +49,9 @@ export async function instantiate(source) {
  * @param {{html?: boolean, evidence?: boolean, layout_path?: string, files: Array<{path: string, bytes: Uint8Array}>}} request
  */
 export function compile(abi, request) {
+  // Per-call WASI canary. wasiCalls lives on the reused instance, so reset it:
+  // a stub fired by an earlier request would otherwise poison every later one.
+  abi.wasiCalls.length = 0;
   const exp = abi.exports;
   const allocs = [];
   const alloc = (len) => {

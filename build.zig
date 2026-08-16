@@ -632,10 +632,25 @@ pub fn build(b: *std.Build) void {
     );
     test_boris_init_step.dependOn(&init_run.step);
 
-    // Layout-rule precedence guard (#400): the reference-theme example must
-    // select identical layouts under both rule declaration orders (fixed
-    // precedence: id > glob specificity > role > fallback) and publish the
-    // documented assets.
+    // Watch + preview-server lifecycle (#392): the watch coordinator must
+    // serve the built tree over loopback, rebuild on content change, push an
+    // SSE reload event to connected clients, and shut down cleanly on SIGTERM
+    // (the accept thread must unblock — the Linux accept-wake fix from #482
+    // lives exactly here, and this black-box script is the one end-to-end
+    // guard for the served-tree + SSE + shutdown contract).
+    const watch_serve_run = b.addSystemCommand(&.{
+        "bash",
+        "scripts/test-watch-serve-lifecycle.sh",
+    });
+    watch_serve_run.setCwd(b.path("."));
+    watch_serve_run.has_side_effects = true;
+    watch_serve_run.step.dependOn(b.getInstallStep());
+    const test_watch_serve_step = b.step(
+        "test-watch-serve-lifecycle",
+        "Run the watch --serve start/rebuild/SSE/shutdown lifecycle guard",
+    );
+    test_watch_serve_step.dependOn(&watch_serve_run.step);
+
     // XHTML output profile evidence (#448, acceptance criterion 5): Boris
     // content must publish a page under the XHTML profile that an independent
     // XML parser (xmllint/libxml2, else python3 ElementTree) accepts, and the
@@ -1842,6 +1857,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&doc_links_run.step);
     test_step.dependOn(&github_pages_audit_test.step);
     test_step.dependOn(&xhtml_evidence_run.step);
+    test_step.dependOn(&watch_serve_run.step);
 
     const test_harness_step = b.step(
         "test-harness",
