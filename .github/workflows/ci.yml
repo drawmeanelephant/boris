@@ -235,7 +235,7 @@ jobs:
         run: zig build --build-file tools/testdata-generator/build.zig test
 
   job-runner-image:
-    name: job-runner image smoke (Linux)
+    name: job-runner smoke (Linux)
     needs: changes
     if: needs.changes.outputs.job_runner == 'true'
     runs-on: ubuntu-latest
@@ -249,7 +249,7 @@ jobs:
         with:
           version: 0.16.0
 
-      - name: Image smoke
+      - name: Native --once smoke
         run: bash scripts/test-job-runner-image.sh
 
   # Dedicated content-audit lane covering tools/content-audit/** and the root

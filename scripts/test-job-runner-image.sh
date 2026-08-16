@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Image smoke for boris-job-runner (#300).
+# Linux smoke for boris-job-runner (#300).
 #
-# Builds linux binaries when already on linux/amd64, copies them into the
-# example image, runs the valid and poisoned fixtures through `docker run`.
-# Skips cleanly when Docker is not available. This is not a live Cloudflare
-# gate and does not claim macOS-vs-Linux parity.
+# Required path: native --once against the valid and poisoned fixtures.
+# That is the compiler contract. The Docker image remains an operator
+# example; it is not this job's gate. This is not a live Cloudflare run
+# and does not claim macOS-vs-Linux byte identity.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,35 +12,16 @@ cd "$ROOT"
 
 note() { printf '==> %s\n' "$*"; }
 pass() { printf '    OK  %s\n' "$*"; }
-skip() { printf '    SKIP %s\n' "$*"; exit 0; }
 fail() { printf '    FAIL %s\n' "$*" >&2; exit 1; }
-
-command -v docker >/dev/null 2>&1 || skip "docker not on PATH"
-docker info >/dev/null 2>&1 || skip "docker daemon not reachable"
-
-uname_m="$(uname -m)"
-uname_s="$(uname -s)"
-if [[ "$uname_s" != "Linux" || ( "$uname_m" != "x86_64" && "$uname_m" != "amd64" ) ]]; then
-  skip "image smoke is linux/amd64 (host is ${uname_s}/${uname_m})"
-fi
 
 note "build ReleaseSafe boris + boris-job-runner"
 zig build -Doptimize=ReleaseSafe
 [[ -x zig-out/bin/boris ]] || fail "missing zig-out/bin/boris"
 [[ -x zig-out/bin/boris-job-runner ]] || fail "missing zig-out/bin/boris-job-runner"
 
-EX="$ROOT/examples/cloudflare-container"
-mkdir -p "$EX/bin"
-cp zig-out/bin/boris zig-out/bin/boris-job-runner "$EX/bin/"
-
-note "docker build"
-docker build -f "$EX/Dockerfile" -t boris-job-runner:test "$EX"
-
-OUT="$ROOT/.zig-cache/job-runner-image"
+OUT="$ROOT/.zig-cache/job-runner-smoke"
 rm -rf "$OUT"
-mkdir -p "$OUT"
-# Image runs as uid 65532; the host-created bind mount is otherwise 0700.
-chmod a+rwx "$OUT"
+mkdir -p "$OUT/ws"
 
 pack() {
   local src="$1" dest="$2"
@@ -57,29 +38,12 @@ PY
 pack docs/contracts/fixtures/valid/content "$OUT/valid.tar"
 pack docs/contracts/fixtures/missing-parent/content "$OUT/poisoned.tar"
 
-run_once() {
-  local archive="$1" json="$2"
-  local cid
-  # Write the result inside the container (/tmp is world-writable) and copy
-  # it out. Do not override --entrypoint: the image already starts
-  # boris-job-runner, and extra args replace CMD.
-  cid="$(docker create \
-    --network none \
-    -e BORIS_BIN=/usr/local/bin/boris \
-    -v "$archive:/in.tar:ro" \
-    boris-job-runner:test \
-    --once --boris /usr/local/bin/boris --archive /in.tar --result-json /tmp/result.json --work-root /tmp/boris-jobs)"
-  set +e
-  docker start -a "$cid"
-  local rc=$?
-  set -e
-  docker cp "$cid:/tmp/result.json" "$json" 2>/dev/null || true
-  docker rm -f "$cid" >/dev/null
-  return "$rc"
-}
-
-note "valid fixture through the image"
-run_once "$OUT/valid.tar" "$OUT/valid.json"
+note "valid fixture through native --once"
+./zig-out/bin/boris-job-runner --once \
+  --boris ./zig-out/bin/boris \
+  --archive "$OUT/valid.tar" \
+  --result-json "$OUT/valid.json" \
+  --work-root "$OUT/ws"
 [[ -f "$OUT/valid.json" ]] || fail "valid.json not written"
 python3 - "$OUT/valid.json" <<'PY'
 import json, sys
@@ -90,14 +54,18 @@ assert d["retried"] is False, d
 assert any(a["path"].endswith("index.html") for a in d["artifacts"]), d
 print("valid ok, artifacts", len(d["artifacts"]))
 PY
-pass "valid fixture compiled inside the image"
+pass "valid fixture compiled"
 
-note "poisoned fixture through the image"
+note "poisoned fixture through native --once"
 set +e
-run_once "$OUT/poisoned.tar" "$OUT/poisoned.json"
+./zig-out/bin/boris-job-runner --once \
+  --boris ./zig-out/bin/boris \
+  --archive "$OUT/poisoned.tar" \
+  --result-json "$OUT/poisoned.json" \
+  --work-root "$OUT/ws"
 poisoned_rc=$?
 set -e
-[[ "$poisoned_rc" -eq 1 ]] || fail "poisoned image job exited $poisoned_rc, expected 1"
+[[ "$poisoned_rc" -eq 1 ]] || fail "poisoned job exited $poisoned_rc, expected 1"
 [[ -f "$OUT/poisoned.json" ]] || fail "poisoned.json not written"
 python3 - "$OUT/poisoned.json" <<'PY'
 import json, sys
@@ -110,4 +78,4 @@ print("poisoned closed correctly")
 PY
 pass "poisoned fixture failed closed, no artifacts"
 
-note "image smoke complete"
+note "job-runner smoke complete"

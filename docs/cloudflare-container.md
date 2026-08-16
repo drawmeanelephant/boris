@@ -68,9 +68,9 @@ The image entrypoint is `boris-job-runner --listen 0.0.0.0:8080
 authenticated edge; the container port is not public. `BORIS_IMAGE_DIGEST`
 is copied into `result.json` when the host provides it.
 
-`scripts/test-job-runner-image.sh` builds the image and runs the valid
-and poisoned fixtures when Docker is available. It skips cleanly when
-Docker is not.
+`scripts/test-job-runner-image.sh` is the Linux CI smoke: native
+`--once` on the valid and poisoned fixtures. The Dockerfile is the
+operator image, not that job's gate.
 
 ## Worker example
 
