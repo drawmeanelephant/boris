@@ -317,9 +317,9 @@
       compiler = `Compiler: ${versionResult.data.compiler_id}`;
       inputMode = health.project.input_mode ?? 'empty';
       project = health.project.content
-        ? `Project found${health.project.publication_profile ? ' with boris.json' : ''}${inputMode === 'cooklang' ? '; Cooklang tree (--cooklang)' : ''}.`
+        ? `Project found${health.project.publication_profile ? ' with boris.json' : ''}${inputMode === 'cooklang' ? '; Cooklang tree (--cooklang)' : inputMode === 'textile' ? '; Textile tree (--textile)' : ''}.`
         : 'This folder is not a Boris project.';
-      if (inputMode === 'cooklang') createPath = 'content/new-recipe.cook';
+      createPath = defaultCreatePath();
       files = filesResult.data.files;
       if (authoringResult.response.ok) setAuthoring(authoringResult.data);
       else authoringStatus = 'Boris authoring vocabulary is unavailable.';
@@ -992,7 +992,9 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
   }
 
   function defaultCreatePath(): string {
-    return inputMode === 'cooklang' ? 'content/new-recipe.cook' : 'content/new-page.md';
+    if (inputMode === 'cooklang') return 'content/new-recipe.cook';
+    if (inputMode === 'textile') return 'content/new-page.textile';
+    return 'content/new-page.md';
   }
 
   function openCreateDialog() {
@@ -1915,7 +1917,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
 
 <dialog bind:this={createDialog} onkeydown={handleDialogKeydown} onclose={() => { createPath = defaultCreatePath(); restoreDialogFocus(); }} aria-labelledby="create-heading">
   <h2 id="create-heading">Create file</h2>
-  <p>Use a project-relative path under content/ or themes/, or boris.json.</p>
+  <p>Use a project-relative path under content/ or themes/, or boris.json. Markdown (<code>.md</code>), Textile (<code>.textile</code>), and Cooklang (<code>.cook</code>) pages are valid.</p>
   <form onsubmit={(event) => { event.preventDefault(); void createFile(); }}>
     <label for="create-path">New file path</label>
     <input id="create-path" bind:value={createPath} />

@@ -264,11 +264,25 @@ HMR, CSS injection, watcher, or typing-triggered build.
 - No arbitrary commands: only the fixed allowlist above.
 - No preview daemon or renderer: a fixed, visible rebuild command only.
 - No deploy, deployment secrets, or hosting dashboard.
+- No recipe scaling until Boris defines it ([issue 554](https://github.com/drawmeanelephant/boris/issues/554)).
 - No layout diagnostics or autofix.
 
 When a capability is missing, the editor says so instead of guessing — the
 authoring hints, problem labels, and preview states are honest about their
 source and confidence.
+
+---
+
+## Keyboard and voice names
+
+Every core control is a named button, link, or standard field. The 14 #418
+actions are exercised keyboard-only in CI. Create File offers `.md`,
+`.textile`, or `.cook` from the same dialog; a Cooklang-only or Textile-only
+tree prefills the matching extension.
+
+Spoken macOS Voice Control and Windows Voice Access are not recorded as
+passing in this tree. The accessibility-tree names are the Show-names analog.
+Recipe scaling stays labeled unavailable.
 
 <Details summary="The editor is not a second compiler">
 

@@ -2158,3 +2158,189 @@ test('publication pane plans an existing profile and does not deploy (#418 M9)',
   await expect(publication).toContainText('no-deployment-verification');
   await expect(page.getByRole('button', { name: 'Deploy', exact: true })).toHaveCount(0);
 });
+
+function visibleLabel(text: string): string {
+  return text.replace(/\s+/g, ' ').replace(/\b(Enter|Esc|Alt\+[A-Za-z]|Ctrl|Cmd|Tab)\b/g, '').replace(/\s+/g, ' ').trim();
+}
+
+async function assertNamedControls(root: ReturnType<Page['locator']>) {
+  const buttons = root.getByRole('button');
+  const count = await buttons.count();
+  expect(count).toBeGreaterThan(0);
+  for (let index = 0; index < count; index += 1) {
+    const button = buttons.nth(index);
+    if (!(await button.isVisible())) continue;
+    const text = visibleLabel(await button.innerText());
+    await expect(button).toHaveAccessibleName(/\S/);
+    if (text.length > 0) await expect(button).toHaveAccessibleName(new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  const links = root.getByRole('link');
+  const linkCount = await links.count();
+  for (let index = 0; index < linkCount; index += 1) {
+    const link = links.nth(index);
+    if (!(await link.isVisible())) continue;
+    const text = visibleLabel(await link.innerText());
+    await expect(link).toHaveAccessibleName(/\S/);
+    if (text.length > 0) await expect(link).toHaveAccessibleName(new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+}
+
+test('chrome buttons and links expose Show-names analog labels (#418 M10)', async ({ page }) => {
+  await installApi(page);
+  await assertNamedControls(page.locator('header, .section-nav, #project, #source, #publication, #problems, #preview, footer'));
+  await page.getByRole('button', { name: 'Create file', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const create = page.getByRole('dialog', { name: 'Create file' });
+  await expect(create.getByRole('textbox', { name: 'New file path' })).toBeFocused();
+  await assertNamedControls(create);
+  await page.keyboard.press('Escape');
+});
+
+test('Textile-only trees prefill a .textile create path (#418 M10)', async ({ page }) => {
+  await installApi(page, { inputMode: 'textile' });
+  await expect(page.getByText(/Textile tree/)).toBeVisible();
+  await page.getByRole('button', { name: 'Create file', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog', { name: 'Create file' }).getByRole('textbox', { name: 'New file path' })).toHaveValue('content/new-page.textile');
+});
+
+test('the 14 #418 actions are completable from the keyboard (#418 M10)', async ({ page }) => {
+  const cookGraph = graphPayload();
+  const graph = cookGraph.graph as { nodes: Array<Record<string, unknown>> };
+  graph.nodes.push({
+    index: 3, id: 'carbonara', sourcePath: 'carbonara.cook', role: 'trunk',
+    parent: null, parentIndex: null, title: 'Carbonara', status: 'published', tags: [], bodyOffset: 20,
+    recipe: {
+      ingredients: [
+        { name: 'pepper-oil', quantity: { amount: '1', unit: 'tbsp' }, preparation: '', recipeRef: 'sauces/pepper-oil' }
+      ],
+      cookware: [],
+      timers: []
+    }
+  });
+  graph.nodes.push({
+    index: 4, id: 'sauces/pepper-oil', sourcePath: 'sauces/pepper-oil.cook', role: 'satellite',
+    parent: 'carbonara', parentIndex: 3, title: 'Pepper oil', status: 'published', tags: [], bodyOffset: 20,
+    recipe: { ingredients: [], cookware: [], timers: [] }
+  });
+  await installApi(page, {
+    inputMode: 'mixed',
+    files: [
+      { path: 'boris.json' },
+      { path: 'content/index.md' },
+      { path: 'content/carbonara.cook' },
+      { path: 'content/sauces/pepper-oil.cook' }
+    ],
+    graph: [cookGraph],
+    publication: { profiles: [{ path: 'boris.json' }], proof: null },
+    commands: {
+      ir_build: commandResult('ir_build', {
+        exit_code: 1, failure_class: 'content',
+        problems: [{
+          severity: 'error', code: 'EFRONTMATTER', message: 'Unknown key.', remediation: 'Remove it.',
+          source_path: 'index.md', line: 1, column: 1, id: 'index', origin: 'build_report',
+          position_confidence: 'exact', packet: 'code: EFRONTMATTER'
+        }]
+      }),
+      plan: commandResult('plan', {
+        publication_plan: {
+          format: 'boris-publication-plan', schema_version: 1, input: 'content', input_format: 'markdown',
+          publication: null, targets: [{ name: 'public', output: 'dist', public: true }]
+        }
+      })
+    },
+    recovery: [{ path: 'content/index.md', content: '# Recovered\n', fingerprint: 'd'.repeat(64) }]
+  });
+
+  // 1 launch / open project
+  await expect(page.getByRole('heading', { name: 'Boris Editor', level: 1 })).toBeVisible();
+  await expect(page.getByRole('status', { name: 'Connection status' })).toContainText('Connected');
+
+  // 13 recover interrupted work before later saves clear the snapshot
+  await page.getByRole('button', { name: 'Restore content/index.md', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Recovered unsaved work');
+  await page.getByRole('button', { name: 'Save file', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
+
+  // 4 move between Source, Project, Problems, Preview
+  for (const name of ['Project', 'Source', 'Problems', 'Preview']) {
+    await page.getByRole('navigation', { name: 'Editor sections' }).getByRole('link', { name, exact: true }).focus();
+    await page.keyboard.press('Enter');
+  }
+
+  // 2 create Markdown
+  await page.getByRole('button', { name: 'Create file', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const create = page.getByRole('dialog', { name: 'Create file' });
+  await expect(create.getByRole('textbox', { name: 'New file path' })).toHaveValue('content/new-page.md');
+  await create.getByRole('textbox', { name: 'New file path' }).fill('content/notes.md');
+  await create.getByRole('textbox', { name: 'New file path' }).press('Enter');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Created content/notes.md.');
+
+  // 3 create Cooklang
+  await page.getByRole('button', { name: 'Create file', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await create.getByRole('textbox', { name: 'New file path' }).fill('content/new-recipe.cook');
+  await create.getByRole('textbox', { name: 'New file path' }).press('Enter');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Created content/new-recipe.cook.');
+
+  // 5 edit frontmatter in the native textarea
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+  await editor.fill('---\nid: index\ntitle: Home\n---\n# Home\n');
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Save file', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
+
+  // 6 select a graph completion
+  await page.getByLabel('Completion category', { exact: true }).selectOption('entity');
+  await page.getByRole('combobox', { name: 'Filter entity', exact: true }).fill('guides');
+  await expect(page.getByRole('option', { name: /guides\/intro/ }).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Insert selected completion', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: 'Save file', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
+
+  // 7–8 introduce a diagnostic and go to it
+  await page.getByRole('button', { name: 'Build diagnostics', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const go = page.getByRole('button', { name: 'Go to index.md line 1 column 1', exact: true });
+  await go.focus();
+  await page.keyboard.press('Enter');
+  await expect(editor).toBeFocused();
+
+  // 9 save and preview
+  await editor.fill('# Saved\n');
+  await page.getByRole('button', { name: 'Save file', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Rebuild preview', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText(/Preview is current from a successful/)).toBeVisible();
+
+  // 10–11 recipe facet: scaling is an honest gap; related recipe is reachable
+  await page.getByRole('button', { name: 'content/carbonara.cook', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  const recipe = page.locator('.recipe-pane');
+  await expect(recipe).toContainText('Scaling is not available');
+  await expect(page.getByRole('button', { name: /Scale / })).toHaveCount(0);
+  await recipe.getByRole('button', { name: 'Go to recipe sauces/pepper-oil', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('textbox', { name: 'Source for content/sauces/pepper-oil.cook' })).toBeVisible();
+
+  // 12 publication plan
+  const planRequest = page.waitForRequest('**/api/commands/run');
+  await page.getByRole('button', { name: 'Run publication plan', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  expect((await planRequest).postDataJSON()).toMatchObject({ mode: 'plan', profile: 'boris.json' });
+  await expect(page.locator('#publication')).toContainText('Normalized plan');
+
+  // 14 dirty buffer is visible; close is the browser beforeunload + recovery
+  await page.getByRole('textbox', { name: 'Source for content/sauces/pepper-oil.cook' }).fill('# Still dirty\n');
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+});
