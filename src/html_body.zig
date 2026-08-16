@@ -448,9 +448,7 @@ test "plain-text body pipeline keeps words and drops chrome across segments" {
         .source_path = "guides/target.md",
         .title = "Target",
     }};
-    const text = try renderSourcePlainText(io, gpa, content_dir, &whiteboard,
-        "Before\n\n{{include includes/fragment.md}}\n\n[[guides/target]]\n\n[Docs](guides/target.md?x=1&y=2#section)\n\n<Aside kind=\"tip\">\nInside **aside**\n</Aside>\n\n<Details summary=\"More\">\nBody text\n</Details>\n\nAfter\n",
-        "index.md", "index.html", .{ .nodes = &nodes });
+    const text = try renderSourcePlainText(io, gpa, content_dir, &whiteboard, "Before\n\n{{include includes/fragment.md}}\n\n[[guides/target]]\n\n[Docs](guides/target.md?x=1&y=2#section)\n\n<Aside kind=\"tip\">\nInside **aside**\n</Aside>\n\n<Details summary=\"More\">\nBody text\n</Details>\n\nAfter\n", "index.md", "index.html", .{ .nodes = &nodes });
 
     // Markdown syntax, admonition chrome, and the `<Aside>`/`<Details>` tags
     // are gone; include-expanded headings, wiki link labels, and link labels

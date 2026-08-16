@@ -1123,7 +1123,6 @@ test "one-shot PAR callback and token exchange retry nonce challenges offline" {
     try std.testing.expectError(error.CodeAlreadyConsumed, pending.exchange(std.testing.allocator, mock.client(), proofs.source()));
 }
 
-
 const StaticProofSource = struct {
     issued_at: u64,
     jti_entropy: u8,

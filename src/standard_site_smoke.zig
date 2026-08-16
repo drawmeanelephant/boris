@@ -1234,5 +1234,3 @@ test "namespace collision fails closed before any write" {
     try std.testing.expectError(error.NamespaceCollision, smoke(gpa, &runtime, &test_config));
     try std.testing.expectEqual(@as(usize, 0), mock.puts);
 }
-
-

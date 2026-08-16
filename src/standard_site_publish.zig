@@ -340,8 +340,7 @@ const MockHost = struct {
                 if (self.token_calls == 1) {
                     return self.respond(allocator, value, 400, &headers, "{\"error\":\"use_dpop_nonce\"}");
                 }
-                return self.respond(allocator, value, 200, &headers,
-                    "{\"access_token\":\"ACCESS-TOKEN-SECRET\",\"token_type\":\"DPoP\",\"sub\":\"" ++ test_oid ++ "\",\"scope\":\"atproto include:site.standard.authFull\",\"expires_in\":3600}");
+                return self.respond(allocator, value, 200, &headers, "{\"access_token\":\"ACCESS-TOKEN-SECRET\",\"token_type\":\"DPoP\",\"sub\":\"" ++ test_oid ++ "\",\"scope\":\"atproto include:site.standard.authFull\",\"expires_in\":3600}");
             }
             if (hasPath(url, self.declared_pds, "/xrpc/com.atproto.repo.putRecord")) {
                 if (!hasDpop(value.headers)) return error.UnexpectedRequest;
@@ -472,7 +471,7 @@ const MockHost = struct {
                 body.appendSlice(arena, "/par\",\"scopes_supported\":[\"atproto\"],\"response_types_supported\":[\"code\"],\"grant_types_supported\":[\"authorization_code\",\"refresh_token\"],\"code_challenge_methods_supported\":[\"S256\"],\"token_endpoint_auth_methods_supported\":[\"none\",\"private_key_jwt\"],\"token_endpoint_auth_signing_alg_values_supported\":[\"ES256\"],\"dpop_signing_alg_values_supported\":[\"ES256\"],\"authorization_response_iss_parameter_supported\":true,\"require_pushed_authorization_requests\":true,\"client_id_metadata_document_supported\":true,\"require_request_uri_registration\":true}") catch return error.OutOfMemory;
             },
         }
-        const headers = [_]transport.Header{ .{ .name = "content-type", .value = content_type } };
+        const headers = [_]transport.Header{.{ .name = "content-type", .value = content_type }};
         return self.respond(allocator, value, status, &headers, body.items);
     }
 

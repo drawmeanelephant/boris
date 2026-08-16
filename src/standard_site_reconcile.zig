@@ -937,8 +937,6 @@ fn testBinding() !xrpc.SessionBinding {
     };
 }
 
-
-
 /// Build a config with a pds binding, project two pages, and render the plan.
 const TestSetup = struct {
     config: standard_site.TargetConfig,

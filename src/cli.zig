@@ -2258,8 +2258,8 @@ test "parse: plan requires a profile and rejects execution or projection selecto
 
 test "parse: standard-site publish selects the family and its options" {
     var o = try parseOptions(std.testing.allocator, &.{
-        "boris",          "standard-site", "publish", "--profile", "boris.json", "--plan",     "standard-site-plan.json",
-        "--out",          "evidence.json", "--prune", "--source-commit", "abc123",     "--quiet",
+        "boris", "standard-site", "publish", "--profile",       "boris.json", "--plan",  "standard-site-plan.json",
+        "--out", "evidence.json", "--prune", "--source-commit", "abc123",     "--quiet",
     });
     defer o.deinit(std.testing.allocator);
     try expectEqual(Command.standard_site, o.command);
@@ -2374,9 +2374,9 @@ test "parse: standard-site logout requires a DID and rejects compiler flags" {
 
 test "parse: standard-site smoke requires a DID and accepts its opt-in flags" {
     var o = try parseOptions(std.testing.allocator, &.{
-        "boris", "standard-site", "smoke", "--did", "did:plc:ewvi7nxzyoun6zhxrhs64oiz",
-        "--namespace", "boris-smoke-manual", "--surface-url", "https://example.com",
-        "--indexer", "https://public.api.example.com", "--out", "smoke-result.json",
+        "boris",                          "standard-site",      "smoke",             "--did",               "did:plc:ewvi7nxzyoun6zhxrhs64oiz",
+        "--namespace",                    "boris-smoke-manual", "--surface-url",     "https://example.com", "--indexer",
+        "https://public.api.example.com", "--out",              "smoke-result.json",
     });
     defer o.deinit(std.testing.allocator);
     try expectEqual(StandardSiteCommand.smoke, o.standard_site_command);

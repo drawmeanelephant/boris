@@ -1225,7 +1225,7 @@ test "records rendering embeds the full canonical payloads with textContent" {
     var config = try testConfig(gpa);
     defer config.deinit(gpa);
     const pages = [_]PageInput{
-        .{ .entity_id = "guides/intro", .output_path = "guides/intro.html", .title = "Intro", .status = .published, .published_at = "2024-01-20T14:30:00Z", .summary = "A guide", .tags = &.{ "guide" }, .text_content = "Intro prose.\n" },
+        .{ .entity_id = "guides/intro", .output_path = "guides/intro.html", .title = "Intro", .status = .published, .published_at = "2024-01-20T14:30:00Z", .summary = "A guide", .tags = &.{"guide"}, .text_content = "Intro prose.\n" },
     };
     var projection = try project(gpa, .{ .config = &config, .site_title = "Boris", .pages = &pages });
     defer projection.deinit(gpa);
