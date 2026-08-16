@@ -92,6 +92,7 @@ pub const Request = struct {
 
 const check_report_name = "editor-check.json";
 const impact_report_name = "editor-impact.json";
+const html_report_name = "html-build-report.json";
 const max_process_output = 16 * 1024 * 1024;
 const max_report_bytes = 32 * 1024 * 1024;
 
@@ -142,7 +143,13 @@ pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Reques
             try appendImpact(allocator, config.project_root, &document, &impact);
             structured_report = true;
         },
-        .validate, .html_build => {},
+        .validate, .html_build => if (try readGeneratedFile(allocator, io, config.project_root, html_report_name)) |bytes| {
+            var document = contracts.readHtmlBuildReport(allocator, bytes) catch return error.UnsupportedArtifact;
+            defer document.deinit();
+            report_version = try allocator.dupe(u8, document.version);
+            try appendStructuredProblems(allocator, config, request.mode, compiler_id, failure_class, &document, .build_report, &problems);
+            structured_report = true;
+        },
     }
 
     if (!structured_report or problems.items.len == 0) {
@@ -193,9 +200,9 @@ pub fn commandArgv(
     errdefer args.deinit(allocator);
     try args.append(allocator, boris_path);
     switch (request.mode) {
-        .validate => try args.appendSlice(allocator, &.{ "validate", "--input", "content" }),
+        .validate => try args.appendSlice(allocator, &.{ "validate", "--input", "content", "--report", ".boris/" ++ html_report_name }),
         .ir_build => try args.appendSlice(allocator, &.{ "build", "--input", "content", "--out", ".boris" }),
-        .html_build => try args.appendSlice(allocator, &.{ "build", "--input", "content", "--html-dir", "dist" }),
+        .html_build => try args.appendSlice(allocator, &.{ "build", "--input", "content", "--html-dir", "dist", "--report", ".boris/" ++ html_report_name }),
         .check => try args.appendSlice(allocator, &.{ "check", "--input", "content", "--format", "json", "--report", ".boris/" ++ check_report_name }),
         .impact => try args.appendSlice(allocator, &.{ "impact", request.impact_id.?, "--input", "content", "--format", "json", "--report", ".boris/" ++ impact_report_name }),
     }
@@ -220,7 +227,7 @@ fn readCompilerId(allocator: std.mem.Allocator, io: Io, config: Config) ![]const
 }
 
 fn prepareArtifactRoot(io: Io, project_root: []const u8, mode: Mode) !void {
-    if (mode != .ir_build and mode != .check and mode != .impact) return;
+    if (mode != .ir_build and mode != .check and mode != .impact and mode != .validate and mode != .html_build) return;
     var root = try Io.Dir.cwd().openDir(io, project_root, .{ .follow_symlinks = false });
     defer root.close(io);
     var artifact_dir = root.openDir(io, ".boris", .{ .follow_symlinks = false }) catch |err| switch (err) {
@@ -236,7 +243,7 @@ fn prepareArtifactRoot(io: Io, project_root: []const u8, mode: Mode) !void {
         .ir_build => "build-report.json",
         .check => check_report_name,
         .impact => impact_report_name,
-        else => unreachable,
+        .validate, .html_build => html_report_name,
     };
     artifact_dir.deleteFile(io, stale_name) catch |err| switch (err) {
         error.FileNotFound => {},
@@ -607,4 +614,12 @@ test "cooklang trees append the compiler selector; markdown trees do not" {
     defer allocator.free(md);
     try std.testing.expect(md.len >= 2);
     try std.testing.expect(!std.mem.eql(u8, md[md.len - 1], "--cooklang"));
+
+    const html = try commandArgv(allocator, "boris", .{ .mode = .html_build }, .markdown);
+    defer allocator.free(html);
+    var saw_report = false;
+    for (html) |arg| {
+        if (std.mem.eql(u8, arg, "--report")) saw_report = true;
+    }
+    try std.testing.expect(saw_report);
 }

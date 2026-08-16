@@ -612,7 +612,8 @@ test('Boris commands expose visible voice names and distinct exit classes', asyn
   await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Content or graph failure (exit 1)');
   await page.getByRole('button', { name: 'Validate project', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Usage or configuration failure (exit 2)');
-  await page.getByRole('button', { name: 'Build HTML', exact: true }).click();
+  await page.getByRole('button', { name: 'Build HTML', exact: true }).focus();
+  await page.keyboard.press('Enter');
   await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('I/O or system failure (exit 3)');
 });
 
@@ -2040,6 +2041,46 @@ test('.cook graph diagnostics are labeled position-approximate (#418 M7)', async
   });
   await page.getByRole('button', { name: 'Build diagnostics', exact: true }).click();
   await expect(page.getByText('Position approximate: graph diagnostic on adapted Markdown, not the .cook line')).toBeVisible();
+});
+
+test('theme layouts list closed slots and preview widths are named (#418 M8)', async ({ page }) => {
+  await installApi(page, {
+    files: [
+      { path: 'boris.json' },
+      { path: 'content/index.md' },
+      { path: 'themes/boris/layouts/main.html' },
+      { path: 'themes/boris/assets/css/site.css' }
+    ],
+    disk: '<html><body>{{title}}{{content}}{{nav}}</body></html>\n',
+    commands: {
+      html_build: commandResult('html_build', {
+        report_version: 'html-build-report-0.1.0',
+        problems: [{
+          severity: 'info', code: 'ILAYOUTSELECTED', message: 'layout rule id:index selected themes/boris/layouts/main.html',
+          remediation: '', source_path: 'index.md', line: 1, column: 1, id: 'index',
+          origin: 'build_report', position_confidence: 'exact', packet: 'code: ILAYOUTSELECTED'
+        }]
+      })
+    }
+  });
+  await page.getByRole('button', { name: 'themes/boris/layouts/main.html', exact: true }).click();
+  const theme = page.locator('.theme-pane');
+  await expect(theme.getByRole('heading', { name: 'Theme layout' })).toBeVisible();
+  await expect(theme).toContainText('Present:');
+  await expect(theme).toContainText('{{title}}');
+  await expect(theme).toContainText('{{content}}');
+  await expect(theme.getByRole('button', { name: 'Open themes/boris/assets/css/site.css', exact: true })).toBeVisible();
+  await expect(theme).toContainText('issue 557');
+
+  await page.getByRole('button', { name: 'Build HTML', exact: true }).click();
+  await expect(theme.getByRole('button', { name: /layout rule id:index selected/ })).toBeVisible();
+
+  await expect(page.getByRole('group', { name: 'Preview width' })).toBeVisible();
+  await page.getByRole('radio', { name: '375px', exact: true }).check();
+  await expect(page.getByRole('radio', { name: '375px', exact: true })).toBeChecked();
+  await expect(page.getByText('Accessibility review aid')).toBeVisible();
+  await page.getByText('Accessibility review aid').click();
+  await expect(page.getByText(/does not replace Voice Control/)).toBeVisible();
 });
 
 test('graph inspector refreshes after a successful diagnostics build (#418 M6)', async ({ page }) => {

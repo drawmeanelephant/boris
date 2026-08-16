@@ -246,3 +246,19 @@ The M7 gate adds:
 
 M7 deliberately does not add editor-local scaling, structured write-back,
 pantry, `.menu`, shopping lists, or nutrition/allergen claims.
+
+## M8 theme authoring
+
+Opening a `themes/**/*.html` layout shows a Theme pane: closed slots from
+`completion.json`, which of those tokens appear in the buffer, theme assets,
+and `ILAYOUTSELECTED` findings from the HTML `--report` after Validate or
+Build HTML. Fallback winners stay silent — that is
+[Boris issue 557](https://github.com/drawmeanelephant/boris/issues/557).
+
+Validate and HTML build now pass `--report .boris/html-build-report.json` so
+`ELAYOUT*` and `ILAYOUTSELECTED` are structured problems, not stderr-only.
+Preview widths 375 / 768 / 1440 resize the iframe only. The accessibility
+list is a review aid and says so.
+
+M8 deliberately does not invent layout-selection evidence, change the layout
+model, or claim a Voice Control certification.
