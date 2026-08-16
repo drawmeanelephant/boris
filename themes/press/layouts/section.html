@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" data-layout="section" data-theme="press">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{{title}} · Section · Press Notes</title>
+  <link rel="stylesheet" href="{{asset-url assets/css/press.css}}">
+  <link rel="icon" href="{{asset-url assets/img/press-mark.svg}}" type="image/svg+xml">
+</head>
+<body class="txp-body txp-section-body" data-layout="section">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="txp-header txp-header--compact" role="banner">
+    <div class="txp-container txp-header-inner">
+      <div class="txp-branding" aria-label="Press Notes">
+        <img class="txp-brand-mark txp-brand-mark--small" src="{{asset-url assets/img/press-mark.svg}}" width="38" height="38" alt="">
+        <span class="txp-site-name">Press Notes</span>
+      </div>
+      <div class="txp-header-trail">{{breadcrumb}}</div>
+    </div>
+  </header>
+
+  <main id="main-content" class="txp-container txp-section-layout" tabindex="-1" data-boris-search-root>
+    <section class="txp-paper txp-content txp-section-intro">
+      {{metadata}}
+      <article class="txp-article">
+        <div class="txp-article-content">
+          {{content}}
+        </div>
+      </article>
+      <section class="txp-page-children" aria-labelledby="section-children-heading">
+        <p class="txp-widget-title" id="section-children-heading">Pages in this section</p>
+        {{children}}
+      </section>
+    </section>
+    <aside class="txp-sidebar txp-section-aside" aria-label="Section navigation">
+      <section class="txp-widget txp-widget--nav">
+        <p class="txp-widget-title">All pages</p>
+        <nav class="txp-nav txp-nav--rail" aria-label="All notebook pages">{{nav}}</nav>
+      </section>
+      <section class="txp-widget">
+        <p class="txp-widget-title">Outline</p>
+        {{toc}}
+      </section>
+    </aside>
+  </main>
+
+  <footer class="txp-footer" role="contentinfo">{{footer}}</footer>
+</body>
+</html>

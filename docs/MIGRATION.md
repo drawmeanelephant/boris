@@ -16,7 +16,7 @@ grammar.
 |----------|------|
 | This guide | Author-facing adoption sequence |
 | [`fixtures/migration-site/`](../fixtures/migration-site/) | Contoso conversion fixture (~32 pages + theme) |
-| [`examples/reference-theme/`](../examples/reference-theme/) | Optional theme dogfood (Aside, Details, page-local assets, layout rules) |
+| [`examples/reference-site/`](../examples/reference-site/) | Optional theme dogfood (Aside, Details, page-local assets, layout rules) |
 | [`tools/migration-lab/`](../tools/migration-lab/) | Standalone **developer laboratories** (drafts + reports) |
 | [`README.md`](../README.md) | Product front door + five-minute build |
 
@@ -203,7 +203,7 @@ For experiments **in this repository**, do **not** replace root `content/`
 | Tree | Use when |
 |------|----------|
 | `fixtures/migration-site/` | Contoso migration (~32 pages): wiki, includes, Aside, deep paths, multi-target |
-| `examples/reference-theme/` | Polished theme surface: Details, page-local `.assets/`, multi-layout rules |
+| `examples/reference-site/` | Polished theme surface: Details, page-local `.assets/`, multi-layout rules |
 
 Minimal satellite:
 
@@ -330,12 +330,12 @@ in one copy-paste command:
 
 ```bash
 ./zig-out/bin/boris \
-  --input examples/reference-theme/content \
-  --theme examples/reference-theme/theme \
+  --input examples/reference-site/content \
+  --theme themes/reference \
   --layout-rule default id:index \
-    examples/reference-theme/theme/layouts/home.html \
+    themes/reference/layouts/home.html \
   --layout-rule default role:trunk \
-    examples/reference-theme/theme/layouts/section.html \
+    themes/reference/layouts/section.html \
   --html-dir test-output/reference-theme \
   --quiet
 
@@ -404,7 +404,7 @@ fixtures rather than inventing a second tutorial tree.
 | Feature | Product syntax / flag | Where to see it working |
 |---------|----------------------|-------------------------|
 | Aside | `<Aside kind="tip">…</Aside>` | `fixtures/migration-site/content/guides/asides.md`; reference `guides/components.md` |
-| Details | `<Details summary="…">…</Details>` | `examples/reference-theme/content/guides/components.md` |
+| Details | `<Details summary="…">…</Details>` | `examples/reference-site/content/guides/components.md` |
 | Includes | `{{include includes/….md}}` | `fixtures/migration-site/content/guides/includes.md` |
 | Wiki page links | `[[entity-id]]` / `[[entity-id\|label]]` | `…/guides/wiki-links.md` |
 | Wiki heading links | `[[entity-id#heading-id]]` | `…/guides/heading-fragments.md` |
@@ -766,7 +766,7 @@ Repository `.gitignore` already covers common product output roots such as
 | Wiki links | Guides / reference throughout |
 | Heading fragments | `guides/heading-fragments.md` |
 | Aside | `guides/asides.md` |
-| Details + page-local assets + layout rules | `examples/reference-theme/` |
+| Details + page-local assets + layout rules | `examples/reference-site/` |
 | Layouts + theme assets | Each fixture’s `theme/` |
 | Unicode | `special/cafe-notes.md` (ASCII path, wiki-linkable) |
 | Deep paths | `guides/deep/nested/path/note.md` |
@@ -791,12 +791,12 @@ When you only touch content, layouts, assets, and docs (as with this guide):
 
 # Reference theme smoke (Details, assets, layout rules)
 ./zig-out/bin/boris \
-  --input examples/reference-theme/content \
-  --theme examples/reference-theme/theme \
+  --input examples/reference-site/content \
+  --theme themes/reference \
   --layout-rule default id:index \
-    examples/reference-theme/theme/layouts/home.html \
+    themes/reference/layouts/home.html \
   --layout-rule default role:trunk \
-    examples/reference-theme/theme/layouts/section.html \
+    themes/reference/layouts/section.html \
   --html-dir test-output/reference-theme \
   --quiet
 
@@ -820,7 +820,7 @@ zig build --build-file tools/migration-lab/build.zig test
 | Doc | Role |
 |-----|------|
 | [`fixtures/migration-site/README.md`](../fixtures/migration-site/README.md) | Contoso fixture how-to |
-| [`examples/reference-theme/README.md`](../examples/reference-theme/README.md) | Theme dogfood commands |
+| [`examples/reference-site/README.md`](../examples/reference-site/README.md) | Theme dogfood commands |
 | [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) | Standalone labs |
 | [`README.md`](../README.md) | Product front door + CLI |
 | [`docs/STATUS.md`](STATUS.md) | Current phase |

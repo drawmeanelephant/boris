@@ -375,7 +375,8 @@ Current phase and known gaps live in [`docs/STATUS.md`](docs/STATUS.md).
 - [`tools/source-rag/`](tools/source-rag/) — source-code RAG exporter
 - [`tools/content-audit/`](tools/content-audit/) — standalone deterministic source-content audit tool
 - [`editor/`](editor/) — local compiler-backed editor
-- [`examples/`](examples/) — themes and dogfood fixtures
+- [`themes/`](themes/) — shipped first-class themes
+- [`examples/`](examples/) — sample sites and unfinished theme studies
 - [`CHANGELOG.md`](CHANGELOG.md) — release history
 
 ## License
