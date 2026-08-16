@@ -1,7 +1,9 @@
 # linux/amd64. Copy ReleaseSafe binaries built on Ubuntu (or a matching
 # cross target) into bin/ next to this file before `docker build` /
 # `wrangler deploy`.
-FROM debian:bookworm-slim
+# Match GitHub Actions ubuntu-latest (24.04) so a ReleaseSafe host binary
+# does not trip a glibc-too-old base.
+FROM ubuntu:24.04
 
 RUN groupadd --gid 65532 boris \
     && useradd --uid 65532 --gid 65532 --home-dir /nonexistent --shell /usr/sbin/nologin boris \

@@ -36,7 +36,7 @@ cp zig-out/bin/boris zig-out/bin/boris-job-runner "$EX/bin/"
 note "docker build"
 docker build -f "$EX/Dockerfile" -t boris-job-runner:test "$EX"
 
-OUT=".zig-cache/job-runner-image"
+OUT="$ROOT/.zig-cache/job-runner-image"
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
@@ -65,8 +65,7 @@ run_once() {
     -v "$OUT:/out" \
     --entrypoint /usr/local/bin/boris-job-runner \
     boris-job-runner:test \
-    --once --archive /in.tar --result-json /out/"$(basename "$json")" --work-root /tmp/boris-jobs \
-    || true
+    --once --archive /in.tar --result-json /out/"$(basename "$json")" --work-root /tmp/boris-jobs
 }
 
 note "valid fixture through the image"
@@ -86,7 +85,9 @@ pass "valid fixture compiled inside the image"
 note "poisoned fixture through the image"
 set +e
 run_once "$OUT/poisoned.tar" "$OUT/poisoned.json"
+poisoned_rc=$?
 set -e
+[[ "$poisoned_rc" -eq 1 ]] || fail "poisoned image job exited $poisoned_rc, expected 1"
 [[ -f "$OUT/poisoned.json" ]] || fail "poisoned.json not written"
 python3 - "$OUT/poisoned.json" <<'PY'
 import json, sys
