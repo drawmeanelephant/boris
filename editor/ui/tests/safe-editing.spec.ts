@@ -11,6 +11,7 @@ type MockOptions = {
   authoring?: Array<Record<string, unknown>>;
   graph?: Array<Record<string, unknown>>;
   files?: Array<{ path: string }>;
+  inputMode?: 'markdown' | 'cooklang' | 'textile' | 'mixed' | 'empty';
   previewRebuilds?: Array<Record<string, unknown>>;
 };
 
@@ -112,7 +113,7 @@ async function installApi(page: Page, options: MockOptions = {}) {
     body: JSON.stringify({
       status: 'ok',
       editor_id: 'boris-editor/0.1.0',
-      project: { content: true, default_layout: true, publication_profile: true }
+      project: { content: true, default_layout: true, publication_profile: true, input_mode: options.inputMode ?? 'markdown' }
     })
   }));
   await page.route('**/api/version', route => route.fulfill({
@@ -1969,6 +1970,76 @@ test('Run impact on this page uses the current graph entity (#418 M6)', async ({
   expect((await request).postDataJSON()).toMatchObject({ mode: 'impact', impact_id: 'guides/intro' });
   await expect(page.getByRole('heading', { name: 'Impact results' })).toBeVisible();
   await expect(page.getByText('page: guides/intro')).toBeVisible();
+});
+
+test('Cooklang trees expose a read-only recipe facet and recipeRef navigation (#418 M7)', async ({ page }) => {
+  const cookGraph = graphPayload();
+  const graph = cookGraph.graph as {
+    nodes: Array<Record<string, unknown>>;
+  };
+  graph.nodes[0] = {
+    ...graph.nodes[0],
+    id: 'carbonara',
+    sourcePath: 'carbonara.cook',
+    title: 'Spaghetti Carbonara',
+    recipe: {
+      ingredients: [
+        { name: 'spaghetti', quantity: { amount: '400', unit: 'g' }, preparation: '', recipeRef: null },
+        { name: 'pepper-oil', quantity: { amount: '1', unit: 'tbsp' }, preparation: '', recipeRef: 'sauces/pepper-oil' }
+      ],
+      cookware: [{ name: 'large pot', quantity: { amount: '', unit: '' } }],
+      timers: [{ name: 'pasta', quantity: { amount: '9', unit: 'minutes' } }]
+    }
+  };
+  graph.nodes.push({
+    index: 3, id: 'sauces/pepper-oil', sourcePath: 'sauces/pepper-oil.cook', role: 'satellite',
+    parent: 'index', parentIndex: 2, title: 'Pepper oil', status: 'published', tags: [], bodyOffset: 20,
+    recipe: { ingredients: [], cookware: [], timers: [] }
+  });
+  await installApi(page, {
+    inputMode: 'cooklang',
+    files: [
+      { path: 'boris.json' },
+      { path: 'content/carbonara.cook' },
+      { path: 'content/sauces/pepper-oil.cook' }
+    ],
+    graph: [cookGraph]
+  });
+  await expect(page.getByText(/Cooklang tree/)).toBeVisible();
+  await page.getByRole('button', { name: 'Create file', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Create file' }).getByRole('textbox', { name: 'New file path' })).toHaveValue('content/new-recipe.cook');
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('button', { name: 'content/carbonara.cook', exact: true }).click();
+  const recipe = page.locator('.recipe-pane');
+  await expect(recipe.getByRole('heading', { name: 'Recipe' })).toBeVisible();
+  await expect(recipe).toContainText('spaghetti');
+  await expect(recipe).toContainText('400 g');
+  await expect(recipe.getByRole('button', { name: 'Print this recipe', exact: true })).toBeVisible();
+  await expect(recipe).toContainText('Scaling is not available');
+  const openRequest = page.waitForRequest('**/api/files/open');
+  await recipe.getByRole('button', { name: 'Go to recipe sauces/pepper-oil', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  expect((await openRequest).postDataJSON()).toMatchObject({ path: 'content/sauces/pepper-oil.cook' });
+});
+
+test('.cook graph diagnostics are labeled position-approximate (#418 M7)', async ({ page }) => {
+  await installApi(page, {
+    inputMode: 'cooklang',
+    files: [{ path: 'content/carbonara.cook' }],
+    commands: {
+      ir_build: commandResult('ir_build', {
+        exit_code: 1, failure_class: 'content',
+        problems: [{
+          severity: 'error', code: 'EREFERENCEMISSING', message: 'Missing recipe.', remediation: '',
+          source_path: 'carbonara.cook', line: 4, column: 1, id: null, origin: 'build_report',
+          position_confidence: 'best_effort', packet: 'code: EREFERENCEMISSING'
+        }]
+      })
+    }
+  });
+  await page.getByRole('button', { name: 'Build diagnostics', exact: true }).click();
+  await expect(page.getByText('Position approximate: graph diagnostic on adapted Markdown, not the .cook line')).toBeVisible();
 });
 
 test('graph inspector refreshes after a successful diagnostics build (#418 M6)', async ({ page }) => {

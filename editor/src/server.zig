@@ -400,6 +400,7 @@ fn serveHealth(io: Io, allocator: std.mem.Allocator, request: *http.Server.Reque
             .content = found.content,
             .default_layout = found.default_layout,
             .publication_profile = found.publication_profile,
+            .input_mode = @tagName(found.input_mode),
         },
     };
     const bytes = try std.json.Stringify.valueAlloc(allocator, response, .{});
