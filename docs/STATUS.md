@@ -78,7 +78,7 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | GitHub Pages | **Shipped and verified** — normalized project/root/custom-domain identity, exact public artifact boundary, retained target-local evidence, optional bounded post-deploy observer. Operator path: [`github-pages.md`](github-pages.md). |
 | Standard.site / AT Protocol | **Shipped for first testers** — offline plan/records/verify, opt-in app-password login, one-shot publish, recorded passing bsky.social live smoke. Browser OAuth is implemented; bsky.social does not grant `site.standard.authFull` (exit 6). Operator path: [`standard-site.md`](standard-site.md). |
 | Publication evidence | **Done** — artifacts → checks → claims → Touch Atlas → Proof Pack, staged, deterministic. |
-| Nostr NIP-23 | **CLI shipped, not a verified target** — `boris nostr plan` / `sign` / `publish` (BIP-340, bounded RFC-6455, per-relay verdict). Plan emits NIP-19 `naddr` / `npub`. `boris --profile` emits `nostr:naddr` alternate links on eligible pages. No location adapter, no Proof Pack, no live-smoke gate. Guide: [`content/guides/nostr-publication.md`](../content/guides/nostr-publication.md). |
+| Nostr NIP-23 | **CLI shipped, not a verified target** — `boris nostr plan` / `sign` / `publish` (BIP-340, bounded RFC-6455, per-relay verdict). Plan emits NIP-19 `naddr` / `npub`. `boris --profile` emits `nostr:naddr` alternate links on eligible pages. Recorded first-tester live-smoke fixture (optional evidence, not a gate). No location adapter, no Proof Pack, no live-smoke gate. Guide: [`content/guides/nostr-publication.md`](../content/guides/nostr-publication.md). |
 
 ### Editor
 
@@ -104,11 +104,6 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 |---|---|
 | Cloudflare Containers (#300) | Open. Native Boris behind a Worker. Not a static rehost. |
 | Freestanding Wasm (#301) | Open. Compiler-shaped embedding bet. |
-| Standard.site HTML verify emit ([#533](https://github.com/drawmeanelephant/boris/issues/533)) | Production HTML never emits verification surfaces. Plan/publish do not wait on it. |
-| Standard.site `boris init` profile ([#528](https://github.com/drawmeanelephant/boris/issues/528)) | Open. |
-| ATProto DPoP wire ([#536](https://github.com/drawmeanelephant/boris/issues/536)) | Open. |
-| Standard.site profile `pds` ([#537](https://github.com/drawmeanelephant/boris/issues/537)) | Contract treats it as optional; publish currently requires it. |
-| publication-profile “Pages only” prose ([#534](https://github.com/drawmeanelephant/boris/issues/534)) | Filed contract drift. The target registry is already `github-pages` \| `standard-site`. |
 | Doctor | **Internal kernel only** — `src/doctor.zig` audits a rendered snapshot. No public `boris doctor` command. The old design note was retired; this row is the remaining card. |
 
 ### Common commands
@@ -155,8 +150,8 @@ context, test-throughput audit) is **done**. It is not relisted as upcoming.
 | 3 | Archive presentation fixes | **Evidence-gated** | Small, framework-free HTML/CSS or layout fixes only after the browser review finds a reproducible issue. |
 | 4 | Migration-guide review findings | **Evidence complete — review remains** | Review the retained MDX/frontmatter/link/asset findings and four generated-site missing routes before claiming a clean migration. |
 | 5 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
-| 6 | Standard.site HTML verify emit | **Open [#533](https://github.com/drawmeanelephant/boris/issues/533)** | Production HTML must emit verification surfaces before `verify` against a real `dist/` can pass. |
-| 7 | Nostr as a verified target | **CLI shipped; verified-target work remains [#454](https://github.com/drawmeanelephant/boris/issues/454)** | plan/sign/publish exist. Location adapter, Proof Pack, and live-smoke are not implied. |
+| 6 | Standard.site HTML verify emit | **Shipped [#569](https://github.com/drawmeanelephant/boris/pull/569)** | `boris --profile` emits verification surfaces from the HTML build. |
+| 7 | Nostr as a verified target | **CLI shipped; verified-target work remains [#454](https://github.com/drawmeanelephant/boris/issues/454)** | plan/sign/publish exist. Recorded first-tester fixture is [#583](https://github.com/drawmeanelephant/boris/issues/583). Location adapter, Proof Pack, and live-smoke **gate** remain [#584](https://github.com/drawmeanelephant/boris/issues/584) and are not implied. |
 | 8 | Cloudflare embedding | **Open [#300](https://github.com/drawmeanelephant/boris/issues/300) / [#301](https://github.com/drawmeanelephant/boris/issues/301)** | Container-backed native builds and freestanding Wasm. Outside the static-target matrix. |
 
 ## Release bookkeeping

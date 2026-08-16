@@ -1,0 +1,72 @@
+{
+  "format": "boris-nostr-publish-report",
+  "schema_version": 1,
+  "plan": {
+    "format": "boris-nostr-publication-plan",
+    "schema_version": 1,
+    "digest": "b6c8bbe29c1b9248b73851220e91c7089f20cf8e4c6798fc75361a1888f83022"
+  },
+  "bundle": {
+    "format": "boris-nostr-signed-bundle",
+    "schema_version": 1,
+    "digest": "e876874a0985d9a6e4dd850eb58f41f6e66c186cb87c4714dd98510e084e69a5"
+  },
+  "signer": {
+    "pubkey": "b6e744290c2e00b4d5cc96dfae0b61e52707a800f39e0d8d6e326a3e9b67d049"
+  },
+  "classification": "partial",
+  "relays": [
+    {
+      "url": "wss://nos.lol",
+      "outcome": "accepted",
+      "attempts": 1,
+      "events": [
+        {
+          "entity_id": "smoke",
+          "event_id": "0ef0b1001237376f9152098b1605dea991f34f874b6c7fc6de5d52d037467dfa",
+          "result": "accepted",
+          "message": ""
+        }
+      ]
+    },
+    {
+      "url": "wss://nostr.mom",
+      "outcome": "accepted",
+      "attempts": 1,
+      "events": [
+        {
+          "entity_id": "smoke",
+          "event_id": "0ef0b1001237376f9152098b1605dea991f34f874b6c7fc6de5d52d037467dfa",
+          "result": "accepted",
+          "message": ""
+        }
+      ]
+    },
+    {
+      "url": "wss://relay.damus.io",
+      "outcome": "error",
+      "attempts": 1,
+      "events": [
+        {
+          "entity_id": "",
+          "event_id": "",
+          "result": "error",
+          "message": "BadStatus"
+        }
+      ]
+    },
+    {
+      "url": "wss://relay.primal.net",
+      "outcome": "accepted",
+      "attempts": 1,
+      "events": [
+        {
+          "entity_id": "smoke",
+          "event_id": "0ef0b1001237376f9152098b1605dea991f34f874b6c7fc6de5d52d037467dfa",
+          "result": "accepted",
+          "message": ""
+        }
+      ]
+    }
+  ]
+}
