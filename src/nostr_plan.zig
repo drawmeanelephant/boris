@@ -497,7 +497,7 @@ fn runFixture(profile_path: []const u8) !Result {
             .cook => .cook,
         },
         .quiet = true,
-        .location = &publication.location,
+        .location = &publication.github_pages,
         .pubkey = config.pubkey,
         .articles = config.articles,
         .relays = config.relays,

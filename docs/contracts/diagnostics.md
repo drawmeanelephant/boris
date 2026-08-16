@@ -161,6 +161,7 @@ See [cooklang-compatibility.md](cooklang-compatibility.md).
 | `ELAYOUTASSET` | error | Layout template references an invalid or excessive asset url | `assemble.loadLayout` / `theme.requireReferencedAssets` → HTML load/validate |
 | `ELAYOUTRULE` | error | Layout-rule selection failure (ambiguous glob, duplicate/invalid selector, mixed theme roots, or rule bounds) | `layout_select` → HTML load/validate |
 | `ELAYOUT` | error | Generic layout failure (structural bounds, invalid UTF-8, …) | HTML load/validate fallback |
+| `EVERIFICATIONHEAD` | warning | Standard.site verification is configured but a selected layout omits the compiler-owned `{{head}}` slot, so eligible pages cannot emit their document AT-URI links; the verification report records them as `not_verified` | `compile.compilePagesInner` → HTML publish / validate |
 | `ILAYOUTSELECTED` | info | A layout rule (`id:` / `glob:` / `role:`) selected a non-fallback layout for a page; records the selection outcome (selector, winning layout path) on the page's source path. Never affects exit codes or `errorCount`. | `compile.compilePagesInner` per-page selection → HTML report |
 | `EUSAGE` | error | CLI usage / flag error (unknown flag, conflicts, malformed options) | CLI (exit 2; not in build-report) |
 | `EIO` | error | I/O or system failure (missing content root, unreadable file, unexpected runtime) | pipeline / CLI (exit 3 when pure I/O) |
@@ -261,6 +262,26 @@ If a precise column is unknown, use column `1`.
 | `1` | Content / validation failed: one or more content `error` diagnostics |
 | `2` | Usage / CLI error (`EUSAGE`) |
 | `3` | I/O or system failure (`EIO`) |
+| `4` | Authorization denied: the one-shot Standard.site publish grant was denied in the browser (`standard-site publish`) |
+| `5` | Timeout: the Standard.site publish callback, browser, or network deadline expired |
+| `6` | Compatibility: the Standard.site publish localhost client or grant was rejected by the authorization server |
+| `7` | Partial publication: `standard-site publish` landed some records but some failed; the evidence records exactly what happened |
+| `8` | Verification: `standard-site publish` failed a binding or plan check (plan drift, digest, DID, PDS, collection, rkey, callback identity) with zero writes, or `standard-site verify` found a missing/mismatched emitted surface (head link or well-known file) |
+| `9` | Session: `standard-site publish`/`login`/`sessions`/`logout` failed at the persistent-session layer — no stored session, revoked or ambiguous refresh, an authority change, or a corrupt/locked/unusable store |
+
+Exit codes `4`–`9` belong exclusively to the explicit `standard-site` family
+(`publish`, `login`, `sessions`, `logout`, `smoke`, `verify`);
+build/validate/watch/plan/init never emit any of them. On `7`, the publish
+evidence or the smoke result artifact is still written (stdout or `--out`) so
+the operator can see exactly which records landed or were left behind; on `9`
+nothing was published and the operator re-authorizes with
+`standard-site login` (see [`atproto-sessions.md`](atproto-sessions.md)). The
+`smoke` command reuses these codes for its phases: `7` marks a partial write
+or a cleanup failure, `8` marks a namespace collision or a readback/surface
+mismatch (see [`atproto-live-smoke.md`](atproto-live-smoke.md)). The offline
+`standard-site verify` command emits `8` when any emitted head link or the
+well-known file (or its base-path sideband) does not match the freshly
+rendered projection, with zero writes and zero network.
 
 Rules:
 

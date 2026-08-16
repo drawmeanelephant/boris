@@ -167,6 +167,14 @@ const modules = [_]Module{
     .{ .name = "atproto_browser_std.zig", .class = .other },
     .{ .name = "atproto_interactive_std.zig", .class = .other },
     .{ .name = "atproto_loopback_std.zig", .class = .other },
+    .{ .name = "atproto_session_store.zig", .class = .{ .emitter = .{
+        .encoder = .json_out,
+        .note = "persistent session wire documents; the 0600 JSON built with json_out, never printed",
+    } }, .source = @embedFile("atproto_session_store.zig") },
+    .{ .name = "atproto_session_std.zig", .class = .other },
+    // Network client, not an emitter: XRPC request envelopes are transient
+    // wire messages to the PDS, audited by the offline mock suite.
+    .{ .name = "atproto_xrpc.zig", .class = .other },
     .{ .name = "cache.zig", .class = .other },
     .{ .name = "cli.zig", .class = .other },
     .{ .name = "compile.zig", .class = .other },
@@ -248,6 +256,26 @@ const modules = [_]Module{
     .{ .name = "scanner.zig", .class = .other },
     .{ .name = "site_url.zig", .class = .other },
     .{ .name = "source_io.zig", .class = .other },
+    .{ .name = "standard_site.zig", .class = .{ .emitter = .{
+        .encoder = .json_out,
+        .note = "deterministic Standard.site projection plan; publication and document payloads delegate to json_out",
+    } }, .source = @embedFile("standard_site.zig") },
+    .{ .name = "standard_site_emit.zig", .class = .{ .emitter = .{
+        .encoder = .json_out,
+        .note = "Standard.site verification report; document and well-known emission fields delegate to json_out",
+    } }, .source = @embedFile("standard_site_emit.zig") },
+    .{ .name = "standard_site_reconcile.zig", .class = .{ .emitter = .{
+        .encoder = .json_out,
+        .note = "Standard.site publish evidence; per-record intended and observed claims delegate to json_out",
+    } }, .source = @embedFile("standard_site_reconcile.zig") },
+    .{ .name = "standard_site_publish.zig", .class = .{ .emitter = .{
+        .encoder = .json_out,
+        .note = "Standard.site publish orchestration; evidence and redacted human summary delegate to json_out",
+    } }, .source = @embedFile("standard_site_publish.zig") },
+    .{ .name = "standard_site_smoke.zig", .class = .{ .emitter = .{
+        .encoder = .json_out,
+        .note = "Standard.site live-smoke result; phase outcomes and redacted summary delegate to json_out",
+    } }, .source = @embedFile("standard_site_smoke.zig") },
     .{ .name = "structured_out.zig", .class = .other },
     .{ .name = "svg_policy.zig", .class = .other },
     .{ .name = "target.zig", .class = .other },

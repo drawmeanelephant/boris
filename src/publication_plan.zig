@@ -10,6 +10,7 @@ const github_pages = @import("github_pages.zig");
 const json_out = @import("json_out.zig");
 const nostr_mod = @import("nostr.zig");
 const publication_profile = @import("publication_profile.zig");
+const standard_site = @import("standard_site.zig");
 
 pub const artifact_format = "boris-publication-plan";
 pub const schema_version: u32 = 1;
@@ -39,15 +40,48 @@ pub fn render(gpa: std.mem.Allocator, plan: *const publication_profile.Publicati
     }
     if (plan.publication) |publication| {
         try out.appendSlice(gpa, ",\n  \"publication\": {\n    \"target\": ");
-        try json_out.writeString(&out, gpa, github_pages.target_name);
-        try out.appendSlice(gpa, ",\n    \"base_url\": ");
-        try json_out.writeString(&out, gpa, publication.location.base_url);
-        try out.appendSlice(gpa, ",\n    \"origin\": ");
-        try json_out.writeString(&out, gpa, publication.location.origin);
-        try out.appendSlice(gpa, ",\n    \"base_path\": ");
-        try json_out.writeString(&out, gpa, publication.location.base_path);
-        try out.appendSlice(gpa, ",\n    \"site_kind\": ");
-        try json_out.writeString(&out, gpa, publication.location.site_kind.name());
+        switch (publication) {
+            .github_pages => |location| {
+                try json_out.writeString(&out, gpa, github_pages.target_name);
+                try out.appendSlice(gpa, ",\n    \"base_url\": ");
+                try json_out.writeString(&out, gpa, location.base_url);
+                try out.appendSlice(gpa, ",\n    \"origin\": ");
+                try json_out.writeString(&out, gpa, location.origin);
+                try out.appendSlice(gpa, ",\n    \"base_path\": ");
+                try json_out.writeString(&out, gpa, location.base_path);
+                try out.appendSlice(gpa, ",\n    \"site_kind\": ");
+                try json_out.writeString(&out, gpa, location.site_kind.name());
+            },
+            .standard_site => |config| {
+                try json_out.writeString(&out, gpa, standard_site.target_name);
+                try out.appendSlice(gpa, ",\n    \"base_url\": ");
+                try json_out.writeString(&out, gpa, config.location.base_url);
+                try out.appendSlice(gpa, ",\n    \"origin\": ");
+                try json_out.writeString(&out, gpa, config.location.origin);
+                try out.appendSlice(gpa, ",\n    \"base_path\": ");
+                try json_out.writeString(&out, gpa, config.location.base_path);
+                try out.appendSlice(gpa, ",\n    \"did\": ");
+                try json_out.writeString(&out, gpa, config.did);
+                try out.appendSlice(gpa, ",\n    \"pds_origin\": ");
+                if (config.pds_origin) |pds| {
+                    try json_out.writeString(&out, gpa, pds);
+                } else {
+                    try json_out.writeNull(&out, gpa);
+                }
+                try out.appendSlice(gpa, ",\n    \"name\": ");
+                try writeOptionalString(&out, gpa, config.name);
+                try out.appendSlice(gpa, ",\n    \"description\": ");
+                try writeOptionalString(&out, gpa, config.description);
+                try out.appendSlice(gpa, ",\n    \"show_in_discover\": ");
+                try json_out.writeBool(&out, gpa, config.show_in_discover);
+                try out.appendSlice(gpa, ",\n    \"include\": ");
+                try writeStringArray(&out, gpa, config.include);
+                try out.appendSlice(gpa, ",\n    \"exclude\": ");
+                try writeStringArray(&out, gpa, config.exclude);
+                try out.appendSlice(gpa, ",\n    \"prune\": ");
+                try json_out.writeBool(&out, gpa, config.prune);
+            },
+        }
         try out.appendSlice(gpa, "\n  }");
     }
     try out.appendSlice(gpa, ",\n  \"targets\": [");
@@ -236,6 +270,15 @@ fn writeOptionalUsize(out: *std.ArrayList(u8), gpa: std.mem.Allocator, value: ?u
     }
 }
 
+fn writeStringArray(out: *std.ArrayList(u8), gpa: std.mem.Allocator, values: []const []const u8) !void {
+    try out.appendSlice(gpa, "[");
+    for (values, 0..) |value, index| {
+        if (index > 0) try out.append(gpa, ',');
+        try json_out.writeString(out, gpa, value);
+    }
+    try out.appendSlice(gpa, "]");
+}
+
 // --- focused renderer and schema tests ------------------------------------
 
 fn readFixture(path: []const u8) ![]u8 {
@@ -283,6 +326,45 @@ test "GitHub Pages publication plan matches the exact golden bytes" {
         "docs/contracts/fixtures/publication-plan/github-pages/profile.json",
         "docs/contracts/fixtures/publication-plan/github-pages/expected/plan.json",
     );
+}
+
+test "Standard.site publication plan matches the exact golden bytes" {
+    try renderFixture(
+        "docs/contracts/fixtures/publication-plan/standard-site/profile.json",
+        "docs/contracts/fixtures/publication-plan/standard-site/expected/plan.json",
+    );
+}
+
+test "Standard.site profile adds the AT identity facts to the normalized plan" {
+    const source =
+        "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"site\":{\"url\":\"https://docs.example.com\",\"title\":\"Boris\"},\"publication\":{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com\",\"origin\":\"https://docs.example.com\",\"base_path\":\"\",\"did\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"name\":\"Boris on the Atmosphere\",\"show_in_discover\":true,\"prune\":true},\"targets\":[{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}]}";
+    var request = try parseProfile(source, .{});
+    defer request.deinit(std.testing.allocator);
+    const bytes = try render(std.testing.allocator, &request.plan);
+    defer std.testing.allocator.free(bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"target\": \"standard-site\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"did\": \"did:plc:ewvi7nxzyoun6zhxrhs64oiz\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"name\": \"Boris on the Atmosphere\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"show_in_discover\": true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"prune\": true") != null);
+}
+
+test "Standard.site profile rejects an invalid or missing DID before planning" {
+    const missing_did =
+        "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"publication\":{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com\",\"origin\":\"https://docs.example.com\",\"base_path\":\"\"},\"targets\":[{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}]}";
+    const bad_did =
+        "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"publication\":{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com\",\"origin\":\"https://docs.example.com\",\"base_path\":\"\",\"did\":\"not-a-did\"},\"targets\":[{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}]}";
+    try std.testing.expectError(error.MissingField, parseProfile(missing_did, .{}));
+    try std.testing.expectError(error.InvalidPublication, parseProfile(bad_did, .{}));
+}
+
+test "Standard.site publication requires one public target and matching site URL" {
+    const no_public =
+        "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"publication\":{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com\",\"origin\":\"https://docs.example.com\",\"base_path\":\"\",\"did\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\"},\"targets\":[{\"name\":\"preview\",\"output\":\"dist\",\"layout\":\"layouts/main.html\"}]}";
+    const mismatched =
+        "{\"format\":\"boris-publication-profile\",\"schema_version\":1,\"site\":{\"url\":\"https://elsewhere.example\"},\"publication\":{\"target\":\"standard-site\",\"base_url\":\"https://docs.example.com\",\"origin\":\"https://docs.example.com\",\"base_path\":\"\",\"did\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\"},\"targets\":[{\"name\":\"public\",\"output\":\"dist\",\"public\":true,\"layout\":\"layouts/main.html\"}]}";
+    try std.testing.expectError(error.PublicationRequiresPublicTarget, parseProfile(no_public, .{}));
+    try std.testing.expectError(error.PublicationSiteMismatch, parseProfile(mismatched, .{}));
 }
 
 test "repeated rendering is byte-identical and does not expose workspace state" {
@@ -399,6 +481,24 @@ test "GitHub Pages rendered plan conforms to its published schema" {
     try validator.validate(schema.value, document.value);
 }
 
+test "Standard.site rendered plan conforms to its published schema" {
+    const source = try readFixture("docs/contracts/fixtures/publication-plan/standard-site/profile.json");
+    defer std.testing.allocator.free(source);
+    const schema_bytes = try readFixture("docs/contracts/schemas/publication-plan-1.schema.json");
+    defer std.testing.allocator.free(schema_bytes);
+    var request = try parseProfile(source, .{});
+    defer request.deinit(std.testing.allocator);
+    const plan_bytes = try render(std.testing.allocator, &request.plan);
+    defer std.testing.allocator.free(plan_bytes);
+
+    var schema = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, schema_bytes, .{});
+    defer schema.deinit();
+    var document = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, plan_bytes, .{});
+    defer document.deinit();
+    const validator: SchemaValidator = .{ .root = schema.value };
+    try validator.validate(schema.value, document.value);
+}
+
 const SchemaError = error{ SchemaViolation, UnsupportedRef, MissingDefs, MissingDef, UnsupportedSchema };
 
 const SchemaValidator = struct {
@@ -447,6 +547,15 @@ const SchemaValidator = struct {
 
     fn validate(self: @This(), schema_in: std.json.Value, document: std.json.Value) SchemaError!void {
         const schema = try self.resolve(schema_in);
+        if (schema.object.get("oneOf")) |alternatives| {
+            var matched = false;
+            for (alternatives.array.items) |alternative| {
+                self.validate(alternative, document) catch continue;
+                matched = true;
+                break;
+            }
+            if (!matched) return error.SchemaViolation;
+        }
         if (schema.object.get("const")) |constant| {
             if (!scalarEqual(constant, document)) return error.SchemaViolation;
         }

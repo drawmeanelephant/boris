@@ -1,11 +1,14 @@
 # Oliver renderer contract (pin, seam, upgrade)
 
-**Status:** normative — Markdown → HTML rendering and the Cooklang seam  \
-**Module:** [`src/render.zig`](../../src/render.zig) (Markdown → HTML) and
+**Status:** normative — Markdown → HTML rendering, the semantic plain-text
+projection, and the Cooklang seam  \
+**Module:** [`src/render.zig`](../../src/render.zig) (Markdown → HTML and
+plain text) and
 [`src/cooklang_seam.zig`](../../src/cooklang_seam.zig) (`.cook` parsing). Both
 consume the single `oliver` pin.  \
 **Upstream:** <https://github.com/drawmeanelephant/oliver>  \
 **Related:** [html-output.md](html-output.md), [heading-ids.md](heading-ids.md),
+[plain-text-projection.md](plain-text-projection.md),
 [parallel-rendering.md](parallel-rendering.md),
 [includes-and-wiki-links.md](includes-and-wiki-links.md)
 
@@ -28,7 +31,10 @@ Boris owns everything outside the seam, exactly as before:
 `src/render.zig` is the **only** place Boris touches Oliver's API. Production
 Markdown bodies go through `render.render(md, arena)` with the same Whiteboard
 arena lifetime contract the previous renderer's `Html` view had: returned bytes
-are valid until `arena.reset(.free_all)`.
+are valid until `arena.reset(.free_all)`. The same typed document also feeds
+`render.renderPlainText(md, arena)`, which walks it (never re-parses Markdown,
+never strips HTML) into the deterministic semantic plain-text projection — see
+[`plain-text-projection.md`](plain-text-projection.md).
 
 ## Pinned revision (exact)
 

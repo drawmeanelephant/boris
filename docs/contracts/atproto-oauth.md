@@ -1,8 +1,10 @@
 # AT Protocol OAuth core contract
 
-**Status:** normative foundation slice; DID/handle authority discovery and one
-native, one-shot authorization-code flow are implemented. Session persistence,
-token refresh, and record publication remain future adapters.
+**Status:** normative foundation slice; DID/handle authority discovery, the
+native one-shot authorization-code flow, durable DPoP-bound session
+persistence and refresh ([`atproto-sessions.md`](atproto-sessions.md)), and
+record publication ([`standard-site-reconciliation.md`](standard-site-reconciliation.md))
+are implemented.
 
 This contract defines Boris's portable AT Protocol OAuth cryptographic core and
 the boundary that future local interactive publishing must preserve. It adds
@@ -482,6 +484,18 @@ flow follows the current
 expected DID, resolved PDS, authorization-server issuer, exact client ID,
 granted scopes, tokens, and DPoP key bound as one session.
 
+`include:site.standard.authFull` is a third-party permission set: the
+account's authorization server must register it, or the grant will omit it and
+the token exchange fails closed as a compatibility error. As of 2026-08-15,
+bsky.social's authorization server issues only Bluesky's own permission sets,
+so a browser authorization of a bsky.social account succeeds while the returned
+scope lacks `include:site.standard.authFull`; Boris rejects it
+(`InvalidTokenResponse`, exit 6) rather than publishing with a session that
+cannot write `site.standard.*` records. Publishing against bsky.social
+therefore requires either a PDS whose authorization server supports the
+Standard.site permission set or a different mechanism entirely — Boris is
+OAuth-only and never accepts app passwords.
+
 Local interactive v1 uses an ephemeral IPv4 loopback callback and the ATProto
 localhost client-metadata convention. Authorization-server support for that
 convention is optional. Rejection must produce an explicit compatibility error;
@@ -492,8 +506,9 @@ client profile.
 Authorization-server and future PDS nonces are separate per-origin state. A
 `use_dpop_nonce` response permits one retry with the newly supplied nonce and a
 fresh proof. Refresh tokens are treated as rotating, single-use credentials;
-future persistence must lock refresh, durably mark an in-flight exchange, and
-fail closed after an ambiguous timeout.
+the persistent session layer serializes refresh behind a process-safe lock,
+durably marks rotation through fail-closed replacement, and fails closed after
+an ambiguous timeout — see [`atproto-sessions.md`](atproto-sessions.md).
 
 ## Test and acceptance surface
 
@@ -526,12 +541,15 @@ separate recorded manual gate using dedicated test identities.
 
 ## Explicitly not implemented
 
-This is not a complete publishing client. The native library flow can open a
-browser, listen once on loopback, issue PAR, and exchange an authorization code,
-but no CLI surface invokes it. It does not render authorization UI, refresh
-tokens, persist sessions or credentials, resume interrupted attempts, publish
-Standard.site/XRPC records, prune remote state, authenticate CI, or implement
-generic OAuth/DID provider support. No live-network smoke is in CI; a stable
+The CLI now invokes this flow through `standard-site login` and
+`standard-site publish`, and the session layer persists and refreshes the
+resulting DPoP-bound session
+([`atproto-sessions.md`](atproto-sessions.md)). The reconciler publishes
+Standard.site/XRPC records and can prune remote state under explicit authority
+([`standard-site-reconciliation.md`](standard-site-reconciliation.md)). Still
+not implemented: authorization UI rendering, resuming an interrupted in-flight
+authorization, app passwords, CI credential distribution, and generic
+OAuth/DID provider support. No live-network smoke is in CI; a stable
 non-personal public fixture was not identified, so this slice keeps all tests
 offline rather than turning mutable public identity state into normative test
 truth.

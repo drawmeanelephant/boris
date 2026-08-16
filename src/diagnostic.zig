@@ -12,11 +12,24 @@ const std = @import("std");
 /// - 1 content validation error
 /// - 2 usage / CLI error
 /// - 3 I/O or system error
+/// - 4 authorization denied (browser denial of the one-shot OAuth grant)
+/// - 5 timeout (callback, browser, or network deadline)
+/// - 6 compatibility (localhost-client or grant incompatibility)
+/// - 7 partial publication (records landed but some failed; evidence emitted)
+/// - 8 verification (plan drift or binding mismatch; zero writes)
 pub const ExitCode = enum(u8) {
     success = 0,
     content_error = 1,
     usage = 2,
     io_error = 3,
+    denial = 4,
+    timeout = 5,
+    compatibility = 6,
+    partial_publication = 7,
+    verification = 8,
+    /// Session layer failure: no stored session, revoked/ambiguous refresh,
+    /// or a session whose authority no longer matches fresh discovery.
+    session = 9,
 
     pub fn int(self: ExitCode) u8 {
         return @intFromEnum(self);
@@ -74,6 +87,11 @@ test "ExitCode values match contract" {
     try std.testing.expectEqual(@as(u8, 1), ExitCode.content_error.int());
     try std.testing.expectEqual(@as(u8, 2), ExitCode.usage.int());
     try std.testing.expectEqual(@as(u8, 3), ExitCode.io_error.int());
+    try std.testing.expectEqual(@as(u8, 4), ExitCode.denial.int());
+    try std.testing.expectEqual(@as(u8, 5), ExitCode.timeout.int());
+    try std.testing.expectEqual(@as(u8, 6), ExitCode.compatibility.int());
+    try std.testing.expectEqual(@as(u8, 7), ExitCode.partial_publication.int());
+    try std.testing.expectEqual(@as(u8, 8), ExitCode.verification.int());
 }
 
 test "FailureClass maps to ExitCode" {

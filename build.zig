@@ -191,6 +191,155 @@ pub fn build(b: *std.Build) void {
     test_atproto_authorization.dependOn(&run_atproto_browser_std_tests.step);
     test_atproto_authorization.dependOn(check_atproto_oauth_freestanding);
 
+    // Typed DPoP-authenticated XRPC record client (get/put/deleteRecord).
+    // Protocol infrastructure for Standard.site publication, not a generic
+    // ATProto SDK. The portable module joins the freestanding gate; native
+    // networking stays behind the existing host transport adapter.
+    const atproto_xrpc_mod = b.createModule(.{
+        .root_source_file = b.path("src/atproto_xrpc.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const atproto_xrpc_tests = b.addTest(.{ .root_module = atproto_xrpc_mod });
+    const run_atproto_xrpc_tests = b.addRunArtifact(atproto_xrpc_tests);
+    run_atproto_xrpc_tests.setCwd(b.path("."));
+
+    const atproto_xrpc_freestanding_mod = b.createModule(.{
+        .root_source_file = b.path("src/atproto_xrpc.zig"),
+        .target = freestanding_target,
+        .optimize = .ReleaseSafe,
+    });
+    const atproto_xrpc_freestanding = b.addObject(.{
+        .name = "atproto-xrpc-freestanding",
+        .root_module = atproto_xrpc_freestanding_mod,
+    });
+    check_atproto_oauth_freestanding.dependOn(&atproto_xrpc_freestanding.step);
+
+    const test_atproto_xrpc = b.step(
+        "test-atproto-xrpc",
+        "Run ATProto XRPC record client, nonce, identity, and freestanding gates",
+    );
+    test_atproto_xrpc.dependOn(&run_atproto_xrpc_tests.step);
+    test_atproto_xrpc.dependOn(check_atproto_oauth_freestanding);
+
+    // Deterministic Standard.site offline record projection and plan.
+    // Credential-free; consumes declared page metadata and profile facts.
+    const standard_site_mod = b.createModule(.{
+        .root_source_file = b.path("src/standard_site.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const standard_site_tests = b.addTest(.{ .root_module = standard_site_mod });
+    const run_standard_site_tests = b.addRunArtifact(standard_site_tests);
+    run_standard_site_tests.setCwd(b.path("."));
+    const test_standard_site_step = b.step(
+        "test-standard-site",
+        "Run Standard.site projection, rkey, eligibility, and plan tests",
+    );
+    test_standard_site_step.dependOn(&run_standard_site_tests.step);
+
+    // Standard.site web-facing verification emission: head links, well-known
+    // overlay, sideband artifact, ownership, and the emitted/limited/not
+    // verified report. Credential-free like the projection it consumes.
+    const standard_site_emit_mod = b.createModule(.{
+        .root_source_file = b.path("src/standard_site_emit.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const standard_site_emit_tests = b.addTest(.{ .root_module = standard_site_emit_mod });
+    const run_standard_site_emit_tests = b.addRunArtifact(standard_site_emit_tests);
+    run_standard_site_emit_tests.setCwd(b.path("."));
+    const test_standard_site_emit_step = b.step(
+        "test-standard-site-emit",
+        "Run Standard.site verification emission, well-known, and report tests",
+    );
+    test_standard_site_emit_step.dependOn(&run_standard_site_emit_tests.step);
+
+    // Standard.site publish reconciliation: consume a committed plan, verify
+    // the authorized session DID/PDS/collections/rkeys/digest, reconcile each
+    // record against the PDS with zero writes for unchanged state, and emit
+    // intended-vs-observed evidence. Offline mock PDS only; no network.
+    const standard_site_reconcile_mod = b.createModule(.{
+        .root_source_file = b.path("src/standard_site_reconcile.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const standard_site_reconcile_tests = b.addTest(.{ .root_module = standard_site_reconcile_mod });
+    const run_standard_site_reconcile_tests = b.addRunArtifact(standard_site_reconcile_tests);
+    run_standard_site_reconcile_tests.setCwd(b.path("."));
+    const test_standard_site_reconcile_step = b.step(
+        "test-standard-site-reconcile",
+        "Run Standard.site reconciliation, evidence, and offline mock PDS tests",
+    );
+    test_standard_site_reconcile_step.dependOn(&run_standard_site_reconcile_tests.step);
+
+    // Standard.site one-shot publish orchestration: identity discovery, the
+    // profile-PDS binding gate, interactive OAuth authorization, and the
+    // reconciliation pass. Offline scripted mock only; no network.
+    const standard_site_publish_mod = b.createModule(.{
+        .root_source_file = b.path("src/standard_site_publish.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const standard_site_publish_tests = b.addTest(.{ .root_module = standard_site_publish_mod });
+    const run_standard_site_publish_tests = b.addRunArtifact(standard_site_publish_tests);
+    run_standard_site_publish_tests.setCwd(b.path("."));
+    const test_standard_site_publish_step = b.step(
+        "test-standard-site-publish",
+        "Run Standard.site publish orchestration, gates, and redaction tests",
+    );
+    test_standard_site_publish_step.dependOn(&run_standard_site_publish_tests.step);
+
+    // Standard.site live interoperability smoke: the manual, opt-in gate that
+    // proves discovery, OAuth, XRPC writes, readback, and cleanup against a
+    // real PDS. The live path is CLI-only; these tests drive an offline
+    // scripted discovery + OAuth + PDS double.
+    const standard_site_smoke_mod = b.createModule(.{
+        .root_source_file = b.path("src/standard_site_smoke.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const standard_site_smoke_tests = b.addTest(.{ .root_module = standard_site_smoke_mod });
+    const run_standard_site_smoke_tests = b.addRunArtifact(standard_site_smoke_tests);
+    run_standard_site_smoke_tests.setCwd(b.path("."));
+    const test_standard_site_smoke_step = b.step(
+        "test-standard-site-smoke",
+        "Run Standard.site live-smoke orchestration tests (offline mock only)",
+    );
+    test_standard_site_smoke_step.dependOn(&run_standard_site_smoke_tests.step);
+
+    // Host session store: user-scoped, 0600, atomic-replace session documents
+    // plus a process-safe advisory lock. No secrets ever leave the 0600 files.
+    const atproto_session_store_mod = b.createModule(.{
+        .root_source_file = b.path("src/atproto_session_store.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const atproto_session_store_tests = b.addTest(.{ .root_module = atproto_session_store_mod });
+    const run_atproto_session_store_tests = b.addRunArtifact(atproto_session_store_tests);
+    run_atproto_session_store_tests.setCwd(b.path("."));
+    const test_atproto_session_store_step = b.step(
+        "test-atproto-session-store",
+        "Run host session store atomic-write, lock, and fail-closed tests",
+    );
+    test_atproto_session_store_step.dependOn(&run_atproto_session_store_tests.step);
+
+    // Host session lifecycle: acquire (load + refresh + rotate-or-die persist),
+    // storeNew, list, remove, and user-scoped root resolution.
+    const atproto_session_std_mod = b.createModule(.{
+        .root_source_file = b.path("src/atproto_session_std.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const atproto_session_std_tests = b.addTest(.{ .root_module = atproto_session_std_mod });
+    const run_atproto_session_std_tests = b.addRunArtifact(atproto_session_std_tests);
+    run_atproto_session_std_tests.setCwd(b.path("."));
+    const test_atproto_session_std_step = b.step(
+        "test-atproto-session-std",
+        "Run session lifecycle acquire/refresh/rotate-or-die tests",
+    );
+    test_atproto_session_std_step.dependOn(&run_atproto_session_std_tests.step);
+
     // Oliver: freestanding Zig markup library (source bytes → typed document
     // → deterministic HTML). Pinned by content hash in build.zig.zon; see
     // docs/contracts/oliver-renderer.md for the exact revision and the
@@ -1341,6 +1490,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(test_atproto_discovery);
     test_step.dependOn(test_atproto_handles);
     test_step.dependOn(test_atproto_authorization);
+    test_step.dependOn(test_atproto_xrpc);
+    test_step.dependOn(&run_standard_site_tests.step);
+    test_step.dependOn(&run_standard_site_emit_tests.step);
     test_step.dependOn(&run_unit_tests.step);
     test_step.dependOn(&run_fixtures_tests.step);
     test_step.dependOn(&run_scanner_tests.step);

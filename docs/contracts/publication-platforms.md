@@ -80,6 +80,7 @@ Status vocabulary: **shipped and verified**, **deliberate but waiting**,
 | Platform | Status | Position |
 |---|---|---|
 | GitHub Pages | **Shipped and verified** (#302) | The depth model, not a recipe. Full chain implemented: workflow, artifact copier, retained evidence, optional bounded post-deploy audit. |
+| Standard.site | **Shipped and verified** (#452 program) | The second verified target, proven by the target registry (below). Profile/plan adapters implemented; offline deterministic projection, compiler-owned `{{head}}` document links, and well-known publication record in [`standard-site.md`](standard-site.md). |
 | Cloudflare Pages (static) | **Deliberate but waiting** | The only deliberate second *static* platform: same artifact-upload model, static-first. Adapter-shaped, but wait for a user before building it. |
 | Cloudflare runtime/edge | **Tracked separately** (#300, #301) | Not a static rehost: Container-backed native builds behind a Worker (#300) and freestanding Wasm embedding (#301). These are compiler-shaped bets, not deployer adapters, and live outside this matrix's deployer row. |
 | Vercel | **Wait for demand** | The real design problem is per-deployment preview URLs against the location invariant, not the deploy command. No proactive work. |
@@ -98,28 +99,24 @@ Status vocabulary: **shipped and verified**, **deliberate but waiting**,
 - No proactive Vercel/Netlify work. Commodity hosts are never proactive
   work.
 - When a second platform is adopted, this contract's registry boundary
-  applies (below).
+  applies (below).## Target registry boundary
 
-## Target registry boundary
+`publication.target` is a small **target registry**: the closed vocabulary is
+`"github-pages"` and `"standard-site"`, validated by
+`isValidTargetName` in the profile parser, and each name maps to its adapters
+(location provider, deployer, packaging rules). See
+[`standard-site.md`](standard-site.md) for the second target's profile and
+plan shape.
 
-Today `publication.target` is the closed string `"github-pages"` (see
-`src/github_pages.zig`, `target_name`), and the publication profile/plan
-contracts treat it as a fixed vocabulary.
-
-When a second platform is adopted, open `publication.target` into a small
-**target registry** and add the first non-GitHub adapter as the proof of the
-seam:
-
-- the registry maps a stable target name to its three adapters (location
-  provider, deployer, packaging rules);
 - unknown target names fail closed in the profile parser, exactly as the
-  current single value does;
+  single-value vocabulary did;
 - the registry is additive: existing `"github-pages"` plans keep working
-  byte-identically;
+  byte-identically (proven by the existing profile/plan fixtures);
 - `github-pages-deployment-evidence.json` already separates the platform
   identity (`provider: "github-pages"`) from the artifact-target identity
-  (e.g. `public`), so the registry never conflates the two.
+  (e.g. `public`), so the registry never conflates the two;
+- `standard-site` profile/plan fixtures and the
+  `publication-plan-1.schema.json` `oneOf` guarantee the additive rule.
 
-Until a second adapter exists, the closed string stays closed. Documenting
-the seam now is not evidence that a registry, adapter, or second platform
-exists.
+When a third platform is adopted, add its name and adapters here; the
+registry is open for new members but closed for typos.
