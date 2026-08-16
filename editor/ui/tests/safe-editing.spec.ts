@@ -734,6 +734,8 @@ test('structured problems group, navigate by UTF-8 byte position, and copy a bou
   expect(copied).toBe(packet);
   expect(copied.length).toBeLessThanOrEqual(4096);
   expect(copied).not.toContain('/Users/');
+  await expect(copy).toHaveText('Copied!');
+  await expect(copy).toHaveAttribute('aria-label', 'Copy packet for EDUPLICATEID at index.md');
 });
 
 test('stderr diagnostics are announced as best-effort and dirty buffers route commands through a resolution dialog', async ({ page }) => {
@@ -864,6 +866,15 @@ test('rebuilding the preview while dirty offers Cancel and Discard & rebuild (#4
   expect(saveRequests).toBe(0);
   await expect(page.locator('.preview-state')).toContainText('Preview is current');
   await expect(page.getByTitle('Boris site preview')).toHaveAttribute('src', /generation=2/);
+});
+
+test('switching completion category focuses the filter (#615)', async ({ page }) => {
+  await installApi(page, { disk: '' });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const category = page.getByRole('combobox', { name: 'Completion category', exact: true });
+  await expect(page.getByRole('combobox', { name: 'Filter frontmatter key', exact: true })).not.toBeFocused();
+  await category.selectOption('status');
+  await expect(page.getByRole('combobox', { name: 'Filter status', exact: true })).toBeFocused();
 });
 
 test('schema and graph completion are an ARIA combobox operable by keyboard and visible names', async ({ page }) => {
