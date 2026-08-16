@@ -1264,7 +1264,7 @@
   </div>
 </dialog>
 
-<dialog bind:this={createDialog} onkeydown={handleDialogKeydown} aria-labelledby="create-heading">
+<dialog bind:this={createDialog} onkeydown={handleDialogKeydown} onclose={() => { createPath = 'content/new-page.md'; }} aria-labelledby="create-heading">
   <h2 id="create-heading">Create file</h2>
   <p>Use a project-relative path under content/ or themes/, or boris.json.</p>
   <form onsubmit={(event) => { event.preventDefault(); void createFile(); }}>
@@ -1277,7 +1277,7 @@
   </form>
 </dialog>
 
-<dialog bind:this={renameDialog} onkeydown={handleDialogKeydown} aria-labelledby="rename-heading">
+<dialog bind:this={renameDialog} onkeydown={handleDialogKeydown} onclose={() => { renamePath = ''; }} aria-labelledby="rename-heading">
   <h2 id="rename-heading">Rename file</h2>
   <p>Rename {activePath} without replacing an existing file.</p>
   <form onsubmit={(event) => { event.preventDefault(); void renameFile(); }}>
