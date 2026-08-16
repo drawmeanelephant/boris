@@ -79,7 +79,10 @@ const ProdRunner = struct {
 
     pub fn reportUsage(_: *const @This(), err: cli.ParseError, bad_arg: ?[]const u8) void {
         cli.printParseError(err, bad_arg);
-        cli.printUsage();
+        switch (err) {
+            error.MissingStandardSiteSubcommand, error.UnknownStandardSiteSubcommand => cli.printStandardSiteUsage(),
+            else => cli.printUsage(),
+        }
     }
 
     pub fn run(self: *const @This(), opts: Options) ExitCode {
@@ -680,6 +683,24 @@ fn resolveAppPasswordIdentity(
     pds_origin.* = document.pds_origin;
 }
 
+/// Resolve `--did` or `--handle` to an owned DID string for smoke (and any
+/// other command that accepts either identity form).
+fn resolveConfiguredDid(
+    gpa: std.mem.Allocator,
+    io: Io,
+    opts: Options,
+    client: atproto_transport.Client,
+) ![]u8 {
+    if (opts.session_did) |text| {
+        const did = try atproto_identity.Did.parse(text);
+        return gpa.dupe(u8, did.slice());
+    }
+    const handle_text = opts.session_handle orelse return error.InvalidDid;
+    var dns = atproto_dns_std.StdDns.init(io) catch |err| return err;
+    const resolved = try atproto_handle.resolve(gpa, dns.client(), client, handle_text);
+    return gpa.dupe(u8, resolved.did.slice());
+}
+
 /// Disable terminal echo on the controlling stdin while a secret is typed,
 /// restoring the original attributes afterwards (including on error paths).
 /// Best-effort and strictly scoped to interactive terminals: when stdin is
@@ -840,7 +861,6 @@ fn smokeResultExitCode(result: *const standard_site_smoke.SmokeResult) ExitCode 
 /// reachable only through this explicit command; no test or CI step invokes
 /// it, and the ordinary offline matrix stays authoritative.
 pub fn runStandardSiteSmoke(io: Io, gpa: std.mem.Allocator, opts: Options, environ: *std.process.Environ.Map) ExitCode {
-    const did_text = opts.session_did orelse return .usage;
     const session_root = resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
     defer gpa.free(session_root);
     const transport_std = atproto_transport_std.StdTransport.create(gpa, io) catch |err| {
@@ -848,6 +868,12 @@ pub fn runStandardSiteSmoke(io: Io, gpa: std.mem.Allocator, opts: Options, envir
         return .io_error;
     };
     defer transport_std.destroy();
+    const did_owned = resolveConfiguredDid(gpa, io, opts, transport_std.client()) catch |err| {
+        std.debug.print("error: standard-site smoke: unable to resolve identity: {s}\n", .{@errorName(err)});
+        return .usage;
+    };
+    defer gpa.free(did_owned);
+    const did_text = did_owned;
     var sessions = atproto_session_std.Sessions.open(gpa, io, session_root) catch |err| return reportSessionError(err);
     defer sessions.deinit();
     var session_provider = SessionProvider{
