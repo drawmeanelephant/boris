@@ -51,6 +51,7 @@ Modes:
   --out PATH          Smoke result artifact path (default: stdout)
   standard-site options (all subcommands):
   --session-root PATH Override the persistent session store root
+  --profile PATH      Standard.site profile: emit verification surfaces on HTML build
   --html              Explicit HTML site mode → --html-dir (default dist)
   --html-dir <DIR>    HTML site mode with output directory DIR
   --target NAME=DIR   HTML multi-target mode (repeatable; order-independent); implies HTML

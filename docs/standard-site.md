@@ -40,11 +40,11 @@ A recorded passing smoke against bsky.social lives at
 boris standard-site plan    --profile standard-site.json
 boris standard-site records --profile standard-site.json
 
-# 2. Build the HTML site. Verification surfaces (head links + well-known)
-#    are not yet wired on the production `boris` HTML path — `verify`
-#    against this dist will fail closed until that emit lands. Plan and
-#    publish do not wait on it.
-boris --quiet
+# 2. Build the HTML site and emit verification surfaces (head links +
+#    well-known). Layouts need the compiler-owned {{head}} slot; init's
+#    theme and the repo theme both have it.
+boris --quiet --profile standard-site.json
+boris standard-site verify --profile standard-site.json --dist dist
 
 # 3. Log in once with an app password (stdin; echo off on a TTY)
 boris standard-site login --app-password --handle YOU.test.bsky.social

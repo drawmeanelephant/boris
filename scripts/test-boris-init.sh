@@ -61,6 +61,14 @@ cd "$OUT/site"
     >"$OUT/build.stdout" 2>"$OUT/build.stderr" || fail "starter build failed: $(head -3 "$OUT/build.stderr")"
 [[ -f "$OUT/site/dist/index.html" ]] || fail "build wrote no index.html"
 [[ -f "$OUT/site/dist/guides/getting-started.html" ]] || fail "build wrote no guides/getting-started.html"
+rm -rf "$OUT/site/dist"
+"$ROOT/zig-out/bin/boris" --input content --html-dir dist --theme themes/boris --profile standard-site.json --quiet \
+    >"$OUT/emit.stdout" 2>"$OUT/emit.stderr" || fail "profile HTML emit failed: $(head -5 "$OUT/emit.stderr")"
+[[ -f "$OUT/site/dist/.well-known/site.standard.publication" ]] || fail "HTML emit wrote no well-known publication file"
+[[ -f "$OUT/site/dist/_boris/proof/standard-site.json" ]] || fail "HTML emit wrote no verification report"
+"$ROOT/zig-out/bin/boris" standard-site verify --profile standard-site.json --dist dist \
+    >"$OUT/verify.json" 2>"$OUT/verify.stderr" || fail "verify against CLI-built dist failed: $(head -5 "$OUT/verify.stderr")"
+grep -q '"overall_passed": true' "$OUT/verify.json" || fail "verify did not pass against the emitted dist"
 "$ROOT/zig-out/bin/boris" validate --input content --theme themes/boris --quiet \
     >"$OUT/validate.stdout" 2>"$OUT/validate.stderr" || fail "starter validate failed: $(head -3 "$OUT/validate.stderr")"
 "$ROOT/zig-out/bin/boris" plan --profile boris.json \
