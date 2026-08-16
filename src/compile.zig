@@ -2267,24 +2267,26 @@ fn compilePagesInner(
                 else => error.LayoutSelectionFailed,
             };
         };
-        // #395: record the selection outcome when a rule (not the fallback)
-        // picked the layout — informational, so it never affects exit codes.
-        if (sel.kind != .fallback) {
+        // #395 / #557: record which layout won and why. Informational —
+        // never affects exit codes or errorCount.
+        const msg = if (sel.kind == .fallback)
+            try std.fmt.allocPrint(gpa, "layout fallback selected {s}", .{sel.layout_path})
+        else blk: {
             const rule = options.layout_rules[sel.rule_index orelse return error.LayoutSelectionFailed];
-            const msg = try std.fmt.allocPrint(gpa, "layout rule {s}:{s} selected {s}", .{
+            break :blk try std.fmt.allocPrint(gpa, "layout rule {s}:{s} selected {s}", .{
                 @tagName(rule.kind),
                 rule.value,
                 sel.layout_path,
             });
-            defer gpa.free(msg);
-            appendHtmlDiagnostic(&options, .{
-                .severity = .info,
-                .code = .ILAYOUTSELECTED,
-                .message = msg,
-                .source_path = page.source_path,
-                .id = page.entity_id,
-            });
-        }
+        };
+        defer gpa.free(msg);
+        appendHtmlDiagnostic(&options, .{
+            .severity = .info,
+            .code = .ILAYOUTSELECTED,
+            .message = msg,
+            .source_path = page.source_path,
+            .id = page.entity_id,
+        });
         page_sel_paths[i] = sel.layout_path;
         const cached = layouts_by_path.get(sel.layout_path) orelse return error.LayoutSelectionFailed;
         page_layouts[i] = cached.layout;
@@ -3714,9 +3716,10 @@ test "#421: content failures are collected with source path and position" {
         .diagnostics = &collector,
     }));
 
-    try std.testing.expectEqual(@as(usize, 1), collector.list.items.len);
-    const d = collector.list.items[0];
-    try std.testing.expectEqual(diag.Code.EINCLUDEMISSING, d.code);
+    try std.testing.expectEqual(@as(usize, 1), diag.countErrors(collector.list.items));
+    const d = for (collector.list.items) |item| {
+        if (item.code == .EINCLUDEMISSING) break item;
+    } else return error.TestExpectedEqual;
     // Source paths are content-root-relative (the stderr contract).
     try std.testing.expectEqualStrings("index.md", d.source_path);
     try std.testing.expect(d.line != null);
@@ -3759,7 +3762,7 @@ test "#395: rule-selected layout emits an info ILAYOUTSELECTED outcome finding" 
         .diagnostics = &collector,
     });
 
-    // Exactly one finding: the info selection outcome (no errors, no fallback noise).
+    // Exactly one finding: the rule-selected page. This fixture has no fallback page.
     try std.testing.expectEqual(@as(usize, 1), collector.list.items.len);
     const d = collector.list.items[0];
     try std.testing.expectEqual(diag.Code.ILAYOUTSELECTED, d.code);
@@ -3768,6 +3771,65 @@ test "#395: rule-selected layout emits an info ILAYOUTSELECTED outcome finding" 
     try std.testing.expectEqualStrings("index", d.id);
     try std.testing.expect(std.mem.indexOf(u8, d.message, "id:index") != null);
     try std.testing.expect(std.mem.indexOf(u8, d.message, "layouts/home.html") != null);
+}
+
+test "#557: fallback layout winners emit ILAYOUTSELECTED" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    const cwd = Io.Dir.cwd();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const work = try std.fmt.allocPrint(gpa, ".zig-cache/tmp/{s}/boris-557-layout-fallback", .{tmp.sub_path});
+    defer gpa.free(work);
+    try cwd.createDirPath(io, work);
+
+    try writeTreeFile(io, work, "layouts/main.html", "{{content}}");
+    try writeTreeFile(io, work, "layouts/home.html", "HOME-{{content}}");
+    try writeTreeFile(io, work, "content/index.md", "# Home\n");
+    try writeTreeFile(io, work, "content/about.md", "---\nid: about\n---\n# About\n");
+
+    const layout_path = try std.fmt.allocPrint(gpa, "{s}/layouts/main.html", .{work});
+    defer gpa.free(layout_path);
+    const home_path = try std.fmt.allocPrint(gpa, "{s}/layouts/home.html", .{work});
+    defer gpa.free(home_path);
+    const content = try std.fmt.allocPrint(gpa, "{s}/content", .{work});
+    defer gpa.free(content);
+    const dist = try std.fmt.allocPrint(gpa, "{s}/dist", .{work});
+    defer gpa.free(dist);
+
+    var collector = diag.Collector.init(gpa, io);
+    defer collector.deinit();
+    _ = try compileHtmlSite(io, gpa, .{
+        .content_root = content,
+        .dist_dir = dist,
+        .layout_path = layout_path,
+        .layout_rules = &.{
+            .{ .kind = .id, .value = "index", .layout_path = home_path },
+        },
+        .quiet = true,
+        .diagnostics = &collector,
+    });
+
+    try std.testing.expectEqual(@as(usize, 2), collector.list.items.len);
+    try std.testing.expectEqual(diag.Code.ILAYOUTSELECTED, collector.list.items[0].code);
+    try std.testing.expectEqual(diag.Code.ILAYOUTSELECTED, collector.list.items[1].code);
+    try std.testing.expectEqual(diag.Severity.info, collector.list.items[0].severity);
+    var saw_rule = false;
+    var saw_fallback = false;
+    for (collector.list.items) |d| {
+        if (std.mem.eql(u8, d.source_path, "index.md")) {
+            try std.testing.expect(std.mem.indexOf(u8, d.message, "id:index") != null);
+            try std.testing.expect(std.mem.indexOf(u8, d.message, "layouts/home.html") != null);
+            saw_rule = true;
+        } else if (std.mem.eql(u8, d.source_path, "about.md")) {
+            try std.testing.expect(std.mem.indexOf(u8, d.message, "layout fallback selected") != null);
+            try std.testing.expect(std.mem.indexOf(u8, d.message, "layouts/main.html") != null);
+            try std.testing.expectEqualStrings("about", d.id);
+            saw_fallback = true;
+        }
+    }
+    try std.testing.expect(saw_rule);
+    try std.testing.expect(saw_fallback);
 }
 
 test "#448: xhtml target emits a well-formed document and fails closed on raw HTML" {

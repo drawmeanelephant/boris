@@ -164,7 +164,7 @@ See [cooklang-compatibility.md](cooklang-compatibility.md).
 | `ELAYOUT` | error | Generic layout failure (structural bounds, invalid UTF-8, …) | HTML load/validate fallback |
 | `EVERIFICATIONHEAD` | warning | Standard.site verification is configured but a selected layout omits the compiler-owned `{{head}}` slot, so eligible pages cannot emit their document AT-URI links; the verification report records them as `not_verified` | `compile.compilePagesInner` → HTML publish / validate |
 | `ENOSTRHEAD` | warning | Nostr head emit is configured but a selected layout omits the compiler-owned `{{head}}` slot, so an eligible allowlisted page cannot carry its `nostr:naddr` alternate link | `compile.compilePagesInner` → HTML publish |
-| `ILAYOUTSELECTED` | info | A layout rule (`id:` / `glob:` / `role:`) selected a non-fallback layout for a page; records the selection outcome (selector, winning layout path) on the page's source path. Never affects exit codes or `errorCount`. | `compile.compilePagesInner` per-page selection → HTML report |
+| `ILAYOUTSELECTED` | info | A layout rule (`id:` / `glob:` / `role:`) or the fallback/default layout selected a page; records the selection outcome (selector or `fallback`, winning layout path) on the page's source path. Never affects exit codes or `errorCount`. | `compile.compilePagesInner` per-page selection → HTML report |
 | `EUSAGE` | error | CLI usage / flag error (unknown flag, conflicts, malformed options) | CLI (exit 2; not in build-report) |
 | `EIO` | error | I/O or system failure (missing content root, unreadable file, unexpected runtime) | pipeline / CLI (exit 3 when pure I/O) |
 
