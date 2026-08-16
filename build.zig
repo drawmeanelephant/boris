@@ -422,6 +422,32 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(render_wasm_safe);
     b.installArtifact(render_wasm_small);
 
+    // compileBundle pulls std.Io, which cannot compile for wasm32-freestanding
+    // in Zig 0.16. wasm32-wasi is the product module target; hosts must stub
+    // WASI imports and the memory compile path must not invoke them.
+    const embed_wasi_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .wasi,
+    });
+    const oliver_wasi_safe = b.dependency("oliver", .{
+        .target = embed_wasi_target,
+        .optimize = .ReleaseSafe,
+    });
+    const oliver_wasi_small = b.dependency("oliver", .{
+        .target = embed_wasi_target,
+        .optimize = .ReleaseSmall,
+    });
+    const embed_wasm_safe = addEmbedWasm(b, embed_wasi_target, .ReleaseSafe, oliver_wasi_safe.module("oliver"), "boris-embed");
+    const embed_wasm_small = addEmbedWasm(b, embed_wasi_target, .ReleaseSmall, oliver_wasi_small.module("oliver"), "boris-embed-small");
+    b.installArtifact(embed_wasm_safe);
+    b.installArtifact(embed_wasm_small);
+    const check_embed_wasm = b.step(
+        "check-embed-wasm",
+        "Compile compileBundle for wasm32-freestanding",
+    );
+    check_embed_wasm.dependOn(&embed_wasm_safe.step);
+    check_embed_wasm.dependOn(&embed_wasm_small.step);
+
     // bitcoin-core/secp256k1, pinned at v0.8.0 in build.zig.zon (#492/#495).
     // Compiled from source (schnorrsig + extrakeys modules; precomputed
     // tables ship in-tree, so there is no configure or generator step) and
@@ -1091,6 +1117,29 @@ pub fn build(b: *std.Build) void {
     test_render_wasm_step.dependOn(check_render_freestanding);
     test_render_wasm_step.dependOn(&run_render_wasm_tests.step);
     test_render_step.dependOn(test_render_wasm_step);
+
+    const embed_wasm_opts = b.addOptions();
+    embed_wasm_opts.addOptionPath("wasm_path", embed_wasm_safe.getEmittedBin());
+    embed_wasm_opts.addOptionPath("wasm_small_path", embed_wasm_small.getEmittedBin());
+    const embed_wasm_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/embed_wasm_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "oliver", .module = oliver_mod },
+            .{ .name = "build_options", .module = embed_wasm_opts.createModule() },
+        },
+    });
+    linkOliver(embed_wasm_test_mod, oliver_mod);
+    const embed_wasm_tests = b.addTest(.{ .root_module = embed_wasm_test_mod });
+    const run_embed_wasm_tests = b.addRunArtifact(embed_wasm_tests);
+    run_embed_wasm_tests.setCwd(b.path("."));
+    const test_embed_wasm_step = b.step(
+        "test-embed-wasm",
+        "Run wasm32-freestanding compileBundle ABI import-scan and invoke",
+    );
+    test_embed_wasm_step.dependOn(check_embed_wasm);
+    test_embed_wasm_step.dependOn(&run_embed_wasm_tests.step);
 
     // --- Experimental HTML assemble + whiteboard compile (milestone 9) -----
     // Not on the default IR/RAG CLI path; tests only.
@@ -1763,6 +1812,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_rag_tests.step);
     test_step.dependOn(&run_render_tests.step);
     test_step.dependOn(test_render_wasm_step);
+    test_step.dependOn(test_embed_wasm_step);
     test_step.dependOn(&run_assemble_tests.step);
     test_step.dependOn(&run_theme_tests.step);
     test_step.dependOn(&run_content_asset_tests.step);
@@ -1805,6 +1855,29 @@ pub fn build(b: *std.Build) void {
 /// because a relative `@import("render.zig")` resolves in the importing
 /// module's context. Oliver is a pure Zig library: no libc, no host tools, no
 /// global state, nothing to pre-build.
+fn addEmbedWasm(
+    b: *std.Build,
+    freestanding_target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    oliver: *std.Build.Module,
+    name: []const u8,
+) *std.Build.Step.Compile {
+    const root = b.createModule(.{
+        .root_source_file = b.path("src/embed_wasm.zig"),
+        .target = freestanding_target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "oliver", .module = oliver }},
+    });
+    const exe = b.addExecutable(.{
+        .name = name,
+        .root_module = root,
+    });
+    exe.entry = .disabled;
+    exe.rdynamic = true;
+    exe.export_memory = true;
+    return exe;
+}
+
 fn addRenderWasm(
     b: *std.Build,
     freestanding_target: std.Build.ResolvedTarget,

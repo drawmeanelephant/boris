@@ -123,3 +123,67 @@ emitted to the artifact sink.
 
 Failed graph/content validation still emits no HTML. Incremental cache,
 `--jobs`, sitemap, search, and evidence stay native-CLI.
+
+---
+
+## M5 — Wasm ABI around `compileBundle`
+
+`src/embed_wasm.zig` exports a small C ABI. The product module is
+`zig-out/bin/boris-embed.wasm` (ReleaseSafe) and `boris-embed-small.wasm`
+(ReleaseSmall).
+
+Zig 0.16 `std.Io` cannot compile for `wasm32-freestanding` (PATH_MAX,
+posix.AT, Threaded). The product target is therefore **`wasm32-wasi`**.
+The module lists `wasi_snapshot_preview1` imports because the standard
+library is linked. The memory compile path must not call them. Hosts
+instantiate with **trap stubs**. A stub being called is an ABI failure.
+
+### Exports
+
+| Export | Meaning |
+|---|---|
+| `boris_version` / `boris_version_len` | Compiler id, IR schema, embed profile |
+| `boris_alloc` / `boris_free` | Host-owned linear-memory buffers |
+| `boris_compile(req_ptr, req_len) -> handle` | `1` completed compile; `0` ABI failure |
+| `boris_last_status` | `0` ok, `1` validation failed, negative ABI error |
+| `boris_result_status(h)` | Same as last status for handle `1` |
+| `boris_result_manifest_{ptr,len}(h)` | JSON manifest (no artifact bytes) |
+| `boris_result_artifact_{count,ptr,len}(h,i)` | Artifact bytes in linear memory |
+| `boris_result_free(h)` | Drop the live result |
+
+One live result handle (`1`) at a time. Hosts must free before the next
+compile.
+
+### Request JSON
+
+Bulk source bytes are **not** in JSON. The request names files already
+copied into wasm memory with `boris_alloc`:
+
+```json
+{"html":false,"layout_path":"layouts/main.html","files":[{"path":"index.md","ptr":4096,"len":80}]}
+```
+
+### Status codes
+
+| Code | Meaning |
+|---:|---|
+| 0 | Compile succeeded |
+| 1 | Compile finished; validation failed (diagnostics + build-report only) |
+| -1 | Out of memory |
+| -2 | Invalid request JSON |
+| -3 | File pointer/length invalid |
+| -4 | Unexpected compile error |
+| -5 | Bad result handle |
+
+Panic traps. It is not a successful empty compile.
+
+### Measured module size (2026-08-16, Zig 0.16.0)
+
+| Artifact | Uncompressed | gzip -9 |
+|---|---:|---:|
+| `boris-embed.wasm` (ReleaseSafe) | 5 448 KiB | 1 583 KiB |
+| `boris-embed-small.wasm` (ReleaseSmall) | 660 KiB | 245 KiB |
+
+Workers Free allows 3 MiB gzip. ReleaseSmall fits with room. The
+automated gate requires ReleaseSmall &lt; 8 MiB and ReleaseSafe &lt; 16 MiB
+uncompressed.

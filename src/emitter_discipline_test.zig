@@ -197,6 +197,8 @@ const modules = [_]Module{
     .{ .name = "doclink.zig", .class = .other },
     .{ .name = "doctor.zig", .class = .other },
     .{ .name = "embed.zig", .class = .other },
+    .{ .name = "embed_wasm.zig", .class = .other },
+    .{ .name = "embed_wasm_test.zig", .class = .other },
     .{ .name = "emitter_discipline_test.zig", .class = .other },
     .{ .name = "emitter_hostile_test.zig", .class = .other },
     .{ .name = "encode.zig", .class = .other },
