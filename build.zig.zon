@@ -14,6 +14,10 @@
             .url = "https://github.com/drawmeanelephant/oliver/archive/c0b3d2b683f0cecf2181b22a800908619e56d0d7.tar.gz",
             .hash = "oliver-0.0.0-LOsZkAe_HwD1k4BLmgWJcT9AI3AopaxmZwjc2gx-23pz",
         },
+        .secp256k1 = .{
+            .url = "git+https://github.com/bitcoin-core/secp256k1#6e2c8bc4ecdc6e71dbe7a368f360d8d453ce435d",
+            .hash = "N-V-__8AAFwQbQAc-L8ZUw4rqyk_OWdYX4-V8crqiWlJ1dhl",
+        },
     },
     .paths = .{
         "build.zig",
