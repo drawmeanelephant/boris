@@ -159,9 +159,11 @@ shows a read-only **Recipe** pane from the compiler `recipe` facet:
 ingredients, cookware, timers, and `recipeRef` links to other recipes. Print
 uses that facet, not a second renderer.
 
-Quantities stay the strings the author wrote. Boris can classify and scale
-those strings; this editor does not run that operation
-([issue 554](https://github.com/drawmeanelephant/boris/issues/554)).
+Quantities stay the strings the author wrote. **Scale factor** plus **Scale
+recipe** asks `boris recipe-scale` and shows the derived view next to the
+authored amounts. **Reset scale** drops that view. Neither button writes the
+`.cook` file
+([issue 554](https://github.com/drawmeanelephant/boris/issues/554) S3).
 Graph diagnostics that are not `ECOOKLANG` are marked **position
 approximate** because Boris locates them on adapted Markdown.
 
@@ -272,8 +274,9 @@ HMR, CSS injection, watcher, or typing-triggered build.
 - No arbitrary commands: only the fixed allowlist above.
 - No preview daemon or renderer: a fixed, visible rebuild command only.
 - No deploy, deployment secrets, or hosting dashboard.
-- This editor does not run recipe scaling
-  ([issue 554](https://github.com/drawmeanelephant/boris/issues/554)).
+- This editor does not classify or multiply recipe amounts locally. Scale
+  recipe only spawns `boris recipe-scale`
+  ([issue 554](https://github.com/drawmeanelephant/boris/issues/554) S3).
 - No layout diagnostics or autofix.
 
 When a capability is missing, the editor says so instead of guessing — the

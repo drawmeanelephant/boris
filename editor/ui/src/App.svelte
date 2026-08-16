@@ -31,7 +31,7 @@
   type RecoverySnapshot = { path: string; content: string; fingerprint: string };
   type RecoveryList = { snapshots: RecoverySnapshot[]; skipped?: number };
   type ErrorResponse = { error?: string; status?: string };
-  type CommandMode = 'validate' | 'ir_build' | 'html_build' | 'check' | 'impact' | 'plan';
+  type CommandMode = 'validate' | 'ir_build' | 'html_build' | 'check' | 'impact' | 'plan' | 'recipe_scale';
   type FailureClass = 'success' | 'content' | 'usage' | 'io' | 'terminated';
   type PendingResolution =
     | { action: 'open'; target: string }
@@ -122,6 +122,7 @@
     findings: AnalysisFinding[];
     impact: ImpactEndpoint[];
     publication_plan?: PublicationPlan | null;
+    recipe_scale_view?: RecipeScaleView | null;
   };
   type ProblemGroup = { key: string; label: string; problems: Problem[] };
   type JsonSchemaProperty = { type?: string | string[]; enum?: Array<string | null>; maxLength?: number; maxItems?: number; pattern?: string; items?: JsonSchemaProperty };
@@ -136,6 +137,18 @@
   type RecipeIngredient = { name: string; quantity: RecipeQuantity; preparation: string; recipeRef: string | null };
   type RecipeItem = { name: string; quantity: RecipeQuantity };
   type RecipeFacet = { ingredients: RecipeIngredient[]; cookware: RecipeItem[]; timers: RecipeItem[] };
+  type RecipeScaleAmount = { class: 'empty' | 'scalable' | 'fixed'; original: string; scaled: string };
+  type RecipeScaleQuantity = { amount: RecipeScaleAmount; unit: string };
+  type RecipeScaleView = {
+    format: string;
+    schemaVersion: string;
+    compiler: string;
+    factor: { num: number; den: number };
+    page: string;
+    ingredients: Array<{ name: string; quantity: RecipeScaleQuantity; preparation: string; recipeRef: string | null }>;
+    cookware: Array<{ name: string; quantity: RecipeScaleQuantity }>;
+    timers: Array<{ name: string; quantity: RecipeScaleQuantity }>;
+  };
   type GraphNode = {
     index: number; id: string; sourcePath: string; role: string; parent: string | null;
     parentIndex: number | null; title: string | null; status: string | null; tags: string[]; bodyOffset: number;
@@ -204,6 +217,8 @@
   let publicationStatus = 'Loading publication profiles…';
   let selectedProfile = '';
   let lastPublicationPlan: PublicationPlan | null = null;
+  let scaleFactor = '';
+  let scaleView: RecipeScaleView | null = null;
 
   $: dirty = activePath !== '' && content !== baseline;
   $: problemGroups = groupProblems(commandResult?.problems ?? []);
@@ -213,6 +228,7 @@
   $: suggestions = completionSuggestions(authoring, completionKind, completionQuery);
   $: if (selectedSuggestion >= suggestions.length) selectedSuggestion = Math.max(0, suggestions.length - 1);
   $: activeNode = nodeForPath(graphPayload?.graph ?? null, activePath);
+  $: visibleScaleView = scaleView && activeNode && scaleView.page === activeNode.id ? scaleView : null;
   $: parentNode = activeNode?.parent ? nodeForId(graphPayload?.graph ?? null, activeNode.parent) : null;
   $: graphChildren = graphLinksForIndices(graphPayload?.graph ?? null, navForNode(graphPayload?.graph ?? null, activeNode)?.children ?? []);
   $: graphSiblings = graphLinksForIndices(graphPayload?.graph ?? null, navForNode(graphPayload?.graph ?? null, activeNode)?.siblings ?? []);
@@ -443,6 +459,14 @@
       commandStatus = 'Choose a publication profile before running the plan.';
       return;
     }
+    if (mode === 'recipe_scale' && !activeNode) {
+      commandStatus = 'Open a recipe page before scaling.';
+      return;
+    }
+    if (mode === 'recipe_scale' && !scaleFactor.trim()) {
+      commandStatus = 'Enter a scale factor before scaling the recipe.';
+      return;
+    }
     commandRunning = true;
     const started = Date.now();
     commandStatus = `Running ${commandLabel(mode)}…`;
@@ -450,6 +474,8 @@
       ? { mode, impact_id: impactId.trim() }
       : mode === 'plan'
         ? { mode, profile: selectedProfile.trim() }
+        : mode === 'recipe_scale'
+          ? { mode, recipe_scale_id: activeNode!.id, recipe_scale_factor: scaleFactor.trim() }
         : { mode };
     const result = await api<CommandResult | ErrorResponse>('/api/commands/run', {
       method: 'POST', body: JSON.stringify(body)
@@ -474,6 +500,9 @@
       await refreshGraph();
     }
     if (commandResult.publication_plan) lastPublicationPlan = commandResult.publication_plan;
+    if (mode === 'recipe_scale' && commandResult.failure_class === 'success' && commandResult.recipe_scale_view) {
+      scaleView = commandResult.recipe_scale_view;
+    }
     if (mode === 'html_build' || mode === 'plan') await refreshPublication();
   }
 
@@ -620,7 +649,8 @@
       html_build: 'Build HTML',
       check: 'Check graph',
       impact: 'Run impact',
-      plan: 'Run publication plan'
+      plan: 'Run publication plan',
+      recipe_scale: 'Scale recipe'
     } satisfies Record<CommandMode, string>)[mode];
   }
 
@@ -768,6 +798,19 @@
     return [quantity.amount, quantity.unit].filter(part => part.trim() !== '').join(' ');
   }
 
+  function displayQuantity(authored: RecipeQuantity, scaled: RecipeScaleQuantity | undefined, timer: boolean): string {
+    const original = quantityLabel(authored);
+    if (timer || !scaled || scaled.amount.scaled === scaled.amount.original) return original || '—';
+    const scaledLabel = [scaled.amount.scaled, scaled.unit].filter(part => part.trim() !== '').join(' ');
+    if (!original) return scaledLabel || '—';
+    return `${original} → ${scaledLabel}`;
+  }
+
+  function resetScale() {
+    scaleView = null;
+    commandStatus = 'Showing authored recipe quantities.';
+  }
+
   function printRecipe() {
     if (!activeNode?.recipe) return;
     const recipe = activeNode.recipe;
@@ -778,7 +821,7 @@
 <style>body{font:16px/1.45 ui-serif,Georgia,serif;margin:1.5rem;color:#17201d}h1{font-size:1.6rem}table{width:100%;border-collapse:collapse;margin:0 0 1.25rem}th,td{text-align:left;padding:.35rem .4rem;border-bottom:1px solid #ccd6cf}p.note{color:#53625c;font-size:.9rem}</style>
 </head><body>
 <h1>${escapeHtml(title)}</h1>
-<p class="note">Read-only Boris recipe facet. Quantities are author strings. This editor does not scale them (issue 554).</p>
+<p class="note">Read-only Boris recipe facet. Quantities are author strings. Scale recipe asks Boris; it does not rewrite the .cook file.</p>
 <h2>Ingredients</h2>
 <table><thead><tr><th>Name</th><th>Quantity</th><th>Preparation / recipe</th></tr></thead><tbody>
 ${rows(recipe.ingredients.map(item => ({ name: item.name, qty: quantityLabel(item.quantity), extra: item.recipeRef ? `recipe ${item.recipeRef}` : item.preparation })))}
@@ -1774,11 +1817,18 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
           <div class="problems-heading">
             <div>
               <h3 id="recipe-heading">Recipe</h3>
-              <p>Read-only Boris <code>recipe</code> facet. Source remains the <code>.cook</code> file. This editor does not scale quantities.</p>
+              <p>Read-only Boris <code>recipe</code> facet. Source remains the <code>.cook</code> file. Scale recipe asks the compiler; it does not write quantities back.</p>
             </div>
             <button type="button" onclick={printRecipe}>Print this recipe</button>
           </div>
-          <p class="fallback-notice">Quantities stay author strings. Boris classifies them as empty, scalable, or fixed and can scale the scalable ones as exact rationals. This editor does not run that operation. See issue 554.</p>
+          <div class="recipe-scale">
+            <label>
+              Scale factor
+              <input type="text" name="scale-factor" bind:value={scaleFactor} autocomplete="off" />
+            </label>
+            <button type="button" disabled={commandRunning} onclick={() => runCommand('recipe_scale')}>Scale recipe</button>
+            <button type="button" disabled={visibleScaleView === null} onclick={resetScale}>Reset scale</button>
+          </div>
           <h4>Ingredients</h4>
           <table class="recipe-table">
             <thead><tr><th>Name</th><th>Quantity</th><th>Preparation</th><th>Recipe reference</th></tr></thead>
@@ -1786,7 +1836,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
               {#each activeNode.recipe.ingredients as ingredient, ingredientIndex (`${ingredient.name}-${ingredientIndex}`)}
                 <tr>
                   <td>{ingredient.name}</td>
-                  <td>{quantityLabel(ingredient.quantity) || '—'}</td>
+                  <td>{displayQuantity(ingredient.quantity, visibleScaleView?.ingredients[ingredientIndex]?.quantity, false)}</td>
                   <td>{ingredient.preparation || '—'}</td>
                   <td>
                     {#if ingredient.recipeRef && nodeForId(graphPayload?.graph ?? null, ingredient.recipeRef)}
@@ -1808,7 +1858,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
             <thead><tr><th>Name</th><th>Quantity</th></tr></thead>
             <tbody>
               {#each activeNode.recipe.cookware as item, itemIndex (`cookware-${item.name}-${itemIndex}`)}
-                <tr><td>{item.name}</td><td>{quantityLabel(item.quantity) || '—'}</td></tr>
+                <tr><td>{item.name}</td><td>{displayQuantity(item.quantity, visibleScaleView?.cookware[itemIndex]?.quantity, false)}</td></tr>
               {/each}
             </tbody>
           </table>
@@ -1817,7 +1867,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
             <thead><tr><th>Name</th><th>Quantity</th></tr></thead>
             <tbody>
               {#each activeNode.recipe.timers as timer, timerIndex (`timer-${timer.name}-${timerIndex}`)}
-                <tr><td>{timer.name || 'timer'}</td><td>{quantityLabel(timer.quantity) || '—'}</td></tr>
+                <tr><td>{timer.name || 'timer'}</td><td>{displayQuantity(timer.quantity, visibleScaleView?.timers[timerIndex]?.quantity, true)}</td></tr>
               {/each}
             </tbody>
           </table>

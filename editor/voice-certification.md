@@ -8,9 +8,9 @@ can operate the same names Playwright reads from the accessibility tree.
 **Spoken Voice Control / Voice Access:** not observed in this slice. Do not
 treat this file as a completed voice-only sign-off.
 
-Recipe scaling (checklist 10) is Boris-gated. The Recipe pane states that
-scaling is unavailable until
-[#554](https://github.com/drawmeanelephant/boris/issues/554).
+Recipe scaling (checklist 10) is keyboard-tested: Scale factor, Scale recipe,
+and Reset scale. The host spawns `boris recipe-scale`. Spoken Voice Control
+is still unobserved.
 
 | # | Action | Keyboard (CI) | Voice Control | Voice Access |
 |---|---|---|---|---|
@@ -23,7 +23,7 @@ scaling is unavailable until
 | 7 | Introduce a validation error | Yes | Unobserved | Unobserved |
 | 8 | Locate / read / fix that error | Yes | Unobserved | Unobserved |
 | 9 | Save and preview | Yes | Unobserved | Unobserved |
-| 10 | Scale a recipe where Boris supports it | Honest gap (#554) | Unobserved | Unobserved |
+| 10 | Scale a recipe where Boris supports it | Yes (`boris recipe-scale`) | Unobserved | Unobserved |
 | 11 | Navigate to a related recipe or page | Yes | Unobserved | Unobserved |
 | 12 | Run a publication plan | Yes | Unobserved | Unobserved |
 | 13 | Recover from an interrupted operation | Yes | Unobserved | Unobserved |

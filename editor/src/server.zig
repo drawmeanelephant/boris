@@ -402,7 +402,7 @@ fn respondApiError(request: *http.Server.Request, err: anyerror) !void {
         error.UnsupportedMediaType => .{ .status = .unsupported_media_type, .code = "unsupported_media_type" },
         error.TooManyFiles => .{ .status = .payload_too_large, .code = "too_many_files" },
         error.CorruptRecovery => .{ .status = .internal_server_error, .code = "corrupt_recovery" },
-        error.ImpactIdRequired, error.UnexpectedImpactId, error.InvalidImpactId, error.ProfileRequired, error.UnexpectedProfile, error.InvalidProfilePath => .{ .status = .bad_request, .code = "invalid_command_request" },
+        error.ImpactIdRequired, error.UnexpectedImpactId, error.InvalidImpactId, error.ProfileRequired, error.UnexpectedProfile, error.InvalidProfilePath, error.RecipeScaleIdRequired, error.RecipeScaleFactorRequired, error.UnexpectedRecipeScale, error.InvalidRecipeScaleId, error.InvalidRecipeScaleFactor => .{ .status = .bad_request, .code = "invalid_command_request" },
         error.UnsupportedArtifact => .{ .status = .bad_gateway, .code = "unsupported_boris_artifact" },
         error.InvalidBorisVersion => .{ .status = .bad_gateway, .code = "invalid_boris_version" },
         error.BorisUnavailable => .{ .status = .service_unavailable, .code = "boris_unavailable" },
