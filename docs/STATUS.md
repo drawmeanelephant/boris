@@ -78,7 +78,7 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | GitHub Pages | **Shipped and verified** — normalized project/root/custom-domain identity, exact public artifact boundary, retained target-local evidence, optional bounded post-deploy observer. Operator path: [`github-pages.md`](github-pages.md). |
 | Standard.site / AT Protocol | **Shipped for first testers** — offline plan/records/verify, opt-in app-password login, one-shot publish, recorded passing bsky.social live smoke. Browser OAuth is implemented; bsky.social does not grant `site.standard.authFull` (exit 6). Operator path: [`standard-site.md`](standard-site.md). |
 | Publication evidence | **Done** — artifacts → checks → claims → Touch Atlas → Proof Pack, staged, deterministic. |
-| Nostr NIP-23 | **CLI shipped, not a verified target** — `boris nostr plan` / `sign` / `publish` (BIP-340, bounded RFC-6455, per-relay verdict). No location adapter, no Proof Pack, no live-smoke gate. Guide: [`content/guides/nostr-publication.md`](../content/guides/nostr-publication.md). |
+| Nostr NIP-23 | **CLI shipped, not a verified target** — `boris nostr plan` / `sign` / `publish` (BIP-340, bounded RFC-6455, per-relay verdict). Plan emits NIP-19 `naddr` / `npub`. No location adapter, no Proof Pack, no live-smoke gate. Guide: [`content/guides/nostr-publication.md`](../content/guides/nostr-publication.md). |
 
 ### Editor
 

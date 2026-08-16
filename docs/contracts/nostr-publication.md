@@ -140,7 +140,7 @@ exactly.
 | Key | Meaning |
 |-----|---------|
 | `enabled` | Whether the Nostr surface is configured for this workspace |
-| `pubkey` | The expected author public key, as 64 lowercase hex characters (NIP-01 hex form, not `npub`) |
+| `pubkey` | The expected author public key: 64 lowercase hex characters **or** a NIP-19 `npub1…`. Stored and planned as hex. `npub` never enters a NIP-01 event. |
 | `articles` | Exact entity-id allowlist; canonically sorted and deduped |
 | `relays` | Relay endpoints, each normalized to `wss://` form, canonically sorted and deduped |
 | `timeout_ms` | Declared transport timeout; `publish` uses it as the per-read/write deadline |
@@ -174,7 +174,8 @@ resends).
 purpose is stating which author's address the planned article belongs to, and
 whose only enforcement is that a later signing slice must refuse to sign with a
 key that does not match it. It is not a credential, and it does not become one
-by being configured.
+by being configured. A NIP-19 `npub` is accepted as input and converted to
+hex before any other work; the closed key set is unchanged.
 
 A secret never appears in a profile, in a plan, or in evidence. There is no
 profile key, plan field, or diagnostic message that can carry one, and there is
@@ -314,6 +315,18 @@ A NIP-23 article's identity is its address, not an event hash:
 ```text
 30023 : pubkey : entity id
 ```
+
+The plan also emits the NIP-19 display forms of that address (#566). They
+are not event tags and they do not enter `intention_digest`:
+
+| Field | Meaning |
+|---|---|
+| `author.npub` | `npub` of `author.expected_pubkey` |
+| `articles[].naddr` | bech32 `naddr` of `(kind, author, d)` plus the plan's `wss://` relays, in that TLV order: `d` (0), author (2), kind (3), each relay (1) |
+| `articles[].naddr_uri` | NIP-21 `nostr:` + `naddr` |
+
+`ws://` loopback relays are omitted from the `naddr`. Hex remains the
+protocol form. `npub` never appears in a NIP-01 event.
 
 Consequences, all of them normative:
 

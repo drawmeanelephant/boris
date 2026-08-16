@@ -379,10 +379,10 @@ fn parseNostr(allocator: std.mem.Allocator, value: std.json.Value) Error!NostrPl
     const obj = try object(value);
     try only(obj, &.{ "enabled", "pubkey", "articles", "relays", "timeout_ms", "retries" });
 
-    const pubkey = try string(try required(obj, "pubkey"));
-    nostr.validatePubkey(pubkey) catch return error.InvalidNostr;
+    const pubkey_raw = try string(try required(obj, "pubkey"));
+    const pubkey = nostr.parseAuthorPubkey(allocator, pubkey_raw) catch return error.InvalidNostr;
 
-    var out = NostrPlan{ .pubkey = try dup(allocator, pubkey) };
+    var out = NostrPlan{ .pubkey = pubkey };
     errdefer out.deinit(allocator);
 
     if (field(obj, "enabled")) |v| out.enabled = try boolean(v);
@@ -921,6 +921,17 @@ test "nostr section normalizes selection and relays into the owned plan" {
     try std.testing.expectEqual(@as(usize, 2), config.retries);
 }
 
+test "nostr section accepts npub and stores hex" {
+    var request = try parseNostrProfile(
+        "{\"pubkey\":\"npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg\",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"]}",
+    );
+    defer request.deinit(std.testing.allocator);
+    try std.testing.expectEqualStrings(
+        "7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e",
+        request.plan.nostr.?.pubkey,
+    );
+}
+
 test "nostr section defaults are bounded and explicit" {
     var request = try parseNostrProfile(
         "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"]}",
@@ -939,6 +950,7 @@ test "nostr section fails closed on identity, selection, and relay defects" {
         // Pubkey grammar: wrong length, uppercase hex, non-hex.
         "{\"pubkey\":\"abc\",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"]}",
         "{\"pubkey\":\"A695F6B60119D9521934A691347D9F78E8770B56DA16BB255EE286DDF9FDA919\",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"]}",
+        "{\"pubkey\":\"npub1notreal\",\"articles\":[\"a\"],\"relays\":[\"wss://r.example.com\"]}",
         // Empty selection, duplicate selection, unusable entity id.
         "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[],\"relays\":[\"wss://r.example.com\"]}",
         "{\"pubkey\":" ++ valid_pubkey ++ ",\"articles\":[\"a\",\"a\"],\"relays\":[\"wss://r.example.com\"]}",

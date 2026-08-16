@@ -12,7 +12,8 @@
     "base_path": "/docs"
   },
   "author": {
-    "expected_pubkey": "a695f6b60119d9521934a691347d9f78e8770b56da16bb255ee286ddf9fda919"
+    "expected_pubkey": "a695f6b60119d9521934a691347d9f78e8770b56da16bb255ee286ddf9fda919",
+    "npub": "npub1562lddspr8v4yxf556gnglvl0r58wz6kmgttkf27u2rdm70a4yvsq6spxc"
   },
   "delivery": {
     "relays": [
@@ -47,7 +48,9 @@
       "created_at": null,
       "created_at_policy": "signing-time",
       "event_id": null,
-      "signature": null
+      "signature": null,
+      "naddr": "naddr1qq8xzun5d93kcetn9anxjunnwspzpf5476mqzxwe2gvnff53x37e778gwu94dkskhvj4ac5xmhulm2geqvzqqqr4guq3jamnwvaz7tmp9eex2mrp0yhx27rpd4cxcefwvdhk6qghwaehxw309aex2mrp0yhx27rpd4cxcefwvdhk6358sku",
+      "naddr_uri": "nostr:naddr1qq8xzun5d93kcetn9anxjunnwspzpf5476mqzxwe2gvnff53x37e778gwu94dkskhvj4ac5xmhulm2geqvzqqqr4guq3jamnwvaz7tmp9eex2mrp0yhx27rpd4cxcefwvdhk6qghwaehxw309aex2mrp0yhx27rpd4cxcefwvdhk6358sku"
     },
     {
       "entity_id": "articles/second",
@@ -70,7 +73,9 @@
       "created_at": null,
       "created_at_policy": "signing-time",
       "event_id": null,
-      "signature": null
+      "signature": null,
+      "naddr": "naddr1qq8kzun5d93kcetn9aek2cm0dejqyg9xjhmtvqgem9fpjd9xjy68m8mcapmsk4k6z6aj2hhzsmwlnldfrypsgqqqw4rszxthwden5te0vyh8yetvv9ujuetcv9khqmr99e3k7mgpzamhxue69uhhyetvv9ujuetcv9khqmr99e3k7mgp8tm3s",
+      "naddr_uri": "nostr:naddr1qq8kzun5d93kcetn9aek2cm0dejqyg9xjhmtvqgem9fpjd9xjy68m8mcapmsk4k6z6aj2hhzsmwlnldfrypsgqqqw4rszxthwden5te0vyh8yetvv9ujuetcv9khqmr99e3k7mgpzamhxue69uhhyetvv9ujuetcv9khqmr99e3k7mgp8tm3s"
     }
   ]
 }
