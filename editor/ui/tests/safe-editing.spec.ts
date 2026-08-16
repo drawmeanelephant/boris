@@ -1124,6 +1124,41 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
     expect(renameRequests).toBe(1);
   });
 
+  test('create and rename dialogs: Esc clears a half-typed path on reopen', async ({ page }) => {
+    await installApi(page);
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+
+    // Create: type a path, Esc out, reopen — the default path is back, not the stale text.
+    const create = page.getByRole('dialog', { name: 'Create file' });
+    await page.getByRole('button', { name: 'Create file', exact: true }).click();
+    await expect(create).toBeVisible();
+    const createInput = create.getByRole('textbox', { name: 'New file path' });
+    await expect(createInput).toHaveValue('content/new-page.md');
+    await createInput.fill('content/posts/');
+    await page.keyboard.press('Escape');
+    await expect(create).toBeHidden();
+    await page.getByRole('button', { name: 'Create file', exact: true }).click();
+    await expect(create).toBeVisible();
+    await expect(createInput).toHaveValue('content/new-page.md');
+    await page.keyboard.press('Escape');
+    await expect(create).toBeHidden();
+
+    // Rename: same, but the reopen state is the active path, not the half-typed text.
+    const rename = page.getByRole('dialog', { name: 'Rename file' });
+    await page.getByRole('button', { name: 'Rename file', exact: true }).click();
+    await expect(rename).toBeVisible();
+    const renameInput = rename.getByRole('textbox', { name: 'New file path' });
+    await expect(renameInput).toHaveValue('content/index.md');
+    await renameInput.fill('content/posts/renamed.md');
+    await page.keyboard.press('Escape');
+    await expect(rename).toBeHidden();
+    await page.getByRole('button', { name: 'Rename file', exact: true }).click();
+    await expect(rename).toBeVisible();
+    await expect(renameInput).toHaveValue('content/index.md');
+    await page.keyboard.press('Escape');
+    await expect(rename).toBeHidden();
+  });
+
   test('delete dialog: Enter confirms and Esc cancels', async ({ page }) => {
     await installApi(page);
     let deleteRequests = 0;
