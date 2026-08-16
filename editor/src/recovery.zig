@@ -20,6 +20,7 @@ pub const Snapshot = struct {
 
 pub const SnapshotList = struct {
     snapshots: []Snapshot,
+    skipped: usize = 0,
 
     pub fn deinit(self: *SnapshotList, allocator: std.mem.Allocator) void {
         for (self.snapshots) |*snapshot| snapshot.deinit(allocator);
@@ -93,7 +94,7 @@ pub fn loadAll(allocator: std.mem.Allocator, io: Io, state_root: []const u8) !Sn
     const recovery_path = try std.fs.path.join(allocator, &.{ state_root, "recovery" });
     defer allocator.free(recovery_path);
     var dir = Io.Dir.cwd().openDir(io, recovery_path, .{ .iterate = true, .follow_symlinks = false }) catch |err| switch (err) {
-        error.FileNotFound => return .{ .snapshots = try allocator.alloc(Snapshot, 0) },
+        error.FileNotFound => return .{ .snapshots = try allocator.alloc(Snapshot, 0), .skipped = 0 },
         else => |other| return other,
     };
     defer dir.close(io);
@@ -119,18 +120,30 @@ pub fn loadAll(allocator: std.mem.Allocator, io: Io, state_root: []const u8) !Sn
         for (snapshots.items) |*snapshot| snapshot.deinit(allocator);
         snapshots.deinit(allocator);
     }
+    var skipped: usize = 0;
     for (names.items) |name| {
         const bytes = try dir.readFileAlloc(io, name, allocator, .limited(10 * 1024 * 1024));
         defer allocator.free(bytes);
-        var parsed = std.json.parseFromSlice(DiskSnapshot, allocator, bytes, .{}) catch return error.CorruptRecovery;
+        var parsed = std.json.parseFromSlice(DiskSnapshot, allocator, bytes, .{}) catch {
+            skipped += 1;
+            continue;
+        };
         defer parsed.deinit();
         if (!std.mem.eql(u8, parsed.value.format, "boris-editor-recovery") or parsed.value.schema_version != 1) {
-            return error.UnsupportedRecoveryVersion;
+            skipped += 1;
+            continue;
         }
-        file_api.validatePath(parsed.value.path) catch return error.CorruptRecovery;
-        file_api.validateFingerprint(parsed.value.fingerprint) catch return error.CorruptRecovery;
+        file_api.validatePath(parsed.value.path) catch {
+            skipped += 1;
+            continue;
+        };
+        file_api.validateFingerprint(parsed.value.fingerprint) catch {
+            skipped += 1;
+            continue;
+        };
         if (parsed.value.content.len > file_api.max_file_bytes or !std.unicode.utf8ValidateSlice(parsed.value.content)) {
-            return error.CorruptRecovery;
+            skipped += 1;
+            continue;
         }
         const owned_path = try allocator.dupe(u8, parsed.value.path);
         errdefer allocator.free(owned_path);
@@ -149,7 +162,7 @@ pub fn loadAll(allocator: std.mem.Allocator, io: Io, state_root: []const u8) !Sn
             return std.mem.order(u8, left.path, right.path) == .lt;
         }
     }.less);
-    return .{ .snapshots = try snapshots.toOwnedSlice(allocator) };
+    return .{ .snapshots = try snapshots.toOwnedSlice(allocator), .skipped = skipped };
 }
 
 fn snapshotName(path: []const u8) [69]u8 {
@@ -180,4 +193,25 @@ test "dirty buffers survive a new recovery-store instance" {
     var empty = try loadAll(allocator, io, root);
     defer empty.deinit(allocator);
     try std.testing.expectEqual(@as(usize, 0), empty.snapshots.len);
+}
+
+test "one corrupt snapshot does not drop the valid ones" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var temp = std.testing.tmpDir(.{});
+    defer temp.cleanup();
+    const root = try temp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(root);
+
+    try save(allocator, io, root, "content/index.md", "keep\n", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    var recovery_dir = try temp.dir.openDir(io, "recovery", .{});
+    defer recovery_dir.close(io);
+    try recovery_dir.writeFile(io, .{ .sub_path = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.json", .data = "{not-json" });
+
+    var loaded = try loadAll(allocator, io, root);
+    defer loaded.deinit(allocator);
+    try std.testing.expectEqual(@as(usize, 1), loaded.snapshots.len);
+    try std.testing.expectEqual(@as(usize, 1), loaded.skipped);
+    try std.testing.expectEqualStrings("content/index.md", loaded.snapshots[0].path);
+    try std.testing.expectEqualStrings("keep\n", loaded.snapshots[0].content);
 }
