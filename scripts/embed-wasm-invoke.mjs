@@ -1,17 +1,68 @@
 #!/usr/bin/env node
-// Test host for the M5 compileBundle wasm ABI. Not product compiler code.
-// Usage: node scripts/embed-wasm-invoke.mjs <module.wasm> [markdown]
-// Prints graph.json bytes to stdout.
+// Test host for the compileBundle wasm ABI. Not product compiler code.
+// Usage:
+//   node scripts/embed-wasm-invoke.mjs <module.wasm> [markdown]
+//   node scripts/embed-wasm-invoke.mjs <module.wasm> --html --evidence \
+//     --file path hostfile --print artifact-path|--manifest
+// Default stdout is graph.json (M5 compat). Failed compiles still print the
+// result manifest when --manifest is set; otherwise they exit 1.
 
 import { readFileSync } from "node:fs";
 import { argv, stdout, stderr, exit } from "node:process";
 
 const wasmPath = argv[2];
 if (!wasmPath) {
-  stderr.write("usage: embed-wasm-invoke.mjs <module.wasm> [markdown]\n");
+  stderr.write(
+    "usage: embed-wasm-invoke.mjs <module.wasm> [--html] [--evidence] [--manifest] [--print PATH] [--file logical host] [markdown]\n",
+  );
   exit(2);
 }
-const markdown = argv[3] ?? "---\ntitle: Home\nstatus: published\n---\n# Home\n";
+
+let html = false;
+let evidence = false;
+let printManifest = false;
+let printPath = null;
+const files = [];
+const rest = argv.slice(3);
+for (let i = 0; i < rest.length; i++) {
+  const arg = rest[i];
+  if (arg === "--html") html = true;
+  else if (arg === "--evidence") evidence = true;
+  else if (arg === "--manifest") printManifest = true;
+  else if (arg === "--print") {
+    printPath = rest[++i];
+    if (!printPath) {
+      stderr.write("--print requires a path\n");
+      exit(2);
+    }
+  } else if (arg === "--file") {
+    const logical = rest[++i];
+    const host = rest[++i];
+    if (!logical || !host) {
+      stderr.write("--file requires logical and host paths\n");
+      exit(2);
+    }
+    files.push({ path: logical, bytes: readFileSync(host) });
+  } else if (/^--[a-z]/.test(arg)) {
+    stderr.write(`unexpected argument: ${arg}\n`);
+    exit(2);
+  } else if (files.length === 0) {
+    // Positional markdown, including frontmatter that starts with `---`.
+    files.push({
+      path: "index.md",
+      bytes: Buffer.from(arg, "utf8"),
+    });
+  } else {
+    stderr.write(`unexpected argument: ${arg}\n`);
+    exit(2);
+  }
+}
+if (files.length === 0) {
+  files.push({
+    path: "index.md",
+    bytes: Buffer.from("---\ntitle: Home\nstatus: published\n---\n# Home\n", "utf8"),
+  });
+}
 
 const bytes = readFileSync(wasmPath);
 const wasiCalls = [];
@@ -59,6 +110,7 @@ for (const name of [
   "memory",
   "boris_alloc",
   "boris_compile",
+  "boris_last_status",
   "boris_result_artifact_count",
   "boris_result_artifact_ptr",
   "boris_result_artifact_len",
@@ -72,18 +124,24 @@ for (const name of [
   }
 }
 
-const md = Buffer.from(markdown, "utf8");
-const mdPtr = exp.boris_alloc(md.length);
-if (md.length !== 0 && mdPtr === 0) {
-  stderr.write("boris_alloc markdown failed\n");
-  exit(1);
+const fileRefs = [];
+for (const file of files) {
+  const ptr = exp.boris_alloc(file.bytes.length);
+  if (file.bytes.length !== 0 && ptr === 0) {
+    stderr.write(`boris_alloc failed for ${file.path}\n`);
+    exit(1);
+  }
+  if (file.bytes.length !== 0) {
+    new Uint8Array(exp.memory.buffer, ptr, file.bytes.length).set(file.bytes);
+  }
+  fileRefs.push({ path: file.path, ptr, len: file.bytes.length });
 }
-if (md.length !== 0) new Uint8Array(exp.memory.buffer, mdPtr, md.length).set(md);
 
 const req = Buffer.from(
   JSON.stringify({
-    html: false,
-    files: [{ path: "index.md", ptr: mdPtr, len: md.length }],
+    html,
+    evidence,
+    files: fileRefs,
   }),
   "utf8",
 );
@@ -101,17 +159,26 @@ if (handle === 0) {
 }
 const manPtr = exp.boris_result_manifest_ptr(handle);
 const manLen = exp.boris_result_manifest_len(handle);
-const manifest = JSON.parse(Buffer.from(new Uint8Array(exp.memory.buffer, manPtr, manLen)).toString("utf8"));
-const graph = manifest.artifacts.find((a) => a.path === "graph.json");
-if (!graph) {
-  stderr.write(`no graph.json in ${JSON.stringify(manifest)}\n`);
-  exit(1);
+const manifestBytes = Buffer.from(new Uint8Array(exp.memory.buffer, manPtr, manLen));
+const manifest = JSON.parse(manifestBytes.toString("utf8"));
+
+if (printManifest) {
+  stdout.write(manifestBytes);
+} else {
+  const wanted = printPath ?? "graph.json";
+  const art = manifest.artifacts.find((a) => a.path === wanted);
+  if (!art) {
+    stderr.write(`no ${wanted} in ${JSON.stringify(manifest)}\n`);
+    exp.boris_result_free(handle);
+    exit(1);
+  }
+  const ptr = exp.boris_result_artifact_ptr(handle, art.index);
+  const len = exp.boris_result_artifact_len(handle, art.index);
+  stdout.write(Buffer.from(new Uint8Array(exp.memory.buffer, ptr, len)));
 }
-const ptr = exp.boris_result_artifact_ptr(handle, graph.index);
-const len = exp.boris_result_artifact_len(handle, graph.index);
-stdout.write(Buffer.from(new Uint8Array(exp.memory.buffer, ptr, len)));
 exp.boris_result_free(handle);
 if (wasiCalls.length !== 0) {
   stderr.write(`wasi stubs were called: ${wasiCalls.join(",")}\n`);
   exit(1);
 }
+

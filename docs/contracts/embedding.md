@@ -1,8 +1,8 @@
 # Embedding: freestanding compiler host seam
 
-**Status:** normative for the M0 render spike and M3 `compileBundle`  
+**Status:** normative for the M0 render spike, M3 `compileBundle`, and M6 evidence  
 **Issue:** [#301](https://github.com/drawmeanelephant/boris/issues/301)  
-**Related:** [oliver-renderer.md](oliver-renderer.md), [source-provider.md](source-provider.md), [artifact-sink.md](artifact-sink.md), [diagnostics.md](diagnostics.md), [json-ir-and-manifest.md](json-ir-and-manifest.md)
+**Related:** [oliver-renderer.md](oliver-renderer.md), [source-provider.md](source-provider.md), [artifact-sink.md](artifact-sink.md), [diagnostics.md](diagnostics.md), [json-ir-and-manifest.md](json-ir-and-manifest.md), [publication-artifacts.md](publication-artifacts.md)
 
 This contract is **not** a publication target. Wasm is an embedding
 profile of the same compiler. It does not add a `publication.target`
@@ -122,7 +122,7 @@ through the same `renderPageSlots` / assemble splice as the CLI, then
 emitted to the artifact sink.
 
 Failed graph/content validation still emits no HTML. Incremental cache,
-`--jobs`, sitemap, search, and evidence stay native-CLI.
+`--jobs`, sitemap, and search stay native-CLI. Evidence is M6.
 
 ---
 
@@ -160,7 +160,7 @@ Bulk source bytes are **not** in JSON. The request names files already
 copied into wasm memory with `boris_alloc`:
 
 ```json
-{"html":false,"layout_path":"layouts/main.html","files":[{"path":"index.md","ptr":4096,"len":80}]}
+{"html":false,"evidence":false,"layout_path":"layouts/main.html","files":[{"path":"index.md","ptr":4096,"len":80}]}
 ```
 
 ### Status codes
@@ -187,3 +187,74 @@ Panic traps. It is not a successful empty compile.
 Workers Free allows 3 MiB gzip. ReleaseSmall fits with room. The
 automated gate requires ReleaseSmall &lt; 8 MiB and ReleaseSafe &lt; 16 MiB
 uncompressed.
+
+---
+
+## M6 — Evidence and poisoned-corpus parity
+
+`CompileConfig.evidence = true` (Wasm request `evidence: true`) emits the
+target-local evidence chain into the same memory sink after a successful
+HTML compile:
+
+- `_boris/proof/artifacts.json`
+- `_boris/proof/checks.json`
+- `_boris/proof/claims.json`
+- `_boris/proof/touches.json`
+
+The inventory covers HTML pages, theme assets, and content-local assets
+already in the sink. Rendered search, sitemap, RSS, llms, IR, and Proof
+Pack presentation are not in this first embed inventory. The rendered-search
+check is therefore `not-applicable` and the search claim is `not-verified`.
+That is an honest limitation, not a verified search claim.
+
+Evidence is **not** a `publication.target`. It describes the in-memory
+artifact set for target name `default`. Failed graph or content validation
+emits no evidence files and therefore no successful claims.
+
+Checks, claims, and touches are derived from sink bytes with the same
+parsers and writers as the native HTML target. They do not open a host
+directory. Memory adapters must not call WASI.
+
+### Parity
+
+| Path | What must match |
+|---|---|
+| Native `compileBundle` vs Wasm `compileBundle` | Byte-identical IR, HTML, and evidence artifacts |
+| Native filesystem compile vs `compileBundle` | Diagnostic `code`, `sourcePath`, `line`, `column`, `severity`, `remediation` on the seeded poisoned corpus |
+| Failed validation | No `_boris/proof/*` artifacts; no verified claims |
+
+Poisoned coverage includes missing parents, parent cycles, self-parent,
+unknown frontmatter, invalid status, duplicate ids, missing includes,
+missing wiki-link targets, and invalid UTF-8.
+
+### Module metadata
+
+`boris_version` and the result manifest name profile
+`embed-ir+html+evidence`. The manifest lists:
+
+| Field | Meaning |
+|---|---|
+| `features` | `markdown`, `closed-frontmatter`, `graph`, `includes`, `wiki`, `html`, `ir`, `evidence` |
+| `unsupported` | `threads`, `watch`, `jobs`, `live-deploy`, `textile`, `cooklang`, `untrusted-multi-tenant`, `proof-pack`, `wasi-filesystem` |
+| `limits` | `isolate_memory_mib` 128; uncompressed gate `release_small_max_mib` 8, `release_safe_max_mib` 16 |
+
+Native CLI extras (search, sitemap, Proof Pack, live deploy adapters) stay
+out of this profile. Cloudflare Worker host limits are M7.
+
+### Measured module size after evidence (2026-08-16, Zig 0.16.0)
+
+Linking the evidence chain grows the product module. These are snapshots,
+not a new size promise.
+
+| Artifact | Uncompressed | gzip -9 |
+|---|---:|---:|
+| `boris-embed.wasm` (ReleaseSafe) | 7 351.7 KiB | 2 080.5 KiB |
+| `boris-embed-small.wasm` (ReleaseSmall) | 937.3 KiB | 330.8 KiB |
+
+ReleaseSmall still fits Workers Free (3 MiB gzip). The automated gate is
+unchanged: ReleaseSmall &lt; 8 MiB and ReleaseSafe &lt; 16 MiB uncompressed.
+
+Representative native `compileBundle` of the one-page HTML+evidence fixture
+in `src/embed.zig` is the max tested source bundle for this card. The Wasm
+parity test uses the same fixture. Peak isolate memory is bounded by the
+128 MiB Worker cap; this card does not claim a measured peak below that.

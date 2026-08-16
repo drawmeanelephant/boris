@@ -688,6 +688,62 @@ pub fn collect(
     return .{ .gpa = gpa, .target = target, .records = records };
 }
 
+/// Collect an inventory from already-committed payload bytes. Paths, producers,
+/// and format versions are borrowed from `items`; the caller must keep those
+/// slices alive until `Inventory.deinit`.
+pub const PayloadSpec = struct {
+    spec: Spec,
+    bytes: []const u8,
+};
+
+pub fn collectFromPayloads(
+    gpa: std.mem.Allocator,
+    target: []const u8,
+    items: []const PayloadSpec,
+) !Inventory {
+    if (target.len == 0) return error.InvalidTarget;
+
+    var records = try gpa.alloc(Record, items.len);
+    var filled: usize = 0;
+    errdefer gpa.free(records);
+
+    for (items) |item| {
+        const spec = item.spec;
+        if (!validateRelativePath(spec.path)) return error.InvalidArtifactPath;
+        if (isReservedPath(spec.path)) return error.InventoryPathCollision;
+        if (!std.mem.eql(u8, spec.producer, spec.kind.producerName())) return error.InvalidArtifactProducer;
+        if (spec.format_version) |version| if (version.len == 0) return error.InvalidFormatVersion;
+
+        const digest = cache.hexDigest(cache.hashBytes(item.bytes));
+        records[filled] = .{
+            .path = spec.path,
+            .kind = spec.kind,
+            .producer = spec.producer,
+            .required = spec.required,
+            .status = .committed,
+            .bytes = item.bytes.len,
+            .sha256 = digest,
+            .format_version = spec.format_version,
+            .dimensions = image_dimensions.dimensions(spec.path, item.bytes),
+            .semantics = switch (spec.kind) {
+                .theme_asset => .static,
+                .content_asset => .content_reference,
+                else => null,
+            },
+        };
+        filled += 1;
+    }
+
+    std.mem.sort(Record, records, {}, recordLess);
+    if (records.len > 1) {
+        for (records[1..], records[0 .. records.len - 1]) |current, previous| {
+            if (std.mem.eql(u8, current.path, previous.path)) return error.DuplicateArtifactPath;
+        }
+    }
+
+    return .{ .gpa = gpa, .target = target, .records = records };
+}
+
 pub fn render(gpa: std.mem.Allocator, inventory: *const Inventory) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(gpa);
@@ -818,6 +874,25 @@ test "inventory collects exact overlay bytes, sorts paths, and emits stable dige
     defer gpa.free(second);
     try std.testing.expectEqualStrings(first, second);
     try std.testing.expect(std.mem.indexOf(u8, first, output_path) == null);
+}
+
+test "collectFromPayloads matches overlay collection for the same bytes" {
+    const gpa = std.testing.allocator;
+    const items = [_]PayloadSpec{
+        .{ .spec = .{ .path = "z.html", .kind = .html_page, .producer = "html-render" }, .bytes = "new page" },
+        .{ .spec = .{ .path = "a.html", .kind = .html_page, .producer = "html-render" }, .bytes = "cached page" },
+        .{ .spec = .{ .path = "assets/site.css", .kind = .theme_asset, .producer = "theme-assets" }, .bytes = "css" },
+    };
+    var inventory = try collectFromPayloads(gpa, "public", &items);
+    defer inventory.deinit();
+    try std.testing.expectEqual(@as(usize, 3), inventory.records.len);
+    try std.testing.expectEqualStrings("a.html", inventory.records[0].path);
+    try std.testing.expectEqualStrings("assets/site.css", inventory.records[1].path);
+    try std.testing.expectEqualStrings("z.html", inventory.records[2].path);
+    try std.testing.expectEqualStrings(
+        "73f623d2c631e3d6d675c6d2ed9a05801bafeb77e522f16122b86e47b13ce4ec",
+        &inventory.records[0].sha256,
+    );
 }
 
 test "generated projections are staged-only and missing paths fail closed" {

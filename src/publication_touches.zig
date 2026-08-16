@@ -3542,6 +3542,83 @@ pub fn writeAfterClaims(
     atomic.replace(io) catch return error.TouchesWriteFailed;
 }
 
+/// Derive the Touch Atlas from committed inventory, checks, and claims bytes.
+/// Same derivation as `writeAfterClaims`; no host directory is opened.
+pub fn renderFromBytes(
+    gpa: std.mem.Allocator,
+    target: []const u8,
+    inventory_bytes: []const u8,
+    checks_bytes: []const u8,
+    claims_bytes: []const u8,
+) Error![]u8 {
+    var report_arena = std.heap.ArenaAllocator.init(gpa);
+    defer report_arena.deinit();
+    const report_gpa = report_arena.allocator();
+
+    var artifacts_input = std.Io.Reader.fixed(inventory_bytes);
+    var inventory = artifact_inventory.parseStream(report_gpa, &artifacts_input, target) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.InvalidArtifactsReport,
+    };
+    defer inventory.deinit();
+    const artifacts_binding = FileBinding{
+        .bytes = inventory_bytes.len,
+        .sha256 = cache.hexDigest(cache.hashBytes(inventory_bytes)),
+    };
+
+    var checks_input = std.Io.Reader.fixed(checks_bytes);
+    const parsed_checks = try parseChecksStream(report_gpa, &checks_input, target);
+    const checks_binding = FileBinding{
+        .bytes = checks_bytes.len,
+        .sha256 = cache.hexDigest(cache.hashBytes(checks_bytes)),
+    };
+
+    var claims_input = std.Io.Reader.fixed(claims_bytes);
+    const parsed_claims = try parseClaimsStream(report_gpa, &claims_input, target);
+    const claims_binding = FileBinding{
+        .bytes = claims_bytes.len,
+        .sha256 = cache.hexDigest(cache.hashBytes(claims_bytes)),
+    };
+
+    if (parsed_checks.artifact_binding.bytes != artifacts_binding.bytes or
+        !std.mem.eql(u8, &parsed_checks.artifact_binding.sha256, &artifacts_binding.sha256) or
+        parsed_checks.artifact_count != inventory.records.len)
+        return error.StaleArtifactsBinding;
+    if (parsed_claims.artifact_binding.bytes != artifacts_binding.bytes or
+        !std.mem.eql(u8, &parsed_claims.artifact_binding.sha256, &artifacts_binding.sha256) or
+        parsed_claims.artifact_count != inventory.records.len)
+        return error.StaleClaimsBinding;
+    if (parsed_claims.checks_binding.bytes != checks_binding.bytes or
+        !std.mem.eql(u8, &parsed_claims.checks_binding.sha256, &checks_binding.sha256) or
+        parsed_claims.check_count != parsed_checks.checks.len or
+        parsed_claims.finding_count != parsed_checks.findings.len)
+        return error.StaleChecksBinding;
+
+    try validateChecksAgainstInventory(report_gpa, &inventory, &parsed_checks.checks);
+    try validateClaimsAgainstChecks(&parsed_checks, checks_binding, &parsed_claims);
+
+    const derived = try buildNodesAndEdges(report_gpa, &inventory, &parsed_checks, &parsed_claims);
+    try validateGraph(report_gpa, &inventory, &parsed_checks, &parsed_claims, derived.nodes, derived.edges);
+
+    const report = writeReport(
+        report_gpa,
+        target,
+        artifacts_binding,
+        checks_binding,
+        claims_binding,
+        &inventory,
+        &parsed_checks,
+        &parsed_claims,
+        derived.nodes,
+        derived.edges,
+    ) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.NoSpaceLeft => unreachable,
+        error.InvalidChecksReport => return error.InvalidChecksReport,
+    };
+    return gpa.dupe(u8, report);
+}
+
 // ---------------------------------------------------------------------------
 // Test fixtures and end-to-end evidence derivation tests.
 // ---------------------------------------------------------------------------
