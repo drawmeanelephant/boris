@@ -2950,8 +2950,9 @@ test "parse: nostr plan owns stdout and rejects every other selector" {
 
 test "parse: recipe-scale requires id and a scalable factor" {
     var o = try parseOptions(std.testing.allocator, &.{
-        "boris", "recipe-scale", "--input", "docs/contracts/fixtures/cooklang-compatibility/content",
-        "--id", "carbonara", "--factor", "2", "--cooklang", "--out", "view.json", "--quiet",
+        "boris",      "recipe-scale", "--input",   "docs/contracts/fixtures/cooklang-compatibility/content",
+        "--id",       "carbonara",    "--factor",  "2",
+        "--cooklang", "--out",        "view.json", "--quiet",
     });
     defer o.deinit(std.testing.allocator);
     try expectEqual(Command.recipe_scale, o.command);
