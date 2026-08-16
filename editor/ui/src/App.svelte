@@ -117,6 +117,8 @@
   let completionOpen = false;
   let paletteQuery = '';
   let paletteSelection = 0;
+  let lastDialogTrigger: HTMLElement | null = null;
+  let skipFocusRestore = false;
 
   $: dirty = activePath !== '' && content !== baseline;
   $: problemGroups = groupProblems(commandResult?.problems ?? []);
@@ -548,6 +550,7 @@
       snapshots = snapshots.filter(snapshot => snapshot.path !== activePath);
       conflict = null;
       deletedConflict = false;
+      skipFocusRestore = true;
       conflictDialog?.close();
       await refreshFiles();
       await rebuildPreview('save');
@@ -559,14 +562,14 @@
       deletedConflict = false;
       editorStatus = `External changes detected in ${activePath}. Nothing was overwritten.`;
       await tick();
-      conflictDialog.showModal();
+      openModal(conflictDialog);
       conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
     } else if (result.response.status === 409 && error.status === 'deleted') {
       conflict = null;
       deletedConflict = true;
       editorStatus = `${activePath} was deleted outside the editor. Nothing was written.`;
       await tick();
-      conflictDialog.showModal();
+      openModal(conflictDialog);
       conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
     } else if (error.error === 'read_only') {
       readOnly = true;
@@ -580,13 +583,14 @@
   async function requestResolution(pending: PendingResolution) {
     pendingResolution = pending;
     await tick();
-    resolutionDialog.showModal();
+    openModal(resolutionDialog);
   }
 
   async function resolvePendingSave() {
     const pending = pendingResolution;
     if (!pending) return;
     pendingResolution = null;
+    skipFocusRestore = true;
     resolutionDialog.close();
     if (await saveFile()) {
       await proceedAfterResolution(pending);
@@ -599,6 +603,7 @@
     const pending = pendingResolution;
     if (!pending) return;
     pendingResolution = null;
+    skipFocusRestore = true;
     resolutionDialog.close();
     await discardBuffer();
     await proceedAfterResolution(pending);
@@ -632,6 +637,7 @@
     loadBuffer(conflict, `Loaded the current disk version of ${activePath}.`);
     await clearRecovery(activePath);
     conflict = null;
+    skipFocusRestore = true;
     conflictDialog.close();
   }
 
@@ -646,6 +652,7 @@
     undoStack = [];
     redoStack = [];
     deletedConflict = false;
+    skipFocusRestore = true;
     conflictDialog.close();
     editorStatus = `Discarded unsaved changes for deleted file ${discardedPath}.`;
     await refreshFiles();
@@ -692,6 +699,7 @@
       method: 'POST', body: JSON.stringify({ path, content: '' })
     });
     if (result.response.ok) {
+      skipFocusRestore = true;
       createDialog.close();
       await refreshFiles();
       loadBuffer(result.data as BufferResponse, `Created ${path}.`);
@@ -702,11 +710,11 @@
 
   function openRenameDialog() {
     renamePath = activePath;
-    renameDialog.showModal();
+    openModal(renameDialog);
   }
 
   function openDeleteDialog() {
-    deleteDialog.showModal();
+    openModal(deleteDialog);
     deleteDialog.querySelector<HTMLButtonElement>('.dialog-actions .danger')?.focus();
   }
 
@@ -755,7 +763,7 @@
     if (document.querySelector('dialog[open]')) return;
     paletteQuery = '';
     paletteSelection = 0;
-    paletteDialog.showModal();
+    openModal(paletteDialog);
   }
 
   function paletteKeydown(event: KeyboardEvent) {
@@ -781,11 +789,17 @@
   }
 
   function executePaletteItem(item: PaletteItem) {
+    skipFocusRestore = true;
     paletteDialog.close();
-    if (item.kind === 'create') createDialog.showModal();
-    else if (item.kind === 'rename') openRenameDialog();
-    else if (item.kind === 'delete') openDeleteDialog();
-    else if (item.kind === 'save') void saveFile();
+    if (item.kind === 'create') {
+      createDialog.showModal();
+    } else if (item.kind === 'rename') {
+      renamePath = activePath;
+      renameDialog.showModal();
+    } else if (item.kind === 'delete') {
+      deleteDialog.showModal();
+      deleteDialog.querySelector<HTMLButtonElement>('.dialog-actions .danger')?.focus();
+    } else if (item.kind === 'save') void saveFile();
     else if (item.kind === 'command') void runCommand(item.mode);
     else if (item.kind === 'preview') void rebuildPreview('manual');
     else if (item.kind === 'source') focusSourcePane();
@@ -810,6 +824,7 @@
     });
     if (result.response.ok) {
       activePath = newPath;
+      skipFocusRestore = true;
       renameDialog.close();
       await refreshFiles();
       editorStatus = `Renamed ${oldPath} to ${newPath}.`;
@@ -825,6 +840,7 @@
       method: 'POST', body: JSON.stringify({ path, confirmed: true })
     });
     if (result.response.ok) {
+      skipFocusRestore = true;
       deleteDialog.close();
       activePath = '';
       content = '';
@@ -857,6 +873,45 @@
       if ((event.target as HTMLElement | null)?.id !== 'source-editor') return;
       event.preventDefault();
       undo();
+    }
+  }
+
+  function rememberDialogTrigger() {
+    const active = document.activeElement;
+    lastDialogTrigger = active instanceof HTMLElement ? active : null;
+    skipFocusRestore = false;
+  }
+
+  function openModal(dialog: HTMLDialogElement) {
+    rememberDialogTrigger();
+    dialog.showModal();
+  }
+
+  function restoreDialogFocus() {
+    if (skipFocusRestore) {
+      skipFocusRestore = false;
+      return;
+    }
+    const trigger = lastDialogTrigger;
+    lastDialogTrigger = null;
+    if (!trigger || !document.contains(trigger) || document.querySelector('dialog[open]')) return;
+    trigger.focus();
+  }
+
+  function handlePaletteBackdrop(event: MouseEvent) {
+    if (event.target === paletteDialog) paletteDialog.close();
+  }
+
+  function handleConflictKeydown(event: KeyboardEvent) {
+    handleDialogKeydown(event);
+    if (event.defaultPrevented) return;
+    if (!event.altKey || event.metaKey || event.ctrlKey) return;
+    if (event.key.toLowerCase() === 'l' && conflict) {
+      event.preventDefault();
+      void loadDiskVersion();
+    } else if (event.key.toLowerCase() === 'd' && deletedConflict) {
+      event.preventDefault();
+      void discardDeletedBuffer();
     }
   }
 
@@ -956,7 +1011,7 @@
       <p>{compiler}</p>
     </div>
     <div class="file-actions" aria-label="File actions">
-      <button type="button" disabled={dirty} onclick={() => createDialog.showModal()}>Create file</button>
+      <button type="button" disabled={dirty} onclick={() => openModal(createDialog)}>Create file</button>
       <button type="button" disabled={!activePath || dirty} onclick={openRenameDialog}>Rename file</button>
       <button type="button" class="danger" disabled={!activePath || dirty} onclick={openDeleteDialog}>Delete file</button>
     </div>
@@ -1223,7 +1278,7 @@
   </div>
 </main>
 
-<dialog bind:this={conflictDialog} onkeydown={handleDialogKeydown} onclose={() => { conflict = null; deletedConflict = false; }} aria-labelledby="conflict-heading">
+<dialog bind:this={conflictDialog} onkeydown={handleConflictKeydown} onclose={() => { conflict = null; deletedConflict = false; restoreDialogFocus(); }} aria-labelledby="conflict-heading">
   <h2 id="conflict-heading">{deletedConflict ? 'File deleted outside Boris Editor' : 'External changes detected'}</h2>
   {#if deletedConflict}
     <p>{activePath} no longer exists on disk. Your unsaved version is still in the editor.</p>
@@ -1231,7 +1286,7 @@
     <textarea id="deleted-version" readonly value={content}></textarea>
     <div class="dialog-actions">
       <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
-      <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
+      <button type="button" onclick={discardDeletedBuffer}>Discard changes<kbd>Alt+D</kbd></button>
       <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
     </div>
   {:else if conflict}
@@ -1248,23 +1303,23 @@
     </div>
     <div class="dialog-actions">
       <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
-      <button type="button" onclick={loadDiskVersion}>Load disk version</button>
+      <button type="button" onclick={loadDiskVersion}>Load disk version<kbd>Alt+L</kbd></button>
       <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version<kbd>Enter</kbd></button>
     </div>
   {/if}
 </dialog>
 
-<dialog bind:this={resolutionDialog} onkeydown={handleResolutionKeydown} onclose={() => { pendingResolution = null; }} aria-labelledby="resolution-heading">
+<dialog bind:this={resolutionDialog} onkeydown={handleResolutionKeydown} onclose={() => { pendingResolution = null; restoreDialogFocus(); }} aria-labelledby="resolution-heading">
   <h2 id="resolution-heading">Unsaved changes in {activePath}</h2>
   <p>{resolutionPrompt}</p>
   <div class="dialog-actions">
-    <button type="button" onclick={() => resolutionDialog.close()}>Cancel</button>
+    <button type="button" onclick={() => resolutionDialog.close()}>Cancel<kbd>Esc</kbd></button>
     <button type="button" onclick={resolvePendingDiscard}>Discard &amp; {resolutionVerb}<kbd>Alt+D</kbd></button>
     <button type="button" class="primary" onclick={resolvePendingSave}>Save &amp; {resolutionVerb}<kbd>Alt+S</kbd></button>
   </div>
 </dialog>
 
-<dialog bind:this={createDialog} onkeydown={handleDialogKeydown} onclose={() => { createPath = 'content/new-page.md'; }} aria-labelledby="create-heading">
+<dialog bind:this={createDialog} onkeydown={handleDialogKeydown} onclose={() => { createPath = 'content/new-page.md'; restoreDialogFocus(); }} aria-labelledby="create-heading">
   <h2 id="create-heading">Create file</h2>
   <p>Use a project-relative path under content/ or themes/, or boris.json.</p>
   <form onsubmit={(event) => { event.preventDefault(); void createFile(); }}>
@@ -1277,7 +1332,7 @@
   </form>
 </dialog>
 
-<dialog bind:this={renameDialog} onkeydown={handleDialogKeydown} onclose={() => { renamePath = ''; }} aria-labelledby="rename-heading">
+<dialog bind:this={renameDialog} onkeydown={handleDialogKeydown} onclose={() => { renamePath = ''; restoreDialogFocus(); }} aria-labelledby="rename-heading">
   <h2 id="rename-heading">Rename file</h2>
   <p>Rename {activePath} without replacing an existing file.</p>
   <form onsubmit={(event) => { event.preventDefault(); void renameFile(); }}>
@@ -1290,7 +1345,7 @@
   </form>
 </dialog>
 
-<dialog bind:this={deleteDialog} onkeydown={handleDialogKeydown} aria-labelledby="delete-heading">
+<dialog bind:this={deleteDialog} onkeydown={handleDialogKeydown} onclose={restoreDialogFocus} aria-labelledby="delete-heading">
   <h2 id="delete-heading">Delete file</h2>
   <p>Delete {activePath || 'selected file'}? This changes the project immediately and cannot be undone in Boris Editor.</p>
   <div class="dialog-actions">
@@ -1299,9 +1354,16 @@
   </div>
 </dialog>
 
-<dialog bind:this={paletteDialog} onkeydown={paletteKeydown} aria-labelledby="palette-heading">
+<dialog
+  class="command-palette"
+  bind:this={paletteDialog}
+  onkeydown={paletteKeydown}
+  onclick={handlePaletteBackdrop}
+  onclose={restoreDialogFocus}
+  aria-labelledby="palette-heading"
+>
   <h2 id="palette-heading">Commands</h2>
-  <p>Ctrl+K anywhere opens this palette.</p>
+  <p>Ctrl+K anywhere opens this palette. Esc or a click outside closes it.</p>
   <label for="palette-query">Filter commands</label>
   <input
     id="palette-query"
@@ -1334,6 +1396,9 @@
   {:else}
     <p>No commands match “{paletteQuery}”.</p>
   {/if}
+  <div class="dialog-actions">
+    <button type="button" onclick={() => paletteDialog.close()}>Cancel<kbd>Esc</kbd></button>
+  </div>
 </dialog>
 
 <footer>

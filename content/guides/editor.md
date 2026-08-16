@@ -55,6 +55,11 @@ every API request must repeat the token, and any supplied `Origin` must match
 the session origin. A bare `--boris` command name is resolved through `PATH`;
 a path-like value is canonicalized against the directory you launched from.
 
+`Ctrl+K` (or `Cmd+K`) opens a command palette for file actions, Boris
+commands, preview rebuild, and jumping to a project file. Esc, the palette's
+**Cancel** button, or a click on the dimmed backdrop closes it without running
+anything.
+
 - [[guides/cli-and-modes|CLI and modes]] — the compiler surface the editor drives
 - [[guides/themes-and-layouts|Themes and layouts]] — what `Build HTML` produces
 

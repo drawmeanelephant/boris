@@ -327,7 +327,7 @@ test('restoring recovered work while dirty offers Save & restore and Discard & r
   await expect(dialog.getByRole('button', { name: /Save & restore/ })).toContainText('Save & restore');
 
   // Cancel keeps the dirty buffer and does not restore.
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await dialog.getByRole('button', { name: /Cancel/ }).click();
   await expect(dialog).toBeHidden();
   await expect(editor).toHaveValue('# Draft\n');
 
@@ -503,7 +503,7 @@ test('switching files while dirty offers Cancel and Save & Switch (#462)', async
   await expect(dialog.locator('p').first()).toContainText('boris.json');
 
   // Cancel keeps the current file and its unsaved buffer.
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await dialog.getByRole('button', { name: /Cancel/ }).click();
   await expect(dialog).toBeHidden();
   await expect(editor).toHaveValue('# Draft\n');
   await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
@@ -661,7 +661,7 @@ test('running a Boris command while dirty offers Cancel and Save & run (#462)', 
   await page.getByRole('button', { name: 'Validate project', exact: true }).click();
   await expect(dialog).toBeVisible();
   await expect(dialog.locator('p').first()).toContainText('Validate project');
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await dialog.getByRole('button', { name: /Cancel/ }).click();
   await expect(dialog).toBeHidden();
   await expect(editor).toHaveValue('# Draft\n');
   await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('No Boris command has run yet.');
@@ -731,7 +731,7 @@ test('rebuilding the preview while dirty offers Cancel and Discard & rebuild (#4
   await page.getByRole('button', { name: 'Rebuild preview', exact: true }).click();
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('button', { name: /Save & rebuild/ })).toContainText('Save & rebuild');
-  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await dialog.getByRole('button', { name: /Cancel/ }).click();
   await expect(dialog).toBeHidden();
   await expect(editor).toHaveValue('# Draft\n');
 
@@ -1164,9 +1164,8 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
       expectedRequests: number;
       open: (page: Page) => Promise<void>;
       prime?: (page: Page) => Promise<void>;
-      // The pointer close for surfaces with a Cancel/Keep-editing affordance; the command
-      // palette has none (its only dismissals are Esc and running an action), so it runs
-      // only the Esc variant.
+      // The pointer close for surfaces with a Cancel/Keep-editing affordance.
+      // After close, focus must return to the control that opened the dialog (#525).
       pointerClose?: (page: Page) => Promise<void>;
       reopen: (page: Page) => Promise<void>;
       assertAfterClose: (page: Page) => Promise<void>;
@@ -1188,7 +1187,10 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
         },
         pointerClose: async page => { await page.getByRole('dialog', { name: 'Create file' }).getByRole('button', { name: /Cancel/ }).click(); },
         reopen: async page => { await page.getByRole('button', { name: 'Create file', exact: true }).click(); },
-        assertAfterClose: async page => { await expect(page.getByRole('dialog', { name: 'Create file' })).toBeHidden(); },
+        assertAfterClose: async page => {
+          await expect(page.getByRole('dialog', { name: 'Create file' })).toBeHidden();
+          await expect(page.getByRole('button', { name: 'Create file', exact: true })).toBeFocused();
+        },
         assertReset: async page => {
           const input = page.getByRole('dialog', { name: 'Create file' }).getByRole('textbox', { name: 'New file path' });
           await expect(input).toHaveValue('content/new-page.md');
@@ -1207,7 +1209,10 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
         },
         pointerClose: async page => { await page.getByRole('dialog', { name: 'Rename file' }).getByRole('button', { name: /Cancel/ }).click(); },
         reopen: async page => { await page.getByRole('button', { name: 'Rename file', exact: true }).click(); },
-        assertAfterClose: async page => { await expect(page.getByRole('dialog', { name: 'Rename file' })).toBeHidden(); },
+        assertAfterClose: async page => {
+          await expect(page.getByRole('dialog', { name: 'Rename file' })).toBeHidden();
+          await expect(page.getByRole('button', { name: 'Rename file', exact: true })).toBeFocused();
+        },
         assertReset: async page => {
           const input = page.getByRole('dialog', { name: 'Rename file' }).getByRole('textbox', { name: 'New file path' });
           await expect(input).toHaveValue('content/index.md');
@@ -1225,7 +1230,10 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
         },
         pointerClose: async page => { await page.getByRole('dialog', { name: 'Delete file' }).getByRole('button', { name: /Cancel/ }).click(); },
         reopen: async page => { await page.getByRole('button', { name: 'Delete file', exact: true }).click(); },
-        assertAfterClose: async page => { await expect(page.getByRole('dialog', { name: 'Delete file' })).toBeHidden(); },
+        assertAfterClose: async page => {
+          await expect(page.getByRole('dialog', { name: 'Delete file' })).toBeHidden();
+          await expect(page.getByRole('button', { name: 'Delete file', exact: true })).toBeFocused();
+        },
         assertReset: async page => {
           await expect(page.getByRole('dialog', { name: 'Delete file' }).getByRole('button', { name: /Delete content\/index\.md/ })).toBeFocused();
         }
@@ -1235,15 +1243,22 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
         mock: {},
         staleRequest: /\/api\/files\/(create|rename|delete|save|open)/,
         expectedRequests: 0,
-        open: async page => { await page.keyboard.press('Control+K'); },
+        open: async page => {
+          await page.getByRole('button', { name: 'Create file', exact: true }).focus();
+          await page.keyboard.press('Control+K');
+        },
         prime: async page => {
           const dialog = page.getByRole('dialog', { name: 'Commands' });
           paletteTotal = await dialog.getByRole('listbox', { name: 'Boris commands' }).getByRole('option').count();
           await dialog.getByRole('combobox', { name: 'Filter commands' }).fill('open');
           await expect(dialog.getByRole('listbox', { name: 'Boris commands' }).getByRole('option')).toHaveCount(2);
         },
+        pointerClose: async page => { await page.getByRole('dialog', { name: 'Commands' }).getByRole('button', { name: /Cancel/ }).click(); },
         reopen: async page => { await page.keyboard.press('Control+K'); },
-        assertAfterClose: async page => { await expect(page.getByRole('dialog', { name: 'Commands' })).toBeHidden(); },
+        assertAfterClose: async page => {
+          await expect(page.getByRole('dialog', { name: 'Commands' })).toBeHidden();
+          await expect(page.getByRole('button', { name: 'Create file', exact: true })).toBeFocused();
+        },
         assertReset: async page => {
           const dialog = page.getByRole('dialog', { name: 'Commands' });
           const input = dialog.getByRole('combobox', { name: 'Filter commands' });
@@ -1265,12 +1280,13 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
           await page.getByRole('button', { name: 'boris.json', exact: true }).click();
           await expect(page.getByRole('dialog', { name: 'Unsaved changes' })).toBeVisible();
         },
-        pointerClose: async page => { await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Cancel', exact: true }).click(); },
+        pointerClose: async page => { await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: /Cancel/ }).click(); },
         reopen: async page => { await page.getByRole('button', { name: 'boris.json', exact: true }).click(); },
         assertAfterClose: async page => {
           await expect(page.getByRole('dialog', { name: 'Unsaved changes' })).toBeHidden();
           await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Draft\n');
           await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+          await expect(page.getByRole('button', { name: 'boris.json', exact: true })).toBeFocused();
         },
         assertReset: async page => {
           const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
@@ -1297,6 +1313,7 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
           await expect(page.getByRole('dialog', { name: 'External changes detected' })).toBeHidden();
           await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Mine\n');
           await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+          await expect(page.getByRole('button', { name: 'Save file', exact: true })).toBeFocused();
         },
         assertReset: async page => {
           const dialog = page.getByRole('dialog', { name: 'External changes detected' });
@@ -1324,6 +1341,7 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
           await expect(page.getByRole('dialog', { name: 'File deleted outside Boris Editor' })).toBeHidden();
           await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Mine\n');
           await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+          await expect(page.getByRole('button', { name: 'Save file', exact: true })).toBeFocused();
         },
         assertReset: async page => {
           const dialog = page.getByRole('dialog', { name: 'File deleted outside Boris Editor' });
@@ -1580,6 +1598,67 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
     await expect(page.getByRole('textbox', { name: 'Source for content/guides/getting-started.md' })).toHaveValue('# Recovered guide\n');
   });
 
+  test('secondary dialog actions carry visible key hints (#526)', async ({ page }) => {
+    await installApi(page);
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n');
+    await page.getByRole('button', { name: 'boris.json', exact: true }).click();
+    const resolution = page.getByRole('dialog', { name: 'Unsaved changes' });
+    await expect(resolution.getByRole('button', { name: /Cancel/ })).toContainText('Esc');
+    await resolution.getByRole('button', { name: /Cancel/ }).click();
+
+    await installApi(page, { saveConflict: true });
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Mine\n');
+    await page.getByRole('button', { name: 'Save file', exact: true }).click();
+    const conflict = page.getByRole('dialog', { name: 'External changes detected' });
+    await expect(conflict.getByRole('button', { name: /Load disk version/ })).toContainText('Alt+L');
+    await conflict.getByRole('button', { name: /Keep editing/ }).click();
+
+    await installApi(page, { saveDeleted: true });
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Mine\n');
+    await page.getByRole('button', { name: 'Save file', exact: true }).click();
+    const deleted = page.getByRole('dialog', { name: 'File deleted outside Boris Editor' });
+    await expect(deleted.getByRole('button', { name: /Discard changes/ })).toContainText('Alt+D');
+  });
+
+  test('Alt+L loads the disk version in the conflict dialog (#526)', async ({ page }) => {
+    await installApi(page, { saveConflict: true });
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Mine\n');
+    await page.getByRole('button', { name: 'Save file', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'External changes detected' });
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Alt+L');
+    await expect(dialog).toBeHidden();
+    await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Changed elsewhere\n');
+  });
+
+  test('closed dialogs do not expose duplicate action names to the accessibility tree (#464)', async ({ page }) => {
+    await installApi(page);
+    await expect(page.getByRole('button', { name: 'Create file', exact: true })).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Rename file', exact: true })).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Delete file', exact: true })).toHaveCount(1);
+    await expect(page.getByRole('button', { name: /Cancel/ })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Create file', exact: true }).click();
+    const create = page.getByRole('dialog', { name: 'Create file' });
+    await expect(create).toBeVisible();
+    // Closed dialogs stay out of the tree: only the open dialog exposes Cancel.
+    // The dialog primary is "Create file Enter", so it does not collide with the
+    // toolbar's exact name. Native showModal inerts the background for Voice
+    // Control; Playwright still lists the toolbar trigger.
+    await expect(page.getByRole('button', { name: /Cancel/ })).toHaveCount(1);
+    await expect(create.getByRole('button', { name: /Cancel/ })).toBeVisible();
+    await expect(create.getByRole('button', { name: /Create file/ })).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Create file', exact: true })).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(create).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Create file', exact: true })).toHaveCount(1);
+    await expect(page.getByRole('button', { name: /Cancel/ })).toHaveCount(0);
+  });
+
   test.describe('pointer conformance', () => {
     test('resolution dialog: clicking Save & switch matches Alt+S and Cancel matches Esc', async ({ page }) => {
       await installApi(page);
@@ -1592,7 +1671,7 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
       await page.getByRole('button', { name: 'boris.json', exact: true }).click();
       await expect(dialog).toBeVisible();
       // Cancel click matches Esc: dialog closes, buffer and file stay put.
-      await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await dialog.getByRole('button', { name: /Cancel/ }).click();
       await expect(dialog).toBeHidden();
       await expect(editor).toHaveValue('# Draft\n');
       await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
@@ -1730,6 +1809,31 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
       await expect(page.getByText('No file selected', { exact: true })).toBeVisible();
       await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Discarded unsaved changes for deleted file content/index.md.');
       expect(saveRequests).toBe(1);
+    });
+
+    test('command palette: Cancel and backdrop click dismiss without running an action (#527)', async ({ page }) => {
+      await installApi(page);
+      let createRequests = 0;
+      page.on('request', request => {
+        if (request.url().includes('/api/files/create')) createRequests += 1;
+      });
+      await page.getByRole('button', { name: 'Create file', exact: true }).focus();
+      await page.keyboard.press('Control+K');
+      const palette = page.getByRole('dialog', { name: 'Commands' });
+      await expect(palette).toBeVisible();
+      await expect(palette.getByRole('button', { name: /Cancel/ })).toContainText('Esc');
+      await palette.getByRole('button', { name: /Cancel/ }).click();
+      await expect(palette).toBeHidden();
+      await expect(page.getByRole('button', { name: 'Create file', exact: true })).toBeFocused();
+      expect(createRequests).toBe(0);
+
+      await page.keyboard.press('Control+K');
+      await expect(palette).toBeVisible();
+      const box = await palette.boundingBox();
+      expect(box).not.toBeNull();
+      await page.mouse.click(Math.max(8, box!.x - 16), Math.max(8, box!.y - 16));
+      await expect(palette).toBeHidden();
+      expect(createRequests).toBe(0);
     });
 
     test('command palette: clicking an option matches Enter', async ({ page }) => {
