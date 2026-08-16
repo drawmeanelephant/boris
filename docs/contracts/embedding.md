@@ -1,6 +1,6 @@
 # Embedding: freestanding compiler host seam
 
-**Status:** normative for the M0 render spike, M3 `compileBundle`, and M6 evidence  
+**Status:** normative for the M0 render spike, M3 `compileBundle`, M6 evidence, and M7 host example  
 **Issue:** [#301](https://github.com/drawmeanelephant/boris/issues/301)  
 **Related:** [oliver-renderer.md](oliver-renderer.md), [source-provider.md](source-provider.md), [artifact-sink.md](artifact-sink.md), [diagnostics.md](diagnostics.md), [json-ir-and-manifest.md](json-ir-and-manifest.md), [publication-artifacts.md](publication-artifacts.md)
 
@@ -258,3 +258,48 @@ Representative native `compileBundle` of the one-page HTML+evidence fixture
 in `src/embed.zig` is the max tested source bundle for this card. The Wasm
 parity test uses the same fixture. Peak isolate memory is bounded by the
 128 MiB Worker cap; this card does not claim a measured peak below that.
+
+---
+
+## M7 — Cloudflare Worker host example
+
+[`hosts/cloudflare-worker/`](../../hosts/cloudflare-worker/) is official host
+glue. It is **not** a `publication.target` and is not on the product
+`zig build` graph. TypeScript/JavaScript here is the same category as
+`editor/ui`: transport, limits, and persistence. It does not parse Markdown.
+
+The host:
+
+- instantiates `boris-embed-small.wasm` with **trap stubs** for every
+  `wasi_snapshot_preview1` import
+- validates and canonically orders the incoming file list (same relative-path
+  rules as `identity.canonicalize`: no absolute, no `..`, no empty/`.`
+  segments, duplicates after `./` folding are rejected)
+- enforces source-count, per-file, total-source, output-count, and
+  output-byte limits **below** current Worker caps
+- uploads successful artifacts to the `ARTIFACTS` R2 binding
+- returns structured HTTP: `ok`, `status`, `diagnostics`, artifact
+  manifest (sizes + sha256, not payload bytes), and an evidence summary
+- does not upload on validation failure; failed compiles cannot report
+  successful claims
+
+| Host limit | Value |
+|---|---:|
+| Source files | 128 |
+| Per-file | 256 KiB |
+| Total source | 2 MiB |
+| Output files | 256 |
+| Total output | 8 MiB |
+| CPU hint | 25 s |
+| Isolate memory target | 96 MiB |
+
+Worker caps these sit under: 128 MiB isolate, 3 / 10 MiB gzip Worker,
+Paid CPU 30 s default / 5 min max, 1 s startup, no Wasm threads.
+
+Local smoke: `node hosts/cloudflare-worker/test.mjs` after `zig build`.
+That does **not** require Cloudflare credentials. A live Worker/R2 invoke
+is an operator step (`wrangler deploy`) and is not a default CI gate.
+
+This card does not close [#301](https://github.com/drawmeanelephant/boris/issues/301).
+Remaining: recorded live Cloudflare invocation, measured isolate peak,
+RAG/context in the first embed profile.
