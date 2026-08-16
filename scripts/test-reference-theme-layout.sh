@@ -25,8 +25,8 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
 
-CONTENT="examples/reference-theme/content"
-THEME="examples/reference-theme/theme"
+CONTENT="examples/reference-site/content"
+THEME="themes/reference"
 
 note() { printf '==> %s\n' "$*"; }
 pass() { printf '    OK  %s\n' "$*"; }

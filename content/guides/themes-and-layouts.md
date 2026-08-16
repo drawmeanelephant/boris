@@ -54,11 +54,10 @@ To use a layout directly without the theme shorthand:
 
 <Aside kind="tip">
 
-The repository includes several ready-made themes under `examples/`:
-- `examples/prototype-corporate` — Corporate documentation style
-- `examples/prototype-minimalist` — Clean minimal style
-- `examples/agent-themes/pure/theme` — Pure CSS, no framework
-- `examples/agent-themes/chota/theme` — Chota micro-framework
+Shipped themes live under `themes/`. The default is `themes/boris`. Also
+shipped: `reference`, `press`, `showcase`, and `archive`. Sample sites that
+build them are under `examples/`. The catalog bar is `themes/README.md` in
+the repository.
 
 </Aside>
 
@@ -75,7 +74,10 @@ Boris splices content into your layout by replacing **marker tokens**. All marke
 | `{{toc}}` | In-page table of contents from `h1`–`h3` headings |
 | `{{children}}` | Direct children of the current page |
 | `{{metadata}}` | Escaped Boris metadata for the current page |
+| `{{relations}}` | Outgoing validated semantic relations, or empty |
+| `{{backlinks}}` | Incoming semantic relations, or empty |
 | `{{footer}}` | Optional layout footer fragment loaded from the theme's `footer.html` file |
+| `{{head}}` | Compiler-owned head tags (Standard.site / Nostr verification). Empty when unused. |
 | `{{asset-url PATH}}` | Path to a theme asset, adjusted for the current page depth |
 
 ## Referencing assets in your layout
@@ -157,7 +159,7 @@ Each target is isolated — it has its own output directory, layout, and asset s
 
 <Details summary="What a layout is not">
 
-No loops. No conditionals. No expressions. No MDX. Ten closed slots plus
+No loops. No conditionals. No expressions. No MDX. Eleven closed slots plus
 `{{asset-url}}`. If you wanted Jinja, you wanted a different compiler.
 
 </Details>

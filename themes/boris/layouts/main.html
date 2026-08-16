@@ -8,6 +8,7 @@
   {{head}}
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 <aside class="site-sidebar">
 <header class="site-brand">
 <span class="site-brand__name">Boris</span>
@@ -31,11 +32,15 @@
 </details>
 </aside>
 {{breadcrumb}}
-{{toc}}
-<main data-boris-search-root>
+<aside class="site-outline" data-boris-search-exclude>{{toc}}</aside>
+<main id="main-content" tabindex="-1" data-boris-search-root>
+{{metadata}}
 {{content}}
+{{children}}
+{{relations}}
+{{backlinks}}
 </main>
-<footer class="site-footer">Boris · graph-native publication compiler · Load → Roll → Ignite → Reset</footer>
+<footer class="site-footer">{{footer}}</footer>
 <script>
 (() => {
   "use strict";

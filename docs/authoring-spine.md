@@ -25,7 +25,8 @@ boris --quiet           # compiles content/ → dist/
 `boris init [DIR]` writes a complete starter, not archaeology: `content/`
 with an `index.md` trunk and two satellites
 (`guides/getting-started.md`, `guides/publishing.md`), a working theme
-(`themes/boris/` with `layouts/main.html` and `assets/css/boris.css`), and
+(`themes/boris/` with `layouts/main.html` and `assets/css/boris.css`; the
+product default also ships `footer.html`), and
 a `boris.json` publication profile. Every page in the spine trail below is
 already present in that tree.
 
@@ -69,10 +70,11 @@ declares a `relations` edge so the graph has something to inspect.
 ## 4. Layout
 
 A theme is local HTML + assets, shaped by the **closed layout vocabulary**:
-ten slots (`{{content}}`, `{{title}}`, `{{nav}}`, `{{breadcrumb}}`,
+eleven slots (`{{content}}`, `{{title}}`, `{{nav}}`, `{{breadcrumb}}`,
 `{{toc}}`, `{{children}}`, `{{metadata}}`, `{{relations}}`,
-`{{backlinks}}`, `{{footer}}`) plus the repeatable `{{asset-url}}` helper.
-The starter's `themes/boris/layouts/main.html` is the working example.
+`{{backlinks}}`, `{{footer}}`, `{{head}}`) plus the repeatable
+`{{asset-url}}` helper. The product default is `themes/boris/`. `boris init`
+writes a smaller starter under the same path.
 
 Schema-aware themes: the completion index's `layout_slots` enum
 (`boris-completion-1.schema.json`) is the machine-readable closed slot set.

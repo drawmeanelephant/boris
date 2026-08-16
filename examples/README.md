@@ -1,74 +1,50 @@
-# Boris theme example portfolio
+# Examples
 
-This directory is a black-box theme-design portfolio for the supplied Boris
-binary. The examples are static HTML/CSS/Markdown artifacts; none modifies
-Boris or Oliver implementation code.
+Sample sites and unfinished theme studies. Shipped first-class themes live
+under [`themes/`](../themes/). This folder is not retired; it is no longer a
+second theme attic.
 
-## Current catalog
+## Sample sites (consume a shipped theme)
 
-| Example | Design direction | Feature posture |
+| Site | Theme | What it shows |
 |---|---|---|
-| textpattern-theme | Classic Textpattern editorial paper, crimson/slate masthead, serif reading | First-class candidate; five layout shapes, graph navigation, core slots, local assets, components, responsive/dark/print states |
-| reference-theme | Calm accessibility-forward documentation | Full reference shell; multi-layout docs, page-local assets, components, graph slots |
-| static-theme-showcase | Soft component-library-inspired docs + blog | Full multi-layout shell; updated with children, TOC, metadata, skip links, and offline checks |
-| daisy-static-theme | Friendly cards and quiet docs | Full single-shell specimen; local CSS and the complete generated docs surface |
-| archive-theme | Ordered long-lived field-note archive | Updated complete archive shell; archive children plus nav, breadcrumb, metadata, TOC, footer |
-| agent-themes/chota | Compact utility-light docs | Full compact docs specimen |
-| agent-themes/pure | Restrained blue field notes | Full responsive docs specimen |
-| agent-themes/cozy-corner | Warm mid-2000s personal blog | Updated complete blog shell; authored blogroll text, metadata, TOC, children, local illustration |
-| agent-themes/journal-archive | Phosphor terminal diary | Updated complete archive shell; metadata, graph navigation, TOC, children, keyboard focus |
-| agent-themes/node-tracker | Dense early-2000s knowledge database | Updated complete node shell; metadata, graph navigation, TOC, children, explicit static controls |
-| framework-themes/pico-semantic | Semantic, class-light documentation | First framework study; native HTML, home/section/main layouts, dark/print/accessibility states |
-| framework-themes/bulma-classic | Familiar CSS-only component vocabulary | First framework study; containers, columns, boxes, tags, responsive shell, no runtime |
-| framework-themes/govuk-service | Public-service information design | Accessibility-forward service shell with banners, focus treatment, alerts, and contents rails |
-| framework-themes/primer-engineering | GitHub-like engineering documentation | Dense boxes, labels, status metadata, code-friendly reading surface, tokenized states |
-| framework-themes/uswds-public | Civic/public-information design tokens | Agency masthead, public banner, cards, alerts, responsive and high-contrast states |
-| framework-themes/open-props-laboratory | Token-first fluid design system | Custom-property lab for fluid type, spacing, surfaces, color modes, and print |
-| prototype-minimalist | Visual comparison prototype | Intentionally a prototype with static placeholder controls; not a production theme candidate |
-| prototype-corporate | Visual comparison prototype | Intentionally a prototype with static placeholder controls; not a production theme candidate |
+| [`reference-site`](reference-site/) | [`themes/reference`](../themes/reference/) | Docs graph, Aside, Details, page-local assets, layout rules |
+| [`press-site`](press-site/) | [`themes/press`](../themes/press/) | Editorial docs + blog + archive |
+| [`showcase-site`](showcase-site/) | [`themes/showcase`](../themes/showcase/) | Docs + blog with a soft component shell |
+| [`archive-site`](archive-site/) | [`themes/archive`](../themes/archive/) | Ordered field-note archive |
 
-The two prototype folders are kept as visual research artifacts. Their
-manual-review notes call out the controls that are not real Boris behavior;
-they are not silently promoted to feature-complete themes.
+Each site README has the exact `boris` invocation. Keep generated trees under
+ignored `test-output/` or `.zig-cache/`.
 
-The framework studies are deliberately Boris-native visual translations. They
-do not vendor framework packages, claim official conformance, fetch a CDN, or
-add a build/runtime dependency to Boris.
+## Not yet first-class
 
-## Shared acceptance surface
+These trees are still theme-shaped. They stay here until they meet
+[`themes/README.md`](../themes/README.md). Do not treat them as shipped chrome.
 
-The complete examples are expected to demonstrate, where the page shape makes
-the slot meaningful:
+| Tree | Why it stays |
+|---|---|
+| `agent-themes/*` | Original voices, thin CSS, some fake chrome (`node-tracker`) |
+| `daisy-static-theme` | Hand-authored cards study; must not ship under a Daisy name |
+| `framework-themes/*` | Visual translations, ~70-line CSS. Not Pico/Bulma/GOV.UK/Primer/USWDS/Open Props. |
+| `prototype-corporate` / `prototype-minimalist` | Visual research. Dead buttons and `#` nav. Not catalog candidates until that chrome is real or gone. |
 
-- title, content, navigation, breadcrumb, metadata, TOC, direct children,
-  shared footer, and page-relative managed assets;
-- Trunk/Satellite graph relationships rather than hand-maintained site maps;
-- headings, links, tables, lists, code, blockquotes, Aside, and Details;
-- semantic landmarks, visible focus, readable mobile stacking, dark-mode
-  behavior where appropriate, and reduced-motion handling;
-- offline output with no CDN, remote fonts, or fake stylesheet navigation.
+The framework studies do not vendor those projects. If a future theme ships
+upstream CSS, it must record version, license, and the URL of the current
+release next to the file.
 
-An empty direct-child region on a leaf page is expected. A prototype that
-intentionally omits a slot should say so in its README or review notes.
+## Shared checks
 
-## Validation pattern
+After building a sample site:
 
-Run the example's documented build command with the supplied binary, then
-inspect the generated artifacts:
+```bash
+rg -n 'https?://|<script src=|@import' test-output/<name> --glob '*.html' --glob '*.css' || true
+```
 
-    find work/probe/<example> -type f | sort
-    rg -n 'data-layout=|site-nav|page-toc|page-children|page-metadata|admonition|details' work/probe/<example> --glob '*.html'
-    rg -n 'https?://|<script|@import' work/probe/<example> --glob '*.html' --glob '*.css' || true
+That command should print nothing. Report compiler defects as Boris issues;
+do not repair the engine from an example.
 
-Keep generated output inside the workspace under an ignored probe directory.
-If the binary or renderer exhibits a defect, capture the exact fixture,
-command, version, expected result, actual result, and artifact evidence in a
-GitHub issue. Do not repair the engine from an example theme.
+## Related
 
-## Porting boundary
-
-The legacy Textpattern files under REFERENCE/rk/ use dollar-sign placeholders
-such as $title$ and $body$. They remain useful as visual provenance, but they
-are not interchangeable with Boris brace markers. The Boris-native port lives
-in textpattern-theme so it can be reviewed, replaced, or proposed as a
-codeless example independently.
+- Theme bar and catalog: [`themes/README.md`](../themes/README.md)
+- Contract: [`docs/contracts/templating-and-themes.md`](../docs/contracts/templating-and-themes.md)
+- Issue: [#574](https://github.com/drawmeanelephant/boris/issues/574)

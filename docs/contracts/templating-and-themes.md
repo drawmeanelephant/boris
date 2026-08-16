@@ -17,11 +17,13 @@ or application-language dependency.
 
 ## 1. Problem and design boundary
 
-`themes/boris/layouts/main.html` is the shipped small-site theme: it has `content`,
-`title`, `nav`, `breadcrumb`, `toc`, and `children` markers. Real documentation sites
-usually need a theme-owned stylesheet, a stable footer, page metadata, several
-page shapes, and more than one output target. The practical extension is a
-small, closed template vocabulary plus explicit static asset ownership.
+`themes/boris/layouts/main.html` is the shipped default theme. Additional
+first-class themes live beside it under [`themes/`](../../themes/README.md);
+`examples/` holds sample sites and unfinished studies, not a second theme
+attic. Real documentation sites usually need a theme-owned stylesheet, a
+stable footer, page metadata, several page shapes, and more than one output
+target. The practical extension is a small, closed template vocabulary plus
+explicit static asset ownership.
 
 The design has four boundaries:
 
@@ -61,6 +63,12 @@ Only regular files below `layouts/`, the optional `footer.html`, and
 separators, cannot be absolute, and cannot contain empty, `.` or `..`
 segments. A theme cannot write outside its target output root.
 
+Shipped themes must stay offline: no remote stylesheets, fonts, or scripts;
+no linked or vendored JavaScript. A named webfont requires the font files
+and their license under the theme. A vendored CSS library is allowed only as
+already-present static bytes with name, version, license, and upstream URL
+recorded in that theme's README. See [`themes/README.md`](../../themes/README.md).
+
 The first implementation may accept a layout path directly and derive its
 theme root from an explicit `--theme` path. A theme manifest is not required
 for this design; if one is later introduced, it must be a Boris-owned closed
@@ -74,7 +82,7 @@ page.
 
 The vocabulary has two construct kinds with different multiplicity rules:
 
-- **Slots** — the ten closed markers in §3.1. Each slot marker may occur at
+- **Slots** — the eleven closed markers in §3.1. Each slot marker may occur at
   most **once** per layout; a duplicate is a hard layout error.
 - **`asset-url` helper** (§3.2) — argument-bearing and **repeatable**, with
   bounded multiplicity: up to **16** occurrences per layout, and the total
@@ -98,6 +106,7 @@ The vocabulary has two construct kinds with different multiplicity rules:
 | `{{relations}}` | no | Current page's outgoing validated semantic relations with canonical links and stable kind attributes/classes; empty when none. |
 | `{{backlinks}}` | no | Incoming relations derived from the validated semantic relation set with canonical links and stable kind attributes/classes; empty when none. |
 | `{{footer}}` | no | Contents of the theme's optional `footer.html`, or the empty string. This is theme-owned trusted static HTML, not page-authored executable content. |
+| `{{head}}` | no | Compiler-owned head-only output (Standard.site document links, Nostr naddr alternates). Empty when the page has nothing to emit. Layouts opt in; omitting the slot never silently claims verification. |
 
 `{{content}}` must occur exactly once. Missing `{{content}}`, a duplicate or
 unknown marker, invalid UTF-8, or an unclosed marker are hard layout errors

@@ -32,9 +32,9 @@ This example selects layouts without any frontmatter layout key:
 
 ```bash
 --layout-rule default id:index \
-  examples/reference-theme/theme/layouts/home.html
+  themes/reference/layouts/home.html
 --layout-rule default role:trunk \
-  examples/reference-theme/theme/layouts/section.html
+  themes/reference/layouts/section.html
 ```
 
 | Selector | Layout | Visible difference |

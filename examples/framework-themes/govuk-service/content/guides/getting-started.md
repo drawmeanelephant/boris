@@ -20,12 +20,12 @@ Build this example from the Boris repository root after a successful
 
 ```bash
 ./zig-out/bin/boris \
-  --input examples/reference-theme/content \
-  --theme examples/reference-theme/theme \
+  --input examples/reference-site/content \
+  --theme themes/reference \
   --layout-rule default id:index \
-    examples/reference-theme/theme/layouts/home.html \
+    themes/reference/layouts/home.html \
   --layout-rule default role:trunk \
-    examples/reference-theme/theme/layouts/section.html \
+    themes/reference/layouts/section.html \
   --html-dir test-output/reference-theme \
   --quiet
 ```

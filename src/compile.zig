@@ -8050,7 +8050,8 @@ test "F9.1 default managed Boris theme publishes its stylesheet" {
     defer gpa.free(index_path);
     const html = try readFileAlloc(io, cwd, index_path, gpa);
     defer gpa.free(html);
-    try std.testing.expect(std.mem.indexOf(u8, html, "<main data-boris-search-root>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "data-boris-search-root") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "skip-link") != null);
     try std.testing.expect(std.mem.indexOf(u8, html, "href=\"assets/css/boris.css\"") != null);
     const css_path = try std.fmt.allocPrint(gpa, "{s}/assets/css/boris.css", .{dist});
     defer gpa.free(css_path);
@@ -9248,7 +9249,7 @@ test "content-local assets: two builds are byte-identical" {
 }
 
 // =============================================================================
-// Optional example: reference theme (examples/reference-theme/)
+// Optional example: reference theme (themes/reference + examples/reference-site)
 // =============================================================================
 
 test "example reference-theme: layouts, components, page-local assets" {
@@ -9261,14 +9262,14 @@ test "example reference-theme: layouts, components, page-local assets" {
     defer gpa.free(dist);
 
     const rules = [_]layout_select.LayoutRule{
-        .{ .kind = .id, .value = "index", .layout_path = "examples/reference-theme/theme/layouts/home.html" },
-        .{ .kind = .role, .value = "trunk", .layout_path = "examples/reference-theme/theme/layouts/section.html" },
+        .{ .kind = .id, .value = "index", .layout_path = "themes/reference/layouts/home.html" },
+        .{ .kind = .role, .value = "trunk", .layout_path = "themes/reference/layouts/section.html" },
     };
 
     const stats = try compileHtmlSite(io, gpa, .{
-        .content_root = "examples/reference-theme/content",
+        .content_root = "examples/reference-site/content",
         .dist_dir = dist,
-        .layout_path = "examples/reference-theme/theme/layouts/main.html",
+        .layout_path = "themes/reference/layouts/main.html",
         .layout_rules = &rules,
         .quiet = true,
     });
@@ -9307,7 +9308,7 @@ test "example reference-theme: layouts, components, page-local assets" {
     defer gpa.free(theme_css_out);
     const copied_css = try readFileAlloc(io, cwd, theme_css_out, gpa);
     defer gpa.free(copied_css);
-    const theme_css = try readFileAlloc(io, cwd, "examples/reference-theme/theme/assets/css/reference.css", gpa);
+    const theme_css = try readFileAlloc(io, cwd, "themes/reference/assets/css/reference.css", gpa);
     defer gpa.free(theme_css);
     try std.testing.expectEqualStrings(theme_css, copied_css);
 
