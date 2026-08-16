@@ -25,7 +25,9 @@
 // state on every close (an onclose assigning conflict/deletedConflict)
 // with the Load disk version handler clearing conflict before closing, and
 // the deleted-file variant's Discard changes / Re-create file handlers
-// clearing deletedConflict before closing.
+// clearing deletedConflict before closing. The create and rename dialogs
+// must reset their path input on close (an onclose assigning the bound
+// variable) so Esc never leaves a half-typed path behind.
 //
 // This keeps the e2e conformance sweep from having to grow by hand: a new
 // hint without a matching handler fails CI here first.
@@ -307,6 +309,20 @@ function analyze(template, script, bodies) {
         }
       }
     }
+    // Record the bound variable of any bind:value input inside a dialog so
+    // the create/rename path-input reset can be checked on the dialog itself.
+    if (elem.name === 'input') {
+      const bind = /bind:value=\{\s*([A-Za-z_$][\w$]*)\s*\}/.exec(tag.raw)?.[1] ?? null;
+      if (bind) {
+        for (let s = stack.length - 1; s >= 0; s--) {
+          const e = stack[s];
+          if (e.name === 'dialog') {
+            (e._boundInputs ??= []).push(bind);
+            break;
+          }
+        }
+      }
+    }
     // Surface wiring discovered from descendants.
     if (elem.attrs.onkeydown && elem.name !== 'svelte:window') {
       if (!bodies.has(elem.attrs.onkeydown)) {
@@ -458,6 +474,26 @@ function analyze(template, script, bodies) {
       if (nullAt === -1 || closeAt === -1 || nullAt > closeAt) {
         problems.push(`conflict dialog ${label} handler (${button.callee}) must clear deletedConflict (deletedConflict = false) before closing the dialog`);
       }
+    }
+  }
+
+  // The create and rename dialogs must reset their path input on every close
+  // (Esc, Cancel, and successful submit all fire onclose), so a half-typed
+  // path can never survive to the next open. An onclose handler assigning
+  // the input's bound variable satisfies the invariant for all close paths.
+  for (const dialog of dialogs) {
+    const buttons = dialog._dialogButtons ?? [];
+    const kind = buttons.some(button => button.text.startsWith('Create file')) ? 'create'
+      : buttons.some(button => button.text.startsWith('Rename file')) ? 'rename' : null;
+    if (!kind) continue;
+    const bound = (dialog._boundInputs ?? [])[0] ?? null;
+    if (!bound) {
+      problems.push(`${kind} dialog at line ${dialog._line ?? '?'} has no bind:value path input to clear on close`);
+      continue;
+    }
+    const closeValue = attrValue(dialog._raw ?? '', 'onclose');
+    if (closeValue === null || !closeValue.includes(`${bound} =`)) {
+      problems.push(`${kind} dialog at line ${dialog._line ?? '?'} does not clear ${bound} on close: add an onclose handler assigning it so Esc cannot leave a half-typed path behind`);
     }
   }
 
@@ -1028,6 +1064,67 @@ const FIXTURES = [
   <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
   <button type="button" onclick={loadDiskVersion}>Load disk version</button>
   <button type="button" class="primary" onclick={() => saveFile(false)}>Replace disk version<kbd>Enter</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'create and rename dialogs clearing their path on close pass',
+    expect: 0,
+    source: `<script lang="ts">
+  function trap(event: KeyboardEvent) { if (event.key !== 'Tab') return; }
+</script>
+<dialog bind:this={createDialog} onkeydown={trap} onclose={() => { createPath = 'content/new-page.md'; }}>
+  <form onsubmit={(event) => { event.preventDefault(); }}>
+    <label for="create-path">New file path</label>
+    <input id="create-path" bind:value={createPath} />
+    <div class="dialog-actions">
+      <button type="button" onclick={() => createDialog.close()}>Cancel<kbd>Esc</kbd></button>
+      <button type="submit" class="primary">Create file<kbd>Enter</kbd></button>
+    </div>
+  </form>
+</dialog>
+<dialog bind:this={renameDialog} onkeydown={trap} onclose={() => { renamePath = ''; }}>
+  <form onsubmit={(event) => { event.preventDefault(); }}>
+    <label for="rename-path">New file path</label>
+    <input id="rename-path" bind:value={renamePath} />
+    <div class="dialog-actions">
+      <button type="button" onclick={() => renameDialog.close()}>Cancel<kbd>Esc</kbd></button>
+      <button type="submit" class="primary">Rename file<kbd>Enter</kbd></button>
+    </div>
+  </form>
+</dialog>`,
+  },
+  {
+    name: 'create dialog without an onclose path clear fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function trap(event: KeyboardEvent) { if (event.key !== 'Tab') return; }
+</script>
+<dialog bind:this={createDialog} onkeydown={trap}>
+  <form onsubmit={(event) => { event.preventDefault(); }}>
+    <label for="create-path">New file path</label>
+    <input id="create-path" bind:value={createPath} />
+    <div class="dialog-actions">
+      <button type="button" onclick={() => createDialog.close()}>Cancel<kbd>Esc</kbd></button>
+      <button type="submit" class="primary">Create file<kbd>Enter</kbd></button>
+    </div>
+  </form>
+</dialog>`,
+  },
+  {
+    name: 'rename dialog without an onclose path clear fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function trap(event: KeyboardEvent) { if (event.key !== 'Tab') return; }
+</script>
+<dialog bind:this={renameDialog} onkeydown={trap}>
+  <form onsubmit={(event) => { event.preventDefault(); }}>
+    <label for="rename-path">New file path</label>
+    <input id="rename-path" bind:value={renamePath} />
+    <div class="dialog-actions">
+      <button type="button" onclick={() => renameDialog.close()}>Cancel<kbd>Esc</kbd></button>
+      <button type="submit" class="primary">Rename file<kbd>Enter</kbd></button>
+    </div>
+  </form>
 </dialog>`,
   },
 ];
