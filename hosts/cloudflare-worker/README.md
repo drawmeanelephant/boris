@@ -111,8 +111,15 @@ Do **not** enable Cloudflare's experimental WASI filesystem. The module lists
 | Live warm CPU (9-artifact compile + R2 upload) | 4 ms — under the Free 10 ms budget (measured 2026-08-16, ORD/IAD) |
 | Live compile-only CPU | 1 ms |
 | Live cold CPU (incl. module instantiation) | 39 ms — charged to the 1 s isolate **startup** budget, not per-request |
-| Live Worker wall (parallel R2 uploads) | ~1.2–1.4 s; R2 write latency on this account measures ~0.6–1.1 s per put (worker binding and admin API, 2026-08-16), unrelated to worker code or bucket region (verified with an `enam`-located bucket) |
+| Live Worker wall (parallel R2 uploads) | ~1.2–1.4 s (account-level R2 write latency; see note below) |
 | Max tested source bundle | the two-file fixtures in `fixtures/` |
+
+The upload wall is dominated by **account-level R2 write latency**: ~0.6–1.1 s
+per put (13 B–8 KB objects), measured identically from the Worker binding and
+the direct admin API, and unchanged after recreating the bucket with an
+`enam` location hint. It is not worker code and not bucket routing. The
+evidence is assembled as a ready-to-paste [Cloudflare support
+ticket](cloudflare-support-ticket.md).
 
 ## Non-goals
 
