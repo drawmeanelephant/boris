@@ -232,19 +232,32 @@ pub const SessionClient = struct {
         url: []const u8,
         body: []const u8,
     ) Error!transport.Response {
-        const authorization_value = if (client.binding.key_pair) |_| value: {
-            const proof = try client.buildProof(allocator, method, url);
-            defer allocator.free(proof);
-            break :value try std.fmt.allocPrint(allocator, "DPoP {s}", .{proof});
-        } else value: {
-            break :value try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.binding.access_token});
-        };
+        const dpop_mode = client.binding.key_pair != null;
+        const proof: ?[]u8 = if (dpop_mode) try client.buildProof(allocator, method, url) else null;
+        defer if (proof) |bytes| allocator.free(bytes);
+
+        const authorization_value = try std.fmt.allocPrint(
+            allocator,
+            "{s} {s}",
+            .{ if (dpop_mode) "DPoP" else "Bearer", client.binding.access_token },
+        );
         defer allocator.free(authorization_value);
-        var headers: [3]transport.Header = undefined;
+
+        var headers: [4]transport.Header = undefined;
         headers[0] = .{ .name = "accept", .value = "application/json" };
         headers[1] = .{ .name = "authorization", .value = authorization_value };
-        headers[2] = .{ .name = "content-type", .value = "application/json" };
-        const header_slice: []const transport.Header = if (method == .get) headers[0..2] else headers[0..3];
+        const header_slice: []const transport.Header = if (dpop_mode) blk: {
+            if (method == .get) {
+                headers[2] = .{ .name = "dpop", .value = proof.? };
+                break :blk headers[0..3];
+            }
+            headers[2] = .{ .name = "content-type", .value = "application/json" };
+            headers[3] = .{ .name = "dpop", .value = proof.? };
+            break :blk headers[0..4];
+        } else if (method == .get) headers[0..2] else blk: {
+            headers[2] = .{ .name = "content-type", .value = "application/json" };
+            break :blk headers[0..3];
+        };
         return client.transport_client.request(allocator, .{
             .method = method,
             .url = url,
@@ -256,8 +269,8 @@ pub const SessionClient = struct {
     }
 
     /// One fresh ES256 DPoP proof with exact `htu`, `htm`, `ath`, `iat`,
-    /// `jti`, and the current PDS nonce. The access token travels only inside
-    /// the `ath` claim hash; the raw token is never sent as a header value.
+    /// `jti`, and the current PDS nonce. The access token is sent as
+    /// `Authorization: DPoP <token>` and hashed into the proof's `ath` claim.
     fn buildProof(
         client: *SessionClient,
         allocator: std.mem.Allocator,
@@ -826,11 +839,15 @@ const XrpcMock = struct {
         if (value.redirect_policy != .forbid) return error.UnexpectedRequest;
 
         var auth: ?[]const u8 = null;
+        var dpop: ?[]const u8 = null;
         var content_type: ?[]const u8 = null;
         for (value.headers) |header| {
             if (std.ascii.eqlIgnoreCase(header.name, "authorization")) {
                 if (auth != null) return error.UnexpectedRequest;
                 auth = header.value;
+            } else if (std.ascii.eqlIgnoreCase(header.name, "dpop")) {
+                if (dpop != null) return error.UnexpectedRequest;
+                dpop = header.value;
             } else if (std.ascii.eqlIgnoreCase(header.name, "content-type")) {
                 if (content_type != null) return error.UnexpectedRequest;
                 content_type = header.value;
@@ -839,6 +856,9 @@ const XrpcMock = struct {
         if (auth == null or !std.mem.startsWith(u8, auth.?, "DPoP ") or auth.?.len <= "DPoP ".len) {
             return error.UnexpectedRequest;
         }
+        if (dpop == null or dpop.?.len == 0) return error.UnexpectedRequest;
+        // The old cheat sent the proof as the Authorization token. Reject it.
+        if (std.mem.eql(u8, auth.?["DPoP ".len..], dpop.?)) return error.UnexpectedRequest;
         if (value.method == .post and (content_type == null or !std.mem.eql(u8, content_type.?, "application/json"))) {
             return error.UnexpectedRequest;
         }
@@ -847,15 +867,15 @@ const XrpcMock = struct {
         // fresh: no two requests in one client lifetime reuse a proof. The
         // payload segment is decoded before the claim check because base64url
         // never preserves the literal bytes.
-        if (!proofHasAth(auth.?)) return error.UnexpectedRequest;
+        if (!proofHasAth(dpop.?)) return error.UnexpectedRequest;
         var proof_hash: [32]u8 = undefined;
-        std.crypto.hash.sha2.Sha256.hash(auth.?, &proof_hash, .{});
+        std.crypto.hash.sha2.Sha256.hash(dpop.?, &proof_hash, .{});
         if (self.previous_proof_hash) |previous| {
             if (std.mem.eql(u8, &previous, &proof_hash)) return error.UnexpectedRequest;
         }
         self.previous_proof_hash = proof_hash;
 
-        const proof_copy = try allocator.dupe(u8, auth.?);
+        const proof_copy = try allocator.dupe(u8, dpop.?);
         errdefer allocator.free(proof_copy);
         const url_copy = try allocator.dupe(u8, value.url);
         errdefer allocator.free(url_copy);
@@ -907,6 +927,8 @@ test "getRecord success returns bound uri cid value and refreshes pds nonce" {
         mock.requests.items[0].url,
     );
     try std.testing.expectEqualStrings("pds-nonce-1", client.pds_nonce.slice());
+    try std.testing.expect(std.mem.indexOfScalar(u8, mock.requests.items[0].proof, '.') != null);
+    try std.testing.expect(!std.mem.startsWith(u8, mock.requests.items[0].proof, "DPoP "));
 }
 
 test "getRecord classifies missing records without failing the request" {

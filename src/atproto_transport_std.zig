@@ -336,7 +336,7 @@ fn mapIoError(err: anyerror) transport.Error {
 /// XRPC Bearer/DPoP record calls are admitted; everything else fails closed
 /// before a socket is opened.
 fn validateNativeRequest(request_value: transport.Request) transport.Error!void {
-    if (request_value.headers.len == 0 or request_value.headers.len > 3) return error.UnexpectedRequest;
+    if (request_value.headers.len == 0 or request_value.headers.len > 4) return error.UnexpectedRequest;
     if (!std.ascii.eqlIgnoreCase(request_value.headers[0].name, "accept")) return error.UnexpectedRequest;
     const accept = request_value.headers[0].value;
     if (!std.mem.eql(u8, accept, "application/json") and
@@ -345,7 +345,10 @@ fn validateNativeRequest(request_value: transport.Request) transport.Error!void 
     switch (request_value.method) {
         .get => {
             if (request_value.headers.len == 1) return;
-            if (request_value.headers.len == 2 and isAuthorizationHeader(request_value.headers[1])) return;
+            if (request_value.headers.len == 2 and isBearerAuthorization(request_value.headers[1])) return;
+            if (request_value.headers.len == 3 and
+                isDpopAuthorization(request_value.headers[1]) and
+                isDpopProofHeader(request_value.headers[2])) return;
             return error.UnexpectedRequest;
         },
         .post => {
@@ -354,19 +357,29 @@ fn validateNativeRequest(request_value: transport.Request) transport.Error!void 
                 isExactContentType(request_value.headers[1], "application/json")) return;
             if (request_value.headers.len == 3 and
                 isExactContentType(request_value.headers[1], "application/x-www-form-urlencoded") and
-                std.ascii.eqlIgnoreCase(request_value.headers[2].name, "dpop") and
-                request_value.headers[2].value.len != 0) return;
+                isDpopProofHeader(request_value.headers[2])) return;
             if (request_value.headers.len == 3 and
-                isAuthorizationHeader(request_value.headers[1]) and
+                isBearerAuthorization(request_value.headers[1]) and
                 isExactContentType(request_value.headers[2], "application/json")) return;
+            if (request_value.headers.len == 4 and
+                isDpopAuthorization(request_value.headers[1]) and
+                isExactContentType(request_value.headers[2], "application/json") and
+                isDpopProofHeader(request_value.headers[3])) return;
             return error.UnexpectedRequest;
         },
     }
 }
 
-fn isAuthorizationHeader(header: transport.Header) bool {
-    if (!std.ascii.eqlIgnoreCase(header.name, "authorization")) return false;
-    return hasNonEmptyScheme(header.value, "Bearer ") or hasNonEmptyScheme(header.value, "DPoP ");
+fn isBearerAuthorization(header: transport.Header) bool {
+    return std.ascii.eqlIgnoreCase(header.name, "authorization") and hasNonEmptyScheme(header.value, "Bearer ");
+}
+
+fn isDpopAuthorization(header: transport.Header) bool {
+    return std.ascii.eqlIgnoreCase(header.name, "authorization") and hasNonEmptyScheme(header.value, "DPoP ");
+}
+
+fn isDpopProofHeader(header: transport.Header) bool {
+    return std.ascii.eqlIgnoreCase(header.name, "dpop") and header.value.len != 0;
 }
 
 fn hasNonEmptyScheme(value: []const u8, scheme: []const u8) bool {
@@ -395,16 +408,16 @@ test "native adapter admits discovery, OAuth, app-password, and XRPC header shap
     const form_type = transport.Header{ .name = "content-type", .value = "application/x-www-form-urlencoded" };
     const dpop = transport.Header{ .name = "dpop", .value = "proof" };
     const bearer = transport.Header{ .name = "authorization", .value = "Bearer access-token" };
-    const dpop_auth = transport.Header{ .name = "authorization", .value = "DPoP proof" };
+    const dpop_auth = transport.Header{ .name = "authorization", .value = "DPoP access-token" };
 
     try validateNativeRequest(shapeRequest(.get, &.{accept_json}, ""));
     try validateNativeRequest(shapeRequest(.get, &.{accept_text}, ""));
     try validateNativeRequest(shapeRequest(.get, &.{ accept_json, bearer }, ""));
-    try validateNativeRequest(shapeRequest(.get, &.{ accept_json, dpop_auth }, ""));
+    try validateNativeRequest(shapeRequest(.get, &.{ accept_json, dpop_auth, dpop }, ""));
     try validateNativeRequest(shapeRequest(.post, &.{ accept_json, form_type, dpop }, "client_id=x"));
     try validateNativeRequest(shapeRequest(.post, &.{ accept_json, json_type }, "{\"identifier\":\"did:plc:x\"}"));
     try validateNativeRequest(shapeRequest(.post, &.{ accept_json, bearer, json_type }, "{}"));
-    try validateNativeRequest(shapeRequest(.post, &.{ accept_json, dpop_auth, json_type }, "{\"repo\":\"did:plc:x\"}"));
+    try validateNativeRequest(shapeRequest(.post, &.{ accept_json, dpop_auth, json_type, dpop }, "{\"repo\":\"did:plc:x\"}"));
 }
 
 test "native adapter rejects request shapes it does not send" {
@@ -421,6 +434,9 @@ test "native adapter rejects request shapes it does not send" {
     try std.testing.expectError(error.UnexpectedRequest, validateNativeRequest(shapeRequest(.post, &.{ accept_json, json_type }, "")));
     try std.testing.expectError(error.UnexpectedRequest, validateNativeRequest(shapeRequest(.post, &.{ accept_json, form_type }, "body")));
     try std.testing.expectError(error.UnexpectedRequest, validateNativeRequest(shapeRequest(.post, &.{ accept_json, basic, json_type }, "{}")));
+    const dpop_auth = transport.Header{ .name = "authorization", .value = "DPoP access-token" };
+    try std.testing.expectError(error.UnexpectedRequest, validateNativeRequest(shapeRequest(.get, &.{ accept_json, dpop_auth }, "")));
+    try std.testing.expectError(error.UnexpectedRequest, validateNativeRequest(shapeRequest(.post, &.{ accept_json, dpop_auth, json_type }, "{}")));
 }
 
 test "connection target policy rejects non-public IPv4 ranges" {
