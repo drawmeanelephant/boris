@@ -3,6 +3,8 @@ import { expect, test, type Page } from '@playwright/test';
 type MockOptions = {
   saveConflict?: boolean;
   saveConflictOnce?: boolean;
+  saveDeleted?: boolean;
+  saveDeletedOnce?: boolean;
   recovery?: Array<{ path: string; content: string; fingerprint: string }>;
   disk?: string;
   commands?: Partial<Record<string, CommandResult>>;
@@ -73,6 +75,7 @@ async function installApi(page: Page, options: MockOptions = {}) {
   let authoringRequest = 0;
   let previewRebuild = 0;
   let conflictOnceRemaining = options.saveConflictOnce ? 1 : 0;
+  let deletedOnceRemaining = options.saveDeletedOnce ? 1 : 0;
 
   await page.route('**/api/health', route => route.fulfill({
     contentType: 'application/json',
@@ -110,6 +113,15 @@ async function installApi(page: Page, options: MockOptions = {}) {
           status: 'conflict', path: body.path, content: '# Changed elsewhere\n',
           fingerprint: 'b'.repeat(64), read_only: false
         })
+      });
+      return;
+    }
+    if (options.saveDeleted || deletedOnceRemaining > 0) {
+      if (deletedOnceRemaining > 0) deletedOnceRemaining -= 1;
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'deleted', path: body.path })
       });
       return;
     }
@@ -1170,6 +1182,63 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
     await expect(dialog).toBeHidden();
   });
 
+  test('deleted-file conflict: Esc keeps editing, Discard changes discards, and Enter re-creates', async ({ page }) => {
+    await installApi(page, { saveDeleted: true });
+    let saveRequests = 0;
+    page.on('request', request => {
+      if (request.url().includes('/api/files/save')) saveRequests += 1;
+    });
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+    await editor.fill('# Mine\n');
+    await page.getByRole('button', { name: 'Save file', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'File deleted outside Boris Editor' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('textbox', { name: 'Your unsaved version' })).toHaveValue('# Mine\n');
+    await expect(dialog.getByRole('button', { name: /Keep editing/ })).toContainText('Esc');
+    await expect(dialog.getByRole('button', { name: /Discard changes/ })).toBeVisible();
+    const recreate = dialog.getByRole('button', { name: /Re-create file/ });
+    await expect(recreate).toContainText('Enter');
+    await expect(recreate).toBeFocused();
+
+    // Esc keeps editing: dialog closes, the dirty buffer survives.
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(editor).toHaveValue('# Mine\n');
+    await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+
+    // Discard changes: Shift+Tab from the focused primary lands on it, Enter discards.
+    await page.getByRole('button', { name: 'Save file', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Shift+Tab');
+    await expect(dialog.getByRole('button', { name: /Discard changes/ })).toBeFocused();
+    const clearRequest = page.waitForRequest('**/api/recovery/clear');
+    await page.keyboard.press('Enter');
+    expect((await clearRequest).postDataJSON()).toMatchObject({ path: 'content/index.md' });
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText('No file selected', { exact: true })).toBeVisible();
+    await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Discarded unsaved changes for deleted file content/index.md.');
+    expect(saveRequests).toBe(2);
+
+    // Enter re-creates: reopen, dirty the buffer, save, and confirm via Enter.
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    await expect(editor).toHaveValue('# Home\n');
+    await editor.fill('# Mine\n');
+    await page.getByRole('button', { name: 'Save file', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    const recreateRequest = page.waitForRequest('**/api/files/save');
+    await page.keyboard.press('Enter');
+    expect((await recreateRequest).postDataJSON()).toMatchObject({
+      path: 'content/index.md', content: '# Mine\n', recreate: true
+    });
+    // The mock keeps 409ing with deleted, so the dialog stays and the buffer survives.
+    await expect(dialog).toBeVisible();
+    await expect(editor).toHaveValue('# Mine\n');
+    await dialog.getByRole('button', { name: /Keep editing/ }).click();
+    await expect(dialog).toBeHidden();
+    expect(saveRequests).toBe(4);
+  });
+
   test('command palette: Ctrl+K opens, arrows select, Enter runs, Esc closes', async ({ page }) => {
     await installApi(page);
     await expect(page.locator('footer .key-hint')).toContainText('Ctrl');
@@ -1401,6 +1470,47 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
       await expect(dialog).toBeVisible();
       await dialog.getByRole('button', { name: /Keep editing/ }).click();
       await expect(dialog).toBeHidden();
+    });
+
+    test('deleted-file conflict: clicking Re-create file matches Enter', async ({ page }) => {
+      await installApi(page, { saveDeletedOnce: true });
+      await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+      const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+      await editor.fill('# Mine\n');
+      await page.getByRole('button', { name: 'Save file', exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: 'File deleted outside Boris Editor' });
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByRole('textbox', { name: 'Your unsaved version' })).toHaveValue('# Mine\n');
+      const recreateRequest = page.waitForRequest('**/api/files/save');
+      await dialog.getByRole('button', { name: /Re-create file/ }).click();
+      expect((await recreateRequest).postDataJSON()).toMatchObject({
+        path: 'content/index.md', content: '# Mine\n', recreate: true
+      });
+      await expect(dialog).toBeHidden();
+      await expect(editor).toHaveValue('# Mine\n');
+      await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Saved content/index.md.');
+      await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
+    });
+
+    test('deleted-file conflict: clicking Discard changes discards the buffer', async ({ page }) => {
+      await installApi(page, { saveDeleted: true });
+      let saveRequests = 0;
+      page.on('request', request => {
+        if (request.url().includes('/api/files/save')) saveRequests += 1;
+      });
+      await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+      const editor = page.getByRole('textbox', { name: 'Source for content/index.md' });
+      await editor.fill('# Mine\n');
+      await page.getByRole('button', { name: 'Save file', exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: 'File deleted outside Boris Editor' });
+      await expect(dialog).toBeVisible();
+      const clearRequest = page.waitForRequest('**/api/recovery/clear');
+      await dialog.getByRole('button', { name: /Discard changes/ }).click();
+      expect((await clearRequest).postDataJSON()).toMatchObject({ path: 'content/index.md' });
+      await expect(dialog).toBeHidden();
+      await expect(page.getByText('No file selected', { exact: true })).toBeVisible();
+      await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('Discarded unsaved changes for deleted file content/index.md.');
+      expect(saveRequests).toBe(1);
     });
 
     test('command palette: clicking an option matches Enter', async ({ page }) => {
