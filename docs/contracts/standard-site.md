@@ -155,9 +155,12 @@ record state and writes evidence with intended-vs-observed claims per
 
 The pure-offline projection surface. `boris standard-site plan --profile PATH
 [--out PATH]` compiles the content tree, renders the deterministic
-`boris-standard-site-plan` (schema v1) — publication + document records,
-`textContent` digests, exclusions, and verification surfaces — and writes it to
-`--out` or stdout. It performs no discovery, OAuth, transport, or mutation, so
+`boris-standard-site-plan` (schema v1) — publication + document records with
+each document's full `textContent` and its digest, exclusions, and
+verification surfaces — and writes it to `--out` or stdout. The plan is
+self-contained for review: every document entry carries the actual plain-text
+projection alongside `text_content_sha256`, so an operator can read what will
+be indexed without a second artifact. It performs no discovery, OAuth, transport, or mutation, so
 an operator can inspect exactly what `publish` would do before any network
 authority is exercised. The emitted bytes are byte-identical to the plan
 `publish` validates and publishes, so the same artifact can be committed and
@@ -170,10 +173,10 @@ The full-payload offline dump. `boris standard-site records --profile PATH
 `plan`/`publish` and renders the complete, canonical record bodies — the
 publication plus every eligible document, with each document's full
 `textContent` embedded — as `boris-standard-site-records` (schema v1). Unlike
-the plan, which carries only per-record digests, this artifact contains the
-exact JSON `publish` would PUT, so an operator can review every byte (including
-the plain-text projection) without any discovery, OAuth, transport, or
-mutation. Fixed key order, LF endings, no timestamps or host data; identical
+the plan, which summarizes each record, this artifact contains the exact
+canonical JSON `publish` would PUT (every field of the complete record body),
+so an operator can review every byte without any discovery, OAuth, transport,
+or mutation. Fixed key order, LF endings, no timestamps or host data; identical
 inputs produce byte-identical output.
 
 ### `boris standard-site verify`

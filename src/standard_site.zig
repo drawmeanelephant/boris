@@ -238,6 +238,8 @@ pub const PlannedDocument = struct {
     published_at: []u8,
     description: ?[]u8,
     tags: [][]const u8,
+    /// Owned plain-text projection; null for metadata-only documents.
+    text_content: ?[]const u8,
     text_content_sha256: ?[64]u8,
     payload: []u8,
     payload_sha256: [64]u8,
@@ -648,6 +650,8 @@ fn projectDocument(
     errdefer gpa.free(payload);
     const description = if (page.summary) |summary| try gpa.dupe(u8, summary) else null;
     errdefer if (description) |value| gpa.free(value);
+    const text_content = if (page.text_content) |text| try gpa.dupe(u8, text) else null;
+    errdefer if (text_content) |value| gpa.free(value);
     const entity_id = try gpa.dupe(u8, page.entity_id);
     errdefer gpa.free(entity_id);
     const title_owned = try gpa.dupe(u8, title);
@@ -668,6 +672,7 @@ fn projectDocument(
         .published_at = published_at,
         .description = description,
         .tags = tags_owned,
+        .text_content = text_content,
         .text_content_sha256 = if (page.text_content) |text| sha256HexLower(text) else null,
         .payload = payload,
         .payload_sha256 = sha256HexLower(payload),
@@ -724,6 +729,7 @@ fn deinitPlannedDocument(document: *PlannedDocument, allocator: std.mem.Allocato
     allocator.free(document.published_at);
     if (document.description) |value| allocator.free(value);
     if (document.tags.len > 0) allocator.free(document.tags);
+    if (document.text_content) |value| allocator.free(value);
     allocator.free(document.payload);
     document.* = undefined;
 }
@@ -878,6 +884,12 @@ pub fn renderPlan(
                 try json_out.writeString(&out, gpa, tag);
             }
             try out.appendSlice(gpa, "]");
+        } else {
+            try json_out.writeNull(&out, gpa);
+        }
+        try out.appendSlice(gpa, ",\n      \"text_content\": ");
+        if (document.text_content) |text| {
+            try json_out.writeString(&out, gpa, text);
         } else {
             try json_out.writeNull(&out, gpa);
         }
@@ -1203,6 +1215,7 @@ test "plan rendering is byte-identical and carries digests and surfaces" {
     try std.testing.expect(std.mem.indexOf(u8, first, "\"format\": \"boris-standard-site-plan\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, first, "\"emittable\": true") != null);
     try std.testing.expect(std.mem.indexOf(u8, first, "\"project_path\": \".well-known/site.standard.publication\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"text_content\": \"Intro prose.\\n\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, first, "\"text_content_sha256\": \"") != null);
     try std.testing.expect(std.mem.indexOf(u8, first, "jobs") == null);
 }
