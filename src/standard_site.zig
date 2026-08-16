@@ -657,10 +657,22 @@ fn projectDocument(
     const title_owned = try gpa.dupe(u8, title);
     errdefer gpa.free(title_owned);
     var tags: std.ArrayList([]const u8) = .empty;
-    errdefer tags.deinit(gpa);
-    for (page.tags) |tag| try tags.append(gpa, tag);
+    errdefer {
+        for (tags.items) |owned| gpa.free(owned);
+        tags.deinit(gpa);
+    }
+    for (page.tags) |tag| {
+        const owned = try gpa.dupe(u8, tag);
+        tags.append(gpa, owned) catch |err| {
+            gpa.free(owned);
+            return err;
+        };
+    }
     const tags_owned = try tags.toOwnedSlice(gpa);
-    errdefer gpa.free(tags_owned);
+    errdefer {
+        for (tags_owned) |owned| gpa.free(owned);
+        gpa.free(tags_owned);
+    }
 
     return .{
         .entity_id = entity_id,
@@ -728,6 +740,7 @@ fn deinitPlannedDocument(document: *PlannedDocument, allocator: std.mem.Allocato
     allocator.free(document.title);
     allocator.free(document.published_at);
     if (document.description) |value| allocator.free(value);
+    for (document.tags) |tag| allocator.free(tag);
     if (document.tags.len > 0) allocator.free(document.tags);
     if (document.text_content) |value| allocator.free(value);
     allocator.free(document.payload);
@@ -1149,6 +1162,52 @@ test "projection maps an eligible corpus deterministically with reasons" {
     try std.testing.expectEqualStrings("https://example.com", projection.publication.url);
     try std.testing.expectEqualStrings("self", projection.publication.rkey);
     try std.testing.expectEqualStrings("at://did:plc:ewvi7nxzyoun6zhxrhs64oiz/site.standard.publication/self", projection.publication.at_uri);
+}
+
+test "projected document tags outlive the page input slices" {
+    const gpa = std.testing.allocator;
+    var config = try testConfig(gpa);
+    defer config.deinit(gpa);
+
+    const tag_a = try gpa.dupe(u8, "guide");
+    const tag_b = try gpa.dupe(u8, "zig");
+    var tag_list = [_][]const u8{ tag_a, tag_b };
+    const pages = [_]PageInput{
+        .{
+            .entity_id = "guides/intro",
+            .output_path = "guides/intro.html",
+            .title = "Intro",
+            .status = .published,
+            .published_at = "2024-01-20T14:30:00Z",
+            .tags = &tag_list,
+        },
+    };
+    var projection = try project(gpa, .{ .config = &config, .site_title = "Boris", .pages = &pages });
+    defer projection.deinit(gpa);
+
+    @memset(tag_a, 'x');
+    @memset(tag_b, 'y');
+    gpa.free(tag_a);
+    gpa.free(tag_b);
+
+    try std.testing.expectEqual(@as(usize, 2), projection.documents[0].tags.len);
+    try std.testing.expectEqualStrings("guide", projection.documents[0].tags[0]);
+    try std.testing.expectEqualStrings("zig", projection.documents[0].tags[1]);
+
+    const surfaces = try verificationSurfaces(gpa, &config, &projection);
+    defer {
+        gpa.free(surfaces.well_known.content);
+        if (surfaces.well_known.project_path) |path| gpa.free(path);
+        gpa.free(surfaces.well_known.required_public_url);
+        for (surfaces.document_links) |link| {
+            gpa.free(link.page);
+            gpa.free(link.href);
+        }
+        gpa.free(surfaces.document_links);
+    }
+    const plan = try renderPlan(gpa, &config, &projection, &surfaces);
+    defer gpa.free(plan);
+    try std.testing.expect(std.mem.indexOf(u8, plan, "\"tags\": [\"guide\",\"zig\"]") != null);
 }
 
 test "filters and prune policy participate in the plan inputs" {
