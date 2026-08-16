@@ -31,6 +31,12 @@ themes/<name>/
 | [`journal`](journal/) | Phosphor terminal diary | `--theme themes/journal` |
 | [`ledger`](ledger/) | Dense early-web nodes | `--theme themes/ledger` |
 | [`reading`](reading/) | Typesetting for non-US-docs English | `--theme themes/reading` |
+| [`semantic`](semantic/) | HTML-first, class-light docs | `--theme themes/semantic` |
+| [`columns`](columns/) | Boxed CSS-only docs | `--theme themes/columns` |
+| [`service`](service/) | Public-service information | `--theme themes/service` |
+| [`engineering`](engineering/) | Dense engineering docs | `--theme themes/engineering` |
+| [`civic`](civic/) | Public-information shell | `--theme themes/civic` |
+| [`tokens`](tokens/) | Fluid custom properties | `--theme themes/tokens` |
 
 Sample sites that build these themes live under `examples/<name>-site/`.
 

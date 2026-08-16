@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" data-layout="home">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Columns</title>
+    <link rel="stylesheet" href="{{asset-url assets/css/columns.css}}">
+      {{head}}
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <header class="hero is-primary">
+      <div class="container hero-body">
+        <p class="brand-kicker">Boxed documentation</p><p class="brand">Columns</p>
+        <div class="navbar-menu" aria-label="Site navigation">{{nav}}</div>
+      </div>
+    </header>
+    <main id="main-content" class="section container" data-boris-search-root>
+      <div class="columns is-variable is-6">
+        <article class="column is-8">
+          <div class="box article-box article-box--home">
+            <p class="tag is-primary is-light">A flexible starting point</p>
+            <header class="content-header"><h1>{{title}}</h1>{{metadata}}</header>
+            <div class="content prose">{{content}}
+        {{relations}}
+        {{backlinks}}</div>
+          </div>
+        </article>
+        <aside class="column is-4 sidebar" data-boris-search-exclude>
+          <div class="box"><p class="menu-label">Explore</p>{{children}}</div>
+          <div class="box"><p class="menu-label">On this page</p>{{toc}}</div>
+        </aside>
+      </div>
+    </main>
+    <footer class="footer">{{footer}}</footer>
+  </body>
+</html>

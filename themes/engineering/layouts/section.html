@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en" data-layout="section">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Engineering</title>
+    <link rel="stylesheet" href="{{asset-url assets/css/engineering.css}}">
+      {{head}}
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <header class="primer-header"><div class="primer-container primer-header__inner"><div><p class="primer-kicker">Engineering documentation</p><p class="primer-brand">Engineering</p></div><div class="primer-nav" aria-label="Site navigation">{{nav}}</div></div></header>
+    <main id="main-content" class="primer-container primer-grid" data-boris-search-root>
+      <article class="Box primer-article"><div class="breadcrumb" aria-label="Breadcrumb">{{breadcrumb}}</div><span class="Label Label--accent">Section</span><h1 class="primer-title">{{title}}</h1>{{metadata}}<div class="markdown-body">{{content}}</div><section class="Box Box--nested" aria-labelledby="children-heading"><h2 id="children-heading" class="h2">Pages in this section</h2>{{children}}</section>
+        {{relations}}
+        {{backlinks}}</article>
+      <aside class="primer-sidebar" aria-label="On this page" data-boris-search-exclude><div class="Box"><p class="primer-kicker">On this page</p>{{toc}}</div></aside>
+    </main>
+    <footer class="primer-footer">{{footer}}</footer>
+  </body>
+</html>

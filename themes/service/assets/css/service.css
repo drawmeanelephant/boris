@@ -1,0 +1,84 @@
+:root {
+  color-scheme: light dark;
+  --govuk-blue: #1d70b8;
+  --govuk-dark-blue: #003078;
+  --govuk-ink: #0b0c0c;
+  --govuk-muted: #505a5f;
+  --govuk-bg: #f3f2f1;
+  --govuk-surface: #fff;
+  --govuk-line: #b1b4b6;
+  --govuk-yellow: #ffdd00;
+  --govuk-green: #00703c;
+  --govuk-red: #d4351c;
+  font-family: Arial, Helvetica, sans-serif;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--govuk-bg); color: var(--govuk-ink); line-height: 1.55; }
+a { color: var(--govuk-blue); text-decoration-thickness: 0.12em; text-underline-offset: 0.13em; }
+a:hover { color: var(--govuk-dark-blue); }
+.govuk-width-container { width: min(calc(100% - 2rem), 66rem); margin-inline: auto; }
+.govuk-skip-link { position: absolute; left: 0.8rem; top: -5rem; z-index: 5; padding: 0.65rem 1rem; background: var(--govuk-yellow); color: #000; font-weight: 700; }
+.govuk-skip-link:focus { top: 0.8rem; }
+.govuk-header { border-bottom: 0.6rem solid var(--govuk-yellow); background: var(--govuk-dark-blue); color: #fff; }
+.govuk-header__inner { display: flex; align-items: end; justify-content: space-between; gap: 2rem; padding-block: 1.4rem; }
+.govuk-caption { margin: 0 0 0.25rem; color: var(--govuk-muted); font-size: 0.82rem; font-weight: 700; }
+.govuk-header .govuk-caption { color: #d8e8f8; }
+.govuk-header__logotype { margin: 0; font-size: clamp(1.5rem, 3vw, 2.25rem); font-weight: 700; letter-spacing: -0.04em; }
+.govuk-service-nav ul { display: flex; flex-wrap: wrap; justify-content: end; gap: 0.35rem 1.1rem; margin: 0; padding: 0; list-style: none; }
+.govuk-service-nav a { color: #fff; font-weight: 700; }
+.govuk-main-wrapper { padding-block: clamp(2rem, 6vw, 4.5rem); }
+.govuk-grid-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(13rem, 1fr); gap: clamp(2rem, 6vw, 5rem); }
+.govuk-grid-column-two-thirds, .govuk-grid-column-one-third { min-width: 0; }
+.govuk-breadcrumbs { margin-bottom: 1.8rem; color: var(--govuk-muted); font-size: 0.9rem; }
+.govuk-heading-xl { max-width: 16ch; margin: 0.2rem 0 1rem; font-size: clamp(2.3rem, 6vw, 4.5rem); line-height: 1.05; letter-spacing: -0.055em; }
+.govuk-heading-m { margin-top: 0; font-size: 1.45rem; line-height: 1.15; }
+.page-metadata { display: flex; flex-wrap: wrap; gap: 0.45rem 1.2rem; margin: 0 0 1.5rem; color: var(--govuk-muted); font-size: 0.88rem; }
+.page-metadata div { display: flex; gap: 0.3rem; }
+.page-metadata dt { font-weight: 700; }
+.page-metadata dd { margin: 0; }
+.prose { max-width: 68ch; }
+.prose h2 { margin-top: 2.7em; font-size: 1.8rem; line-height: 1.15; }
+.prose h3 { margin-top: 2em; font-size: 1.35rem; }
+.prose img { max-width: 100%; height: auto; border: 1px solid var(--govuk-line); }
+.prose pre { overflow-x: auto; padding: 1rem; background: #263238; color: #fff; }
+.prose table { width: 100%; border-collapse: collapse; }
+.prose th, .prose td { padding: 0.75rem 0.5rem; border-bottom: 1px solid var(--govuk-line); text-align: left; vertical-align: top; }
+.govuk-contents-list { margin-top: 2.2rem; padding-top: 1rem; border-top: 0.25rem solid var(--govuk-blue); }
+.govuk-contents-list ul { margin: 0.6rem 0 0; padding-left: 1.2rem; }
+.govuk-contents-list li { margin-block: 0.45rem; }
+.govuk-contents-rail { align-self: start; position: sticky; top: 1rem; }
+.govuk-home-grid { margin-top: 3rem; }
+.govuk-panel { padding: clamp(1.4rem, 4vw, 3rem); background: #d8e8f8; border-left: 0.6rem solid var(--govuk-blue); }
+.admonition, .details { margin-block: 1.5rem; padding: 1rem; border: 1px solid var(--govuk-line); border-left: 0.35rem solid var(--govuk-blue); background: var(--govuk-surface); }
+.admonition--warning, .admonition--danger { border-left-color: var(--govuk-red); }
+.admonition--tip { border-left-color: var(--govuk-green); }
+details summary { cursor: pointer; font-weight: 700; }
+.govuk-footer { margin-top: 2rem; border-top: 0.6rem solid var(--govuk-yellow); background: var(--govuk-dark-blue); color: #fff; }
+.govuk-footer__inner { width: min(calc(100% - 2rem), 66rem); margin-inline: auto; padding-block: 2rem; }
+.govuk-footer__inner p { margin: 0.25rem 0; }
+.govuk-hint { color: #d8e8f8; }
+:focus-visible { outline: 0.25rem solid var(--govuk-yellow); outline-offset: 0.15rem; }
+@media (prefers-color-scheme: dark) { :root { --govuk-ink: #f0f0ef; --govuk-muted: #c8c8c7; --govuk-bg: #1b1c1c; --govuk-surface: #262727; --govuk-line: #777; } .govuk-panel { background: #12395c; } }
+@media (max-width: 48rem) { .govuk-header__inner { display: grid; align-items: start; } .govuk-service-nav ul { justify-content: start; } .govuk-grid-row { grid-template-columns: 1fr; } .govuk-contents-rail { position: static; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+@media print { .govuk-header, .govuk-footer, .govuk-contents-rail, .govuk-skip-link { display: none; } .govuk-main-wrapper { padding: 0; } body { background: #fff; color: #000; } a { color: inherit; } }
+
+/* First-class constructs */
+.govuk-service-nav .is-current > a, .site-nav .is-current > a { text-decoration-thickness: 0.18em; }
+.site-nav ul ul { margin: 0.2rem 0 0.3rem 0.7rem; padding-left: 0.7rem; border-inline-start: 4px solid var(--govuk-yellow); }
+.page-toc ul, .page-children ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
+.page-toc__l2 { padding-inline-start: 0.7rem; }
+.page-toc__l3 { padding-inline-start: 1.3rem; }
+.prose :not(pre) > code { padding: 0.08em 0.28em; background: #fff; border: 1px solid var(--govuk-line); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.prose pre code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+.prose hr { border: 0; border-top: 1px solid var(--govuk-line); margin: 2rem 0; }
+.prose dl { margin: 1.2rem 0; }
+.prose dt { margin-top: 0.7rem; font-weight: 700; }
+.prose dd { margin: 0.2rem 0 0 1.1rem; }
+.prose del { color: var(--govuk-muted); }
+.prose blockquote { margin-inline: 0; padding: 0.3rem 1rem; border-inline-start: 0.35rem solid var(--govuk-blue); }
+.footnotes { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--govuk-line); color: var(--govuk-muted); font-size: 0.88rem; }
+.admonition__title { margin: 0 0 0.3rem; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; }
+.details__body > :first-child { margin-top: 0.7rem; }
+.semantic-relations, .semantic-backlinks { margin-top: 2rem; padding-top: 1rem; border-top: 0.25rem solid var(--govuk-blue); }
