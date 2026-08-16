@@ -6,7 +6,6 @@ Focused adversarial coverage for PR #50 page layout selection
 Normative contracts:
 
 - `docs/contracts/templating-and-themes.md` §4
-- `docs/designs/page-layout-selection-rfc.md`
 - `docs/contracts/multi-target-isolated-output.md`
 
 Happy-path acceptance remains under the parent

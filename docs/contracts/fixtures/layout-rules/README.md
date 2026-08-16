@@ -1,8 +1,7 @@
 # Layout-rules fixture
 
 Acceptance fixture for deterministic page layout selection
-(`docs/designs/page-layout-selection-rfc.md`,
-`docs/contracts/templating-and-themes.md` §4).
+(`docs/contracts/templating-and-themes.md` §4).
 
 ```text
 content/                         theme-site graph shape (Trunk/Satellite)

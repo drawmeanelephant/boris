@@ -161,13 +161,12 @@ misuse the Documentation Intelligence schema or write `build-report.json`.
 | `check` | What graph/dependency health facts and first-slice unreferenced-page findings exist after a valid frozen graph? | Documentation Intelligence policy | Optional explicit report only |
 | normal `build` | Can Boris preflight, render, stage, commit, and emit the selected publication/projection? | Publication and projection semantics | Selected product artifacts |
 | publication evidence | What can be proven about exact committed target bytes? | Inventory, checks, claims, Touch Atlas, and Proof Pack contracts | Target-local evidence after commit |
-| proposed `doctor` | Does an existing publication snapshot agree with source/profile/rendered-artifact expectations? | Separate design proposal; not a public command | Proposed optional report only |
+| proposed `doctor` | Does an existing publication snapshot agree with source/profile/rendered-artifact expectations? | Internal kernel in `src/doctor.zig`; no public command | Optional report only, if a command lands |
 
 `check` is not an alias: it uses a validated graph to run analysis policy and
 does not validate HTML layouts, themes, content assets, or the complete HTML
-render path. Doctor remains a design-only post-publication snapshot auditor in
-[`../design/doctor-v1.md`](../design/doctor-v1.md); it is neither implemented by
-nor folded into `validate`.
+render path. Doctor is an internal snapshot kernel (`src/doctor.zig`) and is
+neither a public command nor folded into `validate`.
 
 ## Deliberate exclusions
 

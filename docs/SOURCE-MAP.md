@@ -29,6 +29,7 @@ The compiler is one binary. Files cluster by job, not by fashion.
 | Nostr (open program) | `src/nostr.zig`, `src/nostr_plan.zig` | issue [#454](https://github.com/drawmeanelephant/boris/issues/454) |
 | Diagnostics | `src/diag.zig`, `src/diagnostic.zig` | [diagnostics.md](contracts/diagnostics.md) |
 | Graph health | `src/intelligence.zig` | [documentation-intelligence.md](contracts/documentation-intelligence.md) |
+| Doctor | `src/doctor.zig` | Internal snapshot kernel only. No public `boris doctor` command. |
 
 Outside `src/`:
 
@@ -40,8 +41,10 @@ Migration labs / source-RAG / search-index / docs-maintenance
 
 ## Rules
 
-- Do not grow a per-function prose twin of `src/`. That experiment was
-  retired.
+- Do not grow a per-function prose twin of `src/` or `tools/`. Those
+  dossier trees were retired. Operator docs for labs live in
+  [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) and
+  [`tools/source-rag/README.md`](../tools/source-rag/README.md).
 - A new module does not require a new Markdown file here. Add a row when
   the *job* is new.
 - If this page and a contract disagree, the contract wins. If this page

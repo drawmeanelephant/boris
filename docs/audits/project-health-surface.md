@@ -9,9 +9,9 @@
 **Product state:** v0.8.1 candidate; base IR schema `0.2.0`
 
 This audit resolves what a deterministic, offline, read-only Boris Doctor can
-prove from the current repository. It does not make
-[`../design/doctor-v1.md`](../design/doctor-v1.md) normative, add a command, or
+prove from the current repository. It does not add a public command or
 change `check`, `impact`, compilation, publication, README, or public content.
+The shipped kernel is [`src/doctor.zig`](../../src/doctor.zig).
 
 ## Executive conclusion
 
@@ -356,6 +356,5 @@ discovery, audit every declared HTML target, and apply public-artifact checks to
 the one declared public target. Project IR/RAG/Context editions remain reported
 as out of Doctor v1 coverage; they are not silently treated as healthy.
 
-The detailed finding model, schema, CLI, exits, compatibility rules,
-implementation slices, and hostile tests are specified in
-[`../design/doctor-v1.md`](../design/doctor-v1.md).
+The shipped kernel is [`src/doctor.zig`](../../src/doctor.zig). There is
+still no public `boris doctor` command; see [`docs/STATUS.md`](../STATUS.md).

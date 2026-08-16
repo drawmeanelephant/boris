@@ -7,5 +7,8 @@
   [AGENTS](/AGENTS.md), the [authoring spine](/docs/authoring-spine.md),
   the [contracts index](/docs/contracts/README.md), and the compiled
   [content site](/content/index.md) to that choice. Retired the
-  per-module source dossier under `docs/boris/` and replaced it with a
-  one-page [source map](/docs/SOURCE-MAP.md).
+  per-module source dossier under `docs/boris/`, the sibling `docs/tools/`
+  dump, and the leftover `docs/design/` / `docs/designs/` notes. Implemented
+  design work now lives in contracts and `src/`. Unfinished Doctor work is a
+  [STATUS](/docs/STATUS.md) line item. Replacement hallway:
+  [source map](/docs/SOURCE-MAP.md).

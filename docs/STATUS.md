@@ -108,6 +108,7 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | ATProto DPoP wire ([#536](https://github.com/drawmeanelephant/boris/issues/536)) | Open. |
 | Standard.site profile `pds` ([#537](https://github.com/drawmeanelephant/boris/issues/537)) | Contract treats it as optional; publish currently requires it. |
 | publication-profile “Pages only” prose ([#534](https://github.com/drawmeanelephant/boris/issues/534)) | Filed contract drift. The target registry is already `github-pages` \| `standard-site`. |
+| Doctor | **Internal kernel only** — `src/doctor.zig` audits a rendered snapshot. No public `boris doctor` command. The old design note was retired; this row is the remaining card. |
 
 ### Common commands
 
