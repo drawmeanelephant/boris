@@ -21,6 +21,7 @@ The compiler is one binary. Files cluster by job, not by fashion.
 | Freestanding render Wasm | `src/render_wasm.zig`, `src/wasm_image.zig` | [embedding.md](contracts/embedding.md) |
 | In-memory compileBundle | `src/embed.zig`, `src/embed_evidence.zig` | [embedding.md](contracts/embedding.md) |
 | compileBundle Wasm ABI | `src/embed_wasm.zig` | [embedding.md](contracts/embedding.md) |
+| Cloudflare Worker host example | `hosts/cloudflare-worker/` | [embedding.md](contracts/embedding.md) |
 | Cooklang recipe scale | `src/recipe_scale.zig`, `src/recipe_scale_view.zig` | [cooklang-compatibility.md](contracts/cooklang-compatibility.md), [cli.md](contracts/cli.md) |
 | HTML body, nav, TOC, assemble | `src/html_body.zig`, `src/html_nav.zig`, `src/html_toc.zig`, `src/assemble.zig`, `src/compile.zig` | [html-output.md](contracts/html-output.md) |
 | Themes, layouts, assets | `src/theme.zig`, `src/layout_select.zig`, `src/content_asset.zig` | [templating-and-themes.md](contracts/templating-and-themes.md), [content-local-assets.md](contracts/content-local-assets.md) |
@@ -39,6 +40,9 @@ Outside `src/`:
 
 Editor
 : [`editor/`](../editor/) — local host. Compiler stays the authority.
+
+Cloudflare Worker host example
+: [`hosts/cloudflare-worker/`](../hosts/cloudflare-worker/) — HTTP/R2 glue around the embed Wasm ABI. Not a publication target.
 
 Migration labs / source-RAG / search-index / docs-maintenance
 : [`tools/`](../tools/) — standalone. Not linked into the `boris` binary.

@@ -27,6 +27,10 @@ zig-out/
 /editor/ui/playwright-report/
 /editor/ui/test-results/
 
+# Cloudflare Worker host glue: copied wasm and optional Wrangler deps.
+/hosts/cloudflare-worker/src/*.wasm
+/hosts/cloudflare-worker/node_modules/
+
 
 
 # Local scratch / private drop (images, notes dumps) — not product source

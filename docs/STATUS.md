@@ -25,7 +25,7 @@ projections. HTML `dist/` is the **default target**, not the whole product.
 | Evidence chain | `artifacts.json` → `checks.json` → `claims.json` → `touches.json` → Proof Pack. |
 | Editor | In-tree authoring surface. Compiler-backed. Not a second stack. |
 | Labs | Standalone migration and source-RAG tools. In the repo story. Not runtime dependencies. |
-| Parked | Cloudflare Containers (#300) and freestanding Wasm (#301). Open cards, not shipped targets. |
+| Parked | Cloudflare Containers (#300). Freestanding Wasm (#301) has an example Worker host; it is not a verified target. |
 
 This is not “a bookseller with a few extras in the basement.” It is also not
 two products sharing a git remote. One compiler, several targets, one graph.
@@ -103,7 +103,7 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | Card | State |
 |---|---|
 | Cloudflare Containers (#300) | Open. Native Boris behind a Worker. Not a static rehost. |
-| Freestanding Wasm (#301) | Open. Compiler-shaped embedding bet. |
+| Freestanding Wasm (#301) | Cards M0–M7 exist. Example Worker host is [`hosts/cloudflare-worker/`](../hosts/cloudflare-worker/). Not a `publication.target`. #301 stays open: no recorded live Cloudflare invoke, isolate-peak unmeasured, RAG/context not in the first embed profile. |
 | Doctor | **Internal kernel only** — `src/doctor.zig` audits a rendered snapshot. No public `boris doctor` command. The old design note was retired; this row is the remaining card. |
 | Nostr verified-target extras ([#584](https://github.com/drawmeanelephant/boris/issues/584)) | Location adapter / registry membership **declined**. Proof Pack and a live-smoke **gate** stay parked unless a product reason appears. |
 

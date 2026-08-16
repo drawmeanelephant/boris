@@ -1,0 +1,15 @@
+# Official #301 M7 host example. Not a publication.target.
+# Copy zig-out/bin/boris-embed-small.wasm to src/boris-embed-small.wasm first.
+
+name = "boris-embed-worker"
+main = "src/worker.mjs"
+compatibility_date = "2026-08-16"
+compatibility_flags = ["nodejs_compat"]
+
+[[r2_buckets]]
+binding = "ARTIFACTS"
+bucket_name = "boris-embed-artifacts"
+
+[[rules]]
+type = "CompiledWasm"
+globs = ["**/*.wasm"]
