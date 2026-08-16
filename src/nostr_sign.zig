@@ -4,13 +4,13 @@
 //! verifies it byte-for-byte, supplies `created_at`, produces the exact
 //! NIP-01 event id and BIP-340 signature for every article, and writes a
 //! signed-event bundle bound to the exact plan bytes. It opens no socket,
-//! contacts no relay, and never publishes; the bundle is the artifact a later
-//! publish slice delivers.
+//! contacts no relay, and never publishes; the bundle is the artifact
+//! `nostr publish` delivers.
 //!
 //! ```text
-//! boris nostr plan   → deterministic unsigned intentions   (nostr_plan.zig)
-//! boris nostr sign   → event id + BIP-340 signature        (this module)
-//! boris nostr publish→ relay delivery + observed evidence  (later slice)
+//! boris nostr plan    → deterministic unsigned intentions   (nostr_plan.zig)
+//! boris nostr sign    → event id + BIP-340 signature        (this module)
+//! boris nostr publish → relay delivery + observed evidence  (nostr_publish.zig)
 //! ```
 //!
 //! ## The signing boundary (#454 §10, #495)
@@ -381,6 +381,26 @@ fn processArticle(
     var event_id_bytes: [32]u8 = undefined;
 
     if (reuse) |pa| {
+        var preimage: std.ArrayList(u8) = .empty;
+        defer preimage.deinit(arena);
+        try nostr.appendEventPreimage(&preimage, arena, pubkey_hex, pa.created_at, nostr.kind_long_form, tags, article.content);
+        var recomputed_id: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(preimage.items, &recomputed_id, .{});
+        var id_hex_buf: [64]u8 = undefined;
+        const id_hex = try std.fmt.bufPrint(&id_hex_buf, "{x}", .{&recomputed_id});
+        if (!std.mem.eql(u8, id_hex, pa.event_id)) {
+            try reject(result, .ENOSTRPLAN, article.entity_id, "prior signed event id does not match the recomputed NIP-01 id", "supply the exact bundle boris nostr sign produced");
+            return;
+        }
+        var sig_bytes: [64]u8 = undefined;
+        _ = std.fmt.hexToBytes(&sig_bytes, pa.signature) catch {
+            try reject(result, .ENOSTRPLAN, article.entity_id, "prior signed event signature is not valid hex", "supply the exact bundle boris nostr sign produced");
+            return;
+        };
+        if (!ctx.verify(sig_bytes, recomputed_id, keypair.public_key)) {
+            try reject(result, .ENOSTRPLAN, article.entity_id, "prior signed event signature does not verify", "supply the exact bundle boris nostr sign produced; a tampered prior is refused");
+            return;
+        }
         event_id_hex = try arena.dupe(u8, pa.event_id);
         signature_hex = try arena.dupe(u8, pa.signature);
     } else {
@@ -856,6 +876,34 @@ test "sign: a malformed plan artifact is refused without a bundle" {
     defer result.deinit();
     try testing.expect(!result.ok());
     try testing.expect(hasCode(result.diagnostics.items, .ENOSTRPLAN));
+}
+
+test "sign: a tampered prior signature is refused rather than reused" {
+    const gpa = testing.allocator;
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const plan = try planForOne(arena_state.allocator(), "articles/vec", vec_tags, vec_content_json, vec_intention_digest);
+
+    var first = try run(testing.io, gpa, .{ .plan = plan, .key = test_secret_key, .created_at = test_created_at, .aux_rand = test_aux });
+    defer first.deinit();
+    try testing.expect(first.ok());
+
+    const flipped = try arena_state.allocator().dupe(u8, first.bundle.?);
+    const needle = "\"signature\": \"";
+    const start = std.mem.indexOf(u8, flipped, needle) orelse return error.TestUnexpectedResult;
+    const hex_at = start + needle.len;
+    flipped[hex_at] = if (flipped[hex_at] == 'a') 'b' else 'a';
+
+    var second = try run(testing.io, gpa, .{
+        .plan = plan,
+        .key = test_secret_key,
+        .created_at = test_created_at + 100,
+        .aux_rand = test_aux,
+        .prior = flipped,
+    });
+    defer second.deinit();
+    try testing.expect(!second.ok());
+    try testing.expect(hasCode(second.diagnostics.items, .ENOSTRPLAN));
 }
 
 test "sign: a prior bundle from a different identity is refused" {

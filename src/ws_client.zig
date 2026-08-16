@@ -478,6 +478,9 @@ pub const Client = struct {
     socket_write_buf: []u8,
     tls_read_buf: []u8,
     tls_write_buf: []u8,
+    /// Incoming-frame scratch. Frames larger than this are `OversizedMessage`
+    /// even if `max_frame_payload` is higher: a relay `OK`/`NOTICE` never
+    /// needs more, and a 1 MiB stack buffer is not worth it.
     read_buf: [16384]u8 = undefined,
     /// Owned by the client; returned from `readMessage` as `.text`.
     message_buf: std.ArrayList(u8) = .empty,
@@ -889,6 +892,7 @@ pub const Client = struct {
             if (payload_len > std.math.maxInt(u64) / 2) return error.ProtocolError;
         }
         if (payload_len > self.limits.max_frame_payload) return error.ProtocolError;
+        if (payload_len > self.read_buf.len) return error.OversizedMessage;
         if (masked) return error.ProtocolError;
 
         const payload: []u8 = self.read_buf[0..@intCast(payload_len)];

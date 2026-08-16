@@ -22,11 +22,12 @@
 //!
 //! ## What is deliberately absent
 //!
-//! No event id, no signature, no `created_at`: all three require the author key
-//! or the signing moment, which the offline plan must not have (`created_at`
-//! participates in the NIP-01 event id, so supplying it here would make the
-//! plan a signing input rather than a deterministic declaration). No relay
-//! connection, no NIP-42 authentication, and no NIP-09 deletion.
+//! No event id, no signature, no `created_at` in the *plan*: all three require
+//! the author key or the signing moment (`created_at` participates in the
+//! NIP-01 event id, so supplying it here would make the plan a signing input
+//! rather than a deterministic declaration). No NIP-42 authentication and no
+//! NIP-09 deletion. Signing and publish live in `nostr_sign.zig` and
+//! `nostr_publish.zig`.
 
 const std = @import("std");
 const graph = @import("graph.zig");
@@ -39,8 +40,9 @@ pub const kind_long_form: u32 = 30023;
 /// A NIP-01 x-only public key in the hex form profiles and plans carry.
 pub const pubkey_hex_len: usize = 64;
 
-/// Bounds on relay configuration. Publishing is a later slice; these keep a
-/// profile from declaring an unbounded wait before that slice exists.
+/// Bounds on relay configuration. `publish` reads these as the transport
+/// deadline and retry budget; the planner still validates them so a profile
+/// cannot declare an unbounded wait.
 pub const max_relays: usize = 32;
 pub const min_timeout_ms: usize = 100;
 pub const max_timeout_ms: usize = 60_000;

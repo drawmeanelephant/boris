@@ -66,6 +66,7 @@ frontmatter or claim a unified publication executor.
 | Publication Proof Pack | **Done (Step 2C closed)** — deterministic two-file presentation model (`proof-pack.json` + `index.html`) over committed artifact, checks, claims, and Touch Atlas evidence; emitted after the Touch Atlas commits with a staged transaction, embedded model digest, semantic-rejection probes, improved HTML presentation, and print-disclosure robustness. |
 | GitHub Pages publication target | **Implemented final audit slice** — the normalized project/root/custom-domain identity, exact public artifact boundary, retained target-local evidence, and optional bounded post-deploy observer are separate; deployment evidence remains temporal and explicitly bounded. |
 | Standard.site / AT Protocol publication | **Shipped for first testers** — offline plan/records/verify, opt-in app-password login, one-shot publish, and a recorded passing bsky.social live smoke. Browser OAuth is implemented but bsky.social does not grant `site.standard.authFull` (exit 6). Operator path: [`standard-site.md`](standard-site.md). |
+| Nostr NIP-23 publication | **Open program — plan/sign/publish shipped** — `boris nostr plan` / `sign` / `publish` implement the NIP-23 pipeline (BIP-340, bounded RFC-6455, per-relay verdict). Not a verified target: no location adapter, no evidence-chain Proof Pack, no live-smoke gate. |
 | Migration-guide executable pass | **Evidence complete** — the 69-page Starlight dogfood converted, compiled to HTML/IR/RAG, and produced a deployable static tree; human review remains required for 109 preserved, 1 stripped, and 79 manual-review findings plus four link-audit misses. |
 | Source-RAG ergonomics measurement | **Measured** — flat, no-bundle, bundles-only, core/docs profiles, and per-tool packs were timed and sized; no behavior change is justified by this snapshot. |
 | Archive-layout evidence | **Done mechanically** — deterministic fixture, black-box audit, and link audit pass; browser viewport and keyboard review remain explicitly unverified. |
@@ -88,6 +89,9 @@ zig build test
 ./zig-out/bin/boris --rss --site-url https://docs.example/ --rss-title "Example Docs" --rss-description "Recent updates" --quiet
 ./zig-out/bin/boris --sitemap --site-url https://docs.example/ --quiet
 ./zig-out/bin/boris --incremental --jobs 4 --quiet
+./zig-out/bin/boris nostr plan --profile PATH
+# echo -n '<hex-or-nsec>' | ./zig-out/bin/boris nostr sign --plan PLAN --key-stdin --out BUNDLE
+# ./zig-out/bin/boris nostr publish --plan PLAN --bundle BUNDLE --out REPORT
 
 zig build --build-file tools/search-index/build.zig test
 zig build --build-file tools/search-index/build.zig run -- \

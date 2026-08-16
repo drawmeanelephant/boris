@@ -20,6 +20,7 @@ Modes:
   standard-site smoke  Live interop smoke against a real PDS (manual, opt-in; never in CI)
   nostr plan          Emit the offline Nostr NIP-23 publication plan (no signing, no relay)
   nostr sign          Sign a plan artifact into a signed-event bundle (offline; key via stdin)
+  nostr publish       Send a signed-event bundle to the plan's relays; writes the report
   init [DIR]          Write a starter site (content, theme, profile) into DIR (default: .)
   (no command)        Same as build
   standard-site publish options:
@@ -111,6 +112,8 @@ Options:
   --out PATH           Signed-event bundle output path (`nostr sign`; default: stdout)
   --prior PATH         Prior signed bundle to reuse unchanged evidence from (`nostr sign`)
   --created-at N       Explicit signing-time override, unix seconds (`nostr sign`; test/recovery)
+  --bundle PATH        Signed-event bundle to publish (`nostr publish`)
+  --out PATH           Publish report output path (`nostr publish`; default: stdout)
   -h, --help          Show this help and exit 0
   -V, --version       Print the compiler version (`boris/<ver>`) and exit 0
 

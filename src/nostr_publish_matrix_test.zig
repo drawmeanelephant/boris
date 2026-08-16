@@ -44,6 +44,8 @@ const Scenario = enum {
     silent,
     /// Reply `["OK", id, false, "auth-required: please authenticate"]`.
     auth_required,
+    /// Reply `["OK", id, false, "blocked: spam"]` — a plain rejection.
+    rejected,
     /// Reply OK for a different event id (must fail closed).
     wrong_id,
     /// Send a text frame that is not JSON.
@@ -352,6 +354,11 @@ fn actOnEvent(self: *MockRelay, fd: std.c.fd_t, id: []const u8) !void {
             const ok = try std.fmt.bufPrint(&ok_buf, "[\"OK\",\"{s}\",false,\"auth-required: please authenticate\"]", .{id});
             try sendServerText(fd, ok);
         },
+        .rejected => {
+            var ok_buf: [512]u8 = undefined;
+            const ok = try std.fmt.bufPrint(&ok_buf, "[\"OK\",\"{s}\",false,\"blocked: spam\"]", .{id});
+            try sendServerText(fd, ok);
+        },
         .wrong_id => {
             var ok_buf: [512]u8 = undefined;
             const ok = try std.fmt.bufPrint(&ok_buf, "[\"OK\",\"{s}\",true,\"\"]", .{"1111111111111111111111111111111111111111111111111111111111111111"});
@@ -418,7 +425,9 @@ fn buildPlan(gpa: std.mem.Allocator, ports: []const u16, timeout_ms: u32, retrie
     try out.appendSlice(gpa, ",\"retries\":");
     const retry = try std.fmt.bufPrint(&num_buf, "{d}", .{retries});
     try out.appendSlice(gpa, retry);
-    try out.appendSlice(gpa, "}}");
+    try out.appendSlice(gpa, "},\"articles\":[{\"entity_id\":\"");
+    try out.appendSlice(gpa, event_entity);
+    try out.appendSlice(gpa, "\"}]}");
     return out.toOwnedSlice(gpa);
 }
 
@@ -559,10 +568,8 @@ const ReportJson = struct {
     },
 };
 
-fn parseReport(gpa: std.mem.Allocator, result: *const np.Result) !ReportJson {
-    var parsed = try std.json.parseFromSlice(ReportJson, gpa, result.report.?, .{ .ignore_unknown_fields = true });
-    defer parsed.deinit();
-    return parsed.value;
+fn parseReport(gpa: std.mem.Allocator, result: *const np.Result) !std.json.Parsed(ReportJson) {
+    return std.json.parseFromSlice(ReportJson, gpa, result.report.?, .{ .ignore_unknown_fields = true });
 }
 
 const Expect = struct {
@@ -590,7 +597,9 @@ fn runScenario(scenario: Scenario, expect: Expect) !void {
     defer result.deinit();
 
     try testing.expectEqual(expect.classification, result.classification.?);
-    const report = try parseReport(testing.allocator, &result);
+    var parsed = try parseReport(testing.allocator, &result);
+    defer parsed.deinit();
+    const report = parsed.value;
     try testing.expectEqual(@as(usize, 1), report.relays.len);
     try testing.expectEqualStrings(expect.outcome, report.relays[0].outcome);
     try testing.expectEqual(expect.attempts, report.relays[0].attempts);
@@ -666,18 +675,27 @@ test "matrix: a silent relay hits the deadline and the run is incomplete" {
 test "matrix: auth-required is an honest unsupported outcome (NIP-42 out of v1)" {
     try runScenario(.auth_required, .{
         .classification = .failed,
-        .outcome = "auth_required",
-        .event_result = "auth_required",
+        .outcome = "auth-required",
+        .event_result = "auth-required",
         .message = "auth-required",
+    });
+}
+
+test "matrix: a plain OK-false is rejected, not a protocol error" {
+    try runScenario(.rejected, .{
+        .classification = .failed,
+        .outcome = "rejected",
+        .event_result = "rejected",
+        .message = "blocked: spam",
     });
 }
 
 test "matrix: an OK for the wrong event id fails closed" {
     try runScenario(.wrong_id, .{
         .classification = .failed,
-        .outcome = "error",
-        .event_result = "error",
-        .message = "Malformed",
+        .outcome = "wrong-id",
+        .event_result = "wrong-id",
+        .message = "wrong-id",
     });
 }
 
@@ -736,7 +754,9 @@ test "matrix: a relay that retries on timeout sends the identical event again" {
     defer result.deinit();
 
     try testing.expectEqual(np.Classification.incomplete, result.classification.?);
-    const report = try parseReport(testing.allocator, &result);
+    var parsed = try parseReport(testing.allocator, &result);
+    defer parsed.deinit();
+    const report = parsed.value;
     try testing.expectEqualStrings("timeout", report.relays[0].outcome);
     try testing.expectEqual(@as(usize, 2), report.relays[0].attempts);
     // The relay saw both identical sends (two EVENT frames).
@@ -760,12 +780,14 @@ test "matrix: mixed relays classify partial and keep per-relay evidence" {
     defer result.deinit();
 
     try testing.expectEqual(np.Classification.partial, result.classification.?);
-    const report = try parseReport(testing.allocator, &result);
+    var parsed = try parseReport(testing.allocator, &result);
+    defer parsed.deinit();
+    const report = parsed.value;
     try testing.expectEqual(@as(usize, 2), report.relays.len);
     try testing.expectEqualStrings("accepted", report.relays[0].outcome);
     try testing.expectEqualStrings("accepted", report.relays[0].events[0].result);
-    try testing.expectEqualStrings("auth_required", report.relays[1].outcome);
-    try testing.expectEqualStrings("auth_required", report.relays[1].events[0].result);
+    try testing.expectEqualStrings("auth-required", report.relays[1].outcome);
+    try testing.expectEqualStrings("auth-required", report.relays[1].events[0].result);
 }
 
 test "matrix: the golden publish-report fixture matches the contract shape" {
@@ -887,7 +909,9 @@ test "tls: a real wss:// relay with a pinned self-signed CA accepts the event" {
     defer result.deinit();
 
     try testing.expectEqual(np.Classification.complete, result.classification.?);
-    const report = try parseReport(testing.allocator, &result);
+    var parsed = try parseReport(testing.allocator, &result);
+    defer parsed.deinit();
+    const report = parsed.value;
     try testing.expectEqual(@as(usize, 1), report.relays.len);
     try testing.expectEqualStrings("accepted", report.relays[0].outcome);
     try testing.expectEqualStrings("accepted", report.relays[0].events[0].result);
@@ -913,7 +937,9 @@ test "tls: a pinned CA does not excuse a hostname mismatch" {
     defer result.deinit();
 
     try testing.expectEqual(np.Classification.failed, result.classification.?);
-    const report = try parseReport(testing.allocator, &result);
+    var parsed = try parseReport(testing.allocator, &result);
+    defer parsed.deinit();
+    const report = parsed.value;
     try testing.expectEqualStrings("error", report.relays[0].outcome);
     try testing.expectEqualStrings("TlsFailed", report.relays[0].events[0].message);
 }

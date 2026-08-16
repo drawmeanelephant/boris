@@ -605,6 +605,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         }
 
         if (std.mem.eql(u8, a, "--bundle") or std.mem.startsWith(u8, a, "--bundle=")) {
+            if (command != .nostr_publish) return error.ConflictingFlags;
             if (saw_nostr_bundle) return error.DuplicateFlag;
             saw_nostr_bundle = true;
             nostr_bundle_path = try takeValue(args, &i, a, "--bundle");
@@ -612,6 +613,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         }
 
         if (std.mem.eql(u8, a, "--key-stdin")) {
+            if (command != .nostr_sign) return error.ConflictingFlags;
             if (saw_nostr_key_stdin) return error.DuplicateFlag;
             saw_nostr_key_stdin = true;
             nostr_key_stdin = true;
@@ -619,6 +621,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         }
 
         if (std.mem.eql(u8, a, "--prior") or std.mem.startsWith(u8, a, "--prior=")) {
+            if (command != .nostr_sign) return error.ConflictingFlags;
             if (saw_nostr_prior) return error.DuplicateFlag;
             saw_nostr_prior = true;
             nostr_prior_path = try takeValue(args, &i, a, "--prior");
@@ -626,6 +629,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         }
 
         if (std.mem.eql(u8, a, "--created-at") or std.mem.startsWith(u8, a, "--created-at=")) {
+            if (command != .nostr_sign) return error.ConflictingFlags;
             if (saw_nostr_created_at) return error.DuplicateFlag;
             saw_nostr_created_at = true;
             const value = try takeValue(args, &i, a, "--created-at");
@@ -2129,6 +2133,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
         if (std.mem.eql(u8, a, "--input") or
             std.mem.eql(u8, a, "--profile") or
             std.mem.eql(u8, a, "--plan") or
+            std.mem.eql(u8, a, "--bundle") or
             std.mem.eql(u8, a, "--prior") or
             std.mem.eql(u8, a, "--created-at") or
             std.mem.eql(u8, a, "--out") or
@@ -2163,6 +2168,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
         if (std.mem.startsWith(u8, a, "--input=") or
             std.mem.startsWith(u8, a, "--profile=") or
             std.mem.startsWith(u8, a, "--plan=") or
+            std.mem.startsWith(u8, a, "--bundle=") or
             std.mem.startsWith(u8, a, "--prior=") or
             std.mem.startsWith(u8, a, "--created-at=") or
             std.mem.startsWith(u8, a, "--out=") or
@@ -2793,6 +2799,14 @@ test "parse: nostr publish rejects missing inputs and foreign selectors" {
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "p", "--bundle", "b", "--rag" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "p", "--bundle", "b", "--timings" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "p", "--bundle", "b", "--html-dir", "dist" }));
+}
+
+test "parse: nostr flags are command-scoped" {
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--key-stdin" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "p", "--bundle", "b", "--key-stdin" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--plan", "p", "--key-stdin", "--bundle", "x" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "plan", "--profile", "a", "--prior", "old.json" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "plan", "--profile", "a", "--bundle", "b" }));
 }
 
 test "parse: nostr plan owns stdout and rejects every other selector" {

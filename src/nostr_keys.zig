@@ -75,6 +75,7 @@ pub const Context = struct {
         var self = try init();
         errdefer self.deinit();
         var seed: [32]u8 = undefined;
+        defer std.crypto.secureZero(u8, &seed);
         io.randomSecure(&seed) catch return error.ContextRandomizationFailed;
         if (c.secp256k1_context_randomize(self.ctx, &seed) != 1) {
             return error.ContextRandomizationFailed;

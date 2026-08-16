@@ -103,6 +103,7 @@ const PlanJson = struct {
         timeout_ms: u32 = nostr.default_timeout_ms,
         retries: u8 = 0,
     },
+    articles: []const struct { entity_id: []const u8 = "" } = &.{},
 };
 
 pub const SignedArticle = struct {
@@ -143,10 +144,15 @@ const EventResult = enum {
     auth_required,
     /// The relay closed the connection before an OK arrived.
     closed,
+    /// An OK named a different event id than the one just sent.
+    wrong_id,
 
     pub fn jsonName(self: EventResult) []const u8 {
         return switch (self) {
             .failed => "error",
+            .wrong_id => "wrong-id",
+            .auth_required => "auth-required",
+            .not_attempted => "not-attempted",
             else => @tagName(self),
         };
     }
@@ -160,10 +166,13 @@ const RelayStatus = enum {
     failed,
     auth_required,
     closed,
+    wrong_id,
 
     pub fn jsonName(self: RelayStatus) []const u8 {
         return switch (self) {
             .failed => "error",
+            .wrong_id => "wrong-id",
+            .auth_required => "auth-required",
             else => @tagName(self),
         };
     }
@@ -292,6 +301,37 @@ fn verifyBundle(
             return false;
         }
     }
+
+    if (plan.articles.len != bundle.articles.len) {
+        try reject(result, .ENOSTRPLAN, "", "the signed bundle article set does not match the plan", "re-sign from the exact plan output; publish sends every planned article and no extras");
+        return false;
+    }
+    for (plan.articles) |planned| {
+        var found = false;
+        for (bundle.articles) |article| {
+            if (std.mem.eql(u8, planned.entity_id, article.entity_id)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            try reject(result, .ENOSTRPLAN, planned.entity_id, "the signed bundle is missing a planned article", "re-sign from the exact plan output");
+            return false;
+        }
+    }
+    for (bundle.articles) |article| {
+        var found = false;
+        for (plan.articles) |planned| {
+            if (std.mem.eql(u8, planned.entity_id, article.entity_id)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            try reject(result, .ENOSTRPLAN, article.entity_id, "the signed bundle carries an article that is not in the plan", "re-sign from the exact plan output");
+            return false;
+        }
+    }
     return true;
 }
 
@@ -321,6 +361,8 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
 
     var plan_digest: [nostr.digest_hex_len]u8 = undefined;
     nostr.digestHex(options.plan, &plan_digest);
+    var bundle_digest: [nostr.digest_hex_len]u8 = undefined;
+    nostr.digestHex(options.bundle, &bundle_digest);
 
     var relay_outcomes: std.ArrayList(RelayOutcome) = .empty;
     defer relay_outcomes.deinit(arena);
@@ -336,7 +378,7 @@ pub fn run(io: Io, gpa: std.mem.Allocator, options: Options) !Result {
     const classification = classify(relay_outcomes.items);
     diag.sortDiagnostics(result.diagnostics.items);
     result.classification = classification;
-    result.report = try renderReport(gpa, &plan_digest, bundle.plan.digest, bundle.signer.pubkey, classification, relay_outcomes.items);
+    result.report = try renderReport(gpa, &plan_digest, &bundle_digest, bundle.signer.pubkey, classification, relay_outcomes.items);
     return result;
 }
 
@@ -402,21 +444,24 @@ fn publishToRelay(
         const outcome = try sendEvent(gpa, arena, &client, relay_url, article, retries, result, &attempts);
         switch (outcome.result) {
             .accepted => {},
-            .rejected, .timeout, .failed, .auth_required, .closed => {
+            .rejected, .timeout, .failed, .auth_required, .closed, .wrong_id => {
                 if (status == .accepted) status = switch (outcome.result) {
                     .rejected => .rejected,
                     .timeout => .timeout,
                     .failed => .failed,
                     .auth_required => .auth_required,
                     .closed => .closed,
+                    .wrong_id => .wrong_id,
                     else => unreachable,
                 };
             },
             .not_attempted => {},
         }
-        // A relay that rejects with auth-required, or closes mid-send, is
-        // not worth more events: the outcome is definitive for this run.
-        if (outcome.result == .failed or outcome.result == .auth_required or outcome.result == .closed) abort_relay = true;
+        // A relay that rejects with auth-required, names the wrong id, or
+        // closes mid-send is not worth more events: the outcome is
+        // definitive for this run. A per-event `rejected` still tries later
+        // events on the same connection.
+        if (outcome.result == .failed or outcome.result == .auth_required or outcome.result == .closed or outcome.result == .wrong_id) abort_relay = true;
         try events.append(arena, outcome);
     }
     return .{ .url = relay_url, .status = status, .attempts = attempts, .events = events.items };
@@ -442,7 +487,7 @@ fn sendEvent(
             try emitRelayDiagnostic(result, relay_url, "could not send the event", err);
             return .{ .entity_id = article.entity_id, .event_id = article.event_id, .result = .failed, .message = @errorName(err) };
         };
-        _ = readUntilOk(gpa, arena, client, article.event.id) catch |err| switch (err) {
+        const read = readUntilOk(gpa, arena, client, article.event.id) catch |err| switch (err) {
             error.AuthRequired => {
                 try emitRelayDiagnostic(result, relay_url, "relay requires NIP-42 authentication, which v1 does not implement", null);
                 return .{ .entity_id = article.entity_id, .event_id = article.event_id, .result = .auth_required, .message = "auth-required" };
@@ -456,23 +501,37 @@ fn sendEvent(
                 try emitRelayDiagnostic(result, relay_url, "no OK within the deadline", null);
                 return .{ .entity_id = article.entity_id, .event_id = article.event_id, .result = .timeout, .message = "" };
             },
+            error.WrongId => {
+                try emitRelayDiagnostic(result, relay_url, "relay OK named a different event id", null);
+                return .{ .entity_id = article.entity_id, .event_id = article.event_id, .result = .wrong_id, .message = "wrong-id" };
+            },
             else => {
                 try emitRelayDiagnostic(result, relay_url, "relay protocol error", err);
                 return .{ .entity_id = article.entity_id, .event_id = article.event_id, .result = .failed, .message = @errorName(err) };
             },
         };
-        return .{ .entity_id = article.entity_id, .event_id = article.event_id, .result = .accepted, .message = "" };
+        switch (read) {
+            .ok => return .{ .entity_id = article.entity_id, .event_id = article.event_id, .result = .accepted, .message = "" },
+            .rejected => |reason| {
+                try emitRelayDiagnostic(result, relay_url, "relay rejected the event", null);
+                return .{ .entity_id = article.entity_id, .event_id = article.event_id, .result = .rejected, .message = reason };
+            },
+        }
     }
     unreachable;
 }
 
-const OkRead = enum { ok };
+const OkRead = union(enum) {
+    ok,
+    /// Arena-owned rejection reason from `["OK", id, false, reason]`.
+    rejected: []const u8,
+};
 
 /// Read messages until the relay answers with `OK` for `wanted_id`, or the
 /// read deadline fires. `NOTICE` is recorded and the wait continues (NOTICE
 /// is never success). `AUTH` or an `auth-required:` OK yields
-/// `error.AuthRequired`. A malformed message or an OK for another id fails
-/// closed.
+/// `error.AuthRequired`. An OK for another id is `error.WrongId`. A
+/// malformed message fails closed.
 fn readUntilOk(gpa: std.mem.Allocator, arena: std.mem.Allocator, client: *ws.Client, wanted_id: []const u8) !OkRead {
     while (true) {
         // A relay that drops the connection without an OK is the same
@@ -491,11 +550,11 @@ fn readUntilOk(gpa: std.mem.Allocator, arena: std.mem.Allocator, client: *ws.Cli
                     .ok => return .ok,
                     .notice => continue,
                     .auth => return error.AuthRequired,
-                    .wrong_id => return error.Malformed,
+                    .wrong_id => return error.WrongId,
                     .rejected => |reason| {
                         // The reason is arena-owned, so it outlives the parse.
                         if (startsWithIgnoreCase(reason, "auth-required:")) return error.AuthRequired;
-                        return error.Rejected;
+                        return .{ .rejected = reason };
                     },
                 }
             },
@@ -646,7 +705,7 @@ fn renderEventMessage(gpa: std.mem.Allocator, article: SignedArticle) ![]u8 {
 fn renderReport(
     gpa: std.mem.Allocator,
     plan_digest: *const [nostr.digest_hex_len]u8,
-    bundle_digest: []const u8,
+    bundle_digest: *const [nostr.digest_hex_len]u8,
     pubkey: []const u8,
     classification: Classification,
     relays: []const RelayOutcome,
@@ -772,4 +831,92 @@ test "startsWithIgnoreCase: auth-required prefix matching" {
     try testing.expect(startsWithIgnoreCase("auth-required: please authenticate", "auth-required:"));
     try testing.expect(startsWithIgnoreCase("AUTH-REQUIRED: please", "auth-required:"));
     try testing.expect(!startsWithIgnoreCase("blocked: no", "auth-required:"));
+}
+
+const test_secret_key = "b7e151628aed2a6abf7158809cf4f3c762e7160f38b4da56a784d9045190cfef";
+const test_pubkey = "dff1d77f2a671c5f36183726db2341be58feae1da2deced843240f7b502ba659";
+const test_aux = [_]u8{0} ** 32;
+const test_created_at: i64 = 1705762000;
+
+fn signedPair(gpa: std.mem.Allocator) !struct { plan: []u8, bundle: []u8 } {
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var tags = [_]nostr.Tag{
+        .{ .name = "d", .value = "articles/vec" },
+        .{ .name = "published_at", .value = "1705761000" },
+    };
+    var digest: [nostr.digest_hex_len]u8 = undefined;
+    try nostr.intentionDigestHex(arena, &tags, "hi", &digest);
+
+    var plan_buf: std.ArrayList(u8) = .empty;
+    errdefer plan_buf.deinit(gpa);
+    try plan_buf.appendSlice(gpa, "{\"format\":\"boris-nostr-publication-plan\",\"schema_version\":1,\"protocol\":{\"kind\":30023},\"author\":{\"expected_pubkey\":\"");
+    try plan_buf.appendSlice(gpa, test_pubkey);
+    try plan_buf.appendSlice(gpa, "\"},\"articles\":[{\"entity_id\":\"articles/vec\",\"kind\":30023,\"tags\":[[\"d\",\"articles/vec\"],[\"published_at\",\"1705761000\"]],\"content\":\"hi\",\"intention_digest\":\"");
+    try plan_buf.appendSlice(gpa, &digest);
+    try plan_buf.appendSlice(gpa, "\"}],\"delivery\":{\"relays\":[\"wss://127.0.0.1:1\"],\"timeout_ms\":100,\"retries\":0}}");
+    const plan = try plan_buf.toOwnedSlice(gpa);
+
+    var signed = try sign_mod.run(testing.io, gpa, .{
+        .plan = plan,
+        .key = test_secret_key,
+        .created_at = test_created_at,
+        .aux_rand = test_aux,
+    });
+    defer signed.deinit();
+    if (signed.bundle == null) return error.TestUnexpectedResult;
+    return .{ .plan = plan, .bundle = try gpa.dupe(u8, signed.bundle.?) };
+}
+
+test "publish: the report bundle digest is the sha-256 of the bundle bytes" {
+    const gpa = testing.allocator;
+    const pair = try signedPair(gpa);
+    defer gpa.free(pair.plan);
+    defer gpa.free(pair.bundle);
+
+    var result = try run(testing.io, gpa, .{ .plan = pair.plan, .bundle = pair.bundle });
+    defer result.deinit();
+    try testing.expect(result.report != null);
+
+    var plan_digest: [nostr.digest_hex_len]u8 = undefined;
+    nostr.digestHex(pair.plan, &plan_digest);
+    var bundle_digest: [nostr.digest_hex_len]u8 = undefined;
+    nostr.digestHex(pair.bundle, &bundle_digest);
+    try testing.expect(!std.mem.eql(u8, &plan_digest, &bundle_digest));
+
+    var parsed = try std.json.parseFromSlice(struct {
+        plan: struct { digest: []const u8 },
+        bundle: struct { digest: []const u8 },
+    }, gpa, result.report.?, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    try testing.expectEqualStrings(&plan_digest, parsed.value.plan.digest);
+    try testing.expectEqualStrings(&bundle_digest, parsed.value.bundle.digest);
+}
+
+test "publish: an extra bundle article is refused before any socket opens" {
+    const gpa = testing.allocator;
+    const pair = try signedPair(gpa);
+    defer gpa.free(pair.plan);
+    defer gpa.free(pair.bundle);
+
+    const extra = pair.bundle;
+    const marker = "\"articles\": [";
+    const idx = std.mem.indexOf(u8, extra, marker) orelse return error.TestUnexpectedResult;
+    const insert_at = idx + marker.len;
+    const first_end = std.mem.indexOfPos(u8, extra, insert_at, "\n    }") orelse return error.TestUnexpectedResult;
+    const first = extra[insert_at .. first_end + 6];
+    var padded_buf: std.ArrayList(u8) = .empty;
+    defer padded_buf.deinit(gpa);
+    try padded_buf.appendSlice(gpa, extra[0..insert_at]);
+    try padded_buf.appendSlice(gpa, first);
+    try padded_buf.appendSlice(gpa, ",");
+    try padded_buf.appendSlice(gpa, extra[insert_at..]);
+    const padded = padded_buf.items;
+
+    var result = try run(testing.io, gpa, .{ .plan = pair.plan, .bundle = padded });
+    defer result.deinit();
+    try testing.expect(result.report == null);
+    try testing.expect(result.diagnostics.items.len > 0);
+    try testing.expectEqual(diag.Code.ENOSTRPLAN, result.diagnostics.items[0].code);
 }

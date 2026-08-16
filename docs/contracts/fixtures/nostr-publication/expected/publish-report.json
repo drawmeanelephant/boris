@@ -9,7 +9,7 @@
   "bundle": {
     "format": "boris-nostr-signed-bundle",
     "schema_version": 1,
-    "digest": "d04f9bf3195e8101c3626a90caa1a3c732ec603e26bc6833bd60ac107119298b"
+    "digest": "051ba9e1aa812a3ad8b3d7a138da5816b65fcca09fe8a1b978644205086537d4"
   },
   "signer": {
     "pubkey": "28db762b3c3d12129d4c0fc741bda4ea3317e4a6a375cb2cda7dee783e807b40"

@@ -261,14 +261,14 @@ seconds; test/recovery only). `nostr publish` options: `--plan PATH`
 (required), `--bundle PATH` (required; verified against the plan before
 anything is sent), and `--out PATH` (report output path; default stdout).
 
-Exit codes: `0` success (for publish this means a report was written — the
-verdict lives in the report, not the code); `1` content failure, including
-`ENOSTRSIGN` refusals, `ENOSTRTIME` ordering violations, and per-relay
-`ENOSTRRELAY` failures (the run still reaches a `complete`/`partial`/
-`failed`/`incomplete` classification and the report is written); `2` usage
-error (missing `--plan`/`--key-stdin`/`--bundle`, an invalid `--created-at`,
-relay configuration refused by the strict profile parser, or a plan/bundle
-over the size bound); `3` I/O or system failure. See the normative
+Exit codes: `0` success (`nostr sign` wrote a bundle; `nostr publish`
+wrote a report — the publish verdict lives in the report, not the code,
+even when relays emit `ENOSTRRELAY`); `1` content failure, including
+`ENOSTRSIGN` refusals and `ENOSTRTIME` ordering violations (no bundle or
+report is written); `2` usage error (missing `--plan`/`--key-stdin`/
+`--bundle`, an invalid `--created-at`, relay configuration refused by the
+strict profile parser, or a plan/bundle over the size bound); `3` I/O or
+system failure. See the normative
 [`nostr-publication` contract](nostr-publication.md) for the plan, signed
 bundle, and report artifacts, the `created_at` update-ordering rules, and
 the hostile mock-relay conformance matrix.

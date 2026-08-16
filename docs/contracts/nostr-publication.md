@@ -1,46 +1,63 @@
-# Nostr publication (NIP-23, offline plan + signing slices)
+# Nostr publication (NIP-23: plan, sign, publish)
 
-**Status:** normative offline contract for two commands. `boris nostr plan
---profile PATH` reads one explicitly selected local publication profile,
-selects the allowlisted pages that are eligible as NIP-23 long-form articles,
-derives the publication-safe Markdown and tag set each event would carry, and
-writes one canonical JSON declaration to stdout. `boris nostr sign` reads that
-plan artifact and a secret key from stdin, computes the exact NIP-01 event id
-and BIP-340 signature for every article, and writes a signed-event bundle. The
-plan slice holds no key and produces no signature; the sign slice opens no
-socket and publishes nothing.
+**Status:** normative contract for the three-command NIP-23 pipeline.
+`boris nostr plan --profile PATH` reads one explicitly selected local
+publication profile, selects the allowlisted pages that are eligible as
+NIP-23 long-form articles, derives the publication-safe Markdown and tag
+set each event would carry, and writes one canonical JSON declaration to
+stdout. `boris nostr sign` reads that plan artifact and a secret key from
+stdin, computes the exact NIP-01 event id and BIP-340 signature for every
+article, and writes a signed-event bundle. `boris nostr publish` reads the
+plan and the bundle, re-verifies the bundle against the plan, and delivers
+the exact signed events to the plan's relays. The plan slice holds no key
+and produces no signature; the sign slice opens no socket and publishes
+nothing; the publish slice never sees a secret.
 
 The plan is a report about a website Boris already knows how to build. It
-describes what the signing slice will sign and what a later publish slice will
-send, in enough detail that a maintainer can review both before either exists.
-Every fact in the plan is derived from committed content and the selected
-profile, so the same inputs always produce the same bytes.
+describes what the signing slice will sign and what the publish slice will
+send, in enough detail that a maintainer can review the plan before either
+step runs. Every fact in the plan is derived from committed content and the
+selected profile, so the same inputs always produce the same bytes.
+
+This is an **open program**, not a verified publication target. It has no
+location adapter, no evidence-chain Proof Pack, and no live-smoke gate.
+GitHub Pages and Standard.site remain the verified targets.
 
 ## Scope
 
-This slice is an offline, deterministic planner and nothing else. Its output is
-a declaration; a successful run means only that Boris has computed a reviewable
-publication plan.
+The three commands are one pipeline with a hard offline/online boundary.
+A successful `plan` run means only that Boris has computed a reviewable
+declaration. A successful `sign` run means a verified signed-event bundle
+was written. A successful `publish` run means a report was written — the
+`complete` / `partial` / `failed` / `incomplete` verdict lives in the
+report, never in a collapsed exit boolean.
 
-Explicit non-goals:
+Explicit non-goals of the program as a whole:
 
-- No secret key is read, held, derived, generated, or requested. There is no
-  key file, no key flag, no key environment variable, and no key prompt.
-- No signature. The NIP-01 `sig` field is absent, and so is the event `id`:
-  both are functions of `created_at` and the signing key, neither of which
-  exists here.
-- No `created_at`. Wall-clock time is a signing-time input, not a plan input.
-- No relay connection, handshake, subscription, `EVENT` message, or `OK`
-  response. Configured relay URLs are strings to normalize and sort, never
-  endpoints to probe.
 - No NIP-42 relay authentication and no NIP-09 deletion request.
-- No Nostr client, relay, key manager, or wallet is implemented or vendored.
+- No key file, key flag, key environment variable, or key prompt. The only
+  secret input is `--key-stdin` on `nostr sign`.
+- No Nostr client, relay, key manager, or wallet is vendored. Signing uses
+  the pinned bitcoin-core/secp256k1 library through a Boris-owned FFI
+  wrapper; transport is a bounded in-repo RFC-6455 client.
+- Nostr is not a verified target. A completed publish is not a Proof Pack
+  claim and does not update `dist/`.
 
-A bare `boris build` never touches the network. The Nostr surface is a separate
-opt-in command over the same content, so nothing about it can move bytes into a
-build. A failed Nostr operation — an ineligible article, an unportable
-paragraph, an unnormalizable relay URL, a refused plan — cannot invalidate a
-built website. The website is the product; the plan is a report about it.
+Per-command boundaries:
+
+- `plan` never reads a key, never signs, never opens a socket. `created_at`,
+  `id`, and `sig` are absent from the plan: they are signing-time inputs.
+- `sign` never opens a socket and never publishes.
+- `publish` never reads a key. Configured relay URLs become live endpoints
+  only here, and every interaction is bounded.
+
+A bare `boris build` never touches the network. The Nostr surface is a
+separate opt-in command family over the same content, so nothing about it
+can move bytes into a build. A failed Nostr operation — an ineligible
+article, an unportable paragraph, an unnormalizable relay URL, a refused
+plan, a signing refusal, a relay timeout — cannot invalidate a built
+website. The website is the product; Nostr is a report about it, then an
+optional delivery of signed events.
 
 ## Protocol authority
 
@@ -126,8 +143,8 @@ exactly.
 | `pubkey` | The expected author public key, as 64 lowercase hex characters (NIP-01 hex form, not `npub`) |
 | `articles` | Exact entity-id allowlist; canonically sorted and deduped |
 | `relays` | Relay endpoints, each normalized to `wss://` form, canonically sorted and deduped |
-| `timeout_ms` | Declared transport timeout, reserved for a later publish slice |
-| `retries` | Declared transport retry count, reserved for a later publish slice |
+| `timeout_ms` | Declared transport timeout; `publish` uses it as the per-read/write deadline |
+| `retries` | Declared transport retry count; `publish` resends identical event bytes this many times after a timeout |
 
 ```json
 "nostr": {
@@ -148,9 +165,10 @@ non-empty `articles` allowlist. A disabled or absent section changes no byte of
 any other artifact.
 
 `timeout_ms` and `retries` are declared transport controls, not article
-identity. This slice never reads them for behavior because it opens no
-connection; they are carried so an operator can review and version the
-transport settings a later slice will use.
+identity. `plan` and `sign` carry them so an operator can review and
+version the settings; only `publish` reads them for behavior (per-read
+and per-write deadlines, and the retry budget for identical-byte
+resends).
 
 `pubkey` is the **expected author public key**. It is public data whose only
 purpose is stating which author's address the planned article belongs to, and
@@ -268,10 +286,10 @@ included file.
 | `r` | Canonical article URL: publication `base_url` joined with the page's HTML output path | required |
 | `i` | The same canonical article URL, as the NIP-73 external content id | required |
 | `k` | Literal `web`, the NIP-73 kind for that content id | required |
-| `image` | — | omitted in v1: Boris owns no document-image fact, and this slice will not promote a body image or a theme asset into article metadata |
-| `created_at` | — | deferred: supplied at signing, never planned |
-| `pubkey` | Profile `nostr.pubkey`, as the expected author | planned as expectation; the signer supplies the real value |
-| `id`, `sig` | — | deferred: both are functions of `created_at` and the signing key |
+| `image` | — | omitted in v1: Boris owns no document-image fact, and this pipeline will not promote a body image or a theme asset into article metadata |
+| `created_at` | Signing-time Unix seconds (`--created-at N` override, else the wall clock) | absent from the plan; required on every signed event |
+| `pubkey` | Profile `nostr.pubkey`, as the expected author | planned as expectation; the signer supplies the real value and must match |
+| `id`, `sig` | SHA-256 of the NIP-01 preimage, then BIP-340 over that id | absent from the plan; required on every signed event; verified before the bundle is written and again before publish sends anything |
 
 The `r` and `i` tags both carry the canonical page URL, for two different
 reasons: `r` (NIP-24) says the article references that URL, and `i` (NIP-73)
@@ -451,8 +469,10 @@ never touches a secret: the bundle was signed offline by `nostr sign`, and
 publishing only re-transmits it. Nothing is sent before the bundle is
 cross-verified against the plan — the bundle's `plan.digest` must match the
 sha-256 of the exact plan bytes, `bundle.signer.pubkey` must equal the plan's
-`author.expected_pubkey`, every article's event id must match the NIP-01
-preimage of its event, and every signature must verify.
+`author.expected_pubkey`, the bundle's article set must be exactly the plan's
+article set (same `entity_id` values, no extras, no omissions), every
+article's event id must match the NIP-01 preimage of its event, and every
+signature must verify.
 
 ### Transport contract
 
@@ -507,7 +527,7 @@ A `failed` or `auth-required` relay is not attempted again for later events.
   "format": "boris-nostr-publish-report",
   "schema_version": 1,
   "plan": { "format": "…", "schema_version": 1, "digest": "<sha256 of the plan bytes>" },
-  "bundle": { "format": "…", "schema_version": 1, "digest": "<bundle digest, equals plan digest>" },
+  "bundle": { "format": "…", "schema_version": 1, "digest": "<sha256 of the exact bundle bytes>" },
   "signer": { "pubkey": "…" },
   "classification": "complete|partial|failed|incomplete",
   "relays": [
@@ -561,7 +581,7 @@ messages, as a conforming server must.
 
 ## Diagnostics
 
-Four codes are emitted by the offline slices, all at `error` severity; see the
+Five codes are emitted by the pipeline, all at `error` severity; see the
 [diagnostics contract](diagnostics.md) for the shared object, text form, and
 ordering.
 
