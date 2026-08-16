@@ -455,7 +455,7 @@ pub fn runJob(io: Io, gpa: std.mem.Allocator, opts: RunOpts) !JobResult {
     }
 
     if (opts.archive.len > opts.limits.source_bytes) {
-        return failedResult(gpa, .limit, opts.command, job_id, opts.limits, opts.image_digest, elapsedMs(io,wall_start), 0, 0, true);
+        return failedResult(gpa, .limit, opts.command, job_id, opts.limits, opts.image_digest, elapsedMs(io, wall_start), 0, 0, true);
     }
 
     const cwd = Io.Dir.cwd();
@@ -464,7 +464,7 @@ pub fn runJob(io: Io, gpa: std.mem.Allocator, opts: RunOpts) !JobResult {
     defer gpa.free(ws_rel);
     cwd.deleteTree(io, ws_rel) catch {};
     cwd.createDirPath(io, ws_rel) catch {
-        return failedResult(gpa, .process, opts.command, job_id, opts.limits, opts.image_digest, elapsedMs(io,wall_start), 0, 0, true);
+        return failedResult(gpa, .process, opts.command, job_id, opts.limits, opts.image_digest, elapsedMs(io, wall_start), 0, 0, true);
     };
 
     var removed = false;
@@ -472,7 +472,7 @@ pub fn runJob(io: Io, gpa: std.mem.Allocator, opts: RunOpts) !JobResult {
 
     const unpack_start = nowMs(io);
     var ws = cwd.openDir(io, ws_rel, .{ .iterate = true }) catch {
-        return failedResult(gpa, .process, opts.command, job_id, opts.limits, opts.image_digest, elapsedMs(io,wall_start), 0, 0, true);
+        return failedResult(gpa, .process, opts.command, job_id, opts.limits, opts.image_digest, elapsedMs(io, wall_start), 0, 0, true);
     };
     defer ws.close(io);
 
@@ -483,9 +483,9 @@ pub fn runJob(io: Io, gpa: std.mem.Allocator, opts: RunOpts) !JobResult {
             error.SourceTooLarge, error.ExpandedTooLarge, error.TooManyFiles => .limit,
             else => .archive,
         };
-        return failedResult(gpa, class, opts.command, job_id, opts.limits, opts.image_digest, elapsedMs(io,wall_start), elapsedMs(io,unpack_start), 0, true);
+        return failedResult(gpa, class, opts.command, job_id, opts.limits, opts.image_digest, elapsedMs(io, wall_start), elapsedMs(io, unpack_start), 0, true);
     };
-    const unpack_ms = elapsedMs(io,unpack_start);
+    const unpack_ms = elapsedMs(io, unpack_start);
 
     const report_rel = try std.fmt.allocPrint(gpa, "{s}/report.json", .{ws_rel});
     defer gpa.free(report_rel);
@@ -534,11 +534,11 @@ pub fn runJob(io: Io, gpa: std.mem.Allocator, opts: RunOpts) !JobResult {
         cwd.deleteTree(io, ws_rel) catch {};
         removed = true;
         const class: RunnerClass = if (err == error.Timeout) .timeout else .process;
-        return failedResult(gpa, class, opts.command, job_id, opts.limits, opts.image_digest, elapsedMs(io,wall_start), unpack_ms, elapsedMs(io,compile_start), true);
+        return failedResult(gpa, class, opts.command, job_id, opts.limits, opts.image_digest, elapsedMs(io, wall_start), unpack_ms, elapsedMs(io, compile_start), true);
     };
     defer gpa.free(run_res.stdout);
     defer gpa.free(run_res.stderr);
-    const compile_ms = elapsedMs(io,compile_start);
+    const compile_ms = elapsedMs(io, compile_start);
 
     const exit_code: ?u8 = switch (run_res.term) {
         .exited => |c| c,
@@ -591,7 +591,7 @@ pub fn runJob(io: Io, gpa: std.mem.Allocator, opts: RunOpts) !JobResult {
         .diagnostics = parsed.diagnostics,
         .artifacts = artifacts,
         .limits = opts.limits,
-        .wall_ms = elapsedMs(io,wall_start),
+        .wall_ms = elapsedMs(io, wall_start),
         .unpack_ms = unpack_ms,
         .compile_ms = compile_ms,
         .workspace_removed = true,
