@@ -546,9 +546,9 @@
       const buffer = result.data as BufferResponse;
       loadBuffer(buffer, `Saved ${activePath}.`);
       snapshots = snapshots.filter(snapshot => snapshot.path !== activePath);
-      conflictDialog?.close();
       conflict = null;
       deletedConflict = false;
+      conflictDialog?.close();
       await refreshFiles();
       await rebuildPreview('save');
       return true;
@@ -1223,7 +1223,7 @@
   </div>
 </main>
 
-<dialog bind:this={conflictDialog} onkeydown={handleDialogKeydown} aria-labelledby="conflict-heading">
+<dialog bind:this={conflictDialog} onkeydown={handleDialogKeydown} onclose={() => { conflict = null; deletedConflict = false; }} aria-labelledby="conflict-heading">
   <h2 id="conflict-heading">{deletedConflict ? 'File deleted outside Boris Editor' : 'External changes detected'}</h2>
   {#if deletedConflict}
     <p>{activePath} no longer exists on disk. Your unsaved version is still in the editor.</p>
@@ -1254,17 +1254,17 @@
   {/if}
 </dialog>
 
-<dialog bind:this={resolutionDialog} onkeydown={handleResolutionKeydown} aria-labelledby="resolution-heading">
+<dialog bind:this={resolutionDialog} onkeydown={handleResolutionKeydown} onclose={() => { pendingResolution = null; }} aria-labelledby="resolution-heading">
   <h2 id="resolution-heading">Unsaved changes in {activePath}</h2>
   <p>{resolutionPrompt}</p>
   <div class="dialog-actions">
-    <button type="button" onclick={() => { pendingResolution = null; resolutionDialog.close(); }}>Cancel</button>
+    <button type="button" onclick={() => resolutionDialog.close()}>Cancel</button>
     <button type="button" onclick={resolvePendingDiscard}>Discard &amp; {resolutionVerb}<kbd>Alt+D</kbd></button>
     <button type="button" class="primary" onclick={resolvePendingSave}>Save &amp; {resolutionVerb}<kbd>Alt+S</kbd></button>
   </div>
 </dialog>
 
-<dialog bind:this={createDialog} onkeydown={handleDialogKeydown} aria-labelledby="create-heading">
+<dialog bind:this={createDialog} onkeydown={handleDialogKeydown} onclose={() => { createPath = 'content/new-page.md'; }} aria-labelledby="create-heading">
   <h2 id="create-heading">Create file</h2>
   <p>Use a project-relative path under content/ or themes/, or boris.json.</p>
   <form onsubmit={(event) => { event.preventDefault(); void createFile(); }}>
@@ -1277,7 +1277,7 @@
   </form>
 </dialog>
 
-<dialog bind:this={renameDialog} onkeydown={handleDialogKeydown} aria-labelledby="rename-heading">
+<dialog bind:this={renameDialog} onkeydown={handleDialogKeydown} onclose={() => { renamePath = ''; }} aria-labelledby="rename-heading">
   <h2 id="rename-heading">Rename file</h2>
   <p>Rename {activePath} without replacing an existing file.</p>
   <form onsubmit={(event) => { event.preventDefault(); void renameFile(); }}>

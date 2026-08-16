@@ -252,7 +252,6 @@ pub fn build(b: *std.Build) void {
     );
     test_atproto_password_step.dependOn(&run_atproto_password_tests.step);
     test_atproto_password_step.dependOn(check_atproto_oauth_freestanding);
-
     // Deterministic Standard.site offline record projection and plan.
     // Credential-free; consumes declared page metadata and profile facts.
     const standard_site_mod = b.createModule(.{

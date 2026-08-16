@@ -10,9 +10,24 @@
 //   - a .combobox-wrap surface must have a keydown handler on its filter
 //     input and that handler must reference every hinted key.
 //   - the .recovery-banner may only hint Tab/Enter (native button focus
-//     and activation) and must contain buttons.
+//     and activation) and must contain buttons, with Restore routing a
+//     dirty buffer through the resolution dialog.
 //   - the footer's hints must be covered by the svelte:window keydown
 //     handler.
+//
+// Beyond the hints, the state machines behind them are checked: the
+// combobox input must reopen the list on focus/input after Esc closes it,
+// the command palette's aria-expanded must track paletteItems while every
+// option's Enter handler guards on the enabled state, the resolution
+// dialog must clear its pending action on every close (an onclose handler
+// assigning pendingResolution to null) with each resolve function nulling
+// it before proceeding, and the conflict dialog must clear its conflict
+// state on every close (an onclose assigning conflict/deletedConflict)
+// with the Load disk version handler clearing conflict before closing, and
+// the deleted-file variant's Discard changes / Re-create file handlers
+// clearing deletedConflict before closing. The create and rename dialogs
+// must reset their path input on close (an onclose assigning the bound
+// variable) so Esc never leaves a half-typed path behind.
 //
 // This keeps the e2e conformance sweep from having to grow by hand: a new
 // hint without a matching handler fails CI here first.
@@ -158,6 +173,7 @@ function parseTag(raw) {
     onkeydown: /onkeydown=\{\s*([A-Za-z_$][\w$]*)\s*\}/.exec(raw)?.[1] ?? null,
     bindThis: /bind:this=\{\s*([A-Za-z_$][\w$]*)\s*\}/.exec(raw)?.[1] ?? null,
     type: /type="([^"]*)"/.exec(raw)?.[1] ?? null,
+    role: /role="([^"]*)"/.exec(raw)?.[1] ?? null,
     classes: [...raw.matchAll(/class="([^"]*)"/g)].flatMap(m => m[1].split(/\s+/)),
   };
   return { name, attrs, closing, selfClosing, void: VOID_TAGS.has(name) };
@@ -201,6 +217,7 @@ function analyze(template, script, bodies) {
   const problems = [];
   const surfaces = [];
   const stack = [];
+  const dialogs = [];
   const comboboxes = new Set();
   const banners = new Set();
   const globalHandler = /<svelte:window\b[^>]*onkeydown=\{\s*([A-Za-z_$][\w$]*)\s*\}/.exec(template)?.[1] ?? null;
@@ -245,6 +262,13 @@ function analyze(template, script, bodies) {
         const kind = surfaceKind(surface);
         if (kind === 'combobox') comboboxes.add(surface);
         if (kind === 'banner') banners.add(surface);
+        // A dialog showing an Alt+<key> hint is the resolution dialog; note
+        // its resolve actions (the buttons carrying those hints) for the
+        // stale-pending check.
+        if (kind === 'dialog' && /^Alt\+/.test(token)) {
+          surface._isResolution = true;
+          if (button) (surface._resolutionCallees ??= []).push(onclickCallee(button._raw ?? ''));
+        }
       }
       surfaces.push({
         kind: surface ? surfaceKind(surface) : null,
@@ -261,7 +285,43 @@ function analyze(template, script, bodies) {
     }
     if (!elem.selfClosing && !elem.void) {
       elem._line = lineOf(template, tag.start);
+      elem._raw = tag.raw;
       stack.push(elem);
+      if (elem.name === 'dialog') dialogs.push(elem);
+    }
+    // The palette dialog is the one containing a role=combobox input; its
+    // options are the role=option list items inside it.
+    if (elem.name === 'input' && elem.attrs.role === 'combobox') {
+      for (let s = stack.length - 1; s >= 0; s--) {
+        const e = stack[s];
+        if (e.name === 'dialog' && !e._paletteInput) {
+          e._paletteInput = tag.raw;
+          break;
+        }
+      }
+    }
+    if (elem.attrs.role === 'option') {
+      for (let s = stack.length - 1; s >= 0; s--) {
+        const e = stack[s];
+        if (e.name === 'dialog') {
+          (e._options ??= []).push({ raw: tag.raw, line: lineOf(template, tag.start) });
+          break;
+        }
+      }
+    }
+    // Record the bound variable of any bind:value input inside a dialog so
+    // the create/rename path-input reset can be checked on the dialog itself.
+    if (elem.name === 'input') {
+      const bind = /bind:value=\{\s*([A-Za-z_$][\w$]*)\s*\}/.exec(tag.raw)?.[1] ?? null;
+      if (bind) {
+        for (let s = stack.length - 1; s >= 0; s--) {
+          const e = stack[s];
+          if (e.name === 'dialog') {
+            (e._boundInputs ??= []).push(bind);
+            break;
+          }
+        }
+      }
     }
     // Surface wiring discovered from descendants.
     if (elem.attrs.onkeydown && elem.name !== 'svelte:window') {
@@ -278,14 +338,22 @@ function analyze(template, script, bodies) {
       }
     }
     if (elem.name === 'button') {
+      const info = {
+        callee: onclickCallee(tag.raw),
+        text: template.slice(tag.end, template.indexOf('</button>', tag.end)).trim(),
+      };
       for (let s = stack.length - 1; s >= 0; s--) {
         const e = stack[s];
         if (e.attrs.classes.includes('recovery-banner')) {
           e._hasButton = true;
-          (e._buttons ??= []).push({
-            callee: onclickCallee(tag.raw),
-            text: template.slice(tag.end, template.indexOf('</button>', tag.end)).trim(),
-          });
+          (e._buttons ??= []).push(info);
+          break;
+        }
+      }
+      for (let s = stack.length - 1; s >= 0; s--) {
+        const e = stack[s];
+        if (e.name === 'dialog') {
+          (e._dialogButtons ??= []).push(info);
           break;
         }
       }
@@ -301,6 +369,131 @@ function analyze(template, script, bodies) {
       if (value === null || !value.includes('= true')) {
         problems.push(`completion combobox at line ${box._line ?? '?'} is missing ${attr} wiring that reopens the suggestion list after Esc closes it`);
       }
+    }
+  }
+
+  // The command palette's state machine: the filter's aria-expanded must
+  // track the current option list (otherwise the combobox role lies about
+  // whether the list is open), and Enter on any option must be inert when the
+  // option is disabled.
+  for (const dialog of dialogs) {
+    if (!dialog._paletteInput) continue; // not the palette
+    const expanded = attrValue(dialog._paletteInput, 'aria-expanded');
+    if (expanded === null || !expanded.includes('paletteItems')) {
+      problems.push(`command palette filter (line ${dialog._line ?? '?'}) aria-expanded does not track paletteItems${expanded === null ? ' (attribute missing)' : ` (got: ${expanded})`}`);
+    }
+    const handler = dialog.attrs.onkeydown;
+    if (handler) {
+      const body = bodies.get(handler) ?? '';
+      const missing = ['paletteItemEnabled', 'executePaletteItem'].filter(token => !body.includes(token));
+      if (missing.length > 0) {
+        problems.push(`command palette ${handler} does not guard Enter on the enabled state (missing ${missing.join(', ')})`);
+      }
+    }
+    const options = dialog._options ?? [];
+    if (options.length === 0) {
+      problems.push(`command palette at line ${dialog._line ?? '?'} has no role=option elements to lint for the Enter guard`);
+      continue;
+    }
+    for (const option of options) {
+      const value = attrValue(option.raw, 'onkeydown');
+      if (value === null) {
+        problems.push(`command palette option at line ${option.line} has no onkeydown Enter handler`);
+        continue;
+      }
+      const missing = ['paletteItemEnabled', 'executePaletteItem'].filter(token => !value.includes(token));
+      if (missing.length > 0) {
+        problems.push(`command palette option at line ${option.line} Enter handler does not guard execution on the enabled state (missing ${missing.join(', ')})`);
+      }
+    }
+  }
+
+  // The resolution dialog's pending action must be cleared on every close
+  // (Esc, Cancel, programmatic): an onclose handler assigns pendingResolution
+  // to null, and each resolve function nulls it before proceeding, so a stale
+  // Save & switch/run/rebuild/restore can never fire after the dialog closes.
+  for (const dialog of dialogs) {
+    if (!dialog._isResolution) continue;
+    const closeValue = attrValue(dialog._raw ?? '', 'onclose');
+    if (closeValue === null || !closeValue.includes('pendingResolution') || !closeValue.includes('= null')) {
+      problems.push(`resolution dialog at line ${dialog._line ?? '?'} does not clear pendingResolution on close: add an onclose handler assigning it to null so Esc cannot leave a stale action`);
+    }
+    for (const callee of new Set((dialog._resolutionCallees ?? []).filter(Boolean))) {
+      const body = bodies.get(callee) ?? '';
+      if (!body.includes('pendingResolution = null')) {
+        problems.push(`resolution dialog ${callee} does not clear pendingResolution before proceeding, so a stale Save & action could fire after the dialog closes`);
+      }
+    }
+  }
+
+  // The conflict dialog's state must be cleared on every close (Keep
+  // editing, Esc, and programmatic closes all fire onclose), and the Load
+  // disk version handler must clear conflict before closing so stale
+  // external-change state can never survive the dialog.
+  for (const dialog of dialogs) {
+    const buttons = dialog._dialogButtons ?? [];
+    if (!buttons.some(button => button.text === 'Load disk version')) continue; // not the conflict dialog
+    const closeValue = attrValue(dialog._raw ?? '', 'onclose');
+    if (closeValue === null || !closeValue.includes('conflict') || !(closeValue.includes('= null') || closeValue.includes('= false'))) {
+      problems.push(`conflict dialog at line ${dialog._line ?? '?'} does not clear the conflict state on close: add an onclose handler assigning conflict (and deletedConflict) to null/false so Keep editing and Esc cannot leave stale state`);
+    }
+    const load = buttons.find(button => button.text === 'Load disk version');
+    if (!load.callee) {
+      problems.push(`conflict dialog Load disk version button at line ${dialog._line ?? '?'} does not call a named handler`);
+      continue;
+    }
+    const body = bodies.get(load.callee) ?? '';
+    const nullAt = body.indexOf('conflict = null');
+    const closeAt = body.indexOf('.close()');
+    if (nullAt === -1 || closeAt === -1 || nullAt > closeAt) {
+      problems.push(`conflict dialog Load disk version handler (${load.callee}) must clear conflict (conflict = null) before closing the dialog`);
+    }
+  }
+
+  // The deleted-file conflict variant carries the same invariant: Discard
+  // changes and Re-create file must clear deletedConflict before the dialog
+  // closes, so neither close path can leave the deleted-file state behind.
+  // The onclose handler above is the safety net; these checks pin the
+  // explicit clears in the two action handlers themselves.
+  for (const dialog of dialogs) {
+    const buttons = dialog._dialogButtons ?? [];
+    if (!buttons.some(button => button.text === 'Load disk version')) continue; // not the conflict dialog
+    for (const label of ['Discard changes', 'Re-create file']) {
+      const button = buttons.find(b => b.text.startsWith(label));
+      if (!button) {
+        problems.push(`conflict dialog at line ${dialog._line ?? '?'} deleted variant has no ${label} button to clear deletedConflict before closing`);
+        continue;
+      }
+      if (!button.callee) {
+        problems.push(`conflict dialog ${label} button at line ${dialog._line ?? '?'} does not call a named handler`);
+        continue;
+      }
+      const body = bodies.get(button.callee) ?? '';
+      const nullAt = body.indexOf('deletedConflict = false');
+      const closeAt = body.indexOf('.close()');
+      if (nullAt === -1 || closeAt === -1 || nullAt > closeAt) {
+        problems.push(`conflict dialog ${label} handler (${button.callee}) must clear deletedConflict (deletedConflict = false) before closing the dialog`);
+      }
+    }
+  }
+
+  // The create and rename dialogs must reset their path input on every close
+  // (Esc, Cancel, and successful submit all fire onclose), so a half-typed
+  // path can never survive to the next open. An onclose handler assigning
+  // the input's bound variable satisfies the invariant for all close paths.
+  for (const dialog of dialogs) {
+    const buttons = dialog._dialogButtons ?? [];
+    const kind = buttons.some(button => button.text.startsWith('Create file')) ? 'create'
+      : buttons.some(button => button.text.startsWith('Rename file')) ? 'rename' : null;
+    if (!kind) continue;
+    const bound = (dialog._boundInputs ?? [])[0] ?? null;
+    if (!bound) {
+      problems.push(`${kind} dialog at line ${dialog._line ?? '?'} has no bind:value path input to clear on close`);
+      continue;
+    }
+    const closeValue = attrValue(dialog._raw ?? '', 'onclose');
+    if (closeValue === null || !closeValue.includes(`${bound} =`)) {
+      problems.push(`${kind} dialog at line ${dialog._line ?? '?'} does not clear ${bound} on close: add an onclose handler assigning it so Esc cannot leave a half-typed path behind`);
     }
   }
 
@@ -564,6 +757,374 @@ const FIXTURES = [
     source: `<script lang="ts"></script>
 <dialog bind:this={d} onkeydown={missingHandler}>
   <button type="button">Save<kbd>Esc</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'palette with tracking aria-expanded and guarded options passes',
+    expect: 0,
+    source: `<script lang="ts">
+  function paletteKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const item = paletteItems[paletteSelection];
+      if (item && paletteItemEnabled(item)) executePaletteItem(item);
+    }
+  }
+</script>
+<dialog bind:this={paletteDialog} onkeydown={paletteKeydown}>
+  <input role="combobox" aria-expanded={paletteItems.length > 0} aria-controls="palette-options" onkeydown={paletteKeydown} />
+  <ul id="palette-options" role="listbox">
+    <li role="option" onkeydown={(event) => { if (event.key === 'Enter') { event.preventDefault(); if (paletteItemEnabled(item)) executePaletteItem(item); } }}>Open file</li>
+  </ul>
+</dialog>`,
+  },
+  {
+    name: 'palette aria-expanded not tracking paletteItems fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function paletteKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const item = paletteItems[paletteSelection];
+      if (item && paletteItemEnabled(item)) executePaletteItem(item);
+    }
+  }
+</script>
+<dialog bind:this={paletteDialog} onkeydown={paletteKeydown}>
+  <input role="combobox" aria-expanded="true" aria-controls="palette-options" onkeydown={paletteKeydown} />
+  <ul id="palette-options" role="listbox">
+    <li role="option" onkeydown={(event) => { if (event.key === 'Enter') { event.preventDefault(); if (paletteItemEnabled(item)) executePaletteItem(item); } }}>Open file</li>
+  </ul>
+</dialog>`,
+  },
+  {
+    name: 'palette option Enter without the enabled guard fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function paletteKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const item = paletteItems[paletteSelection];
+      if (item && paletteItemEnabled(item)) executePaletteItem(item);
+    }
+  }
+</script>
+<dialog bind:this={paletteDialog} onkeydown={paletteKeydown}>
+  <input role="combobox" aria-expanded={paletteItems.length > 0} aria-controls="palette-options" onkeydown={paletteKeydown} />
+  <ul id="palette-options" role="listbox">
+    <li role="option" onkeydown={(event) => { if (event.key === 'Enter') { event.preventDefault(); executePaletteItem(item); } }}>Open file</li>
+  </ul>
+</dialog>`,
+  },
+  {
+    name: 'palette handler Enter without the enabled guard fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function paletteKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') { event.preventDefault(); executePaletteItem(paletteItems[paletteSelection]); }
+  }
+</script>
+<dialog bind:this={paletteDialog} onkeydown={paletteKeydown}>
+  <input role="combobox" aria-expanded={paletteItems.length > 0} aria-controls="palette-options" onkeydown={paletteKeydown} />
+  <ul id="palette-options" role="listbox">
+    <li role="option" onkeydown={(event) => { if (event.key === 'Enter') { event.preventDefault(); if (paletteItemEnabled(item)) executePaletteItem(item); } }}>Open file</li>
+  </ul>
+</dialog>`,
+  },
+  {
+    name: 'resolution dialog clearing pendingResolution on close passes',
+    expect: 0,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) {
+    if (event.altKey && event.key.toLowerCase() === 's') resolvePendingSave();
+  }
+  async function resolvePendingSave() {
+    const pending = pendingResolution;
+    if (!pending) return;
+    pendingResolution = null;
+    resolutionDialog.close();
+    await saveFile();
+  }
+</script>
+<dialog bind:this={resolutionDialog} onkeydown={h} onclose={() => { pendingResolution = null; }}>
+  <button type="button" onclick={() => resolutionDialog.close()}>Cancel</button>
+  <button type="button" onclick={resolvePendingSave}>Save &amp; switch<kbd>Alt+S</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'resolution dialog without an onclose pending clear fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) {
+    if (event.altKey && event.key.toLowerCase() === 's') resolvePendingSave();
+  }
+  async function resolvePendingSave() {
+    const pending = pendingResolution;
+    if (!pending) return;
+    pendingResolution = null;
+    resolutionDialog.close();
+    await saveFile();
+  }
+</script>
+<dialog bind:this={resolutionDialog} onkeydown={h}>
+  <button type="button" onclick={() => resolutionDialog.close()}>Cancel</button>
+  <button type="button" onclick={resolvePendingSave}>Save &amp; switch<kbd>Alt+S</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'resolution dialog resolve function not clearing the pending state fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) {
+    if (event.altKey && event.key.toLowerCase() === 's') resolvePendingSave();
+  }
+  async function resolvePendingSave() {
+    await saveFile();
+  }
+</script>
+<dialog bind:this={resolutionDialog} onkeydown={h} onclose={() => { pendingResolution = null; }}>
+  <button type="button" onclick={() => resolutionDialog.close()}>Cancel</button>
+  <button type="button" onclick={resolvePendingSave}>Save &amp; switch<kbd>Alt+S</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'conflict dialog clearing state on close and in Load disk version passes',
+    expect: 0,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) { if (event.key === 'Tab' || event.key === 'Enter') return; }
+  async function loadDiskVersion() {
+    if (!conflict) return;
+    loadBuffer(conflict, 'Loaded the disk version.');
+    conflict = null;
+    conflictDialog.close();
+  }
+  async function discardDeletedBuffer() {
+    deletedConflict = false;
+    conflictDialog.close();
+  }
+  async function saveFile(recreate = false) {
+    if (recreate && result.response.ok) {
+      deletedConflict = false;
+      conflictDialog?.close();
+    }
+  }
+</script>
+<dialog bind:this={conflictDialog} onkeydown={h} onclose={() => { conflict = null; deletedConflict = false; }}>
+  <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
+  <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
+  <button type="button" onclick={loadDiskVersion}>Load disk version</button>
+  <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version<kbd>Enter</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'conflict dialog without an onclose state clear fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) { if (event.key === 'Tab' || event.key === 'Enter') return; }
+  async function loadDiskVersion() {
+    if (!conflict) return;
+    loadBuffer(conflict, 'Loaded the disk version.');
+    conflict = null;
+    conflictDialog.close();
+  }
+  async function discardDeletedBuffer() {
+    deletedConflict = false;
+    conflictDialog.close();
+  }
+  async function saveFile(recreate = false) {
+    if (recreate && result.response.ok) {
+      deletedConflict = false;
+      conflictDialog?.close();
+    }
+  }
+</script>
+<dialog bind:this={conflictDialog} onkeydown={h}>
+  <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
+  <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
+  <button type="button" onclick={loadDiskVersion}>Load disk version</button>
+  <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version<kbd>Enter</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'conflict dialog Load disk version clearing after close fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) { if (event.key === 'Tab' || event.key === 'Enter') return; }
+  async function loadDiskVersion() {
+    if (!conflict) return;
+    loadBuffer(conflict, 'Loaded the disk version.');
+    conflictDialog.close();
+    conflict = null;
+  }
+  async function discardDeletedBuffer() {
+    deletedConflict = false;
+    conflictDialog.close();
+  }
+  async function saveFile(recreate = false) {
+    if (recreate && result.response.ok) {
+      deletedConflict = false;
+      conflictDialog?.close();
+    }
+  }
+</script>
+<dialog bind:this={conflictDialog} onkeydown={h} onclose={() => { conflict = null; deletedConflict = false; }}>
+  <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
+  <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
+  <button type="button" onclick={loadDiskVersion}>Load disk version</button>
+  <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version<kbd>Enter</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'conflict dialog deleted variant clearing deletedConflict passes',
+    expect: 0,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) { if (event.key === 'Tab' || event.key === 'Enter') return; }
+  async function loadDiskVersion() {
+    if (!conflict) return;
+    loadBuffer(conflict, 'Loaded the disk version.');
+    conflict = null;
+    conflictDialog.close();
+  }
+  async function discardDeletedBuffer() {
+    deletedConflict = false;
+    conflictDialog.close();
+  }
+  async function saveFile(recreate = false) {
+    if (recreate && result.response.ok) {
+      deletedConflict = false;
+      conflictDialog?.close();
+    }
+  }
+</script>
+<dialog bind:this={conflictDialog} onkeydown={h} onclose={() => { conflict = null; deletedConflict = false; }}>
+  <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
+  <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
+  <button type="button" onclick={loadDiskVersion}>Load disk version</button>
+  <button type="button" class="primary" onclick={() => saveFile(false)}>Replace disk version<kbd>Enter</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'conflict dialog Discard changes clearing after close fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) { if (event.key === 'Tab' || event.key === 'Enter') return; }
+  async function loadDiskVersion() {
+    if (!conflict) return;
+    loadBuffer(conflict, 'Loaded the disk version.');
+    conflict = null;
+    conflictDialog.close();
+  }
+  async function discardDeletedBuffer() {
+    conflictDialog.close();
+    deletedConflict = false;
+  }
+  async function saveFile(recreate = false) {
+    if (recreate && result.response.ok) {
+      deletedConflict = false;
+      conflictDialog?.close();
+    }
+  }
+</script>
+<dialog bind:this={conflictDialog} onkeydown={h} onclose={() => { conflict = null; deletedConflict = false; }}>
+  <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
+  <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
+  <button type="button" onclick={loadDiskVersion}>Load disk version</button>
+  <button type="button" class="primary" onclick={() => saveFile(false)}>Replace disk version<kbd>Enter</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'conflict dialog Re-create path not clearing deletedConflict before close fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) { if (event.key === 'Tab' || event.key === 'Enter') return; }
+  async function loadDiskVersion() {
+    if (!conflict) return;
+    loadBuffer(conflict, 'Loaded the disk version.');
+    conflict = null;
+    conflictDialog.close();
+  }
+  async function discardDeletedBuffer() {
+    deletedConflict = false;
+    conflictDialog.close();
+  }
+  async function saveFile(recreate = false) {
+    if (recreate && result.response.ok) {
+      conflictDialog?.close();
+    }
+  }
+</script>
+<dialog bind:this={conflictDialog} onkeydown={h} onclose={() => { conflict = null; deletedConflict = false; }}>
+  <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
+  <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
+  <button type="button" onclick={loadDiskVersion}>Load disk version</button>
+  <button type="button" class="primary" onclick={() => saveFile(false)}>Replace disk version<kbd>Enter</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'create and rename dialogs clearing their path on close pass',
+    expect: 0,
+    source: `<script lang="ts">
+  function trap(event: KeyboardEvent) { if (event.key !== 'Tab') return; }
+</script>
+<dialog bind:this={createDialog} onkeydown={trap} onclose={() => { createPath = 'content/new-page.md'; }}>
+  <form onsubmit={(event) => { event.preventDefault(); }}>
+    <label for="create-path">New file path</label>
+    <input id="create-path" bind:value={createPath} />
+    <div class="dialog-actions">
+      <button type="button" onclick={() => createDialog.close()}>Cancel<kbd>Esc</kbd></button>
+      <button type="submit" class="primary">Create file<kbd>Enter</kbd></button>
+    </div>
+  </form>
+</dialog>
+<dialog bind:this={renameDialog} onkeydown={trap} onclose={() => { renamePath = ''; }}>
+  <form onsubmit={(event) => { event.preventDefault(); }}>
+    <label for="rename-path">New file path</label>
+    <input id="rename-path" bind:value={renamePath} />
+    <div class="dialog-actions">
+      <button type="button" onclick={() => renameDialog.close()}>Cancel<kbd>Esc</kbd></button>
+      <button type="submit" class="primary">Rename file<kbd>Enter</kbd></button>
+    </div>
+  </form>
+</dialog>`,
+  },
+  {
+    name: 'create dialog without an onclose path clear fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function trap(event: KeyboardEvent) { if (event.key !== 'Tab') return; }
+</script>
+<dialog bind:this={createDialog} onkeydown={trap}>
+  <form onsubmit={(event) => { event.preventDefault(); }}>
+    <label for="create-path">New file path</label>
+    <input id="create-path" bind:value={createPath} />
+    <div class="dialog-actions">
+      <button type="button" onclick={() => createDialog.close()}>Cancel<kbd>Esc</kbd></button>
+      <button type="submit" class="primary">Create file<kbd>Enter</kbd></button>
+    </div>
+  </form>
+</dialog>`,
+  },
+  {
+    name: 'rename dialog without an onclose path clear fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function trap(event: KeyboardEvent) { if (event.key !== 'Tab') return; }
+</script>
+<dialog bind:this={renameDialog} onkeydown={trap}>
+  <form onsubmit={(event) => { event.preventDefault(); }}>
+    <label for="rename-path">New file path</label>
+    <input id="rename-path" bind:value={renamePath} />
+    <div class="dialog-actions">
+      <button type="button" onclick={() => renameDialog.close()}>Cancel<kbd>Esc</kbd></button>
+      <button type="submit" class="primary">Rename file<kbd>Enter</kbd></button>
+    </div>
+  </form>
 </dialog>`,
   },
 ];
