@@ -17,8 +17,12 @@
 //
 // Beyond the hints, the state machines behind them are checked: the
 // combobox input must reopen the list on focus/input after Esc closes it,
-// and the command palette's aria-expanded must track paletteItems while
-// every option's Enter handler guards on the enabled state.
+// the command palette's aria-expanded must track paletteItems while every
+// option's Enter handler guards on the enabled state, and the resolution
+// dialog must clear its pending action on every close (an onclose handler
+// assigning pendingResolution to null) with each resolve function nulling
+// it before proceeding, so a stale Save & action can never fire after the
+// dialog closes.
 //
 // This keeps the e2e conformance sweep from having to grow by hand: a new
 // hint without a matching handler fails CI here first.
@@ -253,6 +257,13 @@ function analyze(template, script, bodies) {
         const kind = surfaceKind(surface);
         if (kind === 'combobox') comboboxes.add(surface);
         if (kind === 'banner') banners.add(surface);
+        // A dialog showing an Alt+<key> hint is the resolution dialog; note
+        // its resolve actions (the buttons carrying those hints) for the
+        // stale-pending check.
+        if (kind === 'dialog' && /^Alt\+/.test(token)) {
+          surface._isResolution = true;
+          if (button) (surface._resolutionCallees ??= []).push(onclickCallee(button._raw ?? ''));
+        }
       }
       surfaces.push({
         kind: surface ? surfaceKind(surface) : null,
@@ -269,6 +280,7 @@ function analyze(template, script, bodies) {
     }
     if (!elem.selfClosing && !elem.void) {
       elem._line = lineOf(template, tag.start);
+      elem._raw = tag.raw;
       stack.push(elem);
       if (elem.name === 'dialog') dialogs.push(elem);
     }
@@ -365,6 +377,24 @@ function analyze(template, script, bodies) {
       const missing = ['paletteItemEnabled', 'executePaletteItem'].filter(token => !value.includes(token));
       if (missing.length > 0) {
         problems.push(`command palette option at line ${option.line} Enter handler does not guard execution on the enabled state (missing ${missing.join(', ')})`);
+      }
+    }
+  }
+
+  // The resolution dialog's pending action must be cleared on every close
+  // (Esc, Cancel, programmatic): an onclose handler assigns pendingResolution
+  // to null, and each resolve function nulls it before proceeding, so a stale
+  // Save & switch/run/rebuild/restore can never fire after the dialog closes.
+  for (const dialog of dialogs) {
+    if (!dialog._isResolution) continue;
+    const closeValue = attrValue(dialog._raw ?? '', 'onclose');
+    if (closeValue === null || !closeValue.includes('pendingResolution') || !closeValue.includes('= null')) {
+      problems.push(`resolution dialog at line ${dialog._line ?? '?'} does not clear pendingResolution on close: add an onclose handler assigning it to null so Esc cannot leave a stale action`);
+    }
+    for (const callee of new Set((dialog._resolutionCallees ?? []).filter(Boolean))) {
+      const body = bodies.get(callee) ?? '';
+      if (!body.includes('pendingResolution = null')) {
+        problems.push(`resolution dialog ${callee} does not clear pendingResolution before proceeding, so a stale Save & action could fire after the dialog closes`);
       }
     }
   }
@@ -701,6 +731,62 @@ const FIXTURES = [
   <ul id="palette-options" role="listbox">
     <li role="option" onkeydown={(event) => { if (event.key === 'Enter') { event.preventDefault(); if (paletteItemEnabled(item)) executePaletteItem(item); } }}>Open file</li>
   </ul>
+</dialog>`,
+  },
+  {
+    name: 'resolution dialog clearing pendingResolution on close passes',
+    expect: 0,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) {
+    if (event.altKey && event.key.toLowerCase() === 's') resolvePendingSave();
+  }
+  async function resolvePendingSave() {
+    const pending = pendingResolution;
+    if (!pending) return;
+    pendingResolution = null;
+    resolutionDialog.close();
+    await saveFile();
+  }
+</script>
+<dialog bind:this={resolutionDialog} onkeydown={h} onclose={() => { pendingResolution = null; }}>
+  <button type="button" onclick={() => resolutionDialog.close()}>Cancel</button>
+  <button type="button" onclick={resolvePendingSave}>Save &amp; switch<kbd>Alt+S</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'resolution dialog without an onclose pending clear fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) {
+    if (event.altKey && event.key.toLowerCase() === 's') resolvePendingSave();
+  }
+  async function resolvePendingSave() {
+    const pending = pendingResolution;
+    if (!pending) return;
+    pendingResolution = null;
+    resolutionDialog.close();
+    await saveFile();
+  }
+</script>
+<dialog bind:this={resolutionDialog} onkeydown={h}>
+  <button type="button" onclick={() => resolutionDialog.close()}>Cancel</button>
+  <button type="button" onclick={resolvePendingSave}>Save &amp; switch<kbd>Alt+S</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'resolution dialog resolve function not clearing the pending state fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) {
+    if (event.altKey && event.key.toLowerCase() === 's') resolvePendingSave();
+  }
+  async function resolvePendingSave() {
+    await saveFile();
+  }
+</script>
+<dialog bind:this={resolutionDialog} onkeydown={h} onclose={() => { pendingResolution = null; }}>
+  <button type="button" onclick={() => resolutionDialog.close()}>Cancel</button>
+  <button type="button" onclick={resolvePendingSave}>Save &amp; switch<kbd>Alt+S</kbd></button>
 </dialog>`,
   },
 ];
