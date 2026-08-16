@@ -27,7 +27,9 @@ Site
 
 Publish
 : [[guides/publishing|Publishing targets]] — local `dist/`, GitHub Pages,
-  Standard.site, evidence chain.
+  Standard.site, evidence chain. ·
+  [[guides/nostr-publication|Nostr NIP-23]] — offline `plan → sign`, then
+  `publish`. Not a verified target.
 
 Projections and intake
 : [[guides/rag-export|RAG, IR, Context, llms.txt]] ·

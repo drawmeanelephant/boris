@@ -21,7 +21,7 @@ projections. HTML `dist/` is the **default target**, not the whole product.
 | Layer | What it is |
 |---|---|
 | Compiler core | One Zig binary. Closed frontmatter. Oliver in-process. Fail-loud graph. Default CLI writes `dist/`. |
-| Publication targets | A registry. GitHub Pages and Standard.site are verified. Nostr is an open program. |
+| Publication targets | A registry. GitHub Pages and Standard.site are verified. Nostr plan/sign/publish is shipped and is not a verified target. |
 | Evidence chain | `artifacts.json` → `checks.json` → `claims.json` → `touches.json` → Proof Pack. |
 | Editor | In-tree authoring surface. Compiler-backed. Not a second stack. |
 | Labs | Standalone migration and source-RAG tools. In the repo story. Not runtime dependencies. |
@@ -78,7 +78,7 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | GitHub Pages | **Shipped and verified** — normalized project/root/custom-domain identity, exact public artifact boundary, retained target-local evidence, optional bounded post-deploy observer. Operator path: [`github-pages.md`](github-pages.md). |
 | Standard.site / AT Protocol | **Shipped for first testers** — offline plan/records/verify, opt-in app-password login, one-shot publish, recorded passing bsky.social live smoke. Browser OAuth is implemented; bsky.social does not grant `site.standard.authFull` (exit 6). Operator path: [`standard-site.md`](standard-site.md). |
 | Publication evidence | **Done** — artifacts → checks → claims → Touch Atlas → Proof Pack, staged, deterministic. |
-| Nostr NIP-23 | **Open program** — [#454](https://github.com/drawmeanelephant/boris/issues/454). Not a verified target. |
+| Nostr NIP-23 | **CLI shipped, not a verified target** — `boris nostr plan` / `sign` / `publish` (BIP-340, bounded RFC-6455, per-relay verdict). No location adapter, no Proof Pack, no live-smoke gate. Guide: [`content/guides/nostr-publication.md`](../content/guides/nostr-publication.md). |
 
 ### Editor
 
@@ -129,6 +129,9 @@ zig build test
 ./zig-out/bin/boris --sitemap --site-url https://docs.example/ --quiet
 ./zig-out/bin/boris --incremental --jobs 4 --quiet
 ./zig-out/bin/boris plan --profile boris.json
+./zig-out/bin/boris nostr plan --profile PATH
+# echo -n '<hex-or-nsec>' | ./zig-out/bin/boris nostr sign --plan PLAN --key-stdin --out BUNDLE
+# ./zig-out/bin/boris nostr publish --plan PLAN --bundle BUNDLE --out REPORT
 
 ./zig-out/bin/boris standard-site                   # family list
 ./zig-out/bin/boris standard-site plan --profile profiles/standard-site.json
@@ -153,7 +156,7 @@ context, test-throughput audit) is **done**. It is not relisted as upcoming.
 | 4 | Migration-guide review findings | **Evidence complete — review remains** | Review the retained MDX/frontmatter/link/asset findings and four generated-site missing routes before claiming a clean migration. |
 | 5 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
 | 6 | Standard.site HTML verify emit | **Open [#533](https://github.com/drawmeanelephant/boris/issues/533)** | Production HTML must emit verification surfaces before `verify` against a real `dist/` can pass. |
-| 7 | Nostr NIP-23 target | **Open program [#454](https://github.com/drawmeanelephant/boris/issues/454)** | Third publication target when the program lands. Not implied by this identity choice. |
+| 7 | Nostr as a verified target | **CLI shipped; verified-target work remains [#454](https://github.com/drawmeanelephant/boris/issues/454)** | plan/sign/publish exist. Location adapter, Proof Pack, and live-smoke are not implied. |
 | 8 | Cloudflare embedding | **Open [#300](https://github.com/drawmeanelephant/boris/issues/300) / [#301](https://github.com/drawmeanelephant/boris/issues/301)** | Container-backed native builds and freestanding Wasm. Outside the static-target matrix. |
 
 ## Release bookkeeping

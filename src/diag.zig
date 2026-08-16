@@ -93,6 +93,11 @@ pub const Code = enum {
     /// under the run: a selected source no longer parses after the graph
     /// validated.
     ENOSTRPLAN,
+    /// A Nostr signing run is refused: the secret key is malformed, the
+    /// signer public key does not match the plan's expected author, the
+    /// secp256k1 context cannot be initialized, or the signature fails to
+    /// self-verify. Never emitted with a bundle.
+    ENOSTRSIGN,
     /// Layout template lacks a required or declared slot marker (or names an
     /// unknown marker).
     ELAYOUTMISSINGMARKER,
@@ -309,6 +314,11 @@ test "Code names match contract strings" {
     try std.testing.expectEqualStrings("EIO", Code.EIO.name());
     try std.testing.expectEqualStrings("EPUBLICATIONLOCATION", Code.EPUBLICATIONLOCATION.name());
     try std.testing.expectEqualStrings("EVERIFICATIONHEAD", Code.EVERIFICATIONHEAD.name());
+    try std.testing.expectEqualStrings("ENOSTRELIGIBILITY", Code.ENOSTRELIGIBILITY.name());
+    try std.testing.expectEqualStrings("ENOSTRMARKDOWN", Code.ENOSTRMARKDOWN.name());
+    try std.testing.expectEqualStrings("ENOSTRTIME", Code.ENOSTRTIME.name());
+    try std.testing.expectEqualStrings("ENOSTRPLAN", Code.ENOSTRPLAN.name());
+    try std.testing.expectEqualStrings("ENOSTRSIGN", Code.ENOSTRSIGN.name());
 }
 
 test "parser categories map to shared diagnostic codes" {

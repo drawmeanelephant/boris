@@ -18,7 +18,8 @@ Keep `content/` a living sample site that matches the Boris v0.8.1 candidate
    Markdown in-process. The compiled site should *use* that surface.
 3. The same compiler authorities support IR, RAG, Context, `llms.txt`, RSS,
    sitemap, rendered search, publication evidence, GitHub Pages, and
-   Standard.site. Nostr is an open program, not a documented publish verb.
+   Standard.site. Nostr plan/sign/publish is a shipped CLI family, not a
+   verified target.
 4. Examples are real, clickable, and safe to compile.
 
 This is author-content work. Do not change the Zig compiler, build system,
@@ -54,6 +55,7 @@ boris check                         → graph/dependency health report
 boris impact ID                     → transitive dependents report
 boris plan --profile PATH           → normalized publication declaration
 boris standard-site …               → Atmosphere family (plan/records/login/publish/smoke)
+boris nostr plan|sign|publish       → NIP-23 family (offline sign, then publish)
 boris build --out DIR               → JSON IR
 boris build --rag --rag-dir DIR     → RAG corpus
 boris build --context --context-dir DIR → Context bundle

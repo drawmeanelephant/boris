@@ -22,11 +22,12 @@
 //!
 //! ## What is deliberately absent
 //!
-//! No event id, no signature, no `created_at`: all three require the author key
-//! or the signing moment, which the offline plan must not have (`created_at`
-//! participates in the NIP-01 event id, so supplying it here would make the
-//! plan a signing input rather than a deterministic declaration). No relay
-//! connection, no NIP-42 authentication, and no NIP-09 deletion.
+//! No event id, no signature, no `created_at` in the *plan*: all three require
+//! the author key or the signing moment (`created_at` participates in the
+//! NIP-01 event id, so supplying it here would make the plan a signing input
+//! rather than a deterministic declaration). No NIP-42 authentication and no
+//! NIP-09 deletion. Signing and publish live in `nostr_sign.zig` and
+//! `nostr_publish.zig`.
 
 const std = @import("std");
 const graph = @import("graph.zig");
@@ -39,8 +40,9 @@ pub const kind_long_form: u32 = 30023;
 /// A NIP-01 x-only public key in the hex form profiles and plans carry.
 pub const pubkey_hex_len: usize = 64;
 
-/// Bounds on relay configuration. Publishing is a later slice; these keep a
-/// profile from declaring an unbounded wait before that slice exists.
+/// Bounds on relay configuration. `publish` reads these as the transport
+/// deadline and retry budget; the planner still validates them so a profile
+/// cannot declare an unbounded wait.
 pub const max_relays: usize = 32;
 pub const min_timeout_ms: usize = 100;
 pub const max_timeout_ms: usize = 60_000;
@@ -462,6 +464,176 @@ pub fn deliveryDigestHex(
 }
 
 // =============================================================================
+// NIP-01 event serialization
+// =============================================================================
+
+/// Escape one string exactly as the canonical NIP-01 event serialization
+/// requires: the compact JSON form `JSON.stringify` produces for the same
+/// string. The event id is the SHA-256 of these exact bytes, so the escaping
+/// is part of the protocol: `\"`, `\\`, `\b`, `\f`, `\n`, `\r`, `\t`, and
+/// `\u00xx` for other control bytes, everything else verbatim (non-ASCII
+/// stays raw UTF-8, exactly like standard JSON serializers).
+pub fn appendJsonString(out: *std.ArrayList(u8), allocator: std.mem.Allocator, s: []const u8) !void {
+    try out.append(allocator, '\"');
+    for (s) |c| {
+        switch (c) {
+            '\"' => try out.appendSlice(allocator, "\\\""),
+            '\\' => try out.appendSlice(allocator, "\\\\"),
+            0x08 => try out.appendSlice(allocator, "\\b"),
+            0x0c => try out.appendSlice(allocator, "\\f"),
+            '\n' => try out.appendSlice(allocator, "\\n"),
+            '\r' => try out.appendSlice(allocator, "\\r"),
+            '\t' => try out.appendSlice(allocator, "\\t"),
+            else => {
+                if (c < 0x20) {
+                    var tmp: [6]u8 = undefined;
+                    const piece = try std.fmt.bufPrint(&tmp, "\\u00{x:0>2}", .{c});
+                    try out.appendSlice(allocator, piece);
+                } else {
+                    try out.append(allocator, c);
+                }
+            },
+        }
+    }
+    try out.append(allocator, '\"');
+}
+
+/// The exact NIP-01 preimage: `[0, "<pubkey>", <created_at>, <kind>,
+/// [<tags>], "<content>"]` — compact, no whitespace, canonical escaping. The
+/// event id is the SHA-256 of these bytes; the signing and publish slices both
+/// serialize through this one function so a signed bundle and a re-verified
+/// publish never disagree about the wire bytes.
+pub fn appendEventPreimage(
+    out: *std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    pubkey_hex: []const u8,
+    created_at: i64,
+    kind: u32,
+    tags: []const Tag,
+    content: []const u8,
+) !void {
+    try out.appendSlice(allocator, "[0,\"");
+    try out.appendSlice(allocator, pubkey_hex);
+    try out.appendSlice(allocator, "\",");
+    try out.appendSlice(allocator, decimal(created_at).slice());
+    try out.appendSlice(allocator, ",");
+    try out.appendSlice(allocator, decimal(kind).slice());
+    try out.appendSlice(allocator, ",[");
+    for (tags, 0..) |tag, i| {
+        if (i > 0) try out.append(allocator, ',');
+        try out.append(allocator, '[');
+        try appendJsonString(out, allocator, tag.name);
+        try out.append(allocator, ',');
+        try appendJsonString(out, allocator, tag.value);
+        try out.append(allocator, ']');
+    }
+    try out.appendSlice(allocator, "],");
+    try appendJsonString(out, allocator, content);
+    try out.append(allocator, ']');
+}
+
+// =============================================================================
+// Secret key input (NIP-19 nsec and hex)
+// =============================================================================
+
+/// Bech32 charset (BIP-173). NIP-19 secret keys use bech32 with the `nsec`
+/// human-readable part and a 32-byte payload.
+const bech32_charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+fn bech32CharValue(c: u8) ?u5 {
+    const index = std.mem.indexOfScalar(u8, bech32_charset, c) orelse return null;
+    return @intCast(index);
+}
+
+fn bech32Polymod(values: []const u5) u32 {
+    const gen = [5]u32{ 0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3 };
+    var chk: u32 = 1;
+    for (values) |v| {
+        const top = chk >> 25;
+        chk = ((chk & 0x1ffffff) << 5) ^ v;
+        for (0..5) |i| {
+            if (((top >> @as(u5, @intCast(i))) & 1) == 1) chk ^= gen[i];
+        }
+    }
+    return chk;
+}
+
+/// BIP-173 `HrpExpand`: the HRP as 5-bit high then low halves around a zero
+/// separator. Caller owns `out`, which must hold `2 * hrp.len + 1` entries.
+fn bech32HrpExpand(hrp: []const u8, out: []u5) usize {
+    var n: usize = 0;
+    for (hrp) |ch| {
+        out[n] = @intCast(ch >> 5);
+        n += 1;
+    }
+    out[n] = 0;
+    n += 1;
+    for (hrp) |ch| {
+        out[n] = @intCast(ch & 0x1f);
+        n += 1;
+    }
+    return n;
+}
+
+/// Decode a NIP-19 `nsec` secret key (bech32 with BIP-173 checksum) into
+/// `out`. Returns `false` for a wrong HRP, malformed characters, a bad
+/// checksum, or a payload that is not exactly 32 bytes. The secret key is a
+/// credential, so any of these is a refusal, never a guess.
+pub fn decodeNsec(input: []const u8, out: *[32]u8) bool {
+    const sep = std.mem.indexOfScalar(u8, input, '1') orelse return false;
+    const hrp = input[0..sep];
+    if (hrp.len == 0 or !std.mem.eql(u8, hrp, "nsec")) return false;
+    const data = input[sep + 1 ..];
+    if (data.len < 6 or data.len > 100) return false;
+
+    // Decode the data chars once: they feed both the payload and the
+    // checksum (BIP-173 polymod over HRP expansion plus the whole data part
+    // must equal 1).
+    var values: [100]u5 = undefined;
+    var check: [128]u5 = undefined;
+    var check_len = bech32HrpExpand(hrp, &check);
+    for (data, 0..) |ch, i| {
+        const v = bech32CharValue(ch) orelse return false;
+        values[i] = v;
+        check[check_len + i] = v;
+    }
+    check_len += data.len;
+    if (bech32Polymod(check[0..check_len]) != 1) return false;
+
+    // Convert the 5-bit payload (everything before the checksum) to bytes.
+    const payload = values[0 .. data.len - 6];
+    var acc: u32 = 0;
+    var bits: u5 = 0;
+    var out_len: usize = 0;
+    for (payload) |v| {
+        acc = (acc << 5) | v;
+        bits += 5;
+        if (bits >= 8) {
+            bits -= 8;
+            out[out_len] = @intCast((acc >> bits) & 0xff);
+            out_len += 1;
+            if (out_len > 32) return false;
+        }
+    }
+    // Padding must be zero; a non-zero trailing group is a malformed string.
+    if (bits != 0 and (acc & ((@as(u32, 1) << bits) - 1)) != 0) return false;
+    return out_len == 32;
+}
+
+/// Decode one secret-key input line into a 32-byte secret: exactly 64 hex
+/// digits (either case) or a NIP-19 `nsec` string. Leading/trailing
+/// whitespace is ignored. Any other input is refused.
+pub fn decodeSecretKey(input: []const u8, out: *[32]u8) bool {
+    const trimmed = std.mem.trim(u8, input, " \t\r\n");
+    if (trimmed.len == 0) return false;
+    if (trimmed.len == 64) {
+        const bytes = std.fmt.hexToBytes(out, trimmed) catch return false;
+        return bytes.len == 32;
+    }
+    return decodeNsec(trimmed, out);
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -655,4 +827,48 @@ test "digest: lowercase hex sha-256 of the exact bytes" {
     try testing.expectEqualStrings("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", &out);
     digestHex("abc", &out);
     try testing.expectEqualStrings("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", &out);
+}
+
+test "nsec: the NIP-19 test vector decodes to its hex secret" {
+    // nostr-protocol/nips @ 656cecc7, 19.md: this nsec is the NIP-19 test
+    // vector for the hex secret below.
+    var out: [32]u8 = undefined;
+    try testing.expect(decodeNsec("nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5", &out));
+    const expected = try testing.allocator.dupe(u8, "67dea2ed018072d675f5415ecfaed7d2597555e202d85b3d65ea4e58d2d92ffa");
+    defer testing.allocator.free(expected);
+    var hex: [64]u8 = undefined;
+    _ = std.fmt.bufPrint(&hex, "{x}", .{out}) catch unreachable;
+    try testing.expectEqualStrings(expected, &hex);
+}
+
+test "nsec: wrong HRP, bad checksum, and wrong length are refused" {
+    var out: [32]u8 = undefined;
+    // npub HRP is a public key, not a secret.
+    try testing.expect(!decodeNsec("npub1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5", &out));
+    // Flip one payload character: checksum must fail.
+    try testing.expect(!decodeNsec("nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe4", &out));
+    // Uppercase data is invalid bech32.
+    try testing.expect(!decodeNsec("NSEC1VL029MGPSPEDVA04G90VLTKH6FVH240ZQTV9K0T9AF8935KE9LAQSNLFE5", &out));
+    // No separator.
+    try testing.expect(!decodeNsec("nsec0", &out));
+}
+
+test "secret key: hex and nsec inputs decode to the same secret" {
+    const hex_input = "67dea2ed018072d675f5415ecfaed7d2597555e202d85b3d65ea4e58d2d92ffa";
+    var a: [32]u8 = undefined;
+    var b: [32]u8 = undefined;
+    try testing.expect(decodeSecretKey(hex_input, &a));
+    try testing.expect(decodeSecretKey("nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5", &b));
+    try testing.expectEqual(a, b);
+    // Whitespace is tolerated around the input line.
+    try testing.expect(decodeSecretKey("  " ++ hex_input ++ "\n", &a));
+}
+
+test "secret key: malformed inputs are refused" {
+    var out: [32]u8 = undefined;
+    try testing.expect(!decodeSecretKey("", &out));
+    try testing.expect(!decodeSecretKey("not-a-key", &out));
+    try testing.expect(!decodeSecretKey("zz" ** 32, &out));
+    try testing.expect(!decodeSecretKey("a" ** 63, &out));
+    try testing.expect(!decodeSecretKey("a" ** 65, &out));
 }

@@ -43,6 +43,13 @@ pub const Command = enum {
     /// its own rather than a mode of `plan`, because `plan` is a configuration
     /// declaration that never scans content and must not start.
     nostr_plan,
+    /// `boris nostr sign` — offline BIP-340 signing of a NIP-23 publication
+    /// plan into a signed-event bundle (no relay, never publishes).
+    nostr_sign,
+    /// `boris nostr publish` — send the exact signed events from a bundle to
+    /// the plan's relays over RFC-6455 WebSocket, per-relay evidence and
+    /// complete/partial/failed/incomplete classification in a report.
+    nostr_publish,
     init,
     /// `standard-site publish` — the explicit one-shot publish family. The
     /// network operation lives only here; no other command publishes.
@@ -212,6 +219,15 @@ pub const Options = struct {
     html_profile: ?render.OutputProfile = null,
     /// Dynamic target list.
     targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 },
+    /// `nostr sign` inputs: the plan artifact path, whether the secret key is
+    /// read from stdin, the signed-bundle output path, an optional prior
+    /// signed bundle, and an optional explicit signing-time override.
+    nostr_plan_path: ?[]const u8 = null,
+    nostr_bundle_path: ?[]const u8 = null,
+    nostr_key_stdin: bool = false,
+    nostr_out_path: ?[]const u8 = null,
+    nostr_prior_path: ?[]const u8 = null,
+    nostr_created_at: ?i64 = null,
 
     pub fn deinit(self: *Options, gpa: std.mem.Allocator) void {
         if (self.publication_location) |*location| location.deinit(gpa);
@@ -357,10 +373,22 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_verify_dist = false;
     var saw_fail_on_unreferenced = false;
     var saw_profile = false;
+    var saw_nostr_plan = false;
+    var saw_nostr_bundle = false;
+    var saw_nostr_key_stdin = false;
+    var saw_nostr_out = false;
+    var saw_nostr_prior = false;
+    var saw_nostr_created_at = false;
     var jobs: usize = 1;
     var html_layout: []const u8 = default_html_layout;
     var theme_root: ?[]const u8 = null;
     var profile_path: ?[]const u8 = null;
+    var nostr_plan_path: ?[]const u8 = null;
+    var nostr_bundle_path: ?[]const u8 = null;
+    var nostr_key_stdin = false;
+    var nostr_out_path: ?[]const u8 = null;
+    var nostr_prior_path: ?[]const u8 = null;
+    var nostr_created_at: ?i64 = null;
 
     var targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 };
     errdefer {
@@ -418,11 +446,22 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         i += 1;
     } else if (i < args.len and std.mem.eql(u8, args[i], "nostr")) {
         i += 1;
-        // Exactly one subcommand today. An unknown one is a usage error rather
-        // than a stub, so nothing can look like signing or publishing exists.
-        if (i >= args.len or !std.mem.eql(u8, args[i], "plan")) return error.UnknownNostrSubcommand;
-        command = .nostr_plan;
-        i += 1;
+        // Exactly the subcommands this build implements. An unknown one is a
+        // usage error rather than a stub, so nothing can look like publishing
+        // exists.
+        if (i >= args.len) return error.UnknownNostrSubcommand;
+        if (std.mem.eql(u8, args[i], "plan")) {
+            command = .nostr_plan;
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "sign")) {
+            command = .nostr_sign;
+            i += 1;
+        } else if (std.mem.eql(u8, args[i], "publish")) {
+            command = .nostr_publish;
+            i += 1;
+        } else {
+            return error.UnknownNostrSubcommand;
+        }
     } else if (i < args.len and std.mem.eql(u8, args[i], "init")) {
         command = .init;
         i += 1;
@@ -541,6 +580,70 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             if (saw_profile) return error.DuplicateFlag;
             saw_profile = true;
             profile_path = try takeValue(args, &i, a, "--profile");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--plan") or std.mem.startsWith(u8, a, "--plan=")) {
+            // `--plan` is owned by the nostr sign/publish family (the
+            // signed-bundle input) and the standard-site family (the
+            // publication plan); anywhere else it is a conflict rather than
+            // a silently accepted flag. The standard-site subcommand
+            // validations below additionally reject it for smoke, login,
+            // sessions, and logout.
+            if (command == .nostr_sign or command == .nostr_publish) {
+                if (saw_nostr_plan) return error.DuplicateFlag;
+                saw_nostr_plan = true;
+                nostr_plan_path = try takeValue(args, &i, a, "--plan");
+            } else if (command == .standard_site) {
+                if (saw_plan_path) return error.DuplicateFlag;
+                saw_plan_path = true;
+                plan_path = try takeValue(args, &i, a, "--plan");
+            } else {
+                return error.ConflictingFlags;
+            }
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--bundle") or std.mem.startsWith(u8, a, "--bundle=")) {
+            if (command != .nostr_publish) return error.ConflictingFlags;
+            if (saw_nostr_bundle) return error.DuplicateFlag;
+            saw_nostr_bundle = true;
+            nostr_bundle_path = try takeValue(args, &i, a, "--bundle");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--key-stdin")) {
+            if (command != .nostr_sign) return error.ConflictingFlags;
+            if (saw_nostr_key_stdin) return error.DuplicateFlag;
+            saw_nostr_key_stdin = true;
+            nostr_key_stdin = true;
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--prior") or std.mem.startsWith(u8, a, "--prior=")) {
+            if (command != .nostr_sign) return error.ConflictingFlags;
+            if (saw_nostr_prior) return error.DuplicateFlag;
+            saw_nostr_prior = true;
+            nostr_prior_path = try takeValue(args, &i, a, "--prior");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--created-at") or std.mem.startsWith(u8, a, "--created-at=")) {
+            if (command != .nostr_sign) return error.ConflictingFlags;
+            if (saw_nostr_created_at) return error.DuplicateFlag;
+            saw_nostr_created_at = true;
+            const value = try takeValue(args, &i, a, "--created-at");
+            nostr_created_at = std.fmt.parseInt(i64, value, 10) catch return error.InvalidValue;
+            continue;
+        }
+
+        // `nostr sign` / `nostr publish` re-own `--out` as the artifact path;
+        // every other command keeps the IR-directory meaning (and nostr_plan
+        // rejects it).
+        if ((command == .nostr_sign or command == .nostr_publish) and (std.mem.eql(u8, a, "--out") or std.mem.startsWith(u8, a, "--out="))) {
+            if (saw_nostr_out) return error.DuplicateFlag;
+            saw_nostr_out = true;
+            nostr_out_path = try takeValue(args, &i, a, "--out");
             continue;
         }
 
@@ -774,13 +877,6 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
                 return error.InvalidValue;
             }
             jobs = parsed_val;
-            continue;
-        }
-
-        if (std.mem.eql(u8, a, "--plan") or std.mem.startsWith(u8, a, "--plan=")) {
-            if (saw_plan_path) return error.DuplicateFlag;
-            saw_plan_path = true;
-            plan_path = try takeValue(args, &i, a, "--plan");
             continue;
         }
 
@@ -1111,6 +1207,71 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .input_format = input_format,
             .input_dir = input_dir,
             .jobs = jobs,
+            .targets = targets,
+        };
+    }
+
+    if (command == .nostr_sign) {
+        // The signer consumes a plan artifact and a secret key read once from
+        // stdin. The profile is configuration, not input, for signing; every
+        // other selector either executes another projection or implies state
+        // the signer does not have. `--timings` is rejected because stdout is
+        // reserved for the signed-event bundle when --out is absent.
+        if (nostr_plan_path == null) return error.MissingValue;
+        if (!nostr_key_stdin) return error.MissingValue;
+        if (saw_profile or saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_target_profiles or has_layout_rules or wants_sitemap or
+            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or
+            saw_format or saw_report or saw_watch or saw_timings or saw_html_dir or saw_incremental or saw_jobs)
+        {
+            return error.ConflictingFlags;
+        }
+        return .{
+            .help = false,
+            .quiet = quiet,
+            .timings = false,
+            .command = .nostr_sign,
+            .nostr_plan_path = nostr_plan_path,
+            .nostr_key_stdin = nostr_key_stdin,
+            .nostr_out_path = nostr_out_path,
+            .nostr_prior_path = nostr_prior_path,
+            .nostr_created_at = nostr_created_at,
+            .mode = .html,
+            .input_format = input_format,
+            .input_dir = input_dir,
+            .out_dir = null,
+            .html_dir = null,
+            .targets = targets,
+        };
+    }
+
+    if (command == .nostr_publish) {
+        // The publisher consumes a plan artifact and its already-signed event
+        // bundle. The secret never enters this command: the bundle was signed
+        // offline by `nostr sign`, and publishing only re-transmits it. Like
+        // the other nostr subcommands, no profile or projection selector is
+        // meaningful here, and stdout is reserved for the report when --out is
+        // absent.
+        if (nostr_plan_path == null) return error.MissingValue;
+        if (nostr_bundle_path == null) return error.MissingValue;
+        if (saw_profile or saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_target_profiles or has_layout_rules or wants_sitemap or
+            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or
+            saw_format or saw_report or saw_watch or saw_timings or saw_html_dir or saw_incremental or saw_jobs)
+        {
+            return error.ConflictingFlags;
+        }
+        return .{
+            .help = false,
+            .quiet = quiet,
+            .timings = false,
+            .command = .nostr_publish,
+            .nostr_plan_path = nostr_plan_path,
+            .nostr_bundle_path = nostr_bundle_path,
+            .nostr_out_path = nostr_out_path,
+            .mode = .html,
+            .input_format = input_format,
+            .input_dir = input_dir,
+            .out_dir = null,
+            .html_dir = null,
             .targets = targets,
         };
     }
@@ -1657,6 +1818,8 @@ pub fn printUsage() void {
         \\  standard-site logout  Remove a persisted session (secure erase; does not revoke)
         \\  standard-site smoke  Live interop smoke against a real PDS (manual, opt-in; never in CI)
         \\  nostr plan          Emit the offline Nostr NIP-23 publication plan (no signing, no relay)
+        \\  nostr sign          Sign a plan artifact into a signed-event bundle (offline; key via stdin)
+        \\  nostr publish       Send a signed-event bundle to the plan's relays; writes the report
         \\  init [DIR]          Write a starter site (content, theme, profile) into DIR (default: .)
         \\  (no command)        Same as build
         \\  standard-site publish options:
@@ -1743,6 +1906,13 @@ pub fn printUsage() void {
         \\  --report PATH        Write an analysis report instead of stdout
         \\  --fail-on-unreferenced Make check fail when it reports unreferenced pages
         \\  --profile PATH       Selected publication profile for `plan`
+        \\  --plan PATH          Plan artifact to sign (`nostr sign`)
+        \\  --key-stdin          Read the hex/nsec secret key once from stdin (`nostr sign`)
+        \\  --out PATH           Signed-event bundle output path (`nostr sign`; default: stdout)
+        \\  --prior PATH         Prior signed bundle to reuse unchanged evidence from (`nostr sign`)
+        \\  --created-at N       Explicit signing-time override, unix seconds (`nostr sign`; test/recovery)
+        \\  --bundle PATH        Signed-event bundle to publish (`nostr publish`)
+        \\  --out PATH           Publish report output path (`nostr publish`; default: stdout)
         \\  -h, --help          Show this help and exit 0
         \\  -V, --version       Print the compiler version (`boris/<ver>`) and exit 0
         \\
@@ -1792,6 +1962,9 @@ pub fn printUsage() void {
         \\      `boris standard-site` (no subcommand) prints the Standard.site family list.
         \\      `boris nostr plan --profile PATH` emits the offline NIP-23 publication plan on stdout;
         \\      it never signs, never contacts a relay, and never reads a key.
+        \\      `boris nostr sign --plan PLAN --key-stdin` reads the secret key once from stdin and
+        \\      writes the signed-event bundle to stdout (or --out PATH); it never contacts a relay.
+        \\      Secrets are never accepted from argv, profile, or environment.
         \\      --html / --html-dir / bare CLI map to a single target named "default".
         \\      Equivalent --target / --target-layout / --layout-rule permutations yield the
         \\      same config (targets sorted by name; rules canonicalized). No layout frontmatter.
@@ -1885,7 +2058,7 @@ pub fn printParseError(err: ParseError, bad_arg: ?[]const u8) void {
             }
         },
         error.UnknownNostrSubcommand => {
-            std.debug.print("error: unknown nostr subcommand (available: plan)\n", .{});
+            std.debug.print("error: unknown nostr subcommand (available: plan, sign, publish)\n", .{});
         },
         error.MissingStandardSiteSubcommand => {
             std.debug.print("error: standard-site requires a subcommand (try: plan, records, verify, login, sessions, logout, publish, smoke)\n", .{});
@@ -1943,6 +2116,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.eql(u8, a, "--html") or
             std.mem.eql(u8, a, "--textile") or
             std.mem.eql(u8, a, "--cooklang") or
+            std.mem.eql(u8, a, "--key-stdin") or
             std.mem.eql(u8, a, "--incremental") or
             std.mem.eql(u8, a, "--watch") or
             std.mem.eql(u8, a, "--fail-on-unreferenced") or
@@ -1958,6 +2132,10 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
         }
         if (std.mem.eql(u8, a, "--input") or
             std.mem.eql(u8, a, "--profile") or
+            std.mem.eql(u8, a, "--plan") or
+            std.mem.eql(u8, a, "--bundle") or
+            std.mem.eql(u8, a, "--prior") or
+            std.mem.eql(u8, a, "--created-at") or
             std.mem.eql(u8, a, "--out") or
             std.mem.eql(u8, a, "--rag-dir") or
             std.mem.eql(u8, a, "--context-dir") or
@@ -1989,6 +2167,10 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
         }
         if (std.mem.startsWith(u8, a, "--input=") or
             std.mem.startsWith(u8, a, "--profile=") or
+            std.mem.startsWith(u8, a, "--plan=") or
+            std.mem.startsWith(u8, a, "--bundle=") or
+            std.mem.startsWith(u8, a, "--prior=") or
+            std.mem.startsWith(u8, a, "--created-at=") or
             std.mem.startsWith(u8, a, "--out=") or
             std.mem.startsWith(u8, a, "--rag-dir=") or
             std.mem.startsWith(u8, a, "--context-dir=") or
@@ -2561,14 +2743,70 @@ test "parse: nostr plan takes the cooklang and textile input overrides" {
     try expectEqual(identity.InputFormat.textile, textile.profile_input_format_override.?);
 }
 
-test "parse: nostr has exactly one subcommand, and it needs a profile" {
-    // A missing or unknown subcommand is named, so nothing suggests that
-    // signing or publishing exists in this build.
+test "parse: nostr subcommands are exactly plan, sign, and publish" {
+    // A missing or unknown subcommand is named; each known one demands its
+    // inputs.
     try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr" }));
-    try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign" }));
-    try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish" }));
     try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "--profile", "a" }));
+    try expectError(error.UnknownNostrSubcommand, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "upload" }));
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "plan" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--plan", "plan.json" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "plan.json" }));
+}
+
+test "parse: nostr sign takes plan, key-stdin, out, prior, and created-at" {
+    var o = try parseOptions(std.testing.allocator, &.{
+        "boris", "nostr", "sign", "--plan", "plan.json", "--key-stdin", "--out", "bundle.json", "--prior", "old.json", "--created-at", "1720000000", "--quiet",
+    });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(Command.nostr_sign, o.command);
+    try expectEqualStrings("plan.json", o.nostr_plan_path.?);
+    try expect(o.nostr_key_stdin);
+    try expectEqualStrings("bundle.json", o.nostr_out_path.?);
+    try expectEqualStrings("old.json", o.nostr_prior_path.?);
+    try expectEqual(@as(i64, 1720000000), o.nostr_created_at.?);
+    try expect(o.quiet);
+}
+
+test "parse: nostr sign rejects invalid values and foreign selectors" {
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--plan", "p", "--key-stdin", "--created-at", "abc" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--plan", "p", "--plan", "q" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--plan", "p", "--key-stdin", "--profile", "a" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--plan", "p", "--key-stdin", "--rag" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--plan", "p", "--key-stdin", "--timings" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--plan", "p", "--key-stdin", "--html-dir", "dist" }));
+}
+
+test "parse: nostr publish takes plan, bundle, and out" {
+    var o = try parseOptions(std.testing.allocator, &.{
+        "boris", "nostr", "publish", "--plan", "plan.json", "--bundle", "bundle.json", "--out", "report.json", "--quiet",
+    });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(Command.nostr_publish, o.command);
+    try expectEqualStrings("plan.json", o.nostr_plan_path.?);
+    try expectEqualStrings("bundle.json", o.nostr_bundle_path.?);
+    try expectEqualStrings("report.json", o.nostr_out_path.?);
+    try expect(o.quiet);
+}
+
+test "parse: nostr publish rejects missing inputs and foreign selectors" {
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "p" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--bundle", "b" }));
+    try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "p", "--bundle", "b", "--bundle", "c" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "p", "--bundle", "b", "--profile", "a" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "p", "--bundle", "b", "--rag" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "p", "--bundle", "b", "--timings" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "p", "--bundle", "b", "--html-dir", "dist" }));
+}
+
+test "parse: nostr flags are command-scoped" {
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--key-stdin" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "publish", "--plan", "p", "--bundle", "b", "--key-stdin" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "sign", "--plan", "p", "--key-stdin", "--bundle", "x" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "plan", "--profile", "a", "--prior", "old.json" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "plan", "--profile", "a", "--bundle", "b" }));
 }
 
 test "parse: nostr plan owns stdout and rejects every other selector" {

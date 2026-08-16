@@ -3,7 +3,7 @@ title: Publishing Targets
 parent: guides
 status: published
 tags: [guides, publication, pages, standard-site]
-summary: HTML dist/ is the default target. GitHub Pages and Standard.site are verified. Nostr is not a target yet.
+summary: HTML dist/ is the default target. GitHub Pages and Standard.site are verified. Nostr is a shipped CLI family, not a verified target.
 ---
 
 <p class="eyebrow">Targets</p>
@@ -18,7 +18,8 @@ summary: HTML dist/ is the default target. GitHub Pages and Standard.site are ve
 
 Publication is a **registry**, not a shell recipe. The closed target names
 today are `github-pages` and `standard-site`. Unknown names fail in the
-profile parser. Nostr is an open program, not a third name you can type.
+profile parser. Nostr is a shipped CLI family (`boris nostr`), not a
+third verified-target name.
 
 </Aside>
 
@@ -52,7 +53,7 @@ publish is a different chain.
 | 1 | Local `dist/` | Always | `boris --quiet` |
 | 2 | GitHub Pages | You want the first verified hosted target | Official Actions workflow |
 | 3 | Standard.site | You mean Atmosphere records | `boris standard-site` |
-| — | Nostr | You are reading the open program | Do not pretend it shipped |
+| — | Nostr | You want NIP-23 events | [[guides/nostr-publication|plan → sign → publish]] |
 
 <Aside kind="tip" id="first-time">
 
@@ -169,8 +170,8 @@ optional Pages observer is a separate, explicitly bounded contract.
 ## What is not a target {#not-a-target}
 
 Nostr NIP-23
-: Open program. Not in the registry. Do not document a `boris nostr`
-  publish path that does not exist.
+: Shipped CLI. Not in the verified-target registry. See
+  [[guides/nostr-publication|Nostr NIP-23 Publication]].
 
 Cloudflare Pages / Vercel / Netlify
 : Waiting or “never proactive.” Adapter-shaped. No recipe in this guide.
@@ -185,6 +186,7 @@ The editor
 ## Next steps
 
 - [[getting-started|Getting Started]] — build the local site first
+- [[guides/nostr-publication|Nostr NIP-23]] — plan → sign → publish
 - [[guides/cli-and-modes|CLI & Output Modes]] — commands vs projections
 - [[guides/editor|Boris Editor]] — compiler-backed authoring
 - [[reference/outputs|Outputs & Artifacts]] — what lands under `dist/`

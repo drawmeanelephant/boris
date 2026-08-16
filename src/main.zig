@@ -26,6 +26,8 @@ const json_out = @import("json_out.zig");
 const publication_profile = @import("publication_profile.zig");
 const publication_plan = @import("publication_plan.zig");
 const nostr_plan = @import("nostr_plan.zig");
+const nostr_sign = @import("nostr_sign.zig");
+const nostr_publish = @import("nostr_publish.zig");
 const init_mod = @import("init.zig");
 const timings = @import("timings.zig");
 const identity = @import("identity.zig");
@@ -159,6 +161,10 @@ fn runPipelineTimed(io: Io, gpa: std.mem.Allocator, opts: Options, print_report:
         }
     else if (opts.command == .nostr_plan)
         runNostrPlan(io, gpa, opts, recorder_ptr)
+    else if (opts.command == .nostr_sign)
+        runNostrSign(io, gpa, opts)
+    else if (opts.command == .nostr_publish)
+        runNostrPublish(io, gpa, opts)
     else if (opts.command == .init)
         runInit(io, gpa, opts)
     else if (opts.command == .validate)
@@ -1466,6 +1472,208 @@ fn standardSiteStatus(text: ?[]const u8) standard_site.Status {
     return .none;
 }
 
+/// Offline Nostr NIP-23 signing: `boris nostr sign`.
+///
+/// Reads the plan artifact, reads the secret key exactly once from stdin
+/// (64 hex digits or a NIP-19 `nsec`), signs every article, and writes the
+/// signed-event bundle to `--out` or stdout. It opens no socket, contacts no
+/// relay, and never publishes. The secret never enters argv, the profile, the
+/// environment, diagnostics, or any artifact.
+pub fn runNostrSign(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    const plan_path = opts.nostr_plan_path orelse return .usage;
+    const plan_bytes = Io.Dir.cwd().readFileAlloc(
+        io,
+        plan_path,
+        gpa,
+        .limited(nostr_sign.max_plan_bytes + 1),
+    ) catch |err| switch (err) {
+        error.StreamTooLong => {
+            std.debug.print("error: plan artifact exceeds the {d}-byte bound\n", .{nostr_sign.max_plan_bytes});
+            return .usage;
+        },
+        else => {
+            std.debug.print("error: unable to read the plan artifact: {s}\n", .{@errorName(err)});
+            return .io_error;
+        },
+    };
+    defer gpa.free(plan_bytes);
+
+    var prior_owned: ?[]u8 = null;
+    defer if (prior_owned) |prior| gpa.free(prior);
+    if (opts.nostr_prior_path) |prior_path| {
+        prior_owned = Io.Dir.cwd().readFileAlloc(
+            io,
+            prior_path,
+            gpa,
+            .limited(nostr_sign.max_plan_bytes + 1),
+        ) catch |err| switch (err) {
+            error.StreamTooLong => {
+                std.debug.print("error: prior signed bundle exceeds the {d}-byte bound\n", .{nostr_sign.max_plan_bytes});
+                return .usage;
+            },
+            else => {
+                std.debug.print("error: unable to read the prior signed bundle: {s}\n", .{@errorName(err)});
+                return .io_error;
+            },
+        };
+    }
+
+    // The secret key is read once from stdin, bounded, and zeroed best-effort
+    // after use. The trim accepts surrounding whitespace; an empty line is a
+    // refusal, never a silent empty key.
+    var stdin_buffer: [nostr_sign.max_secret_bytes + 2]u8 = undefined;
+    defer std.crypto.secureZero(u8, &stdin_buffer);
+    var stdin_reader = std.Io.File.stdin().reader(io, &stdin_buffer);
+    const raw_key = stdin_reader.interface.takeDelimiter('\n') catch |err| switch (err) {
+        error.StreamTooLong => {
+            std.debug.print("error: secret key on stdin exceeds the {d}-byte bound\n", .{nostr_sign.max_secret_bytes});
+            return .usage;
+        },
+        error.ReadFailed => {
+            std.debug.print("error: unable to read the secret key from stdin\n", .{});
+            return .io_error;
+        },
+    };
+    const key = std.mem.trim(u8, raw_key orelse "", " \t\r\n");
+    if (key.len == 0) {
+        std.debug.print("error: empty secret key on stdin (pipe hex or nsec; never argv, profile, or environment)\n", .{});
+        return .usage;
+    }
+
+    var result = nostr_sign.run(io, gpa, .{
+        .plan = plan_bytes,
+        .key = key,
+        .created_at = opts.nostr_created_at,
+        .prior = prior_owned,
+    }) catch |err| {
+        std.debug.print("error: signing failed: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer result.deinit();
+
+    if (result.diagnostics.items.len > 0) {
+        pipeline.printDiagnostics(gpa, result.diagnostics.items, opts.quiet) catch return .io_error;
+    }
+
+    const bundle = result.bundle orelse return .content_error;
+
+    if (opts.nostr_out_path) |out_path| {
+        Io.Dir.cwd().writeFile(io, .{ .sub_path = out_path, .data = bundle }) catch |err| {
+            std.debug.print("error: unable to write the signed-event bundle: {s}\n", .{@errorName(err)});
+            return .io_error;
+        };
+        if (!opts.quiet) {
+            std.debug.print("ok: wrote signed-event bundle to {s}\n", .{out_path});
+        }
+        return .success;
+    }
+
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+    stdout_writer.interface.writeAll(bundle) catch |err| {
+        std.debug.print("error: unable to write the signed-event bundle: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    stdout_writer.interface.flush() catch |err| {
+        std.debug.print("error: unable to flush the signed-event bundle: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    if (!opts.quiet) {
+        std.debug.print("ok: wrote signed-event bundle to stdout\n", .{});
+    }
+    return .success;
+}
+
+/// Online Nostr publication: `boris nostr publish --plan PLAN --bundle BUNDLE`.
+///
+/// Reads the plan artifact and its signed-event bundle, verifies the bundle
+/// against the plan (digest, expected pubkey, event ids, signatures — nothing
+/// is sent before verification), then sends the exact signed events to each
+/// configured relay over RFC-6455 WebSocket. Every relay interaction is
+/// bounded and produces per-relay evidence; the run always reaches a
+/// complete/partial/failed/incomplete verdict, and the canonical report is
+/// written to `--out` or stdout. The secret never enters this command.
+pub fn runNostrPublish(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    const plan_path = opts.nostr_plan_path orelse return .usage;
+    const bundle_path = opts.nostr_bundle_path orelse return .usage;
+
+    const plan_bytes = Io.Dir.cwd().readFileAlloc(
+        io,
+        plan_path,
+        gpa,
+        .limited(nostr_sign.max_plan_bytes + 1),
+    ) catch |err| switch (err) {
+        error.StreamTooLong => {
+            std.debug.print("error: plan artifact exceeds the {d}-byte bound\n", .{nostr_sign.max_plan_bytes});
+            return .usage;
+        },
+        else => {
+            std.debug.print("error: unable to read the plan artifact: {s}\n", .{@errorName(err)});
+            return .io_error;
+        },
+    };
+    defer gpa.free(plan_bytes);
+
+    const bundle_bytes = Io.Dir.cwd().readFileAlloc(
+        io,
+        bundle_path,
+        gpa,
+        .limited(nostr_sign.max_plan_bytes + 1),
+    ) catch |err| switch (err) {
+        error.StreamTooLong => {
+            std.debug.print("error: signed bundle exceeds the {d}-byte bound\n", .{nostr_sign.max_plan_bytes});
+            return .usage;
+        },
+        else => {
+            std.debug.print("error: unable to read the signed bundle: {s}\n", .{@errorName(err)});
+            return .io_error;
+        },
+    };
+    defer gpa.free(bundle_bytes);
+
+    var result = nostr_publish.run(io, gpa, .{
+        .plan = plan_bytes,
+        .bundle = bundle_bytes,
+    }) catch |err| {
+        std.debug.print("error: publishing failed: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer result.deinit();
+
+    if (result.diagnostics.items.len > 0) {
+        pipeline.printDiagnostics(gpa, result.diagnostics.items, opts.quiet) catch return .io_error;
+    }
+
+    const report = result.report orelse return .content_error;
+
+    if (opts.nostr_out_path) |out_path| {
+        Io.Dir.cwd().writeFile(io, .{ .sub_path = out_path, .data = report }) catch |err| {
+            std.debug.print("error: unable to write the publish report: {s}\n", .{@errorName(err)});
+            return .io_error;
+        };
+        if (!opts.quiet) {
+            const label: []const u8 = if (result.classification) |c| c.jsonName() else "?";
+            std.debug.print("ok: wrote publish report ({s}) to {s}\n", .{ label, out_path });
+        }
+        return .success;
+    }
+
+    var stdout_buffer: [4096]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+    stdout_writer.interface.writeAll(report) catch |err| {
+        std.debug.print("error: unable to write the publish report: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    stdout_writer.interface.flush() catch |err| {
+        std.debug.print("error: unable to flush the publish report: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    if (!opts.quiet) {
+        const label: []const u8 = if (result.classification) |c| c.jsonName() else "?";
+        std.debug.print("ok: wrote publish report ({s}) to stdout\n", .{label});
+    }
+    return .success;
+}
 /// Deterministic provenance-rich AI context export (same compile + graph validation as IR/RAG).
 pub fn runContext(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timings.Recorder) ExitCode {
     const context_dir = opts.context_dir orelse "context";

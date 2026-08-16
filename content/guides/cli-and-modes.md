@@ -32,9 +32,13 @@ check` is graph-health analysis, not an alias for validation.
 | `boris impact ID` | Which pages or source endpoints depend on this id? | Nothing, unless `--report` is supplied |
 | `boris plan --profile PATH` | What normalized publication declaration does this profile describe? | JSON declaration on stdout |
 | `boris standard-site …` | Atmosphere plan / records / login / publish / smoke | Depends on the subcommand |
+| `boris nostr plan` | What is the offline NIP-23 publication plan for this profile? | Plan JSON on stdout |
+| `boris nostr sign` | Sign the plan into a signed-event bundle (key once via stdin) | Bundle JSON on stdout or `--out PATH` |
+| `boris nostr publish` | Deliver the signed events to the plan's relays | Report JSON on stdout or `--out PATH` |
 
 > Pick the command that matches the question. `validate` is not `check`.
-> `plan` does not publish. `standard-site` is a family, not the default path.
+> `plan` does not publish. `standard-site` and `nostr` are families, not
+> the default path.
 
 `watch` is HTML-only. The compatibility flag `--watch` and `build --watch`
 remain accepted. `check` and `impact` operate only after the graph is valid;
@@ -95,6 +99,24 @@ RSS and sitemap are different projections. RSS flags cannot be combined with
 HTML, IR, RAG, Context, `llms.txt`, `check`, or `impact`; sitemap is an HTML
 target option and requires exactly one unambiguous target.
 
+## Nostr NIP-23 publication
+
+The `nostr` family is the one place the CLI touches a relay, and the secret
+and the network never mix: `nostr plan` and `nostr sign` are fully offline,
+and `nostr publish` never sees a key.
+
+```bash
+./zig-out/bin/boris nostr plan --profile profiles/site.json
+./zig-out/bin/boris nostr sign --plan plan.json --key-stdin --out bundle.json
+./zig-out/bin/boris nostr publish --plan plan.json --bundle bundle.json --out report.json
+```
+
+A publish run reports the honest per-relay outcome
+(`complete`/`partial`/`failed`/`incomplete`) in a JSON report; a relay that
+demands NIP-42 authentication is reported as `auth-required/unsupported`
+rather than silently skipped. See
+[[guides/nostr-publication|Nostr NIP-23 Publication]] for the full workflow.
+
 ## Multiple HTML targets and layouts
 
 Use repeatable `--target NAME=DIR` options when the same content needs isolated
@@ -139,5 +161,6 @@ bsky.social use `login --app-password`. See
 ## Next steps
 
 - [[reference/commands|Command Reference]] — complete CLI surface.
+- [[guides/nostr-publication|Nostr NIP-23 Publication]] — offline plan → sign → publish.
 - [[guides/search-and-ui|Search & Browser UI]] — compiler-owned rendered search.
 - [[reference/diagnostics|Diagnostics]] — error categories and recovery.
