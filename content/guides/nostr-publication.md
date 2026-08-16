@@ -70,6 +70,11 @@ Each planned article carries `naddr` and `naddr_uri`. Paste `naddr` into a
 Nostr client to open the long-form article. The address is
 `(30023, pubkey, id)` and does not change when you edit the page.
 
+`boris --profile PATH --quiet` with `nostr.enabled` also writes
+`<link rel="alternate" href="nostr:naddr1…">` into the page head for every
+eligible allowlisted article. A bare `boris` build without `--profile`
+does not.
+
 ## Sign {#sign}
 
 ```bash

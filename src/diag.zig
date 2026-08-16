@@ -117,6 +117,11 @@ pub const Code = enum {
     /// document AT-URI links. Warning: the build still succeeds and the
     /// verification report records those pages as `not_verified`.
     EVERIFICATIONHEAD,
+    /// Nostr head emit is configured but a selected layout omits the
+    /// compiler-owned `{{head}}` slot, so an eligible allowlisted page cannot
+    /// carry its `nostr:naddr` alternate link. Warning: the HTML build still
+    /// succeeds.
+    ENOSTRHEAD,
     /// Informational: a layout rule (id/glob/role selector) selected a
     /// non-fallback layout for a page. Records the selection outcome for
     /// editors/tools; never affects exit codes or errorCount.
@@ -314,6 +319,7 @@ test "Code names match contract strings" {
     try std.testing.expectEqualStrings("EIO", Code.EIO.name());
     try std.testing.expectEqualStrings("EPUBLICATIONLOCATION", Code.EPUBLICATIONLOCATION.name());
     try std.testing.expectEqualStrings("EVERIFICATIONHEAD", Code.EVERIFICATIONHEAD.name());
+    try std.testing.expectEqualStrings("ENOSTRHEAD", Code.ENOSTRHEAD.name());
     try std.testing.expectEqualStrings("ENOSTRELIGIBILITY", Code.ENOSTRELIGIBILITY.name());
     try std.testing.expectEqualStrings("ENOSTRMARKDOWN", Code.ENOSTRMARKDOWN.name());
     try std.testing.expectEqualStrings("ENOSTRTIME", Code.ENOSTRTIME.name());

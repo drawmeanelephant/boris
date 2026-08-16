@@ -328,6 +328,15 @@ are not event tags and they do not enter `intention_digest`:
 `ws://` loopback relays are omitted from the `naddr`. Hex remains the
 protocol form. `npub` never appears in a NIP-01 event.
 
+When the HTML build is invoked with `--profile PATH` and that profile has
+`nostr.enabled`, each eligible allowlisted page also receives one
+compiler-owned head link (`<link rel="alternate" href="nostr:naddr1…">`)
+in the `{{head}}` slot (#571). Eligibility is the same closed set as
+`boris nostr plan` except Markdown-body inspection: a hard-wrapped
+paragraph or raw HTML still fails the plan, not the HTML build. A bare
+`boris` build without `--profile` emits no Nostr links. A layout that
+omits `{{head}}` warns `ENOSTRHEAD` and still succeeds.
+
 Consequences, all of them normative:
 
 - **Editing content keeps the address.** A corrected paragraph republishes to

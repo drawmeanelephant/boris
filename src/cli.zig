@@ -1404,8 +1404,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     }
 
     // `--profile` on the HTML build is the Standard.site verification-emit
-    // opt-in (#533). Other modes already have their own profile commands
-    // (`plan`, `standard-site *`, `nostr plan`) or do not emit surfaces.
+    // opt-in (#533) and the Nostr `nostr:naddr` alternate-link emit (#571).
+    // Other modes already have their own profile commands (`plan`,
+    // `standard-site *`, `nostr plan`) or do not emit surfaces.
     if (saw_profile) {
         if (command == .watch or saw_watch or command == .validate or
             command == .check or command == .impact or
@@ -1868,7 +1869,7 @@ pub fn printUsage() void {
         \\  --out PATH          Smoke result artifact path (default: stdout)
         \\  standard-site options (all subcommands):
         \\  --session-root PATH Override the persistent session store root
-        \\  --profile PATH      Standard.site profile: emit verification surfaces on HTML build
+        \\  --profile PATH      Publication profile: emit Standard.site verification and/or Nostr naddr head links
         \\  --html              Explicit HTML site mode → --html-dir (default dist)
         \\  --html-dir <DIR>    HTML site mode with output directory DIR
         \\  --target NAME=DIR   HTML multi-target mode (repeatable; order-independent); implies HTML
