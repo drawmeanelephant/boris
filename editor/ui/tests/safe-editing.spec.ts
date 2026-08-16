@@ -1301,6 +1301,32 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
     await expect(palette).toBeHidden();
   });
 
+  test('command palette: Esc clears the filter and reopen restores the full list', async ({ page }) => {
+    await installApi(page);
+    await page.keyboard.press('Control+K');
+    const palette = page.getByRole('dialog', { name: 'Commands' });
+    await expect(palette).toBeVisible();
+    const input = palette.getByRole('combobox', { name: 'Filter commands' });
+    const listbox = palette.getByRole('listbox', { name: 'Boris commands' });
+    const totalOptions = await listbox.getByRole('option').count();
+
+    // A filter narrows the list to the two Open file options.
+    await input.fill('open');
+    const openOptions = listbox.getByRole('option', { name: /Open file/ });
+    await expect(openOptions).toHaveCount(2);
+    await expect(listbox.getByRole('option')).toHaveCount(2);
+
+    // Esc closes; reopening resets the filter and brings back the full list.
+    await page.keyboard.press('Escape');
+    await expect(palette).toBeHidden();
+    await page.keyboard.press('Control+K');
+    await expect(palette).toBeVisible();
+    await expect(input).toHaveValue('');
+    await expect(listbox.getByRole('option')).toHaveCount(totalOptions);
+    await page.keyboard.press('Escape');
+    await expect(palette).toBeHidden();
+  });
+
   test('completion combobox: arrows navigate, Enter inserts, Esc closes', async ({ page }) => {
     await installApi(page, {
       disk: '',
