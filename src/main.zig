@@ -454,6 +454,7 @@ fn classifyPublishError(err: anyerror) ExitCode {
         error.InvalidSessionWire,
         error.InvalidKeySeed,
         error.StoreCorrupt,
+        error.WrongDocumentType,
         error.StoreExists,
         error.StoreFull,
         error.StoreIo,
@@ -505,6 +506,7 @@ fn reportSessionError(err: anyerror) ExitCode {
         error.RefreshAmbiguous => "session refresh was interrupted and may have rotated; the stored session was removed — run `boris standard-site login --did <DID>`",
         error.SessionAuthorityChanged => "the stored session's authority no longer matches fresh discovery; run `boris standard-site login --did <DID>`",
         error.InvalidSessionWire, error.InvalidKeySeed, error.StoreCorrupt => "the stored session document is corrupt; run `boris standard-site logout --did <DID>` then log in again",
+        error.WrongDocumentType => "the stored session document is the other credential type; run `boris standard-site logout --did <DID>` then log in again",
         error.StorePermissionDenied => "the session store is not readable/writable; check permissions on the session root",
         error.StoreLocked => "the session store is locked by another process",
         else => @errorName(err),
@@ -544,9 +546,10 @@ const SessionProvider = struct {
         if (self.sessions.acquire(account.did.slice(), client, self.proof_source.source(), now)) |session| {
             return .{ .oauth = session };
         } else |err| switch (err) {
-            // No OAuth session, or the stored document is an app-password
-            // document (wrong format tag) — try the app-password path.
-            error.NoSession, error.StoreCorrupt => {},
+            // Nothing stored, or the stored document is the app-password
+            // sibling. Genuine corruption fails closed and must not open
+            // the browser or overwrite the file.
+            error.NoSession, error.WrongDocumentType => {},
             else => return err,
         }
 
@@ -663,10 +666,26 @@ pub fn runStandardSiteLoginAppPassword(io: Io, gpa: std.mem.Allocator, opts: Opt
     return .success;
 }
 
+/// Resolve a user-supplied handle through DNS/HTTPS and require the DID
+/// document's `alsoKnownAs` backlink. Stops at the DID document so the
+/// app-password path never depends on OAuth authorization-server metadata.
+fn resolveVerifiedHandleDocument(
+    gpa: std.mem.Allocator,
+    io: Io,
+    client: atproto_transport.Client,
+    handle_text: []const u8,
+) !atproto_identity.DidDocument {
+    var dns = atproto_dns_std.StdDns.init(io) catch |err| return err;
+    const resolved = try atproto_handle.resolve(gpa, dns.client(), client, handle_text);
+    const document = try atproto_identity.resolveDidDocument(gpa, client, resolved.did);
+    try atproto_identity.requireHandleBacklink(document, resolved.handle);
+    return document;
+}
+
 /// Resolve the login identity (`--did` or `--handle`) to a DID + PDS origin.
 /// The app-password path deliberately stops at the DID document — it never
 /// requires the OAuth authorization-server metadata that the interactive flow
-/// needs.
+/// needs. A handle still requires the bidirectional `alsoKnownAs` backlink.
 fn resolveAppPasswordIdentity(
     gpa: std.mem.Allocator,
     io: Io,
@@ -682,15 +701,14 @@ fn resolveAppPasswordIdentity(
         return;
     }
     const handle_text = opts.session_handle orelse return error.InvalidDid;
-    var dns = atproto_dns_std.StdDns.init(io) catch |err| return err;
-    const resolved = try atproto_handle.resolve(gpa, dns.client(), client, handle_text);
-    did.* = resolved.did;
-    const document = try atproto_identity.resolveDidDocument(gpa, client, resolved.did);
+    const document = try resolveVerifiedHandleDocument(gpa, io, client, handle_text);
+    did.* = document.did;
     pds_origin.* = document.pds_origin;
 }
 
 /// Resolve `--did` or `--handle` to an owned DID string for smoke (and any
-/// other command that accepts either identity form).
+/// other command that accepts either identity form). Handle resolution
+/// requires the same `alsoKnownAs` backlink as app-password login.
 fn resolveConfiguredDid(
     gpa: std.mem.Allocator,
     io: Io,
@@ -702,9 +720,8 @@ fn resolveConfiguredDid(
         return gpa.dupe(u8, did.slice());
     }
     const handle_text = opts.session_handle orelse return error.InvalidDid;
-    var dns = atproto_dns_std.StdDns.init(io) catch |err| return err;
-    const resolved = try atproto_handle.resolve(gpa, dns.client(), client, handle_text);
-    return gpa.dupe(u8, resolved.did.slice());
+    const document = try resolveVerifiedHandleDocument(gpa, io, client, handle_text);
+    return gpa.dupe(u8, document.did.slice());
 }
 
 /// Disable terminal echo on the controlling stdin while a secret is typed,
@@ -757,13 +774,13 @@ fn readAppPasswordFromStdin(gpa: std.mem.Allocator, io: Io) ![]u8 {
 /// returned slice is owned; the caller zeroes and frees it.
 fn readAppPasswordLine(gpa: std.mem.Allocator, reader: *std.Io.Reader) ![]u8 {
     const raw = reader.takeDelimiterExclusive('\n') catch |err| switch (err) {
-        error.EndOfStream => return error.AuthenticationFailed,
+        error.EndOfStream => return error.EmptyPassword,
         error.StreamTooLong => return error.ResponseTooLarge,
         else => return err,
     };
     var end = raw.len;
     if (end > 0 and raw[end - 1] == '\r') end -= 1;
-    if (end == 0) return error.AuthenticationFailed;
+    if (end == 0) return error.EmptyPassword;
     return gpa.dupe(u8, raw[0..end]);
 }
 
@@ -771,19 +788,24 @@ fn readAppPasswordLine(gpa: std.mem.Allocator, reader: *std.Io.Reader) ![]u8 {
 /// secret-free message.
 fn reportAppPasswordLoginError(err: anyerror) ExitCode {
     const code: ExitCode = switch (err) {
+        error.EmptyPassword => .usage,
         error.AuthenticationFailed => .denial,
         error.Timeout => .timeout,
-        error.InvalidDid, error.InvalidHandle, error.UnsupportedDidMethod => .usage,
+        error.InvalidDid, error.InvalidHandle, error.HandleMismatch, error.UnsupportedDidMethod => .usage,
         error.InvalidJwt, error.InvalidResponse, error.InvalidStatus, error.InvalidContentType, error.SubjectDidMismatch => .compatibility,
-        error.SessionRevoked, error.InvalidSessionWire, error.StoreCorrupt, error.StoreExists, error.StoreFull, error.StoreIo, error.StoreLocked, error.StoreNotFound, error.StorePermissionDenied, error.StoreUnexpected, error.HomeUnavailable => .session,
+        error.SessionRevoked, error.InvalidSessionWire, error.StoreCorrupt, error.WrongDocumentType, error.StoreExists, error.StoreFull, error.StoreIo, error.StoreLocked, error.StoreNotFound, error.StorePermissionDenied, error.StoreUnexpected, error.HomeUnavailable => .session,
         else => .io_error,
     };
-    const message: []const u8 = switch (code) {
-        .denial => "the PDS rejected the app password or identifier; nothing was stored",
-        .compatibility => "the PDS returned an unexpected response; nothing was stored",
-        .session => "unable to persist the app-password session; check the session root",
-        .usage => "invalid AT Protocol identity for --app-password login",
-        else => @errorName(err),
+    const message: []const u8 = switch (err) {
+        error.EmptyPassword => "password cannot be empty; nothing was stored",
+        error.HandleMismatch => "the DID document does not name this handle in alsoKnownAs; nothing was stored",
+        else => switch (code) {
+            .denial => "the PDS rejected the app password or identifier; nothing was stored",
+            .compatibility => "the PDS returned an unexpected response; nothing was stored",
+            .session => "unable to persist the app-password session; check the session root",
+            .usage => "invalid AT Protocol identity for --app-password login",
+            else => @errorName(err),
+        },
     };
     std.debug.print("error: standard-site login --app-password: {s}\n", .{message});
     return code;
@@ -3038,9 +3060,9 @@ test "readAppPasswordLine treats end of stream as the end of the credential" {
 
 test "readAppPasswordLine rejects empty input whether blank or at end of stream" {
     var blank = std.Io.Reader.fixed("\n");
-    try std.testing.expectError(error.AuthenticationFailed, readAppPasswordLine(std.testing.allocator, &blank));
+    try std.testing.expectError(error.EmptyPassword, readAppPasswordLine(std.testing.allocator, &blank));
     var empty = std.Io.Reader.fixed("");
-    try std.testing.expectError(error.AuthenticationFailed, readAppPasswordLine(std.testing.allocator, &empty));
+    try std.testing.expectError(error.EmptyPassword, readAppPasswordLine(std.testing.allocator, &empty));
 }
 
 test {

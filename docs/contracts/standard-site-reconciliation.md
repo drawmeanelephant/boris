@@ -43,7 +43,9 @@ Each planned record is fetched first (`getRecord`) and classified against the
 intended payload by **canonical value comparison** — the remote record `value`
 is deep-compared to the intended payload JSON, key-order-insensitive. The
 reconciler never hand-rolls DAG-CBOR CIDs and never infers remote state from a
-local digest.
+local digest. A record is **not found** when `getRecord` sees HTTP 400 with
+`RecordNotFound` or HTTP 404 (some PDS and XRPC proxies use 404 for the same
+missing-record case).
 
 | Intended state | Remote observation | Operation | Verification |
 |---|---|---|---|

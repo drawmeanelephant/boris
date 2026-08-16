@@ -236,6 +236,15 @@ pub fn resolveDidDocument(
     return validateDidDocument(allocator, did, did_response.body);
 }
 
+/// Require the DID document to name `handle` in `alsoKnownAs`. Used by the
+/// OAuth discovery chain and by the app-password login path, which stops at
+/// the DID document and must not skip the backlink.
+pub fn requireHandleBacklink(document: DidDocument, handle: Handle) Error!void {
+    try handle.requireResolutionAllowed();
+    const claimed = document.claimed_handle orelse return error.HandleMismatch;
+    if (!handle.eql(&claimed)) return error.HandleMismatch;
+}
+
 /// Continues authority discovery from one already-resolved DID document. This
 /// avoids a second DID fetch between handle verification and OAuth binding.
 pub fn discoverResolvedDocument(
@@ -244,11 +253,7 @@ pub fn discoverResolvedDocument(
     document: DidDocument,
     verified_handle: ?Handle,
 ) Error!DiscoveredAccount {
-    if (verified_handle) |handle| {
-        try handle.requireResolutionAllowed();
-        const claimed = document.claimed_handle orelse return error.HandleMismatch;
-        if (!handle.eql(&claimed)) return error.HandleMismatch;
-    }
+    if (verified_handle) |handle| try requireHandleBacklink(document, handle);
     const pds = document.pds_origin;
 
     const resource_url = try pds.wellKnown("oauth-protected-resource");
@@ -648,6 +653,29 @@ test "DID document validates identity and first matching PDS service" {
         did,
         "{\"id\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"service\":[{\"id\":\"#atproto_pds\",\"type\":\"AtprotoPersonalDataServer\",\"serviceEndpoint\":\"https://pds.example.com/path\"}]}",
     ));
+}
+
+test "requireHandleBacklink demands the DID document alsoKnownAs match" {
+    const did = try Did.parse(valid_did);
+    const matching =
+        \\{"id":"did:plc:ewvi7nxzyoun6zhxrhs64oiz","alsoKnownAs":["at://alice.example.com"],"service":[
+        \\{"id":"#atproto_pds","type":"AtprotoPersonalDataServer","serviceEndpoint":"https://pds.example.com"}
+        \\]}
+    ;
+    const document = try validateDidDocument(std.testing.allocator, did, matching);
+    const handle = try Handle.parse("alice.example.com");
+    try requireHandleBacklink(document, handle);
+
+    const other = try Handle.parse("other.example.com");
+    try std.testing.expectError(error.HandleMismatch, requireHandleBacklink(document, other));
+
+    const no_handle =
+        \\{"id":"did:plc:ewvi7nxzyoun6zhxrhs64oiz","service":[
+        \\{"id":"#atproto_pds","type":"AtprotoPersonalDataServer","serviceEndpoint":"https://pds.example.com"}
+        \\]}
+    ;
+    const bare = try validateDidDocument(std.testing.allocator, did, no_handle);
+    try std.testing.expectError(error.HandleMismatch, requireHandleBacklink(bare, handle));
 }
 
 test "origin and endpoint validation fail closed" {
