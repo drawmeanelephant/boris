@@ -493,7 +493,7 @@ pub fn compileHtmlToSink(
     defer site.deinit();
 
     var stats: CompileStats = .{};
-    const dummy_dir = Io.Dir.cwd();
+    const dummy_dir: Io.Dir = .{ .handle = 0 };
     for (db.items(), 0..) |*page, page_index| {
         var doc_arena = std.heap.ArenaAllocator.init(gpa);
         defer doc_arena.deinit();

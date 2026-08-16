@@ -57,6 +57,7 @@ const FsIdentity = struct {
     ino: u64,
 
     fn fromStat(st: Io.File.Stat) FsIdentity {
+        if (@TypeOf(st.inode) == void) return .{ .ino = 0 };
         return .{ .ino = @intCast(st.inode) };
     }
 };
