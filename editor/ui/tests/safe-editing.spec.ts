@@ -2467,3 +2467,43 @@ test('unreadable recovery snapshots are ignored without hiding the valid ones (#
   await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('1 recovery snapshot was unreadable and ignored');
   await expect(page.getByRole('button', { name: 'Restore content/index.md', exact: true })).toBeVisible();
 });
+
+function manyProjectFiles(count: number): Array<{ path: string }> {
+  const files = [{ path: 'boris.json' }];
+  for (let index = 0; index < count; index += 1) {
+    files.push({ path: `content/p${String(index).padStart(3, '0')}.md` });
+  }
+  return files;
+}
+
+test('large project file trees stay bounded and filterable (#418 M11)', async ({ page }) => {
+  await installApi(page, { files: manyProjectFiles(250) });
+  const tree = page.getByRole('navigation', { name: 'Project files' });
+  await expect(page.getByRole('status', { name: 'Project files status' }))
+    .toContainText('Showing 200 of 251 project files. Filter to find the rest.');
+  await expect(tree.getByRole('button')).toHaveCount(200);
+  await expect(tree.getByRole('button', { name: 'content/p249.md', exact: true })).toHaveCount(0);
+
+  await page.getByRole('textbox', { name: 'Filter project files' }).fill('p249');
+  await expect(page.getByRole('status', { name: 'Project files status' }))
+    .toContainText('1 project file matches “p249”');
+  await expect(tree.getByRole('button')).toHaveCount(1);
+  await page.getByRole('button', { name: 'content/p249.md', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Source for content/p249.md' })).toBeVisible();
+});
+
+test('command palette caps unfiltered files and finds the rest by filter (#418 M11)', async ({ page }) => {
+  await installApi(page, { files: manyProjectFiles(250) });
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  const listbox = palette.getByRole('listbox', { name: 'Boris commands' });
+  await expect(listbox.getByRole('option', { name: /Open file/ })).toHaveCount(50);
+  await expect(listbox.getByRole('option', { name: /p249/ })).toHaveCount(0);
+
+  await palette.getByRole('combobox', { name: 'Filter commands' }).fill('p249');
+  await expect(listbox.getByRole('option', { name: /Open file/ })).toHaveCount(1);
+  await expect(listbox.getByRole('option', { name: /p249/ })).toHaveAttribute('aria-selected', 'true');
+  await palette.getByRole('combobox', { name: 'Filter commands' }).press('Enter');
+  await expect(palette).toBeHidden();
+  await expect(page.getByRole('textbox', { name: 'Source for content/p249.md' })).toBeVisible();
+});
