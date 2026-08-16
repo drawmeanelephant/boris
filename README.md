@@ -319,6 +319,7 @@ Current phase and known gaps live in [`docs/STATUS.md`](docs/STATUS.md).
 ## Project map
 
 - [`docs/STATUS.md`](docs/STATUS.md) — identity, current phase, and known gaps
+- [`docs/SOURCE-MAP.md`](docs/SOURCE-MAP.md) — where `src/` clusters live
 - [`docs/contracts/`](docs/contracts/) — normative behavior
 - [`docs/authoring-spine.md`](docs/authoring-spine.md) — init → publish → verify
 - [`docs/MIGRATION.md`](docs/MIGRATION.md) — migration workflow

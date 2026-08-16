@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Asides &amp; Admonitions · Boris</title>
+  <link rel="stylesheet" href="../assets/css/boris.css">
+</head>
+<body>
+<aside class="site-sidebar">
+<header class="site-brand">
+<span class="site-brand__name">Boris</span>
+<span class="site-brand__tagline">A native compiler for documentation you can inspect, publish, and reuse.</span>
+</header>
+<section class="site-search" data-boris-search-ui aria-labelledby="site-search-label">
+<form action="_boris/search/" method="get" role="search" data-boris-search-form>
+<label class="site-search__label" id="site-search-label" for="site-search-input">Search documentation</label>
+<div class="site-search__controls">
+<input id="site-search-input" name="q" type="search" autocomplete="off" placeholder="Search…" spellcheck="false">
+<button type="submit">Search</button>
+</div>
+</form>
+<p class="site-search__status" data-boris-search-status role="status" aria-live="polite">Loading search…</p>
+<ol class="site-search__results" data-boris-search-results aria-label="Search results"></ol>
+<noscript><p class="site-search__fallback">Search needs JavaScript in this static site. Use the documentation navigation above.</p></noscript>
+</section>
+<details class="site-menu" open>
+<summary>Documentation menu</summary>
+<nav class="site-nav" aria-label="Site">
+<ul>
+<li class="site-nav__trunk"><a href="../getting-started.html">Getting Started</a>
+<ul>
+<li class="site-nav__satellite"><a href="cli-and-modes.html">CLI &amp; Output Modes</a></li>
+</ul>
+</li>
+<li class="site-nav__trunk is-ancestor"><a href="../index.html">Boris Documentation</a>
+<ul>
+<li class="site-nav__satellite"><a href="../comparison.html">Why Boris? (Comparison &amp; Rationale)</a></li>
+<li class="site-nav__satellite is-ancestor"><a href="../guides.html">User Guides</a>
+<ul>
+<li class="site-nav__satellite is-ancestor"><a href="overview.html">Content Model &amp; Pipeline</a>
+<ul>
+<li class="site-nav__satellite is-current"><a href="asides.html" aria-current="page">Asides &amp; Admonitions</a></li>
+<li class="site-nav__satellite"><a href="building-pages.html">Building Pages</a></li>
+<li class="site-nav__satellite"><a href="editor.html">Boris Editor</a></li>
+<li class="site-nav__satellite"><a href="migration.html">Migrating to Boris</a></li>
+<li class="site-nav__satellite"><a href="oliver-markdown.html">Markdown Showcase</a></li>
+<li class="site-nav__satellite"><a href="rag-export.html">AI &amp; Machine Outputs</a></li>
+<li class="site-nav__satellite"><a href="search-and-ui.html">Search &amp; Browser UI</a></li>
+<li class="site-nav__satellite"><a href="themes-and-layouts.html">Themes &amp; Layouts</a></li>
+<li class="site-nav__satellite"><a href="trunk-satellite.html">Trunk &amp; Satellite — Content Hierarchy</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="publishing.html">Publishing Targets</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="../reference.html">Reference</a>
+<ul>
+<li class="site-nav__satellite"><a href="../markdown-feature-usage.html">Markdown Feature Usage Register</a></li>
+<li class="site-nav__satellite"><a href="../reference/commands.html">Command Reference</a></li>
+<li class="site-nav__satellite"><a href="../reference/diagnostics.html">Diagnostics &amp; Troubleshooting</a></li>
+<li class="site-nav__satellite"><a href="../reference/frontmatter.html">Frontmatter Reference</a></li>
+<li class="site-nav__satellite"><a href="../reference/outputs.html">Outputs &amp; Artifacts</a></li>
+<li class="site-nav__satellite"><a href="../reference/relationships.html">Relationships</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="../technology-and-rationale.html">Technology &amp; Rationale</a></li>
+</ul>
+</li>
+</ul>
+</nav>
+</details>
+</aside>
+<nav class="breadcrumb" aria-label="Breadcrumb">
+<ol>
+<li><a href="../index.html">Boris Documentation</a></li>
+<li><a href="../guides.html">User Guides</a></li>
+<li><a href="overview.html">Content Model &amp; Pipeline</a></li>
+<li aria-current="page">Asides &amp; Admonitions</li>
+</ol>
+</nav>
+<nav class="page-toc" aria-label="On this page">
+<ul>
+<li class="page-toc__l1"><a href="#asides-admonitions">Asides &amp; Admonitions</a></li>
+<li class="page-toc__l2"><a href="#syntax">Syntax</a></li>
+<li class="page-toc__l2"><a href="#available-kinds">Available kinds</a></li>
+<li class="page-toc__l2"><a href="#disclosure-details">Disclosure details</a></li>
+<li class="page-toc__l2"><a href="#live-examples">Live Examples</a></li>
+<li class="page-toc__l3"><a href="#1-note">1. Note</a></li>
+<li class="page-toc__l3"><a href="#2-tip">2. Tip</a></li>
+<li class="page-toc__l3"><a href="#3-info">3. Info</a></li>
+<li class="page-toc__l3"><a href="#4-warning">4. Warning</a></li>
+<li class="page-toc__l3"><a href="#5-danger">5. Danger</a></li>
+<li class="page-toc__l2"><a href="#rich-content-inside-asides">Rich Content Inside Asides</a></li>
+<li class="page-toc__l3"><a href="#best-practices">Best Practices</a></li>
+<li class="page-toc__l2"><a href="#rules-and-constraints">Rules and constraints</a></li>
+<li class="page-toc__l2"><a href="#next-steps">Next steps</a></li>
+</ul>
+</nav>
+<main data-boris-search-root>
+<h1 id="asides-admonitions">Asides &amp; Admonitions</h1>
+<p>Boris supports semantic callout blocks called <strong>Asides</strong>. Use them to draw attention to important information without breaking prose flow.</p>
+<h2 id="syntax">Syntax</h2>
+<pre><code class="language-markdown">&lt;Aside kind=&quot;note&quot;&gt;
+
+This is a note. It appears inline with the content.
+
+&lt;/Aside&gt;
+</code></pre>
+<p>The <code>kind</code> attribute determines the visual style and semantic meaning.</p>
+<p><code>kind</code> defaults to <code>note</code>. An Aside may also have a safe in-page <code>id</code>, or use
+the legacy <code>type</code> spelling as an alias for <code>kind</code>:</p>
+<pre><code class="language-markdown">&lt;Aside kind=&quot;warning&quot; id=&quot;before-you-publish&quot;&gt;
+
+Check the graph before publishing.
+
+&lt;/Aside&gt;
+</code></pre>
+<p>All attribute values are double-quoted. Aside ids use letters, digits, <code>_</code>,
+and <code>-</code>, starting with a letter or digit. Unknown or duplicate attributes are
+errors.</p>
+<h2 id="available-kinds">Available kinds</h2>
+<table>
+<thead>
+<tr>
+<th>Kind</th>
+<th>Use for</th>
+<th>Example Syntax</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>note</code></td>
+<td>Background context, implementation details, helpful explanations</td>
+<td><code>&amp;lt;Aside kind=&quot;note&quot;&amp;gt;...&amp;lt;/Aside&amp;gt;</code></td>
+</tr>
+<tr>
+<td><code>tip</code></td>
+<td>Performance optimizations, best practices, efficiency suggestions</td>
+<td><code>&amp;lt;Aside kind=&quot;tip&quot;&amp;gt;...&amp;lt;/Aside&amp;gt;</code></td>
+</tr>
+<tr>
+<td><code>info</code></td>
+<td>General informational callouts and architectural notes</td>
+<td><code>&amp;lt;Aside kind=&quot;info&quot;&amp;gt;...&amp;lt;/Aside&amp;gt;</code></td>
+</tr>
+<tr>
+<td><code>warning</code></td>
+<td>Breaking changes, compatibility issues, potential problems</td>
+<td><code>&amp;lt;Aside kind=&quot;warning&quot;&amp;gt;...&amp;lt;/Aside&amp;gt;</code></td>
+</tr>
+<tr>
+<td><code>danger</code></td>
+<td>High-risk actions that could cause data loss or security issues</td>
+<td><code>&amp;lt;Aside kind=&quot;danger&quot;&amp;gt;...&amp;lt;/Aside&amp;gt;</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="disclosure-details">Disclosure details</h2>
+<p>Use <code>&lt;Details&gt;</code> when a reader may want extra explanation without leaving the
+page. <code>summary</code> is required plain text; <code>id</code> is optional; <code>open=&quot;true&quot;</code> opens
+the disclosure by default.</p>
+<pre><code class="language-markdown">&lt;Details summary=&quot;Why does this matter?&quot; id=&quot;why-details&quot;&gt;
+
+The body is ordinary Markdown.
+
+&lt;/Details&gt;
+</code></pre>
+<details class="details" id="why-details">
+<summary>Why does this matter?</summary>
+<div class="details__body">
+<p>The body is ordinary Markdown, and the disclosure is not a graph node.</p>
+</div>
+</details>
+<h2 id="live-examples">Live Examples</h2>
+<p>Here are copy-pasteable snippets and live rendered examples for all 5 Aside kinds:</p>
+<h3 id="1-note">1. Note</h3>
+<pre><code class="language-markdown">&lt;Aside kind=&quot;note&quot;&gt;
+
+**Note:** Boris uses closed frontmatter. The accepted keys are `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, and `summary`.
+
+&lt;/Aside&gt;
+</code></pre>
+<aside class="admonition admonition--note" aria-label="Note">
+<p class="admonition__title">Note</p>
+<div class="admonition__body">
+<p><strong>Note:</strong> Boris uses closed frontmatter. The accepted keys are <code>id</code>, <code>title</code>, <code>parent</code>, <code>status</code>, <code>tags</code>, <code>relations</code>, <code>published_at</code>, and <code>summary</code>.</p>
+</div>
+</aside>
+<h3 id="2-tip">2. Tip</h3>
+<pre><code class="language-markdown">&lt;Aside kind=&quot;tip&quot;&gt;
+
+**Tip:** Use `boris validate` before a build; use `boris check` when you want a graph-health report after the graph is valid.
+
+&lt;/Aside&gt;
+</code></pre>
+<aside class="admonition admonition--tip" aria-label="Tip">
+<p class="admonition__title">Tip</p>
+<div class="admonition__body">
+<p><strong>Tip:</strong> Use <code>boris validate</code> before a build; use <code>boris check</code> when you want a graph-health report after the graph is valid.</p>
+</div>
+</aside>
+<h3 id="3-info">3. Info</h3>
+<pre><code class="language-markdown">&lt;Aside kind=&quot;info&quot;&gt;
+
+**Info:** Bare `boris` builds HTML under `dist/`. IR mode requires `--out`, and RAG export requires `--rag`.
+
+&lt;/Aside&gt;
+</code></pre>
+<aside class="admonition admonition--info" aria-label="Info">
+<p class="admonition__title">Info</p>
+<div class="admonition__body">
+<p><strong>Info:</strong> Bare <code>boris</code> builds HTML under <code>dist/</code>. IR mode requires <code>--out</code>, and RAG export requires <code>--rag</code>.</p>
+</div>
+</aside>
+<h3 id="4-warning">4. Warning</h3>
+<pre><code class="language-markdown">&lt;Aside kind=&quot;warning&quot;&gt;
+
+**Warning:** The `parent` key must reference another page's exact entity id. File paths and titles are rejected.
+
+&lt;/Aside&gt;
+</code></pre>
+<aside class="admonition admonition--warning" aria-label="Warning">
+<p class="admonition__title">Warning</p>
+<div class="admonition__body">
+<p><strong>Warning:</strong> The <code>parent</code> key must reference another page's exact entity id. File paths and titles are rejected.</p>
+</div>
+</aside>
+<h3 id="5-danger">5. Danger</h3>
+<pre><code class="language-markdown">&lt;Aside kind=&quot;danger&quot;&gt;
+
+**Danger:** Do not edit files under `dist/` directly. Outputs are completely overwritten on build.
+
+&lt;/Aside&gt;
+</code></pre>
+<aside class="admonition admonition--danger" aria-label="Danger">
+<p class="admonition__title">Danger</p>
+<div class="admonition__body">
+<p><strong>Danger:</strong> Do not edit files under <code>dist/</code> directly. Outputs are completely overwritten on build.</p>
+</div>
+</aside>
+<h2 id="rich-content-inside-asides">Rich Content Inside Asides</h2>
+<p>Asides support full Markdown formatting inside their body, including bold text, inline code, lists, and links:</p>
+<pre><code class="language-markdown">&lt;Aside kind=&quot;tip&quot;&gt;
+
+### Best Practices
+
+- Keep parent links explicit and validated.
+- Use `&amp;#91;&amp;#91;wiki-links&amp;#93;&amp;#93;` for safe cross-referencing: see [[guides/overview|Overview]].
+- Store reusable fragments in `content/includes/`.
+
+&lt;/Aside&gt;
+</code></pre>
+<aside class="admonition admonition--tip" aria-label="Tip">
+<p class="admonition__title">Tip</p>
+<div class="admonition__body">
+<h3 id="best-practices">Best Practices</h3>
+<ul>
+<li>Keep parent links explicit and validated.</li>
+<li>Use <code>&amp;#91;&amp;#91;wiki-links&amp;#93;&amp;#93;</code> for safe cross-referencing: see <a href="overview.html">Overview</a>.</li>
+<li>Store reusable fragments in <code>content/includes/</code>.</li>
+</ul>
+</div>
+</aside>
+<h2 id="rules-and-constraints">Rules and constraints</h2>
+<ul>
+<li>The opening tag <code>&lt;Aside kind=&quot;...&quot;&gt;</code> and closing tag <code>&lt;/Aside&gt;</code> must each be on their own line.</li>
+<li>Always include blank lines between the tags and the Markdown body content.</li>
+<li>Asides are <strong>in-document</strong> components — they stay in document order and do not produce separate pages or navigation nodes.</li>
+<li>Aside accepts <code>kind</code> (default <code>note</code>), optional <code>id</code>, and legacy <code>type</code> as a <code>kind</code> alias. Kinds are <code>note</code>, <code>tip</code>, <code>info</code>, <code>warning</code>, and <code>danger</code>. Unknown attributes or unrecognized PascalCase tags produce a component error.</li>
+<li>Boris also supports a constrained <code>&lt;Details summary=&quot;...&quot;&gt;</code> disclosure component. It accepts the required <code>summary</code>, optional <code>id</code>, and <code>open=&quot;true&quot;</code>; the body is ordinary Markdown and components cannot nest.</li>
+<li>Asides appear in RAG and IR export packaging using <code>:::kind</code> syntax — this is an export-only representation. Do not use <code>:::kind</code> syntax in your <code>content/</code> source files.</li>
+</ul>
+<h2 id="next-steps">Next steps</h2>
+<ul>
+<li><a href="building-pages.html">Building Pages</a> — other page authoring features</li>
+<li><a href="oliver-markdown.html">Markdown Showcase</a> — the full set of Markdown extensions Boris supports</li>
+</ul>
+
+</main>
+<footer class="site-footer">Boris · deterministic documentation compiler · Load → Roll → Ignite → Reset</footer>
+<script>
+(() => {
+  "use strict";
+  const ui = document.querySelector("[data-boris-search-ui]");
+  if (!ui) return;
+  const input = ui.querySelector("#site-search-input");
+  const form = ui.querySelector("form");
+  const status = ui.querySelector("[data-boris-search-status]");
+  const results = ui.querySelector("[data-boris-search-results]");
+  // Derive site-root-relative prefix from the page-relative theme stylesheet href
+  // emitted by asset-url ("" from index.html, "../" from guides/overview.html, …).
+  const siteRootPrefix = (() => {
+    const sheet = document.querySelector('link[rel="stylesheet"][href*="assets/"]');
+    const href = sheet ? (sheet.getAttribute("href") || "") : "";
+    const marker = href.lastIndexOf("assets/");
+    return marker >= 0 ? href.slice(0, marker) : "";
+  })();
+  if (form) form.action = siteRootPrefix + "_boris/search/";
+  const indexUrl = new URL(siteRootPrefix + "_boris/search/search-index.json", document.baseURI);
+  const expectedFormat = "boris-rendered-search-index";
+  const expectedSchema = 1;
+  let documents = [];
+
+  const normalize = value => String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const fields = section => [section.heading, section.text, section.code].map(normalize);
+  const excerpt = (section, terms) => {
+    const source = String(section.text || section.code || section.heading || "").replace(/\s+/g, " ").trim();
+    if (!source) return "";
+    const needle = terms.find(term => source.toLowerCase().indexOf(term) >= 0);
+    const start = needle ? Math.max(0, source.toLowerCase().indexOf(needle) - 48) : 0;
+    return (start ? "…" : "") + source.slice(start, start + 150) + (start + 150 < source.length ? "…" : "");
+  };
+  const scoreDocument = (doc, terms, phrase) => {
+    const title = normalize(doc.title);
+    let best = null;
+    (Array.isArray(doc.sections) ? doc.sections : []).forEach((section, sectionIndex) => {
+      const values = fields(section);
+      let score = 0;
+      terms.forEach(term => {
+        if (title.includes(term)) score += 12;
+        if (values[0].includes(term)) score += 8;
+        if (values[1].includes(term)) score += 2;
+        if (values[2].includes(term)) score += 1;
+      });
+      if (section.level === 1) score += 1;
+      if (phrase && (title.includes(phrase) || values.some(value => value.includes(phrase)))) score += 5;
+      if (score && (!best || score > best.score)) best = { doc, section, sectionIndex, score };
+    });
+    return best;
+  };
+  const setStatus = message => { status.textContent = message; };
+  const render = () => {
+    results.replaceChildren();
+    const query = normalize(input.value);
+    if (!query) { setStatus(documents.length ? "Type to search the site." : "Search index unavailable."); return; }
+    const terms = query.split(" ").filter(Boolean);
+    const matches = documents.map(doc => scoreDocument(doc, terms, query)).filter(Boolean).sort((a, b) => b.score - a.score || String(a.doc.path).localeCompare(String(b.doc.path)) || a.sectionIndex - b.sectionIndex);
+    if (!matches.length) { setStatus("No results. Try a different search."); return; }
+    setStatus(`${matches.length} result${matches.length === 1 ? "" : "s"}.`);
+    matches.slice(0, 12).forEach(match => {
+      const item = document.createElement("li"); item.className = "site-search__result";
+      const link = document.createElement("a"); link.href = new URL(siteRootPrefix + String(match.doc.path).replace(/^\/+/, "") + (match.section.fragment ? "#" + match.section.fragment : ""), document.baseURI).href;
+      const title = document.createElement("span"); title.className = "site-search__title"; title.textContent = match.section.heading || match.doc.title;
+      const path = document.createElement("span"); path.className = "site-search__path"; path.textContent = String(match.doc.path) + (match.section.fragment ? "#" + String(match.section.fragment) : "");
+      const text = document.createElement("span"); text.className = "site-search__excerpt"; text.textContent = excerpt(match.section, terms);
+      link.append(title, path, text); item.append(link); results.append(item);
+    });
+  };
+  form.addEventListener("submit", event => { event.preventDefault(); render(); input.focus(); });
+  input.addEventListener("input", render);
+  document.addEventListener("keydown", event => { if (event.key === "/" && document.activeElement !== input && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { event.preventDefault(); input.focus(); } if (event.key === "Escape" && document.activeElement === input) { input.value = ""; render(); } });
+  fetch(indexUrl, { credentials: "same-origin" }).then(response => { if (!response.ok) throw new Error("index request failed"); return response.json(); }).then(index => {
+    if (!index || index.format !== expectedFormat || index.schema_version !== expectedSchema || !Array.isArray(index.documents)) throw new Error("unsupported search index");
+    documents = index.documents.filter(doc => doc && typeof doc.path === "string" && typeof doc.title === "string" && Array.isArray(doc.sections)).map(doc => ({
+      path: doc.path,
+      title: doc.title,
+      sections: doc.sections.filter(section => section && typeof section.level === "number" && typeof section.heading === "string" && typeof section.fragment === "string" && typeof section.text === "string" && typeof section.code === "string")
+    }));
+    render();
+  }).catch(() => { documents = []; setStatus("Search index unavailable."); });
+})();
+</script>
+</body>
+</html>

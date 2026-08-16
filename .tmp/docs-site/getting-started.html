@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Getting Started · Boris</title>
+  <link rel="stylesheet" href="assets/css/boris.css">
+</head>
+<body>
+<aside class="site-sidebar">
+<header class="site-brand">
+<span class="site-brand__name">Boris</span>
+<span class="site-brand__tagline">A native compiler for documentation you can inspect, publish, and reuse.</span>
+</header>
+<section class="site-search" data-boris-search-ui aria-labelledby="site-search-label">
+<form action="_boris/search/" method="get" role="search" data-boris-search-form>
+<label class="site-search__label" id="site-search-label" for="site-search-input">Search documentation</label>
+<div class="site-search__controls">
+<input id="site-search-input" name="q" type="search" autocomplete="off" placeholder="Search…" spellcheck="false">
+<button type="submit">Search</button>
+</div>
+</form>
+<p class="site-search__status" data-boris-search-status role="status" aria-live="polite">Loading search…</p>
+<ol class="site-search__results" data-boris-search-results aria-label="Search results"></ol>
+<noscript><p class="site-search__fallback">Search needs JavaScript in this static site. Use the documentation navigation above.</p></noscript>
+</section>
+<details class="site-menu" open>
+<summary>Documentation menu</summary>
+<nav class="site-nav" aria-label="Site">
+<ul>
+<li class="site-nav__trunk is-current"><a href="getting-started.html" aria-current="page">Getting Started</a>
+<ul>
+<li class="site-nav__satellite"><a href="guides/cli-and-modes.html">CLI &amp; Output Modes</a></li>
+</ul>
+</li>
+<li class="site-nav__trunk"><a href="index.html">Boris Documentation</a>
+<ul>
+<li class="site-nav__satellite"><a href="comparison.html">Why Boris? (Comparison &amp; Rationale)</a></li>
+<li class="site-nav__satellite"><a href="guides.html">User Guides</a>
+<ul>
+<li class="site-nav__satellite"><a href="guides/overview.html">Content Model &amp; Pipeline</a>
+<ul>
+<li class="site-nav__satellite"><a href="guides/asides.html">Asides &amp; Admonitions</a></li>
+<li class="site-nav__satellite"><a href="guides/building-pages.html">Building Pages</a></li>
+<li class="site-nav__satellite"><a href="guides/editor.html">Boris Editor</a></li>
+<li class="site-nav__satellite"><a href="guides/migration.html">Migrating to Boris</a></li>
+<li class="site-nav__satellite"><a href="guides/oliver-markdown.html">Markdown Showcase</a></li>
+<li class="site-nav__satellite"><a href="guides/rag-export.html">AI &amp; Machine Outputs</a></li>
+<li class="site-nav__satellite"><a href="guides/search-and-ui.html">Search &amp; Browser UI</a></li>
+<li class="site-nav__satellite"><a href="guides/themes-and-layouts.html">Themes &amp; Layouts</a></li>
+<li class="site-nav__satellite"><a href="guides/trunk-satellite.html">Trunk &amp; Satellite — Content Hierarchy</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="guides/publishing.html">Publishing Targets</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="reference.html">Reference</a>
+<ul>
+<li class="site-nav__satellite"><a href="markdown-feature-usage.html">Markdown Feature Usage Register</a></li>
+<li class="site-nav__satellite"><a href="reference/commands.html">Command Reference</a></li>
+<li class="site-nav__satellite"><a href="reference/diagnostics.html">Diagnostics &amp; Troubleshooting</a></li>
+<li class="site-nav__satellite"><a href="reference/frontmatter.html">Frontmatter Reference</a></li>
+<li class="site-nav__satellite"><a href="reference/outputs.html">Outputs &amp; Artifacts</a></li>
+<li class="site-nav__satellite"><a href="reference/relationships.html">Relationships</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="technology-and-rationale.html">Technology &amp; Rationale</a></li>
+</ul>
+</li>
+</ul>
+</nav>
+</details>
+</aside>
+<nav class="breadcrumb" aria-label="Breadcrumb">
+<ol>
+<li aria-current="page">Getting Started</li>
+</ol>
+</nav>
+<nav class="page-toc" aria-label="On this page">
+<ul>
+<li class="page-toc__l1"><a href="#getting-started">Getting Started with Boris</a></li>
+<li class="page-toc__l2"><a href="#build-boris">1. Build Boris</a></li>
+<li class="page-toc__l2"><a href="#inspect">2. Inspect the sample content</a></li>
+<li class="page-toc__l2"><a href="#preflight">3. Preflight without publishing</a></li>
+<li class="page-toc__l2"><a href="#publish-local">4. Publish the static site</a></li>
+<li class="page-toc__l2"><a href="#hosted">5. Then choose a hosted target</a></li>
+<li class="page-toc__l2"><a href="#next">What to learn next</a></li>
+</ul>
+</nav>
+<main data-boris-search-root>
+<h1 id="getting-started">Getting Started with Boris</h1>
+<p>Boris is a <strong>graph-native publication compiler</strong>. Markdown in. A validated
+Trunk/Satellite graph. Then you choose a target. HTML <code>dist/</code> is the default
+— not the product.</p>
+<p>The shortest useful path is: build Boris, preflight the sample content, build
+the site, open the HTML. Hosted targets come after that.</p>
+<aside class="admonition admonition--info" id="search-comes-along" aria-label="Info">
+<p class="admonition__title">Info</p>
+<div class="admonition__body">
+<p>The default HTML build also publishes a rendered-search artifact and
+target-local publication evidence. You do not need to run a second search
+index command for a normal Boris build.</p>
+</div>
+</aside>
+<p>Prefer closed frontmatter keys (<code>id</code>, <code>title</code>, <code>parent</code>, <code>status</code>, <code>tags</code>,
+<code>relations</code>, <code>published_at</code>, <code>summary</code>) and
+double-quoted Aside attributes. Fragment files under <code>content/includes/</code> are
+<strong>not</strong> site pages — only the include directive pulls them into a page body.</p>
+<h2 id="build-boris">1. Build Boris</h2>
+<p>Building Boris itself requires:</p>
+<ul>
+<li><strong>Zig 0.16+</strong> — the compiler language Boris is written in. Markdown
+rendering uses the Oliver library, pinned in <code>build.zig.zon</code> and fetched by
+Zig at build time — no CMake or other host tools are required.</li>
+</ul>
+<pre><code class="language-bash">git clone https://github.com/drawmeanelephant/boris.git
+cd boris
+zig build
+</code></pre>
+<p>The binary is written to <code>./zig-out/bin/boris</code>.</p>
+<h2 id="inspect">2. Inspect the sample content</h2>
+<p>Pages are ordinary Markdown files under <code>content/</code>. The path without its
+extension is normally the page's entity id: <code>content/guides/overview.md</code>
+becomes <code>guides/overview</code>. Start with
+<a href="guides/building-pages.html">Building Pages</a> if you want to add a page, or
+<a href="guides/oliver-markdown.html">the Markdown showcase</a> if you want to see what
+Oliver will actually render.</p>
+<h2 id="preflight">3. Preflight without publishing</h2>
+<pre><code class="language-bash">./zig-out/bin/boris validate --quiet
+</code></pre>
+<p><code>validate</code> runs Boris's authoritative HTML source and configuration checks,
+including graph resolution, component parsing, layout loading, and bounded
+render preparation. It creates no HTML, cache, search, or publication-evidence
+files.</p>
+<aside class="admonition admonition--tip" id="validate-vs-check" aria-label="Tip">
+<p class="admonition__title">Tip</p>
+<div class="admonition__body">
+<p><code>validate</code> is not <code>check</code>. <code>check</code> is graph-health policy after the graph is
+already valid. Use <code>validate</code> to ask “would this compile?” Use <code>check</code> to
+ask “is this graph healthy?”</p>
+</div>
+</aside>
+<h2 id="publish-local">4. Publish the static site</h2>
+<pre><code class="language-bash">./zig-out/bin/boris build --quiet
+</code></pre>
+<p>The default target is <code>dist/</code>. Open <code>dist/index.html</code> directly for reading, or
+serve the <code>dist/</code> directory with any static file server when you want the
+browser search UI to fetch its same-origin index.</p>
+<p>A first-time author publishes <strong>local HTML</strong>. Hosted targets come after you
+can open <code>dist/index.html</code> and point at a broken parent with a straight face.</p>
+<h2 id="hosted">5. Then choose a hosted target</h2>
+<p>Local <code>dist/</code> is the default. It is not the only exit.</p>
+<table>
+<thead>
+<tr>
+<th align="left">Next</th>
+<th align="left">When</th>
+<th align="left">Guide</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">Stay local</td>
+<td align="left">You wanted files</td>
+<td align="left">You are done</td>
+</tr>
+<tr>
+<td align="left">GitHub Pages</td>
+<td align="left">First verified hosted target</td>
+<td align="left"><a href="guides/publishing.html#github-pages">Publishing → Pages</a></td>
+</tr>
+<tr>
+<td align="left">Standard.site</td>
+<td align="left">Atmosphere records</td>
+<td align="left"><a href="guides/publishing.html#standard-site">Publishing → Standard.site</a></td>
+</tr>
+<tr>
+<td align="left">Editor</td>
+<td align="left">You want a local authoring UI</td>
+<td align="left"><a href="guides/editor.html">Boris Editor</a></td>
+</tr>
+</tbody>
+</table>
+<details class="details">
+<summary>What you should not do on day one</summary>
+<div class="details__body">
+<p>Do not start with browser OAuth against bsky.social. Do not type an app
+password on argv. Do not edit files under <code>dist/</code>. Do not run the standalone
+search-index tool after a normal Boris build. Do not invent a <code>boris nostr</code>
+command because you read a roadmap issue.</p>
+</div>
+</details>
+<h2 id="next">What to learn next</h2>
+<ul>
+<li><a href="guides/overview.html">Content Model &amp; Pipeline</a> — how discovery, graph
+validation, rendering, and projections fit together.</li>
+<li><a href="guides/publishing.html">Publishing Targets</a> — Pages, Standard.site, and the
+evidence chain.</li>
+<li><a href="guides/cli-and-modes.html">CLI &amp; Output Modes</a> — build, validate, watch, graph
+analysis, layouts, and machine exports.</li>
+<li><a href="guides/oliver-markdown.html">Markdown Showcase</a> — tables, footnotes, definition
+lists, heading ids, and everything this site is allowed to flex.</li>
+<li><a href="reference/frontmatter.html">Frontmatter Reference</a> — the complete closed author
+grammar.</li>
+<li><a href="reference/outputs.html">Outputs &amp; Artifacts</a> — HTML, search, IR, RAG, Context,
+<code>llms.txt</code>, RSS, sitemap, and publication evidence.</li>
+</ul>
+
+</main>
+<footer class="site-footer">Boris · deterministic documentation compiler · Load → Roll → Ignite → Reset</footer>
+<script>
+(() => {
+  "use strict";
+  const ui = document.querySelector("[data-boris-search-ui]");
+  if (!ui) return;
+  const input = ui.querySelector("#site-search-input");
+  const form = ui.querySelector("form");
+  const status = ui.querySelector("[data-boris-search-status]");
+  const results = ui.querySelector("[data-boris-search-results]");
+  // Derive site-root-relative prefix from the page-relative theme stylesheet href
+  // emitted by asset-url ("" from index.html, "../" from guides/overview.html, …).
+  const siteRootPrefix = (() => {
+    const sheet = document.querySelector('link[rel="stylesheet"][href*="assets/"]');
+    const href = sheet ? (sheet.getAttribute("href") || "") : "";
+    const marker = href.lastIndexOf("assets/");
+    return marker >= 0 ? href.slice(0, marker) : "";
+  })();
+  if (form) form.action = siteRootPrefix + "_boris/search/";
+  const indexUrl = new URL(siteRootPrefix + "_boris/search/search-index.json", document.baseURI);
+  const expectedFormat = "boris-rendered-search-index";
+  const expectedSchema = 1;
+  let documents = [];
+
+  const normalize = value => String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const fields = section => [section.heading, section.text, section.code].map(normalize);
+  const excerpt = (section, terms) => {
+    const source = String(section.text || section.code || section.heading || "").replace(/\s+/g, " ").trim();
+    if (!source) return "";
+    const needle = terms.find(term => source.toLowerCase().indexOf(term) >= 0);
+    const start = needle ? Math.max(0, source.toLowerCase().indexOf(needle) - 48) : 0;
+    return (start ? "…" : "") + source.slice(start, start + 150) + (start + 150 < source.length ? "…" : "");
+  };
+  const scoreDocument = (doc, terms, phrase) => {
+    const title = normalize(doc.title);
+    let best = null;
+    (Array.isArray(doc.sections) ? doc.sections : []).forEach((section, sectionIndex) => {
+      const values = fields(section);
+      let score = 0;
+      terms.forEach(term => {
+        if (title.includes(term)) score += 12;
+        if (values[0].includes(term)) score += 8;
+        if (values[1].includes(term)) score += 2;
+        if (values[2].includes(term)) score += 1;
+      });
+      if (section.level === 1) score += 1;
+      if (phrase && (title.includes(phrase) || values.some(value => value.includes(phrase)))) score += 5;
+      if (score && (!best || score > best.score)) best = { doc, section, sectionIndex, score };
+    });
+    return best;
+  };
+  const setStatus = message => { status.textContent = message; };
+  const render = () => {
+    results.replaceChildren();
+    const query = normalize(input.value);
+    if (!query) { setStatus(documents.length ? "Type to search the site." : "Search index unavailable."); return; }
+    const terms = query.split(" ").filter(Boolean);
+    const matches = documents.map(doc => scoreDocument(doc, terms, query)).filter(Boolean).sort((a, b) => b.score - a.score || String(a.doc.path).localeCompare(String(b.doc.path)) || a.sectionIndex - b.sectionIndex);
+    if (!matches.length) { setStatus("No results. Try a different search."); return; }
+    setStatus(`${matches.length} result${matches.length === 1 ? "" : "s"}.`);
+    matches.slice(0, 12).forEach(match => {
+      const item = document.createElement("li"); item.className = "site-search__result";
+      const link = document.createElement("a"); link.href = new URL(siteRootPrefix + String(match.doc.path).replace(/^\/+/, "") + (match.section.fragment ? "#" + match.section.fragment : ""), document.baseURI).href;
+      const title = document.createElement("span"); title.className = "site-search__title"; title.textContent = match.section.heading || match.doc.title;
+      const path = document.createElement("span"); path.className = "site-search__path"; path.textContent = String(match.doc.path) + (match.section.fragment ? "#" + String(match.section.fragment) : "");
+      const text = document.createElement("span"); text.className = "site-search__excerpt"; text.textContent = excerpt(match.section, terms);
+      link.append(title, path, text); item.append(link); results.append(item);
+    });
+  };
+  form.addEventListener("submit", event => { event.preventDefault(); render(); input.focus(); });
+  input.addEventListener("input", render);
+  document.addEventListener("keydown", event => { if (event.key === "/" && document.activeElement !== input && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { event.preventDefault(); input.focus(); } if (event.key === "Escape" && document.activeElement === input) { input.value = ""; render(); } });
+  fetch(indexUrl, { credentials: "same-origin" }).then(response => { if (!response.ok) throw new Error("index request failed"); return response.json(); }).then(index => {
+    if (!index || index.format !== expectedFormat || index.schema_version !== expectedSchema || !Array.isArray(index.documents)) throw new Error("unsupported search index");
+    documents = index.documents.filter(doc => doc && typeof doc.path === "string" && typeof doc.title === "string" && Array.isArray(doc.sections)).map(doc => ({
+      path: doc.path,
+      title: doc.title,
+      sections: doc.sections.filter(section => section && typeof section.level === "number" && typeof section.heading === "string" && typeof section.fragment === "string" && typeof section.text === "string" && typeof section.code === "string")
+    }));
+    render();
+  }).catch(() => { documents = []; setStatus("Search index unavailable."); });
+})();
+</script>
+</body>
+</html>

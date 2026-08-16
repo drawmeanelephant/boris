@@ -1,0 +1,1252 @@
+{
+  "format": "boris-publication-touches",
+  "schema_version": 1,
+  "target": "default",
+  "inputs": {
+    "artifacts": {
+      "path": "_boris/proof/artifacts.json",
+      "bytes": 10575,
+      "sha256": "c9a7d59e89ec42d89df8bce062e4ab1566d127c7b7d75b5de26e5d82244c8bfa",
+      "format": "boris-publication-artifacts",
+      "schema_version": 1,
+      "target": "default",
+      "artifact_count": 29
+    },
+    "checks": {
+      "path": "_boris/proof/checks.json",
+      "bytes": 2247,
+      "sha256": "94d8eaa175514c8e1b55489517f0090678bda85184951fdca79da2fb4cf2d880",
+      "format": "boris-publication-checks",
+      "schema_version": 1,
+      "target": "default",
+      "check_count": 3,
+      "finding_count": 0
+    },
+    "claims": {
+      "path": "_boris/proof/claims.json",
+      "bytes": 6514,
+      "sha256": "2eea60a02410dd10a37e8a4e4cb38dd3041d31f56b42520d7f4e2a4ec9cc82d9",
+      "format": "boris-publication-claims",
+      "schema_version": 1,
+      "target": "default",
+      "claim_count": 3,
+      "limitation_count": 6
+    }
+  },
+  "nodes": [
+    {
+      "kind": "target",
+      "id": "target",
+      "metadata": {
+        "target": "default"
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:_boris/search/search-index.json",
+      "metadata": {
+        "inventory_index": 0,
+        "path": "_boris/search/search-index.json",
+        "kind": "rendered-search",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:assets/css/boris.css",
+      "metadata": {
+        "inventory_index": 1,
+        "path": "assets/css/boris.css",
+        "kind": "theme-asset",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:comparison.html",
+      "metadata": {
+        "inventory_index": 2,
+        "path": "comparison.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:getting-started.html",
+      "metadata": {
+        "inventory_index": 3,
+        "path": "getting-started.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:guides.html",
+      "metadata": {
+        "inventory_index": 4,
+        "path": "guides.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:guides/asides.html",
+      "metadata": {
+        "inventory_index": 5,
+        "path": "guides/asides.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:guides/building-pages.html",
+      "metadata": {
+        "inventory_index": 6,
+        "path": "guides/building-pages.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:guides/cli-and-modes.html",
+      "metadata": {
+        "inventory_index": 7,
+        "path": "guides/cli-and-modes.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:guides/editor.html",
+      "metadata": {
+        "inventory_index": 8,
+        "path": "guides/editor.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:guides/migration.html",
+      "metadata": {
+        "inventory_index": 9,
+        "path": "guides/migration.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:guides/oliver-markdown.html",
+      "metadata": {
+        "inventory_index": 10,
+        "path": "guides/oliver-markdown.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:guides/overview.html",
+      "metadata": {
+        "inventory_index": 11,
+        "path": "guides/overview.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:guides/publishing.html",
+      "metadata": {
+        "inventory_index": 12,
+        "path": "guides/publishing.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:guides/rag-export.html",
+      "metadata": {
+        "inventory_index": 13,
+        "path": "guides/rag-export.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:guides/search-and-ui.html",
+      "metadata": {
+        "inventory_index": 14,
+        "path": "guides/search-and-ui.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:guides/themes-and-layouts.html",
+      "metadata": {
+        "inventory_index": 15,
+        "path": "guides/themes-and-layouts.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:guides/trunk-satellite.html",
+      "metadata": {
+        "inventory_index": 16,
+        "path": "guides/trunk-satellite.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:index.assets/desktop.png",
+      "metadata": {
+        "inventory_index": 17,
+        "path": "index.assets/desktop.png",
+        "kind": "content-asset",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:index.assets/mobile.png",
+      "metadata": {
+        "inventory_index": 18,
+        "path": "index.assets/mobile.png",
+        "kind": "content-asset",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:index.assets/search_open.png",
+      "metadata": {
+        "inventory_index": 19,
+        "path": "index.assets/search_open.png",
+        "kind": "content-asset",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:index.html",
+      "metadata": {
+        "inventory_index": 20,
+        "path": "index.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:markdown-feature-usage.html",
+      "metadata": {
+        "inventory_index": 21,
+        "path": "markdown-feature-usage.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:reference.html",
+      "metadata": {
+        "inventory_index": 22,
+        "path": "reference.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:reference/commands.html",
+      "metadata": {
+        "inventory_index": 23,
+        "path": "reference/commands.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:reference/diagnostics.html",
+      "metadata": {
+        "inventory_index": 24,
+        "path": "reference/diagnostics.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:reference/frontmatter.html",
+      "metadata": {
+        "inventory_index": 25,
+        "path": "reference/frontmatter.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:reference/outputs.html",
+      "metadata": {
+        "inventory_index": 26,
+        "path": "reference/outputs.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:reference/relationships.html",
+      "metadata": {
+        "inventory_index": 27,
+        "path": "reference/relationships.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "artifact",
+      "id": "artifact:technology-and-rationale.html",
+      "metadata": {
+        "inventory_index": 28,
+        "path": "technology-and-rationale.html",
+        "kind": "html-page",
+        "status": "committed",
+        "required": true
+      }
+    },
+    {
+      "kind": "check",
+      "id": "check:artifact-integrity",
+      "metadata": {
+        "check_index": 0,
+        "check_id": "artifact-integrity",
+        "status": "passed",
+        "coverage": "complete"
+      }
+    },
+    {
+      "kind": "check",
+      "id": "check:rendered-html",
+      "metadata": {
+        "check_index": 1,
+        "check_id": "rendered-html",
+        "status": "passed",
+        "coverage": "complete"
+      }
+    },
+    {
+      "kind": "check",
+      "id": "check:rendered-search",
+      "metadata": {
+        "check_index": 2,
+        "check_id": "rendered-search",
+        "status": "passed",
+        "coverage": "complete"
+      }
+    },
+    {
+      "kind": "claim",
+      "id": "claim:committed-artifacts-match-inventory",
+      "metadata": {
+        "claim_index": 0,
+        "claim_id": "committed-artifacts-match-inventory",
+        "status": "verified"
+      }
+    },
+    {
+      "kind": "claim",
+      "id": "claim:rendered-html-passed-declared-audit",
+      "metadata": {
+        "claim_index": 1,
+        "claim_id": "rendered-html-passed-declared-audit",
+        "status": "verified"
+      }
+    },
+    {
+      "kind": "claim",
+      "id": "claim:rendered-search-matches-selected-html",
+      "metadata": {
+        "claim_index": 2,
+        "claim_id": "rendered-search-matches-selected-html",
+        "status": "verified"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:target-local-only",
+      "metadata": {
+        "limitation_index": 0,
+        "limitation_id": "target-local-only",
+        "source": "docs/contracts/publication-checks.md#authority-and-transaction-boundary"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:no-deployment-verification",
+      "metadata": {
+        "limitation_index": 1,
+        "limitation_id": "no-deployment-verification",
+        "source": "docs/contracts/publication-model.md#verification-vocabulary-and-claims"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:no-accessibility-verification",
+      "metadata": {
+        "limitation_index": 2,
+        "limitation_id": "no-accessibility-verification",
+        "source": "docs/contracts/publication-model.md#projections"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:no-prose-quality-verification",
+      "metadata": {
+        "limitation_index": 3,
+        "limitation_id": "no-prose-quality-verification",
+        "source": "docs/contracts/publication-model.md#verification-vocabulary-and-claims"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:no-universal-reproducibility-claim",
+      "metadata": {
+        "limitation_index": 4,
+        "limitation_id": "no-universal-reproducibility-claim",
+        "source": "docs/contracts/publication-model.md#verification-vocabulary-and-claims"
+      }
+    },
+    {
+      "kind": "limitation",
+      "id": "limitation:omitted-projections-not-certified",
+      "metadata": {
+        "limitation_index": 5,
+        "limitation_id": "omitted-projections-not-certified",
+        "source": "docs/contracts/publication-model.md#the-conductor-rule"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:_boris/search/search-index.json"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:assets/css/boris.css"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:comparison.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:getting-started.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:guides.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:guides/asides.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:guides/building-pages.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:guides/cli-and-modes.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:guides/editor.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:guides/migration.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:guides/oliver-markdown.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:guides/overview.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:guides/publishing.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:guides/rag-export.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:guides/search-and-ui.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:guides/themes-and-layouts.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:guides/trunk-satellite.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:index.assets/desktop.png"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:index.assets/mobile.png"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:index.assets/search_open.png"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:index.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:markdown-feature-usage.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:reference.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:reference/commands.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:reference/diagnostics.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:reference/frontmatter.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:reference/outputs.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:reference/relationships.html"
+    },
+    {
+      "kind": "target-owns-artifact",
+      "from": "target",
+      "to": "artifact:technology-and-rationale.html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:_boris/search/search-index.json",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:_boris/search/search-index.json",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:assets/css/boris.css",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:comparison.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:comparison.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:getting-started.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:getting-started.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/asides.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/asides.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/building-pages.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/building-pages.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/cli-and-modes.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/cli-and-modes.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/editor.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/editor.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/migration.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/migration.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/oliver-markdown.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/oliver-markdown.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/overview.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/overview.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/publishing.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/publishing.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/rag-export.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/rag-export.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/search-and-ui.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/search-and-ui.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/themes-and-layouts.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/themes-and-layouts.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/trunk-satellite.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:guides/trunk-satellite.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:index.assets/desktop.png",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:index.assets/mobile.png",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:index.assets/search_open.png",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:index.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:index.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:markdown-feature-usage.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:markdown-feature-usage.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:reference.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:reference.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:reference/commands.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:reference/commands.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:reference/diagnostics.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:reference/diagnostics.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:reference/frontmatter.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:reference/frontmatter.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:reference/outputs.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:reference/outputs.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:reference/relationships.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:reference/relationships.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:technology-and-rationale.html",
+      "to": "check:artifact-integrity"
+    },
+    {
+      "kind": "artifact-subject-of-check",
+      "from": "artifact:technology-and-rationale.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:_boris/search/search-index.json",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:assets/css/boris.css",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:comparison.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:comparison.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:getting-started.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:getting-started.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/asides.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/asides.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/building-pages.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/building-pages.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/cli-and-modes.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/cli-and-modes.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/editor.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/editor.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/migration.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/migration.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/oliver-markdown.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/oliver-markdown.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/overview.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/overview.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/publishing.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/publishing.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/rag-export.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/rag-export.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/search-and-ui.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/search-and-ui.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/themes-and-layouts.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/themes-and-layouts.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/trunk-satellite.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:guides/trunk-satellite.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:index.assets/desktop.png",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:index.assets/mobile.png",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:index.assets/search_open.png",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:index.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:index.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:markdown-feature-usage.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:markdown-feature-usage.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:reference.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:reference.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:reference/commands.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:reference/commands.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:reference/diagnostics.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:reference/diagnostics.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:reference/frontmatter.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:reference/frontmatter.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:reference/outputs.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:reference/outputs.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:reference/relationships.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:reference/relationships.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:technology-and-rationale.html",
+      "to": "check:rendered-html"
+    },
+    {
+      "kind": "artifact-supports-check",
+      "from": "artifact:technology-and-rationale.html",
+      "to": "check:rendered-search"
+    },
+    {
+      "kind": "check-supports-claim",
+      "from": "check:artifact-integrity",
+      "to": "claim:committed-artifacts-match-inventory"
+    },
+    {
+      "kind": "check-supports-claim",
+      "from": "check:rendered-html",
+      "to": "claim:rendered-html-passed-declared-audit"
+    },
+    {
+      "kind": "check-supports-claim",
+      "from": "check:rendered-search",
+      "to": "claim:rendered-search-matches-selected-html"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:target-local-only"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:no-deployment-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:no-accessibility-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:no-prose-quality-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:committed-artifacts-match-inventory",
+      "to": "limitation:no-universal-reproducibility-claim"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:target-local-only"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:no-deployment-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:no-accessibility-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:no-prose-quality-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-html-passed-declared-audit",
+      "to": "limitation:no-universal-reproducibility-claim"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:target-local-only"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:no-deployment-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:no-accessibility-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:no-prose-quality-verification"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:no-universal-reproducibility-claim"
+    },
+    {
+      "kind": "claim-limited-by",
+      "from": "claim:rendered-search-matches-selected-html",
+      "to": "limitation:omitted-projections-not-certified"
+    }
+  ]
+}

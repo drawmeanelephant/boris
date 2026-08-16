@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Command Reference · Boris</title>
+  <link rel="stylesheet" href="../assets/css/boris.css">
+</head>
+<body>
+<aside class="site-sidebar">
+<header class="site-brand">
+<span class="site-brand__name">Boris</span>
+<span class="site-brand__tagline">A native compiler for documentation you can inspect, publish, and reuse.</span>
+</header>
+<section class="site-search" data-boris-search-ui aria-labelledby="site-search-label">
+<form action="_boris/search/" method="get" role="search" data-boris-search-form>
+<label class="site-search__label" id="site-search-label" for="site-search-input">Search documentation</label>
+<div class="site-search__controls">
+<input id="site-search-input" name="q" type="search" autocomplete="off" placeholder="Search…" spellcheck="false">
+<button type="submit">Search</button>
+</div>
+</form>
+<p class="site-search__status" data-boris-search-status role="status" aria-live="polite">Loading search…</p>
+<ol class="site-search__results" data-boris-search-results aria-label="Search results"></ol>
+<noscript><p class="site-search__fallback">Search needs JavaScript in this static site. Use the documentation navigation above.</p></noscript>
+</section>
+<details class="site-menu" open>
+<summary>Documentation menu</summary>
+<nav class="site-nav" aria-label="Site">
+<ul>
+<li class="site-nav__trunk"><a href="../getting-started.html">Getting Started</a>
+<ul>
+<li class="site-nav__satellite"><a href="../guides/cli-and-modes.html">CLI &amp; Output Modes</a></li>
+</ul>
+</li>
+<li class="site-nav__trunk is-ancestor"><a href="../index.html">Boris Documentation</a>
+<ul>
+<li class="site-nav__satellite"><a href="../comparison.html">Why Boris? (Comparison &amp; Rationale)</a></li>
+<li class="site-nav__satellite"><a href="../guides.html">User Guides</a>
+<ul>
+<li class="site-nav__satellite"><a href="../guides/overview.html">Content Model &amp; Pipeline</a>
+<ul>
+<li class="site-nav__satellite"><a href="../guides/asides.html">Asides &amp; Admonitions</a></li>
+<li class="site-nav__satellite"><a href="../guides/building-pages.html">Building Pages</a></li>
+<li class="site-nav__satellite"><a href="../guides/editor.html">Boris Editor</a></li>
+<li class="site-nav__satellite"><a href="../guides/migration.html">Migrating to Boris</a></li>
+<li class="site-nav__satellite"><a href="../guides/oliver-markdown.html">Markdown Showcase</a></li>
+<li class="site-nav__satellite"><a href="../guides/rag-export.html">AI &amp; Machine Outputs</a></li>
+<li class="site-nav__satellite"><a href="../guides/search-and-ui.html">Search &amp; Browser UI</a></li>
+<li class="site-nav__satellite"><a href="../guides/themes-and-layouts.html">Themes &amp; Layouts</a></li>
+<li class="site-nav__satellite"><a href="../guides/trunk-satellite.html">Trunk &amp; Satellite — Content Hierarchy</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="../guides/publishing.html">Publishing Targets</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite is-ancestor"><a href="../reference.html">Reference</a>
+<ul>
+<li class="site-nav__satellite"><a href="../markdown-feature-usage.html">Markdown Feature Usage Register</a></li>
+<li class="site-nav__satellite is-current"><a href="commands.html" aria-current="page">Command Reference</a></li>
+<li class="site-nav__satellite"><a href="diagnostics.html">Diagnostics &amp; Troubleshooting</a></li>
+<li class="site-nav__satellite"><a href="frontmatter.html">Frontmatter Reference</a></li>
+<li class="site-nav__satellite"><a href="outputs.html">Outputs &amp; Artifacts</a></li>
+<li class="site-nav__satellite"><a href="relationships.html">Relationships</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="../technology-and-rationale.html">Technology &amp; Rationale</a></li>
+</ul>
+</li>
+</ul>
+</nav>
+</details>
+</aside>
+<nav class="breadcrumb" aria-label="Breadcrumb">
+<ol>
+<li><a href="../index.html">Boris Documentation</a></li>
+<li><a href="../reference.html">Reference</a></li>
+<li aria-current="page">Command Reference</li>
+</ol>
+</nav>
+<nav class="page-toc" aria-label="On this page">
+<ul>
+<li class="page-toc__l1"><a href="#command-reference">Command Reference</a></li>
+<li class="page-toc__l2"><a href="#commands-at-a-glance">Commands at a glance</a></li>
+<li class="page-toc__l2"><a href="#basic-usage">Basic usage</a></li>
+<li class="page-toc__l2"><a href="#html-build-and-validation-options">HTML build and validation options</a></li>
+<li class="page-toc__l2"><a href="#machine-and-publication-projections">Machine and publication projections</a></li>
+<li class="page-toc__l3"><a href="#json-ir">JSON IR</a></li>
+<li class="page-toc__l3"><a href="#rag-corpus">RAG corpus</a></li>
+<li class="page-toc__l3"><a href="#context-bundle">Context bundle</a></li>
+<li class="page-toc__l3"><a href="#llmstxt">llms.txt</a></li>
+<li class="page-toc__l3"><a href="#rss-20">RSS 2.0</a></li>
+<li class="page-toc__l3"><a href="#xml-sitemap">XML sitemap</a></li>
+<li class="page-toc__l2"><a href="#analysis-output">Analysis output</a></li>
+<li class="page-toc__l2"><a href="#publication-profiles">Publication profiles</a></li>
+<li class="page-toc__l2"><a href="#standardsite-family">Standard.site family</a></li>
+<li class="page-toc__l2"><a href="#exit-codes">Exit codes</a></li>
+<li class="page-toc__l2"><a href="#common-options">Common options</a></li>
+<li class="page-toc__l2"><a href="#related-pages">Related pages</a></li>
+</ul>
+</nav>
+<main data-boris-search-root>
+<h1 id="command-reference">Command Reference</h1>
+<p>The public CLI has six core commands plus the <code>standard-site</code> family. With no
+command, Boris runs <code>build</code> and publishes an HTML site under <code>dist/</code> — the
+default target, not the only one.</p>
+<h2 id="commands-at-a-glance">Commands at a glance</h2>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+<th align="right">Writes by default?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>build</code></td>
+<td>Compile HTML or one selected machine/publication projection</td>
+<td align="right">Yes, to the selected output</td>
+</tr>
+<tr>
+<td><code>validate</code></td>
+<td>Run the HTML compiler preflight without publishing</td>
+<td align="right">No</td>
+</tr>
+<tr>
+<td><code>watch</code></td>
+<td>Build HTML, then watch for changes and rebuild</td>
+<td align="right">Yes</td>
+</tr>
+<tr>
+<td><code>check</code></td>
+<td>Report graph and dependency health after validation</td>
+<td align="right">No</td>
+</tr>
+<tr>
+<td><code>impact ID</code></td>
+<td>Report transitive dependents of a page or source endpoint</td>
+<td align="right">No</td>
+</tr>
+<tr>
+<td><code>plan --profile PATH</code></td>
+<td>Normalize a publication profile without publishing</td>
+<td align="right">No</td>
+</tr>
+<tr>
+<td><code>standard-site …</code></td>
+<td>Atmosphere plan / records / login / publish / smoke / logout</td>
+<td align="right">Depends on the subcommand</td>
+</tr>
+</tbody>
+</table>
+<h2 id="basic-usage">Basic usage</h2>
+<pre><code class="language-bash">./zig-out/bin/boris build --input content --html-dir dist
+./zig-out/bin/boris                         # same default HTML build
+./zig-out/bin/boris validate --input content --quiet
+./zig-out/bin/boris watch --input content --html-dir dist
+</code></pre>
+<p><code>validate</code> is the authoritative no-publication HTML preflight. It checks the
+same content, graph, renderer, layout, theme, target, and sitemap
+configuration used by an HTML build, but writes no HTML, cache, search, IR,
+RAG, Context,
+<code>llms.txt</code>, RSS, sitemap, or publication-evidence files.</p>
+<p><code>check</code> is different: it runs Documentation Intelligence over a valid frozen
+graph. It can return exit <code>1</code> for a policy finding such as an unreferenced
+page, even when an HTML build is valid. Use <code>impact ID</code> to inspect transitive
+dependents. Neither command checks layout/theme rendering or external URLs.</p>
+<h2 id="html-build-and-validation-options">HTML build and validation options</h2>
+<pre><code class="language-bash">./zig-out/bin/boris build \
+  --input content \
+  --html-layout themes/boris/layouts/main.html \
+  --html-dir dist
+
+./zig-out/bin/boris validate \
+  --input content \
+  --html-layout themes/boris/layouts/main.html \
+  --html-dir .tmp/validate
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--input DIR</code></td>
+<td><code>content</code></td>
+<td>Content root</td>
+</tr>
+<tr>
+<td><code>--html-dir DIR</code></td>
+<td><code>dist</code></td>
+<td>Single HTML target output</td>
+</tr>
+<tr>
+<td><code>--html-layout PATH</code></td>
+<td>Product default theme layout</td>
+<td>HTML layout file</td>
+</tr>
+<tr>
+<td><code>--theme ROOT</code></td>
+<td>—</td>
+<td>Shorthand for <code>ROOT/layouts/main.html</code> plus its theme assets</td>
+</tr>
+<tr>
+<td><code>--target NAME=DIR</code></td>
+<td>—</td>
+<td>Add a named HTML target; repeatable</td>
+</tr>
+<tr>
+<td><code>--target-layout NAME=PATH</code></td>
+<td>—</td>
+<td>Layout fallback for a named target</td>
+</tr>
+<tr>
+<td><code>--layout-rule TARGET SELECTOR PATH</code></td>
+<td>—</td>
+<td>Select layouts by <code>id:</code>, <code>role:</code>, or <code>glob:</code></td>
+</tr>
+<tr>
+<td><code>--incremental</code></td>
+<td>off</td>
+<td>Reuse the HTML cache where safe</td>
+</tr>
+<tr>
+<td><code>--watch</code></td>
+<td>off</td>
+<td>Build and watch; equivalent to watch-compatible build behavior</td>
+</tr>
+<tr>
+<td><code>--jobs N</code>, <code>-j N</code></td>
+<td><code>1</code></td>
+<td>Bound page-render workers; maximum <code>64</code></td>
+</tr>
+<tr>
+<td><code>--textile</code></td>
+<td>off</td>
+<td>Discover <code>.textile</code> input in addition to the normal Markdown path</td>
+</tr>
+</tbody>
+</table>
+<p><code>--target</code> is mutually exclusive with <code>--html-dir</code>. A layout must contain
+exactly one <code>{{content}}</code> marker; other markers are optional. See
+<a href="../guides/themes-and-layouts.html">Themes &amp; Layouts</a> for the layout vocabulary.</p>
+<h2 id="machine-and-publication-projections">Machine and publication projections</h2>
+<p>These are build projections. Select one projection per invocation and use
+explicit paths in scripts so generated trees are easy to identify.</p>
+<h3 id="json-ir">JSON IR</h3>
+<pre><code class="language-bash">./zig-out/bin/boris build --out .boris
+</code></pre>
+<p>Writes <code>manifest.json</code>, <code>graph.json</code>, and <code>build-report.json</code> under the chosen
+directory. <code>--no-rag</code> is the explicit IR-only spelling when no <code>--out</code> path is
+needed.</p>
+<h3 id="rag-corpus">RAG corpus</h3>
+<pre><code class="language-bash">./zig-out/bin/boris build --rag --rag-dir rag
+./zig-out/bin/boris build --rag --rag-dir rag --scope guides --split-size 2000000
+</code></pre>
+<p><code>--scope</code> selects a bounded entity-id scope after validating the complete
+graph. <code>--bundles-only</code> omits per-page files and emits only bundled parts.</p>
+<h3 id="context-bundle">Context bundle</h3>
+<pre><code class="language-bash">./zig-out/bin/boris build --context --context-dir context
+</code></pre>
+<p>The bundle contains Markdown, a manifest, a graph snapshot, and optional split
+parts. A scoped bundle still validates the full graph first.</p>
+<h3 id="llmstxt"><code>llms.txt</code></h3>
+<pre><code class="language-bash">./zig-out/bin/boris build --llms --llms-path public/llms.txt
+</code></pre>
+<p>The generated page links use Boris's current HTML routes, such as
+<code>/guides/building-pages.html</code>; the file is a discovery projection, not a
+second content model.</p>
+<h3 id="rss-20">RSS 2.0</h3>
+<pre><code class="language-bash">./zig-out/bin/boris build --rss \
+  --site-url https://docs.example/ \
+  --rss-title &quot;Example Docs&quot; \
+  --rss-description &quot;Recent documentation updates&quot; \
+  --rss-path public/rss.xml \
+  --rss-limit 20
+</code></pre>
+<p>RSS requires <code>--site-url</code>, <code>--rss-title</code>, and <code>--rss-description</code>. It includes
+eligible pages with valid <code>published_at</code> and <code>summary</code> metadata. RSS is its own
+projection and cannot be combined with HTML, IR, RAG, Context, <code>llms.txt</code>,
+<code>validate</code>, <code>check</code>, or <code>impact</code>.</p>
+<h3 id="xml-sitemap">XML sitemap</h3>
+<pre><code class="language-bash">./zig-out/bin/boris build --sitemap --site-url https://docs.example/
+./zig-out/bin/boris build --sitemap-path meta/sitemap.xml --site-url https://docs.example/
+</code></pre>
+<p>Sitemap publication is HTML-only, requires an HTTP(S) <code>--site-url</code>, and is
+limited to one HTML target. The path is relative to that target. <code>validate</code>
+accepts the same sitemap configuration but renders it in memory and discards
+the result.</p>
+<h2 id="analysis-output">Analysis output</h2>
+<pre><code class="language-bash">./zig-out/bin/boris check --input content --format json --report .tmp/health.json
+./zig-out/bin/boris impact guides/overview --input content --format human
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--format human|json</code></td>
+<td>Human summary or deterministic JSON; analysis commands only</td>
+</tr>
+<tr>
+<td><code>--report PATH</code></td>
+<td>Write the analysis report to PATH instead of standard output</td>
+</tr>
+<tr>
+<td><code>--quiet</code></td>
+<td>Suppress normal progress and diagnostic text where supported</td>
+</tr>
+</tbody>
+</table>
+<h2 id="publication-profiles">Publication profiles</h2>
+<pre><code class="language-bash">./zig-out/bin/boris plan --profile profiles/site.json
+</code></pre>
+<p><code>plan</code> requires a profile and emits only the normalized publication declaration
+to standard output. It does not discover content, validate a graph, or publish
+an output. <code>--input</code>, <code>--textile</code>, and <code>--html-dir</code> can provide the supported
+profile overrides; execution and projection flags are rejected.</p>
+<h2 id="standardsite-family">Standard.site family</h2>
+<pre><code class="language-bash">./zig-out/bin/boris standard-site
+./zig-out/bin/boris standard-site plan --profile profiles/standard-site.json
+./zig-out/bin/boris standard-site records --profile profiles/standard-site.json
+./zig-out/bin/boris standard-site login --app-password --handle YOU.test.bsky.social
+./zig-out/bin/boris standard-site publish --profile profiles/standard-site.json --did did:plc:…
+./zig-out/bin/boris standard-site logout --did did:plc:…
+</code></pre>
+<p>Offline <code>plan</code> / <code>records</code> / <code>verify</code> need no credentials. Live publish
+against bsky.social uses <code>login --app-password</code>, not browser OAuth. App
+passwords grant broad account write — use a dedicated test identity. See
+<a href="../guides/publishing.html#standard-site">Publishing Targets</a>.</p>
+<p>GitHub Pages is not a <code>boris pages</code> verb. It is the official Actions
+workflow plus <code>plan --profile</code> for the normalized location.</p>
+<h2 id="exit-codes">Exit codes</h2>
+<table>
+<thead>
+<tr>
+<th align="right">Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="right"><code>0</code></td>
+<td>Command completed successfully</td>
+</tr>
+<tr>
+<td align="right"><code>1</code></td>
+<td>Content/graph error, or a failing <code>check</code> health finding</td>
+</tr>
+<tr>
+<td align="right"><code>2</code></td>
+<td>Usage error, missing value, or conflicting flags</td>
+</tr>
+<tr>
+<td align="right"><code>3</code></td>
+<td>I/O or other system failure</td>
+</tr>
+</tbody>
+</table>
+<p>Common <code>1</code> diagnostics include <code>EFRONTMATTER</code>, <code>EPARENTMISSING</code>,
+<code>EPARENTCYCLE</code>, <code>EREFERENCEMISSING</code>, include failures, and component failures.
+For a compiler preflight, start with <code>boris validate</code>; use <code>check</code> only when
+you want its separate health policy and report.</p>
+<h2 id="common-options">Common options</h2>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--help</code>, <code>-h</code></td>
+<td>Print the CLI help</td>
+</tr>
+<tr>
+<td><code>--quiet</code></td>
+<td>Reduce normal output</td>
+</tr>
+<tr>
+<td><code>--input DIR</code></td>
+<td>Select the content root</td>
+</tr>
+<tr>
+<td><code>--textile</code></td>
+<td>Enable explicit <code>.textile</code> discovery</td>
+</tr>
+</tbody>
+</table>
+<p>For the exact installed surface, run:</p>
+<pre><code class="language-bash">./zig-out/bin/boris --help
+</code></pre>
+<h2 id="related-pages">Related pages</h2>
+<ul>
+<li><a href="../guides/cli-and-modes.html">CLI &amp; Modes</a> — task-oriented command choices</li>
+<li><a href="frontmatter.html">Frontmatter Reference</a> — accepted author metadata</li>
+<li><a href="outputs.html">Outputs &amp; Artifacts</a> — generated trees and schemas</li>
+<li><a href="diagnostics.html">Diagnostics &amp; Troubleshooting</a> — error triage</li>
+</ul>
+
+</main>
+<footer class="site-footer">Boris · deterministic documentation compiler · Load → Roll → Ignite → Reset</footer>
+<script>
+(() => {
+  "use strict";
+  const ui = document.querySelector("[data-boris-search-ui]");
+  if (!ui) return;
+  const input = ui.querySelector("#site-search-input");
+  const form = ui.querySelector("form");
+  const status = ui.querySelector("[data-boris-search-status]");
+  const results = ui.querySelector("[data-boris-search-results]");
+  // Derive site-root-relative prefix from the page-relative theme stylesheet href
+  // emitted by asset-url ("" from index.html, "../" from guides/overview.html, …).
+  const siteRootPrefix = (() => {
+    const sheet = document.querySelector('link[rel="stylesheet"][href*="assets/"]');
+    const href = sheet ? (sheet.getAttribute("href") || "") : "";
+    const marker = href.lastIndexOf("assets/");
+    return marker >= 0 ? href.slice(0, marker) : "";
+  })();
+  if (form) form.action = siteRootPrefix + "_boris/search/";
+  const indexUrl = new URL(siteRootPrefix + "_boris/search/search-index.json", document.baseURI);
+  const expectedFormat = "boris-rendered-search-index";
+  const expectedSchema = 1;
+  let documents = [];
+
+  const normalize = value => String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const fields = section => [section.heading, section.text, section.code].map(normalize);
+  const excerpt = (section, terms) => {
+    const source = String(section.text || section.code || section.heading || "").replace(/\s+/g, " ").trim();
+    if (!source) return "";
+    const needle = terms.find(term => source.toLowerCase().indexOf(term) >= 0);
+    const start = needle ? Math.max(0, source.toLowerCase().indexOf(needle) - 48) : 0;
+    return (start ? "…" : "") + source.slice(start, start + 150) + (start + 150 < source.length ? "…" : "");
+  };
+  const scoreDocument = (doc, terms, phrase) => {
+    const title = normalize(doc.title);
+    let best = null;
+    (Array.isArray(doc.sections) ? doc.sections : []).forEach((section, sectionIndex) => {
+      const values = fields(section);
+      let score = 0;
+      terms.forEach(term => {
+        if (title.includes(term)) score += 12;
+        if (values[0].includes(term)) score += 8;
+        if (values[1].includes(term)) score += 2;
+        if (values[2].includes(term)) score += 1;
+      });
+      if (section.level === 1) score += 1;
+      if (phrase && (title.includes(phrase) || values.some(value => value.includes(phrase)))) score += 5;
+      if (score && (!best || score > best.score)) best = { doc, section, sectionIndex, score };
+    });
+    return best;
+  };
+  const setStatus = message => { status.textContent = message; };
+  const render = () => {
+    results.replaceChildren();
+    const query = normalize(input.value);
+    if (!query) { setStatus(documents.length ? "Type to search the site." : "Search index unavailable."); return; }
+    const terms = query.split(" ").filter(Boolean);
+    const matches = documents.map(doc => scoreDocument(doc, terms, query)).filter(Boolean).sort((a, b) => b.score - a.score || String(a.doc.path).localeCompare(String(b.doc.path)) || a.sectionIndex - b.sectionIndex);
+    if (!matches.length) { setStatus("No results. Try a different search."); return; }
+    setStatus(`${matches.length} result${matches.length === 1 ? "" : "s"}.`);
+    matches.slice(0, 12).forEach(match => {
+      const item = document.createElement("li"); item.className = "site-search__result";
+      const link = document.createElement("a"); link.href = new URL(siteRootPrefix + String(match.doc.path).replace(/^\/+/, "") + (match.section.fragment ? "#" + match.section.fragment : ""), document.baseURI).href;
+      const title = document.createElement("span"); title.className = "site-search__title"; title.textContent = match.section.heading || match.doc.title;
+      const path = document.createElement("span"); path.className = "site-search__path"; path.textContent = String(match.doc.path) + (match.section.fragment ? "#" + String(match.section.fragment) : "");
+      const text = document.createElement("span"); text.className = "site-search__excerpt"; text.textContent = excerpt(match.section, terms);
+      link.append(title, path, text); item.append(link); results.append(item);
+    });
+  };
+  form.addEventListener("submit", event => { event.preventDefault(); render(); input.focus(); });
+  input.addEventListener("input", render);
+  document.addEventListener("keydown", event => { if (event.key === "/" && document.activeElement !== input && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { event.preventDefault(); input.focus(); } if (event.key === "Escape" && document.activeElement === input) { input.value = ""; render(); } });
+  fetch(indexUrl, { credentials: "same-origin" }).then(response => { if (!response.ok) throw new Error("index request failed"); return response.json(); }).then(index => {
+    if (!index || index.format !== expectedFormat || index.schema_version !== expectedSchema || !Array.isArray(index.documents)) throw new Error("unsupported search index");
+    documents = index.documents.filter(doc => doc && typeof doc.path === "string" && typeof doc.title === "string" && Array.isArray(doc.sections)).map(doc => ({
+      path: doc.path,
+      title: doc.title,
+      sections: doc.sections.filter(section => section && typeof section.level === "number" && typeof section.heading === "string" && typeof section.fragment === "string" && typeof section.text === "string" && typeof section.code === "string")
+    }));
+    render();
+  }).catch(() => { documents = []; setStatus("Search index unavailable."); });
+})();
+</script>
+</body>
+</html>

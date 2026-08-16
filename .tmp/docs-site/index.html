@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Boris Documentation · Boris</title>
+  <link rel="stylesheet" href="assets/css/boris.css">
+</head>
+<body>
+<aside class="site-sidebar">
+<header class="site-brand">
+<span class="site-brand__name">Boris</span>
+<span class="site-brand__tagline">A native compiler for documentation you can inspect, publish, and reuse.</span>
+</header>
+<section class="site-search" data-boris-search-ui aria-labelledby="site-search-label">
+<form action="_boris/search/" method="get" role="search" data-boris-search-form>
+<label class="site-search__label" id="site-search-label" for="site-search-input">Search documentation</label>
+<div class="site-search__controls">
+<input id="site-search-input" name="q" type="search" autocomplete="off" placeholder="Search…" spellcheck="false">
+<button type="submit">Search</button>
+</div>
+</form>
+<p class="site-search__status" data-boris-search-status role="status" aria-live="polite">Loading search…</p>
+<ol class="site-search__results" data-boris-search-results aria-label="Search results"></ol>
+<noscript><p class="site-search__fallback">Search needs JavaScript in this static site. Use the documentation navigation above.</p></noscript>
+</section>
+<details class="site-menu" open>
+<summary>Documentation menu</summary>
+<nav class="site-nav" aria-label="Site">
+<ul>
+<li class="site-nav__trunk"><a href="getting-started.html">Getting Started</a>
+<ul>
+<li class="site-nav__satellite"><a href="guides/cli-and-modes.html">CLI &amp; Output Modes</a></li>
+</ul>
+</li>
+<li class="site-nav__trunk is-current"><a href="index.html" aria-current="page">Boris Documentation</a>
+<ul>
+<li class="site-nav__satellite"><a href="comparison.html">Why Boris? (Comparison &amp; Rationale)</a></li>
+<li class="site-nav__satellite"><a href="guides.html">User Guides</a>
+<ul>
+<li class="site-nav__satellite"><a href="guides/overview.html">Content Model &amp; Pipeline</a>
+<ul>
+<li class="site-nav__satellite"><a href="guides/asides.html">Asides &amp; Admonitions</a></li>
+<li class="site-nav__satellite"><a href="guides/building-pages.html">Building Pages</a></li>
+<li class="site-nav__satellite"><a href="guides/editor.html">Boris Editor</a></li>
+<li class="site-nav__satellite"><a href="guides/migration.html">Migrating to Boris</a></li>
+<li class="site-nav__satellite"><a href="guides/oliver-markdown.html">Markdown Showcase</a></li>
+<li class="site-nav__satellite"><a href="guides/rag-export.html">AI &amp; Machine Outputs</a></li>
+<li class="site-nav__satellite"><a href="guides/search-and-ui.html">Search &amp; Browser UI</a></li>
+<li class="site-nav__satellite"><a href="guides/themes-and-layouts.html">Themes &amp; Layouts</a></li>
+<li class="site-nav__satellite"><a href="guides/trunk-satellite.html">Trunk &amp; Satellite — Content Hierarchy</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="guides/publishing.html">Publishing Targets</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="reference.html">Reference</a>
+<ul>
+<li class="site-nav__satellite"><a href="markdown-feature-usage.html">Markdown Feature Usage Register</a></li>
+<li class="site-nav__satellite"><a href="reference/commands.html">Command Reference</a></li>
+<li class="site-nav__satellite"><a href="reference/diagnostics.html">Diagnostics &amp; Troubleshooting</a></li>
+<li class="site-nav__satellite"><a href="reference/frontmatter.html">Frontmatter Reference</a></li>
+<li class="site-nav__satellite"><a href="reference/outputs.html">Outputs &amp; Artifacts</a></li>
+<li class="site-nav__satellite"><a href="reference/relationships.html">Relationships</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="technology-and-rationale.html">Technology &amp; Rationale</a></li>
+</ul>
+</li>
+</ul>
+</nav>
+</details>
+</aside>
+<nav class="breadcrumb" aria-label="Breadcrumb">
+<ol>
+<li aria-current="page">Boris Documentation</li>
+</ol>
+</nav>
+<nav class="page-toc" aria-label="On this page">
+<ul>
+<li class="page-toc__l1"><a href="#one-compiler">One compiler. Many targets. One graph.</a></li>
+<li class="page-toc__l2"><a href="#why">Why this exists</a></li>
+<li class="page-toc__l2"><a href="#product-shape">The product shape</a></li>
+<li class="page-toc__l2"><a href="#oliver-flex">Oliver, used like we meant it</a></li>
+<li class="page-toc__l3"><a href="#headings-with-their-own-names">Headings with their own names</a></li>
+<li class="page-toc__l3"><a href="#gallery-ial">Custom gallery heading</a></li>
+<li class="page-toc__l3"><a href="#inline-craft">Inline craft</a></li>
+<li class="page-toc__l3"><a href="#lists">Lists that earn their indent</a></li>
+<li class="page-toc__l3"><a href="#opinions-table">A table with opinions</a></li>
+<li class="page-toc__l3"><a href="#glossary">Definition list, because glossaries should look like glossaries</a></li>
+<li class="page-toc__l3"><a href="#footnotes">Footnotes that stay out of the way</a></li>
+<li class="page-toc__l3"><a href="#includes-and-wikis">Includes and wiki-links</a></li>
+<li class="page-toc__l2"><a href="#choose">Choose a path</a></li>
+</ul>
+</nav>
+<main data-boris-search-root>
+<h1 id="one-compiler" class="hero-heading">One compiler. Many targets. One graph.</h1>
+<p>Boris is a <strong>graph-native publication compiler</strong>. Markdown in. A validated
+Trunk/Satellite graph. Then you choose a target. HTML <code>dist/</code> is the default
+— not the product.</p>
+<p><a href="getting-started.html">Get started</a> ·
+<a href="guides/publishing.html">Publish</a> ·
+<a href="guides/oliver-markdown.html">Watch Oliver work</a> ·
+<a href="reference/commands.html">Open the reference</a></p>
+<aside class="admonition admonition--info" id="default-path" aria-label="Info">
+<p class="admonition__title">Info</p>
+<div class="admonition__body">
+<p>The command you run first is still <code>boris --quiet</code>. That writes <code>dist/</code>.
+Everything else on this site is an explicit target, projection, or annex —
+named, linked, and fail-loud. Nothing here is a Node build step in a trench
+coat.</p>
+</div>
+</aside>
+<h2 id="why">Why this exists</h2>
+<p>Most “documentation tools” are application frameworks that happen to eat
+Markdown. Boris is the opposite: a <strong>Zig compiler</strong> that happens to publish
+sites.</p>
+<dl>
+<dt>Local and static</dt>
+<dd>One native binary. Files you can inspect, archive, or serve. Node is not
+in the publication workflow. <del>npm install</del> is not a personality.</dd>
+</dl>
+<dl>
+<dt>Graph-aware</dt>
+<dd><code>parent</code> builds Trunk/Satellite hierarchy. Wiki-links and includes resolve
+against the frozen graph. Broken structure fails the build. The codes are
+exits, not vibes — see <a href="reference/diagnostics.html">Diagnostics</a>.</dd>
+</dl>
+<dl>
+<dt>Closed on purpose</dt>
+<dd>Eight frontmatter keys. Two components. No YAML archaeology, no MDX
+runtime, no “whatever the plugin ate.” Exact rules live in the
+<a href="reference/frontmatter.html">frontmatter reference</a>.</dd>
+</dl>
+<dl>
+<dt>One source, several honest exits</dt>
+<dd>HTML, GitHub Pages, Standard.site, IR, RAG, Context, <code>llms.txt</code>, RSS, and
+sitemap are <strong>separate selections</strong> over the same revision. Emitting one
+does not prove another.</dd>
+</dl>
+<dl>
+<dt>In-process Markdown</dt>
+<dd>Page bodies are rendered by <strong>Oliver</strong> — pinned in <code>build.zig.zon</code>, called
+through <code>src/render.zig</code>, never a subprocess. This page is the argument.</dd>
+</dl>
+<hr />
+<h2 id="product-shape">The product shape</h2>
+<pre><code class="language-text">Markdown + closed frontmatter
+          │
+          ▼
+ discover → parse → validate/freeze the graph
+          │
+          ├── HTML publication          (default: dist/)
+          ├── GitHub Pages              (verified target)
+          ├── Standard.site / AT Proto  (verified target)
+          ├── JSON IR / RAG / Context / llms.txt
+          └── RSS 2.0, or an HTML sitemap when selected
+</code></pre>
+<table>
+<thead>
+<tr>
+<th align="left">If you want…</th>
+<th align="left">That is…</th>
+<th align="left">Start here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">A site on disk</td>
+<td align="left">Default target</td>
+<td align="left"><a href="getting-started.html">Getting Started</a></td>
+</tr>
+<tr>
+<td align="left">A hosted shop window</td>
+<td align="left">GitHub Pages</td>
+<td align="left"><a href="guides/publishing.html#github-pages">Publishing → Pages</a></td>
+</tr>
+<tr>
+<td align="left">Atmosphere records</td>
+<td align="left">Standard.site</td>
+<td align="left"><a href="guides/publishing.html#standard-site">Publishing → Standard.site</a></td>
+</tr>
+<tr>
+<td align="left">A compiler-backed editor</td>
+<td align="left">Product surface</td>
+<td align="left"><a href="guides/editor.html">Boris Editor</a></td>
+</tr>
+<tr>
+<td align="left">Machine packs</td>
+<td align="left">Projections</td>
+<td align="left"><a href="guides/rag-export.html">AI &amp; Machine Outputs</a></td>
+</tr>
+<tr>
+<td align="left">The syntax this page is flexing</td>
+<td align="left">Oliver</td>
+<td align="left"><a href="guides/oliver-markdown.html">Markdown Showcase</a></td>
+</tr>
+</tbody>
+</table>
+<aside class="admonition admonition--tip" id="stranger-command" aria-label="Tip">
+<p class="admonition__title">Tip</p>
+<div class="admonition__body">
+<p>A stranger reading only this page should run <code>zig build &amp;&amp; boris --quiet</code>,
+open <code>dist/index.html</code>, and come back. The rest of the registry waits.</p>
+</div>
+</aside>
+<details class="details">
+<summary>Bookseller vs publisher — the identity we actually picked</summary>
+<div class="details__body">
+<p>Issue <a href="https://github.com/drawmeanelephant/boris/issues/538">#538</a> forced a
+choice. We did <strong>not</strong> keep “documentation compiler, annexes in the
+basement.” We did <strong>not</strong> split the editor into a second product.</p>
+<p>We picked <strong>publisher platform</strong>: HTML <code>dist/</code> is the default target, not
+the whole product. GitHub Pages and Standard.site are verified targets. The
+editor, migration labs, and evidence chain are first-class surfaces of the
+same compiler. Nostr is an open program. Cloudflare embedding is parked.</p>
+<p>Living status: the repository <a href="https://github.com/drawmeanelephant/boris/blob/afterparty/docs/STATUS.md"><code>docs/STATUS.md</code></a>
+file. Contracts still win if this page and a contract disagree.</p>
+</div>
+</details>
+<h2 id="oliver-flex">Oliver, used like we meant it</h2>
+<p>This site is compiled by the compiler it documents. The following is not a
+museum card. It is the body of this page.</p>
+<h3 id="headings-with-their-own-names">Headings with their own names</h3>
+<p>The heading above carries an explicit id. The next one overrides the auto
+slug on purpose:</p>
+<h3 id="gallery-ial" class="showcase-heading">Custom gallery heading</h3>
+<p>That id is <code>gallery-ial</code>. Link it as
+<code>[[index#gallery-ial|this exact heading]]</code> — <a href="index.html#gallery-ial">like this</a>.</p>
+<h3 id="inline-craft">Inline craft</h3>
+<p><em>italic</em>, <strong>strong</strong>, <em><strong>both</strong></em>, <code>code</code>, and <del>the bookseller one-liner we
+retired</del>.</p>
+<blockquote>
+<p>Block quotes are still block quotes. They nest when you need them to.</p>
+<blockquote>
+<p>Nested. Unimpressed. CommonMark.</p>
+</blockquote>
+</blockquote>
+<p>A thematic break is three hyphens and a little dignity:</p>
+<hr />
+<p>Autolink, because we can: https://github.com/drawmeanelephant/boris</p>
+<h3 id="lists">Lists that earn their indent</h3>
+<ul>
+<li>Write Markdown under <code>content/</code>
+<ul>
+<li>Closed frontmatter</li>
+<li>Wiki-links to entity ids, not guessed <code>.html</code> paths</li>
+</ul>
+</li>
+<li>Freeze the graph
+<ol>
+<li>Discover</li>
+<li>Validate</li>
+<li>Render with Oliver</li>
+<li>Commit <code>dist/</code> — or refuse to</li>
+</ol>
+</li>
+</ul>
+<h3 id="opinions-table">A table with opinions</h3>
+<table>
+<thead>
+<tr>
+<th align="left">Left-aligned fact</th>
+<th align="center">Centered status</th>
+<th align="right">Right-aligned exit</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">Default CLI</td>
+<td align="center"><code>dist/</code></td>
+<td align="right"><code>0</code></td>
+</tr>
+<tr>
+<td align="left">Broken <code>parent</code></td>
+<td align="center">fail-loud</td>
+<td align="right"><code>1</code></td>
+</tr>
+<tr>
+<td align="left">Unknown flag</td>
+<td align="center">usage</td>
+<td align="right"><code>2</code></td>
+</tr>
+<tr>
+<td align="left">Disk said no</td>
+<td align="center">system</td>
+<td align="right"><code>3</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="glossary">Definition list, because glossaries should look like glossaries</h3>
+<dl>
+<dt>Trunk</dt>
+<dd>A page with no <code>parent</code>. A root of the navigation tree.</dd>
+</dl>
+<dl>
+<dt>Satellite</dt>
+<dd>A page with exactly one direct <code>parent</code>. May itself have satellites.</dd>
+</dl>
+<dl>
+<dt>Target</dt>
+<dd>A contracted publication destination. <code>dist/</code> is one. Pages is one.
+Standard.site is one. A wish is not.</dd>
+</dl>
+<dl>
+<dt>Projection</dt>
+<dd>A machine or feed output from the same frozen graph. IR, RAG, Context,
+<code>llms.txt</code>, RSS. Not a second content model.</dd>
+</dl>
+<h3 id="footnotes">Footnotes that stay out of the way</h3>
+<p>Oliver renders footnote refs in document order and appends the section.<sup class="footnote-ref"><a href="#fn-1" id="fnref-1" data-footnote-ref>1</a></sup>
+The editor does not invent a second footnote grammar.<sup class="footnote-ref"><a href="#fn-2" id="fnref-2" data-footnote-ref>2</a></sup></p>
+<h3 id="includes-and-wikis">Includes and wiki-links</h3>
+<p>Reusable source fragments live under <code>content/includes/</code> and are <strong>not</strong>
+pages:</p>
+<p>Prefer closed frontmatter keys (<code>id</code>, <code>title</code>, <code>parent</code>, <code>status</code>, <code>tags</code>,
+<code>relations</code>, <code>published_at</code>, <code>summary</code>) and
+double-quoted Aside attributes. Fragment files under <code>content/includes/</code> are
+<strong>not</strong> site pages — only the include directive pulls them into a page body.</p>
+<p>A first-time author publishes <strong>local HTML</strong>. Hosted targets come after you
+can open <code>dist/index.html</code> and point at a broken parent with a straight face.</p>
+<p>Cross-page graph links look like this: see
+<a href="guides/building-pages.html">Building Pages</a> and
+<a href="reference/commands.html#exit-codes">the exit-code table</a>.</p>
+<section class="footnotes" data-footnotes>
+<ol>
+<li id="fn-1">
+<p>First-use order. The renderer collects definitions after the last reference. <a href="#fnref-1" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="1" aria-label="Back to reference 1">↩</a></p>
+</li>
+<li id="fn-2">
+<p>The Boris Editor is an interaction layer. Oliver remains the markup authority. <a href="#fnref-2" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="2" aria-label="Back to reference 2">↩</a></p>
+</li>
+</ol>
+</section>
+<aside class="admonition admonition--warning" id="not-mdx" aria-label="Warning">
+<p class="admonition__title">Warning</p>
+<div class="admonition__body">
+<p><code>&lt;Aside&gt;</code> and <code>&lt;Details&gt;</code> are the only registered PascalCase components.
+Unknown tags are errors. They do not nest. <code>&gt; [!NOTE]</code> is a blockquote
+with a costume, not a callout. <code>:::</code> is an export spelling, not an
+authoring spelling.</p>
+</div>
+</aside>
+<details class="details">
+<summary>What this page deliberately does not render</summary>
+<div class="details__body">
+<p>Math (<code>$x$</code>), task-list checkboxes, fenced divs, critic markup, and
+smart-quote rewriting are <strong>not</strong> Boris Markdown. If you type them, Oliver
+keeps them as text. The compatibility wall is in
+<a href="guides/oliver-markdown.html#what-is-not-rendered">the showcase</a>.</p>
+</div>
+</details>
+<h2 id="choose">Choose a path</h2>
+<table>
+<thead>
+<tr>
+<th>If you want to…</th>
+<th>Start here</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Build a first site</td>
+<td><a href="getting-started.html">Getting Started</a></td>
+</tr>
+<tr>
+<td>Publish it somewhere real</td>
+<td><a href="guides/publishing.html">Publishing Targets</a></td>
+</tr>
+<tr>
+<td>Create pages and links</td>
+<td><a href="guides/building-pages.html">Building Pages</a></td>
+</tr>
+<tr>
+<td>Understand nested hierarchy</td>
+<td><a href="guides/trunk-satellite.html">Trunk &amp; Satellite</a></td>
+</tr>
+<tr>
+<td>Customize HTML and themes</td>
+<td><a href="guides/themes-and-layouts.html">Themes &amp; Layouts</a></td>
+</tr>
+<tr>
+<td>Use search in a rendered site</td>
+<td><a href="guides/search-and-ui.html">Search &amp; Browser UI</a></td>
+</tr>
+<tr>
+<td>Edit with the local editor</td>
+<td><a href="guides/editor.html">Boris Editor</a></td>
+</tr>
+<tr>
+<td>Export machine-readable content</td>
+<td><a href="guides/rag-export.html">AI &amp; Machine Outputs</a></td>
+</tr>
+<tr>
+<td>Compare approaches</td>
+<td><a href="comparison.html">Why Boris?</a> and <a href="technology-and-rationale.html">Technology &amp; Rationale</a></td>
+</tr>
+<tr>
+<td>Find exact flags and diagnostics</td>
+<td><a href="reference/commands.html">Command Reference</a> and <a href="reference/diagnostics.html">Diagnostics</a></td>
+</tr>
+</tbody>
+</table>
+<aside class="admonition admonition--note" id="contracts-win" aria-label="Note">
+<p class="admonition__title">Note</p>
+<div class="admonition__body">
+<p>This site is teaching. Contracts are law. If a sentence here and a file
+under <code>docs/contracts/</code> disagree, the contract wins and this page should be
+filed as a lie.</p>
+</div>
+</aside>
+
+</main>
+<footer class="site-footer">Boris · deterministic documentation compiler · Load → Roll → Ignite → Reset</footer>
+<script>
+(() => {
+  "use strict";
+  const ui = document.querySelector("[data-boris-search-ui]");
+  if (!ui) return;
+  const input = ui.querySelector("#site-search-input");
+  const form = ui.querySelector("form");
+  const status = ui.querySelector("[data-boris-search-status]");
+  const results = ui.querySelector("[data-boris-search-results]");
+  // Derive site-root-relative prefix from the page-relative theme stylesheet href
+  // emitted by asset-url ("" from index.html, "../" from guides/overview.html, …).
+  const siteRootPrefix = (() => {
+    const sheet = document.querySelector('link[rel="stylesheet"][href*="assets/"]');
+    const href = sheet ? (sheet.getAttribute("href") || "") : "";
+    const marker = href.lastIndexOf("assets/");
+    return marker >= 0 ? href.slice(0, marker) : "";
+  })();
+  if (form) form.action = siteRootPrefix + "_boris/search/";
+  const indexUrl = new URL(siteRootPrefix + "_boris/search/search-index.json", document.baseURI);
+  const expectedFormat = "boris-rendered-search-index";
+  const expectedSchema = 1;
+  let documents = [];
+
+  const normalize = value => String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const fields = section => [section.heading, section.text, section.code].map(normalize);
+  const excerpt = (section, terms) => {
+    const source = String(section.text || section.code || section.heading || "").replace(/\s+/g, " ").trim();
+    if (!source) return "";
+    const needle = terms.find(term => source.toLowerCase().indexOf(term) >= 0);
+    const start = needle ? Math.max(0, source.toLowerCase().indexOf(needle) - 48) : 0;
+    return (start ? "…" : "") + source.slice(start, start + 150) + (start + 150 < source.length ? "…" : "");
+  };
+  const scoreDocument = (doc, terms, phrase) => {
+    const title = normalize(doc.title);
+    let best = null;
+    (Array.isArray(doc.sections) ? doc.sections : []).forEach((section, sectionIndex) => {
+      const values = fields(section);
+      let score = 0;
+      terms.forEach(term => {
+        if (title.includes(term)) score += 12;
+        if (values[0].includes(term)) score += 8;
+        if (values[1].includes(term)) score += 2;
+        if (values[2].includes(term)) score += 1;
+      });
+      if (section.level === 1) score += 1;
+      if (phrase && (title.includes(phrase) || values.some(value => value.includes(phrase)))) score += 5;
+      if (score && (!best || score > best.score)) best = { doc, section, sectionIndex, score };
+    });
+    return best;
+  };
+  const setStatus = message => { status.textContent = message; };
+  const render = () => {
+    results.replaceChildren();
+    const query = normalize(input.value);
+    if (!query) { setStatus(documents.length ? "Type to search the site." : "Search index unavailable."); return; }
+    const terms = query.split(" ").filter(Boolean);
+    const matches = documents.map(doc => scoreDocument(doc, terms, query)).filter(Boolean).sort((a, b) => b.score - a.score || String(a.doc.path).localeCompare(String(b.doc.path)) || a.sectionIndex - b.sectionIndex);
+    if (!matches.length) { setStatus("No results. Try a different search."); return; }
+    setStatus(`${matches.length} result${matches.length === 1 ? "" : "s"}.`);
+    matches.slice(0, 12).forEach(match => {
+      const item = document.createElement("li"); item.className = "site-search__result";
+      const link = document.createElement("a"); link.href = new URL(siteRootPrefix + String(match.doc.path).replace(/^\/+/, "") + (match.section.fragment ? "#" + match.section.fragment : ""), document.baseURI).href;
+      const title = document.createElement("span"); title.className = "site-search__title"; title.textContent = match.section.heading || match.doc.title;
+      const path = document.createElement("span"); path.className = "site-search__path"; path.textContent = String(match.doc.path) + (match.section.fragment ? "#" + String(match.section.fragment) : "");
+      const text = document.createElement("span"); text.className = "site-search__excerpt"; text.textContent = excerpt(match.section, terms);
+      link.append(title, path, text); item.append(link); results.append(item);
+    });
+  };
+  form.addEventListener("submit", event => { event.preventDefault(); render(); input.focus(); });
+  input.addEventListener("input", render);
+  document.addEventListener("keydown", event => { if (event.key === "/" && document.activeElement !== input && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { event.preventDefault(); input.focus(); } if (event.key === "Escape" && document.activeElement === input) { input.value = ""; render(); } });
+  fetch(indexUrl, { credentials: "same-origin" }).then(response => { if (!response.ok) throw new Error("index request failed"); return response.json(); }).then(index => {
+    if (!index || index.format !== expectedFormat || index.schema_version !== expectedSchema || !Array.isArray(index.documents)) throw new Error("unsupported search index");
+    documents = index.documents.filter(doc => doc && typeof doc.path === "string" && typeof doc.title === "string" && Array.isArray(doc.sections)).map(doc => ({
+      path: doc.path,
+      title: doc.title,
+      sections: doc.sections.filter(section => section && typeof section.level === "number" && typeof section.heading === "string" && typeof section.fragment === "string" && typeof section.text === "string" && typeof section.code === "string")
+    }));
+    render();
+  }).catch(() => { documents = []; setStatus("Search index unavailable."); });
+})();
+</script>
+</body>
+</html>

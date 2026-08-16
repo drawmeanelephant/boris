@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Building Pages · Boris</title>
+  <link rel="stylesheet" href="../assets/css/boris.css">
+</head>
+<body>
+<aside class="site-sidebar">
+<header class="site-brand">
+<span class="site-brand__name">Boris</span>
+<span class="site-brand__tagline">A native compiler for documentation you can inspect, publish, and reuse.</span>
+</header>
+<section class="site-search" data-boris-search-ui aria-labelledby="site-search-label">
+<form action="_boris/search/" method="get" role="search" data-boris-search-form>
+<label class="site-search__label" id="site-search-label" for="site-search-input">Search documentation</label>
+<div class="site-search__controls">
+<input id="site-search-input" name="q" type="search" autocomplete="off" placeholder="Search…" spellcheck="false">
+<button type="submit">Search</button>
+</div>
+</form>
+<p class="site-search__status" data-boris-search-status role="status" aria-live="polite">Loading search…</p>
+<ol class="site-search__results" data-boris-search-results aria-label="Search results"></ol>
+<noscript><p class="site-search__fallback">Search needs JavaScript in this static site. Use the documentation navigation above.</p></noscript>
+</section>
+<details class="site-menu" open>
+<summary>Documentation menu</summary>
+<nav class="site-nav" aria-label="Site">
+<ul>
+<li class="site-nav__trunk"><a href="../getting-started.html">Getting Started</a>
+<ul>
+<li class="site-nav__satellite"><a href="cli-and-modes.html">CLI &amp; Output Modes</a></li>
+</ul>
+</li>
+<li class="site-nav__trunk is-ancestor"><a href="../index.html">Boris Documentation</a>
+<ul>
+<li class="site-nav__satellite"><a href="../comparison.html">Why Boris? (Comparison &amp; Rationale)</a></li>
+<li class="site-nav__satellite is-ancestor"><a href="../guides.html">User Guides</a>
+<ul>
+<li class="site-nav__satellite is-ancestor"><a href="overview.html">Content Model &amp; Pipeline</a>
+<ul>
+<li class="site-nav__satellite"><a href="asides.html">Asides &amp; Admonitions</a></li>
+<li class="site-nav__satellite is-current"><a href="building-pages.html" aria-current="page">Building Pages</a></li>
+<li class="site-nav__satellite"><a href="editor.html">Boris Editor</a></li>
+<li class="site-nav__satellite"><a href="migration.html">Migrating to Boris</a></li>
+<li class="site-nav__satellite"><a href="oliver-markdown.html">Markdown Showcase</a></li>
+<li class="site-nav__satellite"><a href="rag-export.html">AI &amp; Machine Outputs</a></li>
+<li class="site-nav__satellite"><a href="search-and-ui.html">Search &amp; Browser UI</a></li>
+<li class="site-nav__satellite"><a href="themes-and-layouts.html">Themes &amp; Layouts</a></li>
+<li class="site-nav__satellite"><a href="trunk-satellite.html">Trunk &amp; Satellite — Content Hierarchy</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="publishing.html">Publishing Targets</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="../reference.html">Reference</a>
+<ul>
+<li class="site-nav__satellite"><a href="../markdown-feature-usage.html">Markdown Feature Usage Register</a></li>
+<li class="site-nav__satellite"><a href="../reference/commands.html">Command Reference</a></li>
+<li class="site-nav__satellite"><a href="../reference/diagnostics.html">Diagnostics &amp; Troubleshooting</a></li>
+<li class="site-nav__satellite"><a href="../reference/frontmatter.html">Frontmatter Reference</a></li>
+<li class="site-nav__satellite"><a href="../reference/outputs.html">Outputs &amp; Artifacts</a></li>
+<li class="site-nav__satellite"><a href="../reference/relationships.html">Relationships</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="../technology-and-rationale.html">Technology &amp; Rationale</a></li>
+</ul>
+</li>
+</ul>
+</nav>
+</details>
+</aside>
+<nav class="breadcrumb" aria-label="Breadcrumb">
+<ol>
+<li><a href="../index.html">Boris Documentation</a></li>
+<li><a href="../guides.html">User Guides</a></li>
+<li><a href="overview.html">Content Model &amp; Pipeline</a></li>
+<li aria-current="page">Building Pages</li>
+</ol>
+</nav>
+<nav class="page-toc" aria-label="On this page">
+<ul>
+<li class="page-toc__l1"><a href="#building-pages">Building Pages</a></li>
+<li class="page-toc__l2"><a href="#create-a-page">Create a page</a></li>
+<li class="page-toc__l2"><a href="#add-frontmatter">Add frontmatter</a></li>
+<li class="page-toc__l2"><a href="#set-hierarchy">Set hierarchy</a></li>
+<li class="page-toc__l2"><a href="#link-to-pages">Link to pages</a></li>
+<li class="page-toc__l2"><a href="#reuse-a-fragment">Reuse a fragment</a></li>
+<li class="page-toc__l2"><a href="#status-and-publication-metadata">Status and publication metadata</a></li>
+<li class="page-toc__l2"><a href="#build-and-inspect">Build and inspect</a></li>
+<li class="page-toc__l2"><a href="#next-steps">Next steps</a></li>
+</ul>
+</nav>
+<main data-boris-search-root>
+<h1 id="building-pages">Building Pages</h1>
+<p>Pages are Markdown files under <code>content/</code>. Their paths, frontmatter, parent
+chains, and supported references determine both the published URL and the
+navigation tree.</p>
+<h2 id="create-a-page">Create a page</h2>
+<p>Use a lowercase <code>.md</code> or <code>.mdx</code> path. The path relative to <code>content/</code>, without
+its extension, becomes the entity id and HTML output path by default:</p>
+<ul>
+<li><code>content/guides/deploying.md</code> → <code>guides/deploying</code> →
+<code>guides/deploying.html</code></li>
+<li><code>content/index.md</code> → <code>index</code> → <code>index.html</code></li>
+</ul>
+<h2 id="add-frontmatter">Add frontmatter</h2>
+<p>Frontmatter is optional and deliberately closed. The accepted author-facing
+keys are <code>id</code>, <code>title</code>, <code>parent</code>, <code>status</code>, <code>tags</code>, <code>relations</code>, <code>published_at</code>,
+and <code>summary</code>. <code>title</code> is optional; if it is absent, the compiler keeps it
+unset rather than inventing one from the filename.</p>
+<pre><code class="language-markdown">---
+title: Deploying a Boris Site
+parent: guides/overview
+status: published
+tags: [deployment, html]
+---
+
+# Deploying a Boris Site
+
+Content goes here.
+</code></pre>
+<p>Use the <a href="../reference/frontmatter.html">frontmatter reference</a> for exact value
+grammar. Unknown keys, including <code>parentEntry</code> and <code>parent_entry</code>, are
+<code>EFRONTMATTER</code> errors.</p>
+<h2 id="set-hierarchy">Set hierarchy</h2>
+<p>Omit <code>parent</code> for a Trunk. Set one direct parent entity id for a Satellite:</p>
+<pre><code class="language-markdown">---
+title: Deployment details
+parent: guides/overview
+---
+</code></pre>
+<p>The parent must exist, and the complete chain must be finite and acyclic.
+Nested Satellites are supported. <a href="trunk-satellite.html">Trunk &amp; Satellite</a>
+explains the resulting navigation and breadcrumb hierarchy.</p>
+<h2 id="link-to-pages">Link to pages</h2>
+<p>Use entity ids rather than guessing <code>.html</code> paths:</p>
+<pre><code class="language-markdown">See [[reference/frontmatter|the frontmatter reference]].
+See [[reference/commands#exit-codes|the exit-code table]].
+</code></pre>
+<p>The HTML compiler validates the page target and, for the HTML path, the
+rendered heading fragment. Broken supported wiki-links fail the publication
+with a diagnostic.</p>
+<p>Ordinary Markdown links to a local <code>.md</code> or <code>.mdx</code> page can also be rewritten to
+the canonical HTML route when they match a discovered source path. External
+links and arbitrary HTML links remain outside that graph guarantee.</p>
+<h2 id="reuse-a-fragment">Reuse a fragment</h2>
+<p>Put short reusable source fragments under <code>content/includes/</code>:</p>
+<pre><code class="language-markdown">{{include includes/shared-tip.md}}
+</code></pre>
+<p>Includes are expanded before Markdown rendering, are not standalone pages, and
+remain literal inside fenced code. Missing fragments and include cycles fail
+the build.</p>
+<h2 id="status-and-publication-metadata">Status and publication metadata</h2>
+<p><code>status</code> may be <code>draft</code>, <code>published</code>, or <code>archived</code>. Draft pages are excluded
+from publication and from graph targets used by published output; archived
+pages remain part of the supported published graph. <code>relations</code> records one of
+the bounded semantic kinds described in <a href="../reference/relationships.html">Relationships</a>;
+it is not a parent edge or a build dependency.</p>
+<p><code>published_at</code> and <code>summary</code> provide metadata for projections such as RSS.
+When <code>published_at</code> is present, <code>summary</code> is required. RSS eligibility also
+requires both fields and a non-draft status.</p>
+<h2 id="build-and-inspect">Build and inspect</h2>
+<pre><code class="language-bash">./zig-out/bin/boris validate --quiet
+./zig-out/bin/boris build --quiet
+</code></pre>
+<p>Use <code>validate</code> for the authoritative no-publication HTML preflight. Use
+<code>check</code> for graph-health analysis and <code>impact ID</code> for dependency impact; neither
+is a substitute for <code>validate</code>.</p>
+<p>The normal build writes <code>dist/</code>, including the compiler-owned rendered-search
+index and target-local publication evidence. Serve <code>dist/</code> with any static
+host if you want the browser search UI to fetch its index.</p>
+<h2 id="next-steps">Next steps</h2>
+<ul>
+<li><a href="oliver-markdown.html">Markdown Showcase</a> — every construct this compiler will actually render.</li>
+<li><a href="publishing.html">Publishing Targets</a> — local <code>dist/</code>, Pages, Standard.site.</li>
+<li><a href="themes-and-layouts.html">Themes &amp; Layouts</a> — customize HTML output.</li>
+<li><a href="search-and-ui.html">Search &amp; Browser UI</a> — understand rendered search.</li>
+<li><a href="../reference/commands.html">Command Reference</a> — exact flags and exit codes.</li>
+</ul>
+
+</main>
+<footer class="site-footer">Boris · deterministic documentation compiler · Load → Roll → Ignite → Reset</footer>
+<script>
+(() => {
+  "use strict";
+  const ui = document.querySelector("[data-boris-search-ui]");
+  if (!ui) return;
+  const input = ui.querySelector("#site-search-input");
+  const form = ui.querySelector("form");
+  const status = ui.querySelector("[data-boris-search-status]");
+  const results = ui.querySelector("[data-boris-search-results]");
+  // Derive site-root-relative prefix from the page-relative theme stylesheet href
+  // emitted by asset-url ("" from index.html, "../" from guides/overview.html, …).
+  const siteRootPrefix = (() => {
+    const sheet = document.querySelector('link[rel="stylesheet"][href*="assets/"]');
+    const href = sheet ? (sheet.getAttribute("href") || "") : "";
+    const marker = href.lastIndexOf("assets/");
+    return marker >= 0 ? href.slice(0, marker) : "";
+  })();
+  if (form) form.action = siteRootPrefix + "_boris/search/";
+  const indexUrl = new URL(siteRootPrefix + "_boris/search/search-index.json", document.baseURI);
+  const expectedFormat = "boris-rendered-search-index";
+  const expectedSchema = 1;
+  let documents = [];
+
+  const normalize = value => String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const fields = section => [section.heading, section.text, section.code].map(normalize);
+  const excerpt = (section, terms) => {
+    const source = String(section.text || section.code || section.heading || "").replace(/\s+/g, " ").trim();
+    if (!source) return "";
+    const needle = terms.find(term => source.toLowerCase().indexOf(term) >= 0);
+    const start = needle ? Math.max(0, source.toLowerCase().indexOf(needle) - 48) : 0;
+    return (start ? "…" : "") + source.slice(start, start + 150) + (start + 150 < source.length ? "…" : "");
+  };
+  const scoreDocument = (doc, terms, phrase) => {
+    const title = normalize(doc.title);
+    let best = null;
+    (Array.isArray(doc.sections) ? doc.sections : []).forEach((section, sectionIndex) => {
+      const values = fields(section);
+      let score = 0;
+      terms.forEach(term => {
+        if (title.includes(term)) score += 12;
+        if (values[0].includes(term)) score += 8;
+        if (values[1].includes(term)) score += 2;
+        if (values[2].includes(term)) score += 1;
+      });
+      if (section.level === 1) score += 1;
+      if (phrase && (title.includes(phrase) || values.some(value => value.includes(phrase)))) score += 5;
+      if (score && (!best || score > best.score)) best = { doc, section, sectionIndex, score };
+    });
+    return best;
+  };
+  const setStatus = message => { status.textContent = message; };
+  const render = () => {
+    results.replaceChildren();
+    const query = normalize(input.value);
+    if (!query) { setStatus(documents.length ? "Type to search the site." : "Search index unavailable."); return; }
+    const terms = query.split(" ").filter(Boolean);
+    const matches = documents.map(doc => scoreDocument(doc, terms, query)).filter(Boolean).sort((a, b) => b.score - a.score || String(a.doc.path).localeCompare(String(b.doc.path)) || a.sectionIndex - b.sectionIndex);
+    if (!matches.length) { setStatus("No results. Try a different search."); return; }
+    setStatus(`${matches.length} result${matches.length === 1 ? "" : "s"}.`);
+    matches.slice(0, 12).forEach(match => {
+      const item = document.createElement("li"); item.className = "site-search__result";
+      const link = document.createElement("a"); link.href = new URL(siteRootPrefix + String(match.doc.path).replace(/^\/+/, "") + (match.section.fragment ? "#" + match.section.fragment : ""), document.baseURI).href;
+      const title = document.createElement("span"); title.className = "site-search__title"; title.textContent = match.section.heading || match.doc.title;
+      const path = document.createElement("span"); path.className = "site-search__path"; path.textContent = String(match.doc.path) + (match.section.fragment ? "#" + String(match.section.fragment) : "");
+      const text = document.createElement("span"); text.className = "site-search__excerpt"; text.textContent = excerpt(match.section, terms);
+      link.append(title, path, text); item.append(link); results.append(item);
+    });
+  };
+  form.addEventListener("submit", event => { event.preventDefault(); render(); input.focus(); });
+  input.addEventListener("input", render);
+  document.addEventListener("keydown", event => { if (event.key === "/" && document.activeElement !== input && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { event.preventDefault(); input.focus(); } if (event.key === "Escape" && document.activeElement === input) { input.value = ""; render(); } });
+  fetch(indexUrl, { credentials: "same-origin" }).then(response => { if (!response.ok) throw new Error("index request failed"); return response.json(); }).then(index => {
+    if (!index || index.format !== expectedFormat || index.schema_version !== expectedSchema || !Array.isArray(index.documents)) throw new Error("unsupported search index");
+    documents = index.documents.filter(doc => doc && typeof doc.path === "string" && typeof doc.title === "string" && Array.isArray(doc.sections)).map(doc => ({
+      path: doc.path,
+      title: doc.title,
+      sections: doc.sections.filter(section => section && typeof section.level === "number" && typeof section.heading === "string" && typeof section.fragment === "string" && typeof section.text === "string" && typeof section.code === "string")
+    }));
+    render();
+  }).catch(() => { documents = []; setStatus("Search index unavailable."); });
+})();
+</script>
+</body>
+</html>

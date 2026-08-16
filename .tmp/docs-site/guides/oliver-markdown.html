@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Markdown Showcase · Boris</title>
+  <link rel="stylesheet" href="../assets/css/boris.css">
+</head>
+<body>
+<aside class="site-sidebar">
+<header class="site-brand">
+<span class="site-brand__name">Boris</span>
+<span class="site-brand__tagline">A native compiler for documentation you can inspect, publish, and reuse.</span>
+</header>
+<section class="site-search" data-boris-search-ui aria-labelledby="site-search-label">
+<form action="_boris/search/" method="get" role="search" data-boris-search-form>
+<label class="site-search__label" id="site-search-label" for="site-search-input">Search documentation</label>
+<div class="site-search__controls">
+<input id="site-search-input" name="q" type="search" autocomplete="off" placeholder="Search…" spellcheck="false">
+<button type="submit">Search</button>
+</div>
+</form>
+<p class="site-search__status" data-boris-search-status role="status" aria-live="polite">Loading search…</p>
+<ol class="site-search__results" data-boris-search-results aria-label="Search results"></ol>
+<noscript><p class="site-search__fallback">Search needs JavaScript in this static site. Use the documentation navigation above.</p></noscript>
+</section>
+<details class="site-menu" open>
+<summary>Documentation menu</summary>
+<nav class="site-nav" aria-label="Site">
+<ul>
+<li class="site-nav__trunk"><a href="../getting-started.html">Getting Started</a>
+<ul>
+<li class="site-nav__satellite"><a href="cli-and-modes.html">CLI &amp; Output Modes</a></li>
+</ul>
+</li>
+<li class="site-nav__trunk is-ancestor"><a href="../index.html">Boris Documentation</a>
+<ul>
+<li class="site-nav__satellite"><a href="../comparison.html">Why Boris? (Comparison &amp; Rationale)</a></li>
+<li class="site-nav__satellite is-ancestor"><a href="../guides.html">User Guides</a>
+<ul>
+<li class="site-nav__satellite is-ancestor"><a href="overview.html">Content Model &amp; Pipeline</a>
+<ul>
+<li class="site-nav__satellite"><a href="asides.html">Asides &amp; Admonitions</a></li>
+<li class="site-nav__satellite"><a href="building-pages.html">Building Pages</a></li>
+<li class="site-nav__satellite"><a href="editor.html">Boris Editor</a></li>
+<li class="site-nav__satellite"><a href="migration.html">Migrating to Boris</a></li>
+<li class="site-nav__satellite is-current"><a href="oliver-markdown.html" aria-current="page">Markdown Showcase</a></li>
+<li class="site-nav__satellite"><a href="rag-export.html">AI &amp; Machine Outputs</a></li>
+<li class="site-nav__satellite"><a href="search-and-ui.html">Search &amp; Browser UI</a></li>
+<li class="site-nav__satellite"><a href="themes-and-layouts.html">Themes &amp; Layouts</a></li>
+<li class="site-nav__satellite"><a href="trunk-satellite.html">Trunk &amp; Satellite — Content Hierarchy</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="publishing.html">Publishing Targets</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="../reference.html">Reference</a>
+<ul>
+<li class="site-nav__satellite"><a href="../markdown-feature-usage.html">Markdown Feature Usage Register</a></li>
+<li class="site-nav__satellite"><a href="../reference/commands.html">Command Reference</a></li>
+<li class="site-nav__satellite"><a href="../reference/diagnostics.html">Diagnostics &amp; Troubleshooting</a></li>
+<li class="site-nav__satellite"><a href="../reference/frontmatter.html">Frontmatter Reference</a></li>
+<li class="site-nav__satellite"><a href="../reference/outputs.html">Outputs &amp; Artifacts</a></li>
+<li class="site-nav__satellite"><a href="../reference/relationships.html">Relationships</a></li>
+</ul>
+</li>
+<li class="site-nav__satellite"><a href="../technology-and-rationale.html">Technology &amp; Rationale</a></li>
+</ul>
+</li>
+</ul>
+</nav>
+</details>
+</aside>
+<nav class="breadcrumb" aria-label="Breadcrumb">
+<ol>
+<li><a href="../index.html">Boris Documentation</a></li>
+<li><a href="../guides.html">User Guides</a></li>
+<li><a href="overview.html">Content Model &amp; Pipeline</a></li>
+<li aria-current="page">Markdown Showcase</li>
+</ol>
+</nav>
+<nav class="page-toc" aria-label="On this page">
+<ul>
+<li class="page-toc__l1"><a href="#markdown-showcase">Markdown Showcase</a></li>
+<li class="page-toc__l2"><a href="#feature-support-at-a-glance">Feature support at a glance</a></li>
+<li class="page-toc__l2"><a href="#headings">Headings</a></li>
+<li class="page-toc__l2"><a href="#custom-showcase-id">Custom heading id</a></li>
+<li class="page-toc__l3"><a href="#level-three-section">Level-three section</a></li>
+<li class="page-toc__l3"><a href="#code-span-and-bold-text">Code span and bold text</a></li>
+<li class="page-toc__l2"><a href="#inline-formatting">Inline formatting</a></li>
+<li class="page-toc__l2"><a href="#paragraphs-breaks-and-rules">Paragraphs, breaks, and rules</a></li>
+<li class="page-toc__l2"><a href="#links-and-images">Links and images</a></li>
+<li class="page-toc__l3"><a href="#wiki-links">Wiki-links ([[entity-id]])</a></li>
+<li class="page-toc__l2"><a href="#block-quotes">Block quotes</a></li>
+<li class="page-toc__l2"><a href="#lists">Lists</a></li>
+<li class="page-toc__l2"><a href="#fenced-code">Fenced code</a></li>
+<li class="page-toc__l2"><a href="#tables">Tables</a></li>
+<li class="page-toc__l2"><a href="#footnotes">Footnotes</a></li>
+<li class="page-toc__l2"><a href="#definition-lists">Definition lists</a></li>
+<li class="page-toc__l2"><a href="#transclusion-includes">Transclusion Includes ({{include path}})</a></li>
+<li class="page-toc__l2"><a href="#raw-html-trusted-authors">Raw HTML (trusted authors)</a></li>
+<li class="page-toc__l2"><a href="#what-is-not-rendered">What is not rendered</a></li>
+<li class="page-toc__l2"><a href="#see-also">See also</a></li>
+</ul>
+</nav>
+<main data-boris-search-root>
+<h1 id="markdown-showcase">Markdown Showcase</h1>
+<p>Boris renders page bodies with <strong>Oliver</strong>, a freestanding Zig markup library
+pinned by content hash in <code>build.zig.zon</code> and consumed natively through
+<code>src/render.zig</code> — never a subprocess, never a shell-out to a CLI. Oliver is
+byte-exact CommonMark 0.31.2 plus GFM tables, with the extensions Boris
+publishes enabled: heading auto-ids, heading attribute lists, footnotes,
+definition lists, and strikethrough.</p>
+<p>This page is a living gallery of the constructs that matter on documentation
+sites.</p>
+<p>Product callouts with document-order guarantees use the constrained
+<a href="asides.html">Aside</a> component. Boris also supports constrained
+<code>&amp;lt;Details&amp;gt;</code> disclosures. <code>&gt; [!NOTE]</code>-style lines are <strong>not</strong> callouts in
+Boris — they render as ordinary blockquotes (see
+<a href="#what-is-not-rendered">what is not rendered</a>).</p>
+<h2 id="feature-support-at-a-glance">Feature support at a glance</h2>
+<table>
+<thead>
+<tr>
+<th align="left">Construct</th>
+<th align="center">Support</th>
+<th align="left">Jump</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">ATX and Setext headings with auto-ids</td>
+<td align="center">Supported</td>
+<td align="left"><a href="#headings">Headings</a></td>
+</tr>
+<tr>
+<td align="left">Heading attribute lists (<code>{#id .class}</code>)</td>
+<td align="center">Supported</td>
+<td align="left"><a href="#headings">Headings</a></td>
+</tr>
+<tr>
+<td align="left">Inline formatting (emphasis, strong, code)</td>
+<td align="center">Supported</td>
+<td align="left"><a href="#inline-formatting">Inline formatting</a></td>
+</tr>
+<tr>
+<td align="left">Links and images (inline + reference)</td>
+<td align="center">Supported</td>
+<td align="left"><a href="#links-and-images">Links and images</a></td>
+</tr>
+<tr>
+<td align="left">Wiki-links (<code>[[entity-id]]</code>)</td>
+<td align="center">Product Core</td>
+<td align="left"><a href="#wiki-links">Wiki-links</a></td>
+</tr>
+<tr>
+<td align="left">Transclusion includes (<code>{{include path}}</code>)</td>
+<td align="center">Product Core</td>
+<td align="left"><a href="#transclusion-includes">Includes</a></td>
+</tr>
+<tr>
+<td align="left">Code (fenced + indented)</td>
+<td align="center">Supported</td>
+<td align="left"><a href="#fenced-code">Fenced code</a></td>
+</tr>
+<tr>
+<td align="left">Block quotes</td>
+<td align="center">Supported</td>
+<td align="left"><a href="#block-quotes">Block quotes</a></td>
+</tr>
+<tr>
+<td align="left">Ordered / unordered / nested lists</td>
+<td align="center">Supported</td>
+<td align="left"><a href="#lists">Lists</a></td>
+</tr>
+<tr>
+<td align="left">Tables (GFM)</td>
+<td align="center">Supported</td>
+<td align="left"><a href="#tables">Tables</a></td>
+</tr>
+<tr>
+<td align="left">Footnotes (<code>[^label]</code> + definitions)</td>
+<td align="center">Supported</td>
+<td align="left"><a href="#footnotes">Footnotes</a></td>
+</tr>
+<tr>
+<td align="left">Definition lists (<code>Term</code> + <code>: def</code>)</td>
+<td align="center">Supported</td>
+<td align="left"><a href="#definition-lists">Definition lists</a></td>
+</tr>
+<tr>
+<td align="left">GFM strikethrough (<code>~~text~~</code>)</td>
+<td align="center">Supported</td>
+<td align="left"><a href="#inline-formatting">Inline formatting</a></td>
+</tr>
+<tr>
+<td align="left">Thematic breaks, autolinks, entities, escapes</td>
+<td align="center">Supported</td>
+<td align="left"><a href="#paragraphs-breaks-and-rules">Paragraphs, breaks, and rules</a></td>
+</tr>
+<tr>
+<td align="left">Raw HTML (trusted authors)</td>
+<td align="center">Supported</td>
+<td align="left"><a href="#raw-html-trusted-authors">Raw HTML</a></td>
+</tr>
+<tr>
+<td align="left">Math, callouts, task lists, fenced divs</td>
+<td align="center">Not rendered</td>
+<td align="left"><a href="#what-is-not-rendered">What is not rendered</a></td>
+</tr>
+</tbody>
+</table>
+<h2 id="headings">Headings</h2>
+<p>Headings feed the in-page TOC when the layout includes the toc marker. Every
+heading gets a deterministic auto-id from its plain text (GFM style: ASCII
+lowercase, punctuation and non-ASCII dropped, whitespace runs become <code>-</code>).
+Duplicate headings share the same id — Boris does not add <code>-1</code>/<code>-2</code> suffixes.
+See <a href="https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/heading-ids.md">heading IDs and wiki fragments</a>.</p>
+<pre><code class="language-markdown">## Custom heading id {#custom-showcase-id .showcase-heading}
+</code></pre>
+<h2 id="custom-showcase-id" class="showcase-heading">Custom heading id</h2>
+<p>That heading carries <code>id=&quot;custom-showcase-id&quot;</code> and class <code>showcase-heading</code> in
+the HTML — a heading attribute list overrides the auto slug. Use it for stable
+anchors independent of auto-slug text.</p>
+<h3 id="level-three-section">Level-three section</h3>
+<p>Auto-ids come from the rendered heading, including inline content:</p>
+<pre><code class="language-markdown">### Code `span` and **bold** text
+</code></pre>
+<h3 id="code-span-and-bold-text">Code <code>span</code> and <strong>bold</strong> text</h3>
+<p>The id is <code>code-span-and-bold-text</code>; the heading text keeps its inline markup.</p>
+<h2 id="inline-formatting">Inline formatting</h2>
+<p>CommonMark inline constructs render as expected:</p>
+<pre><code class="language-markdown">*italic* and **strong** and ***both***, `code`, and ~~struck text~~.
+</code></pre>
+<p><em>italic</em> and <strong>strong</strong> and <em><strong>both</strong></em>, <code>code</code>, and <del>struck text</del>.</p>
+<p>GFM strikethrough (two tildes) renders as <code>&lt;del&gt;</code>; a single <code>~</code> or a run of
+three or more tildes stays literal.</p>
+<p>Backslash escapes and entity references are literal:</p>
+<ul>
+<li><code>\*not emphasis\*</code></li>
+<li><code>AT&amp;amp;T</code> renders as AT&amp;T</li>
+</ul>
+<h2 id="paragraphs-breaks-and-rules">Paragraphs, breaks, and rules</h2>
+<p>Consecutive lines without a blank line form one paragraph; soft breaks render
+as line breaks inside it. Two spaces at the end of a line (or a backslash)
+force a hard break.</p>
+<p>A thematic break is three or more <code>-</code>, <code>*</code>, or <code>_</code> on their own line:</p>
+<hr />
+<p>Autolinks are written as bare URLs or <code>&lt;...&gt;</code>:</p>
+<ul>
+<li>https://example.com</li>
+<li><a href="mailto:hello@example.com">mailto:hello@example.com</a></li>
+</ul>
+<h2 id="links-and-images">Links and images</h2>
+<p>Standard Markdown links (inline and reference) and images (inline and
+reference) are supported. Link destinations are emitted as-is with HTML
+escaping; Boris rewrites graph-backed documentation links and content-local
+image destinations before rendering (see
+<a href="building-pages.html">Building Pages</a>).</p>
+<pre><code class="language-markdown">[Inline link](https://example.com &quot;title&quot;)
+[Reference][ref]
+![Alt text](image.png)
+</code></pre>
+<h3 id="wiki-links">Wiki-links (<code>[[entity-id]]</code>)</h3>
+<p>Boris rewrites wiki-links to relative page links before rendering. A heading
+fragment must match a rendered heading id on the target page:</p>
+<pre><code class="language-markdown">[[guides/overview]]
+[[guides/overview|Display label]]
+[[guides/overview#headings|Headings section]]
+</code></pre>
+<p>See <a href="building-pages.html">Building Pages</a> for the full syntax and error
+codes.</p>
+<h2 id="block-quotes">Block quotes</h2>
+<pre><code class="language-markdown">&gt; Block quotes are CommonMark block quotes.
+&gt;
+&gt; &gt; They nest.
+</code></pre>
+<h2 id="lists">Lists</h2>
+<p>Ordered and unordered lists nest and render as tight or loose lists per
+CommonMark:</p>
+<pre><code class="language-markdown">- one
+  - nested
+- two
+
+1. first
+2. second
+</code></pre>
+<p>Task lists (<code>- [ ]</code>) are <strong>not</strong> rendered as checkboxes — see
+<a href="#what-is-not-rendered">what is not rendered</a>.</p>
+<h2 id="fenced-code">Fenced code</h2>
+<p>Fenced code blocks keep their content verbatim and escape angle brackets.
+Oliver emits the CommonMark-recommended <code>class=&quot;language-…&quot;</code> form:</p>
+<pre><code class="language-markdown">```zig
+const answer = 42;
+</code></pre>
+<pre><code>
+```zig
+const answer = 42;
+</code></pre>
+<p>Indented code (four spaces) also renders as a <code>&lt;pre&gt;&lt;code&gt;</code> block without a
+language class.</p>
+<h2 id="tables">Tables</h2>
+<p>GFM tables are supported with alignment:</p>
+<pre><code class="language-markdown">| Left | Center | Right |
+| :--- | :----: | ----: |
+| a    |   b    |    c  |
+</code></pre>
+<table>
+<thead>
+<tr>
+<th align="left">Left</th>
+<th align="center">Center</th>
+<th align="right">Right</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">a</td>
+<td align="center">b</td>
+<td align="right">c</td>
+</tr>
+</tbody>
+</table>
+<h2 id="footnotes">Footnotes</h2>
+<p>Footnote references and definitions render with back-references:</p>
+<pre><code class="language-markdown">Boris renders Markdown natively.[^native]
+
+[^native]: The Oliver library parses and renders in-process; no subprocess.
+</code></pre>
+<p>Boris renders Markdown natively.<sup class="footnote-ref"><a href="#fn-1" id="fnref-1" data-footnote-ref>1</a></sup></p>
+<p>References are numbered in first-use order; the footnote section is appended at
+the end of the page body. Footnote references inside definition-list bodies
+render correctly.</p>
+<h2 id="definition-lists">Definition lists</h2>
+<p>A term paragraph followed by <code>:</code> definition lines renders as a definition
+list:</p>
+<pre><code class="language-markdown">Trunk
+: A page with no direct parent; the root of a navigation branch.
+
+Satellite
+: A page with exactly one direct parent.
+</code></pre>
+<dl>
+<dt>Trunk</dt>
+<dd>A page with no direct parent; the root of a navigation branch.</dd>
+</dl>
+<dl>
+<dt>Satellite</dt>
+<dd>A page with exactly one direct parent.</dd>
+</dl>
+<h2 id="transclusion-includes">Transclusion Includes (<code>{{include path}}</code>)</h2>
+<p>Includes are Boris-mediated and resolved <strong>before</strong> rendering — the renderer
+never reads files:</p>
+<pre><code class="language-markdown">{{include includes/shared-tip.md}}
+</code></pre>
+<p>See <a href="building-pages.html">Building Pages</a> for include rules and cycle
+diagnostics.</p>
+<h2 id="raw-html-trusted-authors">Raw HTML (trusted authors)</h2>
+<p>Raw inline HTML and HTML blocks pass through unescaped. Boris assumes trusted
+author content — it does <strong>not</strong> sanitize. Fenced code is always escaped.</p>
+<pre><code class="language-html">&lt;details&gt;
+&lt;summary&gt;Why does this matter?&lt;/summary&gt;
+Content inside a raw HTML block.
+&lt;/details&gt;
+</code></pre>
+<h2 id="what-is-not-rendered">What is not rendered</h2>
+<p>The following constructs are <strong>not</strong> part of Boris's Markdown surface. If a
+source line uses them, Oliver treats it as ordinary text (block quotes keep
+the <code>&gt;</code> marker and <code>[!NOTE]</code> text; math stays literal):</p>
+<ul>
+<li>Math (<code>$x$</code>, <code>$$x$$</code>)</li>
+<li>Callouts (<code>&gt; [!NOTE]</code> and Python-Markdown <code>!!!</code>)</li>
+<li>Task lists (<code>- [ ]</code>)</li>
+<li>Fenced divs (<code>:::</code>)</li>
+<li>Bracketed spans (<code>[text]{ial}</code>)</li>
+<li>Critic markup (<code>{++…++}</code>, <code>{--…--}</code>, <code>{~~…~&gt;…~~}</code>)</li>
+<li>Smart typography (apostrophes and quotes stay as authored)</li>
+<li>Abbreviations, citations, indices, TOC markers, metadata variables, and
+engine-side file includes</li>
+</ul>
+<p>Prefer the Boris-native equivalents: <code>&amp;lt;Aside&amp;gt;</code>/<code>&amp;lt;Details&amp;gt;</code>
+components for callouts, <code>{{include}}</code> for includes, and wiki-links for
+internal references. See the <a href="https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/oliver-renderer.md">renderer contract</a>
+for the full compatibility classification.</p>
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="asides.html">Aside components and admonitions</a></li>
+<li><a href="building-pages.html">Building Pages</a> — frontmatter, links, includes</li>
+<li><a href="search-and-ui.html">Search and UI</a></li>
+<li><a href="https://github.com/drawmeanelephant/boris/blob/main/docs/contracts/oliver-renderer.md">Renderer contract</a></li>
+</ul>
+<section class="footnotes" data-footnotes>
+<ol>
+<li id="fn-1">
+<p>The Oliver library parses and renders in-process; no subprocess. <a href="#fnref-1" class="footnote-backref" data-footnote-backref data-footnote-backref-idx="1" aria-label="Back to reference 1">↩</a></p>
+</li>
+</ol>
+</section>
+
+</main>
+<footer class="site-footer">Boris · deterministic documentation compiler · Load → Roll → Ignite → Reset</footer>
+<script>
+(() => {
+  "use strict";
+  const ui = document.querySelector("[data-boris-search-ui]");
+  if (!ui) return;
+  const input = ui.querySelector("#site-search-input");
+  const form = ui.querySelector("form");
+  const status = ui.querySelector("[data-boris-search-status]");
+  const results = ui.querySelector("[data-boris-search-results]");
+  // Derive site-root-relative prefix from the page-relative theme stylesheet href
+  // emitted by asset-url ("" from index.html, "../" from guides/overview.html, …).
+  const siteRootPrefix = (() => {
+    const sheet = document.querySelector('link[rel="stylesheet"][href*="assets/"]');
+    const href = sheet ? (sheet.getAttribute("href") || "") : "";
+    const marker = href.lastIndexOf("assets/");
+    return marker >= 0 ? href.slice(0, marker) : "";
+  })();
+  if (form) form.action = siteRootPrefix + "_boris/search/";
+  const indexUrl = new URL(siteRootPrefix + "_boris/search/search-index.json", document.baseURI);
+  const expectedFormat = "boris-rendered-search-index";
+  const expectedSchema = 1;
+  let documents = [];
+
+  const normalize = value => String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const fields = section => [section.heading, section.text, section.code].map(normalize);
+  const excerpt = (section, terms) => {
+    const source = String(section.text || section.code || section.heading || "").replace(/\s+/g, " ").trim();
+    if (!source) return "";
+    const needle = terms.find(term => source.toLowerCase().indexOf(term) >= 0);
+    const start = needle ? Math.max(0, source.toLowerCase().indexOf(needle) - 48) : 0;
+    return (start ? "…" : "") + source.slice(start, start + 150) + (start + 150 < source.length ? "…" : "");
+  };
+  const scoreDocument = (doc, terms, phrase) => {
+    const title = normalize(doc.title);
+    let best = null;
+    (Array.isArray(doc.sections) ? doc.sections : []).forEach((section, sectionIndex) => {
+      const values = fields(section);
+      let score = 0;
+      terms.forEach(term => {
+        if (title.includes(term)) score += 12;
+        if (values[0].includes(term)) score += 8;
+        if (values[1].includes(term)) score += 2;
+        if (values[2].includes(term)) score += 1;
+      });
+      if (section.level === 1) score += 1;
+      if (phrase && (title.includes(phrase) || values.some(value => value.includes(phrase)))) score += 5;
+      if (score && (!best || score > best.score)) best = { doc, section, sectionIndex, score };
+    });
+    return best;
+  };
+  const setStatus = message => { status.textContent = message; };
+  const render = () => {
+    results.replaceChildren();
+    const query = normalize(input.value);
+    if (!query) { setStatus(documents.length ? "Type to search the site." : "Search index unavailable."); return; }
+    const terms = query.split(" ").filter(Boolean);
+    const matches = documents.map(doc => scoreDocument(doc, terms, query)).filter(Boolean).sort((a, b) => b.score - a.score || String(a.doc.path).localeCompare(String(b.doc.path)) || a.sectionIndex - b.sectionIndex);
+    if (!matches.length) { setStatus("No results. Try a different search."); return; }
+    setStatus(`${matches.length} result${matches.length === 1 ? "" : "s"}.`);
+    matches.slice(0, 12).forEach(match => {
+      const item = document.createElement("li"); item.className = "site-search__result";
+      const link = document.createElement("a"); link.href = new URL(siteRootPrefix + String(match.doc.path).replace(/^\/+/, "") + (match.section.fragment ? "#" + match.section.fragment : ""), document.baseURI).href;
+      const title = document.createElement("span"); title.className = "site-search__title"; title.textContent = match.section.heading || match.doc.title;
+      const path = document.createElement("span"); path.className = "site-search__path"; path.textContent = String(match.doc.path) + (match.section.fragment ? "#" + String(match.section.fragment) : "");
+      const text = document.createElement("span"); text.className = "site-search__excerpt"; text.textContent = excerpt(match.section, terms);
+      link.append(title, path, text); item.append(link); results.append(item);
+    });
+  };
+  form.addEventListener("submit", event => { event.preventDefault(); render(); input.focus(); });
+  input.addEventListener("input", render);
+  document.addEventListener("keydown", event => { if (event.key === "/" && document.activeElement !== input && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { event.preventDefault(); input.focus(); } if (event.key === "Escape" && document.activeElement === input) { input.value = ""; render(); } });
+  fetch(indexUrl, { credentials: "same-origin" }).then(response => { if (!response.ok) throw new Error("index request failed"); return response.json(); }).then(index => {
+    if (!index || index.format !== expectedFormat || index.schema_version !== expectedSchema || !Array.isArray(index.documents)) throw new Error("unsupported search index");
+    documents = index.documents.filter(doc => doc && typeof doc.path === "string" && typeof doc.title === "string" && Array.isArray(doc.sections)).map(doc => ({
+      path: doc.path,
+      title: doc.title,
+      sections: doc.sections.filter(section => section && typeof section.level === "number" && typeof section.heading === "string" && typeof section.fragment === "string" && typeof section.text === "string" && typeof section.code === "string")
+    }));
+    render();
+  }).catch(() => { documents = []; setStatus("Search index unavailable."); });
+})();
+</script>
+</body>
+</html>
