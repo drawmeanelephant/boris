@@ -18,6 +18,7 @@ type MockOptions = {
   openError?: { error: string };
   saveError?: { error: string };
   commandByCall?: CommandResult[];
+  recoverySkipped?: number;
 };
 
 type CommandResult = {
@@ -132,7 +133,7 @@ async function installApi(page: Page, options: MockOptions = {}) {
     body: JSON.stringify({ files: options.files ?? [{ path: 'boris.json' }, { path: 'content/index.md' }] })
   }));
   await page.route('**/api/recovery', route => route.fulfill({
-    contentType: 'application/json', body: JSON.stringify({ snapshots: options.recovery ?? [] })
+    contentType: 'application/json', body: JSON.stringify({ snapshots: options.recovery ?? [], skipped: options.recoverySkipped ?? 0 })
   }));
   await page.route('**/api/files/open', async route => {
     if (options.openError) {
@@ -2433,4 +2434,36 @@ test('compiler version names the supported IR range (#418 M11)', async ({ page }
     }
   });
   await expect(page.getByText('Compiler: boris/0.8.1; IR 0.2.0–0.4.0')).toBeVisible();
+});
+
+test('overlapping saves send one request (#418 M11)', async ({ page }) => {
+  let saves = 0;
+  await installApi(page);
+  await page.route('**/api/files/save', async route => {
+    saves += 1;
+    const body = route.request().postDataJSON() as { path: string; content: string };
+    await new Promise(resolve => setTimeout(resolve, 80));
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'saved', path: body.path, content: body.content,
+        fingerprint: 'c'.repeat(64), read_only: false
+      })
+    });
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Storm\n');
+  await page.keyboard.press('Control+s');
+  await page.keyboard.press('Control+s');
+  await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
+  expect(saves).toBe(1);
+});
+
+test('unreadable recovery snapshots are ignored without hiding the valid ones (#418 M11)', async ({ page }) => {
+  await installApi(page, {
+    recovery: [{ path: 'content/index.md', content: '# Recovered\n', fingerprint: 'd'.repeat(64) }],
+    recoverySkipped: 1
+  });
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('1 recovery snapshot was unreadable and ignored');
+  await expect(page.getByRole('button', { name: 'Restore content/index.md', exact: true })).toBeVisible();
 });

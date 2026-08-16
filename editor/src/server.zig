@@ -276,7 +276,10 @@ fn serveFileDelete(io: Io, allocator: std.mem.Allocator, request: *http.Server.R
 fn serveRecoveryList(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, config: Config) !void {
     var snapshots = recovery.loadAll(allocator, io, config.state_root) catch |err| return respondApiError(request, err);
     defer snapshots.deinit(allocator);
-    const bytes = try std.json.Stringify.valueAlloc(allocator, .{ .snapshots = snapshots.snapshots }, .{});
+    const bytes = try std.json.Stringify.valueAlloc(allocator, .{
+        .snapshots = snapshots.snapshots,
+        .skipped = snapshots.skipped,
+    }, .{});
     defer allocator.free(bytes);
     return respondJson(request, .ok, bytes);
 }

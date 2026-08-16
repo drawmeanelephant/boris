@@ -293,6 +293,11 @@ A single author file may be at most 8 MiB. A project may list at most 50,000
 author-owned files. Those bounds are spoken in the status line. If a Boris
 command is killed or times out, the same named button retries it.
 
+Save is one in-flight write at a time. A second Save or Ctrl+S during that
+write is ignored so the fingerprint cannot race. If a crash-recovery snapshot
+is unreadable, valid snapshots still appear and the status line says how many
+were ignored.
+
 <Details summary="The editor is not a second compiler">
 
 It does not own frontmatter grammar, Markdown, the graph, or publication.

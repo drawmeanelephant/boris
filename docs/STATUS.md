@@ -84,7 +84,7 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 
 | Capability | Current state |
 |---|---|
-| Boris Editor | **First-class authoring surface** — local host, schema- and graph-aware completion, compiler-backed problems, live preview of committed `dist/`, publication plan over `boris plan --profile`. Stale artifacts stay in-shell. File and list bounds (8 MiB / 50,000 files) are named. Keyboard checklist for [#418](https://github.com/drawmeanelephant/boris/issues/418) M10 is in CI; spoken Voice Control is not claimed. Guide: [`content/guides/editor.md`](../content/guides/editor.md). |
+| Boris Editor | **First-class authoring surface** — local host, schema- and graph-aware completion, compiler-backed problems, live preview of committed `dist/`, publication plan over `boris plan --profile`. Stale artifacts stay in-shell. File and list bounds (8 MiB / 50,000 files) are named. Overlapping saves are serialized; corrupt recovery snapshots are skipped. Keyboard checklist for [#418](https://github.com/drawmeanelephant/boris/issues/418) M10 is in CI; spoken Voice Control is not claimed. Guide: [`content/guides/editor.md`](../content/guides/editor.md). |
 
 ### Labs
 

@@ -20,7 +20,7 @@
     read_only: boolean;
   };
   type RecoverySnapshot = { path: string; content: string; fingerprint: string };
-  type RecoveryList = { snapshots: RecoverySnapshot[] };
+  type RecoveryList = { snapshots: RecoverySnapshot[]; skipped?: number };
   type ErrorResponse = { error?: string; status?: string };
   type CommandMode = 'validate' | 'ir_build' | 'html_build' | 'check' | 'impact' | 'plan';
   type FailureClass = 'success' | 'content' | 'usage' | 'io' | 'terminated';
@@ -170,6 +170,7 @@
   let renamePath = '';
   let pendingResolution: PendingResolution | null = null;
   let commandRunning = false;
+  let saveInFlight = false;
   let commandResult: CommandResult | null = null;
   let impactId = '';
   let authoring: AuthoringPayload | null = null;
@@ -253,7 +254,7 @@
       if (item.kind === 'open' || item.kind === 'source' || item.kind === 'entity') return [paletteItemKey(item), true] as const;
       if (item.kind === 'parent') return [paletteItemKey(item), parentNode !== null] as const;
       if (item.kind === 'impact-here') return [paletteItemKey(item), activeNode !== null && !commandRunning] as const;
-      if (item.kind === 'save') return [paletteItemKey(item), dirty && !readOnly] as const;
+      if (item.kind === 'save') return [paletteItemKey(item), dirty && !readOnly && !saveInFlight] as const;
       if (item.kind === 'preview') return [paletteItemKey(item), previewData?.phase !== 'running'] as const;
       if (item.kind === 'command') return [paletteItemKey(item), !commandRunning] as const;
       if (dirty) return [paletteItemKey(item), false] as const;
@@ -334,6 +335,9 @@
       const recoveryResult = await api<RecoveryList>('/api/recovery');
       if (recoveryResult.response.ok) {
         snapshots = recoveryResult.data.snapshots;
+        if ((recoveryResult.data.skipped ?? 0) > 0) {
+          editorStatus = `${recoveryResult.data.skipped} recovery snapshot${recoveryResult.data.skipped === 1 ? ' was' : 's were'} unreadable and ignored.`;
+        }
       } else {
         editorStatus = 'Project files are available, but recovery snapshots could not be loaded.';
       }
@@ -855,45 +859,53 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
   }
 
   async function saveFile(recreate = false, replacementFingerprint = fingerprint): Promise<boolean> {
-    if (!activePath || readOnly || !dirty) return false;
-    const result = await api<BufferResponse | ErrorResponse>('/api/files/save', {
-      method: 'POST',
-      body: JSON.stringify({ path: activePath, content, fingerprint: replacementFingerprint, recreate })
-    });
-    if (result.response.ok) {
-      const buffer = result.data as BufferResponse;
-      loadBuffer(buffer, `Saved ${activePath}.`);
-      snapshots = snapshots.filter(snapshot => snapshot.path !== activePath);
-      conflict = null;
-      deletedConflict = false;
-      skipFocusRestore = true;
-      conflictDialog?.close();
-      await refreshFiles();
-      await rebuildPreview('save');
-      return true;
+    if (!activePath || readOnly || !dirty || saveInFlight) return false;
+    // Capture before saveInFlight disables Save file; otherwise the conflict
+    // dialog would remember <body> and Esc could not restore the trigger (#462).
+    const trigger = document.activeElement;
+    saveInFlight = true;
+    try {
+      const result = await api<BufferResponse | ErrorResponse>('/api/files/save', {
+        method: 'POST',
+        body: JSON.stringify({ path: activePath, content, fingerprint: replacementFingerprint, recreate })
+      });
+      if (result.response.ok) {
+        const buffer = result.data as BufferResponse;
+        loadBuffer(buffer, `Saved ${activePath}.`);
+        snapshots = snapshots.filter(snapshot => snapshot.path !== activePath);
+        conflict = null;
+        deletedConflict = false;
+        skipFocusRestore = true;
+        conflictDialog?.close();
+        await refreshFiles();
+        await rebuildPreview('save');
+        return true;
+      }
+      const error = result.data as ErrorResponse;
+      if (result.response.status === 409 && error.status === 'conflict') {
+        conflict = result.data as BufferResponse;
+        deletedConflict = false;
+        editorStatus = `External changes detected in ${activePath}. Nothing was overwritten.`;
+        await tick();
+        openModal(conflictDialog, trigger);
+        conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
+      } else if (result.response.status === 409 && error.status === 'deleted') {
+        conflict = null;
+        deletedConflict = true;
+        editorStatus = `${activePath} was deleted outside the editor. Nothing was written.`;
+        await tick();
+        openModal(conflictDialog, trigger);
+        conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
+      } else if (error.error === 'read_only') {
+        readOnly = true;
+        editorStatus = `${activePath} is read-only. Nothing was written.`;
+      } else {
+        editorStatus = `Save failed for ${activePath}: ${hostErrorLabel(error.error)}. Your buffer remains unsaved.`;
+      }
+      return false;
+    } finally {
+      saveInFlight = false;
     }
-    const error = result.data as ErrorResponse;
-    if (result.response.status === 409 && error.status === 'conflict') {
-      conflict = result.data as BufferResponse;
-      deletedConflict = false;
-      editorStatus = `External changes detected in ${activePath}. Nothing was overwritten.`;
-      await tick();
-      openModal(conflictDialog);
-      conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
-    } else if (result.response.status === 409 && error.status === 'deleted') {
-      conflict = null;
-      deletedConflict = true;
-      editorStatus = `${activePath} was deleted outside the editor. Nothing was written.`;
-      await tick();
-      openModal(conflictDialog);
-      conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
-    } else if (error.error === 'read_only') {
-      readOnly = true;
-      editorStatus = `${activePath} is read-only. Nothing was written.`;
-    } else {
-      editorStatus = `Save failed for ${activePath}: ${hostErrorLabel(error.error)}. Your buffer remains unsaved.`;
-    }
-    return false;
   }
 
   async function requestResolution(pending: PendingResolution) {
@@ -1078,7 +1090,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     if (item.kind === 'open' || item.kind === 'source' || item.kind === 'entity') return true;
     if (item.kind === 'parent') return parentNode !== null;
     if (item.kind === 'impact-here') return activeNode !== null && !commandRunning;
-    if (item.kind === 'save') return dirty && !readOnly;
+    if (item.kind === 'save') return dirty && !readOnly && !saveInFlight;
     if (item.kind === 'preview') return previewData?.phase !== 'running';
     if (item.kind === 'command') return !commandRunning;
     if (dirty) return false;
@@ -1219,14 +1231,13 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     }
   }
 
-  function rememberDialogTrigger() {
-    const active = document.activeElement;
-    lastDialogTrigger = active instanceof HTMLElement ? active : null;
+  function rememberDialogTrigger(source: EventTarget | null = document.activeElement) {
+    lastDialogTrigger = source instanceof HTMLElement ? source : null;
     skipFocusRestore = false;
   }
 
-  function openModal(dialog: HTMLDialogElement) {
-    rememberDialogTrigger();
+  function openModal(dialog: HTMLDialogElement, trigger?: EventTarget | null) {
+    rememberDialogTrigger(trigger === undefined ? document.activeElement : trigger);
     dialog.showModal();
   }
 
@@ -1389,7 +1400,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
       <div class="source-actions" aria-label="Editing actions">
         <button type="button" disabled={undoStack.length === 0 || readOnly} onclick={undo}>Undo</button>
         <button type="button" disabled={redoStack.length === 0 || readOnly} onclick={redo}>Redo</button>
-        <button type="button" class="primary" disabled={!dirty || readOnly} onclick={() => saveFile()}>Save file</button>
+        <button type="button" class="primary" disabled={!dirty || readOnly || saveInFlight} onclick={() => saveFile()}>Save file</button>
       </div>
     </div>
     {#if activePath}
