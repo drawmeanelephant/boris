@@ -553,3 +553,24 @@ svg { width: 20px; height: 20px; flex-shrink: 0; }
 @media (max-width: 1280px) {
     .toc-sidebar { display: none; }
 }
+
+.skip-link { position: absolute; left: 1rem; top: -4rem; z-index: 60; padding: 0.45rem 0.7rem; background: var(--color-primary); color: #fff; }
+.skip-link:focus { top: 1rem; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.page-metadata { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin: 0 0 1.2rem; color: var(--color-on-surface-variant); font-size: 0.82rem; }
+.page-metadata dt { font-weight: 700; }
+.page-metadata dd { margin: 0; }
+.page-children, .semantic-relations, .semantic-backlinks { margin-top: 2rem; }
+.page-toc ul { margin: 0; padding-left: 1rem; }
+.page-toc__l2 { padding-inline-start: 0.6rem; }
+.page-toc__l3 { padding-inline-start: 1.1rem; }
+.site-nav .is-current > a { font-weight: 700; color: var(--color-primary); }
+.boris-content dl { margin: 1.2rem 0; }
+.boris-content dt { margin-top: 0.7rem; font-weight: 700; }
+.boris-content dd { margin: 0.2rem 0 0 1.1rem; }
+.footnotes { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--color-outline-variant); color: var(--color-on-surface-variant); font-size: 0.88rem; }
+.details { margin: 1.2rem 0; }
+.site-footer { padding: 1rem var(--spacing-lg); border-top: 1px solid var(--color-outline-variant); color: var(--color-on-surface-variant); font-size: 0.85rem; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+@media print { .skip-link, .header, .sidebar, .toc-sidebar, .search-container { display: none; } .main-wrapper { display: block; margin: 0; } }

@@ -37,6 +37,8 @@ themes/<name>/
 | [`engineering`](engineering/) | Dense engineering docs | `--theme themes/engineering` |
 | [`civic`](civic/) | Public-information shell | `--theme themes/civic` |
 | [`tokens`](tokens/) | Fluid custom properties | `--theme themes/tokens` |
+| [`corporate`](corporate/) | Dense product-docs chrome | `--theme themes/corporate` |
+| [`minimal`](minimal/) | Same shell, no search | `--theme themes/minimal` |
 
 Sample sites that build these themes live under `examples/<name>-site/`.
 

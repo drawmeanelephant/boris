@@ -57,9 +57,9 @@ To use a layout directly without the theme shorthand:
 Shipped themes live under `themes/`. The default is `themes/boris`. Also
 shipped: `reference`, `press`, `showcase`, `archive`, `field-notes`,
 `compact`, `cards`, `cozy`, `journal`, `ledger`, `reading`, `semantic`,
-`columns`, `service`, `engineering`, `civic`, and `tokens`. Sample sites
-are under `examples/`. The catalog bar is `themes/README.md` in the
-repository.
+`columns`, `service`, `engineering`, `civic`, `tokens`, `corporate`, and
+`minimal`. Sample sites are under `examples/`. The catalog bar is
+`themes/README.md` in the repository.
 
 </Aside>
 
