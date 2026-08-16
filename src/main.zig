@@ -1036,6 +1036,89 @@ fn buildStandardSiteSurfaces(
     return .success;
 }
 
+/// HTML-build verification bundle. Pointers in `vctx` alias `proj`/`surfaces`
+/// and are valid only while this struct lives.
+const HtmlVerification = struct {
+    proj: StandardSiteProjection,
+    surfaces: standard_site.VerificationSurfaces,
+    vctx: standard_site_emit.VerificationContext,
+
+    fn deinit(self: *HtmlVerification, gpa: std.mem.Allocator) void {
+        deinitVerificationSurfaces(gpa, &self.surfaces);
+        self.proj.deinit(gpa);
+    }
+};
+
+/// When `--profile` names a Standard.site target, build the offline
+/// projection and surfaces so the HTML compile can emit verification
+/// artifacts. A missing profile, or a GitHub Pages profile, is a no-op.
+fn loadHtmlVerification(
+    io: Io,
+    gpa: std.mem.Allocator,
+    opts: Options,
+    out: *?HtmlVerification,
+) ExitCode {
+    const profile_path = opts.profile_path orelse return .success;
+    const profile_bytes = Io.Dir.cwd().readFileAlloc(
+        io,
+        profile_path,
+        gpa,
+        .limited(publication_profile.max_profile_bytes + 1),
+    ) catch |err| switch (err) {
+        error.StreamTooLong => return reportPublicationPlanConfigError(error.ProfileTooLarge),
+        else => {
+            std.debug.print("error: unable to read publication profile: {s}\n", .{@errorName(err)});
+            return .io_error;
+        },
+    };
+    defer gpa.free(profile_bytes);
+
+    const cwd_path = std.process.currentPathAlloc(io, gpa) catch |err| {
+        std.debug.print("error: unable to resolve publication profile workspace: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer gpa.free(cwd_path);
+    const workspace = publication_profile.profileWorkspace(gpa, cwd_path, profile_path) catch |err| {
+        return reportPublicationPlanConfigError(err);
+    };
+    var request = publication_profile.parseBytes(gpa, workspace, profile_bytes, .{
+        .jobs = opts.jobs,
+        .incremental = opts.incremental,
+        .quiet = opts.quiet,
+    }) catch |err| {
+        return reportPublicationPlanConfigError(err);
+    };
+    defer request.deinit(gpa);
+
+    const publication = request.plan.publication orelse return .success;
+    switch (publication) {
+        .standard_site => {},
+        .github_pages => return .success,
+    }
+
+    var proj: StandardSiteProjection = undefined;
+    const code = buildStandardSiteProjection(io, gpa, opts, &proj);
+    if (code != .success) return code;
+    var surfaces: standard_site.VerificationSurfaces = undefined;
+    const surf_code = buildStandardSiteSurfaces(gpa, proj.targetConfig(), &proj.projection, &surfaces);
+    if (surf_code != .success) {
+        proj.deinit(gpa);
+        return surf_code;
+    }
+    out.* = .{
+        .proj = proj,
+        .surfaces = surfaces,
+        .vctx = undefined,
+    };
+    if (out.*) |*bundle| {
+        bundle.vctx = .{
+            .surfaces = &bundle.surfaces,
+            .projection = &bundle.proj.projection,
+        };
+    }
+    return .success;
+}
+
 fn deinitVerificationSurfaces(gpa: std.mem.Allocator, surfaces: *standard_site.VerificationSurfaces) void {
     gpa.free(surfaces.well_known.content);
     if (surfaces.well_known.project_path) |path| gpa.free(path);
@@ -2394,6 +2477,12 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
     defer if (report_collector) |*c| c.deinit();
     const collector_ptr: ?*diag.Collector = if (report_collector) |*c| c else null;
 
+    var html_verification: ?HtmlVerification = null;
+    defer if (html_verification) |*bundle| bundle.deinit(gpa);
+    const verify_code = loadHtmlVerification(io, gpa, opts, &html_verification);
+    if (verify_code != .success) return verify_code;
+    const verification: ?*const standard_site_emit.VerificationContext = if (html_verification) |*bundle| &bundle.vctx else null;
+
     if (opts.targets.items.len > 0) {
         compile.compileHtmlSiteMulti(io, gpa, opts.targets.items, .{
             .content_root = opts.input_dir,
@@ -2408,6 +2497,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .allow_markdown_literals = opts.allow_markdown_links,
             .timings = recorder,
             .diagnostics = collector_ptr,
+            .standard_site_verification = verification,
         }) catch |err| {
             const code = mapHtmlError(err, opts.targets.items, layout_path);
             appendEscapedDiagnostic(collector_ptr, err, code);
@@ -2435,6 +2525,7 @@ pub fn runHtml(io: Io, gpa: std.mem.Allocator, opts: Options, recorder: ?*timing
             .allow_markdown_literals = opts.allow_markdown_links,
             .timings = recorder,
             .diagnostics = collector_ptr,
+            .standard_site_verification = verification,
         }) catch |err| {
             const code = mapHtmlError(err, &.{}, layout_path);
             appendEscapedDiagnostic(collector_ptr, err, code);

@@ -1403,7 +1403,17 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         };
     }
 
-    if (saw_profile) return error.ConflictingFlags;
+    // `--profile` on the HTML build is the Standard.site verification-emit
+    // opt-in (#533). Other modes already have their own profile commands
+    // (`plan`, `standard-site *`, `nostr plan`) or do not emit surfaces.
+    if (saw_profile) {
+        if (command == .watch or saw_watch or command == .validate or
+            command == .check or command == .impact or
+            wants_rag or wants_ir or wants_context or wants_llms or wants_rss)
+        {
+            return error.ConflictingFlags;
+        }
+    }
     if (saw_fail_on_unreferenced and command != .check) return error.ConflictingFlags;
 
     if (command == .validate) {
@@ -1754,6 +1764,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .serve = saw_serve or serve_port != null,
             .serve_port = serve_port,
             .html_profile = default_profile,
+            .profile_path = profile_path,
             .targets = targets,
             .command = command,
             .impact_id = impact_id,
@@ -1857,6 +1868,7 @@ pub fn printUsage() void {
         \\  --out PATH          Smoke result artifact path (default: stdout)
         \\  standard-site options (all subcommands):
         \\  --session-root PATH Override the persistent session store root
+        \\  --profile PATH      Standard.site profile: emit verification surfaces on HTML build
         \\  --html              Explicit HTML site mode → --html-dir (default dist)
         \\  --html-dir <DIR>    HTML site mode with output directory DIR
         \\  --target NAME=DIR   HTML multi-target mode (repeatable; order-independent); implies HTML
@@ -2552,7 +2564,12 @@ test "parse: plan selects an explicit profile and preserves only supported overr
 
 test "parse: plan requires a profile and rejects execution or projection selectors" {
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "plan" }));
-    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--profile", "site.json" }));
+    var html_profile = try parseOptions(std.testing.allocator, &.{ "boris", "--profile", "site.json" });
+    defer html_profile.deinit(std.testing.allocator);
+    try expectEqual(Mode.html, html_profile.mode);
+    try expectEqualStrings("site.json", html_profile.profile_path.?);
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--watch", "--profile", "site.json" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "validate", "--profile", "site.json" }));
     try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--profile", "b" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--out", "out" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "plan", "--profile", "a", "--target", "public=dist" }));
