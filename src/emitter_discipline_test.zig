@@ -175,6 +175,10 @@ const modules = [_]Module{
     // Network client, not an emitter: XRPC request envelopes are transient
     // wire messages to the PDS, audited by the offline mock suite.
     .{ .name = "atproto_xrpc.zig", .class = .other },
+    // Network auth client, not an emitter: createSession/refreshSession request
+    // envelopes are transient wire messages to the PDS, audited by the offline
+    // mock suite. The credential travels only in the request body.
+    .{ .name = "atproto_password.zig", .class = .other },
     .{ .name = "cache.zig", .class = .other },
     .{ .name = "cli.zig", .class = .other },
     .{ .name = "compile.zig", .class = .other },

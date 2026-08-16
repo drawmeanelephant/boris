@@ -493,14 +493,16 @@ scope lacks `include:site.standard.authFull`; Boris rejects it
 (`InvalidTokenResponse`, exit 6) rather than publishing with a session that
 cannot write `site.standard.*` records. Publishing against bsky.social
 therefore requires either a PDS whose authorization server supports the
-Standard.site permission set or a different mechanism entirely — Boris is
-OAuth-only and never accepts app passwords.
+Standard.site permission set or the explicit opt-in app-password credential
+path ([`atproto-app-password.md`](atproto-app-password.md)).
 
 Local interactive v1 uses an ephemeral IPv4 loopback callback and the ATProto
 localhost client-metadata convention. Authorization-server support for that
 convention is optional. Rejection must produce an explicit compatibility error;
-it must not fall back to an app password, export a token, or weaken the redirect
-binding. A hosted callback or installed custom URI scheme is a separate future
+it must not *silently* fall back to an app password, export a token, or weaken
+the redirect binding. An app password is accepted only through the explicit,
+separately-authorized `standard-site login --app-password` path, never inside
+this flow. A hosted callback or installed custom URI scheme is a separate future
 client profile.
 
 Authorization-server and future PDS nonces are separate per-origin state. A
@@ -548,8 +550,11 @@ resulting DPoP-bound session
 Standard.site/XRPC records and can prune remote state under explicit authority
 ([`standard-site-reconciliation.md`](standard-site-reconciliation.md)). Still
 not implemented: authorization UI rendering, resuming an interrupted in-flight
-authorization, app passwords, CI credential distribution, and generic
-OAuth/DID provider support. No live-network smoke is in CI; a stable
+authorization, CI credential distribution, and generic
+OAuth/DID provider support. App passwords are supported only through the
+separate opt-in `login --app-password` path
+([`atproto-app-password.md`](atproto-app-password.md)), never as a fallback
+inside this flow. No live-network smoke is in CI; a stable
 non-personal public fixture was not identified, so this slice keeps all tests
 offline rather than turning mutable public identity state into normative test
 truth.

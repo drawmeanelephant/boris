@@ -21,11 +21,12 @@ const reconcile = @import("standard_site_reconcile.zig");
 const identity = @import("atproto_identity.zig");
 const authorization = @import("atproto_authorization.zig");
 const interactive = @import("atproto_interactive_std.zig");
+const password = @import("atproto_password.zig");
 const session_std = @import("atproto_session_std.zig");
 const transport = @import("atproto_transport.zig");
 const xrpc = @import("atproto_xrpc.zig");
 
-pub const Error = identity.Error || authorization.Error || xrpc.Error || reconcile.Error || interactive.Error || session_std.Error || error{
+pub const Error = identity.Error || authorization.Error || password.Error || xrpc.Error || reconcile.Error || interactive.Error || session_std.Error || error{
     InvalidWallClock,
     PdsOriginMismatch,
     PlanDrift,
@@ -36,6 +37,44 @@ pub const Error = identity.Error || authorization.Error || xrpc.Error || reconci
 /// Must match the revision in build.zig.zon (enforced by the zon test below);
 /// the upgrade procedure lives in docs/contracts/oliver-renderer.md.
 pub const oliver_pin = "oliver@c0b3d2b683f0cecf2181b22a800908619e56d0d7";
+
+/// A session acquired for one publish/smoke run: either the DPoP-bound OAuth
+/// session or the Bearer app-password session. Both carry the DID + PDS origin
+/// needed for the authority gate; only the OAuth form binds an authorization
+/// server.
+pub const AcquiredSession = union(enum) {
+    oauth: authorization.AuthorizedSession,
+    app_password: password.AppPasswordSession,
+
+    pub fn deinit(self: *AcquiredSession) void {
+        switch (self.*) {
+            .oauth => |*session| session.deinit(),
+            .app_password => |*session| session.deinit(),
+        }
+    }
+};
+
+/// Whether an acquired session's identity facts match fresh discovery. The
+/// OAuth form also pins the authorization server; the app-password form has no
+/// authorization server, so only DID + PDS are bound.
+pub fn sessionMatchesAccount(session: *const AcquiredSession, account: identity.DiscoveredAccount) bool {
+    return switch (session.*) {
+        .oauth => |*s| std.mem.eql(u8, s.account.did.slice(), account.did.slice()) and
+            std.mem.eql(u8, s.account.pds_origin.slice(), account.pds_origin.slice()) and
+            std.mem.eql(u8, s.account.authorization_server_origin.slice(), account.authorization_server_origin.slice()),
+        .app_password => |*s| std.mem.eql(u8, s.did.slice(), account.did.slice()) and
+            std.mem.eql(u8, s.pds_origin.slice(), account.pds_origin.slice()),
+    };
+}
+
+/// Build the XRPC record client for an acquired session (DPoP for OAuth,
+/// Bearer for app-password).
+pub fn sessionClient(session: *const AcquiredSession, transport_client: transport.Client, proofs: authorization.ProofSource) xrpc.SessionClient {
+    return switch (session.*) {
+        .oauth => |*s| xrpc.SessionClient.fromAuthorizedSession(s, transport_client, proofs),
+        .app_password => |*s| xrpc.SessionClient.fromBearerSession(s.did, s.pds_origin, s.access_token.slice(), transport_client),
+    };
+}
 
 /// Host capabilities for one publish invocation. Tests inject a scripted
 /// transport, a deterministic proof source, a session-provider callback, and
@@ -54,7 +93,7 @@ pub const Runtime = struct {
         std.Io,
         transport.Client,
         identity.DiscoveredAccount,
-    ) Error!authorization.AuthorizedSession,
+    ) Error!AcquiredSession,
     /// Epoch seconds for the evidence observation timestamp.
     now_fn: *const fn (std.Io) i64,
 };
@@ -107,16 +146,12 @@ pub fn publish(
     defer session.deinit();
 
     // A persisted session is bound to the authority facts recorded at login;
-    // if the account has since moved PDS or authorization server, the stored
-    // session is no longer safe to reuse and must never touch the network.
-    if (!std.mem.eql(u8, session.account.did.slice(), account.did.slice()) or
-        !std.mem.eql(u8, session.account.pds_origin.slice(), account.pds_origin.slice()) or
-        !std.mem.eql(u8, session.account.authorization_server_origin.slice(), account.authorization_server_origin.slice()))
-    {
-        return error.SessionAuthorityChanged;
-    }
+    // if the account has since moved PDS (or authorization server, for OAuth),
+    // the stored session is no longer safe to reuse and must never touch the
+    // network.
+    if (!sessionMatchesAccount(&session, account)) return error.SessionAuthorityChanged;
 
-    var client = xrpc.SessionClient.fromAuthorizedSession(&session, runtime.client, runtime.proofs);
+    var client = sessionClient(&session, runtime.client, runtime.proofs);
 
     const seconds = runtime.now_fn(runtime.io);
     if (seconds < 0) return error.InvalidWallClock;
@@ -671,9 +706,9 @@ fn provideTestSession(
     io: std.Io,
     client: transport.Client,
     account: identity.DiscoveredAccount,
-) Error!authorization.AuthorizedSession {
+) Error!AcquiredSession {
     const mock: *MockHost = @ptrCast(@alignCast(ctx));
-    return testAuthorize(allocator, io, client, account, mock);
+    return .{ .oauth = try testAuthorize(allocator, io, client, account, mock) };
 }
 
 fn testRuntime(io: std.Io, mock: *MockHost) Runtime {

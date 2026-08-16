@@ -114,6 +114,12 @@ pub const Options = struct {
     /// DID for `standard-site login` / `standard-site logout` (required by
     /// both; forbidden elsewhere in the family).
     session_did: ?[]const u8 = null,
+    /// Handle for `standard-site login --app-password` (alternative to
+    /// `--did`; resolves to the DID via DNS/HTTPS).
+    session_handle: ?[]const u8 = null,
+    /// Select the opt-in app-password credential path for `standard-site
+    /// login` (never a fallback inside the OAuth flow).
+    app_password: bool = false,
     /// Override the persistent session root for the `standard-site` family
     /// (default: `$HOME/.local/share/boris/sessions`).
     session_root: ?[]const u8 = null,
@@ -325,6 +331,10 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var standard_site_publish = false;
     var session_did: ?[]const u8 = null;
     var saw_session_did = false;
+    var session_handle: ?[]const u8 = null;
+    var saw_session_handle = false;
+    var app_password = false;
+    var saw_app_password = false;
     var session_root: ?[]const u8 = null;
     var saw_session_root = false;
     var plan_path: ?[]const u8 = null;
@@ -777,6 +787,20 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        if (std.mem.eql(u8, a, "--handle") or std.mem.startsWith(u8, a, "--handle=")) {
+            if (saw_session_handle) return error.DuplicateFlag;
+            saw_session_handle = true;
+            session_handle = try takeValue(args, &i, a, "--handle");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--app-password")) {
+            if (saw_app_password) return error.DuplicateFlag;
+            saw_app_password = true;
+            app_password = true;
+            continue;
+        }
+
         if (std.mem.eql(u8, a, "--session-root") or std.mem.startsWith(u8, a, "--session-root=")) {
             if (saw_session_root) return error.DuplicateFlag;
             saw_session_root = true;
@@ -1122,30 +1146,42 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         switch (standard_site_command) {
             .publish => {
                 if (profile_path == null) return error.MissingValue;
-                if (saw_session_did or saw_smoke_only or saw_verify_dist) return error.ConflictingFlags;
+                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_verify_dist) return error.ConflictingFlags;
             },
             .plan => {
                 if (profile_path == null) return error.MissingValue;
-                if (saw_session_did or saw_smoke_only or saw_verify_dist or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
+                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_verify_dist or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
             },
             .records => {
                 if (profile_path == null) return error.MissingValue;
-                if (saw_session_did or saw_smoke_only or saw_verify_dist or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
+                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_verify_dist or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
             },
             .verify => {
                 if (profile_path == null) return error.MissingValue;
-                if (saw_session_did or saw_smoke_only or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
+                if (saw_session_did or saw_session_handle or saw_app_password or saw_smoke_only or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
             },
-            .login, .logout => {
-                if (session_did == null) return error.MissingValue;
+            .login => {
                 if (profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingFlags;
+                if (app_password) {
+                    // App-password login takes exactly one identity: a DID or
+                    // a handle (resolved to a DID).
+                    if (session_did == null and session_handle == null) return error.MissingValue;
+                    if (session_did != null and session_handle != null) return error.ConflictingFlags;
+                } else {
+                    if (session_did == null) return error.MissingValue;
+                    if (session_handle != null) return error.ConflictingFlags;
+                }
+            },
+            .logout => {
+                if (session_did == null) return error.MissingValue;
+                if (session_handle != null or app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingFlags;
             },
             .sessions => {
-                if (saw_session_did or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingFlags;
+                if (saw_session_did or saw_session_handle or saw_app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingFlags;
             },
             .smoke => {
                 if (session_did == null) return error.MissingValue;
-                if (profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_verify_dist) return error.ConflictingFlags;
+                if (session_handle != null or saw_app_password or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_verify_dist) return error.ConflictingFlags;
             },
         }
         return .{
@@ -1164,6 +1200,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .publish_prune = publish_prune,
             .source_commit = source_commit,
             .session_did = session_did,
+            .session_handle = session_handle,
+            .app_password = app_password,
             .session_root = session_root,
             .smoke_namespace = smoke_namespace,
             .smoke_surface_url = smoke_surface_url,
@@ -1621,6 +1659,8 @@ pub fn printUsage() void {
         \\  --out PATH          Verify result artifact path (default: stdout)
         \\  standard-site login/logout options:
         \\  --did DID           AT Protocol DID to authorize (login) or forget (logout)
+        \\  --handle HANDLE     AT Protocol handle for `login --app-password` (resolved to a DID)
+        \\  --app-password      Opt-in app-password login (broad account write; never OAuth scope)
         \\  standard-site smoke options:
         \\  --did DID           Test identity DID (required)
         \\  --namespace NAME    Unique rkey namespace prefix (default: clock-derived)
@@ -2370,6 +2410,28 @@ test "parse: standard-site logout requires a DID and rejects compiler flags" {
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--did", "a", "--profile", "p.json" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "sessions", "--did", "a" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--did", "d" }));
+}
+
+test "parse: standard-site login --app-password takes exactly one of --did or --handle" {
+    var o = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--app-password", "--did", "did:plc:ewvi7nxzyoun6zhxrhs64oiz" });
+    defer o.deinit(std.testing.allocator);
+    try expect(o.app_password);
+    try expectEqualStrings("did:plc:ewvi7nxzyoun6zhxrhs64oiz", o.session_did.?);
+    try expect(o.session_handle == null);
+
+    var h = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--app-password", "--handle", "Alice.Example.COM" });
+    defer h.deinit(std.testing.allocator);
+    try expect(h.app_password);
+    try expect(h.session_did == null);
+    try expectEqualStrings("Alice.Example.COM", h.session_handle.?);
+
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--app-password" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "login", "--app-password", "--did", "a", "--handle", "b" }));
+    // The app-password flag is login-only, and --handle is login-only.
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "publish", "--profile", "a", "--app-password" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "logout", "--did", "a", "--app-password" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "smoke", "--did", "a", "--app-password" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "sessions", "--app-password" }));
 }
 
 test "parse: standard-site smoke requires a DID and accepts its opt-in flags" {

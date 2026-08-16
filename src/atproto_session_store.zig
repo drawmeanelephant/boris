@@ -13,6 +13,7 @@
 
 const std = @import("std");
 const authorization = @import("atproto_authorization.zig");
+const password = @import("atproto_password.zig");
 const json_out = @import("json_out.zig");
 
 pub const Error = authorization.Error || std.mem.Allocator.Error || error{
@@ -158,14 +159,28 @@ pub const Store = struct {
     /// Persist a session under the given DID, atomically replacing any
     /// previous document for that DID.
     pub fn save(self: *Store, did: []const u8, session: *const authorization.AuthorizedSession) Error!void {
-        const file_name = try self.fileNameForDid(did);
-        defer self.allocator.free(file_name);
         const bytes = try sessionToWireBytes(self.allocator, session);
         defer {
             std.crypto.secureZero(u8, bytes);
             self.allocator.free(bytes);
         }
+        try self.writeDocument(did, bytes);
+    }
 
+    /// Persist an app-password session under the given DID, atomically
+    /// replacing any previous document (OAuth or app-password) for that DID.
+    pub fn savePassword(self: *Store, did: []const u8, session: *const password.AppPasswordSession) Error!void {
+        const bytes = try passwordToWireBytes(self.allocator, session);
+        defer {
+            std.crypto.secureZero(u8, bytes);
+            self.allocator.free(bytes);
+        }
+        try self.writeDocument(did, bytes);
+    }
+
+    fn writeDocument(self: *Store, did: []const u8, bytes: []const u8) Error!void {
+        const file_name = try self.fileNameForDid(did);
+        defer self.allocator.free(file_name);
         var atomic = self.dir.createFileAtomic(self.io, file_name, .{
             .replace = true,
             .permissions = std.Io.File.Permissions.fromMode(0o600),
@@ -199,6 +214,32 @@ pub const Store = struct {
             self.allocator.free(bytes);
         }
         return try sessionFromWireBytes(self.allocator, bytes);
+    }
+
+    /// Load the app-password session for `did`. Returns `null` when no
+    /// document exists. A document that exists but is not a valid
+    /// `boris-app-password-v1` payload (including an OAuth session document
+    /// stored under the same DID) fails closed with `StoreCorrupt`.
+    pub fn loadPassword(self: *Store, did: []const u8) Error!?password.AppPasswordSession {
+        const file_name = try self.fileNameForDid(did);
+        defer self.allocator.free(file_name);
+        var read_buffer: [16 * 1024]u8 = undefined;
+        const file = self.dir.openFile(self.io, file_name, .{ .mode = .read_only }) catch |err| switch (err) {
+            error.FileNotFound => return null,
+            else => return mapError(err),
+        };
+        defer file.close(self.io);
+        var file_reader = file.reader(self.io, &read_buffer);
+        const bytes = file_reader.interface.allocRemaining(self.allocator, .limited(max_session_document_bytes)) catch |err| switch (err) {
+            error.StreamTooLong => return error.StoreCorrupt,
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return mapError(err),
+        };
+        defer {
+            std.crypto.secureZero(u8, bytes);
+            self.allocator.free(bytes);
+        }
+        return try passwordFromWireBytes(self.allocator, bytes);
     }
 
     /// Delete the session for `did`, securely zeroing the document first.
@@ -382,6 +423,91 @@ pub fn sessionFromWireBytes(allocator: std.mem.Allocator, bytes: []const u8) Err
     });
 }
 
+/// Serialize an app-password session to the on-disk JSON document
+/// (`boris-app-password-v1`). Holds only DID, PDS origin, access/refresh JWTs,
+/// and expiry/obtained-at — no DPoP key, client id, scope, or nonce, so it can
+/// never be mistaken for an OAuth session. The caller must zero and free the
+/// returned bytes after writing.
+pub fn passwordToWireBytes(allocator: std.mem.Allocator, session: *const password.AppPasswordSession) Error![]u8 {
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(allocator);
+
+    try buf.appendSlice(allocator, "{\n");
+    const fields = [_]struct { name: []const u8, value: []const u8 }{
+        .{ .name = "format", .value = "boris-app-password-v1" },
+        .{ .name = "did", .value = session.did.slice() },
+        .{ .name = "pds_origin", .value = session.pds_origin.slice() },
+        .{ .name = "access_token", .value = session.access_token.slice() },
+    };
+    for (fields) |field| {
+        try json_out.indent(&buf, allocator, 1);
+        try json_out.writeString(&buf, allocator, field.name);
+        try buf.appendSlice(allocator, ": ");
+        try json_out.writeString(&buf, allocator, field.value);
+        try buf.appendSlice(allocator, ",\n");
+    }
+
+    try json_out.indent(&buf, allocator, 1);
+    try json_out.writeString(&buf, allocator, "refresh_token");
+    try buf.appendSlice(allocator, ": ");
+    if (session.refresh_token) |token| {
+        try json_out.writeString(&buf, allocator, token.slice());
+    } else {
+        try json_out.writeNull(&buf, allocator);
+    }
+    try buf.appendSlice(allocator, ",\n");
+
+    try json_out.indent(&buf, allocator, 1);
+    try json_out.writeString(&buf, allocator, "access_token_expires_in");
+    try buf.appendSlice(allocator, ": ");
+    try json_out.writeUsize(&buf, allocator, session.access_token_expires_in);
+    try buf.appendSlice(allocator, ",\n");
+
+    try json_out.indent(&buf, allocator, 1);
+    try json_out.writeString(&buf, allocator, "access_token_obtained_at_seconds");
+    try buf.appendSlice(allocator, ": ");
+    try json_out.writeUsize(&buf, allocator, session.access_token_obtained_at_seconds);
+    try buf.appendSlice(allocator, "\n");
+
+    try buf.appendSlice(allocator, "}\n");
+    return buf.toOwnedSlice(allocator);
+}
+
+/// Rebuild an owned app-password session from a wire document. The format tag,
+/// DID, PDS origin, JWT shape, and positive lifetime are all revalidated, so a
+/// tampered or corrupt document fails closed.
+pub fn passwordFromWireBytes(allocator: std.mem.Allocator, bytes: []const u8) Error!password.AppPasswordSession {
+    if (bytes.len == 0 or bytes.len > max_session_document_bytes) return error.StoreCorrupt;
+    const Parsed = struct {
+        format: []const u8,
+        did: []const u8,
+        pds_origin: []const u8,
+        access_token: []const u8,
+        refresh_token: ?[]const u8 = null,
+        access_token_expires_in: u64,
+        access_token_obtained_at_seconds: u64 = 0,
+    };
+    var parsed = std.json.parseFromSlice(Parsed, allocator, bytes, .{
+        .ignore_unknown_fields = true,
+        .max_value_len = max_session_document_bytes,
+        .allocate = .alloc_always,
+    }) catch return error.StoreCorrupt;
+    defer parsed.deinit();
+    const value = parsed.value;
+    if (!std.mem.eql(u8, value.format, "boris-app-password-v1")) return error.StoreCorrupt;
+    return password.sessionFromWire(allocator, .{
+        .did = value.did,
+        .pds_origin = value.pds_origin,
+        .access_token = value.access_token,
+        .refresh_token = value.refresh_token,
+        .access_token_expires_in = value.access_token_expires_in,
+        .access_token_obtained_at_seconds = value.access_token_obtained_at_seconds,
+    }) catch |err| switch (err) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => return error.StoreCorrupt,
+    };
+}
+
 const test_did = "did:plc:ewvi7nxzyoun6zhxrhs64oiz";
 
 fn makeTestSession(allocator: std.mem.Allocator) !authorization.AuthorizedSession {
@@ -401,6 +527,17 @@ fn makeTestSession(allocator: std.mem.Allocator) !authorization.AuthorizedSessio
         .key_seed = &key_seed,
         .authorization_server_nonce = "nonce-1",
         .access_token_expires_in = 3600,
+        .access_token_obtained_at_seconds = 1_700_000_000,
+    });
+}
+
+fn makeTestPasswordSession() !password.AppPasswordSession {
+    return password.sessionFromWire(std.testing.allocator, .{
+        .did = test_did,
+        .pds_origin = "https://pds.example.com",
+        .access_token = "access-jwt.example",
+        .refresh_token = "refresh-jwt.example",
+        .access_token_expires_in = 7200,
         .access_token_obtained_at_seconds = 1_700_000_000,
     });
 }
@@ -435,6 +572,44 @@ test "store saves, loads, lists, and removes sessions with no leaks" {
     const after = try store.list();
     defer store.deinitDidList(after);
     try std.testing.expectEqual(@as(usize, 0), after.len);
+}
+
+test "app-password sessions save, load, remove, and fail closed on tamper" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var store = try Store.openIn(gpa, io, tmp.dir, "sessions");
+    defer store.deinit();
+
+    var session = try makeTestPasswordSession();
+    defer session.deinit();
+    try store.savePassword(test_did, &session);
+
+    var loaded = (try store.loadPassword(test_did)) orelse return error.TestUnexpectedResult;
+    defer loaded.deinit();
+    try std.testing.expectEqualStrings("access-jwt.example", loaded.access_token.slice());
+    try std.testing.expectEqualStrings("refresh-jwt.example", loaded.refresh_token.?.slice());
+    try std.testing.expectEqualStrings(test_did, loaded.did.slice());
+    try std.testing.expectEqual(@as(u64, 7200), loaded.access_token_expires_in);
+
+    // An OAuth document and an app-password document share one filename per
+    // DID: the OAuth loader must reject the app-password document as corrupt.
+    try std.testing.expectError(error.StoreCorrupt, store.load(test_did));
+
+    const file_name = try store.fileNameForDid(test_did);
+    defer gpa.free(file_name);
+    const raw = try store.dir.readFileAlloc(io, file_name, gpa, .limited(max_session_document_bytes));
+    defer gpa.free(raw);
+    const tampered = try std.mem.replaceOwned(u8, gpa, raw, "access-jwt.example", "bad token");
+    defer gpa.free(tampered);
+    try store.dir.writeFile(io, .{ .sub_path = file_name, .data = tampered, .flags = .{ .truncate = true, .permissions = std.Io.File.Permissions.fromMode(0o600) } });
+    try std.testing.expectError(error.StoreCorrupt, store.loadPassword(test_did));
+
+    // restore a clean copy so remove can prove the erase path.
+    try store.savePassword(test_did, &session);
+    try std.testing.expect(try store.remove(test_did));
+    try std.testing.expect((try store.loadPassword(test_did)) == null);
 }
 
 test "tampered session documents fail closed" {

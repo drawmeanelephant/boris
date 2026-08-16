@@ -11,6 +11,7 @@
 
 const std = @import("std");
 const authorization = @import("atproto_authorization.zig");
+const password = @import("atproto_password.zig");
 const store_mod = @import("atproto_session_store.zig");
 const transport = @import("atproto_transport.zig");
 
@@ -98,8 +99,41 @@ pub const Sessions = struct {
         try self.store.save(did, session);
     }
 
+    /// Persist a freshly authorized app-password session for `did`, replacing
+    /// any previous document (OAuth or app-password) for that DID.
+    pub fn storeNewPassword(self: *Sessions, did: []const u8, session: *const password.AppPasswordSession) Error!void {
+        var guard = try self.store.lock();
+        defer guard.release();
+        try self.store.savePassword(did, session);
+    }
+
     pub fn has(self: *Sessions, did: []const u8) Error!bool {
         return (try self.store.load(did)) != null;
+    }
+
+    pub fn hasPassword(self: *Sessions, did: []const u8) Error!bool {
+        return (try self.store.loadPassword(did)) != null;
+    }
+
+    /// Load and (if needed) refresh the app-password session for `did`. The
+    /// same fail-closed rotate-or-die rule as the OAuth `acquire` applies to
+    /// the single-use rotating refresh JWT.
+    pub fn acquirePassword(
+        self: *Sessions,
+        did: []const u8,
+        client: transport.Client,
+        now_seconds: u64,
+    ) Error!password.AppPasswordSession {
+        var guard = try self.store.lock();
+        defer guard.release();
+        var stored = (try self.store.loadPassword(did)) orelse return error.NoSession;
+        if (usablePassword(&stored, now_seconds)) return stored;
+
+        var refreshed = try self.rotateOrDiePassword(did, &stored, client);
+        refreshed.markObtained(now_seconds);
+        errdefer refreshed.deinit();
+        try self.store.savePassword(did, &refreshed);
+        return refreshed;
     }
 
     /// Remove the stored session for `did` (secure erase). Returns whether a
@@ -148,6 +182,42 @@ pub const Sessions = struct {
         // stale document behind to burn again on the next run.
         errdefer _ = self.store.remove(did) catch {};
         try self.store.save(did, &refreshed);
+        return refreshed;
+    }
+
+    /// Whether the stored app-password access token is still usable without a
+    /// refresh (same early-skew policy as the OAuth path).
+    fn usablePassword(session: *const password.AppPasswordSession, now_seconds: u64) bool {
+        if (session.access_token_obtained_at_seconds == 0) return false;
+        if (session.access_token_expires_in <= refresh_early_skew_seconds) return false;
+        const expires_at = session.access_token_obtained_at_seconds +| session.access_token_expires_in;
+        return now_seconds +| refresh_early_skew_seconds < expires_at;
+    }
+
+    /// Rotate an app-password session, or die. The refresh JWT is single-use
+    /// and rotates on success; a definitive rejection or an ambiguous failure
+    /// both drop the stale document so it is never replayed.
+    fn rotateOrDiePassword(
+        self: *Sessions,
+        did: []const u8,
+        stored: *const password.AppPasswordSession,
+        client: transport.Client,
+    ) Error!password.AppPasswordSession {
+        const refreshed = password.refresh(self.allocator, client, stored) catch |err| switch (err) {
+            error.SessionRevoked => {
+                _ = try self.store.remove(did);
+                return error.SessionRevoked;
+            },
+            error.OutOfMemory => return error.OutOfMemory,
+            else => {
+                // Ambiguous: the request may have reached the server and the
+                // single-use refresh JWT may already be consumed. Fail closed.
+                _ = self.store.remove(did) catch {};
+                return error.RefreshAmbiguous;
+            },
+        };
+        errdefer _ = self.store.remove(did) catch {};
+        try self.store.savePassword(did, &refreshed);
         return refreshed;
     }
 };
@@ -374,4 +444,177 @@ test "storeNew replaces an existing session document" {
     defer sessions.deinitList(listed);
     try std.testing.expectEqual(@as(usize, 1), listed.len);
     try std.testing.expectEqualStrings(test_did, listed[0]);
+}
+
+/// A valid-looking access JWT whose payload claims the given lifetime. Only
+/// the payload segment matters to the password module's expiry parser.
+const JwtBytes = struct { bytes: [512]u8, len: usize };
+
+fn passwordJwt(lifetime: u64) JwtBytes {
+    var payload_json: [128]u8 = undefined;
+    const json = std.fmt.bufPrint(&payload_json, "{{\"iat\":1700000000,\"exp\":{d}}}", .{1700000000 + lifetime}) catch unreachable;
+    var payload: [128]u8 = undefined;
+    const payload_len = std.base64.url_safe_no_pad.Encoder.calcSize(json.len);
+    _ = std.base64.url_safe_no_pad.Encoder.encode(payload[0..payload_len], json);
+    var out: [512]u8 = undefined;
+    const rendered = std.fmt.bufPrint(&out, "e30.{s}.c2ln", .{payload[0..payload_len]}) catch unreachable;
+    return .{ .bytes = out, .len = rendered.len };
+}
+
+fn makeStoredPasswordSession(allocator: std.mem.Allocator, obtained_at: u64) !password.AppPasswordSession {
+    return password.sessionFromWire(allocator, .{
+        .did = test_did,
+        .pds_origin = "https://pds.example.com",
+        .access_token = "old-access",
+        .refresh_token = "old-refresh",
+        .access_token_expires_in = 3600,
+        .access_token_obtained_at_seconds = obtained_at,
+    });
+}
+
+const PasswordRefreshMock = struct {
+    call: usize = 0,
+    status: u16,
+    body: []const u8,
+    fail_with: ?transport.Error = null,
+
+    fn client(self: *PasswordRefreshMock) transport.Client {
+        return .{ .context = self, .request_fn = request };
+    }
+
+    fn request(
+        context: *anyopaque,
+        allocator: std.mem.Allocator,
+        value: transport.Request,
+    ) transport.Error!transport.Response {
+        const self: *PasswordRefreshMock = @ptrCast(@alignCast(context));
+        if (self.fail_with) |failure| {
+            self.fail_with = null;
+            return failure;
+        }
+        if (self.call >= 1 or value.method != .post or
+            !std.mem.eql(u8, value.url, "https://pds.example.com/xrpc/com.atproto.server.refreshSession"))
+        {
+            return error.UnexpectedRequest;
+        }
+        var bearer: ?[]const u8 = null;
+        for (value.headers) |header| {
+            if (std.ascii.eqlIgnoreCase(header.name, "authorization")) {
+                if (bearer != null or !std.mem.startsWith(u8, header.value, "Bearer ")) return error.UnexpectedRequest;
+                bearer = header.value["Bearer ".len..];
+            }
+        }
+        if (bearer == null or !std.mem.eql(u8, bearer.?, "old-refresh")) return error.UnexpectedRequest;
+        self.call += 1;
+        const headers = [_]transport.Header{.{ .name = "content-type", .value = "application/json" }};
+        return transport.Response.initCopy(allocator, self.status, &headers, self.body, value.limits);
+    }
+};
+
+fn passwordRefreshResponse(lifetime: u64) JwtBytes {
+    const access = passwordJwt(lifetime);
+    const refresh = passwordJwt(lifetime);
+    var out: [512]u8 = undefined;
+    const rendered = std.fmt.bufPrint(
+        &out,
+        "{{\"accessJwt\":\"{s}\",\"refreshJwt\":\"{s}\",\"did\":\"{s}\"}}",
+        .{ access.bytes[0..access.len], refresh.bytes[0..refresh.len], test_did },
+    ) catch unreachable;
+    return .{ .bytes = out, .len = rendered.len };
+}
+
+test "acquirePassword reuses a fresh stored session without touching the network" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var sessions = try Sessions.openIn(gpa, io, tmp.dir, "sessions");
+    defer sessions.deinit();
+
+    var session = try makeStoredPasswordSession(gpa, 1_700_000_000);
+    session.markObtained(1_700_000_000);
+    defer session.deinit();
+    try sessions.storeNewPassword(test_did, &session);
+
+    const response = passwordRefreshResponse(7200);
+    var mock = PasswordRefreshMock{ .status = 200, .body = response.bytes[0..response.len] };
+    var acquired = try sessions.acquirePassword(test_did, mock.client(), 1_700_000_100);
+    defer acquired.deinit();
+    try std.testing.expectEqual(@as(usize, 0), mock.call);
+    try std.testing.expectEqualStrings("old-access", acquired.access_token.slice());
+}
+
+test "acquirePassword refreshes an expired session and persists the rotation" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var sessions = try Sessions.openIn(gpa, io, tmp.dir, "sessions");
+    defer sessions.deinit();
+
+    var session = try makeStoredPasswordSession(gpa, 1_700_000_000);
+    session.markObtained(1_700_000_000);
+    defer session.deinit();
+    try sessions.storeNewPassword(test_did, &session);
+
+    const response = passwordRefreshResponse(7200);
+    var mock = PasswordRefreshMock{ .status = 200, .body = response.bytes[0..response.len] };
+    var acquired = try sessions.acquirePassword(test_did, mock.client(), 1_700_010_000);
+    defer acquired.deinit();
+    try std.testing.expectEqual(@as(usize, 1), mock.call);
+    try std.testing.expectEqual(@as(u64, 7200), acquired.access_token_expires_in);
+    try std.testing.expectEqual(@as(u64, 1_700_010_000), acquired.access_token_obtained_at_seconds);
+
+    var second_mock = PasswordRefreshMock{ .status = 200, .body = response.bytes[0..response.len] };
+    var second = try sessions.acquirePassword(test_did, second_mock.client(), 1_700_010_001);
+    defer second.deinit();
+    try std.testing.expectEqual(@as(usize, 0), second_mock.call);
+}
+
+test "acquirePassword removes a revoked session and errors" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var sessions = try Sessions.openIn(gpa, io, tmp.dir, "sessions");
+    defer sessions.deinit();
+
+    var session = try makeStoredPasswordSession(gpa, 1_700_000_000);
+    session.markObtained(1_700_000_000);
+    defer session.deinit();
+    try sessions.storeNewPassword(test_did, &session);
+
+    var mock = PasswordRefreshMock{ .status = 400, .body = "{\"error\":\"ExpiredToken\"}" };
+    try std.testing.expectError(error.SessionRevoked, sessions.acquirePassword(test_did, mock.client(), 1_700_010_000));
+    try std.testing.expect(!(try sessions.hasPassword(test_did)));
+}
+
+test "acquirePassword drops the document on ambiguous refresh and reports RefreshAmbiguous" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var sessions = try Sessions.openIn(gpa, io, tmp.dir, "sessions");
+    defer sessions.deinit();
+
+    var session = try makeStoredPasswordSession(gpa, 1_700_000_000);
+    session.markObtained(1_700_000_000);
+    defer session.deinit();
+    try sessions.storeNewPassword(test_did, &session);
+
+    var mock = PasswordRefreshMock{ .status = 0, .body = "", .fail_with = error.Timeout };
+    try std.testing.expectError(error.RefreshAmbiguous, sessions.acquirePassword(test_did, mock.client(), 1_700_010_000));
+    try std.testing.expect(!(try sessions.hasPassword(test_did)));
+}
+
+test "acquirePassword reports NoSession when nothing is stored" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var sessions = try Sessions.openIn(gpa, io, tmp.dir, "sessions");
+    defer sessions.deinit();
+    const response = passwordRefreshResponse(7200);
+    var mock = PasswordRefreshMock{ .status = 200, .body = response.bytes[0..response.len] };
+    try std.testing.expectError(error.NoSession, sessions.acquirePassword(test_did, mock.client(), 1_700_000_000));
 }

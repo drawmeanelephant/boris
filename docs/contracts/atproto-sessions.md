@@ -5,6 +5,11 @@ rotate-or-die persistence, and explicit login/sessions/logout behavior are
 implemented. This contract extends, never weakens, the identity and one-shot
 authorization guarantees of [`atproto-oauth.md`](atproto-oauth.md).
 
+The store hosts two document types under one lock and one erase/replace
+discipline: `boris-session-v1` (the DPoP OAuth session) and
+`boris-app-password-v1` (the opt-in Bearer path defined by
+[`atproto-app-password.md`](atproto-app-password.md)).
+
 This contract defines how Boris stores a user-authorized Standard.site session
 across process restarts and refreshes it without repeating browser
 authorization. It also fixes the failure model: every way a stored session can
@@ -59,6 +64,14 @@ origin, authorization/token/PAR endpoints, optional verified handle), the
 seed, the Authorization Server nonce, and the access-token expiry and
 obtained-at timestamps. No repository path, plan digest, or evidence binding
 is stored.
+
+The same file, lock, and atomic-replace discipline hosts the second document
+type: `boris-app-password-v1`, written by
+`standard-site login --app-password` and holding only the DID, PDS origin,
+access JWT, optional refresh JWT, and expiry/obtained-at timestamps — no DPoP
+key seed, `client_id`, scope, or nonce, so the two formats can never be
+mistaken for one another. Storing one replaces the other for the same DID, and
+`logout` erases whichever document is present.
 
 ### Secret discipline
 
@@ -135,6 +148,7 @@ publication. `login`/`sessions`/`logout` report the same code on store errors.
 
 ```text
 boris standard-site login --did DID [--session-root PATH]
+boris standard-site login --app-password (--did DID | --handle HANDLE) [--session-root PATH]
 boris standard-site sessions [--session-root PATH]
 boris standard-site logout --did DID [--session-root PATH]
 ```
@@ -142,6 +156,11 @@ boris standard-site logout --did DID [--session-root PATH]
 - `login` resolves the DID, runs the interactive one-shot OAuth flow, and
   atomically persists the resulting DPoP-bound session. It never prints token
   material.
+- `login --app-password` resolves a DID or handle, discloses the broad write
+  access it grants, reads the app password from stdin (never argv/env/profile),
+  authenticates with `com.atproto.server.createSession`, and persists the
+  Bearer session. It is a sibling of the OAuth login, never a fallback within
+  it.
 - `sessions` lists stored DIDs, one per line on stdout, in sorted order.
 - `logout` securely erases the stored document. It does **not** revoke the
   authorization-server session: the refresh token remains usable server-side
@@ -204,7 +223,8 @@ network or real credential is involved.
 
 ## Explicitly not implemented
 
-App passwords, silent migration of arbitrary credential formats, OS
-keychain/keyring integration, server-side revocation on logout, CI secret
-distribution, and any storage of credentials inside the repository, source
-content, build output, publication plan, or evidence remain out of scope.
+Silent fallback from OAuth to a credential, silent migration of arbitrary
+credential formats, OS keychain/keyring integration, server-side revocation on
+logout, CI secret distribution, and any storage of credentials inside the
+repository, source content, build output, publication plan, or evidence remain
+out of scope.
