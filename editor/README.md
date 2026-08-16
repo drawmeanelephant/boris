@@ -257,7 +257,7 @@ pantry, `.menu`, shopping lists, or nutrition/allergen claims.
 Opening a `themes/**/*.html` layout shows a Theme pane: closed slots from
 `completion.json`, which of those tokens appear in the buffer, theme assets,
 and `ILAYOUTSELECTED` findings from the HTML `--report` after Validate or
-Build HTML, including fallback winners.
+Build HTML, including fallback winners on targets that have layout rules.
 
 Validate and HTML build now pass `--report .boris/html-build-report.json` so
 `ELAYOUT*` and `ILAYOUTSELECTED` are structured problems, not stderr-only.

@@ -2122,7 +2122,7 @@ test('theme layouts list closed slots and preview widths are named (#418 M8)', a
   await expect(theme).toContainText('{{title}}');
   await expect(theme).toContainText('{{content}}');
   await expect(theme.getByRole('button', { name: 'Open themes/boris/assets/css/site.css', exact: true })).toBeVisible();
-  await expect(theme).toContainText('including fallback');
+  await expect(theme).toContainText('when the target has layout rules');
 
   await page.getByRole('button', { name: 'Build HTML', exact: true }).click();
   await expect(theme.getByRole('button', { name: /layout rule id:index selected/ })).toBeVisible();
