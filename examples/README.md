@@ -12,21 +12,25 @@ second theme attic.
 | [`press-site`](press-site/) | [`themes/press`](../themes/press/) | Editorial docs + blog + archive |
 | [`showcase-site`](showcase-site/) | [`themes/showcase`](../themes/showcase/) | Docs + blog with a soft component shell |
 | [`archive-site`](archive-site/) | [`themes/archive`](../themes/archive/) | Ordered field-note archive |
+| [`field-notes-site`](field-notes-site/) | [`themes/field-notes`](../themes/field-notes/) | Compact docs graph |
+| [`compact-site`](compact-site/) | [`themes/compact`](../themes/compact/) | Small-type docs |
+| [`cards-site`](cards-site/) | [`themes/cards`](../themes/cards/) | Soft cards |
+| [`cozy-site`](cozy-site/) | [`themes/cozy`](../themes/cozy/) | Personal blog |
+| [`journal-site`](journal-site/) | [`themes/journal`](../themes/journal/) | Terminal diary |
+| [`ledger-site`](ledger-site/) | [`themes/ledger`](../themes/ledger/) | Dense node pages |
+| [`reading-site`](reading-site/) | [`themes/reading`](../themes/reading/) | `:lang` typesetting specimens |
 
 Each site README has the exact `boris` invocation. Keep generated trees under
 ignored `test-output/` or `.zig-cache/`.
 
 ## Not yet first-class
 
-These trees are still theme-shaped. They stay here until they meet
-[`themes/README.md`](../themes/README.md). Do not treat them as shipped chrome.
+These trees stay here. They do not meet [`themes/README.md`](../themes/README.md).
 
 | Tree | Why it stays |
 |---|---|
-| `agent-themes/*` | Original voices, thin CSS, some fake chrome (`node-tracker`) |
-| `daisy-static-theme` | Hand-authored cards study; must not ship under a Daisy name |
 | `framework-themes/*` | Visual translations, ~70-line CSS. Not Pico/Bulma/GOV.UK/Primer/USWDS/Open Props. |
-| `prototype-corporate` / `prototype-minimalist` | Visual research. Dead buttons and `#` nav. Not catalog candidates until that chrome is real or gone. |
+| `prototype-corporate` / `prototype-minimalist` | Visual research. Dead buttons and `#` nav. |
 
 The framework studies do not vendor those projects. If a future theme ships
 upstream CSS, it must record version, license, and the URL of the current
