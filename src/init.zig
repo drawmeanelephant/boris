@@ -47,7 +47,8 @@ const index_md =
     \\  guides/getting-started.md   satellite, parent: index
     \\  guides/publishing.md        satellite, parent: index
     \\themes/boris/                 starter theme (closed layout slots)
-    \\boris.json                    publication profile
+    \\boris.json                    publication profile (GitHub Pages)
+    \\standard-site.json            Atmosphere profile (edit the fake DID/URL)
     \\```
     \\
 ;
@@ -127,13 +128,16 @@ const publishing_md =
     \\
     \\```text
     \\boris plan --profile boris.json
+    \\boris standard-site plan --profile standard-site.json
     \\```
     \\
     \\The official GitHub Pages workflow (see the repository's
     \\`docs/github-pages.md`) builds a verified target: it resolves the Pages
     \\location from `actions/configure-pages`, fails on any URL projection
     \\that disagrees with it, uploads only inventory-verified files, and
-    \\retains a separate evidence artifact. This starter page is related to
+    \\retains a separate evidence artifact. Atmosphere publication uses
+    \\`standard-site.json`: replace the obviously-fake DID and URL
+    \\before `standard-site publish`. This starter page is related to
     \\[[guides/getting-started]] so the semantic graph has an edge to inspect.
     \\
 ;
@@ -144,6 +148,32 @@ const starter_profile =
     \\  "schema_version": 1,
     \\  "input": "content",
     \\  "site": { "title": "My Boris Site" },
+    \\  "targets": [
+    \\    { "name": "public", "output": "dist", "public": true, "theme": "themes/boris" }
+    \\  ]
+    \\}
+    \\
+;
+
+/// Obviously fake Atmosphere identity. The DID is syntactically valid
+/// `did:plc` (24 `a`s) and the URL is not a real public site. Testers must
+/// replace both. `pds` is omitted: publish binds to the discovered PDS.
+const standard_site_profile =
+    \\{
+    \\  "format": "boris-publication-profile",
+    \\  "schema_version": 1,
+    \\  "input": "content",
+    \\  "site": { "title": "My Boris Site" },
+    \\  "publication": {
+    \\    "target": "standard-site",
+    \\    "base_url": "https://replace-me.example.com/",
+    \\    "origin": "https://replace-me.example.com/",
+    \\    "base_path": "",
+    \\    "did": "did:plc:aaaaaaaaaaaaaaaaaaaaaaaa",
+    \\    "name": "My Boris Site",
+    \\    "show_in_discover": false,
+    \\    "prune": false
+    \\  },
     \\  "targets": [
     \\    { "name": "public", "output": "dist", "public": true, "theme": "themes/boris" }
     \\  ]
@@ -164,6 +194,7 @@ const files = [_]FileToWrite{
     .{ .path = "themes/boris/layouts/main.html", .data = starter_layout },
     .{ .path = "themes/boris/assets/css/boris.css", .data = starter_css },
     .{ .path = "boris.json", .data = starter_profile },
+    .{ .path = "standard-site.json", .data = standard_site_profile },
 };
 
 /// Create `sub_path` (including any missing parents) relative to `dir`,
@@ -240,11 +271,13 @@ pub fn run(io: Io, gpa: std.mem.Allocator, target_dir: []const u8, quiet: bool) 
             \\  content/guides/getting-started.md satellite page
             \\  content/guides/publishing.md      satellite page with a relation
             \\  themes/boris/                     starter theme (closed layout slots)
-            \\  boris.json                        publication profile
+            \\  boris.json                        publication profile (GitHub Pages)
+            \\  standard-site.json                Atmosphere profile (replace the fake DID/URL)
             \\
             \\next steps:
             \\  boris --input content --html-dir dist --theme themes/boris     build the site
             \\  boris plan --profile boris.json                                inspect the plan
+            \\  boris standard-site plan --profile standard-site.json          inspect Atmosphere records
             \\  boris watch --input content --html-dir dist --theme themes/boris   rebuild on change
             \\
         , .{target_dir});

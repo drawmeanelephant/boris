@@ -32,9 +32,13 @@ A recorded passing smoke against bsky.social lives at
 ## First-tester path (bsky.social)
 
 ```text
+# 0. If you do not have a profile yet: `boris init` writes
+#    standard-site.json with an obviously fake DID and URL.
+#    Replace both before publish. Omit pds (publish binds to discovery).
+
 # 1. Inspect the Atmosphere projection with no network (no HTML required)
-boris standard-site plan    --profile profiles/standard-site.json
-boris standard-site records --profile profiles/standard-site.json
+boris standard-site plan    --profile standard-site.json
+boris standard-site records --profile standard-site.json
 
 # 2. Build the HTML site. Verification surfaces (head links + well-known)
 #    are not yet wired on the production `boris` HTML path — `verify`
@@ -50,7 +54,7 @@ boris standard-site login --app-password --handle YOU.test.bsky.social
 boris standard-site smoke --handle YOU.test.bsky.social --out smoke.json
 
 # 5. Publish the real site (the DID and PDS come from the profile)
-boris standard-site publish --profile profiles/standard-site.json
+boris standard-site publish --profile standard-site.json
 
 # 6. Forget the local session (does not revoke the app password at the PDS)
 boris standard-site logout --did did:plc:…
@@ -63,7 +67,10 @@ Revoke it when the test is done.
 ## Profile
 
 A Standard.site profile is a `boris-publication-profile` whose
-`publication.target` is `"standard-site"`. Fixture:
+`publication.target` is `"standard-site"`. `boris init` writes a starter at
+`standard-site.json` with a fake DID (`did:plc:` + 24 `a`s) and
+`https://replace-me.example.com/`. Replace those before publish. Contract
+fixture (not for testers):
 
 [`contracts/fixtures/publication-plan/standard-site/profile.json`](contracts/fixtures/publication-plan/standard-site/profile.json)
 
@@ -79,11 +86,10 @@ Required publication fields:
 | `prune` | Delete remote records absent from the plan (publish still needs `--prune`) |
 | `pds` | Optional. Omit it and publish uses the PDS login printed. If you set it, paste that shard origin — never `https://bsky.social`. |
 
-`boris init` writes a GitHub-Pages-oriented starter profile, not a
-Standard.site one. Copy the fixture and replace the example DID and URLs.
-Pages become documents only when they have `published_at` and status
-`published` or `archived`; drafts and the usual trunk `index` are excluded
-unless they carry a date.
+`boris init` still writes a GitHub-Pages `boris.json`. The Atmosphere starter
+is the extra `standard-site.json` file. Pages become documents only
+when they have `published_at` and status `published` or `archived`; drafts
+and the usual trunk `index` are excluded unless they carry a date.
 
 ## Sessions
 
