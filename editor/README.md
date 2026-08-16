@@ -59,6 +59,8 @@ zig build --build-file editor/build.zig
   ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor-contract-probe
 ./editor/scripts/test-host.sh \
   ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+./editor/scripts/test-publication.sh \
+  ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
 ```
 
 M0 deliberately does not edit files, display diagnostics, preview a site, or

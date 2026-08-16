@@ -24,6 +24,7 @@ pub const Kind = enum {
     graph,
     documentation_intelligence,
     publication_plan,
+    proof_pack,
     frontmatter_schema,
 };
 
@@ -174,6 +175,49 @@ pub fn readPublicationPlan(allocator: std.mem.Allocator, bytes: []const u8) Erro
     try requireString(&document, "input_format");
     try requireArray(&document, "targets");
     return withVersion(document, "1");
+}
+
+pub const ProofSummaryView = struct {
+    target: []const u8,
+    overall_presentation_status: []const u8,
+    artifacts_total: u32,
+    checks_total: u32,
+    findings_total: u32,
+    claims_total: u32,
+};
+
+pub fn readProofPack(allocator: std.mem.Allocator, bytes: []const u8) Error!Document {
+    var document = try parseObject(allocator, bytes, .proof_pack);
+    errdefer document.deinit();
+    try expectString(&document, "format", "boris-publication-proof-pack");
+    try expectInteger(&document, "schema_version", 1);
+    try requireString(&document, "target");
+    try requireObject(&document, "summary");
+    _ = try extractProofSummary(&document);
+    return withVersion(document, "1");
+}
+
+pub fn extractProofSummary(document: *const Document) Error!ProofSummaryView {
+    if (document.kind != .proof_pack) return error.InvalidField;
+    const target = try objectString(rootObject(document), "target");
+    const summary_value = rootObject(document).get("summary") orelse return error.MissingField;
+    if (summary_value != .object) return error.InvalidField;
+    const summary = &summary_value.object;
+    const status = try objectString(summary, "overall_presentation_status");
+    return .{
+        .target = target,
+        .overall_presentation_status = status,
+        .artifacts_total = try nestedTotal(summary, "artifacts"),
+        .checks_total = try nestedTotal(summary, "checks"),
+        .findings_total = try nestedTotal(summary, "findings"),
+        .claims_total = try nestedTotal(summary, "claims"),
+    };
+}
+
+fn nestedTotal(object: *const std.json.ObjectMap, key: []const u8) Error!u32 {
+    const value = object.get(key) orelse return error.MissingField;
+    if (value != .object) return error.InvalidField;
+    return objectU32(&value.object, "total");
 }
 
 pub fn readFrontmatterSchema(allocator: std.mem.Allocator, bytes: []const u8) Error!Document {
@@ -414,6 +458,11 @@ fn requireInteger(document: *const Document, key: []const u8) Error!void {
     if (value != .integer) return error.InvalidField;
 }
 
+fn requireObject(document: *const Document, key: []const u8) Error!void {
+    const value = rootObject(document).get(key) orelse return error.MissingField;
+    if (value != .object) return error.InvalidField;
+}
+
 fn expectString(document: *const Document, key: []const u8, expected: []const u8) Error!void {
     const value = rootObject(document).get(key) orelse return error.MissingField;
     if (value != .string) return error.InvalidField;
@@ -463,6 +512,22 @@ test "HTML-path report adapter accepts html-build-report-0.1.0" {
 
     try std.testing.expectError(error.UnsupportedSchemaVersion, readGraph(allocator,
         \\{"schemaVersion":"9.0.0","frozen":true,"nodes":[],"edges":[],"reverseIndex":[],"nav":[]}
+    ));
+}
+
+test "proof pack adapter accepts schema 1 and rejects unknown formats" {
+    const allocator = std.testing.allocator;
+    var good = try readProofPack(allocator,
+        \\{"format":"boris-publication-proof-pack","schema_version":1,"target":"public","summary":{"artifacts":{"total":2},"checks":{"total":3},"findings":{"total":0},"claims":{"total":3},"overall_presentation_status":"verified"}}
+    );
+    defer good.deinit();
+    try std.testing.expectEqual(.proof_pack, good.kind);
+    const view = try extractProofSummary(&good);
+    try std.testing.expectEqualStrings("verified", view.overall_presentation_status);
+    try std.testing.expectEqual(@as(u32, 2), view.artifacts_total);
+
+    try std.testing.expectError(error.UnknownFormat, readProofPack(allocator,
+        \\{"format":"boris-publication-plan","schema_version":1,"target":"public","summary":{"artifacts":{"total":0},"checks":{"total":3},"findings":{"total":0},"claims":{"total":3},"overall_presentation_status":"verified"}}
     ));
 }
 

@@ -19,7 +19,7 @@
   type RecoverySnapshot = { path: string; content: string; fingerprint: string };
   type RecoveryList = { snapshots: RecoverySnapshot[] };
   type ErrorResponse = { error?: string; status?: string };
-  type CommandMode = 'validate' | 'ir_build' | 'html_build' | 'check' | 'impact';
+  type CommandMode = 'validate' | 'ir_build' | 'html_build' | 'check' | 'impact' | 'plan';
   type FailureClass = 'success' | 'content' | 'usage' | 'io' | 'terminated';
   type PendingResolution =
     | { action: 'open'; target: string }
@@ -61,6 +61,44 @@
     column: number | null;
   };
   type ImpactEndpoint = { endpoint_type: 'page' | 'source'; value: string };
+  type PublicationSite = { url?: string | null; title?: string | null; description?: string | null };
+  type PublicationIdentity = {
+    target?: string | null;
+    base_url?: string | null;
+    origin?: string | null;
+    base_path?: string | null;
+    site_kind?: string | null;
+  };
+  type PublicationTarget = {
+    name: string;
+    output: string;
+    public?: boolean | null;
+    theme?: string | null;
+    layout?: string | null;
+  };
+  type PublicationPlan = {
+    format: string;
+    schema_version: number;
+    input: string;
+    input_format: string;
+    site?: PublicationSite | null;
+    publication?: PublicationIdentity | null;
+    targets: PublicationTarget[];
+    editions?: { ir?: unknown; rag?: unknown; context?: unknown };
+  };
+  type PublicationProfile = { path: string };
+  type PublicationProof = {
+    path: string;
+    html_path: string | null;
+    target: string;
+    schema_version: string;
+    overall_presentation_status: string;
+    artifacts_total: number;
+    checks_total: number;
+    findings_total: number;
+    claims_total: number;
+  };
+  type PublicationPayload = { profiles: PublicationProfile[]; proof: PublicationProof | null };
   type CommandResult = {
     mode: CommandMode;
     exit_code: number | null;
@@ -71,6 +109,7 @@
     problems: Problem[];
     findings: AnalysisFinding[];
     impact: ImpactEndpoint[];
+    publication_plan?: PublicationPlan | null;
   };
   type ProblemGroup = { key: string; label: string; problems: Problem[] };
   type JsonSchemaProperty = { type?: string | string[]; enum?: Array<string | null>; maxLength?: number; maxItems?: number; pattern?: string; items?: JsonSchemaProperty };
@@ -144,6 +183,10 @@
   let graphStatus = 'Loading the Boris graph…';
   let inputMode: NonNullable<Health['project']['input_mode']> = 'empty';
   let previewWidth: 'full' | '375' | '768' | '1440' = 'full';
+  let publicationPayload: PublicationPayload | null = null;
+  let publicationStatus = 'Loading publication profiles…';
+  let selectedProfile = '';
+  let lastPublicationPlan: PublicationPlan | null = null;
 
   $: dirty = activePath !== '' && content !== baseline;
   $: problemGroups = groupProblems(commandResult?.problems ?? []);
@@ -186,6 +229,7 @@
       { kind: 'command', mode: 'html_build' },
       { kind: 'command', mode: 'check' },
       { kind: 'command', mode: 'impact' },
+      { kind: 'command', mode: 'plan' },
       { kind: 'preview' },
       { kind: 'source' },
       { kind: 'parent' },
@@ -256,13 +300,14 @@
       return;
     }
     try {
-      const [healthResult, versionResult, filesResult, authoringResult, graphResult, previewResult] = await Promise.all([
+      const [healthResult, versionResult, filesResult, authoringResult, graphResult, previewResult, publicationResult] = await Promise.all([
         api<Health>('/api/health'),
         api<Version>('/api/version'),
         api<FileList>('/api/files'),
         api<AuthoringPayload>('/api/authoring'),
         api<GraphPayload>('/api/graph'),
-        api<PreviewState>('/api/preview/state')
+        api<PreviewState>('/api/preview/state'),
+        api<PublicationPayload>('/api/publication')
       ]);
       if (![healthResult, versionResult, filesResult].every(result => result.response.ok)) {
         throw new Error('host request failed');
@@ -280,6 +325,8 @@
       else authoringStatus = 'Boris authoring vocabulary is unavailable.';
       if (graphResult.response.ok) setGraph(graphResult.data);
       else graphStatus = 'Boris graph is unavailable.';
+      if (publicationResult.response.ok) setPublication(publicationResult.data);
+      else publicationStatus = 'Publication profiles are unavailable.';
       if (previewResult.response.ok) setPreview(previewResult.data);
       const recoveryResult = await api<RecoveryList>('/api/recovery');
       if (recoveryResult.response.ok) {
@@ -339,9 +386,17 @@
       commandStatus = 'Enter an entity or source endpoint before running impact.';
       return;
     }
+    if (mode === 'plan' && !selectedProfile.trim()) {
+      commandStatus = 'Choose a publication profile before running the plan.';
+      return;
+    }
     commandRunning = true;
     commandStatus = `Running ${commandLabel(mode)}…`;
-    const body = mode === 'impact' ? { mode, impact_id: impactId.trim() } : { mode };
+    const body = mode === 'impact'
+      ? { mode, impact_id: impactId.trim() }
+      : mode === 'plan'
+        ? { mode, profile: selectedProfile.trim() }
+        : { mode };
     const result = await api<CommandResult | ErrorResponse>('/api/commands/run', {
       method: 'POST', body: JSON.stringify(body)
     });
@@ -361,6 +416,8 @@
       await refreshAuthoring();
       await refreshGraph();
     }
+    if (commandResult.publication_plan) lastPublicationPlan = commandResult.publication_plan;
+    if (mode === 'html_build' || mode === 'plan') await refreshPublication();
   }
 
   function setAuthoring(payload: AuthoringPayload) {
@@ -387,6 +444,27 @@
     const result = await api<GraphPayload>('/api/graph');
     if (result.response.ok) setGraph(result.data);
     else graphStatus = 'The Boris build succeeded, but graph.json could not be adapted.';
+  }
+
+  function setPublication(payload: PublicationPayload) {
+    publicationPayload = payload;
+    if (payload.profiles.length === 0) {
+      publicationStatus = 'No publication profile found at the project root.';
+      selectedProfile = '';
+      return;
+    }
+    if (!payload.profiles.some(profile => profile.path === selectedProfile)) {
+      selectedProfile = payload.profiles[0].path;
+    }
+    publicationStatus = payload.proof
+      ? `Local Proof Pack present for target ${payload.proof.target} (${payload.proof.overall_presentation_status}).`
+      : `Ready to plan with ${payload.profiles.length === 1 ? payload.profiles[0].path : `${payload.profiles.length} profiles`}.`;
+  }
+
+  async function refreshPublication() {
+    const result = await api<PublicationPayload>('/api/publication');
+    if (result.response.ok) setPublication(result.data);
+    else publicationStatus = 'Publication profiles could not be loaded.';
   }
 
   function setPreview(state: PreviewState) {
@@ -461,7 +539,8 @@
       ir_build: 'Build diagnostics',
       html_build: 'Build HTML',
       check: 'Check graph',
-      impact: 'Run impact'
+      impact: 'Run impact',
+      plan: 'Run publication plan'
     } satisfies Record<CommandMode, string>)[mode];
   }
 
@@ -1210,6 +1289,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
   <a href="#project">Project</a>
   <a href="#source">Source</a>
   <a href="#graph">Graph</a>
+  <a href="#publication">Publication</a>
   <a href="#problems">Problems</a>
   <a href="#preview">Preview</a>
 </nav>
@@ -1569,6 +1649,77 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
       </section>
     {/if}
     <p role="status" aria-label="Editing status" aria-live="polite">{editorStatus}</p>
+    <section id="publication" class="publication-pane" aria-labelledby="publication-heading">
+      <div class="problems-heading">
+        <div>
+          <h2 id="publication-heading">Publication</h2>
+          <p>The editor runs <code>boris plan --profile</code> and shows the normalized declaration. It does not deploy or store secrets.</p>
+        </div>
+      </div>
+      <p role="status" aria-label="Publication status" aria-live="polite">{publicationStatus}</p>
+      {#if (publicationPayload?.profiles.length ?? 0) > 0}
+        <label for="publication-profile">Publication profile</label>
+        <div class="impact-command">
+          <div>
+            <select id="publication-profile" bind:value={selectedProfile} disabled={commandRunning}>
+              {#each publicationPayload?.profiles ?? [] as profile (profile.path)}
+                <option value={profile.path}>{profile.path}</option>
+              {/each}
+            </select>
+            <button type="button" disabled={commandRunning || !selectedProfile} onclick={() => runCommand('plan')}>Run publication plan</button>
+          </div>
+        </div>
+      {:else}
+        <p>Add a <code>boris-publication-profile</code> file such as <code>boris.json</code> at the project root. The compiler does not invent profiles.</p>
+      {/if}
+
+      {#if lastPublicationPlan}
+        {@const plan = lastPublicationPlan}
+        <h3>Normalized plan</h3>
+        <p>This JSON is a static declaration. Success here means only that Boris validated the profile. It is not proof, evidence, or a deployed site.</p>
+        <dl>
+          <div><dt>Input</dt><dd>{plan.input} · {plan.input_format}</dd></div>
+          {#if plan.site?.title}<div><dt>Site</dt><dd>{plan.site.title}{plan.site.url ? ` · ${plan.site.url}` : ''}</dd></div>{/if}
+          {#if plan.publication}
+            <div><dt>Declared target</dt><dd>{plan.publication.target ?? 'none'}</dd></div>
+            {#if plan.publication.base_url}
+              <div><dt>Public location</dt><dd>{plan.publication.base_url} ({plan.publication.origin ?? ''}{plan.publication.base_path ?? ''}{plan.publication.site_kind ? ` · ${plan.publication.site_kind}` : ''})</dd></div>
+            {/if}
+          {:else}
+            <div><dt>Declared target</dt><dd>None. This is a local HTML/edition declaration, not a hosted platform identity.</dd></div>
+          {/if}
+        </dl>
+        {#if plan.targets.length > 0}
+          <h4>Targets</h4>
+          <ul class="graph-links">
+            {#each plan.targets as target (target.name)}
+              <li>{target.name} → {target.output}{target.public ? ' · public' : ''}{target.theme ? ` · ${target.theme}` : ''}{target.layout ? ` · ${target.layout}` : ''}</li>
+            {/each}
+          </ul>
+        {/if}
+        {#if plan.publication?.target === 'github-pages'}
+          <p class="fallback-notice">GitHub Pages is the verified target. Deploy stays in the official Actions workflow: resolve location, fail closed on URL disagreement, upload only inventory-verified files. This editor does not run that workflow.</p>
+        {:else if plan.publication?.target === 'standard-site'}
+          <p class="fallback-notice">Standard.site is a verified first-tester target. Plan and publish stay on the Boris CLI. The editor does not log in or publish.</p>
+        {:else if plan.publication?.target}
+          <p class="fallback-notice">{plan.publication.target} is declared in the plan. The editor does not add a platform adapter or treat this as a verified deploy.</p>
+        {/if}
+      {/if}
+
+      {#if publicationPayload?.proof}
+        {@const proof = publicationPayload.proof}
+        <h3>Local evidence</h3>
+        <p>The Proof Pack at <code>{proof.path}</code> is target-local presentation of committed artifacts, checks, and claims. It does not verify a deployed site.</p>
+        <dl>
+          <div><dt>Target</dt><dd>{proof.target}</dd></div>
+          <div><dt>Presentation status</dt><dd>{proof.overall_presentation_status}</dd></div>
+          <div><dt>Counts</dt><dd>{proof.artifacts_total} artifacts · {proof.checks_total} checks · {proof.findings_total} findings · {proof.claims_total} claims</dd></div>
+        </dl>
+        <p>Limitation <code>no-deployment-verification</code> is part of every Proof Pack. Local build verification and deployed-site verification are different facts.</p>
+      {:else}
+        <p>No local Proof Pack at <code>dist/_boris/proof/proof-pack.json</code> yet. Build HTML to produce evidence; that still is not a deploy.</p>
+      {/if}
+    </section>
   </section>
 
   <div class="workspace-rail">

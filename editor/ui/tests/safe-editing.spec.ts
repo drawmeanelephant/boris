@@ -13,6 +13,7 @@ type MockOptions = {
   files?: Array<{ path: string }>;
   inputMode?: 'markdown' | 'cooklang' | 'textile' | 'mixed' | 'empty';
   previewRebuilds?: Array<Record<string, unknown>>;
+  publication?: Record<string, unknown>;
 };
 
 type CommandResult = {
@@ -30,12 +31,14 @@ type CommandResult = {
   }>;
   findings: Array<Record<string, unknown>>;
   impact: Array<Record<string, unknown>>;
+  publication_plan?: Record<string, unknown> | null;
 };
 
 function commandResult(mode: string, overrides: Partial<CommandResult> = {}): CommandResult {
   return {
     mode, exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.8.1',
     report_version: null, used_stderr_fallback: false, problems: [], findings: [], impact: [],
+    publication_plan: null,
     ...overrides
   };
 }
@@ -199,6 +202,13 @@ async function installApi(page: Page, options: MockOptions = {}) {
     graphRequest += 1;
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });
+  await page.route('**/api/publication', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify(options.publication ?? {
+      profiles: [{ path: 'boris.json' }],
+      proof: null
+    })
+  }));
   await page.route('**/api/preview/state', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ phase: 'idle', generation: 0, exit_code: null, used_stderr_fallback: false, message: 'Preview has not been built yet.', preview_url: 'https://preview.invalid/?token=test' })
@@ -218,7 +228,7 @@ test('semantic shell and file tree expose stable keyboard and voice names', asyn
   await expect(page.getByRole('heading', { name: 'Boris Editor', level: 1 })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Editor sections' })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Project files' })).toBeVisible();
-  for (const name of ['Project', 'Source', 'Graph', 'Problems', 'Preview']) {
+  for (const name of ['Project', 'Source', 'Graph', 'Publication', 'Problems', 'Preview']) {
     const link = page.getByRole('link', { name, exact: true });
     await expect(link).toBeVisible();
     await expect(link).toHaveText(name);
@@ -2092,4 +2102,59 @@ test('graph inspector refreshes after a successful diagnostics build (#418 M6)',
   await expect(page.getByRole('status', { name: 'Graph status' })).toContainText('Build diagnostics to create the Boris graph.');
   await page.getByRole('button', { name: 'Build diagnostics', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Graph status' })).toContainText('Boris graph ready (3 pages).');
+});
+
+test('publication pane plans an existing profile and does not deploy (#418 M9)', async ({ page }) => {
+  const plan = {
+    format: 'boris-publication-plan',
+    schema_version: 1,
+    input: 'content',
+    input_format: 'markdown',
+    site: { url: 'https://owner.github.io/boris', title: 'Boris', description: null },
+    publication: {
+      target: 'github-pages',
+      base_url: 'https://owner.github.io/boris',
+      origin: 'https://owner.github.io',
+      base_path: '/boris',
+      site_kind: 'project-site'
+    },
+    targets: [{ name: 'public', output: 'dist', public: true, theme: 'themes/boris', layout: null }],
+    editions: { ir: null, rag: null, context: null }
+  };
+  await installApi(page, {
+    publication: {
+      profiles: [{ path: 'boris.json' }, { path: 'standard-site.json' }],
+      proof: {
+        path: 'dist/_boris/proof/proof-pack.json',
+        html_path: 'dist/_boris/proof/index.html',
+        target: 'public',
+        schema_version: '1',
+        overall_presentation_status: 'verified',
+        artifacts_total: 2,
+        checks_total: 3,
+        findings_total: 0,
+        claims_total: 3
+      }
+    },
+    commands: { plan: commandResult('plan', { publication_plan: plan }) }
+  });
+  const publication = page.locator('#publication');
+  await expect(publication.getByRole('heading', { name: 'Publication' })).toBeVisible();
+  await expect(publication.getByRole('status', { name: 'Publication status' })).toContainText('Local Proof Pack present');
+  await expect(page.getByRole('combobox', { name: 'Publication profile', exact: true })).toBeVisible();
+  await page.getByRole('combobox', { name: 'Publication profile', exact: true }).selectOption('boris.json');
+  const run = page.getByRole('button', { name: 'Run publication plan', exact: true });
+  await expect(run).toHaveText('Run publication plan');
+  const planRequest = page.waitForRequest('**/api/commands/run');
+  await run.focus();
+  await page.keyboard.press('Enter');
+  expect((await planRequest).postDataJSON()).toMatchObject({ mode: 'plan', profile: 'boris.json' });
+  await expect(publication.getByRole('heading', { name: 'Normalized plan' })).toBeVisible();
+  await expect(publication).toContainText('github-pages');
+  await expect(publication).toContainText('https://owner.github.io/boris');
+  await expect(publication).toContainText('public → dist');
+  await expect(publication).toContainText('does not run that workflow');
+  await expect(publication.getByRole('heading', { name: 'Local evidence' })).toBeVisible();
+  await expect(publication).toContainText('no-deployment-verification');
+  await expect(page.getByRole('button', { name: 'Deploy', exact: true })).toHaveCount(0);
 });
