@@ -17,7 +17,7 @@ pub const os = struct {
     pub const NAME_MAX: usize = 255;
 };
 
-const version_text = pipeline.compiler_id ++ ";ir=" ++ pipeline.schema_version ++ ";profile=embed-ir+html";
+const version_text = pipeline.compiler_id ++ ";ir=" ++ pipeline.schema_version ++ ";profile=embed-ir+html+evidence";
 
 pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, _: ?usize) noreturn {
     _ = msg;
@@ -37,6 +37,7 @@ const FileRef = struct {
 
 const Request = struct {
     html: bool = false,
+    evidence: bool = false,
     layout_path: []const u8 = "layouts/main.html",
     files: []const FileRef = &.{},
 };
@@ -120,6 +121,7 @@ export fn boris_compile(req_ptr: u32, req_len: u32) u32 {
 
     var compilation = embed.compileBundle(unusedIo(), allocator, files, .{
         .html = parsed.value.html,
+        .evidence = parsed.value.evidence,
         .layout_path = parsed.value.layout_path,
     }) catch |err| {
         last_abi_status = switch (err) {
@@ -237,7 +239,7 @@ fn writeManifest(ok: bool, diagnostics: []const diag.Diagnostic, arts: []const O
     try w.writeAll(pipeline.compiler_id);
     try w.writeAll("\",\"schema_version\":\"");
     try w.writeAll(pipeline.schema_version);
-    try w.writeAll("\",\"profile\":\"embed-ir+html\",\"diagnostics\":[");
+    try w.writeAll("\",\"profile\":\"embed-ir+html+evidence\",\"features\":[\"markdown\",\"closed-frontmatter\",\"graph\",\"includes\",\"wiki\",\"html\",\"ir\",\"evidence\"],\"unsupported\":[\"threads\",\"watch\",\"jobs\",\"live-deploy\",\"textile\",\"cooklang\",\"untrusted-multi-tenant\",\"proof-pack\",\"wasi-filesystem\"],\"limits\":{\"isolate_memory_mib\":128,\"release_small_max_mib\":8,\"release_safe_max_mib\":16},\"diagnostics\":[");
     for (diagnostics, 0..) |d, i| {
         if (i > 0) try w.writeAll(",");
         try w.writeAll("{\"severity\":\"");
