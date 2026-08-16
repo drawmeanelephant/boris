@@ -39,6 +39,8 @@ Modes:
   --out PATH          Verify result artifact path (default: stdout)
   standard-site login/logout options:
   --did DID           AT Protocol DID to authorize (login) or forget (logout)
+  --handle HANDLE     AT Protocol handle for `login --app-password` (resolved to a DID)
+  --app-password      Opt-in app-password login (broad account write; never OAuth scope)
   standard-site smoke options:
   --did DID           Test identity DID (required)
   --namespace NAME    Unique rkey namespace prefix (default: clock-derived)
