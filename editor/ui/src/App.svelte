@@ -1831,7 +1831,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
               <p>Closed slots come from Boris <code>completion.json</code>. The buffer scan is presentation only.</p>
             </div>
           </div>
-          <p class="fallback-notice">Boris does not record fallback layout winners. Rule-selected pages appear as <code>ILAYOUTSELECTED</code> after Build HTML or Validate. See issue 557.</p>
+          <p class="fallback-notice">Layout winners, including fallback, appear as <code>ILAYOUTSELECTED</code> after Build HTML or Validate.</p>
           {#if closedLayoutSlots.length === 0}
             <p>Build diagnostics to load the closed layout-slot vocabulary.</p>
           {:else}

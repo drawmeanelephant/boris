@@ -122,9 +122,9 @@ pub const Code = enum {
     /// carry its `nostr:naddr` alternate link. Warning: the HTML build still
     /// succeeds.
     ENOSTRHEAD,
-    /// Informational: a layout rule (id/glob/role selector) selected a
-    /// non-fallback layout for a page. Records the selection outcome for
-    /// editors/tools; never affects exit codes or errorCount.
+    /// Informational: a layout rule (id/glob/role) or the fallback layout
+    /// won for a page. Records the selection outcome for editors/tools;
+    /// never affects exit codes or errorCount.
     ILAYOUTSELECTED,
     EUSAGE,
     EIO,

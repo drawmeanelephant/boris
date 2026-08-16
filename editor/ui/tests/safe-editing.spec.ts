@@ -2107,6 +2107,10 @@ test('theme layouts list closed slots and preview widths are named (#418 M8)', a
           severity: 'info', code: 'ILAYOUTSELECTED', message: 'layout rule id:index selected themes/boris/layouts/main.html',
           remediation: '', source_path: 'index.md', line: 1, column: 1, id: 'index',
           origin: 'build_report', position_confidence: 'exact', packet: 'code: ILAYOUTSELECTED'
+        }, {
+          severity: 'info', code: 'ILAYOUTSELECTED', message: 'layout fallback selected themes/boris/layouts/main.html',
+          remediation: '', source_path: 'about.md', line: 1, column: 1, id: 'about',
+          origin: 'build_report', position_confidence: 'exact', packet: 'code: ILAYOUTSELECTED'
         }]
       })
     }
@@ -2118,10 +2122,11 @@ test('theme layouts list closed slots and preview widths are named (#418 M8)', a
   await expect(theme).toContainText('{{title}}');
   await expect(theme).toContainText('{{content}}');
   await expect(theme.getByRole('button', { name: 'Open themes/boris/assets/css/site.css', exact: true })).toBeVisible();
-  await expect(theme).toContainText('issue 557');
+  await expect(theme).toContainText('including fallback');
 
   await page.getByRole('button', { name: 'Build HTML', exact: true }).click();
   await expect(theme.getByRole('button', { name: /layout rule id:index selected/ })).toBeVisible();
+  await expect(theme.getByRole('button', { name: /layout fallback selected/ })).toBeVisible();
 
   await expect(page.getByRole('group', { name: 'Preview width' })).toBeVisible();
   await page.getByRole('radio', { name: '375px', exact: true }).check();
