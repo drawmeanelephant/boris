@@ -1,8 +1,8 @@
 # Embedding: freestanding compiler host seam
 
-**Status:** normative for the M0 render spike; later cards extend this file  
+**Status:** normative for the M0 render spike and M3 `compileBundle`  
 **Issue:** [#301](https://github.com/drawmeanelephant/boris/issues/301)  
-**Related:** [oliver-renderer.md](oliver-renderer.md)
+**Related:** [oliver-renderer.md](oliver-renderer.md), [source-provider.md](source-provider.md), [artifact-sink.md](artifact-sink.md), [diagnostics.md](diagnostics.md), [json-ir-and-manifest.md](json-ir-and-manifest.md)
 
 This contract is **not** a publication target. Wasm is an embedding
 profile of the same compiler. It does not add a `publication.target`
@@ -75,3 +75,38 @@ a promise that a later full `compileBundle` module will.
 
 The automated gate requires ReleaseSmall &lt; 2 MiB and ReleaseSafe &lt;
 4 MiB uncompressed so a sudden size regression fails CI.
+
+---
+
+## M3 — `compileBundle` (native, IR only)
+
+`src/embed.zig` is the product function the Wasm ABI will later export.
+It is files-in, diagnostics-and-IR-out. It is **not** a
+`publication.target`.
+
+```zig
+pub fn compileBundle(
+    io: Io,
+    gpa: std.mem.Allocator,
+    files: []const SourceFile,
+    config: CompileConfig,
+) !Compilation;
+```
+
+`io` is required by the shared pipeline type. The memory source provider
+and memory artifact sink do not scan a host directory or write an output
+tree. `CompileConfig` is closed: first cut is Markdown IR only
+(`input_format`).
+
+`Compilation` carries:
+
+- structured diagnostics with the existing
+  [diagnostics.md](diagnostics.md) fields
+- the IR artifact set (`manifest.json`, `graph.json`, `completion.json`,
+  `build-report.json`) when validation succeeds
+- `build-report.json` only when validation fails — no graph-dependent IR,
+  same rule as `pipeline.run`
+
+Native CLI still calls `pipeline.compile` / `pipeline.run` through the
+filesystem adapters. `compileBundle` is an additional entry, not a second
+parser or graph.
