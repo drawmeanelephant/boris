@@ -570,3 +570,17 @@ test "create and confirmed delete use no-clobber semantics" {
     try delete(io, root, "content/guides/new.md", true);
     try std.testing.expectError(error.FileNotFound, open(allocator, io, root, "content/guides/new.md"));
 }
+
+test "files larger than 8 MiB are refused without writing" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var temp = try createTestProject();
+    defer temp.cleanup();
+    const root = try testProjectPath(&temp, allocator);
+    defer allocator.free(root);
+    const huge = try allocator.alloc(u8, max_file_bytes + 1);
+    defer allocator.free(huge);
+    @memset(huge, 'a');
+    try std.testing.expectError(error.FileTooLarge, create(allocator, io, root, "content/huge.md", huge));
+    try std.testing.expectError(error.FileNotFound, open(allocator, io, root, "content/huge.md"));
+}

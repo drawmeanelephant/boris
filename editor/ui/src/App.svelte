@@ -375,7 +375,7 @@
       loadBuffer(buffer, buffer.read_only ? `Opened ${path} read-only.` : `Opened ${path}.`);
       return true;
     } else {
-      editorStatus = `Could not open ${path}.`;
+      editorStatus = `Could not open ${path}: ${hostErrorLabel((result.data as ErrorResponse).error)}.`;
       return false;
     }
   }
@@ -405,11 +405,14 @@
     });
     commandRunning = false;
     if (!result.response.ok) {
-      commandStatus = `Could not run ${commandLabel(mode)}: ${(result.data as ErrorResponse).error ?? 'request failed'}.`;
+      commandStatus = `Could not run ${commandLabel(mode)}: ${hostErrorLabel((result.data as ErrorResponse).error)}.`;
       return;
     }
     commandResult = result.data as CommandResult;
     commandStatus = `${commandLabel(mode)} finished: ${failureLabel(commandResult.failure_class, commandResult.exit_code)}.`;
+    if (commandResult.failure_class === 'terminated') {
+      commandStatus += ' Run the same command again when Boris is ready.';
+    }
     if (mode === 'html_build') {
       previewState = commandResult.failure_class === 'success'
         ? 'The last HTML build succeeded. Live preview serving arrives in the preview slice.'
@@ -563,6 +566,15 @@
       impact: 'Run impact',
       plan: 'Run publication plan'
     } satisfies Record<CommandMode, string>)[mode];
+  }
+
+  function hostErrorLabel(code: string | undefined): string {
+    if (code === 'payload_too_large') return 'the file exceeds the 8 MiB editor bound';
+    if (code === 'too_many_files') return 'the project has more than 50,000 author-owned files';
+    if (code === 'boris_unavailable') return 'the Boris binary is not available; restart the editor';
+    if (code === 'invalid_boris_version') return 'the Boris version string is not usable';
+    if (code === 'unsupported_boris_artifact') return 'a generated Boris artifact is stale or unsupported; rebuild it';
+    return code ?? 'request failed';
   }
 
   function failureLabel(failure: FailureClass, exitCode: number | null): string {
@@ -879,7 +891,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
       readOnly = true;
       editorStatus = `${activePath} is read-only. Nothing was written.`;
     } else {
-      editorStatus = `Save failed for ${activePath}. Your buffer remains unsaved.`;
+      editorStatus = `Save failed for ${activePath}: ${hostErrorLabel(error.error)}. Your buffer remains unsaved.`;
     }
     return false;
   }
@@ -1008,7 +1020,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
       await refreshFiles();
       loadBuffer(result.data as BufferResponse, `Created ${path}.`);
     } else {
-      editorStatus = `Could not create ${path}: ${(result.data as ErrorResponse).error ?? 'request failed'}.`;
+      editorStatus = `Could not create ${path}: ${hostErrorLabel((result.data as ErrorResponse).error)}.`;
     }
   }
 
@@ -1160,7 +1172,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
       await refreshFiles();
       editorStatus = `Renamed ${oldPath} to ${newPath}.`;
     } else {
-      editorStatus = `Could not rename ${oldPath}: ${result.data.error ?? 'request failed'}.`;
+      editorStatus = `Could not rename ${oldPath}: ${hostErrorLabel(result.data.error)}.`;
     }
   }
 
@@ -1182,7 +1194,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
       await refreshFiles();
       editorStatus = `Deleted ${path}.`;
     } else {
-      editorStatus = `Could not delete ${path}: ${result.data.error ?? 'request failed'}.`;
+      editorStatus = `Could not delete ${path}: ${hostErrorLabel(result.data.error)}.`;
     }
   }
 

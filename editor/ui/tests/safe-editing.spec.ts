@@ -15,6 +15,9 @@ type MockOptions = {
   previewRebuilds?: Array<Record<string, unknown>>;
   publication?: Record<string, unknown>;
   version?: Record<string, unknown>;
+  openError?: { error: string };
+  saveError?: { error: string };
+  commandByCall?: CommandResult[];
 };
 
 type CommandResult = {
@@ -132,13 +135,30 @@ async function installApi(page: Page, options: MockOptions = {}) {
     contentType: 'application/json', body: JSON.stringify({ snapshots: options.recovery ?? [] })
   }));
   await page.route('**/api/files/open', async route => {
+    if (options.openError) {
+      await route.fulfill({
+        status: 413,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: options.openError.error })
+      });
+      return;
+    }
     const { path } = route.request().postDataJSON() as { path: string };
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ status: 'opened', path, content: disk, fingerprint, read_only: false })
     });
   });
+  let commandCall = 0;
   await page.route('**/api/files/save', async route => {
+    if (options.saveError) {
+      await route.fulfill({
+        status: 413,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: options.saveError.error })
+      });
+      return;
+    }
     const body = route.request().postDataJSON() as { path: string; content: string };
     if (options.saveConflict || conflictOnceRemaining > 0) {
       if (conflictOnceRemaining > 0) conflictOnceRemaining -= 1;
@@ -187,9 +207,14 @@ async function installApi(page: Page, options: MockOptions = {}) {
   }
   await page.route('**/api/commands/run', async route => {
     const { mode } = route.request().postDataJSON() as { mode: string };
+    const queued = options.commandByCall;
+    const payload = queued
+      ? queued[Math.min(commandCall, queued.length - 1)]
+      : (options.commands?.[mode] ?? commandResult(mode));
+    commandCall += 1;
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify(options.commands?.[mode] ?? commandResult(mode))
+      body: JSON.stringify(payload)
     });
   });
   await page.route('**/api/authoring', route => {
@@ -2366,6 +2391,38 @@ test('stale completion.json keeps the frontmatter schema and names rebuild (#418
   await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
   await expect(page.getByText(/stale or unsupported/)).toBeVisible();
   await expect(page.getByText('Frontmatter field bounds from Boris schema')).toBeVisible();
+});
+
+test('opening a file over 8 MiB names the editor bound (#418 M11)', async ({ page }) => {
+  await installApi(page, { openError: { error: 'payload_too_large' } });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('8 MiB editor bound');
+});
+
+test('saving a file over 8 MiB keeps the buffer and names the bound (#418 M11)', async ({ page }) => {
+  await installApi(page, { saveError: { error: 'payload_too_large' } });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Too big\n');
+  await page.getByRole('button', { name: 'Save file', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status', { name: 'Editing status' })).toContainText('8 MiB editor bound');
+  await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+});
+
+test('a terminated Boris command stays retryable (#418 M11)', async ({ page }) => {
+  await installApi(page, {
+    commandByCall: [
+      commandResult('validate', { exit_code: null, failure_class: 'terminated' }),
+      commandResult('validate')
+    ]
+  });
+  await page.getByRole('button', { name: 'Validate project', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Process terminated');
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Run the same command again');
+  await page.getByRole('button', { name: 'Validate project', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status', { name: 'Boris command status' })).toContainText('Success');
 });
 
 test('compiler version names the supported IR range (#418 M11)', async ({ page }) => {

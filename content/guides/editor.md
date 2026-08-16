@@ -289,6 +289,10 @@ unsupported schema, the editor stays open and tells you to Build diagnostics
 or Build HTML. It does not rewrite the artifact. The Project pane also names
 the IR versions this editor adapter accepts.
 
+A single author file may be at most 8 MiB. A project may list at most 50,000
+author-owned files. Those bounds are spoken in the status line. If a Boris
+command is killed or times out, the same named button retries it.
+
 <Details summary="The editor is not a second compiler">
 
 It does not own frontmatter grammar, Markdown, the graph, or publication.
