@@ -2065,7 +2065,7 @@ test('Cooklang trees expose a read-only recipe facet and recipeRef navigation (#
   await expect(recipe).toContainText('spaghetti');
   await expect(recipe).toContainText('400 g');
   await expect(recipe.getByRole('button', { name: 'Print this recipe', exact: true })).toBeVisible();
-  await expect(recipe).toContainText('Scaling is not available');
+  await expect(recipe).toContainText('This editor does not run that operation');
   const openRequest = page.waitForRequest('**/api/files/open');
   await recipe.getByRole('button', { name: 'Go to recipe sauces/pepper-oil', exact: true }).focus();
   await page.keyboard.press('Enter');
@@ -2369,7 +2369,7 @@ test('the 14 #418 actions are completable from the keyboard (#418 M10)', async (
   await page.getByRole('button', { name: 'content/carbonara.cook', exact: true }).focus();
   await page.keyboard.press('Enter');
   const recipe = page.locator('.recipe-pane');
-  await expect(recipe).toContainText('Scaling is not available');
+  await expect(recipe).toContainText('This editor does not run that operation');
   await expect(page.getByRole('button', { name: /Scale / })).toHaveCount(0);
   await recipe.getByRole('button', { name: 'Go to recipe sauces/pepper-oil', exact: true }).focus();
   await page.keyboard.press('Enter');

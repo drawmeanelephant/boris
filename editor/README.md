@@ -236,8 +236,9 @@ fail the way Boris fails; the editor does not guess a dialect.
 
 The Recipe pane is a read-only view of the compiler `recipe` facet on
 `graph.json` (IR 0.4.0): ingredients, cookware, timers, string quantities, and
-`recipeRef` navigation. `.cook` remains the source of truth. Scaling is not
-implemented; that is [Boris issue 554](https://github.com/drawmeanelephant/boris/issues/554).
+`recipeRef` navigation. `.cook` remains the source of truth. Quantity
+scaling is a compiler-owned string operation; the editor does not run it
+([Boris issue 554](https://github.com/drawmeanelephant/boris/issues/554)).
 Graph diagnostics on `.cook` pages that are not `ECOOKLANG` keep the existing
 best-effort confidence and are labeled as approximate (adapted Markdown locus).
 
