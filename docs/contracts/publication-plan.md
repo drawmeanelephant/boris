@@ -69,7 +69,8 @@ shown below; object-key order in the source profile has no effect.
 Optional normalized values use explicit `null` so consumers can compare a
 complete plan shape without guessing whether a field was omitted. The optional
 `publication` object is emitted between `site` and `targets` when the selected
-profile declares a GitHub Pages target:
+profile declares a registry target (`github-pages` or `standard-site`). A
+GitHub Pages declaration looks like:
 
 ```json
 "publication": {
@@ -80,6 +81,14 @@ profile declares a GitHub Pages target:
   "site_kind": "project-site"
 }
 ```
+
+A Standard.site declaration uses `"target": "standard-site"` plus the
+normalized Standard.site fields (`did`, `name`, filters, `pds_origin`,
+and the same location triple). See
+[`standard-site.md`](standard-site.md) and the
+[standard-site plan fixture](fixtures/publication-plan/standard-site/expected/plan.json).
+The schema `oneOf` is additive; this document does not reshape
+`schema_version`.
 
 The location is normalized and cross-checked by the profile parser; it is not
 a deployment result. A target is

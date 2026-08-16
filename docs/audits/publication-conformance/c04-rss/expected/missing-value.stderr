@@ -15,7 +15,7 @@ Modes:
   standard-site records Dump the full canonical record payloads offline (no network)
   standard-site verify  Cross-check the built head links + well-known file offline (no network)
   standard-site login  Authorize a DID or handle and persist the session
-  standard-site sessions  List persisted sessions (DIDs only; no secrets)
+  standard-site sessions  List persisted sessions (DID, flavor, PDS; no secrets)
   standard-site logout  Remove a persisted session (secure erase; does not revoke)
   standard-site smoke  Live interop smoke against a real PDS (manual, opt-in; never in CI)
   nostr plan          Emit the offline Nostr NIP-23 publication plan (no signing, no relay)
@@ -41,7 +41,7 @@ Modes:
   --out PATH          Verify result artifact path (default: stdout)
   standard-site login/logout options:
   --did DID           AT Protocol DID to authorize (login) or forget (logout)
-  --handle HANDLE     AT Protocol handle for login --app-password or smoke (resolved to a DID)
+  --handle HANDLE     AT Protocol handle for login --app-password, logout, or smoke
   --app-password      Opt-in app-password login (broad account write; never OAuth scope)
   standard-site smoke options:
   --did DID           Test identity DID (or use --handle)

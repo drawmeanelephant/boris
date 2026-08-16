@@ -265,6 +265,19 @@ pub const Store = struct {
         return true;
     }
 
+    /// Whether a session document exists for `did`. Does not parse or load
+    /// secrets; a present-but-corrupt file still returns true.
+    pub fn exists(self: *Store, did: []const u8) Error!bool {
+        const file_name = try self.fileNameForDid(did);
+        defer self.allocator.free(file_name);
+        const file = self.dir.openFile(self.io, file_name, .{ .mode = .read_only }) catch |err| switch (err) {
+            error.FileNotFound => return false,
+            else => return mapError(err),
+        };
+        file.close(self.io);
+        return true;
+    }
+
     /// Enumerate stored DIDs (sorted). The returned slice owns both the array
     /// and each DID string; free with `deinitDidList`.
     pub fn list(self: *Store) Error![]const []u8 {
@@ -292,7 +305,108 @@ pub const Store = struct {
         for (items) |item| self.allocator.free(item);
         self.allocator.free(items);
     }
+
+    /// Enumerate stored sessions with closed flavor tokens and PDS origins.
+    /// Never returns tokens, nonces, or key material. A corrupt document
+    /// fails closed instead of omitting the row.
+    pub fn listEntries(self: *Store) Error![]ListedSession {
+        var result: std.ArrayList(ListedSession) = .empty;
+        errdefer {
+            for (result.items) |item| item.deinit(self.allocator);
+            result.deinit(self.allocator);
+        }
+        var iterator = self.dir.iterate();
+        while (iterator.next(self.io) catch |err| return mapError(err)) |entry| {
+            if (entry.kind != .file) continue;
+            const did = (try self.didFromFileName(entry.name)) orelse continue;
+            errdefer self.allocator.free(did);
+            const public = try self.readPublicFields(entry.name);
+            errdefer self.allocator.free(public.pds_origin);
+            try result.append(self.allocator, .{
+                .did = did,
+                .flavor = public.flavor,
+                .pds_origin = public.pds_origin,
+            });
+        }
+        std.mem.sort(ListedSession, result.items, {}, listedLessThan);
+        return result.toOwnedSlice(self.allocator);
+    }
+
+    fn listedLessThan(_: void, a: ListedSession, b: ListedSession) bool {
+        return std.mem.lessThan(u8, a.did, b.did);
+    }
+
+    pub fn deinitListEntries(self: *Store, items: []ListedSession) void {
+        for (items) |item| item.deinit(self.allocator);
+        self.allocator.free(items);
+    }
+
+    fn readPublicFields(self: *Store, file_name: []const u8) Error!SessionPublicFields {
+        var read_buffer: [16 * 1024]u8 = undefined;
+        const file = self.dir.openFile(self.io, file_name, .{ .mode = .read_only }) catch |err| return mapError(err);
+        defer file.close(self.io);
+        var file_reader = file.reader(self.io, &read_buffer);
+        const bytes = file_reader.interface.allocRemaining(self.allocator, .limited(max_session_document_bytes)) catch |err| switch (err) {
+            error.StreamTooLong => return error.StoreCorrupt,
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return mapError(err),
+        };
+        defer {
+            std.crypto.secureZero(u8, bytes);
+            self.allocator.free(bytes);
+        }
+        return peekPublicFields(self.allocator, bytes);
+    }
 };
+
+pub const SessionFlavor = enum {
+    oauth,
+    app_password,
+
+    pub fn label(self: SessionFlavor) []const u8 {
+        return switch (self) {
+            .oauth => "oauth",
+            .app_password => "app-password",
+        };
+    }
+};
+
+pub const ListedSession = struct {
+    did: []u8,
+    flavor: SessionFlavor,
+    pds_origin: []u8,
+
+    pub fn deinit(self: ListedSession, allocator: std.mem.Allocator) void {
+        allocator.free(self.did);
+        allocator.free(self.pds_origin);
+    }
+};
+
+const SessionPublicFields = struct {
+    flavor: SessionFlavor,
+    pds_origin: []u8,
+};
+
+fn peekPublicFields(allocator: std.mem.Allocator, bytes: []const u8) Error!SessionPublicFields {
+    const Peek = struct { format: []const u8, pds_origin: []const u8 };
+    var parsed = std.json.parseFromSlice(Peek, allocator, bytes, .{
+        .ignore_unknown_fields = true,
+        .max_value_len = max_session_document_bytes,
+        .allocate = .alloc_always,
+    }) catch return error.StoreCorrupt;
+    defer parsed.deinit();
+    const flavor: SessionFlavor = if (std.mem.eql(u8, parsed.value.format, "boris-session-v1"))
+        .oauth
+    else if (std.mem.eql(u8, parsed.value.format, "boris-app-password-v1"))
+        .app_password
+    else
+        return error.StoreCorrupt;
+    if (parsed.value.pds_origin.len == 0) return error.StoreCorrupt;
+    return .{
+        .flavor = flavor,
+        .pds_origin = try allocator.dupe(u8, parsed.value.pds_origin),
+    };
+}
 
 /// Serialize an authorized session to the on-disk JSON document. Secret
 /// material (tokens, nonce, key seed) is hex-encoded but never logged; the
@@ -565,6 +679,14 @@ test "store saves, loads, lists, and removes sessions with no leaks" {
     defer store.deinitDidList(listed);
     try std.testing.expectEqual(@as(usize, 1), listed.len);
     try std.testing.expectEqualStrings(test_did, listed[0]);
+    try std.testing.expect(try store.exists(test_did));
+
+    const entries = try store.listEntries();
+    defer store.deinitListEntries(entries);
+    try std.testing.expectEqual(@as(usize, 1), entries.len);
+    try std.testing.expectEqualStrings(test_did, entries[0].did);
+    try std.testing.expectEqual(SessionFlavor.oauth, entries[0].flavor);
+    try std.testing.expectEqualStrings("https://pds.example.com", entries[0].pds_origin);
 
     try std.testing.expect(try store.remove(test_did));
     try std.testing.expect(!(try store.remove(test_did)));
@@ -592,6 +714,11 @@ test "app-password sessions save, load, remove, and fail closed on tamper" {
     try std.testing.expectEqualStrings("refresh-jwt.example", loaded.refresh_token.?.slice());
     try std.testing.expectEqualStrings(test_did, loaded.did.slice());
     try std.testing.expectEqual(@as(u64, 7200), loaded.access_token_expires_in);
+
+    const password_entries = try store.listEntries();
+    defer store.deinitListEntries(password_entries);
+    try std.testing.expectEqual(SessionFlavor.app_password, password_entries[0].flavor);
+    try std.testing.expectEqualStrings("https://pds.example.com", password_entries[0].pds_origin);
 
     // An OAuth document and an app-password document share one filename per
     // DID: the OAuth loader must reject the app-password document as corrupt.

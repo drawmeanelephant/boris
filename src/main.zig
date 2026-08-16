@@ -82,7 +82,12 @@ const ProdRunner = struct {
     pub fn reportUsage(_: *const @This(), err: cli.ParseError, bad_arg: ?[]const u8) void {
         cli.printParseError(err, bad_arg);
         switch (err) {
-            error.MissingStandardSiteSubcommand, error.UnknownStandardSiteSubcommand => cli.printStandardSiteUsage(),
+            error.MissingStandardSiteSubcommand,
+            error.UnknownStandardSiteSubcommand,
+            error.MissingStandardSiteProfile,
+            error.MissingStandardSiteIdentity,
+            error.ConflictingStandardSiteFlags,
+            => cli.printStandardSiteUsage(),
             else => cli.printUsage(),
         }
     }
@@ -791,21 +796,21 @@ fn reportAppPasswordLoginError(err: anyerror) ExitCode {
 
 /// `boris standard-site sessions [--session-root PATH]`
 ///
-/// List stored session DIDs (one per line on stdout). No secret material is
+/// List stored sessions as `did flavor pds` (one line per DID). Flavor is
+/// the closed token `oauth` or `app-password`. No secret material is
 /// ever rendered.
 pub fn runStandardSiteSessions(io: Io, gpa: std.mem.Allocator, opts: Options, environ: *std.process.Environ.Map) ExitCode {
     const root = resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
     defer gpa.free(root);
     var sessions = atproto_session_std.Sessions.open(gpa, io, root) catch |err| return reportSessionError(err);
     defer sessions.deinit();
-    const listed = sessions.list() catch |err| return reportSessionError(err);
-    defer sessions.deinitList(listed);
+    const listed = sessions.listEntries() catch |err| return reportSessionError(err);
+    defer sessions.deinitListEntries(listed);
 
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
-    for (listed) |did| {
-        stdout_writer.interface.writeAll(did) catch return .io_error;
-        stdout_writer.interface.writeAll("\n") catch return .io_error;
+    for (listed) |entry| {
+        stdout_writer.interface.print("{s} {s} {s}\n", .{ entry.did, entry.flavor.label(), entry.pds_origin }) catch return .io_error;
     }
     stdout_writer.interface.flush() catch {};
     if (!opts.quiet) {
@@ -814,14 +819,32 @@ pub fn runStandardSiteSessions(io: Io, gpa: std.mem.Allocator, opts: Options, en
     return .success;
 }
 
-/// `boris standard-site logout --did DID [--session-root PATH]`
+/// `boris standard-site logout (--did DID | --handle HANDLE) [--session-root PATH]`
 ///
 /// Securely erase the stored session for the DID. This only removes the local
-/// credential; it never revokes the authorization server session.
+/// credential; it never revokes the authorization server session. `--handle`
+/// is resolved the same way login resolves it; an unresolvable handle fails
+/// closed.
 pub fn runStandardSiteLogout(io: Io, gpa: std.mem.Allocator, opts: Options, environ: *std.process.Environ.Map) ExitCode {
-    const did_text = opts.session_did orelse return .usage;
     const root = resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
     defer gpa.free(root);
+
+    var owned_did: ?[]u8 = null;
+    defer if (owned_did) |bytes| gpa.free(bytes);
+    const did_text = if (opts.session_did) |text| text else blk: {
+        const transport_std = atproto_transport_std.StdTransport.create(gpa, io) catch |err| {
+            std.debug.print("error: unable to start the ATProto transport: {s}\n", .{@errorName(err)});
+            return .io_error;
+        };
+        defer transport_std.destroy();
+        const resolved = resolveConfiguredDid(gpa, io, opts, transport_std.client()) catch |err| {
+            std.debug.print("error: standard-site logout: unable to resolve handle: {s}\n", .{@errorName(err)});
+            return .usage;
+        };
+        owned_did = resolved;
+        break :blk resolved;
+    };
+
     var sessions = atproto_session_std.Sessions.open(gpa, io, root) catch |err| return reportSessionError(err);
     defer sessions.deinit();
     const removed = sessions.remove(did_text) catch |err| return reportSessionError(err);
@@ -882,6 +905,15 @@ pub fn runStandardSiteSmoke(io: Io, gpa: std.mem.Allocator, opts: Options, envir
     const did_text = did_owned;
     var sessions = atproto_session_std.Sessions.open(gpa, io, session_root) catch |err| return reportSessionError(err);
     defer sessions.deinit();
+    const stored = sessions.hasDocument(did_text) catch |err| return reportSessionError(err);
+    if (!stored) {
+        if (opts.session_handle) |handle| {
+            std.debug.print("error: standard-site smoke: no stored session — run `boris standard-site login --app-password --handle {s}` first\n", .{handle});
+        } else {
+            std.debug.print("error: standard-site smoke: no stored session — run `boris standard-site login --app-password --did {s}` first\n", .{did_text});
+        }
+        return .session;
+    }
     var session_provider = SessionProvider{
         .sessions = &sessions,
         .proof_source = .{ .io = io },
