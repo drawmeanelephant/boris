@@ -291,6 +291,7 @@ const modules = [_]Module{
     .{ .name = "scanner.zig", .class = .other },
     .{ .name = "site_url.zig", .class = .other },
     .{ .name = "source_io.zig", .class = .other },
+    .{ .name = "source_provider.zig", .class = .other },
     .{ .name = "standard_site.zig", .class = .{ .emitter = .{
         .encoder = .json_out,
         .note = "deterministic Standard.site projection plan; publication and document payloads delegate to json_out",
