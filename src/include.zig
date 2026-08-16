@@ -252,6 +252,27 @@ pub fn readSourceAlloc(io: Io, dir: Io.Dir, path: []const u8, allocator: std.mem
     };
 }
 
+/// Optional include reader so expansion can use an in-memory source provider.
+pub const IncludeReader = struct {
+    ptr: *anyopaque,
+    readFn: *const fn (ptr: *anyopaque, path: []const u8, allocator: std.mem.Allocator) IncludeError![]u8,
+
+    pub fn read(self: IncludeReader, path: []const u8, allocator: std.mem.Allocator) IncludeError![]u8 {
+        return self.readFn(self.ptr, path, allocator);
+    }
+};
+
+fn readIncludeBytes(
+    io: Io,
+    content_dir: Io.Dir,
+    reader: ?IncludeReader,
+    path: []const u8,
+    allocator: std.mem.Allocator,
+) IncludeError![]u8 {
+    if (reader) |r| return r.read(path, allocator);
+    return readSourceAlloc(io, content_dir, path, allocator);
+}
+
 fn setFail(fail_out: ?*FailInfo, body: []const u8, offset: usize, detail_s: []const u8, locus_s: []const u8) void {
     if (fail_out) |f| f.setAt(body, offset, detail_s, locus_s);
 }
@@ -437,8 +458,21 @@ pub fn expandIncludes(
     owner_path: []const u8,
     fail_out: ?*FailInfo,
 ) IncludeError![]u8 {
+    return expandIncludesWithReader(io, content_dir, null, gpa, arena, body, owner_path, fail_out);
+}
+
+pub fn expandIncludesWithReader(
+    io: Io,
+    content_dir: Io.Dir,
+    reader: ?IncludeReader,
+    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    body: []const u8,
+    owner_path: []const u8,
+    fail_out: ?*FailInfo,
+) IncludeError![]u8 {
     var budget: ExpansionBudget = .{};
-    return expandIncludesWithBudget(io, content_dir, gpa, arena, body, owner_path, fail_out, &budget);
+    return expandIncludesWithBudget(io, content_dir, reader, gpa, arena, body, owner_path, fail_out, &budget);
 }
 
 const ExpansionBudget = struct {
@@ -461,6 +495,7 @@ const ExpansionBudget = struct {
 fn expandIncludesWithBudget(
     io: Io,
     content_dir: Io.Dir,
+    reader: ?IncludeReader,
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
     body: []const u8,
@@ -474,12 +509,13 @@ fn expandIncludesWithBudget(
     defer cache.deinit(gpa);
     try stack.append(gpa, owner_path);
     // Root expansion: locus empty so diagnostics use owner_path from the caller.
-    return expandRecursive(io, content_dir, gpa, arena, body, "", &stack, &cache, budget, 0, fail_out);
+    return expandRecursive(io, content_dir, reader, gpa, arena, body, "", &stack, &cache, budget, 0, fail_out);
 }
 
 fn expandRecursive(
     io: Io,
     content_dir: Io.Dir,
+    reader: ?IncludeReader,
     gpa: std.mem.Allocator,
     arena: std.mem.Allocator,
     body: []const u8,
@@ -580,7 +616,7 @@ fn expandRecursive(
             try out.appendSlice(arena, body[copy_from..start]);
 
             const expanded = cache.get(path) orelse expanded: {
-                const file_bytes = readSourceAlloc(io, content_dir, path, gpa) catch |err| {
+                const file_bytes = readIncludeBytes(io, content_dir, reader, path, gpa) catch |err| {
                     setFail(fail_out, body, start, path, locus_path);
                     return err;
                 };
@@ -589,7 +625,7 @@ fn expandRecursive(
 
                 try stack.append(gpa, path);
                 var nested_fail: FailInfo = .{};
-                const value = expandRecursive(io, content_dir, gpa, arena, nested_body, path, stack, cache, budget, depth + 1, &nested_fail) catch |err| {
+                const value = expandRecursive(io, content_dir, reader, gpa, arena, nested_body, path, stack, cache, budget, depth + 1, &nested_fail) catch |err| {
                     _ = stack.pop();
                     // nested_fail owns its strings; copy before nested buffers go out of scope.
                     if (fail_out) |f| f.* = nested_fail;
@@ -949,6 +985,7 @@ test "expandIncludes bounds exponential fan-out" {
         expandIncludesWithBudget(
             io,
             content_dir,
+            null,
             gpa,
             arena.allocator(),
             "{{include includes/level-12.md}}",

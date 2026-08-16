@@ -381,6 +381,11 @@ pub fn loadLayout(io: Io, dir: Io.Dir, path: []const u8, arena: std.mem.Allocato
 
     var reader = file.reader(io, &.{});
     const raw = try reader.interface.allocRemaining(arena, .unlimited);
+    return loadLayoutFromBytes(raw);
+}
+
+/// Split already-loaded layout bytes. Used by the in-memory embed path.
+pub fn loadLayoutFromBytes(raw: []const u8) !Layout {
     return Layout.split(raw);
 }
 
@@ -506,6 +511,29 @@ pub fn writePageWithSlotsOpts(
     }
 
     try atomic_file.replace(io);
+}
+
+/// Render the same slot splice into an owned buffer (embed / memory sink).
+pub fn renderPageAlloc(
+    gpa: std.mem.Allocator,
+    layout: Layout,
+    slots: SlotValues,
+) ![]u8 {
+    var aw = std.Io.Writer.Allocating.init(gpa);
+    errdefer aw.deinit();
+    var asset_i: usize = 0;
+    for (layout.segmentsSlice()) |seg| {
+        switch (seg) {
+            .static => |s| try aw.writer.writeAll(s),
+            .slot => |slot| try aw.writer.writeAll(slots.forSlot(slot)),
+            .asset_url => {
+                if (asset_i >= slots.asset_hrefs.len) return error.InvalidAssetUrl;
+                try aw.writer.writeAll(slots.asset_hrefs[asset_i]);
+                asset_i += 1;
+            },
+        }
+    }
+    return try aw.toOwnedSlice();
 }
 
 // ---------------------------------------------------------------------------
