@@ -10,9 +10,15 @@
 //   - a .combobox-wrap surface must have a keydown handler on its filter
 //     input and that handler must reference every hinted key.
 //   - the .recovery-banner may only hint Tab/Enter (native button focus
-//     and activation) and must contain buttons.
+//     and activation) and must contain buttons, with Restore routing a
+//     dirty buffer through the resolution dialog.
 //   - the footer's hints must be covered by the svelte:window keydown
 //     handler.
+//
+// Beyond the hints, the state machines behind them are checked: the
+// combobox input must reopen the list on focus/input after Esc closes it,
+// and the command palette's aria-expanded must track paletteItems while
+// every option's Enter handler guards on the enabled state.
 //
 // This keeps the e2e conformance sweep from having to grow by hand: a new
 // hint without a matching handler fails CI here first.
@@ -158,6 +164,7 @@ function parseTag(raw) {
     onkeydown: /onkeydown=\{\s*([A-Za-z_$][\w$]*)\s*\}/.exec(raw)?.[1] ?? null,
     bindThis: /bind:this=\{\s*([A-Za-z_$][\w$]*)\s*\}/.exec(raw)?.[1] ?? null,
     type: /type="([^"]*)"/.exec(raw)?.[1] ?? null,
+    role: /role="([^"]*)"/.exec(raw)?.[1] ?? null,
     classes: [...raw.matchAll(/class="([^"]*)"/g)].flatMap(m => m[1].split(/\s+/)),
   };
   return { name, attrs, closing, selfClosing, void: VOID_TAGS.has(name) };
@@ -201,6 +208,7 @@ function analyze(template, script, bodies) {
   const problems = [];
   const surfaces = [];
   const stack = [];
+  const dialogs = [];
   const comboboxes = new Set();
   const banners = new Set();
   const globalHandler = /<svelte:window\b[^>]*onkeydown=\{\s*([A-Za-z_$][\w$]*)\s*\}/.exec(template)?.[1] ?? null;
@@ -262,6 +270,27 @@ function analyze(template, script, bodies) {
     if (!elem.selfClosing && !elem.void) {
       elem._line = lineOf(template, tag.start);
       stack.push(elem);
+      if (elem.name === 'dialog') dialogs.push(elem);
+    }
+    // The palette dialog is the one containing a role=combobox input; its
+    // options are the role=option list items inside it.
+    if (elem.name === 'input' && elem.attrs.role === 'combobox') {
+      for (let s = stack.length - 1; s >= 0; s--) {
+        const e = stack[s];
+        if (e.name === 'dialog' && !e._paletteInput) {
+          e._paletteInput = tag.raw;
+          break;
+        }
+      }
+    }
+    if (elem.attrs.role === 'option') {
+      for (let s = stack.length - 1; s >= 0; s--) {
+        const e = stack[s];
+        if (e.name === 'dialog') {
+          (e._options ??= []).push({ raw: tag.raw, line: lineOf(template, tag.start) });
+          break;
+        }
+      }
     }
     // Surface wiring discovered from descendants.
     if (elem.attrs.onkeydown && elem.name !== 'svelte:window') {
@@ -300,6 +329,42 @@ function analyze(template, script, bodies) {
       const value = attrValue(raw, attr);
       if (value === null || !value.includes('= true')) {
         problems.push(`completion combobox at line ${box._line ?? '?'} is missing ${attr} wiring that reopens the suggestion list after Esc closes it`);
+      }
+    }
+  }
+
+  // The command palette's state machine: the filter's aria-expanded must
+  // track the current option list (otherwise the combobox role lies about
+  // whether the list is open), and Enter on any option must be inert when the
+  // option is disabled.
+  for (const dialog of dialogs) {
+    if (!dialog._paletteInput) continue; // not the palette
+    const expanded = attrValue(dialog._paletteInput, 'aria-expanded');
+    if (expanded === null || !expanded.includes('paletteItems')) {
+      problems.push(`command palette filter (line ${dialog._line ?? '?'}) aria-expanded does not track paletteItems${expanded === null ? ' (attribute missing)' : ` (got: ${expanded})`}`);
+    }
+    const handler = dialog.attrs.onkeydown;
+    if (handler) {
+      const body = bodies.get(handler) ?? '';
+      const missing = ['paletteItemEnabled', 'executePaletteItem'].filter(token => !body.includes(token));
+      if (missing.length > 0) {
+        problems.push(`command palette ${handler} does not guard Enter on the enabled state (missing ${missing.join(', ')})`);
+      }
+    }
+    const options = dialog._options ?? [];
+    if (options.length === 0) {
+      problems.push(`command palette at line ${dialog._line ?? '?'} has no role=option elements to lint for the Enter guard`);
+      continue;
+    }
+    for (const option of options) {
+      const value = attrValue(option.raw, 'onkeydown');
+      if (value === null) {
+        problems.push(`command palette option at line ${option.line} has no onkeydown Enter handler`);
+        continue;
+      }
+      const missing = ['paletteItemEnabled', 'executePaletteItem'].filter(token => !value.includes(token));
+      if (missing.length > 0) {
+        problems.push(`command palette option at line ${option.line} Enter handler does not guard execution on the enabled state (missing ${missing.join(', ')})`);
       }
     }
   }
@@ -564,6 +629,78 @@ const FIXTURES = [
     source: `<script lang="ts"></script>
 <dialog bind:this={d} onkeydown={missingHandler}>
   <button type="button">Save<kbd>Esc</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'palette with tracking aria-expanded and guarded options passes',
+    expect: 0,
+    source: `<script lang="ts">
+  function paletteKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const item = paletteItems[paletteSelection];
+      if (item && paletteItemEnabled(item)) executePaletteItem(item);
+    }
+  }
+</script>
+<dialog bind:this={paletteDialog} onkeydown={paletteKeydown}>
+  <input role="combobox" aria-expanded={paletteItems.length > 0} aria-controls="palette-options" onkeydown={paletteKeydown} />
+  <ul id="palette-options" role="listbox">
+    <li role="option" onkeydown={(event) => { if (event.key === 'Enter') { event.preventDefault(); if (paletteItemEnabled(item)) executePaletteItem(item); } }}>Open file</li>
+  </ul>
+</dialog>`,
+  },
+  {
+    name: 'palette aria-expanded not tracking paletteItems fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function paletteKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const item = paletteItems[paletteSelection];
+      if (item && paletteItemEnabled(item)) executePaletteItem(item);
+    }
+  }
+</script>
+<dialog bind:this={paletteDialog} onkeydown={paletteKeydown}>
+  <input role="combobox" aria-expanded="true" aria-controls="palette-options" onkeydown={paletteKeydown} />
+  <ul id="palette-options" role="listbox">
+    <li role="option" onkeydown={(event) => { if (event.key === 'Enter') { event.preventDefault(); if (paletteItemEnabled(item)) executePaletteItem(item); } }}>Open file</li>
+  </ul>
+</dialog>`,
+  },
+  {
+    name: 'palette option Enter without the enabled guard fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function paletteKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const item = paletteItems[paletteSelection];
+      if (item && paletteItemEnabled(item)) executePaletteItem(item);
+    }
+  }
+</script>
+<dialog bind:this={paletteDialog} onkeydown={paletteKeydown}>
+  <input role="combobox" aria-expanded={paletteItems.length > 0} aria-controls="palette-options" onkeydown={paletteKeydown} />
+  <ul id="palette-options" role="listbox">
+    <li role="option" onkeydown={(event) => { if (event.key === 'Enter') { event.preventDefault(); executePaletteItem(item); } }}>Open file</li>
+  </ul>
+</dialog>`,
+  },
+  {
+    name: 'palette handler Enter without the enabled guard fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function paletteKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter') { event.preventDefault(); executePaletteItem(paletteItems[paletteSelection]); }
+  }
+</script>
+<dialog bind:this={paletteDialog} onkeydown={paletteKeydown}>
+  <input role="combobox" aria-expanded={paletteItems.length > 0} aria-controls="palette-options" onkeydown={paletteKeydown} />
+  <ul id="palette-options" role="listbox">
+    <li role="option" onkeydown={(event) => { if (event.key === 'Enter') { event.preventDefault(); if (paletteItemEnabled(item)) executePaletteItem(item); } }}>Open file</li>
+  </ul>
 </dialog>`,
   },
 ];
