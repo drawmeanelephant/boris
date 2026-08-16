@@ -25,7 +25,8 @@ Markdown + frontmatter
           ├── RAG corpus         (--rag)
           ├── AI Context Bundle  (--context)
           ├── llms.txt map       (--llms)
-          └── RSS 2.0 feed       (--rss)
+          ├── RSS 2.0 feed       (--rss)
+          └── Nostr NIP-23 events (nostr plan → sign → publish)
 ```
 
 The content model is deliberately understandable: **Trunks** are root pages,
@@ -47,6 +48,11 @@ instead of quietly producing a broken site.
 - Deterministic staged XML sitemap for one public HTML target.
 - First-class GitHub Pages publication identity and an official verified Actions workflow.
 - Standard.site / AT Protocol publication: offline plan + explicit login/publish/smoke. The first-tester path against bsky.social is an app password, not browser OAuth.
+- Nostr NIP-23 long-form publication: an offline `nostr plan → sign` pipeline
+  signs your pages with BIP-340 (libsecp256k1), then `nostr publish` delivers
+  the exact signed events to your relays over a bounded RFC-6455 WebSocket
+  client — with per-relay evidence and an honest `complete`/`partial`/`failed`/
+  `incomplete` verdict, never a collapsed "Published" boolean.
 - Standalone migration labs for Astro/Starlight, WordPress, Instagram, Obsidian,
   Notion, and related source shapes.
 
@@ -62,6 +68,39 @@ second content model.
 Boris is not trying to replace every SSG. It is for people who want a small,
 inspectable compiler, graph-aware documentation, and a useful hand-off to AI
 tools without requiring a Node runtime to publish the site.
+
+## Nostr NIP-23 publication
+
+Pages allowlisted in the profile can be published to the Nostr network as
+NIP-23 long-form-content events. The pipeline keeps the secret and the
+network strictly apart:
+
+```text
+boris nostr plan --profile PROFILE.json        # offline: plan JSON on stdout
+boris nostr sign --plan PLAN.json --key-stdin  # offline: key once via stdin, bundle out
+boris nostr publish --plan PLAN.json --bundle BUNDLE.json  # online: exact signed events to relays
+```
+
+- **`nostr plan`** is the only profile-selection step; it never reads a key,
+  signs, or contacts a relay.
+- **`nostr sign`** is the only command that reads a secret — the key (64 hex
+  digits or a NIP-19 `nsec`) is read once from stdin and never accepted from
+  argv, a profile, an environment variable, or a log. It signs the exact
+  NIP-01 event IDs with BIP-340 Schnorr signatures (bitcoin-core/secp256k1,
+  pinned and verified) and writes a signed-event bundle.
+- **`nostr publish`** never sees a key. It verifies the bundle against the
+  plan offline, then sends the exact signed events to the plan's relays over
+  a bounded in-repo RFC-6455 client (`wss://`; `ws://` only for loopback
+  test relays). Every relay interaction is bounded and recorded: the report
+  classifies the run `complete` / `partial` / `failed` / `incomplete` with
+  per-relay evidence, and a relay that demands NIP-42 authentication is
+  reported honestly as unsupported rather than silently skipped.
+
+A bare `boris build` never needs a key, a relay, or the network, and a failed
+Nostr operation never invalidates a committed website. The normative
+[`nostr-publication` contract](docs/contracts/nostr-publication.md) specifies
+the plan, signed-bundle, and report artifacts; the CLI surface is in
+[`cli.md`](docs/contracts/cli.md).
 
 ## Quick start
 

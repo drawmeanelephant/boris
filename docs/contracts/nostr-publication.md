@@ -1,17 +1,20 @@
-# Nostr publication plan (NIP-23, offline slice)
+# Nostr publication (NIP-23, offline plan + signing slices)
 
-**Status:** normative offline-plan contract. `boris nostr plan --profile PATH`
-reads one explicitly selected local publication profile, selects the
-allowlisted pages that are eligible as NIP-23 long-form articles, derives the
-publication-safe Markdown and tag set each event would carry, and writes one
-canonical JSON declaration to stdout. It holds no key, produces no signature,
-opens no socket, and publishes nothing.
+**Status:** normative offline contract for two commands. `boris nostr plan
+--profile PATH` reads one explicitly selected local publication profile,
+selects the allowlisted pages that are eligible as NIP-23 long-form articles,
+derives the publication-safe Markdown and tag set each event would carry, and
+writes one canonical JSON declaration to stdout. `boris nostr sign` reads that
+plan artifact and a secret key from stdin, computes the exact NIP-01 event id
+and BIP-340 signature for every article, and writes a signed-event bundle. The
+plan slice holds no key and produces no signature; the sign slice opens no
+socket and publishes nothing.
 
 The plan is a report about a website Boris already knows how to build. It
-describes what a later signing slice would sign and what a later publish slice
-would send, in enough detail that a maintainer can review both before either
-exists. Every fact in the plan is derived from committed content and the
-selected profile, so the same inputs always produce the same bytes.
+describes what the signing slice will sign and what a later publish slice will
+send, in enough detail that a maintainer can review both before either exists.
+Every fact in the plan is derived from committed content and the selected
+profile, so the same inputs always produce the same bytes.
 
 ## Scope
 
@@ -78,20 +81,37 @@ written to stdout and nowhere else: this slice has no output-path flag, so it
 cannot overwrite a prior artifact, and it creates no directory, cache, or
 report.
 
-`plan` is the only `nostr` subcommand in this slice. Any other subcommand
-spelling — including any word that suggests signing, sending, or deleting — is
-a usage error, not a stub, because no such capability exists to route to.
+The end-to-end pipeline is three commands, one per slice. The secret and the
+network are never mixed: signing is the only step that reads a key (once,
+from stdin), and publishing is the only step that contacts a relay. A bare
+`boris build` never needs a key, a relay, or the network.
 
-| Code | Meaning |
-|-----:|---------|
-| `0` | A complete plan was written to stdout |
-| `1` | Content failure: an allowlisted article is ineligible, or its publication-safe Markdown is not portable |
-| `2` | Usage or configuration failure: unknown subcommand or flag, missing `--profile`, invalid profile, invalid `nostr` section, or an enabled section with no publication location |
-| `3` | I/O or system failure, including a stdout write failure |
+```text
+boris nostr plan --profile PATH                 # offline → plan JSON on stdout
+boris nostr sign --plan PLAN.json --key-stdin   # offline → signed bundle
+boris nostr publish --plan PLAN.json --bundle BUNDLE.json   # online → report
+```
 
-Exit `1` and exit `2` are kept distinct deliberately. Exit `1` means an author
-must change a page; exit `2` means an operator must change the profile. Nothing
-is written to stdout on either.
+`nostr sign` re-owns `--out` as the bundle output path and accepts `--prior
+PATH` (prior signed bundle for the same address, enabling unchanged-evidence
+reuse and the strict `created_at` update ordering below) and `--created-at N`
+(explicit unix seconds; test/recovery only). `nostr publish` requires both
+`--plan` and `--bundle`, verifies the bundle against the plan before sending
+anything, and re-owns `--out` as the report output path. Both commands write
+their artifact to `--out` or stdout, and both refuse every other spelling as
+a usage error rather than a stub.
+
+Exit codes are shared across the three commands: `1` means an author must
+change a page (ineligibility, non-portable Markdown, `ENOSTRSIGN` refusal,
+`ENOSTRTIME` ordering violation); `2` means an operator must change the
+profile or invocation (missing `--profile`/`--plan`/`--key-stdin`/`--bundle`,
+invalid profile, invalid `nostr` section, invalid expected-author `pubkey`,
+an enabled section with no publication location, an invalid `--created-at`,
+or a plan/bundle over the size bound); `3` is I/O or system failure. For
+`nostr publish`, a report is written and exit `0` is returned on any
+completed run — the `complete`/`partial`/`failed`/`incomplete` verdict is
+carried by the report, never collapsed into an exit boolean. Nothing is
+written to stdout on exits `1` and `2`.
 
 ## Profile configuration
 
@@ -325,9 +345,223 @@ directory, at any time of day.
 Determinism is what makes the plan reviewable. A maintainer diffs two plans and
 sees only what actually changed about the articles.
 
+## Signing (`boris nostr sign`)
+
+```text
+boris nostr sign --plan PLAN --key-stdin [--out PATH] [--prior PATH] [--created-at N]
+```
+
+The signer consumes the exact plan artifact `boris nostr plan` emitted and
+produces one signed-event bundle. It is offline: no relay, no socket, no
+network. A failed signing run never writes a bundle — the artifact is
+all-or-nothing, and an error diagnostic means no bundle at all.
+
+### Secret key boundary
+
+- The key is read **once from stdin** (`--key-stdin`, required), as 64
+  lowercase hex digits or a NIP-19 `nsec`. It is bounded (128 bytes), trimmed
+  of surrounding whitespace, and zeroed best-effort after use.
+- The key never enters argv, the profile, the environment, the plan, the
+  bundle, diagnostics, logs, or git history. There is no key file and no key
+  prompt.
+- The signer public key must match the plan's `author.expected_pubkey`. A
+  mismatch is a refusal (`ENOSTRSIGN`), never a silent re-identity.
+- The BIP-340 dependency is bitcoin-core/secp256k1, pinned at `v0.8.0`
+  (PGP-signed tag `18f07c42…`, commit `6e2c8bc4…`, archive sha256
+  `eb52b0e9…d17c8bb`) in `build.zig.zon`; see the dependency record in
+  `src/nostr_keys.zig`. Signing uses `secp256k1_schnorrsig_sign32` — the
+  32-byte NIP-01 event id is signed directly, with the BIP-340 nonce function
+  (`BIP0340/nonce`); RFC6979 is ECDSA's nonce derivation and is not on this
+  path.
+- **Auxiliary-randomness policy**: production signing passes fresh 32-byte
+  CSPRNG bytes as BIP-340 auxiliary randomness and fails closed if they cannot
+  be obtained. The context is additionally randomized for side-channel
+  hardening; neither changes signature output. Conformance tests inject fixed
+  aux bytes so expected signatures are reproducible.
+
+### NIP-01 event id and signature
+
+For every article, the event id is the SHA-256 of the exact canonical NIP-01
+preimage, with no whitespace:
+
+```text
+[0, "<pubkey hex>", <created_at>, 30023, [<tags>], "<content>"]
+```
+
+Content and tag values are escaped exactly as `JSON.stringify` escapes them
+(`\"`, `\\`, `\b`, `\f`, `\n`, `\r`, `\t`, `\u00xx` for other control bytes;
+non-ASCII stays raw UTF-8). The signature is the BIP-340 Schnorr signature of
+that 32-byte id. The signature is verified against the event id before any
+bundle bytes are written; the bundle records `signature_verified: true` only
+for events that passed.
+
+### `created_at` and update ordering
+
+- `created_at` is a **signing-time input**: current Unix seconds by default,
+  or an explicit `--created-at N` test/recovery override. It is never a
+  build-phase value.
+- `created_at` must be at least the article's authored `published_at`
+  (`ENOSTRTIME` otherwise).
+- With `--prior PATH` (a prior signed bundle), an **unchanged** intention
+  reuses the exact prior signed event — same id, signature, and `created_at` —
+  so republishing identical content never churns signatures or timestamps.
+- A **changed** intention requires the new `created_at` to be **strictly
+  greater than** the prior event's `created_at`. Kind `30023` is addressable
+  and relays break same-`created_at` ties by event-id ordering, so a same- or
+  older-`created_at` update would silently lose to the prior event. When the
+  wall clock cannot satisfy the rule (same-second rapid update, or a future
+  prior timestamp) the run fails deterministically with `ENOSTRTIME` unless an
+  explicit `--created-at` override satisfies it. The signer never emits a
+  weaker event that some relays would discard.
+- A prior bundle from a different identity is refused (`ENOSTRPLAN`): reuse
+  is only ever within one author.
+
+### The signed-event bundle
+
+```json
+{
+  "format": "boris-nostr-signed-bundle",
+  "schema_version": 1,
+  "protocol": { "nips_revision": "…", "research_date": "…", "kind": 30023 },
+  "plan": { "format": "…", "schema_version": 1, "digest": "<sha256 of the exact plan bytes>" },
+  "signer": { "pubkey": "…", "created_at_policy": "signing-time" },
+  "articles": [
+    {
+      "entity_id": "…", "d": "…",
+      "intention_digest": "…", "disposition": "signed|reused",
+      "created_at": 1705762000, "published_at_unix": 1705761000,
+      "event_id": "…", "signature": "…", "signature_verified": true,
+      "event": { "id": "…", "pubkey": "…", "created_at": 1705762000,
+                  "kind": 30023, "tags": [[…]], "content": "…", "sig": "…" }
+    }
+  ]
+}
+```
+
+The bundle is byte-deterministic for identical plan bytes, key, aux, and
+`created_at`; it is bound to the exact plan bytes by the `plan.digest`. The
+signed `event` object is the NIP-01 wire event a publish slice would send
+verbatim.
+
+## Publishing (`boris nostr publish`)
+
+The publish slice sends the exact signed `event` objects from a bundle to the
+plan's `delivery.relays` and writes a canonical report. It never re-signs and
+never touches a secret: the bundle was signed offline by `nostr sign`, and
+publishing only re-transmits it. Nothing is sent before the bundle is
+cross-verified against the plan — the bundle's `plan.digest` must match the
+sha-256 of the exact plan bytes, `bundle.signer.pubkey` must equal the plan's
+`author.expected_pubkey`, every article's event id must match the NIP-01
+preimage of its event, and every signature must verify.
+
+### Transport contract
+
+- Relay URLs are `ws://` or `wss://` with an explicit host and optional
+  port/path. `ws://` is refused for any non-loopback host (`localhost`,
+  `127.0.0.1`, `[::1]`): plaintext WebSocket is a loopback/test convenience
+  only.
+- `wss://` uses `std.crypto.tls` with explicit hostname verification and a
+  real CA bundle (system roots).
+- The opening handshake is validated exactly: status `101`, `Upgrade:
+  websocket`, `Connection: Upgrade`, and `Sec-WebSocket-Accept` computed over
+  the client key + `258EAFA5-E914-47DA-95CA-C5AB0DC85B11`.
+- Client frames are always masked (RFC 6455 §5.1); a **masked server frame is
+  a protocol error**. Control-frame payloads over 125 bytes, fragmented
+  control frames, unknown opcodes, and payloads over the declared ceiling are
+  protocol errors. Outgoing text messages larger than
+  `max_fragment_bytes` (64 KiB) are themselves fragmented on the wire — an
+  initial text frame with FIN clear, then continuation frames — as every
+  conforming server must accept. Message reassembly is bounded by a size
+  ceiling, and every read and write is individually bounded by a deadline
+  (the plan's `delivery.timeout_ms`), so no relay interaction can hold the
+  run open.
+- The client answers `Ping` with `Pong` and honors `Close`; a relay that
+  closes before an `OK` is classified `closed`.
+
+### Per-relay evidence and classification
+
+Each relay produces one outcome per event and one relay-level status:
+
+| Event result | Meaning |
+|---|---|
+| `accepted` | An `OK` with `true` matched the sent event id |
+| `rejected` | An `OK` with `false` (reason kept as the message) |
+| `auth-required` | An `OK` whose reason starts with `auth-required:` — NIP-42 is out of v1 (#493), reported honestly as unsupported, no retry |
+| `wrong-id` | An `OK` named a different event id — fail closed |
+| `timeout` | No `OK` within the deadline (retried, identical bytes, per `delivery.retries`) |
+| `closed` | The relay closed the connection before an `OK` |
+| `error` | Connect/handshake failure or a relay protocol error |
+| `not-attempted` | A later event skipped after a definitive failure for that relay |
+
+The run-wide verdict is `complete` (every relay accepted every event),
+`partial` (at least one relay accepted at least one event), `failed` (no
+relay accepted anything), or `incomplete` (at least one relay timed out and
+nothing was accepted). The report lists each relay with its URL, outcome,
+attempt count, and per-event evidence; the classification is the last field.
+A `failed` or `auth-required` relay is not attempted again for later events.
+
+### The publish report
+
+```json
+{
+  "format": "boris-nostr-publish-report",
+  "schema_version": 1,
+  "plan": { "format": "…", "schema_version": 1, "digest": "<sha256 of the plan bytes>" },
+  "bundle": { "format": "…", "schema_version": 1, "digest": "<bundle digest, equals plan digest>" },
+  "signer": { "pubkey": "…" },
+  "classification": "complete|partial|failed|incomplete",
+  "relays": [
+    {
+      "url": "wss://relay.example.com/",
+      "outcome": "accepted",
+      "attempts": 1,
+      "events": [
+        { "entity_id": "…", "event_id": "…", "result": "accepted", "message": "" }
+      ]
+    }
+  ]
+}
+```
+
+Every relay interaction is bounded and produces a verdict, so the run always
+writes a report. A static golden example lives at
+[`docs/contracts/fixtures/nostr-publication/expected/publish-report.json`](fixtures/nostr-publication/expected/publish-report.json).
+
+### Conformance matrix
+
+A hostile mock-relay matrix (`nostr_publish_matrix_test.zig`) drives the real
+client over loopback: honest accept, fragmented `OK` reassembly, `Ping` before
+`OK` (answered with `Pong`), `NOTICE` then `OK`, close-before-`OK`, a masked
+server frame, a silent relay, `auth-required`, an `OK` for the wrong event id,
+non-JSON garbage, an oversized frame, a bad handshake, a retry that re-sends
+identical event bytes, and a mixed two-relay run classified `partial`.
+
+Two additions exercise the parser and the TLS path directly. A fuzz-stream
+scenario feeds random frames (random opcodes, lengths, mask bits, fin flags)
+to the client's frame reader and asserts it fails closed without hanging or
+crashing; the same seeded round-trip drives `encodeFrame`/`parseFrame`
+consistency. And a real `wss://` end-to-end test runs a TLS mock relay
+(`scripts/nostr-mock-relay-tls.py`, Python `ssl`) pinned by committed
+self-signed test credentials
+([`fixtures/nostr-publication/tls/`](fixtures/nostr-publication/tls/)): the
+positive case asserts the full publish round-trip completes over TLS, and a
+negative case pins the same CA but connects to `127.0.0.1` to assert
+hostname verification fails closed.
+
+The write side is fuzzed against a recording mock relay: random payloads
+and fragmentation patterns (fragment sizes 1 through 65536, payload lengths
+across every length-encoding boundary) travel through `sendText` over a real
+loopback socket, and the relay's record — mask bit, FIN sequence, length
+codes, and the unmasked payload — is asserted byte-exact against what was
+sent. A separate test covers the write deadline: a relay that completes the
+handshake and then stops reading forces the client's flush to block, and the
+per-write deadline must interrupt it mid-flush (`WriteTimeout`) rather than
+hang. Both mock relays (in-repo and Python TLS) reassemble fragmented client
+messages, as a conforming server must.
+
 ## Diagnostics
 
-Three codes are emitted by this slice, all at `error` severity; see the
+Four codes are emitted by the offline slices, all at `error` severity; see the
 [diagnostics contract](diagnostics.md) for the shared object, text form, and
 ordering.
 
@@ -335,22 +569,21 @@ ordering.
 |------|-------|-----:|
 | `ENOSTRELIGIBILITY` | Eligibility selection: an allowlisted page cannot be published as NIP-23, its entity id is absent from the page graph, or an authored tag is not a valid `t` topic | `1` |
 | `ENOSTRMARKDOWN` | Publication-safe Markdown validation: the view carries a fail-closed defect, or a doc-link, wiki-link, include, or content-local image does not resolve | `1` |
-| `ENOSTRTIME` | `published_at` derivation: the authored UTC `published_at` does not convert to a Unix second count | `1` |
-| `ENOSTRPLAN` | Plan assembly against a corpus that changed under the run: a selected source no longer parses after the graph validated | `1` |
+| `ENOSTRTIME` | Plan: the authored UTC `published_at` does not convert to a Unix second count. Sign: `created_at` precedes `published_at`, or a changed intention needs a strictly newer `created_at` than the prior event (NIP-01 tie-break) | `1` |
+| `ENOSTRPLAN` | Plan assembly against a corpus that changed under the run, or a signer input that is not a valid plan/prior artifact (wrong format, wrong schema, `d` mismatch, intention-digest mismatch, prior from a different identity) | `1` |
+| `ENOSTRSIGN` | Signing refusal: the secret key is malformed, the signer public key does not match the plan's expected author, the secp256k1 context or aux randomness is unavailable, or a signature fails to self-verify before the bundle is written | `1` |
 
-`ENOSTRRELAY` is registered but **not emitted here**. Relay configuration is
-refused earlier and harder, by the strict profile parser, as an invalid `nostr`
-section (exit `2`) — before any content is read. The code is reserved for the
-publish slice, where a relay is a live endpoint that can reject, time out, or
-demand authentication, and where a per-relay outcome needs a per-relay
-diagnostic.
+`ENOSTRRELAY` is emitted by the **publish slice only** — the offline slices
+never touch a relay. Relay configuration is still refused earlier and harder,
+by the strict profile parser, as an invalid `nostr` section (exit `2`) —
+before any content is read. During publish, a relay is a live endpoint that
+can reject, time out, close, or demand authentication; each relay attempt is
+bounded, each failure emits an `ENOSTRRELAY` diagnostic, and the per-relay
+evidence in the report keeps the run's verdict honest.
 
 Configuration failures do not use a diagnostic code at all. A missing
 `--profile`, an invalid profile, a malformed `nostr` section, a disabled
-section, an invalid expected-author `pubkey`, and an enabled section with no
-publication location are all usage errors reported on stderr with exit `2`,
-because none of them is a statement about content.
-
-`ENOSTRSIGN` is deliberately **not** part of this slice. It belongs to the
-later signing slice, and reserving a code for a capability that does not exist
-would imply the capability is coming with a shape already decided.
+section, an invalid expected-author `pubkey`, an enabled section with no
+publication location, a missing `--plan`, or a missing `--key-stdin` are all
+usage errors reported on stderr with exit `2`, because none of them is a
+statement about content.

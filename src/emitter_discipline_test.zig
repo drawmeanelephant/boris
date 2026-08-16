@@ -227,6 +227,7 @@ const modules = [_]Module{
     .{ .name = "link_audit.zig", .class = .other },
     .{ .name = "main.zig", .class = .other },
     .{ .name = "nostr.zig", .class = .other },
+    .{ .name = "nostr_keys.zig", .class = .other },
     .{
         .name = "nostr_plan.zig",
         .class = .{ .emitter = .{
@@ -235,6 +236,23 @@ const modules = [_]Module{
         } },
         .source = @embedFile("nostr_plan.zig"),
     },
+    .{
+        .name = "nostr_sign.zig",
+        .class = .{ .emitter = .{
+            .encoder = .json_out,
+            .note = "signed-event bundle; every runtime value goes through json_out",
+        } },
+        .source = @embedFile("nostr_sign.zig"),
+    },
+    .{
+        .name = "nostr_publish.zig",
+        .class = .{ .emitter = .{
+            .encoder = .json_out,
+            .note = "publish report; every runtime value goes through json_out",
+        } },
+        .source = @embedFile("nostr_publish.zig"),
+    },
+    .{ .name = "nostr_publish_matrix_test.zig", .class = .other },
     .{ .name = "page.zig", .class = .other },
     .{ .name = "parser.zig", .class = .other },
     .{ .name = "pathutil.zig", .class = .other },
@@ -296,6 +314,7 @@ const modules = [_]Module{
     .{ .name = "unicode_policy.zig", .class = .other },
     .{ .name = "watch.zig", .class = .other },
     .{ .name = "wikilink.zig", .class = .other },
+    .{ .name = "ws_client.zig", .class = .other },
 };
 
 /// Formatting calls that write caller-supplied bytes with no encoder between.

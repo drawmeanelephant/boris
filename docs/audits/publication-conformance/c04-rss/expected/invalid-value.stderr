@@ -19,6 +19,7 @@ Modes:
   standard-site logout  Remove a persisted session (secure erase; does not revoke)
   standard-site smoke  Live interop smoke against a real PDS (manual, opt-in; never in CI)
   nostr plan          Emit the offline Nostr NIP-23 publication plan (no signing, no relay)
+  nostr sign          Sign a plan artifact into a signed-event bundle (offline; key via stdin)
   init [DIR]          Write a starter site (content, theme, profile) into DIR (default: .)
   (no command)        Same as build
   standard-site publish options:
@@ -105,6 +106,11 @@ Options:
   --report PATH        Write an analysis report instead of stdout
   --fail-on-unreferenced Make check fail when it reports unreferenced pages
   --profile PATH       Selected publication profile for `plan`
+  --plan PATH          Plan artifact to sign (`nostr sign`)
+  --key-stdin          Read the hex/nsec secret key once from stdin (`nostr sign`)
+  --out PATH           Signed-event bundle output path (`nostr sign`; default: stdout)
+  --prior PATH         Prior signed bundle to reuse unchanged evidence from (`nostr sign`)
+  --created-at N       Explicit signing-time override, unix seconds (`nostr sign`; test/recovery)
   -h, --help          Show this help and exit 0
   -V, --version       Print the compiler version (`boris/<ver>`) and exit 0
 
@@ -154,6 +160,9 @@ Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JS
       `boris standard-site` (no subcommand) prints the Standard.site family list.
       `boris nostr plan --profile PATH` emits the offline NIP-23 publication plan on stdout;
       it never signs, never contacts a relay, and never reads a key.
+      `boris nostr sign --plan PLAN --key-stdin` reads the secret key once from stdin and
+      writes the signed-event bundle to stdout (or --out PATH); it never contacts a relay.
+      Secrets are never accepted from argv, profile, or environment.
       --html / --html-dir / bare CLI map to a single target named "default".
       Equivalent --target / --target-layout / --layout-rule permutations yield the
       same config (targets sorted by name; rules canonicalized). No layout frontmatter.

@@ -1,0 +1,39 @@
+{
+  "format": "boris-nostr-publish-report",
+  "schema_version": 1,
+  "plan": {
+    "format": "boris-nostr-publication-plan",
+    "schema_version": 1,
+    "digest": "d04f9bf3195e8101c3626a90caa1a3c732ec603e26bc6833bd60ac107119298b"
+  },
+  "bundle": {
+    "format": "boris-nostr-signed-bundle",
+    "schema_version": 1,
+    "digest": "d04f9bf3195e8101c3626a90caa1a3c732ec603e26bc6833bd60ac107119298b"
+  },
+  "signer": {
+    "pubkey": "28db762b3c3d12129d4c0fc741bda4ea3317e4a6a375cb2cda7dee783e807b40"
+  },
+  "classification": "complete",
+  "relays": [
+    {
+      "url": "wss://relay.example.com/",
+      "outcome": "accepted",
+      "attempts": 2,
+      "events": [
+        {
+          "entity_id": "articles/first",
+          "event_id": "fb7a91dbc4bcb57735b946a46dbad04d5d540cf7f75d6b8947a9eb8c1806894b",
+          "result": "accepted",
+          "message": ""
+        },
+        {
+          "entity_id": "articles/second",
+          "event_id": "9036be67ba59bbe8dc069bf0aedd5da573f51360f6977e0825fab5d40288c8fd",
+          "result": "accepted",
+          "message": ""
+        }
+      ]
+    }
+  ]
+}
