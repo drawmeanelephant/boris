@@ -77,6 +77,7 @@ Required publication fields:
 | `show_in_discover` | `preferences.showInDiscover` hint |
 | `include` / `exclude` | Optional entity-id globs |
 | `prune` | Delete remote records absent from the plan (publish still needs `--prune`) |
+| `pds` | Optional. Omit it and publish uses the PDS login printed. If you set it, paste that shard origin — never `https://bsky.social`. |
 
 `boris init` writes a GitHub-Pages-oriented starter profile, not a
 Standard.site one. Copy the fixture and replace the example DID and URLs.

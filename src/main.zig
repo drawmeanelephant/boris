@@ -487,14 +487,17 @@ fn classifyPublishError(err: anyerror) ExitCode {
 
 fn reportPublishError(err: anyerror) ExitCode {
     const code = classifyPublishError(err);
-    const message: []const u8 = switch (code) {
-        .verification => "verification failed; nothing was published (binding or plan mismatch)",
-        .denial => "authorization was denied in the browser; nothing was published",
-        .timeout => "timed out waiting for the authorization callback",
-        .compatibility => "authorization server rejected the localhost client or grant",
-        .partial_publication => "some records failed; the evidence records exactly what landed",
-        .session => "session layer failure: no stored session, revoked/ambiguous refresh, or authority change — run `boris standard-site login --did <DID>`",
-        else => @errorName(err),
+    const message: []const u8 = switch (err) {
+        error.PdsOriginMismatch => "profile pds does not match the discovered PDS — copy the origin login printed, not https://bsky.social; nothing was published",
+        else => switch (code) {
+            .verification => "verification failed; nothing was published (binding or plan mismatch)",
+            .denial => "authorization was denied in the browser; nothing was published",
+            .timeout => "timed out waiting for the authorization callback",
+            .compatibility => "authorization server rejected the localhost client or grant",
+            .partial_publication => "some records failed; the evidence records exactly what landed",
+            .session => "session layer failure: no stored session, revoked/ambiguous refresh, or authority change — run `boris standard-site login --did <DID>`",
+            else => @errorName(err),
+        },
     };
     std.debug.print("error: standard-site publish: {s}\n", .{message});
     return code;
