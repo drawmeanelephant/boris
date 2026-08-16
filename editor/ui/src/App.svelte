@@ -546,9 +546,9 @@
       const buffer = result.data as BufferResponse;
       loadBuffer(buffer, `Saved ${activePath}.`);
       snapshots = snapshots.filter(snapshot => snapshot.path !== activePath);
-      conflictDialog?.close();
       conflict = null;
       deletedConflict = false;
+      conflictDialog?.close();
       await refreshFiles();
       await rebuildPreview('save');
       return true;

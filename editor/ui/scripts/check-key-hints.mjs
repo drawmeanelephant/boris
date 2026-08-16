@@ -23,7 +23,9 @@
 // assigning pendingResolution to null) with each resolve function nulling
 // it before proceeding, and the conflict dialog must clear its conflict
 // state on every close (an onclose assigning conflict/deletedConflict)
-// with the Load disk version handler clearing conflict before closing.
+// with the Load disk version handler clearing conflict before closing, and
+// the deleted-file variant's Discard changes / Re-create file handlers
+// clearing deletedConflict before closing.
 //
 // This keeps the e2e conformance sweep from having to grow by hand: a new
 // hint without a matching handler fails CI here first.
@@ -432,6 +434,33 @@ function analyze(template, script, bodies) {
     }
   }
 
+  // The deleted-file conflict variant carries the same invariant: Discard
+  // changes and Re-create file must clear deletedConflict before the dialog
+  // closes, so neither close path can leave the deleted-file state behind.
+  // The onclose handler above is the safety net; these checks pin the
+  // explicit clears in the two action handlers themselves.
+  for (const dialog of dialogs) {
+    const buttons = dialog._dialogButtons ?? [];
+    if (!buttons.some(button => button.text === 'Load disk version')) continue; // not the conflict dialog
+    for (const label of ['Discard changes', 'Re-create file']) {
+      const button = buttons.find(b => b.text.startsWith(label));
+      if (!button) {
+        problems.push(`conflict dialog at line ${dialog._line ?? '?'} deleted variant has no ${label} button to clear deletedConflict before closing`);
+        continue;
+      }
+      if (!button.callee) {
+        problems.push(`conflict dialog ${label} button at line ${dialog._line ?? '?'} does not call a named handler`);
+        continue;
+      }
+      const body = bodies.get(button.callee) ?? '';
+      const nullAt = body.indexOf('deletedConflict = false');
+      const closeAt = body.indexOf('.close()');
+      if (nullAt === -1 || closeAt === -1 || nullAt > closeAt) {
+        problems.push(`conflict dialog ${label} handler (${button.callee}) must clear deletedConflict (deletedConflict = false) before closing the dialog`);
+      }
+    }
+  }
+
   // The recovery banner's Restore button must route a dirty buffer through
   // the Save/Discard resolution dialog; otherwise the Tab + Enter hint drifts
   // from what Restore actually does while editing.
@@ -833,9 +862,21 @@ const FIXTURES = [
     conflict = null;
     conflictDialog.close();
   }
+  async function discardDeletedBuffer() {
+    deletedConflict = false;
+    conflictDialog.close();
+  }
+  async function saveFile(recreate = false) {
+    if (recreate && result.response.ok) {
+      deletedConflict = false;
+      conflictDialog?.close();
+    }
+  }
 </script>
 <dialog bind:this={conflictDialog} onkeydown={h} onclose={() => { conflict = null; deletedConflict = false; }}>
   <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
+  <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
   <button type="button" onclick={loadDiskVersion}>Load disk version</button>
   <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version<kbd>Enter</kbd></button>
 </dialog>`,
@@ -851,9 +892,21 @@ const FIXTURES = [
     conflict = null;
     conflictDialog.close();
   }
+  async function discardDeletedBuffer() {
+    deletedConflict = false;
+    conflictDialog.close();
+  }
+  async function saveFile(recreate = false) {
+    if (recreate && result.response.ok) {
+      deletedConflict = false;
+      conflictDialog?.close();
+    }
+  }
 </script>
 <dialog bind:this={conflictDialog} onkeydown={h}>
   <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
+  <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
   <button type="button" onclick={loadDiskVersion}>Load disk version</button>
   <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version<kbd>Enter</kbd></button>
 </dialog>`,
@@ -869,11 +922,112 @@ const FIXTURES = [
     conflictDialog.close();
     conflict = null;
   }
+  async function discardDeletedBuffer() {
+    deletedConflict = false;
+    conflictDialog.close();
+  }
+  async function saveFile(recreate = false) {
+    if (recreate && result.response.ok) {
+      deletedConflict = false;
+      conflictDialog?.close();
+    }
+  }
 </script>
 <dialog bind:this={conflictDialog} onkeydown={h} onclose={() => { conflict = null; deletedConflict = false; }}>
   <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
+  <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
   <button type="button" onclick={loadDiskVersion}>Load disk version</button>
   <button type="button" class="primary" onclick={() => saveFile(false, conflict!.fingerprint)}>Replace disk version<kbd>Enter</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'conflict dialog deleted variant clearing deletedConflict passes',
+    expect: 0,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) { if (event.key === 'Tab' || event.key === 'Enter') return; }
+  async function loadDiskVersion() {
+    if (!conflict) return;
+    loadBuffer(conflict, 'Loaded the disk version.');
+    conflict = null;
+    conflictDialog.close();
+  }
+  async function discardDeletedBuffer() {
+    deletedConflict = false;
+    conflictDialog.close();
+  }
+  async function saveFile(recreate = false) {
+    if (recreate && result.response.ok) {
+      deletedConflict = false;
+      conflictDialog?.close();
+    }
+  }
+</script>
+<dialog bind:this={conflictDialog} onkeydown={h} onclose={() => { conflict = null; deletedConflict = false; }}>
+  <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
+  <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
+  <button type="button" onclick={loadDiskVersion}>Load disk version</button>
+  <button type="button" class="primary" onclick={() => saveFile(false)}>Replace disk version<kbd>Enter</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'conflict dialog Discard changes clearing after close fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) { if (event.key === 'Tab' || event.key === 'Enter') return; }
+  async function loadDiskVersion() {
+    if (!conflict) return;
+    loadBuffer(conflict, 'Loaded the disk version.');
+    conflict = null;
+    conflictDialog.close();
+  }
+  async function discardDeletedBuffer() {
+    conflictDialog.close();
+    deletedConflict = false;
+  }
+  async function saveFile(recreate = false) {
+    if (recreate && result.response.ok) {
+      deletedConflict = false;
+      conflictDialog?.close();
+    }
+  }
+</script>
+<dialog bind:this={conflictDialog} onkeydown={h} onclose={() => { conflict = null; deletedConflict = false; }}>
+  <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
+  <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
+  <button type="button" onclick={loadDiskVersion}>Load disk version</button>
+  <button type="button" class="primary" onclick={() => saveFile(false)}>Replace disk version<kbd>Enter</kbd></button>
+</dialog>`,
+  },
+  {
+    name: 'conflict dialog Re-create path not clearing deletedConflict before close fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function h(event: KeyboardEvent) { if (event.key === 'Tab' || event.key === 'Enter') return; }
+  async function loadDiskVersion() {
+    if (!conflict) return;
+    loadBuffer(conflict, 'Loaded the disk version.');
+    conflict = null;
+    conflictDialog.close();
+  }
+  async function discardDeletedBuffer() {
+    deletedConflict = false;
+    conflictDialog.close();
+  }
+  async function saveFile(recreate = false) {
+    if (recreate && result.response.ok) {
+      conflictDialog?.close();
+    }
+  }
+</script>
+<dialog bind:this={conflictDialog} onkeydown={h} onclose={() => { conflict = null; deletedConflict = false; }}>
+  <button type="button" onclick={() => conflictDialog.close()}>Keep editing<kbd>Esc</kbd></button>
+  <button type="button" onclick={discardDeletedBuffer}>Discard changes</button>
+  <button type="button" class="primary" onclick={() => saveFile(true)}>Re-create file<kbd>Enter</kbd></button>
+  <button type="button" onclick={loadDiskVersion}>Load disk version</button>
+  <button type="button" class="primary" onclick={() => saveFile(false)}>Replace disk version<kbd>Enter</kbd></button>
 </dialog>`,
   },
 ];
