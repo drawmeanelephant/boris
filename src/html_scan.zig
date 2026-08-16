@@ -222,6 +222,25 @@ pub fn isRawTextElement(name: []const u8) bool {
         std.ascii.eqlIgnoreCase(name, "textarea");
 }
 
+/// HTML void elements never have a matching closer. Search exclusion depth
+/// must not increment for them, or a `<br>` / `<img>` inside chrome would
+/// permanently leave the excluded region.
+pub fn isVoidElement(name: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(name, "area") or
+        std.ascii.eqlIgnoreCase(name, "base") or
+        std.ascii.eqlIgnoreCase(name, "br") or
+        std.ascii.eqlIgnoreCase(name, "col") or
+        std.ascii.eqlIgnoreCase(name, "embed") or
+        std.ascii.eqlIgnoreCase(name, "hr") or
+        std.ascii.eqlIgnoreCase(name, "img") or
+        std.ascii.eqlIgnoreCase(name, "input") or
+        std.ascii.eqlIgnoreCase(name, "link") or
+        std.ascii.eqlIgnoreCase(name, "meta") or
+        std.ascii.eqlIgnoreCase(name, "source") or
+        std.ascii.eqlIgnoreCase(name, "track") or
+        std.ascii.eqlIgnoreCase(name, "wbr");
+}
+
 /// Find the content range inside the element opened at `open_start`, balancing
 /// nested elements with the same name. This preserves the rendered-search
 /// extractor's existing matching semantics while making the range reusable for
@@ -315,6 +334,13 @@ test "raw-text elements are identified case-insensitively" {
     try std.testing.expect(isRawTextElement("CODE"));
     try std.testing.expect(isRawTextElement("pre"));
     try std.testing.expect(!isRawTextElement("div"));
+}
+
+test "void elements are identified case-insensitively" {
+    try std.testing.expect(isVoidElement("BR"));
+    try std.testing.expect(isVoidElement("img"));
+    try std.testing.expect(!isVoidElement("div"));
+    try std.testing.expect(!isVoidElement("aside"));
 }
 
 test "a quoted angle bracket does not terminate the tag" {

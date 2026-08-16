@@ -21,10 +21,23 @@ const hasAttr = html_scan.hasAttr;
 
 const matchingRange = html_scan.matchingRange;
 
-fn findRoot(html: []const u8, require_marker: bool) Error!?Range {
+const ExtractRoot = struct {
+    range: Range,
+    /// True for an explicit marker, `<main>`, `<article>`, or `role="main"`.
+    /// False for `<body>` / whole-document fallback, where layout chrome is skipped.
+    declared: bool,
+};
+
+fn elementRange(html: []const u8, start: usize, name: []const u8) Error!Range {
+    return matchingRange(html, start, name) orelse error.MissingSearchRoot;
+}
+
+fn findRoot(html: []const u8, require_marker: bool) Error!?ExtractRoot {
     var explicit: ?usize = null;
     var count: usize = 0;
     var first_main: ?usize = null;
+    var first_article: ?usize = null;
+    var first_role_main: ?usize = null;
     var first_body: ?usize = null;
     var i: usize = 0;
     while (i < html.len) {
@@ -38,16 +51,60 @@ fn findRoot(html: []const u8, require_marker: bool) Error!?Range {
             if (hasAttr(t, "data-boris-search-root")) {
                 explicit = start;
                 count += 1;
-            } else if (first_main == null and std.ascii.eqlIgnoreCase(tag.name, "main")) first_main = start else if (first_body == null and std.ascii.eqlIgnoreCase(tag.name, "body")) first_body = start;
+            } else if (first_main == null and std.ascii.eqlIgnoreCase(tag.name, "main")) {
+                first_main = start;
+            } else if (first_article == null and std.ascii.eqlIgnoreCase(tag.name, "article")) {
+                first_article = start;
+            } else if (first_role_main == null and std.ascii.eqlIgnoreCase(attrValue(t, "role") orelse "", "main")) {
+                first_role_main = start;
+            } else if (first_body == null and std.ascii.eqlIgnoreCase(tag.name, "body")) {
+                first_body = start;
+            }
         }
         i = tag.end + 1;
     }
     if (count > 1) return error.MultipleSearchRoots;
-    if (explicit) |s| return matchingRange(html, s, "main") orelse error.MissingSearchRoot;
+    if (explicit) |s| return .{ .range = try elementRange(html, s, "main"), .declared = true };
     if (require_marker) return error.MissingSearchRoot;
-    if (first_main) |s| return matchingRange(html, s, "main") orelse error.MissingSearchRoot;
-    if (first_body) |s| return matchingRange(html, s, "body") orelse error.MissingSearchRoot;
+    if (first_main) |s| return .{ .range = try elementRange(html, s, "main"), .declared = true };
+    if (first_article) |s| return .{ .range = try elementRange(html, s, "article"), .declared = true };
+    if (first_role_main) |s| {
+        const tag = tagAt(html, s) orelse return error.MissingSearchRoot;
+        return .{ .range = try elementRange(html, s, tag.name), .declared = true };
+    }
+    if (first_body) |s| return .{ .range = try elementRange(html, s, "body"), .declared = false };
     return null;
+}
+
+fn isAlwaysExcludedName(name: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(name, "nav") or
+        std.ascii.eqlIgnoreCase(name, "footer") or
+        std.ascii.eqlIgnoreCase(name, "script") or
+        std.ascii.eqlIgnoreCase(name, "style") or
+        std.ascii.eqlIgnoreCase(name, "template") or
+        std.ascii.eqlIgnoreCase(name, "noscript") or
+        std.ascii.eqlIgnoreCase(name, "svg") or
+        std.ascii.eqlIgnoreCase(name, "canvas");
+}
+
+fn isFallbackChromeName(name: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(name, "header") or std.ascii.eqlIgnoreCase(name, "aside");
+}
+
+fn isSearchExcludeMarker(txt: []const u8) bool {
+    return hasAttr(txt, "data-boris-search-exclude") or
+        hasAttr(txt, "data-boris-search-ignore") or
+        hasAttr(txt, "data-boris-noindex");
+}
+
+fn isHidden(txt: []const u8) bool {
+    return hasAttr(txt, "hidden") or
+        hasAttr(txt, "inert") or
+        std.mem.eql(u8, attrValue(txt, "aria-hidden") orelse "", "true");
+}
+
+fn opensElement(tag: Tag) bool {
+    return !tag.closing and !tag.self_closing and !html_scan.isVoidElement(tag.name);
 }
 
 fn appendCodepoint(out: *std.ArrayList(u8), a: std.mem.Allocator, cp: u32) !void {
@@ -131,7 +188,12 @@ fn slugify(a: std.mem.Allocator, text: []const u8) ![]u8 {
 }
 
 pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, require_marker: bool) !Document {
-    const root: Range = try findRoot(html, require_marker) orelse Range{ .start = 0, .end = html.len };
+    const found = try findRoot(html, require_marker) orelse ExtractRoot{
+        .range = .{ .start = 0, .end = html.len },
+        .declared = false,
+    };
+    const root = found.range;
+    const exclude_chrome = !found.declared;
     var sections: std.ArrayList(MutableSection) = .empty;
     defer {
         for (sections.items) |*s| {
@@ -169,10 +231,17 @@ pub fn indexHtml(a: std.mem.Allocator, path: []const u8, html: []const u8, requi
             i = tag.end + 1;
             continue;
         }
-        const hidden = hasAttr(txt, "hidden") or hasAttr(txt, "inert") or std.mem.eql(u8, attrValue(txt, "aria-hidden") orelse "", "true");
-        const excluded_name = std.ascii.eqlIgnoreCase(n, "nav") or std.ascii.eqlIgnoreCase(n, "footer") or std.ascii.eqlIgnoreCase(n, "script") or std.ascii.eqlIgnoreCase(n, "style") or std.ascii.eqlIgnoreCase(n, "template") or std.ascii.eqlIgnoreCase(n, "noscript") or std.ascii.eqlIgnoreCase(n, "svg") or std.ascii.eqlIgnoreCase(n, "canvas") or hasAttr(txt, "data-boris-search-exclude") or hidden;
+        const excluded_name = isAlwaysExcludedName(n) or
+            (exclude_chrome and isFallbackChromeName(n)) or
+            isSearchExcludeMarker(txt) or
+            isHidden(txt);
         if (!tag.closing) {
-            if (excluded_name and !tag.self_closing) excluded += 1;
+            // Count every nested opener while excluded. Incrementing only on
+            // the chrome tag itself let `</h2>` inside `<nav>`/`<aside>` drop
+            // the depth to zero and index the remaining sidebar.
+            if (excluded_name or excluded > 0) {
+                if (opensElement(tag)) excluded += 1;
+            }
             if (excluded == 0) {
                 if (n.len == 2 and n[0] == 'h' and n[1] >= '1' and n[1] <= '6') {
                     try sections.append(a, .{ .level = n[1] - '0' });
@@ -429,6 +498,176 @@ test "explicitly visible content is indexed" {
     const d = try indexHtml(std.testing.allocator, "index.html", html, true);
     defer freeDocument(std.testing.allocator, d);
     try std.testing.expect(std.mem.indexOf(u8, d.sections[0].text, "Visible prose") != null);
+}
+
+fn headingFragment(d: Document, heading: []const u8) []const u8 {
+    for (d.sections) |s| {
+        if (std.mem.eql(u8, s.heading, heading)) return s.fragment;
+    }
+    return "";
+}
+
+fn sectionHaystack(d: Document) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(std.testing.allocator);
+    for (d.sections) |s| {
+        try out.appendSlice(std.testing.allocator, s.heading);
+        try out.append(std.testing.allocator, '\n');
+        try out.appendSlice(std.testing.allocator, s.text);
+        try out.append(std.testing.allocator, '\n');
+        try out.appendSlice(std.testing.allocator, s.code);
+        try out.append(std.testing.allocator, '\n');
+    }
+    return out.toOwnedSlice(std.testing.allocator);
+}
+
+test "fallback layout chrome is not indexed while page body is" {
+    // Mirrors the Oliver Pages layout: no <main>, shared <aside> sidebar
+    // headings, page-local content inside <article>.
+    const html =
+        \\<html><head><title>Fallback</title></head><body>
+        \\<header class="site-header"><p>Oliver docs chrome</p></header>
+        \\<article class="txp-content">
+        \\<header class="article-header"><p>crumb</p></header>
+        \\<h1 id="real-title">Real Title</h1>
+        \\<p>Authored prose about widgets.</p>
+        \\<pre><code>zig build test</code></pre>
+        \\<table><tr><td>arm64</td></tr></table>
+        \\<aside class="admonition"><p>Authored note stays searchable.</p></aside>
+        \\</article>
+        \\<aside class="txp-sidebar">
+        \\<h2 id="search">Search</h2>
+        \\<h2 id="on-this-page">On this page</h2>
+        \\<h2 id="documentation">Documentation</h2>
+        \\<h2 id="conformance">Conformance</h2>
+        \\<h2 id="about-oliver">About Oliver</h2>
+        \\<h2 id="publication">Publication</h2>
+        \\<nav class="site-nav"><ul><li><a href="XHTML.html">XHTML</a></li><li>Cooklang</li><li>commonmark</li></ul></nav>
+        \\</aside>
+        \\<footer>shared footer chrome</footer>
+        \\</body></html>
+    ;
+    const d = try indexHtml(std.testing.allocator, "guides/widgets.html", html, false);
+    defer freeDocument(std.testing.allocator, d);
+    const hay = try sectionHaystack(d);
+    defer std.testing.allocator.free(hay);
+
+    try std.testing.expectEqualStrings("Real Title", d.title);
+    try std.testing.expect(d.sections.len >= 1);
+    try std.testing.expectEqualStrings("real-title", headingFragment(d, "Real Title"));
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Authored prose about widgets") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "zig build test") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "arm64") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Authored note stays searchable") != null);
+
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Oliver docs chrome") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "shared footer chrome") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "XHTML") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Cooklang") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "commonmark") == null);
+    for (d.sections) |s| {
+        try std.testing.expect(std.mem.indexOf(u8, s.heading, "Search") == null);
+        try std.testing.expect(std.mem.indexOf(u8, s.heading, "On this page") == null);
+        try std.testing.expect(std.mem.indexOf(u8, s.heading, "Documentation") == null);
+        try std.testing.expect(std.mem.indexOf(u8, s.heading, "Conformance") == null);
+        try std.testing.expect(std.mem.indexOf(u8, s.heading, "About Oliver") == null);
+        try std.testing.expect(std.mem.indexOf(u8, s.heading, "Publication") == null);
+    }
+}
+
+test "nested chrome headings do not leak after the first closer" {
+    const html =
+        \\<body>
+        \\<nav><h2>Documentation</h2><ul><li>XHTML</li><li>Cooklang</li></ul></nav>
+        \\<h1 id="page">Page</h1>
+        \\<p>Only the body term widgets belongs here.</p>
+        \\</body>
+    ;
+    const d = try indexHtml(std.testing.allocator, "index.html", html, false);
+    defer freeDocument(std.testing.allocator, d);
+    const hay = try sectionHaystack(d);
+    defer std.testing.allocator.free(hay);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "widgets") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Documentation") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "XHTML") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Cooklang") == null);
+}
+
+test "explicit search ignore markers skip nested chrome" {
+    const html =
+        \\<main data-boris-search-root>
+        \\<h1 id="keep">Keep heading</h1>
+        \\<p>KeepTerm stays.</p>
+        \\<div data-boris-search-ignore><h2>Ignored heading</h2><p>IgnoredIgnore</p></div>
+        \\<section data-boris-noindex><p>NoindexTerm</p></section>
+        \\<div data-boris-search-exclude><p>ExcludeTerm</p></div>
+        \\</main>
+    ;
+    const d = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, d);
+    const hay = try sectionHaystack(d);
+    defer std.testing.allocator.free(hay);
+    try std.testing.expectEqualStrings("keep", headingFragment(d, "Keep heading"));
+    try std.testing.expect(std.mem.indexOf(u8, hay, "KeepTerm") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "IgnoredIgnore") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Ignored heading") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "NoindexTerm") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "ExcludeTerm") == null);
+}
+
+test "declared main still indexes authored asides and headers" {
+    const html =
+        \\<body>
+        \\<aside class="sidebar"><h2>Documentation</h2><p>XHTML</p></aside>
+        \\<main data-boris-search-root>
+        \\<header><p>Article kicker</p></header>
+        \\<h1 id="install">Installing</h1>
+        \\<aside class="admonition"><p>Authored aside prose.</p></aside>
+        \\</main>
+        \\</body>
+    ;
+    const d = try indexHtml(std.testing.allocator, "guides/install.html", html, false);
+    defer freeDocument(std.testing.allocator, d);
+    const hay = try sectionHaystack(d);
+    defer std.testing.allocator.free(hay);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Article kicker") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Authored aside prose") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Documentation") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "XHTML") == null);
+}
+
+test "body fallback excludes header and aside chrome" {
+    const html =
+        \\<body>
+        \\<header>Site brand chrome</header>
+        \\<div class="content"><h1 id="only">Only heading</h1><p>Local widgets prose.</p></div>
+        \\<aside><h2>Documentation</h2><p>XHTML sidebar only</p></aside>
+        \\<footer>Footer chrome</footer>
+        \\</body>
+    ;
+    const d = try indexHtml(std.testing.allocator, "index.html", html, false);
+    defer freeDocument(std.testing.allocator, d);
+    const hay = try sectionHaystack(d);
+    defer std.testing.allocator.free(hay);
+    try std.testing.expectEqualStrings("only", headingFragment(d, "Only heading"));
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Local widgets prose") != null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Site brand chrome") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Documentation") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "XHTML sidebar only") == null);
+    try std.testing.expect(std.mem.indexOf(u8, hay, "Footer chrome") == null);
+}
+
+test "search index JSON stays byte-deterministic" {
+    const html = "<main data-boris-search-root><h1>Title</h1><p>Prose.</p></main>";
+    const a = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, a);
+    const b = try indexHtml(std.testing.allocator, "index.html", html, true);
+    defer freeDocument(std.testing.allocator, b);
+    const first = try writeJson(std.testing.allocator, &.{a});
+    defer std.testing.allocator.free(first);
+    const second = try writeJson(std.testing.allocator, &.{b});
+    defer std.testing.allocator.free(second);
+    try std.testing.expectEqualStrings(first, second);
 }
 
 test "writeJson escapes control characters so the index stays parseable" {
