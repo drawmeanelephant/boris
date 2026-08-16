@@ -19,6 +19,7 @@ The compiler is one binary. Files cluster by job, not by fashion.
 | Aside / Details | `src/aside.zig` | [components.md](contracts/components.md) |
 | Oliver render | `src/render.zig` | [oliver-renderer.md](contracts/oliver-renderer.md) |
 | Freestanding render Wasm | `src/render_wasm.zig`, `src/wasm_image.zig` | [embedding.md](contracts/embedding.md) |
+| In-memory compileBundle | `src/embed.zig` | [embedding.md](contracts/embedding.md) |
 | Cooklang recipe scale | `src/recipe_scale.zig`, `src/recipe_scale_view.zig` | [cooklang-compatibility.md](contracts/cooklang-compatibility.md), [cli.md](contracts/cli.md) |
 | HTML body, nav, TOC, assemble | `src/html_body.zig`, `src/html_nav.zig`, `src/html_toc.zig`, `src/assemble.zig`, `src/compile.zig` | [html-output.md](contracts/html-output.md) |
 | Themes, layouts, assets | `src/theme.zig`, `src/layout_select.zig`, `src/content_asset.zig` | [templating-and-themes.md](contracts/templating-and-themes.md), [content-local-assets.md](contracts/content-local-assets.md) |

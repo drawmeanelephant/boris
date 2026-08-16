@@ -693,6 +693,21 @@ pub fn build(b: *std.Build) void {
     );
     test_pipeline_step.dependOn(&run_pipeline_tests.step);
 
+    const embed_mod = b.createModule(.{
+        .root_source_file = b.path("src/embed.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    linkOliver(embed_mod, oliver_mod);
+    const embed_tests = b.addTest(.{ .root_module = embed_mod });
+    const run_embed_tests = b.addRunArtifact(embed_tests);
+    run_embed_tests.setCwd(b.path("."));
+    const test_embed_step = b.step(
+        "test-embed",
+        "Run in-memory compileBundle tests",
+    );
+    test_embed_step.dependOn(&run_embed_tests.step);
+
     // --- Publication profile parser + static planner (Slice 1) -----------
     const publication_profile_mod = b.createModule(.{
         .root_source_file = b.path("src/publication_profile.zig"),
@@ -1715,6 +1730,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&reference_theme_run.step);
     test_step.dependOn(&version_pin_run.step);
     test_step.dependOn(&run_pipeline_tests.step);
+    test_step.dependOn(&run_embed_tests.step);
     test_step.dependOn(&run_publication_profile_tests.step);
     test_step.dependOn(&run_github_pages_tests.step);
     test_step.dependOn(&github_pages_artifact_run.step);
