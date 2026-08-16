@@ -155,7 +155,7 @@ context, test-throughput audit) is **done**. It is not relisted as upcoming.
 | 5 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
 | 6 | Standard.site HTML verify emit | **Shipped [#569](https://github.com/drawmeanelephant/boris/pull/569)** | `boris --profile` emits verification surfaces from the HTML build. |
 | 7 | Nostr as a verified target | **Decided — stays off the seam** | Location adapter / registry membership declined. See [`publication-platforms.md`](contracts/publication-platforms.md). Proof Pack and a live-smoke **gate** stay parked on [#584](https://github.com/drawmeanelephant/boris/issues/584) and are not implied. |
-| 8 | Cloudflare embedding | **Open [#300](https://github.com/drawmeanelephant/boris/issues/300) / [#301](https://github.com/drawmeanelephant/boris/issues/301)** | Container-backed native builds and freestanding Wasm. Outside the static-target matrix. |
+| 8 | Cloudflare embedding | **#301 cards landed; parent + #300 remain open** | Example Worker host is [`hosts/cloudflare-worker/`](../hosts/cloudflare-worker/). Not a `publication.target`. Live Cloudflare smoke, isolate-peak measurement, and RAG/context embed remain on [#301](https://github.com/drawmeanelephant/boris/issues/301). Containers stay on [#300](https://github.com/drawmeanelephant/boris/issues/300). |
 
 ## Release bookkeeping
 

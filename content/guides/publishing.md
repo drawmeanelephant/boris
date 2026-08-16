@@ -178,7 +178,13 @@ Cloudflare Pages / Vercel / Netlify
 : Waiting or “never proactive.” Adapter-shaped. No recipe in this guide.
 
 Cloudflare Containers / Wasm
-: Compiler-shaped bets, not deployer adapters.
+: Compiler-shaped bets, not deployer adapters. The Wasm path has an
+  example Worker host at
+  [`hosts/cloudflare-worker/`](https://github.com/drawmeanelephant/boris/blob/afterparty/hosts/cloudflare-worker/README.md);
+  the contract is
+  [`docs/contracts/embedding.md`](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/embedding.md).
+  Neither is a `publication.target`. Containers stay on
+  [#300](https://github.com/drawmeanelephant/boris/issues/300).
 
 The editor
 : An authoring surface. It can run `Build HTML`. It is not a publication
