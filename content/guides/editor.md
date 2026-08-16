@@ -80,7 +80,10 @@ then atomically renames it into place.
   on disk after you opened it, the editor reports the problem and writes
   nothing. The conflict dialog keeps both your unsaved buffer and the current
   disk version visible and requires an explicit choice (keep editing, load the
-  disk version, or replace it).
+  disk version, or replace it). The open file is probed while you work and
+  when the window is focused, so an external edit, delete, or permission
+  change does not wait for Save. Transient filesystem errors are skipped and
+  retried.
 - **Undo / redo** — session-local, keyboard-driven (`Ctrl/Cmd+Z`, `Ctrl/Cmd+
   Shift+Z`) and via the toolbar.
 - **Recovery snapshots** — dirty buffers are snapshotted to the disposable OS

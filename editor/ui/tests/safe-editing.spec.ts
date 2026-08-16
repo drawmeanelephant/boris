@@ -135,6 +135,17 @@ async function installApi(page: Page, options: MockOptions = {}) {
   await page.route('**/api/recovery', route => route.fulfill({
     contentType: 'application/json', body: JSON.stringify({ snapshots: options.recovery ?? [], skipped: options.recoverySkipped ?? 0 })
   }));
+  await page.route('**/api/files/probe', async route => {
+    const body = route.request().postDataJSON() as { fingerprint?: string };
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'unchanged',
+        fingerprint: body.fingerprint ?? 'a'.repeat(64),
+        read_only: false
+      })
+    });
+  });
   await page.route('**/api/files/open', async route => {
     if (options.openError) {
       await route.fulfill({
@@ -2534,4 +2545,53 @@ test('a dead editor host is named and tells you to restart (#418 M11)', async ({
     .toContainText('Local host unavailable. Restart boris-editor.');
   await expect(page.getByRole('status', { name: 'Editing status' }))
     .toContainText('The editor host stopped');
+});
+
+test('external disk changes while dirty open the conflict dialog (#418 M11)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Mine\n');
+  await page.route('**/api/files/probe', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      status: 'changed', path: 'content/index.md', content: '# External\n',
+      fingerprint: 'b'.repeat(64), read_only: false
+    })
+  }));
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  const dialog = page.getByRole('dialog', { name: 'External changes detected' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('textbox', { name: 'Your unsaved version' })).toHaveValue('# Mine\n');
+  await expect(dialog.getByRole('textbox', { name: 'Current disk version' })).toHaveValue('# External\n');
+});
+
+test('external delete while dirty opens the deleted-file dialog (#418 M11)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Mine\n');
+  await page.route('**/api/files/probe', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ status: 'deleted' })
+  }));
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.getByRole('dialog', { name: 'File deleted outside Boris Editor' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Mine\n');
+});
+
+test('a clean buffer reloads when disk changes outside the editor (#418 M11)', async ({ page }) => {
+  await installApi(page);
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Home\n');
+  await page.route('**/api/files/probe', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      status: 'changed', path: 'content/index.md', content: '# External\n',
+      fingerprint: 'b'.repeat(64), read_only: false
+    })
+  }));
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# External\n');
+  await expect(page.getByRole('status', { name: 'Editing status' }))
+    .toContainText('Loaded external changes to content/index.md.');
+  await expect(page.getByText('Saved on disk', { exact: true })).toBeVisible();
 });

@@ -93,6 +93,10 @@ fingerprint="$(printf '%s' "$opened" | body_of | fingerprint_of)"
 
 # An external write after open must produce a 409 and preserve both versions.
 printf '# External edit\n' >"$work/project/content/index.md"
+probe="$(api_post /api/files/probe "{\"path\":\"content/index.md\",\"fingerprint\":\"$fingerprint\"}")"
+[[ "$(printf '%s' "$probe" | code_of)" == "200" ]]
+printf '%s' "$probe" | body_of | grep -q '"status":"changed"'
+printf '%s' "$probe" | body_of | grep -q '# External edit'
 conflict="$(api_post /api/files/save "{\"path\":\"content/index.md\",\"content\":\"# My edit\\n\",\"fingerprint\":\"$fingerprint\"}")"
 [[ "$(printf '%s' "$conflict" | code_of)" == "409" ]]
 printf '%s' "$conflict" | body_of | grep -q '"status":"conflict"'
@@ -132,6 +136,9 @@ deleted="$(api_post /api/files/delete '{"path":"content/existing.md","confirmed"
 opened="$(api_post /api/files/open '{"path":"content/index.md"}')"
 fingerprint="$(printf '%s' "$opened" | body_of | fingerprint_of)"
 rm "$work/project/content/index.md"
+gone="$(api_post /api/files/probe "{\"path\":\"content/index.md\",\"fingerprint\":\"$fingerprint\"}")"
+[[ "$(printf '%s' "$gone" | code_of)" == "200" ]]
+printf '%s' "$gone" | body_of | grep -q '"status":"deleted"'
 missing="$(api_post /api/files/save "{\"path\":\"content/index.md\",\"content\":\"# Recreate\\n\",\"fingerprint\":\"$fingerprint\"}")"
 [[ "$(printf '%s' "$missing" | code_of)" == "409" ]]
 printf '%s' "$missing" | body_of | grep -q '"status":"deleted"'

@@ -90,6 +90,8 @@ truth unless the author explicitly saves it.
 The authenticated file API is intentionally small:
 
 - `GET /api/files` and `POST /api/files/open` enumerate and open safe files;
+- `POST /api/files/probe` compares the open-file fingerprint to disk without
+  writing; transient filesystem errors stay in-session;
 - `POST /api/files/save`, `/create`, `/rename`, and `/delete` perform explicit
   project mutations with conflict/no-clobber checks;
 - `GET /api/recovery` and `POST /api/recovery/snapshot` or `/clear` manage

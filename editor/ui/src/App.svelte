@@ -21,6 +21,13 @@
     fingerprint: string;
     read_only: boolean;
   };
+  type ProbeResponse = {
+    status: 'unchanged' | 'changed' | 'deleted' | 'transient';
+    path?: string;
+    content?: string;
+    fingerprint?: string;
+    read_only?: boolean;
+  };
   type RecoverySnapshot = { path: string; content: string; fingerprint: string };
   type RecoveryList = { snapshots: RecoverySnapshot[]; skipped?: number };
   type ErrorResponse = { error?: string; status?: string };
@@ -162,6 +169,8 @@
   let redoStack: string[] = [];
   let recoveryTimer: ReturnType<typeof setInterval> | undefined;
   let hostTimer: ReturnType<typeof setInterval> | undefined;
+  let diskTimer: ReturnType<typeof setInterval> | undefined;
+  let probeInFlight = false;
   let conflict: BufferResponse | null = null;
   let deletedConflict = false;
   let conflictDialog: HTMLDialogElement;
@@ -373,6 +382,7 @@
         editorStatus = 'Project files are available, but recovery snapshots could not be loaded.';
       }
       startHostWatch();
+      startDiskWatch();
     } catch {
       noteHostUnavailable();
       compiler = 'Boris version unavailable.';
@@ -893,6 +903,11 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
     hostTimer = setInterval(() => void watchHost(), 5000);
   }
 
+  function startDiskWatch() {
+    if (diskTimer) return;
+    diskTimer = setInterval(() => void probeDisk(), 3000);
+  }
+
   async function watchHost() {
     const result = await api<Health>('/api/health');
     if (!result.response.ok) noteHostUnavailable();
@@ -925,6 +940,76 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
 
   function handleVisibility() {
     if (document.visibilityState === 'hidden') flushRecovery();
+    else void probeDisk();
+  }
+
+  async function probeDisk() {
+    if (!activePath || !fingerprint || saveInFlight || probeInFlight) return;
+    if (document.querySelector('dialog[open]')) return;
+    probeInFlight = true;
+    try {
+      const result = await api<ProbeResponse | ErrorResponse>('/api/files/probe', {
+        method: 'POST',
+        body: JSON.stringify({ path: activePath, fingerprint })
+      });
+      if (!result.response.ok) {
+        if ((result.data as ErrorResponse).error === 'host_unavailable') noteHostUnavailable();
+        return;
+      }
+      const probe = result.data as ProbeResponse;
+      if (probe.status === 'transient') return;
+      if (probe.status === 'unchanged') {
+        if (probe.read_only !== undefined && probe.read_only !== readOnly) {
+          readOnly = probe.read_only;
+          editorStatus = probe.read_only
+            ? `${activePath} is now read-only on disk.`
+            : `${activePath} is writable again.`;
+        }
+        return;
+      }
+      await refreshFiles();
+      if (probe.status === 'deleted') {
+        if (dirty) {
+          conflict = null;
+          deletedConflict = true;
+          editorStatus = `${activePath} was deleted outside the editor.`;
+          await tick();
+          openModal(conflictDialog);
+          conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
+        } else {
+          const gone = activePath;
+          stopRecoveryTimer();
+          activePath = '';
+          content = '';
+          baseline = '';
+          fingerprint = '';
+          undoStack = [];
+          redoStack = [];
+          editorStatus = `${gone} was deleted outside the editor.`;
+        }
+        return;
+      }
+      if (probe.status !== 'changed' || probe.content === undefined || !probe.fingerprint || !probe.path) return;
+      const disk: BufferResponse = {
+        status: 'conflict',
+        path: probe.path,
+        content: probe.content,
+        fingerprint: probe.fingerprint,
+        read_only: probe.read_only ?? false
+      };
+      if (dirty) {
+        conflict = disk;
+        deletedConflict = false;
+        editorStatus = `External changes detected in ${activePath}. Nothing was overwritten.`;
+        await tick();
+        openModal(conflictDialog);
+        conflictDialog.querySelector<HTMLButtonElement>('.dialog-actions .primary')?.focus();
+      } else {
+        loadBuffer(disk, `Loaded external changes to ${probe.path}.`);
+      }
+    } finally {
+      probeInFlight = false;
+    }
   }
 
   async function saveFile(recreate = false, replacementFingerprint = fingerprint): Promise<boolean> {
@@ -1410,6 +1495,7 @@ ${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLab
   onbeforeunload={warnUnsaved}
   onpagehide={flushRecovery}
   onvisibilitychange={handleVisibility}
+  onfocus={() => void probeDisk()}
 />
 
 <header>
