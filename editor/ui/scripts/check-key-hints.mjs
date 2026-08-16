@@ -58,16 +58,40 @@ function scriptBlock(source) {
   return end === -1 ? source.slice(start) : source.slice(start, end);
 }
 
-// Extracts balanced { } bodies for every `function NAME(` in the script.
+// Extracts balanced { } bodies for every `function NAME(` in the script. The
+// body brace is the first { after the parameter list closes, so type
+// annotations like `{ path: string }` inside the signature are skipped.
 function handlerBodies(script) {
   const bodies = new Map();
   const re = /function\s+([A-Za-z_$][\w$]*)\s*\(/g;
   let match;
   while ((match = re.exec(script))) {
-    const open = script.indexOf('{', match.index + match[0].length);
-    if (open === -1) continue;
+    const name = match[1];
+    const parenOpen = match.index + match[0].length - 1;
     let depth = 0;
     let quote = null;
+    let parenClose = -1;
+    for (let i = parenOpen; i < script.length; i++) {
+      const ch = script[i];
+      if (quote) {
+        if (ch === quote && script[i - 1] !== '\\') quote = null;
+      } else if (ch === '"' || ch === "'" || ch === '`') {
+        quote = ch;
+      } else if (ch === '(') {
+        depth += 1;
+      } else if (ch === ')') {
+        depth -= 1;
+        if (depth === 0) {
+          parenClose = i;
+          break;
+        }
+      }
+    }
+    if (parenClose === -1) continue;
+    const open = script.indexOf('{', parenClose + 1);
+    if (open === -1) continue;
+    let bodyDepth = 0;
+    quote = null;
     let end = open;
     for (; end < script.length; end++) {
       const ch = script[end];
@@ -76,13 +100,13 @@ function handlerBodies(script) {
       } else if (ch === '"' || ch === "'" || ch === '`') {
         quote = ch;
       } else if (ch === '{') {
-        depth += 1;
+        bodyDepth += 1;
       } else if (ch === '}') {
-        depth -= 1;
-        if (depth === 0) break;
+        bodyDepth -= 1;
+        if (bodyDepth === 0) break;
       }
     }
-    bodies.set(match[1], script.slice(open, end + 1));
+    bodies.set(name, script.slice(open, end + 1));
   }
   return bodies;
 }
@@ -143,12 +167,42 @@ function lineOf(text, index) {
   return text.slice(0, index).split('\n').length;
 }
 
+// Value of an attribute like `onfocus={() => completionOpen = true}` inside a
+// raw tag string, brace-balanced (returns null when the attribute is absent).
+function attrValue(raw, name) {
+  const idx = raw.indexOf(`${name}={`);
+  if (idx === -1) return null;
+  let i = idx + name.length + 2;
+  let depth = 0;
+  const start = i;
+  for (; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) break;
+    }
+  }
+  return raw.slice(start, i);
+}
+
+// Named function referenced by a button's onclick: supports both the inline
+// arrow form (`() => restoreSnapshot(snapshot)`) and a plain reference.
+function onclickCallee(raw) {
+  const arrow = /onclick=\{\s*\(\)\s*=>\s*([A-Za-z_$][\w$]*)\s*\(/.exec(raw);
+  if (arrow) return arrow[1];
+  const named = /onclick=\{\s*([A-Za-z_$][\w$]*)\s*\}/.exec(raw);
+  return named ? named[1] : null;
+}
+
 // --- analysis ---------------------------------------------------------------
 
 function analyze(template, script, bodies) {
   const problems = [];
   const surfaces = [];
   const stack = [];
+  const comboboxes = new Set();
+  const banners = new Set();
   const globalHandler = /<svelte:window\b[^>]*onkeydown=\{\s*([A-Za-z_$][\w$]*)\s*\}/.exec(template)?.[1] ?? null;
 
   const isSurface = elem =>
@@ -187,6 +241,11 @@ function analyze(template, script, bodies) {
         if (e.name === 'form') form = true;
         if (surface !== null && button !== null) break;
       }
+      if (surface) {
+        const kind = surfaceKind(surface);
+        if (kind === 'combobox') comboboxes.add(surface);
+        if (kind === 'banner') banners.add(surface);
+      }
       surfaces.push({
         kind: surface ? surfaceKind(surface) : null,
         elem: surface,
@@ -200,7 +259,10 @@ function analyze(template, script, bodies) {
       stack.push(elem);
       continue;
     }
-    if (!elem.selfClosing && !elem.void) stack.push(elem);
+    if (!elem.selfClosing && !elem.void) {
+      elem._line = lineOf(template, tag.start);
+      stack.push(elem);
+    }
     // Surface wiring discovered from descendants.
     if (elem.attrs.onkeydown && elem.name !== 'svelte:window') {
       if (!bodies.has(elem.attrs.onkeydown)) {
@@ -210,6 +272,7 @@ function analyze(template, script, bodies) {
         const e = stack[s];
         if (e.attrs.classes.includes('combobox-wrap') && !e._handler) {
           e._handler = elem.attrs.onkeydown;
+          e._inputRaw = tag.raw;
           break;
         }
       }
@@ -219,9 +282,45 @@ function analyze(template, script, bodies) {
         const e = stack[s];
         if (e.attrs.classes.includes('recovery-banner')) {
           e._hasButton = true;
+          (e._buttons ??= []).push({
+            callee: onclickCallee(tag.raw),
+            text: template.slice(tag.end, template.indexOf('</button>', tag.end)).trim(),
+          });
           break;
         }
       }
+    }
+  }
+
+  // The combobox Esc-close hint must be reversible: the filter input has to
+  // reopen the list on focus and on input, or Esc becomes a one-way trap.
+  for (const box of comboboxes) {
+    const raw = box._inputRaw ?? '';
+    for (const attr of ['onfocus', 'oninput']) {
+      const value = attrValue(raw, attr);
+      if (value === null || !value.includes('= true')) {
+        problems.push(`completion combobox at line ${box._line ?? '?'} is missing ${attr} wiring that reopens the suggestion list after Esc closes it`);
+      }
+    }
+  }
+
+  // The recovery banner's Restore button must route a dirty buffer through
+  // the Save/Discard resolution dialog; otherwise the Tab + Enter hint drifts
+  // from what Restore actually does while editing.
+  for (const banner of banners) {
+    const restore = (banner._buttons ?? []).find(button => button.text.startsWith('Restore'));
+    if (!restore) {
+      problems.push(`recovery banner at line ${banner._line ?? '?'} has no Restore button to route dirty buffers through the resolution dialog`);
+      continue;
+    }
+    if (!restore.callee) {
+      problems.push(`recovery banner Restore button at line ${banner._line ?? '?'} does not call a named handler`);
+      continue;
+    }
+    const body = bodies.get(restore.callee) ?? '';
+    const missing = ['dirty', 'requestResolution', "'restore'"].filter(token => !body.includes(token));
+    if (missing.length > 0) {
+      problems.push(`recovery banner Restore button (${restore.callee}, line ${banner._line ?? '?'}) does not route dirty buffers through the resolution dialog (missing ${missing.join(', ')})`);
     }
   }
 
@@ -359,21 +458,81 @@ const FIXTURES = [
 </div>`,
   },
   {
-    name: 'banner Tab/Enter hints with buttons pass',
+    name: 'combobox with onfocus/oninput reopen wiring passes',
     expect: 0,
-    source: `<script lang="ts"></script>
+    source: `<script lang="ts">
+  function keys(event: KeyboardEvent) {
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Enter' || event.key === 'Escape') return;
+  }
+</script>
+<div class="combobox-wrap">
+  <input onfocus={() => completionOpen = true} oninput={() => completionOpen = true} onkeydown={keys} />
+  <p class="key-hint"><kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> insert · <kbd>Esc</kbd> close</p>
+</div>`,
+  },
+  {
+    name: 'combobox missing the onfocus/oninput reopen wiring fails',
+    expect: 1,
+    source: `<script lang="ts">
+  function keys(event: KeyboardEvent) {
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'Enter' || event.key === 'Escape') return;
+  }
+</script>
+<div class="combobox-wrap">
+  <input onkeydown={keys} />
+  <p class="key-hint"><kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> insert · <kbd>Esc</kbd> close</p>
+</div>`,
+  },
+  {
+    name: 'banner Tab/Enter hints with a dirty-routing Restore pass',
+    expect: 0,
+    source: `<script lang="ts">
+  async function restoreSnapshot(snapshot: { path: string }) {
+    if (dirty) { await requestResolution({ action: 'restore', snapshot }); return; }
+    await openFile(snapshot.path);
+  }
+</script>
 <aside class="recovery-banner">
   <p class="key-hint"><kbd>Tab</kbd> to an action · <kbd>Enter</kbd> runs it</p>
-  <button type="button">Restore</button>
+  <button type="button" onclick={() => restoreSnapshot(snapshot)}>Restore content/index.md</button>
+  <button type="button" onclick={() => clearRecovery(path)}>Discard recovery for content/index.md</button>
+</aside>`,
+  },
+  {
+    name: 'banner Restore without the dirty-buffer routing fails',
+    expect: 1,
+    source: `<script lang="ts">
+  async function restoreSnapshot(snapshot: { path: string }) {
+    await openFile(snapshot.path);
+  }
+</script>
+<aside class="recovery-banner">
+  <p class="key-hint"><kbd>Tab</kbd> to an action · <kbd>Enter</kbd> runs it</p>
+  <button type="button" onclick={() => restoreSnapshot(snapshot)}>Restore content/index.md</button>
+</aside>`,
+  },
+  {
+    name: 'banner with no Restore button fails',
+    expect: 1,
+    source: `<script lang="ts">
+  async function clearRecovery(path: string) {}
+</script>
+<aside class="recovery-banner">
+  <p class="key-hint"><kbd>Tab</kbd> to an action · <kbd>Enter</kbd> runs it</p>
+  <button type="button" onclick={() => clearRecovery(path)}>Discard recovery for content/index.md</button>
 </aside>`,
   },
   {
     name: 'banner hint for a non-native key fails',
     expect: 1,
-    source: `<script lang="ts"></script>
+    source: `<script lang="ts">
+  async function restoreSnapshot(snapshot: { path: string }) {
+    if (dirty) { await requestResolution({ action: 'restore', snapshot }); return; }
+  }
+</script>
 <aside class="recovery-banner">
   <p class="key-hint"><kbd>Alt+R</kbd> restores</p>
-  <button type="button">Restore</button>
+  <button type="button" onclick={() => restoreSnapshot(snapshot)}>Restore content/index.md</button>
 </aside>`,
   },
   {
