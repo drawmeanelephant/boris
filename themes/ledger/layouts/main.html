@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en" data-layout="ledger">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}} · Ledger</title>
+  <link rel="stylesheet" href="{{asset-url assets/ledger.css}}">
+  {{head}}
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar">
+    <span class="logo">Ledger</span>
+  </header>
+
+  <div class="page-wrap">
+    <main id="main-content" class="node-main" tabindex="-1" data-boris-search-root>
+      <div class="crumbs">{{breadcrumb}}</div>
+      {{metadata}}
+      <article class="node-body">
+        <div class="node-copy">{{content}}</div>
+      </article>
+      <section class="writeup-list" aria-labelledby="writeups">
+        <h2 id="writeups">Writeups</h2>
+        {{children}}
+      </section>
+      {{relations}}
+      {{backlinks}}
+    </main>
+
+    <aside class="epicenter" aria-label="Nodelets">
+      <nav class="nodelet" aria-label="Node tracker">
+        <h2>Node Tracker</h2>
+        <div class="nodelet-body">{{nav}}</div>
+      </nav>
+      <section class="nodelet" data-boris-search-exclude>
+        <h2>On this page</h2>
+        <div class="nodelet-body">{{toc}}</div>
+      </section>
+    </aside>
+  </div>
+
+  <footer class="site-footer">{{footer}}</footer>
+</body>
+</html>

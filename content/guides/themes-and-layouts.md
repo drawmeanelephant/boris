@@ -55,9 +55,10 @@ To use a layout directly without the theme shorthand:
 <Aside kind="tip">
 
 Shipped themes live under `themes/`. The default is `themes/boris`. Also
-shipped: `reference`, `press`, `showcase`, and `archive`. Sample sites that
-build them are under `examples/`. The catalog bar is `themes/README.md` in
-the repository.
+shipped: `reference`, `press`, `showcase`, `archive`, `field-notes`,
+`compact`, `cards`, `cozy`, `journal`, `ledger`, and `reading`. Sample sites
+are under `examples/`. The catalog bar is `themes/README.md` in the
+repository.
 
 </Aside>
 

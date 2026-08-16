@@ -24,6 +24,13 @@ themes/<name>/
 | [`press`](press/) | Editorial paper, crimson masthead, serif reading | `--theme themes/press` |
 | [`showcase`](showcase/) | Soft docs + blog shell | `--theme themes/showcase` |
 | [`archive`](archive/) | Ordered long-lived field notes | `--theme themes/archive` |
+| [`field-notes`](field-notes/) | Restrained blue notes | `--theme themes/field-notes` |
+| [`compact`](compact/) | Small-type documentation | `--theme themes/compact` |
+| [`cards`](cards/) | Soft cards and quiet docs | `--theme themes/cards` |
+| [`cozy`](cozy/) | Mid-2000s personal blog | `--theme themes/cozy` |
+| [`journal`](journal/) | Phosphor terminal diary | `--theme themes/journal` |
+| [`ledger`](ledger/) | Dense early-web nodes | `--theme themes/ledger` |
+| [`reading`](reading/) | Typesetting for non-US-docs English | `--theme themes/reading` |
 
 Sample sites that build these themes live under `examples/<name>-site/`.
 
@@ -50,7 +57,9 @@ No theme in this catalog currently ships a font file or a third-party CSS librar
 
 ## Stretch
 
-One extra theme for reading that is not US-docs English is welcome later: system CJK stacks, `:lang(ja)` / `:lang(zh)` / `:lang(ko)`, no costume chrome. It is not required for this catalog.
+[`reading`](reading/) is the one non-US-docs typesetting theme: system CJK
+stacks and `:lang(ja)` / `:lang(zh)` / `:lang(ko)`. It is not a costume set
+and it does not vendor webfonts.
 
 ## Related
 

@@ -1,0 +1,80 @@
+/* Reading: system stacks only. No shipped webfonts. */
+:root {
+  color-scheme: light dark;
+  --ink: CanvasText;
+  --paper: Canvas;
+  --muted: color-mix(in srgb, CanvasText 58%, Canvas);
+  --line: color-mix(in srgb, CanvasText 16%, transparent);
+  --measure: 42rem;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.65;
+}
+
+html { background: var(--paper); color: var(--ink); }
+* { box-sizing: border-box; }
+body { margin: 0 auto; max-width: 76rem; padding: 1rem 1.25rem 3rem; }
+a { color: inherit; text-underline-offset: 0.16em; }
+:focus-visible { outline: 3px solid color-mix(in srgb, CanvasText 55%, transparent); outline-offset: 3px; }
+.skip-link { position: absolute; left: 1rem; top: -4rem; z-index: 5; padding: 0.4rem 0.65rem; background: var(--ink); color: var(--paper); text-decoration: none; }
+.skip-link:focus { top: 1rem; }
+
+.site-header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.75rem; margin-bottom: 1.5rem; padding-bottom: 0.85rem; border-bottom: 1px solid var(--line); }
+.brand { margin: 0; font-weight: 750; letter-spacing: -0.03em; }
+.breadcrumb ol { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0; padding: 0; list-style: none; color: var(--muted); font-size: 0.88rem; }
+.breadcrumb li + li::before { content: "/"; margin-right: 0.3rem; opacity: 0.5; }
+
+.shell { display: grid; gap: 1.25rem; }
+@media (min-width: 52rem) {
+  .shell { grid-template-columns: 13rem minmax(0, 1fr) 11rem; align-items: start; }
+  .rail { position: sticky; top: 1rem; }
+}
+.rail { font-size: 0.9rem; }
+.site-nav ul, .page-toc ul, .page-children ul { margin: 0; padding: 0; list-style: none; }
+.site-nav ul ul { margin: 0.2rem 0 0.3rem 0.55rem; padding-left: 0.55rem; border-inline-start: 1px solid var(--line); }
+.site-nav a, .page-toc a { display: inline-block; padding: 0.15rem 0.25rem; color: inherit; text-decoration: none; }
+.site-nav a:hover, .page-toc a:hover, .site-nav .is-current > a { text-decoration: underline; }
+.site-nav .is-current > a { font-weight: 750; }
+
+main { min-width: 0; max-width: var(--measure); }
+.page-metadata { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin: 0 0 1.2rem; color: var(--muted); font-size: 0.8rem; }
+.page-metadata dt { font-weight: 750; }
+.page-metadata dd { margin: 0; }
+.prose > :first-child { margin-top: 0; }
+.prose h1, .prose h2, .prose h3 { line-height: 1.25; letter-spacing: -0.02em; }
+.prose pre { overflow-x: auto; padding: 0.85rem; border: 1px solid var(--line); }
+.prose :not(pre) > code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+.prose table { display: block; overflow-x: auto; border-collapse: collapse; }
+.prose th, .prose td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); text-align: start; }
+.admonition { margin: 1.2rem 0; padding: 0.75rem 0.9rem; border-inline-start: 0.25rem solid var(--ink); background: color-mix(in srgb, CanvasText 5%, Canvas); }
+.page-children, .semantic-relations, .semantic-backlinks { margin-top: 2rem; }
+.site-footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.85rem; }
+
+/* CJK: taller measure, no italic-as-emphasis. System faces only. */
+:lang(ja) {
+  font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans CJK JP", sans-serif;
+  line-height: 1.9;
+  line-break: strict;
+}
+:lang(zh) {
+  font-family: "PingFang SC", "PingFang TC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  line-height: 1.85;
+  line-break: strict;
+}
+:lang(ko) {
+  font-family: "Apple SD Gothic Neo", "Noto Sans CJK KR", "Malgun Gothic", sans-serif;
+  line-height: 1.85;
+  word-break: keep-all;
+}
+:lang(ja) em, :lang(zh) em, :lang(ko) em,
+:lang(ja) i, :lang(zh) i, :lang(ko) i { font-style: normal; font-weight: 650; }
+.specimen { margin: 1.5rem 0; padding: 1rem 1.1rem; border: 1px solid var(--line); }
+.specimen p { margin: 0.65rem 0 0; }
+.specimen p:first-child { margin-top: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+@media print {
+  .skip-link, .rail { display: none; }
+  .shell { display: block; }
+}
