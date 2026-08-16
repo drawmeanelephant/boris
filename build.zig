@@ -503,6 +503,20 @@ pub fn build(b: *std.Build) void {
     );
     test_source_provider_step.dependOn(&run_source_provider_tests.step);
 
+    const artifact_sink_mod = b.createModule(.{
+        .root_source_file = b.path("src/artifact_sink.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const artifact_sink_tests = b.addTest(.{ .root_module = artifact_sink_mod });
+    const run_artifact_sink_tests = b.addRunArtifact(artifact_sink_tests);
+    run_artifact_sink_tests.setCwd(b.path("."));
+    const test_artifact_sink_step = b.step(
+        "test-artifact-sink",
+        "Run in-memory artifact-sink tests",
+    );
+    test_artifact_sink_step.dependOn(&run_artifact_sink_tests.step);
+
     // --- Frontmatter parser tests (milestone 5) ----------------------------
     const parser_mod = b.createModule(.{
         .root_source_file = b.path("src/parser.zig"),
@@ -1691,6 +1705,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_fixtures_tests.step);
     test_step.dependOn(&run_scanner_tests.step);
     test_step.dependOn(&run_source_provider_tests.step);
+    test_step.dependOn(&run_artifact_sink_tests.step);
     test_step.dependOn(&run_parser_tests.step);
     test_step.dependOn(&run_textile_tests.step);
     test_step.dependOn(&run_cooklang_tests.step);
