@@ -84,9 +84,12 @@ then atomically renames it into place.
 - **Undo / redo** — session-local, keyboard-driven (`Ctrl/Cmd+Z`, `Ctrl/Cmd+
   Shift+Z`) and via the toolbar.
 - **Recovery snapshots** — dirty buffers are snapshotted to the disposable OS
-  user-cache state root. A later editor process labels them as *recovered
+  user-cache state root on the first unsaved change, then periodically, and
+  again when the tab hides. A later editor process labels them as *recovered
   unsaved work* and requires an explicit **Restore** or **Discard** action;
-  recovery data never becomes repository truth unless you save it.
+  recovery data never becomes repository truth unless you save it. If the
+  editor host stops, the tab says to restart `boris-editor` and open the new
+  launch URL.
 
 There is no autosave: an explicit save is the only path from your buffer to
 disk.
