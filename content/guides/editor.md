@@ -119,6 +119,8 @@ Schema suggestions are available before any IR artifact exists. Graph-backed
 categories (entities, wiki-links, parents, relations, layout slots) explain
 that **Build diagnostics** is required to create the completion index; after a
 successful IR build the UI reloads `completion.json` without a restart.
+Opening the project, saving, running a Boris command, rebuilding preview,
+and refreshing completion name the wait and how long it took.
 
 Insertion is explicit and undoable — there is no typing-time rewrite of your
 source. The native textarea remains the editing surface.
