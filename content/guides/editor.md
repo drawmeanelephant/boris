@@ -143,6 +143,23 @@ If diagnostics have not been built yet, the pane says so instead of guessing.
 
 ---
 
+## Cooklang recipes
+
+If `content/` is a `.cook`-only tree, the editor treats it as a Cooklang
+project. Boris commands and preview run with `--cooklang`. Opening a recipe
+shows a read-only **Recipe** pane from the compiler `recipe` facet:
+ingredients, cookware, timers, and `recipeRef` links to other recipes. Print
+uses that facet, not a second renderer.
+
+Quantities stay the strings the author wrote. Scaling is not available until
+Boris defines it ([issue 554](https://github.com/drawmeanelephant/boris/issues/554)).
+Graph diagnostics that are not `ECOOKLANG` are marked **position
+approximate** because Boris locates them on adapted Markdown.
+
+- [[guides/building-pages|Building and writing pages]] — frontmatter and relations on recipe pages too
+
+---
+
 ## Compiler-backed commands and problems
 
 The Problems pane runs a fixed allowlist of Boris invocations against saved

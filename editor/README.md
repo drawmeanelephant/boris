@@ -222,3 +222,27 @@ graph build.
 
 M6 deliberately does not add an editable graph database, a second graph
 model, heading-fragment navigation, or theme/layout diagnostics.
+
+## M7 Cooklang / restaurant authoring
+
+A content tree of only `.cook` pages is a Cooklang project. Health reports
+`input_mode: cooklang`, and every fixed Boris invocation (validate, IR/HTML
+build, check, impact, preview) adds `--cooklang`. Mixed trees stay mixed and
+fail the way Boris fails; the editor does not guess a dialect.
+
+The Recipe pane is a read-only view of the compiler `recipe` facet on
+`graph.json` (IR 0.4.0): ingredients, cookware, timers, string quantities, and
+`recipeRef` navigation. `.cook` remains the source of truth. Scaling is not
+implemented; that is [Boris issue 554](https://github.com/drawmeanelephant/boris/issues/554).
+Graph diagnostics on `.cook` pages that are not `ECOOKLANG` keep the existing
+best-effort confidence and are labeled as approximate (adapted Markdown locus).
+
+The M7 gate adds:
+
+```bash
+./editor/scripts/test-cooklang.sh \
+  ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
+```
+
+M7 deliberately does not add editor-local scaling, structured write-back,
+pantry, `.menu`, shopping lists, or nutrition/allergen claims.

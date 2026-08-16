@@ -7,6 +7,7 @@ const std = @import("std");
 const Io = std.Io;
 const contracts = @import("contracts.zig");
 const diagnostic_packet = @import("diagnostic_packet.zig");
+const project = @import("project.zig");
 
 pub const Mode = enum {
     validate,
@@ -165,26 +166,41 @@ pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Reques
 }
 
 fn execute(allocator: std.mem.Allocator, io: Io, config: Config, request: Request) !std.process.RunResult {
-    const common: std.process.RunOptions = .{
-        .argv = undefined,
+    const discovered = project.discover(io, config.project_root) catch project.Discovery{
+        .content = false,
+        .default_layout = false,
+        .publication_profile = false,
+        .input_mode = .empty,
+    };
+    const argv = try commandArgv(allocator, config.boris_path, request, discovered.input_mode);
+    defer allocator.free(argv);
+    return std.process.run(allocator, io, .{
+        .argv = argv,
         .cwd = .{ .path = config.project_root },
         .stdout_limit = .limited(max_process_output),
         .stderr_limit = .limited(max_process_output),
         .timeout = .{ .duration = .{ .clock = .awake, .raw = .fromSeconds(120) } },
-    };
-    return switch (request.mode) {
-        .validate => std.process.run(allocator, io, withArgv(common, &.{ config.boris_path, "validate", "--input", "content" })),
-        .ir_build => std.process.run(allocator, io, withArgv(common, &.{ config.boris_path, "build", "--input", "content", "--out", ".boris" })),
-        .html_build => std.process.run(allocator, io, withArgv(common, &.{ config.boris_path, "build", "--input", "content", "--html-dir", "dist" })),
-        .check => std.process.run(allocator, io, withArgv(common, &.{ config.boris_path, "check", "--input", "content", "--format", "json", "--report", ".boris/" ++ check_report_name })),
-        .impact => std.process.run(allocator, io, withArgv(common, &.{ config.boris_path, "impact", request.impact_id.?, "--input", "content", "--format", "json", "--report", ".boris/" ++ impact_report_name })),
-    };
+    });
 }
 
-fn withArgv(options: std.process.RunOptions, argv: []const []const u8) std.process.RunOptions {
-    var result = options;
-    result.argv = argv;
-    return result;
+pub fn commandArgv(
+    allocator: std.mem.Allocator,
+    boris_path: []const u8,
+    request: Request,
+    input_mode: project.InputMode,
+) ![]const []const u8 {
+    var args: std.ArrayList([]const u8) = .empty;
+    errdefer args.deinit(allocator);
+    try args.append(allocator, boris_path);
+    switch (request.mode) {
+        .validate => try args.appendSlice(allocator, &.{ "validate", "--input", "content" }),
+        .ir_build => try args.appendSlice(allocator, &.{ "build", "--input", "content", "--out", ".boris" }),
+        .html_build => try args.appendSlice(allocator, &.{ "build", "--input", "content", "--html-dir", "dist" }),
+        .check => try args.appendSlice(allocator, &.{ "check", "--input", "content", "--format", "json", "--report", ".boris/" ++ check_report_name }),
+        .impact => try args.appendSlice(allocator, &.{ "impact", request.impact_id.?, "--input", "content", "--format", "json", "--report", ".boris/" ++ impact_report_name }),
+    }
+    if (input_mode == .cooklang) try args.append(allocator, "--cooklang");
+    return args.toOwnedSlice(allocator);
 }
 
 fn readCompilerId(allocator: std.mem.Allocator, io: Io, config: Config) ![]const u8 {
@@ -579,4 +595,16 @@ test "impact ids cannot become command options" {
     try validateImpactId("guides/getting-started");
     try std.testing.expectError(error.InvalidImpactId, validateImpactId("--help"));
     try std.testing.expectError(error.InvalidImpactId, validateImpactId("bad\nvalue"));
+}
+
+test "cooklang trees append the compiler selector; markdown trees do not" {
+    const allocator = std.testing.allocator;
+    const cook = try commandArgv(allocator, "boris", .{ .mode = .validate }, .cooklang);
+    defer allocator.free(cook);
+    try std.testing.expectEqualStrings("--cooklang", cook[cook.len - 1]);
+
+    const md = try commandArgv(allocator, "boris", .{ .mode = .ir_build }, .markdown);
+    defer allocator.free(md);
+    try std.testing.expect(md.len >= 2);
+    try std.testing.expect(!std.mem.eql(u8, md[md.len - 1], "--cooklang"));
 }

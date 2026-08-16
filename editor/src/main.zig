@@ -176,6 +176,7 @@ test {
     _ = diagnostic_packet;
     _ = file_api;
     _ = preview;
+    _ = project;
     _ = recovery;
     _ = runner;
     _ = security;

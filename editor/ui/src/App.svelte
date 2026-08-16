@@ -4,7 +4,7 @@
   type Health = {
     status: string;
     editor_id: string;
-    project: { content: boolean; default_layout: boolean; publication_profile: boolean };
+    project: { content: boolean; default_layout: boolean; publication_profile: boolean; input_mode?: 'markdown' | 'cooklang' | 'textile' | 'mixed' | 'empty' };
   };
   type Version = { compiler_id: string };
   type FileEntry = { path: string };
@@ -81,9 +81,14 @@
   type Suggestion = { value: string; insert: string; detail: string };
   type PreviewState = { phase: 'idle' | 'running' | 'success' | 'failed' | 'stale'; generation: number; exit_code: number | null; used_stderr_fallback: boolean; message: string; preview_url: string };
   type GraphEndpoint = { type: 'page' | 'source'; value: string };
+  type RecipeQuantity = { amount: string; unit: string };
+  type RecipeIngredient = { name: string; quantity: RecipeQuantity; preparation: string; recipeRef: string | null };
+  type RecipeItem = { name: string; quantity: RecipeQuantity };
+  type RecipeFacet = { ingredients: RecipeIngredient[]; cookware: RecipeItem[]; timers: RecipeItem[] };
   type GraphNode = {
     index: number; id: string; sourcePath: string; role: string; parent: string | null;
     parentIndex: number | null; title: string | null; status: string | null; tags: string[]; bodyOffset: number;
+    recipe?: RecipeFacet | null;
   };
   type GraphEdge = { from: GraphEndpoint; to: GraphEndpoint; kind: 'parent' | 'include' | 'reference' };
   type GraphNav = { index: number; id: string; breadcrumb: number[]; children: number[]; siblings: number[] };
@@ -137,6 +142,7 @@
   let skipFocusRestore = false;
   let graphPayload: GraphPayload | null = null;
   let graphStatus = 'Loading the Boris graph…';
+  let inputMode: NonNullable<Health['project']['input_mode']> = 'empty';
 
   $: dirty = activePath !== '' && content !== baseline;
   $: problemGroups = groupProblems(commandResult?.problems ?? []);
@@ -257,9 +263,11 @@
       const health = healthResult.data;
       connection = `Connected to ${health.editor_id}.`;
       compiler = `Compiler: ${versionResult.data.compiler_id}`;
+      inputMode = health.project.input_mode ?? 'empty';
       project = health.project.content
-        ? `Project found${health.project.publication_profile ? ' with boris.json' : ''}.`
+        ? `Project found${health.project.publication_profile ? ' with boris.json' : ''}${inputMode === 'cooklang' ? '; Cooklang tree (--cooklang)' : ''}.`
         : 'This folder is not a Boris project.';
+      if (inputMode === 'cooklang') createPath = 'content/new-recipe.cook';
       files = filesResult.data.files;
       if (authoringResult.response.ok) setAuthoring(authoringResult.data);
       else authoringStatus = 'Boris authoring vocabulary is unavailable.';
@@ -576,6 +584,50 @@
     await runCommand('impact');
   }
 
+  function quantityLabel(quantity: RecipeQuantity): string {
+    return [quantity.amount, quantity.unit].filter(part => part.trim() !== '').join(' ');
+  }
+
+  function printRecipe() {
+    if (!activeNode?.recipe) return;
+    const recipe = activeNode.recipe;
+    const title = activeNode.title ?? activeNode.id;
+    const rows = (items: Array<{ name: string; extra?: string; qty: string }>) =>
+      items.map(item => `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.qty)}</td><td>${escapeHtml(item.extra ?? '')}</td></tr>`).join('');
+    const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+<style>body{font:16px/1.45 ui-serif,Georgia,serif;margin:1.5rem;color:#17201d}h1{font-size:1.6rem}table{width:100%;border-collapse:collapse;margin:0 0 1.25rem}th,td{text-align:left;padding:.35rem .4rem;border-bottom:1px solid #ccd6cf}p.note{color:#53625c;font-size:.9rem}</style>
+</head><body>
+<h1>${escapeHtml(title)}</h1>
+<p class="note">Read-only Boris recipe facet. Quantities are author strings. Scaling is not a Boris contract (issue 554).</p>
+<h2>Ingredients</h2>
+<table><thead><tr><th>Name</th><th>Quantity</th><th>Preparation / recipe</th></tr></thead><tbody>
+${rows(recipe.ingredients.map(item => ({ name: item.name, qty: quantityLabel(item.quantity), extra: item.recipeRef ? `recipe ${item.recipeRef}` : item.preparation })))}
+</tbody></table>
+<h2>Cookware</h2>
+<table><thead><tr><th>Name</th><th>Quantity</th><th></th></tr></thead><tbody>
+${rows(recipe.cookware.map(item => ({ name: item.name, qty: quantityLabel(item.quantity) })))}
+</tbody></table>
+<h2>Timers</h2>
+<table><thead><tr><th>Name</th><th>Quantity</th><th></th></tr></thead><tbody>
+${rows(recipe.timers.map(item => ({ name: item.name || 'timer', qty: quantityLabel(item.quantity) })))}
+</tbody></table>
+</body></html>`;
+    const printer = window.open('', 'boris-recipe-print');
+    if (!printer) {
+      editorStatus = 'Could not open the recipe print view. Allow pop-ups for this local editor.';
+      return;
+    }
+    printer.document.open();
+    printer.document.write(html);
+    printer.document.close();
+    printer.focus();
+    printer.print();
+  }
+
+  function escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] ?? character));
+  }
+
   async function navigateToProblem(problem: Problem | AnalysisFinding) {
     if (!problem.source_path) return;
     const path = projectPathForProblem(problem.source_path);
@@ -853,6 +905,15 @@
     }
   }
 
+  function defaultCreatePath(): string {
+    return inputMode === 'cooklang' ? 'content/new-recipe.cook' : 'content/new-page.md';
+  }
+
+  function openCreateDialog() {
+    createPath = defaultCreatePath();
+    openModal(createDialog);
+  }
+
   function openRenameDialog() {
     renamePath = activePath;
     openModal(renameDialog);
@@ -949,6 +1010,7 @@
     skipFocusRestore = true;
     paletteDialog.close();
     if (item.kind === 'create') {
+      createPath = defaultCreatePath();
       createDialog.showModal();
     } else if (item.kind === 'rename') {
       renamePath = activePath;
@@ -1172,7 +1234,7 @@
       <p>{compiler}</p>
     </div>
     <div class="file-actions" aria-label="File actions">
-      <button type="button" disabled={dirty} onclick={() => openModal(createDialog)}>Create file</button>
+      <button type="button" disabled={dirty} onclick={openCreateDialog}>Create file</button>
       <button type="button" disabled={!activePath || dirty} onclick={openRenameDialog}>Rename file</button>
       <button type="button" class="danger" disabled={!activePath || dirty} onclick={openDeleteDialog}>Delete file</button>
     </div>
@@ -1368,6 +1430,60 @@
           <p>This file is not a page in the Boris graph.</p>
         {/if}
       </section>
+      {#if activeNode?.recipe}
+        <section class="recipe-pane" aria-labelledby="recipe-heading">
+          <div class="problems-heading">
+            <div>
+              <h3 id="recipe-heading">Recipe</h3>
+              <p>Read-only Boris <code>recipe</code> facet. Source remains the <code>.cook</code> file. Scaling is not available.</p>
+            </div>
+            <button type="button" onclick={printRecipe}>Print this recipe</button>
+          </div>
+          <p class="fallback-notice">Boris has no scaling contract. Quantities stay author strings. See issue 554.</p>
+          <h4>Ingredients</h4>
+          <table class="recipe-table">
+            <thead><tr><th>Name</th><th>Quantity</th><th>Preparation</th><th>Recipe reference</th></tr></thead>
+            <tbody>
+              {#each activeNode.recipe.ingredients as ingredient, ingredientIndex (`${ingredient.name}-${ingredientIndex}`)}
+                <tr>
+                  <td>{ingredient.name}</td>
+                  <td>{quantityLabel(ingredient.quantity) || '—'}</td>
+                  <td>{ingredient.preparation || '—'}</td>
+                  <td>
+                    {#if ingredient.recipeRef && nodeForId(graphPayload?.graph ?? null, ingredient.recipeRef)}
+                      <button type="button" onclick={() => openGraphNode(nodeForId(graphPayload?.graph ?? null, ingredient.recipeRef!))}>
+                        Go to recipe {ingredient.recipeRef}
+                      </button>
+                    {:else if ingredient.recipeRef}
+                      {ingredient.recipeRef}
+                    {:else}
+                      —
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+          <h4>Cookware</h4>
+          <table class="recipe-table">
+            <thead><tr><th>Name</th><th>Quantity</th></tr></thead>
+            <tbody>
+              {#each activeNode.recipe.cookware as item, itemIndex (`cookware-${item.name}-${itemIndex}`)}
+                <tr><td>{item.name}</td><td>{quantityLabel(item.quantity) || '—'}</td></tr>
+              {/each}
+            </tbody>
+          </table>
+          <h4>Timers</h4>
+          <table class="recipe-table">
+            <thead><tr><th>Name</th><th>Quantity</th></tr></thead>
+            <tbody>
+              {#each activeNode.recipe.timers as timer, timerIndex (`timer-${timer.name}-${timerIndex}`)}
+                <tr><td>{timer.name || 'timer'}</td><td>{quantityLabel(timer.quantity) || '—'}</td></tr>
+              {/each}
+            </tbody>
+          </table>
+        </section>
+      {/if}
       <p class:warning={dirty || readOnly} class="buffer-state">
         {readOnly ? 'Read-only file' : dirty ? 'Unsaved changes' : 'Saved on disk'}
       </p>
@@ -1447,7 +1563,9 @@
                   {problem.position_confidence === 'exact'
                     ? 'Exact compiler-reported source position'
                     : problem.position_confidence === 'best_effort'
-                      ? 'Best-effort source position'
+                      ? (problem.source_path?.endsWith('.cook') && problem.code !== 'ECOOKLANG'
+                        ? 'Position approximate: graph diagnostic on adapted Markdown, not the .cook line'
+                        : 'Best-effort source position')
                       : 'No source position reported'}
                 </p>
                 <div class="problem-actions">
@@ -1566,7 +1684,7 @@
   </div>
 </dialog>
 
-<dialog bind:this={createDialog} onkeydown={handleDialogKeydown} onclose={() => { createPath = 'content/new-page.md'; restoreDialogFocus(); }} aria-labelledby="create-heading">
+<dialog bind:this={createDialog} onkeydown={handleDialogKeydown} onclose={() => { createPath = defaultCreatePath(); restoreDialogFocus(); }} aria-labelledby="create-heading">
   <h2 id="create-heading">Create file</h2>
   <p>Use a project-relative path under content/ or themes/, or boris.json.</p>
   <form onsubmit={(event) => { event.preventDefault(); void createFile(); }}>

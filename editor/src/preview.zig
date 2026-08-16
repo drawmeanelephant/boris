@@ -7,6 +7,7 @@ const std = @import("std");
 const Io = std.Io;
 const http = std.http;
 const net = std.Io.net;
+const project = @import("project.zig");
 
 pub const Phase = enum { idle, running, success, failed, stale };
 
@@ -37,8 +38,18 @@ pub const Manager = struct {
         self.exit_code = null;
         self.used_stderr_fallback = false;
         self.setMessage("Boris incremental preview build is running.");
+        const discovered = project.discover(io, self.project_root) catch project.Discovery{
+            .content = false,
+            .default_layout = false,
+            .publication_profile = false,
+            .input_mode = .empty,
+        };
+        const argv: []const []const u8 = if (discovered.input_mode == .cooklang)
+            &.{ self.boris_path, "build", "--input", "content", "--incremental", "--html-dir", "dist", "--cooklang" }
+        else
+            &.{ self.boris_path, "build", "--input", "content", "--incremental", "--html-dir", "dist" };
         const execution = std.process.run(allocator, io, .{
-            .argv = &.{ self.boris_path, "build", "--input", "content", "--incremental", "--html-dir", "dist" },
+            .argv = argv,
             .cwd = .{ .path = self.project_root },
             .stdout_limit = .limited(16 * 1024 * 1024),
             .stderr_limit = .limited(16 * 1024 * 1024),
