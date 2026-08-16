@@ -54,6 +54,20 @@ pub const AcquiredSession = union(enum) {
     }
 };
 
+/// When the profile omits `pds`, publish binds to the PDS discovered from
+/// the DID document. When the profile sets `pds`, it must match that origin
+/// after HTTPS origin parse (ASCII-lowercased so an uppercase host is not a
+/// false mismatch).
+fn bindProfilePds(profile_pds: ?[]const u8, discovered: []const u8) Error!void {
+    const raw = profile_pds orelse return;
+    var lowered: [identity.max_origin_bytes]u8 = undefined;
+    if (raw.len == 0 or raw.len > lowered.len) return error.PdsOriginMismatch;
+    for (raw, 0..) |byte, index| lowered[index] = std.ascii.toLower(byte);
+    const parsed = identity.Origin.parse(lowered[0..raw.len]) catch return error.PdsOriginMismatch;
+    if (std.mem.eql(u8, parsed.slice(), discovered)) return;
+    return error.PdsOriginMismatch;
+}
+
 /// Whether an acquired session's identity facts match fresh discovery. The
 /// OAuth form also pins the authorization server; the app-password form has no
 /// authorization server, so only DID + PDS are bound.
@@ -139,8 +153,7 @@ pub fn publish(
 ) Error!reconcile.Evidence {
     var account = try identity.discover(gpa, runtime.client, config.did);
 
-    const bound_pds = config.pds_origin orelse return error.PdsOriginMismatch;
-    if (!std.mem.eql(u8, bound_pds, account.pds_origin.slice())) return error.PdsOriginMismatch;
+    try bindProfilePds(config.pds_origin, account.pds_origin.slice());
 
     var session = try runtime.session_fn(runtime.session_ctx, gpa, runtime.io, runtime.client, account);
     defer session.deinit();
@@ -822,6 +835,37 @@ test "PDS binding mismatch fails closed before any authorization" {
     try std.testing.expectEqual(@as(usize, 0), mock.par_calls);
     try std.testing.expectEqual(@as(usize, 0), mock.token_calls);
     try std.testing.expectEqual(@as(usize, 0), mock.puts);
+}
+
+test "omitted profile pds binds to the discovered origin" {
+    const gpa = std.testing.allocator;
+    var setup = try TestSetup.init(gpa);
+    defer setup.deinit(gpa);
+    if (setup.config.pds_origin) |previous| gpa.free(previous);
+    setup.config.pds_origin = null;
+    var mock = MockHost.init(gpa);
+    defer mock.deinit();
+    const runtime = testRuntime(std.testing.io, &mock);
+
+    var evidence = try publish(gpa, &runtime, &setup.config, &setup.projection, setup.plan, setup.digest, false, test_bindings);
+    defer evidence.deinit(gpa);
+    try std.testing.expect(evidence.overall_passed);
+    try std.testing.expectEqualStrings(test_pds, evidence.pds_origin);
+}
+
+test "profile pds host is compared after ASCII lowercasing" {
+    const gpa = std.testing.allocator;
+    var setup = try TestSetup.init(gpa);
+    defer setup.deinit(gpa);
+    if (setup.config.pds_origin) |previous| gpa.free(previous);
+    setup.config.pds_origin = try gpa.dupe(u8, "https://PDS.EXAMPLE.COM");
+    var mock = MockHost.init(gpa);
+    defer mock.deinit();
+    const runtime = testRuntime(std.testing.io, &mock);
+
+    var evidence = try publish(gpa, &runtime, &setup.config, &setup.projection, setup.plan, setup.digest, false, test_bindings);
+    defer evidence.deinit(gpa);
+    try std.testing.expect(evidence.overall_passed);
 }
 
 test "a rejected record fails overall but the rest still publish, with evidence" {

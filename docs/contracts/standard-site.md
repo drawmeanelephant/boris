@@ -44,6 +44,7 @@ location values and these Standard.site fields:
 | `show_in_discover` | `preferences.showInDiscover` hint | boolean |
 | `include` / `exclude` | Page filters | glob patterns; filters apply to entity ids |
 | `prune` | Delete records absent from the projection | boolean (write-command input) |
+| `pds` | Optional pin of the write PDS origin | omitted → publish binds to the PDS discovered from the DID document; if set, HTTPS origin that must match that discovery after parse |
 
 The location invariant from
 [`publication-platforms.md`](publication-platforms.md) holds: `base_url` must
