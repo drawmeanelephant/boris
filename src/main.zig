@@ -7,6 +7,7 @@
 //! + exports a deterministic corpus.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const cli = @import("cli.zig");
 const diagnostic = @import("diagnostic.zig");
@@ -35,7 +36,10 @@ const standard_site_publish = @import("standard_site_publish.zig");
 const html_body = @import("html_body.zig");
 const source_io = @import("source_io.zig");
 const atproto_authorization = @import("atproto_authorization.zig");
+const atproto_dns_std = @import("atproto_dns_std.zig");
+const atproto_handle = @import("atproto_handle.zig");
 const atproto_identity = @import("atproto_identity.zig");
+const atproto_password = @import("atproto_password.zig");
 const atproto_transport = @import("atproto_transport.zig");
 const atproto_transport_std = @import("atproto_transport_std.zig");
 const atproto_interactive_std = @import("atproto_interactive_std.zig");
@@ -505,10 +509,11 @@ fn resolveSessionRoot(gpa: std.mem.Allocator, environ: *std.process.Environ.Map,
     return atproto_session_std.Sessions.userRoot(gpa, environ.*, opts.session_root);
 }
 
-/// Provides the session for a publish run. The persistent store wins: a
-/// stored session is loaded and refreshed without the browser. Only when no
-/// session exists does the provider run the interactive one-shot flow, and it
-/// immediately persists the result so future publishes skip the browser.
+/// Provides the session for a publish/smoke run. The persistent store wins:
+/// a stored session — OAuth first (the primary path), then app-password — is
+/// loaded and refreshed without the browser. Only when no session exists does
+/// the provider run the interactive one-shot OAuth flow, and it immediately
+/// persists the result so future publishes skip the browser.
 const SessionProvider = struct {
     sessions: *atproto_session_std.Sessions,
     proof_source: atproto_interactive_std.NativeProofSource,
@@ -520,14 +525,26 @@ const SessionProvider = struct {
         io: std.Io,
         client: atproto_transport.Client,
         account: atproto_identity.DiscoveredAccount,
-    ) standard_site_publish.Error!atproto_authorization.AuthorizedSession {
+    ) standard_site_publish.Error!standard_site_publish.AcquiredSession {
         const self: *SessionProvider = @ptrCast(@alignCast(ctx));
         const now_seconds = standard_site_publish.wallClockSeconds(io);
         if (now_seconds < 0) return error.InvalidWallClock;
         const now: u64 = @intCast(now_seconds);
 
+        // OAuth is the default and primary path.
         if (self.sessions.acquire(account.did.slice(), client, self.proof_source.source(), now)) |session| {
-            return session;
+            return .{ .oauth = session };
+        } else |err| switch (err) {
+            // No OAuth session, or the stored document is an app-password
+            // document (wrong format tag) — try the app-password path.
+            error.NoSession, error.StoreCorrupt => {},
+            else => return err,
+        }
+
+        // A stored app-password session (never a fallback inside the OAuth
+        // flow; a distinct, separately-stored credential).
+        if (self.sessions.acquirePassword(account.did.slice(), client, now)) |session| {
+            return .{ .app_password = session };
         } else |err| switch (err) {
             error.NoSession => {}, // fall through to the interactive flow
             else => return err,
@@ -540,7 +557,7 @@ const SessionProvider = struct {
         if (!self.quiet) {
             std.debug.print("standard-site: saved a persistent session for {s}; future publishes will not open the browser\n", .{account.did.slice()});
         }
-        return session;
+        return .{ .oauth = session };
     }
 };
 
@@ -550,6 +567,7 @@ const SessionProvider = struct {
 /// and persist the DPoP-bound session (tokens and key seed, 0600, atomic
 /// replace) under the user-scoped session root. Never prints token material.
 pub fn runStandardSiteLogin(io: Io, gpa: std.mem.Allocator, opts: Options, environ: *std.process.Environ.Map) ExitCode {
+    if (opts.app_password) return runStandardSiteLoginAppPassword(io, gpa, opts, environ);
     const did_text = opts.session_did orelse return .usage;
     const root = resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
     defer gpa.free(root);
@@ -578,6 +596,170 @@ pub fn runStandardSiteLogin(io: Io, gpa: std.mem.Allocator, opts: Options, envir
         std.debug.print("standard-site: signed in {s} (PDS {s}); session stored securely\n", .{ account.did.slice(), account.pds_origin.slice() });
     }
     return .success;
+}
+
+/// Upper bound on an app password read from stdin. ATProto app passwords are
+/// short (`xxxx-xxxx-xxxx-xxxx`); the bound exists only to fail closed on a
+/// hostile or accidental oversized input.
+const max_app_password_bytes = 1024;
+
+/// `boris standard-site login --app-password (--did DID | --handle HANDLE)`
+///
+/// Resolve the identity to a DID + PDS origin, disclose the broad write access
+/// this path grants, read the app password from stdin (never argv/env/profile),
+/// authenticate with `com.atproto.server.createSession`, and persist the
+/// Bearer session under the shared store root. The credential and both JWTs
+/// never appear in diagnostics, logs, evidence, or the human summary.
+pub fn runStandardSiteLoginAppPassword(io: Io, gpa: std.mem.Allocator, opts: Options, environ: *std.process.Environ.Map) ExitCode {
+    const transport_std = atproto_transport_std.StdTransport.create(gpa, io) catch |err| {
+        std.debug.print("error: unable to start the ATProto transport: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer transport_std.destroy();
+
+    var did: atproto_identity.Did = undefined;
+    var pds_origin: atproto_identity.Origin = undefined;
+    resolveAppPasswordIdentity(gpa, io, opts, transport_std.client(), &did, &pds_origin) catch |err| {
+        return reportAppPasswordLoginError(err);
+    };
+
+    // Disclosed before prompting, and never suppressed: this is the security
+    // boundary the operator opts into, not progress chatter.
+    std.debug.print("standard-site: --app-password grants broad account write access to {s} on {s} (not just the Standard.site scope). Revoke it under App Passwords in your provider's account settings.\n", .{ did.slice(), pds_origin.slice() });
+
+    const app_password = readAppPasswordFromStdin(gpa, io) catch |err| {
+        return reportAppPasswordLoginError(err);
+    };
+    defer {
+        std.crypto.secureZero(u8, app_password);
+        gpa.free(app_password);
+    }
+
+    var session = atproto_password.createSession(gpa, transport_std.client(), pds_origin, did, app_password) catch |err| {
+        return reportAppPasswordLoginError(err);
+    };
+    defer session.deinit();
+    const now_seconds = standard_site_publish.wallClockSeconds(io);
+    if (now_seconds < 0) return reportSessionError(error.InvalidWallClock);
+    session.markObtained(@intCast(now_seconds));
+
+    const root = resolveSessionRoot(gpa, environ, opts) catch |err| return reportSessionError(err);
+    defer gpa.free(root);
+    var sessions = atproto_session_std.Sessions.open(gpa, io, root) catch |err| return reportSessionError(err);
+    defer sessions.deinit();
+    sessions.storeNewPassword(did.slice(), &session) catch |err| return reportSessionError(err);
+    if (!opts.quiet) {
+        std.debug.print("standard-site: signed in {s} (PDS {s}) with an app password; session stored securely\n", .{ did.slice(), pds_origin.slice() });
+    }
+    return .success;
+}
+
+/// Resolve the login identity (`--did` or `--handle`) to a DID + PDS origin.
+/// The app-password path deliberately stops at the DID document — it never
+/// requires the OAuth authorization-server metadata that the interactive flow
+/// needs.
+fn resolveAppPasswordIdentity(
+    gpa: std.mem.Allocator,
+    io: Io,
+    opts: Options,
+    client: atproto_transport.Client,
+    did: *atproto_identity.Did,
+    pds_origin: *atproto_identity.Origin,
+) !void {
+    if (opts.session_did) |text| {
+        did.* = try atproto_identity.Did.parse(text);
+        const document = try atproto_identity.resolveDidDocument(gpa, client, did.*);
+        pds_origin.* = document.pds_origin;
+        return;
+    }
+    const handle_text = opts.session_handle orelse return error.InvalidDid;
+    var dns = atproto_dns_std.StdDns.init(io) catch |err| return err;
+    const resolved = try atproto_handle.resolve(gpa, dns.client(), client, handle_text);
+    did.* = resolved.did;
+    const document = try atproto_identity.resolveDidDocument(gpa, client, resolved.did);
+    pds_origin.* = document.pds_origin;
+}
+
+/// Disable terminal echo on the controlling stdin while a secret is typed,
+/// restoring the original attributes afterwards (including on error paths).
+/// Best-effort and strictly scoped to interactive terminals: when stdin is
+/// not a TTY (e.g. a piped secret file) or the platform has no termios
+/// support, the guard is inactive and reading proceeds unchanged. A hard
+/// SIGINT mid-prompt is left to the shell's job-control reset, as with most
+/// CLI tools.
+const EchoGuard = struct {
+    active: bool = false,
+    original: std.posix.termios = undefined,
+
+    fn init() EchoGuard {
+        // The ATProto transport already restricts this command to macOS and
+        // Linux; those are also the targets with usable termios here.
+        if (comptime builtin.os.tag != .macos and builtin.os.tag != .linux) return .{};
+        const original = std.posix.tcgetattr(std.posix.STDIN_FILENO) catch return .{};
+        var muted = original;
+        muted.lflag.ECHO = false;
+        std.posix.tcsetattr(std.posix.STDIN_FILENO, .NOW, muted) catch return .{};
+        return .{ .active = true, .original = original };
+    }
+
+    fn deinit(self: *EchoGuard) void {
+        if (!self.active) return;
+        std.posix.tcsetattr(std.posix.STDIN_FILENO, .NOW, self.original) catch {};
+        self.active = false;
+    }
+};
+
+/// Read the app password from stdin: one line on an interactive terminal
+/// (echo suppressed), or up to EOF on a pipe/file. The first newline (or end
+/// of stream) ends the credential, and empty input is rejected. The caller
+/// zeroes and frees the returned slice.
+fn readAppPasswordFromStdin(gpa: std.mem.Allocator, io: Io) ![]u8 {
+    var echo = EchoGuard.init();
+    defer echo.deinit();
+    if (echo.active) std.debug.print("Password: ", .{});
+
+    var buffer: [max_app_password_bytes]u8 = undefined;
+    var reader = std.Io.File.stdin().reader(io, &buffer);
+    defer std.crypto.secureZero(u8, &buffer);
+    return readAppPasswordLine(gpa, &reader.interface);
+}
+
+/// Extract one credential from `reader`, up to (but excluding) the first
+/// newline or end of stream, rejecting empty input. A trailing carriage
+/// return is trimmed so both Unix and legacy CRLF terminals work. The
+/// returned slice is owned; the caller zeroes and frees it.
+fn readAppPasswordLine(gpa: std.mem.Allocator, reader: *std.Io.Reader) ![]u8 {
+    const raw = reader.takeDelimiterExclusive('\n') catch |err| switch (err) {
+        error.EndOfStream => return error.AuthenticationFailed,
+        error.StreamTooLong => return error.ResponseTooLarge,
+        else => return err,
+    };
+    var end = raw.len;
+    if (end > 0 and raw[end - 1] == '\r') end -= 1;
+    if (end == 0) return error.AuthenticationFailed;
+    return gpa.dupe(u8, raw[0..end]);
+}
+
+/// Map an app-password login failure to a coarse exit code and a human,
+/// secret-free message.
+fn reportAppPasswordLoginError(err: anyerror) ExitCode {
+    const code: ExitCode = switch (err) {
+        error.AuthenticationFailed => .denial,
+        error.Timeout => .timeout,
+        error.InvalidDid, error.InvalidHandle, error.UnsupportedDidMethod => .usage,
+        error.InvalidJwt, error.InvalidResponse, error.InvalidStatus, error.InvalidContentType, error.SubjectDidMismatch => .compatibility,
+        error.SessionRevoked, error.InvalidSessionWire, error.StoreCorrupt, error.StoreExists, error.StoreFull, error.StoreIo, error.StoreLocked, error.StoreNotFound, error.StorePermissionDenied, error.StoreUnexpected, error.HomeUnavailable => .session,
+        else => .io_error,
+    };
+    const message: []const u8 = switch (code) {
+        .denial => "the PDS rejected the app password or identifier; nothing was stored",
+        .compatibility => "the PDS returned an unexpected response; nothing was stored",
+        .session => "unable to persist the app-password session; check the session root",
+        .usage => "invalid AT Protocol identity for --app-password login",
+        else => @errorName(err),
+    };
+    std.debug.print("error: standard-site login --app-password: {s}\n", .{message});
+    return code;
 }
 
 /// `boris standard-site sessions [--session-root PATH]`
@@ -2596,6 +2778,35 @@ test "parseOptions: HTML mode defaults and exclusive dirs" {
         error.ConflictingFlags,
         parseOptions(std.testing.allocator, &.{ "boris", "--html-dir", "d", "--rag" }),
     );
+}
+
+test "readAppPasswordLine trims one trailing newline and returns an owned slice" {
+    var reader = std.Io.Reader.fixed("hunter2-1234\n");
+    const pw = try readAppPasswordLine(std.testing.allocator, &reader);
+    defer std.testing.allocator.free(pw);
+    defer std.crypto.secureZero(u8, pw);
+    try std.testing.expectEqualStrings("hunter2-1234", pw);
+}
+
+test "readAppPasswordLine trims a trailing carriage return for CRLF terminals" {
+    var reader = std.Io.Reader.fixed("hunter2\r\n");
+    const pw = try readAppPasswordLine(std.testing.allocator, &reader);
+    defer std.testing.allocator.free(pw);
+    try std.testing.expectEqualStrings("hunter2", pw);
+}
+
+test "readAppPasswordLine treats end of stream as the end of the credential" {
+    var reader = std.Io.Reader.fixed("hunter2");
+    const pw = try readAppPasswordLine(std.testing.allocator, &reader);
+    defer std.testing.allocator.free(pw);
+    try std.testing.expectEqualStrings("hunter2", pw);
+}
+
+test "readAppPasswordLine rejects empty input whether blank or at end of stream" {
+    var blank = std.Io.Reader.fixed("\n");
+    try std.testing.expectError(error.AuthenticationFailed, readAppPasswordLine(std.testing.allocator, &blank));
+    var empty = std.Io.Reader.fixed("");
+    try std.testing.expectError(error.AuthenticationFailed, readAppPasswordLine(std.testing.allocator, &empty));
 }
 
 test {

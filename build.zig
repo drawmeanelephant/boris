@@ -222,6 +222,36 @@ pub fn build(b: *std.Build) void {
     test_atproto_xrpc.dependOn(&run_atproto_xrpc_tests.step);
     test_atproto_xrpc.dependOn(check_atproto_oauth_freestanding);
 
+    // Portable app-password (createSession/refreshSession) authentication:
+    // the explicit, opt-in Bearer credential path for command-line publishers.
+    // Like the XRPC client it composes an injected transport and no host
+    // capabilities, so it joins the freestanding gate.
+    const atproto_password_mod = b.createModule(.{
+        .root_source_file = b.path("src/atproto_password.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const atproto_password_tests = b.addTest(.{ .root_module = atproto_password_mod });
+    const run_atproto_password_tests = b.addRunArtifact(atproto_password_tests);
+    run_atproto_password_tests.setCwd(b.path("."));
+
+    const atproto_password_freestanding_mod = b.createModule(.{
+        .root_source_file = b.path("src/atproto_password.zig"),
+        .target = freestanding_target,
+        .optimize = .ReleaseSafe,
+    });
+    const atproto_password_freestanding = b.addObject(.{
+        .name = "atproto-password-freestanding",
+        .root_module = atproto_password_freestanding_mod,
+    });
+    check_atproto_oauth_freestanding.dependOn(&atproto_password_freestanding.step);
+
+    const test_atproto_password_step = b.step(
+        "test-atproto-password",
+        "Run ATProto app-password createSession/refreshSession and freestanding gates",
+    );
+    test_atproto_password_step.dependOn(&run_atproto_password_tests.step);
+    test_atproto_password_step.dependOn(check_atproto_oauth_freestanding);
     // Deterministic Standard.site offline record projection and plan.
     // Credential-free; consumes declared page metadata and profile facts.
     const standard_site_mod = b.createModule(.{
@@ -1491,6 +1521,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(test_atproto_handles);
     test_step.dependOn(test_atproto_authorization);
     test_step.dependOn(test_atproto_xrpc);
+    test_step.dependOn(test_atproto_password_step);
     test_step.dependOn(&run_standard_site_tests.step);
     test_step.dependOn(&run_standard_site_emit_tests.step);
     test_step.dependOn(&run_unit_tests.step);

@@ -66,7 +66,7 @@ pub const Runtime = struct {
         io: std.Io,
         client: transport.Client,
         account: identity.DiscoveredAccount,
-    ) Error!authorization.AuthorizedSession,
+    ) Error!publish.AcquiredSession,
     /// Epoch seconds; used to derive the unique run namespace.
     now_fn: *const fn (std.Io) i64,
 };
@@ -198,14 +198,10 @@ pub fn smoke(gpa: std.mem.Allocator, runtime: *const Runtime, config: *const Con
     defer session.deinit();
 
     // A persisted session is bound to the authority facts recorded at login;
-    // if the account has since moved PDS or authorization server, the stored
-    // session is no longer safe to reuse and must never touch the network.
-    if (!std.mem.eql(u8, session.account.did.slice(), account.did.slice()) or
-        !std.mem.eql(u8, session.account.pds_origin.slice(), account.pds_origin.slice()) or
-        !std.mem.eql(u8, session.account.authorization_server_origin.slice(), account.authorization_server_origin.slice()))
-    {
-        return error.SessionAuthorityChanged;
-    }
+    // if the account has since moved PDS (or authorization server, for OAuth),
+    // the stored session is no longer safe to reuse and must never touch the
+    // network.
+    if (!publish.sessionMatchesAccount(&session, account)) return error.SessionAuthorityChanged;
 
     const seconds = runtime.now_fn(runtime.io);
     if (seconds < 0) return error.InvalidWallClock;
@@ -225,7 +221,7 @@ pub fn smoke(gpa: std.mem.Allocator, runtime: *const Runtime, config: *const Con
     const document_at_uri = try xrpc.buildAtUri(gpa, did, collection_document, document_rkey);
     defer gpa.free(document_at_uri);
 
-    var client = xrpc.SessionClient.fromAuthorizedSession(&session, runtime.client, runtime.proofs);
+    var client = publish.sessionClient(&session, runtime.client, runtime.proofs);
 
     // Fail closed if the unique namespace already exists, so a re-run can
     // never overwrite records it did not create.
@@ -1077,10 +1073,10 @@ fn provideTestSession(
     io: std.Io,
     client: transport.Client,
     account: identity.DiscoveredAccount,
-) Error!authorization.AuthorizedSession {
+) Error!publish.AcquiredSession {
     const mock: *MockHost = @ptrCast(@alignCast(ctx));
     _ = mock;
-    return testAuthorize(allocator, io, client, account);
+    return .{ .oauth = try testAuthorize(allocator, io, client, account) };
 }
 
 fn testRuntime(io: std.Io, mock: *MockHost) Runtime {

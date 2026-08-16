@@ -51,7 +51,10 @@ const Nonce = Fixed(oauth.max_nonce_length);
 pub const SessionBinding = struct {
     did: identity.Did,
     pds_origin: identity.Origin,
-    key_pair: oauth.KeyPair,
+    /// Present for DPoP-bound OAuth sessions; `null` selects Bearer auth
+    /// (app-password sessions), which sends the access token directly with no
+    /// proof and no DPoP nonce requirement.
+    key_pair: ?oauth.KeyPair,
     access_token: []const u8,
 };
 
@@ -78,6 +81,26 @@ pub const SessionClient = struct {
             },
             .transport_client = transport_client,
             .proofs = proofs,
+        };
+    }
+
+    /// Bearer-authenticated client for an app-password session: no DPoP key,
+    /// no proof, no nonce — the access JWT travels in `Authorization: Bearer`.
+    pub fn fromBearerSession(
+        did: identity.Did,
+        pds_origin: identity.Origin,
+        access_token: []const u8,
+        transport_client: transport.Client,
+    ) SessionClient {
+        return .{
+            .binding = .{
+                .did = did,
+                .pds_origin = pds_origin,
+                .key_pair = null,
+                .access_token = access_token,
+            },
+            .transport_client = transport_client,
+            .proofs = bearerProofSource(),
         };
     }
 
@@ -177,6 +200,11 @@ pub const SessionClient = struct {
         url: []const u8,
         body: []const u8,
     ) Error!transport.Response {
+        // Bearer (app-password) requests carry no DPoP nonce and never retry
+        // a `use_dpop_nonce` challenge.
+        if (client.binding.key_pair == null) {
+            return client.sendOnce(allocator, method, url, body);
+        }
         var response = try client.sendOnce(allocator, method, url, body);
         errdefer {
             std.crypto.secureZero(u8, response.body);
@@ -204,9 +232,13 @@ pub const SessionClient = struct {
         url: []const u8,
         body: []const u8,
     ) Error!transport.Response {
-        const proof = try client.buildProof(allocator, method, url);
-        defer allocator.free(proof);
-        const authorization_value = try std.fmt.allocPrint(allocator, "DPoP {s}", .{proof});
+        const authorization_value = if (client.binding.key_pair) |_| value: {
+            const proof = try client.buildProof(allocator, method, url);
+            defer allocator.free(proof);
+            break :value try std.fmt.allocPrint(allocator, "DPoP {s}", .{proof});
+        } else value: {
+            break :value try std.fmt.allocPrint(allocator, "Bearer {s}", .{client.binding.access_token});
+        };
         defer allocator.free(authorization_value);
         var headers: [3]transport.Header = undefined;
         headers[0] = .{ .name = "accept", .value = "application/json" };
@@ -235,7 +267,7 @@ pub const SessionClient = struct {
         var material = try client.proofs.next();
         defer std.crypto.secureZero(u8, std.mem.asBytes(&material));
         const jti = oauth.identifierFromEntropy(material.jti_entropy);
-        return oauth.buildDpopProof(allocator, client.binding.key_pair, .{
+        return oauth.buildDpopProof(allocator, client.binding.key_pair.?, .{
             .method = if (method == .get) "GET" else "POST",
             .target_uri = url,
             .issued_at = material.issued_at,
@@ -599,6 +631,17 @@ fn validOpaque(value: []const u8, limit: usize) bool {
     if (value.len == 0 or value.len > limit) return false;
     for (value) |byte| if (byte <= 0x20 or byte >= 0x7f) return false;
     return true;
+}
+
+/// Placeholder proof source for Bearer sessions. It must never be invoked;
+/// the bearer branch of `sendOnce` never asks for a proof, and returning an
+/// error here turns an accidental call into a hard failure.
+fn bearerProofSource() authorization.ProofSource {
+    return .{ .context = undefined, .next_fn = bearerNoProofs };
+}
+
+fn bearerNoProofs(_: *anyopaque) authorization.Error!authorization.ProofMaterial {
+    return error.ProofUnavailable;
 }
 
 fn Fixed(comptime capacity: usize) type {
@@ -985,6 +1028,64 @@ test "hostile responses fail closed: redirect, bad JSON, wrong did" {
         error.WrongRecordIdentity,
         wrong_client.getRecord(std.testing.allocator, "site.standard.document", "guides~intro"),
     );
+}
+
+const BearerMock = struct {
+    call: usize = 0,
+
+    fn client(self: *BearerMock) transport.Client {
+        return .{ .context = self, .request_fn = request };
+    }
+
+    fn request(
+        context: *anyopaque,
+        allocator: std.mem.Allocator,
+        value: transport.Request,
+    ) transport.Error!transport.Response {
+        const self: *BearerMock = @ptrCast(@alignCast(context));
+        if (self.call >= 1 or value.method != .get or value.redirect_policy != .forbid) {
+            return error.UnexpectedRequest;
+        }
+        var auth: ?[]const u8 = null;
+        for (value.headers) |header| {
+            if (std.ascii.eqlIgnoreCase(header.name, "authorization")) {
+                if (auth != null) return error.UnexpectedRequest;
+                auth = header.value;
+            }
+        }
+        if (auth == null or !std.mem.eql(u8, auth.?, "Bearer access-token")) return error.UnexpectedRequest;
+        self.call += 1;
+        // No dpop-nonce header: Bearer requests never require or track one.
+        const headers = [_]transport.Header{.{
+            .name = "content-type",
+            .value = "application/json",
+        }};
+        return transport.Response.initCopy(
+            allocator,
+            200,
+            &headers,
+            "{\"uri\":\"at://did:plc:ewvi7nxzyoun6zhxrhs64oiz/site.standard.document/guides~intro\",\"cid\":\"bafyreihwn3gfvnopsh4a6dmn2d3b7k5wqj2jqbzj6jydhpm5yfjjj7qbx4\",\"value\":{\"title\":\"Intro\"}}",
+            value.limits,
+        );
+    }
+};
+
+test "bearer session sends the access token directly and skips the DPoP nonce" {
+    var mock = BearerMock{};
+    var client = SessionClient.fromBearerSession(
+        try identity.Did.parse(test_did_text),
+        try identity.Origin.parse(test_pds),
+        "access-token",
+        mock.client(),
+    );
+    const result = try client.getRecord(std.testing.allocator, "site.standard.document", "guides~intro");
+    var found = switch (result) {
+        .found => |response| response,
+        .not_found => return error.UnexpectedRequest,
+    };
+    defer found.deinit();
+    try std.testing.expectEqual(@as(usize, 1), mock.call);
+    try std.testing.expectEqualStrings("Intro", found.value.value.object.get("value").?.object.get("title").?.string);
 }
 
 test "a response without a pds nonce fails closed" {

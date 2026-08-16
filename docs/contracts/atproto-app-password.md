@@ -1,8 +1,9 @@
 # RFC: opt-in app-password authentication for Standard.site
 
-**Status:** Accepted — not yet implemented. This RFC records a decision to
-change the app-password non-goal; the existing contracts remain authoritative
-until the implementation PR amends them (see
+**Status:** Implemented. `standard-site login --app-password` (with
+`--did` or `--handle`), the `boris-app-password-v1` session document, and the
+Bearer XRPC reuse in `publish`/`smoke` are live; the dependent contracts have
+been amended accordingly (see
 ["Changes required on implementation"](#changes-required-on-implementation)).
 
 **Scope:** a separate, explicit app-password credential path for the
@@ -116,7 +117,12 @@ OAuth session; neither command gains an inline password flag.
 stdin (prompted) or a dedicated secret file descriptor — never as a CLI
 argument (which is visible in the process list), never an environment variable
 holding the value, never the publication profile, never a log, never evidence,
-never Git. This matches the existing Nostr secret discipline.
+never Git. This matches the existing Nostr secret discipline. On an
+interactive terminal the echo is suppressed while typing (termios `ECHO` off
+for the duration of the read, restored even on failure) and exactly one line
+is consumed, so the credential never lands in terminal scrollback; on a pipe
+or file the secret is read to end of stream. Either way the first newline
+ends the credential and empty input is rejected.
 
 **Authentication.** The command resolves the handle (or takes the DID
 directly), calls `com.atproto.server.createSession` with the app password,
@@ -167,18 +173,17 @@ session, and smoke surface work against the PDS most people actually have.
 
 ## Changes required on implementation
 
-When the path lands, amend the existing language (no implementation edits are
-in scope for this RFC):
+All three dependent contracts were amended when the path landed:
 
-- `atproto-oauth.md`: replace "Boris is OAuth-only and never accepts app
-  passwords" and the "must not fall back to an app password" clause with the
-  revised non-goal above, and move "app passwords" out of the "Explicitly not
+- `atproto-oauth.md`: "Boris is OAuth-only and never accepts app passwords"
+  and the "must not fall back to an app password" clause were replaced with the
+  revised non-goal, and "app passwords" was moved out of the "Explicitly not
   implemented" list.
-- `atproto-sessions.md`: note that the store hosts two document types
+- `atproto-sessions.md`: the store now documents two document types
   (`boris-session-v1` and `boris-app-password-v1`) under one lock and one
   erase/replace discipline.
-- `atproto-live-smoke.md`: update the bsky.social limitation to say the smoke
-  can complete against bsky.social via the opt-in app-password path, while the
+- `atproto-live-smoke.md`: the bsky.social limitation now states the smoke can
+  complete against bsky.social via the opt-in app-password path, while the
   OAuth scope limitation itself remains accurate.
 
 ## Out of scope (unchanged)

@@ -109,8 +109,10 @@ in the last result artifact. Nothing else is ever eligible.
   Standard.site permission; Boris fails closed with exit 6 (`compatibility`,
   `InvalidTokenResponse`) and zero writes. A live OAuth smoke therefore
   requires a PDS whose authorization server registers the Standard.site
-  permission set (for example, a self-hosted PDS); app-password-based tooling
-  is out of scope for Boris.
+  permission set (for example, a self-hosted PDS). A live smoke against a
+  bsky.social account can complete through the opt-in app-password credential
+  path ([`atproto-app-password.md`](atproto-app-password.md)); the OAuth scope
+  limitation itself remains accurate.
 - No load testing, provider certification, or permanent demo account is in
   scope.
 
@@ -139,8 +141,10 @@ implementation list documents clients and indexers, not PDS providers; the
 Standard.site author's own OAuth deployment (andromeda.social) is self-hosted.
 
 Net: a live OAuth smoke today requires a self-hosted PDS whose OAuth provider
-registers the Standard.site permission set. bsky.social cannot complete one,
-and Boris will not fall back to app passwords.
+registers the Standard.site permission set. bsky.social cannot complete an
+OAuth smoke, but a live smoke can complete against bsky.social through the
+explicit, opt-in app-password path (`standard-site login --app-password`);
+Boris never falls back to a credential inside the OAuth flow.
 
 ## Test surface
 
