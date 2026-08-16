@@ -80,14 +80,14 @@ Here are copy-pasteable snippets and live rendered examples for all 5 Aside kind
 ```markdown
 <Aside kind="note">
 
-**Note:** Boris uses closed frontmatter. The accepted keys are `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, and `summary`.
+**Note:** Boris uses closed frontmatter. The accepted keys are `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, `summary`, and `servings` (`serves` / `yield` are aliases). Unknown keys fail.
 
 </Aside>
 ```
 
 <Aside kind="note">
 
-**Note:** Boris uses closed frontmatter. The accepted keys are `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, and `summary`.
+**Note:** Boris uses closed frontmatter. The accepted keys are `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, `summary`, and `servings` (`serves` / `yield` are aliases). Unknown keys fail.
 
 </Aside>
 

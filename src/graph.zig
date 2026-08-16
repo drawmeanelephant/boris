@@ -40,6 +40,8 @@ pub const Node = struct {
     /// RSS-only author metadata; deliberately not serialized in the base IR.
     published_at: ?[]const u8 = null,
     summary: ?[]const u8 = null,
+    /// Cooklang convention count; deliberately not serialized in graph.json.
+    servings: ?page_mod.Servings = null,
     tags: []const []const u8 = &.{},
     role: Role = .trunk,
     body_offset: usize = 0,

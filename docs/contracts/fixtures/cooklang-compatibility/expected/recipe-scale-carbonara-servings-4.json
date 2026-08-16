@@ -1,0 +1,26 @@
+{
+  "format": "boris-recipe-scale",
+  "schemaVersion": "0.1.0",
+  "compiler": "boris/0.8.1+cooklang",
+  "factor": { "num": 2, "den": 1 },
+  "servings": { "current": 2, "target": 4, "authored": "2" },
+  "page": "carbonara",
+  "ingredients": [
+    { "name": "spaghetti", "quantity": { "amount": { "class": "scalable", "original": "400", "scaled": "800" }, "unit": "g" }, "preparation": "", "recipeRef": null },
+    { "name": "eggs", "quantity": { "amount": { "class": "scalable", "original": "3", "scaled": "6" }, "unit": "" }, "preparation": "", "recipeRef": null },
+    { "name": "pecorino", "quantity": { "amount": { "class": "scalable", "original": "60", "scaled": "120" }, "unit": "g" }, "preparation": "", "recipeRef": null },
+    { "name": "black pepper", "quantity": { "amount": { "class": "empty", "original": "", "scaled": "" }, "unit": "" }, "preparation": "", "recipeRef": null },
+    { "name": "guanciale", "quantity": { "amount": { "class": "scalable", "original": "150", "scaled": "300" }, "unit": "g" }, "preparation": "cut into strips", "recipeRef": null },
+    { "name": "pasta water", "quantity": { "amount": { "class": "scalable", "original": "1", "scaled": "2" }, "unit": "cup" }, "preparation": "", "recipeRef": null },
+    { "name": "pepper-oil", "quantity": { "amount": { "class": "scalable", "original": "1", "scaled": "2" }, "unit": "tbsp" }, "preparation": "", "recipeRef": "sauces/pepper-oil" }
+  ],
+  "cookware": [
+    { "name": "large pot", "quantity": { "amount": { "class": "empty", "original": "", "scaled": "" }, "unit": "" } },
+    { "name": "bowl", "quantity": { "amount": { "class": "empty", "original": "", "scaled": "" }, "unit": "" } },
+    { "name": "frying pan", "quantity": { "amount": { "class": "empty", "original": "", "scaled": "" }, "unit": "" } }
+  ],
+  "timers": [
+    { "name": "", "quantity": { "amount": { "class": "scalable", "original": "5", "scaled": "5" }, "unit": "minutes" } },
+    { "name": "pasta", "quantity": { "amount": { "class": "scalable", "original": "9", "scaled": "9" }, "unit": "minutes" } }
+  ]
+}

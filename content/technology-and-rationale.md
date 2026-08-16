@@ -66,7 +66,7 @@ This also means the `{{nav}}` sidebar in your HTML layout is produced from the *
 
 ## Why a closed frontmatter grammar?
 
-Boris accepts exactly eight author-facing frontmatter keys: `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, and `summary`. Unknown keys are rejected with `EFRONTMATTER`. This is intentional.
+Boris accepts a closed author-facing frontmatter set: `id`, `title`, `parent`, `status`, `tags`, `relations`, `published_at`, `summary`, and the Cooklang-convention `servings` exception (`serves` / `yield` are aliases for that one field). Unknown keys are rejected with `EFRONTMATTER`. This is intentional, not open YAML.
 
 An open frontmatter grammar (full arbitrary YAML) creates ambiguity about which keys are meaningful, accumulates legacy keys silently, and makes it impossible to give confident diagnostics. A closed grammar means every key has a documented meaning, every rejected key gives a clear error, and the frontmatter contract can be versioned and evolved deliberately.
 

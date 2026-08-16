@@ -1027,6 +1027,7 @@ pub fn compile(io: Io, gpa: std.mem.Allocator, options: CompileOptions) !Result 
             .status = statusName(p.status),
             .published_at = p.published_at,
             .summary = p.summary,
+            .servings = p.servings,
             .tags = p.tags,
             .body_offset = p.body_offset,
             .role = if (p.parent != null) .satellite else .trunk,
@@ -1331,6 +1332,7 @@ test "Cooklang mode extracts recipes, links them, and fails closed" {
     const carbonara = valid.pages.items[0];
     try std.testing.expectEqualStrings("carbonara", carbonara.id);
     try std.testing.expectEqualStrings("carbonara.cook", carbonara.source_path);
+    try std.testing.expectEqual(@as(u32, 2), carbonara.servings.?.count);
 
     // The structured recipe is the point of the format; prose alone would make
     // an ingredient unqueryable.

@@ -26,7 +26,7 @@ still a page; its entity id comes from its path.
 
 ## Accepted keys
 
-Exactly these eight author-facing keys are accepted:
+Exactly these nine author-facing keys are accepted. The set is still closed.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
@@ -38,9 +38,12 @@ Exactly these eight author-facing keys are accepted:
 | `relations` | list | `[]` | Typed semantic relations such as `relates_to=target` |
 | `published_at` | UTC timestamp | unset | Exact `YYYY-MM-DDTHH:MM:SSZ`; requires `summary` |
 | `summary` | string | unset | One-line summary, 1–1,024 bytes |
+| `servings` | count | unset (scale treats current as 1) | Cooklang convention: how many people the recipe is for |
 
-There are no aliases. In particular, `parentEntry` and `parent_entry` are
-unknown author keys and fail with `EFRONTMATTER`.
+`serves` and `yield` are the only aliases, and they mean `servings`. Every
+other Cooklang metadata name (`source`, `author`, `course`, `time`, …) is
+still `EFRONTMATTER`. `parentEntry` and `parent_entry` stay unknown. This is
+not open YAML.
 
 ## Examples
 

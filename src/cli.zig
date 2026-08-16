@@ -232,10 +232,11 @@ pub const Options = struct {
     nostr_out_path: ?[]const u8 = null,
     nostr_prior_path: ?[]const u8 = null,
     nostr_created_at: ?i64 = null,
-    /// `recipe-scale` inputs: one page id, the authored factor text, and an
+    /// `recipe-scale` inputs: one page id, factor or servings target, and an
     /// optional JSON output path (stdout is always written on success).
     recipe_scale_id: ?[]const u8 = null,
     recipe_scale_factor: ?[]const u8 = null,
+    recipe_scale_servings: ?[]const u8 = null,
     recipe_scale_out: ?[]const u8 = null,
 
     pub fn deinit(self: *Options, gpa: std.mem.Allocator) void {
@@ -407,6 +408,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_recipe_scale_id = false;
     var recipe_scale_factor: ?[]const u8 = null;
     var saw_recipe_scale_factor = false;
+    var recipe_scale_servings: ?[]const u8 = null;
+    var saw_recipe_scale_servings = false;
     var recipe_scale_out: ?[]const u8 = null;
     var saw_recipe_scale_out = false;
 
@@ -689,6 +692,13 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             if (saw_recipe_scale_factor) return error.DuplicateFlag;
             saw_recipe_scale_factor = true;
             recipe_scale_factor = try takeValue(args, &i, a, "--factor");
+            continue;
+        }
+        if (std.mem.eql(u8, a, "--servings") or std.mem.startsWith(u8, a, "--servings=")) {
+            if (command != .recipe_scale) return error.ConflictingFlags;
+            if (saw_recipe_scale_servings) return error.DuplicateFlag;
+            saw_recipe_scale_servings = true;
+            recipe_scale_servings = try takeValue(args, &i, a, "--servings");
             continue;
         }
 
@@ -1350,8 +1360,13 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     }
 
     if (command == .recipe_scale) {
-        if (recipe_scale_id == null or recipe_scale_factor == null) return error.MissingValue;
-        _ = recipe_scale.parseFactor(recipe_scale_factor.?) catch return error.InvalidValue;
+        if (recipe_scale_id == null) return error.MissingValue;
+        const has_factor = recipe_scale_factor != null;
+        const has_servings = recipe_scale_servings != null;
+        if (has_factor and has_servings) return error.ConflictingFlags;
+        if (!has_factor and !has_servings) return error.MissingValue;
+        if (has_factor) _ = recipe_scale.parseFactor(recipe_scale_factor.?) catch return error.InvalidValue;
+        if (has_servings) _ = recipe_scale.parseServingsTarget(recipe_scale_servings.?) catch return error.InvalidValue;
         // The view owns stdout. Projection selectors, watch/HTML, analysis,
         // and `--timings` would either execute another path or corrupt the
         // JSON stream.
@@ -1368,6 +1383,7 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .command = .recipe_scale,
             .recipe_scale_id = recipe_scale_id,
             .recipe_scale_factor = recipe_scale_factor,
+            .recipe_scale_servings = recipe_scale_servings,
             .recipe_scale_out = recipe_scale_out,
             .mode = .html,
             .input_format = input_format,
@@ -1997,7 +2013,8 @@ pub fn printUsage() void {
         \\  --fail-on-unreferenced Make check fail when it reports unreferenced pages
         \\  --profile PATH       Selected publication profile for `plan`
         \\  --id PAGE            Recipe page entity id (`recipe-scale`; required)
-        \\  --factor TEXT        Scale factor: 2, 1/2, 1.5, 1 1/2 (`recipe-scale`; required)
+        \\  --factor TEXT        Scale factor: 2, 1/2, 1.5, 1 1/2 (`recipe-scale`; exclusive with --servings)
+        \\  --servings N         Target serving count (`recipe-scale`; exclusive with --factor)
         \\  --out PATH           Scaled-view JSON path (`recipe-scale`; default: stdout only)
         \\  --plan PATH          Plan artifact to sign (`nostr sign`)
         \\  --key-stdin          Read the hex/nsec secret key once from stdin (`nostr sign`)
@@ -2053,7 +2070,8 @@ pub fn printUsage() void {
         \\      `boris validate` observes the selected HTML target configuration but writes no artifacts.
         \\      `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
         \\      `boris recipe-scale --input DIR --id PAGE --factor TEXT` prints a derived
-        \\      scaled view on stdout; it never rewrites .cook or graph.json.
+        \\      scaled view on stdout; `--servings N` is the same view with
+        \\      factor = N / current (missing current is 1). Never rewrites .cook or graph.json.
         \\      `boris standard-site` (no subcommand) prints the Standard.site family list.
         \\      `boris nostr plan --profile PATH` emits the offline NIP-23 publication plan on stdout;
         \\      it never signs, never contacts a relay, and never reads a key.
@@ -2242,6 +2260,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.eql(u8, a, "--created-at") or
             std.mem.eql(u8, a, "--id") or
             std.mem.eql(u8, a, "--factor") or
+            std.mem.eql(u8, a, "--servings") or
             std.mem.eql(u8, a, "--out") or
             std.mem.eql(u8, a, "--rag-dir") or
             std.mem.eql(u8, a, "--context-dir") or
@@ -2279,6 +2298,7 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.startsWith(u8, a, "--created-at=") or
             std.mem.startsWith(u8, a, "--id=") or
             std.mem.startsWith(u8, a, "--factor=") or
+            std.mem.startsWith(u8, a, "--servings=") or
             std.mem.startsWith(u8, a, "--out=") or
             std.mem.startsWith(u8, a, "--rag-dir=") or
             std.mem.startsWith(u8, a, "--context-dir=") or
@@ -2966,6 +2986,11 @@ test "parse: recipe-scale requires id and a scalable factor" {
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale" }));
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara" }));
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--factor", "2" }));
+    var servings_opts = try parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara", "--servings", "4" });
+    defer servings_opts.deinit(std.testing.allocator);
+    try expectEqualStrings("4", servings_opts.recipe_scale_servings.?);
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara", "--factor", "2", "--servings", "4" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara", "--servings", "0" }));
     try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara", "--factor", "0" }));
     try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara", "--factor", "some" }));
     try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara", "--factor", "1/0" }));
