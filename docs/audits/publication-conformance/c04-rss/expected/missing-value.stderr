@@ -10,9 +10,43 @@ Modes:
   check               Read-only graph health report (findings do not fail by default)
   impact <ID>         Read-only transitive impact report for a page
   plan                Emit a normalized publication plan (no publication)
+  standard-site publish  One-shot Standard.site publish (OAuth + reconcile; never implicit)
+  standard-site plan    Emit the deterministic Standard.site plan offline (no network)
+  standard-site records Dump the full canonical record payloads offline (no network)
+  standard-site verify  Cross-check the built head links + well-known file offline (no network)
+  standard-site login  Authorize a DID and persist the session for later publishes
+  standard-site sessions  List persisted sessions (DIDs only; no secrets)
+  standard-site logout  Remove a persisted session (secure erase; does not revoke)
+  standard-site smoke  Live interop smoke against a real PDS (manual, opt-in; never in CI)
   nostr plan          Emit the offline Nostr NIP-23 publication plan (no signing, no relay)
   init [DIR]          Write a starter site (content, theme, profile) into DIR (default: .)
   (no command)        Same as build
+  standard-site publish options:
+  --profile PATH      Standard.site publication profile (required)
+  --plan PATH         Committed standard-site plan to validate (fail closed on drift)
+  --out PATH          Evidence artifact path (default: stdout)
+  --prune             Explicit prune authority (ANDs with the profile prune flag)
+  --source-commit C   Source commit recorded in the evidence bindings
+  standard-site plan options:
+  --profile PATH      Standard.site publication profile (required)
+  --out PATH          Plan artifact path (default: stdout)
+  standard-site records options:
+  --profile PATH      Standard.site publication profile (required)
+  --out PATH          Records artifact path (default: stdout)
+  standard-site verify options:
+  --profile PATH      Standard.site publication profile (required)
+  --dist DIR          Built output directory to check (default: dist)
+  --out PATH          Verify result artifact path (default: stdout)
+  standard-site login/logout options:
+  --did DID           AT Protocol DID to authorize (login) or forget (logout)
+  standard-site smoke options:
+  --did DID           Test identity DID (required)
+  --namespace NAME    Unique rkey namespace prefix (default: clock-derived)
+  --surface-url URL   Served verification-surface origin to check (optional)
+  --indexer URL       Indexer/AppView origin observed non-normatively (optional)
+  --out PATH          Smoke result artifact path (default: stdout)
+  standard-site options (all subcommands):
+  --session-root PATH Override the persistent session store root
   --html              Explicit HTML site mode → --html-dir (default dist)
   --html-dir <DIR>    HTML site mode with output directory DIR
   --target NAME=DIR   HTML multi-target mode (repeatable; order-independent); implies HTML
