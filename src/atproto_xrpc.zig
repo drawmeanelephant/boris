@@ -508,11 +508,22 @@ fn parseDeleteResult(allocator: std.mem.Allocator, body: []const u8) Error!Delet
     defer parsed.deinit();
     const root = parsed.value;
     if (root != .object) return error.InvalidResponse;
-    const commit = root.object.get("commit");
-    if (commit) |value| {
-        if (value != .string) return error.InvalidResponse;
-    }
-    return .{ .allocator = allocator, .commit = if (commit) |value| try allocator.dupe(u8, value.string) else null };
+    const commit = root.object.get("commit") orelse {
+        return .{ .allocator = allocator, .commit = null };
+    };
+    const cid_text = switch (commit) {
+        // Historical/mock string form.
+        .string => |text| text,
+        // Live lexicon form: com.atproto.repo.defs#commitMeta `{ cid, rev }`.
+        .object => |object| blk: {
+            const cid = object.get("cid") orelse return error.InvalidResponse;
+            if (cid != .string or cid.string.len == 0) return error.InvalidResponse;
+            break :blk cid.string;
+        },
+        else => return error.InvalidResponse,
+    };
+    if (cid_text.len == 0) return error.InvalidResponse;
+    return .{ .allocator = allocator, .commit = try allocator.dupe(u8, cid_text) };
 }
 
 pub fn buildAtUri(
@@ -951,6 +962,20 @@ test "deleteRecord posts the bound triple" {
         "{\"repo\":\"did:plc:ewvi7nxzyoun6zhxrhs64oiz\",\"collection\":\"site.standard.document\",\"rkey\":\"old-rkey\"}",
         mock.requests.items[0].body,
     );
+}
+
+test "deleteRecord accepts a live commitMeta object" {
+    const scripted = [_]XrpcMock.Scripted{.{
+        .status = 200,
+        .body = "{\"commit\":{\"cid\":\"bafyreihwn3gfvnopsh4a6dmn2d3b7k5wqj2jqbzj6jydhpm5yfjjj7qbx4\",\"rev\":\"3lzzzzzzzzzzz\"}}",
+    }};
+    var mock = XrpcMock.init(std.testing.allocator, &scripted);
+    defer mock.deinit();
+    var proofs = TestProofSource{};
+    var client = SessionClient.init(try testBinding(), mock.client(), proofs.source());
+    var result = try client.deleteRecord(std.testing.allocator, "site.standard.document", "old-rkey", null);
+    defer result.deinit();
+    try std.testing.expectEqualStrings("bafyreihwn3gfvnopsh4a6dmn2d3b7k5wqj2jqbzj6jydhpm5yfjjj7qbx4", result.commit.?);
 }
 
 test "use_dpop_nonce is retried once with a fresh proof and fails closed on a second challenge" {

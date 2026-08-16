@@ -16,16 +16,15 @@ contract wins.
 
 The full offline Standard.site publication chain is implemented, tested, and
 merged into `afterparty` (PR #512). The online half — OAuth sessions, a
-one-shot publish command, and a live smoke — is implemented and merged, with
-one known external blocker: **no public PDS registers the Standard.site OAuth
-permission set**, so the OAuth live-smoke cannot complete against any public
-provider. The app-password credential path (the RFC's answer to that blocker)
-is implemented and **pending review in PR #521**.
+one-shot publish command, live smoke, and the opt-in app-password path — is
+also merged (PR #521, `fc29928`). A **recorded passing live smoke** against
+bsky.social via app-password is in
+[`fixtures/standard-site-live-smoke/`](fixtures/standard-site-live-smoke/README.md).
 
-Everything compiles and the test suite is green on `afterparty`. There is no
-known in-repo defect; the remaining work is external integration (a PDS that
-grants the scope, or a live smoke against the app-password path) plus the
-parked architectural question of whether Boris ever operates its own PDS.
+The remaining external blocker is OAuth-only: **no public PDS registers the
+Standard.site OAuth permission set**, so the OAuth live-smoke still cannot
+complete against bsky.social (exit 6). The parked architectural question is
+whether Boris ever operates its own PDS.
 
 ---
 
@@ -53,61 +52,62 @@ release gate, and the C03/C04 publication-conformance goldens.
 
 ---
 
-## 3. What is pending review (PR #521, `feat/standard-site-app-password`)
+## 3. What landed after the first handoff (PR #521 + live-smoke follow-up)
 
-Branch: `feat/standard-site-app-password` → PR
-[drawmeanelephant/boris#521](https://github.com/drawmeanelephant/boris/pull/521).
-Clean PR diff: 16 files, +1575/−73, all gates green locally.
+PR [drawmeanelephant/boris#521](https://github.com/drawmeanelephant/boris/pull/521)
+merged to `afterparty` as `fc29928` on 2026-08-16. CI was red on help-text
+goldens (`--handle` / `--app-password`); those C03/C04 fixtures were
+regoldened and the new run was green on Ubuntu and macOS before merge.
 
 1. **Opt-in app-password login** (`standard-site login --app-password
    (--did DID | --handle HANDLE)`) — the accepted RFC
-   ([`atproto-app-password.md`](atproto-app-password.md), flipped to
-   *Implemented*): a portable Bearer core (`src/atproto_password.zig`,
-   `createSession`/`refreshSession` over `com.atproto.server.*`, JWT
-   `exp`-`iat` lifetime parsing, DID revalidation, password zeroed after
-   send), a `boris-app-password-v1` session document in the same 0600
-   atomic-replace store, `SessionClient.fromBearerSession`, and an
-   `AcquiredSession` tagged union so `publish`/`smoke` reuse either auth
-   flavor. OAuth remains the default and is never silently downgraded.
-2. **Terminal echo suppression** — while the app password is typed, termios
-   `ECHO` is off for the read (restored via `defer` even on failure), and the
-   read consumes exactly one line (`takeDelimiterExclusive('\n')`), which also
-   fixes a pre-existing interactive hang (`allocRemaining` waited for EOF on a
-   TTY). Piped secret files still read to EOF. Verified live over a pty:
-   marker never echoed, ECHO restored, clean exit.
+   ([`atproto-app-password.md`](atproto-app-password.md), *Implemented*):
+   portable Bearer core, `boris-app-password-v1` session document, Bearer
+   XRPC, `AcquiredSession` tagged union. OAuth remains the default and is
+   never silently downgraded.
+2. **Terminal echo suppression** — termios `ECHO` off for the interactive
+   read; one line consumed; piped secrets still read to EOF.
+3. **Live-smoke follow-up** (this pickup) — three live-path defects that
+   unit mocks never saw:
+   - `StdTransport` only admitted OAuth form+DPoP POSTs, so
+     `createSession` and Bearer/DPoP XRPC were rejected as
+     `UnexpectedRequest` before a socket opened.
+   - `deleteRecord` required `commit` to be a string; a live PDS returns
+     lexicon `commitMeta` `{ cid, rev }`, so cleanup was marked failed
+     even when the delete succeeded.
+   - Live `getRecord` injects `$type`; exact-value readback failed. Readback
+     now requires every intended field and tolerates extra remote keys.
 
-The RFC decision record: Boris is a **local CLI publisher**. v1 = existing
-user PDS + app password + explicit CLI publish, with **zero Boris-operated
-infrastructure**. A public/native OAuth client remains a v1.x/v2 option;
-confidential OAuth/BFF infrastructure is explicitly out of scope unless a
-product reason appears; **operating a PDS is not a Boris requirement**.
+The RFC decision record is unchanged: Boris is a **local CLI publisher**.
+v1 = existing user PDS + app password + explicit CLI publish, with **zero
+Boris-operated infrastructure**. Operating a PDS is not a Boris requirement.
 
 ---
 
 ## 4. What remains to be done (the real list)
 
-### 4.1 Live interop proof (the main external gap)
+### 4.1 Live interop proof
 
-The smoke command is implemented and merge-tested, but it has never produced a
-recorded pass artifact against a real PDS:
+The app-password live smoke is **done**. Recorded artifact:
 
-- **OAuth path:** blocked. No public PDS registers the Standard.site
-  permission set (`site.standard.authFull`). bsky.social authorizes in the
-  browser but returns a scope without the Standard.site permission; Boris
-  fails closed with exit 6 (`compatibility`). This is recorded in
-  [`atproto-live-smoke.md`](atproto-live-smoke.md) §"PDS OAuth scope support"
-  and [`atproto-oauth.md`](atproto-oauth.md). The Standard.site author's own
-  deployment (andromeda.social) is self-hosted; self-hosting a PDS is
-  explicitly out of Boris scope for v1.
-- **App-password path:** the RFC's answer — `createSession`/app passwords
-  bypass OAuth scopes entirely, so a bsky.social smoke **can** complete
-  through the app-password path once PR #521 lands. This is the fastest route
-  to a real recorded artifact: log in with a test account's app password,
-  run `standard-site smoke --did <test-DID>`, record the artifact.
+[`fixtures/standard-site-live-smoke/bsky.social.json`](fixtures/standard-site-live-smoke/bsky.social.json)
 
-**Suggested immediate work:** merge PR #521, then run the smoke against a
-dedicated test account on bsky.social via app-password and commit the result
-artifact as evidence.
+| Field | Value |
+|---|---|
+| Date | 2026-08-16 |
+| Handle | `tbuddy23.bsky.social` |
+| DID | `did:plc:fqf5y5yyddraj7pywme4al2i` |
+| PDS | `https://morel.us-east.host.bsky.network` |
+| Namespace | `boris-live-20260816b` |
+| Verdict | `passed` (discovery, authorization, write, readback, cleanup) |
+| Indexer | `lagged` (non-normative; AppView had not ingested before cleanup) |
+
+- **OAuth path:** still blocked. No public PDS registers
+  `site.standard.authFull`. bsky.social authorizes in the browser but
+  returns a scope without the Standard.site permission; Boris fails closed
+  with exit 6. Unchanged; recorded in
+  [`atproto-live-smoke.md`](atproto-live-smoke.md) and
+  [`atproto-oauth.md`](atproto-oauth.md).
 
 ### 4.2 PDS / auth architecture decision (parked by the user)
 
@@ -123,21 +123,22 @@ up:
 
 ### 4.3 Small known quirks (non-blocking, documented)
 
-- A live PDS rejection of an invalid app password surfaces as
-  `UnexpectedRequest` (exit 3) rather than the friendlier `denial`
-  classification — a pre-existing quirk of the live `createSession` path.
+- The earlier note that an invalid app password surfaces as
+  `UnexpectedRequest` was a misdiagnosis: the native adapter was rejecting
+  the JSON `createSession` shape before the request left the machine. After
+  the transport fix, a genuine PDS rejection classifies as `denial` /
+  `AuthenticationFailed` (exit 4).
 - The `publication_touches` OOM test has occasionally flaked with an OS KILL
   under memory pressure, then passed on re-run; unrelated to the
   Standard.site work, but worth a look if it bites CI.
 
 ### 4.4 GitHub bookkeeping
 
-- PR #521 needs review + merge (CI is currently running; `mergeStateStatus`
-  was `BLOCKED` → will flip to `CLEAN` when green). After merge, the
-  app-password RFC should be linked from the closed #479/#478 issues or noted
-  in #452.
-- All nine issues from the original graph are closed; no re-open is
-  warranted — the remaining work is external integration, not spec gaps.
+- PR #521 is merged. The app-password RFC and the recorded live-smoke
+  artifact are noted on closed #452 (and should be mirrored on #479/#481
+  if a later pass wants the child issues to point at the follow-up).
+- All nine issues from the original graph remain closed; the remaining work
+  is the parked PDS/OAuth-scope question, not a spec gap.
 
 ---
 
@@ -210,13 +211,15 @@ git diff --check
 
 # live (manual, opt-in)
 ./zig-out/bin/boris standard-site login  --did did:plc:...            # OAuth
-./zig-out/bin/boris standard-site login  --app-password --did did:plc:...   # PR #521
+./zig-out/bin/boris standard-site login  --app-password --did did:plc:...   # or --handle
 ./zig-out/bin/boris standard-site publish --profile <profile.json> --did did:plc:...
 ./zig-out/bin/boris standard-site smoke  --did did:plc:... [--surface-url ...] [--out ...]
 ```
 
 Golden fixtures live under `docs/contracts/fixtures/publication-plan/` and the
 C03/C04 conformance goldens under `docs/audits/publication-conformance/`.
+The recorded live-smoke artifact is
+[`docs/contracts/fixtures/standard-site-live-smoke/`](fixtures/standard-site-live-smoke/README.md).
 
 ---
 
@@ -230,6 +233,7 @@ C03/C04 conformance goldens under `docs/audits/publication-conformance/`.
 | [`atproto-sessions.md`](atproto-sessions.md) | persistent session document + lifecycle |
 | [`atproto-app-password.md`](atproto-app-password.md) | **RFC (Implemented)** opt-in app-password path |
 | [`atproto-live-smoke.md`](atproto-live-smoke.md) | live smoke contract + PDS scope-support survey |
+| [`fixtures/standard-site-live-smoke/`](fixtures/standard-site-live-smoke/README.md) | recorded passing bsky.social app-password smoke |
 | [`plain-text-projection.md`](plain-text-projection.md) | deterministic plain-text projection |
 | [`publication-platforms.md`](publication-platforms.md) | publication-platform overview |
 | [parent issue #452](https://github.com/drawmeanelephant/boris/issues/452) | the original spec; closed; this file is referenced from it |
@@ -241,3 +245,4 @@ C03/C04 conformance goldens under `docs/audits/publication-conformance/`.
 | Date | Note |
 |---|---|
 | 2026-08-16 | Created. Records the merged #512 surface, the pending PR #521 (app-password + echo suppression), the live-PDS blocker, and the parked PDS/auth decision. |
+| 2026-08-16 | PR #521 merged. Recorded a passing bsky.social app-password live smoke. Fixed native-transport Bearer/JSON admission, live `commitMeta` delete parse, and `$type`-tolerant readback. OAuth scope gap and parked PDS question remain. |
