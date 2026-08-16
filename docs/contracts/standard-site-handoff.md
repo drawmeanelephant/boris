@@ -98,7 +98,7 @@ The app-password live smoke is **done**. Recorded artifact:
 | Handle | `tbuddy23.bsky.social` |
 | DID | `did:plc:fqf5y5yyddraj7pywme4al2i` |
 | PDS | `https://morel.us-east.host.bsky.network` |
-| Namespace | `boris-live-20260816b` |
+| Namespace | `boris-live-20260816c` (refreshed 2026-08-16 after #532/#539) |
 | Verdict | `passed` (discovery, authorization, write, readback, cleanup) |
 | Indexer | `lagged` (non-normative; AppView had not ingested before cleanup) |
 

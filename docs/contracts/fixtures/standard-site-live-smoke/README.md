@@ -13,7 +13,7 @@ of any PDS.
 | DID | `did:plc:fqf5y5yyddraj7pywme4al2i` |
 | PDS | `https://morel.us-east.host.bsky.network` |
 | Auth | stored `boris-app-password-v1` session (no OAuth scope) |
-| Namespace | `boris-live-20260816b` |
+| Namespace | `boris-live-20260816c` |
 | Verdict | `passed` |
 
 The JSON contains identity facts, AT-URIs, CIDs, and phase outcomes only. It
