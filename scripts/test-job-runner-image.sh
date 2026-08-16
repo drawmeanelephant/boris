@@ -39,6 +39,8 @@ docker build -f "$EX/Dockerfile" -t boris-job-runner:test "$EX"
 OUT="$ROOT/.zig-cache/job-runner-image"
 rm -rf "$OUT"
 mkdir -p "$OUT"
+# Image runs as uid 65532; the host-created bind mount is otherwise 0700.
+chmod a+rwx "$OUT"
 
 pack() {
   local src="$1" dest="$2"
