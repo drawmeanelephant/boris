@@ -117,6 +117,8 @@ host if you want the browser search UI to fetch its index.
 
 ## Next steps
 
+- [[guides/oliver-markdown|Markdown Showcase]] — every construct this compiler will actually render.
+- [[guides/publishing|Publishing Targets]] — local `dist/`, Pages, Standard.site.
 - [[guides/themes-and-layouts|Themes & Layouts]] — customize HTML output.
 - [[guides/search-and-ui|Search & Browser UI]] — understand rendered search.
 - [[reference/commands|Command Reference]] — exact flags and exit codes.

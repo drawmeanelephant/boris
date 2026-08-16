@@ -1,75 +1,113 @@
 # Project status — Boris
 
-**As of:** 2026-08-11
+**As of:** 2026-08-16
 
 **Integration line:** `afterparty` during the Build Week judging window; `main` is frozen.
 
 **Product metadata:** `v0.8.1 candidate` / `boris/0.8.1`; base IR `schemaVersion` **`0.2.0`**.
-**Phase:** post-v0.8 integration and release reconciliation.
+**Phase:** post-v0.8 integration and identity reconciliation.
+**Afterparty tip:** PR **#532** (Standard.site first-tester path). The line is past **#524**; it is not “the merge set through #318.”
 
 **Build baseline:** Zig **0.16** and the Oliver library pinned in `build.zig.zon` (pure Zig; no CMake or other host tools).
 
-Boris is a Zig documentation compiler: Markdown in, validated documentation
-graph out as HTML by default, with optional IR, RAG, Context Bundle, and
-`llms.txt`, and RSS 2.0 exports. It is not a Node SSG, an MDX runtime, or a migration
-framework. Normative behavior lives in [`docs/contracts/`](contracts/);
-release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
-The publication-model boundary is canonically defined by
-[`publication-model.md`](contracts/publication-model.md); it does not add
-frontmatter or claim a unified publication executor.
+## Identity
+
+**Choice (issue [#538](https://github.com/drawmeanelephant/boris/issues/538)): publisher platform.**
+
+Boris is a **graph-native publication compiler** with multiple targets.
+Markdown in, a validated Trunk/Satellite graph, then one or more contracted
+projections. HTML `dist/` is the **default target**, not the whole product.
+
+| Layer | What it is |
+|---|---|
+| Compiler core | One Zig binary. Closed frontmatter. Oliver in-process. Fail-loud graph. Default CLI writes `dist/`. |
+| Publication targets | A registry. GitHub Pages and Standard.site are verified. Nostr is an open program. |
+| Evidence chain | `artifacts.json` → `checks.json` → `claims.json` → `touches.json` → Proof Pack. |
+| Editor | In-tree authoring surface. Compiler-backed. Not a second stack. |
+| Labs | Standalone migration and source-RAG tools. In the repo story. Not runtime dependencies. |
+| Parked | Cloudflare Containers (#300) and freestanding Wasm (#301). Open cards, not shipped targets. |
+
+This is not “a bookseller with a few extras in the basement.” It is also not
+two products sharing a git remote. One compiler, several targets, one graph.
+
+Normative behavior lives in [`docs/contracts/`](contracts/).
+The publication-model boundary is
+[`publication-model.md`](contracts/publication-model.md).
+The target registry is
+[`publication-platforms.md`](contracts/publication-platforms.md).
+Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 
 ## Read this first
 
 - The next release is **v0.8.1 candidate**. It must not be tagged until release
   context is complete. The historical `v0.8.0` tag remains preserved as
   erroneous evidence: it resolves to a commit carrying 0.7.0 metadata and is
-  not an ancestor of `afterparty`.
-- The current afterparty merge set runs through PR **#318**: generated-output
-  hygiene, docs-maintenance hardening, default-site layout polish, rendered
-  search foundation, CLI hardening, browser UI, staged publication,
-  standalone-tool CI, nested hierarchy, human-first documentation IA, the
-  release-state packet and fragment normalization, relationship inventory and
-  candidate classification, theme-dogfood and archive review, migration-lab
-  publication safety, RSS 2.0 and sitemap exports, the publication profile /
-  plan / artifact-inventory / checks / claims evidence chain, the Touch Atlas
-  (contract and first slice), testdata-generator and jobs passthrough, the
-  test-throughput audit, and the Proof Pack (contract, first slice, semantic
-  rejection probes, HTML presentation, and print-disclosure robustness),
-  release bookkeeping, the standalone content audit, parser-authority cleanup,
-  and the first GitHub Pages publication slice in PRs #275–#318.
-- Rendered-site search is **shipped on `afterparty`**: the compiler produces the
-  search artifact from its staged live-page overlay and the default layout has
-  a small browser UI with a no-JavaScript navigation fallback. Its normative
-  artifact surface is [`rendered-search.md`](contracts/rendered-search.md).
-- Product RAG is now a **working-context projection**: default `--rag` emits
+  not an ancestor of `afterparty`. More than **200** fragments sit under
+  [`docs/changelog.d/`](changelog.d/). That queue is release-owner work. This
+  status page does not cut the release.
+- A stranger’s first command is still `zig build && ./zig-out/bin/boris --quiet`.
+  That publishes HTML to `dist/`. Everything else is an explicit target,
+  projection, or annex — named below, not hidden.
+- Rendered-site search is **shipped**: the compiler produces the search
+  artifact from its staged live-page overlay and the default layout has a
+  small browser UI with a no-JavaScript navigation fallback.
+  [`rendered-search.md`](contracts/rendered-search.md).
+- Product RAG is a **working-context projection**: default `--rag` emits
   bounded `working-N.md` upload packs of verbatim site documents (never the
-  `docs/rag/system` corpus) plus a `manifest.json` sidecar (schema v2), and
-  `--rag --complete` is the explicit full-corpus export that rejects `--scope`.
-  Normative surface:
+  `docs/rag/system` corpus) plus a `manifest.json` sidecar (schema v2).
+  `--rag --complete` is the explicit full-corpus export and rejects `--scope`.
   [`rag-export.md`](contracts/rag-export.md).
 
 ## What works
 
+### Compiler core
+
 | Capability | Current state |
 |---|---|
 | Default site build | **Done** — `boris` writes HTML to `dist/`. |
-| Markdown rendering | **Done** — Oliver (pinned in `build.zig.zon`) through the `src/render.zig` seam: CommonMark + GFM tables + heading ids/IAL, footnotes, definition lists. |
+| Markdown rendering | **Done** — Oliver (pinned in `build.zig.zon`) through `src/render.zig`: CommonMark + GFM tables + heading ids/IAL, footnotes, definition lists, strikethrough. |
 | Content graph | **Done** — closed frontmatter, validated Trunk/Satellite hierarchy with arbitrary finite acyclic parent chains, includes, wiki links, and heading targets. |
-| No-publication validation | **Done on `afterparty`** — `boris validate` reuses the canonical HTML prepublication compiler path for source, graph, dependency, component, layout, theme, asset, and sitemap validity without creating target, cache, search, or evidence artifacts. |
-| HTML navigation and layouts | **Done** — graph-backed nav, breadcrumbs, TOC, closed layout slots, assets, layout rules, incremental/watch/jobs, isolated targets, and opt-in deterministic XML sitemap publication. |
-| Machine outputs | **Done** — IR 0.2, RAG (working-context packs + `--complete` corpus, schema 2), Context Bundles, `llms.txt`, and deterministic RSS 2.0; semantic relations retain their documented conditional IR 0.3 artifacts. |
-| Migration laboratories | **Done as bounded developer tools** — read-only review, conversion aids, relationship candidates, and theme materialization; they do not widen Boris author grammar. |
-| Rendered-site search | **Done on `afterparty`** — deterministic staged compiler publication, standalone CLI, browser UI, zero-results state, and no-JavaScript navigation fallback. |
-| Relationship review inventory | **Done on `afterparty`** — schema-v2 exact target inventory preserves provenance, duplicate keys, slug states, draft exclusion, unsupported-file rows, and deterministic JSON/Markdown reports. |
-| Relationship candidate classification | **Done on `afterparty`** — exact eligible-key review output reports `inventoried`, `ambiguous`, `absent`, and `invalid`; no automatic selection or relation emission. |
-| Publication Touch Atlas | **Implemented first slice** — deterministic target-local `touches.json` relationship index derived exclusively from the committed bytes of `artifacts.json`, `checks.json`, and `claims.json`; runs after claims replacement with no payload rereads; OOM-safe construction. |
-| Publication Proof Pack | **Done (Step 2C closed)** — deterministic two-file presentation model (`proof-pack.json` + `index.html`) over committed artifact, checks, claims, and Touch Atlas evidence; emitted after the Touch Atlas commits with a staged transaction, embedded model digest, semantic-rejection probes, improved HTML presentation, and print-disclosure robustness. |
-| GitHub Pages publication target | **Implemented final audit slice** — the normalized project/root/custom-domain identity, exact public artifact boundary, retained target-local evidence, and optional bounded post-deploy observer are separate; deployment evidence remains temporal and explicitly bounded. |
-| Standard.site / AT Protocol publication | **Shipped for first testers** — offline plan/records/verify, opt-in app-password login, one-shot publish, and a recorded passing bsky.social live smoke. Browser OAuth is implemented but bsky.social does not grant `site.standard.authFull` (exit 6). Operator path: [`standard-site.md`](standard-site.md). |
-| Migration-guide executable pass | **Evidence complete** — the 69-page Starlight dogfood converted, compiled to HTML/IR/RAG, and produced a deployable static tree; human review remains required for 109 preserved, 1 stripped, and 79 manual-review findings plus four link-audit misses. |
-| Source-RAG ergonomics measurement | **Measured** — flat, no-bundle, bundles-only, core/docs profiles, and per-tool packs were timed and sized; no behavior change is justified by this snapshot. |
-| Archive-layout evidence | **Done mechanically** — deterministic fixture, black-box audit, and link audit pass; browser viewport and keyboard review remain explicitly unverified. |
-| Twenty Twenty materialization dogfood | **Done** — bounded GPL-evidenced archaeology → reviewed ledger → static materialization → Boris build → link audit; no PHP/JS runtime behavior was adopted. |
+| No-publication validation | **Done** — `boris validate` reuses the canonical HTML prepublication compiler path and writes no target, cache, search, or evidence artifacts. |
+| HTML navigation and layouts | **Done** — graph-backed nav, breadcrumbs, TOC, closed layout slots, assets, layout rules, incremental/watch/jobs, isolated targets, opt-in XML sitemap. |
+| Machine outputs | **Done** — IR 0.2, RAG (working-context packs + `--complete` corpus, schema 2), Context Bundles, `llms.txt`, deterministic RSS 2.0; semantic relations retain their documented conditional IR 0.3 artifacts. |
+
+### Publication targets
+
+| Target | Current state |
+|---|---|
+| GitHub Pages | **Shipped and verified** — normalized project/root/custom-domain identity, exact public artifact boundary, retained target-local evidence, optional bounded post-deploy observer. Operator path: [`github-pages.md`](github-pages.md). |
+| Standard.site / AT Protocol | **Shipped for first testers** — offline plan/records/verify, opt-in app-password login, one-shot publish, recorded passing bsky.social live smoke. Browser OAuth is implemented; bsky.social does not grant `site.standard.authFull` (exit 6). Operator path: [`standard-site.md`](standard-site.md). |
+| Publication evidence | **Done** — artifacts → checks → claims → Touch Atlas → Proof Pack, staged, deterministic. |
+| Nostr NIP-23 | **Open program** — [#454](https://github.com/drawmeanelephant/boris/issues/454). Not a verified target. |
+
+### Editor
+
+| Capability | Current state |
+|---|---|
+| Boris Editor | **First-class authoring surface** — local host, schema- and graph-aware completion, compiler-backed problems, live preview of committed `dist/`. Conformance campaign: [#418](https://github.com/drawmeanelephant/boris/issues/418) / [#462](https://github.com/drawmeanelephant/boris/issues/462). Guide: [`content/guides/editor.md`](../content/guides/editor.md). |
+
+### Labs
+
+| Capability | Current state |
+|---|---|
+| Migration laboratories | **Done as bounded developer tools** — read-only review, conversion aids, relationship candidates, theme materialization. They do not widen Boris author grammar. |
+| Relationship inventory + classification | **Done** — schema-v2 inventory and exact eligible-key classification (`inventoried`, `ambiguous`, `absent`, `invalid`). No automatic relation emission. |
+| Migration-guide executable pass | **Evidence complete** — 69-page Starlight dogfood converted and compiled; human review remains for preserved/stripped/manual-review findings. |
+| Source-RAG ergonomics | **Measured** — no behavior change justified by the snapshot. |
+| Archive-layout evidence | **Done mechanically** — fixture, black-box audit, and link audit pass; browser viewport and keyboard review remain unverified. |
+| Twenty Twenty materialization | **Done** — bounded GPL-evidenced archaeology → reviewed ledger → static materialization → Boris build → link audit. |
+
+### Parked / open
+
+| Card | State |
+|---|---|
+| Cloudflare Containers (#300) | Open. Native Boris behind a Worker. Not a static rehost. |
+| Freestanding Wasm (#301) | Open. Compiler-shaped embedding bet. |
+| Standard.site HTML verify emit ([#533](https://github.com/drawmeanelephant/boris/issues/533)) | Production HTML never emits verification surfaces. Plan/publish do not wait on it. |
+| Standard.site `boris init` profile ([#528](https://github.com/drawmeanelephant/boris/issues/528)) | Open. |
+| ATProto DPoP wire ([#536](https://github.com/drawmeanelephant/boris/issues/536)) | Open. |
+| Standard.site profile `pds` ([#537](https://github.com/drawmeanelephant/boris/issues/537)) | Contract treats it as optional; publish currently requires it. |
+| publication-profile “Pages only” prose ([#534](https://github.com/drawmeanelephant/boris/issues/534)) | Filed contract drift. The target registry is already `github-pages` \| `standard-site`. |
 
 ### Common commands
 
@@ -88,30 +126,33 @@ zig build test
 ./zig-out/bin/boris --rss --site-url https://docs.example/ --rss-title "Example Docs" --rss-description "Recent updates" --quiet
 ./zig-out/bin/boris --sitemap --site-url https://docs.example/ --quiet
 ./zig-out/bin/boris --incremental --jobs 4 --quiet
+./zig-out/bin/boris plan --profile boris.json
 
+./zig-out/bin/boris standard-site                   # family list
+./zig-out/bin/boris standard-site plan --profile profiles/standard-site.json
+
+zig build --build-file editor/build.zig
 zig build --build-file tools/search-index/build.zig test
-zig build --build-file tools/search-index/build.zig run -- \
-  --root=./dist --out=./dist/_boris/search
-
 zig build --build-file tools/migration-lab/build.zig test
 zig build test-layout-hostile
 ```
 
 ## Active roadmap
 
+Completed afterparty work (relationship classification, Touch Atlas, Proof Pack,
+Pages, Standard.site first-tester path, editor conformance sweeps, RAG working
+context, test-throughput audit) is **done**. It is not relisted as upcoming.
+
 | Order | Card | State | Boundary / verification |
 |---:|---|---|---|
-| 1 | Release-state decision | **Decided — pending release context** | Preserve the erroneous v0.8.0 tag and use the new v0.8.1 identifier; do not tag or publish until release context is complete. Then run [`release-gate.sh`](../scripts/release-gate.sh). |
-| 2 | Relationship candidate classification | **Done on `afterparty`** | Exact eligible-key review evidence is complete; `selected` remains reserved for a future explicit rule. |
-| 3 | Publication Touch Atlas | **Implemented first slice** | Derives and atomically replaces `touches.json` after claims commit; the contract's non-claims (source provenance, runtime traces, deployment graph, accessibility/prose inference, proof-pack, repairs) remain out of scope. |
-| 4 | Archive browser review | **Next evidence pass** | Inspect the retained fixture at 375px, 768px, and 1440px plus keyboard traversal; record actual evidence before changing layout behavior. |
-| 5 | Archive presentation fixes | **Evidence-gated** | Small, framework-free HTML/CSS or layout fixes only after the browser review finds a reproducible issue. |
-| 6 | Migration-guide executable pass | **Evidence complete — review findings remain** | 69-page Starlight dogfood converted and compiled successfully; review the retained MDX/frontmatter/link/asset findings and four generated-site missing routes before claiming a clean migration. |
-| 7 | Source-RAG ergonomics measurement | **Measured — no behavior change** | Default flat export: 988 source files, 16,012 KiB on disk, 1.48s. `--no-bundles`: 9,468 KiB, 1.13s. Bundles-only at 256 KiB: 7,084 KiB, 28 parts, 1.14s. Core/docs bundles-only: 1,668/3,448 KiB. Tools per-pack: 6 packs, 2,224 KiB, 0.61s. Keep product RAG distinct. |
-| 8 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
-| 9 | Build optimization | **Measured — no change** | Throughput audit: `zig build test` graph is fully sibling-parallel (42 flat test-run deps); scaling `-j1`→`-j8` ≈3x; warm default ≈16–20s. Residual floor is structural ≈8.8× shared-suite duplication across four co-dominant roots (`main`, `compile`, `hardening_test`, `layout_select_hostile_test`); no single root dominates. See [test-throughput-audit.md](audits/test-throughput-audit.md). |
-| 10 | Publication Proof Pack (Phase 7A) | **Done — Step 2C closed** | Deterministic `proof-pack.json` presentation model and static `index.html` emitted after the Touch Atlas commits; strict four-report binding, canonical JSON/HTML rendering, first-slice staged transaction with embedded model digest, exit-3 mapping, quiet diagnostic capture, semantic-rejection probes, HTML presentation cleanup, and print-disclosure robustness. |
-| 11 | GitHub Pages publication target (Issue #302) | **Implemented final audit slice** | Validate the Pages location offline, consume one normalized identity across applicable URL-bearing projections, package only exact inventory records, retain target-local evidence separately, and optionally upload bounded `boris-github-pages-deployment-evidence` after deploy. The observer does not replace local checks or claim universal deployment correctness. |
+| 1 | Release-state decision | **Decided — pending release context** | Preserve the erroneous v0.8.0 tag; next identifier is v0.8.1. Do not tag until release context is complete. Then run [`release-gate.sh`](../scripts/release-gate.sh). |
+| 2 | Archive browser review | **Next evidence pass** | Inspect the retained fixture at 375px, 768px, and 1440px plus keyboard traversal; record actual evidence before changing layout behavior. |
+| 3 | Archive presentation fixes | **Evidence-gated** | Small, framework-free HTML/CSS or layout fixes only after the browser review finds a reproducible issue. |
+| 4 | Migration-guide review findings | **Evidence complete — review remains** | Review the retained MDX/frontmatter/link/asset findings and four generated-site missing routes before claiming a clean migration. |
+| 5 | Source-RAG publication safety | **Dependent on evidence** | Make only a tested, narrowly justified staging/cleanup improvement. |
+| 6 | Standard.site HTML verify emit | **Open [#533](https://github.com/drawmeanelephant/boris/issues/533)** | Production HTML must emit verification surfaces before `verify` against a real `dist/` can pass. |
+| 7 | Nostr NIP-23 target | **Open program [#454](https://github.com/drawmeanelephant/boris/issues/454)** | Third publication target when the program lands. Not implied by this identity choice. |
+| 8 | Cloudflare embedding | **Open [#300](https://github.com/drawmeanelephant/boris/issues/300) / [#301](https://github.com/drawmeanelephant/boris/issues/301)** | Container-backed native builds and freestanding Wasm. Outside the static-target matrix. |
 
 ## Release bookkeeping
 
@@ -127,10 +168,9 @@ The release audit found these follow-ups:
   candidate is `v0.8.1`, which remains untagged until release context is
   complete.
 - Retained fragments have a permitted category heading and are tracked in a
-  deterministic 91-row [`fragment inventory`](changelog.d/INVENTORY.md); one
-  unnumbered fragment (`twentytwenty-theme-materialization-dogfood.md`) is
-  retained as found and awaits release-owner placement. The release owner
-  still decides whether and when to consume them.
+  deterministic [`fragment inventory`](changelog.d/INVENTORY.md). The inventory
+  no longer matches the on-disk count (200+ fragments). That is release-owner
+  work, not an invitation to cut v0.8.1 from a docs PR.
 - The release gate now correctly accepts the validated four-level nested hierarchy fixture.
 
 ## Product boundaries that remain deliberate
@@ -140,9 +180,10 @@ The release audit found these follow-ups:
 | Subprocess Markdown rendering | Oliver is consumed as a native Zig module (never a subprocess). |
 | Node/React/Astro/Next as the compiler | Boris itself is the Zig compiler. |
 | Full YAML frontmatter or arbitrary MDX | The author grammar and registered components are intentionally closed. |
-| Embedded HTTP server | Serve generated `dist/` with any ordinary static host. |
+| Embedded HTTP server as product architecture | Serve generated `dist/` with any ordinary static host. The editor host is a local authoring surface, not a public app server. |
 | Universal migration conversion | Migration labs are review-first, bounded developer tools. |
 | Speed or cross-OS-byte-identity claims | Measure the specific workload and platform first. |
+| Silently deleting targets or the editor | Demotion in the story is not removal. Removal is a different issue. |
 
 ## Risk and environment notes
 
@@ -154,6 +195,9 @@ The release audit found these follow-ups:
   phases remain coordinated for deterministic output.
 - Generated directories (`dist/`, `rag/`, `source-rag/`, caches, and temporary
   release-gate output) are not source-of-truth or review currency.
+- Standard.site app passwords grant broad account write. Use a dedicated
+  non-personal test identity. Never put the password on argv, in the profile,
+  in the environment, in git, or in evidence.
 
 ## Documentation map
 
@@ -162,11 +206,15 @@ The release audit found these follow-ups:
 | [`README.md`](../README.md) | Product outcomes and quick start |
 | [`docs/contracts/`](contracts/) | Normative compiler and artifact behavior |
 | [`docs/contracts/publication-model.md`](contracts/publication-model.md) | Canonical ownership of document facts, publication facts, migration provenance, projections, and verification claims |
+| [`docs/contracts/publication-platforms.md`](contracts/publication-platforms.md) | Target registry and verified-target adapter seam |
 | [`CHANGELOG.md`](../CHANGELOG.md) | Released-history record |
 | [`docs/changelog.d/`](changelog.d/) | Pending release fragments |
 | [`docs/MIGRATION.md`](MIGRATION.md) | Bounded author migration workflow |
+| [`docs/authoring-spine.md`](authoring-spine.md) | Teaching path from `boris init` to publish + verify |
 | [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) | Standalone migration-lab commands |
 | [`tools/search-index/README.md`](../tools/search-index/README.md) | Rendered search tool |
 | [`docs/github-pages.md`](github-pages.md) | GitHub Pages setup, location model, workflow, and evidence boundary |
+| [`docs/standard-site.md`](standard-site.md) | Standard.site first-tester path |
 | [`docs/RELEASE-GATE.md`](RELEASE-GATE.md) | Mechanical ship checks |
 | [`AGENTS.md`](../AGENTS.md) | Repository policy and agent constraints |
+| [`content/`](../content/) | Compiled public documentation site (Oliver-rendered) |

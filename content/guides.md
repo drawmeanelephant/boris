@@ -5,18 +5,35 @@ status: published
 tags: [guides]
 ---
 
-# User Guides
+# User Guides {#user-guides}
 
-Step-by-step guides for authoring, organizing, and publishing documentation with Boris.
+Step-by-step guides for authoring, organizing, and publishing with Boris.
+HTML `dist/` is the default target. The rest of this list is the product.
 
-- [[guides/overview]] — Content model and compiler pipeline overview
-- [[guides/cli-and-modes]] — Choosing build, validate, watch, analysis, and export commands
-- [[guides/editor]] — The local Boris Editor: safe editing, schema-aware completion, compiler-backed problems, and live preview
-- [[guides/building-pages]] — Creating Markdown pages, writing frontmatter, using wiki-links and includes
-- [[guides/trunk-satellite]] — How the content graph works, parent/child relationships, navigation hierarchy
-- [[guides/themes-and-layouts]] — Custom HTML layouts, the `--theme` flag, layout markers and asset management
-- [[guides/asides]] — Semantic callouts and constrained disclosure blocks
-- [[guides/search-and-ui]] — Compiler-owned rendered search and the browser UI
-- [[guides/rag-export]] — RAG corpus, JSON IR, AI Context Bundle, and `llms.txt` generation
-- [[guides/oliver-markdown]] — Tables, footnotes, definition lists, heading ids, and supported Markdown extensions
-- [[guides/migration]] — Moving from Hugo, Starlight, Astro, or a plain Markdown folder to Boris
+Authoring
+: [[guides/overview|Content model and compiler pipeline]] ·
+  [[guides/building-pages|Pages, frontmatter, wiki-links, includes]] ·
+  [[guides/trunk-satellite|Trunk & Satellite hierarchy]] ·
+  [[guides/asides|Asides and Details]] ·
+  [[guides/oliver-markdown|Oliver Markdown showcase]] ·
+  [[guides/editor|Boris Editor]]
+
+Site
+: [[guides/themes-and-layouts|Themes and layouts]] ·
+  [[guides/search-and-ui|Rendered search and the browser UI]] ·
+  [[guides/cli-and-modes|CLI and output modes]]
+
+Publish
+: [[guides/publishing|Publishing targets]] — local `dist/`, GitHub Pages,
+  Standard.site, evidence chain.
+
+Projections and intake
+: [[guides/rag-export|RAG, IR, Context, llms.txt]] ·
+  [[guides/migration|Migrating to Boris]]
+
+<Aside kind="note">
+
+Reference material — flags, keys, diagnostics — lives under
+[[reference|Reference]], not here. This index is the teaching trail.
+
+</Aside>

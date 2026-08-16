@@ -53,8 +53,8 @@ every API request must repeat the token, and any supplied `Origin` must match
 the session origin. A bare `--boris` command name is resolved through `PATH`;
 a path-like value is canonicalized against the directory you launched from.
 
-- `[[cli-and-modes|CLI and modes]]` — the compiler surface the editor drives
-- `[[themes-and-layouts|Themes and layouts]]` — what `Build HTML` produces
+- [[guides/cli-and-modes|CLI and modes]] — the compiler surface the editor drives
+- [[guides/themes-and-layouts|Themes and layouts]] — what `Build HTML` produces
 
 ---
 
@@ -110,9 +110,9 @@ successful IR build the UI reloads `completion.json` without a restart.
 Insertion is explicit and undoable — there is no typing-time rewrite of your
 source. The native textarea remains the editing surface.
 
-- `[[building-pages|Building and writing pages]]` — the frontmatter and
+- [[guides/building-pages|Building and writing pages]] — the frontmatter and
   wiki-link vocabulary these suggestions complete
-- `[[reference/frontmatter|Frontmatter reference]]` — the closed key set
+- [[reference/frontmatter|Frontmatter reference]] — the closed key set
 
 ---
 
@@ -149,9 +149,9 @@ project` and `Build HTML` use a bounded stderr adapter; a visible notice marks
 those positions as best-effort. Analysis findings and impact endpoints are
 displayed as Boris-owned facts — the editor never infers either.
 
-- `[[reference/diagnostics|Diagnostics reference]]` — the error codes you will
+- [[reference/diagnostics|Diagnostics reference]] — the error codes you will
   see here
-- `[[overview|Content model and pipeline]]` — what the graph checks
+- [[guides/overview|Content model and pipeline]] — what the graph checks
 
 ---
 
@@ -194,6 +194,7 @@ source and confidence.
 
 ## Next steps
 
-- `[[guides|User guides]]` — back to the guide index
-- `[[oliver-markdown|Markdown syntax]]` — what the source pane accepts
-- `[[reference/commands|CLI reference]]` — every compiler command the editor wraps
+- [[guides|User guides]] — back to the guide index
+- [[guides/oliver-markdown|Markdown syntax]] — what the source pane accepts
+- [[guides/publishing|Publishing targets]] — what a successful HTML build is for
+- [[reference/commands|CLI reference]] — every compiler command the editor wraps

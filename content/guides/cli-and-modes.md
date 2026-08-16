@@ -29,6 +29,7 @@ check` is graph-health analysis, not an alias for validation.
 | `boris check` | What graph/dependency health facts and policy findings exist? | Nothing, unless `--report` is supplied |
 | `boris impact ID` | Which pages or source endpoints depend on this id? | Nothing, unless `--report` is supplied |
 | `boris plan --profile PATH` | What normalized publication declaration does this profile describe? | JSON declaration on stdout |
+| `boris standard-site …` | Atmosphere plan / records / login / publish / smoke | Depends on the subcommand |
 
 `watch` is HTML-only. The compatibility flag `--watch` and `build --watch`
 remain accepted. `check` and `impact` operate only after the graph is valid;
@@ -105,6 +106,21 @@ HTML outputs:
 `--target` is exclusive with `--html-dir`. Page-specific `--layout-rule`
 selectors can choose layouts by entity id, glob, or resolved role. Each target
 owns its layout, assets, cache, search artifact, and publication evidence.
+
+## Publication families
+
+`plan` inspects a profile. It does not publish. Hosted targets are explicit:
+
+```bash
+./zig-out/bin/boris plan --profile boris.json
+./zig-out/bin/boris standard-site
+./zig-out/bin/boris standard-site plan --profile profiles/standard-site.json
+```
+
+GitHub Pages is driven by the official Actions workflow, not a `boris pages`
+verb. Standard.site is the `boris standard-site` family. First testers on
+bsky.social use `login --app-password`. See
+[[guides/publishing|Publishing Targets]].
 
 ## Exit codes
 

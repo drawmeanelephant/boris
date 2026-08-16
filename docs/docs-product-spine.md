@@ -2,7 +2,7 @@
 
 ## One-Sentence Product Definition
 
-**Boris is a zero-dependency native static documentation compiler that turns rich Markdown files into validated, searchable HTML documentation sites and machine-ready AI packages from a single source.**
+**Boris is a graph-native publication compiler: rich Markdown in, a validated Trunk/Satellite graph, then one or more contracted targets. HTML `dist/` is the default target, not the whole product.**
 
 ---
 
@@ -15,7 +15,7 @@
    Boris builds complete static documentation sites—not just isolated HTML renders. It enforces explicit page hierarchies (`parent: <id>`) and validates parent chains plus supported internal references before writing files, alongside graph-backed navigation, breadcrumbs, TOC, and optional client-side full-text search.
 
 3. **Single-Source Multi-Output (Human & Machine)**  
-   From one frozen, validated content tree, Boris publishes static HTML for human readers, client-side search indices (via `tools/search-index`), JSON IR schemas for developer tooling (`--out`), RAG corpora (`--rag`) for vector DBs, AI Context Bundles (`--context`) for LLM prompts, and standard `llms.txt` (`--llms`) for crawlers.
+   From one frozen, validated content tree, Boris publishes static HTML for human readers (default `dist/`), verified hosted targets (GitHub Pages, Standard.site), client-side search indices, JSON IR (`--out`), RAG corpora (`--rag`), AI Context Bundles (`--context`), and `llms.txt` (`--llms`). Emitting one projection does not prove another.
 
 ---
 

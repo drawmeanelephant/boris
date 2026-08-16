@@ -7,10 +7,18 @@ tags: [rationale, comparison, architecture]
 
 # Why Boris? (Comparison & Rationale)
 
-Boris is a dedicated static documentation compiler. This document contrasts Boris with traditional static site generators, JavaScript web frameworks, hosted CMS platforms, and plain Markdown files.
+{{include includes/identity.md}}
+
+This document contrasts Boris with traditional static site generators,
+JavaScript web frameworks, hosted CMS platforms, and plain Markdown files.
 
 <Aside kind="info">
-**Core Difference:** Boris treats documentation as a validated, directed graph and compiles it into static HTML, client-side search, and machine AI exports from a single native binary—without Node.js, npm dependencies, or JavaScript runtime build steps.
+
+**Core difference:** Boris treats documentation as a validated, directed
+graph and compiles it into static HTML, hosted publication targets,
+client-side search, and machine AI exports from a single native binary —
+without Node.js, npm dependencies, or JavaScript runtime build steps.
+
 </Aside>
 
 ---
@@ -26,6 +34,7 @@ Boris is a dedicated static documentation compiler. This document contrasts Bori
 | **Rich Markdown** | Basic CommonMark | MDX (arbitrary JS) | **CommonMark + GFM tables + Boris extensions**: heading ids, footnotes, definition lists, wiki-links, includes |
 | **Full-Text Search** | External service | Bundled JS indexers | **Compiler-owned rendered index + optional browser UI** |
 | **Machine & AI Exports** | Scraping / plugins | Custom build scripts | **Native Exports**: JSON IR 0.2.0, RAG, Context, `llms.txt` |
+| **Publication targets** | “Push the folder” | Adapter plugins / platform CLIs | **Registry**: local `dist/`, GitHub Pages, Standard.site |
 | **Client JS Footprint** | None | Varies by framework setup | **No required runtime; search UI is optional** |
 
 Table: Architectural Comparison Matrix
@@ -70,6 +79,7 @@ Uncompiled Markdown folders in git repositories lack navigation menus, breadcrum
 ## Next Steps
 
 - [[getting-started|Getting Started]] — Build your first site in 5 minutes.
+- [[guides/publishing|Publishing Targets]] — local `dist/`, Pages, Standard.site.
 - [[technology-and-rationale|Technology & Rationale]] — Deep dive into Zig, native Markdown rendering, and memory design.
 - [[guides/overview|Content Model & Pipeline]] — Learn how Trunk/Satellite page graphs operate.
 

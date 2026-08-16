@@ -8,7 +8,17 @@ tags: [guides, graph, hierarchy]
 # Trunk & Satellite — Content Hierarchy
 
 The `parent` field gives Boris an explicit site hierarchy. It is a graph edge,
-not a display label or a directory convention.
+not a display label or a directory convention. Hosted targets and machine
+projections consume the same frozen hierarchy — see
+[[guides/publishing|Publishing Targets]].
+
+<Aside kind="note">
+
+Directory layout is a convenience for humans. Navigation is not inferred
+from folders. If you wanted implicit hierarchy, you wanted a different
+compiler.
+
+</Aside>
 
 ## The two roles
 

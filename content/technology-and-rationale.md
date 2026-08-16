@@ -7,6 +7,8 @@ tags: [architecture, zig, rationale]
 
 # Technology & Rationale
 
+{{include includes/identity.md}}
+
 Boris makes specific, deliberate technical choices. This page explains what those choices are, why they were made, and what they mean for you as someone running the tool.
 
 ## Core Architectural Pillars
@@ -89,6 +91,7 @@ If each output format used a different content model, they would drift. Boris so
 | Closed frontmatter grammar | Every key has a defined meaning; rejections are diagnostic |
 | No required client JS runtime | Works everywhere; no build toolchain needed |
 | Single-source multi-output | Same graph model per mode; align by generating from one revision |
+| Publication registry | HTML `dist/` default; Pages and Standard.site verified; no silent merge of targets |
 
 [^arena]: Per-page arena allocation frees rendering scratch after each page publish. Durable `PageDb` metadata is retained for the run. Process RSS is not claimed.
 [^cabi]: A native Zig library call renders markdown in-process, without child processes or a separate renderer executable.
