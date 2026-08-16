@@ -21,7 +21,10 @@ selected profile, so the same inputs always produce the same bytes.
 
 This is an **open program**, not a verified publication target. It has no
 location adapter, no evidence-chain Proof Pack, and no live-smoke gate.
-GitHub Pages and Standard.site remain the verified targets.
+A recorded first-tester publish lives at
+[`fixtures/nostr-live-smoke/`](fixtures/nostr-live-smoke/README.md); it is
+observational evidence, not a CI job and not a `boris nostr smoke`
+command. GitHub Pages and Standard.site remain the verified targets.
 
 ## Scope
 
@@ -577,6 +580,10 @@ A `failed` or `auth-required` relay is not attempted again for later events.
 Every relay interaction is bounded and produces a verdict, so the run always
 writes a report. A static golden example lives at
 [`docs/contracts/fixtures/nostr-publication/expected/publish-report.json`](fixtures/nostr-publication/expected/publish-report.json).
+A dated public-relay run, including its `partial` classification and per-relay
+outcomes, is checked in at
+[`fixtures/nostr-live-smoke/`](fixtures/nostr-live-smoke/README.md). That
+fixture is not a required gate.
 
 ### Conformance matrix
 

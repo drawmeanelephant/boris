@@ -120,6 +120,11 @@ A relay that demands NIP-42 AUTH is `auth-required/unsupported`. Other
 relays are still attempted. Exit `0` means the run completed; read the
 verdict in the report.
 
+A recorded disposable-identity publish lives at
+[`docs/contracts/fixtures/nostr-live-smoke/`](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/contracts/fixtures/nostr-live-smoke/README.md).
+It is optional evidence, not CI. Re-run notes are the first-person try on
+[#454](https://github.com/drawmeanelephant/boris/issues/454).
+
 <Details summary="What this family will not do">
 
 It will not delete remote events (no NIP-09). It will not fold into a
