@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Request } from '@playwright/test';
 
 type MockOptions = {
   saveConflict?: boolean;
@@ -1124,41 +1124,6 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
     expect(renameRequests).toBe(1);
   });
 
-  test('create and rename dialogs: Esc clears a half-typed path on reopen', async ({ page }) => {
-    await installApi(page);
-    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
-
-    // Create: type a path, Esc out, reopen — the default path is back, not the stale text.
-    const create = page.getByRole('dialog', { name: 'Create file' });
-    await page.getByRole('button', { name: 'Create file', exact: true }).click();
-    await expect(create).toBeVisible();
-    const createInput = create.getByRole('textbox', { name: 'New file path' });
-    await expect(createInput).toHaveValue('content/new-page.md');
-    await createInput.fill('content/posts/');
-    await page.keyboard.press('Escape');
-    await expect(create).toBeHidden();
-    await page.getByRole('button', { name: 'Create file', exact: true }).click();
-    await expect(create).toBeVisible();
-    await expect(createInput).toHaveValue('content/new-page.md');
-    await page.keyboard.press('Escape');
-    await expect(create).toBeHidden();
-
-    // Rename: same, but the reopen state is the active path, not the half-typed text.
-    const rename = page.getByRole('dialog', { name: 'Rename file' });
-    await page.getByRole('button', { name: 'Rename file', exact: true }).click();
-    await expect(rename).toBeVisible();
-    const renameInput = rename.getByRole('textbox', { name: 'New file path' });
-    await expect(renameInput).toHaveValue('content/index.md');
-    await renameInput.fill('content/posts/renamed.md');
-    await page.keyboard.press('Escape');
-    await expect(rename).toBeHidden();
-    await page.getByRole('button', { name: 'Rename file', exact: true }).click();
-    await expect(rename).toBeVisible();
-    await expect(renameInput).toHaveValue('content/index.md');
-    await page.keyboard.press('Escape');
-    await expect(rename).toBeHidden();
-  });
-
   test('delete dialog: Enter confirms and Esc cancels', async ({ page }) => {
     await installApi(page);
     let deleteRequests = 0;
@@ -1183,6 +1148,205 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
     expect((await deleteRequest).postDataJSON()).toMatchObject({ path: 'content/index.md', confirmed: true });
     await expect(dialog).toBeHidden();
     expect(deleteRequests).toBe(1);
+  });
+
+  test('Esc-reopen contract: every dialog and the palette resets state and fires no stale requests', async ({ page }) => {
+    await installApi(page);
+    await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+    await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toBeVisible();
+
+    type EscReopenCase = {
+      name: string;
+      mock: MockOptions;
+      staleRequest: RegExp;
+      // Matching requests the Esc→reopen window may legitimately fire: 0 for triggerless
+      // reopens, 1 for the conflict dialogs whose only reopen path is pressing Save again.
+      expectedRequests: number;
+      open: (page: Page) => Promise<void>;
+      prime?: (page: Page) => Promise<void>;
+      reopen: (page: Page) => Promise<void>;
+      assertAfterEsc: (page: Page) => Promise<void>;
+      assertReset: (page: Page) => Promise<void>;
+    };
+
+    let paletteTotal = 0;
+
+    const surfaces: EscReopenCase[] = [
+      {
+        name: 'create dialog',
+        mock: {},
+        staleRequest: /\/api\/files\/create/,
+        expectedRequests: 0,
+        open: async page => { await page.getByRole('button', { name: 'Create file', exact: true }).click(); },
+        prime: async page => {
+          await page.getByRole('dialog', { name: 'Create file' })
+            .getByRole('textbox', { name: 'New file path' }).fill('content/posts/');
+        },
+        reopen: async page => { await page.getByRole('button', { name: 'Create file', exact: true }).click(); },
+        assertAfterEsc: async page => { await expect(page.getByRole('dialog', { name: 'Create file' })).toBeHidden(); },
+        assertReset: async page => {
+          const input = page.getByRole('dialog', { name: 'Create file' }).getByRole('textbox', { name: 'New file path' });
+          await expect(input).toHaveValue('content/new-page.md');
+          await expect(input).toBeFocused();
+        }
+      },
+      {
+        name: 'rename dialog',
+        mock: {},
+        staleRequest: /\/api\/files\/rename/,
+        expectedRequests: 0,
+        open: async page => { await page.getByRole('button', { name: 'Rename file', exact: true }).click(); },
+        prime: async page => {
+          await page.getByRole('dialog', { name: 'Rename file' })
+            .getByRole('textbox', { name: 'New file path' }).fill('content/posts/renamed.md');
+        },
+        reopen: async page => { await page.getByRole('button', { name: 'Rename file', exact: true }).click(); },
+        assertAfterEsc: async page => { await expect(page.getByRole('dialog', { name: 'Rename file' })).toBeHidden(); },
+        assertReset: async page => {
+          const input = page.getByRole('dialog', { name: 'Rename file' }).getByRole('textbox', { name: 'New file path' });
+          await expect(input).toHaveValue('content/index.md');
+          await expect(input).toBeFocused();
+        }
+      },
+      {
+        name: 'delete dialog',
+        mock: {},
+        staleRequest: /\/api\/files\/delete/,
+        expectedRequests: 0,
+        open: async page => { await page.getByRole('button', { name: 'Delete file', exact: true }).click(); },
+        prime: async page => {
+          await expect(page.getByRole('dialog', { name: 'Delete file' }).getByRole('button', { name: /Delete content\/index\.md/ })).toBeFocused();
+        },
+        reopen: async page => { await page.getByRole('button', { name: 'Delete file', exact: true }).click(); },
+        assertAfterEsc: async page => { await expect(page.getByRole('dialog', { name: 'Delete file' })).toBeHidden(); },
+        assertReset: async page => {
+          await expect(page.getByRole('dialog', { name: 'Delete file' }).getByRole('button', { name: /Delete content\/index\.md/ })).toBeFocused();
+        }
+      },
+      {
+        name: 'command palette',
+        mock: {},
+        staleRequest: /\/api\/files\/(create|rename|delete|save|open)/,
+        expectedRequests: 0,
+        open: async page => { await page.keyboard.press('Control+K'); },
+        prime: async page => {
+          const dialog = page.getByRole('dialog', { name: 'Commands' });
+          paletteTotal = await dialog.getByRole('listbox', { name: 'Boris commands' }).getByRole('option').count();
+          await dialog.getByRole('combobox', { name: 'Filter commands' }).fill('open');
+          await expect(dialog.getByRole('listbox', { name: 'Boris commands' }).getByRole('option')).toHaveCount(2);
+        },
+        reopen: async page => { await page.keyboard.press('Control+K'); },
+        assertAfterEsc: async page => { await expect(page.getByRole('dialog', { name: 'Commands' })).toBeHidden(); },
+        assertReset: async page => {
+          const dialog = page.getByRole('dialog', { name: 'Commands' });
+          const input = dialog.getByRole('combobox', { name: 'Filter commands' });
+          await expect(input).toHaveValue('');
+          await expect(input).toBeFocused();
+          const options = dialog.getByRole('listbox', { name: 'Boris commands' }).getByRole('option');
+          await expect(options).toHaveCount(paletteTotal);
+          await expect(options.first()).toHaveAttribute('aria-selected', 'true');
+        }
+      },
+      {
+        name: 'resolution dialog',
+        mock: {},
+        staleRequest: /\/api\/files\/(save|open)/,
+        expectedRequests: 0,
+        open: async page => {
+          await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Draft\n');
+          await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+          await page.getByRole('button', { name: 'boris.json', exact: true }).click();
+          await expect(page.getByRole('dialog', { name: 'Unsaved changes' })).toBeVisible();
+        },
+        reopen: async page => { await page.getByRole('button', { name: 'boris.json', exact: true }).click(); },
+        assertAfterEsc: async page => {
+          await expect(page.getByRole('dialog', { name: 'Unsaved changes' })).toBeHidden();
+          await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Draft\n');
+          await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+        },
+        assertReset: async page => {
+          const dialog = page.getByRole('dialog', { name: 'Unsaved changes' });
+          await expect(dialog).toBeVisible();
+          await expect(dialog).toContainText('Save or discard the changes before opening boris.json?');
+        }
+      },
+      {
+        name: 'conflict dialog (external changes)',
+        mock: { saveConflict: true },
+        staleRequest: /\/api\/files\/save/,
+        expectedRequests: 1,
+        open: async page => {
+          await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Mine\n');
+          await page.getByRole('button', { name: 'Save file', exact: true }).click();
+          await expect(page.getByRole('dialog', { name: 'External changes detected' })).toBeVisible();
+        },
+        prime: async page => {
+          await expect(page.getByRole('dialog', { name: 'External changes detected' }).getByRole('button', { name: /Replace disk version/ })).toBeFocused();
+        },
+        reopen: async page => { await page.getByRole('button', { name: 'Save file', exact: true }).click(); },
+        assertAfterEsc: async page => {
+          await expect(page.getByRole('dialog', { name: 'External changes detected' })).toBeHidden();
+          await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Mine\n');
+          await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+        },
+        assertReset: async page => {
+          const dialog = page.getByRole('dialog', { name: 'External changes detected' });
+          await expect(dialog).toBeVisible();
+          await expect(dialog.getByRole('button', { name: /Replace disk version/ })).toBeFocused();
+          await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Mine\n');
+        }
+      },
+      {
+        name: 'deleted-file conflict dialog',
+        mock: { saveDeleted: true },
+        staleRequest: /\/api\/files\/save/,
+        expectedRequests: 1,
+        open: async page => {
+          await page.getByRole('textbox', { name: 'Source for content/index.md' }).fill('# Mine\n');
+          await page.getByRole('button', { name: 'Save file', exact: true }).click();
+          await expect(page.getByRole('dialog', { name: 'File deleted outside Boris Editor' })).toBeVisible();
+        },
+        prime: async page => {
+          await expect(page.getByRole('dialog', { name: 'File deleted outside Boris Editor' }).getByRole('button', { name: /Re-create file/ })).toBeFocused();
+        },
+        reopen: async page => { await page.getByRole('button', { name: 'Save file', exact: true }).click(); },
+        assertAfterEsc: async page => {
+          await expect(page.getByRole('dialog', { name: 'File deleted outside Boris Editor' })).toBeHidden();
+          await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Mine\n');
+          await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+        },
+        assertReset: async page => {
+          const dialog = page.getByRole('dialog', { name: 'File deleted outside Boris Editor' });
+          await expect(dialog).toBeVisible();
+          await expect(dialog.getByRole('button', { name: /Re-create file/ })).toBeFocused();
+          await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Mine\n');
+        }
+      }
+    ];
+
+    for (const surface of surfaces) {
+      await test.step(surface.name, async () => {
+        await page.unrouteAll({ behavior: 'ignoreErrors' });
+        await installApi(page, surface.mock);
+        await surface.open(page);
+        await surface.prime?.(page);
+
+        let requests = 0;
+        const onRequest = (request: Request) => {
+          if (surface.staleRequest.test(request.url())) requests += 1;
+        };
+        page.on('request', onRequest);
+
+        await page.keyboard.press('Escape');
+        await surface.assertAfterEsc(page);
+        await surface.reopen(page);
+        await surface.assertReset(page);
+        expect(requests).toBe(surface.expectedRequests);
+
+        page.off('request', onRequest);
+        await page.keyboard.press('Escape');
+      });
+    }
   });
 
   test('conflict dialog: Esc keeps editing and Enter replaces the disk version', async ({ page }) => {
@@ -1297,32 +1461,6 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
 
     await page.keyboard.press('Control+K');
     await expect(palette).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(palette).toBeHidden();
-  });
-
-  test('command palette: Esc clears the filter and reopen restores the full list', async ({ page }) => {
-    await installApi(page);
-    await page.keyboard.press('Control+K');
-    const palette = page.getByRole('dialog', { name: 'Commands' });
-    await expect(palette).toBeVisible();
-    const input = palette.getByRole('combobox', { name: 'Filter commands' });
-    const listbox = palette.getByRole('listbox', { name: 'Boris commands' });
-    const totalOptions = await listbox.getByRole('option').count();
-
-    // A filter narrows the list to the two Open file options.
-    await input.fill('open');
-    const openOptions = listbox.getByRole('option', { name: /Open file/ });
-    await expect(openOptions).toHaveCount(2);
-    await expect(listbox.getByRole('option')).toHaveCount(2);
-
-    // Esc closes; reopening resets the filter and brings back the full list.
-    await page.keyboard.press('Escape');
-    await expect(palette).toBeHidden();
-    await page.keyboard.press('Control+K');
-    await expect(palette).toBeVisible();
-    await expect(input).toHaveValue('');
-    await expect(listbox.getByRole('option')).toHaveCount(totalOptions);
     await page.keyboard.press('Escape');
     await expect(palette).toBeHidden();
   });
