@@ -84,7 +84,7 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 
 | Capability | Current state |
 |---|---|
-| Boris Editor | **First-class authoring surface** — local host, schema- and graph-aware completion, compiler-backed problems, live preview of committed `dist/`, publication plan over `boris plan --profile`. Keyboard checklist for [#418](https://github.com/drawmeanelephant/boris/issues/418) M10 is in CI; spoken Voice Control is not claimed. Guide: [`content/guides/editor.md`](../content/guides/editor.md). |
+| Boris Editor | **First-class authoring surface** — local host, schema- and graph-aware completion, compiler-backed problems, live preview of committed `dist/`, publication plan over `boris plan --profile`. Stale or unsupported generated artifacts stay in-shell and name the rebuild command. Keyboard checklist for [#418](https://github.com/drawmeanelephant/boris/issues/418) M10 is in CI; spoken Voice Control is not claimed. Guide: [`content/guides/editor.md`](../content/guides/editor.md). |
 
 ### Labs
 

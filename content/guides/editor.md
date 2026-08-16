@@ -284,6 +284,11 @@ Spoken macOS Voice Control and Windows Voice Access are not recorded as
 passing in this tree. The accessibility-tree names are the Show-names analog.
 Recipe scaling stays labeled unavailable.
 
+If `graph.json`, `completion.json`, or a Proof Pack is corrupt or from an
+unsupported schema, the editor stays open and tells you to Build diagnostics
+or Build HTML. It does not rewrite the artifact. The Project pane also names
+the IR versions this editor adapter accepts.
+
 <Details summary="The editor is not a second compiler">
 
 It does not own frontmatter grammar, Markdown, the graph, or publication.

@@ -14,6 +14,7 @@ type MockOptions = {
   inputMode?: 'markdown' | 'cooklang' | 'textile' | 'mixed' | 'empty';
   previewRebuilds?: Array<Record<string, unknown>>;
   publication?: Record<string, unknown>;
+  version?: Record<string, unknown>;
 };
 
 type CommandResult = {
@@ -120,7 +121,8 @@ async function installApi(page: Page, options: MockOptions = {}) {
     })
   }));
   await page.route('**/api/version', route => route.fulfill({
-    contentType: 'application/json', body: JSON.stringify({ compiler_id: 'boris/0.8.1' })
+    contentType: 'application/json',
+    body: JSON.stringify(options.version ?? { compiler_id: 'boris/0.8.1' })
   }));
   await page.route('**/api/files', route => route.fulfill({
     contentType: 'application/json',
@@ -2343,4 +2345,35 @@ test('the 14 #418 actions are completable from the keyboard (#418 M10)', async (
   // 14 dirty buffer is visible; close is the browser beforeunload + recovery
   await page.getByRole('textbox', { name: 'Source for content/sauces/pepper-oil.cook' }).fill('# Still dirty\n');
   await expect(page.getByText('Unsaved changes', { exact: true })).toBeVisible();
+});
+
+test('stale graph.json stays in the shell and names Build diagnostics (#418 M11)', async ({ page }) => {
+  await installApi(page, {
+    graph: [{ graph: null, graph_status: 'unsupported' }]
+  });
+  await expect(page.getByRole('status', { name: 'Graph status' })).toContainText('stale or unsupported');
+  await expect(page.getByRole('status', { name: 'Graph status' })).toContainText('Build diagnostics');
+  await expect(page.getByRole('heading', { name: 'Boris Editor', level: 1 })).toBeVisible();
+});
+
+test('stale completion.json keeps the frontmatter schema and names rebuild (#418 M11)', async ({ page }) => {
+  await installApi(page, {
+    authoring: [{
+      ...authoringPayload(false),
+      completion_status: 'unsupported'
+    }]
+  });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  await expect(page.getByText(/stale or unsupported/)).toBeVisible();
+  await expect(page.getByText('Frontmatter field bounds from Boris schema')).toBeVisible();
+});
+
+test('compiler version names the supported IR range (#418 M11)', async ({ page }) => {
+  await installApi(page, {
+    version: {
+      compiler_id: 'boris/0.8.1',
+      supported: { completion: [1], ir: ['0.2.0', '0.3.0', '0.4.0'], publication_plan: [1], frontmatter: [1] }
+    }
+  });
+  await expect(page.getByText('Compiler: boris/0.8.1; IR 0.2.0–0.4.0')).toBeVisible();
 });

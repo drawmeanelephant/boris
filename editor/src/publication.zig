@@ -30,10 +30,18 @@ pub const ProofSummary = struct {
 
 pub fn render(allocator: std.mem.Allocator, io: Io, project_root: []const u8) ![]u8 {
     const profiles = try listProfiles(allocator, io, project_root);
-    const proof = try readProof(allocator, io, project_root);
+    const proof = readProof(allocator, io, project_root) catch |err| switch (err) {
+        error.UnsupportedArtifact => return std.json.Stringify.valueAlloc(allocator, .{
+            .profiles = profiles,
+            .proof = null,
+            .proof_status = "unsupported",
+        }, .{}),
+        else => |other| return other,
+    };
     return std.json.Stringify.valueAlloc(allocator, .{
         .profiles = profiles,
         .proof = proof,
+        .proof_status = if (proof != null) "ready" else "absent",
     }, .{});
 }
 
@@ -196,4 +204,27 @@ test "proof pack summary is the validated artifact, not an editor rewrite" {
     try std.testing.expectEqualStrings("public", proof.get("target").?.string);
     try std.testing.expectEqualStrings("verified", proof.get("overall_presentation_status").?.string);
     try std.testing.expectEqual(@as(i64, 2), proof.get("artifacts_total").?.integer);
+    try std.testing.expectEqualStrings("ready", parsed.value.object.get("proof_status").?.string);
+}
+
+test "stale Proof Pack does not drop profile listing" {
+    const io = std.testing.io;
+    const allocator = std.testing.allocator;
+    var temp = std.testing.tmpDir(.{});
+    defer temp.cleanup();
+    try temp.dir.writeFile(io, .{ .sub_path = "boris.json", .data =
+        \\{"format":"boris-publication-profile","schema_version":1,"input":"content"}
+    });
+    try temp.dir.createDirPath(io, "dist/_boris/proof");
+    try temp.dir.writeFile(io, .{ .sub_path = "dist/_boris/proof/proof-pack.json", .data = "{\"format\":\"not-a-proof-pack\"}\n" });
+    const path = try temp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(path);
+
+    const bytes = try render(allocator, io, path);
+    defer allocator.free(bytes);
+    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, bytes, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("unsupported", parsed.value.object.get("proof_status").?.string);
+    try std.testing.expect(parsed.value.object.get("proof").? == .null);
+    try std.testing.expectEqualStrings("boris.json", parsed.value.object.get("profiles").?.array.items[0].object.get("path").?.string);
 }

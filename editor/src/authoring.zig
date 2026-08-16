@@ -15,12 +15,20 @@ fn renderPayload(allocator: std.mem.Allocator, completion_bytes: ?[]const u8) ![
     var schema = contracts.readFrontmatterSchema(allocator, frontmatter_schema) catch return error.UnsupportedArtifact;
     defer schema.deinit();
     var completion: ?contracts.Document = null;
-    if (completion_bytes) |bytes| completion = contracts.readCompletion(allocator, bytes) catch return error.UnsupportedArtifact;
+    var unsupported = false;
+    if (completion_bytes) |bytes| {
+        completion = contracts.readCompletion(allocator, bytes) catch |err| switch (err) {
+            error.InvalidJson, error.InvalidRoot, error.MissingField, error.InvalidField, error.UnknownFormat, error.UnsupportedSchemaVersion, error.InvalidDiagnostic => blk: {
+                unsupported = true;
+                break :blk null;
+            },
+        };
+    }
     defer if (completion) |*document| document.deinit();
     return std.json.Stringify.valueAlloc(allocator, .{
         .frontmatter_schema = schema.parsed.value,
         .completion = if (completion) |document| document.parsed.value else null,
-        .completion_status = if (completion != null) "ready" else "build_required",
+        .completion_status = if (completion != null) "ready" else if (unsupported) "unsupported" else "build_required",
     }, .{});
 }
 
@@ -55,5 +63,13 @@ test "schema remains available without completion.json" {
     const bytes = try renderPayload(std.testing.allocator, null);
     defer std.testing.allocator.free(bytes);
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"completion_status\":\"build_required\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"additionalProperties\":false") != null);
+}
+
+test "stale completion.json does not drop the frontmatter schema" {
+    const bytes = try renderPayload(std.testing.allocator, "{\"format\":\"boris-completion-index\",\"schema_version\":9}");
+    defer std.testing.allocator.free(bytes);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"completion_status\":\"unsupported\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bytes, "\"completion\":null") != null);
     try std.testing.expect(std.mem.indexOf(u8, bytes, "\"additionalProperties\":false") != null);
 }
