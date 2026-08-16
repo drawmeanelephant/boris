@@ -7,6 +7,7 @@
 //! + exports a deterministic corpus.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Io = std.Io;
 const cli = @import("cli.zig");
 const diagnostic = @import("diagnostic.zig");
@@ -679,22 +680,61 @@ fn resolveAppPasswordIdentity(
     pds_origin.* = document.pds_origin;
 }
 
-/// Read the app password from stdin, trimming one trailing newline (and an
-/// optional carriage return) so both an interactive terminal line and a piped
-/// secret file work. The caller zeroes and frees the returned slice.
+/// Disable terminal echo on the controlling stdin while a secret is typed,
+/// restoring the original attributes afterwards (including on error paths).
+/// Best-effort and strictly scoped to interactive terminals: when stdin is
+/// not a TTY (e.g. a piped secret file) or the platform has no termios
+/// support, the guard is inactive and reading proceeds unchanged. A hard
+/// SIGINT mid-prompt is left to the shell's job-control reset, as with most
+/// CLI tools.
+const EchoGuard = struct {
+    active: bool = false,
+    original: std.posix.termios = undefined,
+
+    fn init() EchoGuard {
+        // The ATProto transport already restricts this command to macOS and
+        // Linux; those are also the targets with usable termios here.
+        if (comptime builtin.os.tag != .macos and builtin.os.tag != .linux) return .{};
+        const original = std.posix.tcgetattr(std.posix.STDIN_FILENO) catch return .{};
+        var muted = original;
+        muted.lflag.ECHO = false;
+        std.posix.tcsetattr(std.posix.STDIN_FILENO, .NOW, muted) catch return .{};
+        return .{ .active = true, .original = original };
+    }
+
+    fn deinit(self: *EchoGuard) void {
+        if (!self.active) return;
+        std.posix.tcsetattr(std.posix.STDIN_FILENO, .NOW, self.original) catch {};
+        self.active = false;
+    }
+};
+
+/// Read the app password from stdin: one line on an interactive terminal
+/// (echo suppressed), or up to EOF on a pipe/file. The first newline (or end
+/// of stream) ends the credential, and empty input is rejected. The caller
+/// zeroes and frees the returned slice.
 fn readAppPasswordFromStdin(gpa: std.mem.Allocator, io: Io) ![]u8 {
-    var buffer: [256]u8 = undefined;
+    var echo = EchoGuard.init();
+    defer echo.deinit();
+    if (echo.active) std.debug.print("Password: ", .{});
+
+    var buffer: [max_app_password_bytes]u8 = undefined;
     var reader = std.Io.File.stdin().reader(io, &buffer);
-    const raw = reader.interface.allocRemaining(gpa, .limited(max_app_password_bytes)) catch |err| switch (err) {
+    defer std.crypto.secureZero(u8, &buffer);
+    return readAppPasswordLine(gpa, &reader.interface);
+}
+
+/// Extract one credential from `reader`, up to (but excluding) the first
+/// newline or end of stream, rejecting empty input. A trailing carriage
+/// return is trimmed so both Unix and legacy CRLF terminals work. The
+/// returned slice is owned; the caller zeroes and frees it.
+fn readAppPasswordLine(gpa: std.mem.Allocator, reader: *std.Io.Reader) ![]u8 {
+    const raw = reader.takeDelimiterExclusive('\n') catch |err| switch (err) {
+        error.EndOfStream => return error.AuthenticationFailed,
         error.StreamTooLong => return error.ResponseTooLarge,
         else => return err,
     };
-    defer {
-        std.crypto.secureZero(u8, raw);
-        gpa.free(raw);
-    }
     var end = raw.len;
-    if (end > 0 and raw[end - 1] == '\n') end -= 1;
     if (end > 0 and raw[end - 1] == '\r') end -= 1;
     if (end == 0) return error.AuthenticationFailed;
     return gpa.dupe(u8, raw[0..end]);
@@ -2738,6 +2778,35 @@ test "parseOptions: HTML mode defaults and exclusive dirs" {
         error.ConflictingFlags,
         parseOptions(std.testing.allocator, &.{ "boris", "--html-dir", "d", "--rag" }),
     );
+}
+
+test "readAppPasswordLine trims one trailing newline and returns an owned slice" {
+    var reader = std.Io.Reader.fixed("hunter2-1234\n");
+    const pw = try readAppPasswordLine(std.testing.allocator, &reader);
+    defer std.testing.allocator.free(pw);
+    defer std.crypto.secureZero(u8, pw);
+    try std.testing.expectEqualStrings("hunter2-1234", pw);
+}
+
+test "readAppPasswordLine trims a trailing carriage return for CRLF terminals" {
+    var reader = std.Io.Reader.fixed("hunter2\r\n");
+    const pw = try readAppPasswordLine(std.testing.allocator, &reader);
+    defer std.testing.allocator.free(pw);
+    try std.testing.expectEqualStrings("hunter2", pw);
+}
+
+test "readAppPasswordLine treats end of stream as the end of the credential" {
+    var reader = std.Io.Reader.fixed("hunter2");
+    const pw = try readAppPasswordLine(std.testing.allocator, &reader);
+    defer std.testing.allocator.free(pw);
+    try std.testing.expectEqualStrings("hunter2", pw);
+}
+
+test "readAppPasswordLine rejects empty input whether blank or at end of stream" {
+    var blank = std.Io.Reader.fixed("\n");
+    try std.testing.expectError(error.AuthenticationFailed, readAppPasswordLine(std.testing.allocator, &blank));
+    var empty = std.Io.Reader.fixed("");
+    try std.testing.expectError(error.AuthenticationFailed, readAppPasswordLine(std.testing.allocator, &empty));
 }
 
 test {

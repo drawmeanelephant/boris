@@ -117,7 +117,12 @@ OAuth session; neither command gains an inline password flag.
 stdin (prompted) or a dedicated secret file descriptor — never as a CLI
 argument (which is visible in the process list), never an environment variable
 holding the value, never the publication profile, never a log, never evidence,
-never Git. This matches the existing Nostr secret discipline.
+never Git. This matches the existing Nostr secret discipline. On an
+interactive terminal the echo is suppressed while typing (termios `ECHO` off
+for the duration of the read, restored even on failure) and exactly one line
+is consumed, so the credential never lands in terminal scrollback; on a pipe
+or file the secret is read to end of stream. Either way the first newline
+ends the credential and empty input is rejected.
 
 **Authentication.** The command resolves the handle (or takes the DID
 directly), calls `com.atproto.server.createSession` with the app password,
