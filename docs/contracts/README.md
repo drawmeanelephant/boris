@@ -65,6 +65,7 @@ per topic:
 | `llms.txt` export | [llms-txt.md](llms-txt.md) |
 | Aside / components | [components.md](components.md) |
 | Markdown rendering (Oliver) | [oliver-renderer.md](oliver-renderer.md) |
+| Freestanding embedding / Wasm render spike | [embedding.md](embedding.md) |
 | HTML output (default CLI) | [html-output.md](html-output.md) |
 | Parallel rendering | [parallel-rendering.md](parallel-rendering.md) |
 | Watch Mode | [watch-mode.md](watch-mode.md) |

@@ -10,7 +10,8 @@ consume the single `oliver` pin.  \
 **Related:** [html-output.md](html-output.md), [heading-ids.md](heading-ids.md),
 [plain-text-projection.md](plain-text-projection.md),
 [parallel-rendering.md](parallel-rendering.md),
-[includes-and-wiki-links.md](includes-and-wiki-links.md)
+[includes-and-wiki-links.md](includes-and-wiki-links.md),
+[embedding.md](embedding.md) (`wasm32-freestanding` render spike)
 
 ---
 
