@@ -129,14 +129,19 @@ export async function runCompile(abi, body, env = {}) {
     throw err;
   }
 
+  // sha256 is opt-in (`include_sha256`): per-artifact hashing costs host CPU
+  // and response bytes for large bundles (measured ~0–7 ms at 89 artifacts on
+  // 2026-08-16), so leave it off unless the caller needs integrity digests.
+  const includeSha = body.include_sha256 === true;
   const manifest = [];
   for (const art of result.artifacts) {
-    manifest.push({
+    const entry = {
       path: art.path,
       media_type: art.media_type,
       bytes: art.bytes.length,
-      sha256: await sha256HexSync(art.bytes),
-    });
+    };
+    if (includeSha) entry.sha256 = await sha256HexSync(art.bytes);
+    manifest.push(entry);
   }
 
   let r2 = null;

@@ -56,6 +56,7 @@ sizes.
   "html": true,
   "evidence": true,
   "layout_path": "layouts/main.html",
+  "include_sha256": false,
   "r2_prefix": "optional/prefix",
   "files": [
     { "path": "index.md", "bytes": "<base64>" },
@@ -63,6 +64,10 @@ sizes.
   ]
 }
 ```
+
+`include_sha256` is opt-in: per-artifact SHA-256 digests cost host CPU and
+inflate the manifest for large bundles (measured ~0–7 ms of host CPU at 89
+artifacts on 2026-08-16), so they are omitted unless requested.
 
 `GET /health` returns the same limits without compiling.
 
@@ -72,8 +77,8 @@ HTTP 200 on a successful compile, 422 on validation-failed compile, 400 on
 host rejection, 500 on ABI/host failure.
 
 The JSON body carries `ok`, `status`, `diagnostics`, an artifact **manifest**
-(path, media type, byte count, sha256, optional `r2_key`), an `evidence`
-summary, and `r2` keys when upload ran. Artifact **bytes** stay out of the
+(path, media type, byte count, optional `sha256` when `include_sha256` is set,
+optional `r2_key`), an `evidence` summary, and `r2` keys when upload ran. Artifact **bytes** stay out of the
 HTTP body so the response is not a second copy of the package.
 
 ## Local smoke (no Cloudflare credentials)
