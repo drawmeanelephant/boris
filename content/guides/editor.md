@@ -176,6 +176,25 @@ notes next to the frame are a review aid, not a certification.
 
 ---
 
+## Publication plan
+
+The Publication pane lists existing `boris-publication-profile` files at the
+project root (`boris.json`, and `standard-site.json` after `boris init`).
+**Run publication plan** invokes `boris plan --profile PATH` and shows the
+normalized declaration: input, declared target, public location, and HTML
+targets. That command does not compile or publish.
+
+Local evidence at `dist/_boris/proof/proof-pack.json` is shown when a previous
+HTML build left a Proof Pack. That pack is target-local presentation. It is
+not deployment verification. GitHub Pages deploy stays in the official
+Actions workflow; Standard.site publish stays on the CLI. The editor does not
+store secrets or run a deployer.
+
+- [[guides/publishing|Publishing targets]] — profile, plan, and verified targets
+- [Publication plan contract](/docs/contracts/publication-plan.md) — what `boris plan` emits
+
+---
+
 ## Compiler-backed commands and problems
 
 The Problems pane runs a fixed allowlist of Boris invocations against saved
@@ -190,6 +209,7 @@ disk, not from your buffer).
 | Build HTML | `boris build --input content --html-dir dist` | nothing yet (see below) |
 | Check graph | `boris check --input content --format json --report .boris/editor-check.json` | Documentation Intelligence report |
 | Run impact | `boris impact <id> --input content --format json --report .boris/editor-impact.json` | Documentation Intelligence report |
+| Run publication plan | `boris plan --profile PATH` | stdout `boris-publication-plan` |
 
 Boris exit codes stay distinct: **1** content/graph failure, **2**
 usage/configuration failure, **3** I/O/system failure. The editor surfaces the
@@ -244,6 +264,7 @@ HMR, CSS injection, watcher, or typing-triggered build.
 - No LSP, frontmatter grammar, Markdown parser, or heading-fragment completion.
 - No arbitrary commands: only the fixed allowlist above.
 - No preview daemon or renderer: a fixed, visible rebuild command only.
+- No deploy, deployment secrets, or hosting dashboard.
 - No layout diagnostics or autofix.
 
 When a capability is missing, the editor says so instead of guessing — the

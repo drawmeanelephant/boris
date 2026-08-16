@@ -118,6 +118,12 @@ input, select { width: 100%; padding: 0.7rem; border: 1px solid #82958b; border-
 .preview-a11y ul { margin: 0.35rem 0 0; padding-left: 1.2rem; }
 .theme-pane { margin-top: 1rem; padding: 1rem; border: 1px solid #9ab8aa; border-radius: 0.5rem; background: #f4f7fa; }
 .theme-pane h4 { margin: 0.85rem 0 0.4rem; font-size: 0.95rem; }
+.publication-pane { margin-top: 1rem; padding: 1rem; border: 1px solid #9ab8aa; border-radius: 0.5rem; background: #f7f6f2; }
+.publication-pane h3 { margin: 0.85rem 0 0.4rem; font-size: 1rem; }
+.publication-pane h4 { margin: 0.85rem 0 0.4rem; font-size: 0.95rem; }
+.publication-pane dl > div { display: grid; grid-template-columns: minmax(7rem, 0.3fr) 1fr; gap: 0.75rem; padding: 0.25rem 0; }
+.publication-pane dt { font-weight: 700; }
+.publication-pane dd { margin: 0; }
 
 dialog { width: min(52rem, calc(100% - 2rem)); max-height: calc(100vh - 3rem); overflow: auto; padding: 1.5rem; border: 1px solid #82958b; border-radius: 0.75rem; box-shadow: 0 1.25rem 4rem #11231d55; }
 dialog::backdrop { background: #10251dc7; }

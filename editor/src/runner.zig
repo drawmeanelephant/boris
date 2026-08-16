@@ -15,6 +15,7 @@ pub const Mode = enum {
     html_build,
     check,
     impact,
+    plan,
 };
 
 pub const FailureClass = enum {
@@ -77,6 +78,7 @@ pub const Result = struct {
     problems: []Problem,
     findings: []Finding,
     impact: []ImpactEndpoint,
+    publication_plan: ?std.json.Value = null,
 };
 
 pub const Config = struct {
@@ -88,6 +90,7 @@ pub const Config = struct {
 pub const Request = struct {
     mode: Mode,
     impact_id: ?[]const u8 = null,
+    profile: ?[]const u8 = null,
 };
 
 const check_report_name = "editor-check.json";
@@ -101,6 +104,8 @@ const max_report_bytes = 32 * 1024 * 1024;
 pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Request) !Result {
     if (request.mode == .impact) try validateImpactId(request.impact_id orelse return error.ImpactIdRequired);
     if (request.mode != .impact and request.impact_id != null) return error.UnexpectedImpactId;
+    if (request.mode == .plan) try validateProfilePath(request.profile orelse return error.ProfileRequired);
+    if (request.mode != .plan and request.profile != null) return error.UnexpectedProfile;
     try prepareArtifactRoot(io, config.project_root, request.mode);
 
     const compiler_id = try readCompilerId(allocator, io, config);
@@ -117,6 +122,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Reques
     var impact: std.ArrayList(ImpactEndpoint) = .empty;
     var report_version: ?[]const u8 = null;
     var structured_report = false;
+    var publication_plan: ?std.json.Value = null;
 
     switch (request.mode) {
         .ir_build => if (try readGeneratedFile(allocator, io, config.project_root, "build-report.json")) |bytes| {
@@ -150,6 +156,12 @@ pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Reques
             try appendStructuredProblems(allocator, config, request.mode, compiler_id, failure_class, &document, .build_report, &problems);
             structured_report = true;
         },
+        .plan => if (failure_class == .success) {
+            const document = contracts.readPublicationPlan(allocator, execution.stdout) catch return error.UnsupportedArtifact;
+            report_version = try allocator.dupe(u8, document.version);
+            publication_plan = document.parsed.value;
+            structured_report = true;
+        },
     }
 
     if (!structured_report or problems.items.len == 0) {
@@ -169,6 +181,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Reques
         .problems = try problems.toOwnedSlice(allocator),
         .findings = try findings.toOwnedSlice(allocator),
         .impact = try impact.toOwnedSlice(allocator),
+        .publication_plan = publication_plan,
     };
 }
 
@@ -205,8 +218,9 @@ pub fn commandArgv(
         .html_build => try args.appendSlice(allocator, &.{ "build", "--input", "content", "--html-dir", "dist", "--report", ".boris/" ++ html_report_name }),
         .check => try args.appendSlice(allocator, &.{ "check", "--input", "content", "--format", "json", "--report", ".boris/" ++ check_report_name }),
         .impact => try args.appendSlice(allocator, &.{ "impact", request.impact_id.?, "--input", "content", "--format", "json", "--report", ".boris/" ++ impact_report_name }),
+        .plan => try args.appendSlice(allocator, &.{ "plan", "--profile", request.profile.? }),
     }
-    if (input_mode == .cooklang) try args.append(allocator, "--cooklang");
+    if (input_mode == .cooklang and request.mode != .plan) try args.append(allocator, "--cooklang");
     return args.toOwnedSlice(allocator);
 }
 
@@ -244,6 +258,7 @@ fn prepareArtifactRoot(io: Io, project_root: []const u8, mode: Mode) !void {
         .check => check_report_name,
         .impact => impact_report_name,
         .validate, .html_build => html_report_name,
+        .plan => unreachable,
     };
     artifact_dir.deleteFile(io, stale_name) catch |err| switch (err) {
         error.FileNotFound => {},
@@ -468,6 +483,7 @@ fn processFailureResult(allocator: std.mem.Allocator, config: Config, mode: Mode
         .problems = try problems.toOwnedSlice(allocator),
         .findings = try allocator.alloc(Finding, 0),
         .impact = try allocator.alloc(ImpactEndpoint, 0),
+        .publication_plan = null,
     };
 }
 
@@ -531,6 +547,11 @@ fn validateImpactId(id: []const u8) !void {
     if (id.len == 0 or id.len > 4096 or id[0] == '-' or !std.unicode.utf8ValidateSlice(id) or std.mem.indexOfAny(u8, id, "\x00\r\n") != null) {
         return error.InvalidImpactId;
     }
+}
+
+fn validateProfilePath(path: []const u8) !void {
+    if (path.len == 0 or path.len > 1024 or path[0] == '-' or !std.unicode.utf8ValidateSlice(path)) return error.InvalidProfilePath;
+    try validateSourcePath(path);
 }
 
 fn cleanText(allocator: std.mem.Allocator, input: []const u8, private_root: []const u8, max_bytes: usize) ![]const u8 {
@@ -622,4 +643,18 @@ test "cooklang trees append the compiler selector; markdown trees do not" {
         if (std.mem.eql(u8, arg, "--report")) saw_report = true;
     }
     try std.testing.expect(saw_report);
+}
+
+test "plan uses the selected profile and does not invent cooklang overrides" {
+    const allocator = std.testing.allocator;
+    const argv = try commandArgv(allocator, "boris", .{ .mode = .plan, .profile = "boris.json" }, .cooklang);
+    defer allocator.free(argv);
+    try std.testing.expectEqual(@as(usize, 4), argv.len);
+    try std.testing.expectEqualStrings("plan", argv[1]);
+    try std.testing.expectEqualStrings("--profile", argv[2]);
+    try std.testing.expectEqualStrings("boris.json", argv[3]);
+
+    try validateProfilePath("standard-site.json");
+    try std.testing.expectError(error.InvalidProfilePath, validateProfilePath("--help"));
+    try std.testing.expectError(error.UnsafeArtifact, validateProfilePath("../secret.json"));
 }

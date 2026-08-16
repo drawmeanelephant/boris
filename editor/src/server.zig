@@ -7,6 +7,7 @@ const graph = @import("graph.zig");
 const file_api = @import("file_api.zig");
 const project = @import("project.zig");
 const preview = @import("preview.zig");
+const publication = @import("publication.zig");
 const recovery = @import("recovery.zig");
 const runner = @import("runner.zig");
 const security = @import("security.zig");
@@ -117,6 +118,12 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
         if (std.mem.eql(u8, target, "/api/graph")) {
             if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
             const bytes = graph.render(allocator, io, config.project_root) catch |err| return respondApiError(request, err);
+            defer allocator.free(bytes);
+            return respondJson(request, .ok, bytes);
+        }
+        if (std.mem.eql(u8, target, "/api/publication")) {
+            if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
+            const bytes = publication.render(allocator, io, config.project_root) catch |err| return respondApiError(request, err);
             defer allocator.free(bytes);
             return respondJson(request, .ok, bytes);
         }
@@ -360,7 +367,7 @@ fn respondApiError(request: *http.Server.Request, err: anyerror) !void {
         error.UnsupportedMediaType => .{ .status = .unsupported_media_type, .code = "unsupported_media_type" },
         error.TooManyFiles => .{ .status = .payload_too_large, .code = "too_many_files" },
         error.CorruptRecovery => .{ .status = .internal_server_error, .code = "corrupt_recovery" },
-        error.ImpactIdRequired, error.UnexpectedImpactId, error.InvalidImpactId => .{ .status = .bad_request, .code = "invalid_command_request" },
+        error.ImpactIdRequired, error.UnexpectedImpactId, error.InvalidImpactId, error.ProfileRequired, error.UnexpectedProfile, error.InvalidProfilePath => .{ .status = .bad_request, .code = "invalid_command_request" },
         error.UnsupportedArtifact => .{ .status = .bad_gateway, .code = "unsupported_boris_artifact" },
         error.InvalidBorisVersion => .{ .status = .bad_gateway, .code = "invalid_boris_version" },
         error.BorisUnavailable => .{ .status = .service_unavailable, .code = "boris_unavailable" },
