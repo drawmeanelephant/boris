@@ -114,12 +114,16 @@ Do **not** enable Cloudflare's experimental WASI filesystem. The module lists
 | Live Worker wall (parallel R2 uploads) | ~1.2–1.4 s (account-level R2 write latency; see note below) |
 | Max tested source bundle | the two-file fixtures in `fixtures/` |
 
-The upload wall is dominated by **account-level R2 write latency**: ~0.6–1.1 s
-per put (13 B–8 KB objects), measured identically from the Worker binding and
-the direct admin API, and unchanged after recreating the bucket with an
-`enam` location hint. It is not worker code and not bucket routing. The
-evidence is assembled as a ready-to-paste [Cloudflare support
-ticket](cloudflare-support-ticket.md).
+The upload wall is dominated by **R2 write latency**: ~0.6–1.1 s per put
+(13 B–8 KB objects) from the Worker binding. Direct admin-API timings are
+higher still but measure the API gateway (control plane), not the R2 data
+plane. Recreating the bucket with an `enam` location hint **and** enabling
+**Local Uploads** (both 2026-08-16) changed nothing: the callers (ORD/IAD
+workers, US-East clients) and the bucket are all ENAM, and same-region
+uploads bypass Local Uploads by design. This is expected R2 write behavior
+(strongly consistent writes), not a defect in worker code or bucket routing.
+The full evidence trail is recorded in
+[cloudflare-support-ticket.md](cloudflare-support-ticket.md).
 
 ## Non-goals
 
