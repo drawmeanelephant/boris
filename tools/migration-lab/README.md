@@ -498,8 +498,7 @@ Rules:
    `parent_entry`.
 
 `report.json` (schema **2**) includes `parent_normalization` counts and a
-`parent_review` array for conflict/invalid rows. See
-[`docs/dogfood/filed-parent-key-normalize.md`](../../docs/dogfood/filed-parent-key-normalize.md).
+`parent_review` array for conflict/invalid rows.
 
 The adapter rejects invalid UTF-8 (including a leading BOM), malformed
 top-level field lines, duplicate keys, and unterminated frontmatter before
@@ -534,10 +533,8 @@ neutral category, and `stripped: true`.
 | [`fixtures/filed-parent-normalize/`](fixtures/filed-parent-normalize/) | Safe parent rewrite matrix (camel / snake / canonical / both-same) |
 | [`fixtures/filed-parent-conflict/`](fixtures/filed-parent-conflict/) | Conflict + invalid parent values (no silent pick) |
 
-A bounded real-site adoption pass (Filed.fyi changelog/releases slice against
-current `main`, including product HTML/IR/RAG evidence and remediation cards)
-is recorded in
-[`docs/dogfood/filed-fyi-adoption-pass.md`](../../docs/dogfood/filed-fyi-adoption-pass.md).
+A bounded Filed.fyi adoption pass was recorded historically; current lab
+state is the Labs table in [`docs/STATUS.md`](../../docs/STATUS.md).
 
 ## Starlight read-only dogfood (locale-dir + root-locale)
 
@@ -670,9 +667,8 @@ Every later duplicate remains visible with `proposed_kind: "relates_to"`,
 it does not consume another product-limit slot. Here `proposed_kind` records a
 defensible semantic mapping, not eligibility for automatic emission.
 
-The bounded real-site results and the converted-map evidence boundary are
-recorded in the
-[Filed.fyi v0.7 relationship-candidate dogfood report](/docs/dogfood/filed-relation-candidates-v07.md).
+Bounded real-site relationship-candidate results are summarized on the Labs
+table in [`docs/STATUS.md`](../../docs/STATUS.md).
 
 ### Boundary classes
 

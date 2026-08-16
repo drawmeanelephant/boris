@@ -45,6 +45,8 @@ Migration labs / source-RAG / search-index / docs-maintenance
   dossier trees were retired. Operator docs for labs live in
   [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) and
   [`tools/source-rag/README.md`](../tools/source-rag/README.md).
+  Historical dogfood reports and retrospectives were retired; current
+  state is the Labs table in [`STATUS.md`](STATUS.md).
 - A new module does not require a new Markdown file here. Add a row when
   the *job* is new.
 - If this page and a contract disagree, the contract wins. If this page

@@ -270,8 +270,8 @@ trees, identify relationships and unsupported constructs, materialize reviewed
 themes, and produce manual-review reports. They do not add Astro, Node, or an
 MDX runtime to Boris core.
 
-Start with [`docs/MIGRATION.md`](docs/MIGRATION.md), then review the dogfood
-examples under [`docs/dogfood/`](docs/dogfood/).
+Start with [`docs/MIGRATION.md`](docs/MIGRATION.md). Current lab state is
+the Labs table in [`docs/STATUS.md`](docs/STATUS.md).
 
 ## AI and OpenAI Build Week
 

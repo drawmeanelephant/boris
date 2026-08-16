@@ -96,6 +96,7 @@ Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 | Source-RAG ergonomics | **Measured** — no behavior change justified by the snapshot. |
 | Archive-layout evidence | **Done mechanically** — fixture, black-box audit, and link audit pass; browser viewport and keyboard review remain unverified. |
 | Twenty Twenty materialization | **Done** — bounded GPL-evidenced archaeology → reviewed ledger → static materialization → Boris build → link audit. |
+| Filed.fyi / theme dogfood reports | **Retired** — long-form `docs/dogfood/` writeups deleted. Facts stay in this table. Human review findings for the Starlight migration-guide pass remain on the roadmap. |
 
 ### Parked / open
 

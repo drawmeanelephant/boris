@@ -84,8 +84,7 @@ projection boundaries, and verification vocabulary.
 2. **Parent key is `parent` only** — `parentEntry` / `parent_entry` fail as
    unknown keys on the product parser. The Filed migration lab rewrites those
    legacy keys to `parent` under `--out` only (with conflict/invalid review);
-   see [`tools/migration-lab/README.md`](../tools/migration-lab/README.md) and
-   [`docs/dogfood/filed-parent-key-normalize.md`](dogfood/filed-parent-key-normalize.md).
+   see [`tools/migration-lab/README.md`](../tools/migration-lab/README.md).
    Do not expect product `boris` to accept the aliases.
 3. **Explicit graph** — Every non-root page is a Satellite with one immediate
    `parent`; the parent may be a Trunk or another Satellite. Parent chains may
@@ -170,13 +169,10 @@ zig build --build-file tools/migration-lab/build.zig run -- \
 Other lab modes (WordPress WXR, Instagram Takeout, Obsidian, Notion, Filed)
 and flags: [`tools/migration-lab/README.md`](../tools/migration-lab/README.md).
 
-**Real-site dogfood (Filed.fyi adoptability history):**
-*   **First Pass (v0.5.1)**: A bounded pass against a live Filed.fyi checkout — inventory, lab modes, product HTML/IR/RAG, remediation cards, and a narrow RC recommendation — is recorded in [`docs/dogfood/filed-fyi-adoption-pass.md`](dogfood/filed-fyi-adoption-pass.md).
-*   **Second Pass (v0.5.1)**: A pass with a five-page representative slice (landing, nested docs, page-local asset, absolute links, hard MDX dialects) is in [`docs/dogfood/filed-fyi-v051-representative-slice.md`](dogfood/filed-fyi-v051-representative-slice.md).
-*   **Third Pass (v0.6.1 pre-release)**: A whole-site preflight of 567 pages and 19 assets under a 200-page candidate selection cap is recorded in [`docs/dogfood/filed-fyi-case-study.md`](dogfood/filed-fyi-case-study.md). It validates whole-site candidate selection, deterministic image/asset migration, automatic synthetic trunk stubs, and perfect GREEN compilation under core Boris, with detailed 5-item remediation cards for the top 5 limitations.
-*   **Fourth Pass (v0.7 development)**: The relationship-candidate sidecar was run twice against the same pinned checkout. It retained 1,370 values, proposed 182 resolved `relates_to` mappings without emitting product relations, compiled 204 generated pages, and produced byte-identical repeated output. See [`docs/dogfood/filed-relation-candidates-v07.md`](dogfood/filed-relation-candidates-v07.md).
-
-These passes provide empirical evidence for human teams planning migration tasks, rather than claiming universal automatic conversion.
+Filed.fyi and theme-materialization dogfood happened (v0.5–v0.7). The long
+reports were retired. Current state is the Labs rows in
+[`docs/STATUS.md`](STATUS.md). These passes are historical evidence, not a
+promise of universal automatic conversion.
 
 **What to open after a lab run:** `REPORT.md` / `report.json` (and mode-specific
 manifests under the `--out` dir). Treat them as **evidence for the human

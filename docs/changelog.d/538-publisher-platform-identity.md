@@ -10,5 +10,6 @@
   per-module source dossier under `docs/boris/`, the sibling `docs/tools/`
   dump, and the leftover `docs/design/` / `docs/designs/` notes. Implemented
   design work now lives in contracts and `src/`. Unfinished Doctor work is a
-  [STATUS](/docs/STATUS.md) line item. Replacement hallway:
-  [source map](/docs/SOURCE-MAP.md).
+  [STATUS](/docs/STATUS.md) line item. Retired `docs/dogfood/`,
+  `docs/evidence/`, and `docs/retrospectives/` the same way. Replacement
+  hallway: [source map](/docs/SOURCE-MAP.md).
