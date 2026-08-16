@@ -75,7 +75,7 @@ target.
 ## Platform deployment matrix
 
 Status vocabulary: **shipped and verified**, **deliberate but waiting**,
-**wait for demand**, **never proactive**.
+**wait for demand**, **never proactive**, **off the seam**.
 
 | Platform | Status | Position |
 |---|---|---|
@@ -86,6 +86,7 @@ Status vocabulary: **shipped and verified**, **deliberate but waiting**,
 | Vercel | **Wait for demand** | The real design problem is per-deployment preview URLs against the location invariant, not the deploy command. No proactive work. |
 | Netlify | **Wait for demand** | Same position as Vercel: preview-location semantics against the invariant, adapter-shaped, no proactive work. |
 | S3 + CloudFront, Surge, Firebase, and other commodity hosts | **Never proactive** | Adapter-shaped hosts with no distinct design problem. Build one only when a concrete user needs it. |
+| Nostr NIP-23 | **Off the seam** | Shipped CLI (`boris nostr plan` / `sign` / `publish`). Relays are not a host: no `base_url`, no committed public artifact, no deployer. The per-relay report and the recorded first-tester fixture are the evidence. Do not add `nostr` to `publication.target` to make the CLI feel finished. See [`nostr-publication.md`](nostr-publication.md). |
 
 ## Rules
 
@@ -98,8 +99,13 @@ Status vocabulary: **shipped and verified**, **deliberate but waiting**,
   exists, is a separate bounded contract with its own limits.
 - No proactive Vercel/Netlify work. Commodity hosts are never proactive
   work.
+- Nostr stays off the verified-target registry. A relay list is not a
+  location provider. Adding it requires a product reason that accepts a
+  new location invariant, not completeness.
 - When a second platform is adopted, this contract's registry boundary
-  applies (below).## Target registry boundary
+  applies (below).
+
+## Target registry boundary
 
 `publication.target` is a small **target registry**: the closed vocabulary is
 `"github-pages"` and `"standard-site"`, validated by
@@ -119,4 +125,5 @@ plan shape.
   `publication-plan-1.schema.json` `oneOf` guarantee the additive rule.
 
 When a third platform is adopted, add its name and adapters here; the
-registry is open for new members but closed for typos.
+registry is open for new members but closed for typos. `nostr` is not
+that third name.

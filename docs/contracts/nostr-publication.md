@@ -19,12 +19,16 @@ send, in enough detail that a maintainer can review the plan before either
 step runs. Every fact in the plan is derived from committed content and the
 selected profile, so the same inputs always produce the same bytes.
 
-This is an **open program**, not a verified publication target. It has no
-location adapter, no evidence-chain Proof Pack, and no live-smoke gate.
-A recorded first-tester publish lives at
-[`fixtures/nostr-live-smoke/`](fixtures/nostr-live-smoke/README.md); it is
-observational evidence, not a CI job and not a `boris nostr smoke`
-command. GitHub Pages and Standard.site remain the verified targets.
+This is an **open program**, not a verified publication target. That is a
+decision, not a missing slice. Relays are not a host: they have no
+`base_url` / `origin` / `base_path`, they do not hold a committed
+artifact inventory, and a `complete` report is not a Proof Pack claim.
+The three-command family, the per-relay verdict, and the recorded
+first-tester fixture at
+[`fixtures/nostr-live-smoke/`](fixtures/nostr-live-smoke/README.md) are
+the Nostr-shaped evidence. GitHub Pages and Standard.site remain the
+verified targets. Do not add `nostr` to the target registry to make this
+CLI feel finished.
 
 ## Scope
 
@@ -43,8 +47,8 @@ Explicit non-goals of the program as a whole:
 - No Nostr client, relay, key manager, or wallet is vendored. Signing uses
   the pinned bitcoin-core/secp256k1 library through a Boris-owned FFI
   wrapper; transport is a bounded in-repo RFC-6455 client.
-- Nostr is not a verified target. A completed publish is not a Proof Pack
-  claim and does not update `dist/`.
+- Nostr stays off the verified-target seam. A completed publish is not a
+  Proof Pack claim and does not update `dist/`.
 
 Per-command boundaries:
 
