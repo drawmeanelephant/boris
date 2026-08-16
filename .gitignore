@@ -30,6 +30,7 @@ zig-out/
 # Cloudflare Worker host glue: copied wasm and optional Wrangler deps.
 /hosts/cloudflare-worker/src/*.wasm
 /hosts/cloudflare-worker/node_modules/
+.wrangler/
 
 
 
