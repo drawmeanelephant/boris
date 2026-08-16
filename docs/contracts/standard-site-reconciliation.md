@@ -26,7 +26,9 @@ closed with zero writes:
 
 - the plan digest equals the committed plan bytes;
 - the session DID equals the plan `inputs.did`;
-- the session PDS origin equals the plan `inputs.pds_origin`;
+- the session PDS origin equals the plan `inputs.pds_origin` when that
+  field is a string; when it is `null` (profile omitted `pds`), the
+  session's bound PDS is accepted;
 - every collection name is the Standard.site constant
   (`site.standard.publication` / `site.standard.document`);
 - every rkey matches the plan (`self` for the publication, the plan's document

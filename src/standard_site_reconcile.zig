@@ -226,8 +226,15 @@ fn verifyPreconditions(
     if (!std.mem.eql(u8, did_text.string, session.binding.did.slice())) return error.SessionDidMismatch;
 
     const pds_text = root.get("inputs").?.object.get("pds_origin").?;
-    if (pds_text != .string) return error.SessionPdsMismatch;
-    if (!std.mem.eql(u8, pds_text.string, session.binding.pds_origin.slice())) return error.SessionPdsMismatch;
+    switch (pds_text) {
+        // Profile omitted `pds`: the plan records null and publish binds to
+        // the session's discovered PDS rather than failing closed.
+        .null => {},
+        .string => {
+            if (!std.mem.eql(u8, pds_text.string, session.binding.pds_origin.slice())) return error.SessionPdsMismatch;
+        },
+        else => return error.SessionPdsMismatch,
+    }
 
     const publication = root.get("publication").?.object;
     const pub_type = publication.get("type").?;
@@ -1313,6 +1320,27 @@ test "session PDS mismatch fails closed before any request" {
         test_observed_at,
     ));
     try std.testing.expectEqual(@as(usize, 0), mock.gets);
+}
+
+test "null plan pds_origin accepts the session bound PDS" {
+    const gpa = std.testing.allocator;
+    var setup = try TestSetup.init(gpa);
+    defer setup.deinit(gpa);
+
+    if (setup.config.pds_origin) |previous| gpa.free(previous);
+    setup.config.pds_origin = null;
+    const plan = try standard_site.renderPlan(gpa, &setup.config, &setup.projection, &setup.surfaces);
+    gpa.free(setup.plan);
+    setup.plan = plan;
+    setup.digest = sha256HexLower(plan);
+
+    var mock = MockPds.init(gpa);
+    defer mock.deinit();
+    var evidence = try runReconcile(gpa, &setup, &mock, false);
+    defer evidence.deinit(gpa);
+    try std.testing.expect(evidence.overall_passed);
+    try std.testing.expectEqualStrings(test_pds, evidence.pds_origin);
+    try std.testing.expectEqual(@as(usize, 3), mock.puts);
 }
 
 test "plan digest mismatch fails closed before any request" {
