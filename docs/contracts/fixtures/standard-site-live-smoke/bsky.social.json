@@ -2,7 +2,7 @@
   "schema": "boris-live-smoke-result",
   "schemaVersion": 1,
   "overall": "passed",
-  "namespace": "boris-live-20260816b",
+  "namespace": "boris-live-20260816c",
   "client": {
     "boris": "boris/0.8.1",
     "oliver": "oliver@c0b3d2b683f0cecf2181b22a800908619e56d0d7"
@@ -29,15 +29,15 @@
     "write": {
       "publication": {
         "status": "passed",
-        "rkey": "boris-live-20260816b-publication",
-        "atUri": "at://did:plc:fqf5y5yyddraj7pywme4al2i/site.standard.publication/boris-live-20260816b-publication",
+        "rkey": "boris-live-20260816c-publication",
+        "atUri": "at://did:plc:fqf5y5yyddraj7pywme4al2i/site.standard.publication/boris-live-20260816c-publication",
         "cid": "bafyreiam6udpunlvznmvbmalyu2echxi4md6bt7v5lbumsakwiwnxp2if4"
       },
       "document": {
         "status": "passed",
-        "rkey": "boris-live-20260816b-document",
-        "atUri": "at://did:plc:fqf5y5yyddraj7pywme4al2i/site.standard.document/boris-live-20260816b-document",
-        "cid": "bafyreib3nwokjjyoifzbcwcz6chnql7djxcd2zlyet72r7mezvdti7yhpu"
+        "rkey": "boris-live-20260816c-document",
+        "atUri": "at://did:plc:fqf5y5yyddraj7pywme4al2i/site.standard.document/boris-live-20260816c-document",
+        "cid": "bafyreif26gsle67zxleycfos7uwihn565n5ngs7cdyudk7xh5ci4utygqy"
       }
     },
     "readback": {
@@ -53,7 +53,7 @@
         "atUriMatches": true,
         "valueMatches": true,
         "cidPresent": true,
-        "cid": "bafyreib3nwokjjyoifzbcwcz6chnql7djxcd2zlyet72r7mezvdti7yhpu"
+        "cid": "bafyreif26gsle67zxleycfos7uwihn565n5ngs7cdyudk7xh5ci4utygqy"
       }
     },
     "verificationSurface": {
@@ -62,7 +62,7 @@
     },
     "indexer": {
       "status": "lagged",
-      "note": "indexer has not indexed at://did:plc:fqf5y5yyddraj7pywme4al2i/site.standard.document/boris-live-20260816b-document yet (status 400)"
+      "note": "indexer has not indexed at://did:plc:fqf5y5yyddraj7pywme4al2i/site.standard.document/boris-live-20260816c-document yet (status 400)"
     },
     "cleanup": {
       "status": "passed",
