@@ -9,6 +9,8 @@ type MockOptions = {
   disk?: string;
   commands?: Partial<Record<string, CommandResult>>;
   authoring?: Array<Record<string, unknown>>;
+  graph?: Array<Record<string, unknown>>;
+  files?: Array<{ path: string }>;
   previewRebuilds?: Array<Record<string, unknown>>;
 };
 
@@ -69,10 +71,38 @@ function authoringPayload(withGraph = true, entities: CompletionEntity[] = [
   };
 }
 
+function graphPayload(ready = true): Record<string, unknown> {
+  if (!ready) return { graph: null, graph_status: 'build_required' };
+  return {
+    graph_status: 'ready',
+    graph: {
+      schemaVersion: '0.2.0', frozen: true,
+      nodes: [
+        { index: 0, id: 'guides/intro', sourcePath: 'guides/intro.md', role: 'trunk', parent: null, parentIndex: null, title: 'Introduction', status: 'published', tags: ['guide'], bodyOffset: 20 },
+        { index: 1, id: 'guides/intro-tips', sourcePath: 'guides/intro-tips.md', role: 'satellite', parent: 'guides/intro', parentIndex: 0, title: 'Intro Tips', status: 'draft', tags: ['guide'], bodyOffset: 20 },
+        { index: 2, id: 'index', sourcePath: 'index.md', role: 'trunk', parent: null, parentIndex: null, title: 'Home', status: 'published', tags: ['home'], bodyOffset: 20 }
+      ],
+      edges: [
+        { from: { type: 'page', value: 'guides/intro-tips' }, to: { type: 'page', value: 'guides/intro' }, kind: 'parent' },
+        { from: { type: 'page', value: 'index' }, to: { type: 'page', value: 'guides/intro' }, kind: 'reference' }
+      ],
+      reverseIndex: [
+        { target: { type: 'page', value: 'guides/intro' }, incomingEdges: [0, 1] }
+      ],
+      nav: [
+        { index: 0, id: 'guides/intro', breadcrumb: [0], children: [1], siblings: [] },
+        { index: 1, id: 'guides/intro-tips', breadcrumb: [0, 1], children: [], siblings: [] },
+        { index: 2, id: 'index', breadcrumb: [2], children: [], siblings: [] }
+      ]
+    }
+  };
+}
+
 async function installApi(page: Page, options: MockOptions = {}) {
   let disk = options.disk ?? '# Home\n';
   let fingerprint = 'a'.repeat(64);
   let authoringRequest = 0;
+  let graphRequest = 0;
   let previewRebuild = 0;
   let conflictOnceRemaining = options.saveConflictOnce ? 1 : 0;
   let deletedOnceRemaining = options.saveDeletedOnce ? 1 : 0;
@@ -90,7 +120,7 @@ async function installApi(page: Page, options: MockOptions = {}) {
   }));
   await page.route('**/api/files', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({ files: [{ path: 'boris.json' }, { path: 'content/index.md' }] })
+    body: JSON.stringify({ files: options.files ?? [{ path: 'boris.json' }, { path: 'content/index.md' }] })
   }));
   await page.route('**/api/recovery', route => route.fulfill({
     contentType: 'application/json', body: JSON.stringify({ snapshots: options.recovery ?? [] })
@@ -162,6 +192,12 @@ async function installApi(page: Page, options: MockOptions = {}) {
     authoringRequest += 1;
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });
+  await page.route('**/api/graph', route => {
+    const sequence = options.graph ?? [graphPayload()];
+    const body = sequence[Math.min(graphRequest, sequence.length - 1)];
+    graphRequest += 1;
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+  });
   await page.route('**/api/preview/state', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ phase: 'idle', generation: 0, exit_code: null, used_stderr_fallback: false, message: 'Preview has not been built yet.', preview_url: 'https://preview.invalid/?token=test' })
@@ -181,7 +217,7 @@ test('semantic shell and file tree expose stable keyboard and voice names', asyn
   await expect(page.getByRole('heading', { name: 'Boris Editor', level: 1 })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Editor sections' })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Project files' })).toBeVisible();
-  for (const name of ['Project', 'Source', 'Problems', 'Preview']) {
+  for (const name of ['Project', 'Source', 'Graph', 'Problems', 'Preview']) {
     const link = page.getByRole('link', { name, exact: true });
     await expect(link).toBeVisible();
     await expect(link).toHaveText(name);
@@ -1866,4 +1902,81 @@ test.describe('keyboard hints conformance sweep (#462)', () => {
       await expect(page.getByRole('textbox', { name: 'Source for content/index.md' })).toHaveValue('# Recovered draft\n');
     });
   });
+});
+
+const graphFiles = [
+  { path: 'boris.json' },
+  { path: 'content/index.md' },
+  { path: 'content/guides/intro.md' },
+  { path: 'content/guides/intro-tips.md' }
+];
+
+test('graph inspector is a read-only view of Boris graph.json (#418 M6)', async ({ page }) => {
+  await installApi(page, { files: graphFiles });
+  await expect(page.getByRole('status', { name: 'Graph status' })).toContainText('Boris graph ready (3 pages).');
+  await page.getByRole('button', { name: 'content/guides/intro-tips.md', exact: true }).click();
+  const graph = page.locator('#graph');
+  await expect(graph).toContainText('guides/intro-tips · Intro Tips · satellite');
+  await expect(graph.getByRole('button', { name: 'Go to parent guides/intro', exact: true })).toBeVisible();
+  await expect(graph.getByRole('button', { name: 'Run impact on guides/intro-tips', exact: true })).toBeVisible();
+  await expect(graph.getByRole('button', { name: /Go to backlink parent ← guides\/intro-tips/ })).toHaveCount(0);
+
+  const openRequest = page.waitForRequest('**/api/files/open');
+  await graph.getByRole('button', { name: 'Go to parent guides/intro', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  expect((await openRequest).postDataJSON()).toMatchObject({ path: 'content/guides/intro.md' });
+  await expect(page.getByRole('textbox', { name: 'Source for content/guides/intro.md' })).toBeVisible();
+  await expect(graph.getByRole('button', { name: /Go to child guides\/intro-tips/ })).toBeVisible();
+  await expect(graph.getByRole('button', { name: /Go to backlink parent ← guides\/intro-tips/ })).toBeVisible();
+  await expect(graph.getByRole('button', { name: /Go to backlink reference ← index/ })).toBeVisible();
+});
+
+test('wiki-link tokens in the buffer resolve through the Boris graph (#418 M6)', async ({ page }) => {
+  await installApi(page, { files: graphFiles, disk: 'See [[guides/intro]] and [[missing-page]].\n' });
+  await page.getByRole('button', { name: 'content/index.md', exact: true }).click();
+  const graph = page.locator('#graph');
+  await expect(graph.getByRole('button', { name: 'Go to wiki link guides/intro', exact: true })).toBeVisible();
+  await expect(graph.getByText('Unresolved wiki link missing-page')).toBeVisible();
+  const openRequest = page.waitForRequest('**/api/files/open');
+  await graph.getByRole('button', { name: 'Go to wiki link guides/intro', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  expect((await openRequest).postDataJSON()).toMatchObject({ path: 'content/guides/intro.md' });
+});
+
+test('the command palette jumps to a graph entity by title (#418 M6)', async ({ page }) => {
+  await installApi(page, { files: graphFiles });
+  await page.keyboard.press('Control+K');
+  const palette = page.getByRole('dialog', { name: 'Commands' });
+  const input = palette.getByRole('combobox', { name: 'Filter commands' });
+  await input.fill('Introduction');
+  const option = palette.getByRole('listbox', { name: 'Boris commands' }).getByRole('option', { name: /Go to guides\/intro/ });
+  await expect(option).toContainText('Introduction');
+  const openRequest = page.waitForRequest('**/api/files/open');
+  await input.press('Enter');
+  expect((await openRequest).postDataJSON()).toMatchObject({ path: 'content/guides/intro.md' });
+  await expect(page.getByRole('textbox', { name: 'Source for content/guides/intro.md' })).toBeVisible();
+});
+
+test('Run impact on this page uses the current graph entity (#418 M6)', async ({ page }) => {
+  await installApi(page, {
+    files: graphFiles,
+    commands: { impact: commandResult('impact', { impact: [{ endpoint_type: 'page', value: 'guides/intro' }] }) }
+  });
+  await page.getByRole('button', { name: 'content/guides/intro.md', exact: true }).click();
+  const request = page.waitForRequest('**/api/commands/run');
+  await page.getByRole('button', { name: 'Run impact on guides/intro', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  expect((await request).postDataJSON()).toMatchObject({ mode: 'impact', impact_id: 'guides/intro' });
+  await expect(page.getByRole('heading', { name: 'Impact results' })).toBeVisible();
+  await expect(page.getByText('page: guides/intro')).toBeVisible();
+});
+
+test('graph inspector refreshes after a successful diagnostics build (#418 M6)', async ({ page }) => {
+  await installApi(page, {
+    graph: [graphPayload(false), graphPayload(true)],
+    commands: { ir_build: commandResult('ir_build') }
+  });
+  await expect(page.getByRole('status', { name: 'Graph status' })).toContainText('Build diagnostics to create the Boris graph.');
+  await page.getByRole('button', { name: 'Build diagnostics', exact: true }).click();
+  await expect(page.getByRole('status', { name: 'Graph status' })).toContainText('Boris graph ready (3 pages).');
 });

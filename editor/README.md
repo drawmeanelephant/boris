@@ -200,3 +200,25 @@ stale/failure states.
 M5 deliberately does not add HMR, CSS injection, a watcher, a daemon, a second
 renderer, typing-triggered builds, or editor-side HTML transformation. Replace
 this fallback with compiler-owned `boris serve` when #392 lands.
+
+## M6 graph-aware navigation
+
+The Graph pane is a read-only inspector of Boris `.boris/graph.json`, with
+relation rows taken from `.boris/completion.json`. The host exposes
+`GET /api/graph` and forwards the validated artifact; it does not invent
+nodes, edges, or backlinks. Wiki-link tokens in the open buffer are scanned
+as `[[id]]` text and resolved against graph entities — the editor does not
+parse Markdown.
+
+From the current page the inspector can go to the parent, children, siblings,
+outgoing reference/include edges, reverse-index backlinks, and completion
+relations. The command palette jumps to an entity by id or title and can run
+`boris impact` on the open page. All of those actions are named buttons.
+
+The diagnostics integration gate deep-compares `/api/graph` with the real
+compiler-generated `graph.json`. Playwright covers parent/backlink/wiki-link
+navigation, title jump, impact-on-this-page, and refresh after a successful
+graph build.
+
+M6 deliberately does not add an editable graph database, a second graph
+model, heading-fragment navigation, or theme/layout diagnostics.
