@@ -125,6 +125,7 @@ zig build test
 ./zig-out/bin/boris --sitemap --site-url https://docs.example/ --quiet
 ./zig-out/bin/boris --incremental --jobs 4 --quiet
 ./zig-out/bin/boris plan --profile boris.json
+./zig-out/bin/boris recipe-scale --input DIR --id PAGE --factor TEXT --cooklang
 ./zig-out/bin/boris nostr plan --profile PATH
 # echo -n '<hex-or-nsec>' | ./zig-out/bin/boris nostr sign --plan PLAN --key-stdin --out BUNDLE
 # ./zig-out/bin/boris nostr publish --plan PLAN --bundle BUNDLE --out REPORT

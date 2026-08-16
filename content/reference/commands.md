@@ -36,6 +36,7 @@ under `dist/` — the default target, not the only one.
 | `nostr plan` | Emit the offline NIP-23 publication plan for the selected profile | No; plan JSON on stdout |
 | `nostr sign` | Sign a plan artifact into a signed-event bundle (key once via stdin) | No; bundle JSON on stdout or `--out PATH` |
 | `nostr publish` | Send the exact signed events to the plan's relays over WebSocket | No; report JSON on stdout or `--out PATH` |
+| `recipe-scale --id PAGE --factor TEXT` | Print a derived Cooklang scale view | No; view JSON on stdout or `--out PATH` |
 
 ## Basic usage
 

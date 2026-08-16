@@ -350,13 +350,22 @@ A factor uses the same scalable forms. Zero and a zero denominator are invalid.
 - References are still not merged.
 
 The scaled view is not written into `graph.json` and does not bump
-`schemaVersion`. A CLI that prints that view is a later slice.
+`schemaVersion`. `boris recipe-scale --input DIR --id PAGE --factor TEXT`
+prints that view as a `boris-recipe-scale` JSON document on stdout
+(and `--out PATH` when given). `--cooklang` is required for a `.cook`
+tree, same family rule as `build`. Zero or unparsable factors are a
+usage error. A missing page, a refused Cooklang tree, or an overflowing
+amount is a content error.
 
 Schema for one scaled amount:
 
 ```json
 { "class": "scalable", "original": "1/2", "scaled": "1" }
 ```
+
+The page envelope is `docs/contracts/schemas/recipe-scale-view-0.1.0.schema.json`
+(`format: boris-recipe-scale`). Timer `scaled` equals `original` even when
+the amount classifies as scalable.
 
 ## IR version selection
 

@@ -12,6 +12,7 @@ const github_pages = @import("github_pages.zig");
 const site_url_mod = @import("site_url.zig");
 const sitemap = @import("sitemap.zig");
 const render = @import("render.zig");
+const recipe_scale = @import("recipe_scale.zig");
 
 pub const ExitCode = diagnostic.ExitCode;
 pub const RunResult = diagnostic.RunResult;
@@ -54,6 +55,9 @@ pub const Command = enum {
     /// `standard-site publish` — the explicit one-shot publish family. The
     /// network operation lives only here; no other command publishes.
     standard_site,
+    /// `boris recipe-scale` — derived Cooklang scale view. Never rewrites
+    /// `.cook` or `graph.json`.
+    recipe_scale,
 };
 
 /// The subcommand selected under the `standard-site` family. Every member is
@@ -228,6 +232,11 @@ pub const Options = struct {
     nostr_out_path: ?[]const u8 = null,
     nostr_prior_path: ?[]const u8 = null,
     nostr_created_at: ?i64 = null,
+    /// `recipe-scale` inputs: one page id, the authored factor text, and an
+    /// optional JSON output path (stdout is always written on success).
+    recipe_scale_id: ?[]const u8 = null,
+    recipe_scale_factor: ?[]const u8 = null,
+    recipe_scale_out: ?[]const u8 = null,
 
     pub fn deinit(self: *Options, gpa: std.mem.Allocator) void {
         if (self.publication_location) |*location| location.deinit(gpa);
@@ -394,6 +403,12 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var nostr_out_path: ?[]const u8 = null;
     var nostr_prior_path: ?[]const u8 = null;
     var nostr_created_at: ?i64 = null;
+    var recipe_scale_id: ?[]const u8 = null;
+    var saw_recipe_scale_id = false;
+    var recipe_scale_factor: ?[]const u8 = null;
+    var saw_recipe_scale_factor = false;
+    var recipe_scale_out: ?[]const u8 = null;
+    var saw_recipe_scale_out = false;
 
     var targets: std.ArrayListUnmanaged(target_mod.TargetSpec) = .{ .items = &.{}, .capacity = 0 };
     errdefer {
@@ -516,6 +531,9 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             return error.UnknownStandardSiteSubcommand;
         }
         if (i < args.len and !std.mem.startsWith(u8, args[i], "-")) return error.UnexpectedPositional;
+    } else if (i < args.len and std.mem.eql(u8, args[i], "recipe-scale")) {
+        command = .recipe_scale;
+        i += 1;
     }
     while (i < args.len) : (i += 1) {
         const a = args[i];
@@ -644,11 +662,33 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
 
         // `nostr sign` / `nostr publish` re-own `--out` as the artifact path;
         // every other command keeps the IR-directory meaning (and nostr_plan
-        // rejects it).
+        // rejects it). `recipe-scale` also re-owns `--out` as a JSON file path.
         if ((command == .nostr_sign or command == .nostr_publish) and (std.mem.eql(u8, a, "--out") or std.mem.startsWith(u8, a, "--out="))) {
             if (saw_nostr_out) return error.DuplicateFlag;
             saw_nostr_out = true;
             nostr_out_path = try takeValue(args, &i, a, "--out");
+            continue;
+        }
+        if (command == .recipe_scale and (std.mem.eql(u8, a, "--out") or std.mem.startsWith(u8, a, "--out="))) {
+            if (saw_recipe_scale_out) return error.DuplicateFlag;
+            saw_recipe_scale_out = true;
+            recipe_scale_out = try takeValue(args, &i, a, "--out");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--id") or std.mem.startsWith(u8, a, "--id=")) {
+            if (command != .recipe_scale) return error.ConflictingFlags;
+            if (saw_recipe_scale_id) return error.DuplicateFlag;
+            saw_recipe_scale_id = true;
+            recipe_scale_id = try takeValue(args, &i, a, "--id");
+            continue;
+        }
+
+        if (std.mem.eql(u8, a, "--factor") or std.mem.startsWith(u8, a, "--factor=")) {
+            if (command != .recipe_scale) return error.ConflictingFlags;
+            if (saw_recipe_scale_factor) return error.DuplicateFlag;
+            saw_recipe_scale_factor = true;
+            recipe_scale_factor = try takeValue(args, &i, a, "--factor");
             continue;
         }
 
@@ -1309,6 +1349,35 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         };
     }
 
+    if (command == .recipe_scale) {
+        if (recipe_scale_id == null or recipe_scale_factor == null) return error.MissingValue;
+        _ = recipe_scale.parseFactor(recipe_scale_factor.?) catch return error.InvalidValue;
+        // The view owns stdout. Projection selectors, watch/HTML, analysis,
+        // and `--timings` would either execute another path or corrupt the
+        // JSON stream.
+        if (saw_html or has_explicit_targets or saw_html_layout or saw_theme or has_target_layouts or has_target_profiles or has_layout_rules or wants_sitemap or
+            wants_rag or wants_ir or wants_context or wants_llms or wants_rss or saw_site_url or saw_pages_location or saw_rss_title or saw_rss_description or saw_rss_limit or
+            saw_format or saw_report or saw_watch or saw_timings or saw_html_dir or saw_incremental or saw_jobs or saw_profile)
+        {
+            return error.ConflictingFlags;
+        }
+        return .{
+            .help = false,
+            .quiet = quiet,
+            .timings = false,
+            .command = .recipe_scale,
+            .recipe_scale_id = recipe_scale_id,
+            .recipe_scale_factor = recipe_scale_factor,
+            .recipe_scale_out = recipe_scale_out,
+            .mode = .html,
+            .input_format = input_format,
+            .input_dir = input_dir,
+            .out_dir = null,
+            .html_dir = null,
+            .targets = targets,
+        };
+    }
+
     if (command == .standard_site) {
         // The `standard-site` family is the one-shot network family: publish,
         // login, sessions, and logout. Compiler modes, targets, and projection
@@ -1828,6 +1897,7 @@ pub fn printUsage() void {
         \\  check               Read-only graph health report (findings do not fail by default)
         \\  impact <ID>         Read-only transitive impact report for a page
         \\  plan                Emit a normalized publication plan (no publication)
+        \\  recipe-scale        Print a derived Cooklang scale view (no rewrite)
         \\  standard-site publish  One-shot Standard.site publish (stored session + reconcile; never implicit)
         \\  standard-site plan    Emit the deterministic Standard.site plan offline (no network)
         \\  standard-site records Dump the full canonical record payloads offline (no network)
@@ -1926,6 +1996,9 @@ pub fn printUsage() void {
         \\  --report PATH        Write an analysis report instead of stdout
         \\  --fail-on-unreferenced Make check fail when it reports unreferenced pages
         \\  --profile PATH       Selected publication profile for `plan`
+        \\  --id PAGE            Recipe page entity id (`recipe-scale`; required)
+        \\  --factor TEXT        Scale factor: 2, 1/2, 1.5, 1 1/2 (`recipe-scale`; required)
+        \\  --out PATH           Scaled-view JSON path (`recipe-scale`; default: stdout only)
         \\  --plan PATH          Plan artifact to sign (`nostr sign`)
         \\  --key-stdin          Read the hex/nsec secret key once from stdin (`nostr sign`)
         \\  --out PATH           Signed-event bundle output path (`nostr sign`; default: stdout)
@@ -1979,6 +2052,8 @@ pub fn printUsage() void {
         \\Note: Bare `boris` builds HTML under dist/ as target "default". Use --out for JSON IR.
         \\      `boris validate` observes the selected HTML target configuration but writes no artifacts.
         \\      `boris plan --profile PATH` emits only the normalized declaration JSON on stdout.
+        \\      `boris recipe-scale --input DIR --id PAGE --factor TEXT` prints a derived
+        \\      scaled view on stdout; it never rewrites .cook or graph.json.
         \\      `boris standard-site` (no subcommand) prints the Standard.site family list.
         \\      `boris nostr plan --profile PATH` emits the offline NIP-23 publication plan on stdout;
         \\      it never signs, never contacts a relay, and never reads a key.
@@ -2165,6 +2240,8 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.eql(u8, a, "--bundle") or
             std.mem.eql(u8, a, "--prior") or
             std.mem.eql(u8, a, "--created-at") or
+            std.mem.eql(u8, a, "--id") or
+            std.mem.eql(u8, a, "--factor") or
             std.mem.eql(u8, a, "--out") or
             std.mem.eql(u8, a, "--rag-dir") or
             std.mem.eql(u8, a, "--context-dir") or
@@ -2200,6 +2277,8 @@ pub fn findBadArg(args: []const []const u8) ?[]const u8 {
             std.mem.startsWith(u8, a, "--bundle=") or
             std.mem.startsWith(u8, a, "--prior=") or
             std.mem.startsWith(u8, a, "--created-at=") or
+            std.mem.startsWith(u8, a, "--id=") or
+            std.mem.startsWith(u8, a, "--factor=") or
             std.mem.startsWith(u8, a, "--out=") or
             std.mem.startsWith(u8, a, "--rag-dir=") or
             std.mem.startsWith(u8, a, "--context-dir=") or
@@ -2867,6 +2946,32 @@ test "parse: nostr plan owns stdout and rejects every other selector" {
         try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, args));
     }
     try expectError(error.DuplicateFlag, parseOptions(std.testing.allocator, &.{ "boris", "nostr", "plan", "--profile", "a", "--profile", "b" }));
+}
+
+test "parse: recipe-scale requires id and a scalable factor" {
+    var o = try parseOptions(std.testing.allocator, &.{
+        "boris", "recipe-scale", "--input", "docs/contracts/fixtures/cooklang-compatibility/content",
+        "--id", "carbonara", "--factor", "2", "--cooklang", "--out", "view.json", "--quiet",
+    });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(Command.recipe_scale, o.command);
+    try expectEqualStrings("carbonara", o.recipe_scale_id.?);
+    try expectEqualStrings("2", o.recipe_scale_factor.?);
+    try expectEqualStrings("view.json", o.recipe_scale_out.?);
+    try expectEqual(identity.InputFormat.cook, o.input_format);
+    try expect(o.out_dir == null);
+    try expect(o.quiet);
+
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara" }));
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--factor", "2" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara", "--factor", "0" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara", "--factor", "some" }));
+    try expectError(error.InvalidValue, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara", "--factor", "1/0" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara", "--factor", "2", "--rag" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara", "--factor", "2", "--timings" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "--id", "carbonara" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "recipe-scale", "--id", "carbonara", "--factor", "2", "--textile", "--cooklang" }));
 }
 
 test "parse: --out selects IR mode" {

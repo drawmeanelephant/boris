@@ -18,7 +18,7 @@ The compiler is one binary. Files cluster by job, not by fashion.
 | Wiki-links, includes, doc links | `src/wikilink.zig`, `src/include.zig`, `src/doclink.zig` | [includes-and-wiki-links.md](contracts/includes-and-wiki-links.md), [documentation-links.md](contracts/documentation-links.md) |
 | Aside / Details | `src/aside.zig` | [components.md](contracts/components.md) |
 | Oliver render | `src/render.zig` | [oliver-renderer.md](contracts/oliver-renderer.md) |
-| Cooklang recipe scale | `src/recipe_scale.zig` | [cooklang-compatibility.md](contracts/cooklang-compatibility.md) |
+| Cooklang recipe scale | `src/recipe_scale.zig`, `src/recipe_scale_view.zig` | [cooklang-compatibility.md](contracts/cooklang-compatibility.md), [cli.md](contracts/cli.md) |
 | HTML body, nav, TOC, assemble | `src/html_body.zig`, `src/html_nav.zig`, `src/html_toc.zig`, `src/assemble.zig`, `src/compile.zig` | [html-output.md](contracts/html-output.md) |
 | Themes, layouts, assets | `src/theme.zig`, `src/layout_select.zig`, `src/content_asset.zig` | [templating-and-themes.md](contracts/templating-and-themes.md), [content-local-assets.md](contracts/content-local-assets.md) |
 | Incremental / watch / jobs | `src/cache.zig`, `src/watch.zig`, `src/timings.zig` | [watch-mode.md](contracts/watch-mode.md), [parallel-rendering.md](contracts/parallel-rendering.md) |

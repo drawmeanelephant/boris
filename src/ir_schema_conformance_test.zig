@@ -16,6 +16,8 @@ const std = @import("std");
 const Io = std.Io;
 const pipeline = @import("pipeline.zig");
 const parser = @import("parser.zig");
+const recipe_scale = @import("recipe_scale.zig");
+const recipe_scale_view = @import("recipe_scale_view.zig");
 
 const output_root = "test-output";
 const work_dir = output_root ++ "/ir-schema-conformance";
@@ -253,6 +255,34 @@ test "the published IR 0.4 graph schema matches freshly emitted recipe IR" {
     try std.testing.expect(result.ok);
 
     try checkArtifact(io, gpa, cook_work ++ "/graph.json", "docs/contracts/schemas/ir-graph-0.4.0.schema.json");
+}
+
+test "the published recipe-scale view schema matches a freshly rendered view" {
+    const io = std.testing.io;
+    const gpa = std.testing.allocator;
+
+    var compiled = try pipeline.compile(io, gpa, .{
+        .content_root = "docs/contracts/fixtures/cooklang-compatibility/content",
+        .quiet = true,
+        .input_format = .cook,
+    });
+    defer compiled.deinit();
+    try std.testing.expect(compiled.ok);
+
+    const factor = try recipe_scale.parseFactor("2");
+    const bytes = try recipe_scale_view.renderFromCompile(gpa, &compiled, "carbonara", factor);
+    defer gpa.free(bytes);
+
+    const schema_bytes = try readAlloc(io, Io.Dir.cwd(), "docs/contracts/schemas/recipe-scale-view-0.1.0.schema.json", gpa);
+    defer gpa.free(schema_bytes);
+    var schema_parsed = try std.json.parseFromSlice(std.json.Value, gpa, schema_bytes, .{});
+    defer schema_parsed.deinit();
+    var doc_parsed = try std.json.parseFromSlice(std.json.Value, gpa, bytes, .{});
+    defer doc_parsed.deinit();
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const v: Validator = .{ .root = schema_parsed.value, .arena = arena_state.allocator() };
+    try v.validate(schema_parsed.value, doc_parsed.value, "recipe-scale-view");
 }
 
 test "conformance validator actually rejects drift" {
