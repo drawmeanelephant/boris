@@ -61,4 +61,26 @@ node -e '
   if (!ref) throw Error("recipeRef sauces/pepper-oil missing from facet");
 ' "$work/graph.json" "$work/project/.boris/graph.json"
 
+before_hash="$(cksum "$work/project/content/carbonara.cook")"
+scaled="$(api_post /api/commands/run '{"mode":"recipe_scale","recipe_scale_id":"carbonara","recipe_scale_factor":"2"}')"
+node -e '
+  const r = JSON.parse(process.argv[1]);
+  if (r.exit_code !== 0 || r.failure_class !== "success") throw Error("recipe-scale failed: " + JSON.stringify(r));
+  const view = r.recipe_scale_view;
+  if (!view || view.format !== "boris-recipe-scale" || view.page !== "carbonara") throw Error("missing scaled view");
+  const spaghetti = view.ingredients.find(i => i.name === "spaghetti");
+  if (!spaghetti || spaghetti.quantity.amount.original !== "400" || spaghetti.quantity.amount.scaled !== "800") {
+    throw Error("spaghetti did not double: " + JSON.stringify(spaghetti));
+  }
+  const pasta = view.timers.find(t => t.name === "pasta");
+  if (!pasta || pasta.quantity.amount.scaled !== pasta.quantity.amount.original) {
+    throw Error("pasta timer scaled: " + JSON.stringify(pasta));
+  }
+' "$scaled"
+after_hash="$(cksum "$work/project/content/carbonara.cook")"
+if [[ "$before_hash" != "$after_hash" ]]; then
+  echo "recipe-scale rewrote carbonara.cook" >&2
+  exit 1
+fi
+
 echo "editor Cooklang integration: ok"

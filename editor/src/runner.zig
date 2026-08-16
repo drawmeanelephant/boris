@@ -16,6 +16,7 @@ pub const Mode = enum {
     check,
     impact,
     plan,
+    recipe_scale,
 };
 
 pub const FailureClass = enum {
@@ -79,6 +80,7 @@ pub const Result = struct {
     findings: []Finding,
     impact: []ImpactEndpoint,
     publication_plan: ?std.json.Value = null,
+    recipe_scale_view: ?std.json.Value = null,
 };
 
 pub const Config = struct {
@@ -91,6 +93,8 @@ pub const Request = struct {
     mode: Mode,
     impact_id: ?[]const u8 = null,
     profile: ?[]const u8 = null,
+    recipe_scale_id: ?[]const u8 = null,
+    recipe_scale_factor: ?[]const u8 = null,
 };
 
 const check_report_name = "editor-check.json";
@@ -106,6 +110,13 @@ pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Reques
     if (request.mode != .impact and request.impact_id != null) return error.UnexpectedImpactId;
     if (request.mode == .plan) try validateProfilePath(request.profile orelse return error.ProfileRequired);
     if (request.mode != .plan and request.profile != null) return error.UnexpectedProfile;
+    if (request.mode == .recipe_scale) {
+        try validateRecipeScaleId(request.recipe_scale_id orelse return error.RecipeScaleIdRequired);
+        try validateRecipeScaleFactor(request.recipe_scale_factor orelse return error.RecipeScaleFactorRequired);
+    }
+    if (request.mode != .recipe_scale and (request.recipe_scale_id != null or request.recipe_scale_factor != null)) {
+        return error.UnexpectedRecipeScale;
+    }
     try prepareArtifactRoot(io, config.project_root, request.mode);
 
     const compiler_id = try readCompilerId(allocator, io, config);
@@ -123,6 +134,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Reques
     var report_version: ?[]const u8 = null;
     var structured_report = false;
     var publication_plan: ?std.json.Value = null;
+    var recipe_scale_view: ?std.json.Value = null;
 
     switch (request.mode) {
         .ir_build => if (try readGeneratedFile(allocator, io, config.project_root, "build-report.json")) |bytes| {
@@ -162,6 +174,10 @@ pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Reques
             publication_plan = document.parsed.value;
             structured_report = true;
         },
+        .recipe_scale => if (failure_class == .success) {
+            recipe_scale_view = try parseRecipeScaleView(allocator, execution.stdout);
+            structured_report = true;
+        },
     }
 
     if (!structured_report or problems.items.len == 0) {
@@ -182,6 +198,7 @@ pub fn run(allocator: std.mem.Allocator, io: Io, config: Config, request: Reques
         .findings = try findings.toOwnedSlice(allocator),
         .impact = try impact.toOwnedSlice(allocator),
         .publication_plan = publication_plan,
+        .recipe_scale_view = recipe_scale_view,
     };
 }
 
@@ -219,6 +236,15 @@ pub fn commandArgv(
         .check => try args.appendSlice(allocator, &.{ "check", "--input", "content", "--format", "json", "--report", ".boris/" ++ check_report_name }),
         .impact => try args.appendSlice(allocator, &.{ "impact", request.impact_id.?, "--input", "content", "--format", "json", "--report", ".boris/" ++ impact_report_name }),
         .plan => try args.appendSlice(allocator, &.{ "plan", "--profile", request.profile.? }),
+        .recipe_scale => try args.appendSlice(allocator, &.{
+            "recipe-scale",
+            "--input",
+            "content",
+            "--id",
+            request.recipe_scale_id.?,
+            "--factor",
+            request.recipe_scale_factor.?,
+        }),
     }
     if (input_mode == .cooklang and request.mode != .plan) try args.append(allocator, "--cooklang");
     return args.toOwnedSlice(allocator);
@@ -258,7 +284,7 @@ fn prepareArtifactRoot(io: Io, project_root: []const u8, mode: Mode) !void {
         .check => check_report_name,
         .impact => impact_report_name,
         .validate, .html_build => html_report_name,
-        .plan => unreachable,
+        .plan, .recipe_scale => unreachable,
     };
     artifact_dir.deleteFile(io, stale_name) catch |err| switch (err) {
         error.FileNotFound => {},
@@ -484,6 +510,7 @@ fn processFailureResult(allocator: std.mem.Allocator, config: Config, mode: Mode
         .findings = try allocator.alloc(Finding, 0),
         .impact = try allocator.alloc(ImpactEndpoint, 0),
         .publication_plan = null,
+        .recipe_scale_view = null,
     };
 }
 
@@ -540,6 +567,27 @@ fn validateSourcePath(path: []const u8) !void {
     var segments = std.mem.splitScalar(u8, path, '/');
     while (segments.next()) |segment| {
         if (segment.len == 0 or std.mem.eql(u8, segment, ".") or std.mem.eql(u8, segment, "..")) return error.UnsafeArtifact;
+    }
+}
+
+fn parseRecipeScaleView(allocator: std.mem.Allocator, stdout: []const u8) !std.json.Value {
+    const value = std.json.parseFromSliceLeaky(std.json.Value, allocator, stdout, .{}) catch return error.UnsupportedArtifact;
+    if (value != .object) return error.UnsupportedArtifact;
+    const format = value.object.get("format") orelse return error.UnsupportedArtifact;
+    if (format != .string or !std.mem.eql(u8, format.string, "boris-recipe-scale")) return error.UnsupportedArtifact;
+    return value;
+}
+
+fn validateRecipeScaleId(id: []const u8) !void {
+    if (id.len == 0 or id.len > 4096 or id[0] == '-' or !std.unicode.utf8ValidateSlice(id) or std.mem.indexOfAny(u8, id, "\x00\r\n") != null) {
+        return error.InvalidRecipeScaleId;
+    }
+}
+
+fn validateRecipeScaleFactor(text: []const u8) !void {
+    const trimmed = std.mem.trim(u8, text, " \t");
+    if (trimmed.len == 0 or trimmed.len > 64 or trimmed[0] == '-' or !std.unicode.utf8ValidateSlice(trimmed) or std.mem.indexOfAny(u8, trimmed, "\x00\r\n") != null) {
+        return error.InvalidRecipeScaleFactor;
     }
 }
 
@@ -643,6 +691,31 @@ test "cooklang trees append the compiler selector; markdown trees do not" {
         if (std.mem.eql(u8, arg, "--report")) saw_report = true;
     }
     try std.testing.expect(saw_report);
+}
+
+test "recipe-scale argv is the fixed compiler command" {
+    const allocator = std.testing.allocator;
+    const argv = try commandArgv(allocator, "boris", .{
+        .mode = .recipe_scale,
+        .recipe_scale_id = "carbonara",
+        .recipe_scale_factor = "2",
+    }, .cooklang);
+    defer allocator.free(argv);
+    try std.testing.expectEqual(@as(usize, 9), argv.len);
+    try std.testing.expectEqualStrings("recipe-scale", argv[1]);
+    try std.testing.expectEqualStrings("--input", argv[2]);
+    try std.testing.expectEqualStrings("content", argv[3]);
+    try std.testing.expectEqualStrings("--id", argv[4]);
+    try std.testing.expectEqualStrings("carbonara", argv[5]);
+    try std.testing.expectEqualStrings("--factor", argv[6]);
+    try std.testing.expectEqualStrings("2", argv[7]);
+    try std.testing.expectEqualStrings("--cooklang", argv[8]);
+
+    try validateRecipeScaleId("carbonara");
+    try validateRecipeScaleFactor("1 1/2");
+    try std.testing.expectError(error.InvalidRecipeScaleId, validateRecipeScaleId("--help"));
+    try std.testing.expectError(error.InvalidRecipeScaleFactor, validateRecipeScaleFactor("--factor"));
+    try std.testing.expectError(error.InvalidRecipeScaleFactor, validateRecipeScaleFactor(""));
 }
 
 test "plan uses the selected profile and does not invent cooklang overrides" {

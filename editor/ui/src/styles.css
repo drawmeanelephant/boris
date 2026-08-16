@@ -87,6 +87,10 @@ input, select { width: 100%; padding: 0.7rem; border: 1px solid #82958b; border-
 .recipe-table { width: 100%; border-collapse: collapse; margin: 0 0 0.5rem; }
 .recipe-table th, .recipe-table td { text-align: left; padding: 0.35rem 0.45rem; border-bottom: 1px solid #d8e0da; vertical-align: top; }
 .recipe-table button { width: auto; min-height: 2.2rem; }
+.recipe-scale { display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: end; margin: 0.75rem 0 1rem; }
+.recipe-scale label { flex: 1 1 10rem; margin: 0; }
+.recipe-scale input { width: 100%; }
+.recipe-scale button { width: auto; }
 .problems-heading { display: flex; justify-content: space-between; align-items: start; gap: 1rem; }
 .command-result { flex: 0 0 auto; padding: 0.4rem 0.65rem; border-radius: 999px; color: #13563e; background: #dff1e8; font-weight: 700; }
 .command-result.failure { color: #7d241b; background: #ffe6e1; }

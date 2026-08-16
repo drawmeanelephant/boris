@@ -108,7 +108,8 @@ completion, autosave, Git integration, diagnostics, or preview.
 ## M3 Boris commands and problems
 
 The host exposes one authenticated `POST /api/commands/run` endpoint backed by
-a fixed command allowlist: validate, IR build, HTML build, check, and impact.
+a fixed command allowlist: validate, IR build, HTML build, check, impact,
+plan, and recipe-scale.
 The UI cannot supply argv or a working directory. Commands run against saved
 repository files, so all controls are disabled while the active buffer is
 dirty.
@@ -236,9 +237,9 @@ fail the way Boris fails; the editor does not guess a dialect.
 
 The Recipe pane is a read-only view of the compiler `recipe` facet on
 `graph.json` (IR 0.4.0): ingredients, cookware, timers, string quantities, and
-`recipeRef` navigation. `.cook` remains the source of truth. Quantity
-scaling is a compiler-owned string operation; the editor does not run it
-([Boris issue 554](https://github.com/drawmeanelephant/boris/issues/554)).
+`recipeRef` navigation. `.cook` remains the source of truth. **Scale recipe**
+spawns `boris recipe-scale`; the editor does not classify or multiply amounts
+([Boris issue 554](https://github.com/drawmeanelephant/boris/issues/554) S3).
 Graph diagnostics on `.cook` pages that are not `ECOOKLANG` keep the existing
 best-effort confidence and are labeled as approximate (adapted Markdown locus).
 
@@ -249,7 +250,7 @@ The M7 gate adds:
   ./zig-out/bin/boris ./editor/zig-out/bin/boris-editor editor/ui/dist
 ```
 
-M7 deliberately does not add editor-local scaling, structured write-back,
+M7 / S3 deliberately does not add editor-local scaling, structured write-back,
 pantry, `.menu`, shopping lists, or nutrition/allergen claims.
 
 ## M8 theme authoring

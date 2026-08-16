@@ -37,6 +37,7 @@ type CommandResult = {
   findings: Array<Record<string, unknown>>;
   impact: Array<Record<string, unknown>>;
   publication_plan?: Record<string, unknown> | null;
+  recipe_scale_view?: Record<string, unknown> | null;
 };
 
 function commandResult(mode: string, overrides: Partial<CommandResult> = {}): CommandResult {
@@ -44,7 +45,37 @@ function commandResult(mode: string, overrides: Partial<CommandResult> = {}): Co
     mode, exit_code: 0, failure_class: 'success', compiler_id: 'boris/0.8.1',
     report_version: null, used_stderr_fallback: false, problems: [], findings: [], impact: [],
     publication_plan: null,
+    recipe_scale_view: null,
     ...overrides
+  };
+}
+
+function cookRecipe() {
+  return {
+    ingredients: [
+      { name: 'spaghetti', quantity: { amount: '400', unit: 'g' }, preparation: '', recipeRef: null },
+      { name: 'salt', quantity: { amount: 'some', unit: '' }, preparation: '', recipeRef: null },
+      { name: 'pepper-oil', quantity: { amount: '1', unit: 'tbsp' }, preparation: '', recipeRef: 'sauces/pepper-oil' }
+    ],
+    cookware: [{ name: 'large pot', quantity: { amount: '', unit: '' } }],
+    timers: [{ name: 'pasta', quantity: { amount: '9', unit: 'minutes' } }]
+  };
+}
+
+function cookScaleView() {
+  return {
+    format: 'boris-recipe-scale',
+    schemaVersion: '0.1.0',
+    compiler: 'boris/0.8.1+cooklang',
+    factor: { num: 2, den: 1 },
+    page: 'carbonara',
+    ingredients: [
+      { name: 'spaghetti', quantity: { amount: { class: 'scalable', original: '400', scaled: '800' }, unit: 'g' }, preparation: '', recipeRef: null },
+      { name: 'salt', quantity: { amount: { class: 'fixed', original: 'some', scaled: 'some' }, unit: '' }, preparation: '', recipeRef: null },
+      { name: 'pepper-oil', quantity: { amount: { class: 'scalable', original: '1', scaled: '2' }, unit: 'tbsp' }, preparation: '', recipeRef: 'sauces/pepper-oil' }
+    ],
+    cookware: [{ name: 'large pot', quantity: { amount: { class: 'empty', original: '', scaled: '' }, unit: '' } }],
+    timers: [{ name: 'pasta', quantity: { amount: { class: 'scalable', original: '9', scaled: '9' }, unit: 'minutes' } }]
   };
 }
 
@@ -2031,14 +2062,7 @@ test('Cooklang trees expose a read-only recipe facet and recipeRef navigation (#
     id: 'carbonara',
     sourcePath: 'carbonara.cook',
     title: 'Spaghetti Carbonara',
-    recipe: {
-      ingredients: [
-        { name: 'spaghetti', quantity: { amount: '400', unit: 'g' }, preparation: '', recipeRef: null },
-        { name: 'pepper-oil', quantity: { amount: '1', unit: 'tbsp' }, preparation: '', recipeRef: 'sauces/pepper-oil' }
-      ],
-      cookware: [{ name: 'large pot', quantity: { amount: '', unit: '' } }],
-      timers: [{ name: 'pasta', quantity: { amount: '9', unit: 'minutes' } }]
-    }
+    recipe: cookRecipe()
   };
   graph.nodes.push({
     index: 3, id: 'sauces/pepper-oil', sourcePath: 'sauces/pepper-oil.cook', role: 'satellite',
@@ -2052,7 +2076,10 @@ test('Cooklang trees expose a read-only recipe facet and recipeRef navigation (#
       { path: 'content/carbonara.cook' },
       { path: 'content/sauces/pepper-oil.cook' }
     ],
-    graph: [cookGraph]
+    graph: [cookGraph],
+    commands: {
+      recipe_scale: commandResult('recipe_scale', { recipe_scale_view: cookScaleView() })
+    }
   });
   await expect(page.getByText(/Cooklang tree/)).toBeVisible();
   await page.getByRole('button', { name: 'Create file', exact: true }).click();
@@ -2065,7 +2092,23 @@ test('Cooklang trees expose a read-only recipe facet and recipeRef navigation (#
   await expect(recipe).toContainText('spaghetti');
   await expect(recipe).toContainText('400 g');
   await expect(recipe.getByRole('button', { name: 'Print this recipe', exact: true })).toBeVisible();
-  await expect(recipe).toContainText('This editor does not run that operation');
+  await expect(recipe.getByRole('textbox', { name: 'Scale factor', exact: true })).toBeVisible();
+  await expect(recipe.getByRole('button', { name: 'Scale recipe', exact: true })).toBeVisible();
+  await expect(recipe.getByRole('button', { name: 'Reset scale', exact: true })).toBeVisible();
+  await recipe.getByRole('textbox', { name: 'Scale factor', exact: true }).fill('2');
+  const scaleRequest = page.waitForRequest('**/api/commands/run');
+  await recipe.getByRole('button', { name: 'Scale recipe', exact: true }).click();
+  expect((await scaleRequest).postDataJSON()).toMatchObject({
+    mode: 'recipe_scale', recipe_scale_id: 'carbonara', recipe_scale_factor: '2'
+  });
+  await expect(recipe).toContainText('400 g → 800 g');
+  await expect(recipe).toContainText('some');
+  await expect(recipe).not.toContainText('some →');
+  await expect(recipe).toContainText('9 minutes');
+  await expect(recipe).not.toContainText('9 minutes →');
+  await recipe.getByRole('button', { name: 'Reset scale', exact: true }).click();
+  await expect(recipe).toContainText('400 g');
+  await expect(recipe).not.toContainText('400 g → 800 g');
   const openRequest = page.waitForRequest('**/api/files/open');
   await recipe.getByRole('button', { name: 'Go to recipe sauces/pepper-oil', exact: true }).focus();
   await page.keyboard.press('Enter');
@@ -2252,13 +2295,7 @@ test('the 14 #418 actions are completable from the keyboard (#418 M10)', async (
   graph.nodes.push({
     index: 3, id: 'carbonara', sourcePath: 'carbonara.cook', role: 'trunk',
     parent: null, parentIndex: null, title: 'Carbonara', status: 'published', tags: [], bodyOffset: 20,
-    recipe: {
-      ingredients: [
-        { name: 'pepper-oil', quantity: { amount: '1', unit: 'tbsp' }, preparation: '', recipeRef: 'sauces/pepper-oil' }
-      ],
-      cookware: [],
-      timers: []
-    }
+    recipe: cookRecipe()
   });
   graph.nodes.push({
     index: 4, id: 'sauces/pepper-oil', sourcePath: 'sauces/pepper-oil.cook', role: 'satellite',
@@ -2289,7 +2326,8 @@ test('the 14 #418 actions are completable from the keyboard (#418 M10)', async (
           format: 'boris-publication-plan', schema_version: 1, input: 'content', input_format: 'markdown',
           publication: null, targets: [{ name: 'public', output: 'dist', public: true }]
         }
-      })
+      }),
+      recipe_scale: commandResult('recipe_scale', { recipe_scale_view: cookScaleView() })
     },
     recovery: [{ path: 'content/index.md', content: '# Recovered\n', fingerprint: 'd'.repeat(64) }]
   });
@@ -2365,12 +2403,22 @@ test('the 14 #418 actions are completable from the keyboard (#418 M10)', async (
   await page.keyboard.press('Enter');
   await expect(page.getByText(/Preview is current from a successful/)).toBeVisible();
 
-  // 10–11 recipe facet: scaling is an honest gap; related recipe is reachable
+  // 10–11 recipe facet: scale via the compiler command; related recipe is reachable
   await page.getByRole('button', { name: 'content/carbonara.cook', exact: true }).focus();
   await page.keyboard.press('Enter');
   const recipe = page.locator('.recipe-pane');
-  await expect(recipe).toContainText('This editor does not run that operation');
-  await expect(page.getByRole('button', { name: /Scale / })).toHaveCount(0);
+  await recipe.getByRole('textbox', { name: 'Scale factor', exact: true }).focus();
+  await recipe.getByRole('textbox', { name: 'Scale factor', exact: true }).fill('2');
+  const scaleRequest = page.waitForRequest('**/api/commands/run');
+  await recipe.getByRole('button', { name: 'Scale recipe', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  expect((await scaleRequest).postDataJSON()).toMatchObject({
+    mode: 'recipe_scale', recipe_scale_id: 'carbonara', recipe_scale_factor: '2'
+  });
+  await expect(recipe).toContainText('400 g → 800 g');
+  await recipe.getByRole('button', { name: 'Reset scale', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(recipe).not.toContainText('400 g → 800 g');
   await recipe.getByRole('button', { name: 'Go to recipe sauces/pepper-oil', exact: true }).focus();
   await page.keyboard.press('Enter');
   await expect(page.getByRole('textbox', { name: 'Source for content/sauces/pepper-oil.cook' })).toBeVisible();
