@@ -32,13 +32,15 @@ A recorded passing smoke against bsky.social lives at
 ## First-tester path (bsky.social)
 
 ```text
-# 1. Build the HTML site (verification surfaces land in dist/)
-boris --quiet
-
-# 2. Inspect the Atmosphere projection with no network
+# 1. Inspect the Atmosphere projection with no network (no HTML required)
 boris standard-site plan    --profile profiles/standard-site.json
 boris standard-site records --profile profiles/standard-site.json
-boris standard-site verify  --profile profiles/standard-site.json --dist dist
+
+# 2. Build the HTML site. Verification surfaces (head links + well-known)
+#    are not yet wired on the production `boris` HTML path — `verify`
+#    against this dist will fail closed until that emit lands. Plan and
+#    publish do not wait on it.
+boris --quiet
 
 # 3. Log in once with an app password (stdin; echo off on a TTY)
 boris standard-site login --app-password --handle YOU.test.bsky.social
