@@ -279,6 +279,120 @@ pub fn writeReport(io: Io, dist_dir: Io.Dir, json: []const u8) !void {
     try writeFileAtomic(io, dist_dir, report_output_path, json);
 }
 
+// ---------------------------------------------------------------------------
+// offline verification
+// ---------------------------------------------------------------------------
+
+pub const verify_format = "boris-standard-site-verify";
+pub const verify_schema_version: u32 = 1;
+
+/// Per-document cross-check of the emitted head link against the projection.
+pub const VerifyDocumentStatus = enum { verified, mismatch, missing };
+
+/// Well-known (or sideband) byte cross-check against the projection.
+pub const VerifyWellKnownStatus = enum { match, mismatch, missing };
+
+pub const VerifyWellKnownResult = struct {
+    status: VerifyWellKnownStatus,
+    /// Project-relative path that was checked (well-known or sideband).
+    checked_path: []const u8,
+    /// Public URL an indexer probes (always present).
+    required_public_url: []const u8,
+};
+
+pub const VerifyDocumentResult = struct {
+    entity_id: []const u8,
+    at_uri: []const u8,
+    status: VerifyDocumentStatus,
+};
+
+/// Classify one emitted HTML page against the expected document head link.
+/// `verified` means the exact `<link rel="site.standard.document" href="AT_URI">`
+/// is present; `mismatch` means a document link is present with a different
+/// AT-URI; `missing` means no document link at all. Pure: no allocation, I/O,
+/// clock, or host data.
+pub fn checkDocument(expected_at_uri: []const u8, html: []const u8) VerifyDocumentStatus {
+    const rel_needle = "rel=\"site.standard.document\"";
+    const rel_pos = std.mem.indexOf(u8, html, rel_needle) orelse return .missing;
+    const after = html[rel_pos + rel_needle.len ..];
+    const href_needle = "href=\"";
+    const href_pos = std.mem.indexOf(u8, after, href_needle) orelse return .mismatch;
+    const value = after[href_pos + href_needle.len ..];
+    if (std.mem.startsWith(u8, value, expected_at_uri) and
+        value.len > expected_at_uri.len and value[expected_at_uri.len] == '"')
+    {
+        return .verified;
+    }
+    return .mismatch;
+}
+
+/// Classify the emitted well-known (or sideband) bytes against the expected
+/// bytes. `actual` is null when the file is absent.
+pub fn checkWellKnown(expected: []const u8, actual: ?[]const u8) VerifyWellKnownStatus {
+    const bytes = actual orelse return .missing;
+    return if (std.mem.eql(u8, expected, bytes)) .match else .mismatch;
+}
+
+/// Render the deterministic offline verification result. Fixed key order, LF
+/// endings, no timestamps or host data. The returned bytes are allocator-owned
+/// and always end in one LF.
+pub fn renderVerify(
+    gpa: std.mem.Allocator,
+    well_known: VerifyWellKnownResult,
+    documents: []const VerifyDocumentResult,
+) ![]u8 {
+    var overall_passed = well_known.status == .match;
+    for (documents) |document| {
+        if (document.status != .verified) overall_passed = false;
+    }
+
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(gpa);
+
+    try out.appendSlice(gpa, "{\n  \"format\": ");
+    try json_out.writeString(&out, gpa, verify_format);
+    try out.appendSlice(gpa, ",\n  \"schema_version\": ");
+    try json_out.writeUsize(&out, gpa, verify_schema_version);
+    try out.appendSlice(gpa, ",\n  \"overall_passed\": ");
+    try json_out.writeBool(&out, gpa, overall_passed);
+    try out.appendSlice(gpa, ",\n  \"well_known\": {\n    \"status\": ");
+    try json_out.writeString(&out, gpa, wellKnownVerifyStatusName(well_known.status));
+    try out.appendSlice(gpa, ",\n    \"checked_path\": ");
+    try json_out.writeString(&out, gpa, well_known.checked_path);
+    try out.appendSlice(gpa, ",\n    \"required_public_url\": ");
+    try json_out.writeString(&out, gpa, well_known.required_public_url);
+    try out.appendSlice(gpa, "\n  },\n  \"documents\": [");
+    for (documents, 0..) |document, index| {
+        if (index > 0) try out.append(gpa, ',');
+        try out.appendSlice(gpa, "\n    {\n      \"entity_id\": ");
+        try json_out.writeString(&out, gpa, document.entity_id);
+        try out.appendSlice(gpa, ",\n      \"at_uri\": ");
+        try json_out.writeString(&out, gpa, document.at_uri);
+        try out.appendSlice(gpa, ",\n      \"status\": ");
+        try json_out.writeString(&out, gpa, verifyDocumentStatusName(document.status));
+        try out.appendSlice(gpa, "\n    }");
+    }
+    if (documents.len > 0) try out.appendSlice(gpa, "\n  ");
+    try out.appendSlice(gpa, "]\n}\n");
+    return out.toOwnedSlice(gpa);
+}
+
+fn wellKnownVerifyStatusName(status: VerifyWellKnownStatus) []const u8 {
+    return switch (status) {
+        .match => "match",
+        .mismatch => "mismatch",
+        .missing => "missing",
+    };
+}
+
+fn verifyDocumentStatusName(status: VerifyDocumentStatus) []const u8 {
+    return switch (status) {
+        .verified => "verified",
+        .mismatch => "mismatch",
+        .missing => "missing",
+    };
+}
+
 fn wellKnownStatusName(status: WellKnownStatus) []const u8 {
     return switch (status) {
         .emitted => "emitted",
@@ -542,4 +656,56 @@ test "report distinguishes emitted, limited, and not verified deterministically"
     try std.testing.expect(std.mem.indexOf(u8, first, "\"not_verified\"") != null);
     try std.testing.expect(std.mem.endsWith(u8, first, "\n"));
     try std.testing.expect(std.mem.indexOf(u8, first, report_output_path) == null);
+}
+
+test "verify classifies emitted head links as verified, mismatch, or missing" {
+    const at_uri = "at://did:plc:test/site.standard.document/guides:intro";
+
+    const verified =
+        "<head>\n  <link rel=\"site.standard.document\" href=\"" ++ at_uri ++ "\">\n</head>\n";
+    try std.testing.expectEqual(VerifyDocumentStatus.verified, checkDocument(at_uri, verified));
+
+    const stale =
+        "<head>\n  <link rel=\"site.standard.document\" href=\"at://did:plc:old/site.standard.document/guides:intro\">\n</head>\n";
+    try std.testing.expectEqual(VerifyDocumentStatus.mismatch, checkDocument(at_uri, stale));
+
+    const absent = "<head>\n  <title>Intro</title>\n</head>\n";
+    try std.testing.expectEqual(VerifyDocumentStatus.missing, checkDocument(at_uri, absent));
+}
+
+test "verify classifies well-known bytes as match, mismatch, or missing" {
+    try std.testing.expectEqual(VerifyWellKnownStatus.match, checkWellKnown("at://did:plc:t/site.standard.publication/self", "at://did:plc:t/site.standard.publication/self"));
+    try std.testing.expectEqual(VerifyWellKnownStatus.mismatch, checkWellKnown("at://did:plc:t/site.standard.publication/self", "at://did:plc:other/site.standard.publication/self"));
+    try std.testing.expectEqual(VerifyWellKnownStatus.missing, checkWellKnown("at://did:plc:t/site.standard.publication/self", null));
+}
+
+test "verify result rendering is deterministic and carries the verdict" {
+    const gpa = std.testing.allocator;
+    const docs = [_]VerifyDocumentResult{
+        .{ .entity_id = "guides/intro", .at_uri = "at://did:plc:t/site.standard.document/guides:intro", .status = .verified },
+        .{ .entity_id = "reference/api", .at_uri = "at://did:plc:t/site.standard.document/reference:api", .status = .missing },
+    };
+    const wke = VerifyWellKnownResult{
+        .status = .match,
+        .checked_path = ".well-known/site.standard.publication",
+        .required_public_url = "https://example.com/.well-known/site.standard.publication",
+    };
+
+    const first = try renderVerify(gpa, wke, &docs);
+    defer gpa.free(first);
+    const second = try renderVerify(gpa, wke, &docs);
+    defer gpa.free(second);
+    try std.testing.expectEqualStrings(first, second);
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"format\": \"boris-standard-site-verify\"") != null);
+    // A single missing document flips the overall verdict.
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"overall_passed\": false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, first, "\"status\": \"missing\"") != null);
+    try std.testing.expect(std.mem.endsWith(u8, first, "\n"));
+
+    const passing = [_]VerifyDocumentResult{
+        .{ .entity_id = "guides/intro", .at_uri = "at://did:plc:t/site.standard.document/guides:intro", .status = .verified },
+    };
+    const all_pass = try renderVerify(gpa, wke, &passing);
+    defer gpa.free(all_pass);
+    try std.testing.expect(std.mem.indexOf(u8, all_pass, "\"overall_passed\": true") != null);
 }

@@ -28,6 +28,7 @@ const init_mod = @import("init.zig");
 const timings = @import("timings.zig");
 const identity = @import("identity.zig");
 const standard_site = @import("standard_site.zig");
+const standard_site_emit = @import("standard_site_emit.zig");
 const standard_site_reconcile = @import("standard_site_reconcile.zig");
 const standard_site_publish = @import("standard_site_publish.zig");
 const html_body = @import("html_body.zig");
@@ -142,6 +143,7 @@ fn runPipelineTimed(io: Io, gpa: std.mem.Allocator, opts: Options, print_report:
             .publish => runStandardSitePublish(io, gpa, opts, environ orelse return .{ .code = .session }),
             .plan => runStandardSitePlan(io, gpa, opts),
             .records => runStandardSiteRecords(io, gpa, opts),
+            .verify => runStandardSiteVerify(io, gpa, opts),
             .login => runStandardSiteLogin(io, gpa, opts, environ orelse return .{ .code = .session }),
             .sessions => runStandardSiteSessions(io, gpa, opts, environ orelse return .{ .code = .session }),
             .logout => runStandardSiteLogout(io, gpa, opts, environ orelse return .{ .code = .session }),
@@ -635,6 +637,32 @@ const StandardSiteProjection = struct {
     }
 };
 
+/// Shared post-projection step: compute the verification surfaces and take
+/// ownership; the caller frees them with `deinitVerificationSurfaces`.
+fn buildStandardSiteSurfaces(
+    gpa: std.mem.Allocator,
+    target_config: *standard_site.TargetConfig,
+    projection: *const standard_site.Projection,
+    out: *standard_site.VerificationSurfaces,
+) ExitCode {
+    out.* = standard_site.verificationSurfaces(gpa, target_config, projection) catch |err| {
+        std.debug.print("error: unable to compute verification surfaces: {s}\n", .{@errorName(err)});
+        return .content_error;
+    };
+    return .success;
+}
+
+fn deinitVerificationSurfaces(gpa: std.mem.Allocator, surfaces: *standard_site.VerificationSurfaces) void {
+    gpa.free(surfaces.well_known.content);
+    if (surfaces.well_known.project_path) |path| gpa.free(path);
+    gpa.free(surfaces.well_known.required_public_url);
+    for (surfaces.document_links) |link| {
+        gpa.free(link.page);
+        gpa.free(link.href);
+    }
+    gpa.free(surfaces.document_links);
+}
+
 /// Shared offline prefix for the `standard-site` plan/records/publish commands:
 /// read and validate the profile, compile the content tree, and build the
 /// deterministic record projection (including the per-page plain-text
@@ -796,20 +824,10 @@ pub fn runStandardSitePlan(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCo
     const target_config = proj.targetConfig();
     const projection = &proj.projection;
 
-    const surfaces = standard_site.verificationSurfaces(gpa, target_config, projection) catch |err| {
-        std.debug.print("error: unable to compute verification surfaces: {s}\n", .{@errorName(err)});
-        return .content_error;
-    };
-    defer {
-        gpa.free(surfaces.well_known.content);
-        if (surfaces.well_known.project_path) |path| gpa.free(path);
-        gpa.free(surfaces.well_known.required_public_url);
-        for (surfaces.document_links) |link| {
-            gpa.free(link.page);
-            gpa.free(link.href);
-        }
-        gpa.free(surfaces.document_links);
-    }
+    var surfaces: standard_site.VerificationSurfaces = undefined;
+    const surf_code = buildStandardSiteSurfaces(gpa, target_config, projection, &surfaces);
+    if (surf_code != .success) return surf_code;
+    defer deinitVerificationSurfaces(gpa, &surfaces);
 
     const plan = standard_site.renderPlan(gpa, target_config, projection, &surfaces) catch |err| {
         std.debug.print("error: unable to render the Standard.site plan: {s}\n", .{@errorName(err)});
@@ -877,6 +895,113 @@ pub fn runStandardSiteRecords(io: Io, gpa: std.mem.Allocator, opts: Options) Exi
     return .success;
 }
 
+/// `boris standard-site verify --profile PATH [--dist DIR] [--out PATH]`
+///
+/// Pure-offline post-build cross-check: render the projection + verification
+/// surfaces, then compare the already-emitted artifacts in the built output
+/// directory — each eligible page's document head link and the well-known file
+/// (or its base-path sideband) — against them byte-for-byte. Any missing or
+/// mismatched surface is a verification failure (exit 8) with zero writes and
+/// zero network.
+pub fn runStandardSiteVerify(io: Io, gpa: std.mem.Allocator, opts: Options) ExitCode {
+    var proj: StandardSiteProjection = undefined;
+    const code = buildStandardSiteProjection(io, gpa, opts, &proj);
+    if (code != .success) return code;
+    defer proj.deinit(gpa);
+    const target_config = proj.targetConfig();
+    const projection = &proj.projection;
+
+    var surfaces: standard_site.VerificationSurfaces = undefined;
+    const surf_code = buildStandardSiteSurfaces(gpa, target_config, projection, &surfaces);
+    if (surf_code != .success) return surf_code;
+    defer deinitVerificationSurfaces(gpa, &surfaces);
+
+    var dist_dir = Io.Dir.cwd().openDir(io, opts.verify_dist, .{}) catch |err| {
+        std.debug.print("error: unable to open the built output directory `{s}` for verification: {s}\n", .{ opts.verify_dist, @errorName(err) });
+        return .io_error;
+    };
+    defer dist_dir.close(io);
+
+    // Well-known (root site) or sideband (base-path) byte cross-check.
+    const w = &surfaces.well_known;
+    const checked_path: []const u8 = if (w.emittable) w.project_path.? else standard_site_emit.sideband_output_path;
+    var well_known_status: standard_site_emit.VerifyWellKnownStatus = .missing;
+    {
+        const actual = dist_dir.readFileAlloc(io, checked_path, gpa, .unlimited) catch |err| switch (err) {
+            error.FileNotFound => null,
+            else => {
+                std.debug.print("error: unable to read the well-known surface for verification: {s}\n", .{@errorName(err)});
+                return .io_error;
+            },
+        };
+        defer if (actual) |bytes| gpa.free(bytes);
+        well_known_status = standard_site_emit.checkWellKnown(w.content, actual);
+    }
+    var overall_passed = well_known_status == .match;
+
+    // Per-document head-link cross-check against the emitted HTML.
+    var doc_results: std.ArrayList(standard_site_emit.VerifyDocumentResult) = .empty;
+    defer doc_results.deinit(gpa);
+    for (projection.documents) |document| {
+        const output_path = document.path[1..]; // strip the leading '/'
+        var status: standard_site_emit.VerifyDocumentStatus = .missing;
+        {
+            const html = dist_dir.readFileAlloc(io, output_path, gpa, .unlimited) catch |err| switch (err) {
+                error.FileNotFound => null,
+                else => {
+                    std.debug.print("error: unable to read the built page `{s}` for verification: {s}\n", .{ output_path, @errorName(err) });
+                    return .io_error;
+                },
+            };
+            defer if (html) |bytes| gpa.free(bytes);
+            if (html) |bytes| status = standard_site_emit.checkDocument(document.at_uri, bytes);
+        }
+        if (status != .verified) overall_passed = false;
+        doc_results.append(gpa, .{
+            .entity_id = document.entity_id,
+            .at_uri = document.at_uri,
+            .status = status,
+        }) catch |err| {
+            std.debug.print("error: unable to build the verification result: {s}\n", .{@errorName(err)});
+            return .io_error;
+        };
+    }
+
+    const result_bytes = standard_site_emit.renderVerify(gpa, .{
+        .status = well_known_status,
+        .checked_path = checked_path,
+        .required_public_url = w.required_public_url,
+    }, doc_results.items) catch |err| {
+        std.debug.print("error: unable to render the verification result: {s}\n", .{@errorName(err)});
+        return .io_error;
+    };
+    defer gpa.free(result_bytes);
+
+    if (opts.verify_out) |out_path| {
+        Io.Dir.cwd().writeFile(io, .{ .sub_path = out_path, .data = result_bytes }) catch |err| {
+            std.debug.print("error: unable to write the verification result: {s}\n", .{@errorName(err)});
+            return .io_error;
+        };
+    } else {
+        var stdout_buffer: [4096]u8 = undefined;
+        var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+        stdout_writer.interface.writeAll(result_bytes) catch |err| {
+            std.debug.print("error: unable to write the verification result: {s}\n", .{@errorName(err)});
+            return .io_error;
+        };
+        stdout_writer.interface.flush() catch |err| {
+            std.debug.print("error: unable to flush the verification result: {s}\n", .{@errorName(err)});
+            return .io_error;
+        };
+    }
+
+    if (!overall_passed) {
+        std.debug.print("error: standard-site verify: the built output does not match the projection (see the result artifact)\n", .{});
+        return .verification;
+    }
+    return .success;
+}
+
 /// `boris standard-site publish --profile PATH [--plan PATH] [--out PATH] [--prune]`
 ///
 /// One-shot publish: read and validate the profile, compile the content tree,
@@ -894,20 +1019,10 @@ pub fn runStandardSitePublish(io: Io, gpa: std.mem.Allocator, opts: Options, env
     const target_config = proj.targetConfig();
     const projection = &proj.projection;
 
-    const surfaces = standard_site.verificationSurfaces(gpa, target_config, projection) catch |err| {
-        std.debug.print("error: unable to compute verification surfaces: {s}\n", .{@errorName(err)});
-        return .content_error;
-    };
-    defer {
-        gpa.free(surfaces.well_known.content);
-        if (surfaces.well_known.project_path) |path| gpa.free(path);
-        gpa.free(surfaces.well_known.required_public_url);
-        for (surfaces.document_links) |link| {
-            gpa.free(link.page);
-            gpa.free(link.href);
-        }
-        gpa.free(surfaces.document_links);
-    }
+    var surfaces: standard_site.VerificationSurfaces = undefined;
+    const surf_code = buildStandardSiteSurfaces(gpa, target_config, projection, &surfaces);
+    if (surf_code != .success) return surf_code;
+    defer deinitVerificationSurfaces(gpa, &surfaces);
 
     const rendered_plan = standard_site.renderPlan(gpa, target_config, projection, &surfaces) catch |err| {
         std.debug.print("error: unable to render the Standard.site plan: {s}\n", .{@errorName(err)});

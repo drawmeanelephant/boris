@@ -176,6 +176,21 @@ the plain-text projection) without any discovery, OAuth, transport, or
 mutation. Fixed key order, LF endings, no timestamps or host data; identical
 inputs produce byte-identical output.
 
+### `boris standard-site verify`
+
+The offline post-build cross-check. `boris standard-site verify --profile
+PATH [--dist DIR] [--out PATH]` renders the projection + verification
+surfaces, then compares the already-emitted artifacts in the built output
+directory against them byte-for-byte: each eligible page's
+`<link rel="site.standard.document">` head link in its HTML, and the well-known
+file (root/custom-domain sites) or its `_boris/proof/standard-site-well-known.txt`
+sideband (base-path deployments). Any missing or mismatched surface fails the
+check with exit code 8 and zero writes; the result is a deterministic
+`boris-standard-site-verify` (schema v1) artifact carrying `overall_passed`,
+the well-known status (`match`/`mismatch`/`missing`), and per-document status
+(`verified`/`mismatch`/`missing`). It performs no discovery, OAuth, transport,
+clock, or mutation — it reads only the local `--dist` tree (default `dist`).
+
 ### `boris standard-site publish`
 
 The explicit, never-implicit network family. `boris standard-site publish

@@ -51,6 +51,7 @@ pub const StandardSiteCommand = enum {
     publish,
     plan,
     records,
+    verify,
     login,
     sessions,
     logout,
@@ -96,6 +97,10 @@ pub const Options = struct {
     /// Records artifact output path for `standard-site records` (default:
     /// stdout).
     records_out: ?[]const u8 = null,
+    /// Verify result output path for `standard-site verify` (default: stdout).
+    verify_out: ?[]const u8 = null,
+    /// Built output directory `standard-site verify` checks (default: `dist`).
+    verify_dist: []const u8 = "dist",
     /// Explicit prune authority for `standard-site publish`; ANDs with the
     /// profile's `prune` flag.
     publish_prune: bool = false,
@@ -311,6 +316,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
     var saw_smoke_surface_url = false;
     var smoke_indexer_origin: ?[]const u8 = null;
     var saw_smoke_indexer_origin = false;
+    var verify_dist: ?[]const u8 = null;
+    var saw_verify_dist = false;
     var saw_fail_on_unreferenced = false;
     var saw_profile = false;
     var jobs: usize = 1;
@@ -392,6 +399,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             standard_site_command = .plan;
         } else if (std.mem.eql(u8, args[i], "records")) {
             standard_site_command = .records;
+        } else if (std.mem.eql(u8, args[i], "verify")) {
+            standard_site_command = .verify;
         } else if (std.mem.eql(u8, args[i], "login")) {
             standard_site_command = .login;
         } else if (std.mem.eql(u8, args[i], "sessions")) {
@@ -703,6 +712,13 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             continue;
         }
 
+        if (std.mem.eql(u8, a, "--dist") or std.mem.startsWith(u8, a, "--dist=")) {
+            if (saw_verify_dist) return error.DuplicateFlag;
+            saw_verify_dist = true;
+            verify_dist = try takeValue(args, &i, a, "--dist");
+            continue;
+        }
+
         if (std.mem.eql(u8, a, "--namespace") or std.mem.startsWith(u8, a, "--namespace=")) {
             if (saw_smoke_namespace) return error.DuplicateFlag;
             saw_smoke_namespace = true;
@@ -999,32 +1015,36 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
         {
             return error.ConflictingFlags;
         }
-        // Smoke-only flags have no meaning on the other subcommands; reject
-        // them rather than silently ignoring them.
+        // Smoke-only and verify-only flags have no meaning on the other
+        // subcommands; reject them rather than silently ignoring them.
         const saw_smoke_only = saw_smoke_namespace or saw_smoke_surface_url or saw_smoke_indexer_origin;
         switch (standard_site_command) {
             .publish => {
                 if (profile_path == null) return error.MissingValue;
-                if (saw_session_did or saw_smoke_only) return error.ConflictingFlags;
+                if (saw_session_did or saw_smoke_only or saw_verify_dist) return error.ConflictingFlags;
             },
             .plan => {
                 if (profile_path == null) return error.MissingValue;
-                if (saw_session_did or saw_smoke_only or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
+                if (saw_session_did or saw_smoke_only or saw_verify_dist or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
             },
             .records => {
+                if (profile_path == null) return error.MissingValue;
+                if (saw_session_did or saw_smoke_only or saw_verify_dist or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
+            },
+            .verify => {
                 if (profile_path == null) return error.MissingValue;
                 if (saw_session_did or saw_smoke_only or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
             },
             .login, .logout => {
                 if (session_did == null) return error.MissingValue;
-                if (profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only) return error.ConflictingFlags;
+                if (profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingFlags;
             },
             .sessions => {
-                if (saw_session_did or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only) return error.ConflictingFlags;
+                if (saw_session_did or profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_out or saw_smoke_only or saw_verify_dist) return error.ConflictingFlags;
             },
             .smoke => {
                 if (session_did == null) return error.MissingValue;
-                if (profile_path != null or saw_plan_path or publish_prune or saw_source_commit) return error.ConflictingFlags;
+                if (profile_path != null or saw_plan_path or publish_prune or saw_source_commit or saw_verify_dist) return error.ConflictingFlags;
             },
         }
         return .{
@@ -1038,6 +1058,8 @@ pub fn parseOptions(gpa: std.mem.Allocator, args: []const []const u8) ParseError
             .publish_out = if (saw_out) out_dir else null,
             .plan_out = if (saw_out) out_dir else null,
             .records_out = if (saw_out) out_dir else null,
+            .verify_out = if (saw_out) out_dir else null,
+            .verify_dist = verify_dist orelse "dist",
             .publish_prune = publish_prune,
             .source_commit = source_commit,
             .session_did = session_did,
@@ -1441,6 +1463,7 @@ pub fn printUsage() void {
         \\  standard-site publish  One-shot Standard.site publish (OAuth + reconcile; never implicit)
         \\  standard-site plan    Emit the deterministic Standard.site plan offline (no network)
         \\  standard-site records Dump the full canonical record payloads offline (no network)
+        \\  standard-site verify  Cross-check the built head links + well-known file offline (no network)
         \\  standard-site login  Authorize a DID and persist the session for later publishes
         \\  standard-site sessions  List persisted sessions (DIDs only; no secrets)
         \\  standard-site logout  Remove a persisted session (secure erase; does not revoke)
@@ -1459,6 +1482,10 @@ pub fn printUsage() void {
         \\  standard-site records options:
         \\  --profile PATH      Standard.site publication profile (required)
         \\  --out PATH          Records artifact path (default: stdout)
+        \\  standard-site verify options:
+        \\  --profile PATH      Standard.site publication profile (required)
+        \\  --dist DIR          Built output directory to check (default: dist)
+        \\  --out PATH          Verify result artifact path (default: stdout)
         \\  standard-site login/logout options:
         \\  --did DID           AT Protocol DID to authorize (login) or forget (logout)
         \\  standard-site smoke options:
@@ -2090,6 +2117,26 @@ test "parse: standard-site records emits full record payloads offline" {
     try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "records" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "records", "--profile", "a", "--did", "d" }));
     try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "records", "--profile", "a", "--prune" }));
+}
+
+test "parse: standard-site verify checks a built output dir offline" {
+    var o = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "verify", "--profile", "site.json", "--dist", "site-out", "--out", "verify.json" });
+    defer o.deinit(std.testing.allocator);
+    try expectEqual(StandardSiteCommand.verify, o.standard_site_command);
+    try expect(!o.standard_site_publish);
+    try expectEqualStrings("site.json", o.profile_path.?);
+    try expectEqualStrings("site-out", o.verify_dist);
+    try expectEqualStrings("verify.json", o.verify_out.?);
+
+    // Default dist dir when `--dist` is absent.
+    var dflt = try parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "verify", "--profile", "site.json" });
+    defer dflt.deinit(std.testing.allocator);
+    try expectEqualStrings("dist", dflt.verify_dist);
+
+    try expectError(error.MissingValue, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "verify" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "verify", "--profile", "a", "--did", "d" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "verify", "--profile", "a", "--prune" }));
+    try expectError(error.ConflictingFlags, parseOptions(std.testing.allocator, &.{ "boris", "standard-site", "plan", "--profile", "a", "--dist", "x" }));
 }
 
 test "parse: standard-site login requires a DID and persists the session root" {
