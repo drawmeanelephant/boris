@@ -6,9 +6,11 @@
 //! settled #494 contract: fragmented OK, Ping-before-OK, Close-before-OK,
 //! a masked server frame, silence (deadline + retry), NOTICE-then-OK,
 //! `auth-required:` rejection (NIP-42 out of v1, #493), OK for the wrong
-//! event id, garbage text, an oversized declared length, and a handshake
-//! refusal. The client must never hang, never accept a wrong answer, and
-//! must classify every outcome honestly in the report artifact.
+//! event id, garbage text, an oversized declared length, a handshake
+//! refusal, and a `ws://localhost` hostname (not `127.0.0.1`) so DNS
+//! lookup is gated (#545). The client must never hang, never accept a
+//! wrong answer, and must classify every outcome honestly in the report
+//! artifact.
 
 const std = @import("std");
 const np = @import("nostr_publish.zig");
@@ -583,6 +585,10 @@ const Expect = struct {
 };
 
 fn runScenario(scenario: Scenario, expect: Expect) !void {
+    try runScenarioUrl(scenario, expect, loopback_url_fmt);
+}
+
+fn runScenarioUrl(scenario: Scenario, expect: Expect, comptime url_fmt: []const u8) !void {
     var relay_threaded = Io.Threaded.init(testing.allocator, .{ .environ = std.process.Environ.empty });
     defer relay_threaded.deinit();
     const relay_io = relay_threaded.io();
@@ -590,7 +596,7 @@ fn runScenario(scenario: Scenario, expect: Expect) !void {
     var relay = try MockRelay.init(relay_io, scenario);
     defer relay.deinit();
 
-    var artifacts = try makeArtifacts(testing.allocator, &.{relay.port}, 250, 0, loopback_url_fmt);
+    var artifacts = try makeArtifacts(testing.allocator, &.{relay.port}, 250, 0, url_fmt);
     defer artifacts.deinit(testing.allocator);
 
     var result = try runMatrix(testing.allocator, &relay, artifacts.plan, artifacts.bundle, .{});
@@ -620,6 +626,17 @@ test "matrix: an honest relay accepts the event (complete)" {
         .outcome = "accepted",
         .event_result = "accepted",
     });
+}
+
+test "matrix: hostname localhost resolves (not just 127.0.0.1)" {
+    // #545: IpAddress.resolve is not DNS. `localhost` must go through
+    // HostName.lookup. This is the CI-safe hostname path; public relays
+    // are a live-smoke card, not this matrix.
+    try runScenarioUrl(.ok, .{
+        .classification = .complete,
+        .outcome = "accepted",
+        .event_result = "accepted",
+    }, "\"ws://localhost:{d}\"");
 }
 
 test "matrix: a fragmented OK is reassembled and accepted" {
