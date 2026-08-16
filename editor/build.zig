@@ -15,6 +15,9 @@ pub fn build(b: *std.Build) void {
     editor_mod.addAnonymousImport("completion_fixture", .{
         .root_source_file = b.path("../docs/contracts/fixtures/valid/expected/completion.json"),
     });
+    editor_mod.addAnonymousImport("graph_fixture", .{
+        .root_source_file = b.path("../docs/contracts/fixtures/valid/expected/graph.json"),
+    });
     const editor = b.addExecutable(.{
         .name = "boris-editor",
         .root_module = editor_mod,

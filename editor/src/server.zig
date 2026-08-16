@@ -3,6 +3,7 @@ const Io = std.Io;
 const http = std.http;
 const net = std.Io.net;
 const authoring = @import("authoring.zig");
+const graph = @import("graph.zig");
 const file_api = @import("file_api.zig");
 const project = @import("project.zig");
 const preview = @import("preview.zig");
@@ -110,6 +111,12 @@ fn route(io: Io, allocator: std.mem.Allocator, request: *http.Server.Request, co
         if (std.mem.eql(u8, target, "/api/authoring")) {
             if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
             const bytes = authoring.render(allocator, io, config.project_root) catch |err| return respondApiError(request, err);
+            defer allocator.free(bytes);
+            return respondJson(request, .ok, bytes);
+        }
+        if (std.mem.eql(u8, target, "/api/graph")) {
+            if (!isReadMethod(request.head.method)) return methodNotAllowed(request, "GET, HEAD");
+            const bytes = graph.render(allocator, io, config.project_root) catch |err| return respondApiError(request, err);
             defer allocator.free(bytes);
             return respondJson(request, .ok, bytes);
         }

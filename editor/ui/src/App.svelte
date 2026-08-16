@@ -34,6 +34,9 @@
     | { kind: 'command'; mode: CommandMode }
     | { kind: 'preview' }
     | { kind: 'source' }
+    | { kind: 'parent' }
+    | { kind: 'impact-here' }
+    | { kind: 'entity'; id: string }
     | { kind: 'open'; path: string };
   type Problem = {
     severity: 'error' | 'warning' | 'info';
@@ -77,6 +80,19 @@
   type CompletionKind = 'frontmatter_key' | 'status' | 'entity' | 'wiki_link' | 'parent' | 'relation_kind' | 'relation_target' | 'layout_slot';
   type Suggestion = { value: string; insert: string; detail: string };
   type PreviewState = { phase: 'idle' | 'running' | 'success' | 'failed' | 'stale'; generation: number; exit_code: number | null; used_stderr_fallback: boolean; message: string; preview_url: string };
+  type GraphEndpoint = { type: 'page' | 'source'; value: string };
+  type GraphNode = {
+    index: number; id: string; sourcePath: string; role: string; parent: string | null;
+    parentIndex: number | null; title: string | null; status: string | null; tags: string[]; bodyOffset: number;
+  };
+  type GraphEdge = { from: GraphEndpoint; to: GraphEndpoint; kind: 'parent' | 'include' | 'reference' };
+  type GraphNav = { index: number; id: string; breadcrumb: number[]; children: number[]; siblings: number[] };
+  type GraphDocument = {
+    schemaVersion: string; frozen: boolean; nodes: GraphNode[]; edges: GraphEdge[];
+    reverseIndex: Array<{ target: GraphEndpoint; incomingEdges: number[] }>; nav: GraphNav[];
+  };
+  type GraphPayload = { graph: GraphDocument | null; graph_status: 'ready' | 'build_required' };
+  type GraphLink = { label: string; path: string; kind: string };
 
   let connection = 'Connecting to the local host…';
   let compiler = 'Checking Boris version…';
@@ -119,6 +135,8 @@
   let paletteSelection = 0;
   let lastDialogTrigger: HTMLElement | null = null;
   let skipFocusRestore = false;
+  let graphPayload: GraphPayload | null = null;
+  let graphStatus = 'Loading the Boris graph…';
 
   $: dirty = activePath !== '' && content !== baseline;
   $: problemGroups = groupProblems(commandResult?.problems ?? []);
@@ -127,6 +145,16 @@
   );
   $: suggestions = completionSuggestions(authoring, completionKind, completionQuery);
   $: if (selectedSuggestion >= suggestions.length) selectedSuggestion = Math.max(0, suggestions.length - 1);
+  $: activeNode = nodeForPath(graphPayload?.graph ?? null, activePath);
+  $: parentNode = activeNode?.parent ? nodeForId(graphPayload?.graph ?? null, activeNode.parent) : null;
+  $: graphChildren = graphLinksForIndices(graphPayload?.graph ?? null, navForNode(graphPayload?.graph ?? null, activeNode)?.children ?? []);
+  $: graphSiblings = graphLinksForIndices(graphPayload?.graph ?? null, navForNode(graphPayload?.graph ?? null, activeNode)?.siblings ?? []);
+  $: graphOutgoing = outgoingGraphLinks(graphPayload?.graph ?? null, activeNode);
+  $: graphBacklinks = incomingGraphLinks(graphPayload?.graph ?? null, activeNode);
+  $: graphRelations = (authoring?.completion?.entities ?? []).find(entity => entity.id === activeNode?.id)?.relations ?? [];
+  $: bufferWikiLinks = wikiLinksInSource(content).map(id => ({
+    id, node: nodeForId(graphPayload?.graph ?? null, id)
+  }));
   $: resolutionPrompt = (() => {
     const pending = pendingResolution;
     if (!pending) return '';
@@ -146,15 +174,25 @@
       { kind: 'command', mode: 'check' },
       { kind: 'command', mode: 'impact' },
       { kind: 'preview' },
-      { kind: 'source' }
+      { kind: 'source' },
+      { kind: 'parent' },
+      { kind: 'impact-here' }
     ];
+    for (const node of graphPayload?.graph?.nodes ?? []) items.push({ kind: 'entity', id: node.id });
     for (const file of files) items.push({ kind: 'open', path: file.path });
     const needle = paletteQuery.trim().toLocaleLowerCase();
-    return needle ? items.filter(item => paletteItemLabel(item).toLocaleLowerCase().includes(needle)) : items;
+    return needle
+      ? items.filter(item =>
+        paletteItemLabel(item).toLocaleLowerCase().includes(needle) ||
+        paletteItemDetail(item).toLocaleLowerCase().includes(needle)
+      )
+      : items;
   })();
   $: paletteEnabled = new Map<string, boolean>(
     paletteItems.map(item => {
-      if (item.kind === 'open' || item.kind === 'source') return [paletteItemKey(item), true] as const;
+      if (item.kind === 'open' || item.kind === 'source' || item.kind === 'entity') return [paletteItemKey(item), true] as const;
+      if (item.kind === 'parent') return [paletteItemKey(item), parentNode !== null] as const;
+      if (item.kind === 'impact-here') return [paletteItemKey(item), activeNode !== null && !commandRunning] as const;
       if (item.kind === 'save') return [paletteItemKey(item), dirty && !readOnly] as const;
       if (item.kind === 'preview') return [paletteItemKey(item), previewData?.phase !== 'running'] as const;
       if (item.kind === 'command') return [paletteItemKey(item), !commandRunning] as const;
@@ -205,11 +243,12 @@
       return;
     }
     try {
-      const [healthResult, versionResult, filesResult, authoringResult, previewResult] = await Promise.all([
+      const [healthResult, versionResult, filesResult, authoringResult, graphResult, previewResult] = await Promise.all([
         api<Health>('/api/health'),
         api<Version>('/api/version'),
         api<FileList>('/api/files'),
         api<AuthoringPayload>('/api/authoring'),
+        api<GraphPayload>('/api/graph'),
         api<PreviewState>('/api/preview/state')
       ]);
       if (![healthResult, versionResult, filesResult].every(result => result.response.ok)) {
@@ -224,6 +263,8 @@
       files = filesResult.data.files;
       if (authoringResult.response.ok) setAuthoring(authoringResult.data);
       else authoringStatus = 'Boris authoring vocabulary is unavailable.';
+      if (graphResult.response.ok) setGraph(graphResult.data);
+      else graphStatus = 'Boris graph is unavailable.';
       if (previewResult.response.ok) setPreview(previewResult.data);
       const recoveryResult = await api<RecoveryList>('/api/recovery');
       if (recoveryResult.response.ok) {
@@ -301,7 +342,10 @@
         ? 'The last HTML build succeeded. Live preview serving arrives in the preview slice.'
         : 'The HTML build failed. Existing dist output, if any, is previous and stale.';
     }
-    if (mode === 'ir_build' && commandResult.failure_class === 'success') await refreshAuthoring();
+    if (mode === 'ir_build' && commandResult.failure_class === 'success') {
+      await refreshAuthoring();
+      await refreshGraph();
+    }
   }
 
   function setAuthoring(payload: AuthoringPayload) {
@@ -315,6 +359,19 @@
     const result = await api<AuthoringPayload>('/api/authoring');
     if (result.response.ok) setAuthoring(result.data);
     else authoringStatus = 'The Boris build succeeded, but completion.json could not be adapted.';
+  }
+
+  function setGraph(payload: GraphPayload) {
+    graphPayload = payload;
+    graphStatus = payload.graph
+      ? `Boris graph ready (${payload.graph.nodes.length} pages).`
+      : 'Build diagnostics to create the Boris graph.';
+  }
+
+  async function refreshGraph() {
+    const result = await api<GraphPayload>('/api/graph');
+    if (result.response.ok) setGraph(result.data);
+    else graphStatus = 'The Boris build succeeded, but graph.json could not be adapted.';
   }
 
   function setPreview(state: PreviewState) {
@@ -429,6 +486,94 @@
   function projectPathForProblem(sourcePath: string): string {
     if (sourcePath === 'boris.json' || sourcePath.startsWith('content/') || sourcePath.startsWith('themes/')) return sourcePath;
     return `content/${sourcePath}`;
+  }
+
+  function projectPathForGraphSource(sourcePath: string): string {
+    return projectPathForProblem(sourcePath);
+  }
+
+  function nodeForPath(graph: GraphDocument | null, path: string): GraphNode | null {
+    if (!graph || !path) return null;
+    return graph.nodes.find(node => projectPathForGraphSource(node.sourcePath) === path) ?? null;
+  }
+
+  function nodeForId(graph: GraphDocument | null, id: string): GraphNode | null {
+    if (!graph) return null;
+    return graph.nodes.find(node => node.id === id) ?? null;
+  }
+
+  function navForNode(graph: GraphDocument | null, node: GraphNode | null): GraphNav | null {
+    if (!graph || !node) return null;
+    return graph.nav.find(entry => entry.id === node.id) ?? null;
+  }
+
+  function graphLinksForIndices(graph: GraphDocument | null, indices: number[]): GraphLink[] {
+    if (!graph) return [];
+    return indices.flatMap(index => {
+      const node = graph.nodes.find(entry => entry.index === index);
+      if (!node) return [];
+      return [{ label: node.title ? `${node.id} · ${node.title}` : node.id, path: projectPathForGraphSource(node.sourcePath), kind: 'page' }];
+    });
+  }
+
+  function endpointPath(graph: GraphDocument | null, endpoint: GraphEndpoint): string | null {
+    if (endpoint.type === 'page') {
+      const node = nodeForId(graph, endpoint.value);
+      return node ? projectPathForGraphSource(node.sourcePath) : null;
+    }
+    return projectPathForGraphSource(endpoint.value);
+  }
+
+  function outgoingGraphLinks(graph: GraphDocument | null, node: GraphNode | null): GraphLink[] {
+    if (!graph || !node) return [];
+    return graph.edges.flatMap(edge => {
+      if (edge.from.type !== 'page' || edge.from.value !== node.id || edge.kind === 'parent') return [];
+      const path = endpointPath(graph, edge.to);
+      if (!path) return [];
+      return [{ label: `${edge.kind} → ${edge.to.value}`, path, kind: edge.kind }];
+    });
+  }
+
+  function incomingGraphLinks(graph: GraphDocument | null, node: GraphNode | null): GraphLink[] {
+    if (!graph || !node) return [];
+    const incoming = graph.reverseIndex.find(entry => entry.target.type === 'page' && entry.target.value === node.id);
+    if (!incoming) return [];
+    return incoming.incomingEdges.flatMap(index => {
+      const edge = graph.edges[index];
+      if (!edge) return [];
+      const path = endpointPath(graph, edge.from);
+      if (!path) return [];
+      return [{ label: `${edge.kind} ← ${edge.from.value}`, path, kind: edge.kind }];
+    });
+  }
+
+  function wikiLinksInSource(source: string): string[] {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    const pattern = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(source))) {
+      const id = match[1].trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+    }
+    return ids;
+  }
+
+  async function openGraphPath(path: string) {
+    await openFile(path);
+  }
+
+  async function openGraphNode(node: GraphNode | null) {
+    if (!node) return;
+    await openGraphPath(projectPathForGraphSource(node.sourcePath));
+  }
+
+  async function runImpactOnCurrent() {
+    if (!activeNode) return;
+    impactId = activeNode.id;
+    await runCommand('impact');
   }
 
   async function navigateToProblem(problem: Problem | AnalysisFinding) {
@@ -726,6 +871,9 @@
     if (item.kind === 'command') return commandLabel(item.mode);
     if (item.kind === 'preview') return 'Rebuild preview';
     if (item.kind === 'source') return 'Focus source pane';
+    if (item.kind === 'parent') return 'Go to parent';
+    if (item.kind === 'impact-here') return 'Run impact on this page';
+    if (item.kind === 'entity') return `Go to ${item.id}`;
     return 'Open file';
   }
 
@@ -735,11 +883,19 @@
     if (item.kind === 'command') return 'Boris command';
     if (item.kind === 'preview') return 'Rebuild the published output';
     if (item.kind === 'source') return 'Jump to the editor';
+    if (item.kind === 'parent') return parentNode ? `${parentNode.id}${parentNode.title ? ` · ${parentNode.title}` : ''}` : 'No parent in the Boris graph';
+    if (item.kind === 'impact-here') return activeNode ? activeNode.id : 'No graph page is open';
+    if (item.kind === 'entity') {
+      const node = nodeForId(graphPayload?.graph ?? null, item.id);
+      return node?.title ?? 'Boris graph entity';
+    }
     return item.path;
   }
 
   function paletteItemEnabled(item: PaletteItem): boolean {
-    if (item.kind === 'open' || item.kind === 'source') return true;
+    if (item.kind === 'open' || item.kind === 'source' || item.kind === 'entity') return true;
+    if (item.kind === 'parent') return parentNode !== null;
+    if (item.kind === 'impact-here') return activeNode !== null && !commandRunning;
     if (item.kind === 'save') return dirty && !readOnly;
     if (item.kind === 'preview') return previewData?.phase !== 'running';
     if (item.kind === 'command') return !commandRunning;
@@ -749,6 +905,7 @@
 
   function paletteItemKey(item: PaletteItem): string {
     if (item.kind === 'open') return `open:${item.path}`;
+    if (item.kind === 'entity') return `entity:${item.id}`;
     if (item.kind === 'command') return `command:${item.mode}`;
     return item.kind;
   }
@@ -803,6 +960,9 @@
     else if (item.kind === 'command') void runCommand(item.mode);
     else if (item.kind === 'preview') void rebuildPreview('manual');
     else if (item.kind === 'source') focusSourcePane();
+    else if (item.kind === 'parent') void openGraphNode(parentNode);
+    else if (item.kind === 'impact-here') void runImpactOnCurrent();
+    else if (item.kind === 'entity') void openGraphNode(nodeForId(graphPayload?.graph ?? null, item.id));
     else void openFile(item.path);
   }
 
@@ -980,6 +1140,7 @@
 <nav class="section-nav" aria-label="Editor sections">
   <a href="#project">Project</a>
   <a href="#source">Source</a>
+  <a href="#graph">Graph</a>
   <a href="#problems">Problems</a>
   <a href="#preview">Preview</a>
 </nav>
@@ -1125,6 +1286,88 @@
           </details>
         {/if}
       </aside>
+      <section id="graph" class="graph-pane" aria-labelledby="graph-heading">
+        <div class="problems-heading">
+          <div>
+            <h3 id="graph-heading">Graph</h3>
+            <p>Read-only view of Boris <code>graph.json</code> and <code>completion.json</code>.</p>
+          </div>
+        </div>
+        <p role="status" aria-label="Graph status" aria-live="polite">{graphStatus}</p>
+        {#if activeNode}
+          <p class="graph-current">{activeNode.id}{activeNode.title ? ` · ${activeNode.title}` : ''} · {activeNode.role}{activeNode.status ? ` · ${activeNode.status}` : ''}</p>
+          <div class="graph-actions" aria-label="Graph navigation">
+            {#if parentNode}
+              <button type="button" onclick={() => openGraphNode(parentNode)}>Go to parent {parentNode.id}</button>
+            {/if}
+            <button type="button" disabled={commandRunning} onclick={runImpactOnCurrent}>Run impact on {activeNode.id}</button>
+          </div>
+          {#if graphChildren.length > 0}
+            <h4>Children</h4>
+            <ul class="graph-links">
+              {#each graphChildren as link (link.path)}
+                <li><button type="button" onclick={() => openGraphPath(link.path)}>Go to child {link.label}</button></li>
+              {/each}
+            </ul>
+          {/if}
+          {#if graphSiblings.length > 0}
+            <h4>Siblings</h4>
+            <ul class="graph-links">
+              {#each graphSiblings as link (link.path)}
+                <li><button type="button" onclick={() => openGraphPath(link.path)}>Go to sibling {link.label}</button></li>
+              {/each}
+            </ul>
+          {/if}
+          {#if graphOutgoing.length > 0}
+            <h4>Outgoing references and includes</h4>
+            <ul class="graph-links">
+              {#each graphOutgoing as link (`${link.kind}:${link.path}`)}
+                <li><button type="button" onclick={() => openGraphPath(link.path)}>Go to {link.label}</button></li>
+              {/each}
+            </ul>
+          {/if}
+          {#if graphBacklinks.length > 0}
+            <h4>Backlinks</h4>
+            <ul class="graph-links">
+              {#each graphBacklinks as link (`back:${link.kind}:${link.path}`)}
+                <li><button type="button" onclick={() => openGraphPath(link.path)}>Go to backlink {link.label}</button></li>
+              {/each}
+            </ul>
+          {/if}
+          {#if graphRelations.length > 0}
+            <h4>Relations from completion.json</h4>
+            <ul class="graph-links">
+              {#each graphRelations as relation (`${relation.kind}:${relation.target}`)}
+                <li>
+                  {#if nodeForId(graphPayload?.graph ?? null, relation.target)}
+                    <button type="button" onclick={() => openGraphNode(nodeForId(graphPayload?.graph ?? null, relation.target))}>
+                      Go to {relation.kind} {relation.target}
+                    </button>
+                  {:else}
+                    <span>{relation.kind} {relation.target}</span>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          {#if bufferWikiLinks.length > 0}
+            <h4>Wiki links in this buffer</h4>
+            <ul class="graph-links">
+              {#each bufferWikiLinks as link (link.id)}
+                <li>
+                  {#if link.node}
+                    <button type="button" onclick={() => openGraphNode(link.node)}>Go to wiki link {link.id}</button>
+                  {:else}
+                    <span>Unresolved wiki link {link.id}</span>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        {:else if graphPayload?.graph}
+          <p>This file is not a page in the Boris graph.</p>
+        {/if}
+      </section>
       <p class:warning={dirty || readOnly} class="buffer-state">
         {readOnly ? 'Read-only file' : dirty ? 'Unsaved changes' : 'Saved on disk'}
       </p>
@@ -1144,6 +1387,10 @@
       {/if}
     {:else}
       <p>Choose a file from Project files. Generated output and editor state are intentionally excluded.</p>
+      <section id="graph" class="graph-pane" aria-labelledby="graph-heading-empty">
+        <h3 id="graph-heading-empty">Graph</h3>
+        <p role="status" aria-label="Graph status" aria-live="polite">{graphStatus}</p>
+      </section>
     {/if}
     <p role="status" aria-label="Editing status" aria-live="polite">{editorStatus}</p>
   </section>

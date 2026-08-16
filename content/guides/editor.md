@@ -123,6 +123,26 @@ source. The native textarea remains the editing surface.
 
 ---
 
+## Graph-aware navigation
+
+The **Graph** pane is a read-only inspector of the last successful Boris
+`graph.json`. It never edits the graph. After **Build diagnostics** the pane
+shows the open page's parent, children, siblings, outgoing references and
+includes, reverse-index backlinks, and any `relations` from
+`completion.json`. Wiki-link tokens (`[[id]]`) in the current buffer are
+listed and resolved against that same graph.
+
+Named buttons open the target file. **Run impact on this page** fills the
+impact field and runs the same `boris impact` command as the Problems pane.
+`Ctrl+K` also jumps to an entity by id or title (`Go to guides/intro`).
+
+If diagnostics have not been built yet, the pane says so instead of guessing.
+
+- [[guides/building-pages|Building and writing pages]] — parent, children, and wiki links
+- [[reference/relationships|Relationships]] — parent, children, and relations this pane displays
+
+---
+
 ## Compiler-backed commands and problems
 
 The Problems pane runs a fixed allowlist of Boris invocations against saved

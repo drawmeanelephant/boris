@@ -72,6 +72,7 @@ node -e '
 rm "$work/project/content/a.md" "$work/project/content/b.md"
 run_command "$work/ir-valid.json" '{"mode":"ir_build"}'
 get_api "$work/authoring.json" '/api/authoring'
+get_api "$work/graph.json" '/api/graph'
 node -e '
   const fs = require("fs");
   const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -81,6 +82,13 @@ node -e '
   if (JSON.stringify(payload.completion) !== JSON.stringify(completion)) throw Error("completion payload differs from Boris artifact");
   if (JSON.stringify(payload.frontmatter_schema) !== JSON.stringify(schema)) throw Error("frontmatter payload differs from canonical Boris schema");
 ' "$work/authoring.json" "$work/project/.boris/completion.json" "$repo_root/docs/contracts/schemas/boris-frontmatter-1.schema.json"
+node -e '
+  const fs = require("fs");
+  const payload = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const graph = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+  if (payload.graph_status !== "ready") throw Error("graph did not refresh after build");
+  if (JSON.stringify(payload.graph) !== JSON.stringify(graph)) throw Error("graph payload differs from Boris graph.json");
+' "$work/graph.json" "$work/project/.boris/graph.json"
 
 run_command "$work/check-valid.json" '{"mode":"check"}'
 node -e '
