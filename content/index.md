@@ -106,7 +106,8 @@ We picked **publisher platform**: HTML `dist/` is the default target, not
 the whole product. GitHub Pages and Standard.site are verified targets. The
 editor, migration labs, and evidence chain are first-class surfaces of the
 same compiler. Nostr plan/sign/publish is shipped and is not a verified
-target. Cloudflare embedding is parked.
+target. Freestanding Wasm embedding has an example Worker host and is
+not a verified target.
 
 Living status: the repository [`docs/STATUS.md`](https://github.com/drawmeanelephant/boris/blob/afterparty/docs/STATUS.md)
 file. Contracts still win if this page and a contract disagree.
