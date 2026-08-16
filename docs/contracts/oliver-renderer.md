@@ -42,8 +42,8 @@ never strips HTML) into the deterministic semantic plain-text projection — see
 |-------|-------|
 | Repository | <https://github.com/drawmeanelephant/oliver> |
 | Branch | `main` |
-| Commit | `c0b3d2b683f0cecf2181b22a800908619e56d0d7` |
-| Package hash | `oliver-0.0.0-LOsZkAe_HwD1k4BLmgWJcT9AI3AopaxmZwjc2gx-23pz` |
+| Commit | `d74249415975d652654e521b7abea40c85b13255` |
+| Package hash | `oliver-0.0.0-LOsZkBCwIgDvYwuL75BY2DBWzhUvfeliKZ7vQlKfi5-I` |
 | Zig | 0.16.0 |
 
 The pin lives in `build.zig.zon` (`.dependencies.oliver.url` + `.hash`). Zig
@@ -55,11 +55,13 @@ time and cached by Zig).
 ### Why this revision
 
 Oliver upstream is CommonMark 0.31.2 (652/652 conformance) plus GFM tables.
-The pinned revision is Oliver `main` as of oliver#39's merge (`c0b3d2b`): the
-Markdown renderer extensions and the Cooklang stack share one revision. Boris
-publishes five dialect extensions Oliver added for the renderer migration, all
-off by default in Oliver and opted into by Boris (so Oliver's own conformance
-corpus stays byte-exact):
+The pinned revision is Oliver `main` as of oliver#77's merge (`d742494`):
+public Cooklang string-quantity classify/scale (`classifyQuantity`,
+`parseFactor`, `scaleAmount`) and mixed numbers (`1 1/2`), on the same
+single pin that already carries the Markdown renderer extensions
+(oliver#39). Boris publishes five dialect extensions Oliver added for the
+renderer migration, all off by default in Oliver and opted into by Boris
+(so Oliver's own conformance corpus stays byte-exact):
 
 | Extension | Oliver option | Boris uses for |
 |-----------|---------------|----------------|

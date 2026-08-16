@@ -1,11 +1,14 @@
 //! Compiler-owned scaling over Cooklang string quantities (#554).
 //!
-//! The recipe IR facet keeps authored amounts as text. This module classifies
-//! those strings and scales only the ones that are exact rationals. Fixed
-//! amounts (`some`, `1-2`) and timers are copied verbatim. Source `.cook`
-//! files are never rewritten.
+//! The recipe IR facet keeps authored amounts as text. Classification and
+//! exact-rational rewrite come from the pinned Oliver string API
+//! (`classifyQuantity` / `parseFactor` / `scaleAmount`, oliver#77). This
+//! module is the Boris wrapper: same public types the CLI/editor consume,
+//! plus `scaleTimerAmount` (timers never scale). Source `.cook` files are
+//! never rewritten.
 
 const std = @import("std");
+const oliver = @import("oliver");
 
 pub const Class = enum {
     empty,
@@ -17,6 +20,14 @@ pub const Class = enum {
             .empty => "empty",
             .scalable => "scalable",
             .fixed => "fixed",
+        };
+    }
+
+    fn fromOliver(class: oliver.cooklang.QuantityClass) Class {
+        return switch (class) {
+            .empty => .empty,
+            .scalable => .scalable,
+            .fixed => .fixed,
         };
     }
 };
@@ -47,122 +58,42 @@ pub const ScaledAmount = struct {
     }
 };
 
-/// Classify an authored amount string. Leading and trailing ASCII spaces are
-/// ignored. The rules are closed:
-///
-/// - empty → `.empty`
-/// - unsigned integer, `a/b` fraction (b ≠ 0), decimal `a.b`, or mixed
-///   `a b/c` → `.scalable`
-/// - everything else, including ranges (`1-2`) and words (`some`) → `.fixed`
+/// Classify an authored amount string. Delegates to Oliver
+/// `classifyQuantity` (docs/COOKLANG.md §11 on the pin).
 pub fn classify(amount: []const u8) Class {
-    const text = std.mem.trim(u8, amount, " \t");
-    if (text.len == 0) return .empty;
-    if (parseRational(text) != null) return .scalable;
-    return .fixed;
+    return Class.fromOliver(oliver.cooklang.classifyQuantity(amount));
 }
 
 /// Parse a scale factor. Accepts the same scalable forms as amounts.
 /// Zero and a zero denominator are invalid.
 pub fn parseFactor(text: []const u8) ScaleError!Factor {
-    const rational = parseRational(std.mem.trim(u8, text, " \t")) orelse return error.InvalidFactor;
-    if (rational.num == 0) return error.InvalidFactor;
-    return rational.reduce();
+    const parsed = oliver.cooklang_scale.parseFactor(text) catch return error.InvalidFactor;
+    return .{ .num = parsed.num, .den = parsed.den };
 }
 
-/// Scale one authored amount. Scalable amounts become a reduced integer or
-/// `num/den` fraction. Fixed and empty amounts are returned unchanged
-/// (the `scaled` slice aliases `original`).
+/// Scale one authored amount through Oliver. Scalable amounts become the
+/// exact rational product (integer, reduced `num/den`, or terminating
+/// decimal for a decimal-family source). Fixed and empty amounts, and
+/// overflow, leave `scaled` aliasing `original`.
 pub fn scaleAmount(allocator: std.mem.Allocator, amount: []const u8, factor: Factor) ScaleError!ScaledAmount {
-    const trimmed = std.mem.trim(u8, amount, " \t");
-    const class = classify(trimmed);
-    if (class != .scalable) {
-        return .{ .class = class, .original = amount, .scaled = amount };
-    }
-    const value = parseRational(trimmed) orelse return error.InvalidFactor;
-    const product = mul(value, factor) catch return error.AmountOverflow;
-    const reduced = product.reduce();
-    const rendered = try renderRational(allocator, reduced);
-    return .{ .class = .scalable, .original = amount, .scaled = rendered };
+    const inner = oliver.cooklang_scale.scaleAmount(allocator, amount, .{
+        .num = factor.num,
+        .den = factor.den,
+    }) catch |err| switch (err) {
+        error.InvalidScaleFactor => return error.InvalidFactor,
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    return .{
+        .class = Class.fromOliver(inner.class),
+        .original = inner.original,
+        .scaled = inner.scaled,
+    };
 }
 
 /// Timers are never scaled: cooking time is not linear with yield.
 pub fn scaleTimerAmount(amount: []const u8) ScaledAmount {
     const class = classify(amount);
     return .{ .class = class, .original = amount, .scaled = amount };
-}
-
-fn parseRational(text: []const u8) ?Factor {
-    if (parseMixed(text)) |value| return value;
-    if (parseFraction(text)) |value| return value;
-    if (parseDecimal(text)) |value| return value;
-    if (parseInteger(text)) |value| return value;
-    return null;
-}
-
-fn parseInteger(text: []const u8) ?Factor {
-    const n = parseDigits(text) orelse return null;
-    return .{ .num = n, .den = 1 };
-}
-
-fn parseFraction(text: []const u8) ?Factor {
-    const slash = std.mem.indexOfScalar(u8, text, '/') orelse return null;
-    if (slash == 0 or slash + 1 >= text.len) return null;
-    if (std.mem.indexOfScalar(u8, text[slash + 1 ..], '/') != null) return null;
-    const num = parseDigits(text[0..slash]) orelse return null;
-    const den = parseDigits(text[slash + 1 ..]) orelse return null;
-    if (den == 0) return null;
-    return .{ .num = num, .den = den };
-}
-
-fn parseDecimal(text: []const u8) ?Factor {
-    const dot = std.mem.indexOfScalar(u8, text, '.') orelse return null;
-    if (std.mem.indexOfScalar(u8, text[dot + 1 ..], '.') != null) return null;
-    const whole_text = text[0..dot];
-    const frac_text = text[dot + 1 ..];
-    if (whole_text.len == 0 and frac_text.len == 0) return null;
-    const whole = if (whole_text.len == 0) 0 else parseDigits(whole_text) orelse return null;
-    const frac = if (frac_text.len == 0) 0 else parseDigits(frac_text) orelse return null;
-    var den: u64 = 1;
-    var i: usize = 0;
-    while (i < frac_text.len) : (i += 1) {
-        den = std.math.mul(u64, den, 10) catch return null;
-    }
-    const whole_part = std.math.mul(u64, whole, den) catch return null;
-    const num = std.math.add(u64, whole_part, frac) catch return null;
-    if (den == 0) return null;
-    return .{ .num = num, .den = den };
-}
-
-fn parseMixed(text: []const u8) ?Factor {
-    const space = std.mem.indexOfScalar(u8, text, ' ') orelse return null;
-    const whole = parseDigits(text[0..space]) orelse return null;
-    const rest = std.mem.trim(u8, text[space + 1 ..], " ");
-    const frac = parseFraction(rest) orelse return null;
-    const whole_part = std.math.mul(u64, whole, frac.den) catch return null;
-    const num = std.math.add(u64, whole_part, frac.num) catch return null;
-    return .{ .num = num, .den = frac.den };
-}
-
-fn parseDigits(text: []const u8) ?u64 {
-    if (text.len == 0) return null;
-    var n: u64 = 0;
-    for (text) |byte| {
-        if (byte < '0' or byte > '9') return null;
-        n = std.math.mul(u64, n, 10) catch return null;
-        n = std.math.add(u64, n, byte - '0') catch return null;
-    }
-    return n;
-}
-
-fn mul(left: Factor, right: Factor) error{AmountOverflow}!Factor {
-    const num = std.math.mul(u64, left.num, right.num) catch return error.AmountOverflow;
-    const den = std.math.mul(u64, left.den, right.den) catch return error.AmountOverflow;
-    return .{ .num = num, .den = den };
-}
-
-fn renderRational(allocator: std.mem.Allocator, value: Factor) error{OutOfMemory}![]u8 {
-    if (value.den == 1) return std.fmt.allocPrint(allocator, "{d}", .{value.num});
-    return std.fmt.allocPrint(allocator, "{d}/{d}", .{ value.num, value.den });
 }
 
 fn gcd(a_in: u64, b_in: u64) u64 {
@@ -182,6 +113,7 @@ test "classify closed amount forms" {
     try std.testing.expectEqual(Class.scalable, classify("2"));
     try std.testing.expectEqual(Class.scalable, classify("400"));
     try std.testing.expectEqual(Class.scalable, classify("1/2"));
+    try std.testing.expectEqual(Class.scalable, classify("1 / 2"));
     try std.testing.expectEqual(Class.scalable, classify("3/4"));
     try std.testing.expectEqual(Class.scalable, classify("1.5"));
     try std.testing.expectEqual(Class.scalable, classify("1 1/2"));
@@ -190,6 +122,9 @@ test "classify closed amount forms" {
     try std.testing.expectEqual(Class.fixed, classify("a pinch"));
     try std.testing.expectEqual(Class.fixed, classify("1/0"));
     try std.testing.expectEqual(Class.fixed, classify("2/"));
+    try std.testing.expectEqual(Class.fixed, classify("=1"));
+    try std.testing.expectEqual(Class.fixed, classify("02"));
+    try std.testing.expectEqual(Class.fixed, classify("1 3/2"));
 }
 
 test "scale scalable amounts to reduced rationals" {
@@ -212,6 +147,10 @@ test "scale scalable amounts to reduced rationals" {
     var third = try scaleAmount(allocator, "1/2", triple);
     defer third.deinit(allocator);
     try std.testing.expectEqualStrings("3/2", third.scaled);
+
+    var decimal = try scaleAmount(allocator, "1.5", triple);
+    defer decimal.deinit(allocator);
+    try std.testing.expectEqualStrings("4.5", decimal.scaled);
 }
 
 test "fixed and empty amounts are copied, not rounded" {
@@ -227,6 +166,11 @@ test "fixed and empty amounts are copied, not rounded" {
     defer range.deinit(allocator);
     try std.testing.expectEqual(Class.fixed, range.class);
     try std.testing.expectEqualStrings("1-2", range.scaled);
+
+    var locked = try scaleAmount(allocator, "=1", double);
+    defer locked.deinit(allocator);
+    try std.testing.expectEqual(Class.fixed, locked.class);
+    try std.testing.expectEqualStrings("=1", locked.scaled);
 
     var empty = try scaleAmount(allocator, "", double);
     defer empty.deinit(allocator);
