@@ -100,19 +100,7 @@ pub const StdTransport = struct {
     }
 
     fn fetchTask(self: *StdTransport, allocator: std.mem.Allocator, request_value: transport.Request) transport.Error!transport.Response {
-        const expected_header_count: usize = if (request_value.method == .get) 1 else 3;
-        if (request_value.headers.len != expected_header_count or
-            !std.ascii.eqlIgnoreCase(request_value.headers[0].name, "accept")) return error.UnexpectedRequest;
-        const accept = request_value.headers[0].value;
-        if (!std.mem.eql(u8, accept, "application/json") and
-            !std.mem.eql(u8, accept, "text/plain")) return error.UnexpectedRequest;
-        if (request_value.method == .post) {
-            if (!std.ascii.eqlIgnoreCase(request_value.headers[1].name, "content-type") or
-                !std.mem.eql(u8, request_value.headers[1].value, "application/x-www-form-urlencoded") or
-                !std.ascii.eqlIgnoreCase(request_value.headers[2].name, "dpop") or
-                request_value.headers[2].value.len == 0 or
-                request_value.body.len == 0) return error.UnexpectedRequest;
-        }
+        try validateNativeRequest(request_value);
         if (!std.mem.startsWith(u8, request_value.url, "https://")) return error.UnsafeTarget;
         const uri = std.Uri.parse(request_value.url) catch return error.UnsafeTarget;
         if (uri.host == null or uri.user != null or uri.password != null or uri.fragment != null) return error.UnsafeTarget;
@@ -341,6 +329,98 @@ fn mapIoError(err: anyerror) transport.Error {
         error.Timeout, error.Canceled => error.Timeout,
         else => error.ConnectFailed,
     };
+}
+
+/// Closed set of request shapes the native adapter will send. Discovery GETs,
+/// OAuth PAR/token POSTs, app-password createSession/refreshSession, and
+/// XRPC Bearer/DPoP record calls are admitted; everything else fails closed
+/// before a socket is opened.
+fn validateNativeRequest(request_value: transport.Request) transport.Error!void {
+    if (request_value.headers.len == 0 or request_value.headers.len > 3) return error.UnexpectedRequest;
+    if (!std.ascii.eqlIgnoreCase(request_value.headers[0].name, "accept")) return error.UnexpectedRequest;
+    const accept = request_value.headers[0].value;
+    if (!std.mem.eql(u8, accept, "application/json") and
+        !std.mem.eql(u8, accept, "text/plain")) return error.UnexpectedRequest;
+
+    switch (request_value.method) {
+        .get => {
+            if (request_value.headers.len == 1) return;
+            if (request_value.headers.len == 2 and isAuthorizationHeader(request_value.headers[1])) return;
+            return error.UnexpectedRequest;
+        },
+        .post => {
+            if (request_value.body.len == 0) return error.UnexpectedRequest;
+            if (request_value.headers.len == 2 and
+                isExactContentType(request_value.headers[1], "application/json")) return;
+            if (request_value.headers.len == 3 and
+                isExactContentType(request_value.headers[1], "application/x-www-form-urlencoded") and
+                std.ascii.eqlIgnoreCase(request_value.headers[2].name, "dpop") and
+                request_value.headers[2].value.len != 0) return;
+            if (request_value.headers.len == 3 and
+                isAuthorizationHeader(request_value.headers[1]) and
+                isExactContentType(request_value.headers[2], "application/json")) return;
+            return error.UnexpectedRequest;
+        },
+    }
+}
+
+fn isAuthorizationHeader(header: transport.Header) bool {
+    if (!std.ascii.eqlIgnoreCase(header.name, "authorization")) return false;
+    return hasNonEmptyScheme(header.value, "Bearer ") or hasNonEmptyScheme(header.value, "DPoP ");
+}
+
+fn hasNonEmptyScheme(value: []const u8, scheme: []const u8) bool {
+    return std.mem.startsWith(u8, value, scheme) and value.len > scheme.len;
+}
+
+fn isExactContentType(header: transport.Header, expected: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(header.name, "content-type") and std.mem.eql(u8, header.value, expected);
+}
+
+fn shapeRequest(method: transport.Method, headers: []const transport.Header, body: []const u8) transport.Request {
+    return .{
+        .method = method,
+        .url = "https://pds.example.com/xrpc/com.atproto.server.createSession",
+        .headers = headers,
+        .body = body,
+        .redirect_policy = .forbid,
+        .limits = .{ .max_body_bytes = 64 * 1024 },
+    };
+}
+
+test "native adapter admits discovery, OAuth, app-password, and XRPC header shapes" {
+    const accept_json = transport.Header{ .name = "accept", .value = "application/json" };
+    const accept_text = transport.Header{ .name = "accept", .value = "text/plain" };
+    const json_type = transport.Header{ .name = "content-type", .value = "application/json" };
+    const form_type = transport.Header{ .name = "content-type", .value = "application/x-www-form-urlencoded" };
+    const dpop = transport.Header{ .name = "dpop", .value = "proof" };
+    const bearer = transport.Header{ .name = "authorization", .value = "Bearer access-token" };
+    const dpop_auth = transport.Header{ .name = "authorization", .value = "DPoP proof" };
+
+    try validateNativeRequest(shapeRequest(.get, &.{accept_json}, ""));
+    try validateNativeRequest(shapeRequest(.get, &.{accept_text}, ""));
+    try validateNativeRequest(shapeRequest(.get, &.{ accept_json, bearer }, ""));
+    try validateNativeRequest(shapeRequest(.get, &.{ accept_json, dpop_auth }, ""));
+    try validateNativeRequest(shapeRequest(.post, &.{ accept_json, form_type, dpop }, "client_id=x"));
+    try validateNativeRequest(shapeRequest(.post, &.{ accept_json, json_type }, "{\"identifier\":\"did:plc:x\"}"));
+    try validateNativeRequest(shapeRequest(.post, &.{ accept_json, bearer, json_type }, "{}"));
+    try validateNativeRequest(shapeRequest(.post, &.{ accept_json, dpop_auth, json_type }, "{\"repo\":\"did:plc:x\"}"));
+}
+
+test "native adapter rejects request shapes it does not send" {
+    const accept_json = transport.Header{ .name = "accept", .value = "application/json" };
+    const json_type = transport.Header{ .name = "content-type", .value = "application/json" };
+    const form_type = transport.Header{ .name = "content-type", .value = "application/x-www-form-urlencoded" };
+    const empty_bearer = transport.Header{ .name = "authorization", .value = "Bearer " };
+    const basic = transport.Header{ .name = "authorization", .value = "Basic abc" };
+
+    try std.testing.expectError(error.UnexpectedRequest, validateNativeRequest(shapeRequest(.get, &.{}, "")));
+    try std.testing.expectError(error.UnexpectedRequest, validateNativeRequest(shapeRequest(.get, &.{ accept_json, json_type }, "")));
+    try std.testing.expectError(error.UnexpectedRequest, validateNativeRequest(shapeRequest(.get, &.{ accept_json, empty_bearer }, "")));
+    try std.testing.expectError(error.UnexpectedRequest, validateNativeRequest(shapeRequest(.get, &.{ accept_json, basic }, "")));
+    try std.testing.expectError(error.UnexpectedRequest, validateNativeRequest(shapeRequest(.post, &.{ accept_json, json_type }, "")));
+    try std.testing.expectError(error.UnexpectedRequest, validateNativeRequest(shapeRequest(.post, &.{ accept_json, form_type }, "body")));
+    try std.testing.expectError(error.UnexpectedRequest, validateNativeRequest(shapeRequest(.post, &.{ accept_json, basic, json_type }, "{}")));
 }
 
 test "connection target policy rejects non-public IPv4 ranges" {

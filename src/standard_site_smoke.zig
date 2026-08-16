@@ -442,7 +442,8 @@ fn readbackOne(
 
 /// Compare the fetched record value against the intended payload bytes,
 /// key-order-insensitive, using only the `value` member of the getRecord
-/// response.
+/// response. Extra remote keys (a live PDS injects `$type`) are tolerated;
+/// every intended field must still be present and equal.
 fn remoteValueMatches(gpa: std.mem.Allocator, root: std.json.Value, intended_payload: []const u8) Error!bool {
     if (root != .object) return false;
     const record_value = root.object.get("value") orelse return false;
@@ -453,7 +454,20 @@ fn remoteValueMatches(gpa: std.mem.Allocator, root: std.json.Value, intended_pay
         .allocate = .alloc_always,
     }) catch return false;
     defer intended.deinit();
-    return jsonValuesEqual(record_value, intended.value);
+    return jsonValueContains(record_value, intended.value);
+}
+
+/// True when `remote` contains every field of `intended` with an equal value.
+/// Object extras on the remote side are ignored; arrays stay exact-length.
+fn jsonValueContains(remote: std.json.Value, intended: std.json.Value) bool {
+    if (intended != .object) return jsonValuesEqual(remote, intended);
+    if (remote != .object) return false;
+    var it = intended.object.iterator();
+    while (it.next()) |entry| {
+        const other = remote.object.get(entry.key_ptr.*) orelse return false;
+        if (!jsonValueContains(other, entry.value_ptr.*)) return false;
+    }
+    return true;
 }
 
 fn jsonValuesEqual(a: std.json.Value, b: std.json.Value) bool {
@@ -925,7 +939,19 @@ const MockHost = struct {
         body.appendSlice(arena, "\",\"cid\":\"") catch return error.OutOfMemory;
         body.appendSlice(arena, stored.cid) catch return error.OutOfMemory;
         body.appendSlice(arena, "\",\"value\":") catch return error.OutOfMemory;
-        body.appendSlice(arena, stored.value) catch return error.OutOfMemory;
+        // Live PDSs inject `$type` on readback; the mock does the same so
+        // the subset comparison is the path the passing test exercises.
+        if (stored.value.len >= 2 and stored.value[0] == '{' and stored.value[stored.value.len - 1] == '}') {
+            const inner = std.mem.trim(u8, stored.value[1 .. stored.value.len - 1], " \t\n\r");
+            body.appendSlice(arena, "{\"$type\":\"site.standard.record\"") catch return error.OutOfMemory;
+            if (inner.len != 0) {
+                body.appendSlice(arena, ",") catch return error.OutOfMemory;
+                body.appendSlice(arena, inner) catch return error.OutOfMemory;
+            }
+            body.appendSlice(arena, "}") catch return error.OutOfMemory;
+        } else {
+            body.appendSlice(arena, stored.value) catch return error.OutOfMemory;
+        }
         body.appendSlice(arena, "}") catch return error.OutOfMemory;
         return self.respond(allocator, value, 200, "application/json", body.items);
     }
@@ -966,7 +992,7 @@ const MockHost = struct {
         }
         const key = recordKey(self.arena.allocator(), collection, rkey) catch return error.OutOfMemory;
         _ = self.records.fetchRemove(key);
-        return self.respond(allocator, value, 200, "application/json", "{}");
+        return self.respond(allocator, value, 200, "application/json", "{\"commit\":{\"cid\":\"" ++ test_cid ++ "\",\"rev\":\"3lzzzzzzzzzzz\"}}");
     }
 
     fn respond(self: *MockHost, allocator: std.mem.Allocator, value: transport.Request, status: u16, content_type: []const u8, body: []const u8) transport.Error!transport.Response {

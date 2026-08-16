@@ -50,7 +50,8 @@ it exercised, but never any token, proof, nonce, or key material.
 4. **Write** — `putRecord` both records; per-record failure is recorded and
    does not abort cleanup.
 5. **Readback** — `getRecord` both records and verify the bound AT-URI, the
-   record value against the intended payload (key-order-insensitive), and CID
+   record value against the intended payload (key-order-insensitive; extra
+   remote keys such as a PDS-injected `$type` are tolerated), and CID
    presence. Success is never claimed before this.
 6. **Verification surface** — when `--surface-url` is given, fetch
    `https://<origin>/.well-known/site.standard.publication` and require a
@@ -145,6 +146,10 @@ registers the Standard.site permission set. bsky.social cannot complete an
 OAuth smoke, but a live smoke can complete against bsky.social through the
 explicit, opt-in app-password path (`standard-site login --app-password`);
 Boris never falls back to a credential inside the OAuth flow.
+
+A recorded passing app-password run against bsky.social (2026-08-16) lives at
+[`fixtures/standard-site-live-smoke/`](fixtures/standard-site-live-smoke/README.md).
+It is observational evidence, not a CI gate.
 
 ## Test surface
 
